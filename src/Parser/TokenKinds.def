@@ -13,6 +13,8 @@ TOKEN(op)
 
 TOKEN_SEPARATOR(colon, ':')
 TOKEN_SEPARATOR(equal, '=')
+TOKEN_SEPARATOR(comma, ',')
+TOKEN_SEPARATOR(asterisk, '*')
 TOKEN_SEPARATOR(left_paren, '(')
 TOKEN_SEPARATOR(right_paren, ')')
 TOKEN_SEPARATOR(left_curly, '{')

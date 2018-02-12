@@ -10,15 +10,18 @@ enum class tok {
 
 class Token {
 private:
-    const tok kind = tok::NUM_TOKENS;
+    tok kind = tok::NUM_TOKENS;
     std::string text;
 
 public:
     Token(tok kind, std::string text) : kind(kind), text(text) {}
-    Token(tok kind, char character) : kind(kind) {
-        text = character;
-    }
+    Token(tok kind, char character) : kind(kind) { text = character; }
     Token() {}
+    Token& operator=(const Token& otherTok) {
+        kind = otherTok.kind;
+        text = otherTok.text;
+        return *this;
+    }
 
     bool is(tok k) const { return kind == k; }
     bool isAny(tok k) const { return is(k); }

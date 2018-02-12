@@ -16,11 +16,14 @@ private:
     // Position of the next character (not yet lexed).
     std::string::const_iterator nextPosition;
 
-    bool isSpace(char character) const { return character == ' '; }
-    bool isNewline(char character) const { return character == '\n' || character == '\r'; }
-    bool isLowercaseLetter(char character) const { return 'a' <= character && character >= 'z'; }
-    bool isUppercaseLetter(char character) const { return 'A' <= character && character >= 'Z'; }
-    bool isLetter(char character) const { return isLowercaseLetter(character) || isUppercaseLetter(character); }
+    bool isSpace() const { return *nextPosition == ' '; }
+    bool isNewline() const { return *nextPosition == '\n' || *nextPosition == '\r'; }
+    bool isTab() const { return *nextPosition == '\t'; }
+    bool isWhitespace() const { return isSpace() || isNewline() || isTab(); }
+    bool isLowercaseLetter() const { return 'a' <= *nextPosition && *nextPosition <= 'z'; }
+    bool isUppercaseLetter() const { return 'A' <= *nextPosition && *nextPosition <= 'Z'; }
+    bool isLetter() const { return isLowercaseLetter() || isUppercaseLetter(); }
+    //bool isSubstring(const std::string& substring) const;
 public:
     Lexer(const std::string& source) : source(source), nextPosition(source.begin()) {}
 
