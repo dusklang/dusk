@@ -9,6 +9,7 @@
 #endif
 
 TOKEN(identifier)
+TOKEN(op)
 
 TOKEN_SEPARATOR(colon)
 TOKEN_SEPARATOR(equal)
