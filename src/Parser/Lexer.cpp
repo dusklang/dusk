@@ -1,10 +1,10 @@
-//  Created by Zach Wolfe on 2018-02-11.
+//  Copyright © 2018 Zach Wolfe. All rights reserved.
 
 #include "Lexer.hpp"
 #include <assert.h>
 #include <iostream>
 
-llvm::Optional<Token> Lexer::nextToken() {
+llvm::Optional<Token> Lexer::getNextToken() {
     while(nextPosition < source.length()) {
         // Skip whitespace.
         if(isWhitespace()) nextPosition++;
@@ -30,11 +30,11 @@ llvm::Optional<Token> Lexer::nextToken() {
         } else break;
     }
 
-    // Return nothing if at the end.
-    if(nextPosition == source.length()) { return llvm::NoneType::None; }
+    #define RETURN(token) currentToken = token; return currentToken
 
-    Token Tok;
-    #define RETURN(token) Tok = token; currentToken = Tok; return Tok
+    // Return nothing if at the end.
+    if(nextPosition == source.length()) { RETURN(llvm::None); }
+
     // Lex separators.
     switch(nextChar()) {
         #define TOKEN_SEPARATOR(name, character) case character:\
@@ -62,7 +62,7 @@ llvm::Optional<Token> Lexer::nextToken() {
     }
 
     // Lex an identifier.
-    while(isLetter())
+    while(nextPosition < source.length() && isLetter())
         tokenText += source.at(nextPosition++);
     if(!tokenText.empty()) {
         RETURN(Token(tok::identifier, tokenText));

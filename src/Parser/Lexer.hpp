@@ -1,4 +1,4 @@
-//  Created by Zach Wolfe on 2018-02-11.
+//  Copyright © 2018 Zach Wolfe. All rights reserved.
 
 #ifndef Lexer_hpp
 #define Lexer_hpp
@@ -11,7 +11,7 @@ class Lexer {
 private:
     // TODO: I'll eventually want to use something that supports Unicode.
     const std::string source;
-    Token currentToken;
+    llvm::Optional<Token> currentToken;
 
     // Position of the next character (not yet lexed).
     int nextPosition = 0;
@@ -38,7 +38,8 @@ private:
 public:
     Lexer(const std::string& source) : source(source) {}
 
-    llvm::Optional<Token> nextToken();
+    llvm::Optional<Token> getNextToken();
+    llvm::Optional<Token> getCurrentToken() const { return currentToken; }
 };
 
 #endif /* Lexer_hpp */
