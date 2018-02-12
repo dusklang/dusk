@@ -11,7 +11,7 @@
 TOKEN(identifier)
 TOKEN(integer_literal)
 TOKEN(decimal_literal)
-TOKEN(op)
+TOKEN(string_literal)
 
 TOKEN_SEPARATOR(colon, ':')
 TOKEN_SEPARATOR(equal, '=')

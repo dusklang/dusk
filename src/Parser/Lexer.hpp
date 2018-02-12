@@ -27,6 +27,7 @@ private:
     bool isLetter() const { return isLowercaseLetter() || isUppercaseLetter(); }
     bool isNumber() const { return '0' <= nextChar() && nextChar() <= '9'; }
     bool isDot() const { return is('.'); }
+    bool isDoubleQuote() const { return is('"'); }
     bool isSubstr(const std::string& substring) const {
         auto j = [this](int i) { return i + this->nextPosition; };
         for(int i = 0; i < substring.length() && j(i) < source.length(); i++) {

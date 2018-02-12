@@ -30,7 +30,7 @@ llvm::Optional<Token> Lexer::nextToken() {
         } else break;
     }
 
-    // Return None if at the end.
+    // Return nothing if at the end.
     if(nextPosition == source.length()) { return llvm::NoneType::None; }
 
     Token Tok;
@@ -43,6 +43,23 @@ llvm::Optional<Token> Lexer::nextToken() {
     }
 
     std::string tokenText;
+
+    // Lex a string literal.
+    if(isDoubleQuote()) {
+        tokenText += '"';
+        nextPosition++;
+        while(nextPosition < source.length() && !isNewline()) {
+            tokenText += nextChar();
+
+            if(isDoubleQuote() && source.at(nextPosition - 1) != '\\') {
+                nextPosition++;
+                RETURN(Token(tok::string_literal, tokenText));
+            } else {
+                nextPosition++;
+            }
+        }
+        assert(false && "Unterminated string literal");
+    }
 
     // Lex an identifier.
     while(isLetter())

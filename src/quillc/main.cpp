@@ -10,6 +10,8 @@ int main(int argc, const char * argv[]) {
                 "/* This is a /* nested /* multi-\nline /* \ncomment */ */ /*with another nest */ */ */"
                 "// followed immediately by another single-line comment\n"
                 "myFloat = 5.4\n"
+                "print(\"This is a \\\"string literal\\\" written inside of a string literal\")\n"
+                "\"This is an unterminated string literal and should cause an assertion to fail."
                 "return 0\n"
                 "}");
 
