@@ -6,7 +6,7 @@
 int main(int argc, const char * argv[]) {
     std::cout << "Dasquillette compiler version 0.0.1\n";
     Lexer lexer("main(argc: Int, argv: char**) : Int {\n"
-                "\treturn\n"
+                "\treturn 759\n"
                 "}");
 
     while(auto Tok = lexer.nextToken()) {

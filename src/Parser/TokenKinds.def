@@ -9,6 +9,7 @@
 #endif
 
 TOKEN(identifier)
+TOKEN(integer_literal)
 TOKEN(op)
 
 TOKEN_SEPARATOR(colon, ':')

@@ -23,6 +23,7 @@ private:
     bool isLowercaseLetter() const { return 'a' <= *nextPosition && *nextPosition <= 'z'; }
     bool isUppercaseLetter() const { return 'A' <= *nextPosition && *nextPosition <= 'Z'; }
     bool isLetter() const { return isLowercaseLetter() || isUppercaseLetter(); }
+    bool isNumber() const { return '0' <= *nextPosition && *nextPosition <= '9'; }
     //bool isSubstring(const std::string& substring) const;
 public:
     Lexer(const std::string& source) : source(source), nextPosition(source.begin()) {}
