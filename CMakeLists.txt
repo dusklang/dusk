@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.4.3)
 project(dasquillette-lang)
 
-set(LLVM_PATH /Users/zachrwolfe/Downloads/llvm)
+set(LLVM_PATH /usr/local/opt/llvm)
 link_directories(${LLVM_PATH}/lib)
 include_directories(src ${LLVM_PATH}/include)
 
@@ -54,6 +54,14 @@ set(LLVM_LIBS ${LLVM_LIBS}
     z
     dl
     ${CURSES_LIBRARIES}
+)
+
+set(ICU_PATH /usr/local/opt/icu4c)
+link_directories(${ICU_PATH}/lib)
+include_directories(${ICU_PATH}/include)
+
+set(ICU_LIBS 
+    libicuuc
 )
 
 add_subdirectory(src)

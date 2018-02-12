@@ -10,11 +10,15 @@ enum class tok {
 
 class Token {
 private:
-    const tok kind;
-    const std::string text;
+    const tok kind = tok::NUM_TOKENS;
+    std::string text;
 
 public:
     Token(tok kind, std::string text) : kind(kind), text(text) {}
+    Token(tok kind, char character) : kind(kind) {
+        text = character;
+    }
+    Token() {}
 
     bool is(tok k) const { return kind == k; }
     bool isAny(tok k) const { return is(k); }
@@ -29,9 +33,10 @@ public:
     bool isNot(tok k1, tok k2, T... k) const { return !isAny(k1, k...); }
 
     tok getKind() const { return kind; }
+    std::string getText() const { return text; }
 
     bool isAnySeparator() const {
-        #define TOKEN_SEPARATOR(name) || kind == tok::sep_ ## name
+        #define TOKEN_SEPARATOR(name, character) || kind == tok::sep_ ## name
         return false
             #include "TokenKinds.def"
         ;

@@ -5,20 +5,18 @@
 #endif
 
 #ifndef TOKEN_SEPARATOR
-#define TOKEN_SEPARATOR(name) TOKEN(sep_ ## name)
+#define TOKEN_SEPARATOR(name, character) TOKEN(sep_ ## name)
 #endif
 
 TOKEN(identifier)
 TOKEN(op)
 
-TOKEN_SEPARATOR(colon)
-TOKEN_SEPARATOR(equal)
-TOKEN_SEPARATOR(left_paren)
-TOKEN_SEPARATOR(right_paren)
-TOKEN_SEPARATOR(left_curly)
-TOKEN_SEPARATOR(right_curly)
-TOKEN_SEPARATOR(left_bracket)
-TOKEN_SEPARATOR(right_bracket)
+TOKEN_SEPARATOR(colon, ':')
+TOKEN_SEPARATOR(equal, '=')
+TOKEN_SEPARATOR(left_paren, '(')
+TOKEN_SEPARATOR(right_paren, ')')
+TOKEN_SEPARATOR(left_curly, '{')
+TOKEN_SEPARATOR(right_curly, '}')
 
 #undef TOKEN
 #undef TOKEN_SEPARATOR

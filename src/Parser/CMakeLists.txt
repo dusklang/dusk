@@ -1,2 +1,11 @@
-add_library(Parser Parser.cpp)
-target_link_libraries(Parser ${llvm_libs})
+set(SOURCES
+    Lexer.cpp
+)
+set(HEADERS
+    Lexer.hpp
+    Token.hpp
+    TokenKinds.def
+)
+
+add_library(Parser ${SOURCES} ${HEADERS})
+target_link_libraries(Parser ${llvm_libs} ${icu_libs})
