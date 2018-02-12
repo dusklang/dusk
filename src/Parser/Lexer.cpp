@@ -5,22 +5,38 @@
 #include <iostream>
 
 llvm::Optional<Token> Lexer::nextToken() {
-    while(nextPosition != source.end()) {
+    while(nextPosition < source.length()) {
         // Skip whitespace.
         if(isWhitespace()) nextPosition++;
         // Skip single-line comments.
         else if(isSubstr("//"))
-            for(nextPosition += 2; nextPosition != source.end() && !isNewline(); nextPosition++);
-        else break;
+            for(nextPosition += 2; nextPosition < source.length() && !isNewline(); nextPosition++);
+        // Skip (optionally nested) multi-line comments.
+        else if(isSubstr("/*")) {
+            int levels = 1;
+            for(nextPosition += 2; nextPosition < source.length(); nextPosition++) {
+                if(isSubstr("/*")) {
+                    nextPosition++;
+                    levels++;
+                } else if(isSubstr("*/")) {
+                    nextPosition++;
+                    levels--;
+                }
+                if(levels == 0) {
+                    nextPosition++;
+                    break;
+                }
+            }
+        } else break;
     }
 
-    // Return None if at EOF.
-    if(nextPosition == source.end()) { return llvm::NoneType::None; }
+    // Return None if at the end.
+    if(nextPosition == source.length()) { return llvm::NoneType::None; }
 
     Token Tok;
     #define RETURN(token) Tok = token; currentToken = Tok; return Tok
     // Lex separators.
-    switch(*nextPosition) {
+    switch(nextChar()) {
         #define TOKEN_SEPARATOR(name, character) case character:\
             nextPosition++; RETURN(Token::Token(tok::sep_ ## name, character));
         #include "TokenKinds.def"
@@ -30,7 +46,7 @@ llvm::Optional<Token> Lexer::nextToken() {
 
     // Lex an identifier.
     while(isLetter())
-        tokenText += *nextPosition++;
+        tokenText += source.at(nextPosition++);
     if(!tokenText.empty()) {
         RETURN(Token(tok::identifier, tokenText));
     }
@@ -43,7 +59,7 @@ llvm::Optional<Token> Lexer::nextToken() {
             assert(!hasDot && "Decimal literals can have only one dot.");
             hasDot = true;
         }
-        tokenText += *nextPosition++;
+        tokenText += source.at(nextPosition++);
     }
     if(!tokenText.empty()) {
         RETURN(Token::Token(hasDot ? tok::decimal_literal : tok::integer_literal, tokenText));
