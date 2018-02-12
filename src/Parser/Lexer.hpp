@@ -12,9 +12,11 @@ private:
     // TODO: I'll eventually want to use something that supports Unicode.
     const std::string source;
     llvm::Optional<Token> currentToken;
+    llvm::Optional<Token> previousToken;
 
     // Position of the next character (not yet lexed).
     int nextPosition = 0;
+    llvm::Optional<int> currentPosition;
 
     const char& nextChar() const { return source.at(nextPosition); }
     bool is(char character) const { return nextChar() == character; }
@@ -40,6 +42,17 @@ public:
 
     llvm::Optional<Token> getNextToken();
     llvm::Optional<Token> getCurrentToken() const { return currentToken; }
+    llvm::Optional<Token> getPreviousToken() {
+        if(!currentPosition)
+            return llvm::None;
+        currentToken = previousToken;
+        previousToken = llvm::None;
+
+        nextPosition = *currentPosition;
+        currentPosition = llvm::None;
+
+        return currentToken;
+    }
 };
 
 #endif /* Lexer_hpp */

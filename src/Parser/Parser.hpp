@@ -6,7 +6,7 @@
 #include "llvm/ADT/Optional.h"
 
 #include "Lexer.hpp"
-#include "AST/AST.hpp"
+#include "AST/Decl.hpp"
 
 class Parser {
 private:
@@ -14,22 +14,31 @@ private:
 
     llvm::Optional<Token> current() { return lexer.getCurrentToken(); }
     llvm::Optional<Token> next() { return lexer.getNextToken(); }
+    llvm::Optional<Token> previous() { return lexer.getPreviousToken(); }
     llvm::Optional<std::string> parseIdentifer() {
         if(current() && current()->is(tok::identifier))
             return current()->getText();
         return llvm::None;
     }
-    template<typename T>
-    T getValueOrThrow(llvm::Optional<T> opt) {
-        if(opt) return *opt;
-        else throw "Exception";
+    llvm::Optional<std::string> parseIntegerLiteral() {
+        if(current() && current()->is(tok::integer_literal))
+            return current()->getText();
+        return llvm::None;
+    }
+    llvm::Optional<std::string> parseDecimalLiteral() {
+        if(current() && current()->is(tok::decimal_literal))
+            return current()->getText();
+        return llvm::None;
     }
 public:
     Parser(const std::string& source) : lexer(source) {}
 
-    llvm::Optional<Decl> parseDecl();
+    std::shared_ptr<ASTNode> parseNode();
+    llvm::Optional<DeclPrototype> parseDeclPrototype();
+    llvm::Optional<Decl> parseDecl(DeclPrototype prototype);
+    std::shared_ptr<Expr> parseDeclRefExpr(DeclPrototype prototype);
+    std::shared_ptr<Expr> parseExpr();
     Lexer* getLexer() { return &lexer; }
-
 };
 
 #endif /* Parser_hpp */

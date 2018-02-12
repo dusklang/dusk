@@ -1,13 +1,8 @@
-//
-//  AST.cpp
-//  quillc
-//
-//  Created by Zach Wolfe on 2018-02-12.
-//
+//  Copyright © 2018 Zach Wolfe. All rights reserved.
 
 #include "AST.hpp"
 
-std::string Decl::prettyPrint() const {
+std::string DeclPrototype::prettyPrint() const {
     std::string str = name;
     for(auto& params: paramLists) {
         str += "(";
@@ -20,6 +15,5 @@ std::string Decl::prettyPrint() const {
         }
         str += ")";
     }
-    str += " : " + typeName;
     return str;
 }

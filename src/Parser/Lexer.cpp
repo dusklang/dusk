@@ -5,6 +5,7 @@
 #include <iostream>
 
 llvm::Optional<Token> Lexer::getNextToken() {
+    int initialNextPosition = nextPosition;
     while(nextPosition < source.length()) {
         // Skip whitespace.
         if(isWhitespace()) nextPosition++;
@@ -30,7 +31,7 @@ llvm::Optional<Token> Lexer::getNextToken() {
         } else break;
     }
 
-    #define RETURN(token) currentToken = token; return currentToken
+    #define RETURN(token) currentPosition = initialNextPosition; previousToken = currentToken; currentToken = token; return currentToken
 
     // Return nothing if at the end.
     if(nextPosition == source.length()) { RETURN(llvm::None); }
@@ -62,8 +63,9 @@ llvm::Optional<Token> Lexer::getNextToken() {
     }
 
     // Lex an identifier.
-    while(nextPosition < source.length() && isLetter())
-        tokenText += source.at(nextPosition++);
+    if(nextPosition < source.length() && isLetter())
+        while(nextPosition < source.length() && (isLetter() || isNumber()))
+            tokenText += source.at(nextPosition++);
     if(!tokenText.empty()) {
         RETURN(Token(tok::identifier, tokenText));
     }

@@ -1,42 +1,33 @@
-//
-//  AST.hpp
-//  quillc
-//
-//  Created by Zach Wolfe on 2018-02-12.
-//
+//  Copyright © 2018 Zach Wolfe. All rights reserved.
 
-#ifndef AST_hpp
-#define AST_hpp
+#pragma once
 
 #include <string>
 #include "llvm/ADT/SmallVector.h"
 
-class Param {
-private:
-    std::string name;
-    std::string typeName;
-public:
-    Param(const std::string& name, const std::string& typeName) : name(name), typeName(typeName) {}
-    std::string prettyPrint() const {
-        return name + ": " + typeName;
-    }
+struct Expr;
+
+// Abstract class from which each node in the AST inherits.
+struct ASTNode {
+    virtual std::string prettyPrint() const = 0;
 };
 
-class Decl {
-private:
+struct Param final : public ASTNode {
+    std::string name;
+    std::shared_ptr<Expr> value;
+
+    Param(const std::string& name, std::shared_ptr<Expr> value) : name(name), value(value) {}
+    std::string prettyPrint() const override;
+};
+
+// This is used in Decls and DeclRefs.
+struct DeclPrototype final : public ASTNode {
     std::string name;
     llvm::SmallVector<llvm::SmallVector<Param, 2>, 1> paramLists;
-    std::string typeName;
-public:
-    Decl(const std::string& name,
-         const llvm::SmallVector<llvm::SmallVector<Param, 2>, 1>& paramLists,
-         const std::string& typeName)
-        : name(name), paramLists(paramLists), typeName(typeName) {
-            for(auto& params: paramLists) {
-                assert(!params.empty() && "Encountered empty parameter list, which is not allowed.");
-            }
-        }
-    std::string prettyPrint() const;
-};
 
-#endif /* AST_hpp */
+    DeclPrototype(const std::string& name,
+                  const llvm::SmallVector<llvm::SmallVector<Param, 2>, 1>& paramLists)
+            : name(name), paramLists(paramLists) {}
+
+    std::string prettyPrint() const override;
+};
