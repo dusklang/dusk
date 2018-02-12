@@ -2,10 +2,17 @@
 
 #include "Lexer.hpp"
 #include <assert.h>
+#include <iostream>
 
 llvm::Optional<Token> Lexer::nextToken() {
-    // Skip whitespace.
-    for(; nextPosition != source.end() && isWhitespace(); nextPosition++);
+    while(nextPosition != source.end()) {
+        // Skip whitespace.
+        if(isWhitespace()) nextPosition++;
+        // Skip single-line comments.
+        else if(isSubstr("//"))
+            for(nextPosition += 2; nextPosition != source.end() && !isNewline(); nextPosition++);
+        else break;
+    }
 
     // Return None if at EOF.
     if(nextPosition == source.end()) { return llvm::NoneType::None; }
@@ -42,7 +49,5 @@ llvm::Optional<Token> Lexer::nextToken() {
         RETURN(Token::Token(hasDot ? tok::decimal_literal : tok::integer_literal, tokenText));
     }
 
-    nextPosition++;
-
-    return llvm::NoneType::None;
+    assert(false && "Unhandled token");
 }

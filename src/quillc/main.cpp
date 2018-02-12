@@ -6,9 +6,9 @@
 int main(int argc, const char * argv[]) {
     std::cout << "Dasquillette compiler version 0.0.1\n";
     Lexer lexer("main(argc: Int, argv: char**) : Int {\n"
-                "\tmyFloat := 0.5\n"
-                "\tmyFloat = 5.4\n"
-                "\treturn 0\n"
+                "myFloat := 0.5 // a comment!\n    \n // another comment!\r\n// yet another comment\n"
+                "myFloat = 5.4\n"
+                "return 0\n"
                 "}");
 
     while(auto Tok = lexer.nextToken()) {

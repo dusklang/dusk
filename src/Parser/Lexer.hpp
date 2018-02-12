@@ -26,7 +26,7 @@ private:
     bool isLetter() const { return isLowercaseLetter() || isUppercaseLetter(); }
     bool isNumber() const { return '0' <= *nextPosition && *nextPosition <= '9'; }
     bool isDot() const { return is('.'); }
-    bool is(const std::string& substring) const {
+    bool isSubstr(const std::string& substring) const {
         std::string accumulatedSubstr;
         for(auto iter = nextPosition; iter != source.end(); iter++) {
             accumulatedSubstr += *iter;
