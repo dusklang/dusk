@@ -29,17 +29,17 @@ llvm::Optional<Token> Lexer::nextToken() {
     }
 
     // Lex an integer or decimal literal.
-    auto alreadyHasDot = false;
+    auto hasDot = false;
     while(isNumber() || isDot()) {
         if(isDot()) {
             // TODO: Add a better diagnostic system than runtime assertions.
-            assert(!alreadyHasDot && "Decimal literals can have only one dot.");
-            alreadyHasDot = true;
+            assert(!hasDot && "Decimal literals can have only one dot.");
+            hasDot = true;
         }
         tokenText += *nextPosition++;
     }
     if(!tokenText.empty()) {
-        RETURN(Token::Token(tok::integer_literal, tokenText));
+        RETURN(Token::Token(hasDot ? tok::decimal_literal : tok::integer_literal, tokenText));
     }
 
     nextPosition++;
