@@ -16,15 +16,26 @@ private:
     // Position of the next character (not yet lexed).
     std::string::const_iterator nextPosition;
 
-    bool isSpace() const { return *nextPosition == ' '; }
-    bool isNewline() const { return *nextPosition == '\n' || *nextPosition == '\r'; }
-    bool isTab() const { return *nextPosition == '\t'; }
+    bool is(char character) const { return *nextPosition == character; }
+    bool isSpace() const { return is(' '); }
+    bool isNewline() const { return is('\n') || is('\r'); }
+    bool isTab() const { return is('\t'); }
     bool isWhitespace() const { return isSpace() || isNewline() || isTab(); }
     bool isLowercaseLetter() const { return 'a' <= *nextPosition && *nextPosition <= 'z'; }
     bool isUppercaseLetter() const { return 'A' <= *nextPosition && *nextPosition <= 'Z'; }
     bool isLetter() const { return isLowercaseLetter() || isUppercaseLetter(); }
     bool isNumber() const { return '0' <= *nextPosition && *nextPosition <= '9'; }
-    //bool isSubstring(const std::string& substring) const;
+    bool isDot() const { return is('.'); }
+    bool is(const std::string& substring) const {
+        std::string accumulatedSubstr;
+        for(auto iter = nextPosition; iter != source.end(); iter++) {
+            accumulatedSubstr += *iter;
+            if(accumulatedSubstr.length() > substring.length()) return false;
+            if(accumulatedSubstr.length() == substring.length())
+                return accumulatedSubstr == substring;
+        }
+        return true;
+    }
 public:
     Lexer(const std::string& source) : source(source), nextPosition(source.begin()) {}
 

@@ -6,7 +6,9 @@
 int main(int argc, const char * argv[]) {
     std::cout << "Dasquillette compiler version 0.0.1\n";
     Lexer lexer("main(argc: Int, argv: char**) : Int {\n"
-                "\treturn 759\n"
+                "\tmyFloat := 0.5\n"
+                "\tmyFloat = 5.4.3\n" // Should cause an assert to fail.
+                "\treturn 0\n"
                 "}");
 
     while(auto Tok = lexer.nextToken()) {

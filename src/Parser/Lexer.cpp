@@ -1,11 +1,13 @@
 //  Created by Zach Wolfe on 2018-02-11.
 
 #include "Lexer.hpp"
+#include <assert.h>
 
 llvm::Optional<Token> Lexer::nextToken() {
     // Skip whitespace.
     for(; nextPosition != source.end() && isWhitespace(); nextPosition++);
 
+    // Return None if at EOF.
     if(nextPosition == source.end()) { return llvm::NoneType::None; }
 
     Token Tok;
@@ -26,9 +28,16 @@ llvm::Optional<Token> Lexer::nextToken() {
         RETURN(Token(tok::identifier, tokenText));
     }
 
-    // Lex an integer literal.
-    while(isNumber())
+    // Lex an integer or decimal literal.
+    auto alreadyHasDot = false;
+    while(isNumber() || isDot()) {
+        if(isDot()) {
+            // TODO: Add a better diagnostic system than runtime assertions.
+            assert(!alreadyHasDot && "Decimal literals can have only one dot.");
+            alreadyHasDot = true;
+        }
         tokenText += *nextPosition++;
+    }
     if(!tokenText.empty()) {
         RETURN(Token::Token(tok::integer_literal, tokenText));
     }
