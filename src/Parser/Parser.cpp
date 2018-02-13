@@ -28,6 +28,10 @@ std::shared_ptr<ASTNode> Parser::parseNode() {
         // after it.
         if(auto decl = parseDecl(*prototype))
             return std::make_shared<Decl>(*decl);
+        if(auto expr = parseDeclRefExpr(*prototype)) {
+            previous();
+            return expr;
+        }
     }
     return nullptr;
 }
@@ -57,7 +61,7 @@ llvm::Optional<DeclPrototype> Parser::parseDeclPrototype() {
 }
 
 llvm::Optional<Decl> Parser::parseDecl(DeclPrototype prototype) {
-    if(!current() || !current()->is(tok::sep_colon)) return llvm::None;
+    if(!(current() && current()->is(tok::sep_colon))) return llvm::None;
     next();
     auto type = parseExpr();
     assert(type && "Expected type expression after declaration header");
