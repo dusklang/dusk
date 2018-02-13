@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.4.3)
-project(dasquillette-lang)
+project(quill-lang)
 
 set(LLVM_PATH /usr/local/opt/llvm)
 link_directories(${LLVM_PATH}/lib)
