@@ -22,6 +22,10 @@ std::shared_ptr<ScopeNode> Parser::parseScope() {
 
 std::shared_ptr<ASTNode> Parser::parseNode() {
     if(!current()) return nullptr;
+
+    // TODO: This line is a hack and should be replaced with a more robust solution to ending ScopeNode parsing.
+    // Currently the user can enter an arbitrary number of '}' and nothing will fail
+    // lexically.
     if(current()->is(tok::sep_right_curly)) return nullptr;
     if(auto prototype = parseDeclPrototype()) {
         next();
