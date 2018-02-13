@@ -23,5 +23,5 @@ struct Decl final : public ASTNode {
                 assert(!params.empty() && "Encountered empty parameter list, which is not allowed.");
             }
         }
-    std::string prettyPrint() const override;
+    std::string prettyPrint(int indentationLevel = -1) const override;
 };

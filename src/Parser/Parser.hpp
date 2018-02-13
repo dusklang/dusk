@@ -33,6 +33,7 @@ private:
 public:
     Parser(const std::string& source) : lexer(source) {}
 
+    std::shared_ptr<ScopeNode> parseScope();
     std::shared_ptr<ASTNode> parseNode();
     llvm::Optional<DeclPrototype> parseDeclPrototype();
     llvm::Optional<Decl> parseDecl(DeclPrototype prototype);

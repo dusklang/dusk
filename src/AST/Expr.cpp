@@ -3,14 +3,14 @@
 #include "Expr.hpp"
 #include "Decl.hpp"
 
-std::string IntegerLiteralExpr::prettyPrint() const {
-    return literal;
+std::string IntegerLiteralExpr::prettyPrint(int indentationLevel) const {
+    return indentation(indentationLevel) + literal;
 }
 
-std::string DecimalLiteralExpr::prettyPrint() const {
-    return literal;
+std::string DecimalLiteralExpr::prettyPrint(int indentationLevel) const {
+    return indentation(indentationLevel) + literal;
 }
 
-std::string DeclRefExpr::prettyPrint() const {
-    return prototype.prettyPrint();
+std::string DeclRefExpr::prettyPrint(int indentationLevel) const {
+    return indentation(indentationLevel) + prototype.prettyPrint();
 }

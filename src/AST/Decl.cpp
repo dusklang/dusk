@@ -4,10 +4,10 @@
 #include "Decl.hpp"
 #include "Expr.hpp"
 
-std::string Param::prettyPrint() const {
+std::string Param::prettyPrint(int indentationLevel) const {
     return name + ": " + value->prettyPrint();
 }
 
-std::string Decl::prettyPrint() const {
-    return prototype.prettyPrint() + " : " + type->prettyPrint() + (isConstant ? " : " : " = ") + expression->prettyPrint();
+std::string Decl::prettyPrint(int indentationLevel) const {
+    return indentation(indentationLevel) + prototype.prettyPrint() + " : " + type->prettyPrint() + (isConstant ? " : " : " = ") + expression->prettyPrint();
 }

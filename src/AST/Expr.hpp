@@ -17,14 +17,14 @@ struct IntegerLiteralExpr: public Expr {
 
     IntegerLiteralExpr(const std::string& literal): literal(literal) {}
 
-    std::string prettyPrint() const override;
+    std::string prettyPrint(int indentationLevel = -1) const override;
 };
 
 struct DecimalLiteralExpr: public Expr {
     std::string literal;
     DecimalLiteralExpr(const std::string& literal): literal(literal) {}
 
-    std::string prettyPrint() const override;
+    std::string prettyPrint(int indentationLevel = -1) const override;
 };
 
 struct DeclRefExpr: public Expr {
@@ -32,5 +32,5 @@ struct DeclRefExpr: public Expr {
 
     DeclRefExpr(DeclPrototype prototype) : prototype(prototype) {}
 
-    std::string prettyPrint() const override;
+    std::string prettyPrint(int indentationLevel = -1) const override;
 };

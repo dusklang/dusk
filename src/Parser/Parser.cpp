@@ -2,7 +2,23 @@
 
 #include "Parser.hpp"
 #include "AST/Expr.hpp"
+#include <vector>
+#include <memory>
 #include <iostream>
+
+std::shared_ptr<ScopeNode> Parser::parseScope() {
+    std::vector<std::shared_ptr<ASTNode>> nodes;
+    while(current()) {
+        if(auto node = parseNode()) {
+            nodes.push_back(node);
+            next();
+        } else {
+            previous();
+            break;
+        }
+    }
+    return std::make_shared<ScopeNode>(nodes);
+}
 
 std::shared_ptr<ASTNode> Parser::parseNode() {
     if(!current()) return nullptr;
