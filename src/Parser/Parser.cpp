@@ -22,6 +22,7 @@ std::shared_ptr<ScopeNode> Parser::parseScope() {
 
 std::shared_ptr<ASTNode> Parser::parseNode() {
     if(!current()) return nullptr;
+    if(current()->is(tok::sep_right_curly)) return nullptr;
     if(auto prototype = parseDeclPrototype()) {
         next();
         // There's no surefire way to tell what the prototype is until we see what comes
@@ -67,18 +68,25 @@ llvm::Optional<Decl> Parser::parseDecl(DeclPrototype prototype) {
     assert(type && "Expected type expression after declaration header");
     next();
     bool isConstant;
-    if(current() && current()->is(tok::sep_colon)) {
-        isConstant = true;
-    } else if(current() && current()->is(tok::sep_equal)) {
-        isConstant = false;
-    } else {
-        // TODO: add support for '{' and function bodies here
-        assert(false && "Expected ':' or '=' after type annotation");
+
+    if(current()) {
+        if(current()->is(tok::sep_colon) || current()->is(tok::sep_equal)) {
+            if(current()->is(tok::sep_colon))
+                isConstant = true;
+            else isConstant = false;
+            next();
+            auto expression = parseExpr();
+            assert(expression && "Expected expression after colon or equal sign");
+            return Decl::Decl(prototype, type, isConstant, expression);
+        } else if(current()->is(tok::sep_left_curly)) {
+            isConstant = true;
+            next();
+            auto body = parseScope();
+            assert(next() && current()->is(tok::sep_right_curly) && "Expected '}' at end of declaration");
+            return Decl::Decl(prototype, type, isConstant, body);
+        }
     }
-    next();
-    auto expression = parseExpr();
-    assert(expression && "Expected expression after colon or equal sign");
-    return Decl::Decl(prototype, type, isConstant, expression);
+    assert(false && "Expected ':', '=' or '{' after type annotation");
 }
 
 std::shared_ptr<Expr> Parser::parseDeclRefExpr(DeclPrototype prototype) {

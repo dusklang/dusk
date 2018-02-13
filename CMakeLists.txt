@@ -10,7 +10,7 @@ add_definitions(
 -D__STDC_CONSTANT_MACROS
 )
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti -std=c++14")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++1z")
 
 #target_link_libraries(ifcount
 #  clangFrontend

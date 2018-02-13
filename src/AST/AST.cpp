@@ -30,5 +30,6 @@ std::string ScopeNode::prettyPrint(int indentationLevel) const {
     std::string str;
     for(auto& node: nodes)
         str += node->prettyPrint(indentationLevel + 1) + "\n";
-    return indentation(indentationLevel) + str;
+    if(!str.empty()) str.pop_back();
+    return str;
 }

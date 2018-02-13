@@ -9,5 +9,8 @@ std::string Param::prettyPrint(int indentationLevel) const {
 }
 
 std::string Decl::prettyPrint(int indentationLevel) const {
-    return indentation(indentationLevel) + prototype.prettyPrint() + " : " + type->prettyPrint() + (isConstant ? " : " : " = ") + expression->prettyPrint();
+    std::string str = indentation(indentationLevel) + prototype.prettyPrint() + " : " + type->prettyPrint();
+    if(expression()) str += (isConstant ? " : " : " = ") + expression()->prettyPrint();
+    else str += " {\n" + body()->prettyPrint(indentationLevel) + "\n" + indentation(indentationLevel) + "}";
+    return str;
 }
