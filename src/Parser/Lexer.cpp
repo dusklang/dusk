@@ -67,6 +67,8 @@ llvm::Optional<Token> Lexer::getNextToken() {
         while(nextPosition < source.length() && (isLetter() || isNumber()))
             tokenText += source.at(nextPosition++);
     if(!tokenText.empty()) {
+        #define TOKEN_KEYWORD(name, sourcerepr) if(tokenText == #sourcerepr) RETURN(Token(tok::kw_ ## name, tokenText));
+        #include "TokenKinds.def"
         RETURN(Token(tok::identifier, tokenText));
     }
 

@@ -4,6 +4,10 @@
 #define TOKEN(name)
 #endif
 
+#ifndef TOKEN_KEYWORD
+#define TOKEN_KEYWORD(name, sourcerepr) TOKEN(kw_ ## name)
+#endif
+
 #ifndef TOKEN_SEPARATOR
 #define TOKEN_SEPARATOR(name, character) TOKEN(sep_ ## name)
 #endif
@@ -12,6 +16,8 @@ TOKEN(identifier)
 TOKEN(integer_literal)
 TOKEN(decimal_literal)
 TOKEN(string_literal)
+
+TOKEN_KEYWORD(mut, mut)
 
 TOKEN_SEPARATOR(colon, ':')
 TOKEN_SEPARATOR(equal, '=')
@@ -24,3 +30,4 @@ TOKEN_SEPARATOR(right_curly, '}')
 
 #undef TOKEN
 #undef TOKEN_SEPARATOR
+#undef TOKEN_KEYWORD
