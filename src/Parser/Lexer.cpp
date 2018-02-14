@@ -5,7 +5,7 @@
 #include <iostream>
 
 llvm::Optional<Token> Lexer::getNextToken() {
-    int initialNextPosition = nextPosition;
+    auto nextPosition = tokenPositions.top();
     while(nextPosition < source.length()) {
         // Skip whitespace.
         if(isWhitespace()) nextPosition++;
@@ -31,10 +31,13 @@ llvm::Optional<Token> Lexer::getNextToken() {
         } else break;
     }
 
-    #define RETURN(token) currentPosition = initialNextPosition; previousToken = currentToken; currentToken = token; return currentToken
+    llvm::Optional<Token> _tok;
+#define RETURN(token) _tok = token; if(_tok) { std::cout << _tok->prettyPrint(); tokenPositions.push(nextPosition); tokens.push(*_tok); } return _tok
 
     // Return nothing if at the end.
-    if(nextPosition == source.length()) { RETURN(llvm::None); }
+    if(nextPosition == source.length()) {
+        RETURN(llvm::None);
+    }
 
     // Lex separators.
     switch(nextChar()) {
