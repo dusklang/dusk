@@ -7,6 +7,7 @@ set(HEADERS
     Lexer.hpp
     Token.hpp
     TokenKinds.def
+    ParseResult.hpp
 )
 
 add_library(Parser ${SOURCES} ${HEADERS})

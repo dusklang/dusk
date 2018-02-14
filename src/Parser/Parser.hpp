@@ -7,6 +7,8 @@
 
 #include "Lexer.hpp"
 #include "AST/Decl.hpp"
+#include "ParseResult.hpp"
+#include "General/Diagnostic.hpp"
 
 class Parser {
 private:
@@ -33,12 +35,12 @@ private:
 public:
     Parser(const std::string& source) : lexer(source) {}
 
-    std::shared_ptr<ScopeNode> parseScope();
-    std::shared_ptr<ASTNode> parseNode();
-    llvm::Optional<DeclPrototype> parseDeclPrototype();
-    llvm::Optional<Decl> parseDecl(DeclPrototype prototype);
-    std::shared_ptr<Expr> parseDeclRefExpr(DeclPrototype prototype);
-    std::shared_ptr<Expr> parseExpr();
+    ParseResult<std::shared_ptr<ScopeNode>>  parseScope();
+    ParseResult<std::shared_ptr<ASTNode>> parseNode();
+    ParseResult<DeclPrototype> parseDeclPrototype();
+    ParseResult<Decl> parseDecl(DeclPrototype prototype);
+    ParseResult<std::shared_ptr<Expr>> parseDeclRefExpr(DeclPrototype prototype);
+    ParseResult<std::shared_ptr<Expr>> parseExpr();
     Lexer* getLexer() { return &lexer; }
 };
 

@@ -2,15 +2,16 @@
 
 #include "Parser.hpp"
 #include "AST/Expr.hpp"
+#include "ParseResult.hpp"
 #include <vector>
 #include <memory>
 #include <iostream>
 
-std::shared_ptr<ScopeNode> Parser::parseScope() {
+ParseResult<std::shared_ptr<ScopeNode>> Parser::parseScope() {
     std::vector<std::shared_ptr<ASTNode>> nodes;
     while(current()) {
         if(auto node = parseNode()) {
-            nodes.push_back(node);
+            nodes.push_back(*node);
             next();
         } else {
             previous();
@@ -20,29 +21,40 @@ std::shared_ptr<ScopeNode> Parser::parseScope() {
     return std::make_shared<ScopeNode>(nodes);
 }
 
-std::shared_ptr<ASTNode> Parser::parseNode() {
-    if(!current()) return nullptr;
+ParseResult<std::shared_ptr<ASTNode>> Parser::parseNode() {
+    if(!current()) return Diagnostic("Expected node.");
 
     // TODO: This line is a hack and should be replaced with a more robust solution to ending ScopeNode parsing.
     // Currently the user can enter an arbitrary number of '}' and nothing will fail
     // lexically.
-    if(current()->is(tok::sep_right_curly)) return nullptr;
+    if(current()->is(tok::sep_right_curly)) return Diagnostic("Exiting scope hack");
+    lexer.saveState();
     if(auto prototype = parseDeclPrototype()) {
         next();
         // There's no surefire way to tell what the prototype is until we see what comes
         // after it.
-        if(auto decl = parseDecl(*prototype))
-            return std::make_shared<Decl>(*decl);
-        if(auto expr = parseDeclRefExpr(*prototype)) {
-            previous();
-            return expr;
+        lexer.saveState();
+        if(auto decl = parseDecl(*prototype)) {
+            return std::dynamic_pointer_cast<ASTNode>(std::make_shared<Decl>(*decl));
         }
+        lexer.rollbackState();
     }
-    return nullptr;
+    lexer.rollbackState();
+    lexer.saveState();
+    /*if(auto expr = parseDeclRefExpr()) {
+        previous();
+        return std::dynamic_pointer_cast<ASTNode>(*expr);
+     }*/
+    return Diagnostic("Failed to parse a node.");
 }
 
-llvm::Optional<DeclPrototype> Parser::parseDeclPrototype() {
-    if(!current()) return llvm::None;
+ParseResult<DeclPrototype> Parser::parseDeclPrototype() {
+    if(!current()) return Diagnostic("Expected declaration prototype");
+    auto isMut = false;
+    if(current()->is(tok::kw_mut)) {
+        isMut = true;
+        if(!next()) return Diagnostic("Expected declaration prototype");
+    }
     auto name = parseIdentifer();
     assert(name && "Expected declaration name.");
     llvm::SmallVector<llvm::SmallVector<Param, 2>, 1> paramLists;
@@ -55,56 +67,52 @@ llvm::Optional<DeclPrototype> Parser::parseDeclPrototype() {
             assert(next() && current()->is(tok::sep_colon) && "Expected ':' after parameter name.");
             next();
             auto argument = parseExpr();
-            assert(argument && "Expected argument value or type.");
-            parameters.push_back(Param::Param(*param, argument));
+            assert(argument && "Expected argument value.");
+            parameters.push_back(Param(*param, *argument));
         } while(next() && current()->is(tok::sep_comma));
         paramLists.push_back(parameters);
     }
     assert(previous());
 
-    return DeclPrototype(*name, paramLists);
+    return DeclPrototype(*name, paramLists, isMut);
 }
 
-llvm::Optional<Decl> Parser::parseDecl(DeclPrototype prototype) {
-    if(!(current() && current()->is(tok::sep_colon))) return llvm::None;
+ParseResult<Decl> Parser::parseDecl(DeclPrototype prototype) {
+    if(!(current() && current()->is(tok::sep_colon))) return Diagnostic("Expected declaration");
     next();
+    if(!current()) return Diagnostic("Expected type expression after declaration header");
     auto type = parseExpr();
     assert(type && "Expected type expression after declaration header");
     next();
-    bool isConstant;
 
     if(current()) {
-        if(current()->is(tok::sep_colon) || current()->is(tok::sep_equal)) {
-            if(current()->is(tok::sep_colon))
-                isConstant = true;
-            else isConstant = false;
+        if(current()->is(tok::sep_equal)) {
             next();
             auto expression = parseExpr();
-            assert(expression && "Expected expression after colon or equal sign");
-            return Decl::Decl(prototype, type, isConstant, expression);
+            assert(expression && "Expected expression after assignment");
+            return Decl(prototype, *type, *expression);
         } else if(current()->is(tok::sep_left_curly)) {
-            isConstant = true;
             next();
             auto body = parseScope();
             assert(next() && current()->is(tok::sep_right_curly) && "Expected '}' at end of declaration");
-            return Decl::Decl(prototype, type, isConstant, body);
+            return Decl(prototype, *type, *body);
         }
     }
-    assert(false && "Expected ':', '=' or '{' after type annotation");
+    assert(false && "Expected '=' or '{' after type annotation");
 }
 
-std::shared_ptr<Expr> Parser::parseDeclRefExpr(DeclPrototype prototype) {
-    return std::make_unique<DeclRefExpr>(DeclRefExpr(prototype));
+ParseResult<std::shared_ptr<Expr>> Parser::parseDeclRefExpr(DeclPrototype prototype) {
+    //return std::make_unique<DeclRefExpr>(DeclRefExpr(prototype));
 }
 
-std::shared_ptr<Expr> Parser::parseExpr() {
+ParseResult<std::shared_ptr<Expr>> Parser::parseExpr() {
     if(auto intVal = parseIntegerLiteral()) {
-        return std::make_unique<IntegerLiteralExpr>(IntegerLiteralExpr(*intVal));
+        return std::dynamic_pointer_cast<Expr>(std::make_shared<IntegerLiteralExpr>(*intVal));
     } else if(auto decimalVal = parseDecimalLiteral()) {
-        return std::make_unique<DecimalLiteralExpr>(DecimalLiteralExpr(*decimalVal));
-    } else if(auto prototype = parseDeclPrototype()) {
+        return std::dynamic_pointer_cast<Expr>(std::make_shared<DecimalLiteralExpr>(*decimalVal));
+    } /*else if(auto prototype = parseDeclPrototype()) {
         return parseDeclRefExpr(*prototype);
-    }
+    }*/
 
-    return nullptr;
+    return Diagnostic("Failed to parse expression.");
 }
