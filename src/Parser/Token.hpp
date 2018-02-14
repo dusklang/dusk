@@ -46,7 +46,7 @@ public:
     }
 
     std::string prettyPrint() {
-        #define TOKEN_SEPARATOR(name, character) case tok::sep_ ## name: return "Separator " + text;
+        #define TOKEN_SEPARATOR(name, character) case tok::sep_ ## name: return "separator " + text;
         #define TOKEN(name) case tok::name: return #name " " + text;
         switch(kind) {
             #include "TokenKinds.def"

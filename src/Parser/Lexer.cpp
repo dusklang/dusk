@@ -5,26 +5,26 @@
 #include <iostream>
 
 llvm::Optional<Token> Lexer::getNextToken() {
-    auto nextPosition = tokenPositions.top();
-    while(nextPosition < source.length()) {
+    auto pos = tokenPositions.top();
+    while(pos < source.length()) {
         // Skip whitespace.
-        if(isWhitespace()) nextPosition++;
+        if(isWhitespace(pos)) pos++;
         // Skip single-line comments.
-        else if(isSubstr("//"))
-            for(nextPosition += 2; nextPosition < source.length() && !isNewline(); nextPosition++);
+        else if(isSubstr("//", pos))
+            for(pos += 2; pos < source.length() && !isNewline(pos); pos++);
         // Skip (optionally nested) multi-line comments.
-        else if(isSubstr("/*")) {
+        else if(isSubstr("/*", pos)) {
             int levels = 1;
-            for(nextPosition += 2; nextPosition < source.length(); nextPosition++) {
-                if(isSubstr("/*")) {
-                    nextPosition++;
+            for(pos += 2; pos < source.length(); pos++) {
+                if(isSubstr("/*", pos)) {
+                    pos++;
                     levels++;
-                } else if(isSubstr("*/")) {
-                    nextPosition++;
+                } else if(isSubstr("*/", pos)) {
+                    pos++;
                     levels--;
                 }
                 if(levels == 0) {
-                    nextPosition++;
+                    pos++;
                     break;
                 }
             }
@@ -32,58 +32,64 @@ llvm::Optional<Token> Lexer::getNextToken() {
     }
 
     llvm::Optional<Token> _tok;
-#define RETURN(token) _tok = token; if(_tok) { std::cout << _tok->prettyPrint(); tokenPositions.push(nextPosition); tokens.push(*_tok); } return _tok
-
-    // Return nothing if at the end.
-    if(nextPosition == source.length()) {
-        RETURN(llvm::None);
+    #define RETURN(token) { \
+        _tok = token;\
+        if(_tok) {\
+            tokenPositions.push(pos);\
+            tokens.push(*_tok);\
+        }\
+        return _tok;\
     }
 
+    // Return nothing if at the end.
+    if(pos == source.length()) RETURN(llvm::None);
+
     // Lex separators.
-    switch(nextChar()) {
+    switch(nextChar(pos)) {
         #define TOKEN_SEPARATOR(name, character) case character:\
-            nextPosition++; RETURN(Token::Token(tok::sep_ ## name, character));
+            pos++; RETURN(Token::Token(tok::sep_ ## name, character));
         #include "TokenKinds.def"
     }
 
     std::string tokenText;
 
     // Lex a string literal.
-    if(isDoubleQuote()) {
+    if(isDoubleQuote(pos)) {
         tokenText += '"';
-        nextPosition++;
-        while(nextPosition < source.length() && !isNewline()) {
-            tokenText += nextChar();
+        pos++;
+        while(pos < source.length() && !isNewline(pos)) {
+            tokenText += nextChar(pos);
 
-            if(isDoubleQuote() && source.at(nextPosition - 1) != '\\') {
-                nextPosition++;
+            if(isDoubleQuote(pos) && source.at(pos - 1) != '\\') {
+                pos++;
                 RETURN(Token(tok::string_literal, tokenText));
             } else {
-                nextPosition++;
+                pos++;
             }
         }
         assert(false && "Unterminated string literal");
     }
 
     // Lex an identifier.
-    if(nextPosition < source.length() && isLetter())
-        while(nextPosition < source.length() && (isLetter() || isNumber()))
-            tokenText += source.at(nextPosition++);
+    if(pos < source.length() && isLetter(pos))
+        while(pos < source.length() && (isLetter(pos) || isNumber(pos)))
+            tokenText += source.at(pos++);
     if(!tokenText.empty()) {
         #define TOKEN_KEYWORD(name, sourcerepr) if(tokenText == #sourcerepr) RETURN(Token(tok::kw_ ## name, tokenText));
         #include "TokenKinds.def"
+
         RETURN(Token(tok::identifier, tokenText));
     }
 
     // Lex an integer or decimal literal.
     auto hasDot = false;
-    while(isNumber() || isDot()) {
-        if(isDot()) {
+    while(isNumber(pos) || isDot(pos)) {
+        if(isDot(pos)) {
             // TODO: Add a better diagnostic system than runtime assertions.
             assert(!hasDot && "Decimal literals can have only one dot.");
             hasDot = true;
         }
-        tokenText += source.at(nextPosition++);
+        tokenText += source.at(pos++);
     }
     if(!tokenText.empty()) {
         RETURN(Token::Token(hasDot ? tok::decimal_literal : tok::integer_literal, tokenText));
