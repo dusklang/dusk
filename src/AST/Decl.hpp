@@ -15,7 +15,6 @@ private:
 public:
     DeclPrototype prototype;
     std::shared_ptr<Expr> type;
-    bool isConstant;
 
     std::shared_ptr<Expr> expression() const { return std::dynamic_pointer_cast<Expr>(value); }
     std::shared_ptr<ScopeNode> body() const {
@@ -24,10 +23,9 @@ public:
 
     Decl(DeclPrototype prototype,
          std::shared_ptr<Expr> type,
-         bool isConstant,
          std::shared_ptr<Expr> expression)
         : value(std::dynamic_pointer_cast<ASTNode>(expression)),
-          prototype(prototype), type(type), isConstant(isConstant) {
+          prototype(prototype), type(type) {
         for(auto& params: prototype.paramLists) {
             assert(!params.empty() && "Encountered empty parameter list, which is not allowed.");
         }
@@ -35,10 +33,9 @@ public:
 
     Decl(DeclPrototype prototype,
          std::shared_ptr<Expr> type,
-         bool isConstant,
          std::shared_ptr<ScopeNode> body)
       : value(std::dynamic_pointer_cast<ASTNode>(body)),
-       prototype(prototype), type(type), isConstant(isConstant) {
+       prototype(prototype), type(type) {
         for(auto& params: prototype.paramLists) {
             assert(!params.empty() && "Encountered empty parameter list, which is not allowed.");
         }

@@ -11,7 +11,7 @@ std::string ASTNode::indentation(int level) const {
 };
 
 std::string DeclPrototype::prettyPrint(int indentationLevel) const {
-    std::string str = name;
+    std::string str = (isMut ? "mut " : "") + name;
     for(auto& params: paramLists) {
         str += "(";
         bool first = true;

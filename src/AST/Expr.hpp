@@ -28,9 +28,12 @@ struct DecimalLiteralExpr: public Expr {
 };
 
 struct DeclRefExpr: public Expr {
-    DeclPrototype prototype;
+    std::string name;
+    llvm::SmallVector<llvm::SmallVector<Argument, 2>, 1> argLists;
 
-    DeclRefExpr(DeclPrototype prototype) : prototype(prototype) {}
+    DeclRefExpr(const std::string& name,
+                const llvm::SmallVector<llvm::SmallVector<Argument, 2>, 1>& argLists)
+    : name(name), argLists(argLists) {}
 
     std::string prettyPrint(int indentationLevel = -1) const override;
 };
