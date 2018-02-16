@@ -22,20 +22,22 @@ public:
     }
 
     Decl(DeclPrototype prototype,
-         std::shared_ptr<Expr> type,
-         std::shared_ptr<Expr> expression)
+         std::shared_ptr<Expr> expression,
+         std::shared_ptr<Expr> type)
         : value(std::dynamic_pointer_cast<ASTNode>(expression)),
-          prototype(prototype), type(type) {
+          prototype(prototype),
+          type(type) {
         for(auto& params: prototype.paramLists) {
             assert(!params.empty() && "Encountered empty parameter list, which is not allowed.");
         }
     }
 
     Decl(DeclPrototype prototype,
-         std::shared_ptr<Expr> type,
-         std::shared_ptr<ScopeNode> body)
+         std::shared_ptr<ScopeNode> body,
+         std::shared_ptr<Expr> type)
       : value(std::dynamic_pointer_cast<ASTNode>(body)),
-       prototype(prototype), type(type) {
+        prototype(prototype),
+        type(type) {
         for(auto& params: prototype.paramLists) {
             assert(!params.empty() && "Encountered empty parameter list, which is not allowed.");
         }

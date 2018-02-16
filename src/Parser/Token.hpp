@@ -43,7 +43,7 @@ public:
     bool isSignificant() const { return !isInsignificant(); }
 
     tok getKind() const { return kind; }
-    std::string getText() const { return text; }
+    const std::string& getText() const { return text; }
     SourceLoc getLoc() const { return loc; }
     SourceRange getRange() const { return SourceRange(loc, text.length()); }
 

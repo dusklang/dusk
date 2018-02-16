@@ -7,6 +7,7 @@
 #include "llvm/ADT/SmallVector.h"
 
 struct Expr;
+struct TypeExpr;
 
 // Abstract class from which each node in the AST inherits.
 struct ASTNode {

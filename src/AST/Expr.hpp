@@ -33,7 +33,43 @@ struct DeclRefExpr: public Expr {
 
     DeclRefExpr(const std::string& name,
                 const llvm::SmallVector<llvm::SmallVector<Argument, 2>, 1>& argLists)
-    : name(name), argLists(argLists) {}
+            : name(name), argLists(argLists) {}
+    void operator=(const DeclRefExpr& other) {
+        name = other.name;
+        argLists = other.argLists;
+    }
 
     std::string prettyPrint(int indentationLevel = -1) const override;
+};
+
+struct TypeExpr: public Expr {
+private:
+    enum {
+        inferred,
+        referenced
+    } tag;
+    union {
+        DeclRefExpr expr;
+    };
+public:
+    TypeExpr() : tag(inferred) {}
+    TypeExpr(const DeclRefExpr& expr) : tag(referenced), expr(expr) {}
+    TypeExpr(const TypeExpr& other) : tag(other.tag) {
+        if(tag == referenced) expr = other.expr;
+    }
+    ~TypeExpr() {}
+    void operator=(const TypeExpr& other) {
+        tag = other.tag;
+        if(tag == referenced) expr = other.expr;
+    }
+
+    const DeclRefExpr& asDeclRef() const {
+        assert(tag == referenced);
+        return expr;
+    }
+
+    bool isInferred() const { return tag == inferred; }
+    std::string prettyPrint(int indentationLevel = -1) const override {
+        return tag == inferred ? "<inferred>" : expr.prettyPrint();
+    }
 };

@@ -5,12 +5,15 @@
 
 int main(int argc, const char * argv[]) {
     std::cout << "Quill compiler version 0.0.1\n\n";
-    Parser parser("helloThere // This is a test of parsing single-line comments\n"
-                  "/* what about multi-line comments? \n aVariableDecl : 4 = 3.141592/* nested?\n */ */\n"
-                  "aParameterizedDecl(that: 4)(currying: 4)(other: 4, sortOf: 4) : 4 { }\n");
+    Parser parser("helloThere(hello: 4) : 4 {}");
 
+//    while(lexer.nextTok().isNot(tok::eof)) {
+//        std::cout << lexer.curTok().prettyPrint() << "\n";
+//    }
     if(auto scope = parser.parseScope()) {
         std::cout << (*scope)->prettyPrint() << '\n';
+    } else {
+        std::cout << scope.failure() << "\n\n";
     }
 
     return 0;
