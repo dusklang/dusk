@@ -16,7 +16,12 @@ TOKEN(identifier)
 TOKEN(integer_literal)
 TOKEN(decimal_literal)
 TOKEN(string_literal)
+
 TOKEN(eof)
+TOKEN(whitespace)
+TOKEN(newline)
+TOKEN(comment_single_line)
+TOKEN(comment_multiple_line)
 
 TOKEN_KEYWORD(mut, mut)
 

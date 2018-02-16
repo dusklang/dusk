@@ -4,32 +4,9 @@
 #include <assert.h>
 #include <iostream>
 
-Token Lexer::getNextToken() {
+Token Lexer::nextTok() {
     auto pos = tokenPositions.top();
-    while(pos < source.length()) {
-        // Skip whitespace.
-        if(isWhitespace(pos)) pos++;
-        // Skip single-line comments.
-        else if(isSubstr("//", pos))
-            for(pos += 2; pos < source.length() && !isNewline(pos); pos++);
-        // Skip (optionally nested) multi-line comments.
-        else if(isSubstr("/*", pos)) {
-            int levels = 1;
-            for(pos += 2; pos < source.length(); pos++) {
-                if(isSubstr("/*", pos)) {
-                    pos++;
-                    levels++;
-                } else if(isSubstr("*/", pos)) {
-                    pos++;
-                    levels--;
-                }
-                if(levels == 0) {
-                    pos++;
-                    break;
-                }
-            }
-        } else break;
-    }
+    std::string tokenText;
 
     Token _tok;
     #define RETURN(token) { \
@@ -39,26 +16,64 @@ Token Lexer::getNextToken() {
         return _tok;\
     }
 
-    // Return nothing if at the end.
+    // Return eof if at the end.
     if(pos == source.length()) RETURN(Token(tok::eof, ""));
 
+    // Lex newlines.
+    for(;pos < source.length() && isNewline(pos); pos++) tokenText += source.at(pos);
+    if(!tokenText.empty()) RETURN(Token(tok::newline, tokenText));
+
+    // Lex whitespace.
+    for(;pos < source.length() && isWhitespace(pos); pos++) tokenText += source.at(pos);
+    if(!tokenText.empty()) RETURN(Token(tok::whitespace, tokenText));
+
+    // Lex single-line comments.
+    if(isSubstr("//", pos)) {
+        tokenText = "//";
+        for(pos += 2; pos < source.length() && !isNewline(pos); pos++) tokenText += source.at(pos);
+    }
+    if(!tokenText.empty()) RETURN(Token(tok::comment_single_line, tokenText));
+
+    // Lex (optionally-nested) multi-line comments.
+    if(isSubstr("/*", pos)) {
+        tokenText = "/*";
+        int levels = 1;
+        for(pos += 2; pos < source.length(); pos++) {
+            tokenText += source.at(pos);
+            if(auto test = isSubstr("/*", pos)) {
+                pos++;
+                tokenText += source.at(pos);
+                levels++;
+            } else if(isSubstr("*/", pos)) {
+                pos++;
+                tokenText += source.at(pos);
+                levels--;
+                if(levels == 0) {
+                    pos++;
+                    tokenText += source.at(pos);
+                    break;
+                }
+            }
+        }
+        if(levels > 0) assert(false && "Unterminated /* comment.");
+    }
+    if(!tokenText.empty()) RETURN(Token(tok::comment_multiple_line, tokenText));
+
     // Lex separators.
-    switch(nextChar(pos)) {
+    switch(source.at(pos)) {
         #define TOKEN_SEPARATOR(name, character) case character:\
             pos++; RETURN(Token(tok::sep_ ## name, character));
         #include "TokenKinds.def"
     }
 
-    std::string tokenText;
-
     // Lex a string literal.
-    if(isDoubleQuote(pos)) {
+    if(is('"', pos)) {
         tokenText += '"';
         pos++;
         while(pos < source.length() && !isNewline(pos)) {
-            tokenText += nextChar(pos);
+            tokenText += source.at(pos);
 
-            if(isDoubleQuote(pos) && source.at(pos - 1) != '\\') {
+            if(is('"', pos) && source.at(pos - 1) != '\\') {
                 pos++;
                 RETURN(Token(tok::string_literal, tokenText));
             } else {
@@ -70,7 +85,7 @@ Token Lexer::getNextToken() {
 
     // Lex an identifier.
     if(pos < source.length() && isLetter(pos))
-        while(pos < source.length() && (isLetter(pos) || isNumber(pos)))
+        while(pos < source.length() && (isLetter(pos) || isNum(pos)))
             tokenText += source.at(pos++);
     if(!tokenText.empty()) {
         #define TOKEN_KEYWORD(name, sourcerepr) if(tokenText == #sourcerepr) RETURN(Token(tok::kw_ ## name, tokenText));
@@ -81,8 +96,8 @@ Token Lexer::getNextToken() {
 
     // Lex an integer or decimal literal.
     auto hasDot = false;
-    while(isNumber(pos) || isDot(pos)) {
-        if(isDot(pos)) {
+    while(isNum(pos) || is('.', pos)) {
+        if(is('.', pos)) {
             // TODO: Add a better diagnostic system than runtime assertions.
             assert(!hasDot && "Decimal literals can have only one dot.");
             hasDot = true;
