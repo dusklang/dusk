@@ -4,7 +4,7 @@
 #include <assert.h>
 #include <iostream>
 
-Token Lexer::nextTok() {
+Token Lexer::nextTokIncludingInsignificant() {
     auto pos = tokenPositions.top();
     std::string tokenText;
 
@@ -26,6 +26,7 @@ Token Lexer::nextTok() {
 
     Token _tok;
     #define RETURN(token) { \
+        if(numberOfNewTokens) *numberOfNewTokens += 1;\
         _tok = token;\
         tokenPositions.push(pos);\
         tokens.push(_tok);\

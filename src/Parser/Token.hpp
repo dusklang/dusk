@@ -37,6 +37,10 @@ public:
     bool isNot(tok k) const { return kind != k; }
     template <typename ...T>
     bool isNot(tok k1, tok k2, T... k) const { return !isAny(k1, k...); }
+    bool isInsignificant() const {
+        return isAny(tok::whitespace, tok::comment_single_line, tok::comment_multiple_line, tok::newline);
+    }
+    bool isSignificant() const { return !isInsignificant(); }
 
     tok getKind() const { return kind; }
     std::string getText() const { return text; }
