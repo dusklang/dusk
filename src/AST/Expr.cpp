@@ -13,10 +13,10 @@ std::string DecimalLiteralExpr::prettyPrint(int indentationLevel) const {
 
 std::string DeclRefExpr::prettyPrint(int indentationLevel) const {
     std::string str = name;
-    for(auto& params: argLists) {
+    if(!argList.empty()) {
         str += "(";
         bool first = true;
-        for(auto& arg: params) {
+        for(auto& arg: argList) {
             if(!first) str += ", ";
             else first = false;
 

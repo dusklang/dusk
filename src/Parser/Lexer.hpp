@@ -40,7 +40,8 @@ public:
     Token nextTok() {
         while(true) {
             auto next = nextTokIncludingInsignificant();
-            if(next.isSignificant()) return next;
+            if(next.isSignificant())
+                return next;
         }
     }
     llvm::Optional<Token> prevTok() {

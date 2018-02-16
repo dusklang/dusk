@@ -24,23 +24,15 @@ public:
     Decl(DeclPrototype prototype,
          std::shared_ptr<Expr> expression,
          std::shared_ptr<Expr> type)
-        : value(std::dynamic_pointer_cast<ASTNode>(expression)),
-          prototype(prototype),
-          type(type) {
-        for(auto& params: prototype.paramLists) {
-            assert(!params.empty() && "Encountered empty parameter list, which is not allowed.");
-        }
-    }
+      : value(std::dynamic_pointer_cast<ASTNode>(expression)),
+        prototype(prototype),
+        type(type) {}
 
     Decl(DeclPrototype prototype,
          std::shared_ptr<ScopeNode> body,
          std::shared_ptr<Expr> type)
       : value(std::dynamic_pointer_cast<ASTNode>(body)),
         prototype(prototype),
-        type(type) {
-        for(auto& params: prototype.paramLists) {
-            assert(!params.empty() && "Encountered empty parameter list, which is not allowed.");
-        }
-    }
-    std::string prettyPrint(int indentationLevel = -1) const override;
+        type(type) {}
+    std::string prettyPrint(int indentationLevel = 0) const override;
 };

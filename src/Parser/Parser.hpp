@@ -21,6 +21,10 @@ public:
     ~ParseResult() {}
     ParseResult(const Success& success) : _tag(succeeded), _success(success) {}
     ParseResult(const Failure& failure) : _tag(failed), _failure(failure) {}
+    ParseResult(const ParseResult<Success, Failure>& other) : _tag(other._tag) {
+        if(_tag == succeeded) _success = other._success;
+        else _failure = other._failure;
+    }
 
     const Success& success() const {
         assert(_tag == succeeded);
@@ -73,18 +77,27 @@ private:
     Token next() { return lexer.nextTok(); }
     llvm::Optional<Token> previous() { return lexer.prevTok(); }
     llvm::Optional<std::string> parseIdentifer() {
-        if(current().is(tok::identifier))
-            return current().getText();
+        if(current().is(tok::identifier)) {
+            auto text = current().getText();
+            next();
+            return text;
+        }
         return llvm::None;
     }
     llvm::Optional<std::string> parseIntegerLiteral() {
-        if(current().is(tok::integer_literal))
-            return current().getText();
+        if(current().is(tok::integer_literal)) {
+            auto text = current().getText();
+            next();
+            return text;
+        }
         return llvm::None;
     }
     llvm::Optional<std::string> parseDecimalLiteral() {
-        if(current().is(tok::decimal_literal))
-            return current().getText();
+        if(current().is(tok::decimal_literal)) {
+            auto text = current().getText();
+            next();
+            return text;
+        }
         return llvm::None;
     }
 public:

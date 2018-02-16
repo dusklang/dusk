@@ -17,29 +17,29 @@ struct IntegerLiteralExpr: public Expr {
 
     IntegerLiteralExpr(const std::string& literal): literal(literal) {}
 
-    std::string prettyPrint(int indentationLevel = -1) const override;
+    std::string prettyPrint(int indentationLevel = 0) const override;
 };
 
 struct DecimalLiteralExpr: public Expr {
     std::string literal;
     DecimalLiteralExpr(const std::string& literal): literal(literal) {}
 
-    std::string prettyPrint(int indentationLevel = -1) const override;
+    std::string prettyPrint(int indentationLevel = 0) const override;
 };
 
 struct DeclRefExpr: public Expr {
     std::string name;
-    llvm::SmallVector<llvm::SmallVector<Argument, 2>, 1> argLists;
+    llvm::SmallVector<Argument, 2> argList;
 
     DeclRefExpr(const std::string& name,
-                const llvm::SmallVector<llvm::SmallVector<Argument, 2>, 1>& argLists)
-            : name(name), argLists(argLists) {}
+                const llvm::SmallVector<Argument, 2>& argList)
+            : name(name), argList(argList) {}
     void operator=(const DeclRefExpr& other) {
         name = other.name;
-        argLists = other.argLists;
+        argList = other.argList;
     }
 
-    std::string prettyPrint(int indentationLevel = -1) const override;
+    std::string prettyPrint(int indentationLevel = 0) const override;
 };
 
 struct TypeExpr: public Expr {
@@ -69,7 +69,7 @@ public:
     }
 
     bool isInferred() const { return tag == inferred; }
-    std::string prettyPrint(int indentationLevel = -1) const override {
+    std::string prettyPrint(int indentationLevel = 0) const override {
         return tag == inferred ? "<inferred>" : expr.prettyPrint();
     }
 };

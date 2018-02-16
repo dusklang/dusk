@@ -12,10 +12,10 @@ std::string ASTNode::indentation(int level) const {
 
 std::string DeclPrototype::prettyPrint(int indentationLevel) const {
     std::string str = (isMut ? "mut " : "") + name;
-    for(auto& params: paramLists) {
+    if(!paramList.empty()) {
         str += "(";
         bool first = true;
-        for(auto& param: params) {
+        for(auto& param: paramList) {
             if(!first) str += ", ";
             else first = false;
 

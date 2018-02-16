@@ -13,8 +13,13 @@ std::string Argument::prettyPrint(int indentationLevel) const {
 }
 
 std::string Decl::prettyPrint(int indentationLevel) const {
-    std::string str = indentation(indentationLevel) + prototype.prettyPrint() + " : " + type->prettyPrint();
-    if(expression()) str += expression()->prettyPrint();
+    std::string str = indentation(indentationLevel) + prototype.prettyPrint();
+    if(type) str += " : " + type->prettyPrint();
+    if(expression()) {
+        if(!type) str += " :";
+        else str += " ";
+        str += "= " + expression()->prettyPrint();
+    }
     else str += " {\n" + body()->prettyPrint(indentationLevel) + "\n" + indentation(indentationLevel) + "}";
     return str;
 }

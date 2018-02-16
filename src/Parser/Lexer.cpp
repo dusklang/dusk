@@ -113,7 +113,7 @@ Token Lexer::nextTokIncludingInsignificant() {
 
     // Lex an integer or decimal literal.
     auto hasDot = false;
-    while(isNum() || is('.')) {
+    while(pos < source.length() && (isNum() || is('.'))) {
         if(is('.')) {
             // TODO: Add a better diagnostic system than runtime assertions.
             assert(!hasDot && "Decimal literals can have only one dot.");
