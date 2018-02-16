@@ -16,6 +16,7 @@ TOKEN(identifier)
 TOKEN(integer_literal)
 TOKEN(decimal_literal)
 TOKEN(string_literal)
+TOKEN(eof)
 
 TOKEN_KEYWORD(mut, mut)
 

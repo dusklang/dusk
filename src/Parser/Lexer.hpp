@@ -46,18 +46,13 @@ public:
         tokenPositions.push(0);
     }
 
-    llvm::Optional<Token> getNextToken();
-    llvm::Optional<Token> getCurrentToken() {
-        if(tokens.empty()) return llvm::None;
-        return tokens.top();
-    }
+    Token getNextToken();
+    Token getCurrentToken() { return tokens.top(); }
     llvm::Optional<Token> getPreviousToken() {
         tokens.pop();
         tokenPositions.pop();
-
-        if(tokens.empty())
-            return llvm::None;
-        return tokens.top();
+        if(tokens.empty()) return llvm::None;
+        return getCurrentToken();
     }
 
     // See the above description of the numberOfNewTokens member.

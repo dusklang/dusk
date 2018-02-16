@@ -1,11 +1,10 @@
 set(SOURCES
-    Parser.cpp
     Lexer.cpp
 )
 set(HEADERS
-    Parser.hpp
     Lexer.hpp
     Token.hpp
+    ParseTree.hpp
     TokenKinds.def
     ParseResult.hpp
 )

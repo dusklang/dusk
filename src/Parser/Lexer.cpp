@@ -4,7 +4,7 @@
 #include <assert.h>
 #include <iostream>
 
-llvm::Optional<Token> Lexer::getNextToken() {
+Token Lexer::getNextToken() {
     auto pos = tokenPositions.top();
     while(pos < source.length()) {
         // Skip whitespace.
@@ -31,23 +31,21 @@ llvm::Optional<Token> Lexer::getNextToken() {
         } else break;
     }
 
-    llvm::Optional<Token> _tok;
+    Token _tok;
     #define RETURN(token) { \
         _tok = token;\
-        if(_tok) {\
-            tokenPositions.push(pos);\
-            tokens.push(*_tok);\
-        }\
+        tokenPositions.push(pos);\
+        tokens.push(_tok);\
         return _tok;\
     }
 
     // Return nothing if at the end.
-    if(pos == source.length()) RETURN(llvm::None);
+    if(pos == source.length()) RETURN(Token(tok::eof, ""));
 
     // Lex separators.
     switch(nextChar(pos)) {
         #define TOKEN_SEPARATOR(name, character) case character:\
-            pos++; RETURN(Token::Token(tok::sep_ ## name, character));
+            pos++; RETURN(Token(tok::sep_ ## name, character));
         #include "TokenKinds.def"
     }
 
@@ -92,7 +90,7 @@ llvm::Optional<Token> Lexer::getNextToken() {
         tokenText += source.at(pos++);
     }
     if(!tokenText.empty()) {
-        RETURN(Token::Token(hasDot ? tok::decimal_literal : tok::integer_literal, tokenText));
+        RETURN(Token(hasDot ? tok::decimal_literal : tok::integer_literal, tokenText));
     }
 
     assert(false && "Unhandled token");
