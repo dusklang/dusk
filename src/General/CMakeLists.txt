@@ -1,8 +1,7 @@
 set(SOURCES
-
 )
 set(HEADERS
-    Diagnostic.hpp
+    SourceLoc.hpp
 )
 
 add_library(General ${SOURCES} ${HEADERS})

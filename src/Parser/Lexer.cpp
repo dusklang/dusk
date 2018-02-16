@@ -33,22 +33,22 @@ Token Lexer::nextTok() {
     }
 
     // Return eof if at the end.
-    if(pos == source.length()) RETURN(Token(tok::eof, ""));
+    if(pos == source.length()) RETURN(Token(tok::eof, "", tokenPositions.top()));
 
     // Lex newlines.
     for(;pos < source.length() && isNewline(); pos++) tokenText += curChar();
-    if(!tokenText.empty()) RETURN(Token(tok::newline, tokenText));
+    if(!tokenText.empty()) RETURN(Token(tok::newline, tokenText, tokenPositions.top()));
 
     // Lex whitespace.
     for(;pos < source.length() && isWhitespace(); pos++) tokenText += curChar();
-    if(!tokenText.empty()) RETURN(Token(tok::whitespace, tokenText));
+    if(!tokenText.empty()) RETURN(Token(tok::whitespace, tokenText, tokenPositions.top()));
 
     // Lex single-line comments.
     if(isSubstr("//")) {
         tokenText = "//";
         for(pos += 2; pos < source.length() && !isNewline(); pos++) tokenText += curChar();
     }
-    if(!tokenText.empty()) RETURN(Token(tok::comment_single_line, tokenText));
+    if(!tokenText.empty()) RETURN(Token(tok::comment_single_line, tokenText, tokenPositions.top()));
 
     // Lex (optionally-nested) multi-line comments.
     if(isSubstr("/*")) {
@@ -73,12 +73,12 @@ Token Lexer::nextTok() {
         }
         if(levels > 0) assert(false && "Unterminated /* comment.");
     }
-    if(!tokenText.empty()) RETURN(Token(tok::comment_multiple_line, tokenText));
+    if(!tokenText.empty()) RETURN(Token(tok::comment_multiple_line, tokenText, tokenPositions.top()));
 
     // Lex separators.
     switch(curChar()) {
         #define TOKEN_SEPARATOR(name, character) case character:\
-            pos++; RETURN(Token(tok::sep_ ## name, character));
+            pos++; RETURN(Token(tok::sep_ ## name, character, tokenPositions.top()));
         #include "TokenKinds.def"
     }
 
@@ -91,7 +91,7 @@ Token Lexer::nextTok() {
 
             if(is('"') && source.at(pos - 1) != '\\') {
                 pos++;
-                RETURN(Token(tok::string_literal, tokenText));
+                RETURN(Token(tok::string_literal, tokenText, tokenPositions.top()));
             } else {
                 pos++;
             }
@@ -104,10 +104,10 @@ Token Lexer::nextTok() {
         while(pos < source.length() && (isLetter() || isNum()))
             tokenText += source.at(pos++);
     if(!tokenText.empty()) {
-        #define TOKEN_KEYWORD(name, sourcerepr) if(tokenText == #sourcerepr) RETURN(Token(tok::kw_ ## name, tokenText));
+        #define TOKEN_KEYWORD(name, sourcerepr) if(tokenText == #sourcerepr) RETURN(Token(tok::kw_ ## name, tokenText, tokenPositions.top()));
         #include "TokenKinds.def"
 
-        RETURN(Token(tok::identifier, tokenText));
+        RETURN(Token(tok::identifier, tokenText, tokenPositions.top()));
     }
 
     // Lex an integer or decimal literal.
@@ -121,7 +121,7 @@ Token Lexer::nextTok() {
         tokenText += source.at(pos++);
     }
     if(!tokenText.empty()) {
-        RETURN(Token(hasDot ? tok::decimal_literal : tok::integer_literal, tokenText));
+        RETURN(Token(hasDot ? tok::decimal_literal : tok::integer_literal, tokenText, tokenPositions.top()));
     }
 
     assert(false && "Unhandled token");

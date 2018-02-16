@@ -6,7 +6,6 @@ set(HEADERS
     Token.hpp
     ParseTree.hpp
     TokenKinds.def
-    ParseResult.hpp
 )
 
 add_library(Parser ${SOURCES} ${HEADERS})

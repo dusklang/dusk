@@ -1,6 +1,7 @@
 //  Copyright © 2018 Zach Wolfe. All rights reserved.
 
 #include <string>
+#include "General/SourceLoc.hpp"
 
 enum class tok {
     #define TOKEN(name) name,
@@ -12,14 +13,16 @@ class Token {
 private:
     tok kind = tok::NUM_TOKENS;
     std::string text;
+    SourceLoc loc;
 
 public:
-    Token(tok kind, std::string text) : kind(kind), text(text) {}
-    Token(tok kind, char character) : kind(kind) { text = character; }
+    Token(tok kind, std::string text, SourceLoc loc) : kind(kind), text(text), loc(loc) {}
+    Token(tok kind, char character, SourceLoc loc) : kind(kind), loc(loc) { text = character; }
     Token() {}
     Token& operator=(const Token& otherTok) {
         kind = otherTok.kind;
         text = otherTok.text;
+        loc = otherTok.loc;
         return *this;
     }
 
@@ -37,6 +40,8 @@ public:
 
     tok getKind() const { return kind; }
     std::string getText() const { return text; }
+    SourceLoc getLoc() const { return loc; }
+    SourceRange getRange() const { return SourceRange(loc, text.length()); }
 
     bool isAnySeparator() const {
         #define TOKEN_SEPARATOR(name, character) || kind == tok::sep_ ## name
