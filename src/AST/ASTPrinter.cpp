@@ -11,7 +11,6 @@ std::string indentation(int level) {
 
 std::string ASTPrinter::visitDecl(Decl* decl, int indentationLevel) {
     std::string str = indentation(indentationLevel) + visitDeclPrototype(&decl->prototype, 0);
-    str += ": " + visitExpr(decl->type.get(), 0);
     if(decl->expression()) {
         str += " = " + visitExpr(decl->expression().get(), 0);
     }
@@ -20,7 +19,10 @@ std::string ASTPrinter::visitDecl(Decl* decl, int indentationLevel) {
 }
 
 std::string ASTPrinter::visitDeclPrototype(DeclPrototype* prototype, int indentationLevel) {
-    std::string str = (prototype->isMut ? "mut " : "") + prototype->name;
+    std::string str;
+    str += prototype->isMut ? "mut " : "";
+    str += prototype->isExtern ? "extern " : "";
+    str += prototype->name;
     if(!prototype->paramList.empty()) {
         str += "(";
         bool first = true;
@@ -32,6 +34,7 @@ std::string ASTPrinter::visitDeclPrototype(DeclPrototype* prototype, int indenta
         }
         str += ")";
     }
+    str += ": " + visitExpr(prototype->type.get(), 0);
     return indentation(indentationLevel) + str;
 }
 

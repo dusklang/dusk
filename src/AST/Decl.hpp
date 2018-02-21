@@ -9,12 +9,28 @@
 
 struct Expr;
 
+// This is used in Decls, or on its own as a standalone prototype.
+struct DeclPrototype final : public ASTNode {
+    std::string name;
+    std::vector<Param> paramList;
+    std::shared_ptr<Expr> type;
+    bool isMut;
+    bool isExtern;
+
+    AST_NODE_CONSTRUCTOR(DeclPrototype,
+                         const std::string& name,
+                         const std::vector<Param>& paramList,
+                         const std::shared_ptr<Expr>& type,
+                         bool isMut,
+                         bool isExtern),
+    name(name), paramList(paramList), type(type), isMut(isMut), isExtern(isExtern) {}
+};
+
 struct Decl final : public ASTNode {
 private:
     std::shared_ptr<ASTNode> value;
 public:
     DeclPrototype prototype;
-    std::shared_ptr<Expr> type;
 
     std::shared_ptr<Expr> expression() const { return std::dynamic_pointer_cast<Expr>(value); }
     std::shared_ptr<Scope> body() const {
@@ -23,17 +39,13 @@ public:
 
     AST_NODE_CONSTRUCTOR(Decl,
                          DeclPrototype prototype,
-                         std::shared_ptr<Expr> expression,
-                         std::shared_ptr<Expr> type),
+                         std::shared_ptr<Expr> expression),
     value(std::dynamic_pointer_cast<ASTNode>(expression)),
-    prototype(prototype),
-    type(type) {}
+    prototype(prototype) {}
 
     AST_NODE_CONSTRUCTOR(Decl,
                          DeclPrototype prototype,
-                         std::shared_ptr<Scope> body,
-                         std::shared_ptr<Expr> type),
+                         std::shared_ptr<Scope> body),
     value(std::dynamic_pointer_cast<ASTNode>(body)),
-    prototype(prototype),
-    type(type) {}
+    prototype(prototype) {}
 };

@@ -38,17 +38,28 @@ struct Argument final : public ASTNode {
     AST_NODE_CONSTRUCTOR(Argument, const std::string& name, std::shared_ptr<Expr> value), name(name), value(value) {}
 };
 
-// This is used in Decls.
-struct DeclPrototype final : public ASTNode {
+// This is used in the parser only, because DeclPrototypes and DeclRefExprs are not always possible
+// to differentiate between until the end.
+struct DeclPrototypeORRef {
     std::string name;
     std::vector<Param> paramList;
+    std::shared_ptr<Expr> type;
     bool isMut;
+    bool isExtern;
+    // The parser's best guess on what this is.
+    typedef enum {
+        prototype,
+        ref
+    } Guess;
+    Guess guess;
 
-    AST_NODE_CONSTRUCTOR(DeclPrototype,
-                         const std::string& name,
-                         const std::vector<Param>& paramList,
-                         bool isMut),
-    name(name), paramList(paramList), isMut(isMut) {}
+    DeclPrototypeORRef(const std::string& name,
+                       const std::vector<Param>& paramList,
+                       const std::shared_ptr<Expr>& type,
+                       bool isMut,
+                       bool isExtern,
+                       Guess guess) :
+    name(name), paramList(paramList), type(type), isMut(isMut), isExtern(isExtern), guess(guess) {}
 };
 
 // A scope node represents a collection of other nodes.

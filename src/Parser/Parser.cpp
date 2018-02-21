@@ -54,28 +54,41 @@ ParseResult<std::shared_ptr<ASTNode>, NodeParsingFailure> Parser::parseNode() {
         next();
         return NodeParsingFailure::EndOfScope();
     }
-    if(auto prototype = TRY(parseDeclPrototype())) {
-        auto decl = TRY(parseDecl(*prototype));
-        if(decl) {
-            return std::dynamic_pointer_cast<ASTNode>(std::make_shared<Decl>(*decl));
+    if(auto protoOrRef = TRY(parseDeclPrototypeORRef())) {
+        if(auto proto = TRY(parseDeclPrototype(*protoOrRef))) {
+            auto decl = TRY(parseDecl(*proto));
+            if(decl) {
+                return std::dynamic_pointer_cast<ASTNode>(std::make_shared<Decl>(*decl));
+            } else {
+                return std::dynamic_pointer_cast<ASTNode>(std::make_shared<DeclPrototype>(*proto));
+            }
         }
 
-        if(auto declRef = TRY(parseDeclRefExpr(*prototype))) {
+        if(auto declRef = TRY(parseDeclRefExpr(*protoOrRef))) {
             return std::dynamic_pointer_cast<ASTNode>(*declRef);
         }
     } else {
         if(auto expr = TRY(parseExpr())) {
             return std::dynamic_pointer_cast<ASTNode>(*expr);
         } else {
-            return NodeParsingFailure(prototype.failure());
+            return NodeParsingFailure(protoOrRef.failure());
         }
     }
     return NodeParsingFailure("Failed to parse node");
 }
 
-ParseResult<DeclPrototype> Parser::parseDeclPrototype() {
+ParseResult<DeclPrototypeORRef> Parser::parseDeclPrototypeORRef() {
     bool isMut = false;
+    bool isExtern = false;
     if(current().is(tok::kw_mut)) {
+        isMut = true;
+        next();
+    }
+    if(current().is(tok::kw_extern)) {
+        isExtern =  true;
+        next();
+    }
+    if(current().is(tok::kw_mut) && !isMut) {
         isMut = true;
         next();
     }
@@ -97,47 +110,55 @@ ParseResult<DeclPrototype> Parser::parseDeclPrototype() {
                                                 "try removing the parentheses");
         next();
     }
-    return DeclPrototype(name, paramList, isMut);
-}
 
-ParseResult<Decl> Parser::parseDecl(DeclPrototype prototype) {
-    auto type = std::make_shared<PlaceholderTypeRefExpr>();
+    std::shared_ptr<PlaceholderTypeRefExpr> type;
     if(current().is(tok::sep_colon)) {
         next();
-        // If we encounter an equal sign, than we infer the type, which is implied by the
-        // default constructor for TypeExpr, so no extra work required.
-        //
-        // Otherwise:
-        if(current().isNot(tok::sep_equal)) {
+        // If we encounter an equal sign or opening curly-brace, then we will infer the type, so no
+        // extra work is required.
+        if(current().isAny(tok::sep_equal, tok::sep_left_curly)) {
+            type = std::make_shared<PlaceholderTypeRefExpr>();
+            return DeclPrototypeORRef(name, paramList, std::dynamic_pointer_cast<Expr>(type), isMut, isExtern, DeclPrototypeORRef::prototype);
+        } else {
             auto ty = TRY(parseExpr());
             if(!ty) return Diagnostic("Expected type for declaration");
 
             type = std::make_shared<PlaceholderTypeRefExpr>(*std::dynamic_pointer_cast<DeclRefExpr>(*ty));
+            return DeclPrototypeORRef(name, paramList, std::dynamic_pointer_cast<Expr>(type), isMut, isExtern, DeclPrototypeORRef::prototype);
         }
-        if(current().is(tok::sep_equal)) {
-            next();
-            auto val = TRY(parseExpr());
-            if(!val) return Diagnostic("Expected expression following assignment operator");
-            return Decl(prototype, *val, std::dynamic_pointer_cast<Expr>(type));
-        } else if(current().isNot(tok::sep_left_curly)) {
-            return Diagnostic("Expected assignment operator or opening '{'.");
-        }
-    } else if(current().isNot(tok::sep_left_curly)) {
-        return Diagnostic("Expected ':' and type expression, or opening '{' to begin computed declaration");
+    } else {
+        return DeclPrototypeORRef(name, paramList, type, isMut, isExtern, DeclPrototypeORRef::ref);
     }
-    next();
-    auto scope = TRY(parseScope());
-    if(!scope) { return scope.failure(); }
-    return Decl(prototype, *scope, std::dynamic_pointer_cast<Expr>(type));
 }
 
-ParseResult<std::shared_ptr<Expr>> Parser::parseDeclRefExpr(DeclPrototype prototype) {
-    if(prototype.isMut) return Diagnostic("Declaration references cannot be mutable");
+ParseResult<DeclPrototype> Parser::parseDeclPrototype(DeclPrototypeORRef protoOrRef) {
+    if(!protoOrRef.type) return Diagnostic("Expected type for declaration prototype");
+    return DeclPrototype(protoOrRef.name, protoOrRef.paramList, protoOrRef.type, protoOrRef.isMut, protoOrRef.isExtern);
+}
+
+ParseResult<Decl> Parser::parseDecl(DeclPrototype prototype) {
+    if(current().is(tok::sep_equal)) {
+        next();
+        auto val = TRY(parseExpr());
+        if(!val) return Diagnostic("Expected expression following assignment operator");
+        return Decl(prototype, *val);
+    } else if(current().is(tok::sep_left_curly)) {
+        next();
+        auto scope = TRY(parseScope());
+        if(!scope) { return scope.failure(); }
+        return Decl(prototype, *scope);
+    }
+    return Diagnostic("Failed to parse declaration");
+}
+
+ParseResult<std::shared_ptr<Expr>> Parser::parseDeclRefExpr(DeclPrototypeORRef protoOrRef) {
+    if(protoOrRef.isMut && protoOrRef.isExtern) return Diagnostic("Expected ':' after declaration");
+    assert(!protoOrRef.type && "ProtoOrRef passed to parseDeclRefExpr should not have a type.");
     std::vector<Argument> argList;
-    for(auto& param: prototype.paramList) {
+    for(auto& param: protoOrRef.paramList) {
         argList.push_back(Argument(param.name, param.value));
     }
-    return std::dynamic_pointer_cast<Expr>(std::make_shared<DeclRefExpr>(prototype.name, argList));
+    return std::dynamic_pointer_cast<Expr>(std::make_shared<DeclRefExpr>(protoOrRef.name, argList));
 
     return Diagnostic("Failed to parse decl ref expression");
 }
@@ -148,9 +169,9 @@ ParseResult<std::shared_ptr<Expr>> Parser::parseExpr() {
     } else if(auto decimalVal = TRY(parseDecimalLiteral())) {
         return std::dynamic_pointer_cast<Expr>(std::make_shared<DecimalLiteralExpr>(*decimalVal));
     } else if(current().is(tok::identifier)) {
-        ParseResult<DeclPrototype> prototype = TRY(parseDeclPrototype());
-        if(prototype) { return parseDeclRefExpr(*prototype); }
-        return prototype.failure();
+        auto protoOrRef = TRY(parseDeclPrototypeORRef());
+        if(protoOrRef) { return parseDeclRefExpr(*protoOrRef); }
+        return protoOrRef.failure();
     }
 
     return Diagnostic("Failed to parse expression.");

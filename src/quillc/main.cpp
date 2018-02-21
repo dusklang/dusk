@@ -5,8 +5,9 @@
 #include "AST/ASTPrinter.hpp"
 
 std::string sourceCode = R"~(
-main(someParams: __builtin_int) {
-    myVal : __builtin_int = 4
+extern sin(val: __builtin_double): __builtin_double
+main(someParams: __builtin_int): {
+    mut myVal := 4.0
 }
 )~";
 

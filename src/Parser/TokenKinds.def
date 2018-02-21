@@ -24,6 +24,7 @@ TOKEN(comment_single_line)
 TOKEN(comment_multiple_line)
 
 TOKEN_KEYWORD(mut, mut)
+TOKEN_KEYWORD(extern, extern)
 
 TOKEN_SEPARATOR(colon, ':')
 TOKEN_SEPARATOR(equal, '=')
