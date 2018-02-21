@@ -41,12 +41,12 @@ struct Argument final : public ASTNode {
 // This is used in Decls.
 struct DeclPrototype final : public ASTNode {
     std::string name;
-    llvm::SmallVector<Param, 2> paramList;
+    std::vector<Param> paramList;
     bool isMut;
 
     AST_NODE_CONSTRUCTOR(DeclPrototype,
                          const std::string& name,
-                         const llvm::SmallVector<Param, 2>& paramList,
+                         const std::vector<Param>& paramList,
                          bool isMut),
     name(name), paramList(paramList), isMut(isMut) {}
 };

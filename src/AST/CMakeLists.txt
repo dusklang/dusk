@@ -9,6 +9,7 @@ set(HEADERS
     ASTVisitor.hpp
     ASTNodes.def
     ASTPrinter.hpp
+    BuiltinTypes.def
 )
 
 add_library(AST ${SOURCES} ${HEADERS})

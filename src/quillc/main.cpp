@@ -5,10 +5,8 @@
 #include "AST/ASTPrinter.hpp"
 
 std::string sourceCode = R"~(
-main : Int = 4
-main(arg: 75, secondArg: wow)
-main(someParams: Array): Void {
-    hello := 435
+main(someParams: __builtin_int) {
+    myVal : __builtin_int = 4
 }
 )~";
 

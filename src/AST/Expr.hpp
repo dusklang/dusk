@@ -35,10 +35,10 @@ struct DecimalLiteralExpr: public Expr {
 
 struct DeclRefExpr: public Expr {
     std::string name;
-    llvm::SmallVector<Argument, 2> argList;
+    std::vector<Argument> argList;
 
     EXPR_CONSTRUCTOR(DeclRef, const std::string& name,
-                     const llvm::SmallVector<Argument, 2>& argList),
+                     const std::vector<Argument>& argList),
                     name(name), argList(argList) {}
 
     void operator=(const DeclRefExpr& other) {

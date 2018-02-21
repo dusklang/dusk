@@ -101,8 +101,8 @@ Token Lexer::nextTokIncludingInsignificant() {
     }
 
     // Lex an identifier.
-    if(pos < source.length() && isLetter())
-        while(pos < source.length() && (isLetter() || isNum()))
+    if(pos < source.length() && (isLetter() || is('_')))
+        while(pos < source.length() && (isLetter() || isNum() || is('_')))
             tokenText += source.at(pos++);
     if(!tokenText.empty()) {
         #define TOKEN_KEYWORD(name, sourcerepr) if(tokenText == #sourcerepr) RETURN(Token(tok::kw_ ## name, tokenText, tokenPositions.top()));

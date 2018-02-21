@@ -1,9 +1,6 @@
 set(SOURCES
-    BuiltinTypes.cpp
 )
 set(HEADERS
-    BuiltinTypes.hpp
-    BuiltinTypes.def
 )
 
 add_library(Sema ${SOURCES} ${HEADERS})

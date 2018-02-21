@@ -81,7 +81,7 @@ ParseResult<DeclPrototype> Parser::parseDeclPrototype() {
     }
     EXPECT(tok::identifier, "Expected identifier to begin declaration prototype");
     auto name = current().getText();
-    llvm::SmallVector<Param, 2> paramList;
+    std::vector<Param> paramList;
     if(next().is(tok::sep_left_paren)) {
         do {
             EXPECT_NEXT(tok::identifier, "Expected parameter name");
@@ -133,7 +133,7 @@ ParseResult<Decl> Parser::parseDecl(DeclPrototype prototype) {
 
 ParseResult<std::shared_ptr<Expr>> Parser::parseDeclRefExpr(DeclPrototype prototype) {
     if(prototype.isMut) return Diagnostic("Declaration references cannot be mutable");
-    llvm::SmallVector<Argument, 2> argList;
+    std::vector<Argument> argList;
     for(auto& param: prototype.paramList) {
         argList.push_back(Argument(param.name, param.value));
     }
