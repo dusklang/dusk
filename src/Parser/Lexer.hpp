@@ -27,7 +27,11 @@ public:
         tokenPositions.push(0);
     }
 
-    Token curTok() { return tokens.top(); }
+    Token curTok() {
+        auto cur = tokens.top();
+        if(cur.isInsignificant()) return nextTok();
+        return cur;
+    }
     Token nextTokIncludingInsignificant();
     llvm::Optional<Token> prevTokIncludingInsignificant() {
         tokens.pop();

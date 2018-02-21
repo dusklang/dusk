@@ -7,28 +7,35 @@
 #include "llvm/ADT/SmallVector.h"
 
 struct Expr;
-struct TypeExpr;
+struct TypeRefExpr;
+
+enum class NodeKind {
+    #define AST_NODE(name) name,
+    #include "ASTNodes.def"
+    NUM_NODES
+};
+
+#define AST_NODE_CONSTRUCTOR(name, args...) name(args) : ASTNode(NodeKind::name)
 
 // Abstract class from which each node in the AST inherits.
 struct ASTNode {
-    virtual std::string prettyPrint(int indentationLevel = 0) const = 0;
-    std::string indentation(int level) const;
+    NodeKind kind;
+    ASTNode(NodeKind kind) : kind(kind) {}
+    virtual ~ASTNode() {}
 };
 
 struct Param final : public ASTNode {
     std::string name;
     std::shared_ptr<Expr> value;
 
-    Param(const std::string& name, std::shared_ptr<Expr> value) : name(name), value(value) {}
-    std::string prettyPrint(int indentationLevel = 0) const override;
+    AST_NODE_CONSTRUCTOR(Param, const std::string& name, std::shared_ptr<Expr> value), name(name), value(value) {}
 };
 
 struct Argument final : public ASTNode {
     std::string name;
     std::shared_ptr<Expr> value;
 
-    Argument(const std::string& name, std::shared_ptr<Expr> value) : name(name), value(value) {}
-    std::string prettyPrint(int indentationLevel = 0) const override;
+    AST_NODE_CONSTRUCTOR(Argument, const std::string& name, std::shared_ptr<Expr> value), name(name), value(value) {}
 };
 
 // This is used in Decls.
@@ -37,19 +44,16 @@ struct DeclPrototype final : public ASTNode {
     llvm::SmallVector<Param, 2> paramList;
     bool isMut;
 
-    DeclPrototype(const std::string& name,
-                  const llvm::SmallVector<Param, 2>& paramList,
-                  bool isMut)
-            : name(name), paramList(paramList), isMut(isMut) {}
-
-    std::string prettyPrint(int indentationLevel = 0) const override;
+    AST_NODE_CONSTRUCTOR(DeclPrototype,
+                         const std::string& name,
+                         const llvm::SmallVector<Param, 2>& paramList,
+                         bool isMut),
+    name(name), paramList(paramList), isMut(isMut) {}
 };
 
 // A scope node represents a collection of other nodes.
-struct ScopeNode final : public ASTNode {
+struct Scope final : public ASTNode {
     std::vector<std::shared_ptr<ASTNode>> nodes;
 
-    ScopeNode(const std::vector<std::shared_ptr<ASTNode>>& nodes) : nodes(nodes) {}
-
-    std::string prettyPrint(int indentationLevel = 0) const override;
+    AST_NODE_CONSTRUCTOR(Scope, const std::vector<std::shared_ptr<ASTNode>>& nodes), nodes(nodes) {}
 };

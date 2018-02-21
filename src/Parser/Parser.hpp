@@ -106,7 +106,7 @@ public:
     }
 
     ParseResult<std::vector<std::shared_ptr<ASTNode>>> parseTopLevel();
-    ParseResult<std::shared_ptr<ScopeNode>> parseScope();
+    ParseResult<std::shared_ptr<Scope>> parseScope();
     ParseResult<std::shared_ptr<ASTNode>, NodeParsingFailure> parseNode();
     ParseResult<DeclPrototype> parseDeclPrototype();
     ParseResult<Decl> parseDecl(DeclPrototype prototype);

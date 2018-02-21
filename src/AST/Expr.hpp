@@ -9,40 +9,45 @@
 #include "AST.hpp"
 #include "Decl.hpp"
 
-// Base class from which each Expression node inherits.
-struct Expr : public ASTNode {};
+enum class ExprKind {
+    #define EXPR_NODE(name) name,
+    #include "ASTNodes.def"
+    NUM_EXPRS
+};
 
+// Base class from which each Expression node inherits.
+struct Expr : public ASTNode {
+    ExprKind exprKind;
+    AST_NODE_CONSTRUCTOR(Expr, ExprKind exprKind), exprKind(exprKind) {}
+};
+
+#define EXPR_CONSTRUCTOR(name, args...) name##Expr(args) : Expr(ExprKind::name)
 struct IntegerLiteralExpr: public Expr {
     std::string literal;
 
-    IntegerLiteralExpr(const std::string& literal): literal(literal) {}
-
-    std::string prettyPrint(int indentationLevel = 0) const override;
+    EXPR_CONSTRUCTOR(IntegerLiteral, const std::string& literal), literal(literal) {}
 };
 
 struct DecimalLiteralExpr: public Expr {
     std::string literal;
-    DecimalLiteralExpr(const std::string& literal): literal(literal) {}
-
-    std::string prettyPrint(int indentationLevel = 0) const override;
+    EXPR_CONSTRUCTOR(DecimalLiteral, const std::string& literal), literal(literal) {}
 };
 
 struct DeclRefExpr: public Expr {
     std::string name;
     llvm::SmallVector<Argument, 2> argList;
 
-    DeclRefExpr(const std::string& name,
-                const llvm::SmallVector<Argument, 2>& argList)
-            : name(name), argList(argList) {}
+    EXPR_CONSTRUCTOR(DeclRef, const std::string& name,
+                     const llvm::SmallVector<Argument, 2>& argList),
+                    name(name), argList(argList) {}
+
     void operator=(const DeclRefExpr& other) {
         name = other.name;
         argList = other.argList;
     }
-
-    std::string prettyPrint(int indentationLevel = 0) const override;
 };
 
-struct TypeExpr: public Expr {
+struct TypeRefExpr: public Expr {
 private:
     enum {
         inferred,
@@ -52,13 +57,13 @@ private:
         DeclRefExpr expr;
     };
 public:
-    TypeExpr() : tag(inferred) {}
-    TypeExpr(const DeclRefExpr& expr) : tag(referenced), expr(expr) {}
-    TypeExpr(const TypeExpr& other) : tag(other.tag) {
+    EXPR_CONSTRUCTOR(TypeRef), tag(inferred) {}
+    EXPR_CONSTRUCTOR(TypeRef, const DeclRefExpr& expr), tag(referenced), expr(expr) {}
+    EXPR_CONSTRUCTOR(TypeRef, const TypeRefExpr& other), tag(other.tag) {
         if(tag == referenced) expr = other.expr;
     }
-    ~TypeExpr() {}
-    void operator=(const TypeExpr& other) {
+    ~TypeRefExpr() {}
+    void operator=(const TypeRefExpr& other) {
         tag = other.tag;
         if(tag == referenced) expr = other.expr;
     }
@@ -69,7 +74,6 @@ public:
     }
 
     bool isInferred() const { return tag == inferred; }
-    std::string prettyPrint(int indentationLevel = 0) const override {
-        return tag == inferred ? "<inferred>" : expr.prettyPrint();
-    }
 };
+
+#undef EXPR_CONSTRUCTOR

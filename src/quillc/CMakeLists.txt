@@ -5,4 +5,4 @@ set(HEADERS
 )
 
 add_executable(quillc ${SOURCES} ${HEADERS})
-target_link_libraries(quillc Parser ${llvm_libs})
+target_link_libraries(quillc Parser AST Sema IRGen ${llvm_libs})

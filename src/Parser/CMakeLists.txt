@@ -6,7 +6,6 @@ set(HEADERS
     Parser.hpp
     Lexer.hpp
     Token.hpp
-    ParseTree.hpp
     TokenKinds.def
 )
 

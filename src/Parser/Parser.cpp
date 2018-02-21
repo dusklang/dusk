@@ -33,7 +33,7 @@ ParseResult<std::vector<std::shared_ptr<ASTNode>>> Parser::parseTopLevel() {
     return nodes;
 }
 
-ParseResult<std::shared_ptr<ScopeNode>> Parser::parseScope() {
+ParseResult<std::shared_ptr<Scope>> Parser::parseScope() {
     std::vector<std::shared_ptr<ASTNode>> nodes;
     while(true) {
         auto node = parseNode();
@@ -45,7 +45,7 @@ ParseResult<std::shared_ptr<ScopeNode>> Parser::parseScope() {
         if(!*node) break;
         nodes.push_back(*node);
     }
-    return std::make_shared<ScopeNode>(nodes);
+    return std::make_shared<Scope>(nodes);
 }
 
 ParseResult<std::shared_ptr<ASTNode>, NodeParsingFailure> Parser::parseNode() {
@@ -101,15 +101,18 @@ ParseResult<DeclPrototype> Parser::parseDeclPrototype() {
 }
 
 ParseResult<Decl> Parser::parseDecl(DeclPrototype prototype) {
-    std::shared_ptr<TypeExpr> type;
+    auto type = std::make_shared<TypeRefExpr>();
     if(current().is(tok::sep_colon)) {
         next();
         // If we encounter an equal sign, than we infer the type, which is implied by the
-        // default constructor for TypeExpr, so no extra work required. Otherwise:
+        // default constructor for TypeExpr, so no extra work required.
+        //
+        // Otherwise:
         if(current().isNot(tok::sep_equal)) {
             auto ty = TRY(parseExpr());
             if(!ty) return Diagnostic("Expected type for declaration");
-            type = std::make_unique<TypeExpr>(*std::dynamic_pointer_cast<DeclRefExpr>(*ty));
+
+            type = std::make_shared<TypeRefExpr>(*std::dynamic_pointer_cast<DeclRefExpr>(*ty));
         }
         if(current().is(tok::sep_equal)) {
             next();
