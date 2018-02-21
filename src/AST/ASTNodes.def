@@ -30,7 +30,7 @@ TYPED_AST_NODE(Expr)
 EXPR_NODE(IntegerLiteral)
 EXPR_NODE(DecimalLiteral)
 EXPR_NODE(DeclRef)
-EXPR_NODE(TypeRef)
+EXPR_NODE(PlaceholderTypeRef)
 
 #undef EXPR_NODE
 #undef UNTYPED_AST_NODE

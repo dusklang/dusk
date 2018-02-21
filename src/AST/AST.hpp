@@ -7,7 +7,7 @@
 #include "llvm/ADT/SmallVector.h"
 
 struct Expr;
-struct TypeRefExpr;
+struct PlaceholderTypeRefExpr;
 
 enum class NodeKind {
     #define AST_NODE(name) name,

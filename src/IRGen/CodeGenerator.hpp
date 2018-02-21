@@ -29,12 +29,12 @@ public:
     CodeGenerator() : builder(context) {}
 
     void visitDecl(Decl* decl, int indentationLevel);
-    std::string visitDeclPrototype(DeclPrototype* prototype, int indentationLevel);
-    std::string visitScope(Scope* scope, int indentationLevel);
-    std::string visitParam(Param* param, int indentationLevel);
-    std::string visitArgument(Argument* argument, int indentationLevel);
-    std::string visitIntegerLiteralExpr(IntegerLiteralExpr* expr, int indentationLevel);
-    std::string visitDecimalLiteralExpr(DecimalLiteralExpr* expr, int indentationLevel);
-    std::string visitDeclRefExpr(DeclRefExpr* expr, int indentationLevel);
-    std::string visitTypeRefExpr(TypeRefExpr* expr, int indentationLevel);
+    void visitDeclPrototype(DeclPrototype* prototype, int indentationLevel);
+    void visitScope(Scope* scope, int indentationLevel);
+    void visitParam(Param* param, int indentationLevel);
+    void visitArgument(Argument* argument, int indentationLevel);
+    llvm::Value* visitIntegerLiteralExpr(IntegerLiteralExpr* expr);
+    llvm::Value* visitDecimalLiteralExpr(DecimalLiteralExpr* expr);
+    llvm::Value* visitDeclRefExpr(DeclRefExpr* expr);
+    llvm::Value* visitPlaceholderTypeRefExpr(PlaceholderTypeRefExpr* expr);
 };

@@ -1,9 +1,0 @@
-//  Copyright © 2018 Zach Wolfe. All rights reserved.
-
-#ifndef BUILTIN_TYPE
-#define BUILTIN_TYPE(name)
-#endif
-
-BUILTIN_TYPE(int)
-
-#undef BUILTIN_TYPE

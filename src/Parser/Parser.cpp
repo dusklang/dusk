@@ -101,7 +101,7 @@ ParseResult<DeclPrototype> Parser::parseDeclPrototype() {
 }
 
 ParseResult<Decl> Parser::parseDecl(DeclPrototype prototype) {
-    auto type = std::make_shared<TypeRefExpr>();
+    auto type = std::make_shared<PlaceholderTypeRefExpr>();
     if(current().is(tok::sep_colon)) {
         next();
         // If we encounter an equal sign, than we infer the type, which is implied by the
@@ -112,7 +112,7 @@ ParseResult<Decl> Parser::parseDecl(DeclPrototype prototype) {
             auto ty = TRY(parseExpr());
             if(!ty) return Diagnostic("Expected type for declaration");
 
-            type = std::make_shared<TypeRefExpr>(*std::dynamic_pointer_cast<DeclRefExpr>(*ty));
+            type = std::make_shared<PlaceholderTypeRefExpr>(*std::dynamic_pointer_cast<DeclRefExpr>(*ty));
         }
         if(current().is(tok::sep_equal)) {
             next();

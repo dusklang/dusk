@@ -47,7 +47,8 @@ struct DeclRefExpr: public Expr {
     }
 };
 
-struct TypeRefExpr: public Expr {
+// This represents either a to-be-inferred type or a DeclRefExpr.
+struct PlaceholderTypeRefExpr: public Expr {
 private:
     enum {
         inferred,
@@ -57,13 +58,13 @@ private:
         DeclRefExpr expr;
     };
 public:
-    EXPR_CONSTRUCTOR(TypeRef), tag(inferred) {}
-    EXPR_CONSTRUCTOR(TypeRef, const DeclRefExpr& expr), tag(referenced), expr(expr) {}
-    EXPR_CONSTRUCTOR(TypeRef, const TypeRefExpr& other), tag(other.tag) {
+    EXPR_CONSTRUCTOR(PlaceholderTypeRef), tag(inferred) {}
+    EXPR_CONSTRUCTOR(PlaceholderTypeRef, const DeclRefExpr& expr), tag(referenced), expr(expr) {}
+    EXPR_CONSTRUCTOR(PlaceholderTypeRef, const PlaceholderTypeRefExpr& other), tag(other.tag) {
         if(tag == referenced) expr = other.expr;
     }
-    ~TypeRefExpr() {}
-    void operator=(const TypeRefExpr& other) {
+    ~PlaceholderTypeRefExpr() {}
+    void operator=(const PlaceholderTypeRefExpr& other) {
         tag = other.tag;
         if(tag == referenced) expr = other.expr;
     }

@@ -75,7 +75,7 @@ std::string ASTPrinter::visitDeclRefExpr(DeclRefExpr* expr, int indentationLevel
     return indentation(indentationLevel) + str;
 }
 
-std::string ASTPrinter::visitTypeRefExpr(TypeRefExpr* expr, int indentationLevel) {
+std::string ASTPrinter::visitPlaceholderTypeRefExpr(PlaceholderTypeRefExpr* expr, int indentationLevel) {
     return expr->isInferred() ? (indentation(indentationLevel) + "<inferred>")
             : visitExpr((Expr*)&expr->asDeclRef(), indentationLevel);
 }

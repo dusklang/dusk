@@ -20,5 +20,5 @@ public:
     std::string visitIntegerLiteralExpr(IntegerLiteralExpr* expr, int indentationLevel);
     std::string visitDecimalLiteralExpr(DecimalLiteralExpr* expr, int indentationLevel);
     std::string visitDeclRefExpr(DeclRefExpr* expr, int indentationLevel);
-    std::string visitTypeRefExpr(TypeRefExpr* expr, int indentationLevel);
+    std::string visitPlaceholderTypeRefExpr(PlaceholderTypeRefExpr* expr, int indentationLevel);
 };
