@@ -12,11 +12,10 @@
 #include "AST/Decl.hpp"
 
 class CodeGenerator final: public ASTVisitor<CodeGenerator,
+                                std::unique_ptr<llvm::Module>,
+                                             llvm::Function*,
                                              void,
-                                             void,
-                                             void,
-                                             void,
-                                             void,
+                                             llvm::Function*,
                                              void,
                                              void,
                                              llvm::Value*>
@@ -25,14 +24,24 @@ private:
     llvm::LLVMContext context;
     llvm::IRBuilder<> builder;
     std::unique_ptr<llvm::Module> module;
+    std::map<std::string, llvm::Value*> storedNonParameterizedDecls;
 public:
     CodeGenerator() : builder(context) {}
 
-    void visitDecl(Decl* decl, int indentationLevel);
-    void visitDeclPrototype(DeclPrototype* prototype, int indentationLevel);
-    void visitScope(Scope* scope, int indentationLevel);
-    void visitParam(Param* param, int indentationLevel);
-    void visitArgument(Argument* argument, int indentationLevel);
+    void visit(ASTNode* node) {
+        switch(node->kind) {
+            #define AST_NODE(name) case NodeKind::name: \
+            visit##name(static_cast<name*>(node));
+            #include "AST/ASTNodes.def"
+            default: break;
+        }
+        LLVM_BUILTIN_UNREACHABLE;
+    }
+    llvm::Function* visitDecl(Decl* decl);
+    llvm::Function* visitDeclPrototype(DeclPrototype* prototype);
+    void visitScope(Scope* scope);
+    void visitParam(Param* param);
+    void visitArgument(Argument* argument);
     llvm::Value* visitIntegerLiteralExpr(IntegerLiteralExpr* expr);
     llvm::Value* visitDecimalLiteralExpr(DecimalLiteralExpr* expr);
     llvm::Value* visitDeclRefExpr(DeclRefExpr* expr);
