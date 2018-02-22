@@ -85,21 +85,19 @@ ParseResult<TypeRef> Parser::parseTypeRef() {
 }
 
 ParseResult<DeclPrototype> Parser::parseDeclPrototype() {
-    bool isMut = false;
+    bool isMut;
     bool isExtern = false;
-    if(current().is(tok::kw_mut)) {
-        isMut = true;
-        next();
-    }
     if(current().is(tok::kw_extern)) {
         isExtern =  true;
         next();
     }
-    if(current().is(tok::kw_mut) && !isMut) {
+    if(current().is(tok::kw_var)) {
         isMut = true;
-        next();
+    } else if(current().is(tok::kw_def)) {
+        isMut = false;
+    } else {
+        return Diagnostic("Expected def or var keywords to begin declaration");
     }
-    EXPECT(tok::kw_def, "Expected def keyword to begin declaration");
     EXPECT_NEXT(tok::identifier, "Expected identifier after def");
     auto name = current().getText();
     std::vector<Param> paramList;

@@ -7,10 +7,13 @@
 #include "llvm/Support/raw_ostream.h"
 
 std::string sourceCode = R"~(
-extern def sin(val: i32): i32
 def main: {
-    return
+    var hello := 4
 }
+/*extern def sin(val: i32): i32
+def main: {
+    var hello := 4
+}*/
 )~";
 
 int main(int argc, const char * argv[]) {
