@@ -18,8 +18,11 @@ llvm::Function* CodeGenerator::visitDecl(Decl* decl) {
     for(auto &arg: function->args()) {
         storedNonParameterizedDecls[arg.getName()] = &arg;
     }
-
-    visitScope(decl->body().get());
+    if(auto expr = decl->expression()) {
+        assert(false && "Code generation for stored decls is not yet supported.");
+    } else {
+        visitScope(decl->body().get());
+    }
 
     llvm::verifyFunction(*function);
 

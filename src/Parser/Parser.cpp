@@ -117,18 +117,13 @@ ParseResult<DeclPrototype> Parser::parseDeclPrototype() {
         next();
     }
 
-    EXPECT(tok::sep_colon, "Expected colon after declaration");
-    next();
-    // If we encounter an equal sign or opening curly-brace, then we will infer the type, so no
-    // extra work is required.
-    if(current().isAny(tok::sep_equal, tok::sep_left_curly)) {
-        return DeclPrototype(name, paramList, TypeRef(), isMut, isExtern);
+    if(current().is(tok::sep_colon)) {
+        auto ty = TRY(parseTypeRef());
+        if(!ty) return Diagnostic("Expected type for declaration");
+        return DeclPrototype(name, paramList, *ty, isMut, isExtern);
     }
 
-    auto ty = TRY(parseTypeRef());
-    if(!ty) return Diagnostic("Expected type for declaration");
-
-    return DeclPrototype(name, paramList, *ty, isMut, isExtern);
+    return DeclPrototype(name, paramList, TypeRef(), isMut, isExtern);
 }
 
 ParseResult<Decl> Parser::parseDecl(DeclPrototype prototype) {
