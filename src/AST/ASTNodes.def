@@ -26,16 +26,16 @@ UNTYPED_AST_NODE(Param)
 UNTYPED_AST_NODE(Argument)
 UNTYPED_AST_NODE(DeclPrototype)
 UNTYPED_AST_NODE(Scope)
+UNTYPED_AST_NODE(TypeRef)
 
 // Typed = they have different kinds to switch over in an enum class called name##Kind.
 TYPED_AST_NODE(Expr)
 TYPED_AST_NODE(Stmt)
 
-// Specific exprs; these get their own methods in ASTVisitor named visitXExpr().
+// Specific exprs; these get their own methods in ASTVisitor named visit##name##Expr().
 EXPR_NODE(IntegerLiteral)
 EXPR_NODE(DecimalLiteral)
 EXPR_NODE(DeclRef)
-EXPR_NODE(PlaceholderTypeRef)
 
 // Ditto for stmts.
 STMT_NODE(Return)

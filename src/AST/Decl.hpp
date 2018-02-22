@@ -6,6 +6,7 @@
 #include <string>
 #include "AST.hpp"
 #include "Expr.hpp"
+#include "Types.hpp"
 
 struct Expr;
 
@@ -13,14 +14,14 @@ struct Expr;
 struct DeclPrototype final : public ASTNode {
     std::string name;
     std::vector<Param> paramList;
-    std::shared_ptr<Expr> type;
+    TypeRef type;
     bool isMut;
     bool isExtern;
 
     AST_NODE_CONSTRUCTOR(DeclPrototype,
                          const std::string& name,
                          const std::vector<Param>& paramList,
-                         const std::shared_ptr<Expr>& type,
+                         TypeRef type,
                          bool isMut,
                          bool isExtern),
     name(name), paramList(paramList), type(type), isMut(isMut), isExtern(isExtern) {}

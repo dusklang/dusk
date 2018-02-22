@@ -16,6 +16,7 @@ class CodeGenerator final: public ASTVisitor<CodeGenerator,
                                              std::unique_ptr<llvm::Module>,
                                              llvm::Function*,
                                              void,
+                                             void,
                                              llvm::Function*,
                                              void,
                                              void,
@@ -46,10 +47,10 @@ public:
     void visitScope(Scope* scope);
     void visitParam(Param* param);
     void visitArgument(Argument* argument);
+    void visitTypeRef(TypeRef* expr);
     llvm::Value* visitIntegerLiteralExpr(IntegerLiteralExpr* expr);
     llvm::Value* visitDecimalLiteralExpr(DecimalLiteralExpr* expr);
     llvm::Value* visitDeclRefExpr(DeclRefExpr* expr);
-    llvm::Value* visitPlaceholderTypeRefExpr(PlaceholderTypeRefExpr* expr);
 
     llvm::Value* visitReturnStmt(ReturnStmt* stmt);
 };

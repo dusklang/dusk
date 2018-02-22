@@ -34,7 +34,7 @@ std::string ASTPrinter::visitDeclPrototype(DeclPrototype* prototype, int indenta
         }
         str += ")";
     }
-    str += ": " + visitExpr(prototype->type.get(), 0);
+    str += ": " + visitTypeRef(&prototype->type, 0);
     return indentation(indentationLevel) + str;
 }
 
@@ -47,11 +47,20 @@ std::string ASTPrinter::visitScope(Scope* scope, int indentationLevel) {
 }
 
 std::string ASTPrinter::visitParam(Param* param, int indentationLevel) {
-    return param->name + ": " + visitExpr(param->value.get(), 0);
+    return param->name + ": " + visitTypeRef(&param->value, 0);
 }
 
 std::string ASTPrinter::visitArgument(Argument* argument, int indentationLevel) {
     return argument->name + ": " + visitExpr(argument->value.get(), 0);
+}
+
+std::string ASTPrinter::visitTypeRef(TypeRef* expr, int indentationLevel) {
+    if(expr->isInferred()) return indentation(indentationLevel) + "<inferred>";
+
+    switch(expr->getType()) {
+        #define BUILTIN_TYPE(name) case BuiltinType::name: return indentation(indentationLevel) + #name;
+        #include "BuiltinTypes.def"
+    }
 }
 
 std::string ASTPrinter::visitIntegerLiteralExpr(IntegerLiteralExpr* expr, int indentationLevel) {
@@ -76,11 +85,6 @@ std::string ASTPrinter::visitDeclRefExpr(DeclRefExpr* expr, int indentationLevel
         str += ")";
     }
     return indentation(indentationLevel) + str;
-}
-
-std::string ASTPrinter::visitPlaceholderTypeRefExpr(PlaceholderTypeRefExpr* expr, int indentationLevel) {
-    return expr->isInferred() ? (indentation(indentationLevel) + "<inferred>")
-            : visitExpr((Expr*)&expr->asDeclRef(), indentationLevel);
 }
 
 std::string ASTPrinter::visitReturnStmt(ReturnStmt* stmt, int indentationLevel) {

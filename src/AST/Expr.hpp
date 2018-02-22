@@ -47,34 +47,4 @@ struct DeclRefExpr: public Expr {
     }
 };
 
-// This represents either a to-be-inferred type or a DeclRefExpr.
-struct PlaceholderTypeRefExpr: public Expr {
-private:
-    enum {
-        inferred,
-        referenced
-    } tag;
-    union {
-        DeclRefExpr expr;
-    };
-public:
-    EXPR_CONSTRUCTOR(PlaceholderTypeRef), tag(inferred) {}
-    EXPR_CONSTRUCTOR(PlaceholderTypeRef, const DeclRefExpr& expr), tag(referenced), expr(expr) {}
-    EXPR_CONSTRUCTOR(PlaceholderTypeRef, const PlaceholderTypeRefExpr& other), tag(other.tag) {
-        if(tag == referenced) expr = other.expr;
-    }
-    ~PlaceholderTypeRefExpr() {}
-    void operator=(const PlaceholderTypeRefExpr& other) {
-        tag = other.tag;
-        if(tag == referenced) expr = other.expr;
-    }
-
-    const DeclRefExpr& asDeclRef() const {
-        assert(tag == referenced);
-        return expr;
-    }
-
-    bool isInferred() const { return tag == inferred; }
-};
-
 #undef EXPR_CONSTRUCTOR

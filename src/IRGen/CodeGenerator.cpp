@@ -44,6 +44,7 @@ void CodeGenerator::visitScope(Scope* scope) {
 }
 void CodeGenerator::visitParam(Param* param) {}
 void CodeGenerator::visitArgument(Argument* argument) {}
+void CodeGenerator::visitTypeRef(TypeRef* expr) {}
 llvm::Value* CodeGenerator::visitIntegerLiteralExpr(IntegerLiteralExpr* expr) {
     return llvm::ConstantInt::get(context, llvm::APInt(32, std::stoi(expr->literal)));
 }
@@ -65,9 +66,6 @@ llvm::Value* CodeGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
     }
 
     return builder.CreateCall(callee, args, "calltmp");
-}
-llvm::Value* CodeGenerator::visitPlaceholderTypeRefExpr(PlaceholderTypeRefExpr* expr) {
-    return nullptr;
 }
 
 llvm::Value* CodeGenerator::visitReturnStmt(ReturnStmt* stmt) {

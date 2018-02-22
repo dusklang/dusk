@@ -4,6 +4,6 @@
 #define BUILTIN_TYPE(name)
 #endif
 
-BUILTIN_TYPE(__builtin_int)
+BUILTIN_TYPE(i32)
 
 #undef BUILTIN_TYPE

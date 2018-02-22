@@ -6,10 +6,12 @@ set(HEADERS
     Decl.hpp
     Expr.hpp
     Stmt.hpp
+    Types.hpp
     ASTVisitor.hpp
     ASTNodes.def
     ASTPrinter.hpp
     BuiltinTypes.def
+    Types.hpp
 )
 
 add_library(AST ${SOURCES} ${HEADERS})

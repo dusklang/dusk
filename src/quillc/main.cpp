@@ -7,9 +7,9 @@
 #include "llvm/Support/raw_ostream.h"
 
 std::string sourceCode = R"~(
-extern sin(val: __builtin_double): __builtin_double
+extern sin(val: i32): i32
 main: {
-    sin(val: 3)
+    return
 }
 )~";
 
