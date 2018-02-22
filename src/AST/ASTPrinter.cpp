@@ -82,3 +82,11 @@ std::string ASTPrinter::visitPlaceholderTypeRefExpr(PlaceholderTypeRefExpr* expr
     return expr->isInferred() ? (indentation(indentationLevel) + "<inferred>")
             : visitExpr((Expr*)&expr->asDeclRef(), indentationLevel);
 }
+
+std::string ASTPrinter::visitReturnStmt(ReturnStmt* stmt, int indentationLevel) {
+    std::string str = indentation(indentationLevel) + "return";
+    if(stmt->value) {
+        str += " " + visitExpr(stmt->value.get(), 0);
+    }
+    return str;
+}

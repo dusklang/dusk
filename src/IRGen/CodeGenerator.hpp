@@ -10,14 +10,16 @@
 #include "AST/ASTVisitor.hpp"
 #include "AST/Expr.hpp"
 #include "AST/Decl.hpp"
+#include "AST/Stmt.hpp"
 
 class CodeGenerator final: public ASTVisitor<CodeGenerator,
-                                std::unique_ptr<llvm::Module>,
+                                             std::unique_ptr<llvm::Module>,
                                              llvm::Function*,
                                              void,
                                              llvm::Function*,
                                              void,
                                              void,
+                                             llvm::Value*,
                                              llvm::Value*>
 {
 private:
@@ -48,4 +50,6 @@ public:
     llvm::Value* visitDecimalLiteralExpr(DecimalLiteralExpr* expr);
     llvm::Value* visitDeclRefExpr(DeclRefExpr* expr);
     llvm::Value* visitPlaceholderTypeRefExpr(PlaceholderTypeRefExpr* expr);
+
+    llvm::Value* visitReturnStmt(ReturnStmt* stmt);
 };

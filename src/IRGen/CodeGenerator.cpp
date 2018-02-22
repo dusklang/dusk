@@ -20,7 +20,6 @@ llvm::Function* CodeGenerator::visitDecl(Decl* decl) {
     }
 
     visitScope(decl->body().get());
-    builder.CreateRet(llvm::ConstantInt::get(context, llvm::APInt(32, 0)));
 
     llvm::verifyFunction(*function);
 
@@ -39,12 +38,8 @@ llvm::Function* CodeGenerator::visitDeclPrototype(DeclPrototype* prototype) {
     return function;
 }
 void CodeGenerator::visitScope(Scope* scope) {
-    for(int i = 0; i < scope->nodes.size(); ++i) {
-        
-        /*
-        if(node.get()) {
-            visit(node.get());
-        }*/
+    for(auto& node: scope->nodes) {
+        visit(node.get());
     }
 }
 void CodeGenerator::visitParam(Param* param) {}
@@ -73,4 +68,12 @@ llvm::Value* CodeGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
 }
 llvm::Value* CodeGenerator::visitPlaceholderTypeRefExpr(PlaceholderTypeRefExpr* expr) {
     return nullptr;
+}
+
+llvm::Value* CodeGenerator::visitReturnStmt(ReturnStmt* stmt) {
+    if(!stmt->value) {
+        return builder.CreateRetVoid();
+    } else {
+        return builder.CreateRet(visitExpr(stmt->value.get()));
+    }
 }

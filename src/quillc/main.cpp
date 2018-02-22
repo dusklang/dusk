@@ -8,8 +8,8 @@
 
 std::string sourceCode = R"~(
 extern sin(val: __builtin_double): __builtin_double
-main(someParams: __builtin_int): {
-    mut myVal := 4.0
+main: {
+    sin(val: 3)
 }
 )~";
 
@@ -17,9 +17,6 @@ int main(int argc, const char * argv[]) {
     std::cout << "Quill compiler version 0.0.1\n\n";
     Parser parser(sourceCode);
 
-//    while(lexer.nextTok().isNot(tok::eof)) {
-//        std::cout << lexer.curTok().prettyPrint() << "\n";
-//    }
     ASTPrinter printer;
     CodeGenerator codeGenerator;
     if(auto file = parser.parseTopLevel()) {

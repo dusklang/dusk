@@ -54,6 +54,9 @@ ParseResult<std::shared_ptr<ASTNode>, NodeParsingFailure> Parser::parseNode() {
         next();
         return NodeParsingFailure::EndOfScope();
     }
+    if(auto stmt = TRY(parseStmt())) {
+        return std::dynamic_pointer_cast<ASTNode>(*stmt);
+    }
     if(auto protoOrRef = TRY(parseDeclPrototypeORRef())) {
         if(auto proto = TRY(parseDeclPrototype(*protoOrRef))) {
             auto decl = TRY(parseDecl(*proto));
@@ -149,6 +152,17 @@ ParseResult<Decl> Parser::parseDecl(DeclPrototype prototype) {
         return Decl(prototype, *scope);
     }
     return Diagnostic("Failed to parse declaration");
+}
+
+ParseResult<std::shared_ptr<Stmt>> Parser::parseStmt() {
+    if(current().is(tok::kw_return)) {
+        next();
+        auto value = parseExpr();
+        if(!value) return std::dynamic_pointer_cast<Stmt>(std::make_shared<ReturnStmt>(nullptr));
+        return std::dynamic_pointer_cast<Stmt>(std::make_shared<ReturnStmt>(*value));
+    } else {
+        return Diagnostic("Unable to parse statement");
+    }
 }
 
 ParseResult<std::shared_ptr<Expr>> Parser::parseDeclRefExpr(DeclPrototypeORRef protoOrRef) {

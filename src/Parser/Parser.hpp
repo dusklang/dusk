@@ -3,6 +3,7 @@
 #pragma once
 
 #include "AST/AST.hpp"
+#include "AST/Stmt.hpp"
 #include "Lexer.hpp"
 
 typedef std::string Diagnostic;
@@ -111,6 +112,7 @@ public:
     ParseResult<DeclPrototypeORRef> parseDeclPrototypeORRef();
     ParseResult<DeclPrototype> parseDeclPrototype(DeclPrototypeORRef protoOrRef);
     ParseResult<Decl> parseDecl(DeclPrototype prototype);
+    ParseResult<std::shared_ptr<Stmt>> parseStmt();
     ParseResult<std::shared_ptr<Expr>> parseDeclRefExpr(DeclPrototypeORRef protoOrRef);
     ParseResult<std::shared_ptr<Expr>> parseExpr();
 };

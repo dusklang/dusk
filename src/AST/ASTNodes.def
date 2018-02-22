@@ -16,6 +16,10 @@
 #define EXPR_NODE(name)
 #endif
 
+#ifndef STMT_NODE
+#define STMT_NODE(name)
+#endif
+
 // Base classes; these get their own overloads of ASTVisitor::visit()
 UNTYPED_AST_NODE(Decl)
 UNTYPED_AST_NODE(Param)
@@ -25,13 +29,18 @@ UNTYPED_AST_NODE(Scope)
 
 // Typed = they have different kinds to switch over in an enum class called name##Kind.
 TYPED_AST_NODE(Expr)
+TYPED_AST_NODE(Stmt)
 
-// Specific exprs; these get their own methods in ASTVisitor named visitXExpr()
+// Specific exprs; these get their own methods in ASTVisitor named visitXExpr().
 EXPR_NODE(IntegerLiteral)
 EXPR_NODE(DecimalLiteral)
 EXPR_NODE(DeclRef)
 EXPR_NODE(PlaceholderTypeRef)
 
+// Ditto for stmts.
+STMT_NODE(Return)
+
+#undef STMT_NODE
 #undef EXPR_NODE
 #undef UNTYPED_AST_NODE
 #undef TYPED_AST_NODE

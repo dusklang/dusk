@@ -7,6 +7,7 @@
 #include "ASTNodes.def"
 
 #include "Expr.hpp"
+#include "Stmt.hpp"
 
 template<typename Impl,
          typename ASTNodeReturnTy,
@@ -34,15 +35,25 @@ public:
     }
     #include "ASTNodes.def"
 
-    // Once we have more than one TYPED_AST_NODE, it would be kind of nice to be able to "iterate" over
-    // them, and "iterate" over their kinds in a switch, but alas I don't think this is possible with
-    // C++ macros because we can't #include or #define other macros inside of a macro definition. Maybe
-    // with some awful template wizardry? Or a boilerplate generator? Or maybe I'm just putting way
-    // too much thought into something that doesn't actually matter that much?
+    // It would be kind of nice to be able to "iterate" over AST_TYPED_NODEs, and and "iterate" over
+    // their kinds in a switch, but alas I don't think this is possible with C++ macros because we
+    // can't #include or #define other macros inside of a macro definition. Maybe with some awful
+    // template wizardry? Or a boilerplate generator? Or maybe I'm just putting way too much thought
+    // into something that doesn't actually matter that much?
     ExprRetTy visitExpr(Expr* expr, Args... args) {
         switch(expr->exprKind) {
         #define EXPR_NODE(name) case ExprKind::name: \
             return static_cast<Impl*>(this)->visit##name##Expr(static_cast<name##Expr*>(expr), std::forward<Args>(args)...);
+            #include "ASTNodes.def"
+            default: break;
+        }
+        LLVM_BUILTIN_UNREACHABLE;
+    }
+
+    StmtRetTy visitStmt(Stmt* stmt, Args... args) {
+        switch(stmt->stmtKind) {
+            #define STMT_NODE(name) case StmtKind::name: \
+                return static_cast<Impl*>(this)->visit##name##Stmt(static_cast<name##Stmt*>(stmt), std::forward<Args>(args)...);
             #include "ASTNodes.def"
             default: break;
         }
