@@ -1,7 +1,6 @@
 //  Copyright © 2018 Zach Wolfe. All rights reserved.
 
 #include "Lexer.hpp"
-#include <assert.h>
 #include <iostream>
 
 Token Lexer::nextTokIncludingInsignificant() {
@@ -57,7 +56,7 @@ Token Lexer::nextTokIncludingInsignificant() {
         int levels = 1;
         for(pos += 2; pos < source.length(); pos++) {
             tokenText += curChar();
-            if(auto test = isSubstr("/*")) {
+            if(isSubstr("/*")) {
                 pos++;
                 tokenText += curChar();
                 levels++;
@@ -72,7 +71,7 @@ Token Lexer::nextTokIncludingInsignificant() {
                 }
             }
         }
-        if(levels > 0) assert(false && "Unterminated /* comment.");
+        if(levels > 0) reportError(pos, "Unterminated /* comment.");
     }
     if(!tokenText.empty()) RETURN(Token(tok::comment_multiple_line, tokenText, tokenPositions.top()));
 
@@ -97,7 +96,7 @@ Token Lexer::nextTokIncludingInsignificant() {
                 pos++;
             }
         }
-        assert(false && "Unterminated string literal");
+        reportError(pos, "Unterminated string literal");
     }
 
     // Lex an identifier.
@@ -115,8 +114,7 @@ Token Lexer::nextTokIncludingInsignificant() {
     auto hasDot = false;
     while(pos < source.length() && (isNum() || is('.'))) {
         if(is('.')) {
-            // TODO: Add a better diagnostic system than runtime assertions.
-            assert(!hasDot && "Decimal literals can have only one dot.");
+            if(hasDot) reportError(pos, "Decimal literals can have only one dot.");
             hasDot = true;
         }
         tokenText += source.at(pos++);
@@ -125,5 +123,5 @@ Token Lexer::nextTokIncludingInsignificant() {
         RETURN(Token(hasDot ? tok::decimal_literal : tok::integer_literal, tokenText, tokenPositions.top()));
     }
 
-    assert(false && "Unhandled token");
+    reportError(pos, "Unhandled token");
 }

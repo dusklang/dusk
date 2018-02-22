@@ -1,4 +1,5 @@
 set(SOURCES
+    SourceLoc.cpp
 )
 set(HEADERS
     SourceLoc.hpp

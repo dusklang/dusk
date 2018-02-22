@@ -10,4 +10,4 @@ set(HEADERS
 )
 
 add_library(Parser ${SOURCES} ${HEADERS})
-target_link_libraries(Parser AST ${llvm_libs} ${icu_libs})
+target_link_libraries(Parser AST General ${llvm_libs} ${icu_libs})

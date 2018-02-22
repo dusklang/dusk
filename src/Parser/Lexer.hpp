@@ -6,6 +6,7 @@
 #include <stack>
 #include "llvm/ADT/Optional.h"
 #include "Token.hpp"
+#include <iostream>
 
 class Lexer final {
 private:
@@ -22,6 +23,13 @@ private:
     // parse the thing we were trying to and should try something else.
     llvm::Optional<int> numberOfNewTokens;
 
+    void reportError(int endPos, std::string message) {
+        auto startPos = tokenPositions.top();
+        SourceRange range(startPos, endPos - startPos);
+        std::cout << "LEXING ERROR: " << message << '\n';
+        std::cout << "Offending area: " << substringAtSourceRange(source, range) << '\n';
+        exit(1);
+    }
 public:
     Lexer(const std::string& source) : source(source) {
         tokenPositions.push(0);

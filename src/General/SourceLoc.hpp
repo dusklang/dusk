@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <string>
+
 typedef int SourceLoc;
 
 class SourceRange {
@@ -14,3 +16,5 @@ public:
     SourceLoc begin() const { return _begin; }
     int length() const { return _length; }
 };
+
+std::string substringAtSourceRange(std::string string, SourceRange range);

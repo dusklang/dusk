@@ -74,7 +74,7 @@ ParseResult<std::shared_ptr<ASTNode>, NodeParsingFailure> Parser::parseNode() {
 
 ParseResult<TypeRef> Parser::parseTypeRef() {
     if(auto typeName = parseIdentifer()) {
-        if(true) {}
+        if(false) {}
         #define BUILTIN_TYPE(name) else if(*typeName == #name) { return TypeRef(BuiltinType::name); }
         #include "AST/BuiltinTypes.def"
         else {
@@ -118,6 +118,7 @@ ParseResult<DeclPrototype> Parser::parseDeclPrototype() {
     }
 
     if(current().is(tok::sep_colon)) {
+        next();
         auto ty = TRY(parseTypeRef());
         if(!ty) return Diagnostic("Expected type for declaration");
         return DeclPrototype(name, paramList, *ty, isMut, isExtern);

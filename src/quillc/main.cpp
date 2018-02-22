@@ -7,8 +7,10 @@
 #include "llvm/Support/raw_ostream.h"
 
 std::string sourceCode = R"~(
+var something = 0.0.0
+//extern something: i32
 def main {
-    def hello = 4
+    var something = 3
 }
 /*extern def sin(val: i32): i32
 def main: {
