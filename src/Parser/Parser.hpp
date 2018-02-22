@@ -110,10 +110,9 @@ public:
     ParseResult<std::shared_ptr<Scope>> parseScope();
     ParseResult<std::shared_ptr<ASTNode>, NodeParsingFailure> parseNode();
     ParseResult<TypeRef> parseTypeRef();
-    ParseResult<DeclPrototypeORRef> parseDeclPrototypeORRef();
-    ParseResult<DeclPrototype> parseDeclPrototype(DeclPrototypeORRef protoOrRef);
+    ParseResult<DeclPrototype> parseDeclPrototype();
     ParseResult<Decl> parseDecl(DeclPrototype prototype);
     ParseResult<std::shared_ptr<Stmt>> parseStmt();
-    ParseResult<std::shared_ptr<Expr>> parseDeclRefExpr(DeclPrototypeORRef protoOrRef);
+    ParseResult<std::shared_ptr<Expr>> parseDeclRefExpr();
     ParseResult<std::shared_ptr<Expr>> parseExpr();
 };

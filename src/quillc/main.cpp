@@ -7,8 +7,8 @@
 #include "llvm/Support/raw_ostream.h"
 
 std::string sourceCode = R"~(
-extern sin(val: i32): i32
-main: {
+extern def sin(val: i32): i32
+def main: {
     return
 }
 )~";

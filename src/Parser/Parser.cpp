@@ -57,25 +57,17 @@ ParseResult<std::shared_ptr<ASTNode>, NodeParsingFailure> Parser::parseNode() {
     if(auto stmt = TRY(parseStmt())) {
         return std::dynamic_pointer_cast<ASTNode>(*stmt);
     }
-    if(auto protoOrRef = TRY(parseDeclPrototypeORRef())) {
-        if(auto proto = TRY(parseDeclPrototype(*protoOrRef))) {
-            auto decl = TRY(parseDecl(*proto));
-            if(decl) {
-                return std::dynamic_pointer_cast<ASTNode>(std::make_shared<Decl>(*decl));
-            } else {
-                return std::dynamic_pointer_cast<ASTNode>(std::make_shared<DeclPrototype>(*proto));
-            }
-        }
-
-        if(auto declRef = TRY(parseDeclRefExpr(*protoOrRef))) {
-            return std::dynamic_pointer_cast<ASTNode>(*declRef);
-        }
-    } else {
-        if(auto expr = TRY(parseExpr())) {
-            return std::dynamic_pointer_cast<ASTNode>(*expr);
+    if(auto proto = TRY(parseDeclPrototype())) {
+        if(auto decl = TRY(parseDecl(*proto))) {
+            return std::dynamic_pointer_cast<ASTNode>(std::make_shared<Decl>(*decl));
         } else {
-            return NodeParsingFailure(protoOrRef.failure());
+            return std::dynamic_pointer_cast<ASTNode>(std::make_shared<DeclPrototype>(*proto));
         }
+    }
+    if(auto expr = TRY(parseExpr())) {
+        return std::dynamic_pointer_cast<ASTNode>(*expr);
+    } else {
+        return NodeParsingFailure(expr.failure());
     }
     return NodeParsingFailure("Failed to parse node");
 }
@@ -92,7 +84,7 @@ ParseResult<TypeRef> Parser::parseTypeRef() {
     return Diagnostic("Unable to parse type ref.");
 }
 
-ParseResult<DeclPrototypeORRef> Parser::parseDeclPrototypeORRef() {
+ParseResult<DeclPrototype> Parser::parseDeclPrototype() {
     bool isMut = false;
     bool isExtern = false;
     if(current().is(tok::kw_mut)) {
@@ -107,12 +99,10 @@ ParseResult<DeclPrototypeORRef> Parser::parseDeclPrototypeORRef() {
         isMut = true;
         next();
     }
-    EXPECT(tok::identifier, "Expected identifier to begin declaration prototype");
+    EXPECT(tok::kw_def, "Expected def keyword to begin declaration");
+    EXPECT_NEXT(tok::identifier, "Expected identifier after def");
     auto name = current().getText();
     std::vector<Param> paramList;
-    std::vector<Argument> argList;
-    bool isInParamMode;
-    bool isStarted = false;
     if(next().is(tok::sep_left_paren)) {
         do {
             EXPECT_NEXT(tok::identifier, "Expected parameter name");
@@ -120,49 +110,27 @@ ParseResult<DeclPrototypeORRef> Parser::parseDeclPrototypeORRef() {
             EXPECT_NEXT(tok::sep_colon, "Expected colon after parameter name");
             next();
             if(auto type = TRY(parseTypeRef())) {
-                if(isStarted && !isInParamMode) return Diagnostic("Unexpected type reference in argument list");
-                isInParamMode = true;
                 paramList.push_back(Param(param, *type));
-            } else {
-                auto argument = TRY(parseExpr());
-                if(!argument) return Diagnostic("Expected argument after parameter name");
-                if(isStarted && isInParamMode) return Diagnostic("Unexpected expression in parameter list");
-                argList.push_back(Argument(param, *argument));
             }
-
-            isStarted = true;
         } while(current().is(tok::sep_comma));
-        EXPECT(tok::sep_right_paren, "Expected ')' after parameter and argument");
-        if(paramList.empty()) return Diagnostic("Expected parameter list for function " + name + ", "
+        EXPECT(tok::sep_right_paren, "Expected ')' after parameter list");
+        if(paramList.empty()) return Diagnostic("Expected parameter list for parameterized declaration " + name + ", "
                                                 "try removing the parentheses");
         next();
     }
 
-    llvm::Optional<TypeRef> type;
-    if(current().is(tok::sep_colon)) {
-        if(isStarted && !isInParamMode) return Diagnostic("Unexpected colon after parameterized decl ref");
-        next();
-        // If we encounter an equal sign or opening curly-brace, then we will infer the type, so no
-        // extra work is required.
-        if(current().isAny(tok::sep_equal, tok::sep_left_curly)) {
-            type = TypeRef();
-            return DeclPrototypeORRef(name, paramList, type, isMut, isExtern);
-        } else {
-            auto ty = TRY(parseTypeRef());
-            if(!ty) return Diagnostic("Expected type for declaration");
-
-            return DeclPrototypeORRef(name, paramList, *ty, isMut, isExtern);
-        }
-    } else {
-        if(isStarted && isInParamMode) return Diagnostic("Expected colon after declaration");
-        return DeclPrototypeORRef(name, argList, type, isMut, isExtern);
+    EXPECT(tok::sep_colon, "Expected colon after declaration");
+    next();
+    // If we encounter an equal sign or opening curly-brace, then we will infer the type, so no
+    // extra work is required.
+    if(current().isAny(tok::sep_equal, tok::sep_left_curly)) {
+        return DeclPrototype(name, paramList, TypeRef(), isMut, isExtern);
     }
-}
 
-ParseResult<DeclPrototype> Parser::parseDeclPrototype(DeclPrototypeORRef protoOrRef) {
-    if(!protoOrRef.isProto()) return Diagnostic("Unable to parse decl prototype");
-    if(!protoOrRef.type) return Diagnostic("Expected type for declaration prototype");
-    return DeclPrototype(protoOrRef.name, protoOrRef.getParamList(), *protoOrRef.type, protoOrRef.isMut, protoOrRef.isExtern);
+    auto ty = TRY(parseTypeRef());
+    if(!ty) return Diagnostic("Expected type for declaration");
+
+    return DeclPrototype(name, paramList, *ty, isMut, isExtern);
 }
 
 ParseResult<Decl> Parser::parseDecl(DeclPrototype prototype) {
@@ -191,13 +159,27 @@ ParseResult<std::shared_ptr<Stmt>> Parser::parseStmt() {
     }
 }
 
-ParseResult<std::shared_ptr<Expr>> Parser::parseDeclRefExpr(DeclPrototypeORRef protoOrRef) {
-    if(!protoOrRef.isDeclRef()) return Diagnostic("Unable to parse decl ref");
-    if(protoOrRef.isMut && protoOrRef.isExtern) return Diagnostic("Unexpected modifier on decl ref");
-    assert(!protoOrRef.type && "ProtoOrRef passed to parseDeclRefExpr should not have a type.");
-    return std::dynamic_pointer_cast<Expr>(std::make_shared<DeclRefExpr>(protoOrRef.name, protoOrRef.getArgList()));
+ParseResult<std::shared_ptr<Expr>> Parser::parseDeclRefExpr() {
+    EXPECT(tok::identifier, "Expected identifier to begin declaration prototype");
+    auto name = current().getText();
+    std::vector<Argument> argList;
+    if(next().is(tok::sep_left_paren)) {
+        do {
+            EXPECT_NEXT(tok::identifier, "Expected parameter name");
+            auto param = current().getText();
+            EXPECT_NEXT(tok::sep_colon, "Expected colon after parameter name");
+            next();
 
-    return Diagnostic("Failed to parse decl ref expression");
+            auto argument = TRY(parseExpr());
+            if(!argument) return Diagnostic("Expected argument after parameter name");
+            argList.push_back(Argument(param, *argument));
+
+        } while(current().is(tok::sep_comma));
+        EXPECT(tok::sep_right_paren, "Expected ')' after parameter and argument");
+        next();
+    }
+
+    return std::dynamic_pointer_cast<Expr>(std::make_shared<DeclRefExpr>(name, argList));
 }
 
 ParseResult<std::shared_ptr<Expr>> Parser::parseExpr() {
@@ -206,9 +188,7 @@ ParseResult<std::shared_ptr<Expr>> Parser::parseExpr() {
     } else if(auto decimalVal = TRY(parseDecimalLiteral())) {
         return std::dynamic_pointer_cast<Expr>(std::make_shared<DecimalLiteralExpr>(*decimalVal));
     } else if(current().is(tok::identifier)) {
-        auto protoOrRef = TRY(parseDeclPrototypeORRef());
-        if(protoOrRef) { return parseDeclRefExpr(*protoOrRef); }
-        return protoOrRef.failure();
+        return parseDeclRefExpr();
     }
 
     return Diagnostic("Failed to parse expression.");

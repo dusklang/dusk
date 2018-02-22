@@ -23,6 +23,7 @@ TOKEN(newline)
 TOKEN(comment_single_line)
 TOKEN(comment_multiple_line)
 
+TOKEN_KEYWORD(def, def)
 TOKEN_KEYWORD(mut, mut)
 TOKEN_KEYWORD(extern, extern)
 TOKEN_KEYWORD(return, return)
