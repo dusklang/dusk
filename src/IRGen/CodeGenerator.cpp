@@ -39,8 +39,12 @@ llvm::Function* CodeGenerator::visitDeclPrototype(DeclPrototype* prototype) {
     return function;
 }
 void CodeGenerator::visitScope(Scope* scope) {
-    for(auto node: scope->nodes) {
-        visit(node.get());
+    for(int i = 0; i < scope->nodes.size(); ++i) {
+        
+        /*
+        if(node.get()) {
+            visit(node.get());
+        }*/
     }
 }
 void CodeGenerator::visitParam(Param* param) {}
@@ -52,7 +56,20 @@ llvm::Value* CodeGenerator::visitDecimalLiteralExpr(DecimalLiteralExpr* expr) {
     return nullptr;
 }
 llvm::Value* CodeGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
-    return nullptr;
+    llvm::Function* callee = module->getFunction(expr->name);
+    assert(callee && "Attempted to reference undeclared identifier");
+
+    assert((callee->arg_size() == expr->argList.size()) && "Incorrect # of arguments passed");
+
+    std::vector<llvm::Value*> args;
+    for(auto& arg: expr->argList) {
+        args.push_back(visitExpr(arg.value.get()));
+        if(!args.back()) {
+            return nullptr;
+        }
+    }
+
+    return builder.CreateCall(callee, args, "calltmp");
 }
 llvm::Value* CodeGenerator::visitPlaceholderTypeRefExpr(PlaceholderTypeRefExpr* expr) {
     return nullptr;

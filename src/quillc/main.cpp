@@ -3,6 +3,8 @@
 #include <iostream>
 #include "Parser/Parser.hpp"
 #include "AST/ASTPrinter.hpp"
+#include "IRGen/CodeGenerator.hpp"
+#include "llvm/Support/raw_ostream.h"
 
 std::string sourceCode = R"~(
 extern sin(val: __builtin_double): __builtin_double
@@ -19,12 +21,17 @@ int main(int argc, const char * argv[]) {
 //        std::cout << lexer.curTok().prettyPrint() << "\n";
 //    }
     ASTPrinter printer;
-    if(auto scope = parser.parseTopLevel()) {
-        for(auto& node: *scope) {
+    CodeGenerator codeGenerator;
+    if(auto file = parser.parseTopLevel()) {
+        /*for(auto& node: *file) {
             std::cout << printer.visit(node.get(), 0) << '\n';
+        }*/
+        for(auto& node: *file) {
+            codeGenerator.visit(node.get());
         }
+        codeGenerator.module->print(llvm::errs(), nullptr);
     } else {
-        std::cout << scope.failure() << "\n";
+        std::cout << file.failure() << "\n";
     }
     std::cout << std::endl;
 

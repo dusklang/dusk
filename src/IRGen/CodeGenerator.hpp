@@ -23,15 +23,17 @@ class CodeGenerator final: public ASTVisitor<CodeGenerator,
 private:
     llvm::LLVMContext context;
     llvm::IRBuilder<> builder;
-    std::unique_ptr<llvm::Module> module;
     std::map<std::string, llvm::Value*> storedNonParameterizedDecls;
 public:
-    CodeGenerator() : builder(context) {}
+    std::unique_ptr<llvm::Module> module;
+    CodeGenerator() : builder(context) {
+        module = std::make_unique<llvm::Module>("my module", context);
+    }
 
     void visit(ASTNode* node) {
         switch(node->kind) {
             #define AST_NODE(name) case NodeKind::name: \
-            visit##name(static_cast<name*>(node));
+            visit##name(static_cast<name*>(node)); return;
             #include "AST/ASTNodes.def"
             default: break;
         }
