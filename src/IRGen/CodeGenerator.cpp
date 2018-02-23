@@ -11,8 +11,8 @@ llvm::Type* CodeGenerator::mapBuiltinTypeToLLVM(BuiltinType type) {
     }
 }
 
-llvm::Function* CodeGenerator::visitDecl(Decl* decl) {
-    llvm::Function* function = visitDeclPrototype(decl->prototype.get());
+llvm::Function* CodeGenerator::visitDecl(std::shared_ptr<Decl> decl) {
+    llvm::Function* function = visitDeclPrototype(decl->prototype);
 
     llvm::BasicBlock* block = llvm::BasicBlock::Create(context, "entry", function);
     builder.SetInsertPoint(block);
@@ -24,7 +24,7 @@ llvm::Function* CodeGenerator::visitDecl(Decl* decl) {
     if(auto expr = decl->expression()) {
         assert(false && "Code generation for stored decls is not yet supported");
     } else {
-        visitScope(decl->body().get());
+        visitScope(decl->body());
     }
 
     llvm::verifyFunction(*function);
@@ -32,7 +32,7 @@ llvm::Function* CodeGenerator::visitDecl(Decl* decl) {
     return function;
 }
 
-llvm::Function* CodeGenerator::visitDeclPrototype(DeclPrototype* prototype) {
+llvm::Function* CodeGenerator::visitDeclPrototype(std::shared_ptr<DeclPrototype> prototype) {
     std::vector<llvm::Type*> arguments;
     for(auto& param: prototype->paramList) {
         arguments.push_back(mapBuiltinTypeToLLVM(param->value.type));
@@ -54,21 +54,21 @@ llvm::Function* CodeGenerator::visitDeclPrototype(DeclPrototype* prototype) {
     }
     return function;
 }
-void CodeGenerator::visitScope(Scope* scope) {
+void CodeGenerator::visitScope(std::shared_ptr<Scope> scope) {
     for(auto& node: scope->nodes) {
-        visit(node.get());
+        visit(node);
     }
 }
-void CodeGenerator::visitParam(Param* param) {}
-void CodeGenerator::visitArgument(Argument* argument) {}
-void CodeGenerator::visitPhysicalTypeRef(PhysicalTypeRef* expr) {}
-llvm::Value* CodeGenerator::visitIntegerLiteralExpr(IntegerLiteralExpr* expr) {
+void CodeGenerator::visitParam(std::shared_ptr<Param> param) {}
+void CodeGenerator::visitArgument(std::shared_ptr<Argument> argument) {}
+void CodeGenerator::visitPhysicalTypeRef(std::shared_ptr<PhysicalTypeRef> expr) {}
+llvm::Value* CodeGenerator::visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr) {
     return llvm::ConstantInt::get(context, llvm::APInt(32, std::stoi(expr->literal)));
 }
-llvm::Value* CodeGenerator::visitDecimalLiteralExpr(DecimalLiteralExpr* expr) {
+llvm::Value* CodeGenerator::visitDecimalLiteralExpr(std::shared_ptr<DecimalLiteralExpr> expr) {
     return llvm::ConstantFP::get(context, llvm::APFloat(std::stod(expr->literal)));
 }
-llvm::Value* CodeGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
+llvm::Value* CodeGenerator::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
     llvm::Function* callee = module->getFunction(expr->name);
     assert(callee && "Undeclared symbol");
 
@@ -77,7 +77,7 @@ llvm::Value* CodeGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
 
     std::vector<llvm::Value*> args;
     for(auto& arg: expr->argList) {
-        args.push_back(visitExpr(arg.value.get()));
+        args.push_back(visitExpr(arg.value));
         if(!args.back()) {
             return nullptr;
         }
@@ -86,10 +86,10 @@ llvm::Value* CodeGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
     return builder.CreateCall(callee, args, "calltmp");
 }
 
-llvm::Value* CodeGenerator::visitReturnStmt(ReturnStmt* stmt) {
+llvm::Value* CodeGenerator::visitReturnStmt(std::shared_ptr<ReturnStmt> stmt) {
     if(!stmt->value) {
         return builder.CreateRetVoid();
     } else {
-        return builder.CreateRet(visitExpr(stmt->value.get()));
+        return builder.CreateRet(visitExpr(stmt->value));
     }
 }

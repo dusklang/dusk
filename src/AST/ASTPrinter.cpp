@@ -9,16 +9,16 @@ std::string indentation(int level) {
     return str;
 }
 
-std::string ASTPrinter::visitDecl(Decl* decl, int indentationLevel) {
-    std::string str = indentation(indentationLevel) + visitDeclPrototype(decl->prototype.get(), 0);
+std::string ASTPrinter::visitDecl(std::shared_ptr<Decl> decl, int indentationLevel) {
+    std::string str = indentation(indentationLevel) + visitDeclPrototype(decl->prototype, 0);
     if(decl->expression()) {
-        str += " = " + visitExpr(decl->expression().get(), 0);
+        str += " = " + visitExpr(decl->expression(), 0);
     }
-    else str += " {\n" + visitScope(decl->body().get(), indentationLevel) + "\n" + indentation(indentationLevel) + "}";
+    else str += " {\n" + visitScope(decl->body(), indentationLevel) + "\n" + indentation(indentationLevel) + "}";
     return str;
 }
 
-std::string ASTPrinter::visitDeclPrototype(DeclPrototype* prototype, int indentationLevel) {
+std::string ASTPrinter::visitDeclPrototype(std::shared_ptr<DeclPrototype> prototype, int indentationLevel) {
     std::string str;
     str += prototype->isMut ? "mut " : "";
     str += prototype->isExtern ? "extern " : "";
@@ -30,13 +30,13 @@ std::string ASTPrinter::visitDeclPrototype(DeclPrototype* prototype, int indenta
             if(!first) str += ", ";
             else first = false;
 
-            str += visitParam(param.get(), 0);
+            str += visitParam(param, 0);
         }
         str += ")";
     }
     std::string typeStr;
     if(prototype->physicalType) {
-        typeStr = visitPhysicalTypeRef(&*prototype->physicalType, 0);
+        typeStr = visitPhysicalTypeRef(std::make_shared<PhysicalTypeRef>(*prototype->physicalType), 0);
     } else {
         typeStr = "<inferred>";
     }
@@ -44,38 +44,38 @@ std::string ASTPrinter::visitDeclPrototype(DeclPrototype* prototype, int indenta
     return indentation(indentationLevel) + str;
 }
 
-std::string ASTPrinter::visitScope(Scope* scope, int indentationLevel) {
+std::string ASTPrinter::visitScope(std::shared_ptr<Scope> scope, int indentationLevel) {
     std::string str;
     for(auto& node: scope->nodes)
-        str += visit(node.get(), indentationLevel + 1) + "\n";
+        str += visit(node, indentationLevel + 1) + "\n";
     if(!str.empty()) str.pop_back();
     return str;
 }
 
-std::string ASTPrinter::visitParam(Param* param, int indentationLevel) {
-    return param->name + ": " + visitPhysicalTypeRef(&param->value, 0);
+std::string ASTPrinter::visitParam(std::shared_ptr<Param> param, int indentationLevel) {
+    return param->name + ": " + visitPhysicalTypeRef(std::make_shared<PhysicalTypeRef>(param->value), 0);
 }
 
-std::string ASTPrinter::visitArgument(Argument* argument, int indentationLevel) {
-    return argument->name + ": " + visitExpr(argument->value.get(), 0);
+std::string ASTPrinter::visitArgument(std::shared_ptr<Argument> argument, int indentationLevel) {
+    return argument->name + ": " + visitExpr(argument->value, 0);
 }
 
-std::string ASTPrinter::visitPhysicalTypeRef(PhysicalTypeRef* expr, int indentationLevel) {
+std::string ASTPrinter::visitPhysicalTypeRef(std::shared_ptr<PhysicalTypeRef> expr, int indentationLevel) {
     switch(expr->type) {
         #define BUILTIN_TYPE(name) case BuiltinType::name: return indentation(indentationLevel) + #name;
         #include "BuiltinTypes.def"
     }
 }
 
-std::string ASTPrinter::visitIntegerLiteralExpr(IntegerLiteralExpr* expr, int indentationLevel) {
+std::string ASTPrinter::visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr, int indentationLevel) {
     return indentation(indentationLevel) + expr->literal;
 }
 
-std::string ASTPrinter::visitDecimalLiteralExpr(DecimalLiteralExpr* expr, int indentationLevel) {
+std::string ASTPrinter::visitDecimalLiteralExpr(std::shared_ptr<DecimalLiteralExpr> expr, int indentationLevel) {
     return indentation(indentationLevel) + expr->literal;
 }
 
-std::string ASTPrinter::visitDeclRefExpr(DeclRefExpr* expr, int indentationLevel) {
+std::string ASTPrinter::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr, int indentationLevel) {
     std::string str = expr->name;
     if(!expr->argList.empty()) {
         str += "(";
@@ -84,17 +84,17 @@ std::string ASTPrinter::visitDeclRefExpr(DeclRefExpr* expr, int indentationLevel
             if(!first) str += ", ";
             else first = false;
 
-            str += visitArgument(&arg, 0);
+            str += visitArgument(std::make_shared<Argument>(arg), 0);
         }
         str += ")";
     }
     return indentation(indentationLevel) + str;
 }
 
-std::string ASTPrinter::visitReturnStmt(ReturnStmt* stmt, int indentationLevel) {
+std::string ASTPrinter::visitReturnStmt(std::shared_ptr<ReturnStmt> stmt, int indentationLevel) {
     std::string str = indentation(indentationLevel) + "return";
     if(stmt->value) {
-        str += " " + visitExpr(stmt->value.get(), 0);
+        str += " " + visitExpr(stmt->value, 0);
     }
     return str;
 }

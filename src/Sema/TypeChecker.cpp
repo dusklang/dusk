@@ -2,10 +2,9 @@
 
 #include "TypeChecker.h"
 
-void TypeChecker::visitDecl(Decl* decl) {
+void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
     // Insert prototype into the current scope.
-    #warning Overhaul ASTVisitor using smart pointers, and remove this pointer creation:
-    declLists.back().push_back(AbstractDecl(std::shared_ptr<Decl>(decl)));
+    declLists.back().push_back(AbstractDecl(decl));
 
     // If we have parameters, start a new scope for referencing them.
     if(decl->isParameterized()) {
@@ -23,7 +22,7 @@ void TypeChecker::visitDecl(Decl* decl) {
         for(auto& node: decl->body()->nodes) {
             // Handle return statements.
             if(auto ret = std::dynamic_pointer_cast<ReturnStmt>(node)) {
-                visitReturnStmt(ret.get());
+                visitReturnStmt(ret);
                 // Handle returning value in a void computed decl.
                 if(decl->getTypeRef()->getType() == BuiltinType::Void) {
                     if(ret->value) {
@@ -31,7 +30,7 @@ void TypeChecker::visitDecl(Decl* decl) {
                         reportError("Attempted to return value from " +
                                     std::string(wasInferred ? "inferred-" : "") +
                                     "Void computed decl '" + decl->prototype->name + "'",
-                                    ret.get());
+                                    ret);
                     } else {
                         continue;
                     }
@@ -40,7 +39,7 @@ void TypeChecker::visitDecl(Decl* decl) {
                 // Handle returning no value in a non-void computed decl.
                 if(!ret->value) {
                     reportError("Computed decl '" + decl->prototype->name + "' must return a value",
-                                ret.get());
+                                ret);
                 }
 
                 // Handle returning a value of a type incompatible with the computed decl's type
@@ -49,19 +48,19 @@ void TypeChecker::visitDecl(Decl* decl) {
                     // TODO: Include in the error message the type of the returned expr.
                     reportError("Attempted to return value of incompatible type from computed decl "
                                 "of type " + decl->prototype->physicalType->range.getSubstring(),
-                                ret.get());
+                                ret);
                 }
             }
             // Handle expressions.
             else if(auto expr = std::dynamic_pointer_cast<Expr>(node)) {
-                visitExpr(expr.get());
+                visitExpr(expr);
                 // Warn on unused expressions.
                 if(expr->type != BuiltinType::Void) {
-                    reportWarning("Unused expression", expr.get());
+                    reportWarning("Unused expression", expr);
                 }
             }
             else {
-                visit(node.get());
+                visit(node);
             }
         }
         declLists.pop_back();
@@ -72,12 +71,12 @@ void TypeChecker::visitDecl(Decl* decl) {
     // We can now assume the decl is stored.
     assert(decl->isStored());
 
-    visitExpr(decl->expression().get());
+    visitExpr(decl->expression());
     if(!decl->prototype->physicalType) decl->getTypeRef()->resolveType(*decl->expression()->type);
 
     if(decl->isParameterized()) declLists.pop_back();
 }
-void TypeChecker::visitDeclPrototype(DeclPrototype* prototype) {
+void TypeChecker::visitDeclPrototype(std::shared_ptr<DeclPrototype> prototype) {
     // THIS SHOULD ONLY EVER BY INVOKED IN THE CASE OF A STANDALONE PROTOTYPE, aka NOT in visitDecl().
 
     if(!prototype->isExtern) {
@@ -88,20 +87,20 @@ void TypeChecker::visitDeclPrototype(DeclPrototype* prototype) {
         reportError("Standalone decl prototypes need types", prototype);
     }
 }
-void TypeChecker::visitScope(Scope* scope) {}
-void TypeChecker::visitParam(Param* param) {}
-void TypeChecker::visitArgument(Argument* argument) {}
-void TypeChecker::visitPhysicalTypeRef(PhysicalTypeRef* expr) {}
-void TypeChecker::visitIntegerLiteralExpr(IntegerLiteralExpr* expr) {
+void TypeChecker::visitScope(std::shared_ptr<Scope> scope) {}
+void TypeChecker::visitParam(std::shared_ptr<Param> param) {}
+void TypeChecker::visitArgument(std::shared_ptr<Argument> argument) {}
+void TypeChecker::visitPhysicalTypeRef(std::shared_ptr<PhysicalTypeRef> expr) {}
+void TypeChecker::visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr) {
     expr->type = BuiltinType::i32;
 }
-void TypeChecker::visitDecimalLiteralExpr(DecimalLiteralExpr* expr) {
+void TypeChecker::visitDecimalLiteralExpr(std::shared_ptr<DecimalLiteralExpr> expr) {
     expr->type = BuiltinType::f64;
 }
-void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
+void TypeChecker::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
     // Type-check arguments.
     for(auto& arg: expr->argList) {
-        visitExpr(arg.value.get());
+        visitExpr(arg.value);
     }
 
     // Find the prototype to reference.
@@ -140,8 +139,8 @@ void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
     reportError(errorMessage, expr);
 }
 
-void TypeChecker::visitReturnStmt(ReturnStmt* stmt) {
+void TypeChecker::visitReturnStmt(std::shared_ptr<ReturnStmt> stmt) {
     if(stmt->value) {
-        visitExpr(stmt->value.get());
+        visitExpr(stmt->value);
     }
 }

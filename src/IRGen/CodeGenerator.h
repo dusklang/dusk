@@ -36,15 +36,15 @@ public:
         module = std::make_unique<llvm::Module>("my module", context);
     }
 
-    llvm::Function* visitDecl(Decl* decl);
-    llvm::Function* visitDeclPrototype(DeclPrototype* prototype);
-    void visitScope(Scope* scope);
-    void visitParam(Param* param);
-    void visitArgument(Argument* argument);
-    void visitPhysicalTypeRef(PhysicalTypeRef* expr);
-    llvm::Value* visitIntegerLiteralExpr(IntegerLiteralExpr* expr);
-    llvm::Value* visitDecimalLiteralExpr(DecimalLiteralExpr* expr);
-    llvm::Value* visitDeclRefExpr(DeclRefExpr* expr);
+    llvm::Function* visitDecl(std::shared_ptr<Decl> decl);
+    llvm::Function* visitDeclPrototype(std::shared_ptr<DeclPrototype> prototype);
+    void visitScope(std::shared_ptr<Scope> scope);
+    void visitParam(std::shared_ptr<Param> param);
+    void visitArgument(std::shared_ptr<Argument> argument);
+    void visitPhysicalTypeRef(std::shared_ptr<PhysicalTypeRef> expr);
+    llvm::Value* visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr);
+    llvm::Value* visitDecimalLiteralExpr(std::shared_ptr<DecimalLiteralExpr> expr);
+    llvm::Value* visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr);
 
-    llvm::Value* visitReturnStmt(ReturnStmt* stmt);
+    llvm::Value* visitReturnStmt(std::shared_ptr<ReturnStmt> stmt);
 };

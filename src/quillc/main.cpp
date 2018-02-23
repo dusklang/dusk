@@ -8,8 +8,7 @@
 #include "llvm/Support/raw_ostream.h"
 
 std::string sourceCode = R"~(
-def doSomethingReallyCool {
-}
+extern def doSomethingReallyCool: i32
 def abs(x: i32): i32 {
     return 4
 }
@@ -28,13 +27,13 @@ int main(int argc, const char * argv[]) {
     CodeGenerator codeGenerator;
     auto file = parser.parseTopLevel();
 //    for(auto& node: file) {
-//        std::cout << printer.visit(node.get(), 0) << '\n';
+//        std::cout << printer.visit(node, 0) << '\n';
 //    }
     for(auto& node: file) {
-        tyChecker.visit(node.get());
+        tyChecker.visit(node);
     }
     for(auto& node: file) {
-        codeGenerator.visit(node.get());
+        codeGenerator.visit(node);
     }
     codeGenerator.module->print(llvm::errs(), nullptr);
     std::cout << std::endl;

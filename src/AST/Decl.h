@@ -20,17 +20,14 @@ struct DeclPrototype final : public ASTNode {
     llvm::Optional<PhysicalTypeRef> physicalType;
     bool isMut;
     bool isExtern;
-    bool isComputed;
 
     AST_NODE_CTOR(DeclPrototype,
                   const std::string& name,
                   const std::vector<std::shared_ptr<Param>>& paramList,
                   llvm::Optional<PhysicalTypeRef> type,
                   bool isMut,
-                  bool isExtern,
-                  bool isComputed = false),
-    name(name), paramList(paramList), physicalType(type), isMut(isMut), isExtern(isExtern),
-    isComputed(isComputed) {}
+                  bool isExtern),
+    name(name), paramList(paramList), physicalType(type), isMut(isMut), isExtern(isExtern) {}
 
     bool isParameterized() const {
         return !paramList.empty();
@@ -88,27 +85,23 @@ private:
     enum {
         parameter, prototype, declaration
     } tag;
-    union {
-        std::shared_ptr<Param> param;
-        std::shared_ptr<DeclPrototype> proto;
-        std::shared_ptr<Decl> decl;
-    };
+    std::shared_ptr<ASTNode> val;
+    std::shared_ptr<Param> param() const { return std::dynamic_pointer_cast<Param>(val); }
+    std::shared_ptr<DeclPrototype> proto() const {
+        return std::dynamic_pointer_cast<DeclPrototype>(val);
+    }
+    std::shared_ptr<Decl> decl() const { return std::dynamic_pointer_cast<Decl>(val); }
 public:
-    AbstractDecl(std::shared_ptr<Param> param) : tag(parameter), param(param) {}
-    AbstractDecl(std::shared_ptr<DeclPrototype> proto) : tag(prototype), proto(proto) {}
-    AbstractDecl(std::shared_ptr<Decl> decl) : tag(declaration), decl(decl) {}
+    AbstractDecl(std::shared_ptr<Param> param) : tag(parameter), val(param) {}
+    AbstractDecl(std::shared_ptr<DeclPrototype> proto) : tag(prototype), val(proto) {}
+    AbstractDecl(std::shared_ptr<Decl> decl) : tag(declaration), val(decl) {}
     ~AbstractDecl() {}
 
-    AbstractDecl(const AbstractDecl& other) : tag(other.tag) {
-        if(other.tag == parameter) param = other.param;
-        if(other.tag == prototype) proto = other.proto;
-        if(other.tag == declaration) decl = other.decl;
+    AbstractDecl(const AbstractDecl& other) : tag(other.tag), val(other.val) {
     }
     void operator=(const AbstractDecl& other) {
         tag = other.tag;
-        if(tag == parameter) param = other.param;
-        if(tag == prototype) proto = other.proto;
-        if(tag == declaration) decl = other.decl;
+        val = other.val;
     }
 
     bool isParameter() const { return tag == parameter; }
@@ -116,41 +109,54 @@ public:
     bool isDeclaration() const { return tag == declaration; }
 
     const std::string& name() const {
-        if(isParameter()) return param->name;
-        if(isPrototype()) return proto->name;
-        if(isDeclaration()) return decl->prototype->name;
+        if(isParameter()) return param()->name;
+        if(isPrototype()) return proto()->name;
+        if(isDeclaration()) return decl()->prototype->name;
         LLVM_BUILTIN_UNREACHABLE;
     }
 
     std::vector<std::shared_ptr<Param>> paramList() const {
         if(isParameter()) return std::vector<std::shared_ptr<Param>>();
-        if(isPrototype()) return proto->paramList;
-        if(isDeclaration()) return decl->prototype->paramList;
+        if(isPrototype()) return proto()->paramList;
+        if(isDeclaration()) return decl()->prototype->paramList;
         LLVM_BUILTIN_UNREACHABLE;
     }
 
     llvm::Optional<PhysicalTypeRef> physicalType() const {
-        if(isParameter()) return param->value;
-        if(isPrototype()) return proto->physicalType;
-        if(isDeclaration()) return decl->prototype->physicalType;
+        if(isParameter()) return param()->value;
+        if(isPrototype()) return proto()->physicalType;
+        if(isDeclaration()) return decl()->prototype->physicalType;
         LLVM_BUILTIN_UNREACHABLE;
     }
 
     TypeRef typeRef() {
-        if(isParameter()) return TypeRef(param->value.type);
-        if(isPrototype()) return TypeRef(proto->physicalType->type);
-        if(isDeclaration()) return *decl->getTypeRef();
+        if(isParameter()) return TypeRef(param()->value.type);
+        if(isPrototype()) return TypeRef(proto()->physicalType->type);
+        if(isDeclaration()) return *decl()->getTypeRef();
         LLVM_BUILTIN_UNREACHABLE;
     }
 
     SourceRange range() {
-        if(isParameter()) return param->range;
-        if(isPrototype()) return proto->range;
-        if(isDeclaration()) return decl->prototype->range;
-        LLVM_BUILTIN_UNREACHABLE;
+        if(auto proto = getProto()) return proto->range;
+        return param()->range;
     }
 
-    bool isMut() const { return isPrototype() ? proto->isMut : false; }
-    bool isExtern() const { return isPrototype() ? proto->isExtern : false; }
-    bool isComputed() const { return isPrototype() ? proto->isComputed : false; }
+    std::shared_ptr<DeclPrototype> getProto() const {
+        if(isPrototype()) return proto();
+        if(isDeclaration()) return decl()->prototype;
+        return nullptr;
+    }
+
+    bool isMut() const {
+        if(auto proto = getProto()) return proto->isMut;
+        return false;
+    }
+    bool isExtern() const {
+        if(auto proto = getProto()) return proto->isExtern;
+        return false;
+    }
+    bool isComputed() const {
+        if(isDeclaration()) return decl()->isComputed();
+        return false;
+    }
 };

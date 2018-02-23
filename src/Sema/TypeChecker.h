@@ -22,14 +22,16 @@ class TypeChecker final: public ASTVisitor<TypeChecker,
 private:
     // FIXME: Name lookup will be super slow; figure out how to hash function overloads.
     std::vector<std::vector<AbstractDecl>> declLists;
-    void reportError(std::string message, ASTNode* node) {
+    template<typename Node>
+    void reportError(std::string message, std::shared_ptr<Node> node) {
         std::cout << "TYPE-CHECKING ERROR: " << message << '\n';
         std::cout << "Offending area: " << node->range.getSubstring() << "\n\n";
         // TODO: Support multiple errors per file.
         exit(1);
     }
 
-    void reportWarning(std::string message, ASTNode* node) {
+    template<typename Node>
+    void reportWarning(std::string message, std::shared_ptr<Node> node) {
         std::cout << "TYPE-CHECKING WARNING: " << message << '\n';
         std::cout << "Offending area: " << node->range.getSubstring() << "\n\n";
     }
@@ -38,15 +40,15 @@ public:
         declLists.push_back(std::vector<AbstractDecl>());
     }
 
-    void visitDecl(Decl* decl);
-    void visitDeclPrototype(DeclPrototype* prototype);
-    void visitScope(Scope* scope);
-    void visitParam(Param* param);
-    void visitArgument(Argument* argument);
-    void visitPhysicalTypeRef(PhysicalTypeRef* expr);
-    void visitIntegerLiteralExpr(IntegerLiteralExpr* expr);
-    void visitDecimalLiteralExpr(DecimalLiteralExpr* expr);
-    void visitDeclRefExpr(DeclRefExpr* expr);
+    void visitDecl(std::shared_ptr<Decl> decl);
+    void visitDeclPrototype(std::shared_ptr<DeclPrototype> prototype);
+    void visitScope(std::shared_ptr<Scope> scope);
+    void visitParam(std::shared_ptr<Param> param);
+    void visitArgument(std::shared_ptr<Argument> argument);
+    void visitPhysicalTypeRef(std::shared_ptr<PhysicalTypeRef> expr);
+    void visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr);
+    void visitDecimalLiteralExpr(std::shared_ptr<DecimalLiteralExpr> expr);
+    void visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr);
 
-    void visitReturnStmt(ReturnStmt* stmt);
+    void visitReturnStmt(std::shared_ptr<ReturnStmt> stmt);
 };
