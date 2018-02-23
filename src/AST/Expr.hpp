@@ -18,6 +18,8 @@ enum class ExprKind {
 // Base class from which each Expression node inherits.
 struct Expr : public ASTNode {
     ExprKind exprKind;
+    llvm::Optional<BuiltinType> type;
+    AST_NODE_CTOR(Expr, ExprKind exprKind, BuiltinType type), exprKind(exprKind), type(type) {}
     AST_NODE_CTOR(Expr, ExprKind exprKind), exprKind(exprKind) {}
 };
 
@@ -38,10 +40,12 @@ struct DeclRefExpr: public Expr {
     std::vector<Argument> argList;
 
     EXPR_CTOR(DeclRef, const std::string& name,
-                     const std::vector<Argument>& argList),
+              const std::vector<Argument>& argList),
     name(name), argList(argList) {}
 
     void operator=(const DeclRefExpr& other) {
+        range = other.range;
+        type = other.type;
         name = other.name;
         argList = other.argList;
     }
