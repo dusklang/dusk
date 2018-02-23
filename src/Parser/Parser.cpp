@@ -1,7 +1,7 @@
 //  Copyright © 2018 Zach Wolfe. All rights reserved.
 
-#include "Parser.hpp"
-#include "AST/Expr.hpp"
+#include "Parser.h"
+#include "AST/Expr.h"
 #include <vector>
 #include <memory>
 #include <iostream>

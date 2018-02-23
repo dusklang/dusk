@@ -4,9 +4,9 @@
 
 #include <memory>
 #include <string>
-#include "AST.hpp"
-#include "Expr.hpp"
-#include "Types.hpp"
+#include "AST.h"
+#include "Expr.h"
+#include "Types.h"
 
 struct Expr;
 

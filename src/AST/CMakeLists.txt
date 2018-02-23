@@ -2,16 +2,16 @@ set(SOURCES
     ASTPrinter.cpp
 )
 set(HEADERS
-    AST.hpp
-    Decl.hpp
-    Expr.hpp
-    Stmt.hpp
-    Types.hpp
-    ASTVisitor.hpp
+    AST.h
+    Decl.h
+    Expr.h
+    Stmt.h
+    Types.h
+    ASTVisitor.h
     ASTNodes.def
-    ASTPrinter.hpp
+    ASTPrinter.h
     BuiltinTypes.def
-    Types.hpp
+    Types.h
 )
 
 add_library(AST ${SOURCES} ${HEADERS})

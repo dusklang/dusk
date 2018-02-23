@@ -1,6 +1,6 @@
 //  Copyright © 2018 Zach Wolfe. All rights reserved.
 
-#include "CodeGenerator.hpp"
+#include "CodeGenerator.h"
 #include "llvm/IR/Verifier.h"
 
 llvm::Type* CodeGenerator::mapBuiltinTypeToLLVM(BuiltinType type) {

@@ -1,7 +1,7 @@
 //  Copyright © 2018 Zach Wolfe. All rights reserved.
 
 #include <string>
-#include "General/SourceLoc.hpp"
+#include "General/SourceLoc.h"
 
 enum class tok {
     #define TOKEN(name) name,

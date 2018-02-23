@@ -5,8 +5,8 @@
 #include <string>
 #include <vector>
 #include "llvm/ADT/Optional.h"
-#include "Types.hpp"
-#include "General/SourceLoc.hpp"
+#include "Types.h"
+#include "General/SourceLoc.h"
 
 struct Expr;
 

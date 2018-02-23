@@ -2,7 +2,7 @@ set(SOURCES
     CodeGenerator.cpp
 )
 set(HEADERS
-    CodeGenerator.hpp
+    CodeGenerator.h
 )
 
 add_library(IRGen ${SOURCES} ${HEADERS})

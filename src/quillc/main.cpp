@@ -1,9 +1,9 @@
 //  Copyright © 2018 Zach Wolfe. All rights reserved.
 
 #include <iostream>
-#include "Parser/Parser.hpp"
-#include "AST/ASTPrinter.hpp"
-#include "IRGen/CodeGenerator.hpp"
+#include "Parser/Parser.h"
+#include "AST/ASTPrinter.h"
+#include "IRGen/CodeGenerator.h"
 #include "llvm/Support/raw_ostream.h"
 
 std::string sourceCode = R"~(

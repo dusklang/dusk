@@ -1,6 +1,6 @@
 //  Copyright © 2018 Zach Wolfe. All rights reserved.
 
-#include "Lexer.hpp"
+#include "Lexer.h"
 #include <iostream>
 
 Token Lexer::nextTokIncludingInsignificant() {

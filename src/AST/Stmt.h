@@ -4,9 +4,9 @@
 
 #include <vector>
 #include <memory>
-#include "AST.hpp"
+#include "AST.h"
 
-#include "Expr.hpp"
+#include "Expr.h"
 
 enum class StmtKind {
     #define STMT_NODE(name) name,

@@ -6,8 +6,8 @@
 #define EXPR_NODE(name) struct name##Expr;
 #include "ASTNodes.def"
 
-#include "Expr.hpp"
-#include "Stmt.hpp"
+#include "Expr.h"
+#include "Stmt.h"
 
 template<typename Impl,
          typename ASTNodeReturnTy,

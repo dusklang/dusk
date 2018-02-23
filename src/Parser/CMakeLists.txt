@@ -3,9 +3,9 @@ set(SOURCES
     Lexer.cpp
 )
 set(HEADERS
-    Parser.hpp
-    Lexer.hpp
-    Token.hpp
+    Parser.h
+    Lexer.h
+    Token.h
     TokenKinds.def
 )
 

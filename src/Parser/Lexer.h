@@ -5,7 +5,7 @@
 #include <string>
 #include <stack>
 #include "llvm/ADT/Optional.h"
-#include "Token.hpp"
+#include "Token.h"
 #include <iostream>
 
 class Lexer final {

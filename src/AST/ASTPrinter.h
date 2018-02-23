@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include "ASTVisitor.hpp"
+#include "ASTVisitor.h"
 
 class ASTPrinter: public ASTVisitor<ASTPrinter,
                                     /*ASTNodeReturnTy*/ std::string,

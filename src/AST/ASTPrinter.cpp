@@ -1,6 +1,6 @@
 //  Copyright © 2018 Zach Wolfe. All rights reserved.
 
-#include "ASTPrinter.hpp"
+#include "ASTPrinter.h"
 
 std::string indentation(int level) {
     const int multiplier = 4;

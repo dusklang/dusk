@@ -4,11 +4,11 @@
 
 #include "llvm/ADT/Optional.h"
 
-#include "AST/AST.hpp"
-#include "AST/Stmt.hpp"
-#include "AST/Decl.hpp"
+#include "AST/AST.h"
+#include "AST/Stmt.h"
+#include "AST/Decl.h"
 
-#include "Lexer.hpp"
+#include "Lexer.h"
 
 class Parser {
 private:

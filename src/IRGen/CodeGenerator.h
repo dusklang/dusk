@@ -8,11 +8,11 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/IRBuilder.h"
 
-#include "AST/AST.hpp"
-#include "AST/ASTVisitor.hpp"
-#include "AST/Expr.hpp"
-#include "AST/Decl.hpp"
-#include "AST/Stmt.hpp"
+#include "AST/AST.h"
+#include "AST/ASTVisitor.h"
+#include "AST/Expr.h"
+#include "AST/Decl.h"
+#include "AST/Stmt.h"
 
 class CodeGenerator final: public ASTVisitor<CodeGenerator,
                                              std::unique_ptr<llvm::Module>,

@@ -2,7 +2,7 @@ set(SOURCES
     SourceLoc.cpp
 )
 set(HEADERS
-    SourceLoc.hpp
+    SourceLoc.h
 )
 
 add_library(General ${SOURCES} ${HEADERS})

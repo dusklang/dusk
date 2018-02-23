@@ -6,8 +6,8 @@
 #include <memory>
 #include "llvm/ADT/SmallVector.h"
 
-#include "AST.hpp"
-#include "Decl.hpp"
+#include "AST.h"
+#include "Decl.h"
 
 enum class ExprKind {
     #define EXPR_NODE(name) name,

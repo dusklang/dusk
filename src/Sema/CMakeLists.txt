@@ -1,6 +1,8 @@
 set(SOURCES
+    TypeChecker.cpp
 )
 set(HEADERS
+    TypeChecker.hpp
 )
 
 #add_library(Sema ${SOURCES} ${HEADERS})
