@@ -12,17 +12,14 @@ enum class tok {
 class Token {
 private:
     tok kind = tok::NUM_TOKENS;
-    std::string text;
-    SourceLoc loc;
+    SourceRange range;
 
 public:
-    Token(tok kind, std::string text, SourceLoc loc) : kind(kind), text(text), loc(loc) {}
-    Token(tok kind, char character, SourceLoc loc) : kind(kind), loc(loc) { text = character; }
-    Token() {}
+    Token(tok kind, SourceRange range) : kind(kind), range(range) {}
+    Token() : range(SourceLoc(nullptr, 0), 0) {}
     Token& operator=(const Token& otherTok) {
         kind = otherTok.kind;
-        text = otherTok.text;
-        loc = otherTok.loc;
+        range = otherTok.range;
         return *this;
     }
 
@@ -43,9 +40,9 @@ public:
     bool isSignificant() const { return !isInsignificant(); }
 
     tok getKind() const { return kind; }
-    const std::string& getText() const { return text; }
-    SourceLoc getLoc() const { return loc; }
-    SourceRange getRange() const { return SourceRange(loc, text.length()); }
+    std::string getText() const { return range.getSubstring(); }
+    SourceLoc getLoc() const { return range.begin; }
+    SourceRange getRange() const { return range; }
 
     bool isAnySeparator() const {
         #define TOKEN_SEPARATOR(name, character) || kind == tok::sep_ ## name
@@ -55,8 +52,8 @@ public:
     }
 
     std::string prettyPrint() {
-        #define TOKEN_SEPARATOR(name, character) case tok::sep_ ## name: return "separator " + text;
-        #define TOKEN(name) case tok::name: return #name " " + text;
+        #define TOKEN_SEPARATOR(name, character) case tok::sep_ ## name: return "separator " + getText();
+        #define TOKEN(name) case tok::name: return #name " " + getText();
         switch(kind) {
             #include "TokenKinds.def"
             default: return "undefined token";

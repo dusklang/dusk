@@ -18,28 +18,28 @@ enum class ExprKind {
 // Base class from which each Expression node inherits.
 struct Expr : public ASTNode {
     ExprKind exprKind;
-    AST_NODE_CONSTRUCTOR(Expr, ExprKind exprKind), exprKind(exprKind) {}
+    AST_NODE_CTOR(Expr, ExprKind exprKind), exprKind(exprKind) {}
 };
 
-#define EXPR_CONSTRUCTOR(name, args...) name##Expr(args) : Expr(ExprKind::name)
+#define EXPR_CTOR(name, args...) name##Expr(SourceRange range, args) : Expr(range, ExprKind::name)
 struct IntegerLiteralExpr: public Expr {
     std::string literal;
 
-    EXPR_CONSTRUCTOR(IntegerLiteral, const std::string& literal), literal(literal) {}
+    EXPR_CTOR(IntegerLiteral, const std::string& literal), literal(literal) {}
 };
 
 struct DecimalLiteralExpr: public Expr {
     std::string literal;
-    EXPR_CONSTRUCTOR(DecimalLiteral, const std::string& literal), literal(literal) {}
+    EXPR_CTOR(DecimalLiteral, const std::string& literal), literal(literal) {}
 };
 
 struct DeclRefExpr: public Expr {
     std::string name;
     std::vector<Argument> argList;
 
-    EXPR_CONSTRUCTOR(DeclRef, const std::string& name,
+    EXPR_CTOR(DeclRef, const std::string& name,
                      const std::vector<Argument>& argList),
-                    name(name), argList(argList) {}
+    name(name), argList(argList) {}
 
     void operator=(const DeclRefExpr& other) {
         name = other.name;
@@ -47,4 +47,4 @@ struct DeclRefExpr: public Expr {
     }
 };
 
-#undef EXPR_CONSTRUCTOR
+#undef EXPR_CTOR

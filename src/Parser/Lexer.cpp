@@ -24,31 +24,31 @@ Token Lexer::nextTokIncludingInsignificant() {
     };
 
     Token _tok;
-    #define RETURN(token) { \
+    #define RETURN(tokenKind) { \
         if(numberOfNewTokens) *numberOfNewTokens += 1;\
-        _tok = token;\
+        _tok = Token(tokenKind, SourceRange(SourceLoc(&source, tokenPositions.top()), pos - tokenPositions.top()));\
         tokenPositions.push(pos);\
         tokens.push(_tok);\
         return _tok;\
     }
 
     // Return eof if at the end.
-    if(pos == source.length()) RETURN(Token(tok::eof, "", tokenPositions.top()));
+    if(pos == source.length()) RETURN(tok::eof);
 
     // Lex newlines.
     for(;pos < source.length() && isNewline(); pos++) tokenText += curChar();
-    if(!tokenText.empty()) RETURN(Token(tok::newline, tokenText, tokenPositions.top()));
+    if(!tokenText.empty()) RETURN(tok::newline);
 
     // Lex whitespace.
     for(;pos < source.length() && isWhitespace(); pos++) tokenText += curChar();
-    if(!tokenText.empty()) RETURN(Token(tok::whitespace, tokenText, tokenPositions.top()));
+    if(!tokenText.empty()) RETURN(tok::whitespace);
 
     // Lex single-line comments.
     if(isSubstr("//")) {
         tokenText = "//";
         for(pos += 2; pos < source.length() && !isNewline(); pos++) tokenText += curChar();
     }
-    if(!tokenText.empty()) RETURN(Token(tok::comment_single_line, tokenText, tokenPositions.top()));
+    if(!tokenText.empty()) RETURN(tok::comment_single_line);
 
     // Lex (optionally-nested) multi-line comments.
     if(isSubstr("/*")) {
@@ -73,12 +73,12 @@ Token Lexer::nextTokIncludingInsignificant() {
         }
         if(levels > 0) reportError(pos, "Unterminated /* comment.");
     }
-    if(!tokenText.empty()) RETURN(Token(tok::comment_multiple_line, tokenText, tokenPositions.top()));
+    if(!tokenText.empty()) RETURN(tok::comment_multiple_line);
 
     // Lex separators.
     switch(curChar()) {
         #define TOKEN_SEPARATOR(name, character) case character:\
-            pos++; RETURN(Token(tok::sep_ ## name, character, tokenPositions.top()));
+            pos++; RETURN(tok::sep_ ## name);
         #include "TokenKinds.def"
     }
 
@@ -91,7 +91,7 @@ Token Lexer::nextTokIncludingInsignificant() {
 
             if(is('"') && source.at(pos - 1) != '\\') {
                 pos++;
-                RETURN(Token(tok::string_literal, tokenText, tokenPositions.top()));
+                RETURN(tok::string_literal);
             } else {
                 pos++;
             }
@@ -104,10 +104,10 @@ Token Lexer::nextTokIncludingInsignificant() {
         while(pos < source.length() && (isLetter() || isNum() || is('_')))
             tokenText += source.at(pos++);
     if(!tokenText.empty()) {
-        #define TOKEN_KEYWORD(name, sourcerepr) if(tokenText == #sourcerepr) RETURN(Token(tok::kw_ ## name, tokenText, tokenPositions.top()));
+        #define TOKEN_KEYWORD(name, sourcerepr) if(tokenText == #sourcerepr) RETURN(tok::kw_ ## name);
         #include "TokenKinds.def"
 
-        RETURN(Token(tok::identifier, tokenText, tokenPositions.top()));
+        RETURN(tok::identifier);
     }
 
     // Lex an integer or decimal literal.
@@ -120,7 +120,7 @@ Token Lexer::nextTokIncludingInsignificant() {
         tokenText += source.at(pos++);
     }
     if(!tokenText.empty()) {
-        RETURN(Token(hasDot ? tok::decimal_literal : tok::integer_literal, tokenText, tokenPositions.top()));
+        RETURN(hasDot ? tok::decimal_literal : tok::integer_literal);
     }
 
     reportError(pos, "Unhandled token");

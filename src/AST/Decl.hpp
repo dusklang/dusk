@@ -18,12 +18,12 @@ struct DeclPrototype final : public ASTNode {
     bool isMut;
     bool isExtern;
 
-    AST_NODE_CONSTRUCTOR(DeclPrototype,
-                         const std::string& name,
-                         const std::vector<Param>& paramList,
-                         TypeRef type,
-                         bool isMut,
-                         bool isExtern),
+    AST_NODE_CTOR(DeclPrototype,
+                  const std::string& name,
+                  const std::vector<Param>& paramList,
+                  TypeRef type,
+                  bool isMut,
+                  bool isExtern),
     name(name), paramList(paramList), type(type), isMut(isMut), isExtern(isExtern) {}
 };
 
@@ -38,15 +38,14 @@ public:
         return std::dynamic_pointer_cast<Scope>(value);
     }
 
-    AST_NODE_CONSTRUCTOR(Decl,
-                         DeclPrototype prototype,
-                         std::shared_ptr<Expr> expression),
-    value(std::dynamic_pointer_cast<ASTNode>(expression)),
-    prototype(prototype) {}
+    AST_NODE_CTOR(Decl,
+                  DeclPrototype prototype,
+                  std::shared_ptr<Expr> expression),
+    value(std::dynamic_pointer_cast<ASTNode>(expression)), prototype(prototype) {}
 
-    AST_NODE_CONSTRUCTOR(Decl,
-                         DeclPrototype prototype,
-                         std::shared_ptr<Scope> body),
+    AST_NODE_CTOR(Decl,
+                  DeclPrototype prototype,
+                  std::shared_ptr<Scope> body),
     value(std::dynamic_pointer_cast<ASTNode>(body)),
     prototype(prototype) {}
 };

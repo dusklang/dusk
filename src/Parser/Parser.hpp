@@ -41,13 +41,28 @@ private:
         }
         return llvm::None;
     }
-    void reportError(std::string message, llvm::Optional<Token> offendingToken = llvm::None) const {
+    std::stack<SourceLoc> currentLoc;
+    void recordCurrentLoc() {
+        currentLoc.push(current().getLoc());
+    }
+    SourceRange currentRange() {
+        auto beginLoc = currentLoc.top();
+        currentLoc.pop();
+        return rangeFrom(beginLoc, current().getRange());
+    }
+    SourceRange rangeFrom(SourceLoc beginLoc, SourceRange endRange) {
+        auto diff = endRange.begin.location - beginLoc.location;
+        auto length = endRange.length + diff;
+        assert(diff >= 0 && "Attempt to get range between a location and a range that occurs after it");
+        return SourceRange(beginLoc, length);
+    }
+    void reportError(std::string message, llvm::Optional<Token> offendingToken = llvm::None) {
         std::cout << "PARSING ERROR: " << message << '\n';
         std::string offendingArea;
         if(offendingToken) {
-            offendingArea = substringAtSourceRange(lexer.getSource(), offendingToken->getRange());
+            offendingArea = offendingToken->getRange().getSubstring();
         } else {
-            offendingArea = lexer.getSubstringSinceSavedPosition();
+            offendingArea = currentRange().getSubstring();
         }
         std::cout << "Offending area: " << offendingArea << "\n\n";
         exit(1);

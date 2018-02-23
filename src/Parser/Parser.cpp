@@ -31,6 +31,7 @@ std::vector<std::shared_ptr<ASTNode>> Parser::parseTopLevel() {
 
 llvm::Optional<std::shared_ptr<Scope>> Parser::parseScope() {
     if(current().isNot(tok::sep_left_curly)) return llvm::None;
+    recordCurrentLoc();
     next();
     std::vector<std::shared_ptr<ASTNode>> nodes;
     while(true) {
@@ -38,11 +39,10 @@ llvm::Optional<std::shared_ptr<Scope>> Parser::parseScope() {
         if(current().is(tok::eof)) reportError("Unexpected eof before end of scope", previous());
         nodes.push_back(parseNode());
     }
-    return std::make_shared<Scope>(nodes);
+    return std::make_shared<Scope>(currentRange(), nodes);
 }
 
 std::shared_ptr<ASTNode> Parser::parseNode() {
-    lexer.savePosition();
     if(auto stmt = TRY(parseStmt())) {
         return std::dynamic_pointer_cast<ASTNode>(*stmt);
     }
@@ -58,16 +58,17 @@ std::shared_ptr<ASTNode> Parser::parseNode() {
 }
 
 TypeRef Parser::parseTypeRef() {
-    auto typeName = TRY(parseIdentifer());
+    recordCurrentLoc();
+    auto typeName = parseIdentifer();
     if(!typeName) reportError("Expected type name", current());
-    #define BUILTIN_TYPE(name) if(*typeName == #name) { return TypeRef(BuiltinType::name); }
+    #define BUILTIN_TYPE(name) if(*typeName == #name) { return TypeRef(currentRange(), BuiltinType::name); }
     #include "AST/BuiltinTypes.def"
     reportError("Invalid type name \"" + *typeName + '"', previous());
     LLVM_BUILTIN_UNREACHABLE;
 }
 
 llvm::Optional<DeclPrototype> Parser::parseDeclPrototype() {
-    lexer.savePosition();
+    recordCurrentLoc();
     bool isMut;
     bool isExtern = false;
     if(current().is(tok::kw_extern)) {
@@ -91,11 +92,12 @@ llvm::Optional<DeclPrototype> Parser::parseDeclPrototype() {
     std::vector<Param> paramList;
     if(next().is(tok::sep_left_paren)) {
         do {
+            recordCurrentLoc();
             EXPECT_NEXT(tok::identifier, "Expected parameter name");
             auto param = current().getText();
             EXPECT_NEXT(tok::sep_colon, "Expected colon after parameter name");
             next();
-            paramList.push_back(Param(param, parseTypeRef()));
+            paramList.push_back(Param(currentRange(), param, parseTypeRef()));
         } while(current().is(tok::sep_comma));
         EXPECT(tok::sep_right_paren, "Expected ')' after parameter list");
         if(paramList.empty()) reportError("Expected parameter list for parameterized declaration " + name + ", "
@@ -105,40 +107,48 @@ llvm::Optional<DeclPrototype> Parser::parseDeclPrototype() {
 
     if(current().is(tok::sep_colon)) {
         next();
-        return DeclPrototype(name, paramList, parseTypeRef(), isMut, isExtern);
+        return DeclPrototype(currentRange(), name, paramList, parseTypeRef(), isMut, isExtern);
     }
 
-    return DeclPrototype(name, paramList, TypeRef(), isMut, isExtern);
+    recordCurrentLoc();
+    auto type = TypeRef(currentRange());
+    return DeclPrototype(currentRange(), name, paramList, type, isMut, isExtern);
 }
 
 llvm::Optional<Decl> Parser::parseDecl(DeclPrototype prototype) {
+    
     if(current().is(tok::sep_equal)) {
         next();
-        return Decl(prototype, parseExpr());
+        auto expr = parseExpr();
+        auto range = rangeFrom(prototype.range.begin, expr->range);
+        return Decl(range, prototype, expr);
     } else if(auto scope = parseScope()) {
-        return Decl(prototype, *scope);
+        auto range = rangeFrom(prototype.range.begin, (*scope)->range);
+        return Decl(range, prototype, *scope);
     }
     return llvm::None;
 }
 
 llvm::Optional<std::shared_ptr<Stmt>> Parser::parseStmt() {
     if(current().is(tok::kw_return)) {
+        recordCurrentLoc();
         next();
         auto value = parseExpr();
-        if(!value) return std::dynamic_pointer_cast<Stmt>(std::make_shared<ReturnStmt>(nullptr));
-        return std::dynamic_pointer_cast<Stmt>(std::make_shared<ReturnStmt>(value));
+        if(!value) return std::dynamic_pointer_cast<Stmt>(std::make_shared<ReturnStmt>(currentRange(), nullptr));
+        return std::dynamic_pointer_cast<Stmt>(std::make_shared<ReturnStmt>(currentRange(), value));
     } else {
         return llvm::None;
     }
 }
 
 std::shared_ptr<Expr> Parser::parseDeclRefExpr() {
-    lexer.savePosition();
+    recordCurrentLoc();
     EXPECT(tok::identifier, "Expected identifier to begin declaration reference expression");
     auto name = current().getText();
     std::vector<Argument> argList;
     if(next().is(tok::sep_left_paren)) {
         do {
+            recordCurrentLoc();
             EXPECT_NEXT(tok::identifier, "Expected parameter name");
             auto param = current().getText();
             EXPECT_NEXT(tok::sep_colon, "Expected colon after parameter name");
@@ -146,23 +156,25 @@ std::shared_ptr<Expr> Parser::parseDeclRefExpr() {
 
             auto argument = parseExpr();
             if(!argument) reportError("Expected argument after parameter name");
-            argList.push_back(Argument(param, argument));
+            argList.push_back(Argument(currentRange(), param, argument));
 
         } while(current().is(tok::sep_comma));
         EXPECT(tok::sep_right_paren, "Expected ')' after parameter and argument");
         next();
     }
 
-    return std::dynamic_pointer_cast<Expr>(std::make_shared<DeclRefExpr>(name, argList));
+    return std::dynamic_pointer_cast<Expr>(std::make_shared<DeclRefExpr>(currentRange(), name, argList));
 }
 
 std::shared_ptr<Expr> Parser::parseExpr() {
-    lexer.savePosition();
+    recordCurrentLoc();
     if(auto intVal = TRY(parseIntegerLiteral())) {
-        return std::dynamic_pointer_cast<Expr>(std::make_shared<IntegerLiteralExpr>(*intVal));
+        return std::dynamic_pointer_cast<Expr>(std::make_shared<IntegerLiteralExpr>(currentRange(), *intVal));
     } else if(auto decimalVal = TRY(parseDecimalLiteral())) {
-        return std::dynamic_pointer_cast<Expr>(std::make_shared<DecimalLiteralExpr>(*decimalVal));
+        return std::dynamic_pointer_cast<Expr>(std::make_shared<DecimalLiteralExpr>(currentRange(), *decimalVal));
     }
+    // Reset the stack.
+    currentRange();
 
     return parseDeclRefExpr();
 }

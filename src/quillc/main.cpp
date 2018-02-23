@@ -7,9 +7,10 @@
 #include "llvm/Support/raw_ostream.h"
 
 std::string sourceCode = R"~(
-def main: f32 {
+def main: i32 {
     var something = 3
 }
+var myVar = 32003.3
 )~";
 
 int main(int argc, const char * argv[]) {

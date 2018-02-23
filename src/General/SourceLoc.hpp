@@ -4,17 +4,17 @@
 
 #include <string>
 
-typedef int SourceLoc;
+struct SourceLoc {
+    const std::string* source;
+    int location;
 
-class SourceRange {
-private:
-    SourceLoc _begin;
-    int _length;
-public:
-    SourceRange(SourceLoc begin, int length) : _begin(begin), _length(length) {}
-    SourceRange() {}
-    SourceLoc begin() const { return _begin; }
-    int length() const { return _length; }
+    SourceLoc(const std::string* source, int location) : source(source), location(location) {}
 };
 
-std::string substringAtSourceRange(std::string string, SourceRange range);
+struct SourceRange {
+    SourceLoc begin;
+    int length;
+
+    SourceRange(SourceLoc begin, int length) : begin(begin), length(length) {}
+    std::string getSubstring() const;
+};

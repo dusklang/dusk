@@ -27,6 +27,9 @@ private:
     llvm::LLVMContext context;
     llvm::IRBuilder<> builder;
     std::map<std::string, llvm::Value*> storedNonParameterizedDecls;
+    void reportError(std::string message, ASTNode* node) {
+        
+    }
 public:
     std::unique_ptr<llvm::Module> module;
     CodeGenerator() : builder(context) {

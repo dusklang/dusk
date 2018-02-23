@@ -6,6 +6,7 @@
 #include <vector>
 #include "llvm/ADT/Optional.h"
 #include "Types.hpp"
+#include "General/SourceLoc.hpp"
 
 struct Expr;
 
@@ -15,12 +16,14 @@ enum class NodeKind {
     NUM_NODES
 };
 
-#define AST_NODE_CONSTRUCTOR(name, args...) name(args) : ASTNode(NodeKind::name)
+#define AST_NODE_CTOR(name, args...) name(SourceRange range, args) : ASTNode(NodeKind::name, range)
+#define AST_NODE_CTOR_NOARG(name) name(SourceRange range) : ASTNode(NodeKind::name, range)
 
 // Abstract class from which each node in the AST inherits.
 struct ASTNode {
     NodeKind kind;
-    ASTNode(NodeKind kind) : kind(kind) {}
+    SourceRange range;
+    ASTNode(NodeKind kind, SourceRange range) : kind(kind), range(range) {}
     virtual ~ASTNode() {}
 };
 
@@ -32,9 +35,9 @@ private:
     } tag;
     BuiltinType type;
 public:
-    AST_NODE_CONSTRUCTOR(TypeRef), tag(inferred) {}
-    AST_NODE_CONSTRUCTOR(TypeRef, BuiltinType type), tag(resolved), type(type) {}
-    AST_NODE_CONSTRUCTOR(TypeRef, const TypeRef& other), type(other.type) {}
+    AST_NODE_CTOR_NOARG(TypeRef), tag(inferred) {}
+    AST_NODE_CTOR(TypeRef, BuiltinType type), tag(resolved), type(type) {}
+    AST_NODE_CTOR(TypeRef, const TypeRef& other), type(other.type) {}
     ~TypeRef() {}
 
     bool isInferred() const { return tag == inferred; }
@@ -57,19 +60,19 @@ struct Param final : public ASTNode {
     std::string name;
     TypeRef value;
 
-    AST_NODE_CONSTRUCTOR(Param, const std::string& name, TypeRef value), name(name), value(value) {}
+    AST_NODE_CTOR(Param, const std::string& name, TypeRef value), name(name), value(value) {}
 };
 
 struct Argument final : public ASTNode {
     std::string name;
     std::shared_ptr<Expr> value;
 
-    AST_NODE_CONSTRUCTOR(Argument, const std::string& name, std::shared_ptr<Expr> value), name(name), value(value) {}
+    AST_NODE_CTOR(Argument, const std::string& name, std::shared_ptr<Expr> value), name(name), value(value) {}
 };
 
 // A scope node represents a collection of other nodes.
 struct Scope final : public ASTNode {
     std::vector<std::shared_ptr<ASTNode>> nodes;
 
-    AST_NODE_CONSTRUCTOR(Scope, const std::vector<std::shared_ptr<ASTNode>>& nodes), nodes(nodes) {}
+    AST_NODE_CTOR(Scope, const std::vector<std::shared_ptr<ASTNode>>& nodes), nodes(nodes) {}
 };

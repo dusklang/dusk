@@ -17,13 +17,13 @@ enum class StmtKind {
 // Base class from which each statement node inherits.
 struct Stmt : public ASTNode {
     StmtKind stmtKind;
-    AST_NODE_CONSTRUCTOR(Stmt, StmtKind stmtKind), stmtKind(stmtKind) {}
+    AST_NODE_CTOR(Stmt, StmtKind stmtKind), stmtKind(stmtKind) {}
 };
 
-#define STMT_CONSTRUCTOR(name, args...) name##Stmt(args) : Stmt(StmtKind::name)
+#define STMT_CTOR(name, args...) name##Stmt(SourceRange range, args) : Stmt(range, StmtKind::name)
 
 struct ReturnStmt: public Stmt {
     std::shared_ptr<Expr> value;
 
-    STMT_CONSTRUCTOR(Return, const std::shared_ptr<Expr>& value), value(value) {}
+    STMT_CTOR(Return, const std::shared_ptr<Expr>& value), value(value) {}
 };

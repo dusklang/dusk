@@ -2,6 +2,6 @@
 
 #include "SourceLoc.hpp"
 
-std::string substringAtSourceRange(std::string string, SourceRange range) {
-    return string.substr(range.begin(), range.length());
+std::string SourceRange::getSubstring() const {
+    return begin.source->substr(begin.location, length);
 }
