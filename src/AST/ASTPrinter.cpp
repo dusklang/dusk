@@ -35,8 +35,8 @@ std::string ASTPrinter::visitDeclPrototype(DeclPrototype* prototype, int indenta
         str += ")";
     }
     std::string typeStr;
-    if(prototype->type) {
-        typeStr = visitPhysicalTypeRef(&*prototype->type, 0);
+    if(prototype->physicalType) {
+        typeStr = visitPhysicalTypeRef(&*prototype->physicalType, 0);
     } else {
         typeStr = "<inferred>";
     }

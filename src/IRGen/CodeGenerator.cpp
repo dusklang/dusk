@@ -7,19 +7,12 @@ llvm::Type* CodeGenerator::mapBuiltinTypeToLLVM(BuiltinType type) {
     switch(type) {
         case BuiltinType::i32: return llvm::Type::getInt32Ty(context);
         case BuiltinType::f64: return llvm::Type::getDoubleTy(context);
+        case BuiltinType::Void: return llvm::Type::getVoidTy(context);
     }
 }
 
 llvm::Function* CodeGenerator::visitDecl(Decl* decl) {
-    llvm::Function* function = module->getFunction(decl->prototype->name);
-    if(!function) function = visitDeclPrototype(decl->prototype.get());
-
-    if(!function) return nullptr;
-
-    if(!function->empty()) {
-        // TODO: Get the location of the original declaration of the function.
-        reportError("Re-declaration of function " + decl->prototype->name, decl->prototype.get());
-    }
+    llvm::Function* function = visitDeclPrototype(decl->prototype.get());
 
     llvm::BasicBlock* block = llvm::BasicBlock::Create(context, "entry", function);
     builder.SetInsertPoint(block);
@@ -29,7 +22,7 @@ llvm::Function* CodeGenerator::visitDecl(Decl* decl) {
         storedNonParameterizedDecls[arg.getName()] = &arg;
     }
     if(auto expr = decl->expression()) {
-        reportError("Code generation for stored decls is not yet supported", decl->prototype.get());
+        assert(false && "Code generation for stored decls is not yet supported");
     } else {
         visitScope(decl->body().get());
     }
@@ -44,10 +37,7 @@ llvm::Function* CodeGenerator::visitDeclPrototype(DeclPrototype* prototype) {
     for(auto& param: prototype->paramList) {
         arguments.push_back(mapBuiltinTypeToLLVM(param.value.type));
     }
-    if(!prototype->type) {
-        reportError("Type inference is not yet supported", prototype);
-    }
-    llvm::FunctionType* functionTy = llvm::FunctionType::get(mapBuiltinTypeToLLVM(prototype->type->type),
+    llvm::FunctionType* functionTy = llvm::FunctionType::get(mapBuiltinTypeToLLVM(prototype->physicalType->type),
                                                              arguments,
                                                              false);
     llvm::Function* function = llvm::Function::Create(functionTy, llvm::Function::ExternalLinkage, prototype->name, module.get());
@@ -74,13 +64,10 @@ llvm::Value* CodeGenerator::visitDecimalLiteralExpr(DecimalLiteralExpr* expr) {
 }
 llvm::Value* CodeGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
     llvm::Function* callee = module->getFunction(expr->name);
-    if(!callee) {
-        reportError("Undeclared identifier " + expr->name, expr);
-    }
+    assert(callee && "Undeclared symbol");
 
-    if(callee->arg_size() != expr->argList.size()) {
-        reportError("Incorrect number of arguments passed to function " + expr->name, expr);
-    }
+    assert((callee->arg_size() == expr->argList.size()) &&
+            "Incorrect number of arguments passed to function");
 
     std::vector<llvm::Value*> args;
     for(auto& arg: expr->argList) {

@@ -15,7 +15,7 @@
 #include "AST/Stmt.h"
 
 class CodeGenerator final: public ASTVisitor<CodeGenerator,
-                                             std::unique_ptr<llvm::Module>,
+                                             void,
                                              llvm::Function*,
                                              void,
                                              void,
@@ -29,12 +29,6 @@ private:
     llvm::LLVMContext context;
     llvm::IRBuilder<> builder;
     std::map<std::string, llvm::Value*> storedNonParameterizedDecls;
-    void reportError(std::string message, ASTNode* node) {
-        std::cout << "CODE GENERATION ERROR: " << message << '\n';
-        std::cout << "Offending area: " << node->range.getSubstring() << "\n\n";
-        // TODO: Support multiple errors per file.
-        exit(1);
-    }
 public:
     llvm::Type* mapBuiltinTypeToLLVM(BuiltinType type);
     std::unique_ptr<llvm::Module> module;
@@ -42,15 +36,6 @@ public:
         module = std::make_unique<llvm::Module>("my module", context);
     }
 
-    void visit(ASTNode* node) {
-        switch(node->kind) {
-            #define AST_NODE(name) case NodeKind::name: \
-            visit##name(static_cast<name*>(node)); return;
-            #include "AST/ASTNodes.def"
-            default: break;
-        }
-        LLVM_BUILTIN_UNREACHABLE;
-    }
     llvm::Function* visitDecl(Decl* decl);
     llvm::Function* visitDeclPrototype(DeclPrototype* prototype);
     void visitScope(Scope* scope);

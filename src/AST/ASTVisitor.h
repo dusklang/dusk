@@ -22,8 +22,14 @@ public:
 
     ASTNodeReturnTy visit(ASTNode* node, Args... args) {
         switch(node->kind) {
-            #define AST_NODE(name) case NodeKind::name: \
-                return static_cast<Impl*>(this)->visit##name(static_cast<name*>(node), std::forward<Args>(args)...);
+            #define AST_NODE(name) case NodeKind::name: { \
+                if constexpr(std::is_same<void, ASTNodeReturnTy>::value) { \
+                    static_cast<Impl*>(this)->visit##name(static_cast<name*>(node), std::forward<Args>(args)...); \
+                    return; \
+                } else { \
+                    return static_cast<Impl*>(this)->visit##name(static_cast<name*>(node), std::forward<Args>(args)...); \
+                } \
+            }
             #include "ASTNodes.def"
             default: break;
         }

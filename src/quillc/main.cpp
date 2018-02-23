@@ -3,16 +3,16 @@
 #include <iostream>
 #include "Parser/Parser.h"
 #include "AST/ASTPrinter.h"
+#include "Sema/TypeChecker.h"
 #include "IRGen/CodeGenerator.h"
 #include "llvm/Support/raw_ostream.h"
 
 std::string sourceCode = R"~(
-extern def sin(x: f64): f64 // Expected no error here.
-extern def main: i32 { // Expected parse error here.
-    return sin(x: 32.44)
+def sin(x: f64): i32 {
+    return 0
 }
-def otherFunc: i32 { // Expected no error here.
-
+def main: i32 {
+    return sin(x: 32.44)
 }
 )~";
 
@@ -21,11 +21,15 @@ int main(int argc, const char * argv[]) {
     Parser parser(sourceCode);
 
     ASTPrinter printer;
+    TypeChecker tyChecker;
     CodeGenerator codeGenerator;
     auto file = parser.parseTopLevel();
     /*for(auto& node: file) {
         std::cout << printer.visit(node.get(), 0) << '\n';
     }*/
+    for(auto& node: file) {
+        tyChecker.visit(node.get());
+    }
     for(auto& node: file) {
         codeGenerator.visit(node.get());
     }

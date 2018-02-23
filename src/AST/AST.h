@@ -56,6 +56,17 @@ public:
     TypeRef(BuiltinType type) : tag(resolved), resolvedType(type) {}
     TypeRef(const PhysicalTypeRef& type) : tag(resolved), physicalType(type) {}
     TypeRef() : tag(inferred) {}
+    ~TypeRef() {}
+
+    TypeRef(const TypeRef& other) : tag(other.tag) {
+        if(other.isResolved()) resolvedType = other.resolvedType;
+        else if(other.isPhysical()) physicalType = other.physicalType;
+    }
+    void operator=(const TypeRef& other) {
+        tag = other.tag;
+        if(other.isResolved()) resolvedType = other.resolvedType;
+        else if(other.isPhysical()) physicalType = other.physicalType;
+    }
 
     bool isInferred() const { return tag == inferred; }
     bool isPhysical() const { return tag == physical; }
