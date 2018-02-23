@@ -116,7 +116,6 @@ llvm::Optional<DeclPrototype> Parser::parseDeclPrototype() {
 }
 
 llvm::Optional<Decl> Parser::parseDecl(DeclPrototype prototype) {
-    
     if(current().is(tok::sep_equal)) {
         next();
         auto expr = parseExpr();

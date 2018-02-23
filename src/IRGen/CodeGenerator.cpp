@@ -9,7 +9,10 @@ llvm::Function* CodeGenerator::visitDecl(Decl* decl) {
 
     if(!function) return nullptr;
 
-    assert(function->empty() && "Function cannot be redefined");
+    if(!function->empty()) {
+        // TODO: Get the location of the original declaration of the function.
+        reportError("Re-declaration of function " + decl->prototype.name, &decl->prototype);
+    }
 
     llvm::BasicBlock* block = llvm::BasicBlock::Create(context, "entry", function);
     builder.SetInsertPoint(block);
@@ -19,7 +22,7 @@ llvm::Function* CodeGenerator::visitDecl(Decl* decl) {
         storedNonParameterizedDecls[arg.getName()] = &arg;
     }
     if(auto expr = decl->expression()) {
-        assert(false && "Code generation for stored decls is not yet supported.");
+        reportError("Code generation for stored decls is not yet supported.", &decl->prototype);
     } else {
         visitScope(decl->body().get());
     }
@@ -56,9 +59,13 @@ llvm::Value* CodeGenerator::visitDecimalLiteralExpr(DecimalLiteralExpr* expr) {
 }
 llvm::Value* CodeGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
     llvm::Function* callee = module->getFunction(expr->name);
-    assert(callee && "Attempted to reference undeclared identifier");
+    if(!callee) {
+        reportError("Undeclared identifier " + expr->name, expr);
+    }
 
-    assert((callee->arg_size() == expr->argList.size()) && "Incorrect # of arguments passed");
+    if(callee->arg_size() != expr->argList.size()) {
+        reportError("Incorrect number of arguments passed to function " + expr->name, expr);
+    }
 
     std::vector<llvm::Value*> args;
     for(auto& arg: expr->argList) {

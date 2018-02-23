@@ -3,6 +3,8 @@
 #pragma once
 
 #include <memory>
+#include <iostream>
+
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/IRBuilder.h"
 
@@ -28,7 +30,9 @@ private:
     llvm::IRBuilder<> builder;
     std::map<std::string, llvm::Value*> storedNonParameterizedDecls;
     void reportError(std::string message, ASTNode* node) {
-        
+        std::cout << "CODE GENERATION ERROR: " << message << '\n';
+        std::cout << "Offending area: " << node->range.getSubstring() << "\n\n";
+        exit(1);
     }
 public:
     std::unique_ptr<llvm::Module> module;
