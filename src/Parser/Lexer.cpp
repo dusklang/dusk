@@ -124,4 +124,5 @@ Token Lexer::nextTokIncludingInsignificant() {
     }
 
     reportError(pos, "Unhandled token");
+    LLVM_BUILTIN_UNREACHABLE;
 }

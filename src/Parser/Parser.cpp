@@ -19,16 +19,12 @@
     return val;\
 }()
 
-ParseResult<std::vector<std::shared_ptr<ASTNode>>> Parser::parseTopLevel() {
+std::vector<std::shared_ptr<ASTNode>> Parser::parseTopLevel() {
     std::vector<std::shared_ptr<ASTNode>> nodes;
     while(true) {
-        auto node = parseNode();
-        if(!node) {
-            if(node.failure().isEOF()) break;
-            if(node.failure().isEOS()) { return Diagnostic("Extraneous closing brace '}'"); }
-            return node.failure().diag();
-        }
-        nodes.push_back(*node);
+        if(current().is(tok::eof)) break;
+        if(current().is(tok::sep_right_curly)) reportError("Extraneous closing brace '}'", current());
+        nodes.push_back(parseNode());
     }
     return nodes;
 }
@@ -36,24 +32,15 @@ ParseResult<std::vector<std::shared_ptr<ASTNode>>> Parser::parseTopLevel() {
 ParseResult<std::shared_ptr<Scope>> Parser::parseScope() {
     std::vector<std::shared_ptr<ASTNode>> nodes;
     while(true) {
-        auto node = parseNode();
-        if(!node) {
-            if(node.failure().isEOS()) break;
-            if(node.failure().isEOF()) return Diagnostic("Unexpected EOF before end of scope");
-            return node.failure().diag();
-        }
-        if(!*node) break;
-        nodes.push_back(*node);
+        if(current().is(tok::sep_right_curly)) { next(); break; }
+        if(current().is(tok::eof)) reportError("Unexpected eof before end of scope", previous());
+        nodes.push_back(parseNode());
     }
     return std::make_shared<Scope>(nodes);
 }
 
-ParseResult<std::shared_ptr<ASTNode>, NodeParsingFailure> Parser::parseNode() {
-    if(current().is(tok::eof)) return NodeParsingFailure::EndOfFile();
-    if(current().is(tok::sep_right_curly)) {
-        next();
-        return NodeParsingFailure::EndOfScope();
-    }
+std::shared_ptr<ASTNode> Parser::parseNode() {
+    lexer.savePosition();
     if(auto stmt = TRY(parseStmt())) {
         return std::dynamic_pointer_cast<ASTNode>(*stmt);
     }
@@ -67,9 +54,10 @@ ParseResult<std::shared_ptr<ASTNode>, NodeParsingFailure> Parser::parseNode() {
     if(auto expr = TRY(parseExpr())) {
         return std::dynamic_pointer_cast<ASTNode>(*expr);
     } else {
-        return NodeParsingFailure(expr.failure());
+        reportError(expr.failure());
     }
-    return NodeParsingFailure("Failed to parse node");
+    reportError("Failed to parse node");
+    LLVM_BUILTIN_UNREACHABLE;
 }
 
 ParseResult<TypeRef> Parser::parseTypeRef() {

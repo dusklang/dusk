@@ -23,6 +23,9 @@ private:
     // parse the thing we were trying to and should try something else.
     llvm::Optional<int> numberOfNewTokens;
 
+    // This is used for error reporting.
+    int savedPosition;
+
     void reportError(int endPos, std::string message) {
         auto startPos = tokenPositions.top();
         SourceRange range(startPos, endPos - startPos);
@@ -76,4 +79,12 @@ public:
 
         numberOfNewTokens = llvm::None;
     }
+
+    void savePosition() { savedPosition = tokenPositions.top(); }
+    std::string getSubstringSinceSavedPosition() const {
+        auto endPos = tokenPositions.top();
+        SourceRange range(savedPosition, endPos - savedPosition);
+        return substringAtSourceRange(source, range);
+    }
+    const std::string& getSource() const { return source; }
 };

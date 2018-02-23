@@ -101,14 +101,25 @@ private:
         }
         return llvm::None;
     }
+    void reportError(std::string message, llvm::Optional<Token> offendingToken = llvm::None) const {
+        std::cout << "PARSING ERROR: " << message << '\n';
+        std::string offendingArea;
+        if(offendingToken) {
+            offendingArea = substringAtSourceRange(lexer.getSource(), offendingToken->getRange());
+        } else {
+            offendingArea = lexer.getSubstringSinceSavedPosition();
+        }
+        std::cout << "Offending area: " << offendingArea;
+        exit(1);
+    }
 public:
     Parser(const std::string& source) : lexer(source) {
         lexer.nextTokIncludingInsignificant();
     }
 
-    ParseResult<std::vector<std::shared_ptr<ASTNode>>> parseTopLevel();
+    std::vector<std::shared_ptr<ASTNode>> parseTopLevel();
     ParseResult<std::shared_ptr<Scope>> parseScope();
-    ParseResult<std::shared_ptr<ASTNode>, NodeParsingFailure> parseNode();
+    std::shared_ptr<ASTNode> parseNode();
     ParseResult<TypeRef> parseTypeRef();
     ParseResult<DeclPrototype> parseDeclPrototype();
     ParseResult<Decl> parseDecl(DeclPrototype prototype);

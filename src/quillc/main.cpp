@@ -7,15 +7,9 @@
 #include "llvm/Support/raw_ostream.h"
 
 std::string sourceCode = R"~(
-var something = 0.0.0
-//extern something: i32
 def main {
     var something = 3
 }
-/*extern def sin(val: i32): i32
-def main: {
-    var hello := 4
-}*/
 )~";
 
 int main(int argc, const char * argv[]) {
@@ -24,17 +18,14 @@ int main(int argc, const char * argv[]) {
 
     ASTPrinter printer;
     CodeGenerator codeGenerator;
-    if(auto file = parser.parseTopLevel()) {
-        /*for(auto& node: *file) {
-            std::cout << printer.visit(node.get(), 0) << '\n';
-        }*/
-        for(auto& node: *file) {
-            codeGenerator.visit(node.get());
-        }
-        codeGenerator.module->print(llvm::errs(), nullptr);
-    } else {
-        std::cout << file.failure() << "\n";
+    auto file = parser.parseTopLevel();
+    /*for(auto& node: file) {
+        std::cout << printer.visit(node.get(), 0) << '\n';
+    }*/
+    for(auto& node: file) {
+        codeGenerator.visit(node.get());
     }
+    codeGenerator.module->print(llvm::errs(), nullptr);
     std::cout << std::endl;
 
     return 0;
