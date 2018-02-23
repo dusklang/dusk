@@ -21,7 +21,7 @@ class TypeChecker final: public ASTVisitor<TypeChecker,
 {
 private:
     // FIXME: Name lookup will be super slow; figure out how to hash function overloads.
-    std::vector<std::vector<Decl*>> declLists;
+    std::vector<std::vector<AbstractDecl>> declLists;
     void reportError(std::string message, ASTNode* node) {
         std::cout << "TYPE-CHECKING ERROR: " << message << '\n';
         std::cout << "Offending area: " << node->range.getSubstring() << "\n\n";
@@ -35,7 +35,7 @@ private:
     }
 public:
     TypeChecker() {
-        declLists.push_back(std::vector<Decl*>());
+        declLists.push_back(std::vector<AbstractDecl>());
     }
 
     void visitDecl(Decl* decl);

@@ -30,7 +30,7 @@ std::string ASTPrinter::visitDeclPrototype(DeclPrototype* prototype, int indenta
             if(!first) str += ", ";
             else first = false;
 
-            str += visitParam(&param, 0);
+            str += visitParam(param.get(), 0);
         }
         str += ")";
     }

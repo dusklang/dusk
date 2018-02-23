@@ -35,7 +35,7 @@ llvm::Function* CodeGenerator::visitDecl(Decl* decl) {
 llvm::Function* CodeGenerator::visitDeclPrototype(DeclPrototype* prototype) {
     std::vector<llvm::Type*> arguments;
     for(auto& param: prototype->paramList) {
-        arguments.push_back(mapBuiltinTypeToLLVM(param.value.type));
+        arguments.push_back(mapBuiltinTypeToLLVM(param->value.type));
     }
     llvm::Type* type;
     if(prototype->physicalType) {
@@ -50,7 +50,7 @@ llvm::Function* CodeGenerator::visitDeclPrototype(DeclPrototype* prototype) {
 
     int i = 0;
     for(auto &arg: function->args()) {
-        arg.setName(prototype->paramList[i++].name);
+        arg.setName(prototype->paramList[i++]->name);
     }
     return function;
 }

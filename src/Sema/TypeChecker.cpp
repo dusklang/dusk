@@ -3,12 +3,20 @@
 #include "TypeChecker.h"
 
 void TypeChecker::visitDecl(Decl* decl) {
-    // Insert a decl into current scope.
-    declLists.back().push_back(decl);
+    // Insert prototype into the current scope.
+    #warning Overhaul ASTVisitor using smart pointers, and remove this pointer creation:
+    declLists.back().push_back(AbstractDecl(std::shared_ptr<Decl>(decl)));
 
+    // If we have parameters, start a new scope for referencing them.
+    if(decl->isParameterized()) {
+        declLists.push_back(std::vector<AbstractDecl>());
+        for(auto& param: decl->prototype->paramList) {
+            declLists.back().push_back(AbstractDecl(param));
+        }
+    }
     if(decl->isComputed()) {
-        // Start a new, inner scope for declarations inside the body of the computed declaration.
-        declLists.push_back(std::vector<Decl*>());
+        // Start another new, inner scope for declarations inside the body of the computed declaration.
+        declLists.push_back(std::vector<AbstractDecl>());
         // Add Void type to computed declaration if it doesn't have one.
         if(!decl->prototype->physicalType) decl->getTypeRef()->resolveType(BuiltinType::Void);
 
@@ -57,6 +65,7 @@ void TypeChecker::visitDecl(Decl* decl) {
             }
         }
         declLists.pop_back();
+        if(decl->isParameterized()) declLists.pop_back();
         return;
     }
 
@@ -65,6 +74,8 @@ void TypeChecker::visitDecl(Decl* decl) {
 
     visitExpr(decl->expression().get());
     if(!decl->prototype->physicalType) decl->getTypeRef()->resolveType(*decl->expression()->type);
+
+    if(decl->isParameterized()) declLists.pop_back();
 }
 void TypeChecker::visitDeclPrototype(DeclPrototype* prototype) {
     // THIS SHOULD ONLY EVER BY INVOKED IN THE CASE OF A STANDALONE PROTOTYPE, aka NOT in visitDecl().
@@ -93,26 +104,26 @@ void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
         visitExpr(arg.value.get());
     }
 
-    // Find the decl to reference.
+    // Find the prototype to reference.
     //
     // TODO: Setup a dependency system to allow decls to be declared after they are referenced.
-    std::vector<Decl*> nameMatches;
+    std::vector<AbstractDecl> nameMatches;
     for(auto it = declLists.rbegin(); it != declLists.rend(); ++it) {
         auto& declList = *it;
         for(auto& decl: declList) {
-            if(decl->prototype->name != expr->name) continue;
+            if(decl.name() != expr->name) continue;
             nameMatches.push_back(decl);
-            if(decl->prototype->paramList.size() != expr->argList.size()) continue;
+            if(decl.paramList().size() != expr->argList.size()) continue;
             // Check the names of all parameters
-            auto param = decl->prototype->paramList.begin();
+            auto param = decl.paramList().begin();
             auto arg = expr->argList.begin();
-            for(;param != decl->prototype->paramList.end(); ++param, ++arg) {
-                if(param->name != arg->name) goto failedToFindMatchInCurrentList;
-                if(param->value.type != arg->value->type) goto failedToFindMatchInCurrentList;
+            for(;param != decl.paramList().end(); ++param, ++arg) {
+                if((*param)->name != arg->name) goto failedToFindMatchInCurrentList;
+                if((*param)->value.type != arg->value->type) goto failedToFindMatchInCurrentList;
             }
             // We must have succeeded! Add the decl's prototype and type to the declRefExpr and return.
-            expr->prototype = decl->prototype;
-            expr->type = decl->getTypeRef()->getType();
+            expr->decl = AbstractDecl(decl);
+            expr->type = decl.typeRef().getType();
             return;
 
             failedToFindMatchInCurrentList: continue;
@@ -123,7 +134,7 @@ void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
     if(!nameMatches.empty()) {
         errorMessage += "\n\nHere are some matches that differ only in parameter labels or types:";
         for(auto& match: nameMatches) {
-            errorMessage += "\n\t" + match->prototype->range.getSubstring();
+            errorMessage += "\n\t" + match.range().getSubstring();
         }
     }
     reportError(errorMessage, expr);
