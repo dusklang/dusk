@@ -11,7 +11,7 @@ message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 # you will need to enable C++11 support
 # for your compiler.
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++1z")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14")
 
 include_directories(src ${LLVM_INCLUDE_DIRS})
 add_definitions(${LLVM_DEFINITIONS})
@@ -29,3 +29,9 @@ set(ICU_LIBS
 )
 
 add_subdirectory(src)
+
+add_custom_target(run
+    COMMAND quillc
+    DEPENDS quillc
+    WORKING_DIRECTORY ${CMAKE_PROJECT_DIR}
+)
