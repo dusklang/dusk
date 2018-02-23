@@ -60,16 +60,13 @@ private:
         assert(diff >= 0 && "Attempt to get range between a location and a range that occurs after it");
         return SourceRange(beginLoc, length);
     }
-    void reportError(std::string message, llvm::Optional<Token> offendingToken = llvm::None) {
+    void reportError(std::string message, SourceRange offendingRange) {
         std::cout << "PARSING ERROR: " << message << '\n';
-        std::string offendingArea;
-        if(offendingToken) {
-            offendingArea = offendingToken->getRange().getSubstring();
-        } else {
-            offendingArea = currentRange().getSubstring();
-        }
-        std::cout << "Offending area: " << offendingArea << "\n\n";
+        std::cout << "Offending area: " << offendingRange.getSubstring() << "\n\n";
         exit(1);
+    }
+    void reportError(std::string message) {
+        reportError(message, currentRange());
     }
 public:
     Parser(const std::string& source) : lexer(source) {

@@ -7,9 +7,12 @@
 #include "llvm/Support/raw_ostream.h"
 
 std::string sourceCode = R"~(
-extern def sin(x: f64): f64
-def main: i32 {
+extern def sin(x: f64): f64 // Expected no error here.
+extern def main: i32 { // Expected parse error here.
     return sin(x: 32.44)
+}
+def otherFunc: i32 { // Expected no error here.
+
 }
 )~";
 

@@ -23,7 +23,7 @@ std::vector<std::shared_ptr<ASTNode>> Parser::parseTopLevel() {
     std::vector<std::shared_ptr<ASTNode>> nodes;
     while(true) {
         if(current().is(tok::eof)) break;
-        if(current().is(tok::sep_right_curly)) reportError("Extraneous closing brace '}'", current());
+        if(current().is(tok::sep_right_curly)) reportError("Extraneous closing brace '}'", current().getRange());
         nodes.push_back(parseNode());
     }
     return nodes;
@@ -36,7 +36,7 @@ llvm::Optional<std::shared_ptr<Scope>> Parser::parseScope() {
     std::vector<std::shared_ptr<ASTNode>> nodes;
     while(true) {
         if(current().is(tok::sep_right_curly)) { next(); break; }
-        if(current().is(tok::eof)) reportError("Unexpected eof before end of scope", previous());
+        if(current().is(tok::eof)) reportError("Unexpected eof before end of scope", previous()->getRange());
         nodes.push_back(parseNode());
     }
     return std::make_shared<Scope>(currentRange(), nodes);
@@ -60,10 +60,10 @@ std::shared_ptr<ASTNode> Parser::parseNode() {
 TypeRef Parser::parseTypeRef() {
     recordCurrentLoc();
     auto typeName = parseIdentifer();
-    if(!typeName) reportError("Expected type name", current());
+    if(!typeName) reportError("Expected type name", current().getRange());
     #define BUILTIN_TYPE(name) if(*typeName == #name) { return TypeRef(currentRange(), BuiltinType::name); }
     #include "AST/BuiltinTypes.def"
-    reportError("Invalid type name \"" + *typeName + '"', previous());
+    reportError("Invalid type name \"" + *typeName + '"', previous()->getRange());
     LLVM_BUILTIN_UNREACHABLE;
 }
 
@@ -107,19 +107,33 @@ llvm::Optional<DeclPrototype> Parser::parseDeclPrototype() {
 
     if(current().is(tok::sep_colon)) {
         next();
-        return DeclPrototype(currentRange(), name, paramList, parseTypeRef(), isMut, isExtern);
+
+        next();
+        auto range = currentRange();
+        previous();
+
+        return DeclPrototype(range, name, paramList, parseTypeRef(), isMut, isExtern);
     }
 
     return DeclPrototype(currentRange(), name, paramList, llvm::None, isMut, isExtern);
 }
 
 llvm::Optional<Decl> Parser::parseDecl(DeclPrototype prototype) {
+    auto checkExtern = [&]() {
+        if(prototype.isExtern) {
+            reportError("'extern' declaration '" + prototype.name +
+                        "' may not have a definition.",
+                        prototype.range);
+        }
+    };
     if(current().is(tok::sep_equal)) {
+        checkExtern();
         next();
         auto expr = parseExpr();
         auto range = rangeFrom(prototype.range.begin, expr->range);
         return Decl(range, std::make_shared<DeclPrototype>(prototype), expr);
     } else if(auto scope = parseScope()) {
+        checkExtern();
         auto range = rangeFrom(prototype.range.begin, (*scope)->range);
         return Decl(range, std::make_shared<DeclPrototype>(prototype), *scope);
     }
