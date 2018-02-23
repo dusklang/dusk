@@ -42,9 +42,12 @@ llvm::Function* CodeGenerator::visitDecl(Decl* decl) {
 llvm::Function* CodeGenerator::visitDeclPrototype(DeclPrototype* prototype) {
     std::vector<llvm::Type*> arguments;
     for(auto& param: prototype->paramList) {
-        arguments.push_back(mapBuiltinTypeToLLVM(param.value.getType()));
+        arguments.push_back(mapBuiltinTypeToLLVM(param.value.type));
     }
-    llvm::FunctionType* functionTy = llvm::FunctionType::get(mapBuiltinTypeToLLVM(prototype->type.getType()),
+    if(!prototype->type) {
+        reportError("Type inference is not yet supported", prototype);
+    }
+    llvm::FunctionType* functionTy = llvm::FunctionType::get(mapBuiltinTypeToLLVM(prototype->type->type),
                                                              arguments,
                                                              false);
     llvm::Function* function = llvm::Function::Create(functionTy, llvm::Function::ExternalLinkage, prototype->name, module.get());

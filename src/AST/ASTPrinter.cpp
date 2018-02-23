@@ -34,7 +34,13 @@ std::string ASTPrinter::visitDeclPrototype(DeclPrototype* prototype, int indenta
         }
         str += ")";
     }
-    str += ": " + visitTypeRef(&prototype->type, 0);
+    std::string typeStr;
+    if(prototype->type) {
+        typeStr = visitTypeRef(&*prototype->type, 0);
+    } else {
+        typeStr = "<inferred>";
+    }
+    str += ": " + typeStr;
     return indentation(indentationLevel) + str;
 }
 
@@ -55,9 +61,7 @@ std::string ASTPrinter::visitArgument(Argument* argument, int indentationLevel) 
 }
 
 std::string ASTPrinter::visitTypeRef(TypeRef* expr, int indentationLevel) {
-    if(expr->isInferred()) return indentation(indentationLevel) + "<inferred>";
-
-    switch(expr->getType()) {
+    switch(expr->type) {
         #define BUILTIN_TYPE(name) case BuiltinType::name: return indentation(indentationLevel) + #name;
         #include "BuiltinTypes.def"
     }

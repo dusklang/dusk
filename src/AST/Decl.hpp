@@ -14,14 +14,14 @@ struct Expr;
 struct DeclPrototype final : public ASTNode {
     std::string name;
     std::vector<Param> paramList;
-    TypeRef type;
+    llvm::Optional<TypeRef> type;
     bool isMut;
     bool isExtern;
 
     AST_NODE_CTOR(DeclPrototype,
                   const std::string& name,
                   const std::vector<Param>& paramList,
-                  TypeRef type,
+                  llvm::Optional<TypeRef> type,
                   bool isMut,
                   bool isExtern),
     name(name), paramList(paramList), type(type), isMut(isMut), isExtern(isExtern) {}

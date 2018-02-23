@@ -28,30 +28,14 @@ struct ASTNode {
 };
 
 struct TypeRef: public ASTNode {
-private:
-    enum Tag {
-        inferred,
-        resolved
-    } tag;
     BuiltinType type;
-public:
-    AST_NODE_CTOR_NOARG(TypeRef), tag(inferred) {}
-    AST_NODE_CTOR(TypeRef, BuiltinType type), tag(resolved), type(type) {}
+
+    AST_NODE_CTOR(TypeRef, BuiltinType type), type(type) {}
     AST_NODE_CTOR(TypeRef, const TypeRef& other), type(other.type) {}
     ~TypeRef() {}
 
-    bool isInferred() const { return tag == inferred; }
-    bool isResolved() const { return tag == resolved; }
-    BuiltinType getType() const {
-        assert(tag == resolved);
-        return type;
-    }
-    void setType(BuiltinType type) {
-        this->type = type;
-        tag = resolved;
-    }
-
     void operator=(const TypeRef& other) {
+        range = other.range;
         type = other.type;
     }
 };
