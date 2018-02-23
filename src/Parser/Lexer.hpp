@@ -30,7 +30,7 @@ private:
         auto startPos = tokenPositions.top();
         SourceRange range(startPos, endPos - startPos);
         std::cout << "LEXING ERROR: " << message << '\n';
-        std::cout << "Offending area: " << substringAtSourceRange(source, range) << '\n';
+        std::cout << "Offending area: " << substringAtSourceRange(source, range) << "\n\n";
         exit(1);
     }
 public:
