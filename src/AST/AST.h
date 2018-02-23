@@ -54,7 +54,7 @@ private:
     };
 public:
     TypeRef(BuiltinType type) : tag(resolved), resolvedType(type) {}
-    TypeRef(const PhysicalTypeRef& type) : tag(resolved), physicalType(type) {}
+    TypeRef(const PhysicalTypeRef& type) : tag(physical), physicalType(type) {}
     TypeRef() : tag(inferred) {}
     ~TypeRef() {}
 
@@ -81,6 +81,7 @@ public:
 
     void resolveType(BuiltinType resolvedType) {
         assert(isInferred());
+        tag = resolved;
         this->resolvedType = resolvedType;
     }
 };

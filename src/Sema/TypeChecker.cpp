@@ -7,11 +7,43 @@ void TypeChecker::visitDecl(Decl* decl) {
     declLists.back().push_back(decl);
 
     if(decl->isComputed()) {
-        // Add void type to computed declaration if it doesn't have one.
+        // Add Void type to computed declaration if it doesn't have one.
         if(!decl->prototype->physicalType) decl->getTypeRef()->resolveType(BuiltinType::Void);
 
         for(auto& node: decl->body()->nodes) {
-            visit(node.get());
+            // Explicitly handle return statements.
+            if(auto ret = std::dynamic_pointer_cast<ReturnStmt>(node)) {
+                visitReturnStmt(ret.get());
+                // Handle returning value in a void computed decl.
+                if(decl->getTypeRef()->getType() == BuiltinType::Void) {
+                    if(ret->value) {
+                        bool wasInferred = (bool)!decl->prototype->physicalType;
+                        reportError("Attempted to return value from " +
+                                    std::string(wasInferred ? "inferred-" : "") +
+                                    "Void computed decl '" + decl->prototype->name + "'",
+                                    ret.get());
+                    } else {
+                        break;
+                    }
+                }
+
+                // Handle returning no value in a non-void computed decl.
+                if(!ret->value) {
+                    reportError("Computed decl '" + decl->prototype->name + "' must return a value",
+                                ret.get());
+                }
+
+                // Handle returning a value of a type incompatible with the computed decl's type
+                // (currently, "incompatible with" just means "not equal to").
+                if(*ret->value->type != decl->getTypeRef()->getType()) {
+                    // TODO: Include in the error message the type of the returned expr.
+                    reportError("Attempted to return value of incompatible type from computed decl "
+                                "of type " + decl->prototype->physicalType->range.getSubstring(),
+                                ret.get());
+                }
+            } else {
+                visit(node.get());
+            }
         }
         return;
     }
@@ -19,7 +51,7 @@ void TypeChecker::visitDecl(Decl* decl) {
     declLists.pop_back();
 
     // We can now assume the decl is stored.
-    assert(!decl->isStored());
+    assert(decl->isStored());
 
     visitExpr(decl->expression().get());
     if(!decl->prototype->physicalType) decl->getTypeRef()->resolveType(*decl->expression()->type);
@@ -50,7 +82,10 @@ void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
     for(auto& arg: expr->argList) {
         visitExpr(arg.value.get());
     }
-    // Type-check return type
+
+    // Find the decl to reference.
+    //
+    // TODO: Setup a dependency system to allow decls to be declared after they are referenced.
     std::vector<Decl*> nameMatches;
     for(auto it = declLists.rbegin(); it != declLists.rend(); ++it) {
         auto& declList = *it;
@@ -73,7 +108,7 @@ void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
         failedToFindMatchInCurrentList: break;
     }
     // We must have failed.
-    std::string errorMessage = "Reference to undeclared identifier '" + expr->name + "'";
+    std::string errorMessage = "Invalid reference to identifier '" + expr->name + "'";
     if(!nameMatches.empty()) {
         errorMessage += "\n\nHere are some matches that differ only in parameter labels or types:";
         for(auto& match: nameMatches) {

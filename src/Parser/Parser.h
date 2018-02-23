@@ -80,6 +80,6 @@ public:
     llvm::Optional<DeclPrototype> parseDeclPrototype();
     llvm::Optional<Decl> parseDecl(DeclPrototype prototype);
     llvm::Optional<std::shared_ptr<Stmt>> parseStmt();
-    std::shared_ptr<Expr> parseDeclRefExpr();
-    std::shared_ptr<Expr> parseExpr();
+    llvm::Optional<std::shared_ptr<Expr>> parseDeclRefExpr();
+    llvm::Optional<std::shared_ptr<Expr>> parseExpr();
 };

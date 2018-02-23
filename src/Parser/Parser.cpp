@@ -54,7 +54,8 @@ std::shared_ptr<ASTNode> Parser::parseNode() {
         }
     }
     auto expr = parseExpr();
-    return std::dynamic_pointer_cast<ASTNode>(expr);
+    assert(expr && "Failed to parse expression");
+    return std::dynamic_pointer_cast<ASTNode>(*expr);
 }
 
 PhysicalTypeRef Parser::parseTypeRef() {
@@ -130,8 +131,9 @@ llvm::Optional<Decl> Parser::parseDecl(DeclPrototype prototype) {
         checkExtern();
         next();
         auto expr = parseExpr();
-        auto range = rangeFrom(prototype.range.begin, expr->range);
-        return Decl(range, std::make_shared<DeclPrototype>(prototype), expr);
+        if(!expr) reportError("Expected expression to assign to declaration " + prototype.name, current().getRange());
+        auto range = rangeFrom(prototype.range.begin, (*expr)->range);
+        return Decl(range, std::make_shared<DeclPrototype>(prototype), *expr);
     } else if(auto scope = parseScope()) {
         checkExtern();
         auto range = rangeFrom(prototype.range.begin, (*scope)->range);
@@ -146,15 +148,16 @@ llvm::Optional<std::shared_ptr<Stmt>> Parser::parseStmt() {
         next();
         auto value = parseExpr();
         if(!value) return std::dynamic_pointer_cast<Stmt>(std::make_shared<ReturnStmt>(currentRange(), nullptr));
-        return std::dynamic_pointer_cast<Stmt>(std::make_shared<ReturnStmt>(currentRange(), value));
+        return std::dynamic_pointer_cast<Stmt>(std::make_shared<ReturnStmt>(currentRange(), *value));
     } else {
         return llvm::None;
     }
 }
 
-std::shared_ptr<Expr> Parser::parseDeclRefExpr() {
+llvm::Optional<std::shared_ptr<Expr>> Parser::parseDeclRefExpr() {
+    if(current().isNot(tok::identifier)) return llvm::None;
+
     recordCurrentLoc();
-    EXPECT(tok::identifier, "Expected identifier to begin declaration reference expression");
     auto name = current().getText();
     std::vector<Argument> argList;
     if(next().is(tok::sep_left_paren)) {
@@ -167,7 +170,7 @@ std::shared_ptr<Expr> Parser::parseDeclRefExpr() {
 
             auto argument = parseExpr();
             if(!argument) reportError("Expected argument after parameter name");
-            argList.push_back(Argument(currentRange(), param, argument));
+            argList.push_back(Argument(currentRange(), param, *argument));
 
         } while(current().is(tok::sep_comma));
         EXPECT(tok::sep_right_paren, "Expected ')' after parameter and argument");
@@ -177,17 +180,17 @@ std::shared_ptr<Expr> Parser::parseDeclRefExpr() {
     return std::dynamic_pointer_cast<Expr>(std::make_shared<DeclRefExpr>(currentRange(), name, argList));
 }
 
-std::shared_ptr<Expr> Parser::parseExpr() {
+llvm::Optional<std::shared_ptr<Expr>> Parser::parseExpr() {
     recordCurrentLoc();
     if(auto intVal = TRY(parseIntegerLiteral())) {
         return std::dynamic_pointer_cast<Expr>(std::make_shared<IntegerLiteralExpr>(currentRange(), *intVal));
     } else if(auto decimalVal = TRY(parseDecimalLiteral())) {
         return std::dynamic_pointer_cast<Expr>(std::make_shared<DecimalLiteralExpr>(currentRange(), *decimalVal));
     }
+
     // Reset the stack.
     next();
     currentRange();
     previous();
-
-    return parseDeclRefExpr();
+    return TRY(parseDeclRefExpr());
 }

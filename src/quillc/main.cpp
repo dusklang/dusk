@@ -8,11 +8,11 @@
 #include "llvm/Support/raw_ostream.h"
 
 std::string sourceCode = R"~(
-def sin(x: f64): i32 {
-    return 0
+def abs(x: i32): i32 {
+    return 4
 }
-def main: i32 {
-    return sin(x: 32.44)
+def main {
+    abs(x: 32.1)
 }
 )~";
 

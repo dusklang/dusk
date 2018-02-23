@@ -37,7 +37,13 @@ llvm::Function* CodeGenerator::visitDeclPrototype(DeclPrototype* prototype) {
     for(auto& param: prototype->paramList) {
         arguments.push_back(mapBuiltinTypeToLLVM(param.value.type));
     }
-    llvm::FunctionType* functionTy = llvm::FunctionType::get(mapBuiltinTypeToLLVM(prototype->physicalType->type),
+    llvm::Type* type;
+    if(prototype->physicalType) {
+        type = mapBuiltinTypeToLLVM(prototype->physicalType->type);
+    } else {
+        type = llvm::Type::getVoidTy(context);
+    }
+    llvm::FunctionType* functionTy = llvm::FunctionType::get(type,
                                                              arguments,
                                                              false);
     llvm::Function* function = llvm::Function::Create(functionTy, llvm::Function::ExternalLinkage, prototype->name, module.get());
