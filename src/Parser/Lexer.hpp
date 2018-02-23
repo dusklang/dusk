@@ -49,7 +49,7 @@ public:
         tokenPositions.pop();
         if(numberOfNewTokens) *numberOfNewTokens -= 1;
         if(tokens.empty()) return llvm::None;
-        return curTok();
+        return tokens.top();
     }
 
     Token nextTok() {

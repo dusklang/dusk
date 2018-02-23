@@ -7,7 +7,7 @@
 #include "llvm/Support/raw_ostream.h"
 
 std::string sourceCode = R"~(
-def main {
+def main: f32 {
     var something = 3
 }
 )~";

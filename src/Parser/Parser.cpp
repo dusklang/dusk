@@ -62,7 +62,7 @@ TypeRef Parser::parseTypeRef() {
     if(!typeName) reportError("Expected type name", current());
     #define BUILTIN_TYPE(name) if(*typeName == #name) { return TypeRef(BuiltinType::name); }
     #include "AST/BuiltinTypes.def"
-    reportError("Invalid type name \"" + *typeName + '"');
+    reportError("Invalid type name \"" + *typeName + '"', previous());
     LLVM_BUILTIN_UNREACHABLE;
 }
 
