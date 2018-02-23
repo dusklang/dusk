@@ -111,7 +111,10 @@ llvm::Optional<DeclPrototype> Parser::parseDeclPrototype() {
     }
 
     recordCurrentLoc();
+    // Hack to work around corresponding hack in currentRange().
+    next();
     auto type = TypeRef(currentRange());
+    previous();
     return DeclPrototype(currentRange(), name, paramList, type, isMut, isExtern);
 }
 

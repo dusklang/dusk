@@ -48,7 +48,11 @@ private:
     SourceRange currentRange() {
         auto beginLoc = currentLoc.top();
         currentLoc.pop();
-        return rangeFrom(beginLoc, current().getRange());
+        // This is a hack because everywhere this function is used, we're already at the first token
+        // *after* the last token of the range we're interested in.
+        auto currentLoc = previous()->getRange();
+        next();
+        return rangeFrom(beginLoc, currentLoc);
     }
     SourceRange rangeFrom(SourceLoc beginLoc, SourceRange endRange) {
         auto diff = endRange.begin.location - beginLoc.location;
