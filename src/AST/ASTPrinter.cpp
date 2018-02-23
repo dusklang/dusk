@@ -10,7 +10,7 @@ std::string indentation(int level) {
 }
 
 std::string ASTPrinter::visitDecl(Decl* decl, int indentationLevel) {
-    std::string str = indentation(indentationLevel) + visitDeclPrototype(&decl->prototype, 0);
+    std::string str = indentation(indentationLevel) + visitDeclPrototype(decl->prototype.get(), 0);
     if(decl->expression()) {
         str += " = " + visitExpr(decl->expression().get(), 0);
     }

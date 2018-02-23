@@ -118,10 +118,10 @@ llvm::Optional<Decl> Parser::parseDecl(DeclPrototype prototype) {
         next();
         auto expr = parseExpr();
         auto range = rangeFrom(prototype.range.begin, expr->range);
-        return Decl(range, prototype, expr);
+        return Decl(range, std::make_shared<DeclPrototype>(prototype), expr);
     } else if(auto scope = parseScope()) {
         auto range = rangeFrom(prototype.range.begin, (*scope)->range);
-        return Decl(range, prototype, *scope);
+        return Decl(range, std::make_shared<DeclPrototype>(prototype), *scope);
     }
     return llvm::None;
 }

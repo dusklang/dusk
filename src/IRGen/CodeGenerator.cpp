@@ -11,14 +11,14 @@ llvm::Type* CodeGenerator::mapBuiltinTypeToLLVM(BuiltinType type) {
 }
 
 llvm::Function* CodeGenerator::visitDecl(Decl* decl) {
-    llvm::Function* function = module->getFunction(decl->prototype.name);
-    if(!function) function = visitDeclPrototype(&decl->prototype);
+    llvm::Function* function = module->getFunction(decl->prototype->name);
+    if(!function) function = visitDeclPrototype(decl->prototype.get());
 
     if(!function) return nullptr;
 
     if(!function->empty()) {
         // TODO: Get the location of the original declaration of the function.
-        reportError("Re-declaration of function " + decl->prototype.name, &decl->prototype);
+        reportError("Re-declaration of function " + decl->prototype->name, decl->prototype.get());
     }
 
     llvm::BasicBlock* block = llvm::BasicBlock::Create(context, "entry", function);
@@ -29,7 +29,7 @@ llvm::Function* CodeGenerator::visitDecl(Decl* decl) {
         storedNonParameterizedDecls[arg.getName()] = &arg;
     }
     if(auto expr = decl->expression()) {
-        reportError("Code generation for stored decls is not yet supported.", &decl->prototype);
+        reportError("Code generation for stored decls is not yet supported", decl->prototype.get());
     } else {
         visitScope(decl->body().get());
     }

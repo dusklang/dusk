@@ -31,7 +31,7 @@ struct Decl final : public ASTNode {
 private:
     std::shared_ptr<ASTNode> value;
 public:
-    DeclPrototype prototype;
+    std::shared_ptr<DeclPrototype> prototype;
 
     std::shared_ptr<Expr> expression() const { return std::dynamic_pointer_cast<Expr>(value); }
     std::shared_ptr<Scope> body() const {
@@ -39,13 +39,13 @@ public:
     }
 
     AST_NODE_CTOR(Decl,
-                  DeclPrototype prototype,
+                  std::shared_ptr<DeclPrototype> prototype,
                   std::shared_ptr<Expr> expression),
     value(std::dynamic_pointer_cast<ASTNode>(expression)), prototype(prototype) {}
 
     AST_NODE_CTOR(Decl,
-                  DeclPrototype prototype,
+                  std::shared_ptr<DeclPrototype> prototype,
                   std::shared_ptr<Scope> body),
-    value(std::dynamic_pointer_cast<ASTNode>(body)),
-    prototype(prototype) {}
+    value(std::dynamic_pointer_cast<ASTNode>(body)), prototype(prototype) {}
+    ~Decl() {}
 };
