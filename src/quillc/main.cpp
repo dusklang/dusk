@@ -8,7 +8,7 @@
 #include "llvm/Support/raw_ostream.h"
 
 std::string sourceCode = R"~(
-extern def doSomethingReallyCool: i32
+extern def doSomethingReallyCool: Void
 def abs(x: i32): i32 {
     return 4
 }

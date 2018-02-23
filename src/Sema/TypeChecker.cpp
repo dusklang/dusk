@@ -3,7 +3,7 @@
 #include "TypeChecker.h"
 
 void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
-    // Insert prototype into the current scope.
+    // Insert declaration into the current scope.
     declLists.back().push_back(AbstractDecl(decl));
 
     // If we have parameters, start a new scope for referencing them.
@@ -86,6 +86,9 @@ void TypeChecker::visitDeclPrototype(std::shared_ptr<DeclPrototype> prototype) {
     if(!prototype->physicalType) {
         reportError("Standalone decl prototypes need types", prototype);
     }
+
+    // Insert declaration into the current scope.
+    declLists.back().push_back(AbstractDecl(prototype));
 }
 void TypeChecker::visitScope(std::shared_ptr<Scope> scope) {}
 void TypeChecker::visitParam(std::shared_ptr<Param> param) {}
