@@ -3,15 +3,17 @@
 #include "TypeChecker.h"
 
 void TypeChecker::visitDecl(Decl* decl) {
-    if(declLists.empty()) declLists.push_back(std::vector<Decl*>());
+    // Insert a decl into current scope.
     declLists.back().push_back(decl);
 
     if(decl->isComputed()) {
+        // Start a new, inner scope for declarations inside the body of the computed declaration.
+        declLists.push_back(std::vector<Decl*>());
         // Add Void type to computed declaration if it doesn't have one.
         if(!decl->prototype->physicalType) decl->getTypeRef()->resolveType(BuiltinType::Void);
 
         for(auto& node: decl->body()->nodes) {
-            // Explicitly handle return statements.
+            // Handle return statements.
             if(auto ret = std::dynamic_pointer_cast<ReturnStmt>(node)) {
                 visitReturnStmt(ret.get());
                 // Handle returning value in a void computed decl.
@@ -23,7 +25,7 @@ void TypeChecker::visitDecl(Decl* decl) {
                                     "Void computed decl '" + decl->prototype->name + "'",
                                     ret.get());
                     } else {
-                        break;
+                        continue;
                     }
                 }
 
@@ -41,14 +43,22 @@ void TypeChecker::visitDecl(Decl* decl) {
                                 "of type " + decl->prototype->physicalType->range.getSubstring(),
                                 ret.get());
                 }
-            } else {
+            }
+            // Handle expressions.
+            else if(auto expr = std::dynamic_pointer_cast<Expr>(node)) {
+                visitExpr(expr.get());
+                // Warn on unused expressions.
+                if(expr->type != BuiltinType::Void) {
+                    reportWarning("Unused expression", expr.get());
+                }
+            }
+            else {
                 visit(node.get());
             }
         }
+        declLists.pop_back();
         return;
     }
-
-    declLists.pop_back();
 
     // We can now assume the decl is stored.
     assert(decl->isStored());
@@ -90,9 +100,9 @@ void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
     for(auto it = declLists.rbegin(); it != declLists.rend(); ++it) {
         auto& declList = *it;
         for(auto& decl: declList) {
-            if(decl->prototype->name != expr->name) break;
+            if(decl->prototype->name != expr->name) continue;
             nameMatches.push_back(decl);
-            if(decl->prototype->paramList.size() != expr->argList.size()) break;
+            if(decl->prototype->paramList.size() != expr->argList.size()) continue;
             // Check the names of all parameters
             auto param = decl->prototype->paramList.begin();
             auto arg = expr->argList.begin();
@@ -104,8 +114,9 @@ void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
             expr->prototype = decl->prototype;
             expr->type = decl->getTypeRef()->getType();
             return;
+
+            failedToFindMatchInCurrentList: continue;
         }
-        failedToFindMatchInCurrentList: break;
     }
     // We must have failed.
     std::string errorMessage = "Invalid reference to identifier '" + expr->name + "'";

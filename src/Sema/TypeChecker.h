@@ -28,8 +28,15 @@ private:
         // TODO: Support multiple errors per file.
         exit(1);
     }
+
+    void reportWarning(std::string message, ASTNode* node) {
+        std::cout << "TYPE-CHECKING WARNING: " << message << '\n';
+        std::cout << "Offending area: " << node->range.getSubstring() << "\n\n";
+    }
 public:
-    TypeChecker() {}
+    TypeChecker() {
+        declLists.push_back(std::vector<Decl*>());
+    }
 
     void visitDecl(Decl* decl);
     void visitDeclPrototype(DeclPrototype* prototype);
