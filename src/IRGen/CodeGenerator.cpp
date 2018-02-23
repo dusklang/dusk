@@ -3,6 +3,13 @@
 #include "CodeGenerator.hpp"
 #include "llvm/IR/Verifier.h"
 
+llvm::Type* CodeGenerator::mapBuiltinTypeToLLVM(BuiltinType type) {
+    switch(type) {
+        case BuiltinType::i32: return llvm::Type::getInt32Ty(context);
+        case BuiltinType::f64: return llvm::Type::getDoubleTy(context);
+    }
+}
+
 llvm::Function* CodeGenerator::visitDecl(Decl* decl) {
     llvm::Function* function = module->getFunction(decl->prototype.name);
     if(!function) function = visitDeclPrototype(&decl->prototype);
@@ -33,8 +40,13 @@ llvm::Function* CodeGenerator::visitDecl(Decl* decl) {
 }
 
 llvm::Function* CodeGenerator::visitDeclPrototype(DeclPrototype* prototype) {
-    std::vector<llvm::Type*> arguments(prototype->paramList.size(), llvm::Type::getInt32Ty(context));
-    llvm::FunctionType* functionTy = llvm::FunctionType::get(llvm::Type::getInt32Ty(context), arguments, false);
+    std::vector<llvm::Type*> arguments;
+    for(auto& param: prototype->paramList) {
+        arguments.push_back(mapBuiltinTypeToLLVM(param.value.getType()));
+    }
+    llvm::FunctionType* functionTy = llvm::FunctionType::get(mapBuiltinTypeToLLVM(prototype->type.getType()),
+                                                             arguments,
+                                                             false);
     llvm::Function* function = llvm::Function::Create(functionTy, llvm::Function::ExternalLinkage, prototype->name, module.get());
 
     int i = 0;
@@ -55,7 +67,7 @@ llvm::Value* CodeGenerator::visitIntegerLiteralExpr(IntegerLiteralExpr* expr) {
     return llvm::ConstantInt::get(context, llvm::APInt(32, std::stoi(expr->literal)));
 }
 llvm::Value* CodeGenerator::visitDecimalLiteralExpr(DecimalLiteralExpr* expr) {
-    return nullptr;
+    return llvm::ConstantFP::get(context, llvm::APFloat(std::stod(expr->literal)));
 }
 llvm::Value* CodeGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
     llvm::Function* callee = module->getFunction(expr->name);

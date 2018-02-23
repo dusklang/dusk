@@ -176,7 +176,9 @@ std::shared_ptr<Expr> Parser::parseExpr() {
         return std::dynamic_pointer_cast<Expr>(std::make_shared<DecimalLiteralExpr>(currentRange(), *decimalVal));
     }
     // Reset the stack.
+    next();
     currentRange();
+    previous();
 
     return parseDeclRefExpr();
 }

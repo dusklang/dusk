@@ -36,6 +36,7 @@ private:
         exit(1);
     }
 public:
+    llvm::Type* mapBuiltinTypeToLLVM(BuiltinType type);
     std::unique_ptr<llvm::Module> module;
     CodeGenerator() : builder(context) {
         module = std::make_unique<llvm::Module>("my module", context);
