@@ -76,7 +76,7 @@ public:
     std::vector<std::shared_ptr<ASTNode>> parseTopLevel();
     llvm::Optional<std::shared_ptr<Scope>> parseScope();
     std::shared_ptr<ASTNode> parseNode();
-    TypeRef parseTypeRef();
+    PhysicalTypeRef parseTypeRef();
     llvm::Optional<DeclPrototype> parseDeclPrototype();
     llvm::Optional<Decl> parseDecl(DeclPrototype prototype);
     llvm::Optional<std::shared_ptr<Stmt>> parseStmt();

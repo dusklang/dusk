@@ -56,7 +56,7 @@ public:
     void visitScope(Scope* scope);
     void visitParam(Param* param);
     void visitArgument(Argument* argument);
-    void visitTypeRef(TypeRef* expr);
+    void visitPhysicalTypeRef(PhysicalTypeRef* expr);
     llvm::Value* visitIntegerLiteralExpr(IntegerLiteralExpr* expr);
     llvm::Value* visitDecimalLiteralExpr(DecimalLiteralExpr* expr);
     llvm::Value* visitDeclRefExpr(DeclRefExpr* expr);

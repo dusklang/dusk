@@ -16,7 +16,7 @@ public:
     std::string visitScope(Scope* scope, int indentationLevel);
     std::string visitParam(Param* param, int indentationLevel);
     std::string visitArgument(Argument* argument, int indentationLevel);
-    std::string visitTypeRef(TypeRef* expr, int indentationLevel);
+    std::string visitPhysicalTypeRef(PhysicalTypeRef* expr, int indentationLevel);
 
     std::string visitIntegerLiteralExpr(IntegerLiteralExpr* expr, int indentationLevel);
     std::string visitDecimalLiteralExpr(DecimalLiteralExpr* expr, int indentationLevel);

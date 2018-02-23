@@ -57,11 +57,11 @@ std::shared_ptr<ASTNode> Parser::parseNode() {
     return std::dynamic_pointer_cast<ASTNode>(expr);
 }
 
-TypeRef Parser::parseTypeRef() {
+PhysicalTypeRef Parser::parseTypeRef() {
     recordCurrentLoc();
     auto typeName = parseIdentifer();
     if(!typeName) reportError("Expected type name", current().getRange());
-    #define BUILTIN_TYPE(name) if(*typeName == #name) { return TypeRef(currentRange(), BuiltinType::name); }
+    #define BUILTIN_TYPE(name) if(*typeName == #name) { return PhysicalTypeRef(currentRange(), BuiltinType::name); }
     #include "AST/BuiltinTypes.def"
     reportError("Invalid type name \"" + *typeName + '"', previous()->getRange());
     LLVM_BUILTIN_UNREACHABLE;

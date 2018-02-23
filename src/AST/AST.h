@@ -27,24 +27,58 @@ struct ASTNode {
     virtual ~ASTNode() {}
 };
 
-struct TypeRef: public ASTNode {
+// This represents an actual reference to a type in a source file.
+struct PhysicalTypeRef: public ASTNode {
     BuiltinType type;
 
-    AST_NODE_CTOR(TypeRef, BuiltinType type), type(type) {}
-    AST_NODE_CTOR(TypeRef, const TypeRef& other), type(other.type) {}
-    ~TypeRef() {}
+    AST_NODE_CTOR(PhysicalTypeRef, BuiltinType type), type(type) {}
+    AST_NODE_CTOR(PhysicalTypeRef, const PhysicalTypeRef& other), type(other.type) {}
+    ~PhysicalTypeRef() {}
 
-    void operator=(const TypeRef& other) {
+    void operator=(const PhysicalTypeRef& other) {
         range = other.range;
         type = other.type;
     }
 };
 
+struct TypeRef {
+private:
+    enum {
+        inferred,
+        physical,
+        resolved
+    } tag;
+    union {
+        BuiltinType resolvedType;
+        PhysicalTypeRef physicalType;
+    };
+public:
+    TypeRef(BuiltinType type) : tag(resolved), resolvedType(type) {}
+    TypeRef(const PhysicalTypeRef& type) : tag(resolved), physicalType(type) {}
+    TypeRef() : tag(inferred) {}
+
+    bool isInferred() const { return tag == inferred; }
+    bool isPhysical() const { return tag == physical; }
+    bool isResolved() const { return tag == resolved; }
+
+    BuiltinType getType() const {
+        assert(!isInferred());
+        if(isPhysical()) return physicalType.type;
+        if(isResolved()) return resolvedType;
+        LLVM_BUILTIN_UNREACHABLE;
+    }
+
+    void resolveType(BuiltinType resolvedType) {
+        assert(isInferred());
+        this->resolvedType = resolvedType;
+    }
+};
+
 struct Param final : public ASTNode {
     std::string name;
-    TypeRef value;
+    PhysicalTypeRef value;
 
-    AST_NODE_CTOR(Param, const std::string& name, TypeRef value), name(name), value(value) {}
+    AST_NODE_CTOR(Param, const std::string& name, PhysicalTypeRef value), name(name), value(value) {}
 };
 
 struct Argument final : public ASTNode {

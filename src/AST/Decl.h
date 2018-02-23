@@ -9,22 +9,27 @@
 #include "Types.h"
 
 struct Expr;
+struct Decl;
 
 // This is used in Decls, or on its own as a standalone prototype.
 struct DeclPrototype final : public ASTNode {
     std::string name;
     std::vector<Param> paramList;
-    llvm::Optional<TypeRef> type;
+    llvm::Optional<PhysicalTypeRef> type;
     bool isMut;
     bool isExtern;
 
     AST_NODE_CTOR(DeclPrototype,
                   const std::string& name,
                   const std::vector<Param>& paramList,
-                  llvm::Optional<TypeRef> type,
+                  llvm::Optional<PhysicalTypeRef> type,
                   bool isMut,
                   bool isExtern),
     name(name), paramList(paramList), type(type), isMut(isMut), isExtern(isExtern) {}
+
+    bool isParameterized() const {
+        return !paramList.empty();
+    }
 };
 
 struct Decl final : public ASTNode {
@@ -33,7 +38,9 @@ private:
 public:
     std::shared_ptr<DeclPrototype> prototype;
 
-    std::shared_ptr<Expr> expression() const { return std::dynamic_pointer_cast<Expr>(value); }
+    std::shared_ptr<Expr> expression() const {
+        return std::dynamic_pointer_cast<Expr>(value);
+    }
     std::shared_ptr<Scope> body() const {
         return std::dynamic_pointer_cast<Scope>(value);
     }
@@ -48,4 +55,9 @@ public:
                   std::shared_ptr<Scope> body),
     value(std::dynamic_pointer_cast<ASTNode>(body)), prototype(prototype) {}
     ~Decl() {}
+
+    bool isStored() const { return (bool)std::dynamic_pointer_cast<Expr>(value); }
+    bool isComputed() const { return (bool)std::dynamic_pointer_cast<Scope>(value); }
+    bool isParameterized() const { return prototype->isParameterized(); }
+    bool isMut() const { return prototype->isMut; }
 };

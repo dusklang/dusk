@@ -26,7 +26,7 @@ UNTYPED_AST_NODE(Param)
 UNTYPED_AST_NODE(Argument)
 UNTYPED_AST_NODE(DeclPrototype)
 UNTYPED_AST_NODE(Scope)
-UNTYPED_AST_NODE(TypeRef)
+UNTYPED_AST_NODE(PhysicalTypeRef)
 
 // Typed = they have different kinds to switch over in an enum class called name##Kind.
 TYPED_AST_NODE(Expr)

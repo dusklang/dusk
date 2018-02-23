@@ -65,7 +65,7 @@ void CodeGenerator::visitScope(Scope* scope) {
 }
 void CodeGenerator::visitParam(Param* param) {}
 void CodeGenerator::visitArgument(Argument* argument) {}
-void CodeGenerator::visitTypeRef(TypeRef* expr) {}
+void CodeGenerator::visitPhysicalTypeRef(PhysicalTypeRef* expr) {}
 llvm::Value* CodeGenerator::visitIntegerLiteralExpr(IntegerLiteralExpr* expr) {
     return llvm::ConstantInt::get(context, llvm::APInt(32, std::stoi(expr->literal)));
 }
