@@ -32,6 +32,7 @@ private:
     void reportError(std::string message, ASTNode* node) {
         std::cout << "CODE GENERATION ERROR: " << message << '\n';
         std::cout << "Offending area: " << node->range.getSubstring() << "\n\n";
+        // TODO: Support multiple errors per file.
         exit(1);
     }
 public:
