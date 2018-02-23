@@ -1,8 +1,6 @@
 cmake_minimum_required(VERSION 3.4.3)
 project(quill-lang)
 
-set(LLVM_DIR /Users/zachrwolfe/Downloads/llvm/build/lib/cmake/llvm)
-
 find_package(LLVM REQUIRED CONFIG)
 
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
