@@ -1,6 +1,7 @@
 //  Copyright © 2018 Zach Wolfe. All rights reserved.
 
 #include <iostream>
+#include <fstream>
 #include "Parser/Parser.h"
 #include "AST/ASTPrinter.h"
 #include "Sema/TypeChecker.h"
@@ -13,9 +14,17 @@
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/IR/LegacyPassManager.h"
 
+std::string standardLibrary = R"~(
+#include <iostream>
+extern "C" void printInt(int x) {
+    std::cout << "Printing int from quill: " << x << "\n";
+}
+)~";
 std::string sourceCode = R"~(
-def abs(x: i32): i32 {
-    return 4
+extern def printInt(x: i32): Void
+def main {
+    printInt(x: 5)
+    return
 }
 )~";
 
@@ -68,7 +77,7 @@ int main(int argc, const char * argv[]) {
 
     codeGenerator.module->setDataLayout(machine->createDataLayout());
 
-    auto fileName = "output.o";
+    auto fileName = "main.o";
     std::error_code errorCode;
     llvm::raw_fd_ostream dest(fileName, errorCode, llvm::sys::fs::F_None);
 
@@ -85,10 +94,22 @@ int main(int argc, const char * argv[]) {
         return 1;
     }
 
-    pass.run(*codeGenerator.module);
+    auto& module = *codeGenerator.module;
+    // TODO: Detect computed decls that don't return a value (TODO is placed here because this line
+    // fails when the code doesn't have a return). I'm going to wait on this at least until we have if
+    // statements.
+    pass.run(module);
     dest.flush();
 
-    llvm::outs() << "Wrote " << fileName << "\n\n";
+    std::ofstream stdLibFile;
+    stdLibFile.open("stdlib.cpp");
+    stdLibFile << standardLibrary;
+    stdLibFile.close();
+
+    std::cout << '\n';
+    std::system("clang++ main.o stdlib.cpp -o main");
+    std::system("./main");
+    std::cout << '\n';
 
     return 0;
 }
