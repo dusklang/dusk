@@ -5,6 +5,10 @@
 void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
     // Insert declaration into the current scope.
     declLists.back().push_back(AbstractDecl(decl));
+    // Reject nested functions.
+    if(declLists.size() > 1 && decl->isComputed()) {
+        reportError("Unexpected nested function '" + decl->prototype->name + "'", decl->prototype);
+    }
 
     // If we have parameters, start a new scope for referencing them.
     if(decl->isParameterized()) {

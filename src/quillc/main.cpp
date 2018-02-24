@@ -24,6 +24,9 @@ std::string sourceCode = R"~(
 extern def printInt(x: i32): Void
 def main {
     printInt(x: 5)
+    def nestedFunction { // Expected error here.
+
+    }
     return
 }
 )~";
