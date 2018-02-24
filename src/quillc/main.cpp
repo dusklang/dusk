@@ -6,15 +6,16 @@
 #include "Sema/TypeChecker.h"
 #include "IRGen/CodeGenerator.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/TargetRegistry.h"
+#include "llvm/Support/TargetSelect.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/TargetOptions.h"
+#include "llvm/IR/LegacyPassManager.h"
 
 std::string sourceCode = R"~(
-extern def doSomethingReallyCool: Void
 def abs(x: i32): i32 {
     return 4
-}
-def main: i32 {
-    doSomethingReallyCool
-    return abs(x: 32)
 }
 )~";
 
@@ -36,7 +37,58 @@ int main(int argc, const char * argv[]) {
         codeGenerator.visit(node);
     }
     codeGenerator.module->print(llvm::errs(), nullptr);
-    std::cout << std::endl;
+
+    // Initialize the target registry etc.
+    llvm::InitializeAllTargetInfos();
+    llvm::InitializeAllTargets();
+    llvm::InitializeAllTargetMCs();
+    llvm::InitializeAllAsmParsers();
+    llvm::InitializeAllAsmPrinters();
+
+    auto triple = llvm::sys::getDefaultTargetTriple();
+    codeGenerator.module->setTargetTriple(triple);
+
+    std::string error;
+    auto target = llvm::TargetRegistry::lookupTarget(triple, error);
+
+    // Print an error and exit if we couldn't find the requested target.
+    // This generally occurs if we've forgotten to initialise the
+    // TargetRegistry or we have a bogus target triple.
+    if (!target) {
+        llvm::errs() << error;
+        return 1;
+    }
+
+    auto cpu = "generic";
+
+    llvm::TargetOptions opt;
+    auto relocationModel = llvm::Optional<llvm::Reloc::Model>();
+    auto machine =
+    target->createTargetMachine(triple, cpu, /*features=*/ "", opt, relocationModel);
+
+    codeGenerator.module->setDataLayout(machine->createDataLayout());
+
+    auto fileName = "output.o";
+    std::error_code errorCode;
+    llvm::raw_fd_ostream dest(fileName, errorCode, llvm::sys::fs::F_None);
+
+    if(errorCode) {
+        llvm::errs() << "Could not open file: " << errorCode.message();
+        return 1;
+    }
+
+    llvm::legacy::PassManager pass;
+    auto fileType = llvm::TargetMachine::CGFT_ObjectFile;
+
+    if(machine->addPassesToEmitFile(pass, dest, fileType)) {
+        llvm::errs() << "Machine can't emit object files.";
+        return 1;
+    }
+
+    pass.run(*codeGenerator.module);
+    dest.flush();
+
+    llvm::outs() << "Wrote " << fileName << "\n\n";
 
     return 0;
 }
