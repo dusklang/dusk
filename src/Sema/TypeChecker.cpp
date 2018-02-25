@@ -75,6 +75,7 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
 
         visitExpr(decl->expression());
         if(decl->type.isInferred()) decl->type.resolveType(*decl->expression()->type);
+        if(decl->type.getType() == BuiltinType::Void) reportError("Stored declarations can not have type Void", decl);
 
         if(decl->isParameterized()) declLists.pop_back();
     } else {

@@ -35,11 +35,11 @@ extern def printDouble(x: f64): Void
 extern def sin(x: f64): f64
 def print(x: i32, plus /*y*/: i32) {
     printInt(x: add(l: x, r: plus))
-    printDouble(x: sin(x: 74.5))
     return
 }
 def main {
-    print(x: 4, plus: 4)
+    def myConst = add(l: 4, r: 74)
+    print(x: 2, plus: myConst) // Should print 80
     return
 }
 )~";

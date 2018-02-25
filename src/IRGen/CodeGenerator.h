@@ -16,7 +16,7 @@
 
 class CodeGenerator final: public ASTVisitor<CodeGenerator,
                                              void,
-                                             llvm::Function*,
+                                             llvm::Value*,
                                              void,
                                              void,
                                              void,
@@ -33,7 +33,7 @@ public:
         module = std::make_unique<llvm::Module>("my module", context);
     }
 
-    llvm::Function* visitDecl(std::shared_ptr<Decl> decl);
+    llvm::Value* visitDecl(std::shared_ptr<Decl> decl);
     void visitScope(std::shared_ptr<Scope> scope);
     void visitArgument(std::shared_ptr<Argument> argument);
     void visitPhysicalTypeRef(std::shared_ptr<PhysicalTypeRef> expr);
