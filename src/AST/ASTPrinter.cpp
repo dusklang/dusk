@@ -10,23 +10,14 @@ std::string indentation(int level) {
 }
 
 std::string ASTPrinter::visitDecl(std::shared_ptr<Decl> decl, int indentationLevel) {
-    std::string str = indentation(indentationLevel) + visitDeclPrototype(decl->prototype, 0);
-    if(decl->expression()) {
-        str += " = " + visitExpr(decl->expression(), 0);
-    }
-    else str += " {\n" + visitScope(decl->body(), indentationLevel) + "\n" + indentation(indentationLevel) + "}";
-    return str;
-}
-
-std::string ASTPrinter::visitDeclPrototype(std::shared_ptr<DeclPrototype> prototype, int indentationLevel) {
-    std::string str;
-    str += prototype->isMut ? "mut " : "";
-    str += prototype->isExtern ? "extern " : "";
-    str += prototype->name;
-    if(!prototype->paramList.empty()) {
+    std::string str = indentation(indentationLevel);
+    str += decl->isMut ? "mut " : "";
+    str += decl->isExtern ? "extern " : "";
+    str += decl->name;
+    if(!decl->paramList.empty()) {
         str += "(";
         bool first = true;
-        for(auto& param: prototype->paramList) {
+        for(auto& param: decl->paramList) {
             if(!first) str += ", ";
             else first = false;
 
@@ -35,13 +26,20 @@ std::string ASTPrinter::visitDeclPrototype(std::shared_ptr<DeclPrototype> protot
         str += ")";
     }
     std::string typeStr;
-    if(prototype->physicalType) {
-        typeStr = visitPhysicalTypeRef(std::make_shared<PhysicalTypeRef>(*prototype->physicalType), 0);
-    } else {
+    if(decl->type.isInferred()) {
         typeStr = "<inferred>";
+    } else {
+        typeStr = getNameForBuiltinType(decl->type.getType());
     }
     str += ": " + typeStr;
-    return indentation(indentationLevel) + str;
+
+    if(decl->expression()) {
+        str += " = " + visitExpr(decl->expression(), 0);
+    }
+    else if(decl->body()) {
+        str += " {\n" + visitScope(decl->body(), indentationLevel) + "\n" + indentation(indentationLevel) + "}";
+    }
+    return str;
 }
 
 std::string ASTPrinter::visitScope(std::shared_ptr<Scope> scope, int indentationLevel) {
@@ -61,10 +59,7 @@ std::string ASTPrinter::visitArgument(std::shared_ptr<Argument> argument, int in
 }
 
 std::string ASTPrinter::visitPhysicalTypeRef(std::shared_ptr<PhysicalTypeRef> expr, int indentationLevel) {
-    switch(expr->type) {
-        #define BUILTIN_TYPE(name) case BuiltinType::name: return indentation(indentationLevel) + #name;
-        #include "BuiltinTypes.def"
-    }
+    return "";
 }
 
 std::string ASTPrinter::visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr, int indentationLevel) {

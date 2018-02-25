@@ -77,8 +77,7 @@ public:
     llvm::Optional<std::shared_ptr<Scope>> parseScope();
     std::shared_ptr<ASTNode> parseNode();
     PhysicalTypeRef parseTypeRef();
-    llvm::Optional<DeclPrototype> parseDeclPrototype();
-    llvm::Optional<Decl> parseDecl(DeclPrototype prototype);
+    llvm::Optional<Decl> parseDecl();
     llvm::Optional<std::shared_ptr<Stmt>> parseStmt();
     llvm::Optional<std::shared_ptr<Expr>> parseDeclRefExpr();
     llvm::Optional<std::shared_ptr<Expr>> parseExpr();

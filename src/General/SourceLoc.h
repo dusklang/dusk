@@ -9,6 +9,7 @@ struct SourceLoc {
     int location;
 
     SourceLoc(const std::string* source, int location) : source(source), location(location) {}
+    SourceLoc() {}
 };
 
 struct SourceRange {
@@ -16,5 +17,6 @@ struct SourceRange {
     int length;
 
     SourceRange(SourceLoc begin, int length) : begin(begin), length(length) {}
+    SourceRange() {}
     std::string getSubstring() const;
 };

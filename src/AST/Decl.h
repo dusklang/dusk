@@ -14,37 +14,17 @@
 struct Expr;
 struct Decl;
 
-// This is used in Decls, or on its own as a standalone prototype.
-struct DeclPrototype final : public ASTNode {
+struct Decl final : public ASTNode {
     std::string name;
     std::vector<std::shared_ptr<Param>> paramList;
-    // This represents the actual type specified at a given location in a source file. This won't
-    // be affected by the type checker. For the actual type of a decl, view Decl::getType()
-    llvm::Optional<PhysicalTypeRef> physicalType;
+    TypeRef type;
     bool isMut;
     bool isExtern;
 
     llvm::Value* codegenVal;
-
-    AST_NODE_CTOR(DeclPrototype,
-                  const std::string& name,
-                  const std::vector<std::shared_ptr<Param>>& paramList,
-                  llvm::Optional<PhysicalTypeRef> type,
-                  bool isMut,
-                  bool isExtern),
-    name(name), paramList(paramList), physicalType(type), isMut(isMut), isExtern(isExtern) {}
-
-    bool isParameterized() const {
-        return !paramList.empty();
-    }
-};
-
-struct Decl final : public ASTNode {
 private:
     std::shared_ptr<ASTNode> value;
-    TypeRef type;
 public:
-    std::shared_ptr<DeclPrototype> prototype;
 
     std::shared_ptr<Expr> expression() const {
         return std::dynamic_pointer_cast<Expr>(value);
@@ -52,124 +32,98 @@ public:
     std::shared_ptr<Scope> body() const {
         return std::dynamic_pointer_cast<Scope>(value);
     }
+    bool hasDefinition() const { return (bool)value; }
 
     AST_NODE_CTOR(Decl,
-                  std::shared_ptr<DeclPrototype> prototype,
-                  std::shared_ptr<Expr> expression),
-    value(std::dynamic_pointer_cast<ASTNode>(expression)), prototype(prototype) {
-        if(prototype->physicalType) {
-            type = TypeRef(*prototype->physicalType);
-        }
-    }
+                  std::string name,
+                  std::vector<std::shared_ptr<Param>> paramList,
+                  TypeRef type,
+                  bool isMut,
+                  bool isExtern,
+                  std::shared_ptr<Expr> expression = nullptr),
+    name(name), paramList(paramList), type(type), isMut(isMut), isExtern(isExtern),
+    value(std::dynamic_pointer_cast<ASTNode>(expression)) {}
 
     AST_NODE_CTOR(Decl,
-                  std::shared_ptr<DeclPrototype> prototype,
+                  std::string name,
+                  std::vector<std::shared_ptr<Param>> paramList,
+                  TypeRef type,
+                  bool isMut,
+                  bool isExtern,
                   std::shared_ptr<Scope> body),
-    value(std::dynamic_pointer_cast<ASTNode>(body)), prototype(prototype) {
-        if(prototype->physicalType) {
-            type = TypeRef(*prototype->physicalType);
-        }
-    }
+    name(name), paramList(paramList), type(type), isMut(isMut), isExtern(isExtern),
+    value(std::dynamic_pointer_cast<ASTNode>(body)) {}
     ~Decl() {}
-
-    TypeRef* getTypeRef() {
-        return &type;
-    }
 
     // Opposites:
     bool isStored() const { return (bool)std::dynamic_pointer_cast<Expr>(value); }
     bool isComputed() const { return (bool)std::dynamic_pointer_cast<Scope>(value); }
 
-    bool isParameterized() const { return prototype->isParameterized(); }
-    bool isMut() const { return prototype->isMut; }
+    bool isParameterized() const { return !paramList.empty(); }
 };
 
 // This currently represents either a Decl, a parameter, or a prototype.
 struct AbstractDecl final {
 private:
     enum {
-        parameter, prototype, declaration
+        parameter, declaration
     } tag;
     std::shared_ptr<ASTNode> val;
     std::shared_ptr<Param> param() const { return std::dynamic_pointer_cast<Param>(val); }
-    std::shared_ptr<DeclPrototype> proto() const {
-        return std::dynamic_pointer_cast<DeclPrototype>(val);
-    }
     std::shared_ptr<Decl> decl() const { return std::dynamic_pointer_cast<Decl>(val); }
 public:
     AbstractDecl(std::shared_ptr<Param> param) : tag(parameter), val(param) {}
-    AbstractDecl(std::shared_ptr<DeclPrototype> proto) : tag(prototype), val(proto) {}
     AbstractDecl(std::shared_ptr<Decl> decl) : tag(declaration), val(decl) {}
     ~AbstractDecl() {}
 
-    AbstractDecl(const AbstractDecl& other) : tag(other.tag), val(other.val) {
-    }
+    AbstractDecl(const AbstractDecl& other) : tag(other.tag), val(other.val) { }
     void operator=(const AbstractDecl& other) {
         tag = other.tag;
         val = other.val;
     }
 
     bool isParameter() const { return tag == parameter; }
-    bool isPrototype() const { return tag == prototype; }
     bool isDeclaration() const { return tag == declaration; }
 
     const std::string& name() const {
         if(isParameter()) return param()->name;
-        if(isPrototype()) return proto()->name;
-        if(isDeclaration()) return decl()->prototype->name;
+        if(isDeclaration()) return decl()->name;
         LLVM_BUILTIN_UNREACHABLE;
     }
 
     std::vector<std::shared_ptr<Param>> paramList() const {
         if(isParameter()) return std::vector<std::shared_ptr<Param>>();
-        if(isPrototype()) return proto()->paramList;
-        if(isDeclaration()) return decl()->prototype->paramList;
-        LLVM_BUILTIN_UNREACHABLE;
-    }
-
-    llvm::Optional<PhysicalTypeRef> physicalType() const {
-        if(isParameter()) return param()->value;
-        if(isPrototype()) return proto()->physicalType;
-        if(isDeclaration()) return decl()->prototype->physicalType;
+        if(isDeclaration()) return decl()->paramList;
         LLVM_BUILTIN_UNREACHABLE;
     }
 
     TypeRef typeRef() {
         if(isParameter()) return TypeRef(param()->value.type);
-        if(isPrototype()) return TypeRef(proto()->physicalType->type);
-        if(isDeclaration()) return *decl()->getTypeRef();
+        if(isDeclaration()) return decl()->type;
         LLVM_BUILTIN_UNREACHABLE;
     }
 
     SourceRange range() {
-        if(auto proto = getProto()) return proto->range;
+        if(isDeclaration()) return decl()->range;
         return param()->range;
-    }
-
-    std::shared_ptr<DeclPrototype> getProto() const {
-        if(isPrototype()) return proto();
-        if(isDeclaration()) return decl()->prototype;
-        return nullptr;
     }
 
     llvm::Value* codegenVal() {
         if(isParameter()) return param()->codegenVal;
-        return getProto()->codegenVal;
+        if(isDeclaration()) return decl()->codegenVal;
+        LLVM_BUILTIN_UNREACHABLE;
     }
 
     bool isMut() const {
-        if(auto proto = getProto()) return proto->isMut;
+        if(isDeclaration()) return decl()->isMut;
         return false;
     }
     bool isExtern() const {
-        if(auto proto = getProto()) return proto->isExtern;
+        if(isDeclaration()) return decl()->isExtern;
         return false;
     }
     bool isComputed() const {
         if(isDeclaration()) return decl()->isComputed();
-        // FIXME: Assuming all prototypes are computed is bad. I'm probably going to get rid
-        // of prototypes soon though, anyway (and just have everything be a decl).
-        if(isPrototype()) return true;
         return false;
     }
 };

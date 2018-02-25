@@ -19,7 +19,6 @@ class CodeGenerator final: public ASTVisitor<CodeGenerator,
                                              llvm::Function*,
                                              void,
                                              void,
-                                             llvm::Function*,
                                              void,
                                              void,
                                              llvm::Value*,
@@ -36,7 +35,6 @@ public:
     }
 
     llvm::Function* visitDecl(std::shared_ptr<Decl> decl);
-    llvm::Function* visitDeclPrototype(std::shared_ptr<DeclPrototype> prototype);
     void visitScope(std::shared_ptr<Scope> scope);
     void visitParam(std::shared_ptr<Param> param);
     void visitArgument(std::shared_ptr<Argument> argument);

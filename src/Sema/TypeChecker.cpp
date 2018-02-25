@@ -7,92 +7,85 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
     declLists.back().push_back(AbstractDecl(decl));
     // Reject nested functions.
     if(declLists.size() > 1 && decl->isComputed()) {
-        reportError("Unexpected nested function '" + decl->prototype->name + "'", decl->prototype);
+        // TODO: Just report the source range of the prototype, which now is not its own
+        // ASTNode so is not possible.
+        reportError("Unexpected nested function '" + decl->name + "'", decl);
     }
 
-    // If we have parameters, start a new scope for referencing them.
-    if(decl->isParameterized()) {
-        declLists.push_back(std::vector<AbstractDecl>());
-        for(auto& param: decl->prototype->paramList) {
-            declLists.back().push_back(AbstractDecl(param));
+    if(decl->hasDefinition()) {
+        // If we have parameters, start a new scope for referencing them.
+        if(decl->isParameterized()) {
+            declLists.push_back(std::vector<AbstractDecl>());
+            for(auto& param: decl->paramList) {
+                declLists.back().push_back(AbstractDecl(param));
+            }
         }
-    }
-    if(decl->isComputed()) {
-        // Start another new, inner scope for declarations inside the body of the computed declaration.
-        declLists.push_back(std::vector<AbstractDecl>());
-        // Add Void type to computed declaration if it doesn't have one.
-        if(!decl->prototype->physicalType) decl->getTypeRef()->resolveType(BuiltinType::Void);
+        if(decl->isComputed()) {
+            // Start another new, inner scope for declarations inside the body of the computed declaration.
+            declLists.push_back(std::vector<AbstractDecl>());
+            // Add Void type to computed declaration if it doesn't have one.
+            if(decl->type.isInferred()) decl->type.resolveType(BuiltinType::Void);
 
-        for(auto& node: decl->body()->nodes) {
-            // Handle return statements.
-            if(auto ret = std::dynamic_pointer_cast<ReturnStmt>(node)) {
-                visitReturnStmt(ret);
-                // Handle returning value in a void computed decl.
-                if(decl->getTypeRef()->getType() == BuiltinType::Void) {
-                    if(ret->value) {
-                        bool wasInferred = (bool)!decl->prototype->physicalType;
-                        reportError("Attempted to return value from " +
-                                    std::string(wasInferred ? "inferred-" : "") +
-                                    "Void computed decl '" + decl->prototype->name + "'",
-                                    ret);
-                    } else {
-                        continue;
+            for(auto& node: decl->body()->nodes) {
+                // Handle return statements.
+                if(auto ret = std::dynamic_pointer_cast<ReturnStmt>(node)) {
+                    visitReturnStmt(ret);
+                    // Handle returning value in a void computed decl.
+                    if(decl->type.getType() == BuiltinType::Void) {
+                        if(ret->value) {
+                            reportError("Attempted to return value from Void computed decl '"
+                                        + decl->name + "'",
+                                        ret);
+                        } else {
+                            continue;
+                        }
                     }
-                }
 
-                // Handle returning no value in a non-void computed decl.
-                if(!ret->value) {
-                    reportError("Computed decl '" + decl->prototype->name + "' must return a value",
-                                ret);
-                }
+                    // Handle returning no value in a non-void computed decl.
+                    if(!ret->value) {
+                        reportError("Computed decl '" + decl->name + "' must return a value",
+                                    ret);
+                    }
 
-                // Handle returning a value of a type incompatible with the computed decl's type
-                // (currently, "incompatible with" just means "not equal to").
-                if(*ret->value->type != decl->getTypeRef()->getType()) {
-                    // TODO: Include in the error message the type of the returned expr.
-                    reportError("Attempted to return value of incompatible type from computed decl "
-                                "of type " + decl->prototype->physicalType->range.getSubstring(),
-                                ret);
+                    // Handle returning a value of a type incompatible with the computed decl's type
+                    // (currently, "incompatible with" just means "not equal to").
+                    if(*ret->value->type != decl->type.getType()) {
+                        // TODO: Include in the error message the type of the returned expr.
+                        reportError("Attempted to return value of incompatible type from computed decl "
+                                    "of type " + getNameForBuiltinType(decl->type.getType()),
+                                    ret);
+                    }
+                } else if(auto expr = std::dynamic_pointer_cast<Expr>(node)) {
+                    visitExpr(expr);
+                    // Warn on unused expressions.
+                    if(expr->type != BuiltinType::Void) {
+                        reportWarning("Unused expression", expr);
+                    }
+                } else {
+                    visit(node);
                 }
             }
-            // Handle expressions.
-            else if(auto expr = std::dynamic_pointer_cast<Expr>(node)) {
-                visitExpr(expr);
-                // Warn on unused expressions.
-                if(expr->type != BuiltinType::Void) {
-                    reportWarning("Unused expression", expr);
-                }
-            }
-            else {
-                visit(node);
-            }
+            declLists.pop_back();
+            if(decl->isParameterized()) declLists.pop_back();
+            return;
         }
-        declLists.pop_back();
+
+        // We can now assume the decl is stored.
+        assert(decl->isStored());
+
+        visitExpr(decl->expression());
+        if(decl->type.isInferred()) decl->type.resolveType(*decl->expression()->type);
+
         if(decl->isParameterized()) declLists.pop_back();
-        return;
+    } else {
+        if(!decl->isExtern) {
+            reportError("Non-extern declarations currently always need definitions", decl);
+        }
+
+        if(decl->type.isInferred()) {
+            reportError("Standalone decl prototypes need types", decl);
+        }
     }
-
-    // We can now assume the decl is stored.
-    assert(decl->isStored());
-
-    visitExpr(decl->expression());
-    if(!decl->prototype->physicalType) decl->getTypeRef()->resolveType(*decl->expression()->type);
-
-    if(decl->isParameterized()) declLists.pop_back();
-}
-void TypeChecker::visitDeclPrototype(std::shared_ptr<DeclPrototype> prototype) {
-    // THIS SHOULD ONLY EVER BY INVOKED IN THE CASE OF A STANDALONE PROTOTYPE, aka NOT in visitDecl().
-
-    if(!prototype->isExtern) {
-        reportError("Non-extern decl prototypes not yet supported", prototype);
-    }
-
-    if(!prototype->physicalType) {
-        reportError("Standalone decl prototypes need types", prototype);
-    }
-
-    // Insert declaration into the current scope.
-    declLists.back().push_back(AbstractDecl(prototype));
 }
 void TypeChecker::visitScope(std::shared_ptr<Scope> scope) {}
 void TypeChecker::visitParam(std::shared_ptr<Param> param) {}

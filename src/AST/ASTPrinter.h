@@ -12,7 +12,6 @@ class ASTPrinter: public ASTVisitor<ASTPrinter,
 {
 public:
     std::string visitDecl(std::shared_ptr<Decl> decl, int indentationLevel);
-    std::string visitDeclPrototype(std::shared_ptr<DeclPrototype> prototype, int indentationLevel);
     std::string visitScope(std::shared_ptr<Scope> scope, int indentationLevel);
     std::string visitParam(std::shared_ptr<Param> param, int indentationLevel);
     std::string visitArgument(std::shared_ptr<Argument> argument, int indentationLevel);

@@ -45,13 +45,8 @@ llvm::Optional<std::shared_ptr<Scope>> Parser::parseScope() {
 std::shared_ptr<ASTNode> Parser::parseNode() {
     if(auto stmt = TRY(parseStmt())) {
         return std::dynamic_pointer_cast<ASTNode>(*stmt);
-    }
-    if(auto proto = TRY(parseDeclPrototype())) {
-        if(auto decl = TRY(parseDecl(*proto))) {
-            return std::dynamic_pointer_cast<ASTNode>(std::make_shared<Decl>(*decl));
-        } else {
-            return std::dynamic_pointer_cast<ASTNode>(std::make_shared<DeclPrototype>(*proto));
-        }
+    } else if(auto decl = TRY(parseDecl())) {
+        return std::dynamic_pointer_cast<ASTNode>(std::make_shared<Decl>(*decl));
     }
     auto expr = parseExpr();
     assert(expr && "Failed to parse expression");
@@ -68,7 +63,7 @@ PhysicalTypeRef Parser::parseTypeRef() {
     LLVM_BUILTIN_UNREACHABLE;
 }
 
-llvm::Optional<DeclPrototype> Parser::parseDeclPrototype() {
+llvm::Optional<Decl> Parser::parseDecl() {
     recordCurrentLoc();
     bool isMut;
     bool isExtern = false;
@@ -106,40 +101,46 @@ llvm::Optional<DeclPrototype> Parser::parseDeclPrototype() {
         next();
     }
 
+    TypeRef type;
+    // Range of the "prototype", which includes everything from the extern keyword (if it exists) to
+    // the type of the declaration (if it's specified).
+    SourceRange protoRange;
+
     if(current().is(tok::sep_colon)) {
         next();
 
         next();
-        auto range = currentRange();
+        protoRange = currentRange();
         previous();
 
-        return DeclPrototype(range, name, paramList, parseTypeRef(), isMut, isExtern);
+        type = parseTypeRef();
+    } else {
+        protoRange = currentRange();
+        type = TypeRef();
     }
 
-    return DeclPrototype(currentRange(), name, paramList, llvm::None, isMut, isExtern);
-}
-
-llvm::Optional<Decl> Parser::parseDecl(DeclPrototype prototype) {
     auto checkExtern = [&]() {
-        if(prototype.isExtern) {
-            reportError("'extern' declaration '" + prototype.name +
+        if(isExtern) {
+            reportError("'extern' declaration '" + name +
                         "' may not have a definition.",
-                        prototype.range);
+                        protoRange);
         }
     };
+
     if(current().is(tok::sep_equal)) {
         checkExtern();
         next();
         auto expr = parseExpr();
-        if(!expr) reportError("Expected expression to assign to declaration " + prototype.name, current().getRange());
-        auto range = rangeFrom(prototype.range.begin, (*expr)->range);
-        return Decl(range, std::make_shared<DeclPrototype>(prototype), *expr);
+        if(!expr) reportError("Expected expression to assign to declaration " + name, current().getRange());
+        auto range = rangeFrom(protoRange.begin, (*expr)->range);
+        return Decl(range, name, paramList, type, isMut, isExtern, *expr);
     } else if(auto scope = parseScope()) {
         checkExtern();
-        auto range = rangeFrom(prototype.range.begin, (*scope)->range);
-        return Decl(range, std::make_shared<DeclPrototype>(prototype), *scope);
+        auto range = rangeFrom(protoRange.begin, (*scope)->range);
+        return Decl(range, name, paramList, type, isMut, isExtern, *scope);
+    } else {
+        return Decl(protoRange, name, paramList, type, isMut, isExtern);
     }
-    return llvm::None;
 }
 
 llvm::Optional<std::shared_ptr<Stmt>> Parser::parseStmt() {

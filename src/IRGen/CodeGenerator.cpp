@@ -12,49 +12,41 @@ llvm::Type* CodeGenerator::mapBuiltinTypeToLLVM(BuiltinType type) {
 }
 
 llvm::Function* CodeGenerator::visitDecl(std::shared_ptr<Decl> decl) {
-    llvm::Function* function = visitDeclPrototype(decl->prototype);
-
-    llvm::BasicBlock* block = llvm::BasicBlock::Create(context, "entry", function);
-    builder.SetInsertPoint(block);
-
-    auto param = decl->prototype->paramList.begin();
-    auto arg = function->args().begin();
-    for(; param != decl->prototype->paramList.end() && arg != function->args().end(); ++param, ++arg) {
-        (*param)->codegenVal = arg;
-    }
-
-    if(auto expr = decl->expression()) {
-        assert(false && "Code generation for stored decls is not yet supported");
-    } else {
-        visitScope(decl->body());
-    }
-
-    llvm::verifyFunction(*function);
-
-    return function;
-}
-
-llvm::Function* CodeGenerator::visitDeclPrototype(std::shared_ptr<DeclPrototype> prototype) {
     std::vector<llvm::Type*> arguments;
-    for(auto& param: prototype->paramList) {
+    for(auto& param: decl->paramList) {
         arguments.push_back(mapBuiltinTypeToLLVM(param->value.type));
     }
-    llvm::Type* type;
-    if(prototype->physicalType) {
-        type = mapBuiltinTypeToLLVM(prototype->physicalType->type);
-    } else {
-        type = llvm::Type::getVoidTy(context);
-    }
+    llvm::Type* type = mapBuiltinTypeToLLVM(decl->type.getType());
     llvm::FunctionType* functionTy = llvm::FunctionType::get(type,
                                                              arguments,
                                                              false);
-    llvm::Function* function = llvm::Function::Create(functionTy, llvm::Function::ExternalLinkage, prototype->name, module.get());
+    llvm::Function* function = llvm::Function::Create(functionTy, llvm::Function::ExternalLinkage, decl->name, module.get());
 
     int i = 0;
     for(auto &arg: function->args()) {
-        arg.setName(prototype->paramList[i++]->name);
+        arg.setName(decl->paramList[i++]->name);
     }
-    prototype->codegenVal = (llvm::Function*) function;
+    decl->codegenVal = function;
+
+    if(decl->hasDefinition()) {
+        llvm::BasicBlock* block = llvm::BasicBlock::Create(context, "entry", function);
+        builder.SetInsertPoint(block);
+
+        auto param = decl->paramList.begin();
+        auto arg = function->args().begin();
+        for(; param != decl->paramList.end() && arg != function->args().end(); ++param, ++arg) {
+            (*param)->codegenVal = arg;
+        }
+
+        if(auto expr = decl->expression()) {
+            assert(false && "Code generation for stored decls is not yet supported");
+        } else {
+            visitScope(decl->body());
+        }
+
+        llvm::verifyFunction(*function);
+    }
+
     return function;
 }
 void CodeGenerator::visitScope(std::shared_ptr<Scope> scope) {

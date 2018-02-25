@@ -16,7 +16,6 @@ class TypeChecker final: public ASTVisitor<TypeChecker,
                                            void,
                                            void,
                                            void,
-                                           void,
                                            void>
 {
 private:
@@ -41,7 +40,6 @@ public:
     }
 
     void visitDecl(std::shared_ptr<Decl> decl);
-    void visitDeclPrototype(std::shared_ptr<DeclPrototype> prototype);
     void visitScope(std::shared_ptr<Scope> scope);
     void visitParam(std::shared_ptr<Param> param);
     void visitArgument(std::shared_ptr<Argument> argument);
