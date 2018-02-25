@@ -14,7 +14,7 @@ llvm::Type* CodeGenerator::mapBuiltinTypeToLLVM(BuiltinType type) {
 llvm::Function* CodeGenerator::visitDecl(std::shared_ptr<Decl> decl) {
     std::vector<llvm::Type*> arguments;
     for(auto& param: decl->paramList) {
-        arguments.push_back(mapBuiltinTypeToLLVM(param->value.type));
+        arguments.push_back(mapBuiltinTypeToLLVM(param->type.getType()));
     }
     llvm::Type* type = mapBuiltinTypeToLLVM(decl->type.getType());
     llvm::FunctionType* functionTy = llvm::FunctionType::get(type,
@@ -54,7 +54,6 @@ void CodeGenerator::visitScope(std::shared_ptr<Scope> scope) {
         visit(node);
     }
 }
-void CodeGenerator::visitParam(std::shared_ptr<Param> param) {}
 void CodeGenerator::visitArgument(std::shared_ptr<Argument> argument) {}
 void CodeGenerator::visitPhysicalTypeRef(std::shared_ptr<PhysicalTypeRef> expr) {}
 llvm::Value* CodeGenerator::visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr) {
@@ -64,7 +63,7 @@ llvm::Value* CodeGenerator::visitDecimalLiteralExpr(std::shared_ptr<DecimalLiter
     return llvm::ConstantFP::get(context, llvm::APFloat(std::stod(expr->literal)));
 }
 llvm::Value* CodeGenerator::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
-    auto referencedVal = expr->decl->codegenVal();
+    auto referencedVal = expr->decl->codegenVal;
     if(expr->decl->isComputed()) {
         auto callee = static_cast<llvm::Function*>(referencedVal);
         assert((callee->arg_size() == expr->argList.size()) &&

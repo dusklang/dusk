@@ -87,15 +87,6 @@ public:
     }
 };
 
-struct Param final : public ASTNode {
-    std::string name;
-    PhysicalTypeRef value;
-
-    llvm::Value* codegenVal;
-
-    AST_NODE_CTOR(Param, const std::string& name, PhysicalTypeRef value), name(name), value(value) {}
-};
-
 struct Argument final : public ASTNode {
     std::string name;
     std::shared_ptr<Expr> value;

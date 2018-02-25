@@ -22,7 +22,6 @@
 
 // Base classes; these get their own overloads of ASTVisitor::visit()
 UNTYPED_AST_NODE(Decl)
-UNTYPED_AST_NODE(Param)
 UNTYPED_AST_NODE(Argument)
 UNTYPED_AST_NODE(Scope)
 UNTYPED_AST_NODE(PhysicalTypeRef)

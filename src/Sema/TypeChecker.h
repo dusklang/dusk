@@ -15,12 +15,11 @@ class TypeChecker final: public ASTVisitor<TypeChecker,
                                            void,
                                            void,
                                            void,
-                                           void,
                                            void>
 {
 private:
     // FIXME: Name lookup will be super slow; figure out how to hash function overloads.
-    std::vector<std::vector<AbstractDecl>> declLists;
+    std::vector<std::vector<std::shared_ptr<Decl>>> declLists;
     template<typename Node>
     void reportError(std::string message, std::shared_ptr<Node> node) {
         std::cout << "TYPE-CHECKING ERROR: " << message << '\n';
@@ -36,12 +35,11 @@ private:
     }
 public:
     TypeChecker() {
-        declLists.push_back(std::vector<AbstractDecl>());
+        declLists.push_back(std::vector<std::shared_ptr<Decl>>());
     }
 
     void visitDecl(std::shared_ptr<Decl> decl);
     void visitScope(std::shared_ptr<Scope> scope);
-    void visitParam(std::shared_ptr<Param> param);
     void visitArgument(std::shared_ptr<Argument> argument);
     void visitPhysicalTypeRef(std::shared_ptr<PhysicalTypeRef> expr);
     void visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr);

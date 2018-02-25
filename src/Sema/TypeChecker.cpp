@@ -4,7 +4,7 @@
 
 void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
     // Insert declaration into the current scope.
-    declLists.back().push_back(AbstractDecl(decl));
+    declLists.back().push_back(decl);
     // Reject nested functions.
     if(declLists.size() > 1 && decl->isComputed()) {
         // TODO: Just report the source range of the prototype, which now is not its own
@@ -15,14 +15,14 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
     if(decl->hasDefinition()) {
         // If we have parameters, start a new scope for referencing them.
         if(decl->isParameterized()) {
-            declLists.push_back(std::vector<AbstractDecl>());
+            declLists.push_back(std::vector<std::shared_ptr<Decl>>());
             for(auto& param: decl->paramList) {
-                declLists.back().push_back(AbstractDecl(param));
+                declLists.back().push_back(param);
             }
         }
         if(decl->isComputed()) {
             // Start another new, inner scope for declarations inside the body of the computed declaration.
-            declLists.push_back(std::vector<AbstractDecl>());
+            declLists.push_back(std::vector<std::shared_ptr<Decl>>());
             // Add Void type to computed declaration if it doesn't have one.
             if(decl->type.isInferred()) decl->type.resolveType(BuiltinType::Void);
 
@@ -88,7 +88,6 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
     }
 }
 void TypeChecker::visitScope(std::shared_ptr<Scope> scope) {}
-void TypeChecker::visitParam(std::shared_ptr<Param> param) {}
 void TypeChecker::visitArgument(std::shared_ptr<Argument> argument) {}
 void TypeChecker::visitPhysicalTypeRef(std::shared_ptr<PhysicalTypeRef> expr) {}
 void TypeChecker::visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr) {
@@ -106,23 +105,23 @@ void TypeChecker::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
     // Find the prototype to reference.
     //
     // TODO: Setup a dependency system to allow decls to be referenced before we know about them.
-    std::vector<AbstractDecl> nameMatches;
+    std::vector<std::shared_ptr<Decl>> nameMatches;
     for(auto it = declLists.rbegin(); it != declLists.rend(); ++it) {
         auto& declList = *it;
         for(auto& decl: declList) {
-            if(decl.name() != expr->name) continue;
+            if(decl->name != expr->name) continue;
             nameMatches.push_back(decl);
-            if(decl.paramList().size() != expr->argList.size()) continue;
+            if(decl->paramList.size() != expr->argList.size()) continue;
             // Check the names of all parameters
-            auto param = decl.paramList().begin();
+            auto param = decl->paramList.begin();
             auto arg = expr->argList.begin();
-            for(;param != decl.paramList().end(); ++param, ++arg) {
+            for(;param != decl->paramList.end(); ++param, ++arg) {
                 if((*param)->name != arg->name) goto failedToFindMatchInCurrentList;
-                if((*param)->value.type != arg->value->type) goto failedToFindMatchInCurrentList;
+                if((*param)->type.getType() != arg->value->type) goto failedToFindMatchInCurrentList;
             }
             // We must have succeeded! Add the decl's prototype and type to the declRefExpr and return.
             expr->decl = decl;
-            expr->type = decl.typeRef().getType();
+            expr->type = decl->type.getType();
             return;
 
             failedToFindMatchInCurrentList: continue;
@@ -133,7 +132,7 @@ void TypeChecker::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
     if(!nameMatches.empty()) {
         errorMessage += "\n\nHere are some matches that differ only in parameter labels or types:";
         for(auto& match: nameMatches) {
-            errorMessage += "\n\t" + match.range().getSubstring();
+            errorMessage += "\n\t" + match->range.getSubstring();
         }
     }
     reportError(errorMessage, expr);

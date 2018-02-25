@@ -38,7 +38,7 @@ struct DecimalLiteralExpr: public Expr {
 struct DeclRefExpr: public Expr {
     std::string name;
     std::vector<Argument> argList;
-    llvm::Optional<AbstractDecl> decl = llvm::None;
+    std::shared_ptr<Decl> decl = nullptr;
 
     EXPR_CTOR(DeclRef, const std::string& name,
               const std::vector<Argument>& argList),

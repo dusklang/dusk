@@ -21,7 +21,7 @@ std::string ASTPrinter::visitDecl(std::shared_ptr<Decl> decl, int indentationLev
             if(!first) str += ", ";
             else first = false;
 
-            str += visitParam(param, 0);
+            str += param->name + ": " + getNameForBuiltinType(param->type.getType());
         }
         str += ")";
     }
@@ -48,10 +48,6 @@ std::string ASTPrinter::visitScope(std::shared_ptr<Scope> scope, int indentation
         str += visit(node, indentationLevel + 1) + "\n";
     if(!str.empty()) str.pop_back();
     return str;
-}
-
-std::string ASTPrinter::visitParam(std::shared_ptr<Param> param, int indentationLevel) {
-    return param->name + ": " + visitPhysicalTypeRef(std::make_shared<PhysicalTypeRef>(param->value), 0);
 }
 
 std::string ASTPrinter::visitArgument(std::shared_ptr<Argument> argument, int indentationLevel) {
