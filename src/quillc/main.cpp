@@ -16,17 +16,30 @@
 
 std::string standardLibrary = R"~(
 #include <iostream>
-extern "C" void printInt(int x) {
-    std::cout << "Printing int from quill: " << x << "\n";
+extern "C" {
+    int add(int l, int r) {
+        return l + r;
+    }
+    void printInt(int x) {
+        std::cout << "Printing int from Quill: " << x << '\n';
+    }
+    void printDouble(double x) {
+        std::cout << "Printing float from Quill: " << x << '\n';
+    }
 }
 )~";
 std::string sourceCode = R"~(
+extern def add(l: i32, r: i32): i32
 extern def printInt(x: i32): Void
+extern def printDouble(x: f64): Void
+extern def sin(x: f64): f64
+def print(x: i32, plus /*y*/: i32) {
+    printInt(x: add(l: x, r: plus))
+    printDouble(x: sin(x: 74.5))
+    return
+}
 def main {
-    printInt(x: 5)
-    def nestedFunction { // Expected error here.
-
-    }
+    print(x: 4, plus: 4)
     return
 }
 )~";

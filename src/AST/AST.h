@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include "llvm/ADT/Optional.h"
+#include "llvm/IR/Value.h"
 #include "Types.h"
 #include "General/SourceLoc.h"
 
@@ -89,6 +90,8 @@ public:
 struct Param final : public ASTNode {
     std::string name;
     PhysicalTypeRef value;
+
+    llvm::Value* codegenVal;
 
     AST_NODE_CTOR(Param, const std::string& name, PhysicalTypeRef value), name(name), value(value) {}
 };

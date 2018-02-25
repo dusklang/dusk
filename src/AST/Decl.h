@@ -4,6 +4,9 @@
 
 #include <memory>
 #include <string>
+
+#include "llvm/IR/Value.h"
+
 #include "AST.h"
 #include "Expr.h"
 #include "Types.h"
@@ -20,6 +23,8 @@ struct DeclPrototype final : public ASTNode {
     llvm::Optional<PhysicalTypeRef> physicalType;
     bool isMut;
     bool isExtern;
+
+    llvm::Value* codegenVal;
 
     AST_NODE_CTOR(DeclPrototype,
                   const std::string& name,
@@ -147,6 +152,11 @@ public:
         return nullptr;
     }
 
+    llvm::Value* codegenVal() {
+        if(isParameter()) return param()->codegenVal;
+        return getProto()->codegenVal;
+    }
+
     bool isMut() const {
         if(auto proto = getProto()) return proto->isMut;
         return false;
@@ -157,6 +167,9 @@ public:
     }
     bool isComputed() const {
         if(isDeclaration()) return decl()->isComputed();
+        // FIXME: Assuming all prototypes are computed is bad. I'm probably going to get rid
+        // of prototypes soon though, anyway (and just have everything be a decl).
+        if(isPrototype()) return true;
         return false;
     }
 };

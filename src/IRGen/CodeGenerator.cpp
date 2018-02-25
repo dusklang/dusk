@@ -17,10 +17,12 @@ llvm::Function* CodeGenerator::visitDecl(std::shared_ptr<Decl> decl) {
     llvm::BasicBlock* block = llvm::BasicBlock::Create(context, "entry", function);
     builder.SetInsertPoint(block);
 
-    storedNonParameterizedDecls.clear();
-    for(auto &arg: function->args()) {
-        storedNonParameterizedDecls[arg.getName()] = &arg;
+    auto param = decl->prototype->paramList.begin();
+    auto arg = function->args().begin();
+    for(; param != decl->prototype->paramList.end() && arg != function->args().end(); ++param, ++arg) {
+        (*param)->codegenVal = arg;
     }
+
     if(auto expr = decl->expression()) {
         assert(false && "Code generation for stored decls is not yet supported");
     } else {
@@ -52,6 +54,7 @@ llvm::Function* CodeGenerator::visitDeclPrototype(std::shared_ptr<DeclPrototype>
     for(auto &arg: function->args()) {
         arg.setName(prototype->paramList[i++]->name);
     }
+    prototype->codegenVal = (llvm::Function*) function;
     return function;
 }
 void CodeGenerator::visitScope(std::shared_ptr<Scope> scope) {
@@ -69,21 +72,24 @@ llvm::Value* CodeGenerator::visitDecimalLiteralExpr(std::shared_ptr<DecimalLiter
     return llvm::ConstantFP::get(context, llvm::APFloat(std::stod(expr->literal)));
 }
 llvm::Value* CodeGenerator::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
-    llvm::Function* callee = module->getFunction(expr->name);
-    assert(callee && "Undeclared symbol");
+    auto referencedVal = expr->decl->codegenVal();
+    if(expr->decl->isComputed()) {
+        auto callee = static_cast<llvm::Function*>(referencedVal);
+        assert((callee->arg_size() == expr->argList.size()) &&
+               "Incorrect number of arguments passed to function");
 
-    assert((callee->arg_size() == expr->argList.size()) &&
-            "Incorrect number of arguments passed to function");
-
-    std::vector<llvm::Value*> args;
-    for(auto& arg: expr->argList) {
-        args.push_back(visitExpr(arg.value));
-        if(!args.back()) {
-            return nullptr;
+        std::vector<llvm::Value*> args;
+        for(auto& arg: expr->argList) {
+            args.push_back(visitExpr(arg.value));
+            if(!args.back()) {
+                return nullptr;
+            }
         }
-    }
 
-    return builder.CreateCall(callee, args, "calltmp");
+        return builder.CreateCall(callee, args, "calltmp");
+    } else {
+        return referencedVal;
+    }
 }
 
 llvm::Value* CodeGenerator::visitReturnStmt(std::shared_ptr<ReturnStmt> stmt) {

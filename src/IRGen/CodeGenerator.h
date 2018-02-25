@@ -28,7 +28,6 @@ class CodeGenerator final: public ASTVisitor<CodeGenerator,
 private:
     llvm::LLVMContext context;
     llvm::IRBuilder<> builder;
-    std::map<std::string, llvm::Value*> storedNonParameterizedDecls;
 public:
     llvm::Type* mapBuiltinTypeToLLVM(BuiltinType type);
     std::unique_ptr<llvm::Module> module;

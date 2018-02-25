@@ -112,7 +112,7 @@ void TypeChecker::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
 
     // Find the prototype to reference.
     //
-    // TODO: Setup a dependency system to allow decls to be declared after they are referenced.
+    // TODO: Setup a dependency system to allow decls to be referenced before we know about them.
     std::vector<AbstractDecl> nameMatches;
     for(auto it = declLists.rbegin(); it != declLists.rend(); ++it) {
         auto& declList = *it;
@@ -128,7 +128,7 @@ void TypeChecker::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
                 if((*param)->value.type != arg->value->type) goto failedToFindMatchInCurrentList;
             }
             // We must have succeeded! Add the decl's prototype and type to the declRefExpr and return.
-            expr->decl = AbstractDecl(decl);
+            expr->decl = decl;
             expr->type = decl.typeRef().getType();
             return;
 
