@@ -57,7 +57,10 @@ public:
 
     // Opposites:
     bool isStored() const { return (bool)std::dynamic_pointer_cast<Expr>(value); }
-    bool isComputed() const { return (bool)std::dynamic_pointer_cast<Scope>(value); }
+    bool isComputed() const {
+        if(!hasDefinition() && isExtern) return true;
+        return (bool)std::dynamic_pointer_cast<Scope>(value);
+    }
 
     bool isParameterized() const { return !paramList.empty(); }
 };
