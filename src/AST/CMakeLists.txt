@@ -1,5 +1,6 @@
 set(SOURCES
     ASTPrinter.cpp
+    Types.cpp
 )
 set(HEADERS
     AST.h
