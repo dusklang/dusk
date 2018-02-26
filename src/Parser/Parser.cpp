@@ -43,7 +43,6 @@ llvm::Optional<std::shared_ptr<Scope>> Parser::parseScope() {
 }
 
 std::shared_ptr<ASTNode> Parser::parseNode() {
-    std::cout << current().getRange().getSubstring() << "\n";
     if(auto stmt = TRY(parseStmt())) {
         return std::dynamic_pointer_cast<ASTNode>(*stmt);
     } else if(auto decl = TRY(parseDecl())) {
