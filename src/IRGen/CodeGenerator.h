@@ -42,4 +42,5 @@ public:
     llvm::Value* visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr);
 
     llvm::Value* visitReturnStmt(std::shared_ptr<ReturnStmt> stmt);
+    llvm::Value* visitAssignmentStmt(std::shared_ptr<AssignmentStmt> stmt);
 };

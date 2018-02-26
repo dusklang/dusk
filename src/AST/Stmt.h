@@ -27,3 +27,11 @@ struct ReturnStmt: public Stmt {
 
     STMT_CTOR(Return, const std::shared_ptr<Expr>& value), value(value) {}
 };
+
+struct AssignmentStmt: public Stmt {
+    std::shared_ptr<DeclRefExpr> lhs;
+    std::shared_ptr<Expr> rhs;
+
+    STMT_CTOR(Assignment, const std::shared_ptr<DeclRefExpr>& lhs, const std::shared_ptr<Expr>& rhs),
+    lhs(lhs), rhs(rhs) {}
+};

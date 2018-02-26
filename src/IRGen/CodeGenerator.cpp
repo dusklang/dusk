@@ -100,3 +100,7 @@ llvm::Value* CodeGenerator::visitReturnStmt(std::shared_ptr<ReturnStmt> stmt) {
         return builder.CreateRet(visitExpr(stmt->value));
     }
 }
+
+llvm::Value* CodeGenerator::visitAssignmentStmt(std::shared_ptr<AssignmentStmt> stmt) {
+    return builder.CreateStore(visitExpr(stmt->rhs), stmt->lhs->decl->codegenVal);
+}

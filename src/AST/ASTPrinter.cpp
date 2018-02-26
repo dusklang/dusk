@@ -89,3 +89,7 @@ std::string ASTPrinter::visitReturnStmt(std::shared_ptr<ReturnStmt> stmt, int in
     }
     return str;
 }
+
+std::string ASTPrinter::visitAssignmentStmt(std::shared_ptr<AssignmentStmt> stmt, int indentationLevel) {
+    return indentation(indentationLevel) + visitExpr(stmt->lhs, 0) + " = " + visitExpr(stmt->rhs, 0);
+}

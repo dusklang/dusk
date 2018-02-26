@@ -21,4 +21,5 @@ public:
     std::string visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr, int indentationLevel);
 
     std::string visitReturnStmt(std::shared_ptr<ReturnStmt> stmt, int indentationLevel);
+    std::string visitAssignmentStmt(std::shared_ptr<AssignmentStmt> stmt, int indentationLevel);
 };

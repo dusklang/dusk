@@ -47,4 +47,5 @@ public:
     void visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr);
 
     void visitReturnStmt(std::shared_ptr<ReturnStmt> stmt);
+    void visitAssignmentStmt(std::shared_ptr<AssignmentStmt> stmt);
 };

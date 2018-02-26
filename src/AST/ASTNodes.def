@@ -37,6 +37,7 @@ EXPR_NODE(DeclRef)
 
 // Ditto for stmts.
 STMT_NODE(Return)
+STMT_NODE(Assignment)
 
 #undef STMT_NODE
 #undef EXPR_NODE

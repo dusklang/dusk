@@ -144,3 +144,16 @@ void TypeChecker::visitReturnStmt(std::shared_ptr<ReturnStmt> stmt) {
         visitExpr(stmt->value);
     }
 }
+
+void TypeChecker::visitAssignmentStmt(std::shared_ptr<AssignmentStmt> stmt) {
+    visitDeclRefExpr(stmt->lhs);
+    visitExpr(stmt->rhs);
+    if(!stmt->lhs->decl->isMut) {
+        reportError("Cannot assign to constant declaration '" + stmt->lhs->decl->name + "'", stmt);
+    }
+    if(stmt->lhs->type != stmt->rhs->type) {
+        reportError("Cannot assign value of type '" + getNameForBuiltinType(*stmt->rhs->type)
+                    + "' to mutable declaration of type '" + getNameForBuiltinType(*stmt->lhs->type),
+                    stmt);
+    }
+}

@@ -123,6 +123,6 @@ Token Lexer::nextTokIncludingInsignificant() {
         RETURN(hasDot ? tok::decimal_literal : tok::integer_literal);
     }
 
-    reportError(pos, "Unhandled token");
+    assert(false && "Unhandled token");
     LLVM_BUILTIN_UNREACHABLE;
 }

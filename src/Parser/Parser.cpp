@@ -43,14 +43,31 @@ llvm::Optional<std::shared_ptr<Scope>> Parser::parseScope() {
 }
 
 std::shared_ptr<ASTNode> Parser::parseNode() {
+
     if(auto stmt = TRY(parseStmt())) {
         return std::dynamic_pointer_cast<ASTNode>(*stmt);
     } else if(auto decl = TRY(parseDecl())) {
         return std::dynamic_pointer_cast<ASTNode>(std::make_shared<Decl>(*decl));
     }
+    recordCurrentLoc();
     auto expr = parseExpr();
     assert(expr && "Failed to parse expression");
-    return std::dynamic_pointer_cast<ASTNode>(*expr);
+    // Parse AssignmentStmt
+    // TODO: Maybe put this into it's own method someday
+    if(current().is(tok::sep_equal)) {
+        next();
+        auto rhsExpr = parseExpr();
+        if(!rhsExpr) reportError("Expected right-hand expression in assignment statement");
+
+        if(auto declRefLHS = std::dynamic_pointer_cast<DeclRefExpr>(*expr)) {
+            return std::make_shared<AssignmentStmt>(currentRange(), declRefLHS, *rhsExpr);
+        } else {
+            reportError("Cannot assign to non-declaration reference");
+        }
+    } else {
+        currentRange();
+        return std::dynamic_pointer_cast<ASTNode>(*expr);
+    }
 }
 
 PhysicalTypeRef Parser::parseTypeRef() {

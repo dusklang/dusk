@@ -17,7 +17,10 @@
 std::string standardLibrary = R"~(
 #include <iostream>
 extern "C" {
-    int add(int l, int r) {
+    int addInt(int l, int r) {
+        return l + r;
+    }
+    double addDouble(double l, double r) {
         return l + r;
     }
     void printInt(int x) {
@@ -29,17 +32,20 @@ extern "C" {
 }
 )~";
 std::string sourceCode = R"~(
-extern def add(l: i32, r: i32): i32
+extern def addInt(l: i32, r: i32): i32
+extern def addDouble(l: f64, r: f64): f64
 extern def printInt(x: i32): Void
 extern def printDouble(x: f64): Void
-extern def sin(x: f64): f64
-def print(x: i32, plus /*y*/: i32) {
-    printInt(x: add(l: x, r: plus))
-    return
-}
 def main {
-    var myConst = add(l: 4, r: 74)
-    print(x: 2, plus: myConst) // Should print 80
+    var myVar = 1
+    printInt(x: myVar) // 1
+    myVar = addInt(l: myVar, r: 1)
+    printInt(x: myVar) // 2
+    var myFloatVar = 2.0
+    printDouble(x: myFloatVar) // 2.0
+    myFloatVar = addDouble(l: myFloatVar, r: 0.1)
+    printDouble(x: myFloatVar) // 2.1
+    printInt(x: myVar) // Still 2
     return
 }
 )~";
