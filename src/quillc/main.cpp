@@ -40,19 +40,13 @@ extern def addDouble(l: f64, r: f64): f64
 extern def printInt(x: i32): Void
 extern def printDouble(x: f64): Void
 extern def printBool(x: Bool): Void
+def someFunction(x: i32): i32 {
+    def x = addInt(l: x, r: 1)
+    printInt(x: x)
+    return someFunction(x: x)
+}
 def main {
-    printBool(x: true)
-    printBool(x: false)
-    printBool(x: true)
-    var myVar: f64 = 1
-    printInt(x: myVar) // 1
-    myVar = addInt(l: myVar, r: 1)
-    printInt(x: myVar) // 2
-    var myFloatVar = 2.0
-    printDouble(x: myFloatVar) // 2.0
-    myFloatVar = addDouble(l: myFloatVar, r: 0.1)
-    printDouble(x: myFloatVar) // 2.1
-    printInt(x: myVar) // Still 2
+    someFunction(x: 4)
     return
 }
 )~";

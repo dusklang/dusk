@@ -3,13 +3,36 @@
 #include "TypeChecker.h"
 
 void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
-    // Insert declaration into the current scope.
-    declLists.back().push_back(decl);
+    // Search for existing declaration in the current scope with the same name and parameter labels.
+    for(auto& existingDecl: declLists.back()) {
+        if(existingDecl->name != decl->name) continue;
+        if(existingDecl->paramList.size() != decl->paramList.size()) continue;
+
+        auto&& param = decl->paramList.begin();
+        auto&& existingParam = existingDecl->paramList.begin();
+        for(;param != decl->paramList.end() && existingParam != existingDecl->paramList.end();
+            ++param, ++existingParam) {
+            if((*existingParam)->name != (*param)->name) goto notAMatch;
+        }
+        // We must have found a matching declaration in the same scope.
+        reportError("Cannot redeclare '" + decl->name + "'\n" +
+                    "\tPrevious declaration here: " + existingDecl->range.getSubstring(),
+                    decl);
+
+        notAMatch: continue;
+    }
+
     // Reject nested functions.
     if(declLists.size() > 1 && decl->isComputed()) {
         // TODO: Just report the source range of the prototype, which now is not its own ASTNode
         // so is not possible.
         reportError("Unexpected nested function '" + decl->name + "'", decl);
+    }
+
+    if(decl->isComputed()) {
+        // If this is a computed declaration, insert declaration into the enclosing scope now to
+        // enable recursion.
+        declLists.back().push_back(decl);
     }
 
     if(decl->hasDefinition()) {
@@ -88,6 +111,10 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
         if(decl->type.getType() == BuiltinType::Void) reportError("Stored declarations can not have type Void", decl);
 
         if(decl->isParameterized()) declLists.pop_back();
+
+        // If this is a stored declaration, add the decl to the enclosing scope now, so we can shadow
+        // declarations from outer scopes.
+        declLists.back().push_back(decl);
     } else {
         if(!decl->isExtern) {
             reportError("Non-extern declarations currently always need definitions", decl);
