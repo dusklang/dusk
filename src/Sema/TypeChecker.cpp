@@ -44,51 +44,64 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
             }
         }
         if(decl->isComputed()) {
-            // Start another new, inner scope for declarations inside the body of the computed declaration.
-            declLists.push_back(std::vector<std::shared_ptr<Decl>>());
             // Add Void type to computed declaration if it doesn't have one.
             if(decl->type.isInferred()) decl->type.resolveType(BuiltinType::Void);
 
-            for(auto& node: decl->body()->nodes) {
-                // Handle return statements.
-                if(auto ret = std::dynamic_pointer_cast<ReturnStmt>(node)) {
-                    visitReturnStmt(ret);
-                    // Handle returning value in a void computed decl.
-                    if(decl->type.getType() == BuiltinType::Void) {
-                        if(ret->value) {
-                            reportError("Attempted to return value from Void computed decl '"
-                                        + decl->name + "'",
-                                        ret);
-                        } else {
-                            continue;
+            // Recursive lambda for handling nested scopes inside the function, as well as the function
+            // body itself.
+            std::function<void(std::shared_ptr<Scope>)> handleScope = [&](std::shared_ptr<Scope> scope) {
+                // Start another new, inner scope for declarations inside the scope.
+                declLists.push_back(std::vector<std::shared_ptr<Decl>>());
+
+                for(auto& node: scope->nodes) {
+                    // Handle return statements.
+                    if(auto ret = std::dynamic_pointer_cast<ReturnStmt>(node)) {
+                        visitReturnStmt(ret);
+                        // Handle returning value in a void computed decl.
+                        if(decl->type.getType() == BuiltinType::Void) {
+                            if(ret->value) {
+                                reportError("Attempted to return value from Void computed decl '"
+                                            + decl->name + "'",
+                                            ret);
+                            } else {
+                                continue;
+                            }
                         }
-                    }
 
-                    // Handle returning no value in a non-void computed decl.
-                    if(!ret->value) {
-                        reportError("Computed decl '" + decl->name + "' must return a value",
-                                    ret);
-                    }
+                        // Handle returning no value in a non-void computed decl.
+                        if(!ret->value) {
+                            reportError("Computed decl '" + decl->name + "' must return a value",
+                                        ret);
+                        }
 
-                    // Handle returning a value of a type incompatible with the computed decl's type
-                    // (currently, "incompatible with" just means "not equal to").
-                    if(*ret->value->type != decl->type.getType()) {
-                        // TODO: Include in the error message the type of the returned expr.
-                        reportError("Attempted to return value of incompatible type from computed decl "
-                                    "of type " + getNameForBuiltinType(decl->type.getType()),
-                                    ret);
+                        // Handle returning a value of a type incompatible with the computed decl's type
+                        // (currently, "incompatible with" just means "not equal to").
+                        if(*ret->value->type != decl->type.getType()) {
+                            // TODO: Include in the error message the type of the returned expr.
+                            reportError("Attempted to return value of incompatible type from computed decl "
+                                        "of type " + getNameForBuiltinType(decl->type.getType()),
+                                        ret);
+                        }
+                    } else if(auto ifStmt = std::dynamic_pointer_cast<IfStmt>(node)) {
+                        visitExpr(ifStmt->condition);
+                        if(ifStmt->condition->type != BuiltinType::Bool) {
+                            reportError("Expression in if statement is not of type Bool", ifStmt);
+                        }
+                        handleScope(ifStmt->thenBlock);
+                        if(ifStmt->elseBlock) handleScope(*ifStmt->elseBlock);
+                    } else if(auto expr = std::dynamic_pointer_cast<Expr>(node)) {
+                        visitExpr(expr);
+                        // Warn on unused expressions.
+                        if(expr->type != BuiltinType::Void) {
+                            reportWarning("Unused expression", expr);
+                        }
+                    } else {
+                        visit(node);
                     }
-                } else if(auto expr = std::dynamic_pointer_cast<Expr>(node)) {
-                    visitExpr(expr);
-                    // Warn on unused expressions.
-                    if(expr->type != BuiltinType::Void) {
-                        reportWarning("Unused expression", expr);
-                    }
-                } else {
-                    visit(node);
                 }
-            }
-            declLists.pop_back();
+                declLists.pop_back();
+            };
+            handleScope(decl->body());
             if(decl->isParameterized()) declLists.pop_back();
             return;
         }
