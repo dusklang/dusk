@@ -13,9 +13,12 @@ llvm::Type* CodeGenerator::mapBuiltinTypeToLLVM(BuiltinType type) {
 
 llvm::Value* CodeGenerator::visitDecl(std::shared_ptr<Decl> decl) {
     if(auto expr = decl->expression()) {
-        assert(!decl->isMut && "Code generation for mutable stored declarations is not yet supported");
-
-        decl->codegenVal = visitExpr(expr);
+        if(decl->isMut) {
+            decl->codegenVal = builder.CreateAlloca(mapBuiltinTypeToLLVM(decl->type.getType()), 0, decl->name.c_str());
+            builder.CreateStore(visitExpr(expr), decl->codegenVal);
+        } else {
+            decl->codegenVal = visitExpr(expr);
+        }
         return decl->codegenVal;
     } else {
         std::vector<llvm::Type*> arguments;
@@ -82,7 +85,11 @@ llvm::Value* CodeGenerator::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) 
 
         return builder.CreateCall(callee, args, "calltmp");
     } else {
-        return referencedVal;
+        if(expr->decl->isMut) {
+            return builder.CreateLoad(expr->decl->codegenVal, expr->decl->name.c_str());
+        } else {
+            return referencedVal;
+        }
     }
 }
 

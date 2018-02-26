@@ -38,7 +38,7 @@ def print(x: i32, plus /*y*/: i32) {
     return
 }
 def main {
-    def myConst = add(l: 4, r: 74)
+    var myConst = add(l: 4, r: 74)
     print(x: 2, plus: myConst) // Should print 80
     return
 }
