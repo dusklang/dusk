@@ -7,8 +7,8 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
     declLists.back().push_back(decl);
     // Reject nested functions.
     if(declLists.size() > 1 && decl->isComputed()) {
-        // TODO: Just report the source range of the prototype, which now is not its own
-        // ASTNode so is not possible.
+        // TODO: Just report the source range of the prototype, which now is not its own ASTNode
+        // so is not possible.
         reportError("Unexpected nested function '" + decl->name + "'", decl);
     }
 
@@ -74,7 +74,17 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
         assert(decl->isStored());
 
         visitExpr(decl->expression());
-        if(decl->type.isInferred()) decl->type.resolveType(*decl->expression()->type);
+        if(decl->type.isInferred()) {
+            decl->type.resolveType(*decl->expression()->type);
+        } else {
+            if(decl->type.getType() != decl->expression()->type) {
+                reportError("Cannot assign value of type '" +
+                            getNameForBuiltinType(*decl->expression()->type) +
+                            "' to declaration of type '" +
+                            getNameForBuiltinType(decl->type.getType()) + "'",
+                            decl);
+            }
+        }
         if(decl->type.getType() == BuiltinType::Void) reportError("Stored declarations can not have type Void", decl);
 
         if(decl->isParameterized()) declLists.pop_back();

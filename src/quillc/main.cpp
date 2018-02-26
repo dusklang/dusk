@@ -44,7 +44,7 @@ def main {
     printBool(x: true)
     printBool(x: false)
     printBool(x: true)
-    var myVar = 1
+    var myVar: f64 = 1
     printInt(x: myVar) // 1
     myVar = addInt(l: myVar, r: 1)
     printInt(x: myVar) // 2
