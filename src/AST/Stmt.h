@@ -35,3 +35,13 @@ struct AssignmentStmt: public Stmt {
     STMT_CTOR(Assignment, const std::shared_ptr<DeclRefExpr>& lhs, const std::shared_ptr<Expr>& rhs),
     lhs(lhs), rhs(rhs) {}
 };
+
+struct IfStmt: public Stmt {
+    std::shared_ptr<Expr> condition;
+    std::shared_ptr<Scope> thenBlock;
+    llvm::Optional<std::shared_ptr<Scope>> elseBlock;
+
+    STMT_CTOR(If, std::shared_ptr<Expr> condition, std::shared_ptr<Scope> thenBlock,
+              llvm::Optional<std::shared_ptr<Scope>> elseBlock),
+    condition(condition), thenBlock(thenBlock), elseBlock(elseBlock) {}
+};

@@ -23,4 +23,5 @@ public:
 
     std::string visitReturnStmt(std::shared_ptr<ReturnStmt> stmt, int indentationLevel);
     std::string visitAssignmentStmt(std::shared_ptr<AssignmentStmt> stmt, int indentationLevel);
+    std::string visitIfStmt(std::shared_ptr<IfStmt> stmt, int indentationLevel, bool isIfElse = false);
 };

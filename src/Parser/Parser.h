@@ -79,6 +79,7 @@ public:
     PhysicalTypeRef parseTypeRef();
     llvm::Optional<Decl> parseDecl();
     llvm::Optional<std::shared_ptr<Stmt>> parseStmt();
+    llvm::Optional<std::shared_ptr<Stmt>> parseIfStmt();
     llvm::Optional<std::shared_ptr<Expr>> parseDeclRefExpr();
     llvm::Optional<std::shared_ptr<Expr>> parseExpr();
 };

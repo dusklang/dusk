@@ -97,3 +97,29 @@ std::string ASTPrinter::visitReturnStmt(std::shared_ptr<ReturnStmt> stmt, int in
 std::string ASTPrinter::visitAssignmentStmt(std::shared_ptr<AssignmentStmt> stmt, int indentationLevel) {
     return indentation(indentationLevel) + visitExpr(stmt->lhs, 0) + " = " + visitExpr(stmt->rhs, 0);
 }
+
+std::string ASTPrinter::visitIfStmt(std::shared_ptr<IfStmt> stmt, int indentationLevel, bool isIfElse) {
+    std::string str;
+    if(!isIfElse) str = indentation(indentationLevel);
+    str += "if " + visitExpr(stmt->condition, 0) + " {\n";
+    str += visitScope(stmt->thenBlock, indentationLevel);
+    str += "\n" + indentation(indentationLevel) + "}";
+    if(stmt->elseBlock) {
+        str += " else ";
+        // Handle else if.
+        if((*stmt->elseBlock)->nodes.size() == 1) {
+            if(auto elseIf = std::dynamic_pointer_cast<IfStmt>((*stmt->elseBlock)->nodes[0])) {
+                str += visitIfStmt(elseIf, indentationLevel, true);
+            } else {
+                // TODO: A goto really shouldn't be necessary here.
+                goto notIfElse;
+            }
+        } else {
+            notIfElse:
+            str += "{\n";
+            str += visitScope(*stmt->elseBlock, indentationLevel);
+            str += "\n" + indentation(indentationLevel) + "}";
+        }
+    }
+    return str;
+}

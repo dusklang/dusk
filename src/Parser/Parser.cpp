@@ -43,7 +43,7 @@ llvm::Optional<std::shared_ptr<Scope>> Parser::parseScope() {
 }
 
 std::shared_ptr<ASTNode> Parser::parseNode() {
-
+    std::cout << current().getRange().getSubstring() << "\n";
     if(auto stmt = TRY(parseStmt())) {
         return std::dynamic_pointer_cast<ASTNode>(*stmt);
     } else if(auto decl = TRY(parseDecl())) {
@@ -168,9 +168,35 @@ llvm::Optional<std::shared_ptr<Stmt>> Parser::parseStmt() {
         auto value = parseExpr();
         if(!value) return std::dynamic_pointer_cast<Stmt>(std::make_shared<ReturnStmt>(currentRange(), nullptr));
         return std::dynamic_pointer_cast<Stmt>(std::make_shared<ReturnStmt>(currentRange(), *value));
-    } else {
-        return llvm::None;
     }
+
+    return parseIfStmt();
+}
+
+llvm::Optional<std::shared_ptr<Stmt>> Parser::parseIfStmt() {
+    if(current().isNot(tok::kw_if)) return llvm::None;
+    recordCurrentLoc();
+    next();
+    auto conditionExpr = parseExpr();
+    if(!conditionExpr) reportError("Expected condition expression for if statement");
+    auto thenScope = parseScope();
+    if(!thenScope) reportError("Expected opening curly brace for if statement");
+    llvm::Optional<std::shared_ptr<Scope>> elseScope;
+    if(current().is(tok::kw_else)) {
+        next();
+        if(auto scope = parseScope()) {
+            elseScope = *scope;
+        } else if(auto elseIf = parseIfStmt()) {
+            elseScope = std::make_shared<Scope>(
+                (*elseIf)->range,
+                std::vector<std::shared_ptr<ASTNode>> { std::dynamic_pointer_cast<ASTNode>(*elseIf) }
+            );
+        }
+    }
+    return std::dynamic_pointer_cast<Stmt>(std::make_shared<IfStmt>(currentRange(),
+                                                                    *conditionExpr,
+                                                                    *thenScope,
+                                                                    elseScope));
 }
 
 llvm::Optional<std::shared_ptr<Expr>> Parser::parseDeclRefExpr() {
