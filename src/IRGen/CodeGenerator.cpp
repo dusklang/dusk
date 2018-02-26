@@ -8,6 +8,7 @@ llvm::Type* CodeGenerator::mapBuiltinTypeToLLVM(BuiltinType type) {
         case BuiltinType::i32: return llvm::Type::getInt32Ty(context);
         case BuiltinType::f64: return llvm::Type::getDoubleTy(context);
         case BuiltinType::Void: return llvm::Type::getVoidTy(context);
+        case BuiltinType::Bool: return llvm::Type::getInt1Ty(context);
     }
 }
 
@@ -67,6 +68,9 @@ llvm::Value* CodeGenerator::visitIntegerLiteralExpr(std::shared_ptr<IntegerLiter
 }
 llvm::Value* CodeGenerator::visitDecimalLiteralExpr(std::shared_ptr<DecimalLiteralExpr> expr) {
     return llvm::ConstantFP::get(context, llvm::APFloat(std::stod(expr->literal)));
+}
+llvm::Value* CodeGenerator::visitBooleanLiteralExpr(std::shared_ptr<BooleanLiteralExpr> expr) {
+    return llvm::ConstantInt::get(context, llvm::APInt(1, expr->literal ? 1 : 0));
 }
 llvm::Value* CodeGenerator::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
     auto referencedVal = expr->decl->codegenVal;

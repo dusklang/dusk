@@ -33,6 +33,7 @@ TYPED_AST_NODE(Stmt)
 // Specific exprs; these get their own methods in ASTVisitor named visit##name##Expr().
 EXPR_NODE(IntegerLiteral)
 EXPR_NODE(DecimalLiteral)
+EXPR_NODE(BooleanLiteral)
 EXPR_NODE(DeclRef)
 
 // Ditto for stmts.

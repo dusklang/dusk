@@ -97,6 +97,9 @@ void TypeChecker::visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> ex
 void TypeChecker::visitDecimalLiteralExpr(std::shared_ptr<DecimalLiteralExpr> expr) {
     expr->type = BuiltinType::f64;
 }
+void TypeChecker::visitBooleanLiteralExpr(std::shared_ptr<BooleanLiteralExpr> expr) {
+    expr->type = BuiltinType::Bool;
+}
 void TypeChecker::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
     // Type-check arguments.
     for(auto& arg: expr->argList) {

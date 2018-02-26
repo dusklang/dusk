@@ -68,6 +68,7 @@ std::shared_ptr<ASTNode> Parser::parseNode() {
         currentRange();
         return std::dynamic_pointer_cast<ASTNode>(*expr);
     }
+    LLVM_BUILTIN_UNREACHABLE;
 }
 
 PhysicalTypeRef Parser::parseTypeRef() {
@@ -200,7 +201,15 @@ llvm::Optional<std::shared_ptr<Expr>> Parser::parseDeclRefExpr() {
 
 llvm::Optional<std::shared_ptr<Expr>> Parser::parseExpr() {
     recordCurrentLoc();
-    if(auto intVal = TRY(parseIntegerLiteral())) {
+    if(current().is(tok::kw_true)) {
+        next();
+        return std::dynamic_pointer_cast<Expr>(std::make_shared<BooleanLiteralExpr>(currentRange(),
+                                                                                    true));
+    } else if(current().is(tok::kw_false)) {
+        next();
+        return std::dynamic_pointer_cast<Expr>(std::make_shared<BooleanLiteralExpr>(currentRange(),
+                                                                                    false));
+    } else if(auto intVal = TRY(parseIntegerLiteral())) {
         return std::dynamic_pointer_cast<Expr>(std::make_shared<IntegerLiteralExpr>(currentRange(), *intVal));
     } else if(auto decimalVal = TRY(parseDecimalLiteral())) {
         return std::dynamic_pointer_cast<Expr>(std::make_shared<DecimalLiteralExpr>(currentRange(), *decimalVal));

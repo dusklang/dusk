@@ -35,6 +35,11 @@ struct DecimalLiteralExpr: public Expr {
     EXPR_CTOR(DecimalLiteral, const std::string& literal), literal(literal) {}
 };
 
+struct BooleanLiteralExpr: public Expr {
+    bool literal;
+    EXPR_CTOR(BooleanLiteral, bool literal), literal(literal) {}
+};
+
 struct DeclRefExpr: public Expr {
     std::string name;
     std::vector<Argument> argList;

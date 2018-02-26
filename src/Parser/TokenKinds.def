@@ -27,6 +27,8 @@ TOKEN_KEYWORD(def, def)
 TOKEN_KEYWORD(var, var)
 TOKEN_KEYWORD(extern, extern)
 TOKEN_KEYWORD(return, return)
+TOKEN_KEYWORD(true, true)
+TOKEN_KEYWORD(false, false)
 
 TOKEN_SEPARATOR(colon, ':')
 TOKEN_SEPARATOR(equal, '=')

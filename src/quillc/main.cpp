@@ -29,6 +29,9 @@ extern "C" {
     void printDouble(double x) {
         std::cout << "Printing float from Quill: " << x << '\n';
     }
+    void printBool(bool x) {
+        std::cout << "Print bool from Quill: " << (x ? "true": "false") << '\n';
+    }
 }
 )~";
 std::string sourceCode = R"~(
@@ -36,7 +39,11 @@ extern def addInt(l: i32, r: i32): i32
 extern def addDouble(l: f64, r: f64): f64
 extern def printInt(x: i32): Void
 extern def printDouble(x: f64): Void
+extern def printBool(x: Bool): Void
 def main {
+    printBool(x: true)
+    printBool(x: false)
+    printBool(x: true)
     var myVar = 1
     printInt(x: myVar) // 1
     myVar = addInt(l: myVar, r: 1)

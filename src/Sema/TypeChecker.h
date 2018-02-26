@@ -44,6 +44,7 @@ public:
     void visitPhysicalTypeRef(std::shared_ptr<PhysicalTypeRef> expr);
     void visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr);
     void visitDecimalLiteralExpr(std::shared_ptr<DecimalLiteralExpr> expr);
+    void visitBooleanLiteralExpr(std::shared_ptr<BooleanLiteralExpr> expr);
     void visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr);
 
     void visitReturnStmt(std::shared_ptr<ReturnStmt> stmt);

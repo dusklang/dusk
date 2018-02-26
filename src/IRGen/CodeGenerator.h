@@ -39,6 +39,7 @@ public:
     void visitPhysicalTypeRef(std::shared_ptr<PhysicalTypeRef> expr);
     llvm::Value* visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr);
     llvm::Value* visitDecimalLiteralExpr(std::shared_ptr<DecimalLiteralExpr> expr);
+    llvm::Value* visitBooleanLiteralExpr(std::shared_ptr<BooleanLiteralExpr> expr);
     llvm::Value* visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr);
 
     llvm::Value* visitReturnStmt(std::shared_ptr<ReturnStmt> stmt);
