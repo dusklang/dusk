@@ -52,19 +52,32 @@ llvm::Value* CodeGenerator::visitDecl(std::shared_ptr<Decl> decl) {
                 for(auto& node: scope->nodes) {
                     if(auto ifStmt = std::dynamic_pointer_cast<IfStmt>(node)) {
                         auto thenBlock = llvm::BasicBlock::Create(context, "if.then", function);
-                        auto elseBlock = llvm::BasicBlock::Create(context, "if.else", function);
+                        llvm::BasicBlock* elseBlock = nullptr;
+                        if(ifStmt->elseScope) {
+                            elseBlock = llvm::BasicBlock::Create(context, "if.else", function);
+                        }
                         auto endBlock = llvm::BasicBlock::Create(context, "if.end", function);
-                        builder.CreateCondBr(visitExpr(ifStmt->condition), thenBlock, elseBlock);
+                        builder.CreateCondBr(visitExpr(ifStmt->condition), thenBlock, ifStmt->elseScope ? elseBlock : endBlock);
 
                         builder.SetInsertPoint(thenBlock);
                         visitInnerScope(ifStmt->thenScope);
-                        builder.CreateBr(endBlock);
-
-                        builder.SetInsertPoint(elseBlock);
-                        if(auto elseScope = ifStmt->elseScope) {
-                            visitInnerScope(*elseScope);
+                        // If the last node in thenScope is a return statement, we need to avoid creating
+                        // a branch after it because a basic block can only have one terminal instruction.
+                        // http://llvm.org/doxygen/classllvm_1_1BasicBlock.html
+                        if(ifStmt->thenScope->nodes.empty() ||
+                           !std::dynamic_pointer_cast<ReturnStmt>(ifStmt->thenScope->nodes.back())) {
+                            builder.CreateBr(endBlock);
                         }
-                        builder.CreateBr(endBlock);
+
+                        if(auto elseScope = ifStmt->elseScope) {
+                            builder.SetInsertPoint(elseBlock);
+                            visitInnerScope(*elseScope);
+                            // Same situation as above.
+                            if((*elseScope)->nodes.empty() ||
+                               !std::dynamic_pointer_cast<ReturnStmt>((*elseScope)->nodes.back())) {
+                                builder.CreateBr(endBlock);
+                            }
+                        }
 
                         builder.SetInsertPoint(endBlock);
                     } else {
