@@ -88,10 +88,10 @@ public:
 };
 
 struct Argument final : public ASTNode {
-    std::string name;
+    std::string label;
     std::shared_ptr<Expr> value;
 
-    AST_NODE_CTOR(Argument, const std::string& name, std::shared_ptr<Expr> value), name(name), value(value) {}
+    AST_NODE_CTOR(Argument, const std::string& label, std::shared_ptr<Expr> value), label(label), value(value) {}
 };
 
 // A scope node represents a collection of other nodes.

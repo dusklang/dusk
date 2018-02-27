@@ -12,14 +12,15 @@
 #include "Types.h"
 
 struct Expr;
+struct ParamDecl;
 
-struct Decl final : public ASTNode {
+struct Decl: public ASTNode {
     std::string name;
     TypeRef type;
     bool isMut;
     bool isExtern;
 
-    std::vector<std::shared_ptr<Decl>> paramList;
+    std::vector<std::shared_ptr<ParamDecl>> paramList;
 
     llvm::Value* codegenVal;
 private:
@@ -39,7 +40,7 @@ public:
                   TypeRef type,
                   bool isMut = false,
                   bool isExtern = false,
-                  std::vector<std::shared_ptr<Decl>> paramList = std::vector<std::shared_ptr<Decl>>(),
+                  std::vector<std::shared_ptr<ParamDecl>> paramList = std::vector<std::shared_ptr<ParamDecl>>(),
                   std::shared_ptr<Expr> expression = nullptr),
     name(name), type(type), isMut(isMut), isExtern(isExtern), paramList(paramList),
     value(std::dynamic_pointer_cast<ASTNode>(expression)) {}
@@ -49,7 +50,7 @@ public:
                   TypeRef type,
                   bool isMut,
                   bool isExtern,
-                  std::vector<std::shared_ptr<Decl>> paramList,
+                  std::vector<std::shared_ptr<ParamDecl>> paramList,
                   std::shared_ptr<Scope> body),
     name(name), type(type), isMut(isMut), isExtern(isExtern), paramList(paramList),
     value(std::dynamic_pointer_cast<ASTNode>(body)) {}
@@ -63,4 +64,21 @@ public:
     }
 
     bool isParameterized() const { return !paramList.empty(); }
+};
+
+// For a ParamDecl, the inherited name field represents the internal name of the parameter, while the
+// label field represents the *external* label for the parameter. If only a name is specified, like so...
+//     def myFunction(intParameter: i32): Void
+// ...that name will be copied into label. If an underscore instead of a label precedes the name of
+// the function...
+//     def myFunction(_ intParameter: i32): Void
+// ...label will be None.
+struct ParamDecl: public Decl {
+    llvm::Optional<std::string> label;
+
+    ParamDecl(SourceRange range,
+              llvm::Optional<std::string> label,
+              std::string name,
+              TypeRef type) :
+    Decl(range, name, type), label(label) {}
 };

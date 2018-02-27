@@ -39,10 +39,28 @@ extern def bothTrue(l: Bool, r: Bool): Bool
 extern def printInt(x: i32): Void
 extern def printChar(x: Char): Void
 extern def println: Void
-def main {
-    // FizzBuzz.
-    var i = 1
-    while lte(l: i, r: 100) {
+def performFizzBuzz(from start: i32, to end: i32) {
+    // Check range.
+    if notTrue(x: lte(l: start, r: end)) {
+        printChar(x: 'I')
+        printChar(x: 'n')
+        printChar(x: 'v')
+        printChar(x: 'a')
+        printChar(x: 'l')
+        printChar(x: 'i')
+        printChar(x: 'd')
+        printChar(x: ' ')
+        printChar(x: 'b')
+        printChar(x: 'o')
+        printChar(x: 'u')
+        printChar(x: 'n')
+        printChar(x: 'd')
+        printChar(x: 's')
+        println
+        return
+    }
+    var i = start
+    while lte(l: i, r: end) {
         def fizz = eq(l: mod(l: i, r: 3), r: 0)
         def buzz = eq(l: mod(l: i, r: 5), r: 0)
         if fizz {
@@ -63,6 +81,11 @@ def main {
         println
         i = add(l: i, r: 1)
     }
+    return
+}
+def main {
+    performFizzBuzz(from: 1, to: 1000)
+    performFizzBuzz(from: 1000, to: 1) // Invalid bounds
 
     return
 }

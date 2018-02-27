@@ -102,15 +102,20 @@ llvm::Optional<Decl> Parser::parseDecl() {
     }
     EXPECT_NEXT(tok::identifier, "Expected identifier after def");
     auto name = current().getText();
-    std::vector<std::shared_ptr<Decl>> paramList;
+    std::vector<std::shared_ptr<ParamDecl>> paramList;
     if(next().is(tok::sep_left_paren)) {
         do {
             recordCurrentLoc();
-            EXPECT_NEXT(tok::identifier, "Expected parameter name");
-            auto param = current().getText();
-            EXPECT_NEXT(tok::sep_colon, "Expected colon after parameter name");
+            EXPECT_NEXT(tok::identifier, "Expected parameter label");
+            auto paramLabel = current().getText();
+            std::string paramName = paramLabel;
+            if(next().is(tok::identifier)) {
+                paramName = current().getText();
+                next();
+            }
+            EXPECT(tok::sep_colon, "Expected colon after parameter name");
             next();
-            paramList.push_back(std::make_shared<Decl>(currentRange(), param, parseTypeRef()));
+            paramList.push_back(std::make_shared<ParamDecl>(currentRange(), paramLabel, paramName, parseTypeRef()));
         } while(current().is(tok::sep_comma));
         EXPECT(tok::sep_right_paren, "Expected ')' after parameter list");
         if(paramList.empty()) reportError("Expected parameter list for parameterized declaration " + name + ", "

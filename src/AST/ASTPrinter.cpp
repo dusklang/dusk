@@ -51,7 +51,7 @@ std::string ASTPrinter::visitScope(std::shared_ptr<Scope> scope, int indentation
 }
 
 std::string ASTPrinter::visitArgument(std::shared_ptr<Argument> argument, int indentationLevel) {
-    return argument->name + ": " + visitExpr(argument->value, 0);
+    return argument->label + ": " + visitExpr(argument->value, 0);
 }
 
 std::string ASTPrinter::visitPhysicalTypeRef(std::shared_ptr<PhysicalTypeRef> expr, int indentationLevel) {

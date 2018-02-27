@@ -12,7 +12,7 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
         auto&& existingParam = existingDecl->paramList.begin();
         for(;param != decl->paramList.end() && existingParam != existingDecl->paramList.end();
             ++param, ++existingParam) {
-            if((*existingParam)->name != (*param)->name) goto notAMatch;
+            if((*existingParam)->label != (*param)->label) goto notAMatch;
         }
         // We must have found a matching declaration in the same scope.
         reportError("Cannot redeclare '" + decl->name + "'\n" +
@@ -191,11 +191,11 @@ void TypeChecker::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
             if(decl->name != expr->name) continue;
             nameMatches.push_back(decl);
             if(decl->paramList.size() != expr->argList.size()) continue;
-            // Check the names of all parameters
+            // Check the labels of all parameters
             auto param = decl->paramList.begin();
             auto arg = expr->argList.begin();
             for(;param != decl->paramList.end(); ++param, ++arg) {
-                if((*param)->name != arg->name) goto failedToFindMatchInCurrentList;
+                if((*param)->label != arg->label) goto failedToFindMatchInCurrentList;
                 if((*param)->type.getType() != arg->value->type) goto failedToFindMatchInCurrentList;
             }
             // We must have succeeded! Add the decl's prototype and type to the declRefExpr and return.
