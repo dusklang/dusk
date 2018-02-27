@@ -45,4 +45,5 @@ public:
     llvm::Value* visitReturnStmt(std::shared_ptr<ReturnStmt> stmt);
     llvm::Value* visitAssignmentStmt(std::shared_ptr<AssignmentStmt> stmt);
     llvm::Value* visitIfStmt(std::shared_ptr<IfStmt> stmt);
+    llvm::Value* visitWhileStmt(std::shared_ptr<WhileStmt> stmt) { return nullptr; }
 };

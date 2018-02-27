@@ -27,6 +27,9 @@ extern "C" {
     bool eq(int l, int r) {
         return l == r;
     }
+    bool lte(int l, int r) {
+        return l <= r;
+    }
     void print(int x) {
         std::cout << "Printing int from Quill: " << x << '\n';
     }
@@ -34,20 +37,15 @@ extern "C" {
 )~";
 std::string sourceCode = R"~(
 extern def add(l: i32, r: i32): i32
-extern def sub(l: i32, r: i32): i32
-extern def eq(l: i32, r: i32): Bool
+extern def lte(l: i32, r: i32): Bool
 extern def print(x: i32): Void
-def fibonacci(n: i32): i32 {
-    if eq(l: n, r: 0) {
-        return 0
-    } else if eq(l: n, r: 1) {
-        return 1
-    }
-
-    return add(l: fibonacci(n: sub(l: n, r: 1)), r: fibonacci(n: sub(l: n, r: 2)))
-}
 def main {
-    print(x: fibonacci(n: 10))
+    // Print numbers from 1 to 100.
+    var i = 1
+    while lte(l: i, r: 100) {
+        print(x: i)
+        i = add(l: i, r: 1)
+    }
 
     return
 }

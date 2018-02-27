@@ -167,9 +167,11 @@ llvm::Optional<std::shared_ptr<Stmt>> Parser::parseStmt() {
         auto value = parseExpr();
         if(!value) return std::dynamic_pointer_cast<Stmt>(std::make_shared<ReturnStmt>(currentRange(), nullptr));
         return std::dynamic_pointer_cast<Stmt>(std::make_shared<ReturnStmt>(currentRange(), *value));
+    } else if(current().is(tok::kw_if)) {
+        return parseIfStmt();
+    } else {
+        return parseWhileStmt();
     }
-
-    return parseIfStmt();
 }
 
 llvm::Optional<std::shared_ptr<Stmt>> Parser::parseIfStmt() {
@@ -196,6 +198,20 @@ llvm::Optional<std::shared_ptr<Stmt>> Parser::parseIfStmt() {
                                                                     *conditionExpr,
                                                                     *thenScope,
                                                                     elseScope));
+}
+
+llvm::Optional<std::shared_ptr<Stmt>> Parser::parseWhileStmt() {
+    if(current().isNot(tok::kw_while)) return llvm::None;
+    recordCurrentLoc();
+    next();
+    auto conditionExpr = parseExpr();
+    if(!conditionExpr) reportError("Expected condition expression for while statement");
+    auto thenScope = parseScope();
+    if(!thenScope) reportError("Expected opening curly brace for while statement");
+    llvm::Optional<std::shared_ptr<Scope>> elseScope;
+    return std::dynamic_pointer_cast<Stmt>(std::make_shared<WhileStmt>(currentRange(),
+                                                                       *conditionExpr,
+                                                                       *thenScope));
 }
 
 llvm::Optional<std::shared_ptr<Expr>> Parser::parseDeclRefExpr() {

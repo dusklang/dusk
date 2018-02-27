@@ -123,3 +123,10 @@ std::string ASTPrinter::visitIfStmt(std::shared_ptr<IfStmt> stmt, int indentatio
     }
     return str;
 }
+
+std::string ASTPrinter::visitWhileStmt(std::shared_ptr<WhileStmt> stmt, int indentationLevel) {
+    std::string str = indentation(indentationLevel) + "while " + visitExpr(stmt->condition, 0) + " {\n";
+    str += visitScope(stmt->thenScope, indentationLevel);
+    str += "\n" + indentation(indentationLevel) + "}";
+    return str;
+}

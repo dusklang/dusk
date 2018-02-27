@@ -31,6 +31,7 @@ TOKEN_KEYWORD(true, true)
 TOKEN_KEYWORD(false, false)
 TOKEN_KEYWORD(if, if)
 TOKEN_KEYWORD(else, else)
+TOKEN_KEYWORD(while, while)
 
 TOKEN_SEPARATOR(colon, ':')
 TOKEN_SEPARATOR(equal, '=')

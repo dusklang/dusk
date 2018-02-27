@@ -41,7 +41,15 @@ struct IfStmt: public Stmt {
     std::shared_ptr<Scope> thenScope;
     llvm::Optional<std::shared_ptr<Scope>> elseScope;
 
-    STMT_CTOR(If, std::shared_ptr<Expr> condition, std::shared_ptr<Scope> thenBlock,
-              llvm::Optional<std::shared_ptr<Scope>> elseBlock),
-    condition(condition), thenScope(thenBlock), elseScope(elseBlock) {}
+    STMT_CTOR(If, std::shared_ptr<Expr> condition, std::shared_ptr<Scope> thenScope,
+              llvm::Optional<std::shared_ptr<Scope>> elseScope),
+    condition(condition), thenScope(thenScope), elseScope(elseScope) {}
+};
+
+struct WhileStmt: public Stmt {
+    std::shared_ptr<Expr> condition;
+    std::shared_ptr<Scope> thenScope;
+
+    STMT_CTOR(While, std::shared_ptr<Expr> condition, std::shared_ptr<Scope> thenScope),
+    condition(condition), thenScope(thenScope) {}
 };

@@ -103,6 +103,12 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
                         }
                         handleScope(ifStmt->thenScope);
                         if(ifStmt->elseScope) handleScope(*ifStmt->elseScope);
+                    } else if(auto whileStmt = std::dynamic_pointer_cast<WhileStmt>(*node)) {
+                        visitExpr(whileStmt->condition);
+                        if(whileStmt->condition->type != BuiltinType::Bool) {
+                            reportError("Expression in while statement is not of type Bool", whileStmt);
+                        }
+                        handleScope(whileStmt->thenScope);
                     } else if(auto expr = std::dynamic_pointer_cast<Expr>(*node)) {
                         visitExpr(expr);
                         // Warn on unused expressions.

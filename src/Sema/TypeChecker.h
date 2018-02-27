@@ -50,4 +50,5 @@ public:
     void visitReturnStmt(std::shared_ptr<ReturnStmt> stmt);
     void visitAssignmentStmt(std::shared_ptr<AssignmentStmt> stmt);
     void visitIfStmt(std::shared_ptr<IfStmt> stmt) {}
+    void visitWhileStmt(std::shared_ptr<WhileStmt> stmt) {}
 };

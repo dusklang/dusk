@@ -80,6 +80,26 @@ llvm::Value* CodeGenerator::visitDecl(std::shared_ptr<Decl> decl) {
                         }
 
                         builder.SetInsertPoint(endBlock);
+                    } else if(auto whileStmt = std::dynamic_pointer_cast<WhileStmt>(node)) {
+                        auto checkBlock = llvm::BasicBlock::Create(context, "while.check", function);
+                        auto thenBlock = llvm::BasicBlock::Create(context, "while.then", function);
+                        auto endBlock = llvm::BasicBlock::Create(context, "if.end", function);
+                        builder.CreateBr(checkBlock);
+
+                        builder.SetInsertPoint(checkBlock);
+                        builder.CreateCondBr(visitExpr(whileStmt->condition), thenBlock, endBlock);
+
+                        builder.SetInsertPoint(thenBlock);
+                        visitInnerScope(whileStmt->thenScope);
+                        // If the last node in thenScope is a return statement, we need to avoid creating
+                        // a branch after it because a basic block can only have one terminal instruction.
+                        // http://llvm.org/doxygen/classllvm_1_1BasicBlock.html
+                        if(whileStmt->thenScope->nodes.empty() ||
+                           !std::dynamic_pointer_cast<ReturnStmt>(whileStmt->thenScope->nodes.back())) {
+                            builder.CreateBr(checkBlock);
+                        }
+
+                        builder.SetInsertPoint(endBlock);
                     } else {
                         visit(node);
                     }
