@@ -41,6 +41,16 @@ private:
         }
         return llvm::None;
     }
+    llvm::Optional<std::string> parseCharLiteral() {
+        if(current().isNot(tok::char_literal)) { return llvm::None; }
+
+        auto text = current().getText();
+        assert(text.size() == 3);
+        text.erase(0, 1);
+        text.erase(1, 1);
+        next();
+        return text;
+    }
     std::stack<SourceLoc> currentLoc;
     void recordCurrentLoc() {
         currentLoc.push(current().getLoc());

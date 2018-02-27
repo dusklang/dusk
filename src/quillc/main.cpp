@@ -17,33 +17,50 @@
 std::string standardLibrary = R"~(
 #include <iostream>
 extern "C" {
-    int add(int l, int r) {
-        return l + r;
-        std::cout << l + r << "\n";
-    }
-    int sub(int l, int r) {
-        return l - r;
-    }
-    bool eq(int l, int r) {
-        return l == r;
-    }
-    bool lte(int l, int r) {
-        return l <= r;
-    }
-    void print(int x) {
-        std::cout << "Printing int from Quill: " << x << '\n';
-    }
+    int add(int l, int r) { return l + r; }
+    int mod(int l, int r) { return l % r; }
+    int sub(int l, int r) { return l - r; }
+    bool eq(int l, int r) { return l == r; }
+    bool lte(int l, int r) { return l <= r; }
+    bool notTrue(bool x) { return !x; }
+    bool bothTrue(bool l, bool r) { return l && r; }
+    void printInt(int x) { std::cout << x; }
+    void printChar(char x) { std::cout << x; }
+    void println() { std::cout << '\n'; }
 }
 )~";
 std::string sourceCode = R"~(
 extern def add(l: i32, r: i32): i32
+extern def mod(l: i32, r: i32): i32
 extern def lte(l: i32, r: i32): Bool
-extern def print(x: i32): Void
+extern def eq(l: i32, r: i32): Bool
+extern def notTrue(x: Bool): Bool
+extern def bothTrue(l: Bool, r: Bool): Bool
+extern def printInt(x: i32): Void
+extern def printChar(x: Char): Void
+extern def println: Void
 def main {
-    // Print numbers from 1 to 100.
+    // FizzBuzz.
     var i = 1
     while lte(l: i, r: 100) {
-        print(x: i)
+        def fizz = eq(l: mod(l: i, r: 3), r: 0)
+        def buzz = eq(l: mod(l: i, r: 5), r: 0)
+        if fizz {
+            printChar(x: 'F')
+            printChar(x: 'i')
+            printChar(x: 'z')
+            printChar(x: 'z')
+        }
+        if buzz {
+            printChar(x: 'B')
+            printChar(x: 'u')
+            printChar(x: 'z')
+            printChar(x: 'z')
+        }
+        if bothTrue(l: notTrue(x: fizz), r: notTrue(x: buzz)) {
+            printInt(x: i)
+        }
+        println
         i = add(l: i, r: 1)
     }
 

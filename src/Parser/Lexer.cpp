@@ -99,6 +99,22 @@ Token Lexer::nextTokIncludingInsignificant() {
         reportError(pos, "Unterminated string literal");
     }
 
+    // Lex a character literal.
+    if(is('\'')) {
+        tokenText += '\'';
+        pos++;
+        if(pos == source.length()) reportError(pos, "Unterminated character literal");
+        tokenText += curChar();
+        pos++;
+        if(pos == source.length()) reportError(pos, "Unterminated character literal");
+        if(!is('\'')) {
+            reportError(pos, "Character literal longer than one ASCII character");
+        }
+        tokenText += '\'';
+        pos++;
+        RETURN(tok::char_literal);
+    }
+
     // Lex an identifier.
     if(pos < source.length() && (isLetter() || is('_')))
         while(pos < source.length() && (isLetter() || isNum() || is('_')))

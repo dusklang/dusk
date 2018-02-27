@@ -40,6 +40,11 @@ struct BooleanLiteralExpr: public Expr {
     EXPR_CTOR(BooleanLiteral, bool literal), literal(literal) {}
 };
 
+struct CharLiteralExpr: public Expr {
+    char literal;
+    EXPR_CTOR(CharLiteral, char literal), literal(literal) {}
+};
+
 struct DeclRefExpr: public Expr {
     std::string name;
     std::vector<Argument> argList;

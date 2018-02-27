@@ -70,6 +70,10 @@ std::string ASTPrinter::visitBooleanLiteralExpr(std::shared_ptr<BooleanLiteralEx
     return indentation(indentationLevel) + std::string(expr->literal ? "true" : "false");
 }
 
+std::string ASTPrinter::visitCharLiteralExpr(std::shared_ptr<CharLiteralExpr> expr, int indentationLevel) {
+    return indentation(indentationLevel) + expr->literal;
+}
+
 std::string ASTPrinter::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr, int indentationLevel) {
     std::string str = expr->name;
     if(!expr->argList.empty()) {

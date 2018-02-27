@@ -9,6 +9,7 @@ llvm::Type* CodeGenerator::mapBuiltinTypeToLLVM(BuiltinType type) {
         case BuiltinType::f64: return llvm::Type::getDoubleTy(context);
         case BuiltinType::Void: return llvm::Type::getVoidTy(context);
         case BuiltinType::Bool: return llvm::Type::getInt1Ty(context);
+        case BuiltinType::Char: return llvm::Type::getInt8Ty(context);
     }
 }
 
@@ -83,7 +84,7 @@ llvm::Value* CodeGenerator::visitDecl(std::shared_ptr<Decl> decl) {
                     } else if(auto whileStmt = std::dynamic_pointer_cast<WhileStmt>(node)) {
                         auto checkBlock = llvm::BasicBlock::Create(context, "while.check", function);
                         auto thenBlock = llvm::BasicBlock::Create(context, "while.then", function);
-                        auto endBlock = llvm::BasicBlock::Create(context, "if.end", function);
+                        auto endBlock = llvm::BasicBlock::Create(context, "while.end", function);
                         builder.CreateBr(checkBlock);
 
                         builder.SetInsertPoint(checkBlock);
@@ -128,6 +129,9 @@ llvm::Value* CodeGenerator::visitDecimalLiteralExpr(std::shared_ptr<DecimalLiter
 }
 llvm::Value* CodeGenerator::visitBooleanLiteralExpr(std::shared_ptr<BooleanLiteralExpr> expr) {
     return llvm::ConstantInt::get(context, llvm::APInt(1, expr->literal ? -1 : 0));
+}
+llvm::Value* CodeGenerator::visitCharLiteralExpr(std::shared_ptr<CharLiteralExpr> expr) {
+    return llvm::ConstantInt::get(context, llvm::APInt(8, expr->literal));
 }
 llvm::Value* CodeGenerator::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
     auto referencedVal = expr->decl->codegenVal;
