@@ -102,13 +102,13 @@ std::string ASTPrinter::visitIfStmt(std::shared_ptr<IfStmt> stmt, int indentatio
     std::string str;
     if(!isIfElse) str = indentation(indentationLevel);
     str += "if " + visitExpr(stmt->condition, 0) + " {\n";
-    str += visitScope(stmt->thenBlock, indentationLevel);
+    str += visitScope(stmt->thenScope, indentationLevel);
     str += "\n" + indentation(indentationLevel) + "}";
-    if(stmt->elseBlock) {
+    if(stmt->elseScope) {
         str += " else ";
         // Handle else if.
-        if((*stmt->elseBlock)->nodes.size() == 1) {
-            if(auto elseIf = std::dynamic_pointer_cast<IfStmt>((*stmt->elseBlock)->nodes[0])) {
+        if((*stmt->elseScope)->nodes.size() == 1) {
+            if(auto elseIf = std::dynamic_pointer_cast<IfStmt>((*stmt->elseScope)->nodes[0])) {
                 str += visitIfStmt(elseIf, indentationLevel, true);
             } else {
                 // TODO: A goto really shouldn't be necessary here.
@@ -117,7 +117,7 @@ std::string ASTPrinter::visitIfStmt(std::shared_ptr<IfStmt> stmt, int indentatio
         } else {
             notIfElse:
             str += "{\n";
-            str += visitScope(*stmt->elseBlock, indentationLevel);
+            str += visitScope(*stmt->elseScope, indentationLevel);
             str += "\n" + indentation(indentationLevel) + "}";
         }
     }

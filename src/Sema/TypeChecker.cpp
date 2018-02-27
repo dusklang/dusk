@@ -87,8 +87,8 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
                         if(ifStmt->condition->type != BuiltinType::Bool) {
                             reportError("Expression in if statement is not of type Bool", ifStmt);
                         }
-                        handleScope(ifStmt->thenBlock);
-                        if(ifStmt->elseBlock) handleScope(*ifStmt->elseBlock);
+                        handleScope(ifStmt->thenScope);
+                        if(ifStmt->elseScope) handleScope(*ifStmt->elseScope);
                     } else if(auto expr = std::dynamic_pointer_cast<Expr>(node)) {
                         visitExpr(expr);
                         // Warn on unused expressions.

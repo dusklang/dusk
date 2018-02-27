@@ -38,10 +38,10 @@ struct AssignmentStmt: public Stmt {
 
 struct IfStmt: public Stmt {
     std::shared_ptr<Expr> condition;
-    std::shared_ptr<Scope> thenBlock;
-    llvm::Optional<std::shared_ptr<Scope>> elseBlock;
+    std::shared_ptr<Scope> thenScope;
+    llvm::Optional<std::shared_ptr<Scope>> elseScope;
 
     STMT_CTOR(If, std::shared_ptr<Expr> condition, std::shared_ptr<Scope> thenBlock,
               llvm::Optional<std::shared_ptr<Scope>> elseBlock),
-    condition(condition), thenBlock(thenBlock), elseBlock(elseBlock) {}
+    condition(condition), thenScope(thenBlock), elseScope(elseBlock) {}
 };

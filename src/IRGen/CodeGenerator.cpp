@@ -48,7 +48,31 @@ llvm::Value* CodeGenerator::visitDecl(std::shared_ptr<Decl> decl) {
                 (*param)->codegenVal = arg;
             }
 
-            visitScope(decl->body());
+            std::function<void(std::shared_ptr<Scope>)> visitInnerScope = [&](std::shared_ptr<Scope> scope) {
+                for(auto& node: scope->nodes) {
+                    if(auto ifStmt = std::dynamic_pointer_cast<IfStmt>(node)) {
+                        auto thenBlock = llvm::BasicBlock::Create(context, "if.then", function);
+                        auto elseBlock = llvm::BasicBlock::Create(context, "if.else", function);
+                        auto endBlock = llvm::BasicBlock::Create(context, "if.end", function);
+                        builder.CreateCondBr(visitExpr(ifStmt->condition), thenBlock, elseBlock);
+
+                        builder.SetInsertPoint(thenBlock);
+                        visitInnerScope(ifStmt->thenScope);
+                        builder.CreateBr(endBlock);
+
+                        builder.SetInsertPoint(elseBlock);
+                        if(auto elseScope = ifStmt->elseScope) {
+                            visitInnerScope(*elseScope);
+                        }
+                        builder.CreateBr(endBlock);
+
+                        builder.SetInsertPoint(endBlock);
+                    } else {
+                        visit(node);
+                    }
+                }
+            };
+            visitInnerScope(decl->body());
 
             llvm::verifyFunction(*function);
         }
@@ -70,7 +94,7 @@ llvm::Value* CodeGenerator::visitDecimalLiteralExpr(std::shared_ptr<DecimalLiter
     return llvm::ConstantFP::get(context, llvm::APFloat(std::stod(expr->literal)));
 }
 llvm::Value* CodeGenerator::visitBooleanLiteralExpr(std::shared_ptr<BooleanLiteralExpr> expr) {
-    return llvm::ConstantInt::get(context, llvm::APInt(1, expr->literal ? 1 : 0));
+    return llvm::ConstantInt::get(context, llvm::APInt(1, expr->literal ? -1 : 0));
 }
 llvm::Value* CodeGenerator::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
     auto referencedVal = expr->decl->codegenVal;
@@ -110,5 +134,5 @@ llvm::Value* CodeGenerator::visitAssignmentStmt(std::shared_ptr<AssignmentStmt> 
 }
 
 llvm::Value* CodeGenerator::visitIfStmt(std::shared_ptr<IfStmt> stmt) {
-    
+    return nullptr;
 }

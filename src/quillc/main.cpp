@@ -19,6 +19,7 @@ std::string standardLibrary = R"~(
 extern "C" {
     int add(int l, int r) {
         return l + r;
+        std::cout << l + r << "\n";
     }
     int sub(int l, int r) {
         return l - r;
@@ -38,20 +39,29 @@ extern def eq(l: i32, r: i32): Bool
 extern def print(x: i32): Void
 def fibonacci(n: i32): i32 {
     if eq(l: n, r: 0) {
+        print(x: 0)
         return 0
     } else if eq(l: n, r: 1) {
+        print(x: 1)
         return 1
     }
 
     return add(l: fibonacci(n: sub(l: n, r: 1)), r: fibonacci(n: sub(l: n, r: 2)))
 }
 def main {
-    print(x: fibonacci(n: 5))
+    if eq(l: 0, r: 1) { // false
+        print(x: 0)
+    } else if eq(l: 1, r: 75) { // false
+        print(x: 1)
+    } else if true {
+        print(x: 2)
+    }
+
     return
 }
 )~";
 
-int main(int argc, const char * argv[]) {
+int main() {
     std::cout << "Quill compiler version 0.0.1\n\n";
     Parser parser(sourceCode);
 
