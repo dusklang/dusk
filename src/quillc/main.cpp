@@ -30,56 +30,56 @@ extern "C" {
 }
 )~";
 std::string sourceCode = R"~(
-extern def add(l: i32, r: i32): i32
-extern def mod(l: i32, r: i32): i32
-extern def lte(l: i32, r: i32): Bool
-extern def eq(l: i32, r: i32): Bool
-extern def notTrue(x: Bool): Bool
-extern def bothTrue(l: Bool, r: Bool): Bool
-extern def printInt(x: i32): Void
-extern def printChar(x: Char): Void
+extern def add(_ l: i32, _ r: i32): i32
+extern def mod(_ l: i32, _ r: i32): i32
+extern def lte(_ l: i32, _ r: i32): Bool
+extern def eq(_ l: i32, _ r: i32): Bool
+extern def notTrue(_ x: Bool): Bool
+extern def bothTrue(_ l: Bool, _ r: Bool): Bool
+extern def printInt(_ x: i32): Void
+extern def printChar(_ x: Char): Void
 extern def println: Void
 def performFizzBuzz(from start: i32, to end: i32) {
     // Check range.
-    if notTrue(x: lte(l: start, r: end)) {
-        printChar(x: 'I')
-        printChar(x: 'n')
-        printChar(x: 'v')
-        printChar(x: 'a')
-        printChar(x: 'l')
-        printChar(x: 'i')
-        printChar(x: 'd')
-        printChar(x: ' ')
-        printChar(x: 'b')
-        printChar(x: 'o')
-        printChar(x: 'u')
-        printChar(x: 'n')
-        printChar(x: 'd')
-        printChar(x: 's')
+    if notTrue(lte(start, end)) {
+        printChar('I')
+        printChar('n')
+        printChar('v')
+        printChar('a')
+        printChar('l')
+        printChar('i')
+        printChar('d')
+        printChar(' ')
+        printChar('b')
+        printChar('o')
+        printChar('u')
+        printChar('n')
+        printChar('d')
+        printChar('s')
         println
         return
     }
     var i = start
-    while lte(l: i, r: end) {
-        def fizz = eq(l: mod(l: i, r: 3), r: 0)
-        def buzz = eq(l: mod(l: i, r: 5), r: 0)
+    while lte(i, end) {
+        def fizz = eq(mod(i, 3), 0)
+        def buzz = eq(mod(i, 5), 0)
         if fizz {
-            printChar(x: 'F')
-            printChar(x: 'i')
-            printChar(x: 'z')
-            printChar(x: 'z')
+            printChar('F')
+            printChar('i')
+            printChar('z')
+            printChar('z')
         }
         if buzz {
-            printChar(x: 'B')
-            printChar(x: 'u')
-            printChar(x: 'z')
-            printChar(x: 'z')
+            printChar('B')
+            printChar('u')
+            printChar('z')
+            printChar('z')
         }
-        if bothTrue(l: notTrue(x: fizz), r: notTrue(x: buzz)) {
-            printInt(x: i)
+        if bothTrue(notTrue(fizz), notTrue(buzz)) {
+            printInt(i)
         }
         println
-        i = add(l: i, r: 1)
+        i = add(i, 1)
     }
     return
 }

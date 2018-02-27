@@ -107,11 +107,16 @@ llvm::Optional<Decl> Parser::parseDecl() {
         do {
             recordCurrentLoc();
             EXPECT_NEXT(tok::identifier, "Expected parameter label");
-            auto paramLabel = current().getText();
-            std::string paramName = paramLabel;
+            llvm::Optional<std::string> paramLabel = current().getText();
+            std::string paramName = *paramLabel;
+            if(*paramLabel == "_") {
+                paramLabel = llvm::None;
+            }
             if(next().is(tok::identifier)) {
                 paramName = current().getText();
                 next();
+            } else {
+                if(!paramLabel) { reportError("Expected parameter name after '_'"); }
             }
             EXPECT(tok::sep_colon, "Expected colon after parameter name");
             next();
@@ -228,14 +233,22 @@ llvm::Optional<std::shared_ptr<Expr>> Parser::parseDeclRefExpr() {
     if(next().is(tok::sep_left_paren)) {
         do {
             recordCurrentLoc();
-            EXPECT_NEXT(tok::identifier, "Expected parameter name");
-            auto param = current().getText();
-            EXPECT_NEXT(tok::sep_colon, "Expected colon after parameter name");
-            next();
+            llvm::Optional<std::string> paramLabel = llvm::None;
+            if(next().is(tok::identifier)) {
+                // Maybe this is an parameter label?
+                auto maybeParamLabel = current().getText();
+                if(next().is(tok::sep_colon)) {
+                    next();
+                    paramLabel = maybeParamLabel;
+                } else {
+                    // Oops, I guess it's an expression instead.
+                    previous();
+                }
+            }
 
             auto argument = parseExpr();
-            if(!argument) reportError("Expected argument after parameter name");
-            argList.push_back(Argument(currentRange(), param, *argument));
+            if(!argument) reportError("Expected expression argument");
+            argList.push_back(Argument(currentRange(), paramLabel, *argument));
 
         } while(current().is(tok::sep_comma));
         EXPECT(tok::sep_right_paren, "Expected ')' after parameter and argument");
