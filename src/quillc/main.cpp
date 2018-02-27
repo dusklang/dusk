@@ -49,6 +49,7 @@ def fibonacci(n: i32): i32 {
     return add(l: fibonacci(n: sub(l: n, r: 1)), r: fibonacci(n: sub(l: n, r: 2)))
 }
 def main {
+    return
     if eq(l: 0, r: 1) { // false
         print(x: 0)
     } else if eq(l: 1, r: 75) { // false

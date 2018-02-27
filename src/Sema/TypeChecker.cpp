@@ -49,13 +49,27 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
 
             // Recursive lambda for handling nested scopes inside the function, as well as the function
             // body itself.
+            //
+            // TODO: Move this to the visitScope() method by storing context in the TypeChecker.
             std::function<void(std::shared_ptr<Scope>)> handleScope = [&](std::shared_ptr<Scope> scope) {
                 // Start another new, inner scope for declarations inside the scope.
                 declLists.push_back(std::vector<std::shared_ptr<Decl>>());
 
-                for(auto& node: scope->nodes) {
+                // These variables track state for nodes after a return statement. We still typecheck
+                // them, but they'll be removed from the AST after we're done.
+                auto alreadyReturned = false;
+                auto alreadyDiagnosedStatementsAfterReturnStatement = false;
+                auto afterReturnIterator = scope->nodes.end();
+                for(auto&& node = scope->nodes.begin(); node != scope->nodes.end(); ++node) {
+                    // Warn on code after a return statement.
+                    if(alreadyReturned && !alreadyDiagnosedStatementsAfterReturnStatement) {
+                        reportWarning("Code after return statement will not be executed", *node);
+                        alreadyReturned = alreadyDiagnosedStatementsAfterReturnStatement;
+                        afterReturnIterator = node;
+                    }
                     // Handle return statements.
-                    if(auto ret = std::dynamic_pointer_cast<ReturnStmt>(node)) {
+                    if(auto ret = std::dynamic_pointer_cast<ReturnStmt>(*node)) {
+                        alreadyReturned = true;
                         visitReturnStmt(ret);
                         // Handle returning value in a void computed decl.
                         if(decl->type.getType() == BuiltinType::Void) {
@@ -82,24 +96,26 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
                                         "of type " + getNameForBuiltinType(decl->type.getType()),
                                         ret);
                         }
-                    } else if(auto ifStmt = std::dynamic_pointer_cast<IfStmt>(node)) {
+                    } else if(auto ifStmt = std::dynamic_pointer_cast<IfStmt>(*node)) {
                         visitExpr(ifStmt->condition);
                         if(ifStmt->condition->type != BuiltinType::Bool) {
                             reportError("Expression in if statement is not of type Bool", ifStmt);
                         }
                         handleScope(ifStmt->thenScope);
                         if(ifStmt->elseScope) handleScope(*ifStmt->elseScope);
-                    } else if(auto expr = std::dynamic_pointer_cast<Expr>(node)) {
+                    } else if(auto expr = std::dynamic_pointer_cast<Expr>(*node)) {
                         visitExpr(expr);
                         // Warn on unused expressions.
                         if(expr->type != BuiltinType::Void) {
                             reportWarning("Unused expression", expr);
                         }
                     } else {
-                        visit(node);
+                        visit(*node);
                     }
                 }
                 declLists.pop_back();
+                // Remove nodes after a return statement.
+                scope->nodes.erase(afterReturnIterator, scope->nodes.end());
             };
             handleScope(decl->body());
             if(decl->isParameterized()) declLists.pop_back();
