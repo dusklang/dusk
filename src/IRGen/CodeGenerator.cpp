@@ -3,20 +3,24 @@
 #include "CodeGenerator.h"
 #include "llvm/IR/Verifier.h"
 
-llvm::Type* CodeGenerator::mapBuiltinTypeToLLVM(BuiltinType type) {
-    switch(type) {
-        case BuiltinType::i32: return llvm::Type::getInt32Ty(context);
-        case BuiltinType::f64: return llvm::Type::getDoubleTy(context);
-        case BuiltinType::Void: return llvm::Type::getVoidTy(context);
-        case BuiltinType::Bool: return llvm::Type::getInt1Ty(context);
-        case BuiltinType::Char: return llvm::Type::getInt8Ty(context);
+llvm::Type* CodeGenerator::mapTypeToLLVM(Type type) {
+    if(auto builtinTy = type.builtinType()) {
+        switch(*type.builtinType()) {
+            case BuiltinType::i32: return llvm::Type::getInt32Ty(context);
+            case BuiltinType::f64: return llvm::Type::getDoubleTy(context);
+            case BuiltinType::Void: return llvm::Type::getVoidTy(context);
+            case BuiltinType::Bool: return llvm::Type::getInt1Ty(context);
+            case BuiltinType::Char: return llvm::Type::getInt8Ty(context);
+        }
+    } else {
+        return llvm::PointerType::get(mapTypeToLLVM(*type.pointedType()), 0);
     }
 }
 
 llvm::Value* CodeGenerator::visitDecl(std::shared_ptr<Decl> decl) {
     if(auto expr = decl->expression()) {
         if(decl->isMut) {
-            decl->codegenVal = builder.CreateAlloca(mapBuiltinTypeToLLVM(decl->type.getType()), 0, decl->name.c_str());
+            decl->codegenVal = builder.CreateAlloca(mapTypeToLLVM(decl->type), 0, decl->name.c_str());
             builder.CreateStore(visitExpr(expr), decl->codegenVal);
         } else {
             decl->codegenVal = visitExpr(expr);
@@ -25,9 +29,9 @@ llvm::Value* CodeGenerator::visitDecl(std::shared_ptr<Decl> decl) {
     } else {
         std::vector<llvm::Type*> arguments;
         for(auto& param: decl->paramList) {
-            arguments.push_back(mapBuiltinTypeToLLVM(param->type.getType()));
+            arguments.push_back(mapTypeToLLVM(param->type));
         }
-        llvm::Type* type = mapBuiltinTypeToLLVM(decl->type.getType());
+        llvm::Type* type = mapTypeToLLVM(decl->type);
         llvm::FunctionType* functionTy = llvm::FunctionType::get(type,
                                                                  arguments,
                                                                  false);
@@ -120,7 +124,6 @@ void CodeGenerator::visitScope(std::shared_ptr<Scope> scope) {
     }
 }
 void CodeGenerator::visitArgument(std::shared_ptr<Argument> argument) {}
-void CodeGenerator::visitPhysicalTypeRef(std::shared_ptr<PhysicalTypeRef> expr) {}
 llvm::Value* CodeGenerator::visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr) {
     return llvm::ConstantInt::get(context, llvm::APInt(32, std::stoi(expr->literal)));
 }

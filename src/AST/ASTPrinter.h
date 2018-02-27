@@ -14,7 +14,6 @@ public:
     std::string visitDecl(std::shared_ptr<Decl> decl, int indentationLevel);
     std::string visitScope(std::shared_ptr<Scope> scope, int indentationLevel);
     std::string visitArgument(std::shared_ptr<Argument> argument, int indentationLevel);
-    std::string visitPhysicalTypeRef(std::shared_ptr<PhysicalTypeRef> expr, int indentationLevel);
 
     std::string visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr, int indentationLevel);
     std::string visitDecimalLiteralExpr(std::shared_ptr<DecimalLiteralExpr> expr, int indentationLevel);

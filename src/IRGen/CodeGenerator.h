@@ -19,7 +19,6 @@ class CodeGenerator final: public ASTVisitor<CodeGenerator,
                                              llvm::Value*,
                                              void,
                                              void,
-                                             void,
                                              llvm::Value*,
                                              llvm::Value*>
 {
@@ -27,7 +26,7 @@ private:
     llvm::LLVMContext context;
     llvm::IRBuilder<> builder;
 public:
-    llvm::Type* mapBuiltinTypeToLLVM(BuiltinType type);
+    llvm::Type* mapTypeToLLVM(Type type);
     std::unique_ptr<llvm::Module> module;
     CodeGenerator() : builder(context) {
         module = std::make_unique<llvm::Module>("my module", context);
@@ -36,7 +35,6 @@ public:
     llvm::Value* visitDecl(std::shared_ptr<Decl> decl);
     void visitScope(std::shared_ptr<Scope> scope);
     void visitArgument(std::shared_ptr<Argument> argument);
-    void visitPhysicalTypeRef(std::shared_ptr<PhysicalTypeRef> expr);
     llvm::Value* visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr);
     llvm::Value* visitDecimalLiteralExpr(std::shared_ptr<DecimalLiteralExpr> expr);
     llvm::Value* visitBooleanLiteralExpr(std::shared_ptr<BooleanLiteralExpr> expr);

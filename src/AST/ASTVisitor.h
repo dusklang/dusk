@@ -42,11 +42,6 @@ public:
     }
     #include "ASTNodes.def"
 
-    // It would be kind of nice to be able to "iterate" over AST_TYPED_NODEs, and "iterate" over
-    // their kinds in a switch, but alas I don't think this is possible with C++ macros because we
-    // can't #include or #define other macros inside of a macro definition. Maybe with some awful
-    // template wizardry? Or a boilerplate generator? Or maybe I'm just putting way too much thought
-    // into something that doesn't actually matter that much?
     ExprRetTy visitExpr(std::shared_ptr<Expr> expr, Args... args) {
         switch(expr->exprKind) {
         #define EXPR_NODE(name) case ExprKind::name: \

@@ -7,9 +7,9 @@
 #include <iostream>
 
 #include "AST/ASTVisitor.h"
+#include "AST/Types.h"
 
 class TypeChecker final: public ASTVisitor<TypeChecker,
-                                           void,
                                            void,
                                            void,
                                            void,
@@ -41,7 +41,6 @@ public:
     void visitDecl(std::shared_ptr<Decl> decl);
     void visitScope(std::shared_ptr<Scope> scope);
     void visitArgument(std::shared_ptr<Argument> argument);
-    void visitPhysicalTypeRef(std::shared_ptr<PhysicalTypeRef> expr);
     void visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr);
     void visitDecimalLiteralExpr(std::shared_ptr<DecimalLiteralExpr> expr);
     void visitBooleanLiteralExpr(std::shared_ptr<BooleanLiteralExpr> expr);

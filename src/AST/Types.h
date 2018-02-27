@@ -3,8 +3,6 @@
 #pragma once
 
 enum class BuiltinType {
-#define BUILTIN_TYPE(name) name,
-#include "BuiltinTypes.def"
+    #define BUILTIN_TYPE(name) name,
+    #include "BuiltinTypes.def"
 };
-
-std::string getNameForBuiltinType(BuiltinType type);

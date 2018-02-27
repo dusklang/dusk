@@ -45,7 +45,7 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
         }
         if(decl->isComputed()) {
             // Add Void type to computed declaration if it doesn't have one.
-            if(decl->type.isInferred()) decl->type.resolveType(BuiltinType::Void);
+            if(decl->type.isInferred()) decl->type = BuiltinType::Void;
 
             // Recursive lambda for handling nested scopes inside the function, as well as the function
             // body itself.
@@ -72,7 +72,7 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
                         alreadyReturned = true;
                         visitReturnStmt(ret);
                         // Handle returning value in a void computed decl.
-                        if(decl->type.getType() == BuiltinType::Void) {
+                        if(decl->type == BuiltinType::Void) {
                             if(ret->value) {
                                 reportError("Attempted to return value from Void computed decl '"
                                             + decl->name + "'",
@@ -90,10 +90,10 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
 
                         // Handle returning a value of a type incompatible with the computed decl's type
                         // (currently, "incompatible with" just means "not equal to").
-                        if(*ret->value->type != decl->type.getType()) {
+                        if(ret->value->type != decl->type) {
                             // TODO: Include in the error message the type of the returned expr.
                             reportError("Attempted to return value of incompatible type from computed decl "
-                                        "of type " + getNameForBuiltinType(decl->type.getType()),
+                                        "of type " + decl->type.name(),
                                         ret);
                         }
                     } else if(auto ifStmt = std::dynamic_pointer_cast<IfStmt>(*node)) {
@@ -133,17 +133,17 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
 
         visitExpr(decl->expression());
         if(decl->type.isInferred()) {
-            decl->type.resolveType(*decl->expression()->type);
+            decl->type = decl->expression()->type;
         } else {
-            if(decl->type.getType() != decl->expression()->type) {
+            if(decl->type != decl->expression()->type) {
                 reportError("Cannot assign value of type '" +
-                            getNameForBuiltinType(*decl->expression()->type) +
+                            decl->expression()->type.name() +
                             "' to declaration of type '" +
-                            getNameForBuiltinType(decl->type.getType()) + "'",
+                            decl->type.name() + "'",
                             decl);
             }
         }
-        if(decl->type.getType() == BuiltinType::Void) reportError("Stored declarations can not have type Void", decl);
+        if(decl->type.builtinType() == BuiltinType::Void) reportError("Stored declarations can not have type Void", decl);
 
         if(decl->isParameterized()) declLists.pop_back();
 
@@ -162,7 +162,6 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
 }
 void TypeChecker::visitScope(std::shared_ptr<Scope> scope) {}
 void TypeChecker::visitArgument(std::shared_ptr<Argument> argument) {}
-void TypeChecker::visitPhysicalTypeRef(std::shared_ptr<PhysicalTypeRef> expr) {}
 void TypeChecker::visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr) {
     expr->type = BuiltinType::i32;
 }
@@ -196,11 +195,11 @@ void TypeChecker::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
             auto arg = expr->argList.begin();
             for(;param != decl->paramList.end(); ++param, ++arg) {
                 if((*param)->label != arg->label) goto failedToFindMatchInCurrentList;
-                if((*param)->type.getType() != arg->value->type) goto failedToFindMatchInCurrentList;
+                if((*param)->type != arg->value->type) goto failedToFindMatchInCurrentList;
             }
             // We must have succeeded! Add the decl's prototype and type to the declRefExpr and return.
             expr->decl = decl;
-            expr->type = decl->type.getType();
+            expr->type = decl->type;
             return;
 
             failedToFindMatchInCurrentList: continue;
@@ -230,8 +229,8 @@ void TypeChecker::visitAssignmentStmt(std::shared_ptr<AssignmentStmt> stmt) {
         reportError("Cannot assign to constant declaration '" + stmt->lhs->decl->name + "'", stmt);
     }
     if(stmt->lhs->type != stmt->rhs->type) {
-        reportError("Cannot assign value of type '" + getNameForBuiltinType(*stmt->rhs->type)
-                    + "' to mutable declaration of type '" + getNameForBuiltinType(*stmt->lhs->type),
+        reportError("Cannot assign value of type '" + stmt->rhs->type.name()
+                    + "' to mutable declaration of type '" + stmt->lhs->type.name(),
                     stmt);
     }
 }

@@ -70,11 +70,11 @@ std::shared_ptr<ASTNode> Parser::parseNode() {
     LLVM_BUILTIN_UNREACHABLE;
 }
 
-PhysicalTypeRef Parser::parseTypeRef() {
+Type Parser::parseTypeRef() {
     recordCurrentLoc();
     auto typeName = parseIdentifer();
     if(!typeName) reportError("Expected type name", current().getRange());
-    #define BUILTIN_TYPE(name) if(*typeName == #name) { return PhysicalTypeRef(currentRange(), BuiltinType::name); }
+    #define BUILTIN_TYPE(name) if(*typeName == #name) { return Type(BuiltinType::name, currentRange()); }
     #include "AST/BuiltinTypes.def"
     reportError("Invalid type name \"" + *typeName + '"', previous()->getRange());
     LLVM_BUILTIN_UNREACHABLE;
@@ -128,7 +128,7 @@ llvm::Optional<Decl> Parser::parseDecl() {
         next();
     }
 
-    TypeRef type;
+    Type type;
     // Range of the "prototype", which includes everything from the extern keyword (if it exists) to
     // the type of the declaration (if it's specified).
     SourceRange protoRange;
@@ -143,7 +143,7 @@ llvm::Optional<Decl> Parser::parseDecl() {
         type = parseTypeRef();
     } else {
         protoRange = currentRange();
-        type = TypeRef();
+        type = Type();
     }
 
     auto checkExtern = [&]() {

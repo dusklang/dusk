@@ -16,7 +16,7 @@ struct ParamDecl;
 
 struct Decl: public ASTNode {
     std::string name;
-    TypeRef type;
+    Type type;
     bool isMut;
     bool isExtern;
 
@@ -37,7 +37,7 @@ public:
 
     AST_NODE_CTOR(Decl,
                   std::string name,
-                  TypeRef type,
+                  Type type,
                   bool isMut = false,
                   bool isExtern = false,
                   std::vector<std::shared_ptr<ParamDecl>> paramList = std::vector<std::shared_ptr<ParamDecl>>(),
@@ -47,7 +47,7 @@ public:
 
     AST_NODE_CTOR(Decl,
                   std::string name,
-                  TypeRef type,
+                  Type type,
                   bool isMut,
                   bool isExtern,
                   std::vector<std::shared_ptr<ParamDecl>> paramList,
@@ -79,6 +79,6 @@ struct ParamDecl: public Decl {
     ParamDecl(SourceRange range,
               llvm::Optional<std::string> label,
               std::string name,
-              TypeRef type) :
+              Type type) :
     Decl(range, name, type), label(label) {}
 };

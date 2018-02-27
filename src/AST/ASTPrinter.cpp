@@ -21,7 +21,7 @@ std::string ASTPrinter::visitDecl(std::shared_ptr<Decl> decl, int indentationLev
             if(!first) str += ", ";
             else first = false;
 
-            str += param->name + ": " + getNameForBuiltinType(param->type.getType());
+            str += param->name + ": " + param->type.name();
         }
         str += ")";
     }
@@ -29,7 +29,7 @@ std::string ASTPrinter::visitDecl(std::shared_ptr<Decl> decl, int indentationLev
     if(decl->type.isInferred()) {
         typeStr = "<inferred>";
     } else {
-        typeStr = getNameForBuiltinType(decl->type.getType());
+        typeStr = decl->type.name();
     }
     str += ": " + typeStr;
 
@@ -54,10 +54,6 @@ std::string ASTPrinter::visitArgument(std::shared_ptr<Argument> argument, int in
     std::string str;
     if(argument->label) str += *argument->label + ": ";
     return str + visitExpr(argument->value, 0);
-}
-
-std::string ASTPrinter::visitPhysicalTypeRef(std::shared_ptr<PhysicalTypeRef> expr, int indentationLevel) {
-    return "";
 }
 
 std::string ASTPrinter::visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr, int indentationLevel) {

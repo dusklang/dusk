@@ -28,63 +28,65 @@ struct ASTNode {
     virtual ~ASTNode() {}
 };
 
-// This represents an actual reference to a type in a source file.
-struct PhysicalTypeRef: public ASTNode {
-    BuiltinType type;
-
-    AST_NODE_CTOR(PhysicalTypeRef, BuiltinType type), type(type) {}
-    AST_NODE_CTOR(PhysicalTypeRef, const PhysicalTypeRef& other), type(other.type) {}
-    ~PhysicalTypeRef() {}
-
-    void operator=(const PhysicalTypeRef& other) {
-        range = other.range;
-        type = other.type;
-    }
-};
-
-struct TypeRef {
+struct Type final {
 private:
     enum {
-        inferred,
-        physical,
-        resolved
+        builtin, pointer, inferred
     } tag;
     union {
-        BuiltinType resolvedType;
-        PhysicalTypeRef physicalType;
+        BuiltinType builtinTy;
+        std::shared_ptr<Type> pointedTy;
     };
+    llvm::Optional<SourceRange> sourceRange;
 public:
-    TypeRef(BuiltinType type) : tag(resolved), resolvedType(type) {}
-    TypeRef(const PhysicalTypeRef& type) : tag(physical), physicalType(type) {}
-    TypeRef() : tag(inferred) {}
-    ~TypeRef() {}
+    Type(BuiltinType builtinTy, llvm::Optional<SourceRange> sourceRange = llvm::None) :
+        tag(builtin), builtinTy(builtinTy), sourceRange(sourceRange) {}
+    Type(std::shared_ptr<Type> pointedTy, llvm::Optional<SourceRange> sourceRange = llvm::None) :
+        tag(pointer), pointedTy(pointedTy), sourceRange(sourceRange) {}
+    Type() : tag(inferred) {}
+    ~Type() {}
 
-    TypeRef(const TypeRef& other) : tag(other.tag) {
-        if(other.isResolved()) resolvedType = other.resolvedType;
-        else if(other.isPhysical()) physicalType = other.physicalType;
+    Type(const Type& other) : tag(other.tag) {
+        switch(tag) {
+            case builtin: builtinTy = other.builtinTy; break;
+            case pointer: pointedTy = other.pointedTy; break;
+            case inferred: break;
+        }
     }
-    void operator=(const TypeRef& other) {
+
+    void operator=(const Type& other) {
         tag = other.tag;
-        if(other.isResolved()) resolvedType = other.resolvedType;
-        else if(other.isPhysical()) physicalType = other.physicalType;
+        switch(tag) {
+            case builtin: builtinTy = other.builtinTy; break;
+            case pointer: pointedTy = other.pointedTy; break;
+            case inferred: break;
+        }
+    }
+
+    bool operator==(Type other) const {
+        if(tag != other.tag) return false;
+        switch(tag) {
+            case builtin: return other.builtinTy == builtinTy;
+            case pointer: return other.pointedTy == pointedTy;
+            case inferred: return true;
+        }
+    }
+
+    bool operator!=(Type other) const {
+        return !(*this == other);
     }
 
     bool isInferred() const { return tag == inferred; }
-    bool isPhysical() const { return tag == physical; }
-    bool isResolved() const { return tag == resolved; }
-
-    BuiltinType getType() const {
-        assert(!isInferred());
-        if(isPhysical()) return physicalType.type;
-        if(isResolved()) return resolvedType;
-        LLVM_BUILTIN_UNREACHABLE;
+    llvm::Optional<BuiltinType> builtinType() {
+        if(tag == builtin) return builtinTy;
+        return llvm::None;
+    }
+    llvm::Optional<std::shared_ptr<Type>> pointedType() {
+        if(tag == pointer) return pointedTy;
+        return llvm::None;
     }
 
-    void resolveType(BuiltinType resolvedType) {
-        assert(isInferred());
-        tag = resolved;
-        this->resolvedType = resolvedType;
-    }
+    std::string name() const;
 };
 
 struct Argument final : public ASTNode {

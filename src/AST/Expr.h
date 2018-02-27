@@ -18,8 +18,8 @@ enum class ExprKind {
 // Base class from which each Expression node inherits.
 struct Expr : public ASTNode {
     ExprKind exprKind;
-    llvm::Optional<BuiltinType> type;
-    AST_NODE_CTOR(Expr, ExprKind exprKind, BuiltinType type), exprKind(exprKind), type(type) {}
+    Type type;
+    AST_NODE_CTOR(Expr, ExprKind exprKind, Type type), exprKind(exprKind), type(type) {}
     AST_NODE_CTOR(Expr, ExprKind exprKind), exprKind(exprKind) {}
 };
 
