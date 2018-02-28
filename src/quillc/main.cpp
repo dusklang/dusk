@@ -26,7 +26,9 @@ extern "C" {
     bool bothTrue(bool l, bool r) { return l && r; }
     void printInt(int x) { std::cout << x; }
     void printChar(char x) { std::cout << x; }
-    void printString(const char* str) { std::cout << str; }
+    bool charEq(char l, char r) { return l == r; }
+    char charDeref(char* character) { return *character; }
+    char* charPtrAdd(char* ptr, int advance) { return ptr + advance; }
 }
 )~";
 std::string sourceCode = R"~(
@@ -38,7 +40,17 @@ extern def notTrue(_ x: Bool): Bool
 extern def bothTrue(_ l: Bool, _ r: Bool): Bool
 extern def printInt(_ x: i32): Void
 extern def printChar(_ x: Char): Void
-extern def printString(_ x: *Char): Void
+extern def charEq(_ l: Char, _ r: Char): Bool
+extern def charDeref(_ x: *Char): Char
+extern def charPtrAdd(_ l: *Char, _ r: i32): *Char
+def printString(_ x: *Char) {
+    var curChar = x
+    while notTrue(charEq(charDeref(curChar), "\0")) {
+        printChar(charDeref(curChar))
+        curChar = charPtrAdd(curChar, 1)
+    }
+    return
+}
 def performFizzBuzz(from start: i32, to end: i32) {
     // Check range.
     if notTrue(lte(start, end)) {
@@ -64,7 +76,7 @@ def performFizzBuzz(from start: i32, to end: i32) {
     return
 }
 def main {
-    performFizzBuzz(from: 1, to: 1000000)
+    performFizzBuzz(from: 1, to: 1000)
 
     return
 }
