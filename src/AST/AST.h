@@ -35,8 +35,8 @@ private:
     } tag;
     union {
         BuiltinType builtinTy;
-        std::shared_ptr<Type> pointedTy;
     };
+    std::shared_ptr<Type> pointedTy;
     llvm::Optional<SourceRange> sourceRange;
 public:
     Type(BuiltinType builtinTy, llvm::Optional<SourceRange> sourceRange = llvm::None) :
@@ -47,7 +47,7 @@ public:
     ~Type() {}
 
     Type(const Type& other) : tag(other.tag) {
-        switch(tag) {
+        switch(other.tag) {
             case builtin: builtinTy = other.builtinTy; break;
             case pointer: pointedTy = other.pointedTy; break;
             case inferred: break;

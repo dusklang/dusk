@@ -40,6 +40,7 @@ private:
         if(lit) next();
         return lit;
     }
+    // TODO: Replace all this source location state tracking with manual state tracking.
     std::stack<SourceLoc> currentLoc;
     void recordCurrentLoc() {
         currentLoc.push(current().getLoc());
@@ -75,7 +76,7 @@ public:
     std::vector<std::shared_ptr<ASTNode>> parseTopLevel();
     llvm::Optional<std::shared_ptr<Scope>> parseScope();
     std::shared_ptr<ASTNode> parseNode();
-    Type parseTypeRef();
+    Type parseType();
     llvm::Optional<Decl> parseDecl();
     llvm::Optional<std::shared_ptr<Stmt>> parseStmt();
     llvm::Optional<std::shared_ptr<Stmt>> parseIfStmt();

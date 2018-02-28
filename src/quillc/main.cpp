@@ -37,6 +37,7 @@ extern def notTrue(_ x: Bool): Bool
 extern def bothTrue(_ l: Bool, _ r: Bool): Bool
 extern def printInt(_ x: i32): Void
 extern def printChar(_ x: Char): Void
+extern def printString(_ x: *Char): Void
 def performFizzBuzz(from start: i32, to end: i32) {
     // Check range.
     if notTrue(lte(start, end)) {

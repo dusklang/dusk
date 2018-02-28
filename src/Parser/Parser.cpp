@@ -70,8 +70,12 @@ std::shared_ptr<ASTNode> Parser::parseNode() {
     LLVM_BUILTIN_UNREACHABLE;
 }
 
-Type Parser::parseTypeRef() {
+Type Parser::parseType() {
     recordCurrentLoc();
+    if(current().is(tok::sep_asterisk)) {
+        next();
+        return Type(std::make_shared<Type>(parseType()));
+    }
     auto typeName = parseIdentifer();
     if(!typeName) reportError("Expected type name", current().getRange());
     #define BUILTIN_TYPE(name) if(*typeName == #name) { return Type(BuiltinType::name, currentRange()); }
@@ -120,7 +124,7 @@ llvm::Optional<Decl> Parser::parseDecl() {
             }
             EXPECT(tok::sep_colon, "Expected colon after parameter name");
             next();
-            paramList.push_back(std::make_shared<ParamDecl>(currentRange(), paramLabel, paramName, parseTypeRef()));
+            paramList.push_back(std::make_shared<ParamDecl>(currentRange(), paramLabel, paramName, parseType()));
         } while(current().is(tok::sep_comma));
         EXPECT(tok::sep_right_paren, "Expected ')' after parameter list");
         if(paramList.empty()) reportError("Expected parameter list for parameterized declaration " + name + ", "
@@ -140,7 +144,7 @@ llvm::Optional<Decl> Parser::parseDecl() {
         protoRange = currentRange();
         previous();
 
-        type = parseTypeRef();
+        type = parseType();
     } else {
         protoRange = currentRange();
         type = Type();

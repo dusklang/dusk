@@ -13,7 +13,7 @@ llvm::Type* CodeGenerator::mapTypeToLLVM(Type type) {
             case BuiltinType::Char: return llvm::Type::getInt8Ty(context);
         }
     } else {
-        return llvm::PointerType::get(mapTypeToLLVM(*type.pointedType()), 0);
+        return llvm::PointerType::get(mapTypeToLLVM(**type.pointedType()), 0);
     }
 }
 
