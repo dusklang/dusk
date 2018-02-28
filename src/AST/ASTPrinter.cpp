@@ -11,7 +11,7 @@ std::string indentation(int level) {
 
 std::string ASTPrinter::visitDecl(std::shared_ptr<Decl> decl, int indentationLevel) {
     std::string str = indentation(indentationLevel);
-    str += decl->isMut ? "mut " : "";
+    str += decl->isVar ? "var " : "";
     str += decl->isExtern ? "extern " : "";
     str += decl->name;
     if(!decl->paramList.empty()) {

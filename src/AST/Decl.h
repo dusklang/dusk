@@ -17,7 +17,7 @@ struct ParamDecl;
 struct Decl: public ASTNode {
     std::string name;
     Type type;
-    bool isMut;
+    bool isVar;
     bool isExtern;
 
     std::vector<std::shared_ptr<ParamDecl>> paramList;
@@ -38,21 +38,21 @@ public:
     AST_NODE_CTOR(Decl,
                   std::string name,
                   Type type,
-                  bool isMut = false,
+                  bool isVar = false,
                   bool isExtern = false,
                   std::vector<std::shared_ptr<ParamDecl>> paramList = std::vector<std::shared_ptr<ParamDecl>>(),
                   std::shared_ptr<Expr> expression = nullptr),
-    name(name), type(type), isMut(isMut), isExtern(isExtern), paramList(paramList),
+    name(name), type(type), isVar(isVar), isExtern(isExtern), paramList(paramList),
     value(std::dynamic_pointer_cast<ASTNode>(expression)) {}
 
     AST_NODE_CTOR(Decl,
                   std::string name,
                   Type type,
-                  bool isMut,
+                  bool isVar,
                   bool isExtern,
                   std::vector<std::shared_ptr<ParamDecl>> paramList,
                   std::shared_ptr<Scope> body),
-    name(name), type(type), isMut(isMut), isExtern(isExtern), paramList(paramList),
+    name(name), type(type), isVar(isVar), isExtern(isExtern), paramList(paramList),
     value(std::dynamic_pointer_cast<ASTNode>(body)) {}
     ~Decl() {}
 

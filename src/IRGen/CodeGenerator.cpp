@@ -19,7 +19,7 @@ llvm::Type* CodeGenerator::mapTypeToLLVM(Type type) {
 
 llvm::Value* CodeGenerator::visitDecl(std::shared_ptr<Decl> decl) {
     if(auto expr = decl->expression()) {
-        if(decl->isMut) {
+        if(decl->isVar) {
             decl->codegenVal = builder.CreateAlloca(mapTypeToLLVM(decl->type), 0, decl->name.c_str());
             builder.CreateStore(visitExpr(expr), decl->codegenVal);
         } else {
@@ -156,7 +156,7 @@ llvm::Value* CodeGenerator::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) 
 
         return builder.CreateCall(callee, args, "calltmp");
     } else {
-        if(expr->decl->isMut) {
+        if(expr->decl->isVar) {
             return builder.CreateLoad(expr->decl->codegenVal, expr->decl->name.c_str());
         } else {
             return referencedVal;

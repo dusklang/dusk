@@ -86,25 +86,25 @@ Type Parser::parseType() {
 
 llvm::Optional<Decl> Parser::parseDecl() {
     recordCurrentLoc();
-    bool isMut;
+    bool isVar;
     bool isExtern = false;
     if(current().is(tok::kw_extern)) {
         isExtern =  true;
         next();
     }
     if(current().is(tok::kw_var)) {
-        isMut = true;
-    } else if(current().is(tok::kw_def)) {
-        isMut = false;
+        isVar = true;
+    } else if(current().is(tok::kw_dec)) {
+        isVar = false;
     } else {
         // Report an error only if we know for a fact that this was supposed to be a declaration.
         if(isExtern) {
-            reportError("Expected def or var keyword to begin declaration");
+            reportError("Expected dec or var keyword to begin declaration");
         } else {
             return llvm::None;
         }
     }
-    EXPECT_NEXT(tok::identifier, "Expected identifier after def");
+    EXPECT_NEXT(tok::identifier, "Expected identifier after dec");
     auto name = current().getText();
     std::vector<std::shared_ptr<ParamDecl>> paramList;
     if(next().is(tok::sep_left_paren)) {
@@ -170,13 +170,13 @@ llvm::Optional<Decl> Parser::parseDecl() {
         auto expr = parseExpr();
         if(!expr) reportError("Expected expression to assign to declaration " + name, current().getRange());
         auto range = rangeFrom(protoRange.begin, (*expr)->range);
-        return Decl(range, name, type, isMut, isExtern, paramList, *expr);
+        return Decl(range, name, type, isVar, isExtern, paramList, *expr);
     } else if(auto scope = parseScope()) {
         checkExtern();
         auto range = rangeFrom(protoRange.begin, (*scope)->range);
-        return Decl(range, name, type, isMut, isExtern, paramList, *scope);
+        return Decl(range, name, type, isVar, isExtern, paramList, *scope);
     } else {
-        return Decl(protoRange, name, type, isMut, isExtern, paramList);
+        return Decl(protoRange, name, type, isVar, isExtern, paramList);
     }
 }
 

@@ -32,18 +32,18 @@ extern "C" {
 }
 )~";
 std::string sourceCode = R"~(
-extern def add(_: i32, _: i32): i32
-extern def mod(_: i32, _: i32): i32
-extern def lte(_: i32, _: i32): Bool
-extern def eq(_: i32, _: i32): Bool
-extern def notTrue(_: Bool): Bool
-extern def bothTrue(_: Bool, _: Bool): Bool
-extern def printInt(_: i32): Void
-extern def printChar(_: Char): Void
-extern def charEq(_: Char, _: Char): Bool
-extern def charDeref(_: *Char): Char
-extern def charPtrAdd(_: *Char, _: i32): *Char
-def printString(_ str: *Char) {
+extern dec add(_: i32, _: i32): i32
+extern dec mod(_: i32, _: i32): i32
+extern dec lte(_: i32, _: i32): Bool
+extern dec eq(_: i32, _: i32): Bool
+extern dec notTrue(_: Bool): Bool
+extern dec bothTrue(_: Bool, _: Bool): Bool
+extern dec printInt(_: i32): Void
+extern dec printChar(_: Char): Void
+extern dec charEq(_: Char, _: Char): Bool
+extern dec charDeref(_: *Char): Char
+extern dec charPtrAdd(_: *Char, _: i32): *Char
+dec printString(_ str: *Char) {
     var curChar = str
     while notTrue(charEq(charDeref(curChar), "\0")) {
         printChar(charDeref(curChar))
@@ -51,7 +51,7 @@ def printString(_ str: *Char) {
     }
     return
 }
-def performFizzBuzz(from start: i32, to end: i32) {
+dec performFizzBuzz(from start: i32, to end: i32) {
     // Check range.
     if notTrue(lte(start, end)) {
         printString("Invalid bounds!\n")
@@ -59,8 +59,8 @@ def performFizzBuzz(from start: i32, to end: i32) {
     }
     var i = start
     while lte(i, end) {
-        def fizz = eq(mod(i, 3), 0)
-        def buzz = eq(mod(i, 5), 0)
+        dec fizz = eq(mod(i, 3), 0)
+        dec buzz = eq(mod(i, 5), 0)
         if fizz {
             printString("Fizz")
         }
@@ -75,7 +75,7 @@ def performFizzBuzz(from start: i32, to end: i32) {
     }
     return
 }
-def main {
+dec main {
     performFizzBuzz(from: 1, to: 1000)
 
     return

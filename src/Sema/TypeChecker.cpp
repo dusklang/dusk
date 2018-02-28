@@ -228,7 +228,7 @@ void TypeChecker::visitReturnStmt(std::shared_ptr<ReturnStmt> stmt) {
 void TypeChecker::visitAssignmentStmt(std::shared_ptr<AssignmentStmt> stmt) {
     visitDeclRefExpr(stmt->lhs);
     visitExpr(stmt->rhs);
-    if(!stmt->lhs->decl->isMut) {
+    if(!stmt->lhs->decl->isVar) {
         reportError("Cannot assign to constant declaration '" + stmt->lhs->decl->name + "'", stmt);
     }
     if(stmt->lhs->type != stmt->rhs->type) {
