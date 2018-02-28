@@ -120,7 +120,13 @@ llvm::Optional<Decl> Parser::parseDecl() {
                 paramName = current().getText();
                 next();
             } else {
-                if(!paramLabel) { reportError("Expected parameter name after '_'"); }
+                if(!paramLabel) {
+                    if(!isExtern) {
+                        reportError("Expected parameter name after '_'");
+                    } else {
+                        paramName = "";
+                    }
+                }
             }
             EXPECT(tok::sep_colon, "Expected colon after parameter name");
             next();

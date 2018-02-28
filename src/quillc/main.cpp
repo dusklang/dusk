@@ -32,19 +32,19 @@ extern "C" {
 }
 )~";
 std::string sourceCode = R"~(
-extern def add(_ l: i32, _ r: i32): i32
-extern def mod(_ l: i32, _ r: i32): i32
-extern def lte(_ l: i32, _ r: i32): Bool
-extern def eq(_ l: i32, _ r: i32): Bool
-extern def notTrue(_ x: Bool): Bool
-extern def bothTrue(_ l: Bool, _ r: Bool): Bool
-extern def printInt(_ x: i32): Void
-extern def printChar(_ x: Char): Void
-extern def charEq(_ l: Char, _ r: Char): Bool
-extern def charDeref(_ x: *Char): Char
-extern def charPtrAdd(_ l: *Char, _ r: i32): *Char
-def printString(_ x: *Char) {
-    var curChar = x
+extern def add(_: i32, _: i32): i32
+extern def mod(_: i32, _: i32): i32
+extern def lte(_: i32, _: i32): Bool
+extern def eq(_: i32, _: i32): Bool
+extern def notTrue(_: Bool): Bool
+extern def bothTrue(_: Bool, _: Bool): Bool
+extern def printInt(_: i32): Void
+extern def printChar(_: Char): Void
+extern def charEq(_: Char, _: Char): Bool
+extern def charDeref(_: *Char): Char
+extern def charPtrAdd(_: *Char, _: i32): *Char
+def printString(_ str: *Char) {
+    var curChar = str
     while notTrue(charEq(charDeref(curChar), "\0")) {
         printChar(charDeref(curChar))
         curChar = charPtrAdd(curChar, 1)
