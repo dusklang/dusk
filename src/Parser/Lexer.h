@@ -4,6 +4,7 @@
 
 #include <string>
 #include <stack>
+#include <map>
 #include "llvm/ADT/Optional.h"
 #include "Token.h"
 #include <iostream>
@@ -22,6 +23,13 @@ private:
     // This is useful because we may need to rollback the lexer after realizing we can't actually
     // parse the thing we were trying to and should try something else.
     llvm::Optional<int> numberOfNewTokens;
+
+    std::map<char, char> specialEscapeCharacters {
+        { 'n', '\n' },
+        { '"', '"' },
+        { '0', '\0' },
+        { '\\', '\\' }
+    };
 
     void reportError(int endPos, std::string message) {
         auto startPos = tokenPositions.top();

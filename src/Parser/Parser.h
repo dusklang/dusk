@@ -26,30 +26,19 @@ private:
         return llvm::None;
     }
     llvm::Optional<std::string> parseIntegerLiteral() {
-        if(current().is(tok::integer_literal)) {
-            auto text = current().getText();
-            next();
-            return text;
-        }
-        return llvm::None;
+        auto lit = current().getIntegerLiteral();
+        if(lit) next();
+        return lit;
     }
     llvm::Optional<std::string> parseDecimalLiteral() {
-        if(current().is(tok::decimal_literal)) {
-            auto text = current().getText();
-            next();
-            return text;
-        }
-        return llvm::None;
+        auto lit = current().getDecimalLiteral();
+        if(lit) next();
+        return lit;
     }
-    llvm::Optional<std::string> parseCharLiteral() {
-        if(current().isNot(tok::char_literal)) { return llvm::None; }
-
-        auto text = current().getText();
-        assert(text.size() == 3);
-        text.erase(0, 1);
-        text.erase(1, 1);
-        next();
-        return text;
+    llvm::Optional<char> parseCharLiteral() {
+        auto lit = current().getCharLiteral();
+        if(lit) next();
+        return lit;
     }
     std::stack<SourceLoc> currentLoc;
     void recordCurrentLoc() {

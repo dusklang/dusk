@@ -26,7 +26,6 @@ extern "C" {
     bool bothTrue(bool l, bool r) { return l && r; }
     void printInt(int x) { std::cout << x; }
     void printChar(char x) { std::cout << x; }
-    void println() { std::cout << '\n'; }
 }
 )~";
 std::string sourceCode = R"~(
@@ -38,25 +37,24 @@ extern def notTrue(_ x: Bool): Bool
 extern def bothTrue(_ l: Bool, _ r: Bool): Bool
 extern def printInt(_ x: i32): Void
 extern def printChar(_ x: Char): Void
-extern def println: Void
 def performFizzBuzz(from start: i32, to end: i32) {
     // Check range.
     if notTrue(lte(start, end)) {
-        printChar('I')
-        printChar('n')
-        printChar('v')
-        printChar('a')
-        printChar('l')
-        printChar('i')
-        printChar('d')
-        printChar(' ')
-        printChar('b')
-        printChar('o')
-        printChar('u')
-        printChar('n')
-        printChar('d')
-        printChar('s')
-        println
+        printChar("I")
+        printChar("n")
+        printChar("v")
+        printChar("a")
+        printChar("l")
+        printChar("i")
+        printChar("d")
+        printChar(" ")
+        printChar("b")
+        printChar("o")
+        printChar("u")
+        printChar("n")
+        printChar("d")
+        printChar("s")
+        printChar("\n")
         return
     }
     var i = start
@@ -64,21 +62,21 @@ def performFizzBuzz(from start: i32, to end: i32) {
         def fizz = eq(mod(i, 3), 0)
         def buzz = eq(mod(i, 5), 0)
         if fizz {
-            printChar('F')
-            printChar('i')
-            printChar('z')
-            printChar('z')
+            printChar("F")
+            printChar("i")
+            printChar("z")
+            printChar("z")
         }
         if buzz {
-            printChar('B')
-            printChar('u')
-            printChar('z')
-            printChar('z')
+            printChar("B")
+            printChar("u")
+            printChar("z")
+            printChar("z")
         }
         if bothTrue(notTrue(fizz), notTrue(buzz)) {
             printInt(i)
         }
-        println
+        printChar("\n")
         i = add(i, 1)
     }
     return

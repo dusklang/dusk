@@ -268,12 +268,12 @@ llvm::Optional<std::shared_ptr<Expr>> Parser::parseExpr() {
         next();
         return std::dynamic_pointer_cast<Expr>(std::make_shared<BooleanLiteralExpr>(currentRange(),
                                                                                     false));
-    } else if(auto intVal = TRY(parseIntegerLiteral())) {
+    } else if(auto intVal = parseIntegerLiteral()) {
         return std::dynamic_pointer_cast<Expr>(std::make_shared<IntegerLiteralExpr>(currentRange(), *intVal));
-    } else if(auto decimalVal = TRY(parseDecimalLiteral())) {
+    } else if(auto decimalVal = parseDecimalLiteral()) {
         return std::dynamic_pointer_cast<Expr>(std::make_shared<DecimalLiteralExpr>(currentRange(), *decimalVal));
-    } else if(auto charVal = TRY(parseCharLiteral())) {
-        return std::dynamic_pointer_cast<Expr>(std::make_shared<CharLiteralExpr>(currentRange(), charVal->at(0)));
+    } else if(auto charVal = parseCharLiteral()) {
+        return std::dynamic_pointer_cast<Expr>(std::make_shared<CharLiteralExpr>(currentRange(), *charVal));
     }
 
     // Reset the stack.

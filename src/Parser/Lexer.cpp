@@ -24,13 +24,14 @@ Token Lexer::nextTokIncludingInsignificant() {
     };
 
     Token _tok;
-    #define RETURN(tokenKind) { \
+    #define RETURN_LIT(tokenKind, literal) { \
         if(numberOfNewTokens) *numberOfNewTokens += 1;\
-        _tok = Token(tokenKind, SourceRange(SourceLoc(&source, tokenPositions.top()), pos - tokenPositions.top()));\
+        _tok = Token(tokenKind, SourceRange(SourceLoc(&source, tokenPositions.top()), pos - tokenPositions.top()), literal);\
         tokenPositions.push(pos);\
         tokens.push(_tok);\
         return _tok;\
     }
+    #define RETURN(tokenKind) RETURN_LIT(tokenKind, "")
 
     // Return eof if at the end.
     if(pos == source.length()) RETURN(tok::eof);
@@ -82,37 +83,41 @@ Token Lexer::nextTokIncludingInsignificant() {
         #include "TokenKinds.def"
     }
 
-    // Lex a string literal.
+    // Lex a string or character literal.
     if(is('"')) {
+        std::string literal = "";
+        bool escapeMode = false;
         tokenText += '"';
         pos++;
         while(pos < source.length() && !isNewline()) {
             tokenText += curChar();
 
-            if(is('"') && source.at(pos - 1) != '\\') {
+            char charToInsert = curChar();
+            if(escapeMode) {
+                try {
+                    charToInsert = specialEscapeCharacters.at(charToInsert);
+                } catch(...) {
+                    reportError(pos, std::string("Invalid escape character '") + charToInsert + "'");
+                }
+                escapeMode = false;
+            }
+
+            if(is('\\')) {
                 pos++;
-                RETURN(tok::string_literal);
+                escapeMode = true;
+            } else if(is('"') && !escapeMode) {
+                pos++;
+                if(literal.size() == 1) {
+                    RETURN_LIT(tok::char_literal, literal);
+                } else {
+                    RETURN_LIT(tok::string_literal, literal);
+                }
             } else {
+                literal += charToInsert;
                 pos++;
             }
         }
         reportError(pos, "Unterminated string literal");
-    }
-
-    // Lex a character literal.
-    if(is('\'')) {
-        tokenText += '\'';
-        pos++;
-        if(pos == source.length()) reportError(pos, "Unterminated character literal");
-        tokenText += curChar();
-        pos++;
-        if(pos == source.length()) reportError(pos, "Unterminated character literal");
-        if(!is('\'')) {
-            reportError(pos, "Character literal longer than one ASCII character");
-        }
-        tokenText += '\'';
-        pos++;
-        RETURN(tok::char_literal);
     }
 
     // Lex an identifier.
@@ -136,7 +141,7 @@ Token Lexer::nextTokIncludingInsignificant() {
         tokenText += source.at(pos++);
     }
     if(!tokenText.empty()) {
-        RETURN(hasDot ? tok::decimal_literal : tok::integer_literal);
+        RETURN_LIT(hasDot ? tok::decimal_literal : tok::integer_literal, tokenText);
     }
 
     assert(false && "Unhandled token");

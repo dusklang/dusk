@@ -14,12 +14,16 @@ private:
     tok kind = tok::NUM_TOKENS;
     SourceRange range;
 
+    // Used to get the actual text of a string or character literal.
+    std::string literal;
+
 public:
-    Token(tok kind, SourceRange range) : kind(kind), range(range) {}
+    Token(tok kind, SourceRange range, std::string literal) : kind(kind), range(range), literal(literal) {}
     Token() : range(SourceLoc(nullptr, 0), 0) {}
     Token& operator=(const Token& otherTok) {
         kind = otherTok.kind;
         range = otherTok.range;
+        literal = otherTok.literal;
         return *this;
     }
 
@@ -43,6 +47,22 @@ public:
     std::string getText() const { return range.getSubstring(); }
     SourceLoc getLoc() const { return range.begin; }
     SourceRange getRange() const { return range; }
+    llvm::Optional<std::string> getStringLiteral() const {
+        if(isNot(tok::string_literal)) return llvm::None;
+        return literal;
+    }
+    llvm::Optional<char> getCharLiteral() const {
+        if(isNot(tok::char_literal)) return llvm::None;
+        return literal[0];
+    }
+    llvm::Optional<std::string> getIntegerLiteral() const {
+        if(isNot(tok::integer_literal)) return llvm::None;
+        return literal;
+    }
+    llvm::Optional<std::string> getDecimalLiteral() const {
+        if(isNot(tok::decimal_literal)) return llvm::None;
+        return literal;
+    }
 
     bool isAnySeparator() const {
         #define TOKEN_SEPARATOR(name, character) || kind == tok::sep_ ## name
