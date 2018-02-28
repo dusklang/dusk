@@ -26,6 +26,7 @@ extern "C" {
     bool bothTrue(bool l, bool r) { return l && r; }
     void printInt(int x) { std::cout << x; }
     void printChar(char x) { std::cout << x; }
+    void printString(const char* str) { std::cout << str; }
 }
 )~";
 std::string sourceCode = R"~(
@@ -41,21 +42,7 @@ extern def printString(_ x: *Char): Void
 def performFizzBuzz(from start: i32, to end: i32) {
     // Check range.
     if notTrue(lte(start, end)) {
-        printChar("I")
-        printChar("n")
-        printChar("v")
-        printChar("a")
-        printChar("l")
-        printChar("i")
-        printChar("d")
-        printChar(" ")
-        printChar("b")
-        printChar("o")
-        printChar("u")
-        printChar("n")
-        printChar("d")
-        printChar("s")
-        printChar("\n")
+        printString("Invalid bounds!\n")
         return
     }
     var i = start
@@ -63,16 +50,10 @@ def performFizzBuzz(from start: i32, to end: i32) {
         def fizz = eq(mod(i, 3), 0)
         def buzz = eq(mod(i, 5), 0)
         if fizz {
-            printChar("F")
-            printChar("i")
-            printChar("z")
-            printChar("z")
+            printString("Fizz")
         }
         if buzz {
-            printChar("B")
-            printChar("u")
-            printChar("z")
-            printChar("z")
+            printString("Buzz")
         }
         if bothTrue(notTrue(fizz), notTrue(buzz)) {
             printInt(i)
@@ -83,8 +64,7 @@ def performFizzBuzz(from start: i32, to end: i32) {
     return
 }
 def main {
-    performFizzBuzz(from: 1, to: 1000)
-    performFizzBuzz(from: 1000, to: 1) // Invalid bounds
+    performFizzBuzz(from: 1, to: 1000000)
 
     return
 }

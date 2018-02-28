@@ -136,6 +136,9 @@ llvm::Value* CodeGenerator::visitBooleanLiteralExpr(std::shared_ptr<BooleanLiter
 llvm::Value* CodeGenerator::visitCharLiteralExpr(std::shared_ptr<CharLiteralExpr> expr) {
     return llvm::ConstantInt::get(context, llvm::APInt(8, expr->literal));
 }
+llvm::Value* CodeGenerator::visitStringLiteralExpr(std::shared_ptr<StringLiteralExpr> expr) {
+    return builder.CreateGlobalStringPtr(expr->literal);
+}
 llvm::Value* CodeGenerator::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
     auto referencedVal = expr->decl->codegenVal;
     if(expr->decl->isComputed()) {

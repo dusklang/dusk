@@ -19,6 +19,7 @@ public:
     std::string visitDecimalLiteralExpr(std::shared_ptr<DecimalLiteralExpr> expr, int indentationLevel);
     std::string visitBooleanLiteralExpr(std::shared_ptr<BooleanLiteralExpr> expr, int indentationLevel);
     std::string visitCharLiteralExpr(std::shared_ptr<CharLiteralExpr> expr, int indentationLevel);
+    std::string visitStringLiteralExpr(std::shared_ptr<StringLiteralExpr> expr, int indentationLevel);
     std::string visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr, int indentationLevel);
 
     std::string visitReturnStmt(std::shared_ptr<ReturnStmt> stmt, int indentationLevel);

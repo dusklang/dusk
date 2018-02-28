@@ -278,6 +278,8 @@ llvm::Optional<std::shared_ptr<Expr>> Parser::parseExpr() {
         return std::dynamic_pointer_cast<Expr>(std::make_shared<DecimalLiteralExpr>(currentRange(), *decimalVal));
     } else if(auto charVal = parseCharLiteral()) {
         return std::dynamic_pointer_cast<Expr>(std::make_shared<CharLiteralExpr>(currentRange(), *charVal));
+    } else if(auto stringVal = parseStringLiteral()) {
+        return std::dynamic_pointer_cast<Expr>(std::make_shared<StringLiteralExpr>(currentRange(), *stringVal));
     }
 
     // Reset the stack.

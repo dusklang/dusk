@@ -69,7 +69,11 @@ std::string ASTPrinter::visitBooleanLiteralExpr(std::shared_ptr<BooleanLiteralEx
 }
 
 std::string ASTPrinter::visitCharLiteralExpr(std::shared_ptr<CharLiteralExpr> expr, int indentationLevel) {
-    return indentation(indentationLevel) + expr->literal;
+    return indentation(indentationLevel) + expr->range.getSubstring();
+}
+
+std::string ASTPrinter::visitStringLiteralExpr(std::shared_ptr<StringLiteralExpr> expr, int indentationLevel) {
+    return indentation(indentationLevel) + expr->range.getSubstring();
 }
 
 std::string ASTPrinter::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr, int indentationLevel) {

@@ -67,7 +67,7 @@ public:
         if(tag != other.tag) return false;
         switch(tag) {
             case builtin: return other.builtinTy == builtinTy;
-            case pointer: return other.pointedTy == pointedTy;
+            case pointer: return *other.pointedTy == *pointedTy;
             case inferred: return true;
         }
     }

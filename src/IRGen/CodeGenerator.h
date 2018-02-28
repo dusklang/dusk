@@ -39,6 +39,7 @@ public:
     llvm::Value* visitDecimalLiteralExpr(std::shared_ptr<DecimalLiteralExpr> expr);
     llvm::Value* visitBooleanLiteralExpr(std::shared_ptr<BooleanLiteralExpr> expr);
     llvm::Value* visitCharLiteralExpr(std::shared_ptr<CharLiteralExpr> expr);
+    llvm::Value* visitStringLiteralExpr(std::shared_ptr<StringLiteralExpr> expr);
     llvm::Value* visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr);
 
     llvm::Value* visitReturnStmt(std::shared_ptr<ReturnStmt> stmt);

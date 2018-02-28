@@ -45,6 +45,11 @@ struct CharLiteralExpr: public Expr {
     EXPR_CTOR(CharLiteral, char literal), literal(literal) {}
 };
 
+struct StringLiteralExpr: public Expr {
+    std::string literal;
+    EXPR_CTOR(StringLiteral, const std::string& literal), literal(literal) {}
+};
+
 struct DeclRefExpr: public Expr {
     std::string name;
     std::vector<Argument> argList;

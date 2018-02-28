@@ -40,6 +40,11 @@ private:
         if(lit) next();
         return lit;
     }
+    llvm::Optional<std::string> parseStringLiteral() {
+        auto lit = current().getStringLiteral();
+        if(lit) next();
+        return lit;
+    }
     // TODO: Replace all this source location state tracking with manual state tracking.
     std::stack<SourceLoc> currentLoc;
     void recordCurrentLoc() {

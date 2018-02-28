@@ -174,6 +174,9 @@ void TypeChecker::visitBooleanLiteralExpr(std::shared_ptr<BooleanLiteralExpr> ex
 void TypeChecker::visitCharLiteralExpr(std::shared_ptr<CharLiteralExpr> expr) {
     expr->type = BuiltinType::Char;
 }
+void TypeChecker::visitStringLiteralExpr(std::shared_ptr<StringLiteralExpr> expr) {
+    expr->type = Type(std::make_shared<Type>(BuiltinType::Char));
+}
 void TypeChecker::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
     // Type-check arguments.
     for(auto& arg: expr->argList) {

@@ -34,6 +34,7 @@ EXPR_NODE(IntegerLiteral)
 EXPR_NODE(DecimalLiteral)
 EXPR_NODE(BooleanLiteral)
 EXPR_NODE(CharLiteral)
+EXPR_NODE(StringLiteral)
 EXPR_NODE(DeclRef)
 
 // Ditto for stmts.

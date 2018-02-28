@@ -45,6 +45,7 @@ public:
     void visitDecimalLiteralExpr(std::shared_ptr<DecimalLiteralExpr> expr);
     void visitBooleanLiteralExpr(std::shared_ptr<BooleanLiteralExpr> expr);
     void visitCharLiteralExpr(std::shared_ptr<CharLiteralExpr> expr);
+    void visitStringLiteralExpr(std::shared_ptr<StringLiteralExpr> expr);
     void visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr);
 
     void visitReturnStmt(std::shared_ptr<ReturnStmt> stmt);
