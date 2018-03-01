@@ -12,7 +12,6 @@
 #include "Types.h"
 
 struct Expr;
-struct ParamDecl;
 
 struct Decl: public ASTNode {
     std::string name;
@@ -20,7 +19,7 @@ struct Decl: public ASTNode {
     bool isVar;
     bool isExtern;
 
-    std::vector<std::shared_ptr<ParamDecl>> paramList;
+    std::vector<std::shared_ptr<Decl>> paramList;
 
     llvm::Value* codegenVal;
 private:
@@ -40,7 +39,7 @@ public:
                   Type type,
                   bool isVar = false,
                   bool isExtern = false,
-                  std::vector<std::shared_ptr<ParamDecl>> paramList = std::vector<std::shared_ptr<ParamDecl>>(),
+                  std::vector<std::shared_ptr<Decl>> paramList = std::vector<std::shared_ptr<Decl>>(),
                   std::shared_ptr<Expr> expression = nullptr),
     name(name), type(type), isVar(isVar), isExtern(isExtern), paramList(paramList),
     value(std::dynamic_pointer_cast<ASTNode>(expression)) {}
@@ -50,7 +49,7 @@ public:
                   Type type,
                   bool isVar,
                   bool isExtern,
-                  std::vector<std::shared_ptr<ParamDecl>> paramList,
+                  std::vector<std::shared_ptr<Decl>> paramList,
                   std::shared_ptr<Scope> body),
     name(name), type(type), isVar(isVar), isExtern(isExtern), paramList(paramList),
     value(std::dynamic_pointer_cast<ASTNode>(body)) {}
@@ -64,21 +63,4 @@ public:
     }
 
     bool isParameterized() const { return !paramList.empty(); }
-};
-
-// For a ParamDecl, the inherited name field represents the internal name of the parameter, while the
-// label field represents the *external* label for the parameter. If only a name is specified, like so...
-//     def myFunction(intParameter: i32): Void
-// ...that name will be copied into label. If an underscore instead of a label precedes the name of
-// the function...
-//     def myFunction(_ intParameter: i32): Void
-// ...label will be None.
-struct ParamDecl: public Decl {
-    llvm::Optional<std::string> label;
-
-    ParamDecl(SourceRange range,
-              llvm::Optional<std::string> label,
-              std::string name,
-              Type type) :
-    Decl(range, name, type), label(label) {}
 };

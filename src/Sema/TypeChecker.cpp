@@ -3,7 +3,7 @@
 #include "TypeChecker.h"
 
 void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
-    // Search for existing declaration in the current scope with the same name and parameter labels.
+    // Search for existing declaration in the current scope with the same name and parameter types.
     for(auto& existingDecl: declLists.back()) {
         if(existingDecl->name != decl->name) continue;
         if(existingDecl->paramList.size() != decl->paramList.size()) continue;
@@ -12,8 +12,9 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
         auto&& existingParam = existingDecl->paramList.begin();
         for(;param != decl->paramList.end() && existingParam != existingDecl->paramList.end();
             ++param, ++existingParam) {
-            if((*existingParam)->label != (*param)->label) goto notAMatch;
+            if((*existingParam)->type != (*param)->type) goto notAMatch;
         }
+
         // We must have found a matching declaration in the same scope.
         reportError("Cannot redeclare '" + decl->name + "'\n" +
                     "\tPrevious declaration here: " + existingDecl->range.getSubstring(),
@@ -193,11 +194,10 @@ void TypeChecker::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
             if(decl->name != expr->name) continue;
             nameMatches.push_back(decl);
             if(decl->paramList.size() != expr->argList.size()) continue;
-            // Check the labels of all parameters
+            // Check the types of all parameters
             auto param = decl->paramList.begin();
             auto arg = expr->argList.begin();
             for(;param != decl->paramList.end(); ++param, ++arg) {
-                if((*param)->label != arg->label) goto failedToFindMatchInCurrentList;
                 if((*param)->type != arg->value->type) goto failedToFindMatchInCurrentList;
             }
             // We must have succeeded! Add the decl's prototype and type to the declRefExpr and return.
@@ -211,7 +211,7 @@ void TypeChecker::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
     // We must have failed.
     std::string errorMessage = "Invalid reference to identifier '" + expr->name + "'";
     if(!nameMatches.empty()) {
-        errorMessage += "\n\nHere are some matches that differ only in parameter labels or types:";
+        errorMessage += "\n\nHere are some matches that differ only in parameter types:";
         for(auto& match: nameMatches) {
             errorMessage += "\n\t" + match->range.getSubstring();
         }

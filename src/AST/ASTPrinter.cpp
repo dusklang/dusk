@@ -51,9 +51,7 @@ std::string ASTPrinter::visitScope(std::shared_ptr<Scope> scope, int indentation
 }
 
 std::string ASTPrinter::visitArgument(std::shared_ptr<Argument> argument, int indentationLevel) {
-    std::string str;
-    if(argument->label) str += *argument->label + ": ";
-    return str + visitExpr(argument->value, 0);
+    return indentation(indentationLevel) + visitExpr(argument->value, 0);
 }
 
 std::string ASTPrinter::visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr, int indentationLevel) {

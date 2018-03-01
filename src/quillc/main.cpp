@@ -43,7 +43,7 @@ extern dec printChar(_: Char): Void
 extern dec charEq(_: Char, _: Char): Bool
 extern dec charDeref(_: *Char): Char
 extern dec charPtrAdd(_: *Char, _: i32): *Char
-dec printString(_ str: *Char) {
+dec printString(str: *Char) {
     var curChar = str
     while notTrue(charEq(charDeref(curChar), "\0")) {
         printChar(charDeref(curChar))
@@ -51,7 +51,7 @@ dec printString(_ str: *Char) {
     }
     return
 }
-dec performFizzBuzz(from start: i32, to end: i32) {
+dec performFizzBuzz(start: i32, end: i32) {
     // Check range.
     if notTrue(lte(start, end)) {
         printString("Invalid bounds!\n")
@@ -76,7 +76,7 @@ dec performFizzBuzz(from start: i32, to end: i32) {
     return
 }
 dec main {
-    performFizzBuzz(from: 1, to: 1000)
+    performFizzBuzz(1, 1000)
 
     return
 }

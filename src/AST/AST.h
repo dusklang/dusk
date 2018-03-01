@@ -90,10 +90,9 @@ public:
 };
 
 struct Argument final : public ASTNode {
-    llvm::Optional<std::string> label;
     std::shared_ptr<Expr> value;
 
-    AST_NODE_CTOR(Argument, llvm::Optional<std::string> label, std::shared_ptr<Expr> value), label(label), value(value) {}
+    AST_NODE_CTOR(Argument, std::shared_ptr<Expr> value), value(value) {}
 };
 
 // A scope node represents a collection of other nodes.

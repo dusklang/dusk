@@ -62,7 +62,7 @@ private:
     SourceRange rangeFrom(SourceLoc beginLoc, SourceRange endRange) {
         auto diff = endRange.begin.location - beginLoc.location;
         auto length = endRange.length + diff;
-        assert(diff >= 0 && "Attempt to get range between a location and a range that occurs after it");
+        //assert(diff >= 0 && "Attempt to get range between a location and a range that occurs after it");
         return SourceRange(beginLoc, length);
     }
     void reportError(std::string message, SourceRange offendingRange) {

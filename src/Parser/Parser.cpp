@@ -106,31 +106,15 @@ llvm::Optional<Decl> Parser::parseDecl() {
     }
     EXPECT_NEXT(tok::identifier, "Expected identifier after dec");
     auto name = current().getText();
-    std::vector<std::shared_ptr<ParamDecl>> paramList;
+    std::vector<std::shared_ptr<Decl>> paramList;
     if(next().is(tok::sep_left_paren)) {
         do {
             recordCurrentLoc();
-            EXPECT_NEXT(tok::identifier, "Expected parameter label");
-            llvm::Optional<std::string> paramLabel = current().getText();
-            std::string paramName = *paramLabel;
-            if(*paramLabel == "_") {
-                paramLabel = llvm::None;
-            }
-            if(next().is(tok::identifier)) {
-                paramName = current().getText();
-                next();
-            } else {
-                if(!paramLabel) {
-                    if(!isExtern) {
-                        reportError("Expected parameter name after '_'");
-                    } else {
-                        paramName = "";
-                    }
-                }
-            }
-            EXPECT(tok::sep_colon, "Expected colon after parameter name");
+            EXPECT_NEXT(tok::identifier, "Expected parameter name");
+            auto paramName = current().getText();
+            EXPECT_NEXT(tok::sep_colon, "Expected colon after parameter name");
             next();
-            paramList.push_back(std::make_shared<ParamDecl>(currentRange(), paramLabel, paramName, parseType()));
+            paramList.push_back(std::make_shared<Decl>(currentRange(), paramName, parseType()));
         } while(current().is(tok::sep_comma));
         EXPECT(tok::sep_right_paren, "Expected ')' after parameter list");
         if(paramList.empty()) reportError("Expected parameter list for parameterized declaration " + name + ", "
@@ -242,23 +226,12 @@ llvm::Optional<std::shared_ptr<Expr>> Parser::parseDeclRefExpr() {
     std::vector<Argument> argList;
     if(next().is(tok::sep_left_paren)) {
         do {
+            next();
             recordCurrentLoc();
-            llvm::Optional<std::string> paramLabel = llvm::None;
-            if(next().is(tok::identifier)) {
-                // Maybe this is an parameter label?
-                auto maybeParamLabel = current().getText();
-                if(next().is(tok::sep_colon)) {
-                    next();
-                    paramLabel = maybeParamLabel;
-                } else {
-                    // Oops, I guess it's an expression instead.
-                    previous();
-                }
-            }
 
             auto argument = parseExpr();
-            if(!argument) reportError("Expected expression argument");
-            argList.push_back(Argument(currentRange(), paramLabel, *argument));
+            if(!argument) reportError("Expected argument");
+            argList.push_back(Argument(currentRange(), *argument));
 
         } while(current().is(tok::sep_comma));
         EXPECT(tok::sep_right_paren, "Expected ')' after parameter and argument");
