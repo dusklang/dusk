@@ -6,8 +6,8 @@
 #include <vector>
 #include "llvm/ADT/Optional.h"
 #include "llvm/IR/Value.h"
-#include "Types.h"
 #include "General/SourceLoc.h"
+#include "boost/variant.hpp"
 
 struct Expr;
 
@@ -29,48 +29,101 @@ struct ASTNode {
 };
 
 struct Type final {
-private:
-    enum {
-        builtin, pointer, inferred
-    } tag;
-    union {
-        BuiltinType builtinTy;
+    struct IntProperties {
+        int bitWidth;
+        bool isSigned;
+
+        bool operator==(IntProperties other) { return bitWidth == other.bitWidth && isSigned == other.isSigned; }
     };
-    std::shared_ptr<Type> pointedTy;
+    struct VoidTy {};
+    struct BoolTy {};
+    struct FloatTy {};
+    struct DoubleTy {};
+    struct ErrorTy {};
+
+    typedef boost::variant<IntProperties, std::shared_ptr<Type>, std::string, VoidTy, BoolTy, FloatTy, DoubleTy, ErrorTy> DataType;
+private:
+    DataType data;
     llvm::Optional<SourceRange> sourceRange;
+
+    struct EqualityVisitor: public boost::static_visitor<bool> {
+        bool operator()(IntProperties lhs, IntProperties rhs) const { return lhs == rhs; }
+        bool operator()(std::shared_ptr<Type> lhs, std::shared_ptr<Type> rhs) const {
+            return *lhs == *rhs;
+        }
+        bool operator()(std::string lhs, std::string rhs) const { return lhs == rhs; }
+        bool operator()(VoidTy, VoidTy) const { return true; }
+        bool operator()(BoolTy, BoolTy) const { return true; }
+        bool operator()(FloatTy, FloatTy) const { return true; }
+        bool operator()(DoubleTy, DoubleTy) const { return true; }
+        bool operator()(ErrorTy, ErrorTy) const { return true; }
+
+        template<typename T, typename U>
+        bool operator()(T, U) const { return false; }
+    };
+
+    Type(DataType data,
+         llvm::Optional<SourceRange> sourceRange = llvm::None)
+        : data(data), sourceRange(sourceRange) {}
 public:
-    Type(BuiltinType builtinTy, llvm::Optional<SourceRange> sourceRange = llvm::None) :
-        tag(builtin), builtinTy(builtinTy), sourceRange(sourceRange) {}
-    Type(std::shared_ptr<Type> pointedTy, llvm::Optional<SourceRange> sourceRange = llvm::None) :
-        tag(pointer), pointedTy(pointedTy), sourceRange(sourceRange) {}
-    Type() : tag(inferred) {}
+    static Type Integer(int bitWidth, bool isSigned, llvm::Optional<SourceRange> sourceRange = llvm::None) {
+        return Type(IntProperties { bitWidth, isSigned }, sourceRange);
+    }
+    static Type I8(llvm::Optional<SourceRange> sourceRange = llvm::None) {
+        return Integer(8, true, sourceRange);
+    }
+    static Type I16(llvm::Optional<SourceRange> sourceRange = llvm::None) {
+        return Integer(16, true, sourceRange);
+    }
+    static Type I32(llvm::Optional<SourceRange> sourceRange = llvm::None) {
+        return Integer(32, true, sourceRange);
+    }
+    static Type I64(llvm::Optional<SourceRange> sourceRange = llvm::None) {
+        return Integer(64, true, sourceRange);
+    }
+    static Type U8(llvm::Optional<SourceRange> sourceRange = llvm::None) {
+        return Integer(8, false, sourceRange);
+    }
+    static Type U16(llvm::Optional<SourceRange> sourceRange = llvm::None) {
+        return Integer(16, false, sourceRange);
+    }
+    static Type U32(llvm::Optional<SourceRange> sourceRange = llvm::None) {
+        return Integer(32, false, sourceRange);
+    }
+    static Type U64(llvm::Optional<SourceRange> sourceRange = llvm::None) {
+        return Integer(64, false, sourceRange);
+    }
+    static Type Error() { return Type(ErrorTy()); }
+
+    static Type Pointer(Type pointedTy, llvm::Optional<SourceRange> sourceRange = llvm::None) {
+        return Type(std::make_shared<Type>(pointedTy), sourceRange);
+    }
+    static Type TypeVariable(std::string name) {
+        return Type(name);
+    }
+    static Type Void(llvm::Optional<SourceRange> sourceRange = llvm::None) {
+        return Type(VoidTy(), sourceRange);
+    }
+    static Type Bool(llvm::Optional<SourceRange> sourceRange = llvm::None) {
+        return Type(BoolTy(), sourceRange);
+    }
+    static Type Float(llvm::Optional<SourceRange> sourceRange = llvm::None) {
+        return Type(FloatTy(), sourceRange);
+    }
+    static Type Double(llvm::Optional<SourceRange> sourceRange = llvm::None) {
+        return Type(DoubleTy(), sourceRange);
+    }
 
     ~Type() = default;
     Type(const Type& other) = default;
     Type& operator=(const Type& other) = default;
 
+    DataType getData() const { return data; }
+
     bool operator==(Type other) const {
-        if(tag != other.tag) return false;
-        switch(tag) {
-            case builtin: return other.builtinTy == builtinTy;
-            case pointer: return *other.pointedTy == *pointedTy;
-            case inferred: return true;
-        }
+        return boost::apply_visitor(EqualityVisitor(), data, other.data);
     }
-
-    bool operator!=(Type other) const {
-        return !(*this == other);
-    }
-
-    bool isInferred() const { return tag == inferred; }
-    llvm::Optional<BuiltinType> builtinType() {
-        if(tag == builtin) return builtinTy;
-        return llvm::None;
-    }
-    llvm::Optional<std::shared_ptr<Type>> pointedType() {
-        if(tag == pointer) return pointedTy;
-        return llvm::None;
-    }
+    bool operator!=(Type other) const { return !(*this == other); }
 
     std::string name() const;
 };

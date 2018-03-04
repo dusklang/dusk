@@ -3,24 +3,44 @@
 #include "CodeGenerator.h"
 #include "llvm/IR/Verifier.h"
 
-llvm::Type* CodeGenerator::mapTypeToLLVM(Type type) {
-    if(auto builtinTy = type.builtinType()) {
-        switch(*type.builtinType()) {
-            case BuiltinType::i32: return llvm::Type::getInt32Ty(context);
-            case BuiltinType::f64: return llvm::Type::getDoubleTy(context);
-            case BuiltinType::Void: return llvm::Type::getVoidTy(context);
-            case BuiltinType::Bool: return llvm::Type::getInt1Ty(context);
-            case BuiltinType::Char: return llvm::Type::getInt8Ty(context);
+llvm::Type* mapTypeToLLVM(llvm::LLVMContext& context, Type type) {
+    struct TypeVisitor: public boost::static_visitor<llvm::Type*> {
+        llvm::LLVMContext& context;
+        TypeVisitor(llvm::LLVMContext& context) : context(context) {}
+        llvm::Type* operator()(std::string typeVariableName) const {
+            assert(false && "Encountered type variable");
+            LLVM_BUILTIN_UNREACHABLE;
         }
-    } else {
-        return llvm::PointerType::get(mapTypeToLLVM(**type.pointedType()), 0);
-    }
+        llvm::Type* operator()(Type::ErrorTy) const {
+            assert(false && "Encountered error type");
+            LLVM_BUILTIN_UNREACHABLE;
+        }
+        llvm::Type* operator()(Type::IntProperties properties) const {
+            return llvm::Type::getIntNTy(context, properties.bitWidth);
+        }
+        llvm::Type* operator()(std::shared_ptr<Type> pointedTy) const {
+            return llvm::PointerType::get(mapTypeToLLVM(context, *pointedTy), 0);
+        }
+        llvm::Type* operator()(Type::VoidTy) const {
+            return llvm::Type::getVoidTy(context);
+        }
+        llvm::Type* operator()(Type::BoolTy) const {
+            return llvm::Type::getInt1Ty(context);
+        }
+        llvm::Type* operator()(Type::FloatTy) const {
+            return llvm::Type::getFloatTy(context);
+        }
+        llvm::Type* operator()(Type::DoubleTy) const {
+            return llvm::Type::getDoubleTy(context);
+        }
+    };
+    return boost::apply_visitor(TypeVisitor(context), type.getData());
 }
 
 llvm::Value* CodeGenerator::visitDecl(std::shared_ptr<Decl> decl) {
     if(auto expr = decl->expression()) {
         if(decl->isVar) {
-            decl->codegenVal = builder.CreateAlloca(mapTypeToLLVM(decl->type), 0, decl->name.c_str());
+            decl->codegenVal = builder.CreateAlloca(mapTypeToLLVM(context, decl->type), 0, decl->name.c_str());
             builder.CreateStore(visitExpr(expr), decl->codegenVal);
         } else {
             decl->codegenVal = visitExpr(expr);
@@ -29,9 +49,9 @@ llvm::Value* CodeGenerator::visitDecl(std::shared_ptr<Decl> decl) {
     } else {
         std::vector<llvm::Type*> arguments;
         for(auto& param: decl->paramList) {
-            arguments.push_back(mapTypeToLLVM(param->type));
+            arguments.push_back(mapTypeToLLVM(context, param->type));
         }
-        llvm::Type* type = mapTypeToLLVM(decl->type);
+        llvm::Type* type = mapTypeToLLVM(context, decl->type);
         llvm::FunctionType* functionTy = llvm::FunctionType::get(type,
                                                                  arguments,
                                                                  false);

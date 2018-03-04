@@ -9,7 +9,6 @@
 
 #include "AST.h"
 #include "Expr.h"
-#include "Types.h"
 
 struct Expr;
 

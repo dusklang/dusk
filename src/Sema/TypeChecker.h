@@ -7,7 +7,6 @@
 #include <iostream>
 
 #include "AST/ASTVisitor.h"
-#include "AST/Types.h"
 
 class TypeChecker final: public ASTVisitor<TypeChecker,
                                            void,

@@ -14,6 +14,8 @@
 #include "AST/Decl.h"
 #include "AST/Stmt.h"
 
+llvm::Type* mapTypeToLLVM(llvm::LLVMContext& context, Type type);
+
 class CodeGenerator final: public ASTVisitor<CodeGenerator,
                                              void,
                                              llvm::Value*,
@@ -26,7 +28,6 @@ private:
     llvm::LLVMContext context;
     llvm::IRBuilder<> builder;
 public:
-    llvm::Type* mapTypeToLLVM(Type type);
     std::unique_ptr<llvm::Module> module;
     CodeGenerator() : builder(context) {
         module = std::make_unique<llvm::Module>("my module", context);

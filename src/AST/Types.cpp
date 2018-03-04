@@ -3,15 +3,33 @@
 #include <string>
 #include <cassert>
 #include "AST.h"
-#include "Types.h"
 
 std::string Type::name() const {
-    switch(tag) {
-        case inferred: return "<to be inferred>";
-        case builtin: switch(builtinTy) {
-            #define BUILTIN_TYPE(name) case BuiltinType::name: return #name;
-            #include "BuiltinTypes.def"
+    struct NameVisitor: public boost::static_visitor<std::string> {
+        std::string operator()(std::string typeVariableName) const {
+            return '<' + typeVariableName + '>';
         }
-        case pointer: return "*" + pointedTy->name();
-    }
+        std::string operator()(IntProperties properties) const {
+            return (properties.isSigned ? "i" : "u") + properties.bitWidth;
+        }
+        std::string operator()(std::shared_ptr<Type> pointedTy) const {
+            return "*" + pointedTy->name();
+        }
+        std::string operator()(VoidTy) const {
+            return "void";
+        }
+        std::string operator()(BoolTy) const {
+            return "bool";
+        }
+        std::string operator()(FloatTy) const {
+            return "f32";
+        }
+        std::string operator()(DoubleTy) const {
+            return "f64";
+        }
+        std::string operator()(ErrorTy) const {
+            return "#ERRORTYPE#";
+        }
+    };
+    return boost::apply_visitor(NameVisitor(), data);
 }

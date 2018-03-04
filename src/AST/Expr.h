@@ -20,7 +20,7 @@ struct Expr : public ASTNode {
     ExprKind exprKind;
     Type type;
     AST_NODE_CTOR(Expr, ExprKind exprKind, Type type), exprKind(exprKind), type(type) {}
-    AST_NODE_CTOR(Expr, ExprKind exprKind), exprKind(exprKind) {}
+    AST_NODE_CTOR(Expr, ExprKind exprKind), exprKind(exprKind), type(Type::Error()) {}
 };
 
 #define EXPR_CTOR(name, args...) name##Expr(SourceRange range, args) : Expr(range, ExprKind::name)

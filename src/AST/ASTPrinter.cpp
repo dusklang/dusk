@@ -25,13 +25,7 @@ std::string ASTPrinter::visitDecl(std::shared_ptr<Decl> decl, int indentationLev
         }
         str += ")";
     }
-    std::string typeStr;
-    if(decl->type.isInferred()) {
-        typeStr = "<inferred>";
-    } else {
-        typeStr = decl->type.name();
-    }
-    str += ": " + typeStr;
+    str += ": " + decl->type.name();
 
     if(decl->expression()) {
         str += " = " + visitExpr(decl->expression(), 0);

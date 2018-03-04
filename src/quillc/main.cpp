@@ -34,16 +34,16 @@ extern "C" {
 std::string sourceCode = R"~(
 extern dec add(_: i32, _: i32): i32
 extern dec mod(_: i32, _: i32): i32
-extern dec lte(_: i32, _: i32): Bool
-extern dec eq(_: i32, _: i32): Bool
-extern dec notTrue(_: Bool): Bool
-extern dec bothTrue(_: Bool, _: Bool): Bool
-extern dec printInt(_: i32): Void
-extern dec printChar(_: Char): Void
-extern dec charEq(_: Char, _: Char): Bool
-extern dec charDeref(_: *Char): Char
-extern dec charPtrAdd(_: *Char, _: i32): *Char
-dec printString(str: *Char) {
+extern dec lte(_: i32, _: i32): bool
+extern dec eq(_: i32, _: i32): bool
+extern dec notTrue(_: bool): bool
+extern dec bothTrue(_: bool, _: bool): bool
+extern dec printInt(_: i32): void
+extern dec printChar(_: i8): void
+extern dec charEq(_: i8, _: i8): bool
+extern dec charDeref(_: *i8): i8
+extern dec charPtrAdd(_: *i8, _: i32): *i8
+dec printString(str: *i8) {
     var curChar = str
     while notTrue(charEq(charDeref(curChar), "\0")) {
         printChar(charDeref(curChar))

@@ -7,11 +7,9 @@ set(HEADERS
     Decl.h
     Expr.h
     Stmt.h
-    Types.h
     ASTVisitor.h
     ASTNodes.def
     ASTPrinter.h
-    BuiltinTypes.def
     Types.h
 )
 

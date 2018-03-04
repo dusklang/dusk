@@ -74,12 +74,27 @@ Type Parser::parseType() {
     recordCurrentLoc();
     if(current().is(tok::sep_asterisk)) {
         next();
-        return Type(std::make_shared<Type>(parseType()));
+        return Type::Pointer(parseType());
     }
     auto typeName = parseIdentifer();
     if(!typeName) reportError("Expected type name", current().getRange());
-    #define BUILTIN_TYPE(name) if(*typeName == #name) { return Type(BuiltinType::name, currentRange()); }
-    #include "AST/BuiltinTypes.def"
+
+    if(*typeName == "i8") { return Type::I8(); }
+    if(*typeName == "i16") { return Type::I16(); }
+    if(*typeName == "i32") { return Type::I32(); }
+    if(*typeName == "i64") { return Type::I64(); }
+
+    if(*typeName == "u8") { return Type::U8(); }
+    if(*typeName == "u16") { return Type::U16(); }
+    if(*typeName == "u32") { return Type::U32(); }
+    if(*typeName == "u64") { return Type::U64(); }
+
+    if(*typeName == "f32") { return Type::Float(); }
+    if(*typeName == "f64") { return Type::Double(); }
+
+    if(*typeName == "bool") { return Type::Bool(); }
+    if(*typeName == "void") { return Type::Void(); }
+
     reportError("Invalid type name \"" + *typeName + '"', previous()->getRange());
     LLVM_BUILTIN_UNREACHABLE;
 }
@@ -122,7 +137,7 @@ llvm::Optional<Decl> Parser::parseDecl() {
         next();
     }
 
-    Type type;
+    Type type = Type::Error();
     // Range of the "prototype", which includes everything from the extern keyword (if it exists) to
     // the type of the declaration (if it's specified).
     SourceRange protoRange;
@@ -137,7 +152,6 @@ llvm::Optional<Decl> Parser::parseDecl() {
         type = parseType();
     } else {
         protoRange = currentRange();
-        type = Type();
     }
 
     auto checkExtern = [&]() {

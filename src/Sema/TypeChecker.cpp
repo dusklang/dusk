@@ -46,7 +46,7 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
         }
         if(decl->isComputed()) {
             // Add Void type to computed declaration if it doesn't have one.
-            if(decl->type.isInferred()) decl->type = BuiltinType::Void;
+            if(decl->type == Type::Error()) decl->type = Type::Void();
 
             // Recursive lambda for handling nested scopes inside the function, as well as the function
             // body itself.
@@ -73,7 +73,7 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
                         alreadyReturned = true;
                         visitReturnStmt(ret);
                         // Handle returning value in a void computed decl.
-                        if(decl->type == BuiltinType::Void) {
+                        if(decl->type == Type::Void()) {
                             if(ret->value) {
                                 reportError("Attempted to return value from Void computed decl '"
                                             + decl->name + "'",
@@ -99,21 +99,21 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
                         }
                     } else if(auto ifStmt = std::dynamic_pointer_cast<IfStmt>(*node)) {
                         visitExpr(ifStmt->condition);
-                        if(ifStmt->condition->type != BuiltinType::Bool) {
+                        if(ifStmt->condition->type != Type::Bool()) {
                             reportError("Expression in if statement is not of type Bool", ifStmt);
                         }
                         handleScope(ifStmt->thenScope);
                         if(ifStmt->elseScope) handleScope(*ifStmt->elseScope);
                     } else if(auto whileStmt = std::dynamic_pointer_cast<WhileStmt>(*node)) {
                         visitExpr(whileStmt->condition);
-                        if(whileStmt->condition->type != BuiltinType::Bool) {
+                        if(whileStmt->condition->type != Type::Bool()) {
                             reportError("Expression in while statement is not of type Bool", whileStmt);
                         }
                         handleScope(whileStmt->thenScope);
                     } else if(auto expr = std::dynamic_pointer_cast<Expr>(*node)) {
                         visitExpr(expr);
                         // Warn on unused expressions.
-                        if(expr->type != BuiltinType::Void) {
+                        if(expr->type != Type::Void()) {
                             reportWarning("Unused expression", expr);
                         }
                     } else {
@@ -133,7 +133,7 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
         assert(decl->isStored());
 
         visitExpr(decl->expression());
-        if(decl->type.isInferred()) {
+        if(decl->type == Type::Error()) {
             decl->type = decl->expression()->type;
         } else {
             if(decl->type != decl->expression()->type) {
@@ -144,7 +144,7 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
                             decl);
             }
         }
-        if(decl->type.builtinType() == BuiltinType::Void) reportError("Stored declarations can not have type Void", decl);
+        if(decl->type == Type::Void()) reportError("Stored declarations can not have type Void", decl);
 
         if(decl->isParameterized()) declLists.pop_back();
 
@@ -156,7 +156,7 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
             reportError("Non-extern declarations currently always need definitions", decl);
         }
 
-        if(decl->type.isInferred()) {
+        if(decl->type == Type::Error()) {
             reportError("Standalone decl prototypes need types", decl);
         }
     }
@@ -164,19 +164,19 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
 void TypeChecker::visitScope(std::shared_ptr<Scope> scope) {}
 void TypeChecker::visitArgument(std::shared_ptr<Argument> argument) {}
 void TypeChecker::visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr) {
-    expr->type = BuiltinType::i32;
+    expr->type = Type::I32();
 }
 void TypeChecker::visitDecimalLiteralExpr(std::shared_ptr<DecimalLiteralExpr> expr) {
-    expr->type = BuiltinType::f64;
+    expr->type = Type::Double();
 }
 void TypeChecker::visitBooleanLiteralExpr(std::shared_ptr<BooleanLiteralExpr> expr) {
-    expr->type = BuiltinType::Bool;
+    expr->type = Type::Bool();
 }
 void TypeChecker::visitCharLiteralExpr(std::shared_ptr<CharLiteralExpr> expr) {
-    expr->type = BuiltinType::Char;
+    expr->type = Type::I8();
 }
 void TypeChecker::visitStringLiteralExpr(std::shared_ptr<StringLiteralExpr> expr) {
-    expr->type = Type(std::make_shared<Type>(BuiltinType::Char));
+    expr->type = Type::Pointer(Type::I8());
 }
 void TypeChecker::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
     // Type-check arguments.
