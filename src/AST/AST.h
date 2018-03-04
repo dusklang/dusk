@@ -44,24 +44,10 @@ public:
     Type(std::shared_ptr<Type> pointedTy, llvm::Optional<SourceRange> sourceRange = llvm::None) :
         tag(pointer), pointedTy(pointedTy), sourceRange(sourceRange) {}
     Type() : tag(inferred) {}
-    ~Type() {}
 
-    Type(const Type& other) : tag(other.tag) {
-        switch(other.tag) {
-            case builtin: builtinTy = other.builtinTy; break;
-            case pointer: pointedTy = other.pointedTy; break;
-            case inferred: break;
-        }
-    }
-
-    void operator=(const Type& other) {
-        tag = other.tag;
-        switch(tag) {
-            case builtin: builtinTy = other.builtinTy; break;
-            case pointer: pointedTy = other.pointedTy; break;
-            case inferred: break;
-        }
-    }
+    ~Type() = default;
+    Type(const Type& other) = default;
+    Type& operator=(const Type& other) = default;
 
     bool operator==(Type other) const {
         if(tag != other.tag) return false;

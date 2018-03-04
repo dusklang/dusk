@@ -59,12 +59,7 @@ struct DeclRefExpr: public Expr {
               const std::vector<Argument>& argList),
     name(name), argList(argList) {}
 
-    void operator=(const DeclRefExpr& other) {
-        range = other.range;
-        type = other.type;
-        name = other.name;
-        argList = other.argList;
-    }
+    DeclRefExpr& operator=(const DeclRefExpr& other) = default;
 };
 
 #undef EXPR_CTOR

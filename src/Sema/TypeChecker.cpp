@@ -194,7 +194,7 @@ void TypeChecker::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
             if(decl->name != expr->name) continue;
             nameMatches.push_back(decl);
             if(decl->paramList.size() != expr->argList.size()) continue;
-            // Check the types of all parameters
+            // Check the types of all parameters.
             auto param = decl->paramList.begin();
             auto arg = expr->argList.begin();
             for(;param != decl->paramList.end(); ++param, ++arg) {

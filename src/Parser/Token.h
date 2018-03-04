@@ -20,12 +20,7 @@ private:
 public:
     Token(tok kind, SourceRange range, std::string literal) : kind(kind), range(range), literal(literal) {}
     Token() : range(SourceLoc(nullptr, 0), 0) {}
-    Token& operator=(const Token& otherTok) {
-        kind = otherTok.kind;
-        range = otherTok.range;
-        literal = otherTok.literal;
-        return *this;
-    }
+    Token& operator=(const Token& otherTok) = default;
 
     bool is(tok k) const { return kind == k; }
     bool isAny(tok k) const { return is(k); }

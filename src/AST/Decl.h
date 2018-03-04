@@ -53,7 +53,7 @@ public:
                   std::shared_ptr<Scope> body),
     name(name), type(type), isVar(isVar), isExtern(isExtern), paramList(paramList),
     value(std::dynamic_pointer_cast<ASTNode>(body)) {}
-    ~Decl() {}
+    ~Decl()  = default;
 
     // Opposites:
     bool isStored() const { return (bool)std::dynamic_pointer_cast<Expr>(value); }
