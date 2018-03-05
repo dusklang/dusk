@@ -11,7 +11,7 @@
 #include "Stmt.h"
 
 template<typename Impl,
-         typename ASTNodeReturnTy,
+         typename ASTNodeReturnTy = void,
          #define AST_NODE(name) typename name##RetTy = void,
          #include "ASTNodes.def"
 

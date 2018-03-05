@@ -9,6 +9,9 @@
 #include "General/SourceLoc.h"
 #include "boost/variant.hpp"
 
+using llvm::Optional;
+using llvm::None;
+
 struct Expr;
 
 enum class NodeKind {
@@ -44,7 +47,7 @@ struct Type final {
     typedef boost::variant<IntProperties, std::shared_ptr<Type>, std::string, VoidTy, BoolTy, FloatTy, DoubleTy, ErrorTy> DataType;
 private:
     DataType data;
-    llvm::Optional<SourceRange> sourceRange;
+    Optional<SourceRange> sourceRange;
 
     struct EqualityVisitor: public boost::static_visitor<bool> {
         bool operator()(IntProperties lhs, IntProperties rhs) const { return lhs == rhs; }
@@ -63,54 +66,54 @@ private:
     };
 
     Type(DataType data,
-         llvm::Optional<SourceRange> sourceRange = llvm::None)
+         Optional<SourceRange> sourceRange = None)
         : data(data), sourceRange(sourceRange) {}
 public:
-    static Type Integer(int bitWidth, bool isSigned, llvm::Optional<SourceRange> sourceRange = llvm::None) {
+    static Type Integer(int bitWidth, bool isSigned, Optional<SourceRange> sourceRange = None) {
         return Type(IntProperties { bitWidth, isSigned }, sourceRange);
     }
-    static Type I8(llvm::Optional<SourceRange> sourceRange = llvm::None) {
+    static Type I8(Optional<SourceRange> sourceRange = None) {
         return Integer(8, true, sourceRange);
     }
-    static Type I16(llvm::Optional<SourceRange> sourceRange = llvm::None) {
+    static Type I16(Optional<SourceRange> sourceRange = None) {
         return Integer(16, true, sourceRange);
     }
-    static Type I32(llvm::Optional<SourceRange> sourceRange = llvm::None) {
+    static Type I32(Optional<SourceRange> sourceRange = None) {
         return Integer(32, true, sourceRange);
     }
-    static Type I64(llvm::Optional<SourceRange> sourceRange = llvm::None) {
+    static Type I64(Optional<SourceRange> sourceRange = None) {
         return Integer(64, true, sourceRange);
     }
-    static Type U8(llvm::Optional<SourceRange> sourceRange = llvm::None) {
+    static Type U8(Optional<SourceRange> sourceRange = None) {
         return Integer(8, false, sourceRange);
     }
-    static Type U16(llvm::Optional<SourceRange> sourceRange = llvm::None) {
+    static Type U16(Optional<SourceRange> sourceRange = None) {
         return Integer(16, false, sourceRange);
     }
-    static Type U32(llvm::Optional<SourceRange> sourceRange = llvm::None) {
+    static Type U32(Optional<SourceRange> sourceRange = None) {
         return Integer(32, false, sourceRange);
     }
-    static Type U64(llvm::Optional<SourceRange> sourceRange = llvm::None) {
+    static Type U64(Optional<SourceRange> sourceRange = None) {
         return Integer(64, false, sourceRange);
     }
     static Type Error() { return Type(ErrorTy()); }
 
-    static Type Pointer(Type pointedTy, llvm::Optional<SourceRange> sourceRange = llvm::None) {
+    static Type Pointer(Type pointedTy, Optional<SourceRange> sourceRange = None) {
         return Type(std::make_shared<Type>(pointedTy), sourceRange);
     }
     static Type TypeVariable(std::string name) {
         return Type(name);
     }
-    static Type Void(llvm::Optional<SourceRange> sourceRange = llvm::None) {
+    static Type Void(Optional<SourceRange> sourceRange = None) {
         return Type(VoidTy(), sourceRange);
     }
-    static Type Bool(llvm::Optional<SourceRange> sourceRange = llvm::None) {
+    static Type Bool(Optional<SourceRange> sourceRange = None) {
         return Type(BoolTy(), sourceRange);
     }
-    static Type Float(llvm::Optional<SourceRange> sourceRange = llvm::None) {
+    static Type Float(Optional<SourceRange> sourceRange = None) {
         return Type(FloatTy(), sourceRange);
     }
-    static Type Double(llvm::Optional<SourceRange> sourceRange = llvm::None) {
+    static Type Double(Optional<SourceRange> sourceRange = None) {
         return Type(DoubleTy(), sourceRange);
     }
 

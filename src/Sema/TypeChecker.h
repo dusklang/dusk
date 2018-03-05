@@ -8,14 +8,7 @@
 
 #include "AST/ASTVisitor.h"
 
-class TypeChecker final: public ASTVisitor<TypeChecker,
-                                           void,
-                                           void,
-                                           void,
-                                           void,
-                                           void,
-                                           void>
-{
+class TypeChecker final: public ASTVisitor<TypeChecker> {
 private:
     // FIXME: Name lookup will be super slow; figure out how to hash function overloads.
     std::vector<std::vector<std::shared_ptr<Decl>>> declLists;

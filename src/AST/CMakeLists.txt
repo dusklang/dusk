@@ -10,7 +10,6 @@ set(HEADERS
     ASTVisitor.h
     ASTNodes.def
     ASTPrinter.h
-    Types.h
 )
 
 add_library(AST ${SOURCES} ${HEADERS})

@@ -29,8 +29,8 @@ std::vector<std::shared_ptr<ASTNode>> Parser::parseTopLevel() {
     return nodes;
 }
 
-llvm::Optional<std::shared_ptr<Scope>> Parser::parseScope() {
-    if(current().isNot(tok::sep_left_curly)) return llvm::None;
+Optional<std::shared_ptr<Scope>> Parser::parseScope() {
+    if(current().isNot(tok::sep_left_curly)) return None;
     recordCurrentLoc();
     next();
     std::vector<std::shared_ptr<ASTNode>> nodes;
@@ -99,7 +99,7 @@ Type Parser::parseType() {
     LLVM_BUILTIN_UNREACHABLE;
 }
 
-llvm::Optional<Decl> Parser::parseDecl() {
+Optional<Decl> Parser::parseDecl() {
     recordCurrentLoc();
     bool isVar;
     bool isExtern = false;
@@ -116,7 +116,7 @@ llvm::Optional<Decl> Parser::parseDecl() {
         if(isExtern) {
             reportError("Expected dec or var keyword to begin declaration");
         } else {
-            return llvm::None;
+            return None;
         }
     }
     EXPECT_NEXT(tok::identifier, "Expected identifier after dec");
@@ -178,7 +178,7 @@ llvm::Optional<Decl> Parser::parseDecl() {
     }
 }
 
-llvm::Optional<std::shared_ptr<Stmt>> Parser::parseStmt() {
+Optional<std::shared_ptr<Stmt>> Parser::parseStmt() {
     if(current().is(tok::kw_return)) {
         recordCurrentLoc();
         next();
@@ -192,15 +192,15 @@ llvm::Optional<std::shared_ptr<Stmt>> Parser::parseStmt() {
     }
 }
 
-llvm::Optional<std::shared_ptr<Stmt>> Parser::parseIfStmt() {
-    if(current().isNot(tok::kw_if)) return llvm::None;
+Optional<std::shared_ptr<Stmt>> Parser::parseIfStmt() {
+    if(current().isNot(tok::kw_if)) return None;
     recordCurrentLoc();
     next();
     auto conditionExpr = parseExpr();
     if(!conditionExpr) reportError("Expected condition expression for if statement");
     auto thenScope = parseScope();
     if(!thenScope) reportError("Expected opening curly brace for if statement");
-    llvm::Optional<std::shared_ptr<Scope>> elseScope;
+    Optional<std::shared_ptr<Scope>> elseScope;
     if(current().is(tok::kw_else)) {
         next();
         if(auto scope = parseScope()) {
@@ -218,22 +218,22 @@ llvm::Optional<std::shared_ptr<Stmt>> Parser::parseIfStmt() {
                                                                     elseScope));
 }
 
-llvm::Optional<std::shared_ptr<Stmt>> Parser::parseWhileStmt() {
-    if(current().isNot(tok::kw_while)) return llvm::None;
+Optional<std::shared_ptr<Stmt>> Parser::parseWhileStmt() {
+    if(current().isNot(tok::kw_while)) return None;
     recordCurrentLoc();
     next();
     auto conditionExpr = parseExpr();
     if(!conditionExpr) reportError("Expected condition expression for while statement");
     auto thenScope = parseScope();
     if(!thenScope) reportError("Expected opening curly brace for while statement");
-    llvm::Optional<std::shared_ptr<Scope>> elseScope;
+    Optional<std::shared_ptr<Scope>> elseScope;
     return std::dynamic_pointer_cast<Stmt>(std::make_shared<WhileStmt>(currentRange(),
                                                                        *conditionExpr,
                                                                        *thenScope));
 }
 
-llvm::Optional<std::shared_ptr<Expr>> Parser::parseDeclRefExpr() {
-    if(current().isNot(tok::identifier)) return llvm::None;
+Optional<std::shared_ptr<Expr>> Parser::parseDeclRefExpr() {
+    if(current().isNot(tok::identifier)) return None;
 
     recordCurrentLoc();
     auto name = current().getText();
@@ -255,7 +255,7 @@ llvm::Optional<std::shared_ptr<Expr>> Parser::parseDeclRefExpr() {
     return std::dynamic_pointer_cast<Expr>(std::make_shared<DeclRefExpr>(currentRange(), name, argList));
 }
 
-llvm::Optional<std::shared_ptr<Expr>> Parser::parseExpr() {
+Optional<std::shared_ptr<Expr>> Parser::parseExpr() {
     recordCurrentLoc();
     if(current().is(tok::kw_true)) {
         next();

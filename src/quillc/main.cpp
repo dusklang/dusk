@@ -125,7 +125,7 @@ int main() {
     auto cpu = "generic";
 
     llvm::TargetOptions opt;
-    auto relocationModel = llvm::Optional<llvm::Reloc::Model>();
+    auto relocationModel = Optional<llvm::Reloc::Model>();
     auto machine =
     target->createTargetMachine(triple, cpu, /*features=*/ "", opt, relocationModel);
 

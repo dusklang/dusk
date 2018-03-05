@@ -3,6 +3,9 @@
 #include <string>
 #include "General/SourceLoc.h"
 
+using llvm::Optional;
+using llvm::None;
+
 enum class tok {
     #define TOKEN(name) name,
     #include "TokenKinds.def"
@@ -42,20 +45,20 @@ public:
     std::string getText() const { return range.getSubstring(); }
     SourceLoc getLoc() const { return range.begin; }
     SourceRange getRange() const { return range; }
-    llvm::Optional<std::string> getStringLiteral() const {
-        if(isNot(tok::string_literal)) return llvm::None;
+    Optional<std::string> getStringLiteral() const {
+        if(isNot(tok::string_literal)) return None;
         return literal;
     }
-    llvm::Optional<char> getCharLiteral() const {
-        if(isNot(tok::char_literal)) return llvm::None;
+    Optional<char> getCharLiteral() const {
+        if(isNot(tok::char_literal)) return None;
         return literal[0];
     }
-    llvm::Optional<std::string> getIntegerLiteral() const {
-        if(isNot(tok::integer_literal)) return llvm::None;
+    Optional<std::string> getIntegerLiteral() const {
+        if(isNot(tok::integer_literal)) return None;
         return literal;
     }
-    llvm::Optional<std::string> getDecimalLiteral() const {
-        if(isNot(tok::decimal_literal)) return llvm::None;
+    Optional<std::string> getDecimalLiteral() const {
+        if(isNot(tok::decimal_literal)) return None;
         return literal;
     }
 

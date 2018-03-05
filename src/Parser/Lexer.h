@@ -22,7 +22,7 @@ private:
     // This counter stores how many new tokens have been added since last calling saveState().
     // This is useful because we may need to rollback the lexer after realizing we can't actually
     // parse the thing we were trying to and should try something else.
-    llvm::Optional<int> numberOfNewTokens;
+    Optional<int> numberOfNewTokens;
 
     std::map<char, char> specialEscapeCharacters {
         { 'n', '\n' },
@@ -49,11 +49,11 @@ public:
         return cur;
     }
     Token nextTokIncludingInsignificant();
-    llvm::Optional<Token> prevTokIncludingInsignificant() {
+    Optional<Token> prevTokIncludingInsignificant() {
         tokens.pop();
         tokenPositions.pop();
         if(numberOfNewTokens) *numberOfNewTokens -= 1;
-        if(tokens.empty()) return llvm::None;
+        if(tokens.empty()) return None;
         return tokens.top();
     }
 
@@ -64,11 +64,11 @@ public:
                 return next;
         }
     }
-    llvm::Optional<Token> prevTok() {
+    Optional<Token> prevTok() {
         while(auto prev = prevTokIncludingInsignificant()) {
             if(prev->isSignificant()) return prev;
         }
-        return llvm::None;
+        return None;
     }
 
     // See the above description of the numberOfNewTokens member.
@@ -82,7 +82,7 @@ public:
             tokenPositions.pop();
         }
 
-        numberOfNewTokens = llvm::None;
+        numberOfNewTokens = None;
     }
 
     const std::string& getSource() const { return source; }
