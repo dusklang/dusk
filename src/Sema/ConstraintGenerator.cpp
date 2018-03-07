@@ -37,6 +37,7 @@ void ConstraintGenerator::visitDecl(std::shared_ptr<Decl> decl) {
                 declLists.back().push_back(param);
             }
         }
+
         if(decl->isComputed()) {
             if(decl->type == Type::Error()) {
                 decl->type = Type::Void();
@@ -50,6 +51,9 @@ void ConstraintGenerator::visitDecl(std::shared_ptr<Decl> decl) {
         } else {
             // Stored.
 
+            // If this is a stored declaration, add the decl to the enclosing scope now, so we can shadow
+            // declarations from outer scopes.
+            declLists.back().push_back(decl);
             visitExpr(decl->expression());
 
             // If the declaration doesn't have an explicit type, then just use the type of the expression.
@@ -63,6 +67,15 @@ void ConstraintGenerator::visitDecl(std::shared_ptr<Decl> decl) {
         }
         // If we have parameters, end the scope we created earlier (see above).
         if(decl->isParameterized()) declLists.pop_back();
+
+        // If this is a stored declaration, add the decl to the enclosing scope now, so we can shadow
+        // declarations from outer scopes.
+        if(decl->isStored()) declLists.back().push_back(decl);
+    } else {
+        // No definition.
+        if(decl->type == Type::Error()) {
+            reportError("Declarations without definitions need explicit types", decl);
+        }
     }
 }
 void ConstraintGenerator::visitScope(std::shared_ptr<Scope> scope) {
@@ -112,12 +125,15 @@ void ConstraintGenerator::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
 
             // Come up with all the constraints that must be satisfied for this declaration to be a
             // a valid choice for this reference.
-            //
-            // Begin with constraining the type of the decl to the type of the expression.
             std::vector<Constraint> currentChoice;
+
+            // Begin with recording the declaration so we can access it later.
+            currentChoice.push_back(Constraint::BindOverload(expr->type, decl));
+
+            // Next, constrain the type of the decl to be equal to the type of the expression.
             currentChoice.push_back(Constraint::Equal(decl->type, expr->type));
 
-            // Now, lets constrain all of the argument types to their corresponding parameter types.
+            // Now, let's constrain all of the argument types to their corresponding parameter types.
             auto param = decl->paramList.begin();
             auto arg = expr->argList.begin();
             for(;param != decl->paramList.end(); ++param, ++arg) {
@@ -130,7 +146,7 @@ void ConstraintGenerator::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
     if(choices.empty()) {
         std::string errorMessage = "Invalid reference to identifier '" + expr->name + "'";
         if(!nameMatches.empty()) {
-            errorMessage += "\n\nHere are some matches that differ only in number or types of parameters:";
+            errorMessage += "\n\nHere are some matches that differ only in the number or types of parameters:";
             for(auto& match: nameMatches) {
                 errorMessage += "\n\t" + match->range.getSubstring();
             }
