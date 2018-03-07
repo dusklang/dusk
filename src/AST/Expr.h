@@ -9,6 +9,8 @@
 #include "AST.h"
 #include "Decl.h"
 
+struct Decl;
+
 enum class ExprKind {
     #define EXPR_NODE(name) name,
     #include "ASTNodes.def"

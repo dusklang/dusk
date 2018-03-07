@@ -5,6 +5,9 @@
 #include <vector>
 #include "boost/variant.hpp"
 
+#include "AST/AST.h"
+#include "AST/Decl.h"
+
 struct Constraint {
     struct EqualConstraint {
         Type lhs, rhs;
@@ -54,4 +57,6 @@ public:
     static Constraint DecimalLiteral(Type ty) { return Constraint(DecimalLiteralConstraint { ty }); }
 
     Data getData() const { return data; }
+
+    void dump(std::ostream& stream);
 };
