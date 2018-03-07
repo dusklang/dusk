@@ -18,8 +18,8 @@ llvm::Type* mapTypeToLLVM(llvm::LLVMContext& context, Type type) {
         llvm::Type* operator()(Type::IntProperties properties) const {
             return llvm::Type::getIntNTy(context, properties.bitWidth);
         }
-        llvm::Type* operator()(std::shared_ptr<Type> pointedTy) const {
-            return llvm::PointerType::get(mapTypeToLLVM(context, *pointedTy), 0);
+        llvm::Type* operator()(Type::PointerTy pointer) const {
+            return llvm::PointerType::get(mapTypeToLLVM(context, *pointer.pointedTy), 0);
         }
         llvm::Type* operator()(Type::VoidTy) const {
             return llvm::Type::getVoidTy(context);

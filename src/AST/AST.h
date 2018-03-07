@@ -38,21 +38,24 @@ struct Type final {
 
         bool operator==(IntProperties other) { return bitWidth == other.bitWidth && isSigned == other.isSigned; }
     };
+    struct PointerTy {
+        std::shared_ptr<Type> pointedTy;
+    };
     struct VoidTy {};
     struct BoolTy {};
     struct FloatTy {};
     struct DoubleTy {};
     struct ErrorTy {};
 
-    typedef boost::variant<IntProperties, std::shared_ptr<Type>, int, VoidTy, BoolTy, FloatTy, DoubleTy, ErrorTy> DataType;
+    typedef boost::variant<IntProperties, PointerTy, int, VoidTy, BoolTy, FloatTy, DoubleTy, ErrorTy> DataType;
 private:
     DataType data;
     Optional<SourceRange> sourceRange;
 
     struct EqualityVisitor: public boost::static_visitor<bool> {
         bool operator()(IntProperties lhs, IntProperties rhs) const { return lhs == rhs; }
-        bool operator()(std::shared_ptr<Type> lhs, std::shared_ptr<Type> rhs) const {
-            return *lhs == *rhs;
+        bool operator()(PointerTy lhs, PointerTy rhs) const {
+            return *lhs.pointedTy == *rhs.pointedTy;
         }
         bool operator()(std::string lhs, std::string rhs) const { return lhs == rhs; }
         bool operator()(VoidTy, VoidTy) const { return true; }
@@ -99,7 +102,8 @@ public:
     static Type Error() { return Type(ErrorTy()); }
 
     static Type Pointer(Type pointedTy, Optional<SourceRange> sourceRange = None) {
-        return Type(std::make_shared<Type>(pointedTy), sourceRange);
+        auto pointed = std::make_shared<Type>(pointedTy);
+        return Type(PointerTy { pointed }, sourceRange);
     }
     static Type TypeVariable(int number) {
         return Type(number);

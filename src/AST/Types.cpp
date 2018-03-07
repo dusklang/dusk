@@ -5,33 +5,34 @@
 #include "AST.h"
 
 std::string Type::name() const {
-    struct NameVisitor: public boost::static_visitor<std::string> {
-        std::string operator()(int typeVariableNumber) const {
-            std::ostringstream stream;
+    struct NameVisitor: public boost::static_visitor<void> {
+        std::ostringstream stream;
+        void operator()(int typeVariableNumber) {
             stream << "<T" << typeVariableNumber << '>';
-            return stream.str();
         }
-        std::string operator()(IntProperties properties) const {
-            return (properties.isSigned ? "i" : "u") + properties.bitWidth;
+        void operator()(IntProperties properties) {
+            stream << (properties.isSigned ? "i" : "u") << properties.bitWidth;
         }
-        std::string operator()(std::shared_ptr<Type> pointedTy) const {
-            return "*" + pointedTy->name();
+        void operator()(PointerTy pointer) {
+            stream << '*' << pointer.pointedTy->name();
         }
-        std::string operator()(VoidTy) const {
-            return "void";
+        void operator()(VoidTy) {
+            stream << "void";
         }
-        std::string operator()(BoolTy) const {
-            return "bool";
+        void operator()(BoolTy) {
+            stream << "bool";
         }
-        std::string operator()(FloatTy) const {
-            return "f32";
+        void operator()(FloatTy) {
+            stream << "f32";
         }
-        std::string operator()(DoubleTy) const {
-            return "f64";
+        void operator()(DoubleTy) {
+            stream << "f64";
         }
-        std::string operator()(ErrorTy) const {
-            return "#ERRORTYPE#";
+        void operator()(ErrorTy) {
+            stream << "#ERRORTYPE#";
         }
     };
-    return boost::apply_visitor(NameVisitor(), data);
+    NameVisitor visitor;
+    boost::apply_visitor(visitor, data);
+    return visitor.stream.str();
 }

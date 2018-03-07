@@ -18,21 +18,24 @@ void Constraint::dump(std::ostream& stream) {
         }
         void operator()(Constraint::BindOverloadConstraint constraint) const {
             writeIndentation();
-            stream << constraint.ty.name() + " bound to declaration " + constraint.decl->range.getSubstring();
+            stream << constraint.ty.name() << " bound to declaration " << constraint.decl->range.getSubstring();
         }
         void operator()(Constraint::DisjunctionConstraint constraint) {
             writeIndentation();
             stream << "Disjunction:\n";
             indentationLevel += 1;
             bool first = true;
-            for(auto& constraint: constraint.constraints) {
+            auto& constraints = constraint.constraints;
+            for(auto it = constraints.begin(); it != constraints.end(); it++) {
                 if(!first) {
                     writeIndentation();
                     stream << "||\n";
                 }
                 first = false;
-                boost::apply_visitor(*this, constraint.getData());
-                stream << '\n';
+                boost::apply_visitor(*this, it->getData());
+                if((it + 1) != constraints.end()) {
+                    stream << '\n';
+                }
             }
             indentationLevel -= 1;
         }
@@ -41,14 +44,17 @@ void Constraint::dump(std::ostream& stream) {
             stream << "Conjunction:\n";
             indentationLevel += 1;
             bool first = true;
-            for(auto& constraint: constraint.constraints) {
+            auto& constraints = constraint.constraints;
+            for(auto it = constraints.begin(); it != constraints.end(); it++) {
                 if(!first) {
                     writeIndentation();
                     stream << "&&\n";
                 }
                 first = false;
-                boost::apply_visitor(*this, constraint.getData());
-                stream << '\n';
+                boost::apply_visitor(*this, it->getData());
+                if((it + 1) != constraints.end()) {
+                    stream << '\n';
+                }
             }
             indentationLevel -= 1;
         }

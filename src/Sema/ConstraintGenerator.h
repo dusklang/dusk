@@ -44,6 +44,13 @@ public:
         declLists.push_back(std::vector<std::shared_ptr<Decl>>());
     }
 
+    void dumpConstraints(std::ostream& stream) {
+        for(auto& constraint: constraints) {
+            constraint.dump(stream);
+            stream << '\n';
+        }
+    }
+
     void visitDecl(std::shared_ptr<Decl> decl);
     void visitScope(std::shared_ptr<Scope> scope);
     void visitArgument(std::shared_ptr<Argument> argument) {}
