@@ -44,7 +44,7 @@ struct Type final {
     struct DoubleTy {};
     struct ErrorTy {};
 
-    typedef boost::variant<IntProperties, std::shared_ptr<Type>, std::string, VoidTy, BoolTy, FloatTy, DoubleTy, ErrorTy> DataType;
+    typedef boost::variant<IntProperties, std::shared_ptr<Type>, int, VoidTy, BoolTy, FloatTy, DoubleTy, ErrorTy> DataType;
 private:
     DataType data;
     Optional<SourceRange> sourceRange;
@@ -101,8 +101,8 @@ public:
     static Type Pointer(Type pointedTy, Optional<SourceRange> sourceRange = None) {
         return Type(std::make_shared<Type>(pointedTy), sourceRange);
     }
-    static Type TypeVariable(std::string name) {
-        return Type(name);
+    static Type TypeVariable(int number) {
+        return Type(number);
     }
     static Type Void(Optional<SourceRange> sourceRange = None) {
         return Type(VoidTy(), sourceRange);

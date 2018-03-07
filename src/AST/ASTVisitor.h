@@ -14,7 +14,6 @@ template<typename Impl,
          typename ASTNodeReturnTy = void,
          #define AST_NODE(name) typename name##RetTy = void,
          #include "ASTNodes.def"
-
          typename... Args>
 class ASTVisitor {
 public:

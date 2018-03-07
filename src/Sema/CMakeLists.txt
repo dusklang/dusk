@@ -1,8 +1,10 @@
 set(SOURCES
     TypeChecker.cpp
+    ConstraintGenerator.cpp
 )
 set(HEADERS
     TypeChecker.h
+    ConstraintGenerator.h
 )
 
 add_library(Sema ${SOURCES} ${HEADERS})
