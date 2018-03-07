@@ -6,8 +6,10 @@
 
 std::string Type::name() const {
     struct NameVisitor: public boost::static_visitor<std::string> {
-        std::string operator()(std::string typeVariableName) const {
-            return '<' + typeVariableName + '>';
+        std::string operator()(int typeVariableNumber) const {
+            std::ostringstream stream;
+            stream << "<T" << typeVariableNumber << '>';
+            return stream.str();
         }
         std::string operator()(IntProperties properties) const {
             return (properties.isSigned ? "i" : "u") + properties.bitWidth;

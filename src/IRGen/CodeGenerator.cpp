@@ -7,7 +7,7 @@ llvm::Type* mapTypeToLLVM(llvm::LLVMContext& context, Type type) {
     struct TypeVisitor: public boost::static_visitor<llvm::Type*> {
         llvm::LLVMContext& context;
         TypeVisitor(llvm::LLVMContext& context) : context(context) {}
-        llvm::Type* operator()(std::string typeVariableName) const {
+        llvm::Type* operator()(int typeVariableNumber) const {
             assert(false && "Encountered type variable");
             LLVM_BUILTIN_UNREACHABLE;
         }
