@@ -56,7 +56,7 @@ public:
     static Constraint IntegerLiteral(Type ty) { return Constraint(IntegerLiteralConstraint { ty }); }
     static Constraint DecimalLiteral(Type ty) { return Constraint(DecimalLiteralConstraint { ty }); }
 
-    Data getData() const { return data; }
+    const Data& getData() const { return data; }
 
     void dump(std::ostream& stream);
 };

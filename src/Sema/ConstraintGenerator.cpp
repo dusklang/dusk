@@ -62,7 +62,7 @@ void ConstraintGenerator::visitDecl(std::shared_ptr<Decl> decl) {
             }
             // Otherwise, constrain the two types to be equal.
             else {
-                constraints.push_back(Constraint::Equal(decl->type, decl->expression()->type));
+                constrain(Constraint::Equal(decl->type, decl->expression()->type));
             }
         }
         // If we have parameters, end the scope we created earlier (see above).
@@ -89,11 +89,11 @@ void ConstraintGenerator::visitScope(std::shared_ptr<Scope> scope) {
 }
 void ConstraintGenerator::visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr) {
     expr->type = newTypeVariable();
-    constraints.push_back(Constraint::IntegerLiteral(expr->type));
+    constrain(Constraint::IntegerLiteral(expr->type));
 }
 void ConstraintGenerator::visitDecimalLiteralExpr(std::shared_ptr<DecimalLiteralExpr> expr) {
     expr->type = newTypeVariable();
-    constraints.push_back(Constraint::DecimalLiteral(expr->type));
+    constrain(Constraint::DecimalLiteral(expr->type));
 }
 void ConstraintGenerator::visitBooleanLiteralExpr(std::shared_ptr<BooleanLiteralExpr> expr) {
     expr->type = Type::Bool();
@@ -153,7 +153,7 @@ void ConstraintGenerator::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
         }
         reportError(errorMessage, expr);
     } else {
-        constraints.push_back(Constraint::Disjunction(choices));
+        constrain(Constraint::Disjunction(choices));
     }
 }
 void ConstraintGenerator::visitReturnStmt(std::shared_ptr<ReturnStmt> stmt) {
@@ -161,7 +161,7 @@ void ConstraintGenerator::visitReturnStmt(std::shared_ptr<ReturnStmt> stmt) {
         reportError("Unexpected return statement outside of a computed declaration", stmt);
     }
     if(!stmt->value) {
-        constraints.push_back(Constraint::Equal(Type::Void(), returnTypeStack.top()));
+        constrain(Constraint::Equal(Type::Void(), returnTypeStack.top()));
     } else {
         visitExpr(stmt->value);
     }
@@ -169,11 +169,11 @@ void ConstraintGenerator::visitReturnStmt(std::shared_ptr<ReturnStmt> stmt) {
 void ConstraintGenerator::visitAssignmentStmt(std::shared_ptr<AssignmentStmt> stmt) {
     visitDeclRefExpr(stmt->lhs);
     visitExpr(stmt->rhs);
-    constraints.push_back(Constraint::Equal(stmt->lhs->type, stmt->rhs->type));
+    constrain(Constraint::Equal(stmt->lhs->type, stmt->rhs->type));
 }
 void ConstraintGenerator::visitIfStmt(std::shared_ptr<IfStmt> stmt) {
     visitExpr(stmt->condition);
-    constraints.push_back(Constraint::Equal(stmt->condition->type, Type::Bool()));
+    constrain(Constraint::Equal(stmt->condition->type, Type::Bool()));
 
     visitScope(stmt->thenScope);
     if(stmt->elseScope) {
@@ -182,7 +182,7 @@ void ConstraintGenerator::visitIfStmt(std::shared_ptr<IfStmt> stmt) {
 }
 void ConstraintGenerator::visitWhileStmt(std::shared_ptr<WhileStmt> stmt) {
     visitExpr(stmt->condition);
-    constraints.push_back(Constraint::Equal(stmt->condition->type, Type::Bool()));
+    constrain(Constraint::Equal(stmt->condition->type, Type::Bool()));
 
     visitScope(stmt->thenScope);
 }
