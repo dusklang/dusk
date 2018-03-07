@@ -34,9 +34,15 @@ private:
 public:
     static Constraint Equal(Type lhs, Type rhs) { return Constraint(EqualConstraint { lhs, rhs }); }
     static Constraint Disjunction(std::vector<Constraint> constraints) {
+        if(constraints.size() == 1) {
+            return constraints[0];
+        }
         return Constraint(DisjunctionConstraint { constraints });
     }
     static Constraint Conjunction(std::vector<Constraint> constraints) {
+        if(constraints.size() == 1) {
+            return constraints[0];
+        }
         return Constraint(ConjunctionConstraint { constraints });
     }
 

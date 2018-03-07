@@ -3,26 +3,6 @@
 #include "TypeChecker.h"
 
 void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
-    // Search for existing declaration in the current scope with the same name and parameter types.
-    for(auto& existingDecl: declLists.back()) {
-        if(existingDecl->name != decl->name) continue;
-        if(existingDecl->paramList.size() != decl->paramList.size()) continue;
-
-        auto&& param = decl->paramList.begin();
-        auto&& existingParam = existingDecl->paramList.begin();
-        for(;param != decl->paramList.end() && existingParam != existingDecl->paramList.end();
-            ++param, ++existingParam) {
-            if((*existingParam)->type != (*param)->type) goto notAMatch;
-        }
-
-        // We must have found a matching declaration in the same scope.
-        reportError("Cannot redeclare '" + decl->name + "'\n" +
-                    "\tPrevious declaration here: " + existingDecl->range.getSubstring(),
-                    decl);
-
-        notAMatch: continue;
-    }
-
     // Reject nested functions.
     if(declLists.size() > 1 && decl->isComputed()) {
         // TODO: Just report the source range of the prototype, which now is not its own ASTNode
