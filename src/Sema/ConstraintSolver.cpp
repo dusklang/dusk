@@ -65,7 +65,7 @@ Optional<Solution> solveConstraint(const Constraint& constraint) {
             LLVM_BUILTIN_UNREACHABLE;
         }
     };
-    return boost::apply_visitor(ConstraintVisitor(), constraint.getData());
+    return boost::apply_visitor(ConstraintVisitor(), constraint.data);
 }
 
 Optional<Solution> solveSystem(const std::vector<Constraint>& constraints) {

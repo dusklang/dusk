@@ -32,7 +32,7 @@ void Constraint::dump(std::ostream& stream) {
                     stream << "||\n";
                 }
                 first = false;
-                boost::apply_visitor(*this, it->getData());
+                boost::apply_visitor(*this, it->data);
                 if((it + 1) != constraints.end()) {
                     stream << '\n';
                 }
@@ -51,7 +51,7 @@ void Constraint::dump(std::ostream& stream) {
                     stream << "&&\n";
                 }
                 first = false;
-                boost::apply_visitor(*this, it->getData());
+                boost::apply_visitor(*this, it->data);
                 if((it + 1) != constraints.end()) {
                     stream << '\n';
                 }

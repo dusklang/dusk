@@ -26,8 +26,8 @@ struct Constraint {
     typedef boost::variant<EqualConstraint, BindOverloadConstraint, DisjunctionConstraint,
                            ConjunctionConstraint>
         Data;
-private:
     Data data;
+private:
     Constraint(Data data) : data(data) {}
 public:
     static Constraint Equal(Type lhs, Type rhs) { return Constraint(EqualConstraint { lhs, rhs }); }
@@ -47,8 +47,6 @@ public:
     static Constraint BindOverload(Type ty, std::shared_ptr<Decl> decl, std::shared_ptr<DeclRefExpr> expr) {
         return Constraint(BindOverloadConstraint { ty, decl, expr });
     }
-
-    const Data& getData() const { return data; }
 
     void dump(std::ostream& stream);
 };
