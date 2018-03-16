@@ -15,6 +15,7 @@ struct Constraint {
     struct BindOverloadConstraint {
         Type ty;
         std::shared_ptr<Decl> decl;
+        std::shared_ptr<DeclRefExpr> expr;
     };
     struct DisjunctionConstraint {
         std::vector<Constraint> constraints;
@@ -22,14 +23,8 @@ struct Constraint {
     struct ConjunctionConstraint {
         std::vector<Constraint> constraints;
     };
-    struct IntegerLiteralConstraint {
-        Type ty;
-    };
-    struct DecimalLiteralConstraint {
-        Type ty;
-    };
     typedef boost::variant<EqualConstraint, BindOverloadConstraint, DisjunctionConstraint,
-                           ConjunctionConstraint, IntegerLiteralConstraint, DecimalLiteralConstraint>
+                           ConjunctionConstraint>
         Data;
 private:
     Data data;
@@ -49,12 +44,9 @@ public:
         return Constraint(ConjunctionConstraint { constraints });
     }
 
-    static Constraint BindOverload(Type ty, std::shared_ptr<Decl> decl) {
-        return Constraint(BindOverloadConstraint { ty, decl });
+    static Constraint BindOverload(Type ty, std::shared_ptr<Decl> decl, std::shared_ptr<DeclRefExpr> expr) {
+        return Constraint(BindOverloadConstraint { ty, decl, expr });
     }
-
-    static Constraint IntegerLiteral(Type ty) { return Constraint(IntegerLiteralConstraint { ty }); }
-    static Constraint DecimalLiteral(Type ty) { return Constraint(DecimalLiteralConstraint { ty }); }
 
     const Data& getData() const { return data; }
 

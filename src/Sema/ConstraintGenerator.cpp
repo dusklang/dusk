@@ -51,9 +51,6 @@ void ConstraintGenerator::visitDecl(std::shared_ptr<Decl> decl) {
         } else {
             // Stored.
 
-            // If this is a stored declaration, add the decl to the enclosing scope now, so we can shadow
-            // declarations from outer scopes.
-            declLists.back().push_back(decl);
             visitExpr(decl->expression());
 
             // If the declaration doesn't have an explicit type, then just use the type of the expression.
@@ -88,12 +85,10 @@ void ConstraintGenerator::visitScope(std::shared_ptr<Scope> scope) {
     declLists.pop_back();
 }
 void ConstraintGenerator::visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr) {
-    expr->type = newTypeVariable();
-    constrain(Constraint::IntegerLiteral(expr->type));
+    expr->type = Type::Integer(32, true);
 }
 void ConstraintGenerator::visitDecimalLiteralExpr(std::shared_ptr<DecimalLiteralExpr> expr) {
-    expr->type = newTypeVariable();
-    constrain(Constraint::DecimalLiteral(expr->type));
+    expr->type = Type::Double();
 }
 void ConstraintGenerator::visitBooleanLiteralExpr(std::shared_ptr<BooleanLiteralExpr> expr) {
     expr->type = Type::Bool();
@@ -127,8 +122,8 @@ void ConstraintGenerator::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
             // a valid choice for this reference.
             std::vector<Constraint> currentChoice;
 
-            // Begin with recording the declaration so we can access it later.
-            currentChoice.push_back(Constraint::BindOverload(expr->type, decl));
+            // Begin with recording the declaration so we can bind the expression to it later.
+            currentChoice.push_back(Constraint::BindOverload(expr->type, decl, expr));
 
             // Next, constrain the type of the decl to be equal to the type of the expression.
             currentChoice.push_back(Constraint::Equal(decl->type, expr->type));

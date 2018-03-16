@@ -58,14 +58,6 @@ void Constraint::dump(std::ostream& stream) {
             }
             indentationLevel -= 1;
         }
-        void operator()(Constraint::IntegerLiteralConstraint constraint) const {
-            writeIndentation();
-            stream << constraint.ty.name() << " is an integer literal";
-        }
-        void operator()(Constraint::DecimalLiteralConstraint constraint) const {
-            writeIndentation();
-            stream << constraint.ty.name() << " is a decimal literal";
-        }
     };
 
     ConstraintVisitor visitor(stream);
