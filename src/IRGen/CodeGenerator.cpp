@@ -34,7 +34,7 @@ llvm::Type* mapTypeToLLVM(llvm::LLVMContext& context, Type type) {
             return llvm::Type::getDoubleTy(context);
         }
     };
-    return boost::apply_visitor(TypeVisitor(context), type.getData());
+    return boost::apply_visitor(TypeVisitor(context), type.data);
 }
 
 llvm::Value* CodeGenerator::visitDecl(std::shared_ptr<Decl> decl) {

@@ -15,25 +15,25 @@ struct EqualConstraintSolver: public boost::static_visitor<Optional<Solution>> {
         return None;
     }
 
-    template<typename T, T>
+    template<typename T>
     Optional<Solution> operator()(T lhs, T rhs) const {
         if(Type(lhs) != Type(rhs)) { return None; }
         return Solution { {}, {} };
     }
 
-    template<int, int>
     Optional<Solution> operator()(int var, int rhs) const {
         reportError("Attempt to constrain two type variables together");
+        LLVM_BUILTIN_UNREACHABLE;
     }
 
-    template<int, typename T>
+    template<typename T>
     Optional<Solution> operator()(int var, T rhs) const {
-        return Solution { {}, {{var, rhs}} };
+        return Solution { {}, {{var, Type(rhs)}} };
     }
 
-    template<int, typename T>
+    template<typename T>
     Optional<Solution> operator()(T lhs, int var) const {
-        return Solution { {}, {{var, lhs}} };
+        return Solution { {}, {{var, Type(lhs)}} };
     }
 };
 Optional<Solution> solveConstraint(const Constraint& constraint) {
@@ -41,7 +41,7 @@ Optional<Solution> solveConstraint(const Constraint& constraint) {
         Optional<Solution> operator()(Constraint::EqualConstraint constraint) const {
             if(constraint.lhs == constraint.rhs) return Solution();
             return boost::apply_visitor(EqualConstraintSolver(),
-                                        constraint.lhs.getData(), constraint.rhs.getData());
+                                        constraint.lhs.data, constraint.rhs.data);
         }
         Optional<Solution> operator()(Constraint::ConjunctionConstraint constraint) const {
             // IMMINENT TODO: Simplify constraints, or we'll get errors trying to constrain two type
@@ -61,6 +61,7 @@ Optional<Solution> solveConstraint(const Constraint& constraint) {
             LLVM_BUILTIN_UNREACHABLE;
         }
         Optional<Solution> operator()(Constraint::BindOverloadConstraint constraint) const {
+            constraint.expr->decl = constraint.decl;
             reportError("Attempted to solve bind overload constraint (unimplemented)");
             LLVM_BUILTIN_UNREACHABLE;
         }

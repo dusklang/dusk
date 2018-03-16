@@ -48,10 +48,10 @@ struct Type final {
     struct ErrorTy {};
 
     typedef boost::variant<IntProperties, PointerTy, int, VoidTy, BoolTy, FloatTy, DoubleTy, ErrorTy> DataType;
-private:
+
     DataType data;
     Optional<SourceRange> sourceRange;
-
+private:
     struct EqualityVisitor: public boost::static_visitor<bool> {
         bool operator()(IntProperties lhs, IntProperties rhs) const { return lhs == rhs; }
         bool operator()(PointerTy lhs, PointerTy rhs) const {
@@ -67,11 +67,10 @@ private:
         template<typename T, typename U>
         bool operator()(T, U) const { return false; }
     };
-
+public:
     Type(DataType data,
          Optional<SourceRange> sourceRange = None)
-        : data(data), sourceRange(sourceRange) {}
-public:
+         : data(data), sourceRange(sourceRange) {}
     static Type Integer(int bitWidth, bool isSigned, Optional<SourceRange> sourceRange = None) {
         return Type(IntProperties { bitWidth, isSigned }, sourceRange);
     }
@@ -124,8 +123,6 @@ public:
     ~Type() = default;
     Type(const Type& other) = default;
     Type& operator=(const Type& other) = default;
-
-    DataType getData() const { return data; }
 
     bool operator==(Type other) const {
         return boost::apply_visitor(EqualityVisitor(), data, other.data);
