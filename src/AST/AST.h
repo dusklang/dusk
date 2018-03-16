@@ -57,7 +57,7 @@ private:
         bool operator()(PointerTy lhs, PointerTy rhs) const {
             return *lhs.pointedTy == *rhs.pointedTy;
         }
-        bool operator()(std::string lhs, std::string rhs) const { return lhs == rhs; }
+        bool operator()(int lhs, int rhs) const { return lhs == rhs; }
         bool operator()(VoidTy, VoidTy) const { return true; }
         bool operator()(BoolTy, BoolTy) const { return true; }
         bool operator()(FloatTy, FloatTy) const { return true; }
@@ -66,6 +66,22 @@ private:
 
         template<typename T, typename U>
         bool operator()(T, U) const { return false; }
+    };
+    struct SubstitutionVisitor: public boost::static_visitor<Type> {
+        const std::map<int, Type>& solution;
+        SubstitutionVisitor(const std::map<int, Type>& solution) : solution(solution) {}
+
+        Type operator()(int var) const {
+            for(const auto& solution: this->solution) {
+                if(solution.first == var) {
+                    return solution.second;
+                }
+            }
+            return Type::TypeVariable(var);
+        }
+
+        template<typename T>
+        Type operator()(T ty) const { return Type(ty); }
     };
 public:
     Type(DataType data,
@@ -130,6 +146,10 @@ public:
     bool operator!=(Type other) const { return !(*this == other); }
 
     std::string name() const;
+
+    Type substituting(const std::map<int, Type>& solution) const {
+        return boost::apply_visitor(SubstitutionVisitor{solution}, this->data);
+    }
 };
 
 struct Argument final : public ASTNode {
