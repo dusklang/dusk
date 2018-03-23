@@ -107,48 +107,11 @@ void ConstraintGenerator::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
         visitExpr(arg.value);
     }
 
-    // Look up all possible matches for this declaration reference, starting with the current scope
-    // and working outwards from there.
-    std::vector<std::shared_ptr<Decl>> nameMatches;
-    std::vector<Constraint> choices;
-    for(auto it = declLists.rbegin(); it != declLists.rend(); ++it) {
-        auto& declList = *it;
-        for(auto& decl: declList) {
-            if(decl->name != expr->name) continue;
-            nameMatches.push_back(decl);
-            if(decl->paramList.size() != expr->argList.size()) continue;
-
-            // Come up with all the constraints that must be satisfied for this declaration to be a
-            // a valid choice for this reference.
-            std::vector<Constraint> currentChoice;
-
-            // Begin with recording the declaration so we can bind the expression to it later.
-            currentChoice.push_back(Constraint::BindOverload(expr->type, decl, expr));
-
-            // Next, constrain the type of the decl to be equal to the type of the expression.
-            currentChoice.push_back(Constraint::Equal(decl->type, expr->type));
-
-            // Now, let's constrain all of the argument types to their corresponding parameter types.
-            auto param = decl->paramList.begin();
-            auto arg = expr->argList.begin();
-            for(;param != decl->paramList.end(); ++param, ++arg) {
-                currentChoice.push_back(Constraint::Equal((*param)->type, arg->value->type));
-            }
-
-            choices.push_back(Constraint::Conjunction(currentChoice));
-        }
-    }
-    if(choices.empty()) {
-        std::string errorMessage = "Invalid reference to identifier '" + expr->name + "'";
-        if(!nameMatches.empty()) {
-            errorMessage += "\n\nHere are some matches that differ only in the number or types of parameters:";
-            for(auto& match: nameMatches) {
-                errorMessage += "\n\t" + match->range.getSubstring();
-            }
-        }
-        reportError(errorMessage, expr);
-    } else {
-        constrain(Constraint::Disjunction(choices));
+    // Now, constrain all of the argument types to their corresponding parameter types.
+    auto param = expr->decl->paramList.begin();
+    auto arg = expr->argList.begin();
+    for(;param != expr->decl->paramList.end(); ++param, ++arg) {
+        constrain(Constraint::Equal((*param)->type, arg->value->type));
     }
 }
 void ConstraintGenerator::visitReturnStmt(std::shared_ptr<ReturnStmt> stmt) {

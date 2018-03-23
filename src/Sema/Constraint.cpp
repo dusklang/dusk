@@ -16,48 +16,6 @@ void Constraint::dump(std::ostream& stream) {
             writeIndentation();
             stream << constraint.lhs.name() << " == " << constraint.rhs.name();
         }
-        void operator()(Constraint::BindOverloadConstraint constraint) const {
-            writeIndentation();
-            stream << constraint.ty.name() << " bound to declaration " << constraint.decl->range.getSubstring();
-        }
-        void operator()(Constraint::DisjunctionConstraint constraint) {
-            writeIndentation();
-            stream << "Disjunction:\n";
-            indentationLevel += 1;
-            bool first = true;
-            auto& constraints = constraint.constraints;
-            for(auto it = constraints.begin(); it != constraints.end(); it++) {
-                if(!first) {
-                    writeIndentation();
-                    stream << "||\n";
-                }
-                first = false;
-                boost::apply_visitor(*this, it->data);
-                if((it + 1) != constraints.end()) {
-                    stream << '\n';
-                }
-            }
-            indentationLevel -= 1;
-        }
-        void operator()(Constraint::ConjunctionConstraint constraint) {
-            writeIndentation();
-            stream << "Conjunction:\n";
-            indentationLevel += 1;
-            bool first = true;
-            auto& constraints = constraint.constraints;
-            for(auto it = constraints.begin(); it != constraints.end(); it++) {
-                if(!first) {
-                    writeIndentation();
-                    stream << "&&\n";
-                }
-                first = false;
-                boost::apply_visitor(*this, it->data);
-                if((it + 1) != constraints.end()) {
-                    stream << '\n';
-                }
-            }
-            indentationLevel -= 1;
-        }
     };
 
     ConstraintVisitor visitor(stream);

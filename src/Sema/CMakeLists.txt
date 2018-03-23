@@ -1,11 +1,11 @@
 set(SOURCES
-    TypeChecker.cpp
+    NameResolver.cpp
     ConstraintGenerator.cpp
     ConstraintSolver.cpp
     Constraint.cpp
 )
 set(HEADERS
-    TypeChecker.h
+    NameResolver.h
     ConstraintGenerator.h
     Constraint.h
     ConstraintSolver.h

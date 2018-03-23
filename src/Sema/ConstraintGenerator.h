@@ -23,12 +23,7 @@ private:
     int typeVariableCount = 0;
 
     void constrain(Constraint constraint) {
-        // Collapse top-level conjunctions.
-        if(auto* conjunction = boost::get<Constraint::ConjunctionConstraint>(&constraint.data)) {
-            for(auto& constraint: conjunction->constraints) constraints.push_back(constraint);
-        } else {
-            constraints.push_back(constraint);
-        }
+        constraints.push_back(constraint);
     }
 
     Type newTypeVariable() {

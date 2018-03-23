@@ -43,32 +43,18 @@ Optional<Solution> solveConstraint(const Constraint& constraint) {
             return boost::apply_visitor(EqualConstraintSolver(),
                                         constraint.lhs.data, constraint.rhs.data);
         }
-        Optional<Solution> operator()(Constraint::ConjunctionConstraint constraint) const {
-            // IMMINENT TODO: Simplify constraints, or we'll get errors trying to constrain two type
-            // variables together.
-            Solution solution;
-            for(auto& subConstraint: constraint.constraints) {
-                if(auto subSolution = solveConstraint(subConstraint)) {
-                    solution += *subSolution;
-                } else {
-                    return None;
-                }
-            }
-            return solution;
-        }
-        Optional<Solution> operator()(Constraint::DisjunctionConstraint constraint) const {
-            reportError("Attempted to solve disjunction constraint (unimplemented)");
-            LLVM_BUILTIN_UNREACHABLE;
-        }
-        Optional<Solution> operator()(Constraint::BindOverloadConstraint constraint) const {
-            constraint.expr->decl = constraint.decl;
-            reportError("Attempted to solve bind overload constraint (unimplemented)");
-            LLVM_BUILTIN_UNREACHABLE;
-        }
     };
     return boost::apply_visitor(ConstraintVisitor(), constraint.data);
 }
 
 Optional<Solution> solveSystem(const std::vector<Constraint>& constraints) {
-    return solveConstraint(Constraint::Conjunction(constraints));
+    Solution solution;
+    for(auto& constraint: constraints) {
+        if(auto subSolution = solveConstraint(constraint)) {
+            solution += *subSolution;
+        } else {
+            return None;
+        }
+    }
+    return solution;
 }
