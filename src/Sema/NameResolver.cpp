@@ -64,7 +64,7 @@ void NameResolver::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
     // We must have failed.
     std::string errorMessage = "Invalid reference to identifier '" + expr->name + "'";
     if(!nameMatches.empty()) {
-        errorMessage += "\n\nHere are some matches that differ only in parameter types:";
+        errorMessage += "\n\nHere are some matches that differ only in arity:";
         for(auto& match: nameMatches) {
             errorMessage += "\n\t" + match->range.getSubstring();
         }

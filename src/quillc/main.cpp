@@ -6,6 +6,7 @@
 #include "AST/ASTPrinter.h"
 #include "Sema/NameResolver.h"
 #include "Sema/ConstraintGenerator.h"
+#include "Sema/ConstraintSolver.h"
 #include "IRGen/CodeGenerator.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/TargetRegistry.h"
@@ -102,6 +103,7 @@ int main() {
         constraintGen.visit(node);
     }
     constraintGen.dumpConstraints(std::cout);
+    solveSystem(constraintGen.constraints);
 //    for(auto& node: file) {
 //        codeGenerator.visit(node);
 //    }

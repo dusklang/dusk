@@ -16,7 +16,6 @@ class ConstraintGenerator: public ASTVisitor<ConstraintGenerator> {
 private:
     // FIXME: Name lookup will be super slow; figure out how to hash function overloads.
     std::vector<std::vector<std::shared_ptr<Decl>>> declLists;
-    std::vector<Constraint> constraints;
     // The return type of the current computed decl, or None if we are not currently in one.
     // FIXME: switch to a stack once nested computed decls are a thing.
     std::stack<Type> returnTypeStack;
@@ -54,6 +53,8 @@ public:
             stream << '\n';
         }
     }
+
+    std::vector<Constraint> constraints;
 
     void visitDecl(std::shared_ptr<Decl> decl);
     void visitScope(std::shared_ptr<Scope> scope);

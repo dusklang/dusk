@@ -18,22 +18,22 @@ struct EqualConstraintSolver: public boost::static_visitor<Optional<Solution>> {
     template<typename T>
     Optional<Solution> operator()(T lhs, T rhs) const {
         if(Type(lhs) != Type(rhs)) { return None; }
-        return Solution { {}, {} };
+        return Solution { {} };
     }
 
     Optional<Solution> operator()(int var, int rhs) const {
-        reportError("Attempt to constrain two type variables together");
+        reportError("Ambiguous type");
         LLVM_BUILTIN_UNREACHABLE;
     }
 
     template<typename T>
     Optional<Solution> operator()(int var, T rhs) const {
-        return Solution { {}, {{var, Type(rhs)}} };
+        return Solution { {{var, Type(rhs)}} };
     }
 
     template<typename T>
     Optional<Solution> operator()(T lhs, int var) const {
-        return Solution { {}, {{var, Type(lhs)}} };
+        return Solution { {{var, Type(lhs)}} };
     }
 };
 Optional<Solution> solveConstraint(const Constraint& constraint) {
@@ -46,11 +46,11 @@ Optional<Solution> solveConstraint(const Constraint& constraint) {
     };
     return boost::apply_visitor(ConstraintVisitor(), constraint.data);
 }
-
 Optional<Solution> solveSystem(const std::vector<Constraint>& constraints) {
     Solution solution;
-    for(auto& constraint: constraints) {
-        if(auto subSolution = solveConstraint(constraint)) {
+    for(auto&& it = constraints.rbegin(); it < constraints.rend(); ++it) {
+        auto subst = it->substituting(solution.types);
+        if(auto subSolution = solveConstraint(*it)) {
             solution += *subSolution;
         } else {
             return None;
@@ -58,3 +58,4 @@ Optional<Solution> solveSystem(const std::vector<Constraint>& constraints) {
     }
     return solution;
 }
+
