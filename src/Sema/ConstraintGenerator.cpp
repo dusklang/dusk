@@ -100,7 +100,9 @@ void ConstraintGenerator::visitStringLiteralExpr(std::shared_ptr<StringLiteralEx
     expr->type = Type::Pointer(Type::I8());
 }
 void ConstraintGenerator::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
-    expr->type = newTypeVariable();
+    if(expr->type == Type::Error()) {
+        expr->type = newTypeVariable();
+    }
 
     // Constrain arguments.
     for(auto& arg: expr->argList) {

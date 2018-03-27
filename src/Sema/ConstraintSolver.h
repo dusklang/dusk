@@ -23,6 +23,13 @@ struct Solution {
     void operator += (const Solution& other) {
         types.insert(other.types.begin(), other.types.end());
     }
+
+    void dump(std::ostream& stream) const {
+        stream << "Solution:" << std::endl;
+        for(auto& unification: types) {
+            stream << unification.first << " = " << unification.second.name() << std::endl;
+        }
+    }
 };
 
 Optional<Solution> solveSystem(const std::vector<Constraint>& constraints);

@@ -21,7 +21,16 @@ private:
     std::stack<Type> returnTypeStack;
     int typeVariableCount = 0;
 
+    struct TempVisitor: public boost::static_visitor<void> {
+        template<typename T>
+        void operator()(T) const {}
+
+        void operator()(int var) const {  }
+    };
+
     void constrain(Constraint constraint) {
+        auto equalConstraint = boost::get<Constraint::EqualConstraint>(constraint.data);
+        boost::apply_visitor(TempVisitor {}, equalConstraint.lhs.data);
         constraints.push_back(constraint);
     }
 

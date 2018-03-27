@@ -103,7 +103,8 @@ int main() {
         constraintGen.visit(node);
     }
     constraintGen.dumpConstraints(std::cout);
-    solveSystem(constraintGen.constraints);
+    std::cout << std::endl;
+    solveSystem(constraintGen.constraints)->dump(std::cout);
 //    for(auto& node: file) {
 //        codeGenerator.visit(node);
 //    }

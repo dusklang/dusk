@@ -58,6 +58,7 @@ void NameResolver::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
 
             // We must have succeeded! Add the decl's prototype and type to the declRefExpr and return.
             expr->decl = decl;
+            expr->type = decl->type;
             return;
         }
     }
