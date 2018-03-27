@@ -5,6 +5,7 @@ set(SOURCES
     Constraint.cpp
 )
 set(HEADERS
+    Solution.h
     NameResolver.h
     ConstraintGenerator.h
     Constraint.h
