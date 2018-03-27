@@ -5,10 +5,10 @@
 #include <string>
 
 struct SourceLoc {
-    const std::string* source;
+    std::string const* source;
     int location;
 
-    SourceLoc(const std::string* source, int location) : source(source), location(location) {}
+    SourceLoc(std::string const* source, int location) : source(source), location(location) {}
     SourceLoc() {}
 };
 

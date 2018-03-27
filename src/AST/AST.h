@@ -68,11 +68,11 @@ private:
         bool operator()(T, U) const { return false; }
     };
     struct SubstitutionVisitor: public boost::static_visitor<Type> {
-        const std::map<int, Type>& solution;
-        SubstitutionVisitor(const std::map<int, Type>& solution) : solution(solution) {}
+        std::map<int, Type> const& solution;
+        SubstitutionVisitor(std::map<int, Type> const& solution) : solution(solution) {}
 
         Type operator()(int var) const {
-            for(const auto& solution: this->solution) {
+            for(auto const& solution: this->solution) {
                 if(solution.first == var) {
                     return solution.second;
                 }
@@ -137,8 +137,8 @@ public:
     }
 
     ~Type() = default;
-    Type(const Type& other) = default;
-    Type& operator=(const Type& other) = default;
+    Type(Type const& other) = default;
+    Type& operator=(Type const& other) = default;
 
     bool operator==(Type other) const {
         return boost::apply_visitor(EqualityVisitor(), data, other.data);
@@ -147,7 +147,7 @@ public:
 
     std::string name() const;
 
-    Type substituting(const std::map<int, Type>& solution) const {
+    Type substituting(std::map<int, Type> const& solution) const {
         return boost::apply_visitor(SubstitutionVisitor{solution}, this->data);
     }
 };
@@ -162,5 +162,5 @@ struct Argument final : public ASTNode {
 struct Scope final : public ASTNode {
     std::vector<std::shared_ptr<ASTNode>> nodes;
 
-    AST_NODE_CTOR(Scope, const std::vector<std::shared_ptr<ASTNode>>& nodes), nodes(nodes) {}
+    AST_NODE_CTOR(Scope, std::vector<std::shared_ptr<ASTNode>> const& nodes), nodes(nodes) {}
 };

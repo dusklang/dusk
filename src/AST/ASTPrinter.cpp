@@ -3,7 +3,7 @@
 #include "ASTPrinter.h"
 
 std::string indentation(int level) {
-    const int multiplier = 4;
+    int const multiplier = 4;
     std::string str;
     for(int i = 0; i < (level * multiplier); i++) str += " ";
     return str;

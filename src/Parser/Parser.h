@@ -74,7 +74,7 @@ private:
         reportError(message, currentRange());
     }
 public:
-    Parser(const std::string& source) : lexer(source) {
+    Parser(std::string const& source) : lexer(source) {
         lexer.nextTokIncludingInsignificant();
     }
 

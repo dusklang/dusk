@@ -20,10 +20,10 @@ public:
     static Constraint Equal(Type lhs, Type rhs) { return Constraint(EqualConstraint { lhs, rhs }); }
 
     void dump(std::ostream& stream);
-    Constraint substituting(const std::map<int, Type>& solution) const {
+    Constraint substituting(std::map<int, Type> const& solution) const {
         struct SubstitutionVisitor: public boost::static_visitor<Constraint> {
-            const std::map<int, Type>& solution;
-            SubstitutionVisitor(const std::map<int, Type>& solution) : solution(solution) {}
+            std::map<int, Type> const& solution;
+            SubstitutionVisitor(std::map<int, Type> const& solution) : solution(solution) {}
             Constraint operator()(EqualConstraint constraint) const {
                 return Constraint::Equal(constraint.lhs.substituting(solution), constraint.rhs.substituting(solution));
             }

@@ -25,14 +25,14 @@ struct Stmt : public ASTNode {
 struct ReturnStmt: public Stmt {
     std::shared_ptr<Expr> value;
 
-    STMT_CTOR(Return, const std::shared_ptr<Expr>& value), value(value) {}
+    STMT_CTOR(Return, std::shared_ptr<Expr> value), value(value) {}
 };
 
 struct AssignmentStmt: public Stmt {
     std::shared_ptr<DeclRefExpr> lhs;
     std::shared_ptr<Expr> rhs;
 
-    STMT_CTOR(Assignment, const std::shared_ptr<DeclRefExpr>& lhs, const std::shared_ptr<Expr>& rhs),
+    STMT_CTOR(Assignment, std::shared_ptr<DeclRefExpr> lhs, std::shared_ptr<Expr> rhs),
     lhs(lhs), rhs(rhs) {}
 };
 

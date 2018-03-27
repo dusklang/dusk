@@ -36,7 +36,7 @@ struct EqualConstraintSolver: public boost::static_visitor<Optional<Solution>> {
         return Solution { {{var, Type(lhs)}} };
     }
 };
-Optional<Solution> solveConstraint(const Constraint& constraint) {
+Optional<Solution> solveConstraint(Constraint const& constraint) {
     struct ConstraintVisitor: public boost::static_visitor<Optional<Solution>> {
         Optional<Solution> operator()(Constraint::EqualConstraint constraint) const {
             if(constraint.lhs == constraint.rhs) return Solution();
@@ -46,7 +46,7 @@ Optional<Solution> solveConstraint(const Constraint& constraint) {
     };
     return boost::apply_visitor(ConstraintVisitor(), constraint.data);
 }
-Optional<Solution> solveSystem(const std::vector<Constraint>& constraints) {
+Optional<Solution> solveSystem(std::vector<Constraint> const& constraints) {
     Solution solution;
     for(auto&& it = constraints.rbegin(); it < constraints.rend(); ++it) {
         auto subst = it->substituting(solution.types);

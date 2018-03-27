@@ -10,7 +10,7 @@
 struct Solution {
     std::map<int, Type> types;
 
-    Solution operator + (const Solution& other) const {
+    Solution operator + (Solution const& other) const {
         auto types = this->types;
         types.insert(this->types.begin(), this->types.end());
         types.insert(other.types.begin(), other.types.end());
@@ -19,7 +19,7 @@ struct Solution {
         };
     }
 
-    void operator += (const Solution& other) {
+    void operator += (Solution const& other) {
         types.insert(other.types.begin(), other.types.end());
     }
 

@@ -29,12 +29,12 @@ struct Expr : public ASTNode {
 struct IntegerLiteralExpr: public Expr {
     std::string literal;
 
-    EXPR_CTOR(IntegerLiteral, const std::string& literal), literal(literal) {}
+    EXPR_CTOR(IntegerLiteral, std::string const& literal), literal(literal) {}
 };
 
 struct DecimalLiteralExpr: public Expr {
     std::string literal;
-    EXPR_CTOR(DecimalLiteral, const std::string& literal), literal(literal) {}
+    EXPR_CTOR(DecimalLiteral, std::string const& literal), literal(literal) {}
 };
 
 struct BooleanLiteralExpr: public Expr {
@@ -49,7 +49,7 @@ struct CharLiteralExpr: public Expr {
 
 struct StringLiteralExpr: public Expr {
     std::string literal;
-    EXPR_CTOR(StringLiteral, const std::string& literal), literal(literal) {}
+    EXPR_CTOR(StringLiteral, std::string const& literal), literal(literal) {}
 };
 
 struct DeclRefExpr: public Expr {
@@ -57,11 +57,11 @@ struct DeclRefExpr: public Expr {
     std::vector<Argument> argList;
     std::shared_ptr<Decl> decl = nullptr;
 
-    EXPR_CTOR(DeclRef, const std::string& name,
-              const std::vector<Argument>& argList),
+    EXPR_CTOR(DeclRef, std::string const& name,
+              std::vector<Argument> const& argList),
     name(name), argList(argList) {}
 
-    DeclRefExpr& operator=(const DeclRefExpr& other) = default;
+    DeclRefExpr& operator=(DeclRefExpr const& other) = default;
 };
 
 #undef EXPR_CTOR

@@ -14,7 +14,7 @@ Token Lexer::nextTokIncludingInsignificant() {
     auto isWhitespace = [&]() -> bool { return is(' ') || isNewline() || is('\t'); };
     auto isLetter = [&]() -> bool { return isBetween('a', 'z') || isBetween('A', 'Z'); };
     auto isNum = [&]() -> bool { return '0' <= curChar() && curChar() <= '9'; };
-    auto isSubstr = [&](const std::string& substring) -> bool {
+    auto isSubstr = [&](std::string const& substring) -> bool {
         if(pos >= source.length()) return false;
         auto j = [&](int i) { return i + pos; };
         for(int i = 0; i < substring.length() && j(i) < source.length(); i++) {

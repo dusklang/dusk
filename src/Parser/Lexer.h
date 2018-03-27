@@ -12,7 +12,7 @@
 class Lexer final {
 private:
     // TODO: I'll eventually want to replace std::string with something that supports Unicode.
-    const std::string source;
+    std::string const source;
     // These two stacks aren't parallel: tokenPositions always has the next position (not yet lexed)
     // on top while tokens always has the most-recently lexed token on top. In other words,
     // tokenPositions should always have exactly one more element than tokens.
@@ -39,7 +39,7 @@ private:
         exit(1);
     }
 public:
-    Lexer(const std::string& source) : source(source) {
+    Lexer(std::string const& source) : source(source) {
         tokenPositions.push(0);
     }
 
@@ -85,5 +85,5 @@ public:
         numberOfNewTokens = None;
     }
 
-    const std::string& getSource() const { return source; }
+    std::string const& getSource() const { return source; }
 };
