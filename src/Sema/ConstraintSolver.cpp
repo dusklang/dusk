@@ -21,19 +21,19 @@ struct EqualConstraintSolver: public boost::static_visitor<Optional<Solution>> {
         return Solution { {} };
     }
 
-    Optional<Solution> operator()(int var, int rhs) const {
+    Optional<Solution> operator()(Type::Variable var, Type::Variable rhs) const {
         reportError("Ambiguous type");
         LLVM_BUILTIN_UNREACHABLE;
     }
 
     template<typename T>
-    Optional<Solution> operator()(int var, T rhs) const {
-        return Solution { {{var, Type(rhs)}} };
+    Optional<Solution> operator()(Type::Variable var, T rhs) const {
+        return Solution { {{var.num, Type(rhs)}} };
     }
 
     template<typename T>
-    Optional<Solution> operator()(T lhs, int var) const {
-        return Solution { {{var, Type(lhs)}} };
+    Optional<Solution> operator()(T lhs, Type::Variable var) const {
+        return Solution { {{var.num, Type(lhs)}} };
     }
 };
 Optional<Solution> solveConstraint(Constraint const& constraint) {

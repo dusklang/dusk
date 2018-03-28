@@ -7,10 +7,16 @@
 std::string Type::name() const {
     struct NameVisitor: public boost::static_visitor<void> {
         std::ostringstream stream;
-        void operator()(int typeVariableNumber) {
-            stream << "<T" << typeVariableNumber << '>';
+        void operator()(Variable typeVariable) {
+            stream << "<T" << typeVariable.num;
+            switch(typeVariable.kind) {
+                case Variable::Integer: stream << ": Integer"; break;
+                case Variable::Decimal: stream << ": Decimal"; break;
+                default: break;
+            }
+            stream << '>';
         }
-        void operator()(IntProperties properties) {
+        void operator()(IntegerTy properties) {
             stream << (properties.isSigned ? "i" : "u") << properties.bitWidth;
         }
         void operator()(PointerTy pointer) {

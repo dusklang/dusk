@@ -32,11 +32,11 @@ struct ASTNode {
 };
 
 struct Type final {
-    struct IntProperties {
+    struct IntegerTy {
         int bitWidth;
         bool isSigned;
 
-        bool operator==(IntProperties other) { return bitWidth == other.bitWidth && isSigned == other.isSigned; }
+        bool operator==(IntegerTy other) { return bitWidth == other.bitWidth && isSigned == other.isSigned; }
     };
     struct PointerTy {
         std::shared_ptr<Type> pointedTy;
@@ -46,18 +46,29 @@ struct Type final {
     struct FloatTy {};
     struct DoubleTy {};
     struct ErrorTy {};
+    struct Variable {
+        enum Kind {
+            General, Integer, Decimal
+        };
+        int num;
+        Kind kind;
 
-    typedef boost::variant<IntProperties, PointerTy, int, VoidTy, BoolTy, FloatTy, DoubleTy, ErrorTy> DataType;
+        bool operator==(Variable const& other) const {
+            return num == other.num && kind == other.kind;
+        };
+    };
+
+    typedef boost::variant<IntegerTy, PointerTy, Variable, VoidTy, BoolTy, FloatTy, DoubleTy, ErrorTy> DataType;
 
     DataType data;
     Optional<SourceRange> sourceRange;
 private:
     struct EqualityVisitor: public boost::static_visitor<bool> {
-        bool operator()(IntProperties lhs, IntProperties rhs) const { return lhs == rhs; }
+        bool operator()(IntegerTy lhs, IntegerTy rhs) const { return lhs == rhs; }
         bool operator()(PointerTy lhs, PointerTy rhs) const {
             return *lhs.pointedTy == *rhs.pointedTy;
         }
-        bool operator()(int lhs, int rhs) const { return lhs == rhs; }
+        bool operator()(Variable lhs, Variable rhs) const { return lhs == rhs; }
         bool operator()(VoidTy, VoidTy) const { return true; }
         bool operator()(BoolTy, BoolTy) const { return true; }
         bool operator()(FloatTy, FloatTy) const { return true; }
@@ -71,13 +82,13 @@ private:
         std::map<int, Type> const& solution;
         SubstitutionVisitor(std::map<int, Type> const& solution) : solution(solution) {}
 
-        Type operator()(int var) const {
+        Type operator()(Type::Variable var) const {
             for(auto const& solution: this->solution) {
-                if(solution.first == var) {
+                if(solution.first == var.num) {
                     return solution.second;
                 }
             }
-            return Type::TypeVariable(var);
+            return Type::TypeVariable(var.num, var.kind);
         }
 
         template<typename T>
@@ -88,7 +99,7 @@ public:
          Optional<SourceRange> sourceRange = None)
          : data(data), sourceRange(sourceRange) {}
     static Type Integer(int bitWidth, bool isSigned, Optional<SourceRange> sourceRange = None) {
-        return Type(IntProperties { bitWidth, isSigned }, sourceRange);
+        return Type(IntegerTy { bitWidth, isSigned }, sourceRange);
     }
     static Type I8(Optional<SourceRange> sourceRange = None) {
         return Integer(8, true, sourceRange);
@@ -120,8 +131,8 @@ public:
         auto pointed = std::make_shared<Type>(pointedTy);
         return Type(PointerTy { pointed }, sourceRange);
     }
-    static Type TypeVariable(int number) {
-        return Type(number);
+    static Type TypeVariable(int number, Variable::Kind kind = Variable::General) {
+        return Type(Variable { number });
     }
     static Type Void(Optional<SourceRange> sourceRange = None) {
         return Type(VoidTy(), sourceRange);
