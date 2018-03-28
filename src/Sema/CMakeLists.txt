@@ -3,6 +3,7 @@ set(SOURCES
     ConstraintGenerator.cpp
     ConstraintSolver.cpp
     Constraint.cpp
+    SolutionApplier.cpp
 )
 set(HEADERS
     Solution.h
@@ -10,6 +11,7 @@ set(HEADERS
     ConstraintGenerator.h
     Constraint.h
     ConstraintSolver.h
+    SolutionApplier.h
 )
 
 add_library(Sema ${SOURCES} ${HEADERS})

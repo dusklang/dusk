@@ -150,6 +150,9 @@ public:
     Type substituting(std::map<int, Type> const& solution) const {
         return boost::apply_visitor(SubstitutionVisitor{solution}, this->data);
     }
+    void substitute(std::map<int, Type> const& solution) {
+        *this = substituting(solution);
+    }
 };
 
 struct Argument final : public ASTNode {
