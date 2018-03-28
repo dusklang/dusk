@@ -109,17 +109,17 @@ Optional<Decl> Parser::parseDecl() {
     }
     if(current().is(tok::kw_var)) {
         isVar = true;
-    } else if(current().is(tok::kw_dec)) {
+    } else if(current().is(tok::kw_def)) {
         isVar = false;
     } else {
         // Report an error only if we know for a fact that this was supposed to be a declaration.
         if(isExtern) {
-            reportError("Expected dec or var keyword to begin declaration");
+            reportError("Expected def or var keyword to begin declaration");
         } else {
             return None;
         }
     }
-    EXPECT_NEXT(tok::identifier, "Expected identifier after dec");
+    EXPECT_NEXT(tok::identifier, "Expected identifier after def");
     auto name = current().getText();
     std::vector<std::shared_ptr<Decl>> paramList;
     if(next().is(tok::sep_left_paren)) {
