@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.4.3)
-project(quill-lang)
+project(meda-lang)
 
 find_package(LLVM REQUIRED CONFIG)
 find_package(Boost 1.66 COMPONENTS program_options REQUIRED)
@@ -32,7 +32,7 @@ set(ICU_LIBS
 add_subdirectory(src)
 
 add_custom_target(run
-    COMMAND quillc
-    DEPENDS quillc
+    COMMAND medac
+    DEPENDS medac
     WORKING_DIRECTORY ${CMAKE_PROJECT_DIR}
 )

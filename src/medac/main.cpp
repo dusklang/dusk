@@ -80,7 +80,7 @@ def main {
 )~";
 
 int main() {
-    std::cout << "Quill compiler version 0.0.1\n\n";
+    std::cout << "Meda compiler version 0.0.1\n\n";
     Parser parser(sourceCode);
 
     ASTPrinter printer;
