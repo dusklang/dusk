@@ -89,9 +89,6 @@ int main() {
     CodeGenerator codeGenerator;
 
     auto file = parser.parseTopLevel();
-//    for(auto node: file) {
-//        std::cout << printer.visit(node, 0) << '\n';
-//    }
     for(auto node: file) {
         nameResolver.visit(node);
     }
@@ -102,6 +99,10 @@ int main() {
     SolutionApplier solutionApplier { solution };
     for(auto node: file) {
         solutionApplier.visit(node);
+    }
+    for(auto node: file) {
+        printer.visit(node, 0, std::cout);
+        std::cout << '\n';
     }
     for(auto& node: file) {
         codeGenerator.visit(node);

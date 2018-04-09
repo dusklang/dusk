@@ -5,25 +5,25 @@
 #include "ASTVisitor.h"
 
 class ASTPrinter: public ASTVisitor<ASTPrinter,
-                                    /*ASTNodeReturnTy*/ std::string,
-                                    #define AST_NODE(_) std::string,
+                                    /*ASTNodeReturnTy*/ void,
+                                    #define AST_NODE(_) void,
                                     #include "ASTNodes.def"
-                                    int>
+                                    /*Arguments*/int, std::ostream&>
 {
 public:
-    std::string visitDecl(std::shared_ptr<Decl> decl, int indentationLevel);
-    std::string visitScope(std::shared_ptr<Scope> scope, int indentationLevel);
-    std::string visitArgument(std::shared_ptr<Argument> argument, int indentationLevel);
+    void visitDecl(std::shared_ptr<Decl> decl, int indentationLevel, std::ostream& stream);
+    void visitScope(std::shared_ptr<Scope> scope, int indentationLevel, std::ostream& stream);
+    void visitArgument(std::shared_ptr<Argument> argument, int indentationLevel, std::ostream& stream);
 
-    std::string visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr, int indentationLevel);
-    std::string visitDecimalLiteralExpr(std::shared_ptr<DecimalLiteralExpr> expr, int indentationLevel);
-    std::string visitBooleanLiteralExpr(std::shared_ptr<BooleanLiteralExpr> expr, int indentationLevel);
-    std::string visitCharLiteralExpr(std::shared_ptr<CharLiteralExpr> expr, int indentationLevel);
-    std::string visitStringLiteralExpr(std::shared_ptr<StringLiteralExpr> expr, int indentationLevel);
-    std::string visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr, int indentationLevel);
+    void visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr, int indentationLevel, std::ostream& stream);
+    void visitDecimalLiteralExpr(std::shared_ptr<DecimalLiteralExpr> expr, int indentationLevel, std::ostream& stream);
+    void visitBooleanLiteralExpr(std::shared_ptr<BooleanLiteralExpr> expr, int indentationLevel, std::ostream& stream);
+    void visitCharLiteralExpr(std::shared_ptr<CharLiteralExpr> expr, int indentationLevel, std::ostream& stream);
+    void visitStringLiteralExpr(std::shared_ptr<StringLiteralExpr> expr, int indentationLevel, std::ostream& stream);
+    void visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr, int indentationLevel, std::ostream& stream);
 
-    std::string visitReturnStmt(std::shared_ptr<ReturnStmt> stmt, int indentationLevel);
-    std::string visitAssignmentStmt(std::shared_ptr<AssignmentStmt> stmt, int indentationLevel);
-    std::string visitIfStmt(std::shared_ptr<IfStmt> stmt, int indentationLevel, bool isIfElse = false);
-    std::string visitWhileStmt(std::shared_ptr<WhileStmt> stmt, int indentationLevel);
+    void visitReturnStmt(std::shared_ptr<ReturnStmt> stmt, int indentationLevel, std::ostream& stream);
+    void visitAssignmentStmt(std::shared_ptr<AssignmentStmt> stmt, int indentationLevel, std::ostream& stream);
+    void visitIfStmt(std::shared_ptr<IfStmt> stmt, int indentationLevel, std::ostream& stream, bool isIfElse = false);
+    void visitWhileStmt(std::shared_ptr<WhileStmt> stmt, int indentationLevel, std::ostream& stream);
 };

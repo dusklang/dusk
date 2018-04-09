@@ -2,129 +2,146 @@
 
 #include "ASTPrinter.h"
 
-std::string indentation(int level) {
-    int const multiplier = 4;
-    std::string str;
-    for(int i = 0; i < (level * multiplier); i++) str += " ";
-    return str;
+int constexpr multiplier = 4;
+inline void indent(int level, std::ostream& stream) {
+    for(int i = 0; i < (level * multiplier); i++) stream << " ";
 }
 
-std::string ASTPrinter::visitDecl(std::shared_ptr<Decl> decl, int indentationLevel) {
-    std::string str = indentation(indentationLevel);
-    str += decl->isVar ? "var " : "";
-    str += decl->isExtern ? "extern " : "";
-    str += decl->name;
+void ASTPrinter::visitDecl(std::shared_ptr<Decl> decl, int indentationLevel, std::ostream& stream) {
+    indent(indentationLevel, stream);
+    stream << (decl->isVar ? "var " : "") << (decl->isExtern ? "extern " : "");
+    stream << decl->name;
     if(!decl->paramList.empty()) {
-        str += "(";
+        stream << "(";
         bool first = true;
         for(auto& param: decl->paramList) {
-            if(!first) str += ", ";
+            if(!first) stream << ", ";
             else first = false;
 
-            str += param->name + ": " + param->type.name();
+            stream << param->name << ": " << param->type.name();
         }
-        str += ")";
+        stream << ")";
     }
-    str += ": " + decl->type.name();
+    stream << ": " << decl->type.name();
 
     if(decl->expression()) {
-        str += " = " + visitExpr(decl->expression(), 0);
+        stream << " = ";
+        visitExpr(decl->expression(), 0, stream);
     }
     else if(decl->body()) {
-        str += " {\n" + visitScope(decl->body(), indentationLevel) + "\n" + indentation(indentationLevel) + "}";
+        stream << " {\n";
+        visitScope(decl->body(), indentationLevel, stream);
+        stream << '\n';
+        indent(indentationLevel, stream);
+        stream << '}';
     }
-    return str;
 }
 
-std::string ASTPrinter::visitScope(std::shared_ptr<Scope> scope, int indentationLevel) {
-    std::string str;
-    for(auto& node: scope->nodes)
-        str += visit(node, indentationLevel + 1) + "\n";
-    if(!str.empty()) str.pop_back();
-    return str;
+void ASTPrinter::visitScope(std::shared_ptr<Scope> scope, int indentationLevel, std::ostream& stream) {
+    for(int i = 0; i < scope->nodes.size(); ++i) {
+        visit(scope->nodes[i], indentationLevel + 1, stream);
+        if(i != scope->nodes.size() - 1) stream << '\n';
+    }
 }
 
-std::string ASTPrinter::visitArgument(std::shared_ptr<Argument> argument, int indentationLevel) {
-    return indentation(indentationLevel) + visitExpr(argument->value, 0);
+void ASTPrinter::visitArgument(std::shared_ptr<Argument> argument, int indentationLevel, std::ostream& stream) {
+    indent(indentationLevel, stream);
+    visitExpr(argument->value, 0, stream);
 }
 
-std::string ASTPrinter::visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr, int indentationLevel) {
-    return indentation(indentationLevel) + expr->literal;
+void ASTPrinter::visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr, int indentationLevel, std::ostream& stream) {
+    indent(indentationLevel, stream);
+    stream << expr->literal;
 }
 
-std::string ASTPrinter::visitDecimalLiteralExpr(std::shared_ptr<DecimalLiteralExpr> expr, int indentationLevel) {
-    return indentation(indentationLevel) + expr->literal;
+void ASTPrinter::visitDecimalLiteralExpr(std::shared_ptr<DecimalLiteralExpr> expr, int indentationLevel, std::ostream& stream) {
+    indent(indentationLevel, stream);
+    stream << expr->literal;
 }
 
-std::string ASTPrinter::visitBooleanLiteralExpr(std::shared_ptr<BooleanLiteralExpr> expr, int indentationLevel) {
-    return indentation(indentationLevel) + std::string(expr->literal ? "true" : "false");
+void ASTPrinter::visitBooleanLiteralExpr(std::shared_ptr<BooleanLiteralExpr> expr, int indentationLevel, std::ostream& stream) {
+    indent(indentationLevel, stream);
+    stream << (expr->literal ? "true" : "false");
 }
 
-std::string ASTPrinter::visitCharLiteralExpr(std::shared_ptr<CharLiteralExpr> expr, int indentationLevel) {
-    return indentation(indentationLevel) + expr->range.getSubstring();
+void ASTPrinter::visitCharLiteralExpr(std::shared_ptr<CharLiteralExpr> expr, int indentationLevel, std::ostream& stream) {
+    indent(indentationLevel, stream);
+    stream << expr->range.getSubstring();
 }
 
-std::string ASTPrinter::visitStringLiteralExpr(std::shared_ptr<StringLiteralExpr> expr, int indentationLevel) {
-    return indentation(indentationLevel) + expr->range.getSubstring();
+void ASTPrinter::visitStringLiteralExpr(std::shared_ptr<StringLiteralExpr> expr, int indentationLevel, std::ostream& stream) {
+    indent(indentationLevel, stream);
+    stream << expr->range.getSubstring();
 }
 
-std::string ASTPrinter::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr, int indentationLevel) {
-    std::string str = expr->name;
+void ASTPrinter::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr, int indentationLevel, std::ostream& stream) {
+    indent(indentationLevel, stream);
+    stream << expr->name;
     if(!expr->argList.empty()) {
-        str += "(";
+        stream << '(';
         bool first = true;
         for(auto& arg: expr->argList) {
-            if(!first) str += ", ";
+            if(!first) stream << ", ";
             else first = false;
 
-            str += visitArgument(std::make_shared<Argument>(arg), 0);
+            visitArgument(std::make_shared<Argument>(arg), 0, stream);
         }
-        str += ")";
+        stream << ')';
     }
-    return indentation(indentationLevel) + str;
 }
 
-std::string ASTPrinter::visitReturnStmt(std::shared_ptr<ReturnStmt> stmt, int indentationLevel) {
-    std::string str = indentation(indentationLevel) + "return";
+void ASTPrinter::visitReturnStmt(std::shared_ptr<ReturnStmt> stmt, int indentationLevel, std::ostream& stream) {
+    indent(indentationLevel, stream);
+    stream << "return";
     if(stmt->value) {
-        str += " " + visitExpr(stmt->value, 0);
+        stream << ' ';
+        visitExpr(stmt->value, 0, stream);
     }
-    return str;
 }
 
-std::string ASTPrinter::visitAssignmentStmt(std::shared_ptr<AssignmentStmt> stmt, int indentationLevel) {
-    return indentation(indentationLevel) + visitExpr(stmt->lhs, 0) + " = " + visitExpr(stmt->rhs, 0);
+void ASTPrinter::visitAssignmentStmt(std::shared_ptr<AssignmentStmt> stmt, int indentationLevel, std::ostream& stream) {
+    indent(indentationLevel, stream);
+    visitExpr(stmt->lhs, 0, stream);
+    stream << " = ";
+    visitExpr(stmt->rhs, 0, stream);
 }
 
-std::string ASTPrinter::visitIfStmt(std::shared_ptr<IfStmt> stmt, int indentationLevel, bool isIfElse) {
-    std::string str;
-    if(!isIfElse) str = indentation(indentationLevel);
-    str += "if " + visitExpr(stmt->condition, 0) + " {\n";
-    str += visitScope(stmt->thenScope, indentationLevel);
-    str += "\n" + indentation(indentationLevel) + "}";
+void ASTPrinter::visitIfStmt(std::shared_ptr<IfStmt> stmt, int indentationLevel, std::ostream& stream, bool isIfElse) {
+    if(!isIfElse) indent(indentationLevel, stream);
+    stream << "if ";
+    visitExpr(stmt->condition, 0, stream);
+    stream << " {\n";
+    visitScope(stmt->thenScope, indentationLevel, stream);
+    stream << '\n';
+    indent(indentationLevel, stream);
+    stream << '}';
     if(stmt->elseScope) {
-        str += " else ";
+        stream << " else ";
         // Handle else if.
         if((*stmt->elseScope)->nodes.size() == 1) {
             if(auto elseIf = std::dynamic_pointer_cast<IfStmt>((*stmt->elseScope)->nodes[0])) {
-                str += visitIfStmt(elseIf, indentationLevel, true);
+                visitIfStmt(elseIf, indentationLevel, stream, true);
             } else {
                 // TODO: A goto really shouldn't be necessary here.
                 goto notIfElse;
             }
         } else {
             notIfElse:
-            str += "{\n";
-            str += visitScope(*stmt->elseScope, indentationLevel);
-            str += "\n" + indentation(indentationLevel) + "}";
+            stream << "{\n";
+            visitScope(*stmt->elseScope, indentationLevel, stream);
+            stream << '\n';
+            indent(indentationLevel, stream);
+            stream << '}';
         }
     }
-    return str;
 }
 
-std::string ASTPrinter::visitWhileStmt(std::shared_ptr<WhileStmt> stmt, int indentationLevel) {
-    std::string str = indentation(indentationLevel) + "while " + visitExpr(stmt->condition, 0) + " {\n";
-    str += visitScope(stmt->thenScope, indentationLevel);
-    str += "\n" + indentation(indentationLevel) + "}";
-    return str;
+void ASTPrinter::visitWhileStmt(std::shared_ptr<WhileStmt> stmt, int indentationLevel, std::ostream& stream) {
+    indent(indentationLevel, stream);
+    stream << "while ";
+    visitExpr(stmt->condition, 0, stream);
+    stream << " {\n";
+    visitScope(stmt->thenScope, indentationLevel, stream);
+    stream << '\n';
+    indent(indentationLevel, stream);
 }
