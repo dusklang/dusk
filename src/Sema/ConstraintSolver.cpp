@@ -28,6 +28,19 @@ struct EqualConstraintSolver: public boost::static_visitor<Optional<Solution>> {
 
     template<typename T>
     Optional<Solution> operator()(Type::Variable var, T rhs) const {
+        switch(var.kind) {
+            case Type::Variable::General: break;
+            case Type::Variable::Integer:
+                if constexpr(!std::is_same_v<T, Type::IntegerTy>) {
+                    reportError("Integer literal cannot unify with non-integer type");
+                }
+                break;
+            case Type::Variable::Decimal:
+                if constexpr(!std::is_same_v<T, Type::FloatTy> && !std::is_same_v<T, Type::DoubleTy>) {
+                    reportError("Decimal literal cannot unify with non-decimal or floating point type");
+                }
+                break;
+        }
         return Solution { {{var.num, Type(rhs)}} };
     }
 

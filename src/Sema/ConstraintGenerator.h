@@ -26,6 +26,12 @@ private:
     Type newTypeVariable() {
         return Type::TypeVariable(typeVariableCount++);
     }
+    Type newIntTypeVariable() {
+        return Type::TypeVariable(typeVariableCount++, Type::Variable::Integer);
+    }
+    Type newDecimalTypeVariable() {
+        return Type::TypeVariable(typeVariableCount++, Type::Variable::Decimal);
+    }
 
     template<typename Node>
     void reportError(std::string message, std::shared_ptr<Node> node) {

@@ -85,10 +85,10 @@ void ConstraintGenerator::visitScope(std::shared_ptr<Scope> scope) {
     declLists.pop_back();
 }
 void ConstraintGenerator::visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr) {
-    expr->type = Type::Integer(32, true);
+    expr->type = newIntTypeVariable();
 }
 void ConstraintGenerator::visitDecimalLiteralExpr(std::shared_ptr<DecimalLiteralExpr> expr) {
-    expr->type = Type::Double();
+    expr->type = newDecimalTypeVariable();
 }
 void ConstraintGenerator::visitBooleanLiteralExpr(std::shared_ptr<BooleanLiteralExpr> expr) {
     expr->type = Type::Bool();

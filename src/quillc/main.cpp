@@ -54,32 +54,26 @@ def printString(str: *i8) {
     }
     return
 }
-def performFizzBuzz(start: i32, end: i32) {
+def performFizzBuzz(end: i32) {
     // Check range.
-    if notTrue(lte(start, end)) {
+    if notTrue(lte(0, end)) {
         printString("Invalid bounds!\n")
         return
     }
-    var i = start
+    var i: f64 = 0
     while lte(i, end) {
         def fizz = eq(mod(i, 3), 0)
         def buzz = eq(mod(i, 5), 0)
-        if fizz {
-            printString("Fizz")
-        }
-        if buzz {
-            printString("Buzz")
-        }
-        if bothTrue(notTrue(fizz), notTrue(buzz)) {
-            printInt(i)
-        }
+        if fizz { printString("Fizz") }
+        if buzz { printString("Buzz") }
+        if bothTrue(notTrue(fizz), notTrue(buzz)) { printInt(i) }
         printChar("\n")
         i = add(i, 1)
     }
     return
 }
 def main {
-    performFizzBuzz(1, 1000)
+    performFizzBuzz(1000)
 
     return
 }
