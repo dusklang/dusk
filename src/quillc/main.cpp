@@ -60,7 +60,7 @@ def performFizzBuzz(end: i32) {
         printString("Invalid bounds!\n")
         return
     }
-    var i: f64 = 0
+    var i: i32 = 0
     while lte(i, end) {
         def fizz = eq(mod(i, 3), 0)
         def buzz = eq(mod(i, 5), 0)
@@ -95,8 +95,12 @@ int main() {
     for(auto node: file) {
         constraintGen.visit(node);
     }
-    Solution solution = *solveSystem(constraintGen.constraints);
-    SolutionApplier solutionApplier { solution };
+    auto solution = solveSystem(constraintGen.constraints);
+    if(!solution) {
+        std::cout << "Failed to solve system of constraints.\n";
+        exit(0);
+    }
+    SolutionApplier solutionApplier { *solution };
     for(auto node: file) {
         solutionApplier.visit(node);
     }
