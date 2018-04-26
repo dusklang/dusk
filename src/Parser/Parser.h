@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include "llvm/ADT/Optional.h"
+#include <optional>
 
 #include "AST/AST.h"
 #include "AST/Stmt.h"
@@ -16,31 +16,31 @@ private:
 
     Token current() { return lexer.curTok(); }
     Token next() { return lexer.nextTok(); }
-    Optional<Token> previous() { return lexer.prevTok(); }
-    Optional<std::string> parseIdentifer() {
+    std::optional<Token> previous() { return lexer.prevTok(); }
+    std::optional<std::string> parseIdentifer() {
         if(current().is(tok::identifier)) {
             auto text = current().getText();
             next();
             return text;
         }
-        return None;
+        return std::nullopt;
     }
-    Optional<std::string> parseIntegerLiteral() {
+    std::optional<std::string> parseIntegerLiteral() {
         auto lit = current().getIntegerLiteral();
         if(lit) next();
         return lit;
     }
-    Optional<std::string> parseDecimalLiteral() {
+    std::optional<std::string> parseDecimalLiteral() {
         auto lit = current().getDecimalLiteral();
         if(lit) next();
         return lit;
     }
-    Optional<char> parseCharLiteral() {
+    std::optional<char> parseCharLiteral() {
         auto lit = current().getCharLiteral();
         if(lit) next();
         return lit;
     }
-    Optional<std::string> parseStringLiteral() {
+    std::optional<std::string> parseStringLiteral() {
         auto lit = current().getStringLiteral();
         if(lit) next();
         return lit;
@@ -79,13 +79,13 @@ public:
     }
 
     std::vector<std::shared_ptr<ASTNode>> parseTopLevel();
-    Optional<std::shared_ptr<Scope>> parseScope();
+    std::optional<std::shared_ptr<Scope>> parseScope();
     std::shared_ptr<ASTNode> parseNode();
     Type parseType();
-    Optional<Decl> parseDecl();
-    Optional<std::shared_ptr<Stmt>> parseStmt();
-    Optional<std::shared_ptr<Stmt>> parseIfStmt();
-    Optional<std::shared_ptr<Stmt>> parseWhileStmt();
-    Optional<std::shared_ptr<Expr>> parseDeclRefExpr();
-    Optional<std::shared_ptr<Expr>> parseExpr();
+    std::optional<Decl> parseDecl();
+    std::optional<std::shared_ptr<Stmt>> parseStmt();
+    std::optional<std::shared_ptr<Stmt>> parseIfStmt();
+    std::optional<std::shared_ptr<Stmt>> parseWhileStmt();
+    std::optional<std::shared_ptr<Expr>> parseDeclRefExpr();
+    std::optional<std::shared_ptr<Expr>> parseExpr();
 };

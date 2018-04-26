@@ -145,5 +145,5 @@ Token Lexer::nextTokIncludingInsignificant() {
     }
 
     assert(false && "Unhandled token");
-    LLVM_BUILTIN_UNREACHABLE;
+    _LIBCPP_UNREACHABLE();
 }

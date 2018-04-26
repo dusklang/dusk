@@ -29,8 +29,8 @@ std::vector<std::shared_ptr<ASTNode>> Parser::parseTopLevel() {
     return nodes;
 }
 
-Optional<std::shared_ptr<Scope>> Parser::parseScope() {
-    if(current().isNot(tok::sep_left_curly)) return None;
+std::optional<std::shared_ptr<Scope>> Parser::parseScope() {
+    if(current().isNot(tok::sep_left_curly)) return std::nullopt;
     recordCurrentLoc();
     next();
     std::vector<std::shared_ptr<ASTNode>> nodes;
@@ -99,7 +99,7 @@ Type Parser::parseType() {
     LLVM_BUILTIN_UNREACHABLE;
 }
 
-Optional<Decl> Parser::parseDecl() {
+std::optional<Decl> Parser::parseDecl() {
     recordCurrentLoc();
     bool isVar;
     bool isExtern = false;
@@ -116,7 +116,7 @@ Optional<Decl> Parser::parseDecl() {
         if(isExtern) {
             reportError("Expected def or var keyword to begin declaration");
         } else {
-            return None;
+            return std::nullopt;
         }
     }
     EXPECT_NEXT(tok::identifier, "Expected identifier after def");
@@ -178,7 +178,7 @@ Optional<Decl> Parser::parseDecl() {
     }
 }
 
-Optional<std::shared_ptr<Stmt>> Parser::parseStmt() {
+std::optional<std::shared_ptr<Stmt>> Parser::parseStmt() {
     if(current().is(tok::kw_return)) {
         recordCurrentLoc();
         next();
@@ -192,15 +192,15 @@ Optional<std::shared_ptr<Stmt>> Parser::parseStmt() {
     }
 }
 
-Optional<std::shared_ptr<Stmt>> Parser::parseIfStmt() {
-    if(current().isNot(tok::kw_if)) return None;
+std::optional<std::shared_ptr<Stmt>> Parser::parseIfStmt() {
+    if(current().isNot(tok::kw_if)) return std::nullopt;
     recordCurrentLoc();
     next();
     auto conditionExpr = parseExpr();
     if(!conditionExpr) reportError("Expected condition expression for if statement");
     auto thenScope = parseScope();
     if(!thenScope) reportError("Expected opening curly brace for if statement");
-    Optional<std::shared_ptr<Scope>> elseScope;
+    std::optional<std::shared_ptr<Scope>> elseScope;
     if(current().is(tok::kw_else)) {
         next();
         if(auto scope = parseScope()) {
@@ -218,22 +218,22 @@ Optional<std::shared_ptr<Stmt>> Parser::parseIfStmt() {
                                                                     elseScope));
 }
 
-Optional<std::shared_ptr<Stmt>> Parser::parseWhileStmt() {
-    if(current().isNot(tok::kw_while)) return None;
+std::optional<std::shared_ptr<Stmt>> Parser::parseWhileStmt() {
+    if(current().isNot(tok::kw_while)) return std::nullopt;
     recordCurrentLoc();
     next();
     auto conditionExpr = parseExpr();
     if(!conditionExpr) reportError("Expected condition expression for while statement");
     auto thenScope = parseScope();
     if(!thenScope) reportError("Expected opening curly brace for while statement");
-    Optional<std::shared_ptr<Scope>> elseScope;
+    std::optional<std::shared_ptr<Scope>> elseScope;
     return std::dynamic_pointer_cast<Stmt>(std::make_shared<WhileStmt>(currentRange(),
                                                                        *conditionExpr,
                                                                        *thenScope));
 }
 
-Optional<std::shared_ptr<Expr>> Parser::parseDeclRefExpr() {
-    if(current().isNot(tok::identifier)) return None;
+std::optional<std::shared_ptr<Expr>> Parser::parseDeclRefExpr() {
+    if(current().isNot(tok::identifier)) return std::nullopt;
 
     recordCurrentLoc();
     auto name = current().getText();
@@ -255,7 +255,7 @@ Optional<std::shared_ptr<Expr>> Parser::parseDeclRefExpr() {
     return std::dynamic_pointer_cast<Expr>(std::make_shared<DeclRefExpr>(currentRange(), name, argList));
 }
 
-Optional<std::shared_ptr<Expr>> Parser::parseExpr() {
+std::optional<std::shared_ptr<Expr>> Parser::parseExpr() {
     recordCurrentLoc();
     if(current().is(tok::kw_true)) {
         next();

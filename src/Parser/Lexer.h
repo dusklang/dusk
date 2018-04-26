@@ -5,7 +5,7 @@
 #include <string>
 #include <stack>
 #include <map>
-#include "llvm/ADT/Optional.h"
+#include <optional>
 #include "Token.h"
 #include <iostream>
 
@@ -22,7 +22,7 @@ private:
     // This counter stores how many new tokens have been added since last calling saveState().
     // This is useful because we may need to rollback the lexer after realizing we can't actually
     // parse the thing we were trying to and should try something else.
-    Optional<int> numberOfNewTokens;
+    std::optional<int> numberOfNewTokens;
 
     std::map<char, char> specialEscapeCharacters {
         { 'n', '\n' },
@@ -49,11 +49,11 @@ public:
         return cur;
     }
     Token nextTokIncludingInsignificant();
-    Optional<Token> prevTokIncludingInsignificant() {
+    std::optional<Token> prevTokIncludingInsignificant() {
         tokens.pop();
         tokenPositions.pop();
         if(numberOfNewTokens) *numberOfNewTokens -= 1;
-        if(tokens.empty()) return None;
+        if(tokens.empty()) return std::nullopt;
         return tokens.top();
     }
 
@@ -64,11 +64,11 @@ public:
                 return next;
         }
     }
-    Optional<Token> prevTok() {
+    std::optional<Token> prevTok() {
         while(auto prev = prevTokIncludingInsignificant()) {
             if(prev->isSignificant()) return prev;
         }
-        return None;
+        return std::nullopt;
     }
 
     // See the above description of the numberOfNewTokens member.
@@ -82,7 +82,7 @@ public:
             tokenPositions.pop();
         }
 
-        numberOfNewTokens = None;
+        numberOfNewTokens = std::nullopt;
     }
 
     std::string const& getSource() const { return source; }

@@ -4,7 +4,6 @@
 
 #include <string>
 #include <memory>
-#include "llvm/ADT/SmallVector.h"
 
 #include "AST.h"
 #include "Decl.h"

@@ -6,12 +6,9 @@
 #include <vector>
 #include <variant>
 #include <map>
-#include "llvm/ADT/Optional.h"
+#include <optional>
 #include "llvm/IR/Value.h"
 #include "General/SourceLoc.h"
-
-using llvm::Optional;
-using llvm::None;
 
 struct Expr;
 
@@ -62,7 +59,7 @@ struct Type final {
     typedef std::variant<IntegerTy, PointerTy, Variable, VoidTy, BoolTy, FloatTy, DoubleTy, ErrorTy> DataType;
 
     DataType data;
-    Optional<SourceRange> sourceRange;
+    std::optional<SourceRange> sourceRange;
 private:
     struct EqualityVisitor {
         bool operator()(IntegerTy lhs, IntegerTy rhs) const { return lhs == rhs; }
@@ -97,54 +94,54 @@ private:
     };
 public:
     Type(DataType data,
-         Optional<SourceRange> sourceRange = None)
+         std::optional<SourceRange> sourceRange = std::nullopt)
          : data(data), sourceRange(sourceRange) {}
-    static Type Integer(int bitWidth, bool isSigned, Optional<SourceRange> sourceRange = None) {
+    static Type Integer(int bitWidth, bool isSigned, std::optional<SourceRange> sourceRange = std::nullopt) {
         return Type(IntegerTy { bitWidth, isSigned }, sourceRange);
     }
-    static Type I8(Optional<SourceRange> sourceRange = None) {
+    static Type I8(std::optional<SourceRange> sourceRange = std::nullopt) {
         return Integer(8, true, sourceRange);
     }
-    static Type I16(Optional<SourceRange> sourceRange = None) {
+    static Type I16(std::optional<SourceRange> sourceRange = std::nullopt) {
         return Integer(16, true, sourceRange);
     }
-    static Type I32(Optional<SourceRange> sourceRange = None) {
+    static Type I32(std::optional<SourceRange> sourceRange = std::nullopt) {
         return Integer(32, true, sourceRange);
     }
-    static Type I64(Optional<SourceRange> sourceRange = None) {
+    static Type I64(std::optional<SourceRange> sourceRange = std::nullopt) {
         return Integer(64, true, sourceRange);
     }
-    static Type U8(Optional<SourceRange> sourceRange = None) {
+    static Type U8(std::optional<SourceRange> sourceRange = std::nullopt) {
         return Integer(8, false, sourceRange);
     }
-    static Type U16(Optional<SourceRange> sourceRange = None) {
+    static Type U16(std::optional<SourceRange> sourceRange = std::nullopt) {
         return Integer(16, false, sourceRange);
     }
-    static Type U32(Optional<SourceRange> sourceRange = None) {
+    static Type U32(std::optional<SourceRange> sourceRange = std::nullopt) {
         return Integer(32, false, sourceRange);
     }
-    static Type U64(Optional<SourceRange> sourceRange = None) {
+    static Type U64(std::optional<SourceRange> sourceRange = std::nullopt) {
         return Integer(64, false, sourceRange);
     }
     static Type Error() { return Type(ErrorTy()); }
 
-    static Type Pointer(Type pointedTy, Optional<SourceRange> sourceRange = None) {
+    static Type Pointer(Type pointedTy, std::optional<SourceRange> sourceRange = std::nullopt) {
         auto pointed = std::make_shared<Type>(pointedTy);
         return Type(PointerTy { pointed }, sourceRange);
     }
     static Type TypeVariable(int number, Variable::Kind kind = Variable::General) {
         return Type(Variable { number });
     }
-    static Type Void(Optional<SourceRange> sourceRange = None) {
+    static Type Void(std::optional<SourceRange> sourceRange = std::nullopt) {
         return Type(VoidTy(), sourceRange);
     }
-    static Type Bool(Optional<SourceRange> sourceRange = None) {
+    static Type Bool(std::optional<SourceRange> sourceRange = std::nullopt) {
         return Type(BoolTy(), sourceRange);
     }
-    static Type Float(Optional<SourceRange> sourceRange = None) {
+    static Type Float(std::optional<SourceRange> sourceRange = std::nullopt) {
         return Type(FloatTy(), sourceRange);
     }
-    static Type Double(Optional<SourceRange> sourceRange = None) {
+    static Type Double(std::optional<SourceRange> sourceRange = std::nullopt) {
         return Type(DoubleTy(), sourceRange);
     }
 
