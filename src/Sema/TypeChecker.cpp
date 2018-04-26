@@ -28,109 +28,32 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
             // Add Void type to computed declaration if it doesn't have one.
             if(decl->type == Type::Error()) decl->type = Type::Void();
 
-            // Recursive lambda for handling nested scopes inside the function, as well as the function
-            // body itself.
-            //
-            // TODO: Move this to the visitScope() method by storing context in the TypeChecker.
-            std::function<void(std::shared_ptr<Scope>)> handleScope = [&](std::shared_ptr<Scope> scope) {
-                // Start another new, inner scope for declarations inside the scope.
-                declLists.push_back(std::vector<std::shared_ptr<Decl>>());
+            returnTypeStack.push(decl->type);
+            visitScope(decl->body());
+            returnTypeStack.pop();
 
-                // These variables track state for nodes after a return statement. We still typecheck
-                // them, but they'll be removed from the AST after we're done.
-                auto alreadyReturned = false;
-                auto alreadyDiagnosedStatementsAfterReturnStatement = false;
-                auto afterReturnIterator = scope->nodes.end();
-                for(auto&& node = scope->nodes.begin(); node != scope->nodes.end(); ++node) {
-                    // Warn on code after a return statement.
-                    if(alreadyReturned && !alreadyDiagnosedStatementsAfterReturnStatement) {
-                        reportWarning("Code after return statement will not be executed", *node);
-                        alreadyReturned = alreadyDiagnosedStatementsAfterReturnStatement;
-                        afterReturnIterator = node;
-                    }
-                    // Handle return statements.
-                    if(auto ret = std::dynamic_pointer_cast<ReturnStmt>(*node)) {
-                        alreadyReturned = true;
-                        visitReturnStmt(ret);
-                        // Handle returning value in a void computed decl.
-                        if(decl->type == Type::Void()) {
-                            if(ret->value) {
-                                reportError("Attempted to return value from Void computed decl '"
-                                            + decl->name + "'",
-                                            ret);
-                            } else {
-                                continue;
-                            }
-                        }
-
-                        // Handle returning no value in a non-void computed decl.
-                        if(!ret->value) {
-                            reportError("Computed decl '" + decl->name + "' must return a value",
-                                        ret);
-                        }
-
-                        // Handle returning a value of a type incompatible with the computed decl's type
-                        // (currently, "incompatible with" just means "not equal to").
-                        if(ret->value->type != decl->type) {
-                            // TODO: Include in the error message the type of the returned expr.
-                            reportError("Attempted to return value of incompatible type from computed decl "
-                                        "of type " + decl->type.name(),
-                                        ret);
-                        }
-                    } else if(auto ifStmt = std::dynamic_pointer_cast<IfStmt>(*node)) {
-                        visitExpr(ifStmt->condition);
-                        if(ifStmt->condition->type != Type::Bool()) {
-                            reportError("Expression in if statement is not of type Bool", ifStmt);
-                        }
-                        handleScope(ifStmt->thenScope);
-                        if(ifStmt->elseScope) handleScope(*ifStmt->elseScope);
-                    } else if(auto whileStmt = std::dynamic_pointer_cast<WhileStmt>(*node)) {
-                        visitExpr(whileStmt->condition);
-                        if(whileStmt->condition->type != Type::Bool()) {
-                            reportError("Expression in while statement is not of type Bool", whileStmt);
-                        }
-                        handleScope(whileStmt->thenScope);
-                    } else if(auto expr = std::dynamic_pointer_cast<Expr>(*node)) {
-                        visitExpr(expr);
-                        // Warn on unused expressions.
-                        if(expr->type != Type::Void()) {
-                            reportWarning("Unused expression", expr);
-                        }
-                    } else {
-                        visit(*node);
-                    }
-                }
-                declLists.pop_back();
-                // Remove nodes after a return statement.
-                scope->nodes.erase(afterReturnIterator, scope->nodes.end());
-            };
-            handleScope(decl->body());
             if(decl->isParameterized()) declLists.pop_back();
-            return;
-        }
-
-        // We can now assume the decl is stored.
-        assert(decl->isStored());
-
-        visitExpr(decl->expression());
-        if(decl->type == Type::Error()) {
-            decl->type = decl->expression()->type;
         } else {
-            if(decl->type != decl->expression()->type) {
-                reportError("Cannot assign value of type '" +
-                            decl->expression()->type.name() +
-                            "' to declaration of type '" +
-                            decl->type.name() + "'",
-                            decl);
+            visitExpr(decl->expression());
+            if(decl->type == Type::Error()) {
+                decl->type = decl->expression()->type;
+            } else {
+                if(decl->type != decl->expression()->type) {
+                    reportError("Cannot assign value of type '" +
+                                decl->expression()->type.name() +
+                                "' to declaration of type '" +
+                                decl->type.name() + "'",
+                                decl);
+                }
             }
+            if(decl->type == Type::Void()) reportError("Stored declarations can not have type Void", decl);
+
+            if(decl->isParameterized()) declLists.pop_back();
+
+            // If this is a stored declaration, add the decl to the enclosing scope now, so we can shadow
+            // declarations from outer scopes.
+            declLists.back().push_back(decl);
         }
-        if(decl->type == Type::Void()) reportError("Stored declarations can not have type Void", decl);
-
-        if(decl->isParameterized()) declLists.pop_back();
-
-        // If this is a stored declaration, add the decl to the enclosing scope now, so we can shadow
-        // declarations from outer scopes.
-        declLists.back().push_back(decl);
     } else {
         if(!decl->isExtern) {
             reportError("Non-extern declarations currently always need definitions", decl);
@@ -141,7 +64,23 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
         }
     }
 }
-void TypeChecker::visitScope(std::shared_ptr<Scope> scope) {}
+void TypeChecker::visitScope(std::shared_ptr<Scope> scope) {
+    // Start a new namespace for declarations inside the scope.
+    declLists.push_back(std::vector<std::shared_ptr<Decl>>());
+    for(auto& node: scope->nodes) {
+        if(auto expr = std::dynamic_pointer_cast<Expr>(node)) {
+            visitExpr(expr);
+            // Warn on unused expressions.
+            if(expr->type != Type::Void()) {
+                reportWarning("Unused expression", expr);
+            }
+        } else {
+            visit(node);
+        }
+    }
+    // End the new namespace.
+    declLists.pop_back();
+}
 void TypeChecker::visitArgument(std::shared_ptr<Argument> argument) {}
 void TypeChecker::visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr) {
     expr->type = Type::I32();
@@ -203,6 +142,43 @@ void TypeChecker::visitReturnStmt(std::shared_ptr<ReturnStmt> stmt) {
     if(stmt->value) {
         visitExpr(stmt->value);
     }
+    // Handle returning value in a void computed decl.
+    if(returnTypeStack.top() == Type::Void()) {
+        if(stmt->value) {
+            reportError("Attempted to return value from Void computed decl '", stmt);
+        } else {
+            return;
+        }
+    }
+
+    // Handle returning no value in a non-void computed decl.
+    if(!stmt->value) {
+        reportError("Computed decl must return a value", stmt);
+    }
+
+    // Handle returning a value of a type incompatible with the computed decl's type
+    // (currently, "incompatible with" just means "not equal to").
+    if(stmt->value->type != returnTypeStack.top()) {
+        // TODO: Include in the error message the type of the returned expr.
+        reportError("Attempted to return value of incompatible type from computed decl "
+                    "of type " + returnTypeStack.top().name(),
+                    stmt);
+    }
+}
+void TypeChecker::visitIfStmt(std::shared_ptr<IfStmt> stmt) {
+    visitExpr(stmt->condition);
+    if(stmt->condition->type != Type::Bool()) {
+        reportError("Expression in if statement is not of type Bool", stmt);
+    }
+    visitScope(stmt->thenScope);
+    if(stmt->elseScope) visitScope(*stmt->elseScope);
+}
+void TypeChecker::visitWhileStmt(std::shared_ptr<WhileStmt> stmt) {
+    visitExpr(stmt->condition);
+    if(stmt->condition->type != Type::Bool()) {
+        reportError("Expression in while statement is not of type Bool", stmt);
+    }
+    visitScope(stmt->thenScope);
 }
 
 void TypeChecker::visitAssignmentStmt(std::shared_ptr<AssignmentStmt> stmt) {

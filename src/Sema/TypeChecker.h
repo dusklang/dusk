@@ -5,6 +5,7 @@
 #include <map>
 #include <memory>
 #include <iostream>
+#include <stack>
 
 #include "AST/ASTVisitor.h"
 
@@ -12,6 +13,7 @@ class TypeChecker final: public ASTVisitor<TypeChecker> {
 private:
     // FIXME: Name lookup will be super slow; figure out how to hash function overloads.
     std::vector<std::vector<std::shared_ptr<Decl>>> declLists;
+    std::stack<Type> returnTypeStack;
     template<typename Node>
     void reportError(std::string message, std::shared_ptr<Node> node) {
         std::cout << "TYPE-CHECKING ERROR: " << message << '\n';
@@ -42,6 +44,6 @@ public:
 
     void visitReturnStmt(std::shared_ptr<ReturnStmt> stmt);
     void visitAssignmentStmt(std::shared_ptr<AssignmentStmt> stmt);
-    void visitIfStmt(std::shared_ptr<IfStmt> stmt) {}
-    void visitWhileStmt(std::shared_ptr<WhileStmt> stmt) {}
+    void visitIfStmt(std::shared_ptr<IfStmt> stmt);
+    void visitWhileStmt(std::shared_ptr<WhileStmt> stmt);
 };
