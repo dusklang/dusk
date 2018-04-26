@@ -1,17 +1,8 @@
 set(SOURCES
-    NameResolver.cpp
-    ConstraintGenerator.cpp
-    ConstraintSolver.cpp
-    Constraint.cpp
-    SolutionApplier.cpp
+    TypeChecker.cpp
 )
 set(HEADERS
-    Solution.h
-    NameResolver.h
-    ConstraintGenerator.h
-    Constraint.h
-    ConstraintSolver.h
-    SolutionApplier.h
+    TypeChecker.h
 )
 
 add_library(Sema ${SOURCES} ${HEADERS})

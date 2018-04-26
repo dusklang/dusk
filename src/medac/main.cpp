@@ -4,10 +4,7 @@
 #include <fstream>
 #include "Parser/Parser.h"
 #include "AST/ASTPrinter.h"
-#include "Sema/NameResolver.h"
-#include "Sema/ConstraintGenerator.h"
-#include "Sema/ConstraintSolver.h"
-#include "Sema/SolutionApplier.h"
+#include "Sema/TypeChecker.h"
 #include "IRGen/CodeGenerator.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/TargetRegistry.h"
@@ -84,29 +81,12 @@ int main() {
     Parser parser(sourceCode);
 
     ASTPrinter printer;
-    NameResolver nameResolver;
-    ConstraintGenerator constraintGen;
+    TypeChecker tyChecker;
     CodeGenerator codeGenerator;
 
     auto file = parser.parseTopLevel();
-    for(auto node: file) {
-        nameResolver.visit(node);
-    }
-    for(auto node: file) {
-        constraintGen.visit(node);
-    }
-    auto solution = solveSystem(constraintGen.constraints);
-    if(!solution) {
-        std::cout << "Failed to solve system of constraints.\n";
-        exit(0);
-    }
-    SolutionApplier solutionApplier { *solution };
-    for(auto node: file) {
-        solutionApplier.visit(node);
-    }
-    for(auto node: file) {
-        printer.visit(node, 0, std::cout);
-        std::cout << '\n';
+    for(auto& node: file) {
+        tyChecker.visit(node);
     }
     for(auto& node: file) {
         codeGenerator.visit(node);

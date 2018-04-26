@@ -1,0 +1,3 @@
+[submodule "dependencies/patterns"]
+	path = dependencies/patterns
+	url = https://github.com/mpark/patterns.git
