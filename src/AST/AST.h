@@ -4,10 +4,11 @@
 
 #include <string>
 #include <vector>
+#include <variant>
+#include <map>
 #include "llvm/ADT/Optional.h"
 #include "llvm/IR/Value.h"
 #include "General/SourceLoc.h"
-#include "boost/variant.hpp"
 
 using llvm::Optional;
 using llvm::None;
@@ -58,12 +59,12 @@ struct Type final {
         };
     };
 
-    typedef boost::variant<IntegerTy, PointerTy, Variable, VoidTy, BoolTy, FloatTy, DoubleTy, ErrorTy> DataType;
+    typedef std::variant<IntegerTy, PointerTy, Variable, VoidTy, BoolTy, FloatTy, DoubleTy, ErrorTy> DataType;
 
     DataType data;
     Optional<SourceRange> sourceRange;
 private:
-    struct EqualityVisitor: public boost::static_visitor<bool> {
+    struct EqualityVisitor {
         bool operator()(IntegerTy lhs, IntegerTy rhs) const { return lhs == rhs; }
         bool operator()(PointerTy lhs, PointerTy rhs) const {
             return *lhs.pointedTy == *rhs.pointedTy;
@@ -78,7 +79,7 @@ private:
         template<typename T, typename U>
         bool operator()(T, U) const { return false; }
     };
-    struct SubstitutionVisitor: public boost::static_visitor<Type> {
+    struct SubstitutionVisitor {
         std::map<int, Type> const& solution;
         SubstitutionVisitor(std::map<int, Type> const& solution) : solution(solution) {}
 
@@ -152,14 +153,14 @@ public:
     Type& operator=(Type const& other) = default;
 
     bool operator==(Type other) const {
-        return boost::apply_visitor(EqualityVisitor(), data, other.data);
+        return std::visit(EqualityVisitor(), data, other.data);
     }
     bool operator!=(Type other) const { return !(*this == other); }
 
     std::string name() const;
 
     Type substituting(std::map<int, Type> const& solution) const {
-        return boost::apply_visitor(SubstitutionVisitor{solution}, this->data);
+        return std::visit(SubstitutionVisitor{solution}, this->data);
     }
     void substitute(std::map<int, Type> const& solution) {
         *this = substituting(solution);

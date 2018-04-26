@@ -1,9 +1,10 @@
 //  Copyright © 2018 Zach Wolfe. All rights reserved.
 
 #include "Constraint.h"
+#include <iostream>
 
 void Constraint::dump(std::ostream& stream) {
-    struct ConstraintVisitor: public boost::static_visitor<void> {
+    struct ConstraintVisitor {
         std::ostream& stream;
         int indentationLevel = 0;
         ConstraintVisitor(std::ostream& stream) : stream(stream) {}
@@ -19,5 +20,5 @@ void Constraint::dump(std::ostream& stream) {
     };
 
     ConstraintVisitor visitor(stream);
-    boost::apply_visitor(visitor, data);
+    std::visit(visitor, data);
 }

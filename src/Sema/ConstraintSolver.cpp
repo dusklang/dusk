@@ -9,7 +9,7 @@ void reportError(std::string message) {
     exit(0);
 }
 
-struct EqualConstraintSolver: public boost::static_visitor<Optional<Solution>> {
+struct EqualConstraintSolver {
     template<typename T, typename U>
     Optional<Solution> operator()(T, U) const {
         return None;
@@ -50,14 +50,14 @@ struct EqualConstraintSolver: public boost::static_visitor<Optional<Solution>> {
     }
 };
 Optional<Solution> solveConstraint(Constraint const& constraint) {
-    struct ConstraintVisitor: public boost::static_visitor<Optional<Solution>> {
+    struct ConstraintVisitor {
         Optional<Solution> operator()(Constraint::EqualConstraint constraint) const {
             if(constraint.lhs == constraint.rhs) return Solution();
-            return boost::apply_visitor(EqualConstraintSolver(),
+            return std::visit(EqualConstraintSolver(),
                                         constraint.lhs.data, constraint.rhs.data);
         }
     };
-    return boost::apply_visitor(ConstraintVisitor(), constraint.data);
+    return std::visit(ConstraintVisitor(), constraint.data);
 }
 Optional<Solution> solveSystem(std::vector<Constraint> const& constraints) {
     Solution solution;

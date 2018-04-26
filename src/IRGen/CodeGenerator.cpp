@@ -4,7 +4,7 @@
 #include "llvm/IR/Verifier.h"
 
 llvm::Type* mapTypeToLLVM(llvm::LLVMContext& context, Type type) {
-    struct TypeVisitor: public boost::static_visitor<llvm::Type*> {
+    struct TypeVisitor {
         llvm::LLVMContext& context;
         TypeVisitor(llvm::LLVMContext& context) : context(context) {}
         llvm::Type* operator()(Type::Variable typeVariable) const {
@@ -34,7 +34,7 @@ llvm::Type* mapTypeToLLVM(llvm::LLVMContext& context, Type type) {
             return llvm::Type::getDoubleTy(context);
         }
     };
-    return boost::apply_visitor(TypeVisitor(context), type.data);
+    return std::visit(TypeVisitor(context), type.data);
 }
 
 llvm::Value* CodeGenerator::visitDecl(std::shared_ptr<Decl> decl) {

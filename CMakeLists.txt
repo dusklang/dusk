@@ -2,7 +2,6 @@ cmake_minimum_required(VERSION 3.4.3)
 project(meda-lang)
 
 find_package(LLVM REQUIRED CONFIG)
-find_package(Boost 1.66 COMPONENTS program_options REQUIRED)
 
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
@@ -14,7 +13,7 @@ message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
 
-include_directories(src ${LLVM_INCLUDE_DIRS} ${BOOST_INCLUDE_DIRS})
+include_directories(src ${LLVM_INCLUDE_DIRS})
 add_definitions(${LLVM_DEFINITIONS})
 
 # Find the libraries that correspond to the LLVM components

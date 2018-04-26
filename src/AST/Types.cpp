@@ -2,10 +2,11 @@
 
 #include <string>
 #include <cassert>
+#include <sstream>
 #include "AST.h"
 
 std::string Type::name() const {
-    struct NameVisitor: public boost::static_visitor<void> {
+    struct NameVisitor {
         std::ostringstream stream;
         void operator()(Variable typeVariable) {
             stream << "<T" << typeVariable.num;
@@ -39,6 +40,6 @@ std::string Type::name() const {
         }
     };
     NameVisitor visitor;
-    boost::apply_visitor(visitor, data);
+    std::visit(visitor, data);
     return visitor.stream.str();
 }

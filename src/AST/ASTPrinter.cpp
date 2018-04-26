@@ -1,5 +1,6 @@
 //  Copyright © 2018 Zach Wolfe. All rights reserved.
 
+#include <iostream>
 #include "ASTPrinter.h"
 
 int constexpr multiplier = 4;

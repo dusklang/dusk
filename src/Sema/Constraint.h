@@ -3,7 +3,7 @@
 #pragma once
 
 #include <vector>
-#include "boost/variant.hpp"
+#include <variant>
 
 #include "AST/AST.h"
 #include "AST/Decl.h"
@@ -12,7 +12,7 @@ struct Constraint {
     struct EqualConstraint {
         Type lhs, rhs;
     };
-    typedef boost::variant<EqualConstraint> Data;
+    typedef std::variant<EqualConstraint> Data;
     Data data;
 private:
     Constraint(Data data) : data(data) {}
@@ -21,13 +21,13 @@ public:
 
     void dump(std::ostream& stream);
     Constraint substituting(std::map<int, Type> const& solution) const {
-        struct SubstitutionVisitor: public boost::static_visitor<Constraint> {
+        struct SubstitutionVisitor {
             std::map<int, Type> const& solution;
             SubstitutionVisitor(std::map<int, Type> const& solution) : solution(solution) {}
             Constraint operator()(EqualConstraint constraint) const {
                 return Constraint::Equal(constraint.lhs.substituting(solution), constraint.rhs.substituting(solution));
             }
         };
-        return boost::apply_visitor(SubstitutionVisitor(solution), data);
+        return std::visit(SubstitutionVisitor(solution), data);
     }
 };
