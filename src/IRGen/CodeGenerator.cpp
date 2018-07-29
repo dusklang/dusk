@@ -37,7 +37,7 @@ llvm::Type* mapTypeToLLVM(llvm::LLVMContext& context, Type type) {
     return std::visit(TypeVisitor(context), type.data);
 }
 
-llvm::Value* CodeGenerator::visitDecl(std::shared_ptr<Decl> decl) {
+llvm::Value* CodeGenerator::visitDecl(Decl* decl) {
     if(auto expr = decl->expression()) {
         if(decl->isVar) {
             decl->codegenVal = builder.CreateAlloca(mapTypeToLLVM(context, decl->type), 0, decl->name.c_str());
@@ -55,7 +55,7 @@ llvm::Value* CodeGenerator::visitDecl(std::shared_ptr<Decl> decl) {
         llvm::FunctionType* functionTy = llvm::FunctionType::get(type,
                                                                  arguments,
                                                                  false);
-        llvm::Function* function = llvm::Function::Create(functionTy, llvm::Function::ExternalLinkage, decl->name, module.get());
+        llvm::Function* function = llvm::Function::Create(functionTy, llvm::Function::ExternalLinkage, decl->name, module);
 
         int i = 0;
         for(auto &arg: function->args()) {
@@ -73,9 +73,9 @@ llvm::Value* CodeGenerator::visitDecl(std::shared_ptr<Decl> decl) {
                 (*param)->codegenVal = arg;
             }
 
-            std::function<void(std::shared_ptr<Scope>)> visitInnerScope = [&](std::shared_ptr<Scope> scope) {
+            std::function<void(Scope*)> visitInnerScope = [&](Scope* scope) {
                 for(auto& node: scope->nodes) {
-                    if(auto ifStmt = std::dynamic_pointer_cast<IfStmt>(node)) {
+                    if(auto ifStmt = dynamic_cast<IfStmt*>(node)) {
                         auto thenBlock = llvm::BasicBlock::Create(context, "if.then", function);
                         llvm::BasicBlock* elseBlock = nullptr;
                         if(ifStmt->elseScope) {
@@ -90,7 +90,7 @@ llvm::Value* CodeGenerator::visitDecl(std::shared_ptr<Decl> decl) {
                         // a branch after it because a basic block can only have one terminal instruction.
                         // http://llvm.org/doxygen/classllvm_1_1BasicBlock.html
                         if(ifStmt->thenScope->nodes.empty() ||
-                           !std::dynamic_pointer_cast<ReturnStmt>(ifStmt->thenScope->nodes.back())) {
+                           !dynamic_cast<ReturnStmt*>(ifStmt->thenScope->nodes.back())) {
                             builder.CreateBr(endBlock);
                         }
 
@@ -99,13 +99,13 @@ llvm::Value* CodeGenerator::visitDecl(std::shared_ptr<Decl> decl) {
                             visitInnerScope(*elseScope);
                             // Same situation as above.
                             if((*elseScope)->nodes.empty() ||
-                               !std::dynamic_pointer_cast<ReturnStmt>((*elseScope)->nodes.back())) {
+                               !dynamic_cast<ReturnStmt*>((*elseScope)->nodes.back())) {
                                 builder.CreateBr(endBlock);
                             }
                         }
 
                         builder.SetInsertPoint(endBlock);
-                    } else if(auto whileStmt = std::dynamic_pointer_cast<WhileStmt>(node)) {
+                    } else if(auto whileStmt = dynamic_cast<WhileStmt*>(node)) {
                         auto checkBlock = llvm::BasicBlock::Create(context, "while.check", function);
                         auto thenBlock = llvm::BasicBlock::Create(context, "while.then", function);
                         auto endBlock = llvm::BasicBlock::Create(context, "while.end", function);
@@ -120,7 +120,7 @@ llvm::Value* CodeGenerator::visitDecl(std::shared_ptr<Decl> decl) {
                         // a branch after it because a basic block can only have one terminal instruction.
                         // http://llvm.org/doxygen/classllvm_1_1BasicBlock.html
                         if(whileStmt->thenScope->nodes.empty() ||
-                           !std::dynamic_pointer_cast<ReturnStmt>(whileStmt->thenScope->nodes.back())) {
+                           !dynamic_cast<ReturnStmt*>(whileStmt->thenScope->nodes.back())) {
                             builder.CreateBr(checkBlock);
                         }
 
@@ -138,28 +138,28 @@ llvm::Value* CodeGenerator::visitDecl(std::shared_ptr<Decl> decl) {
         return function;
     }
 }
-void CodeGenerator::visitScope(std::shared_ptr<Scope> scope) {
+void CodeGenerator::visitScope(Scope* scope) {
     for(auto& node: scope->nodes) {
         visit(node);
     }
 }
-void CodeGenerator::visitArgument(std::shared_ptr<Argument> argument) {}
-llvm::Value* CodeGenerator::visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr) {
+void CodeGenerator::visitArgument(Argument* argument) {}
+llvm::Value* CodeGenerator::visitIntegerLiteralExpr(IntegerLiteralExpr* expr) {
     return llvm::ConstantInt::get(context, llvm::APInt(32, std::stoi(expr->literal)));
 }
-llvm::Value* CodeGenerator::visitDecimalLiteralExpr(std::shared_ptr<DecimalLiteralExpr> expr) {
+llvm::Value* CodeGenerator::visitDecimalLiteralExpr(DecimalLiteralExpr* expr) {
     return llvm::ConstantFP::get(context, llvm::APFloat(std::stod(expr->literal)));
 }
-llvm::Value* CodeGenerator::visitBooleanLiteralExpr(std::shared_ptr<BooleanLiteralExpr> expr) {
+llvm::Value* CodeGenerator::visitBooleanLiteralExpr(BooleanLiteralExpr* expr) {
     return llvm::ConstantInt::get(context, llvm::APInt(1, expr->literal ? -1 : 0));
 }
-llvm::Value* CodeGenerator::visitCharLiteralExpr(std::shared_ptr<CharLiteralExpr> expr) {
+llvm::Value* CodeGenerator::visitCharLiteralExpr(CharLiteralExpr* expr) {
     return llvm::ConstantInt::get(context, llvm::APInt(8, expr->literal));
 }
-llvm::Value* CodeGenerator::visitStringLiteralExpr(std::shared_ptr<StringLiteralExpr> expr) {
+llvm::Value* CodeGenerator::visitStringLiteralExpr(StringLiteralExpr* expr) {
     return builder.CreateGlobalStringPtr(expr->literal);
 }
-llvm::Value* CodeGenerator::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
+llvm::Value* CodeGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
     auto referencedVal = expr->decl->codegenVal;
     if(expr->decl->isComputed()) {
         auto callee = static_cast<llvm::Function*>(referencedVal);
@@ -184,7 +184,7 @@ llvm::Value* CodeGenerator::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) 
     }
 }
 
-llvm::Value* CodeGenerator::visitReturnStmt(std::shared_ptr<ReturnStmt> stmt) {
+llvm::Value* CodeGenerator::visitReturnStmt(ReturnStmt* stmt) {
     if(!stmt->value) {
         return builder.CreateRetVoid();
     } else {
@@ -192,10 +192,10 @@ llvm::Value* CodeGenerator::visitReturnStmt(std::shared_ptr<ReturnStmt> stmt) {
     }
 }
 
-llvm::Value* CodeGenerator::visitAssignmentStmt(std::shared_ptr<AssignmentStmt> stmt) {
+llvm::Value* CodeGenerator::visitAssignmentStmt(AssignmentStmt* stmt) {
     return builder.CreateStore(visitExpr(stmt->rhs), stmt->lhs->decl->codegenVal);
 }
 
-llvm::Value* CodeGenerator::visitIfStmt(std::shared_ptr<IfStmt> stmt) {
+llvm::Value* CodeGenerator::visitIfStmt(IfStmt* stmt) {
     return nullptr;
 }

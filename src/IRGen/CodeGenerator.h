@@ -2,7 +2,6 @@
 
 #pragma once
 
-#include <memory>
 #include <iostream>
 
 #include "llvm/IR/LLVMContext.h"
@@ -28,23 +27,24 @@ private:
     llvm::LLVMContext context;
     llvm::IRBuilder<> builder;
 public:
-    std::unique_ptr<llvm::Module> module;
+    llvm::Module* module;
     CodeGenerator() : builder(context) {
-        module = std::make_unique<llvm::Module>("my module", context);
+        module = new llvm::Module("my module", context);
     }
+    ~CodeGenerator() { delete module; }
 
-    llvm::Value* visitDecl(std::shared_ptr<Decl> decl);
-    void visitScope(std::shared_ptr<Scope> scope);
-    void visitArgument(std::shared_ptr<Argument> argument);
-    llvm::Value* visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr);
-    llvm::Value* visitDecimalLiteralExpr(std::shared_ptr<DecimalLiteralExpr> expr);
-    llvm::Value* visitBooleanLiteralExpr(std::shared_ptr<BooleanLiteralExpr> expr);
-    llvm::Value* visitCharLiteralExpr(std::shared_ptr<CharLiteralExpr> expr);
-    llvm::Value* visitStringLiteralExpr(std::shared_ptr<StringLiteralExpr> expr);
-    llvm::Value* visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr);
+    llvm::Value* visitDecl(Decl* decl);
+    void visitScope(Scope* scope);
+    void visitArgument(Argument* argument);
+    llvm::Value* visitIntegerLiteralExpr(IntegerLiteralExpr* expr);
+    llvm::Value* visitDecimalLiteralExpr(DecimalLiteralExpr* expr);
+    llvm::Value* visitBooleanLiteralExpr(BooleanLiteralExpr* expr);
+    llvm::Value* visitCharLiteralExpr(CharLiteralExpr* expr);
+    llvm::Value* visitStringLiteralExpr(StringLiteralExpr* expr);
+    llvm::Value* visitDeclRefExpr(DeclRefExpr* expr);
 
-    llvm::Value* visitReturnStmt(std::shared_ptr<ReturnStmt> stmt);
-    llvm::Value* visitAssignmentStmt(std::shared_ptr<AssignmentStmt> stmt);
-    llvm::Value* visitIfStmt(std::shared_ptr<IfStmt> stmt);
-    llvm::Value* visitWhileStmt(std::shared_ptr<WhileStmt> stmt) { return nullptr; }
+    llvm::Value* visitReturnStmt(ReturnStmt* stmt);
+    llvm::Value* visitAssignmentStmt(AssignmentStmt* stmt);
+    llvm::Value* visitIfStmt(IfStmt* stmt);
+    llvm::Value* visitWhileStmt(WhileStmt* stmt) { return nullptr; }
 };

@@ -78,14 +78,14 @@ public:
         lexer.nextTokIncludingInsignificant();
     }
 
-    std::vector<std::shared_ptr<ASTNode>> parseTopLevel();
-    std::optional<std::shared_ptr<Scope>> parseScope();
-    std::shared_ptr<ASTNode> parseNode();
+    std::vector<ASTNode*> parseTopLevel();
+    std::optional<Scope*> parseScope();
+    ASTNode* parseNode();
     Type parseType();
     std::optional<Decl> parseDecl();
-    std::optional<std::shared_ptr<Stmt>> parseStmt();
-    std::optional<std::shared_ptr<Stmt>> parseIfStmt();
-    std::optional<std::shared_ptr<Stmt>> parseWhileStmt();
-    std::optional<std::shared_ptr<Expr>> parseDeclRefExpr();
-    std::optional<std::shared_ptr<Expr>> parseExpr();
+    std::optional<Stmt*> parseStmt();
+    std::optional<Stmt*> parseIfStmt();
+    std::optional<Stmt*> parseWhileStmt();
+    std::optional<Expr*> parseDeclRefExpr();
+    std::optional<Expr*> parseExpr();
 };

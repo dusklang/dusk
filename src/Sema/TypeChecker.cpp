@@ -2,7 +2,7 @@
 
 #include "TypeChecker.h"
 
-void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
+void TypeChecker::visitDecl(Decl* decl) {
     // Reject nested functions.
     if(declLists.size() > 1 && decl->isComputed()) {
         // TODO: Just report the source range of the prototype, which now is not its own ASTNode
@@ -19,7 +19,7 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
     if(decl->hasDefinition()) {
         // If we have parameters, start a new scope for referencing them.
         if(decl->isParameterized()) {
-            declLists.push_back(std::vector<std::shared_ptr<Decl>>());
+            declLists.push_back(std::vector<Decl*>());
             for(auto& param: decl->paramList) {
                 declLists.back().push_back(param);
             }
@@ -64,11 +64,11 @@ void TypeChecker::visitDecl(std::shared_ptr<Decl> decl) {
         }
     }
 }
-void TypeChecker::visitScope(std::shared_ptr<Scope> scope) {
+void TypeChecker::visitScope(Scope* scope) {
     // Start a new namespace for declarations inside the scope.
-    declLists.push_back(std::vector<std::shared_ptr<Decl>>());
+    declLists.push_back(std::vector<Decl*>());
     for(auto& node: scope->nodes) {
-        if(auto expr = std::dynamic_pointer_cast<Expr>(node)) {
+        if(auto expr = dynamic_cast<Expr*>(node)) {
             visitExpr(expr);
             // Warn on unused expressions.
             if(expr->type != Type::Void()) {
@@ -81,23 +81,23 @@ void TypeChecker::visitScope(std::shared_ptr<Scope> scope) {
     // End the new namespace.
     declLists.pop_back();
 }
-void TypeChecker::visitArgument(std::shared_ptr<Argument> argument) {}
-void TypeChecker::visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr) {
+void TypeChecker::visitArgument(Argument* argument) {}
+void TypeChecker::visitIntegerLiteralExpr(IntegerLiteralExpr* expr) {
     expr->type = Type::I32();
 }
-void TypeChecker::visitDecimalLiteralExpr(std::shared_ptr<DecimalLiteralExpr> expr) {
+void TypeChecker::visitDecimalLiteralExpr(DecimalLiteralExpr* expr) {
     expr->type = Type::Double();
 }
-void TypeChecker::visitBooleanLiteralExpr(std::shared_ptr<BooleanLiteralExpr> expr) {
+void TypeChecker::visitBooleanLiteralExpr(BooleanLiteralExpr* expr) {
     expr->type = Type::Bool();
 }
-void TypeChecker::visitCharLiteralExpr(std::shared_ptr<CharLiteralExpr> expr) {
+void TypeChecker::visitCharLiteralExpr(CharLiteralExpr* expr) {
     expr->type = Type::I8();
 }
-void TypeChecker::visitStringLiteralExpr(std::shared_ptr<StringLiteralExpr> expr) {
+void TypeChecker::visitStringLiteralExpr(StringLiteralExpr* expr) {
     expr->type = Type::Pointer(Type::I8());
 }
-void TypeChecker::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
+void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
     // Type-check arguments.
     for(auto& arg: expr->argList) {
         visitExpr(arg.value);
@@ -106,7 +106,7 @@ void TypeChecker::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
     // Find the prototype to reference.
     //
     // TODO: Setup a dependency system to allow decls to be referenced before we know about them.
-    std::vector<std::shared_ptr<Decl>> nameMatches;
+    std::vector<Decl*> nameMatches;
     for(auto it = declLists.rbegin(); it != declLists.rend(); ++it) {
         auto& declList = *it;
         for(auto& decl: declList) {
@@ -138,7 +138,7 @@ void TypeChecker::visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr) {
     reportError(errorMessage, expr);
 }
 
-void TypeChecker::visitReturnStmt(std::shared_ptr<ReturnStmt> stmt) {
+void TypeChecker::visitReturnStmt(ReturnStmt* stmt) {
     if(stmt->value) {
         visitExpr(stmt->value);
     }
@@ -165,7 +165,7 @@ void TypeChecker::visitReturnStmt(std::shared_ptr<ReturnStmt> stmt) {
                     stmt);
     }
 }
-void TypeChecker::visitIfStmt(std::shared_ptr<IfStmt> stmt) {
+void TypeChecker::visitIfStmt(IfStmt* stmt) {
     visitExpr(stmt->condition);
     if(stmt->condition->type != Type::Bool()) {
         reportError("Expression in if statement is not of type Bool", stmt);
@@ -173,7 +173,7 @@ void TypeChecker::visitIfStmt(std::shared_ptr<IfStmt> stmt) {
     visitScope(stmt->thenScope);
     if(stmt->elseScope) visitScope(*stmt->elseScope);
 }
-void TypeChecker::visitWhileStmt(std::shared_ptr<WhileStmt> stmt) {
+void TypeChecker::visitWhileStmt(WhileStmt* stmt) {
     visitExpr(stmt->condition);
     if(stmt->condition->type != Type::Bool()) {
         reportError("Expression in while statement is not of type Bool", stmt);
@@ -181,7 +181,7 @@ void TypeChecker::visitWhileStmt(std::shared_ptr<WhileStmt> stmt) {
     visitScope(stmt->thenScope);
 }
 
-void TypeChecker::visitAssignmentStmt(std::shared_ptr<AssignmentStmt> stmt) {
+void TypeChecker::visitAssignmentStmt(AssignmentStmt* stmt) {
     visitDeclRefExpr(stmt->lhs);
     visitExpr(stmt->rhs);
     if(!stmt->lhs->decl->isVar) {

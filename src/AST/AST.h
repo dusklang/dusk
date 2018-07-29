@@ -18,9 +18,6 @@ enum class NodeKind {
     NUM_NODES
 };
 
-#define AST_NODE_CTOR(name, args...) name(SourceRange range, args) : ASTNode(NodeKind::name, range)
-#define AST_NODE_CTOR_NOARG(name) name(SourceRange range) : ASTNode(NodeKind::name, range)
-
 // Abstract class from which each node in the AST inherits.
 struct ASTNode {
     NodeKind kind;
@@ -37,7 +34,8 @@ struct Type final {
         bool operator==(IntegerTy other) { return bitWidth == other.bitWidth && isSigned == other.isSigned; }
     };
     struct PointerTy {
-        std::shared_ptr<Type> pointedTy;
+        Type* pointedTy;
+        ~PointerTy() { delete pointedTy; }
     };
     struct VoidTy {};
     struct BoolTy {};
@@ -126,7 +124,7 @@ public:
     static Type Error() { return Type(ErrorTy()); }
 
     static Type Pointer(Type pointedTy, std::optional<SourceRange> sourceRange = std::nullopt) {
-        auto pointed = std::make_shared<Type>(pointedTy);
+        auto pointed = new Type(pointedTy);
         return Type(PointerTy { pointed }, sourceRange);
     }
     static Type TypeVariable(int number, Variable::Kind kind = Variable::General) {
@@ -165,14 +163,22 @@ public:
 };
 
 struct Argument final : public ASTNode {
-    std::shared_ptr<Expr> value;
+    Expr* value;
 
-    AST_NODE_CTOR(Argument, std::shared_ptr<Expr> value), value(value) {}
+    Argument(SourceRange range, Expr* value): ASTNode(NodeKind::Argument, range), value(value) {}
+
+    ~Argument() override;
 };
 
 // A scope node represents a collection of other nodes.
 struct Scope final : public ASTNode {
-    std::vector<std::shared_ptr<ASTNode>> nodes;
+    std::vector<ASTNode*> nodes;
 
-    AST_NODE_CTOR(Scope, std::vector<std::shared_ptr<ASTNode>> const& nodes), nodes(nodes) {}
+    Scope(SourceRange range, std::vector<ASTNode*> nodes): ASTNode(NodeKind::Scope, range), nodes(nodes) {}
+
+    ~Scope() override {
+        for (ASTNode* node: nodes) {
+            delete node;
+        }
+    }
 };

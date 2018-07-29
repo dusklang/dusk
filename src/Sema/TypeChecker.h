@@ -2,8 +2,6 @@
 
 #pragma once
 
-#include <map>
-#include <memory>
 #include <iostream>
 #include <stack>
 
@@ -11,11 +9,10 @@
 
 class TypeChecker final: public ASTVisitor<TypeChecker> {
 private:
-    // FIXME: Name lookup will be super slow; figure out how to hash function overloads.
-    std::vector<std::vector<std::shared_ptr<Decl>>> declLists;
+    std::vector<std::vector<Decl*>> declLists;
     std::stack<Type> returnTypeStack;
     template<typename Node>
-    void reportError(std::string message, std::shared_ptr<Node> node) {
+    void reportError(std::string message, Node* node) {
         std::cout << "TYPE-CHECKING ERROR: " << message << '\n';
         std::cout << "Offending area: " << node->range.getSubstring() << "\n\n";
         // TODO: Support multiple errors per file.
@@ -23,27 +20,27 @@ private:
     }
 
     template<typename Node>
-    void reportWarning(std::string message, std::shared_ptr<Node> node) {
+    void reportWarning(std::string message, Node* node) {
         std::cout << "TYPE-CHECKING WARNING: " << message << '\n';
         std::cout << "Offending area: " << node->range.getSubstring() << "\n\n";
     }
 public:
     TypeChecker() {
-        declLists.push_back(std::vector<std::shared_ptr<Decl>>());
+        declLists.push_back(std::vector<Decl*>());
     }
 
-    void visitDecl(std::shared_ptr<Decl> decl);
-    void visitScope(std::shared_ptr<Scope> scope);
-    void visitArgument(std::shared_ptr<Argument> argument);
-    void visitIntegerLiteralExpr(std::shared_ptr<IntegerLiteralExpr> expr);
-    void visitDecimalLiteralExpr(std::shared_ptr<DecimalLiteralExpr> expr);
-    void visitBooleanLiteralExpr(std::shared_ptr<BooleanLiteralExpr> expr);
-    void visitCharLiteralExpr(std::shared_ptr<CharLiteralExpr> expr);
-    void visitStringLiteralExpr(std::shared_ptr<StringLiteralExpr> expr);
-    void visitDeclRefExpr(std::shared_ptr<DeclRefExpr> expr);
+    void visitDecl(Decl* decl);
+    void visitScope(Scope* scope);
+    void visitArgument(Argument* argument);
+    void visitIntegerLiteralExpr(IntegerLiteralExpr* expr);
+    void visitDecimalLiteralExpr(DecimalLiteralExpr* expr);
+    void visitBooleanLiteralExpr(BooleanLiteralExpr* expr);
+    void visitCharLiteralExpr(CharLiteralExpr* expr);
+    void visitStringLiteralExpr(StringLiteralExpr* expr);
+    void visitDeclRefExpr(DeclRefExpr* expr);
 
-    void visitReturnStmt(std::shared_ptr<ReturnStmt> stmt);
-    void visitAssignmentStmt(std::shared_ptr<AssignmentStmt> stmt);
-    void visitIfStmt(std::shared_ptr<IfStmt> stmt);
-    void visitWhileStmt(std::shared_ptr<WhileStmt> stmt);
+    void visitReturnStmt(ReturnStmt* stmt);
+    void visitAssignmentStmt(AssignmentStmt* stmt);
+    void visitIfStmt(IfStmt* stmt);
+    void visitWhileStmt(WhileStmt* stmt);
 };

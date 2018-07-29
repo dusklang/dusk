@@ -3,7 +3,6 @@
 #include "Parser.h"
 #include "AST/Expr.h"
 #include <vector>
-#include <memory>
 #include <iostream>
 
 #define EXPECT(token, message) if(current().isNot(token)) reportError(message)
@@ -19,8 +18,8 @@
     return val;\
 }()
 
-std::vector<std::shared_ptr<ASTNode>> Parser::parseTopLevel() {
-    std::vector<std::shared_ptr<ASTNode>> nodes;
+std::vector<ASTNode*> Parser::parseTopLevel() {
+    std::vector<ASTNode*> nodes;
     while(true) {
         if(current().is(tok::eof)) break;
         if(current().is(tok::sep_right_curly)) reportError("Extraneous closing brace '}'", current().getRange());
@@ -29,24 +28,24 @@ std::vector<std::shared_ptr<ASTNode>> Parser::parseTopLevel() {
     return nodes;
 }
 
-std::optional<std::shared_ptr<Scope>> Parser::parseScope() {
+std::optional<Scope*> Parser::parseScope() {
     if(current().isNot(tok::sep_left_curly)) return std::nullopt;
     recordCurrentLoc();
     next();
-    std::vector<std::shared_ptr<ASTNode>> nodes;
+    std::vector<ASTNode*> nodes;
     while(true) {
         if(current().is(tok::sep_right_curly)) { next(); break; }
         if(current().is(tok::eof)) reportError("Unexpected eof before end of scope", previous()->getRange());
         nodes.push_back(parseNode());
     }
-    return std::make_shared<Scope>(currentRange(), nodes);
+    return new Scope(currentRange(), nodes);
 }
 
-std::shared_ptr<ASTNode> Parser::parseNode() {
+ASTNode* Parser::parseNode() {
     if(auto stmt = TRY(parseStmt())) {
-        return std::dynamic_pointer_cast<ASTNode>(*stmt);
+        return *stmt;
     } else if(auto decl = TRY(parseDecl())) {
-        return std::dynamic_pointer_cast<ASTNode>(std::make_shared<Decl>(*decl));
+        return new Decl(*decl);
     }
     recordCurrentLoc();
     auto expr = parseExpr();
@@ -58,14 +57,14 @@ std::shared_ptr<ASTNode> Parser::parseNode() {
         auto rhsExpr = parseExpr();
         if(!rhsExpr) reportError("Expected right-hand expression in assignment statement");
 
-        if(auto declRefLHS = std::dynamic_pointer_cast<DeclRefExpr>(*expr)) {
-            return std::make_shared<AssignmentStmt>(currentRange(), declRefLHS, *rhsExpr);
+        if(auto declRefLHS = dynamic_cast<DeclRefExpr*>(*expr)) {
+            return new AssignmentStmt(currentRange(), declRefLHS, *rhsExpr);
         } else {
             reportError("Cannot assign to non-declaration reference");
         }
     } else {
         currentRange();
-        return std::dynamic_pointer_cast<ASTNode>(*expr);
+        return *expr;
     }
     LLVM_BUILTIN_UNREACHABLE;
 }
@@ -121,7 +120,7 @@ std::optional<Decl> Parser::parseDecl() {
     }
     EXPECT_NEXT(tok::identifier, "Expected identifier after def");
     auto name = current().getText();
-    std::vector<std::shared_ptr<Decl>> paramList;
+    std::vector<Decl*> paramList;
     if(next().is(tok::sep_left_paren)) {
         do {
             recordCurrentLoc();
@@ -129,7 +128,7 @@ std::optional<Decl> Parser::parseDecl() {
             auto paramName = current().getText();
             EXPECT_NEXT(tok::sep_colon, "Expected colon after parameter name");
             next();
-            paramList.push_back(std::make_shared<Decl>(currentRange(), paramName, parseType()));
+            paramList.push_back(new Decl(currentRange(), paramName, parseType()));
         } while(current().is(tok::sep_comma));
         EXPECT(tok::sep_right_paren, "Expected ')' after parameter list");
         if(paramList.empty()) reportError("Expected parameter list for parameterized declaration " + name + ", "
@@ -178,13 +177,13 @@ std::optional<Decl> Parser::parseDecl() {
     }
 }
 
-std::optional<std::shared_ptr<Stmt>> Parser::parseStmt() {
+std::optional<Stmt*> Parser::parseStmt() {
     if(current().is(tok::kw_return)) {
         recordCurrentLoc();
         next();
         auto value = parseExpr();
-        if(!value) return std::dynamic_pointer_cast<Stmt>(std::make_shared<ReturnStmt>(currentRange(), nullptr));
-        return std::dynamic_pointer_cast<Stmt>(std::make_shared<ReturnStmt>(currentRange(), *value));
+        if(!value) return new ReturnStmt(currentRange(), nullptr);
+        return new ReturnStmt(currentRange(), *value);
     } else if(current().is(tok::kw_if)) {
         return parseIfStmt();
     } else {
@@ -192,7 +191,7 @@ std::optional<std::shared_ptr<Stmt>> Parser::parseStmt() {
     }
 }
 
-std::optional<std::shared_ptr<Stmt>> Parser::parseIfStmt() {
+std::optional<Stmt*> Parser::parseIfStmt() {
     if(current().isNot(tok::kw_if)) return std::nullopt;
     recordCurrentLoc();
     next();
@@ -200,25 +199,25 @@ std::optional<std::shared_ptr<Stmt>> Parser::parseIfStmt() {
     if(!conditionExpr) reportError("Expected condition expression for if statement");
     auto thenScope = parseScope();
     if(!thenScope) reportError("Expected opening curly brace for if statement");
-    std::optional<std::shared_ptr<Scope>> elseScope;
+    std::optional<Scope*> elseScope;
     if(current().is(tok::kw_else)) {
         next();
         if(auto scope = parseScope()) {
             elseScope = *scope;
         } else if(auto elseIf = parseIfStmt()) {
-            elseScope = std::make_shared<Scope>(
+            elseScope = new Scope(
                 (*elseIf)->range,
-                std::vector<std::shared_ptr<ASTNode>> { std::dynamic_pointer_cast<ASTNode>(*elseIf) }
+                std::vector<ASTNode*> { *elseIf }
             );
         }
     }
-    return std::dynamic_pointer_cast<Stmt>(std::make_shared<IfStmt>(currentRange(),
-                                                                    *conditionExpr,
-                                                                    *thenScope,
-                                                                    elseScope));
+    return new IfStmt(currentRange(),
+                      *conditionExpr,
+                      *thenScope,
+                      elseScope);
 }
 
-std::optional<std::shared_ptr<Stmt>> Parser::parseWhileStmt() {
+std::optional<Stmt*> Parser::parseWhileStmt() {
     if(current().isNot(tok::kw_while)) return std::nullopt;
     recordCurrentLoc();
     next();
@@ -226,13 +225,13 @@ std::optional<std::shared_ptr<Stmt>> Parser::parseWhileStmt() {
     if(!conditionExpr) reportError("Expected condition expression for while statement");
     auto thenScope = parseScope();
     if(!thenScope) reportError("Expected opening curly brace for while statement");
-    std::optional<std::shared_ptr<Scope>> elseScope;
-    return std::dynamic_pointer_cast<Stmt>(std::make_shared<WhileStmt>(currentRange(),
-                                                                       *conditionExpr,
-                                                                       *thenScope));
+    std::optional<Scope*> elseScope;
+    return new WhileStmt(currentRange(),
+                         *conditionExpr,
+                         *thenScope);
 }
 
-std::optional<std::shared_ptr<Expr>> Parser::parseDeclRefExpr() {
+std::optional<Expr*> Parser::parseDeclRefExpr() {
     if(current().isNot(tok::identifier)) return std::nullopt;
 
     recordCurrentLoc();
@@ -252,27 +251,25 @@ std::optional<std::shared_ptr<Expr>> Parser::parseDeclRefExpr() {
         next();
     }
 
-    return std::dynamic_pointer_cast<Expr>(std::make_shared<DeclRefExpr>(currentRange(), name, argList));
+    return new DeclRefExpr(currentRange(), name, argList);
 }
 
-std::optional<std::shared_ptr<Expr>> Parser::parseExpr() {
+std::optional<Expr*> Parser::parseExpr() {
     recordCurrentLoc();
     if(current().is(tok::kw_true)) {
         next();
-        return std::dynamic_pointer_cast<Expr>(std::make_shared<BooleanLiteralExpr>(currentRange(),
-                                                                                    true));
+        return new BooleanLiteralExpr(currentRange(), true);
     } else if(current().is(tok::kw_false)) {
         next();
-        return std::dynamic_pointer_cast<Expr>(std::make_shared<BooleanLiteralExpr>(currentRange(),
-                                                                                    false));
+        return new BooleanLiteralExpr(currentRange(), false);
     } else if(auto intVal = parseIntegerLiteral()) {
-        return std::dynamic_pointer_cast<Expr>(std::make_shared<IntegerLiteralExpr>(currentRange(), *intVal));
+        return new IntegerLiteralExpr(currentRange(), *intVal);
     } else if(auto decimalVal = parseDecimalLiteral()) {
-        return std::dynamic_pointer_cast<Expr>(std::make_shared<DecimalLiteralExpr>(currentRange(), *decimalVal));
+        return new DecimalLiteralExpr(currentRange(), *decimalVal);
     } else if(auto charVal = parseCharLiteral()) {
-        return std::dynamic_pointer_cast<Expr>(std::make_shared<CharLiteralExpr>(currentRange(), *charVal));
+        return new CharLiteralExpr(currentRange(), *charVal);
     } else if(auto stringVal = parseStringLiteral()) {
-        return std::dynamic_pointer_cast<Expr>(std::make_shared<StringLiteralExpr>(currentRange(), *stringVal));
+        return new StringLiteralExpr(currentRange(), *stringVal);
     }
 
     // Reset the stack.

@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.4.3)
 project(meda-lang)
 
+SET(CMAKE_C_COMPILER /usr/local/opt/llvm/bin/clang)
+SET(CMAKE_CXX_COMPILER /usr/local/opt/llvm/bin/clang++)
+
 find_package(LLVM REQUIRED CONFIG)
 set(PATTERNS_INCLUDE_DIRS dependencies/patterns/include)
 

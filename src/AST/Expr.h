@@ -3,7 +3,6 @@
 #pragma once
 
 #include <string>
-#include <memory>
 
 #include "AST.h"
 #include "Decl.h"
@@ -20,47 +19,47 @@ enum class ExprKind {
 struct Expr : public ASTNode {
     ExprKind exprKind;
     Type type;
-    AST_NODE_CTOR(Expr, ExprKind exprKind, Type type), exprKind(exprKind), type(type) {}
-    AST_NODE_CTOR(Expr, ExprKind exprKind), exprKind(exprKind), type(Type::Error()) {}
+    Expr(SourceRange range, ExprKind exprKind, Type type) : ASTNode(NodeKind::Expr, range), exprKind(exprKind), type(type) {}
+    Expr(SourceRange range, ExprKind exprKind) : ASTNode(NodeKind::Expr, range), exprKind(exprKind), type(Type::Error()) {}
 };
 
-#define EXPR_CTOR(name, args...) name##Expr(SourceRange range, args) : Expr(range, ExprKind::name)
 struct IntegerLiteralExpr: public Expr {
     std::string literal;
 
-    EXPR_CTOR(IntegerLiteral, std::string const& literal), literal(literal) {}
+    IntegerLiteralExpr(SourceRange range, std::string const& literal) :
+    Expr(range, ExprKind::IntegerLiteral), literal(literal) {}
 };
 
 struct DecimalLiteralExpr: public Expr {
     std::string literal;
-    EXPR_CTOR(DecimalLiteral, std::string const& literal), literal(literal) {}
+    DecimalLiteralExpr(SourceRange range, std::string const& literal) : Expr(range, ExprKind::DecimalLiteral), literal(literal) {}
 };
 
 struct BooleanLiteralExpr: public Expr {
     bool literal;
-    EXPR_CTOR(BooleanLiteral, bool literal), literal(literal) {}
+    BooleanLiteralExpr(SourceRange range, bool literal) : Expr(range, ExprKind::BooleanLiteral), literal(literal) {}
 };
 
 struct CharLiteralExpr: public Expr {
     char literal;
-    EXPR_CTOR(CharLiteral, char literal), literal(literal) {}
+    CharLiteralExpr(SourceRange range, char literal) : Expr(range, ExprKind::CharLiteral), literal(literal) {}
 };
 
 struct StringLiteralExpr: public Expr {
     std::string literal;
-    EXPR_CTOR(StringLiteral, std::string const& literal), literal(literal) {}
+    StringLiteralExpr(SourceRange range, std::string literal) : Expr(range, ExprKind::StringLiteral), literal(literal) {}
 };
 
 struct DeclRefExpr: public Expr {
     std::string name;
     std::vector<Argument> argList;
-    std::shared_ptr<Decl> decl = nullptr;
+    Decl* decl = nullptr;
 
-    EXPR_CTOR(DeclRef, std::string const& name,
-              std::vector<Argument> const& argList),
+    DeclRefExpr(SourceRange range, std::string name,
+                std::vector<Argument> const& argList) : Expr(range, ExprKind::DeclRef),
     name(name), argList(argList) {}
+
+    ~DeclRefExpr() override { delete decl; }
 
     DeclRefExpr& operator=(DeclRefExpr const& other) = default;
 };
-
-#undef EXPR_CTOR

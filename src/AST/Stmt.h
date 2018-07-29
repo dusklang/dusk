@@ -3,7 +3,6 @@
 #pragma once
 
 #include <vector>
-#include <memory>
 #include "AST.h"
 
 #include "Expr.h"
@@ -17,39 +16,55 @@ enum class StmtKind {
 // Base class from which each statement node inherits.
 struct Stmt : public ASTNode {
     StmtKind stmtKind;
-    AST_NODE_CTOR(Stmt, StmtKind stmtKind), stmtKind(stmtKind) {}
+    Stmt(SourceRange range, StmtKind stmtKind) : ASTNode(NodeKind::Stmt, range), stmtKind(stmtKind) {}
 };
 
-#define STMT_CTOR(name, args...) name##Stmt(SourceRange range, args) : Stmt(range, StmtKind::name)
-
 struct ReturnStmt: public Stmt {
-    std::shared_ptr<Expr> value;
+    Expr* value;
 
-    STMT_CTOR(Return, std::shared_ptr<Expr> value), value(value) {}
+    ReturnStmt(SourceRange range, Expr* value) : Stmt(range, StmtKind::Return), value(value) {}
+
+    ~ReturnStmt() override { delete value; }
 };
 
 struct AssignmentStmt: public Stmt {
-    std::shared_ptr<DeclRefExpr> lhs;
-    std::shared_ptr<Expr> rhs;
+    DeclRefExpr* lhs;
+    Expr* rhs;
 
-    STMT_CTOR(Assignment, std::shared_ptr<DeclRefExpr> lhs, std::shared_ptr<Expr> rhs),
+    AssignmentStmt(SourceRange range, DeclRefExpr* lhs, Expr* rhs) : Stmt(range, StmtKind::Assignment),
     lhs(lhs), rhs(rhs) {}
+
+    ~AssignmentStmt() override {
+        delete lhs;
+        delete rhs;
+    }
 };
 
 struct IfStmt: public Stmt {
-    std::shared_ptr<Expr> condition;
-    std::shared_ptr<Scope> thenScope;
-    std::optional<std::shared_ptr<Scope>> elseScope;
+    Expr* condition;
+    Scope* thenScope;
+    std::optional<Scope*> elseScope;
 
-    STMT_CTOR(If, std::shared_ptr<Expr> condition, std::shared_ptr<Scope> thenScope,
-              std::optional<std::shared_ptr<Scope>> elseScope),
+    IfStmt(SourceRange range, Expr* condition, Scope* thenScope,
+           std::optional<Scope*> elseScope) : Stmt(range, StmtKind::If),
     condition(condition), thenScope(thenScope), elseScope(elseScope) {}
+
+    ~IfStmt() override {
+        delete condition;
+        delete thenScope;
+        if(elseScope) delete *elseScope;
+    }
 };
 
 struct WhileStmt: public Stmt {
-    std::shared_ptr<Expr> condition;
-    std::shared_ptr<Scope> thenScope;
+    Expr* condition;
+    Scope* thenScope;
 
-    STMT_CTOR(While, std::shared_ptr<Expr> condition, std::shared_ptr<Scope> thenScope),
+    WhileStmt(SourceRange range, Expr* condition, Scope* thenScope) : Stmt(range, StmtKind::While),
     condition(condition), thenScope(thenScope) {}
+
+    ~WhileStmt() override {
+        delete condition;
+        delete thenScope;
+    }
 };
