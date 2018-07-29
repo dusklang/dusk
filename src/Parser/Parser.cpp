@@ -1,9 +1,12 @@
 //  Copyright © 2018 Zach Wolfe. All rights reserved.
 
-#include "Parser.h"
-#include "AST/Expr.h"
 #include <vector>
 #include <iostream>
+
+#include "AST/Expr.h"
+#include "AST/Stmt.h"
+#include "AST/Decl.h"
+#include "Parser.h"
 
 #define EXPECT(token, message) if(current().isNot(token)) reportError(message)
 #define EXPECT_NEXT(token, message) {\
@@ -28,8 +31,8 @@ std::vector<ASTNode*> Parser::parseTopLevel() {
     return nodes;
 }
 
-std::optional<Scope*> Parser::parseScope() {
-    if(current().isNot(tok::sep_left_curly)) return std::nullopt;
+Scope* Parser::parseScope() {
+    if(current().isNot(tok::sep_left_curly)) return nullptr;
     recordCurrentLoc();
     next();
     std::vector<ASTNode*> nodes;
@@ -43,9 +46,9 @@ std::optional<Scope*> Parser::parseScope() {
 
 ASTNode* Parser::parseNode() {
     if(auto stmt = TRY(parseStmt())) {
-        return *stmt;
+        return stmt;
     } else if(auto decl = TRY(parseDecl())) {
-        return new Decl(*decl);
+        return decl;
     }
     recordCurrentLoc();
     auto expr = parseExpr();
@@ -57,16 +60,16 @@ ASTNode* Parser::parseNode() {
         auto rhsExpr = parseExpr();
         if(!rhsExpr) reportError("Expected right-hand expression in assignment statement");
 
-        if(auto declRefLHS = dynamic_cast<DeclRefExpr*>(*expr)) {
-            return new AssignmentStmt(currentRange(), declRefLHS, *rhsExpr);
+        if(auto declRefLHS = dynamic_cast<DeclRefExpr*>(expr)) {
+            return new AssignmentStmt(currentRange(), declRefLHS, rhsExpr);
         } else {
             reportError("Cannot assign to non-declaration reference");
         }
     } else {
         currentRange();
-        return *expr;
+        return expr;
     }
-    LLVM_BUILTIN_UNREACHABLE;
+    __builtin_unreachable();
 }
 
 Type Parser::parseType() {
@@ -95,10 +98,10 @@ Type Parser::parseType() {
     if(*typeName == "void") { return Type::Void(); }
 
     reportError("Invalid type name \"" + *typeName + '"', previous()->getRange());
-    LLVM_BUILTIN_UNREACHABLE;
+    __builtin_unreachable();
 }
 
-std::optional<Decl> Parser::parseDecl() {
+Decl* Parser::parseDecl() {
     recordCurrentLoc();
     bool isVar;
     bool isExtern = false;
@@ -115,7 +118,7 @@ std::optional<Decl> Parser::parseDecl() {
         if(isExtern) {
             reportError("Expected def or var keyword to begin declaration");
         } else {
-            return std::nullopt;
+            return nullptr;
         }
     }
     EXPECT_NEXT(tok::identifier, "Expected identifier after def");
@@ -166,24 +169,24 @@ std::optional<Decl> Parser::parseDecl() {
         next();
         auto expr = parseExpr();
         if(!expr) reportError("Expected expression to assign to declaration " + name, current().getRange());
-        auto range = rangeFrom(protoRange.begin, (*expr)->range);
-        return Decl(range, name, type, isVar, isExtern, paramList, *expr);
+        auto range = rangeFrom(protoRange.begin, expr->range);
+        return new Decl(range, name, type, isVar, isExtern, paramList, expr);
     } else if(auto scope = parseScope()) {
         checkExtern();
-        auto range = rangeFrom(protoRange.begin, (*scope)->range);
-        return Decl(range, name, type, isVar, isExtern, paramList, *scope);
+        auto range = rangeFrom(protoRange.begin, scope->range);
+        return new Decl(range, name, type, isVar, isExtern, paramList, scope);
     } else {
-        return Decl(protoRange, name, type, isVar, isExtern, paramList);
+        return new Decl(protoRange, name, type, isVar, isExtern, paramList);
     }
 }
 
-std::optional<Stmt*> Parser::parseStmt() {
+Stmt* Parser::parseStmt() {
     if(current().is(tok::kw_return)) {
         recordCurrentLoc();
         next();
         auto value = parseExpr();
         if(!value) return new ReturnStmt(currentRange(), nullptr);
-        return new ReturnStmt(currentRange(), *value);
+        return new ReturnStmt(currentRange(), value);
     } else if(current().is(tok::kw_if)) {
         return parseIfStmt();
     } else {
@@ -191,52 +194,51 @@ std::optional<Stmt*> Parser::parseStmt() {
     }
 }
 
-std::optional<Stmt*> Parser::parseIfStmt() {
-    if(current().isNot(tok::kw_if)) return std::nullopt;
+Stmt* Parser::parseIfStmt() {
+    if(current().isNot(tok::kw_if)) return nullptr;
     recordCurrentLoc();
     next();
     auto conditionExpr = parseExpr();
     if(!conditionExpr) reportError("Expected condition expression for if statement");
     auto thenScope = parseScope();
     if(!thenScope) reportError("Expected opening curly brace for if statement");
-    std::optional<Scope*> elseScope;
+    Scope* elseScope;
     if(current().is(tok::kw_else)) {
         next();
         if(auto scope = parseScope()) {
-            elseScope = *scope;
+            elseScope = scope;
         } else if(auto elseIf = parseIfStmt()) {
             elseScope = new Scope(
-                (*elseIf)->range,
-                std::vector<ASTNode*> { *elseIf }
+                elseIf->range,
+                std::vector<ASTNode*> { elseIf }
             );
         }
     }
     return new IfStmt(currentRange(),
-                      *conditionExpr,
-                      *thenScope,
+                      conditionExpr,
+                      thenScope,
                       elseScope);
 }
 
-std::optional<Stmt*> Parser::parseWhileStmt() {
-    if(current().isNot(tok::kw_while)) return std::nullopt;
+Stmt* Parser::parseWhileStmt() {
+    if(current().isNot(tok::kw_while)) return nullptr;
     recordCurrentLoc();
     next();
     auto conditionExpr = parseExpr();
     if(!conditionExpr) reportError("Expected condition expression for while statement");
     auto thenScope = parseScope();
     if(!thenScope) reportError("Expected opening curly brace for while statement");
-    std::optional<Scope*> elseScope;
     return new WhileStmt(currentRange(),
-                         *conditionExpr,
-                         *thenScope);
+                         conditionExpr,
+                         thenScope);
 }
 
-std::optional<Expr*> Parser::parseDeclRefExpr() {
-    if(current().isNot(tok::identifier)) return std::nullopt;
+Expr* Parser::parseDeclRefExpr() {
+    if(current().isNot(tok::identifier)) return nullptr;
 
     recordCurrentLoc();
     auto name = current().getText();
-    std::vector<Argument> argList;
+    std::vector<Expr*> argList;
     if(next().is(tok::sep_left_paren)) {
         do {
             next();
@@ -244,7 +246,7 @@ std::optional<Expr*> Parser::parseDeclRefExpr() {
 
             auto argument = parseExpr();
             if(!argument) reportError("Expected argument");
-            argList.push_back(Argument(currentRange(), *argument));
+            argList.push_back(argument);
 
         } while(current().is(tok::sep_comma));
         EXPECT(tok::sep_right_paren, "Expected ')' after parameter and argument");
@@ -254,7 +256,7 @@ std::optional<Expr*> Parser::parseDeclRefExpr() {
     return new DeclRefExpr(currentRange(), name, argList);
 }
 
-std::optional<Expr*> Parser::parseExpr() {
+Expr* Parser::parseExpr() {
     recordCurrentLoc();
     if(current().is(tok::kw_true)) {
         next();

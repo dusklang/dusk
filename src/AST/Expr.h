@@ -5,7 +5,7 @@
 #include <string>
 
 #include "AST.h"
-#include "Decl.h"
+#include "Type.h"
 
 struct Decl;
 
@@ -52,14 +52,14 @@ struct StringLiteralExpr: public Expr {
 
 struct DeclRefExpr: public Expr {
     std::string name;
-    std::vector<Argument> argList;
+    std::vector<Expr*> argList;
     Decl* decl = nullptr;
 
     DeclRefExpr(SourceRange range, std::string name,
-                std::vector<Argument> const& argList) : Expr(range, ExprKind::DeclRef),
+                std::vector<Expr*> const& argList) : Expr(range, ExprKind::DeclRef),
     name(name), argList(argList) {}
 
-    ~DeclRefExpr() override { delete decl; }
+    ~DeclRefExpr() override;
 
     DeclRefExpr& operator=(DeclRefExpr const& other) = default;
 };

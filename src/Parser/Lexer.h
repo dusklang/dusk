@@ -6,8 +6,9 @@
 #include <stack>
 #include <map>
 #include <optional>
-#include "Token.h"
 #include <iostream>
+
+#include "Token.h"
 
 class Lexer final {
 private:

@@ -19,7 +19,6 @@ class CodeGenerator final: public ASTVisitor<CodeGenerator,
                                              void,
                                              llvm::Value*,
                                              void,
-                                             void,
                                              llvm::Value*,
                                              llvm::Value*>
 {
@@ -31,11 +30,14 @@ public:
     CodeGenerator() : builder(context) {
         module = new llvm::Module("my module", context);
     }
-    ~CodeGenerator() { delete module; }
+    ~CodeGenerator() {
+        if(module) {
+            delete module;
+        }
+    }
 
     llvm::Value* visitDecl(Decl* decl);
     void visitScope(Scope* scope);
-    void visitArgument(Argument* argument);
     llvm::Value* visitIntegerLiteralExpr(IntegerLiteralExpr* expr);
     llvm::Value* visitDecimalLiteralExpr(DecimalLiteralExpr* expr);
     llvm::Value* visitBooleanLiteralExpr(BooleanLiteralExpr* expr);

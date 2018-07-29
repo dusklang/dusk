@@ -9,17 +9,14 @@ llvm::Type* mapTypeToLLVM(llvm::LLVMContext& context, Type type) {
         TypeVisitor(llvm::LLVMContext& context) : context(context) {}
         llvm::Type* operator()(Type::Variable typeVariable) const {
             assert(false && "Encountered type variable");
-            LLVM_BUILTIN_UNREACHABLE;
+            __builtin_unreachable();
         }
         llvm::Type* operator()(Type::ErrorTy) const {
             assert(false && "Encountered error type");
-            LLVM_BUILTIN_UNREACHABLE;
+            __builtin_unreachable();
         }
         llvm::Type* operator()(Type::IntegerTy properties) const {
             return llvm::Type::getIntNTy(context, properties.bitWidth);
-        }
-        llvm::Type* operator()(Type::PointerTy pointer) const {
-            return llvm::PointerType::get(mapTypeToLLVM(context, *pointer.pointedTy), 0);
         }
         llvm::Type* operator()(Type::VoidTy) const {
             return llvm::Type::getVoidTy(context);
@@ -34,7 +31,11 @@ llvm::Type* mapTypeToLLVM(llvm::LLVMContext& context, Type type) {
             return llvm::Type::getDoubleTy(context);
         }
     };
-    return std::visit(TypeVisitor(context), type.data);
+    llvm::Type* ty = std::visit(TypeVisitor(context), type.data);
+    for(uint8_t i = 0; i < type.indirection; ++i) {
+        ty = llvm::PointerType::get(ty, 0);
+    }
+    return ty;
 }
 
 llvm::Value* CodeGenerator::visitDecl(Decl* decl) {
@@ -96,10 +97,10 @@ llvm::Value* CodeGenerator::visitDecl(Decl* decl) {
 
                         if(auto elseScope = ifStmt->elseScope) {
                             builder.SetInsertPoint(elseBlock);
-                            visitInnerScope(*elseScope);
+                            visitInnerScope(elseScope);
                             // Same situation as above.
-                            if((*elseScope)->nodes.empty() ||
-                               !dynamic_cast<ReturnStmt*>((*elseScope)->nodes.back())) {
+                            if(elseScope->nodes.empty() ||
+                               !dynamic_cast<ReturnStmt*>(elseScope->nodes.back())) {
                                 builder.CreateBr(endBlock);
                             }
                         }
@@ -143,7 +144,6 @@ void CodeGenerator::visitScope(Scope* scope) {
         visit(node);
     }
 }
-void CodeGenerator::visitArgument(Argument* argument) {}
 llvm::Value* CodeGenerator::visitIntegerLiteralExpr(IntegerLiteralExpr* expr) {
     return llvm::ConstantInt::get(context, llvm::APInt(32, std::stoi(expr->literal)));
 }
@@ -167,8 +167,8 @@ llvm::Value* CodeGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
                "Incorrect number of arguments passed to function");
 
         std::vector<llvm::Value*> args;
-        for(auto& arg: expr->argList) {
-            args.push_back(visitExpr(arg.value));
+        for(auto* arg: expr->argList) {
+            args.push_back(visitExpr(arg));
             if(!args.back()) {
                 return nullptr;
             }

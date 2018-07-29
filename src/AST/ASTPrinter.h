@@ -13,7 +13,6 @@ class ASTPrinter: public ASTVisitor<ASTPrinter,
 public:
     void visitDecl(Decl* decl, int indentationLevel, std::ostream& stream);
     void visitScope(Scope* scope, int indentationLevel, std::ostream& stream);
-    void visitArgument(Argument* argument, int indentationLevel, std::ostream& stream);
 
     void visitIntegerLiteralExpr(IntegerLiteralExpr* expr, int indentationLevel, std::ostream& stream);
     void visitDecimalLiteralExpr(DecimalLiteralExpr* expr, int indentationLevel, std::ostream& stream);

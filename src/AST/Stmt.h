@@ -3,14 +3,16 @@
 #pragma once
 
 #include <vector>
+
 #include "AST.h"
 
-#include "Expr.h"
+struct Expr;
+struct DeclRefExpr;
 
 enum class StmtKind {
     #define STMT_NODE(name) name,
     #include "ASTNodes.def"
-    NUM_EXPRS
+    NUM_STMTS
 };
 
 // Base class from which each statement node inherits.
@@ -24,7 +26,7 @@ struct ReturnStmt: public Stmt {
 
     ReturnStmt(SourceRange range, Expr* value) : Stmt(range, StmtKind::Return), value(value) {}
 
-    ~ReturnStmt() override { delete value; }
+    ~ReturnStmt() override;
 };
 
 struct AssignmentStmt: public Stmt {
@@ -34,26 +36,19 @@ struct AssignmentStmt: public Stmt {
     AssignmentStmt(SourceRange range, DeclRefExpr* lhs, Expr* rhs) : Stmt(range, StmtKind::Assignment),
     lhs(lhs), rhs(rhs) {}
 
-    ~AssignmentStmt() override {
-        delete lhs;
-        delete rhs;
-    }
+    ~AssignmentStmt() override;
 };
 
 struct IfStmt: public Stmt {
     Expr* condition;
     Scope* thenScope;
-    std::optional<Scope*> elseScope;
+    Scope* elseScope;
 
     IfStmt(SourceRange range, Expr* condition, Scope* thenScope,
-           std::optional<Scope*> elseScope) : Stmt(range, StmtKind::If),
+           Scope* elseScope) : Stmt(range, StmtKind::If),
     condition(condition), thenScope(thenScope), elseScope(elseScope) {}
 
-    ~IfStmt() override {
-        delete condition;
-        delete thenScope;
-        if(elseScope) delete *elseScope;
-    }
+    ~IfStmt() override;
 };
 
 struct WhileStmt: public Stmt {
@@ -63,8 +58,5 @@ struct WhileStmt: public Stmt {
     WhileStmt(SourceRange range, Expr* condition, Scope* thenScope) : Stmt(range, StmtKind::While),
     condition(condition), thenScope(thenScope) {}
 
-    ~WhileStmt() override {
-        delete condition;
-        delete thenScope;
-    }
+    ~WhileStmt() override;
 };

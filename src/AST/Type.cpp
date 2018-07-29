@@ -3,11 +3,14 @@
 #include <string>
 #include <cassert>
 #include <sstream>
-#include "AST.h"
+
+#include "Type.h"
 
 std::string Type::name() const {
     struct NameVisitor {
         std::ostringstream stream;
+        NameVisitor(std::ostringstream stream) : stream(std::move(stream)) {}
+
         void operator()(Variable typeVariable) {
             stream << "<T" << typeVariable.num;
             switch(typeVariable.kind) {
@@ -19,9 +22,6 @@ std::string Type::name() const {
         }
         void operator()(IntegerTy properties) {
             stream << (properties.isSigned ? "i" : "u") << properties.bitWidth;
-        }
-        void operator()(PointerTy pointer) {
-            stream << '*' << pointer.pointedTy->name();
         }
         void operator()(VoidTy) {
             stream << "void";
@@ -39,7 +39,11 @@ std::string Type::name() const {
             stream << "#ERRORTYPE#";
         }
     };
-    NameVisitor visitor;
+    std::ostringstream stream;
+    for(uint8_t i = 0; i < indirection; ++i) {
+        stream << "*";
+    }
+    NameVisitor visitor(std::move(stream));
     std::visit(visitor, data);
     return visitor.stream.str();
 }

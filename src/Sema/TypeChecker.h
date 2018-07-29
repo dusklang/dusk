@@ -31,7 +31,6 @@ public:
 
     void visitDecl(Decl* decl);
     void visitScope(Scope* scope);
-    void visitArgument(Argument* argument);
     void visitIntegerLiteralExpr(IntegerLiteralExpr* expr);
     void visitDecimalLiteralExpr(DecimalLiteralExpr* expr);
     void visitBooleanLiteralExpr(BooleanLiteralExpr* expr);

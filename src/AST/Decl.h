@@ -3,12 +3,15 @@
 #pragma once
 
 #include <string>
-
-#include "llvm/IR/Value.h"
+#include <vector>
 
 #include "AST.h"
 
 struct Expr;
+struct Scope;
+namespace llvm {
+    class Value;
+}
 
 struct Decl: public ASTNode {
     std::string name;
@@ -44,7 +47,9 @@ public:
          Scope* body);
 
     ~Decl() {
-        delete value;
+        if(value) {
+            delete value;
+        }
         for (Decl* param: paramList) {
             delete param;
         }

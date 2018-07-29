@@ -9,6 +9,7 @@
 
 #include "Expr.h"
 #include "Stmt.h"
+#include "Decl.h"
 
 template<typename Impl,
          typename ASTNodeReturnTy = void,
@@ -33,7 +34,7 @@ public:
             #include "ASTNodes.def"
             default: break;
         }
-        LLVM_BUILTIN_UNREACHABLE;
+        __builtin_unreachable();
     }
 
     #define UNTYPED_AST_NODE(name) name##RetTy visit##name(name* node, Args... args) { \
@@ -48,7 +49,7 @@ public:
             #include "ASTNodes.def"
             default: break;
         }
-        LLVM_BUILTIN_UNREACHABLE;
+        __builtin_unreachable();
     }
 
     StmtRetTy visitStmt(Stmt* stmt, Args... args) {
@@ -58,6 +59,6 @@ public:
             #include "ASTNodes.def"
             default: break;
         }
-        LLVM_BUILTIN_UNREACHABLE;
+        __builtin_unreachable();
     }
 };

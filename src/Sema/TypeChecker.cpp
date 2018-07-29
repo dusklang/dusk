@@ -81,7 +81,6 @@ void TypeChecker::visitScope(Scope* scope) {
     // End the new namespace.
     declLists.pop_back();
 }
-void TypeChecker::visitArgument(Argument* argument) {}
 void TypeChecker::visitIntegerLiteralExpr(IntegerLiteralExpr* expr) {
     expr->type = Type::I32();
 }
@@ -100,7 +99,7 @@ void TypeChecker::visitStringLiteralExpr(StringLiteralExpr* expr) {
 void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
     // Type-check arguments.
     for(auto& arg: expr->argList) {
-        visitExpr(arg.value);
+        visitExpr(arg);
     }
 
     // Find the prototype to reference.
@@ -109,7 +108,8 @@ void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
     std::vector<Decl*> nameMatches;
     for(auto it = declLists.rbegin(); it != declLists.rend(); ++it) {
         auto& declList = *it;
-        for(auto& decl: declList) {
+
+        for(auto* decl: declList) {
             if(decl->name != expr->name) continue;
             nameMatches.push_back(decl);
             if(decl->paramList.size() != expr->argList.size()) continue;
@@ -117,7 +117,7 @@ void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
             auto param = decl->paramList.begin();
             auto arg = expr->argList.begin();
             for(;param != decl->paramList.end(); ++param, ++arg) {
-                if((*param)->type != arg->value->type) goto failedToFindMatchInCurrentList;
+                if((*param)->type != (*arg)->type) goto failedToFindMatchInCurrentList;
             }
             // We must have succeeded! Add the decl's prototype and type to the declRefExpr and return.
             expr->decl = decl;
@@ -171,7 +171,7 @@ void TypeChecker::visitIfStmt(IfStmt* stmt) {
         reportError("Expression in if statement is not of type Bool", stmt);
     }
     visitScope(stmt->thenScope);
-    if(stmt->elseScope) visitScope(*stmt->elseScope);
+    if(stmt->elseScope) visitScope(stmt->elseScope);
 }
 void TypeChecker::visitWhileStmt(WhileStmt* stmt) {
     visitExpr(stmt->condition);

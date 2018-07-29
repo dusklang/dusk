@@ -2,12 +2,12 @@
 
 #pragma once
 
-#include <optional>
+struct Expr;
+struct Stmt;
+struct Decl;
 
 #include "AST/AST.h"
-#include "AST/Stmt.h"
-#include "AST/Decl.h"
-
+#include "AST/Type.h"
 #include "Lexer.h"
 
 class Parser {
@@ -79,13 +79,13 @@ public:
     }
 
     std::vector<ASTNode*> parseTopLevel();
-    std::optional<Scope*> parseScope();
+    Scope* parseScope();
     ASTNode* parseNode();
     Type parseType();
-    std::optional<Decl> parseDecl();
-    std::optional<Stmt*> parseStmt();
-    std::optional<Stmt*> parseIfStmt();
-    std::optional<Stmt*> parseWhileStmt();
-    std::optional<Expr*> parseDeclRefExpr();
-    std::optional<Expr*> parseExpr();
+    Decl* parseDecl();
+    Stmt* parseStmt();
+    Stmt* parseIfStmt();
+    Stmt* parseWhileStmt();
+    Expr* parseDeclRefExpr();
+    Expr* parseExpr();
 };

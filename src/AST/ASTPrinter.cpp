@@ -45,11 +45,6 @@ void ASTPrinter::visitScope(Scope* scope, int indentationLevel, std::ostream& st
     }
 }
 
-void ASTPrinter::visitArgument(Argument* argument, int indentationLevel, std::ostream& stream) {
-    indent(indentationLevel, stream);
-    visitExpr(argument->value, 0, stream);
-}
-
 void ASTPrinter::visitIntegerLiteralExpr(IntegerLiteralExpr* expr, int indentationLevel, std::ostream& stream) {
     indent(indentationLevel, stream);
     stream << expr->literal;
@@ -81,11 +76,11 @@ void ASTPrinter::visitDeclRefExpr(DeclRefExpr* expr, int indentationLevel, std::
     if(!expr->argList.empty()) {
         stream << '(';
         bool first = true;
-        for(auto& arg: expr->argList) {
+        for(auto* arg: expr->argList) {
             if(!first) stream << ", ";
             else first = false;
 
-            visitArgument(new Argument(arg), 0, stream);
+            visitExpr(arg, 0, stream);
         }
         stream << ')';
     }
@@ -119,8 +114,8 @@ void ASTPrinter::visitIfStmt(IfStmt* stmt, int indentationLevel, std::ostream& s
     if(stmt->elseScope) {
         stream << " else ";
         // Handle else if.
-        if((*stmt->elseScope)->nodes.size() == 1) {
-            if(auto elseIf = dynamic_cast<IfStmt*>((*stmt->elseScope)->nodes[0])) {
+        if(stmt->elseScope->nodes.size() == 1) {
+            if(auto elseIf = dynamic_cast<IfStmt*>(stmt->elseScope->nodes[0])) {
                 visitIfStmt(elseIf, indentationLevel, stream, true);
             } else {
                 // TODO: A goto really shouldn't be necessary here.
@@ -129,7 +124,7 @@ void ASTPrinter::visitIfStmt(IfStmt* stmt, int indentationLevel, std::ostream& s
         } else {
             notIfElse:
             stream << "{\n";
-            visitScope(*stmt->elseScope, indentationLevel, stream);
+            visitScope(stmt->elseScope, indentationLevel, stream);
             stream << '\n';
             indent(indentationLevel, stream);
             stream << '}';
