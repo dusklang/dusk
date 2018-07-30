@@ -159,6 +159,45 @@ llvm::Value* CodeGenerator::visitCharLiteralExpr(CharLiteralExpr* expr) {
 llvm::Value* CodeGenerator::visitStringLiteralExpr(StringLiteralExpr* expr) {
     return builder.CreateGlobalStringPtr(expr->literal);
 }
+llvm::Value* CodeGenerator::visitPrefixOpExpr(PrefixOpExpr* expr) {
+    auto operand = visitExpr(expr->operand);
+    switch(expr->op) {
+        case OperatorKind::add: return operand;
+        case OperatorKind::subtract: return builder.CreateNeg(operand);
+        case OperatorKind::asterisk: return builder.CreateLoad(operand);
+        case OperatorKind::b_not: return builder.CreateNot(operand);
+        case OperatorKind::b_and:
+        case OperatorKind::b_or:
+        case OperatorKind::divide:
+        case OperatorKind::equal:
+        case OperatorKind::not_equal:
+        case OperatorKind::less_than:
+        case OperatorKind::less_than_or_equal:
+        case OperatorKind::greater_than:
+        case OperatorKind::greater_than_or_equal:
+        case OperatorKind::modulo: assert(false && "Invalid prefix operator");
+    }
+}
+llvm::Value* CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
+    auto lhs = visitExpr(expr->lhs);
+    auto rhs = visitExpr(expr->rhs);
+    switch(expr->op) {
+        case OperatorKind::add: return builder.CreateAdd(lhs, rhs);
+        case OperatorKind::subtract: return builder.CreateSub(lhs, rhs);
+        case OperatorKind::asterisk: return builder.CreateMul(lhs, rhs);
+        case OperatorKind::b_not: assert(false && "Invalid prefix operator");
+        case OperatorKind::b_and: return builder.CreateAnd(lhs, rhs);
+        case OperatorKind::b_or: return builder.CreateOr(lhs, rhs);
+        case OperatorKind::divide: return builder.CreateSDiv(lhs, rhs);
+        case OperatorKind::equal: return builder.CreateICmpEQ(lhs, rhs);
+        case OperatorKind::not_equal: return builder.CreateICmpNE(lhs, rhs);
+        case OperatorKind::less_than: return builder.CreateICmpSLT(lhs, rhs);
+        case OperatorKind::less_than_or_equal: return builder.CreateICmpSLE(lhs, rhs);
+        case OperatorKind::greater_than: builder.CreateICmpSGT(lhs, rhs);
+        case OperatorKind::greater_than_or_equal: builder.CreateICmpSGE(lhs, rhs);
+        case OperatorKind::modulo: builder.CreateSRem(lhs, rhs);
+    }
+}
 llvm::Value* CodeGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
     auto referencedVal = expr->decl->codegenVal;
     if(expr->decl->isComputed()) {
@@ -183,7 +222,6 @@ llvm::Value* CodeGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
         }
     }
 }
-
 llvm::Value* CodeGenerator::visitReturnStmt(ReturnStmt* stmt) {
     if(!stmt->value) {
         return builder.CreateRetVoid();
@@ -191,11 +229,9 @@ llvm::Value* CodeGenerator::visitReturnStmt(ReturnStmt* stmt) {
         return builder.CreateRet(visitExpr(stmt->value));
     }
 }
-
 llvm::Value* CodeGenerator::visitAssignmentStmt(AssignmentStmt* stmt) {
     return builder.CreateStore(visitExpr(stmt->rhs), stmt->lhs->decl->codegenVal);
 }
-
 llvm::Value* CodeGenerator::visitIfStmt(IfStmt* stmt) {
     return nullptr;
 }

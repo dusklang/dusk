@@ -17,55 +17,40 @@
 std::string standardLibrary = R"~(
 #include <iostream>
 extern "C" {
-    int add(int l, int r) { return l + r; }
-    int mod(int l, int r) { return l % r; }
-    int sub(int l, int r) { return l - r; }
-    bool eq(int l, int r) { return l == r; }
-    bool lte(int l, int r) { return l <= r; }
-    bool notTrue(bool x) { return !x; }
-    bool bothTrue(bool l, bool r) { return l && r; }
     void printInt(int x) { std::cout << x; }
     void printChar(char x) { std::cout << x; }
-    bool charEq(char l, char r) { return l == r; }
     char charDeref(char* character) { return *character; }
     char* charPtrAdd(char* ptr, int advance) { return ptr + advance; }
 }
 )~";
 std::string sourceCode = R"~(
-extern def add(_: i32, _: i32): i32
-extern def mod(_: i32, _: i32): i32
-extern def lte(_: i32, _: i32): bool
-extern def eq(_: i32, _: i32): bool
-extern def notTrue(_: bool): bool
-extern def bothTrue(_: bool, _: bool): bool
 extern def printInt(_: i32): void
 extern def printChar(_: i8): void
-extern def charEq(_: i8, _: i8): bool
-extern def charDeref(_: *i8): i8
 extern def charPtrAdd(_: *i8, _: i32): *i8
+extern def charDeref(_: *i8): i8
 def printString(str: *i8) {
     var curChar = str
-    while notTrue(charEq(charDeref(curChar), "\0")) {
-        printChar(charDeref(curChar))
+    while *curChar != "\0" {
+        printChar(*curChar)
         curChar = charPtrAdd(curChar, 1)
     }
     return
 }
 def performFizzBuzz(end: i32) {
     // Check range.
-    if notTrue(lte(0, end)) {
+    if end < 0 {
         printString("Invalid bounds!\n")
         return
     }
     var i: i32 = 0
-    while lte(i, end) {
-        def fizz = eq(mod(i, 3), 0)
-        def buzz = eq(mod(i, 5), 0)
+    while i <= end {
+        def fizz = i % 3 == 0
+        def buzz = i % 5 == 0
         if fizz { printString("Fizz") }
         if buzz { printString("Buzz") }
-        if bothTrue(notTrue(fizz), notTrue(buzz)) { printInt(i) }
+        if !fizz && !buzz { printInt(i) }
         printChar("\n")
-        i = add(i, 1)
+        i = i + 1
     }
     return
 }
@@ -78,16 +63,19 @@ def main {
 
 int main() {
     std::cout << "Meda compiler version 0.0.1\n\n";
-    Parser parser(sourceCode);
 
+    Parser parser(sourceCode);
     ASTPrinter printer;
     TypeChecker tyChecker;
     CodeGenerator codeGenerator;
 
     auto file = parser.parseTopLevel();
+    std::cout << "hello?\n";
     for(auto& node: file) {
         tyChecker.visit(node);
+        std::cout << "hello tychck?\n";
     }
+    std::cout << "hello?\n";
     for(auto& node: file) {
         codeGenerator.visit(node);
     }

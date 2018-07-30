@@ -43,6 +43,8 @@ public:
     llvm::Value* visitBooleanLiteralExpr(BooleanLiteralExpr* expr);
     llvm::Value* visitCharLiteralExpr(CharLiteralExpr* expr);
     llvm::Value* visitStringLiteralExpr(StringLiteralExpr* expr);
+    llvm::Value* visitPrefixOpExpr(PrefixOpExpr* expr);
+    llvm::Value* visitBinOpExpr(BinOpExpr* expr);
     llvm::Value* visitDeclRefExpr(DeclRefExpr* expr);
 
     llvm::Value* visitReturnStmt(ReturnStmt* stmt);

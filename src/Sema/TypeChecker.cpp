@@ -96,6 +96,20 @@ void TypeChecker::visitCharLiteralExpr(CharLiteralExpr* expr) {
 void TypeChecker::visitStringLiteralExpr(StringLiteralExpr* expr) {
     expr->type = Type::Pointer(Type::I8());
 }
+void TypeChecker::visitPrefixOpExpr(PrefixOpExpr* expr) {
+    visitExpr(expr->operand);
+    // FIXME: Ensure the given operator is valid for the operand type.
+    expr->type = expr->type;
+}
+void TypeChecker::visitBinOpExpr(BinOpExpr* expr) {
+    visitExpr(expr->lhs);
+    visitExpr(expr->rhs);
+    if(expr->lhs->type != expr->rhs->type) {
+        reportError("Mismatched types in binary operator expression", expr);
+    }
+    // FIXME: Ensure the given operator is valid for the operand types.
+    expr->type = expr->type;
+}
 void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
     // Type-check arguments.
     for(auto& arg: expr->argList) {
@@ -137,7 +151,6 @@ void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
     }
     reportError(errorMessage, expr);
 }
-
 void TypeChecker::visitReturnStmt(ReturnStmt* stmt) {
     if(stmt->value) {
         visitExpr(stmt->value);

@@ -70,6 +70,27 @@ void ASTPrinter::visitStringLiteralExpr(StringLiteralExpr* expr, int indentation
     stream << expr->range.getSubstring();
 }
 
+void ASTPrinter::visitPrefixOpExpr(PrefixOpExpr* expr, int indentationLevel, std::ostream& stream) {
+    indent(indentationLevel, stream);
+    switch(expr->op) {
+        #define TOKEN_OPERATOR(name, string) case OperatorKind::name: stream << string; break;
+        #include "Parser/TokenKinds.def"
+    }
+    visitExpr(expr->operand, 0, stream);
+}
+
+void ASTPrinter::visitBinOpExpr(BinOpExpr* expr, int indentationLevel, std::ostream& stream) {
+    indent(indentationLevel, stream);
+    visitExpr(expr->lhs, 0, stream);
+    stream << " ";
+    switch(expr->op) {
+        #define TOKEN_OPERATOR(name, string) case OperatorKind::name: stream << string; break;
+        #include "Parser/TokenKinds.def"
+    }
+    stream << " ";
+    visitExpr(expr->rhs, 0, stream);
+}
+
 void ASTPrinter::visitDeclRefExpr(DeclRefExpr* expr, int indentationLevel, std::ostream& stream) {
     indent(indentationLevel, stream);
     stream << expr->name;

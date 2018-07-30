@@ -21,6 +21,40 @@
     return val;\
 }()
 
+std::vector<std::vector<OperatorKind>> precedenceLevels {
+    { OperatorKind::asterisk, OperatorKind::divide, OperatorKind::modulo },
+    { OperatorKind::add, OperatorKind::subtract },
+    {
+        OperatorKind::less_than,
+        OperatorKind::less_than_or_equal,
+        OperatorKind::greater_than,
+        OperatorKind::greater_than_or_equal
+    },
+    { OperatorKind::equal, OperatorKind::not_equal },
+    { OperatorKind::b_and, OperatorKind::b_or }
+};
+
+std::optional<int> getPrecedence(OperatorKind op) {
+    for(int level = 0; level < precedenceLevels.size(); ++level) {
+        for(auto otherOp: precedenceLevels[level]) {
+            if(op == otherOp) { return level; }
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<OperatorKind> parseOperator(tok token) {
+    switch(token) {
+        #define TOKEN_OPERATOR(name, string) case tok::op_ ## name: return OperatorKind::name;
+        #include "TokenKinds.def"
+        default: return std::nullopt;
+    }
+}
+bool isBinary(OperatorKind op) {
+    return op != OperatorKind::b_not;
+}
+
+#include "AST/ASTPrinter.h"
 std::vector<ASTNode*> Parser::parseTopLevel() {
     std::vector<ASTNode*> nodes;
     while(true) {
@@ -74,7 +108,7 @@ ASTNode* Parser::parseNode() {
 
 Type Parser::parseType() {
     recordCurrentLoc();
-    if(current().is(tok::sep_asterisk)) {
+    if(current().is(tok::op_asterisk)) {
         next();
         return Type::Pointer(parseType());
     }
@@ -257,8 +291,84 @@ Expr* Parser::parseDeclRefExpr() {
 }
 
 Expr* Parser::parseExpr() {
+    std::vector<Expr*> exprStack { parseTerm() };
+    std::vector<OperatorKind> opStack;
+
+    auto popStacks = [&]() {
+        auto rhs = exprStack.back();
+        exprStack.pop_back();
+        auto lhs = exprStack.back();
+        exprStack.pop_back();
+        auto nextOp = opStack.back();
+        opStack.pop_back();
+        switch(nextOp) {
+            case OperatorKind::asterisk:
+            case OperatorKind::divide:
+            case OperatorKind::modulo:
+            case OperatorKind::add:
+            case OperatorKind::subtract:
+            case OperatorKind::equal:
+            case OperatorKind::not_equal:
+            case OperatorKind::less_than:
+            case OperatorKind::less_than_or_equal:
+            case OperatorKind::greater_than:
+            case OperatorKind::greater_than_or_equal:
+            case OperatorKind::b_and:
+            case OperatorKind::b_or:
+                exprStack.push_back(new BinOpExpr(SourceRange(), lhs, rhs, nextOp));
+            default: __builtin_unreachable();
+        }
+    };
+
+    while(true) {
+        std::cout << "tast\n";
+        auto kind = current().getKind();
+        std::cout << "test\n";
+        auto op = parseOperator(kind);
+        std::cout << "tast\n";
+        if(!op) { break; }
+        next();
+        std::cout << "test\n";
+        if(!isBinary(*op)) {
+            reportError("Expected binary operator");
+        }
+        while(!opStack.empty() && getPrecedence(opStack.back()) <= getPrecedence(*op)) {
+            popStacks();
+        }
+        opStack.push_back(*op);
+        exprStack.push_back(parseTerm());
+
+        ASTPrinter printer;
+        printer.visitExpr(exprStack.back(), 0, std::cout);
+        std::cout << "\n";
+    }
+    while(!opStack.empty()) {
+        popStacks();
+    }
+    return exprStack.front();
+}
+
+Expr* Parser::parseTerm() {
     recordCurrentLoc();
-    if(current().is(tok::kw_true)) {
+    if(current().is(tok::sep_left_paren)) {
+        next();
+        auto expr = parseExpr();
+        EXPECT(tok::sep_right_paren, "Unclosed parentheses");
+        next();
+        return expr;
+    } else if(current().is(tok::op_asterisk)) {
+        next();
+        return new PrefixOpExpr(currentRange(), parseTerm(), OperatorKind::asterisk);
+    } else if(current().is(tok::op_add)) {
+        next();
+        return new PrefixOpExpr(currentRange(), parseTerm(), OperatorKind::add);
+    } else if(current().is(tok::op_subtract)) {
+        next();
+        return new PrefixOpExpr(currentRange(), parseTerm(), OperatorKind::subtract);
+    } else if(current().is(tok::op_b_not)) {
+        next();
+        return new PrefixOpExpr(currentRange(), parseTerm(), OperatorKind::b_not);
+    } else if(current().is(tok::kw_true)) {
         next();
         return new BooleanLiteralExpr(currentRange(), true);
     } else if(current().is(tok::kw_false)) {

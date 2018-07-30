@@ -12,6 +12,10 @@
 #define TOKEN_SEPARATOR(name, character) TOKEN(sep_ ## name)
 #endif
 
+#ifndef TOKEN_OPERATOR
+#define TOKEN_OPERATOR(name, string) TOKEN(op_ ## name)
+#endif
+
 TOKEN(identifier)
 TOKEN(integer_literal)
 TOKEN(decimal_literal)
@@ -37,12 +41,27 @@ TOKEN_KEYWORD(while, while)
 TOKEN_SEPARATOR(colon, ':')
 TOKEN_SEPARATOR(equal, '=')
 TOKEN_SEPARATOR(comma, ',')
-TOKEN_SEPARATOR(asterisk, '*')
 TOKEN_SEPARATOR(left_paren, '(')
 TOKEN_SEPARATOR(right_paren, ')')
 TOKEN_SEPARATOR(left_curly, '{')
 TOKEN_SEPARATOR(right_curly, '}')
 
+TOKEN_OPERATOR(add, "+")
+TOKEN_OPERATOR(subtract, "-")
+TOKEN_OPERATOR(asterisk, "*")
+TOKEN_OPERATOR(divide, "/")
+TOKEN_OPERATOR(modulo, "%")
+TOKEN_OPERATOR(equal, "==")
+TOKEN_OPERATOR(not_equal, "!=")
+TOKEN_OPERATOR(less_than_or_equal, "<=")
+TOKEN_OPERATOR(less_than, "<")
+TOKEN_OPERATOR(greater_than_or_equal, ">=")
+TOKEN_OPERATOR(greater_than, ">")
+TOKEN_OPERATOR(b_or, "||")
+TOKEN_OPERATOR(b_and, "&&")
+TOKEN_OPERATOR(b_not, "!")
+
 #undef TOKEN
-#undef TOKEN_SEPARATOR
 #undef TOKEN_KEYWORD
+#undef TOKEN_SEPARATOR
+#undef TOKEN_OPERATOR

@@ -10,12 +10,16 @@ struct Decl;
 #include "AST/Type.h"
 #include "Lexer.h"
 
-class Parser {
+class Parser final {
 private:
     Lexer lexer;
 
     Token current() { return lexer.curTok(); }
-    Token next() { return lexer.nextTok(); }
+    Token next() {
+        lexer.nextTok();
+        std::cout << lexer.curTok().prettyPrint() << "\n";
+        return lexer.curTok();
+    }
     std::optional<Token> previous() { return lexer.prevTok(); }
     std::optional<std::string> parseIdentifer() {
         if(current().is(tok::identifier)) {
@@ -88,4 +92,5 @@ public:
     Stmt* parseWhileStmt();
     Expr* parseDeclRefExpr();
     Expr* parseExpr();
+    Expr* parseTerm();
 };

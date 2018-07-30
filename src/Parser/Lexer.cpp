@@ -2,6 +2,7 @@
 
 #include "Lexer.h"
 #include <iostream>
+#include <vector>
 
 Token Lexer::nextTokIncludingInsignificant() {
     auto pos = tokenPositions.top();
@@ -83,6 +84,14 @@ Token Lexer::nextTokIncludingInsignificant() {
         #include "TokenKinds.def"
     }
 
+    // Lex operators.
+    if(false) {}
+    #define TOKEN_OPERATOR(name, text) else if(isSubstr(text)) { \
+        pos += std::string(text).size();\
+        RETURN(tok::op_ ## name); \
+    }
+    #include "TokenKinds.def"
+
     // Lex a string or character literal.
     if(is('"')) {
         std::string literal = "";
@@ -107,6 +116,7 @@ Token Lexer::nextTokIncludingInsignificant() {
                 escapeMode = true;
             } else if(is('"') && !escapeMode) {
                 pos++;
+                // FIXME: HACK.
                 if(literal.size() == 1) {
                     RETURN_LIT(tok::char_literal, literal);
                 } else {

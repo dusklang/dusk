@@ -50,6 +50,26 @@ struct StringLiteralExpr: public Expr {
     StringLiteralExpr(SourceRange range, std::string literal) : Expr(range, ExprKind::StringLiteral), literal(literal) {}
 };
 
+enum class OperatorKind {
+    #define TOKEN_OPERATOR(name, string) name,
+    #include "Parser/TokenKinds.def"
+};
+
+struct BinOpExpr: public Expr {
+    Expr* lhs;
+    Expr* rhs;
+    OperatorKind op;
+
+    BinOpExpr(SourceRange range, Expr* lhs, Expr* rhs, OperatorKind op) : Expr(range, ExprKind::BinOp), lhs(lhs), rhs(rhs), op(op) {}
+};
+
+struct PrefixOpExpr: public Expr {
+    Expr* operand;
+    OperatorKind op;
+
+    PrefixOpExpr(SourceRange range, Expr* operand, OperatorKind op) : Expr(range, ExprKind::PrefixOp), operand(operand), op(op) {}
+};
+
 struct DeclRefExpr: public Expr {
     std::string name;
     std::vector<Expr*> argList;

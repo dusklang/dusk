@@ -19,6 +19,8 @@ public:
     void visitBooleanLiteralExpr(BooleanLiteralExpr* expr, int indentationLevel, std::ostream& stream);
     void visitCharLiteralExpr(CharLiteralExpr* expr, int indentationLevel, std::ostream& stream);
     void visitStringLiteralExpr(StringLiteralExpr* expr, int indentationLevel, std::ostream& stream);
+    void visitPrefixOpExpr(PrefixOpExpr* expr, int indentationLevel, std::ostream& stream);
+    void visitBinOpExpr(BinOpExpr* expr, int indentationLevel, std::ostream& stream);
     void visitDeclRefExpr(DeclRefExpr* expr, int indentationLevel, std::ostream& stream);
 
     void visitReturnStmt(ReturnStmt* stmt, int indentationLevel, std::ostream& stream);
