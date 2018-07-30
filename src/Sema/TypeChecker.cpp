@@ -67,7 +67,7 @@ void TypeChecker::visitDecl(Decl* decl) {
 void TypeChecker::visitScope(Scope* scope) {
     // Start a new namespace for declarations inside the scope.
     declLists.push_back(std::vector<Decl*>());
-    for(auto& node: scope->nodes) {
+    for(auto node: scope->nodes) {
         if(auto expr = dynamic_cast<Expr*>(node)) {
             visitExpr(expr);
             // Warn on unused expressions.

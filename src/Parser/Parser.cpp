@@ -202,7 +202,7 @@ Stmt* Parser::parseIfStmt() {
     if(!conditionExpr) reportError("Expected condition expression for if statement");
     auto thenScope = parseScope();
     if(!thenScope) reportError("Expected opening curly brace for if statement");
-    Scope* elseScope;
+    Scope* elseScope = nullptr;
     if(current().is(tok::kw_else)) {
         next();
         if(auto scope = parseScope()) {
