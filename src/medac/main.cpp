@@ -70,12 +70,9 @@ int main() {
     CodeGenerator codeGenerator;
 
     auto file = parser.parseTopLevel();
-    std::cout << "hello?\n";
     for(auto& node: file) {
         tyChecker.visit(node);
-        std::cout << "hello tychck?\n";
     }
-    std::cout << "hello?\n";
     for(auto& node: file) {
         codeGenerator.visit(node);
     }

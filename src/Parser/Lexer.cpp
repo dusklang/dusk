@@ -77,12 +77,6 @@ Token Lexer::nextTokIncludingInsignificant() {
     }
     if(!tokenText.empty()) RETURN(tok::comment_multiple_line);
 
-    // Lex separators.
-    switch(curChar()) {
-        #define TOKEN_SEPARATOR(name, character) case character:\
-            pos++; RETURN(tok::sep_ ## name);
-        #include "TokenKinds.def"
-    }
 
     // Lex operators.
     if(false) {}
@@ -91,6 +85,13 @@ Token Lexer::nextTokIncludingInsignificant() {
         RETURN(tok::op_ ## name); \
     }
     #include "TokenKinds.def"
+
+    // Lex separators.
+    switch(curChar()) {
+        #define TOKEN_SEPARATOR(name, character) case character:\
+            pos++; RETURN(tok::sep_ ## name);
+        #include "TokenKinds.def"
+    }
 
     // Lex a string or character literal.
     if(is('"')) {

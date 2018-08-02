@@ -119,6 +119,11 @@ public:
         return Type(DoubleTy(), sourceRange);
     }
 
+    Type pointeeType() const {
+        assert(indirection > 0 && "Tried to get pointee type of non-pointer type");
+        return Type(data, sourceRange, indirection - 1);
+    }
+
     ~Type() = default;
     Type(Type const& other) = default;
     Type& operator=(Type const& other) = default;

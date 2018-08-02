@@ -159,6 +159,7 @@ void ASTPrinter::visitWhileStmt(WhileStmt* stmt, int indentationLevel, std::ostr
     visitExpr(stmt->condition, 0, stream);
     stream << " {\n";
     visitScope(stmt->thenScope, indentationLevel, stream);
-    stream << '\n';
+    stream << "\n";
     indent(indentationLevel, stream);
+    stream << "}";
 }

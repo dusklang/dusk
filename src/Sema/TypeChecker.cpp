@@ -99,7 +99,14 @@ void TypeChecker::visitStringLiteralExpr(StringLiteralExpr* expr) {
 void TypeChecker::visitPrefixOpExpr(PrefixOpExpr* expr) {
     visitExpr(expr->operand);
     // FIXME: Ensure the given operator is valid for the operand type.
-    expr->type = expr->type;
+    switch(expr->op) {
+        case OperatorKind::asterisk:
+            expr->type = expr->operand->type.pointeeType();
+            break;
+        default:
+            expr->type = expr->operand->type;
+            break;
+    }
 }
 void TypeChecker::visitBinOpExpr(BinOpExpr* expr) {
     visitExpr(expr->lhs);
@@ -108,7 +115,21 @@ void TypeChecker::visitBinOpExpr(BinOpExpr* expr) {
         reportError("Mismatched types in binary operator expression", expr);
     }
     // FIXME: Ensure the given operator is valid for the operand types.
-    expr->type = expr->type;
+    switch(expr->op) {
+        case OperatorKind::equal:
+        case OperatorKind::not_equal:
+        case OperatorKind::less_than:
+        case OperatorKind::greater_than:
+        case OperatorKind::less_than_or_equal:
+        case OperatorKind::greater_than_or_equal:
+            expr->type = Type::Bool();
+            break;
+        default:
+            // LHS and RHS were asserted to be equal above, so it shouldn't matter which
+            // we use.
+            expr->type = expr->lhs->type;
+            break;
+    }
 }
 void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
     // Type-check arguments.

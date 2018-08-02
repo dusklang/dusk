@@ -17,7 +17,6 @@ private:
     Token current() { return lexer.curTok(); }
     Token next() {
         lexer.nextTok();
-        std::cout << lexer.curTok().prettyPrint() << "\n";
         return lexer.curTok();
     }
     std::optional<Token> previous() { return lexer.prevTok(); }

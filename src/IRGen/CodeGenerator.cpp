@@ -193,9 +193,9 @@ llvm::Value* CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
         case OperatorKind::not_equal: return builder.CreateICmpNE(lhs, rhs);
         case OperatorKind::less_than: return builder.CreateICmpSLT(lhs, rhs);
         case OperatorKind::less_than_or_equal: return builder.CreateICmpSLE(lhs, rhs);
-        case OperatorKind::greater_than: builder.CreateICmpSGT(lhs, rhs);
-        case OperatorKind::greater_than_or_equal: builder.CreateICmpSGE(lhs, rhs);
-        case OperatorKind::modulo: builder.CreateSRem(lhs, rhs);
+        case OperatorKind::greater_than: return builder.CreateICmpSGT(lhs, rhs);
+        case OperatorKind::greater_than_or_equal: return builder.CreateICmpSGE(lhs, rhs);
+        case OperatorKind::modulo: return builder.CreateSRem(lhs, rhs);
     }
 }
 llvm::Value* CodeGenerator::visitDeclRefExpr(DeclRefExpr* expr) {

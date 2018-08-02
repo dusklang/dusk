@@ -59,7 +59,9 @@ std::vector<ASTNode*> Parser::parseTopLevel() {
     std::vector<ASTNode*> nodes;
     while(true) {
         if(current().is(tok::eof)) break;
-        if(current().is(tok::sep_right_curly)) reportError("Extraneous closing brace '}'", current().getRange());
+        if(current().is(tok::sep_right_curly)) {
+            reportError("Extraneous closing brace '}'", current().getRange());
+        }
         nodes.push_back(parseNode());
     }
     return nodes;
@@ -316,19 +318,16 @@ Expr* Parser::parseExpr() {
             case OperatorKind::b_and:
             case OperatorKind::b_or:
                 exprStack.push_back(new BinOpExpr(SourceRange(), lhs, rhs, nextOp));
+                break;
             default: __builtin_unreachable();
         }
     };
 
     while(true) {
-        std::cout << "tast\n";
         auto kind = current().getKind();
-        std::cout << "test\n";
         auto op = parseOperator(kind);
-        std::cout << "tast\n";
         if(!op) { break; }
         next();
-        std::cout << "test\n";
         if(!isBinary(*op)) {
             reportError("Expected binary operator");
         }
@@ -337,10 +336,6 @@ Expr* Parser::parseExpr() {
         }
         opStack.push_back(*op);
         exprStack.push_back(parseTerm());
-
-        ASTPrinter printer;
-        printer.visitExpr(exprStack.back(), 0, std::cout);
-        std::cout << "\n";
     }
     while(!opStack.empty()) {
         popStacks();
