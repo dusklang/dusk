@@ -175,11 +175,15 @@ llvm::Value* CodeGenerator::visitPrefixOpExpr(PrefixOpExpr* expr) {
         case OperatorKind::less_than_or_equal:
         case OperatorKind::greater_than:
         case OperatorKind::greater_than_or_equal:
-        case OperatorKind::modulo: assert(false && "Invalid prefix operator");
+        case OperatorKind::modulo: assert(false && "Cannot use modulo as prefix operator");
+        case OperatorKind::assignment: assert(false && "Cannot use equal as prefix operator");
     }
 }
 llvm::Value* CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
-    auto lhs = visitExpr(expr->lhs);
+    llvm::Value* lhs;
+    if(expr->op != OperatorKind::assignment) {
+        lhs = visitExpr(expr->lhs);
+    }
     auto rhs = visitExpr(expr->rhs);
     switch(expr->op) {
         case OperatorKind::add: return builder.CreateAdd(lhs, rhs);
@@ -196,6 +200,9 @@ llvm::Value* CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
         case OperatorKind::greater_than: return builder.CreateICmpSGT(lhs, rhs);
         case OperatorKind::greater_than_or_equal: return builder.CreateICmpSGE(lhs, rhs);
         case OperatorKind::modulo: return builder.CreateSRem(lhs, rhs);
+        case OperatorKind::assignment:
+            auto declRef = dynamic_cast<DeclRefExpr*>(expr->lhs);
+            return builder.CreateStore(rhs, declRef->decl->codegenVal);
     }
 }
 llvm::Value* CodeGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
@@ -228,9 +235,6 @@ llvm::Value* CodeGenerator::visitReturnStmt(ReturnStmt* stmt) {
     } else {
         return builder.CreateRet(visitExpr(stmt->value));
     }
-}
-llvm::Value* CodeGenerator::visitAssignmentStmt(AssignmentStmt* stmt) {
-    return builder.CreateStore(visitExpr(stmt->rhs), stmt->lhs->decl->codegenVal);
 }
 llvm::Value* CodeGenerator::visitIfStmt(IfStmt* stmt) {
     return nullptr;

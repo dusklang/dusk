@@ -41,7 +41,6 @@ public:
     void visitDeclRefExpr(DeclRefExpr* expr);
 
     void visitReturnStmt(ReturnStmt* stmt);
-    void visitAssignmentStmt(AssignmentStmt* stmt);
     void visitIfStmt(IfStmt* stmt);
     void visitWhileStmt(WhileStmt* stmt);
 };

@@ -39,7 +39,6 @@ TOKEN_KEYWORD(else, else)
 TOKEN_KEYWORD(while, while)
 
 TOKEN_SEPARATOR(colon, ':')
-TOKEN_SEPARATOR(equal, '=')
 TOKEN_SEPARATOR(comma, ',')
 TOKEN_SEPARATOR(left_paren, '(')
 TOKEN_SEPARATOR(right_paren, ')')
@@ -60,6 +59,7 @@ TOKEN_OPERATOR(greater_than, ">")
 TOKEN_OPERATOR(b_or, "||")
 TOKEN_OPERATOR(b_and, "&&")
 TOKEN_OPERATOR(b_not, "!")
+TOKEN_OPERATOR(assignment, "=")
 
 #undef TOKEN
 #undef TOKEN_KEYWORD

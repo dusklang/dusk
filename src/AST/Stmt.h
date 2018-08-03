@@ -29,16 +29,6 @@ struct ReturnStmt: public Stmt {
     ~ReturnStmt() override;
 };
 
-struct AssignmentStmt: public Stmt {
-    DeclRefExpr* lhs;
-    Expr* rhs;
-
-    AssignmentStmt(SourceRange range, DeclRefExpr* lhs, Expr* rhs) : Stmt(range, StmtKind::Assignment),
-    lhs(lhs), rhs(rhs) {}
-
-    ~AssignmentStmt() override;
-};
-
 struct IfStmt: public Stmt {
     Expr* condition;
     Scope* thenScope;

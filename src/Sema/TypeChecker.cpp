@@ -112,7 +112,7 @@ void TypeChecker::visitBinOpExpr(BinOpExpr* expr) {
     visitExpr(expr->lhs);
     visitExpr(expr->rhs);
     if(expr->lhs->type != expr->rhs->type) {
-        reportError("Mismatched types in binary operator expression", expr);
+        reportError("Mismatched types `" + expr->lhs->type.name() + "` and `" + expr->rhs->type.name() + "` in binary operator expression", expr);
     }
     // FIXME: Ensure the given operator is valid for the operand types.
     switch(expr->op) {
@@ -124,6 +124,22 @@ void TypeChecker::visitBinOpExpr(BinOpExpr* expr) {
         case OperatorKind::greater_than_or_equal:
             expr->type = Type::Bool();
             break;
+        case OperatorKind::assignment: {
+            auto declRef = dynamic_cast<DeclRefExpr*>(expr->lhs);
+            if(!declRef) {
+                reportError("Only stored declaration references can be assigned to", expr);
+            }
+            if(!declRef->decl->isVar) {
+                reportError("Cannot assign to constant declaration '" + declRef->decl->name + "'", expr);
+            }
+            if(declRef->type != expr->rhs->type) {
+                reportError("Cannot assign value of type '" + expr->rhs->type.name()
+                            + "' to mutable declaration of type '" + declRef->type.name(),
+                            expr);
+            }
+            expr->type = Type::Void();
+        }
+        break;
         default:
             // LHS and RHS were asserted to be equal above, so it shouldn't matter which
             // we use.
@@ -213,17 +229,4 @@ void TypeChecker::visitWhileStmt(WhileStmt* stmt) {
         reportError("Expression in while statement is not of type Bool", stmt);
     }
     visitScope(stmt->thenScope);
-}
-
-void TypeChecker::visitAssignmentStmt(AssignmentStmt* stmt) {
-    visitDeclRefExpr(stmt->lhs);
-    visitExpr(stmt->rhs);
-    if(!stmt->lhs->decl->isVar) {
-        reportError("Cannot assign to constant declaration '" + stmt->lhs->decl->name + "'", stmt);
-    }
-    if(stmt->lhs->type != stmt->rhs->type) {
-        reportError("Cannot assign value of type '" + stmt->rhs->type.name()
-                    + "' to mutable declaration of type '" + stmt->lhs->type.name(),
-                    stmt);
-    }
 }

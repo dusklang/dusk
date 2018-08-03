@@ -9,11 +9,6 @@ ReturnStmt::~ReturnStmt() {
     }
 }
 
-AssignmentStmt::~AssignmentStmt() {
-    delete lhs;
-    delete rhs;
-}
-
 IfStmt::~IfStmt() {
     delete condition;
     delete thenScope;

@@ -116,13 +116,6 @@ void ASTPrinter::visitReturnStmt(ReturnStmt* stmt, int indentationLevel, std::os
     }
 }
 
-void ASTPrinter::visitAssignmentStmt(AssignmentStmt* stmt, int indentationLevel, std::ostream& stream) {
-    indent(indentationLevel, stream);
-    visitExpr(stmt->lhs, 0, stream);
-    stream << " = ";
-    visitExpr(stmt->rhs, 0, stream);
-}
-
 void ASTPrinter::visitIfStmt(IfStmt* stmt, int indentationLevel, std::ostream& stream, bool isIfElse) {
     if(!isIfElse) indent(indentationLevel, stream);
     stream << "if ";

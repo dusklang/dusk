@@ -31,7 +31,8 @@ std::vector<std::vector<OperatorKind>> precedenceLevels {
         OperatorKind::greater_than_or_equal
     },
     { OperatorKind::equal, OperatorKind::not_equal },
-    { OperatorKind::b_and, OperatorKind::b_or }
+    { OperatorKind::b_and, OperatorKind::b_or },
+    { OperatorKind::assignment }
 };
 
 std::optional<int> getPrecedence(OperatorKind op) {
@@ -88,24 +89,8 @@ ASTNode* Parser::parseNode() {
     }
     recordCurrentLoc();
     auto expr = parseExpr();
-    assert(expr && "Failed to parse expression");
-    // Parse AssignmentStmt
-    // TODO: Maybe put this into it's own method someday
-    if(current().is(tok::sep_equal)) {
-        next();
-        auto rhsExpr = parseExpr();
-        if(!rhsExpr) reportError("Expected right-hand expression in assignment statement");
-
-        if(auto declRefLHS = dynamic_cast<DeclRefExpr*>(expr)) {
-            return new AssignmentStmt(currentRange(), declRefLHS, rhsExpr);
-        } else {
-            reportError("Cannot assign to non-declaration reference");
-        }
-    } else {
-        currentRange();
-        return expr;
-    }
-    __builtin_unreachable();
+    assert(expr && "Failed to parse node");
+    return expr;
 }
 
 Type Parser::parseType() {
@@ -200,7 +185,7 @@ Decl* Parser::parseDecl() {
         }
     };
 
-    if(current().is(tok::sep_equal)) {
+    if(current().is(tok::op_assignment)) {
         checkExtern();
         next();
         auto expr = parseExpr();
@@ -317,6 +302,7 @@ Expr* Parser::parseExpr() {
             case OperatorKind::greater_than_or_equal:
             case OperatorKind::b_and:
             case OperatorKind::b_or:
+            case OperatorKind::assignment:
                 exprStack.push_back(new BinOpExpr(SourceRange(), lhs, rhs, nextOp));
                 break;
             default: __builtin_unreachable();

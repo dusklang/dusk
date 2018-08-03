@@ -48,7 +48,6 @@ public:
     llvm::Value* visitDeclRefExpr(DeclRefExpr* expr);
 
     llvm::Value* visitReturnStmt(ReturnStmt* stmt);
-    llvm::Value* visitAssignmentStmt(AssignmentStmt* stmt);
     llvm::Value* visitIfStmt(IfStmt* stmt);
     llvm::Value* visitWhileStmt(WhileStmt* stmt) { return nullptr; }
 };
