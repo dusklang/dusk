@@ -70,9 +70,9 @@ void TypeChecker::visitScope(Scope* scope) {
     for(auto node: scope->nodes) {
         if(auto expr = dynamic_cast<Expr*>(node)) {
             visitExpr(expr);
-            // Warn on unused expressions.
+            // Disallow unused expressions.
             if(expr->type != Type::Void()) {
-                reportWarning("Unused expression", expr);
+                reportError("Unused expression", expr);
             }
         } else {
             visit(node);
