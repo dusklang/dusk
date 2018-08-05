@@ -50,7 +50,7 @@ def performFizzBuzz(end: i32) {
         if buzz { printString("Buzz") }
         if !fizz && !buzz { printInt(i) }
         printChar("\n")
-        i = i + 1
+        i += 1
     }
     return
 }

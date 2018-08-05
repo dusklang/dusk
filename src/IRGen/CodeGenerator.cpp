@@ -37,7 +37,6 @@ llvm::Type* mapTypeToLLVM(llvm::LLVMContext& context, Type type) {
     }
     return ty;
 }
-
 llvm::Value* CodeGenerator::visitDecl(Decl* decl) {
     if(auto expr = decl->expression()) {
         if(decl->isVar) {
@@ -175,8 +174,14 @@ llvm::Value* CodeGenerator::visitPrefixOpExpr(PrefixOpExpr* expr) {
         case OperatorKind::less_than_or_equal:
         case OperatorKind::greater_than:
         case OperatorKind::greater_than_or_equal:
-        case OperatorKind::modulo: assert(false && "Cannot use modulo as prefix operator");
-        case OperatorKind::assignment: assert(false && "Cannot use equal as prefix operator");
+        case OperatorKind::modulo:
+        case OperatorKind::assignment:
+        case OperatorKind::add_assignment:
+        case OperatorKind::sub_assignment:
+        case OperatorKind::mult_assignment:
+        case OperatorKind::div_assignment:
+        case OperatorKind::mod_assignment:
+            assert(false && "Invalid prefix operator");
     }
 }
 llvm::Value* CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
@@ -201,8 +206,35 @@ llvm::Value* CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
         case OperatorKind::greater_than_or_equal: return builder.CreateICmpSGE(lhs, rhs);
         case OperatorKind::modulo: return builder.CreateSRem(lhs, rhs);
         case OperatorKind::assignment:
+        case OperatorKind::add_assignment:
+        case OperatorKind::sub_assignment:
+        case OperatorKind::mult_assignment:
+        case OperatorKind::div_assignment:
+        case OperatorKind::mod_assignment:
             auto declRef = dynamic_cast<DeclRefExpr*>(expr->lhs);
-            return builder.CreateStore(rhs, declRef->decl->codegenVal);
+            llvm::Value* value;
+            switch(expr->op) {
+                case OperatorKind::assignment:
+                    value = rhs;
+                    break;
+                case OperatorKind::add_assignment:
+                    value = builder.CreateAdd(lhs, rhs);
+                    break;
+                case OperatorKind::sub_assignment:
+                    value = builder.CreateSub(lhs, rhs);
+                    break;
+                case OperatorKind::mult_assignment:
+                    value = builder.CreateMul(lhs, rhs);
+                    break;
+                case OperatorKind::div_assignment:
+                    value = builder.CreateSDiv(lhs, rhs);
+                    break;
+                case OperatorKind::mod_assignment:
+                    value = builder.CreateSRem(lhs, rhs);
+                    break;
+                default: __builtin_unreachable();
+            }
+            return builder.CreateStore(value, declRef->decl->codegenVal);
     }
 }
 llvm::Value* CodeGenerator::visitDeclRefExpr(DeclRefExpr* expr) {

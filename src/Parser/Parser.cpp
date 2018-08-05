@@ -32,7 +32,7 @@ std::vector<std::vector<OperatorKind>> precedenceLevels {
     },
     { OperatorKind::equal, OperatorKind::not_equal },
     { OperatorKind::b_and, OperatorKind::b_or },
-    { OperatorKind::assignment }
+    { OperatorKind::assignment, OperatorKind::add_assignment, OperatorKind::sub_assignment, OperatorKind::mult_assignment, OperatorKind::div_assignment, OperatorKind::mod_assignment }
 };
 
 std::optional<int> getPrecedence(OperatorKind op) {
@@ -303,6 +303,11 @@ Expr* Parser::parseExpr() {
             case OperatorKind::b_and:
             case OperatorKind::b_or:
             case OperatorKind::assignment:
+            case OperatorKind::add_assignment:
+            case OperatorKind::sub_assignment:
+            case OperatorKind::mult_assignment:
+            case OperatorKind::div_assignment:
+            case OperatorKind::mod_assignment:
                 exprStack.push_back(new BinOpExpr(SourceRange(), lhs, rhs, nextOp));
                 break;
             default: __builtin_unreachable();

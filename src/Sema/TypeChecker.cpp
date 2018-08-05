@@ -123,8 +123,13 @@ void TypeChecker::visitBinOpExpr(BinOpExpr* expr) {
         case OperatorKind::less_than_or_equal:
         case OperatorKind::greater_than_or_equal:
             expr->type = Type::Bool();
-            break;
-        case OperatorKind::assignment: {
+        break;
+        case OperatorKind::assignment:
+        case OperatorKind::add_assignment:
+        case OperatorKind::sub_assignment:
+        case OperatorKind::mult_assignment:
+        case OperatorKind::div_assignment:
+        case OperatorKind::mod_assignment: {
             auto declRef = dynamic_cast<DeclRefExpr*>(expr->lhs);
             if(!declRef) {
                 reportError("Only stored declaration references can be assigned to", expr);
