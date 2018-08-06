@@ -181,7 +181,24 @@ llvm::Value* CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
         case BinOp::And: return builder.CreateAnd(lhs, rhs);
         case BinOp::Or: return builder.CreateOr(lhs, rhs);
         case BinOp::Div:
-            return builder.CreateSDiv(lhs, rhs);
+            return match(expr->type.data)(
+               pattern(as<Type::IntegerTy>(arg)) = [&](auto properties) {
+                   if(properties.isSigned) {
+                       return builder.CreateSDiv(lhs, rhs);
+                   } else {
+                       return builder.CreateUDiv(lhs, rhs);
+                   }
+               },
+               pattern(as<Type::FloatTy>(_)) = [&] {
+                   return builder.CreateFDiv(lhs, rhs);
+               },
+               pattern(as<Type::DoubleTy>(_)) = [&] {
+                   return builder.CreateFDiv(lhs, rhs);
+               },
+               pattern(_) = [&]() -> llvm::Value* {
+                   assert(false && "Can't divide values of that type");
+               }
+            );
         case BinOp::Equal: return builder.CreateICmpEQ(lhs, rhs);
         case BinOp::NotEqual: return builder.CreateICmpNE(lhs, rhs);
         case BinOp::LessThan: return builder.CreateICmpSLT(lhs, rhs);
@@ -220,6 +237,49 @@ llvm::Value* CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
             }
             return builder.CreateStore(value, declRef->decl->codegenVal);
     }
+}
+llvm::Value* CodeGenerator::visitCastExpr(CastExpr* expr) {
+    auto ogType = expr->operand->type;
+    auto destType = expr->destType;
+    auto ogValue = visitExpr(expr->operand);
+
+    if(ogType == destType) { return ogValue; }
+
+    auto destTypeLLVM = mapTypeToLLVM(context, destType);
+    assert(
+        (ogType.indirection == 0 && destType.indirection == 0) &&
+        "pointer casting isn't yet allowed"
+    );
+    return match(expr->operand->type.data, expr->destType.data)(
+        pattern(as<Type::IntegerTy>(arg), as<Type::IntegerTy>(arg)) = [&](auto og, auto dest) {
+            // TODO: Detect overflow.
+            if(dest.isSigned) {
+                return builder.CreateSExtOrTrunc(ogValue, destTypeLLVM);
+            } else {
+                return builder.CreateZExtOrTrunc(ogValue, destTypeLLVM);
+            }
+        },
+        pattern(as<Type::IntegerTy>(arg), as<Type::FloatTy>(arg)) = [&](auto og, auto dest) {
+            if(og.isSigned) {
+                return builder.CreateSIToFP(ogValue, destTypeLLVM);
+            } else {
+                return builder.CreateUIToFP(ogValue, destTypeLLVM);
+            }
+        },
+        pattern(as<Type::FloatTy>(arg), as<Type::IntegerTy>(arg)) = [&](auto og, auto dest) {
+            if(dest.isSigned) {
+                return builder.CreateFPToSI(ogValue, destTypeLLVM);
+            } else {
+                return builder.CreateFPToSI(ogValue, destTypeLLVM);
+            }
+        },
+        pattern(as<Type::FloatTy>(_), as<Type::DoubleTy>(_)) = [&] {
+            return builder.CreateFPExt(ogValue, destTypeLLVM);
+        },
+        pattern(as<Type::DoubleTy>(_), as<Type::FloatTy>(_)) = [&] {
+            return builder.CreateFPTrunc(ogValue, destTypeLLVM);
+        }
+    );
 }
 llvm::Value* CodeGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
     auto referencedVal = expr->decl->codegenVal;

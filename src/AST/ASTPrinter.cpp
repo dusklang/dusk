@@ -110,6 +110,12 @@ void ASTPrinter::visitBinOpExpr(BinOpExpr* expr, int indentationLevel, std::ostr
     visitExpr(expr->rhs, 0, stream);
 }
 
+void ASTPrinter::visitCastExpr(CastExpr* expr, int indentationLevel, std::ostream& stream) {
+    indent(indentationLevel, stream);
+    visitExpr(expr->operand, 0, stream);
+    stream << " as " << expr->type.name();
+}
+
 void ASTPrinter::visitDeclRefExpr(DeclRefExpr* expr, int indentationLevel, std::ostream& stream) {
     indent(indentationLevel, stream);
     stream << expr->name;

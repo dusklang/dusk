@@ -2,6 +2,10 @@
 
 #include "TypeChecker.h"
 
+#include "mpark/patterns.hpp"
+
+using namespace mpark::patterns;
+
 void TypeChecker::visitDecl(Decl* decl) {
     // Reject nested functions.
     if(declLists.size() > 1 && decl->isComputed()) {
@@ -149,6 +153,10 @@ void TypeChecker::visitBinOpExpr(BinOpExpr* expr) {
             expr->type = expr->lhs->type;
             break;
     }
+}
+void TypeChecker::visitCastExpr(CastExpr* expr) {
+    visitExpr(expr->operand);
+    expr->type = expr->destType;
 }
 void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
     // Type-check arguments.

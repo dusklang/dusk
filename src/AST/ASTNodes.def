@@ -37,6 +37,7 @@ EXPR_NODE(StringLiteral)
 EXPR_NODE(BinOp)
 EXPR_NODE(PreOp)
 EXPR_NODE(DeclRef)
+EXPR_NODE(Cast)
 
 // Ditto for stmts.
 STMT_NODE(Return)

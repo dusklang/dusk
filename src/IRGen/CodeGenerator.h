@@ -45,6 +45,7 @@ public:
     llvm::Value* visitStringLiteralExpr(StringLiteralExpr* expr);
     llvm::Value* visitPreOpExpr(PreOpExpr* expr);
     llvm::Value* visitBinOpExpr(BinOpExpr* expr);
+    llvm::Value* visitCastExpr(CastExpr* expr);
     llvm::Value* visitDeclRefExpr(DeclRefExpr* expr);
 
     llvm::Value* visitReturnStmt(ReturnStmt* stmt);

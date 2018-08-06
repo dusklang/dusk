@@ -37,28 +37,7 @@ def printInt(val: i32) {
         return
     } else {
         printInt(val / 10)
-        def curPlace = val % 10
-        if curPlace == 0 {
-            printChar("0")
-        } else if curPlace == 1 {
-            printChar("1")
-        } else if curPlace == 2 {
-            printChar("2")
-        } else if curPlace == 3 {
-            printChar("3")
-        } else if curPlace == 4 {
-            printChar("4")
-        } else if curPlace == 5 {
-            printChar("5")
-        } else if curPlace == 6 {
-            printChar("6")
-        } else if curPlace == 7 {
-            printChar("7")
-        } else if curPlace == 8 {
-            printChar("8")
-        } else if curPlace == 9 {
-            printChar("9")
-        }
+        printChar("0" + (val % 10) as i8)
         return
     }
 }

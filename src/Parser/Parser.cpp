@@ -361,35 +361,40 @@ Expr* Parser::parseExpr() {
 
 Expr* Parser::parseTerm() {
     recordCurrentLoc();
+    Expr* retVal;
     if(current().is(tok::sep_left_paren)) {
         next();
         auto expr = parseExpr();
         EXPECT(tok::sep_right_paren, "Unclosed parentheses");
         next();
-        return expr;
+        retVal = expr;
     } else if(auto preOp = parsePrefixOperator(current().getKind())) {
         next();
         auto range = currentRange();
-        return new PreOpExpr(range, parseTerm(), *preOp);
+        retVal = new PreOpExpr(range, parseTerm(), *preOp);
     } else if(current().is(tok::kw_true)) {
         next();
-        return new BooleanLiteralExpr(currentRange(), true);
+        retVal = new BooleanLiteralExpr(currentRange(), true);
     } else if(current().is(tok::kw_false)) {
         next();
-        return new BooleanLiteralExpr(currentRange(), false);
+        retVal = new BooleanLiteralExpr(currentRange(), false);
     } else if(auto intVal = parseIntegerLiteral()) {
-        return new IntegerLiteralExpr(currentRange(), *intVal);
+        retVal = new IntegerLiteralExpr(currentRange(), *intVal);
     } else if(auto decimalVal = parseDecimalLiteral()) {
-        return new DecimalLiteralExpr(currentRange(), *decimalVal);
+        retVal = new DecimalLiteralExpr(currentRange(), *decimalVal);
     } else if(auto charVal = parseCharLiteral()) {
-        return new CharLiteralExpr(currentRange(), *charVal);
+        retVal = new CharLiteralExpr(currentRange(), *charVal);
     } else if(auto stringVal = parseStringLiteral()) {
-        return new StringLiteralExpr(currentRange(), *stringVal);
+        retVal = new StringLiteralExpr(currentRange(), *stringVal);
+    } else {
+        retVal = TRY(parseDeclRefExpr());
     }
 
-    // Reset the stack.
-    next();
-    currentRange();
-    previous();
-    return TRY(parseDeclRefExpr());
+    if(retVal && current().is(tok::kw_as)) {
+        next();
+        auto destType = parseType();
+        retVal = new CastExpr(currentRange(), retVal, destType);
+    }
+
+    return retVal;
 }

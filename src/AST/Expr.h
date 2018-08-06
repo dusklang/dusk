@@ -94,6 +94,13 @@ struct PreOpExpr: public Expr {
     PreOpExpr(SourceRange range, Expr* operand, PreOp op) : Expr(range, ExprKind::PreOp), operand(operand), op(op) {}
 };
 
+struct CastExpr: public Expr {
+    Expr* operand;
+    Type destType;
+
+    CastExpr(SourceRange range, Expr* operand, Type destType) : Expr(range, ExprKind::Cast), operand(operand), destType(destType) {}
+};
+
 struct DeclRefExpr: public Expr {
     std::string name;
     std::vector<Expr*> argList;
