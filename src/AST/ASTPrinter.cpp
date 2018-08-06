@@ -70,11 +70,13 @@ void ASTPrinter::visitStringLiteralExpr(StringLiteralExpr* expr, int indentation
     stream << expr->range.getSubstring();
 }
 
-void ASTPrinter::visitPrefixOpExpr(PrefixOpExpr* expr, int indentationLevel, std::ostream& stream) {
+void ASTPrinter::visitPreOpExpr(PreOpExpr* expr, int indentationLevel, std::ostream& stream) {
     indent(indentationLevel, stream);
     switch(expr->op) {
-        #define TOKEN_OPERATOR(name, string) case OperatorKind::name: stream << string; break;
-        #include "Parser/TokenKinds.def"
+        case PreOp::Positive: stream << '+';
+        case PreOp::Negative: stream << '-';
+        case PreOp::Deref: stream << '*';
+        case PreOp::Not: stream << '!';
     }
     visitExpr(expr->operand, 0, stream);
 }
@@ -82,12 +84,29 @@ void ASTPrinter::visitPrefixOpExpr(PrefixOpExpr* expr, int indentationLevel, std
 void ASTPrinter::visitBinOpExpr(BinOpExpr* expr, int indentationLevel, std::ostream& stream) {
     indent(indentationLevel, stream);
     visitExpr(expr->lhs, 0, stream);
-    stream << " ";
+    stream << ' ';
     switch(expr->op) {
-        #define TOKEN_OPERATOR(name, string) case OperatorKind::name: stream << string; break;
-        #include "Parser/TokenKinds.def"
+        case BinOp::Add: stream << '+';
+        case BinOp::Sub: stream << '-';
+        case BinOp::Mult: stream << '*';
+        case BinOp::Div: stream << '/';
+        case BinOp::Mod: stream << '%';
+        case BinOp::Or: stream << "||";
+        case BinOp::And: stream << "&&";
+        case BinOp::Assignment: stream << '=';
+        case BinOp::AddAssignment: stream << "+=";
+        case BinOp::SubAssignment: stream << "-=";
+        case BinOp::MultAssignment: stream << "*=";
+        case BinOp::DivAssignment: stream << "/=";
+        case BinOp::ModAssignment: stream << "%=";
+        case BinOp::Equal: stream << "==";
+        case BinOp::NotEqual: stream << "!=";
+        case BinOp::LessThan: stream << '<';
+        case BinOp::LessThanOrEqual: stream << "<=";
+        case BinOp::GreaterThan: stream << '>';
+        case BinOp::GreaterThanOrEqual: stream << ">=";
     }
-    stream << " ";
+    stream << ' ';
     visitExpr(expr->rhs, 0, stream);
 }
 

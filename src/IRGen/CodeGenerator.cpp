@@ -158,78 +158,60 @@ llvm::Value* CodeGenerator::visitCharLiteralExpr(CharLiteralExpr* expr) {
 llvm::Value* CodeGenerator::visitStringLiteralExpr(StringLiteralExpr* expr) {
     return builder.CreateGlobalStringPtr(expr->literal);
 }
-llvm::Value* CodeGenerator::visitPrefixOpExpr(PrefixOpExpr* expr) {
+llvm::Value* CodeGenerator::visitPreOpExpr(PreOpExpr* expr) {
     auto operand = visitExpr(expr->operand);
     switch(expr->op) {
-        case OperatorKind::add: return operand;
-        case OperatorKind::subtract: return builder.CreateNeg(operand);
-        case OperatorKind::asterisk: return builder.CreateLoad(operand);
-        case OperatorKind::b_not: return builder.CreateNot(operand);
-        case OperatorKind::b_and:
-        case OperatorKind::b_or:
-        case OperatorKind::divide:
-        case OperatorKind::equal:
-        case OperatorKind::not_equal:
-        case OperatorKind::less_than:
-        case OperatorKind::less_than_or_equal:
-        case OperatorKind::greater_than:
-        case OperatorKind::greater_than_or_equal:
-        case OperatorKind::modulo:
-        case OperatorKind::assignment:
-        case OperatorKind::add_assignment:
-        case OperatorKind::sub_assignment:
-        case OperatorKind::mult_assignment:
-        case OperatorKind::div_assignment:
-        case OperatorKind::mod_assignment:
-            assert(false && "Invalid prefix operator");
+        case PreOp::Positive: return operand;
+        case PreOp::Negative: return builder.CreateNeg(operand);
+        case PreOp::Deref: return builder.CreateLoad(operand);
+        case PreOp::Not: return builder.CreateNot(operand);
     }
 }
 llvm::Value* CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
     llvm::Value* lhs;
-    if(expr->op != OperatorKind::assignment) {
+    if(expr->op != BinOp::Assignment) {
         lhs = visitExpr(expr->lhs);
     }
     auto rhs = visitExpr(expr->rhs);
     switch(expr->op) {
-        case OperatorKind::add: return builder.CreateAdd(lhs, rhs);
-        case OperatorKind::subtract: return builder.CreateSub(lhs, rhs);
-        case OperatorKind::asterisk: return builder.CreateMul(lhs, rhs);
-        case OperatorKind::b_not: assert(false && "Invalid prefix operator");
-        case OperatorKind::b_and: return builder.CreateAnd(lhs, rhs);
-        case OperatorKind::b_or: return builder.CreateOr(lhs, rhs);
-        case OperatorKind::divide: return builder.CreateSDiv(lhs, rhs);
-        case OperatorKind::equal: return builder.CreateICmpEQ(lhs, rhs);
-        case OperatorKind::not_equal: return builder.CreateICmpNE(lhs, rhs);
-        case OperatorKind::less_than: return builder.CreateICmpSLT(lhs, rhs);
-        case OperatorKind::less_than_or_equal: return builder.CreateICmpSLE(lhs, rhs);
-        case OperatorKind::greater_than: return builder.CreateICmpSGT(lhs, rhs);
-        case OperatorKind::greater_than_or_equal: return builder.CreateICmpSGE(lhs, rhs);
-        case OperatorKind::modulo: return builder.CreateSRem(lhs, rhs);
-        case OperatorKind::assignment:
-        case OperatorKind::add_assignment:
-        case OperatorKind::sub_assignment:
-        case OperatorKind::mult_assignment:
-        case OperatorKind::div_assignment:
-        case OperatorKind::mod_assignment:
+        case BinOp::Add: return builder.CreateAdd(lhs, rhs);
+        case BinOp::Sub: return builder.CreateSub(lhs, rhs);
+        case BinOp::Mult: return builder.CreateMul(lhs, rhs);
+        case BinOp::And: return builder.CreateAnd(lhs, rhs);
+        case BinOp::Or: return builder.CreateOr(lhs, rhs);
+        case BinOp::Div: return builder.CreateSDiv(lhs, rhs);
+        case BinOp::Equal: return builder.CreateICmpEQ(lhs, rhs);
+        case BinOp::NotEqual: return builder.CreateICmpNE(lhs, rhs);
+        case BinOp::LessThan: return builder.CreateICmpSLT(lhs, rhs);
+        case BinOp::LessThanOrEqual: return builder.CreateICmpSLE(lhs, rhs);
+        case BinOp::GreaterThan: return builder.CreateICmpSGT(lhs, rhs);
+        case BinOp::GreaterThanOrEqual: return builder.CreateICmpSGE(lhs, rhs);
+        case BinOp::Mod: return builder.CreateSRem(lhs, rhs);
+        case BinOp::Assignment:
+        case BinOp::AddAssignment:
+        case BinOp::SubAssignment:
+        case BinOp::MultAssignment:
+        case BinOp::DivAssignment:
+        case BinOp::ModAssignment:
             auto declRef = dynamic_cast<DeclRefExpr*>(expr->lhs);
             llvm::Value* value;
             switch(expr->op) {
-                case OperatorKind::assignment:
+                case BinOp::Assignment:
                     value = rhs;
                     break;
-                case OperatorKind::add_assignment:
+                case BinOp::AddAssignment:
                     value = builder.CreateAdd(lhs, rhs);
                     break;
-                case OperatorKind::sub_assignment:
+                case BinOp::SubAssignment:
                     value = builder.CreateSub(lhs, rhs);
                     break;
-                case OperatorKind::mult_assignment:
+                case BinOp::MultAssignment:
                     value = builder.CreateMul(lhs, rhs);
                     break;
-                case OperatorKind::div_assignment:
+                case BinOp::DivAssignment:
                     value = builder.CreateSDiv(lhs, rhs);
                     break;
-                case OperatorKind::mod_assignment:
+                case BinOp::ModAssignment:
                     value = builder.CreateSRem(lhs, rhs);
                     break;
                 default: __builtin_unreachable();

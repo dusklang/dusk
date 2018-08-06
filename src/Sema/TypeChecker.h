@@ -36,7 +36,7 @@ public:
     void visitBooleanLiteralExpr(BooleanLiteralExpr* expr);
     void visitCharLiteralExpr(CharLiteralExpr* expr);
     void visitStringLiteralExpr(StringLiteralExpr* expr);
-    void visitPrefixOpExpr(PrefixOpExpr* expr);
+    void visitPreOpExpr(PreOpExpr* expr);
     void visitBinOpExpr(BinOpExpr* expr);
     void visitDeclRefExpr(DeclRefExpr* expr);
 

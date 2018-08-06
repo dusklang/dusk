@@ -19,14 +19,6 @@ add_definitions(${LLVM_DEFINITIONS})
 # that we wish to use
 llvm_map_components_to_libnames(llvm_libs support core irreader all)
 
-set(ICU_PATH /usr/local/opt/icu4c)
-link_directories(${ICU_PATH}/lib)
-include_directories(${ICU_PATH}/include)
-
-set(ICU_LIBS 
-    libicuuc
-)
-
 add_subdirectory(src)
 
 add_custom_target(run

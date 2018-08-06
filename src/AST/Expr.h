@@ -50,24 +50,48 @@ struct StringLiteralExpr: public Expr {
     StringLiteralExpr(SourceRange range, std::string literal) : Expr(range, ExprKind::StringLiteral), literal(literal) {}
 };
 
-enum class OperatorKind {
-    #define TOKEN_OPERATOR(name, string) name,
-    #include "Parser/TokenKinds.def"
+enum class BinOp {
+    AddAssignment,
+    SubAssignment,
+    MultAssignment,
+    DivAssignment,
+    ModAssignment,
+    Add,
+    Sub,
+    Mult,
+    Div,
+    Mod,
+    Equal,
+    NotEqual,
+    LessThanOrEqual,
+    LessThan,
+    GreaterThanOrEqual,
+    GreaterThan,
+    Or,
+    And,
+    Assignment
+};
+
+enum class PreOp {
+    Positive,
+    Negative,
+    Deref,
+    Not
 };
 
 struct BinOpExpr: public Expr {
     Expr* lhs;
     Expr* rhs;
-    OperatorKind op;
+    BinOp op;
 
-    BinOpExpr(SourceRange range, Expr* lhs, Expr* rhs, OperatorKind op) : Expr(range, ExprKind::BinOp), lhs(lhs), rhs(rhs), op(op) {}
+    BinOpExpr(SourceRange range, Expr* lhs, Expr* rhs, BinOp op) : Expr(range, ExprKind::BinOp), lhs(lhs), rhs(rhs), op(op) {}
 };
 
-struct PrefixOpExpr: public Expr {
+struct PreOpExpr: public Expr {
     Expr* operand;
-    OperatorKind op;
+    PreOp op;
 
-    PrefixOpExpr(SourceRange range, Expr* operand, OperatorKind op) : Expr(range, ExprKind::PrefixOp), operand(operand), op(op) {}
+    PreOpExpr(SourceRange range, Expr* operand, PreOp op) : Expr(range, ExprKind::PreOp), operand(operand), op(op) {}
 };
 
 struct DeclRefExpr: public Expr {

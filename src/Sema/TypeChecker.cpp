@@ -96,11 +96,11 @@ void TypeChecker::visitCharLiteralExpr(CharLiteralExpr* expr) {
 void TypeChecker::visitStringLiteralExpr(StringLiteralExpr* expr) {
     expr->type = Type::Pointer(Type::I8());
 }
-void TypeChecker::visitPrefixOpExpr(PrefixOpExpr* expr) {
+void TypeChecker::visitPreOpExpr(PreOpExpr* expr) {
     visitExpr(expr->operand);
     // FIXME: Ensure the given operator is valid for the operand type.
     switch(expr->op) {
-        case OperatorKind::asterisk:
+        case PreOp::Deref:
             expr->type = expr->operand->type.pointeeType();
             break;
         default:
@@ -116,23 +116,23 @@ void TypeChecker::visitBinOpExpr(BinOpExpr* expr) {
     }
     // FIXME: Ensure the given operator is valid for the operand types.
     switch(expr->op) {
-        case OperatorKind::equal:
-        case OperatorKind::not_equal:
-        case OperatorKind::less_than:
-        case OperatorKind::greater_than:
-        case OperatorKind::less_than_or_equal:
-        case OperatorKind::greater_than_or_equal:
+        case BinOp::Equal:
+        case BinOp::NotEqual:
+        case BinOp::LessThan:
+        case BinOp::LessThanOrEqual:
+        case BinOp::GreaterThan:
+        case BinOp::GreaterThanOrEqual:
             expr->type = Type::Bool();
         break;
-        case OperatorKind::assignment:
-        case OperatorKind::add_assignment:
-        case OperatorKind::sub_assignment:
-        case OperatorKind::mult_assignment:
-        case OperatorKind::div_assignment:
-        case OperatorKind::mod_assignment: {
+        case BinOp::Assignment:
+        case BinOp::AddAssignment:
+        case BinOp::SubAssignment:
+        case BinOp::MultAssignment:
+        case BinOp::DivAssignment:
+        case BinOp::ModAssignment: {
             auto declRef = dynamic_cast<DeclRefExpr*>(expr->lhs);
             if(!declRef) {
-                reportError("Only stored declaration references can be assigned to", expr);
+                reportError("Only stored declaration references can currently be assigned to", expr);
             }
             if(!declRef->decl->isVar) {
                 reportError("Cannot assign to constant declaration '" + declRef->decl->name + "'", expr);
@@ -146,8 +146,6 @@ void TypeChecker::visitBinOpExpr(BinOpExpr* expr) {
         }
         break;
         default:
-            // LHS and RHS were asserted to be equal above, so it shouldn't matter which
-            // we use.
             expr->type = expr->lhs->type;
             break;
     }

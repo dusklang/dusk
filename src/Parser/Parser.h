@@ -15,10 +15,11 @@ private:
     Lexer lexer;
 
     Token current() { return lexer.curTok(); }
-    Token next() {
-        lexer.nextTok();
-        return lexer.curTok();
+    Token next() { return lexer.nextTok(); }
+    Token nextIncludingInsignificant() {
+        return lexer.nextTokIncludingInsignificant();
     }
+
     std::optional<Token> previous() { return lexer.prevTok(); }
     std::optional<std::string> parseIdentifer() {
         if(current().is(tok::identifier)) {

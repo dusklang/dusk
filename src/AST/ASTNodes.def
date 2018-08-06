@@ -35,7 +35,7 @@ EXPR_NODE(BooleanLiteral)
 EXPR_NODE(CharLiteral)
 EXPR_NODE(StringLiteral)
 EXPR_NODE(BinOp)
-EXPR_NODE(PrefixOp)
+EXPR_NODE(PreOp)
 EXPR_NODE(DeclRef)
 
 // Ditto for stmts.
