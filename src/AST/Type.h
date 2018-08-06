@@ -37,36 +37,7 @@ struct Type final {
     DataType data;
     std::optional<SourceRange> sourceRange;
     uint8_t indirection;
-private:
-    struct EqualityVisitor {
-        bool operator()(IntegerTy lhs, IntegerTy rhs) const { return lhs == rhs; }
-        bool operator()(Variable lhs, Variable rhs) const { return lhs == rhs; }
-        bool operator()(VoidTy, VoidTy) const { return true; }
-        bool operator()(BoolTy, BoolTy) const { return true; }
-        bool operator()(FloatTy, FloatTy) const { return true; }
-        bool operator()(DoubleTy, DoubleTy) const { return true; }
-        bool operator()(ErrorTy, ErrorTy) const { return true; }
 
-        template<typename T, typename U>
-        bool operator()(T, U) const { return false; }
-    };
-    struct SubstitutionVisitor {
-        std::map<int, Type> const& solution;
-        SubstitutionVisitor(std::map<int, Type> const& solution) : solution(solution) {}
-
-        Type operator()(Type::Variable var) const {
-            for(auto const& solution: this->solution) {
-                if(solution.first == var.num) {
-                    return solution.second;
-                }
-            }
-            return Type::TypeVariable(var.num, var.kind);
-        }
-
-        template<typename T>
-        Type operator()(T ty) const { return Type(ty); }
-    };
-public:
     Type(DataType data,
          std::optional<SourceRange> sourceRange = std::nullopt,
          uint8_t indirection = 0)
@@ -128,17 +99,12 @@ public:
     Type(Type const& other) = default;
     Type& operator=(Type const& other) = default;
 
-    bool operator==(Type other) const {
-        return (bool)std::visit(EqualityVisitor(), data, other.data)
-            && (this->indirection == other.indirection);
-    }
+    bool operator==(Type other) const;
     bool operator!=(Type other) const { return !(*this == other); }
 
     std::string name() const;
 
-    Type substituting(std::map<int, Type> const& solution) const {
-        return std::visit(SubstitutionVisitor{solution}, this->data);
-    }
+    Type substituting(std::map<int, Type> const& solution) const;
     void substitute(std::map<int, Type> const& solution) {
         *this = substituting(solution);
     }

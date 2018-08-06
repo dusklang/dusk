@@ -3,15 +3,19 @@
 #include <string>
 #include <cassert>
 #include <sstream>
+#include "mpark/patterns.hpp"
+
+using namespace mpark::patterns;
 
 #include "Type.h"
 
 std::string Type::name() const {
-    struct NameVisitor {
-        std::ostringstream stream;
-        NameVisitor(std::ostringstream stream) : stream(std::move(stream)) {}
-
-        void operator()(Variable typeVariable) {
+    std::ostringstream stream;
+    for(uint8_t i = 0; i < indirection; ++i) {
+        stream << "*";
+    }
+    match(data)(
+        pattern(as<Variable>(arg)) = [&](auto typeVariable) {
             stream << "<T" << typeVariable.num;
             switch(typeVariable.kind) {
                 case Variable::Integer: stream << ": Integer"; break;
@@ -19,31 +23,54 @@ std::string Type::name() const {
                 default: break;
             }
             stream << '>';
-        }
-        void operator()(IntegerTy properties) {
+        },
+        pattern(as<IntegerTy>(arg)) = [&](auto properties) {
             stream << (properties.isSigned ? "i" : "u") << properties.bitWidth;
-        }
-        void operator()(VoidTy) {
+        },
+        pattern(as<VoidTy>(_)) = [&] {
             stream << "void";
-        }
-        void operator()(BoolTy) {
+        },
+        pattern(as<BoolTy>(_)) = [&] {
             stream << "bool";
-        }
-        void operator()(FloatTy) {
+        },
+        pattern(as<FloatTy>(_)) = [&] {
             stream << "f32";
-        }
-        void operator()(DoubleTy) {
+        },
+        pattern(as<DoubleTy>(_)) = [&] {
             stream << "f64";
-        }
-        void operator()(ErrorTy) {
+        },
+        pattern(as<ErrorTy>(_)) = [&] {
             stream << "#ERRORTYPE#";
         }
-    };
-    std::ostringstream stream;
-    for(uint8_t i = 0; i < indirection; ++i) {
-        stream << "*";
-    }
-    NameVisitor visitor(std::move(stream));
-    std::visit(visitor, data);
-    return visitor.stream.str();
+    );
+    return stream.str();
+}
+
+bool Type::operator==(Type other) const {
+    return match(data, other.data)(
+       pattern(as<IntegerTy>(arg), as<IntegerTy>(arg))
+           = [](auto lhs, auto rhs) { return lhs == rhs; },
+       pattern(as<Variable>(arg), as<Variable>(arg))
+           = [](auto lhs, auto rhs) { return lhs == rhs; },
+       pattern(as<VoidTy>(_), as<VoidTy>(_)) = [] { return true; },
+       pattern(as<BoolTy>(_), as<BoolTy>(_)) = [] { return true; },
+       pattern(as<FloatTy>(_), as<FloatTy>(_)) = [] { return true; },
+       pattern(as<DoubleTy>(_), as<DoubleTy>(_)) = [] { return true; },
+       pattern(as<ErrorTy>(_), as<ErrorTy>(_)) = [] { return true; },
+       pattern(_, _) = [] { return false; }
+   ) && (indirection == other.indirection);
+}
+
+Type Type::substituting(std::map<int, Type> const& solution) const {
+    return match(data)(
+       pattern(as<Variable>(arg)) = [&](auto var) {
+           for(auto const& solution: solution) {
+               if(solution.first == var.num) {
+                   return solution.second;
+               }
+           }
+           return Type::TypeVariable(var.num, var.kind);
+       },
+       pattern(_) = [&] { return *this; }
+    );
 }

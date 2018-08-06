@@ -17,13 +17,11 @@
 std::string standardLibrary = R"~(
 #include <iostream>
 extern "C" {
-    void printInt(int x) { std::cout << x; }
     void printChar(char x) { std::cout << x; }
     char* charPtrAdd(char* ptr, int advance) { return ptr + advance; }
 }
 )~";
 std::string sourceCode = R"~(
-extern def printInt(_: i32): void
 extern def printChar(_: i8): void
 extern def charPtrAdd(_: *i8, _: i32): *i8
 def printString(str: *i8) {
@@ -33,6 +31,36 @@ def printString(str: *i8) {
         curChar = charPtrAdd(curChar, 1)
     }
     return
+}
+def printInt(val: i32) {
+    if val == 0 {
+        return
+    } else {
+        printInt(val / 10)
+        def curPlace = val % 10
+        if curPlace == 0 {
+            printChar("0")
+        } else if curPlace == 1 {
+            printChar("1")
+        } else if curPlace == 2 {
+            printChar("2")
+        } else if curPlace == 3 {
+            printChar("3")
+        } else if curPlace == 4 {
+            printChar("4")
+        } else if curPlace == 5 {
+            printChar("5")
+        } else if curPlace == 6 {
+            printChar("6")
+        } else if curPlace == 7 {
+            printChar("7")
+        } else if curPlace == 8 {
+            printChar("8")
+        } else if curPlace == 9 {
+            printChar("9")
+        }
+        return
+    }
 }
 def performFizzBuzz(end: i32) {
     // Check range.

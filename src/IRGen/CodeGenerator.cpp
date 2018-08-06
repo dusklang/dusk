@@ -3,35 +3,36 @@
 #include "CodeGenerator.h"
 #include "llvm/IR/Verifier.h"
 
+#include "mpark/patterns.hpp"
+
+using namespace mpark::patterns;
+
 llvm::Type* mapTypeToLLVM(llvm::LLVMContext& context, Type type) {
-    struct TypeVisitor {
-        llvm::LLVMContext& context;
-        TypeVisitor(llvm::LLVMContext& context) : context(context) {}
-        llvm::Type* operator()(Type::Variable typeVariable) const {
+    llvm::Type* ty = match(type.data)(
+        pattern(as<Type::Variable>(_)) = []() -> llvm::Type* {
             assert(false && "Encountered type variable");
-            __builtin_unreachable();
-        }
-        llvm::Type* operator()(Type::ErrorTy) const {
+            return nullptr;
+        },
+        pattern(as<Type::ErrorTy>(_)) = []() -> llvm::Type* {
             assert(false && "Encountered error type");
-            __builtin_unreachable();
-        }
-        llvm::Type* operator()(Type::IntegerTy properties) const {
+            return nullptr;
+        },
+        pattern(as<Type::IntegerTy>(arg)) = [&](auto properties) -> llvm::Type* {
             return llvm::Type::getIntNTy(context, properties.bitWidth);
-        }
-        llvm::Type* operator()(Type::VoidTy) const {
+        },
+        pattern(as<Type::VoidTy>(_)) = [&]() -> llvm::Type* {
             return llvm::Type::getVoidTy(context);
-        }
-        llvm::Type* operator()(Type::BoolTy) const {
+        },
+        pattern(as<Type::BoolTy>(_)) = [&]() -> llvm::Type* {
             return llvm::Type::getInt1Ty(context);
-        }
-        llvm::Type* operator()(Type::FloatTy) const {
+        },
+        pattern(as<Type::FloatTy>(_)) = [&]() -> llvm::Type* {
             return llvm::Type::getFloatTy(context);
-        }
-        llvm::Type* operator()(Type::DoubleTy) const {
+        },
+        pattern(as<Type::DoubleTy>(_)) = [&]() -> llvm::Type* {
             return llvm::Type::getDoubleTy(context);
         }
-    };
-    llvm::Type* ty = std::visit(TypeVisitor(context), type.data);
+    );
     for(uint8_t i = 0; i < type.indirection; ++i) {
         ty = llvm::PointerType::get(ty, 0);
     }
@@ -179,7 +180,8 @@ llvm::Value* CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
         case BinOp::Mult: return builder.CreateMul(lhs, rhs);
         case BinOp::And: return builder.CreateAnd(lhs, rhs);
         case BinOp::Or: return builder.CreateOr(lhs, rhs);
-        case BinOp::Div: return builder.CreateSDiv(lhs, rhs);
+        case BinOp::Div:
+            return builder.CreateSDiv(lhs, rhs);
         case BinOp::Equal: return builder.CreateICmpEQ(lhs, rhs);
         case BinOp::NotEqual: return builder.CreateICmpNE(lhs, rhs);
         case BinOp::LessThan: return builder.CreateICmpSLT(lhs, rhs);

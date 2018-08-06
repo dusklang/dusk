@@ -74,6 +74,7 @@ std::optional<BinOp> parseBinaryOperator(tok token) {
         MATCH(add, Add);
         MATCH(subtract, Sub);
         MATCH(asterisk, Mult);
+        MATCH(divide, Div);
         MATCH(modulo, Mod);
         MATCH(assignment, Assignment);
         MATCH(add_assignment, AddAssignment);
