@@ -19,7 +19,6 @@ std::string standardLibrary = R"~(
 extern "C" {
     void printInt(int x) { std::cout << x; }
     void printChar(char x) { std::cout << x; }
-    char charDeref(char* character) { return *character; }
     char* charPtrAdd(char* ptr, int advance) { return ptr + advance; }
 }
 )~";
@@ -27,7 +26,6 @@ std::string sourceCode = R"~(
 extern def printInt(_: i32): void
 extern def printChar(_: i8): void
 extern def charPtrAdd(_: *i8, _: i32): *i8
-extern def charDeref(_: *i8): i8
 def printString(str: *i8) {
     var curChar = str
     while *curChar != "\0" {
