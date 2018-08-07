@@ -21,8 +21,18 @@ extern "C" {
 }
 )~";
 std::string sourceCode = R"~(
+
+struct FILE {
+    def fpos: *i8
+    def base: *void
+    def handle: u16
+    def flags: i16
+    def unget: i16
+    def alloc: u32
+    def buffalignment: u16
+}
 extern def printChar(_: i8): void
-extern def charPtrAdd(_: *i8, _: i32): *i8
+
 def printString(str: *i8) {
     var curChar = str
     while *curChar != "\0" {

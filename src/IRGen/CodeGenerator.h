@@ -19,6 +19,7 @@ class CodeGenerator final: public ASTVisitor<CodeGenerator,
                                              void,
                                              llvm::Value*,
                                              void,
+                                             void,
                                              llvm::Value*,
                                              llvm::Value*>
 {
@@ -38,6 +39,7 @@ public:
 
     llvm::Value* visitDecl(Decl* decl);
     void visitScope(Scope* scope);
+    void visitStructDecl(StructDecl* decl);
     llvm::Value* visitIntegerLiteralExpr(IntegerLiteralExpr* expr);
     llvm::Value* visitDecimalLiteralExpr(DecimalLiteralExpr* expr);
     llvm::Value* visitBooleanLiteralExpr(BooleanLiteralExpr* expr);

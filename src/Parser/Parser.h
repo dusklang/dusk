@@ -87,6 +87,7 @@ public:
     ASTNode* parseNode();
     Type parseType();
     Decl* parseDecl();
+    StructDecl* parseStructDecl();
     Stmt* parseStmt();
     Stmt* parseIfStmt();
     Stmt* parseWhileStmt();

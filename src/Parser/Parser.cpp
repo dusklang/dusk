@@ -137,6 +137,8 @@ ASTNode* Parser::parseNode() {
         return stmt;
     } else if(auto decl = TRY(parseDecl())) {
         return decl;
+    } else if(auto decl = TRY(parseStructDecl())) {
+        return decl;
     }
     recordCurrentLoc();
     auto expr = parseExpr();
@@ -169,8 +171,7 @@ Type Parser::parseType() {
     if(*typeName == "bool") { return Type::Bool(); }
     if(*typeName == "void") { return Type::Void(); }
 
-    reportError("Invalid type name \"" + *typeName + '"', previous()->getRange());
-    __builtin_unreachable();
+    return Type::Struct(*typeName);
 }
 
 Decl* Parser::parseDecl() {
@@ -250,6 +251,41 @@ Decl* Parser::parseDecl() {
     } else {
         return new Decl(protoRange, name, type, isVar, isExtern, paramList);
     }
+}
+
+StructDecl* Parser::parseStructDecl() {
+    recordCurrentLoc();
+    if(current().isNot(tok::kw_struct)) {
+        return nullptr;
+    }
+    next();
+    auto name = parseIdentifer();
+    if(!name) {
+        reportError("Expected struct name");
+    }
+    if(current().isNot(tok::sep_left_curly)) {
+        reportError("Expected opening curly brace to begin struct declaration");
+    }
+    next();
+    std::vector<Decl*> fields;
+    while(current().isNot(tok::sep_right_curly)) {
+        auto field = parseDecl();
+        if(!field) {
+            reportError("Expected struct field");
+        }
+        if(field->isExtern) {
+            reportError("Struct fields cannot be declared as `extern`");
+        }
+        if(field->isParameterized()) {
+            reportError("Struct fields cannot have parameters");
+        }
+        if(field->hasDefinition()) {
+            reportError("Struct fields cannot (yet) have definitions");
+        }
+        fields.push_back(field);
+    }
+    next();
+    return new StructDecl(currentRange(), *name, fields);
 }
 
 Stmt* Parser::parseStmt() {

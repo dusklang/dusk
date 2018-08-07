@@ -8,6 +8,8 @@
 
 #include "General/SourceLoc.h"
 
+struct StructDecl;
+
 struct Type final {
     struct IntegerTy {
         int bitWidth;
@@ -20,6 +22,14 @@ struct Type final {
     struct FloatTy {};
     struct DoubleTy {};
     struct ErrorTy {};
+    struct StructTy {
+        std::string name;
+        StructDecl* decl;
+
+        bool operator==(StructTy other) const {
+            return name == other.name && decl == other.decl;
+        }
+    };
     struct Variable {
         enum Kind {
             General, Integer, Decimal
@@ -29,10 +39,10 @@ struct Type final {
 
         bool operator==(Variable const& other) const {
             return num == other.num && kind == other.kind;
-        };
+        }
     };
 
-    typedef std::variant<IntegerTy, Variable, VoidTy, BoolTy, FloatTy, DoubleTy, ErrorTy> DataType;
+    typedef std::variant<IntegerTy, Variable, VoidTy, BoolTy, FloatTy, DoubleTy, ErrorTy, StructTy> DataType;
 
     DataType data;
     std::optional<SourceRange> sourceRange;
@@ -88,6 +98,9 @@ struct Type final {
     }
     static Type Double(std::optional<SourceRange> sourceRange = std::nullopt) {
         return Type(DoubleTy(), sourceRange);
+    }
+    static Type Struct(std::string name, StructDecl* decl = nullptr, std::optional<SourceRange> sourceRange = std::nullopt) {
+        return Type(StructTy { name, decl }, sourceRange);
     }
 
     Type pointeeType() const {

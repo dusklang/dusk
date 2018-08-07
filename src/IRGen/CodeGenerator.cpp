@@ -139,6 +139,9 @@ llvm::Value* CodeGenerator::visitDecl(Decl* decl) {
         return function;
     }
 }
+void CodeGenerator::visitStructDecl(StructDecl* decl) {
+    
+}
 void CodeGenerator::visitScope(Scope* scope) {
     for(auto& node: scope->nodes) {
         visit(node);

@@ -38,6 +38,16 @@ void ASTPrinter::visitDecl(Decl* decl, int indentationLevel, std::ostream& strea
     }
 }
 
+void ASTPrinter::visitStructDecl(StructDecl* decl, int indentationLevel, std::ostream& stream) {
+    indent(indentationLevel, stream);
+    stream << "struct " << decl->name << " {";
+    for(auto field: decl->fields) {
+        visitDecl(field, indentationLevel + 1, stream);
+    }
+    indent(indentationLevel, stream);
+    stream << "}\n";
+}
+
 void ASTPrinter::visitScope(Scope* scope, int indentationLevel, std::ostream& stream) {
     for(int i = 0; i < scope->nodes.size(); ++i) {
         visit(scope->nodes[i], indentationLevel + 1, stream);

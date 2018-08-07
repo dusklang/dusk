@@ -30,6 +30,7 @@ public:
     }
 
     void visitDecl(Decl* decl);
+    void visitStructDecl(StructDecl* decl);
     void visitScope(Scope* scope);
     void visitIntegerLiteralExpr(IntegerLiteralExpr* expr);
     void visitDecimalLiteralExpr(DecimalLiteralExpr* expr);

@@ -61,3 +61,10 @@ public:
 
     bool isParameterized() const { return !paramList.empty(); }
 };
+
+struct StructDecl: public ASTNode {
+    std::string name;
+    std::vector<Decl*> fields;
+
+    StructDecl(SourceRange range, std::string name, std::vector<Decl*> fields) : ASTNode(NodeKind::StructDecl, range), name(name), fields(fields) {}
+};

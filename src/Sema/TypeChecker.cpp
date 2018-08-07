@@ -68,6 +68,9 @@ void TypeChecker::visitDecl(Decl* decl) {
         }
     }
 }
+void TypeChecker::visitStructDecl(StructDecl* decl) {
+
+}
 void TypeChecker::visitScope(Scope* scope) {
     // Start a new namespace for declarations inside the scope.
     declLists.push_back(std::vector<Decl*>());

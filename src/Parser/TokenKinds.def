@@ -38,6 +38,7 @@ TOKEN_KEYWORD(if, if)
 TOKEN_KEYWORD(else, else)
 TOKEN_KEYWORD(while, while)
 TOKEN_KEYWORD(as, as)
+TOKEN_KEYWORD(struct, struct)
 
 TOKEN_SEPARATOR(colon, ':')
 TOKEN_SEPARATOR(comma, ',')

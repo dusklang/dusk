@@ -23,6 +23,7 @@
 // Base classes; these get their own overloads of ASTVisitor::visit()
 UNTYPED_AST_NODE(Decl)
 UNTYPED_AST_NODE(Scope)
+UNTYPED_AST_NODE(StructDecl)
 
 // Typed = they have different kinds to switch over in an enum class called name##Kind.
 TYPED_AST_NODE(Expr)
