@@ -17,26 +17,15 @@
 std::string standardLibrary = R"~(
 #include <iostream>
 extern "C" {
-    void printChar(char x) { std::cout << x; }
-    const char* test = "test";
 }
 )~";
 std::string sourceCode = R"~(
 
-struct FILE {
-    def fpos: *i8
-    def base: *void
-    def handle: u16
-    def flags: i16
-    def unget: i16
-    def alloc: u32
-    def buffincrement: u16
+extern def putchar(_: i32): void
+def printChar(character: i8) {
+    putchar(character as i32)
+    return
 }
-extern var test: *i8
-extern var stdin: *FILE
-extern var stdout: *FILE
-extern var stderr: *FILE
-extern def printChar(_: i8): void
 
 def printString(str: *i8) {
     var curChar = str
@@ -74,8 +63,7 @@ def performFizzBuzz(end: i32) {
     return
 }
 def main {
-    //performFizzBuzz(100)
-    printString(test)
+    performFizzBuzz(100)
 
     return
 }

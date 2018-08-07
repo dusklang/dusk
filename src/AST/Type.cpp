@@ -27,6 +27,9 @@ std::string Type::name() const {
         pattern(as<IntegerTy>(arg)) = [&](auto properties) {
             stream << (properties.isSigned ? "i" : "u") << properties.bitWidth;
         },
+        pattern(as<StructTy>(arg)) = [&](auto structTy) {
+            stream << structTy.name;
+        },
         pattern(as<VoidTy>(_)) = [&] {
             stream << "void";
         },
@@ -51,6 +54,8 @@ bool Type::operator==(Type other) const {
        pattern(as<IntegerTy>(arg), as<IntegerTy>(arg))
            = [](auto lhs, auto rhs) { return lhs == rhs; },
        pattern(as<Variable>(arg), as<Variable>(arg))
+           = [](auto lhs, auto rhs) { return lhs == rhs; },
+       pattern(as<StructTy>(arg), as<StructTy>(arg))
            = [](auto lhs, auto rhs) { return lhs == rhs; },
        pattern(as<VoidTy>(_), as<VoidTy>(_)) = [] { return true; },
        pattern(as<BoolTy>(_), as<BoolTy>(_)) = [] { return true; },
