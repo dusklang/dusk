@@ -47,7 +47,7 @@ def performFizzBuzz(end: i32) {
         printString("Invalid bounds!\n")
         return
     }
-    var i: i32 = 0
+    var i = 0
     while i <= end {
         def fizz = i % 3 == 0
         def buzz = i % 5 == 0

@@ -118,8 +118,16 @@ void TypeChecker::visitBinOpExpr(BinOpExpr* expr) {
     if(expr->lhs->type != expr->rhs->type) {
         reportError("Mismatched types `" + expr->lhs->type.name() + "` and `" + expr->rhs->type.name() + "` in binary operator expression", expr);
     }
-    // FIXME: Ensure the given operator is valid for the operand types.
+    expr->type = expr->lhs->type;
+    // FIXME: Check that operators are valid on the operand types.
     switch(expr->op) {
+        case BinOp::Add:  break;
+        case BinOp::Sub:  break;
+        case BinOp::Mult: break;
+        case BinOp::Div:  break;
+        case BinOp::Mod:  break;
+        case BinOp::Or:   break;
+        case BinOp::And:  break;
         case BinOp::Equal:
         case BinOp::NotEqual:
         case BinOp::LessThan:
@@ -127,7 +135,7 @@ void TypeChecker::visitBinOpExpr(BinOpExpr* expr) {
         case BinOp::GreaterThan:
         case BinOp::GreaterThanOrEqual:
             expr->type = Type::Bool();
-        break;
+            break;
         case BinOp::Assignment:
         case BinOp::AddAssignment:
         case BinOp::SubAssignment:
@@ -146,12 +154,26 @@ void TypeChecker::visitBinOpExpr(BinOpExpr* expr) {
                             + "' to mutable declaration of type '" + declRef->type.name(),
                             expr);
             }
+            switch(expr->op) {
+                case BinOp::AddAssignment:
+                    checkAdd(expr->lhs, expr->rhs);
+                    break;
+                case BinOp::SubAssignment:
+                    checkSub(expr->lhs, expr->rhs);
+                    break;
+                case BinOp::MultAssignment:
+                    checkMult(expr->lhs, expr->rhs);
+                    break;
+                case BinOp::DivAssignment:
+                    checkDiv(expr->lhs, expr->rhs);
+                    break;
+                case BinOp::ModAssignment:
+                    checkMod(expr->lhs, expr->rhs);
+                    break;
+                default: break;
+            }
             expr->type = Type::Void();
         }
-        break;
-        default:
-            expr->type = expr->lhs->type;
-            break;
     }
 }
 void TypeChecker::visitCastExpr(CastExpr* expr) {

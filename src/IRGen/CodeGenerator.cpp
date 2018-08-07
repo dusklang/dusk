@@ -174,38 +174,108 @@ llvm::Value* CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
         lhs = visitExpr(expr->lhs);
     }
     auto rhs = visitExpr(expr->rhs);
+    auto createAdd = [&]() -> llvm::Value* {
+        return match(expr->type.data)(
+            pattern(as<Type::IntegerTy>(arg)) = [&](auto properties) {
+                return builder.CreateAdd(lhs, rhs);
+            },
+            pattern(as<Type::FloatTy>(_)) = [&] {
+                return builder.CreateFAdd(lhs, rhs);
+            },
+            pattern(as<Type::DoubleTy>(_)) = [&] {
+                return builder.CreateFAdd(lhs, rhs);
+            },
+            pattern(_) = [&]() -> llvm::Value* {
+                assert(false && "Can't add values of that type");
+            }
+        );
+    };
+    auto createSub = [&]() -> llvm::Value* {
+        return match(expr->type.data)(
+            pattern(as<Type::IntegerTy>(arg)) = [&](auto properties) {
+                return builder.CreateSub(lhs, rhs);
+            },
+            pattern(as<Type::FloatTy>(_)) = [&] {
+                return builder.CreateFSub(lhs, rhs);
+            },
+            pattern(as<Type::DoubleTy>(_)) = [&] {
+                return builder.CreateFSub(lhs, rhs);
+            },
+            pattern(_) = [&]() -> llvm::Value* {
+                assert(false && "Can't subtract values of that type");
+            }
+        );
+    };
+    auto createMult = [&]() -> llvm::Value* {
+        return match(expr->type.data)(
+            pattern(as<Type::IntegerTy>(arg)) = [&](auto properties) {
+                return builder.CreateMul(lhs, rhs);
+            },
+            pattern(as<Type::FloatTy>(_)) = [&] {
+                return builder.CreateFMul(lhs, rhs);
+            },
+            pattern(as<Type::DoubleTy>(_)) = [&] {
+                return builder.CreateFMul(lhs, rhs);
+            },
+            pattern(_) = [&]() -> llvm::Value* {
+                assert(false && "Can't multiply values of that type");
+            }
+        );
+    };
+    auto createDiv = [&]() -> llvm::Value* {
+        return match(expr->type.data)(
+            pattern(as<Type::IntegerTy>(arg)) = [&](auto properties) {
+                if(properties.isSigned) {
+                    return builder.CreateSDiv(lhs, rhs);
+                } else {
+                    return builder.CreateUDiv(lhs, rhs);
+                }
+            },
+            pattern(as<Type::FloatTy>(_)) = [&] {
+                return builder.CreateFDiv(lhs, rhs);
+            },
+            pattern(as<Type::DoubleTy>(_)) = [&] {
+                return builder.CreateFDiv(lhs, rhs);
+            },
+            pattern(_) = [&]() -> llvm::Value* {
+                assert(false && "Can't divide values of that type");
+            }
+        );
+    };
+    auto createMod = [&]() -> llvm::Value* {
+        return match(expr->type.data)(
+            pattern(as<Type::IntegerTy>(arg)) = [&](auto properties) {
+                if(properties.isSigned) {
+                    return builder.CreateSRem(lhs, rhs);
+                } else {
+                    return builder.CreateURem(lhs, rhs);
+                }
+            },
+            pattern(as<Type::FloatTy>(_)) = [&] {
+                return builder.CreateFRem(lhs, rhs);
+            },
+            pattern(as<Type::DoubleTy>(_)) = [&] {
+                return builder.CreateFRem(lhs, rhs);
+            },
+            pattern(_) = [&]() -> llvm::Value* {
+                assert(false && "Can't modulo values of that type");
+            }
+        );
+    };
     switch(expr->op) {
-        case BinOp::Add: return builder.CreateAdd(lhs, rhs);
-        case BinOp::Sub: return builder.CreateSub(lhs, rhs);
-        case BinOp::Mult: return builder.CreateMul(lhs, rhs);
+        case BinOp::Add: return createAdd();
+        case BinOp::Sub: return createSub();
+        case BinOp::Mult: return createMult();
+        case BinOp::Div: return createDiv();
+        case BinOp::Mod: return createMod();
         case BinOp::And: return builder.CreateAnd(lhs, rhs);
         case BinOp::Or: return builder.CreateOr(lhs, rhs);
-        case BinOp::Div:
-            return match(expr->type.data)(
-               pattern(as<Type::IntegerTy>(arg)) = [&](auto properties) {
-                   if(properties.isSigned) {
-                       return builder.CreateSDiv(lhs, rhs);
-                   } else {
-                       return builder.CreateUDiv(lhs, rhs);
-                   }
-               },
-               pattern(as<Type::FloatTy>(_)) = [&] {
-                   return builder.CreateFDiv(lhs, rhs);
-               },
-               pattern(as<Type::DoubleTy>(_)) = [&] {
-                   return builder.CreateFDiv(lhs, rhs);
-               },
-               pattern(_) = [&]() -> llvm::Value* {
-                   assert(false && "Can't divide values of that type");
-               }
-            );
         case BinOp::Equal: return builder.CreateICmpEQ(lhs, rhs);
         case BinOp::NotEqual: return builder.CreateICmpNE(lhs, rhs);
         case BinOp::LessThan: return builder.CreateICmpSLT(lhs, rhs);
         case BinOp::LessThanOrEqual: return builder.CreateICmpSLE(lhs, rhs);
         case BinOp::GreaterThan: return builder.CreateICmpSGT(lhs, rhs);
         case BinOp::GreaterThanOrEqual: return builder.CreateICmpSGE(lhs, rhs);
-        case BinOp::Mod: return builder.CreateSRem(lhs, rhs);
         case BinOp::Assignment:
         case BinOp::AddAssignment:
         case BinOp::SubAssignment:
@@ -219,21 +289,21 @@ llvm::Value* CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
                     value = rhs;
                     break;
                 case BinOp::AddAssignment:
-                    value = builder.CreateAdd(lhs, rhs);
+                    value = createAdd();
                     break;
                 case BinOp::SubAssignment:
-                    value = builder.CreateSub(lhs, rhs);
+                    value = createSub();
                     break;
                 case BinOp::MultAssignment:
-                    value = builder.CreateMul(lhs, rhs);
+                    value = createMult();
                     break;
                 case BinOp::DivAssignment:
-                    value = builder.CreateSDiv(lhs, rhs);
+                    value = createDiv();
                     break;
                 case BinOp::ModAssignment:
-                    value = builder.CreateSRem(lhs, rhs);
+                    value = createMod();
                     break;
-                default: __builtin_unreachable();
+                default: break;
             }
             return builder.CreateStore(value, declRef->decl->codegenVal);
     }
