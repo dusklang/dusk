@@ -24,6 +24,7 @@ public:
     void visitBinOpExpr(BinOpExpr* expr, int indentationLevel, std::ostream& stream);
     void visitCastExpr(CastExpr* expr, int indentationLevel, std::ostream& stream);
     void visitDeclRefExpr(DeclRefExpr* expr, int indentationLevel, std::ostream& stream);
+    void visitMemberRefExpr(MemberRefExpr* expr, int indentationLevel, std::ostream& stream);
 
     void visitReturnStmt(ReturnStmt* stmt, int indentationLevel, std::ostream& stream);
     void visitIfStmt(IfStmt* stmt, int indentationLevel, std::ostream& stream, bool isIfElse = false);

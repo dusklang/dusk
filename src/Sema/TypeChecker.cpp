@@ -272,6 +272,32 @@ void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
     }
     reportError(errorMessage, expr);
 }
+void TypeChecker::visitMemberRefExpr(MemberRefExpr* expr) {
+    visitExpr(expr->root);
+    if(expr->root->type.indirection > 0) {
+        reportError("Cannot reference a member of a pointer type", expr);
+    }
+    match(expr->root->type.data)(
+        pattern(as<Type::StructTy>(arg)) = [&](auto structTy) {
+            std::optional<size_t> fieldDecl = std::nullopt;
+
+            auto& fields = structTy.decl->fields;
+            for(size_t field = 0; field < fields.size(); ++field) {
+                if(expr->name == fields[field]->name) {
+                    fieldDecl = field;
+                }
+            }
+            if(!fieldDecl) {
+                reportError("Struct `" + structTy.name + "` has no member `" + expr->name + "`", expr);
+            }
+            expr->declIndex = *fieldDecl;
+            expr->type = fields[*fieldDecl]->type;
+        },
+        pattern(_) = [&] {
+            reportError("Cannot reference member `" + expr->name + "` of non-struct type", expr);
+        }
+    );
+}
 void TypeChecker::visitReturnStmt(ReturnStmt* stmt) {
     if(stmt->value) {
         visitExpr(stmt->value);

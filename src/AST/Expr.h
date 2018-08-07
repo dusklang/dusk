@@ -114,3 +114,16 @@ struct DeclRefExpr: public Expr {
 
     DeclRefExpr& operator=(DeclRefExpr const& other) = default;
 };
+
+struct MemberRefExpr: public Expr {
+    Expr* root;
+    std::string name;
+    size_t declIndex = -1;
+
+    MemberRefExpr(SourceRange range, Expr* root, std::string name) : Expr(range, ExprKind::DeclRef),
+    root(root), name(name) {}
+
+    ~MemberRefExpr() override;
+
+    MemberRefExpr& operator=(MemberRefExpr const& other) = default;
+};

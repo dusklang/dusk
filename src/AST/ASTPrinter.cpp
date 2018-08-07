@@ -142,6 +142,11 @@ void ASTPrinter::visitDeclRefExpr(DeclRefExpr* expr, int indentationLevel, std::
     }
 }
 
+void ASTPrinter::visitMemberRefExpr(MemberRefExpr* expr, int indentationLevel, std::ostream& stream) {
+    visitExpr(expr->root, indentationLevel, stream);
+    stream << '.' << expr->name;
+}
+
 void ASTPrinter::visitReturnStmt(ReturnStmt* stmt, int indentationLevel, std::ostream& stream) {
     indent(indentationLevel, stream);
     stream << "return";

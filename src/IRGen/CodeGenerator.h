@@ -49,6 +49,7 @@ public:
     llvm::Value* visitBinOpExpr(BinOpExpr* expr);
     llvm::Value* visitCastExpr(CastExpr* expr);
     llvm::Value* visitDeclRefExpr(DeclRefExpr* expr);
+    llvm::Value* visitMemberRefExpr(MemberRefExpr* expr);
 
     llvm::Value* visitReturnStmt(ReturnStmt* stmt);
     llvm::Value* visitIfStmt(IfStmt* stmt);

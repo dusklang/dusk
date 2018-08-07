@@ -17,9 +17,26 @@
 std::string standardLibrary = R"~(
 #include <iostream>
 extern "C" {
+    struct Person {
+        const char* name;
+        uint8_t age;
+        uint8_t numberOfChildren;
+    };
+    Person henry {
+        "Henry",
+        42,
+        4
+    };
 }
 )~";
 std::string sourceCode = R"~(
+
+struct Person {
+    def name: *i8
+    def age: u8
+    def numberOfChildren: u8
+}
+extern var henry: Person
 
 extern def putchar(_: i32): void
 def printChar(character: i8) {
@@ -63,7 +80,13 @@ def performFizzBuzz(end: i32) {
     return
 }
 def main {
-    performFizzBuzz(100)
+    printString(henry.name)
+    printString(" is ")
+    printInt(henry.age as i32)
+    printString(" years old and has ")
+    printInt(henry.numberOfChildren as i32)
+    printString(" children.\n")
+    //performFizzBuzz(100)
 
     return
 }

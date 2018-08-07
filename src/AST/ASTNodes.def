@@ -39,6 +39,7 @@ EXPR_NODE(BinOp)
 EXPR_NODE(PreOp)
 EXPR_NODE(DeclRef)
 EXPR_NODE(Cast)
+EXPR_NODE(MemberRef)
 
 // Ditto for stmts.
 STMT_NODE(Return)

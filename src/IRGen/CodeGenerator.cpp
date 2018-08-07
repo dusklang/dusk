@@ -396,6 +396,12 @@ llvm::Value* CodeGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
         }
     }
 }
+llvm::Value* CodeGenerator::visitMemberRefExpr(MemberRefExpr* expr) {
+    llvm::Value* root = visitExpr(expr->root);
+    auto index = llvm::ConstantInt::get(context, llvm::APInt(32, expr->declIndex));
+    auto addr = builder.CreateGEP(root, index);
+    return builder.CreateLoad(addr);
+}
 llvm::Value* CodeGenerator::visitReturnStmt(ReturnStmt* stmt) {
     if(!stmt->value) {
         return builder.CreateRetVoid();

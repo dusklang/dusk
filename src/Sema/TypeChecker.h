@@ -43,6 +43,7 @@ public:
     void visitBinOpExpr(BinOpExpr* expr);
     void visitCastExpr(CastExpr* expr);
     void visitDeclRefExpr(DeclRefExpr* expr);
+    void visitMemberRefExpr(MemberRefExpr* expr);
 
     void visitReturnStmt(ReturnStmt* stmt);
     void visitIfStmt(IfStmt* stmt);
