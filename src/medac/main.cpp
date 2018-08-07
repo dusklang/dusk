@@ -22,10 +22,20 @@ extern "C" {
         uint8_t age;
         uint8_t numberOfChildren;
     };
-    Person henry {
+    Person henry = {
         "Henry",
         42,
         4
+    };
+    Person sally = {
+       "Sally",
+       25,
+       1
+    };
+    Person alexandra = {
+        "Alexandra",
+        20,
+        0
     };
 }
 )~";
@@ -37,6 +47,8 @@ struct Person {
     def numberOfChildren: u8
 }
 extern var henry: Person
+extern var sally: Person
+extern var alexandra: Person
 
 extern def putchar(_: i32): void
 def printChar(character: i8) {
@@ -79,14 +91,28 @@ def performFizzBuzz(end: i32) {
     }
     return
 }
-def main {
-    printString(henry.name)
+def printPerson(person: Person) {
+    printString(person.name)
     printString(" is ")
-    printInt(henry.age as i32)
+    printInt(person.age as i32)
     printString(" years old and has ")
-    printInt(henry.numberOfChildren as i32)
-    printString(" children.\n")
-    //performFizzBuzz(100)
+    if person.numberOfChildren == 0 as u8 {
+        printString("no")
+    } else {
+        printInt(person.numberOfChildren as i32)
+    }
+    if person.numberOfChildren == 1 as u8 {
+        printString(" child.\n")
+    } else {
+        printString(" children.\n")
+    }
+
+    return
+}
+def main {
+    printPerson(henry)
+    printPerson(sally)
+    printPerson(alexandra)
 
     return
 }

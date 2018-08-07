@@ -429,10 +429,20 @@ Expr* Parser::parseTerm() {
         retVal = TRY(parseDeclRefExpr());
     }
 
-    if(retVal && current().is(tok::kw_as)) {
-        next();
-        auto destType = parseType();
-        retVal = new CastExpr(currentRange(), retVal, destType);
+    if(retVal) {
+        while(current().is(tok::sep_dot)) {
+            next();
+            auto memberName = parseIdentifer();
+            if(!memberName) {
+                reportError("Expected member name after '.'");
+            }
+            retVal = new MemberRefExpr(currentRange(), retVal, *memberName);
+        }
+        while(current().is(tok::kw_as)) {
+            next();
+            auto destType = parseType();
+            retVal = new CastExpr(currentRange(), retVal, destType);
+        }
     }
 
     return retVal;

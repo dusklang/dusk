@@ -233,7 +233,7 @@ void TypeChecker::visitCastExpr(CastExpr* expr) {
 }
 void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
     // Type-check arguments.
-    for(auto& arg: expr->argList) {
+    for(auto arg: expr->argList) {
         visitExpr(arg);
     }
 

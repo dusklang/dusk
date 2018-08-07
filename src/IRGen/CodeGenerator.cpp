@@ -345,6 +345,10 @@ llvm::Value* CodeGenerator::visitCastExpr(CastExpr* expr) {
         pattern(as<Type::IntegerTy>(arg), as<Type::IntegerTy>(arg)) = [&](auto og, auto dest) {
             // TODO: Detect overflow.
             if(dest.isSigned) {
+                ogValue->print(llvm::outs());
+                std::cout << "\n\n";
+                destTypeLLVM->print(llvm::outs());
+                std::cout << "\n\n";
                 return builder.CreateSExtOrTrunc(ogValue, destTypeLLVM);
             } else {
                 return builder.CreateZExtOrTrunc(ogValue, destTypeLLVM);
@@ -398,8 +402,13 @@ llvm::Value* CodeGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
 }
 llvm::Value* CodeGenerator::visitMemberRefExpr(MemberRefExpr* expr) {
     llvm::Value* root = visitExpr(expr->root);
+    auto firstIndex = llvm::ConstantInt::get(context, llvm::APInt(32, 0));
     auto index = llvm::ConstantInt::get(context, llvm::APInt(32, expr->declIndex));
-    auto addr = builder.CreateGEP(root, index);
+    // FIXME: Don't copy the whole struct.
+    auto structCopy = builder.CreateAlloca(mapTypeToLLVM(context, expr->root->type));
+    builder.CreateStore(root, structCopy);
+    std::vector<llvm::Value*> indices { firstIndex, index };
+    auto addr = builder.CreateGEP(structCopy, indices);
     return builder.CreateLoad(addr);
 }
 llvm::Value* CodeGenerator::visitReturnStmt(ReturnStmt* stmt) {

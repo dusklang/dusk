@@ -120,10 +120,8 @@ struct MemberRefExpr: public Expr {
     std::string name;
     size_t declIndex = -1;
 
-    MemberRefExpr(SourceRange range, Expr* root, std::string name) : Expr(range, ExprKind::DeclRef),
+    MemberRefExpr(SourceRange range, Expr* root, std::string name) : Expr(range, ExprKind::MemberRef),
     root(root), name(name) {}
-
-    ~MemberRefExpr() override;
 
     MemberRefExpr& operator=(MemberRefExpr const& other) = default;
 };

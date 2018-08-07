@@ -46,6 +46,7 @@ TOKEN_SEPARATOR(left_paren, '(')
 TOKEN_SEPARATOR(right_paren, ')')
 TOKEN_SEPARATOR(left_curly, '{')
 TOKEN_SEPARATOR(right_curly, '}')
+TOKEN_SEPARATOR(dot, '.')
 
 TOKEN_OPERATOR(add_assignment, "+=")
 TOKEN_OPERATOR(sub_assignment, "-=")
