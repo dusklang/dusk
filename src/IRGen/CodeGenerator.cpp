@@ -20,6 +20,13 @@ llvm::Type* mapTypeToLLVM(llvm::LLVMContext& context, Type type) {
         pattern(as<Type::IntegerTy>(arg)) = [&](auto properties) -> llvm::Type* {
             return llvm::Type::getIntNTy(context, properties.bitWidth);
         },
+        pattern(as<Type::StructTy>(arg)) = [&](auto structTy) -> llvm::Type* {
+            std::vector<llvm::Type*> types;
+            for(auto field: structTy.decl->fields) {
+                types.push_back(mapTypeToLLVM(context, field->type));
+            }
+            return llvm::StructType::get(context, types);
+        },
         pattern(as<Type::VoidTy>(_)) = [&]() -> llvm::Type* {
             return llvm::Type::getVoidTy(context);
         },

@@ -6,6 +6,24 @@
 
 using namespace mpark::patterns;
 
+void TypeChecker::visitType(Type *type) {
+    match(type->data)(
+        pattern(as<Type::StructTy>(arg)) = [&](auto& structTy) {
+            StructDecl* structDecl;
+            for(auto decl: structs) {
+                if(structTy.name == decl->name) {
+                    structDecl = decl;
+                    break;
+                }
+            }
+            if(!structDecl) {
+                reportError<ASTNode>("Reference to undeclared type `" + structTy.name + '`', nullptr);
+            }
+            structTy.decl = structDecl;
+        },
+        pattern(_) = [] {}
+    );
+}
 void TypeChecker::visitDecl(Decl* decl) {
     // Reject nested functions.
     if(declLists.size() > 1 && decl->isComputed()) {
@@ -20,23 +38,36 @@ void TypeChecker::visitDecl(Decl* decl) {
         declLists.back().push_back(decl);
     }
 
+    if(decl->type != Type::Error()) {
+        visitType(&decl->type);
+    }
+    for(auto param: decl->paramList) {
+        visitType(&param->type);
+    }
+
     if(decl->hasDefinition()) {
         // If we have parameters, start a new scope for referencing them.
         if(decl->isParameterized()) {
             declLists.push_back(std::vector<Decl*>());
-            for(auto& param: decl->paramList) {
+            for(auto param: decl->paramList) {
                 declLists.back().push_back(param);
             }
         }
         if(decl->isComputed()) {
             // Add Void type to computed declaration if it doesn't have one.
-            if(decl->type == Type::Error()) decl->type = Type::Void();
+            if(decl->type == Type::Error()) {
+                decl->type = Type::Void();
+            } else {
+                visitType(&decl->type);
+            }
 
             returnTypeStack.push(decl->type);
             visitScope(decl->body());
             returnTypeStack.pop();
 
-            if(decl->isParameterized()) declLists.pop_back();
+            if(decl->isParameterized()) {
+                declLists.pop_back();
+            }
         } else {
             visitExpr(decl->expression());
             if(decl->type == Type::Error()) {
@@ -69,7 +100,18 @@ void TypeChecker::visitDecl(Decl* decl) {
     }
 }
 void TypeChecker::visitStructDecl(StructDecl* decl) {
-
+    if(declLists.size() > 1) {
+        reportError("`struct` declarations may not (yet) be nested", decl);
+    }
+    for(auto other: structs) {
+        if(decl->name == other->name) {
+            reportError(std::string("Re-declaration of structure `") + decl->name + '`', decl);
+        }
+    }
+    for(auto field: decl->fields) {
+        visitType(&field->type);
+    }
+    structs.push_back(decl);
 }
 void TypeChecker::visitScope(Scope* scope) {
     // Start a new namespace for declarations inside the scope.
@@ -184,6 +226,7 @@ void TypeChecker::visitBinOpExpr(BinOpExpr* expr) {
 }
 void TypeChecker::visitCastExpr(CastExpr* expr) {
     visitExpr(expr->operand);
+    visitType(&expr->destType);
     expr->type = expr->destType;
 }
 void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {

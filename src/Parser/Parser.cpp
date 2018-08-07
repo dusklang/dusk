@@ -282,6 +282,9 @@ StructDecl* Parser::parseStructDecl() {
         if(field->hasDefinition()) {
             reportError("Struct fields cannot (yet) have definitions");
         }
+        if(field->type == Type::Error()) {
+            reportError("Struct fields must have explicit types");
+        }
         fields.push_back(field);
     }
     next();

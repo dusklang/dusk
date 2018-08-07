@@ -10,6 +10,7 @@
 class TypeChecker final: public ASTVisitor<TypeChecker> {
 private:
     std::vector<std::vector<Decl*>> declLists;
+    std::vector<StructDecl*> structs;
     std::stack<Type> returnTypeStack;
     template<typename Node>
     void reportError(std::string message, Node* node) {
@@ -29,6 +30,7 @@ public:
         declLists.push_back(std::vector<Decl*>());
     }
 
+    void visitType(Type* type);
     void visitDecl(Decl* decl);
     void visitStructDecl(StructDecl* decl);
     void visitScope(Scope* scope);
