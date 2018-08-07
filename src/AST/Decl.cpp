@@ -34,10 +34,10 @@ Scope* Decl::body() const {
 }
 
 bool Decl::isStored() const {
-    return (bool)dynamic_cast<Expr*>(value);
+    return !isComputed();
 }
 
 bool Decl::isComputed() const {
-    if(!hasDefinition() && isExtern) return true;
+    if(!hasDefinition() && isExtern && !isVar) return true;
     return (bool)dynamic_cast<Scope*>(value);
 }

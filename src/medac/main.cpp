@@ -18,7 +18,7 @@ std::string standardLibrary = R"~(
 #include <iostream>
 extern "C" {
     void printChar(char x) { std::cout << x; }
-    char* test = "test";
+    const char* test = "test";
 }
 )~";
 std::string sourceCode = R"~(
