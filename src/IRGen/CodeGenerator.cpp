@@ -175,23 +175,28 @@ llvm::Value* CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
     }
     auto rhs = visitExpr(expr->rhs);
     auto createAdd = [&]() -> llvm::Value* {
-        return match(expr->type.data)(
-            pattern(as<Type::IntegerTy>(arg)) = [&](auto properties) {
-                return builder.CreateAdd(lhs, rhs);
-            },
-            pattern(as<Type::FloatTy>(_)) = [&] {
-                return builder.CreateFAdd(lhs, rhs);
-            },
-            pattern(as<Type::DoubleTy>(_)) = [&] {
-                return builder.CreateFAdd(lhs, rhs);
-            },
-            pattern(_) = [&]() -> llvm::Value* {
-                assert(false && "Can't add values of that type");
-            }
-        );
+        if(expr->lhs->type.indirection > 0) {
+            return builder.CreateGEP(lhs, rhs);
+        } else {
+            return match(expr->lhs->type.data)(
+                pattern(as<Type::IntegerTy>(arg)) = [&](auto properties) {
+                    return builder.CreateAdd(lhs, rhs);
+                },
+                pattern(as<Type::FloatTy>(_)) = [&] {
+                    return builder.CreateFAdd(lhs, rhs);
+                },
+                pattern(as<Type::DoubleTy>(_)) = [&] {
+                    return builder.CreateFAdd(lhs, rhs);
+                },
+                pattern(_) = [&]() -> llvm::Value* {
+                    assert(false && "Can't add values of that type");
+                    __builtin_unreachable();
+                }
+            );
+        }
     };
     auto createSub = [&]() -> llvm::Value* {
-        return match(expr->type.data)(
+        return match(expr->lhs->type.data)(
             pattern(as<Type::IntegerTy>(arg)) = [&](auto properties) {
                 return builder.CreateSub(lhs, rhs);
             },
@@ -207,7 +212,7 @@ llvm::Value* CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
         );
     };
     auto createMult = [&]() -> llvm::Value* {
-        return match(expr->type.data)(
+        return match(expr->lhs->type.data)(
             pattern(as<Type::IntegerTy>(arg)) = [&](auto properties) {
                 return builder.CreateMul(lhs, rhs);
             },
@@ -223,7 +228,7 @@ llvm::Value* CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
         );
     };
     auto createDiv = [&]() -> llvm::Value* {
-        return match(expr->type.data)(
+        return match(expr->lhs->type.data)(
             pattern(as<Type::IntegerTy>(arg)) = [&](auto properties) {
                 if(properties.isSigned) {
                     return builder.CreateSDiv(lhs, rhs);
@@ -243,7 +248,7 @@ llvm::Value* CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
         );
     };
     auto createMod = [&]() -> llvm::Value* {
-        return match(expr->type.data)(
+        return match(expr->lhs->type.data)(
             pattern(as<Type::IntegerTy>(arg)) = [&](auto properties) {
                 if(properties.isSigned) {
                     return builder.CreateSRem(lhs, rhs);
@@ -303,7 +308,7 @@ llvm::Value* CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
                 case BinOp::ModAssignment:
                     value = createMod();
                     break;
-                default: break;
+                default: __builtin_unreachable();
             }
             return builder.CreateStore(value, declRef->decl->codegenVal);
     }

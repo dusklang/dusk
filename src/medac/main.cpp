@@ -18,7 +18,6 @@ std::string standardLibrary = R"~(
 #include <iostream>
 extern "C" {
     void printChar(char x) { std::cout << x; }
-    char* charPtrAdd(char* ptr, int advance) { return ptr + advance; }
 }
 )~";
 std::string sourceCode = R"~(
@@ -28,7 +27,7 @@ def printString(str: *i8) {
     var curChar = str
     while *curChar != "\0" {
         printChar(*curChar)
-        curChar = charPtrAdd(curChar, 1)
+        curChar += 1
     }
     return
 }
@@ -60,7 +59,7 @@ def performFizzBuzz(end: i32) {
     return
 }
 def main {
-    performFizzBuzz(1000)
+    performFizzBuzz(100)
 
     return
 }
@@ -149,4 +148,3 @@ int main() {
 
     return 0;
 }
-

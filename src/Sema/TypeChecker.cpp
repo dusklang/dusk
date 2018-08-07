@@ -115,10 +115,23 @@ void TypeChecker::visitPreOpExpr(PreOpExpr* expr) {
 void TypeChecker::visitBinOpExpr(BinOpExpr* expr) {
     visitExpr(expr->lhs);
     visitExpr(expr->rhs);
-    if(expr->lhs->type != expr->rhs->type) {
-        reportError("Mismatched types `" + expr->lhs->type.name() + "` and `" + expr->rhs->type.name() + "` in binary operator expression", expr);
-    }
+    bool pointerAdd = false;
     expr->type = expr->lhs->type;
+    if(expr->lhs->type != expr->rhs->type) {
+        IDENTIFIERS(x);
+        // Allow +, +=, - and -= between pointers and integers.
+        match(expr->lhs->type.indirection, expr->rhs->type.indirection, expr->rhs->type.data)(
+            pattern(x, 0, as<Type::IntegerTy>(_)) = [&](auto x) {
+                WHEN(x > 0 && (expr->op == BinOp::Add || expr->op == BinOp::AddAssignment))
+                {
+                    pointerAdd = true;
+                };
+            },
+            pattern(_, _, _) = [&] {
+                reportError("Mismatched types `" + expr->lhs->type.name() + "` and `" + expr->rhs->type.name() + "` in binary operator expression", expr);
+            }
+        );
+    }
     // FIXME: Check that operators are valid on the operand types.
     switch(expr->op) {
         case BinOp::Add:  break;
@@ -149,27 +162,17 @@ void TypeChecker::visitBinOpExpr(BinOpExpr* expr) {
             if(!declRef->decl->isVar) {
                 reportError("Cannot assign to constant declaration '" + declRef->decl->name + "'", expr);
             }
-            if(declRef->type != expr->rhs->type) {
+            if(declRef->type != expr->rhs->type && !pointerAdd) {
                 reportError("Cannot assign value of type '" + expr->rhs->type.name()
                             + "' to mutable declaration of type '" + declRef->type.name(),
                             expr);
             }
             switch(expr->op) {
-                case BinOp::AddAssignment:
-                    checkAdd(expr->lhs, expr->rhs);
-                    break;
-                case BinOp::SubAssignment:
-                    checkSub(expr->lhs, expr->rhs);
-                    break;
-                case BinOp::MultAssignment:
-                    checkMult(expr->lhs, expr->rhs);
-                    break;
-                case BinOp::DivAssignment:
-                    checkDiv(expr->lhs, expr->rhs);
-                    break;
-                case BinOp::ModAssignment:
-                    checkMod(expr->lhs, expr->rhs);
-                    break;
+                case BinOp::AddAssignment: break;
+                case BinOp::SubAssignment: break;
+                case BinOp::MultAssignment: break;
+                case BinOp::DivAssignment: break;
+                case BinOp::ModAssignment: break;
                 default: break;
             }
             expr->type = Type::Void();
