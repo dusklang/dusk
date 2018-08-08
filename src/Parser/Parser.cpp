@@ -21,7 +21,7 @@
     return val;\
 }()
 
-// FIXME: Allocating a multi-dimensional array on the heap is
+// FIXME: Allocating a multi-dimensional array on the heap for this is silly.
 std::vector<std::vector<BinOp>> precedenceLevels {
     { BinOp::Mult, BinOp::Div, BinOp::Mod },
 
@@ -36,6 +36,8 @@ std::vector<std::vector<BinOp>> precedenceLevels {
 
     { BinOp::Equal, BinOp::NotEqual },
 
+    { BinOp::BitwiseAnd, BinOp::BitwiseOr },
+
     { BinOp::And, BinOp::Or },
 
     {
@@ -44,28 +46,19 @@ std::vector<std::vector<BinOp>> precedenceLevels {
         BinOp::SubAssignment,
         BinOp::MultAssignment,
         BinOp::DivAssignment,
-        BinOp::ModAssignment
+        BinOp::ModAssignment,
+        BinOp::AndAssignment,
+        BinOp::OrAssignment
     }
 };
 
-std::optional<int> getPrecedence(BinOp op) {
+int getPrecedence(BinOp op) {
     for(int level = 0; level < precedenceLevels.size(); ++level) {
         for(auto otherOp: precedenceLevels[level]) {
             if(op == otherOp) { return level; }
         }
     }
-    return std::nullopt;
-}
-
-bool bothPrefixAndBinary(BinOp op) {
-    switch(op) {
-        case BinOp::Add:
-        case BinOp::Sub:
-        case BinOp::Mult:
-            return true;
-        default:
-            return false;
-    }
+    assert(false && "Undefined precedence for binary operator");
 }
 
 std::optional<BinOp> parseBinaryOperator(tok token) {
