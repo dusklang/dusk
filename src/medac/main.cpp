@@ -37,7 +37,7 @@ extern "C" {
         20,
         0
     };
-    auto someNumber = new int32_t;
+    int32t_t* someNumber = new int32_t;
 }
 )~";
 std::string sourceCode = R"~(

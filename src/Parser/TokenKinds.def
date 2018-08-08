@@ -8,12 +8,8 @@
 #define TOKEN_KEYWORD(name, sourcerepr) TOKEN(kw_ ## name)
 #endif
 
-#ifndef TOKEN_SEPARATOR
-#define TOKEN_SEPARATOR(name, character) TOKEN(sep_ ## name)
-#endif
-
-#ifndef TOKEN_OPERATOR
-#define TOKEN_OPERATOR(name, string) TOKEN(op_ ## name)
+#ifndef TOKEN_SYMBOL
+#define TOKEN_SYMBOL(name, character) TOKEN(sym_ ## name)
 #endif
 
 TOKEN(identifier)
@@ -40,36 +36,35 @@ TOKEN_KEYWORD(while, while)
 TOKEN_KEYWORD(as, as)
 TOKEN_KEYWORD(struct, struct)
 
-TOKEN_SEPARATOR(colon, ':')
-TOKEN_SEPARATOR(comma, ',')
-TOKEN_SEPARATOR(left_paren, '(')
-TOKEN_SEPARATOR(right_paren, ')')
-TOKEN_SEPARATOR(left_curly, '{')
-TOKEN_SEPARATOR(right_curly, '}')
-TOKEN_SEPARATOR(dot, '.')
+TOKEN_SYMBOL(colon, ":")
+TOKEN_SYMBOL(comma, ",")
+TOKEN_SYMBOL(left_paren, "(")
+TOKEN_SYMBOL(right_paren, ")")
+TOKEN_SYMBOL(left_curly, "{")
+TOKEN_SYMBOL(right_curly, "}")
+TOKEN_SYMBOL(dot, ".")
 
-TOKEN_OPERATOR(add_assignment, "+=")
-TOKEN_OPERATOR(sub_assignment, "-=")
-TOKEN_OPERATOR(mult_assignment, "*=")
-TOKEN_OPERATOR(div_assignment, "/=")
-TOKEN_OPERATOR(mod_assignment, "%=")
-TOKEN_OPERATOR(add, "+")
-TOKEN_OPERATOR(subtract, "-")
-TOKEN_OPERATOR(asterisk, "*")
-TOKEN_OPERATOR(divide, "/")
-TOKEN_OPERATOR(modulo, "%")
-TOKEN_OPERATOR(equal, "==")
-TOKEN_OPERATOR(not_equal, "!=")
-TOKEN_OPERATOR(less_than_or_equal, "<=")
-TOKEN_OPERATOR(less_than, "<")
-TOKEN_OPERATOR(greater_than_or_equal, ">=")
-TOKEN_OPERATOR(greater_than, ">")
-TOKEN_OPERATOR(b_or, "||")
-TOKEN_OPERATOR(b_and, "&&")
-TOKEN_OPERATOR(b_not, "!")
-TOKEN_OPERATOR(assignment, "=")
+TOKEN_SYMBOL(add_assignment, "+=")
+TOKEN_SYMBOL(sub_assignment, "-=")
+TOKEN_SYMBOL(mult_assignment, "*=")
+TOKEN_SYMBOL(div_assignment, "/=")
+TOKEN_SYMBOL(mod_assignment, "%=")
+TOKEN_SYMBOL(add, "+")
+TOKEN_SYMBOL(subtract, "-")
+TOKEN_SYMBOL(asterisk, "*")
+TOKEN_SYMBOL(divide, "/")
+TOKEN_SYMBOL(modulo, "%")
+TOKEN_SYMBOL(equal, "==")
+TOKEN_SYMBOL(not_equal, "!=")
+TOKEN_SYMBOL(less_than_or_equal, "<=")
+TOKEN_SYMBOL(less_than, "<")
+TOKEN_SYMBOL(greater_than_or_equal, ">=")
+TOKEN_SYMBOL(greater_than, ">")
+TOKEN_SYMBOL(b_or, "||")
+TOKEN_SYMBOL(b_and, "&&")
+TOKEN_SYMBOL(b_not, "!")
+TOKEN_SYMBOL(assignment, "=")
 
 #undef TOKEN
 #undef TOKEN_KEYWORD
-#undef TOKEN_SEPARATOR
-#undef TOKEN_OPERATOR
+#undef TOKEN_SYMBOL

@@ -61,15 +61,7 @@ public:
         return literal;
     }
 
-    bool isAnySeparator() const {
-        #define TOKEN_SEPARATOR(name, character) || kind == tok::sep_ ## name
-        return false
-            #include "TokenKinds.def"
-        ;
-    }
-
     std::string prettyPrint() {
-        #define TOKEN_SEPARATOR(name, character) case tok::sep_ ## name: return "separator " + getText();
         #define TOKEN(name) case tok::name: return #name " " + getText();
         switch(kind) {
             #include "TokenKinds.def"

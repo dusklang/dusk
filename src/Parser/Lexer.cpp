@@ -80,18 +80,11 @@ Token Lexer::nextTokIncludingInsignificant() {
 
     // Lex operators.
     if(false) {}
-    #define TOKEN_OPERATOR(name, text) else if(isSubstr(text)) { \
+    #define TOKEN_SYMBOL(name, text) else if(isSubstr(text)) { \
         pos += std::string(text).size();\
-        RETURN(tok::op_ ## name); \
+        RETURN(tok::sym_ ## name); \
     }
     #include "TokenKinds.def"
-
-    // Lex separators.
-    switch(curChar()) {
-        #define TOKEN_SEPARATOR(name, character) case character:\
-            pos++; RETURN(tok::sep_ ## name);
-        #include "TokenKinds.def"
-    }
 
     // Lex a string or character literal.
     if(is('"')) {

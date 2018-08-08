@@ -69,7 +69,7 @@ bool bothPrefixAndBinary(BinOp op) {
 }
 
 std::optional<BinOp> parseBinaryOperator(tok token) {
-#define MATCH(tokName, opName) case tok::op_ ## tokName: return BinOp::opName
+#define MATCH(tokName, opName) case tok::sym_ ## tokName: return BinOp::opName
     switch(token) {
         MATCH(add, Add);
         MATCH(subtract, Sub);
@@ -95,7 +95,7 @@ std::optional<BinOp> parseBinaryOperator(tok token) {
 #undef MATCH
 }
 std::optional<PreOp> parsePrefixOperator(tok token) {
-#define MATCH(tokName, opName) case tok::op_ ## tokName: return PreOp::opName
+#define MATCH(tokName, opName) case tok::sym_ ## tokName: return PreOp::opName
     switch(token) {
         MATCH(add, Positive);
         MATCH(subtract, Negative);
@@ -111,7 +111,7 @@ std::vector<ASTNode*> Parser::parseTopLevel() {
     std::vector<ASTNode*> nodes;
     while(true) {
         if(current().is(tok::eof)) break;
-        if(current().is(tok::sep_right_curly)) {
+        if(current().is(tok::sym_right_curly)) {
             reportError("Extraneous closing brace '}'", current().getRange());
         }
         nodes.push_back(parseNode());
@@ -120,12 +120,12 @@ std::vector<ASTNode*> Parser::parseTopLevel() {
 }
 
 Scope* Parser::parseScope() {
-    if(current().isNot(tok::sep_left_curly)) return nullptr;
+    if(current().isNot(tok::sym_left_curly)) return nullptr;
     recordCurrentLoc();
     next();
     std::vector<ASTNode*> nodes;
     while(true) {
-        if(current().is(tok::sep_right_curly)) { next(); break; }
+        if(current().is(tok::sym_right_curly)) { next(); break; }
         if(current().is(tok::eof)) reportError("Unexpected eof before end of scope", previous()->getRange());
         nodes.push_back(parseNode());
     }
@@ -148,7 +148,7 @@ ASTNode* Parser::parseNode() {
 
 Type Parser::parseType() {
     recordCurrentLoc();
-    if(current().is(tok::op_asterisk)) {
+    if(current().is(tok::sym_asterisk)) {
         next();
         return Type::Pointer(parseType());
     }
@@ -197,16 +197,16 @@ Decl* Parser::parseDecl() {
     EXPECT_NEXT(tok::identifier, "Expected identifier after def");
     auto name = current().getText();
     std::vector<Decl*> paramList;
-    if(next().is(tok::sep_left_paren)) {
+    if(next().is(tok::sym_left_paren)) {
         do {
             recordCurrentLoc();
             EXPECT_NEXT(tok::identifier, "Expected parameter name");
             auto paramName = current().getText();
-            EXPECT_NEXT(tok::sep_colon, "Expected colon after parameter name");
+            EXPECT_NEXT(tok::sym_colon, "Expected colon after parameter name");
             next();
             paramList.push_back(new Decl(currentRange(), paramName, parseType()));
-        } while(current().is(tok::sep_comma));
-        EXPECT(tok::sep_right_paren, "Expected ')' after parameter list");
+        } while(current().is(tok::sym_comma));
+        EXPECT(tok::sym_right_paren, "Expected ')' after parameter list");
         if(paramList.empty()) reportError("Expected parameter list for parameterized declaration " + name + ", "
                                           "try removing the parentheses");
         next();
@@ -217,7 +217,7 @@ Decl* Parser::parseDecl() {
     // the type of the declaration (if it's specified).
     SourceRange protoRange;
 
-    if(current().is(tok::sep_colon)) {
+    if(current().is(tok::sym_colon)) {
         next();
 
         next();
@@ -237,7 +237,7 @@ Decl* Parser::parseDecl() {
         }
     };
 
-    if(current().is(tok::op_assignment)) {
+    if(current().is(tok::sym_assignment)) {
         checkExtern();
         next();
         auto expr = parseExpr();
@@ -263,12 +263,12 @@ StructDecl* Parser::parseStructDecl() {
     if(!name) {
         reportError("Expected struct name");
     }
-    if(current().isNot(tok::sep_left_curly)) {
+    if(current().isNot(tok::sym_left_curly)) {
         reportError("Expected opening curly brace to begin struct declaration");
     }
     next();
     std::vector<Decl*> fields;
-    while(current().isNot(tok::sep_right_curly)) {
+    while(current().isNot(tok::sym_right_curly)) {
         auto field = parseDecl();
         if(!field) {
             reportError("Expected struct field");
@@ -350,7 +350,7 @@ Expr* Parser::parseDeclRefExpr() {
     recordCurrentLoc();
     auto name = current().getText();
     std::vector<Expr*> argList;
-    if(next().is(tok::sep_left_paren)) {
+    if(next().is(tok::sym_left_paren)) {
         do {
             next();
             recordCurrentLoc();
@@ -359,8 +359,8 @@ Expr* Parser::parseDeclRefExpr() {
             if(!argument) reportError("Expected argument");
             argList.push_back(argument);
 
-        } while(current().is(tok::sep_comma));
-        EXPECT(tok::sep_right_paren, "Expected ')' after parameter and argument");
+        } while(current().is(tok::sym_comma));
+        EXPECT(tok::sym_right_paren, "Expected ')' after parameter and argument");
         next();
     }
 
@@ -401,10 +401,10 @@ Expr* Parser::parseExpr() {
 Expr* Parser::parseTerm() {
     recordCurrentLoc();
     Expr* retVal;
-    if(current().is(tok::sep_left_paren)) {
+    if(current().is(tok::sym_left_paren)) {
         next();
         auto expr = parseExpr();
-        EXPECT(tok::sep_right_paren, "Unclosed parentheses");
+        EXPECT(tok::sym_right_paren, "Unclosed parentheses");
         next();
         retVal = expr;
     } else if(auto preOp = parsePrefixOperator(current().getKind())) {
@@ -430,7 +430,7 @@ Expr* Parser::parseTerm() {
     }
 
     if(retVal) {
-        while(current().is(tok::sep_dot)) {
+        while(current().is(tok::sym_dot)) {
             next();
             auto memberName = parseIdentifer();
             if(!memberName) {
