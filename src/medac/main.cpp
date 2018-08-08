@@ -37,18 +37,20 @@ extern "C" {
         20,
         0
     };
+    auto someNumber = new int32_t;
 }
 )~";
 std::string sourceCode = R"~(
 
 struct Person {
-    def name: *i8
-    def age: u8
-    def numberOfChildren: u8
+    var name: *i8
+    var age: u8
+    var numberOfChildren: u8
 }
 extern var henry: Person
 extern var sally: Person
 extern var alexandra: Person
+extern var someNumber: *i32
 
 extern def putchar(_: i32): void
 def printChar(character: i8) {
@@ -64,14 +66,22 @@ def printString(str: *i8) {
     }
     return
 }
-def printInt(val: i32) {
+def printIntRecursively(val: i32) {
     if val == 0 {
         return
     } else {
-        printInt(val / 10)
+        printIntRecursively(val / 10)
         printChar("0" + (val % 10) as i8)
         return
     }
+}
+def printInt(val: i32) {
+    if val == 0 {
+        printChar("0")
+    } else {
+        printIntRecursively(val)
+    }
+    return
 }
 def performFizzBuzz(end: i32) {
     // Check range.
@@ -113,6 +123,21 @@ def main {
     printPerson(henry)
     printPerson(sally)
     printPerson(alexandra)
+
+    var george = henry
+    george.name = "George"
+    george.age = 72 as u8
+    george.numberOfChildren = 1 as u8
+    printPerson(george)
+
+    printPerson(henry)
+
+    printString("someNumber before: ")
+    printInt(*someNumber)
+    (*someNumber) += 5
+    printString("\nsomeNumber after: ")
+    printInt(*someNumber)
+    printChar("\n")
 
     return
 }

@@ -202,25 +202,8 @@ void TypeChecker::visitBinOpExpr(BinOpExpr* expr) {
         case BinOp::MultAssignment:
         case BinOp::DivAssignment:
         case BinOp::ModAssignment: {
-            auto declRef = dynamic_cast<DeclRefExpr*>(expr->lhs);
-            if(!declRef) {
-                reportError("Only stored declaration references can currently be assigned to", expr);
-            }
-            if(!declRef->decl->isVar) {
-                reportError("Cannot assign to constant declaration '" + declRef->decl->name + "'", expr);
-            }
-            if(declRef->type != expr->rhs->type && !pointerAdd) {
-                reportError("Cannot assign value of type '" + expr->rhs->type.name()
-                            + "' to mutable declaration of type '" + declRef->type.name(),
-                            expr);
-            }
-            switch(expr->op) {
-                case BinOp::AddAssignment: break;
-                case BinOp::SubAssignment: break;
-                case BinOp::MultAssignment: break;
-                case BinOp::DivAssignment: break;
-                case BinOp::ModAssignment: break;
-                default: break;
+            if(!expr->lhs->isMutable()) {
+                reportError("Cannot assign to immutable expression", expr);
             }
             expr->type = Type::Void();
         }

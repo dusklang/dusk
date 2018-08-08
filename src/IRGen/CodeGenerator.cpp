@@ -7,7 +7,21 @@
 
 using namespace mpark::patterns;
 
-llvm::Type* mapTypeToLLVM(llvm::LLVMContext& context, Type type) {
+llvm::Value* CodeGenerator::toDirect(CodeGenVal val) {
+    if(!val.isIndirect) return val.val;
+
+    // If we have a pointer to the value, load from it.
+    return builder.CreateLoad(val.val);
+}
+llvm::Value* CodeGenerator::toIndirect(CodeGenVal val) {
+    if(val.isIndirect) return val.val;
+
+    // If we don't already have a pointer to the value, we'll need to copy it to the stack.
+    auto copy = builder.CreateAlloca(val.val->getType());
+    builder.CreateStore(val.val, copy);
+    return copy;
+}
+llvm::Type* CodeGenerator::toLLVMTy(Type type) {
     llvm::Type* ty = match(type.data)(
         pattern(as<Type::Variable>(_)) = []() -> llvm::Type* {
             assert(false && "Encountered type variable");
@@ -23,7 +37,7 @@ llvm::Type* mapTypeToLLVM(llvm::LLVMContext& context, Type type) {
         pattern(as<Type::StructTy>(arg)) = [&](auto structTy) -> llvm::Type* {
             std::vector<llvm::Type*> types;
             for(auto field: structTy.decl->fields) {
-                types.push_back(mapTypeToLLVM(context, field->type));
+                types.push_back(toLLVMTy(field->type));
             }
             return llvm::StructType::get(context, types);
         },
@@ -45,25 +59,25 @@ llvm::Type* mapTypeToLLVM(llvm::LLVMContext& context, Type type) {
     }
     return ty;
 }
-llvm::Value* CodeGenerator::visitDecl(Decl* decl) {
+CodeGenVal CodeGenerator::visitDecl(Decl* decl) {
     if(auto expr = decl->expression()) {
         if(decl->isVar) {
-            decl->codegenVal = builder.CreateAlloca(mapTypeToLLVM(context, decl->type), 0, decl->name.c_str());
-            builder.CreateStore(visitExpr(expr), decl->codegenVal);
+            decl->codegenVal = builder.CreateAlloca(toLLVMTy(decl->type), 0, decl->name.c_str());
+            builder.CreateStore(toDirect(visitExpr(expr)), decl->codegenVal);
         } else {
-            decl->codegenVal = visitExpr(expr);
+            decl->codegenVal = toDirect(visitExpr(expr));
         }
-        return decl->codegenVal;
+        return DirectVal { decl->codegenVal };
     } else {
         std::vector<llvm::Type*> arguments;
         for(auto& param: decl->paramList) {
-            arguments.push_back(mapTypeToLLVM(context, param->type));
+            arguments.push_back(toLLVMTy(param->type));
         }
-        llvm::Type* type = mapTypeToLLVM(context, decl->type);
+        llvm::Type* type = toLLVMTy(decl->type);
         if(decl->isVar) {
             llvm::GlobalVariable* var = new llvm::GlobalVariable(*module, type, false, llvm::GlobalVariable::ExternalLinkage, nullptr, decl->name);
             decl->codegenVal = var;
-            return var;
+            return DirectVal { var };
         } else {
             llvm::FunctionType* functionTy = llvm::FunctionType::get(type,
                                                                      arguments,
@@ -95,7 +109,7 @@ llvm::Value* CodeGenerator::visitDecl(Decl* decl) {
                                 elseBlock = llvm::BasicBlock::Create(context, "if.else", function);
                             }
                             auto endBlock = llvm::BasicBlock::Create(context, "if.end", function);
-                            builder.CreateCondBr(visitExpr(ifStmt->condition), thenBlock, ifStmt->elseScope ? elseBlock : endBlock);
+                            builder.CreateCondBr(toDirect(visitExpr(ifStmt->condition)), thenBlock, ifStmt->elseScope ? elseBlock : endBlock);
 
                             builder.SetInsertPoint(thenBlock);
                             visitInnerScope(ifStmt->thenScope);
@@ -125,7 +139,7 @@ llvm::Value* CodeGenerator::visitDecl(Decl* decl) {
                             builder.CreateBr(checkBlock);
 
                             builder.SetInsertPoint(checkBlock);
-                            builder.CreateCondBr(visitExpr(whileStmt->condition), thenBlock, endBlock);
+                            builder.CreateCondBr(toDirect(visitExpr(whileStmt->condition)), thenBlock, endBlock);
 
                             builder.SetInsertPoint(thenBlock);
                             visitInnerScope(whileStmt->thenScope);
@@ -148,7 +162,7 @@ llvm::Value* CodeGenerator::visitDecl(Decl* decl) {
                 llvm::verifyFunction(*function);
             }
 
-            return function;
+            return DirectVal { function };
         }
     }
 }
@@ -160,125 +174,122 @@ void CodeGenerator::visitScope(Scope* scope) {
         visit(node);
     }
 }
-llvm::Value* CodeGenerator::visitIntegerLiteralExpr(IntegerLiteralExpr* expr) {
-    return llvm::ConstantInt::get(context, llvm::APInt(32, std::stoi(expr->literal)));
+CodeGenVal CodeGenerator::visitIntegerLiteralExpr(IntegerLiteralExpr* expr) {
+    return DirectVal { llvm::ConstantInt::get(context, llvm::APInt(32, std::stoi(expr->literal))) };
 }
-llvm::Value* CodeGenerator::visitDecimalLiteralExpr(DecimalLiteralExpr* expr) {
-    return llvm::ConstantFP::get(context, llvm::APFloat(std::stod(expr->literal)));
+CodeGenVal CodeGenerator::visitDecimalLiteralExpr(DecimalLiteralExpr* expr) {
+    return DirectVal { llvm::ConstantFP::get(context, llvm::APFloat(std::stod(expr->literal))) };
 }
-llvm::Value* CodeGenerator::visitBooleanLiteralExpr(BooleanLiteralExpr* expr) {
-    return llvm::ConstantInt::get(context, llvm::APInt(1, expr->literal ? -1 : 0));
+CodeGenVal CodeGenerator::visitBooleanLiteralExpr(BooleanLiteralExpr* expr) {
+    return DirectVal { llvm::ConstantInt::get(context, llvm::APInt(1, expr->literal ? -1 : 0)) };
 }
-llvm::Value* CodeGenerator::visitCharLiteralExpr(CharLiteralExpr* expr) {
-    return llvm::ConstantInt::get(context, llvm::APInt(8, expr->literal));
+CodeGenVal CodeGenerator::visitCharLiteralExpr(CharLiteralExpr* expr) {
+    return DirectVal { llvm::ConstantInt::get(context, llvm::APInt(8, expr->literal)) };
 }
-llvm::Value* CodeGenerator::visitStringLiteralExpr(StringLiteralExpr* expr) {
-    return builder.CreateGlobalStringPtr(expr->literal);
+CodeGenVal CodeGenerator::visitStringLiteralExpr(StringLiteralExpr* expr) {
+    return DirectVal { builder.CreateGlobalStringPtr(expr->literal) };
 }
-llvm::Value* CodeGenerator::visitPreOpExpr(PreOpExpr* expr) {
+CodeGenVal CodeGenerator::visitPreOpExpr(PreOpExpr* expr) {
     auto operand = visitExpr(expr->operand);
     switch(expr->op) {
         case PreOp::Positive: return operand;
-        case PreOp::Negative: return builder.CreateNeg(operand);
-        case PreOp::Deref: return builder.CreateLoad(operand);
-        case PreOp::Not: return builder.CreateNot(operand);
+        case PreOp::Negative: return DirectVal { builder.CreateNeg(toDirect(operand)) };
+        case PreOp::Deref: return IndirectVal { toDirect(operand) };
+        case PreOp::Not: return DirectVal { builder.CreateNot(toDirect(operand)) };
     }
 }
-llvm::Value* CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
-    llvm::Value* lhs;
-    if(expr->op != BinOp::Assignment) {
-        lhs = visitExpr(expr->lhs);
-    }
+CodeGenVal CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
+    auto lhs = visitExpr(expr->lhs);
     auto rhs = visitExpr(expr->rhs);
-    auto createAdd = [&]() -> llvm::Value* {
+    auto createAdd = [&]() -> DirectVal {
         if(expr->lhs->type.indirection > 0) {
-            return builder.CreateGEP(lhs, rhs);
+            return DirectVal { builder.CreateGEP(toDirect(lhs), toDirect(rhs)) };
         } else {
             return match(expr->lhs->type.data)(
                 pattern(as<Type::IntegerTy>(arg)) = [&](auto properties) {
-                    return builder.CreateAdd(lhs, rhs);
+                    return DirectVal { builder.CreateAdd(toDirect(lhs), toDirect(rhs)) };
                 },
                 pattern(as<Type::FloatTy>(_)) = [&] {
-                    return builder.CreateFAdd(lhs, rhs);
+                    return DirectVal { builder.CreateFAdd(toDirect(lhs), toDirect(rhs)) };
                 },
                 pattern(as<Type::DoubleTy>(_)) = [&] {
-                    return builder.CreateFAdd(lhs, rhs);
+                    return DirectVal { builder.CreateFAdd(toDirect(lhs), toDirect(rhs)) };
                 },
-                pattern(_) = [&]() -> llvm::Value* {
+                pattern(_) = [&]() -> DirectVal {
                     assert(false && "Can't add values of that type");
                     __builtin_unreachable();
                 }
             );
         }
     };
-    auto createSub = [&]() -> llvm::Value* {
+    auto createSub = [&]() -> DirectVal {
         return match(expr->lhs->type.data)(
             pattern(as<Type::IntegerTy>(arg)) = [&](auto properties) {
-                return builder.CreateSub(lhs, rhs);
+                return DirectVal { builder.CreateSub(toDirect(lhs), toDirect(rhs)) };
             },
             pattern(as<Type::FloatTy>(_)) = [&] {
-                return builder.CreateFSub(lhs, rhs);
+                return DirectVal { builder.CreateFSub(toDirect(lhs), toDirect(rhs)) };
             },
             pattern(as<Type::DoubleTy>(_)) = [&] {
-                return builder.CreateFSub(lhs, rhs);
+                return DirectVal { builder.CreateFSub(toDirect(lhs), toDirect(rhs)) };
             },
-            pattern(_) = [&]() -> llvm::Value* {
+            pattern(_) = [&]() -> DirectVal {
                 assert(false && "Can't subtract values of that type");
             }
         );
     };
-    auto createMult = [&]() -> llvm::Value* {
+    auto createMult = [&]() -> DirectVal {
         return match(expr->lhs->type.data)(
             pattern(as<Type::IntegerTy>(arg)) = [&](auto properties) {
-                return builder.CreateMul(lhs, rhs);
+                return DirectVal { builder.CreateMul(toDirect(lhs), toDirect(rhs)) };
             },
             pattern(as<Type::FloatTy>(_)) = [&] {
-                return builder.CreateFMul(lhs, rhs);
+                return DirectVal { builder.CreateFMul(toDirect(lhs), toDirect(rhs)) };
             },
             pattern(as<Type::DoubleTy>(_)) = [&] {
-                return builder.CreateFMul(lhs, rhs);
+                return DirectVal { builder.CreateFMul(toDirect(lhs), toDirect(rhs)) };
             },
-            pattern(_) = [&]() -> llvm::Value* {
+            pattern(_) = [&]() -> DirectVal {
                 assert(false && "Can't multiply values of that type");
             }
         );
     };
-    auto createDiv = [&]() -> llvm::Value* {
+    auto createDiv = [&]() -> DirectVal {
         return match(expr->lhs->type.data)(
             pattern(as<Type::IntegerTy>(arg)) = [&](auto properties) {
                 if(properties.isSigned) {
-                    return builder.CreateSDiv(lhs, rhs);
+                    return DirectVal { builder.CreateSDiv(toDirect(lhs), toDirect(rhs)) };
                 } else {
-                    return builder.CreateUDiv(lhs, rhs);
+                    return DirectVal { builder.CreateUDiv(toDirect(lhs), toDirect(rhs)) };
                 }
             },
             pattern(as<Type::FloatTy>(_)) = [&] {
-                return builder.CreateFDiv(lhs, rhs);
+                return DirectVal { builder.CreateFDiv(toDirect(lhs), toDirect(rhs)) };
             },
             pattern(as<Type::DoubleTy>(_)) = [&] {
-                return builder.CreateFDiv(lhs, rhs);
+                return DirectVal { builder.CreateFDiv(toDirect(lhs), toDirect(rhs)) };
             },
-            pattern(_) = [&]() -> llvm::Value* {
+            pattern(_) = [&]() -> DirectVal {
                 assert(false && "Can't divide values of that type");
             }
         );
     };
-    auto createMod = [&]() -> llvm::Value* {
+    auto createMod = [&]() -> DirectVal {
         return match(expr->lhs->type.data)(
             pattern(as<Type::IntegerTy>(arg)) = [&](auto properties) {
                 if(properties.isSigned) {
-                    return builder.CreateSRem(lhs, rhs);
+                    return DirectVal { builder.CreateSRem(toDirect(lhs), toDirect(rhs)) };
                 } else {
-                    return builder.CreateURem(lhs, rhs);
+                    return DirectVal { builder.CreateURem(toDirect(lhs), toDirect(rhs)) };
                 }
             },
             pattern(as<Type::FloatTy>(_)) = [&] {
-                return builder.CreateFRem(lhs, rhs);
+                return DirectVal { builder.CreateFRem(toDirect(lhs), toDirect(rhs)) };
             },
             pattern(as<Type::DoubleTy>(_)) = [&] {
-                return builder.CreateFRem(lhs, rhs);
+                return DirectVal { builder.CreateFRem(toDirect(lhs), toDirect(rhs)) };
             },
-            pattern(_) = [&]() -> llvm::Value* {
+            pattern(_) = [&]() -> DirectVal {
                 assert(false && "Can't modulo values of that type");
             }
         );
@@ -289,94 +300,91 @@ llvm::Value* CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
         case BinOp::Mult: return createMult();
         case BinOp::Div: return createDiv();
         case BinOp::Mod: return createMod();
-        case BinOp::And: return builder.CreateAnd(lhs, rhs);
-        case BinOp::Or: return builder.CreateOr(lhs, rhs);
-        case BinOp::Equal: return builder.CreateICmpEQ(lhs, rhs);
-        case BinOp::NotEqual: return builder.CreateICmpNE(lhs, rhs);
-        case BinOp::LessThan: return builder.CreateICmpSLT(lhs, rhs);
-        case BinOp::LessThanOrEqual: return builder.CreateICmpSLE(lhs, rhs);
-        case BinOp::GreaterThan: return builder.CreateICmpSGT(lhs, rhs);
-        case BinOp::GreaterThanOrEqual: return builder.CreateICmpSGE(lhs, rhs);
+        case BinOp::And: return DirectVal { builder.CreateAnd(toDirect(lhs), toDirect(rhs)) };
+        case BinOp::Or: return DirectVal { builder.CreateOr(toDirect(lhs), toDirect(rhs)) };
+        case BinOp::Equal: return DirectVal { builder.CreateICmpEQ(toDirect(lhs), toDirect(rhs)) };
+        case BinOp::NotEqual: return DirectVal { builder.CreateICmpNE(toDirect(lhs), toDirect(rhs)) };
+        case BinOp::LessThan: return DirectVal { builder.CreateICmpSLT(toDirect(lhs), toDirect(rhs)) };
+        case BinOp::LessThanOrEqual: return DirectVal { builder.CreateICmpSLE(toDirect(lhs), toDirect(rhs)) };
+        case BinOp::GreaterThan: return DirectVal { builder.CreateICmpSGT(toDirect(lhs), toDirect(rhs)) };
+        case BinOp::GreaterThanOrEqual:
+            return DirectVal { builder.CreateICmpSGE(toDirect(lhs), toDirect(rhs)) };
         case BinOp::Assignment:
         case BinOp::AddAssignment:
         case BinOp::SubAssignment:
         case BinOp::MultAssignment:
         case BinOp::DivAssignment:
         case BinOp::ModAssignment:
-            auto declRef = dynamic_cast<DeclRefExpr*>(expr->lhs);
+            llvm::Value* lhsInd = toIndirect(lhs);
             llvm::Value* value;
             switch(expr->op) {
                 case BinOp::Assignment:
-                    value = rhs;
+                    value = toDirect(rhs);
                     break;
                 case BinOp::AddAssignment:
-                    value = createAdd();
+                    value = createAdd().val;
                     break;
                 case BinOp::SubAssignment:
-                    value = createSub();
+                    value = createSub().val;
                     break;
                 case BinOp::MultAssignment:
-                    value = createMult();
+                    value = createMult().val;
                     break;
                 case BinOp::DivAssignment:
-                    value = createDiv();
+                    value = createDiv().val;
                     break;
                 case BinOp::ModAssignment:
-                    value = createMod();
+                    value = createMod().val;
                     break;
                 default: __builtin_unreachable();
             }
-            return builder.CreateStore(value, declRef->decl->codegenVal);
+            return DirectVal { builder.CreateStore(value, lhsInd) };
     }
 }
-llvm::Value* CodeGenerator::visitCastExpr(CastExpr* expr) {
+CodeGenVal CodeGenerator::visitCastExpr(CastExpr* expr) {
     auto ogType = expr->operand->type;
     auto destType = expr->destType;
     auto ogValue = visitExpr(expr->operand);
 
     if(ogType == destType) { return ogValue; }
 
-    auto destTypeLLVM = mapTypeToLLVM(context, destType);
+    auto destTypeLLVM = toLLVMTy(destType);
     assert(
         (ogType.indirection == 0 && destType.indirection == 0) &&
         "pointer casting isn't yet allowed"
     );
     return match(expr->operand->type.data, expr->destType.data)(
-        pattern(as<Type::IntegerTy>(arg), as<Type::IntegerTy>(arg)) = [&](auto og, auto dest) {
+        pattern(as<Type::IntegerTy>(arg), as<Type::IntegerTy>(arg)) = [&](auto og, auto dest) -> DirectVal {
             // TODO: Detect overflow.
             if(dest.isSigned) {
-                ogValue->print(llvm::outs());
-                std::cout << "\n\n";
-                destTypeLLVM->print(llvm::outs());
-                std::cout << "\n\n";
-                return builder.CreateSExtOrTrunc(ogValue, destTypeLLVM);
+                return DirectVal { builder.CreateSExtOrTrunc(toDirect(ogValue), destTypeLLVM) };
             } else {
-                return builder.CreateZExtOrTrunc(ogValue, destTypeLLVM);
+                return DirectVal { builder.CreateZExtOrTrunc(toDirect(ogValue), destTypeLLVM) };
             }
         },
-        pattern(as<Type::IntegerTy>(arg), as<Type::FloatTy>(arg)) = [&](auto og, auto dest) {
+        pattern(as<Type::IntegerTy>(arg), as<Type::FloatTy>(arg)) = [&](auto og, auto dest) -> DirectVal {
             if(og.isSigned) {
-                return builder.CreateSIToFP(ogValue, destTypeLLVM);
+                return DirectVal { builder.CreateSIToFP(toDirect(ogValue), destTypeLLVM) };
             } else {
-                return builder.CreateUIToFP(ogValue, destTypeLLVM);
+                return DirectVal { builder.CreateUIToFP(toDirect(ogValue), destTypeLLVM) };
             }
         },
-        pattern(as<Type::FloatTy>(arg), as<Type::IntegerTy>(arg)) = [&](auto og, auto dest) {
+        pattern(as<Type::FloatTy>(arg), as<Type::IntegerTy>(arg)) = [&](auto og, auto dest) -> DirectVal {
             if(dest.isSigned) {
-                return builder.CreateFPToSI(ogValue, destTypeLLVM);
+                return DirectVal { builder.CreateFPToSI(toDirect(ogValue), destTypeLLVM) };
             } else {
-                return builder.CreateFPToSI(ogValue, destTypeLLVM);
+                return DirectVal { builder.CreateFPToSI(toDirect(ogValue), destTypeLLVM) };
             }
         },
-        pattern(as<Type::FloatTy>(_), as<Type::DoubleTy>(_)) = [&] {
-            return builder.CreateFPExt(ogValue, destTypeLLVM);
+        pattern(as<Type::FloatTy>(_), as<Type::DoubleTy>(_)) = [&]() -> DirectVal {
+            return DirectVal { builder.CreateFPExt(toDirect(ogValue), destTypeLLVM) };
         },
-        pattern(as<Type::DoubleTy>(_), as<Type::FloatTy>(_)) = [&] {
-            return builder.CreateFPTrunc(ogValue, destTypeLLVM);
+        pattern(as<Type::DoubleTy>(_), as<Type::FloatTy>(_)) = [&]() -> DirectVal {
+            return DirectVal { builder.CreateFPTrunc(toDirect(ogValue), destTypeLLVM) };
         }
     );
 }
-llvm::Value* CodeGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
+CodeGenVal CodeGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
     auto referencedVal = expr->decl->codegenVal;
     if(expr->decl->isComputed()) {
         auto callee = static_cast<llvm::Function*>(referencedVal);
@@ -385,39 +393,36 @@ llvm::Value* CodeGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
 
         std::vector<llvm::Value*> args;
         for(auto* arg: expr->argList) {
-            args.push_back(visitExpr(arg));
+            args.push_back(toDirect(visitExpr(arg)));
             if(!args.back()) {
-                return nullptr;
+                return DirectVal { nullptr };
             }
         }
 
-        return builder.CreateCall(callee, args, "calltmp");
+        return DirectVal { builder.CreateCall(callee, args, "calltmp") };
     } else {
         if(expr->decl->isVar) {
-            return builder.CreateLoad(referencedVal, expr->decl->name.c_str());
+            return IndirectVal { referencedVal };
         } else {
-            return referencedVal;
+            return DirectVal { referencedVal };
         }
     }
 }
-llvm::Value* CodeGenerator::visitMemberRefExpr(MemberRefExpr* expr) {
-    llvm::Value* root = visitExpr(expr->root);
+CodeGenVal CodeGenerator::visitMemberRefExpr(MemberRefExpr* expr) {
+    llvm::Value* root = toIndirect(visitExpr(expr->root));
     auto firstIndex = llvm::ConstantInt::get(context, llvm::APInt(32, 0));
     auto index = llvm::ConstantInt::get(context, llvm::APInt(32, expr->declIndex));
-    // FIXME: Don't copy the whole struct.
-    auto structCopy = builder.CreateAlloca(mapTypeToLLVM(context, expr->root->type));
-    builder.CreateStore(root, structCopy);
     std::vector<llvm::Value*> indices { firstIndex, index };
-    auto addr = builder.CreateGEP(structCopy, indices);
-    return builder.CreateLoad(addr);
+    auto addr = builder.CreateGEP(root, indices);
+    return IndirectVal { addr };
 }
-llvm::Value* CodeGenerator::visitReturnStmt(ReturnStmt* stmt) {
+CodeGenVal CodeGenerator::visitReturnStmt(ReturnStmt* stmt) {
     if(!stmt->value) {
-        return builder.CreateRetVoid();
+        return DirectVal { builder.CreateRetVoid() };
     } else {
-        return builder.CreateRet(visitExpr(stmt->value));
+        return DirectVal { builder.CreateRet(toDirect(visitExpr(stmt->value))) };
     }
 }
-llvm::Value* CodeGenerator::visitIfStmt(IfStmt* stmt) {
-    return nullptr;
+CodeGenVal CodeGenerator::visitIfStmt(IfStmt* stmt) {
+    return DirectVal { nullptr };
 }

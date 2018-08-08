@@ -21,6 +21,7 @@ struct Expr : public ASTNode {
     Type type;
     Expr(SourceRange range, ExprKind exprKind, Type type) : ASTNode(NodeKind::Expr, range), exprKind(exprKind), type(type) {}
     Expr(SourceRange range, ExprKind exprKind) : ASTNode(NodeKind::Expr, range), exprKind(exprKind), type(Type::Error()) {}
+    virtual bool isMutable() const { return false; }
 };
 
 struct IntegerLiteralExpr: public Expr {
@@ -85,6 +86,8 @@ struct BinOpExpr: public Expr {
     BinOp op;
 
     BinOpExpr(SourceRange range, Expr* lhs, Expr* rhs, BinOp op) : Expr(range, ExprKind::BinOp), lhs(lhs), rhs(rhs), op(op) {}
+
+    bool isMutable() const override { return lhs->isMutable(); }
 };
 
 struct PreOpExpr: public Expr {
@@ -92,6 +95,12 @@ struct PreOpExpr: public Expr {
     PreOp op;
 
     PreOpExpr(SourceRange range, Expr* operand, PreOp op) : Expr(range, ExprKind::PreOp), operand(operand), op(op) {}
+    bool isMutable() const override {
+        switch(op) {
+            case PreOp::Deref: return true;
+            default: return false;
+        }
+    }
 };
 
 struct CastExpr: public Expr {
@@ -113,6 +122,8 @@ struct DeclRefExpr: public Expr {
     ~DeclRefExpr() override;
 
     DeclRefExpr& operator=(DeclRefExpr const& other) = default;
+
+    bool isMutable() const override;
 };
 
 struct MemberRefExpr: public Expr {
@@ -124,4 +135,8 @@ struct MemberRefExpr: public Expr {
     root(root), name(name) {}
 
     MemberRefExpr& operator=(MemberRefExpr const& other) = default;
+
+    bool isMutable() const override {
+        return root->isMutable();
+    }
 };

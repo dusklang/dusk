@@ -8,3 +8,7 @@ DeclRefExpr::~DeclRefExpr() {
         delete decl;
     }
 }
+
+bool DeclRefExpr::isMutable() const {
+    return decl->isVar;
+}
