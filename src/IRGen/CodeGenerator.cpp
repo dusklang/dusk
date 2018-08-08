@@ -8,18 +8,24 @@
 using namespace mpark::patterns;
 
 llvm::Value* CodeGenerator::toDirect(CodeGenVal val) {
-    if(!val.isIndirect) return val.val;
-
-    // If we have a pointer to the value, load from it.
-    return builder.CreateLoad(val.val);
+    return match(val)(
+        pattern(as<DirectVal>(arg)) = [](auto val) { return val.val; },
+        pattern(as<IndirectVal>(arg)) = [&](auto val) -> llvm::Value* {
+            // If we have a pointer to the value, load from it.
+            return builder.CreateLoad(val.val);
+        }
+    );
 }
 llvm::Value* CodeGenerator::toIndirect(CodeGenVal val) {
-    if(val.isIndirect) return val.val;
-
-    // If we don't already have a pointer to the value, we'll need to copy it to the stack.
-    auto copy = builder.CreateAlloca(val.val->getType());
-    builder.CreateStore(val.val, copy);
-    return copy;
+    return match(val)(
+        pattern(as<IndirectVal>(arg)) = [](auto val) { return val.val; },
+        pattern(as<DirectVal>(arg)) = [&](auto val) -> llvm::Value* {
+            // If we don't already have a pointer to the value, we'll need to copy it to the stack.
+            auto copy = builder.CreateAlloca(val.val->getType());
+            builder.CreateStore(val.val, copy);
+            return copy;
+        }
+    );
 }
 llvm::Type* CodeGenerator::toLLVMTy(Type type) {
     llvm::Type* ty = match(type.data)(

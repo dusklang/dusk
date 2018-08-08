@@ -57,6 +57,20 @@ def printChar(character: i8) {
     putchar(character as i32)
     return
 }
+/*
+var pedro: Person {
+    get {
+        printString("Getting the value of pedro")
+        return Person {
+            name: "Pedro"
+            age: 27 as u8
+            numberOfChildren: 0 as u8
+        }
+    }
+    set {
+        printString("Setting the value of pedro")
+    }
+}*/
 
 def printString(str: *i8) {
     var curChar = str
