@@ -154,6 +154,9 @@ void TypeChecker::visitPreOpExpr(PreOpExpr* expr) {
         case PreOp::Deref:
             expr->type = expr->operand->type.pointeeType();
             break;
+        case PreOp::AddrOf:
+            expr->type = Type::Pointer(expr->operand->type);
+            break;
         default:
             expr->type = expr->operand->type;
             break;
@@ -181,13 +184,15 @@ void TypeChecker::visitBinOpExpr(BinOpExpr* expr) {
     }
     // FIXME: Check that operators are valid on the operand types.
     switch(expr->op) {
-        case BinOp::Add:  break;
-        case BinOp::Sub:  break;
-        case BinOp::Mult: break;
-        case BinOp::Div:  break;
-        case BinOp::Mod:  break;
-        case BinOp::Or:   break;
-        case BinOp::And:  break;
+        case BinOp::Add:        break;
+        case BinOp::Sub:        break;
+        case BinOp::Mult:       break;
+        case BinOp::Div:        break;
+        case BinOp::Mod:        break;
+        case BinOp::BitwiseOr:  break;
+        case BinOp::Or:         break;
+        case BinOp::BitwiseAnd: break;
+        case BinOp::And:        break;
         case BinOp::Equal:
         case BinOp::NotEqual:
         case BinOp::LessThan:
@@ -201,7 +206,9 @@ void TypeChecker::visitBinOpExpr(BinOpExpr* expr) {
         case BinOp::SubAssignment:
         case BinOp::MultAssignment:
         case BinOp::DivAssignment:
-        case BinOp::ModAssignment: {
+        case BinOp::ModAssignment:
+        case BinOp::AndAssignment:
+        case BinOp::OrAssignment: {
             if(!expr->lhs->isMutable()) {
                 reportError("Cannot assign to immutable expression", expr);
             }

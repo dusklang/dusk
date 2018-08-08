@@ -37,7 +37,7 @@ extern "C" {
         20,
         0
     };
-    int32t_t* someNumber = new int32_t;
+    int32_t* someNumber = new int32_t;
 }
 )~";
 std::string sourceCode = R"~(
@@ -101,17 +101,17 @@ def performFizzBuzz(end: i32) {
     }
     return
 }
-def printPerson(person: Person) {
-    printString(person.name)
+def printPerson(person: *Person) {
+    printString((*person).name)
     printString(" is ")
-    printInt(person.age as i32)
+    printInt((*person).age as i32)
     printString(" years old and has ")
-    if person.numberOfChildren == 0 as u8 {
+    if (*person).numberOfChildren == 0 as u8 {
         printString("no")
     } else {
-        printInt(person.numberOfChildren as i32)
+        printInt((*person).numberOfChildren as i32)
     }
-    if person.numberOfChildren == 1 as u8 {
+    if (*person).numberOfChildren == 1 as u8 {
         printString(" child.\n")
     } else {
         printString(" children.\n")
@@ -120,21 +120,21 @@ def printPerson(person: Person) {
     return
 }
 def main {
-    printPerson(henry)
-    printPerson(sally)
-    printPerson(alexandra)
+    printPerson(&henry)
+    printPerson(&sally)
+    printPerson(&alexandra)
 
     var george = henry
     george.name = "George"
     george.age = 72 as u8
     george.numberOfChildren = 1 as u8
-    printPerson(george)
+    printPerson(&george)
 
-    printPerson(henry)
+    printPerson(&henry)
 
     printString("someNumber before: ")
     printInt(*someNumber)
-    (*someNumber) += 5
+    (*someNumber) |= 5
     printString("\nsomeNumber after: ")
     printInt(*someNumber)
     printChar("\n")

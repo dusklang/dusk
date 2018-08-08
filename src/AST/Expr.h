@@ -57,6 +57,8 @@ enum class BinOp {
     MultAssignment,
     DivAssignment,
     ModAssignment,
+    AndAssignment,
+    OrAssignment,
     Add,
     Sub,
     Mult,
@@ -70,6 +72,8 @@ enum class BinOp {
     GreaterThan,
     Or,
     And,
+    BitwiseAnd,
+    BitwiseOr,
     Assignment
 };
 
@@ -77,6 +81,7 @@ enum class PreOp {
     Positive,
     Negative,
     Deref,
+    AddrOf,
     Not
 };
 

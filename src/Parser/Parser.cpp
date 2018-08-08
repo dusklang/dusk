@@ -82,6 +82,8 @@ std::optional<BinOp> parseBinaryOperator(tok token) {
         MATCH(mult_assignment, MultAssignment);
         MATCH(div_assignment, DivAssignment);
         MATCH(mod_assignment, ModAssignment);
+        MATCH(and_assignment, AndAssignment);
+        MATCH(or_assignment, OrAssignment);
         MATCH(equal, Equal);
         MATCH(not_equal, NotEqual);
         MATCH(less_than, LessThan);
@@ -90,6 +92,8 @@ std::optional<BinOp> parseBinaryOperator(tok token) {
         MATCH(greater_than_or_equal, GreaterThanOrEqual);
         MATCH(b_or, Or);
         MATCH(b_and, And);
+        MATCH(pipe, BitwiseOr);
+        MATCH(ampersand, BitwiseAnd);
         default: return std::nullopt;
     }
 #undef MATCH
@@ -101,6 +105,7 @@ std::optional<PreOp> parsePrefixOperator(tok token) {
         MATCH(subtract, Negative);
         MATCH(asterisk, Deref);
         MATCH(b_not, Not);
+        MATCH(ampersand, AddrOf);
         default: return std::nullopt;
     }
 #undef MATCH

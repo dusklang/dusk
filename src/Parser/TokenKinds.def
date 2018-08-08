@@ -49,6 +49,8 @@ TOKEN_SYMBOL(sub_assignment, "-=")
 TOKEN_SYMBOL(mult_assignment, "*=")
 TOKEN_SYMBOL(div_assignment, "/=")
 TOKEN_SYMBOL(mod_assignment, "%=")
+TOKEN_SYMBOL(or_assignment, "|=")
+TOKEN_SYMBOL(and_assignment, "&=")
 TOKEN_SYMBOL(add, "+")
 TOKEN_SYMBOL(subtract, "-")
 TOKEN_SYMBOL(asterisk, "*")
@@ -64,6 +66,8 @@ TOKEN_SYMBOL(b_or, "||")
 TOKEN_SYMBOL(b_and, "&&")
 TOKEN_SYMBOL(b_not, "!")
 TOKEN_SYMBOL(assignment, "=")
+TOKEN_SYMBOL(ampersand, "&")
+TOKEN_SYMBOL(pipe, "|")
 
 #undef TOKEN
 #undef TOKEN_KEYWORD

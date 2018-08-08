@@ -83,10 +83,21 @@ void ASTPrinter::visitStringLiteralExpr(StringLiteralExpr* expr, int indentation
 void ASTPrinter::visitPreOpExpr(PreOpExpr* expr, int indentationLevel, std::ostream& stream) {
     indent(indentationLevel, stream);
     switch(expr->op) {
-        case PreOp::Positive: stream << '+';
-        case PreOp::Negative: stream << '-';
-        case PreOp::Deref: stream << '*';
-        case PreOp::Not: stream << '!';
+        case PreOp::Positive:
+            stream << '+';
+            break;
+        case PreOp::Negative:
+            stream << '-';
+            break;
+        case PreOp::Deref:
+            stream << '*';
+            break;
+        case PreOp::Not:
+            stream << '!';
+            break;
+        case PreOp::AddrOf:
+            stream << '&';
+            break;
     }
     visitExpr(expr->operand, 0, stream);
 }
@@ -96,25 +107,75 @@ void ASTPrinter::visitBinOpExpr(BinOpExpr* expr, int indentationLevel, std::ostr
     visitExpr(expr->lhs, 0, stream);
     stream << ' ';
     switch(expr->op) {
-        case BinOp::Add: stream << '+';
-        case BinOp::Sub: stream << '-';
-        case BinOp::Mult: stream << '*';
-        case BinOp::Div: stream << '/';
-        case BinOp::Mod: stream << '%';
-        case BinOp::Or: stream << "||";
-        case BinOp::And: stream << "&&";
-        case BinOp::Assignment: stream << '=';
-        case BinOp::AddAssignment: stream << "+=";
-        case BinOp::SubAssignment: stream << "-=";
-        case BinOp::MultAssignment: stream << "*=";
-        case BinOp::DivAssignment: stream << "/=";
-        case BinOp::ModAssignment: stream << "%=";
-        case BinOp::Equal: stream << "==";
-        case BinOp::NotEqual: stream << "!=";
-        case BinOp::LessThan: stream << '<';
-        case BinOp::LessThanOrEqual: stream << "<=";
-        case BinOp::GreaterThan: stream << '>';
-        case BinOp::GreaterThanOrEqual: stream << ">=";
+        case BinOp::Add:
+            stream << '+';
+            break;
+        case BinOp::Sub:
+            stream << '-';
+            break;
+        case BinOp::Mult:
+            stream << '*';
+            break;
+        case BinOp::Div:
+            stream << '/';
+            break;
+        case BinOp::Mod:
+            stream << '%';
+            break;
+        case BinOp::BitwiseOr:
+            stream << '|';
+            break;
+        case BinOp::Or:
+            stream << "||";
+            break;
+        case BinOp::BitwiseAnd:
+            stream << '&';
+            break;
+        case BinOp::And:
+            stream << "&&";
+            break;
+        case BinOp::Assignment:
+            stream << '=';
+            break;
+        case BinOp::AddAssignment:
+            stream << "+=";
+            break;
+        case BinOp::SubAssignment:
+            stream << "-=";
+            break;
+        case BinOp::MultAssignment:
+            stream << "*=";
+            break;
+        case BinOp::DivAssignment:
+            stream << "/=";
+            break;
+        case BinOp::ModAssignment:
+            stream << "%=";
+            break;
+        case BinOp::AndAssignment:
+            stream << "&=";
+            break;
+        case BinOp::OrAssignment:
+            stream << "|=";
+            break;
+        case BinOp::Equal:
+            stream << "==";
+            break;
+        case BinOp::NotEqual:
+            stream << "!=";
+            break;
+        case BinOp::LessThan:
+            stream << '<';
+            break;
+        case BinOp::LessThanOrEqual:
+            stream << "<=";
+            break;
+        case BinOp::GreaterThan:
+            stream << '>';
+            break;
+        case BinOp::GreaterThanOrEqual:
+            stream << ">=";
+            break;
     }
     stream << ' ';
     visitExpr(expr->rhs, 0, stream);

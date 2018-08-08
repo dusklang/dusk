@@ -196,6 +196,7 @@ CodeGenVal CodeGenerator::visitPreOpExpr(PreOpExpr* expr) {
         case PreOp::Negative: return DirectVal { builder.CreateNeg(toDirect(operand)) };
         case PreOp::Deref: return IndirectVal { toDirect(operand) };
         case PreOp::Not: return DirectVal { builder.CreateNot(toDirect(operand)) };
+        case PreOp::AddrOf: return DirectVal { toIndirect(operand) };
     }
 }
 CodeGenVal CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
@@ -300,8 +301,12 @@ CodeGenVal CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
         case BinOp::Mult: return createMult();
         case BinOp::Div: return createDiv();
         case BinOp::Mod: return createMod();
-        case BinOp::And: return DirectVal { builder.CreateAnd(toDirect(lhs), toDirect(rhs)) };
-        case BinOp::Or: return DirectVal { builder.CreateOr(toDirect(lhs), toDirect(rhs)) };
+        case BinOp::BitwiseAnd:
+        case BinOp::And:
+            return DirectVal { builder.CreateAnd(toDirect(lhs), toDirect(rhs)) };
+        case BinOp::BitwiseOr:
+        case BinOp::Or:
+            return DirectVal { builder.CreateOr(toDirect(lhs), toDirect(rhs)) };
         case BinOp::Equal: return DirectVal { builder.CreateICmpEQ(toDirect(lhs), toDirect(rhs)) };
         case BinOp::NotEqual: return DirectVal { builder.CreateICmpNE(toDirect(lhs), toDirect(rhs)) };
         case BinOp::LessThan: return DirectVal { builder.CreateICmpSLT(toDirect(lhs), toDirect(rhs)) };
@@ -315,6 +320,8 @@ CodeGenVal CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
         case BinOp::MultAssignment:
         case BinOp::DivAssignment:
         case BinOp::ModAssignment:
+        case BinOp::AndAssignment:
+        case BinOp::OrAssignment:
             llvm::Value* lhsInd = toIndirect(lhs);
             llvm::Value* value;
             switch(expr->op) {
@@ -335,6 +342,12 @@ CodeGenVal CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
                     break;
                 case BinOp::ModAssignment:
                     value = createMod().val;
+                    break;
+                case BinOp::AndAssignment:
+                    value = builder.CreateAnd(toDirect(lhs), toDirect(rhs));
+                    break;
+                case BinOp::OrAssignment:
+                    value = builder.CreateOr(toDirect(lhs), toDirect(rhs));
                     break;
                 default: __builtin_unreachable();
             }
