@@ -20,15 +20,9 @@ struct DirectVal final {
 struct IndirectVal final {
     llvm::Value* val;
 };
-struct ComputedVal final {
-    llvm::Function* get;
-    llvm::Function* set;
-};
 /// DirectVal means the underlying llvm value is of the same llvm type you'd get if you passed the type of the expression it
 /// was derived from to `toLLVMTy`.
 /// IndirectVal means the underlying llvm value is one level of indirection removed from its direct val.
-///
-/// ComputedVal means the value is represented by getter and setter functions, not physical memory or an llvm value.
 ///
 /// Consider the following code sample:
 ///     var foo = 5
@@ -43,7 +37,7 @@ struct ComputedVal final {
 ///  - `visitBinOpExpr` will also call `toIndirect` on its left operand so that it can store the result
 ///    of the addition back in memory
 ///  - Since `foo` is already an indirect value, `toIndirect` doesn't need to do anything special
-typedef std::variant<DirectVal, IndirectVal, ComputedVal> CodeGenVal;
+typedef std::variant<DirectVal, IndirectVal> CodeGenVal;
 
 class CodeGenerator final: public ASTVisitor<CodeGenerator,
                                              void,
