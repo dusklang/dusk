@@ -2,64 +2,95 @@
 
 #pragma once
 
-struct Expr;
-struct Stmt;
-struct Decl;
+#include <optional>
+#include <stack>
 
 #include "AST/AST.h"
 #include "AST/Type.h"
 #include "Lexer.h"
 
-class Parser final {
-private:
-    Lexer lexer;
+struct Expr;
+struct Stmt;
+struct Decl;
 
-    Token current() { return lexer.curTok(); }
-    Token next() { return lexer.nextTok(); }
+class Parser final {
+    std::vector<Token> tokens;
+    uint32_t curTok = -1;
+    std::optional<uint32_t> savedState = std::nullopt;
+
+    Token cur() {
+        return tokens[curTok];
+    }
     Token nextIncludingInsignificant() {
-        return lexer.nextTokIncludingInsignificant();
+        return tokens[++curTok];
+    }
+    Token next() {
+        while(true) {
+            auto next = nextIncludingInsignificant();
+            if(next.isSignificant())
+                return next;
+        }
+    }
+    std::optional<Token> prevIncludingInsignificant() {
+        curTok--;
+        if(curTok == 0) return std::nullopt;
+        return tokens[curTok];
+    }
+    std::optional<Token> prev() {
+        while(auto prev = prevIncludingInsignificant()) {
+            if(prev->isSignificant()) return prev;
+        }
+        return std::nullopt;
+    }
+    void saveState() {
+        savedState = curTok;
+    }
+    void recallState() {
+        if(savedState) {
+            curTok = *savedState;
+        }
+        savedState = std::nullopt;
     }
 
-    std::optional<Token> previous() { return lexer.prevTok(); }
     std::optional<std::string> parseIdentifer() {
-        if(current().is(tok::identifier)) {
-            auto text = current().getText();
+        if(cur().is(tok::identifier)) {
+            auto text = cur().getText();
             next();
             return text;
         }
         return std::nullopt;
     }
     std::optional<std::string> parseIntegerLiteral() {
-        auto lit = current().getIntegerLiteral();
+        auto lit = cur().getIntegerLiteral();
         if(lit) next();
         return lit;
     }
     std::optional<std::string> parseDecimalLiteral() {
-        auto lit = current().getDecimalLiteral();
+        auto lit = cur().getDecimalLiteral();
         if(lit) next();
         return lit;
     }
     std::optional<char> parseCharLiteral() {
-        auto lit = current().getCharLiteral();
+        auto lit = cur().getCharLiteral();
         if(lit) next();
         return lit;
     }
     std::optional<std::string> parseStringLiteral() {
-        auto lit = current().getStringLiteral();
+        auto lit = cur().getStringLiteral();
         if(lit) next();
         return lit;
     }
     // TODO: Replace all this source location state tracking with manual state tracking.
     std::stack<SourceLoc> currentLoc;
     void recordCurrentLoc() {
-        currentLoc.push(current().getLoc());
+        currentLoc.push(cur().getLoc());
     }
     SourceRange currentRange() {
         auto beginLoc = currentLoc.top();
         currentLoc.pop();
         // This is a hack because everywhere this function is used, we're already at the first token
         // *after* the last token of the range we're interested in.
-        auto currentLoc = previous()->getRange();
+        auto currentLoc = prev()->getRange();
         next();
         return rangeFrom(beginLoc, currentLoc);
     }
@@ -78,8 +109,9 @@ private:
         reportError(message, currentRange());
     }
 public:
-    Parser(std::string const& source) : lexer(source) {
-        lexer.nextTokIncludingInsignificant();
+    Parser(std::string const& source) {
+        tokens = lex(source);
+        next();
     }
 
     std::vector<ASTNode*> parseTopLevel();

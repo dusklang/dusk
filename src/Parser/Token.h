@@ -21,7 +21,7 @@ private:
 
 public:
     Token(tok kind, SourceRange range, std::string literal) : kind(kind), range(range), literal(literal) {}
-    Token() : range(SourceLoc(nullptr, 0), 0) {}
+    Token() : range(SourceLoc("", 0), 0) {}
     Token& operator=(Token const& otherTok) = default;
 
     bool is(tok k) const { return kind == k; }
@@ -61,11 +61,5 @@ public:
         return literal;
     }
 
-    std::string prettyPrint() {
-        #define TOKEN(name) case tok::name: return #name " " + getText();
-        switch(kind) {
-            #include "TokenKinds.def"
-            default: return "undefined token";
-        }
-    };
+    std::string prettyPrint();
 };

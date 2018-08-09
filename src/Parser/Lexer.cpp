@@ -1,13 +1,28 @@
 //  Copyright © 2018 Zach Wolfe. All rights reserved.
 
-#include "Lexer.h"
 #include <iostream>
 #include <vector>
+#include <map>
+#include <optional>
 
-Token Lexer::nextTokIncludingInsignificant() {
-    auto pos = tokenPositions.top();
-    std::string tokenText;
+#include "Lexer.h"
 
+std::map<char, char> specialEscapeCharacters {
+    { 'n', '\n' },
+    { '"', '"' },
+    { '0', '\0' },
+    { '\\', '\\' }
+};
+
+std::vector<Token> lex(std::string const& source) {
+    uint32_t pos = 0;
+    std::vector<Token> tokens;
+    auto reportError = [&](int endPos, std::string message) {
+        SourceRange range(SourceLoc(source, pos), endPos - pos);
+        std::cout << "LEXING ERROR: " << message << '\n';
+        std::cout << "Offending area: " << range.getSubstring() << "\n\n";
+        exit(1);
+    };
     auto curChar = [&]() -> char { return source.at(pos); };
     auto is = [&](char character) -> bool { return curChar() == character; };
     auto isBetween = [&](char lower, char higher) -> bool { return lower <= curChar() && curChar() != higher; };
@@ -24,130 +39,148 @@ Token Lexer::nextTokIncludingInsignificant() {
         return true;
     };
 
-    Token _tok;
-    #define RETURN_LIT(tokenKind, literal) { \
-        if(numberOfNewTokens) *numberOfNewTokens += 1;\
-        _tok = Token(tokenKind, SourceRange(SourceLoc(&source, tokenPositions.top()), pos - tokenPositions.top()), literal);\
-        tokenPositions.push(pos);\
-        tokens.push(_tok);\
-        return _tok;\
-    }
-    #define RETURN(tokenKind) RETURN_LIT(tokenKind, "")
+    while(true) {
+        auto beginPos = pos;
+        std::string tokenText;
 
-    // Return eof if at the end.
-    if(pos == source.length()) RETURN(tok::eof);
+        #define RETURN_LIT(tokenKind, literal) { \
+            tokens.push_back(\
+                Token(tokenKind, SourceRange(SourceLoc(source, beginPos), pos - beginPos), literal)\
+            );\
+            goto nextIteration;\
+        }
+        #define RETURN(tokenKind) RETURN_LIT(tokenKind, "")
+        #define RETURN_EOF() {\
+            tokens.push_back(\
+                Token(tok::eof, SourceRange(SourceLoc(source, beginPos), pos - beginPos), "")\
+            );\
+            break;\
+        }
 
-    // Lex newlines.
-    for(;pos < source.length() && isNewline(); pos++) tokenText += curChar();
-    if(!tokenText.empty()) RETURN(tok::newline);
+        // Return eof if at the end.
+        if(pos == source.length()) {
+            tokens.push_back(
+                Token(tok::eof, SourceRange(SourceLoc(source, beginPos), pos - beginPos), "")
+            );
+            break;
+        }
 
-    // Lex whitespace.
-    for(;pos < source.length() && isWhitespace(); pos++) tokenText += curChar();
-    if(!tokenText.empty()) RETURN(tok::whitespace);
+        // Lex newlines.
+        for(;pos < source.length() && isNewline(); pos++) tokenText += curChar();
+        if(!tokenText.empty()) RETURN(tok::newline);
 
-    // Lex single-line comments.
-    if(isSubstr("//")) {
-        tokenText = "//";
-        for(pos += 2; pos < source.length() && !isNewline(); pos++) tokenText += curChar();
-    }
-    if(!tokenText.empty()) RETURN(tok::comment_single_line);
+        // Lex whitespace.
+        for(;pos < source.length() && isWhitespace(); pos++) tokenText += curChar();
+        if(!tokenText.empty()) RETURN(tok::whitespace);
 
-    // Lex (optionally-nested) multi-line comments.
-    if(isSubstr("/*")) {
-        tokenText = "/*";
-        int levels = 1;
-        for(pos += 2; pos < source.length(); pos++) {
-            tokenText += curChar();
-            if(isSubstr("/*")) {
-                pos++;
+        // Lex single-line comments.
+        if(isSubstr("//")) {
+            tokenText = "//";
+            for(pos += 2; pos < source.length() && !isNewline(); pos++) tokenText += curChar();
+        }
+        if(!tokenText.empty()) RETURN(tok::comment_single_line);
+
+        // Lex (optionally-nested) multi-line comments.
+        if(isSubstr("/*")) {
+            tokenText = "/*";
+            int levels = 1;
+            for(pos += 2; pos < source.length(); pos++) {
                 tokenText += curChar();
-                levels++;
-            } else if(isSubstr("*/")) {
-                pos++;
-                tokenText += curChar();
-                levels--;
-                if(levels == 0) {
+                if(isSubstr("/*")) {
                     pos++;
                     tokenText += curChar();
-                    break;
+                    levels++;
+                } else if(isSubstr("*/")) {
+                    pos++;
+                    tokenText += curChar();
+                    levels--;
+                    if(levels == 0) {
+                        pos++;
+                        tokenText += curChar();
+                        break;
+                    }
                 }
             }
+            if(levels > 0) reportError(pos, "Unterminated /* comment.");
         }
-        if(levels > 0) reportError(pos, "Unterminated /* comment.");
-    }
-    if(!tokenText.empty()) RETURN(tok::comment_multiple_line);
+        if(!tokenText.empty()) RETURN(tok::comment_multiple_line);
 
 
-    // Lex operators.
-    if(false) {}
-    #define TOKEN_SYMBOL(name, text) else if(isSubstr(text)) { \
-        pos += std::string(text).size();\
-        RETURN(tok::sym_ ## name); \
-    }
-    #include "TokenKinds.def"
-
-    // Lex a string or character literal.
-    if(is('"')) {
-        std::string literal = "";
-        bool escapeMode = false;
-        tokenText += '"';
-        pos++;
-        while(pos < source.length() && !isNewline()) {
-            tokenText += curChar();
-
-            char charToInsert = curChar();
-            if(escapeMode) {
-                try {
-                    charToInsert = specialEscapeCharacters.at(charToInsert);
-                } catch(...) {
-                    reportError(pos, std::string("Invalid escape character '") + charToInsert + "'");
-                }
-                escapeMode = false;
-            }
-
-            if(is('\\')) {
-                pos++;
-                escapeMode = true;
-            } else if(is('"') && !escapeMode) {
-                pos++;
-                // FIXME: HACK.
-                if(literal.size() == 1) {
-                    RETURN_LIT(tok::char_literal, literal);
-                } else {
-                    RETURN_LIT(tok::string_literal, literal);
-                }
-            } else {
-                literal += charToInsert;
-                pos++;
-            }
+        // Lex operators.
+        if(false) {}
+        #define TOKEN_SYMBOL(name, text) else if(isSubstr(text)) { \
+            pos += std::string(text).size();\
+            RETURN(tok::sym_ ## name); \
         }
-        reportError(pos, "Unterminated string literal");
-    }
-
-    // Lex an identifier.
-    if(pos < source.length() && (isLetter() || is('_')))
-        while(pos < source.length() && (isLetter() || isNum() || is('_')))
-            tokenText += source.at(pos++);
-    if(!tokenText.empty()) {
-        #define TOKEN_KEYWORD(name, sourcerepr) if(tokenText == #sourcerepr) RETURN(tok::kw_ ## name);
         #include "TokenKinds.def"
 
-        RETURN(tok::identifier);
-    }
+        // Lex a string or character literal.
+        if(is('"')) {
+            std::string literal = "";
+            bool escapeMode = false;
+            tokenText += '"';
+            pos++;
+            while(pos < source.length() && !isNewline()) {
+                tokenText += curChar();
 
-    // Lex an integer or decimal literal.
-    auto hasDot = false;
-    while(pos < source.length() && (isNum() || is('.'))) {
-        if(is('.')) {
-            if(hasDot) reportError(pos, "Decimal literals can have only one dot.");
-            hasDot = true;
+                char charToInsert = curChar();
+                if(escapeMode) {
+                    try {
+                        charToInsert = specialEscapeCharacters.at(charToInsert);
+                    } catch(...) {
+                        reportError(pos, std::string("Invalid escape character '") + charToInsert + "'");
+                    }
+                    escapeMode = false;
+                }
+
+                if(is('\\')) {
+                    pos++;
+                    escapeMode = true;
+                } else if(is('"') && !escapeMode) {
+                    pos++;
+                    // FIXME: HACK.
+                    if(literal.size() == 1) {
+                        RETURN_LIT(tok::char_literal, literal);
+                    } else {
+                        RETURN_LIT(tok::string_literal, literal);
+                    }
+                } else {
+                    literal += charToInsert;
+                    pos++;
+                }
+            }
+            reportError(pos, "Unterminated string literal");
         }
-        tokenText += source.at(pos++);
-    }
-    if(!tokenText.empty()) {
-        RETURN_LIT(hasDot ? tok::decimal_literal : tok::integer_literal, tokenText);
-    }
 
-    assert(false && "Unhandled token");
-    _LIBCPP_UNREACHABLE();
+        // Lex an identifier.
+        if(pos < source.length() && (isLetter() || is('_')))
+            while(pos < source.length() && (isLetter() || isNum() || is('_')))
+                tokenText += source.at(pos++);
+        if(!tokenText.empty()) {
+            #define TOKEN_KEYWORD(name, sourcerepr) if(tokenText == #sourcerepr) RETURN(tok::kw_ ## name);
+            #include "TokenKinds.def"
+
+            RETURN(tok::identifier);
+        }
+
+        // Lex an integer or decimal literal.
+        {
+            auto hasDot = false;
+            while(pos < source.length() && (isNum() || is('.'))) {
+                if(is('.')) {
+                    if(hasDot) reportError(pos, "Decimal literals can have only one dot.");
+                    hasDot = true;
+                }
+                tokenText += source.at(pos++);
+            }
+            if(!tokenText.empty()) {
+                RETURN_LIT(hasDot ? tok::decimal_literal : tok::integer_literal, tokenText);
+            }
+        }
+
+        assert(false && "Unhandled token");
+
+        nextIteration:;
+    }
+    return tokens;
 }

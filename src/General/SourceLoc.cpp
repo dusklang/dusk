@@ -3,5 +3,5 @@
 #include "SourceLoc.h"
 
 std::string SourceRange::getSubstring() const {
-    return begin.source->substr(begin.location, length);
+    return begin.source.substr(begin.location, length);
 }
