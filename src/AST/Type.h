@@ -9,100 +9,95 @@
 #include "General/SourceLoc.h"
 
 struct StructDecl;
+struct Type;
+
+enum class Signedness: uint8_t {
+    Signed, Unsigned
+};
+struct IntTy {
+    int bitWidth;
+    Signedness signedness;
+
+    bool operator==(IntTy other) { return bitWidth == other.bitWidth && signedness == other.signedness; }
+
+    static IntTy I8() {
+        return IntTy { 8, Signedness::Signed };
+    }
+    static IntTy I16() {
+        return IntTy { 16, Signedness::Signed };
+    }
+    static IntTy I32() {
+        return IntTy { 32, Signedness::Signed };
+    }
+    static IntTy I64() {
+        return IntTy { 64, Signedness::Signed };
+    }
+    static IntTy U8() {
+        return IntTy { 8, Signedness::Unsigned };
+    }
+    static IntTy U16() {
+        return IntTy { 16, Signedness::Unsigned };
+    }
+    static IntTy U32() {
+        return IntTy { 32, Signedness::Unsigned };
+    }
+    static IntTy U64() {
+        return IntTy { 64, Signedness::Unsigned };
+    }
+};
+struct VoidTy {};
+struct BoolTy {};
+struct FloatTy {};
+struct DoubleTy {};
+struct ErrorTy {};
+struct StructTy {
+    std::string name;
+    StructDecl* decl = nullptr;
+
+    bool operator==(StructTy other) const {
+        return name == other.name && decl == other.decl;
+    }
+
+    static StructTy get(std::string name) {
+        return StructTy { name };
+    }
+};
+struct PointerTy {
+    Type* pointedTy;
+    static PointerTy get(Type pointedTy);
+};
+struct TyVariable {
+    enum Kind {
+        General, Integer, Decimal
+    };
+    uint32_t num;
+    Kind kind;
+
+    bool operator==(TyVariable const& other) const {
+        return num == other.num && kind == other.kind;
+    }
+
+    static TyVariable get(uint32_t num, Kind kind = General) {
+        return TyVariable { num, kind };
+    }
+};
 
 struct Type final {
-    struct IntegerTy {
-        int bitWidth;
-        bool isSigned;
-
-        bool operator==(IntegerTy other) { return bitWidth == other.bitWidth && isSigned == other.isSigned; }
-    };
-    struct VoidTy {};
-    struct BoolTy {};
-    struct FloatTy {};
-    struct DoubleTy {};
-    struct ErrorTy {};
-    struct StructTy {
-        std::string name;
-        StructDecl* decl;
-
-        bool operator==(StructTy other) const {
-            return name == other.name && decl == other.decl;
-        }
-    };
-    struct PointerTy {
-        Type* pointedTy;
-    };
-    struct Variable {
-        enum Kind {
-            General, Integer, Decimal
-        };
-        int num;
-        Kind kind;
-
-        bool operator==(Variable const& other) const {
-            return num == other.num && kind == other.kind;
-        }
-    };
-
-    typedef std::variant<IntegerTy, Variable, VoidTy, BoolTy, FloatTy, DoubleTy, ErrorTy, StructTy, PointerTy> DataType;
+    typedef std::variant<IntTy, TyVariable, VoidTy, BoolTy, FloatTy, DoubleTy, ErrorTy, StructTy, PointerTy> DataType;
 
     DataType data;
-    std::optional<SourceRange> sourceRange;
+    std::optional<SourceRange> sourceRange = std::nullopt;
 
-    Type(DataType data,
-         std::optional<SourceRange> sourceRange = std::nullopt)
-    : data(data), sourceRange(sourceRange) {}
-    static Type Integer(int bitWidth, bool isSigned, std::optional<SourceRange> sourceRange = std::nullopt) {
-        return Type(IntegerTy { bitWidth, isSigned }, sourceRange);
-    }
-    static Type I8(std::optional<SourceRange> sourceRange = std::nullopt) {
-        return Integer(8, true, sourceRange);
-    }
-    static Type I16(std::optional<SourceRange> sourceRange = std::nullopt) {
-        return Integer(16, true, sourceRange);
-    }
-    static Type I32(std::optional<SourceRange> sourceRange = std::nullopt) {
-        return Integer(32, true, sourceRange);
-    }
-    static Type I64(std::optional<SourceRange> sourceRange = std::nullopt) {
-        return Integer(64, true, sourceRange);
-    }
-    static Type U8(std::optional<SourceRange> sourceRange = std::nullopt) {
-        return Integer(8, false, sourceRange);
-    }
-    static Type U16(std::optional<SourceRange> sourceRange = std::nullopt) {
-        return Integer(16, false, sourceRange);
-    }
-    static Type U32(std::optional<SourceRange> sourceRange = std::nullopt) {
-        return Integer(32, false, sourceRange);
-    }
-    static Type U64(std::optional<SourceRange> sourceRange = std::nullopt) {
-        return Integer(64, false, sourceRange);
-    }
-    static Type Error() { return Type(ErrorTy()); }
-
-    static Type Pointer(Type pointedTy, std::optional<SourceRange> sourceRange = std::nullopt) {
-        return Type(PointerTy { new Type(pointedTy) }, sourceRange);
-    }
-    static Type TypeVariable(int number, Variable::Kind kind = Variable::General) {
-        return Type(Variable { number });
-    }
-    static Type Void(std::optional<SourceRange> sourceRange = std::nullopt) {
-        return Type(VoidTy(), sourceRange);
-    }
-    static Type Bool(std::optional<SourceRange> sourceRange = std::nullopt) {
-        return Type(BoolTy(), sourceRange);
-    }
-    static Type Float(std::optional<SourceRange> sourceRange = std::nullopt) {
-        return Type(FloatTy(), sourceRange);
-    }
-    static Type Double(std::optional<SourceRange> sourceRange = std::nullopt) {
-        return Type(DoubleTy(), sourceRange);
-    }
-    static Type Struct(std::string name, StructDecl* decl = nullptr, std::optional<SourceRange> sourceRange = std::nullopt) {
-        return Type(StructTy { name, decl }, sourceRange);
-    }
+    Type(DataType data) : data(data) {}
+    Type(IntTy ty) : data(ty) {}
+    Type(ErrorTy ty) : data(ty) {}
+    Type(VoidTy ty) : data(ty) {}
+    Type(BoolTy ty) : data(ty) {}
+    Type(FloatTy ty) : data(ty) {}
+    Type(DoubleTy ty) : data(ty) {}
+    Type(PointerTy ty) : data(ty) {}
+    Type(StructTy ty) : data(ty) {}
+    Type(TyVariable ty) : data(ty) {}
 
     Type* pointeeType() const;
 

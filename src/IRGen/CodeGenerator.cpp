@@ -29,37 +29,37 @@ llvm::Value* CodeGenerator::toIndirect(CodeGenVal val) {
 }
 llvm::Type* CodeGenerator::toLLVMTy(Type type) {
     return match(type.data)(
-        pattern(as<Type::Variable>(_)) = []() -> llvm::Type* {
+        pattern(as<TyVariable>(_)) = []() -> llvm::Type* {
             assert(false && "Encountered type variable");
             return nullptr;
         },
-        pattern(as<Type::ErrorTy>(_)) = []() -> llvm::Type* {
+        pattern(as<ErrorTy>(_)) = []() -> llvm::Type* {
             assert(false && "Encountered error type");
             return nullptr;
         },
-        pattern(as<Type::IntegerTy>(arg)) = [&](auto properties) -> llvm::Type* {
+        pattern(as<IntTy>(arg)) = [&](auto properties) -> llvm::Type* {
             return llvm::Type::getIntNTy(context, properties.bitWidth);
         },
-        pattern(as<Type::StructTy>(arg)) = [&](auto structTy) -> llvm::Type* {
+        pattern(as<StructTy>(arg)) = [&](auto structTy) -> llvm::Type* {
             std::vector<llvm::Type*> types;
             for(auto field: structTy.decl->fields) {
                 types.push_back(toLLVMTy(field->type));
             }
             return llvm::StructType::get(context, types);
         },
-        pattern(as<Type::VoidTy>(_)) = [&]() -> llvm::Type* {
+        pattern(as<VoidTy>(_)) = [&]() -> llvm::Type* {
             return llvm::Type::getVoidTy(context);
         },
-        pattern(as<Type::BoolTy>(_)) = [&]() -> llvm::Type* {
+        pattern(as<BoolTy>(_)) = [&]() -> llvm::Type* {
             return llvm::Type::getInt1Ty(context);
         },
-        pattern(as<Type::FloatTy>(_)) = [&]() -> llvm::Type* {
+        pattern(as<FloatTy>(_)) = [&]() -> llvm::Type* {
             return llvm::Type::getFloatTy(context);
         },
-        pattern(as<Type::DoubleTy>(_)) = [&]() -> llvm::Type* {
+        pattern(as<DoubleTy>(_)) = [&]() -> llvm::Type* {
             return llvm::Type::getDoubleTy(context);
         },
-        pattern(as<Type::PointerTy>(ds(arg))) = [&](auto pointedTy) -> llvm::Type* {
+        pattern(as<PointerTy>(ds(arg))) = [&](auto pointedTy) -> llvm::Type* {
             return llvm::PointerType::get(toLLVMTy(*pointedTy), 0);
         }
     );
@@ -209,16 +209,16 @@ CodeGenVal CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
     auto rhs = visitExpr(expr->rhs);
     auto createAdd = [&]() -> DirectVal {
         return match(expr->lhs->type.data, expr->rhs->type.data)(
-            pattern(as<Type::IntegerTy>(arg), as<Type::IntegerTy>(_)) = [&](auto properties) {
+            pattern(as<IntTy>(arg), as<IntTy>(_)) = [&](auto properties) {
                 return DirectVal { builder.CreateAdd(toDirect(lhs), toDirect(rhs)) };
             },
-            pattern(as<Type::FloatTy>(_), as<Type::FloatTy>(_)) = [&] {
+            pattern(as<FloatTy>(_), as<FloatTy>(_)) = [&] {
                 return DirectVal { builder.CreateFAdd(toDirect(lhs), toDirect(rhs)) };
             },
-            pattern(as<Type::DoubleTy>(_), as<Type::DoubleTy>(_)) = [&] {
+            pattern(as<DoubleTy>(_), as<DoubleTy>(_)) = [&] {
                 return DirectVal { builder.CreateFAdd(toDirect(lhs), toDirect(rhs)) };
             },
-            pattern(as<Type::PointerTy>(_), as<Type::IntegerTy>(_)) = [&] {
+            pattern(as<PointerTy>(_), as<IntTy>(_)) = [&] {
                 return DirectVal { builder.CreateGEP(toDirect(lhs), toDirect(rhs)) };
             },
             pattern(_, _) = [&]() -> DirectVal {
@@ -229,13 +229,13 @@ CodeGenVal CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
     };
     auto createSub = [&]() -> DirectVal {
         return match(expr->lhs->type.data)(
-            pattern(as<Type::IntegerTy>(arg)) = [&](auto properties) {
+            pattern(as<IntTy>(arg)) = [&](auto properties) {
                 return DirectVal { builder.CreateSub(toDirect(lhs), toDirect(rhs)) };
             },
-            pattern(as<Type::FloatTy>(_)) = [&] {
+            pattern(as<FloatTy>(_)) = [&] {
                 return DirectVal { builder.CreateFSub(toDirect(lhs), toDirect(rhs)) };
             },
-            pattern(as<Type::DoubleTy>(_)) = [&] {
+            pattern(as<DoubleTy>(_)) = [&] {
                 return DirectVal { builder.CreateFSub(toDirect(lhs), toDirect(rhs)) };
             },
             pattern(_) = [&]() -> DirectVal {
@@ -245,13 +245,13 @@ CodeGenVal CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
     };
     auto createMult = [&]() -> DirectVal {
         return match(expr->lhs->type.data)(
-            pattern(as<Type::IntegerTy>(arg)) = [&](auto properties) {
+            pattern(as<IntTy>(arg)) = [&](auto properties) {
                 return DirectVal { builder.CreateMul(toDirect(lhs), toDirect(rhs)) };
             },
-            pattern(as<Type::FloatTy>(_)) = [&] {
+            pattern(as<FloatTy>(_)) = [&] {
                 return DirectVal { builder.CreateFMul(toDirect(lhs), toDirect(rhs)) };
             },
-            pattern(as<Type::DoubleTy>(_)) = [&] {
+            pattern(as<DoubleTy>(_)) = [&] {
                 return DirectVal { builder.CreateFMul(toDirect(lhs), toDirect(rhs)) };
             },
             pattern(_) = [&]() -> DirectVal {
@@ -261,17 +261,16 @@ CodeGenVal CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
     };
     auto createDiv = [&]() -> DirectVal {
         return match(expr->lhs->type.data)(
-            pattern(as<Type::IntegerTy>(arg)) = [&](auto properties) {
-                if(properties.isSigned) {
-                    return DirectVal { builder.CreateSDiv(toDirect(lhs), toDirect(rhs)) };
-                } else {
-                    return DirectVal { builder.CreateUDiv(toDirect(lhs), toDirect(rhs)) };
+            pattern(as<IntTy>(arg)) = [&](auto properties) {
+                switch(properties.signedness) {
+                    case Signedness::Signed:   return DirectVal { builder.CreateSDiv(toDirect(lhs), toDirect(rhs)) };
+                    case Signedness::Unsigned: return DirectVal { builder.CreateUDiv(toDirect(lhs), toDirect(rhs)) };
                 }
             },
-            pattern(as<Type::FloatTy>(_)) = [&] {
+            pattern(as<FloatTy>(_)) = [&] {
                 return DirectVal { builder.CreateFDiv(toDirect(lhs), toDirect(rhs)) };
             },
-            pattern(as<Type::DoubleTy>(_)) = [&] {
+            pattern(as<DoubleTy>(_)) = [&] {
                 return DirectVal { builder.CreateFDiv(toDirect(lhs), toDirect(rhs)) };
             },
             pattern(_) = [&]() -> DirectVal {
@@ -281,17 +280,18 @@ CodeGenVal CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
     };
     auto createMod = [&]() -> DirectVal {
         return match(expr->lhs->type.data)(
-            pattern(as<Type::IntegerTy>(arg)) = [&](auto properties) {
-                if(properties.isSigned) {
-                    return DirectVal { builder.CreateSRem(toDirect(lhs), toDirect(rhs)) };
-                } else {
-                    return DirectVal { builder.CreateURem(toDirect(lhs), toDirect(rhs)) };
+            pattern(as<IntTy>(arg)) = [&](auto properties) {
+                switch(properties.signedness) {
+                    case Signedness::Signed:
+                        return DirectVal { builder.CreateSRem(toDirect(lhs), toDirect(rhs)) };
+                    case Signedness::Unsigned:
+                        return DirectVal { builder.CreateURem(toDirect(lhs), toDirect(rhs)) };
                 }
             },
-            pattern(as<Type::FloatTy>(_)) = [&] {
+            pattern(as<FloatTy>(_)) = [&] {
                 return DirectVal { builder.CreateFRem(toDirect(lhs), toDirect(rhs)) };
             },
-            pattern(as<Type::DoubleTy>(_)) = [&] {
+            pattern(as<DoubleTy>(_)) = [&] {
                 return DirectVal { builder.CreateFRem(toDirect(lhs), toDirect(rhs)) };
             },
             pattern(_) = [&]() -> DirectVal {
@@ -367,39 +367,36 @@ CodeGenVal CodeGenerator::visitCastExpr(CastExpr* expr) {
 
     auto destTypeLLVM = toLLVMTy(destType);
     return match(expr->operand->type.data, expr->destType.data)(
-        pattern(as<Type::IntegerTy>(arg), as<Type::IntegerTy>(arg)) = [&](auto og, auto dest) -> DirectVal {
+        pattern(as<IntTy>(arg), as<IntTy>(arg)) = [&](auto og, auto dest) -> DirectVal {
             // TODO: Detect overflow.
-            if(dest.isSigned) {
-                return DirectVal { builder.CreateSExtOrTrunc(toDirect(ogValue), destTypeLLVM) };
-            } else {
-                return DirectVal { builder.CreateZExtOrTrunc(toDirect(ogValue), destTypeLLVM) };
+            switch(dest.signedness) {
+                case Signedness::Signed:   return DirectVal { builder.CreateSExtOrTrunc(toDirect(ogValue), destTypeLLVM) };
+                case Signedness::Unsigned: return DirectVal { builder.CreateZExtOrTrunc(toDirect(ogValue), destTypeLLVM) };
             }
         },
-        pattern(as<Type::IntegerTy>(arg), as<Type::FloatTy>(arg)) = [&](auto og, auto dest) -> DirectVal {
-            if(og.isSigned) {
-                return DirectVal { builder.CreateSIToFP(toDirect(ogValue), destTypeLLVM) };
-            } else {
-                return DirectVal { builder.CreateUIToFP(toDirect(ogValue), destTypeLLVM) };
+        pattern(as<IntTy>(arg), as<FloatTy>(arg)) = [&](auto og, auto dest) -> DirectVal {
+            switch(og.signedness) {
+                case Signedness::Signed:   return DirectVal { builder.CreateSIToFP(toDirect(ogValue), destTypeLLVM) };
+                case Signedness::Unsigned: return DirectVal { builder.CreateUIToFP(toDirect(ogValue), destTypeLLVM) };
             }
         },
-        pattern(as<Type::FloatTy>(arg), as<Type::IntegerTy>(arg)) = [&](auto og, auto dest) -> DirectVal {
-            if(dest.isSigned) {
-                return DirectVal { builder.CreateFPToSI(toDirect(ogValue), destTypeLLVM) };
-            } else {
-                return DirectVal { builder.CreateFPToSI(toDirect(ogValue), destTypeLLVM) };
+        pattern(as<FloatTy>(arg), as<IntTy>(arg)) = [&](auto og, auto dest) -> DirectVal {
+            switch(dest.signedness) {
+                case Signedness::Signed:   return DirectVal { builder.CreateFPToSI(toDirect(ogValue), destTypeLLVM) };
+                case Signedness::Unsigned: return DirectVal { builder.CreateFPToSI(toDirect(ogValue), destTypeLLVM) };
             }
         },
-        pattern(as<Type::FloatTy>(_), as<Type::DoubleTy>(_)) = [&]() -> DirectVal {
+        pattern(as<FloatTy>(_), as<DoubleTy>(_)) = [&]() -> DirectVal {
             return DirectVal { builder.CreateFPExt(toDirect(ogValue), destTypeLLVM) };
         },
-        pattern(as<Type::DoubleTy>(_), as<Type::FloatTy>(_)) = [&]() -> DirectVal {
+        pattern(as<DoubleTy>(_), as<FloatTy>(_)) = [&]() -> DirectVal {
             return DirectVal { builder.CreateFPTrunc(toDirect(ogValue), destTypeLLVM) };
         },
-        pattern(as<Type::PointerTy>(_), _) = []() -> DirectVal {
+        pattern(as<PointerTy>(_), _) = []() -> DirectVal {
             assert(false && "pointer casting is not yet supported");
             __builtin_unreachable();
         },
-        pattern(_, as<Type::PointerTy>(_)) = []() -> DirectVal {
+        pattern(_, as<PointerTy>(_)) = []() -> DirectVal {
             assert(false && "pointer casting is not yet supported");
             __builtin_unreachable();
         }

@@ -9,20 +9,24 @@ using namespace mpark::patterns;
 
 #include "Type.h"
 
+PointerTy PointerTy::get(Type pointedTy) {
+    return PointerTy { new Type(pointedTy) };
+}
+
 std::string Type::name() const {
     std::ostringstream stream;
     match(data)(
-        pattern(as<Variable>(arg)) = [&](auto typeVariable) {
+        pattern(as<TyVariable>(arg)) = [&](auto typeVariable) {
             stream << "<T" << typeVariable.num;
             switch(typeVariable.kind) {
-                case Variable::Integer: stream << ": Integer"; break;
-                case Variable::Decimal: stream << ": Decimal"; break;
+                case TyVariable::Integer: stream << ": Integer"; break;
+                case TyVariable::Decimal: stream << ": Decimal"; break;
                 default: break;
             }
             stream << '>';
         },
-        pattern(as<IntegerTy>(arg)) = [&](auto properties) {
-            stream << (properties.isSigned ? "i" : "u") << properties.bitWidth;
+        pattern(as<IntTy>(arg)) = [&](auto properties) {
+            stream << (properties.signedness == Signedness::Signed ? "i" : "u") << properties.bitWidth;
         },
         pattern(as<StructTy>(arg)) = [&](auto structTy) {
             stream << structTy.name;
@@ -61,9 +65,9 @@ Type* Type::pointeeType() const {
 
 bool Type::operator==(Type other) const {
     return match(data, other.data)(
-       pattern(as<IntegerTy>(arg), as<IntegerTy>(arg))
+       pattern(as<IntTy>(arg), as<IntTy>(arg))
            = [](auto lhs, auto rhs) { return lhs == rhs; },
-       pattern(as<Variable>(arg), as<Variable>(arg))
+       pattern(as<TyVariable>(arg), as<TyVariable>(arg))
            = [](auto lhs, auto rhs) { return lhs == rhs; },
        pattern(as<StructTy>(arg), as<StructTy>(arg))
            = [](auto lhs, auto rhs) { return lhs == rhs; },
@@ -81,13 +85,13 @@ bool Type::operator==(Type other) const {
 
 Type Type::substituting(std::map<int, Type> const& solution) const {
     return match(data)(
-       pattern(as<Variable>(arg)) = [&](auto var) {
+       pattern(as<TyVariable>(arg)) = [&](auto var) -> Type {
            for(auto const& solution: solution) {
                if(solution.first == var.num) {
                    return solution.second;
                }
            }
-           return Type::TypeVariable(var.num, var.kind);
+           return TyVariable::get(var.num, var.kind);
        },
        pattern(_) = [&] { return *this; }
     );

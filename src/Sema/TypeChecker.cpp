@@ -8,7 +8,7 @@ using namespace mpark::patterns;
 
 void TypeChecker::visitType(Type *type) {
     match(type->data)(
-        pattern(as<Type::StructTy>(arg)) = [&](auto& structTy) {
+        pattern(as<StructTy>(arg)) = [&](auto& structTy) {
             StructDecl* structDecl;
             for(auto decl: structs) {
                 if(structTy.name == decl->name) {
@@ -21,7 +21,7 @@ void TypeChecker::visitType(Type *type) {
             }
             structTy.decl = structDecl;
         },
-        pattern(as<Type::PointerTy>(ds(arg))) = [&](auto& pointedTy) {
+        pattern(as<PointerTy>(ds(arg))) = [&](auto& pointedTy) {
             visitType(pointedTy);
         },
         pattern(_) = [] {}
@@ -41,7 +41,7 @@ void TypeChecker::visitDecl(Decl* decl) {
         declLists.back().push_back(decl);
     }
 
-    if(decl->type != Type::Error()) {
+    if(decl->type != ErrorTy()) {
         visitType(&decl->type);
     }
     for(auto param: decl->paramList) {
@@ -58,8 +58,8 @@ void TypeChecker::visitDecl(Decl* decl) {
         }
         if(decl->isComputed()) {
             // Add Void type to computed declaration if it doesn't have one.
-            if(decl->type == Type::Error()) {
-                decl->type = Type::Void();
+            if(decl->type == ErrorTy()) {
+                decl->type = VoidTy();
             } else {
                 visitType(&decl->type);
             }
@@ -73,7 +73,7 @@ void TypeChecker::visitDecl(Decl* decl) {
             }
         } else {
             visitExpr(decl->expression());
-            if(decl->type == Type::Error()) {
+            if(decl->type == ErrorTy()) {
                 decl->type = decl->expression()->type;
             } else {
                 if(decl->type != decl->expression()->type) {
@@ -84,7 +84,7 @@ void TypeChecker::visitDecl(Decl* decl) {
                                 decl);
                 }
             }
-            if(decl->type == Type::Void()) reportError("Stored declarations can not have type Void", decl);
+            if(decl->type == VoidTy()) reportError("Stored declarations can not have type Void", decl);
 
             if(decl->isParameterized()) declLists.pop_back();
 
@@ -99,7 +99,7 @@ void TypeChecker::visitDecl(Decl* decl) {
             reportError("Non-extern declarations currently always need definitions", decl);
         }
 
-        if(decl->type == Type::Error()) {
+        if(decl->type == ErrorTy()) {
             reportError("Standalone decl prototypes need types", decl);
         }
     }
@@ -125,7 +125,7 @@ void TypeChecker::visitScope(Scope* scope) {
         if(auto expr = dynamic_cast<Expr*>(node)) {
             visitExpr(expr);
             // Disallow unused expressions.
-            if(expr->type != Type::Void()) {
+            if(expr->type != VoidTy()) {
                 reportError("Unused expression", expr);
             }
         } else {
@@ -136,19 +136,19 @@ void TypeChecker::visitScope(Scope* scope) {
     declLists.pop_back();
 }
 void TypeChecker::visitIntegerLiteralExpr(IntegerLiteralExpr* expr) {
-    expr->type = Type::I32();
+    expr->type = IntTy::I32();
 }
 void TypeChecker::visitDecimalLiteralExpr(DecimalLiteralExpr* expr) {
-    expr->type = Type::Double();
+    expr->type = DoubleTy();
 }
 void TypeChecker::visitBooleanLiteralExpr(BooleanLiteralExpr* expr) {
-    expr->type = Type::Bool();
+    expr->type = BoolTy();
 }
 void TypeChecker::visitCharLiteralExpr(CharLiteralExpr* expr) {
-    expr->type = Type::I8();
+    expr->type = IntTy::I8();
 }
 void TypeChecker::visitStringLiteralExpr(StringLiteralExpr* expr) {
-    expr->type = Type::Pointer(Type::I8());
+    expr->type = PointerTy::get(IntTy::I8());
 }
 void TypeChecker::visitPreOpExpr(PreOpExpr* expr) {
     visitExpr(expr->operand);
@@ -158,7 +158,7 @@ void TypeChecker::visitPreOpExpr(PreOpExpr* expr) {
             expr->type = *expr->operand->type.pointeeType();
             break;
         case PreOp::AddrOf:
-            expr->type = Type::Pointer(expr->operand->type);
+            expr->type = PointerTy::get(expr->operand->type);
             break;
         default:
             expr->type = expr->operand->type;
@@ -173,7 +173,7 @@ void TypeChecker::visitBinOpExpr(BinOpExpr* expr) {
     if(expr->lhs->type != expr->rhs->type) {
         // Allow +, +=, - and -= between pointers and integers.
         match(expr->lhs->type.data, expr->rhs->type.data)(
-            pattern(as<Type::PointerTy>(_), as<Type::IntegerTy>(_)) = [&] {
+            pattern(as<PointerTy>(_), as<IntTy>(_)) = [&] {
                 WHEN(expr->op == BinOp::Add || expr->op == BinOp::AddAssignment)
                 {
                     pointerAdd = true;
@@ -201,7 +201,7 @@ void TypeChecker::visitBinOpExpr(BinOpExpr* expr) {
         case BinOp::LessThanOrEqual:
         case BinOp::GreaterThan:
         case BinOp::GreaterThanOrEqual:
-            expr->type = Type::Bool();
+            expr->type = BoolTy();
             break;
         case BinOp::Assignment:
         case BinOp::AddAssignment:
@@ -214,7 +214,7 @@ void TypeChecker::visitBinOpExpr(BinOpExpr* expr) {
             if(!expr->lhs->isMutable()) {
                 reportError("Cannot assign to immutable expression", expr);
             }
-            expr->type = Type::Void();
+            expr->type = VoidTy();
         }
     }
 }
@@ -267,11 +267,11 @@ void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
 void TypeChecker::visitMemberRefExpr(MemberRefExpr* expr) {
     visitExpr(expr->root);
 
-    if_let(pattern(as<Type::PointerTy>(_)) = expr->root->type.data) = [&] {
+    if_let(pattern(as<PointerTy>(_)) = expr->root->type.data) = [&] {
         reportError("Cannot reference a member of a pointer type", expr);
     };
     match(expr->root->type.data)(
-        pattern(as<Type::StructTy>(arg)) = [&](auto structTy) {
+        pattern(as<StructTy>(arg)) = [&](auto structTy) {
             std::optional<size_t> fieldDecl = std::nullopt;
 
             auto& fields = structTy.decl->fields;
@@ -296,7 +296,7 @@ void TypeChecker::visitReturnStmt(ReturnStmt* stmt) {
         visitExpr(stmt->value);
     }
     // Handle returning value in a void computed decl.
-    if(returnTypeStack.top() == Type::Void()) {
+    if(returnTypeStack.top() == VoidTy()) {
         if(stmt->value) {
             reportError("Attempted to return value from Void computed decl '", stmt);
         } else {
@@ -320,7 +320,7 @@ void TypeChecker::visitReturnStmt(ReturnStmt* stmt) {
 }
 void TypeChecker::visitIfStmt(IfStmt* stmt) {
     visitExpr(stmt->condition);
-    if(stmt->condition->type != Type::Bool()) {
+    if(stmt->condition->type != BoolTy()) {
         reportError("Expression in if statement is not of type Bool", stmt);
     }
     visitScope(stmt->thenScope);
@@ -328,7 +328,7 @@ void TypeChecker::visitIfStmt(IfStmt* stmt) {
 }
 void TypeChecker::visitWhileStmt(WhileStmt* stmt) {
     visitExpr(stmt->condition);
-    if(stmt->condition->type != Type::Bool()) {
+    if(stmt->condition->type != BoolTy()) {
         reportError("Expression in while statement is not of type Bool", stmt);
     }
     visitScope(stmt->thenScope);

@@ -20,7 +20,7 @@ struct Expr : public ASTNode {
     ExprKind exprKind;
     Type type;
     Expr(SourceRange range, ExprKind exprKind, Type type) : ASTNode(NodeKind::Expr, range), exprKind(exprKind), type(type) {}
-    Expr(SourceRange range, ExprKind exprKind) : ASTNode(NodeKind::Expr, range), exprKind(exprKind), type(Type::Error()) {}
+    Expr(SourceRange range, ExprKind exprKind) : ASTNode(NodeKind::Expr, range), exprKind(exprKind), type(ErrorTy()) {}
     virtual bool isMutable() const { return false; }
 };
 

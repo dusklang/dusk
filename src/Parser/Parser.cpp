@@ -148,28 +148,28 @@ Type Parser::parseType() {
     recordCurrentLoc();
     if(current().is(tok::sym_asterisk)) {
         next();
-        return Type::Pointer(parseType());
+        return PointerTy::get(parseType());
     }
     auto typeName = parseIdentifer();
     if(!typeName) reportError("Expected type name", current().getRange());
 
-    if(*typeName == "i8") { return Type::I8(); }
-    if(*typeName == "i16") { return Type::I16(); }
-    if(*typeName == "i32") { return Type::I32(); }
-    if(*typeName == "i64") { return Type::I64(); }
+    if(*typeName == "i8") { return IntTy::I8(); }
+    if(*typeName == "i16") { return IntTy::I16(); }
+    if(*typeName == "i32") { return IntTy::I32(); }
+    if(*typeName == "i64") { return IntTy::I64(); }
 
-    if(*typeName == "u8") { return Type::U8(); }
-    if(*typeName == "u16") { return Type::U16(); }
-    if(*typeName == "u32") { return Type::U32(); }
-    if(*typeName == "u64") { return Type::U64(); }
+    if(*typeName == "u8") { return IntTy::U8(); }
+    if(*typeName == "u16") { return IntTy::U16(); }
+    if(*typeName == "u32") { return IntTy::U32(); }
+    if(*typeName == "u64") { return IntTy::U64(); }
 
-    if(*typeName == "f32") { return Type::Float(); }
-    if(*typeName == "f64") { return Type::Double(); }
+    if(*typeName == "f32") { return FloatTy(); }
+    if(*typeName == "f64") { return DoubleTy(); }
 
-    if(*typeName == "bool") { return Type::Bool(); }
-    if(*typeName == "void") { return Type::Void(); }
+    if(*typeName == "bool") { return BoolTy(); }
+    if(*typeName == "void") { return VoidTy(); }
 
-    return Type::Struct(*typeName);
+    return StructTy::get(*typeName);
 }
 
 Decl* Parser::parseDecl() {
@@ -210,7 +210,7 @@ Decl* Parser::parseDecl() {
         next();
     }
 
-    Type type = Type::Error();
+    Type type = ErrorTy();
     // Range of the "prototype", which includes everything from the extern keyword (if it exists) to
     // the type of the declaration (if it's specified).
     SourceRange protoRange;
@@ -280,7 +280,7 @@ StructDecl* Parser::parseStructDecl() {
         if(field->hasDefinition()) {
             reportError("Struct fields cannot (yet) have definitions");
         }
-        if(field->type == Type::Error()) {
+        if(field->type == ErrorTy()) {
             reportError("Struct fields must have explicit types");
         }
         fields.push_back(field);
