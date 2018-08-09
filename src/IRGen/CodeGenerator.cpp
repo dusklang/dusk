@@ -28,7 +28,7 @@ llvm::Value* CodeGenerator::toIndirect(CodeGenVal val) {
     );
 }
 llvm::Type* CodeGenerator::toLLVMTy(Type type) {
-    llvm::Type* ty = match(type.data)(
+    return match(type.data)(
         pattern(as<Type::Variable>(_)) = []() -> llvm::Type* {
             assert(false && "Encountered type variable");
             return nullptr;
@@ -58,12 +58,11 @@ llvm::Type* CodeGenerator::toLLVMTy(Type type) {
         },
         pattern(as<Type::DoubleTy>(_)) = [&]() -> llvm::Type* {
             return llvm::Type::getDoubleTy(context);
+        },
+        pattern(as<Type::PointerTy>(ds(arg))) = [&](auto pointedTy) -> llvm::Type* {
+            return llvm::PointerType::get(toLLVMTy(*pointedTy), 0);
         }
     );
-    for(uint8_t i = 0; i < type.indirection; ++i) {
-        ty = llvm::PointerType::get(ty, 0);
-    }
-    return ty;
 }
 CodeGenVal CodeGenerator::visitDecl(Decl* decl) {
     if(auto expr = decl->expression()) {
@@ -209,25 +208,24 @@ CodeGenVal CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
     auto lhs = visitExpr(expr->lhs);
     auto rhs = visitExpr(expr->rhs);
     auto createAdd = [&]() -> DirectVal {
-        if(expr->lhs->type.indirection > 0) {
-            return DirectVal { builder.CreateGEP(toDirect(lhs), toDirect(rhs)) };
-        } else {
-            return match(expr->lhs->type.data)(
-                pattern(as<Type::IntegerTy>(arg)) = [&](auto properties) {
-                    return DirectVal { builder.CreateAdd(toDirect(lhs), toDirect(rhs)) };
-                },
-                pattern(as<Type::FloatTy>(_)) = [&] {
-                    return DirectVal { builder.CreateFAdd(toDirect(lhs), toDirect(rhs)) };
-                },
-                pattern(as<Type::DoubleTy>(_)) = [&] {
-                    return DirectVal { builder.CreateFAdd(toDirect(lhs), toDirect(rhs)) };
-                },
-                pattern(_) = [&]() -> DirectVal {
-                    assert(false && "Can't add values of that type");
-                    __builtin_unreachable();
-                }
-            );
-        }
+        return match(expr->lhs->type.data, expr->rhs->type.data)(
+            pattern(as<Type::IntegerTy>(arg), as<Type::IntegerTy>(_)) = [&](auto properties) {
+                return DirectVal { builder.CreateAdd(toDirect(lhs), toDirect(rhs)) };
+            },
+            pattern(as<Type::FloatTy>(_), as<Type::FloatTy>(_)) = [&] {
+                return DirectVal { builder.CreateFAdd(toDirect(lhs), toDirect(rhs)) };
+            },
+            pattern(as<Type::DoubleTy>(_), as<Type::DoubleTy>(_)) = [&] {
+                return DirectVal { builder.CreateFAdd(toDirect(lhs), toDirect(rhs)) };
+            },
+            pattern(as<Type::PointerTy>(_), as<Type::IntegerTy>(_)) = [&] {
+                return DirectVal { builder.CreateGEP(toDirect(lhs), toDirect(rhs)) };
+            },
+            pattern(_, _) = [&]() -> DirectVal {
+                assert(false && "Can't add values of those types");
+                __builtin_unreachable();
+            }
+        );
     };
     auto createSub = [&]() -> DirectVal {
         return match(expr->lhs->type.data)(
@@ -368,10 +366,6 @@ CodeGenVal CodeGenerator::visitCastExpr(CastExpr* expr) {
     if(ogType == destType) { return ogValue; }
 
     auto destTypeLLVM = toLLVMTy(destType);
-    assert(
-        (ogType.indirection == 0 && destType.indirection == 0) &&
-        "pointer casting isn't yet allowed"
-    );
     return match(expr->operand->type.data, expr->destType.data)(
         pattern(as<Type::IntegerTy>(arg), as<Type::IntegerTy>(arg)) = [&](auto og, auto dest) -> DirectVal {
             // TODO: Detect overflow.
@@ -400,6 +394,14 @@ CodeGenVal CodeGenerator::visitCastExpr(CastExpr* expr) {
         },
         pattern(as<Type::DoubleTy>(_), as<Type::FloatTy>(_)) = [&]() -> DirectVal {
             return DirectVal { builder.CreateFPTrunc(toDirect(ogValue), destTypeLLVM) };
+        },
+        pattern(as<Type::PointerTy>(_), _) = []() -> DirectVal {
+            assert(false && "pointer casting is not yet supported");
+            __builtin_unreachable();
+        },
+        pattern(_, as<Type::PointerTy>(_)) = []() -> DirectVal {
+            assert(false && "pointer casting is not yet supported");
+            __builtin_unreachable();
         }
     );
 }

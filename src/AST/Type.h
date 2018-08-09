@@ -30,6 +30,9 @@ struct Type final {
             return name == other.name && decl == other.decl;
         }
     };
+    struct PointerTy {
+        Type* pointedTy;
+    };
     struct Variable {
         enum Kind {
             General, Integer, Decimal
@@ -42,16 +45,14 @@ struct Type final {
         }
     };
 
-    typedef std::variant<IntegerTy, Variable, VoidTy, BoolTy, FloatTy, DoubleTy, ErrorTy, StructTy> DataType;
+    typedef std::variant<IntegerTy, Variable, VoidTy, BoolTy, FloatTy, DoubleTy, ErrorTy, StructTy, PointerTy> DataType;
 
     DataType data;
     std::optional<SourceRange> sourceRange;
-    uint8_t indirection;
 
     Type(DataType data,
-         std::optional<SourceRange> sourceRange = std::nullopt,
-         uint8_t indirection = 0)
-    : data(data), sourceRange(sourceRange), indirection(indirection) {}
+         std::optional<SourceRange> sourceRange = std::nullopt)
+    : data(data), sourceRange(sourceRange) {}
     static Type Integer(int bitWidth, bool isSigned, std::optional<SourceRange> sourceRange = std::nullopt) {
         return Type(IntegerTy { bitWidth, isSigned }, sourceRange);
     }
@@ -82,7 +83,7 @@ struct Type final {
     static Type Error() { return Type(ErrorTy()); }
 
     static Type Pointer(Type pointedTy, std::optional<SourceRange> sourceRange = std::nullopt) {
-        return Type(pointedTy.data, sourceRange, pointedTy.indirection + 1);
+        return Type(PointerTy { new Type(pointedTy) }, sourceRange);
     }
     static Type TypeVariable(int number, Variable::Kind kind = Variable::General) {
         return Type(Variable { number });
@@ -103,10 +104,7 @@ struct Type final {
         return Type(StructTy { name, decl }, sourceRange);
     }
 
-    Type pointeeType() const {
-        assert(indirection > 0 && "Tried to get pointee type of non-pointer type");
-        return Type(data, sourceRange, indirection - 1);
-    }
+    Type* pointeeType() const;
 
     ~Type() = default;
     Type(Type const& other) = default;

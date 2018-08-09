@@ -21,6 +21,9 @@ void TypeChecker::visitType(Type *type) {
             }
             structTy.decl = structDecl;
         },
+        pattern(as<Type::PointerTy>(ds(arg))) = [&](auto& pointedTy) {
+            visitType(pointedTy);
+        },
         pattern(_) = [] {}
     );
 }
@@ -152,7 +155,7 @@ void TypeChecker::visitPreOpExpr(PreOpExpr* expr) {
     // FIXME: Ensure the given operator is valid for the operand type.
     switch(expr->op) {
         case PreOp::Deref:
-            expr->type = expr->operand->type.pointeeType();
+            expr->type = *expr->operand->type.pointeeType();
             break;
         case PreOp::AddrOf:
             expr->type = Type::Pointer(expr->operand->type);
@@ -168,16 +171,15 @@ void TypeChecker::visitBinOpExpr(BinOpExpr* expr) {
     bool pointerAdd = false;
     expr->type = expr->lhs->type;
     if(expr->lhs->type != expr->rhs->type) {
-        IDENTIFIERS(x);
         // Allow +, +=, - and -= between pointers and integers.
-        match(expr->lhs->type.indirection, expr->rhs->type.indirection, expr->rhs->type.data)(
-            pattern(x, 0, as<Type::IntegerTy>(_)) = [&](auto x) {
-                WHEN(x > 0 && (expr->op == BinOp::Add || expr->op == BinOp::AddAssignment))
+        match(expr->lhs->type.data, expr->rhs->type.data)(
+            pattern(as<Type::PointerTy>(_), as<Type::IntegerTy>(_)) = [&] {
+                WHEN(expr->op == BinOp::Add || expr->op == BinOp::AddAssignment)
                 {
                     pointerAdd = true;
                 };
             },
-            pattern(_, _, _) = [&] {
+            pattern(_, _) = [&] {
                 reportError("Mismatched types `" + expr->lhs->type.name() + "` and `" + expr->rhs->type.name() + "` in binary operator expression", expr);
             }
         );
@@ -264,9 +266,10 @@ void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
 }
 void TypeChecker::visitMemberRefExpr(MemberRefExpr* expr) {
     visitExpr(expr->root);
-    if(expr->root->type.indirection > 0) {
+
+    if_let(pattern(as<Type::PointerTy>(_)) = expr->root->type.data) = [&] {
         reportError("Cannot reference a member of a pointer type", expr);
-    }
+    };
     match(expr->root->type.data)(
         pattern(as<Type::StructTy>(arg)) = [&](auto structTy) {
             std::optional<size_t> fieldDecl = std::nullopt;

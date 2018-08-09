@@ -11,9 +11,6 @@ using namespace mpark::patterns;
 
 std::string Type::name() const {
     std::ostringstream stream;
-    for(uint8_t i = 0; i < indirection; ++i) {
-        stream << "*";
-    }
     match(data)(
         pattern(as<Variable>(arg)) = [&](auto typeVariable) {
             stream << "<T" << typeVariable.num;
@@ -42,11 +39,24 @@ std::string Type::name() const {
         pattern(as<DoubleTy>(_)) = [&] {
             stream << "f64";
         },
+        pattern(as<PointerTy>(ds(arg))) = [&](auto pointedTy) {
+            stream << '*' << pointedTy->name();
+        },
         pattern(as<ErrorTy>(_)) = [&] {
             stream << "#ERRORTYPE#";
         }
     );
     return stream.str();
+}
+
+Type* Type::pointeeType() const {
+    return match(data)(
+        pattern(as<PointerTy>(arg)) = [](auto pointer) { return pointer.pointedTy; },
+        pattern(_) = []() -> Type* {
+            assert(false && "Attempt to get the pointee type of a non-pointer type");
+            __builtin_unreachable();
+        }
+    );
 }
 
 bool Type::operator==(Type other) const {
@@ -62,8 +72,11 @@ bool Type::operator==(Type other) const {
        pattern(as<FloatTy>(_), as<FloatTy>(_)) = [] { return true; },
        pattern(as<DoubleTy>(_), as<DoubleTy>(_)) = [] { return true; },
        pattern(as<ErrorTy>(_), as<ErrorTy>(_)) = [] { return true; },
+       pattern(as<PointerTy>(ds(arg)), as<PointerTy>(ds(arg))) = [](auto lhs, auto rhs) {
+           return *lhs == *rhs;
+       },
        pattern(_, _) = [] { return false; }
-   ) && (indirection == other.indirection);
+    );
 }
 
 Type Type::substituting(std::map<int, Type> const& solution) const {
