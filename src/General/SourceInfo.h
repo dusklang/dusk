@@ -24,6 +24,15 @@ struct SourceRange {
     SourceRange() : begin(0), end(0) {}
 };
 
+struct LineRange {
+    uint32_t const line;
+    SourcePos const startColumn;
+    SourcePos const endColumn;
+
+    LineRange(uint32_t line, SourcePos startColumn, SourcePos endColumn) :
+        line(line), startColumn(startColumn), endColumn(endColumn) {}
+};
+
 class SourceFile {
     std::vector<SourcePos> lines;
 
@@ -38,4 +47,5 @@ public:
     }
     StringRef substringFromRange(SourceRange range) const;
     StringRef substringFromLine(uint32_t lineNum) const;
+    std::vector<LineRange> linesInRange(SourceRange range) const;
 };
