@@ -4,6 +4,8 @@
 
 #include <string>
 #include <sstream>
+#include <vector>
+#include <optional>
 
 #include "String.h"
 
@@ -11,6 +13,7 @@ struct SourcePos {
     uint32_t pos;
 
     SourcePos(uint32_t pos) : pos(pos) {}
+    SourcePos() : pos(0) {}
 };
 
 struct SourceRange {
@@ -21,11 +24,18 @@ struct SourceRange {
     SourceRange() : begin(0), end(0) {}
 };
 
-struct SourceFile {
-    std::string name;
-    std::string source;
+class SourceFile {
+    std::vector<SourcePos> lines;
+
+public:
+    std::string const name;
+    std::string const source;
 
     SourceFile(std::string name, std::string source) : name(name), source(source) {}
 
+    void nextLinePosition(SourcePos linePos) {
+        lines.push_back(linePos);
+    }
     StringRef substringFromRange(SourceRange range) const;
+    StringRef substringFromLine(uint32_t lineNum) const;
 };

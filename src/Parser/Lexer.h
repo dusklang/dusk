@@ -7,4 +7,4 @@
 #include "Token.h"
 #include "General/SourceInfo.h"
 
-std::vector<Token> lex(SourceFile const& file);
+std::vector<Token> lex(SourceFile* file);

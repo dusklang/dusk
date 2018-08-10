@@ -74,7 +74,7 @@ class Parser final {
         exit(1);
     }
 public:
-    Parser(SourceFile const& file) : file(file) {
+    Parser(SourceFile* file) : file(*file) {
         tokens = lex(file);
 
         next();

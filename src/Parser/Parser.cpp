@@ -344,7 +344,7 @@ Expr* Parser::parseDeclRefExpr() {
             argList.push_back(argument);
 
         } while(cur().is(tok::sym_comma));
-        EXPECT(tok::sym_right_paren, "Expected ')' after parameter and argument");
+        EXPECT(tok::sym_right_paren, "Expected ')' after argument");
         next();
     }
 

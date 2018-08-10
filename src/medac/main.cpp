@@ -163,7 +163,8 @@ int main() {
     std::cout << "Meda compiler version 0.0.1\n\n";
 
     SourceFile file("main.meda", sourceCode);
-    Parser parser(file);
+    Parser parser(&file);
+
     ASTPrinter printer(file);
     TypeChecker tyChecker(file);
     CodeGenerator codeGenerator;
