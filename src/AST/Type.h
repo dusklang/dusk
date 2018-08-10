@@ -6,7 +6,7 @@
 #include <optional>
 #include <map>
 
-#include "General/SourceLoc.h"
+#include "General/SourceInfo.h"
 
 struct StructDecl;
 struct Type;

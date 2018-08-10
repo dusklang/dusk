@@ -6,4 +6,4 @@ set(HEADERS
 )
 
 add_library(IRGen ${SOURCES} ${HEADERS})
-target_link_libraries(IRGen AST General ${llvm_libs} ${icu_libs})
+target_link_libraries(IRGen AST General ${llvm_libs})

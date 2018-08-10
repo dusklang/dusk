@@ -14,13 +14,14 @@ std::map<char, char> specialEscapeCharacters {
     { '\\', '\\' }
 };
 
-std::vector<Token> lex(std::string const& source) {
+std::vector<Token> lex(SourceFile const& file) {
+    auto& source = file.source;
     uint32_t pos = 0;
     std::vector<Token> tokens;
-    auto reportError = [&](int endPos, std::string message) {
-        SourceRange range(SourceLoc(source, pos), endPos - pos);
+    auto reportError = [&](uint32_t endPos, std::string message) {
+        SourceRange range { SourcePos { pos }, SourcePos { endPos } };
         std::cout << "LEXING ERROR: " << message << '\n';
-        std::cout << "Offending area: " << range.getSubstring() << "\n\n";
+        std::cout << "Offending area: " << file.substringFromRange(range) << "\n\n";
         exit(1);
     };
     auto curChar = [&]() -> char { return source.at(pos); };
@@ -45,14 +46,14 @@ std::vector<Token> lex(std::string const& source) {
 
         #define RETURN_LIT(tokenKind, literal) { \
             tokens.push_back(\
-                Token(tokenKind, SourceRange(SourceLoc(source, beginPos), pos - beginPos), literal)\
+                Token(tokenKind, SourceRange(beginPos, pos), literal)\
             );\
             goto nextIteration;\
         }
         #define RETURN(tokenKind) RETURN_LIT(tokenKind, "")
         #define RETURN_EOF() {\
             tokens.push_back(\
-                Token(tok::eof, SourceRange(SourceLoc(source, beginPos), pos - beginPos), "")\
+                Token(tok::eof, SourceRange(beginPos, pos), "")\
             );\
             break;\
         }
@@ -60,7 +61,7 @@ std::vector<Token> lex(std::string const& source) {
         // Return eof if at the end.
         if(pos == source.length()) {
             tokens.push_back(
-                Token(tok::eof, SourceRange(SourceLoc(source, beginPos), pos - beginPos), "")
+                Token(tok::eof, SourceRange { SourcePos { beginPos }, SourcePos { pos } }, "")
             );
             break;
         }
@@ -160,7 +161,7 @@ std::vector<Token> lex(std::string const& source) {
             #define TOKEN_KEYWORD(name, sourcerepr) if(tokenText == #sourcerepr) RETURN(tok::kw_ ## name);
             #include "TokenKinds.def"
 
-            RETURN(tok::identifier);
+            RETURN_LIT(tok::identifier, tokenText);
         }
 
         // Lex an integer or decimal literal.

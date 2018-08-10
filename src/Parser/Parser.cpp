@@ -110,7 +110,7 @@ std::vector<ASTNode*> Parser::parseTopLevel() {
     while(true) {
         if(cur().is(tok::eof)) break;
         if(cur().is(tok::sym_right_curly)) {
-            reportError("Extraneous closing brace '}'", cur().getRange());
+            reportError("Extraneous closing brace '}'");
         }
         nodes.push_back(parseNode());
     }
@@ -119,12 +119,11 @@ std::vector<ASTNode*> Parser::parseTopLevel() {
 
 Scope* Parser::parseScope() {
     if(cur().isNot(tok::sym_left_curly)) return nullptr;
-    recordCurrentLoc();
     next();
     std::vector<ASTNode*> nodes;
     while(true) {
         if(cur().is(tok::sym_right_curly)) { next(); break; }
-        if(cur().is(tok::eof)) reportError("Unexpected eof before end of scope", prev()->getRange());
+        if(cur().is(tok::eof)) reportError("Unexpected eof before end of scope");
         nodes.push_back(parseNode());
     }
     return new Scope(currentRange(), nodes);
@@ -138,20 +137,18 @@ ASTNode* Parser::parseNode() {
     } else if(auto decl = TRY(parseStructDecl())) {
         return decl;
     }
-    recordCurrentLoc();
     auto expr = parseExpr();
     assert(expr && "Failed to parse node");
     return expr;
 }
 
 Type Parser::parseType() {
-    recordCurrentLoc();
     if(cur().is(tok::sym_asterisk)) {
         next();
         return PointerTy::get(parseType());
     }
-    auto typeName = parseIdentifer();
-    if(!typeName) reportError("Expected type name", cur().getRange());
+    auto typeName = parseIdentifier();
+    if(!typeName) reportError("Expected type name");
 
     if(*typeName == "i8") { return IntTy::I8(); }
     if(*typeName == "i16") { return IntTy::I16(); }
@@ -173,7 +170,6 @@ Type Parser::parseType() {
 }
 
 Decl* Parser::parseDecl() {
-    recordCurrentLoc();
     bool isVar;
     bool isExtern = false;
     if(cur().is(tok::kw_extern)) {
@@ -197,7 +193,6 @@ Decl* Parser::parseDecl() {
     std::vector<Decl*> paramList;
     if(next().is(tok::sym_left_paren)) {
         do {
-            recordCurrentLoc();
             EXPECT_NEXT(tok::identifier, "Expected parameter name");
             auto paramName = cur().getText();
             EXPECT_NEXT(tok::sym_colon, "Expected colon after parameter name");
@@ -230,8 +225,7 @@ Decl* Parser::parseDecl() {
     auto checkExtern = [&]() {
         if(isExtern) {
             reportError("'extern' declaration '" + name +
-                        "' may not have a definition.",
-                        protoRange);
+                        "' may not have a definition.");
         }
     };
 
@@ -239,25 +233,22 @@ Decl* Parser::parseDecl() {
         checkExtern();
         next();
         auto expr = parseExpr();
-        if(!expr) reportError("Expected expression to assign to declaration " + name, cur().getRange());
-        auto range = rangeFrom(protoRange.begin, expr->range);
-        return new Decl(range, name, type, isVar, isExtern, paramList, expr);
+        if(!expr) reportError("Expected expression to assign to declaration " + name);
+        return new Decl(SourceRange(0, 0), name, type, isVar, isExtern, paramList, expr);
     } else if(auto scope = parseScope()) {
         checkExtern();
-        auto range = rangeFrom(protoRange.begin, scope->range);
-        return new Decl(range, name, type, isVar, isExtern, paramList, scope);
+        return new Decl(SourceRange(0, 0), name, type, isVar, isExtern, paramList, scope);
     } else {
         return new Decl(protoRange, name, type, isVar, isExtern, paramList);
     }
 }
 
 StructDecl* Parser::parseStructDecl() {
-    recordCurrentLoc();
     if(cur().isNot(tok::kw_struct)) {
         return nullptr;
     }
     next();
-    auto name = parseIdentifer();
+    auto name = parseIdentifier();
     if(!name) {
         reportError("Expected struct name");
     }
@@ -291,7 +282,6 @@ StructDecl* Parser::parseStructDecl() {
 
 Stmt* Parser::parseStmt() {
     if(cur().is(tok::kw_return)) {
-        recordCurrentLoc();
         next();
         auto value = parseExpr();
         if(!value) return new ReturnStmt(currentRange(), nullptr);
@@ -305,7 +295,6 @@ Stmt* Parser::parseStmt() {
 
 Stmt* Parser::parseIfStmt() {
     if(cur().isNot(tok::kw_if)) return nullptr;
-    recordCurrentLoc();
     next();
     auto conditionExpr = parseExpr();
     if(!conditionExpr) reportError("Expected condition expression for if statement");
@@ -331,7 +320,6 @@ Stmt* Parser::parseIfStmt() {
 
 Stmt* Parser::parseWhileStmt() {
     if(cur().isNot(tok::kw_while)) return nullptr;
-    recordCurrentLoc();
     next();
     auto conditionExpr = parseExpr();
     if(!conditionExpr) reportError("Expected condition expression for while statement");
@@ -345,13 +333,11 @@ Stmt* Parser::parseWhileStmt() {
 Expr* Parser::parseDeclRefExpr() {
     if(cur().isNot(tok::identifier)) return nullptr;
 
-    recordCurrentLoc();
     auto name = cur().getText();
     std::vector<Expr*> argList;
     if(next().is(tok::sym_left_paren)) {
         do {
             next();
-            recordCurrentLoc();
 
             auto argument = parseExpr();
             if(!argument) reportError("Expected argument");
@@ -397,7 +383,6 @@ Expr* Parser::parseExpr() {
 }
 
 Expr* Parser::parseTerm() {
-    recordCurrentLoc();
     Expr* retVal;
     if(cur().is(tok::sym_left_paren)) {
         next();
@@ -430,7 +415,7 @@ Expr* Parser::parseTerm() {
     if(retVal) {
         while(cur().is(tok::sym_dot)) {
             next();
-            auto memberName = parseIdentifer();
+            auto memberName = parseIdentifier();
             if(!memberName) {
                 reportError("Expected member name after '.'");
             }

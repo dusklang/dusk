@@ -6,6 +6,8 @@
 #include "AST/ASTPrinter.h"
 #include "Sema/TypeChecker.h"
 #include "IRGen/CodeGenerator.h"
+#include "General/SourceInfo.h"
+
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
@@ -160,16 +162,17 @@ def main {
 int main() {
     std::cout << "Meda compiler version 0.0.1\n\n";
 
-    Parser parser(sourceCode);
-    ASTPrinter printer;
-    TypeChecker tyChecker;
+    SourceFile file("main.meda", sourceCode);
+    Parser parser(file);
+    ASTPrinter printer(file);
+    TypeChecker tyChecker(file);
     CodeGenerator codeGenerator;
 
-    auto file = parser.parseTopLevel();
-    for(auto& node: file) {
+    auto nodes = parser.parseTopLevel();
+    for(auto& node: nodes) {
         tyChecker.visit(node);
     }
-    for(auto& node: file) {
+    for(auto& node: nodes) {
         codeGenerator.visit(node);
     }
     codeGenerator.module->print(llvm::errs(), nullptr);

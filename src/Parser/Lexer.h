@@ -5,5 +5,6 @@
 #include <string>
 
 #include "Token.h"
+#include "General/SourceInfo.h"
 
-std::vector<Token> lex(std::string const& source);
+std::vector<Token> lex(SourceFile const& file);

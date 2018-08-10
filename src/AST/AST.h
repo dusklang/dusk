@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 #include <map>
-#include "General/SourceLoc.h"
+#include "General/SourceInfo.h"
 
 struct Expr;
 

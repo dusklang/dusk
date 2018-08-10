@@ -72,12 +72,12 @@ void ASTPrinter::visitBooleanLiteralExpr(BooleanLiteralExpr* expr, int indentati
 
 void ASTPrinter::visitCharLiteralExpr(CharLiteralExpr* expr, int indentationLevel, std::ostream& stream) {
     indent(indentationLevel, stream);
-    stream << expr->range.getSubstring();
+    stream << file.substringFromRange(expr->range);
 }
 
 void ASTPrinter::visitStringLiteralExpr(StringLiteralExpr* expr, int indentationLevel, std::ostream& stream) {
     indent(indentationLevel, stream);
-    stream << expr->range.getSubstring();
+    stream << file.substringFromRange(expr->range);
 }
 
 void ASTPrinter::visitPreOpExpr(PreOpExpr* expr, int indentationLevel, std::ostream& stream) {

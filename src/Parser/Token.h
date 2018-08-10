@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#include "General/SourceLoc.h"
+#include "General/SourceInfo.h"
 
 enum class tok {
     #define TOKEN(name) name,
@@ -12,16 +12,14 @@ enum class tok {
 };
 
 class Token {
-private:
     tok kind = tok::NUM_TOKENS;
     SourceRange range;
 
-    // Used to get the actual text of a string or character literal.
-    std::string literal;
+    // Used to get the actual text of a string, character, or numeric literal, or identifier.
+    std::string text;
 
 public:
-    Token(tok kind, SourceRange range, std::string literal) : kind(kind), range(range), literal(literal) {}
-    Token() : range(SourceLoc("", 0), 0) {}
+    Token(tok kind, SourceRange range, std::string text) : kind(kind), range(range), text(text) {}
     Token& operator=(Token const& otherTok) = default;
 
     bool is(tok k) const { return kind == k; }
@@ -41,24 +39,28 @@ public:
     bool isSignificant() const { return !isInsignificant(); }
 
     tok getKind() const { return kind; }
-    std::string getText() const { return range.getSubstring(); }
-    SourceLoc getLoc() const { return range.begin; }
+    std::string getText() const { return text; }
+    SourcePos getLoc() const { return range.begin; }
     SourceRange getRange() const { return range; }
     std::optional<std::string> getStringLiteral() const {
         if(isNot(tok::string_literal)) return std::nullopt;
-        return literal;
+        return text;
     }
     std::optional<char> getCharLiteral() const {
         if(isNot(tok::char_literal)) return std::nullopt;
-        return literal[0];
+        return text[0];
     }
     std::optional<std::string> getIntegerLiteral() const {
         if(isNot(tok::integer_literal)) return std::nullopt;
-        return literal;
+        return text;
     }
     std::optional<std::string> getDecimalLiteral() const {
         if(isNot(tok::decimal_literal)) return std::nullopt;
-        return literal;
+        return text;
+    }
+    std::optional<std::string> getIdentifier() const {
+        if(isNot(tok::identifier)) return std::nullopt;
+        return text;
     }
 
     std::string prettyPrint();

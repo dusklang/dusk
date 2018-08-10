@@ -259,7 +259,7 @@ void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
     if(!nameMatches.empty()) {
         errorMessage += "\n\nHere are some matches that differ only in parameter types:";
         for(auto& match: nameMatches) {
-            errorMessage += "\n\t" + match->range.getSubstring();
+            errorMessage += "\n\t" + file.substringFromRange(match->range);
         }
     }
     reportError(errorMessage, expr);
