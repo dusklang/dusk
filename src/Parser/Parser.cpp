@@ -8,7 +8,13 @@
 #include "AST/Decl.h"
 #include "Parser.h"
 
-#define EXPECT(token, message) if(cur().isNot(token)) reportError(message)
+#define ERR(message) Diagnostic(Diagnostic::Error, file, message)
+
+#define EXPECT(token, message) if(cur().isNot(token)) { \
+    reportDiag( \
+        ERR(message).primaryRange(cur().getRange())\
+    ); \
+}
 #define EXPECT_NEXT(token, message) {\
     next();\
     EXPECT(token, message);\
@@ -62,7 +68,7 @@ int getPrecedence(BinOp op) {
 }
 
 std::optional<BinOp> parseBinaryOperator(tok token) {
-#define MATCH(tokName, opName) case tok::sym_ ## tokName: return BinOp::opName
+    #define MATCH(tokName, opName) case tok::sym_ ## tokName: return BinOp::opName
     switch(token) {
         MATCH(add, Add);
         MATCH(subtract, Sub);
@@ -89,10 +95,10 @@ std::optional<BinOp> parseBinaryOperator(tok token) {
         MATCH(ampersand, BitwiseAnd);
         default: return std::nullopt;
     }
-#undef MATCH
+    #undef MATCH
 }
 std::optional<PreOp> parsePrefixOperator(tok token) {
-#define MATCH(tokName, opName) case tok::sym_ ## tokName: return PreOp::opName
+    #define MATCH(tokName, opName) case tok::sym_ ## tokName: return PreOp::opName
     switch(token) {
         MATCH(add, Positive);
         MATCH(subtract, Negative);
@@ -101,7 +107,7 @@ std::optional<PreOp> parsePrefixOperator(tok token) {
         MATCH(ampersand, AddrOf);
         default: return std::nullopt;
     }
-#undef MATCH
+    #undef MATCH
 }
 
 #include "AST/ASTPrinter.h"
@@ -110,7 +116,7 @@ std::vector<ASTNode*> Parser::parseTopLevel() {
     while(true) {
         if(cur().is(tok::eof)) break;
         if(cur().is(tok::sym_right_curly)) {
-            reportError("Extraneous closing brace '}'");
+            reportDiag(ERR("extraneous closing brace '}'").primaryRange(cur().getRange()));
         }
         nodes.push_back(parseNode());
     }
@@ -119,11 +125,17 @@ std::vector<ASTNode*> Parser::parseTopLevel() {
 
 Scope* Parser::parseScope() {
     if(cur().isNot(tok::sym_left_curly)) return nullptr;
+    auto openingCurly = cur();
     next();
     std::vector<ASTNode*> nodes;
     while(true) {
         if(cur().is(tok::sym_right_curly)) { next(); break; }
-        if(cur().is(tok::eof)) reportError("Unexpected eof before end of scope");
+        if(cur().is(tok::eof)) {
+            auto prevTok = prev();
+            reportDiag(
+                ERR("unexpected eof before end of scope").range(openingCurly.getRange(), "scope begins here")
+            );
+        }
         nodes.push_back(parseNode());
     }
     return new Scope(currentRange(), nodes);
@@ -148,7 +160,7 @@ Type Parser::parseType() {
         return PointerTy::get(parseType());
     }
     auto typeName = parseIdentifier();
-    if(!typeName) reportError("Expected type name");
+    if(!typeName) reportDiag(ERR("expected type name").primaryRange(cur().getRange()));
 
     if(*typeName == "i8") { return IntTy::I8(); }
     if(*typeName == "i16") { return IntTy::I16(); }
@@ -183,25 +195,37 @@ Decl* Parser::parseDecl() {
     } else {
         // Report an error only if we know for a fact that this was supposed to be a declaration.
         if(isExtern) {
-            reportError("Expected def or var keyword to begin declaration");
+            reportDiag(ERR("expected def or var keyword to begin declaration").primaryRange(cur().getRange()));
         } else {
             return nullptr;
         }
     }
-    EXPECT_NEXT(tok::identifier, "Expected identifier after def");
+    EXPECT_NEXT(tok::identifier, "expected identifier after def");
     auto name = cur().getText();
     std::vector<Decl*> paramList;
     if(next().is(tok::sym_left_paren)) {
+        auto leftParen = cur();
+        bool isFirst = true;
         do {
-            EXPECT_NEXT(tok::identifier, "Expected parameter name");
-            auto paramName = cur().getText();
-            EXPECT_NEXT(tok::sym_colon, "Expected colon after parameter name");
             next();
-            paramList.push_back(new Decl(currentRange(), paramName, parseType()));
+            auto paramName = parseIdentifier();
+            if(!paramName) {
+                auto diag = ERR("expected parameter name");
+                if(isFirst && cur().is(tok::sym_right_paren)) {
+                    diag.primaryRange(leftParen.getRange() + cur().getRange(), "try removing empty parameter list");
+                } else {
+                    diag.primaryRange(cur().getRange());
+                }
+                reportDiag(diag);
+            }
+            if(isFirst) {
+                isFirst = false;
+            }
+            EXPECT(tok::sym_colon, "expected colon after parameter name");
+            next();
+            paramList.push_back(new Decl(currentRange(), *paramName, parseType()));
         } while(cur().is(tok::sym_comma));
-        EXPECT(tok::sym_right_paren, "Expected ')' after parameter list");
-        if(paramList.empty()) reportError("Expected parameter list for parameterized declaration " + name + ", "
-                                          "try removing the parentheses");
+        EXPECT(tok::sym_right_paren, "expected ')' after parameter list");
         next();
     }
 
@@ -222,10 +246,11 @@ Decl* Parser::parseDecl() {
         protoRange = currentRange();
     }
 
+    auto definitionBeginTok = cur();
     auto checkExtern = [&]() {
         if(isExtern) {
-            reportError("'extern' declaration '" + name +
-                        "' may not have a definition.");
+            reportDiag(ERR("'extern' declaration '" + name +
+                           "' may not have a definition.").primaryRange(definitionBeginTok.getRange()));
         }
     };
 
@@ -233,7 +258,10 @@ Decl* Parser::parseDecl() {
         checkExtern();
         next();
         auto expr = parseExpr();
-        if(!expr) reportError("Expected expression to assign to declaration " + name);
+        if(!expr) {
+            reportDiag(ERR("expected expression to assign to declaration `" + name + '`')
+                .primaryRange(cur().getRange()));
+        }
         return new Decl(SourceRange(0, 0), name, type, isVar, isExtern, paramList, expr);
     } else if(auto scope = parseScope()) {
         checkExtern();
@@ -250,31 +278,20 @@ StructDecl* Parser::parseStructDecl() {
     next();
     auto name = parseIdentifier();
     if(!name) {
-        reportError("Expected struct name");
+        reportDiag(ERR("expected struct name").primaryRange(cur().getRange()));
     }
-    if(cur().isNot(tok::sym_left_curly)) {
-        reportError("Expected opening curly brace to begin struct declaration");
-    }
+    EXPECT(tok::sym_left_curly, "expected opening curly brace to begin struct declaration");
     next();
     std::vector<Decl*> fields;
     while(cur().isNot(tok::sym_right_curly)) {
-        auto field = parseDecl();
-        if(!field) {
-            reportError("Expected struct field");
+        auto fieldName = parseIdentifier();
+        if(!fieldName) {
+            reportDiag(ERR("expected struct field name").primaryRange(cur().getRange()));
         }
-        if(field->isExtern) {
-            reportError("Struct fields cannot be declared as `extern`");
-        }
-        if(field->isParameterized()) {
-            reportError("Struct fields cannot have parameters");
-        }
-        if(field->hasDefinition()) {
-            reportError("Struct fields cannot (yet) have definitions");
-        }
-        if(field->type == ErrorTy()) {
-            reportError("Struct fields must have explicit types");
-        }
-        fields.push_back(field);
+        EXPECT(tok::sym_colon, "expected colon in struct field");
+        next();
+        auto fieldType = parseType();
+        fields.push_back(new Decl(SourceRange(), *fieldName, fieldType, /*isVar*/ true));
     }
     next();
     return new StructDecl(currentRange(), *name, fields);
@@ -295,11 +312,24 @@ Stmt* Parser::parseStmt() {
 
 Stmt* Parser::parseIfStmt() {
     if(cur().isNot(tok::kw_if)) return nullptr;
+    auto ifTok = cur();
     next();
     auto conditionExpr = parseExpr();
-    if(!conditionExpr) reportError("Expected condition expression for if statement");
+    if(!conditionExpr) {
+        reportDiag(
+           ERR("expected condition expression for if statement")
+               .primaryRange(cur().getRange())
+               .range(ifTok.getRange(), "if statement begins here")
+        );
+    }
     auto thenScope = parseScope();
-    if(!thenScope) reportError("Expected opening curly brace for if statement");
+    if(!thenScope) {
+        reportDiag(
+            ERR("expected opening curly brace for if statement")
+                .primaryRange(cur().getRange())
+                .range(ifTok.getRange(), "if statement begins here")
+        );
+    }
     Scope* elseScope = nullptr;
     if(cur().is(tok::kw_else)) {
         next();
@@ -320,11 +350,24 @@ Stmt* Parser::parseIfStmt() {
 
 Stmt* Parser::parseWhileStmt() {
     if(cur().isNot(tok::kw_while)) return nullptr;
+    auto whileTok = cur();
     next();
     auto conditionExpr = parseExpr();
-    if(!conditionExpr) reportError("Expected condition expression for while statement");
+    if(!conditionExpr) {
+        reportDiag(
+            ERR("expected condition expression for while statement")
+                .primaryRange(cur().getRange())
+                   .range(whileTok.getRange(), "while statement begins here")
+        );
+    }
     auto thenScope = parseScope();
-    if(!thenScope) reportError("Expected opening curly brace for while statement");
+    if(!thenScope) {
+        reportDiag(
+           ERR("expected opening curly brace for while statement")
+               .primaryRange(cur().getRange())
+               .range(whileTok.getRange(), "while statement begins here")
+        );
+    }
     return new WhileStmt(currentRange(),
                          conditionExpr,
                          thenScope);
@@ -340,11 +383,11 @@ Expr* Parser::parseDeclRefExpr() {
             next();
 
             auto argument = parseExpr();
-            if(!argument) reportError("Expected argument");
+            if(!argument) reportDiag(ERR("expected argument").primaryRange(cur().getRange()));
             argList.push_back(argument);
 
         } while(cur().is(tok::sym_comma));
-        EXPECT(tok::sym_right_paren, "Expected ')' after argument");
+        EXPECT(tok::sym_right_paren, "expected ')' after argument");
         next();
     }
 
@@ -387,7 +430,7 @@ Expr* Parser::parseTerm() {
     if(cur().is(tok::sym_left_paren)) {
         next();
         auto expr = parseExpr();
-        EXPECT(tok::sym_right_paren, "Unclosed parentheses");
+        EXPECT(tok::sym_right_paren, "unclosed parentheses");
         next();
         retVal = expr;
     } else if(auto preOp = parsePrefixOperator(cur().getKind())) {
@@ -417,7 +460,7 @@ Expr* Parser::parseTerm() {
             next();
             auto memberName = parseIdentifier();
             if(!memberName) {
-                reportError("Expected member name after '.'");
+                reportDiag(ERR("expected member name after '.'").primaryRange(cur().getRange()));
             }
             retVal = new MemberRefExpr(currentRange(), retVal, *memberName);
         }

@@ -8,6 +8,7 @@
 #include "AST/AST.h"
 #include "AST/Type.h"
 #include "General/SourceInfo.h"
+#include "General/Diagnostics.h"
 #include "Lexer.h"
 
 struct Expr;
@@ -18,7 +19,7 @@ class Parser final {
     SourceFile const& file;
     std::vector<Token> tokens;
     uint32_t curTok = -1;
-    std::optional<uint32_t> savedState = std::nullopt;
+    std::stack<uint32_t> savedState;
 
     Token cur() {
         return tokens[curTok];
@@ -44,13 +45,12 @@ class Parser final {
         return std::nullopt;
     }
     void saveState() {
-        savedState = curTok;
+        savedState.push(curTok);
     }
     void recallState() {
-        if(savedState) {
-            curTok = *savedState;
-        }
-        savedState = std::nullopt;
+        assert(!savedState.empty());
+        curTok = savedState.top();
+        savedState.pop();
     }
 
     SourceRange currentRange() const {
@@ -69,9 +69,14 @@ class Parser final {
     PARSE_METHOD(std::string, StringLiteral)
     PARSE_METHOD(std::string, Identifier)
 
-    void reportError(std::string message) {
-        std::cout << "PARSING ERROR: " << message << '\n';
-        exit(1);
+    void reportDiag(Diagnostic diag) {
+        diag.print(std::cout);
+        switch(diag.kind) {
+            case Diagnostic::Error:
+                exit(1);
+            case Diagnostic::Warning:
+                break;
+        }
     }
 public:
     Parser(SourceFile* file) : file(*file) {

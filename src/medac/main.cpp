@@ -45,9 +45,9 @@ extern "C" {
 std::string sourceCode = R"~(
 
 struct Person {
-    var name: *i8
-    var age: u8
-    var numberOfChildren: u8
+    name: *i8
+    age: u8
+    numberOfChildren: u8
 }
 extern var henry: Person
 extern var sally: Person
@@ -151,7 +151,7 @@ def main {
     printString("someNumber before: ")
     printInt(*someNumber)
     (*someNumber) |= 5
-    printString("\nsomeNumber after: )
+    printString("\nsomeNumber after: ")
     printInt(*someNumber)
     printChar("\n")
 
