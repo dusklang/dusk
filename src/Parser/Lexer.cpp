@@ -26,12 +26,6 @@ std::vector<Token> lex(SourceFile* file) {
             exit(1);
         }
     };
-    auto reportError = [&](uint32_t endPos, std::string message) {
-        SourceRange range(pos, endPos);
-        Diagnostic diag(Diagnostic::Error, *file, message);
-        diag.print(std::cout);
-        exit(1);
-    };
     auto curChar = [&]() -> char { return source.at(pos); };
     auto is = [&](char character) -> bool {
         if(pos >= source.length()) {
@@ -163,7 +157,6 @@ std::vector<Token> lex(SourceFile* file) {
                                 std::string("invalid escape character \"") + charToInsert + '"')
                                    .primaryRange(SourceRange(pos,  pos + 1))
                         );
-                        reportError(pos, std::string("Invalid escape character '") + charToInsert + "'");
                     }
                     escapeMode = false;
                 }
@@ -185,7 +178,11 @@ std::vector<Token> lex(SourceFile* file) {
                     pos++;
                 }
             }
-            reportError(pos, "Unterminated string literal");
+            reportDiag(
+                Diagnostic(Diagnostic::Error, *file, "unterminated string literal")
+                       .range(SourceRange(curTokBegin, curTokBegin + 1), "literal begins here")
+                       .primaryRange(SourceRange(pos, pos + 1), "newline terminates literal here")
+            );
         }
         afterStrings:
 

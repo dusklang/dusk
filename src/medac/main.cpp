@@ -102,7 +102,7 @@ def printInt(val: i32) {
 def performFizzBuzz(end: i32) {
     // Check range.
     if end < 0 {
-        printString("Invalid \b bounds!\n")
+        printString("Invalid bounds!\n")
         return
     }
     var i = 0
@@ -151,7 +151,7 @@ def main {
     printString("someNumber before: ")
     printInt(*someNumber)
     (*someNumber) |= 5
-    printString("\nsomeNumber after: ")
+    printString("\nsomeNumber after: )
     printInt(*someNumber)
     printChar("\n")
 
