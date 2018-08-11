@@ -100,9 +100,9 @@ CodeGenVal CodeGenerator::visitDecl(Decl* decl) {
                 builder.SetInsertPoint(block);
 
                 auto param = decl->paramList.begin();
-                auto arg = function->args().begin();
-                for(; param != decl->paramList.end() && arg != function->args().end(); ++param, ++arg) {
-                    (*param)->codegenVal = arg;
+                auto funcArg = function->args().begin();
+                for(; param != decl->paramList.end() && funcArg != function->args().end(); ++param, ++funcArg) {
+                    (*param)->codegenVal = funcArg;
                 }
 
                 std::function<void(Scope*)> visitInnerScope = [&](Scope* scope) {
@@ -110,11 +110,11 @@ CodeGenVal CodeGenerator::visitDecl(Decl* decl) {
                         if(auto ifStmt = dynamic_cast<IfStmt*>(node)) {
                             auto thenBlock = llvm::BasicBlock::Create(context, "if.then", function);
                             llvm::BasicBlock* elseBlock = nullptr;
-                            if(ifStmt->elseScope) {
+                            if(ifStmt->elseNode) {
                                 elseBlock = llvm::BasicBlock::Create(context, "if.else", function);
                             }
                             auto endBlock = llvm::BasicBlock::Create(context, "if.end", function);
-                            builder.CreateCondBr(toDirect(visitExpr(ifStmt->condition)), thenBlock, ifStmt->elseScope ? elseBlock : endBlock);
+                            builder.CreateCondBr(toDirect(visitExpr(ifStmt->condition)), thenBlock, ifStmt->elseNode ? elseBlock : endBlock);
 
                             builder.SetInsertPoint(thenBlock);
                             visitInnerScope(ifStmt->thenScope);
@@ -126,14 +126,25 @@ CodeGenVal CodeGenerator::visitDecl(Decl* decl) {
                                 builder.CreateBr(endBlock);
                             }
 
-                            if(auto elseScope = ifStmt->elseScope) {
+                            if(ifStmt->elseNode) {
                                 builder.SetInsertPoint(elseBlock);
-                                visitInnerScope(elseScope);
-                                // Same situation as above.
-                                if(elseScope->nodes.empty() ||
-                                   !dynamic_cast<ReturnStmt*>(elseScope->nodes.back())) {
-                                    builder.CreateBr(endBlock);
-                                }
+                                match(ifStmt->elseNode)(
+                                    pattern(some(as<Scope*>(arg))) = [&](auto scope) {
+                                        visitInnerScope(scope);
+                                        // Same situation as above.
+                                        if(scope->nodes.empty() ||
+                                           !dynamic_cast<ReturnStmt*>(scope->nodes.back())) {
+                                            builder.CreateBr(endBlock);
+                                        }
+                                    },
+                                    pattern(some(as<IfStmt*>(arg))) = [&](auto stmt) {
+                                        // FIXME: HACK. Make visitInnerScope into regular visitXXX methods
+                                        // so we can just call visitIfStmt on stmt instead of allocating
+                                        // a new Scope.
+                                        visitInnerScope(new Scope(SourceRange(), { stmt }));
+                                    },
+                                    pattern(_) = []{}
+                                );
                             }
 
                             builder.SetInsertPoint(endBlock);

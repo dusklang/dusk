@@ -17,7 +17,7 @@ private:
     template<typename Node>
     void reportError(std::string message, Node* node) {
         std::cout << "TYPE-CHECKING ERROR: " << message << '\n';
-        std::cout << "Offending area: " << file.substringFromRange(node->range) << "\n\n";
+        //std::cout << "Offending area: " << file.substringFromRange(node->range) << "\n\n";
         // TODO: Support multiple errors per file.
         exit(1);
     }

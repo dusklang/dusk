@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <optional>
 #include "General/SourceInfo.h"
 
 struct Expr;
@@ -18,16 +19,15 @@ enum class NodeKind {
 // Abstract class from which each node in the AST inherits.
 struct ASTNode {
     NodeKind kind;
-    SourceRange range;
-    ASTNode(NodeKind kind, SourceRange range) : kind(kind), range(range) {}
+    ASTNode(NodeKind kind) : kind(kind) {}
     virtual ~ASTNode() {}
 };
 
 // A scope node represents a collection of other nodes.
 struct Scope final : public ASTNode {
+    std::optional<SourceRange> range;
     std::vector<ASTNode*> nodes;
-
-    Scope(SourceRange range, std::vector<ASTNode*> nodes): ASTNode(NodeKind::Scope, range), nodes(nodes) {}
+    Scope(std::optional<SourceRange> range, std::vector<ASTNode*> nodes) : ASTNode(NodeKind::Scope), range(range), nodes(nodes) {}
 
     ~Scope() override {
         for (ASTNode* node: nodes) {

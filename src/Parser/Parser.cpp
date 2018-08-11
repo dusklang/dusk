@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <iostream>
+#include <optional>
 
 #include "AST/Expr.h"
 #include "AST/Stmt.h"
@@ -125,11 +126,16 @@ std::vector<ASTNode*> Parser::parseTopLevel() {
 
 Scope* Parser::parseScope() {
     if(cur().isNot(tok::sym_left_curly)) return nullptr;
-    auto openingCurly = cur();
+    Token openingCurly = cur();
+    std::optional<Token> closingCurly;
     next();
     std::vector<ASTNode*> nodes;
     while(true) {
-        if(cur().is(tok::sym_right_curly)) { next(); break; }
+        if(cur().is(tok::sym_right_curly)) {
+            closingCurly = cur();
+            next();
+            break;
+        }
         if(cur().is(tok::eof)) {
             auto prevTok = prev();
             reportDiag(
@@ -138,7 +144,7 @@ Scope* Parser::parseScope() {
         }
         nodes.push_back(parseNode());
     }
-    return new Scope(currentRange(), nodes);
+    return new Scope(openingCurly.getRange() + closingCurly->getRange(), nodes);
 }
 
 ASTNode* Parser::parseNode() {
@@ -299,10 +305,11 @@ StructDecl* Parser::parseStructDecl() {
 
 Stmt* Parser::parseStmt() {
     if(cur().is(tok::kw_return)) {
+        auto returnTok = cur();
         next();
         auto value = parseExpr();
-        if(!value) return new ReturnStmt(currentRange(), nullptr);
-        return new ReturnStmt(currentRange(), value);
+        if(!value) return new ReturnStmt(returnTok.getRange(), nullptr);
+        return new ReturnStmt(returnTok.getRange(), value);
     } else if(cur().is(tok::kw_if)) {
         return parseIfStmt();
     } else {
@@ -310,7 +317,7 @@ Stmt* Parser::parseStmt() {
     }
 }
 
-Stmt* Parser::parseIfStmt() {
+IfStmt* Parser::parseIfStmt() {
     if(cur().isNot(tok::kw_if)) return nullptr;
     auto ifTok = cur();
     next();
@@ -330,22 +337,19 @@ Stmt* Parser::parseIfStmt() {
                 .range(ifTok.getRange(), "if statement begins here")
         );
     }
-    Scope* elseScope = nullptr;
+    std::optional<std::variant<Scope*, IfStmt*>> elseNode = std::nullopt;
     if(cur().is(tok::kw_else)) {
         next();
         if(auto scope = parseScope()) {
-            elseScope = scope;
+            elseNode = scope;
         } else if(auto elseIf = parseIfStmt()) {
-            elseScope = new Scope(
-                elseIf->range,
-                std::vector<ASTNode*> { elseIf }
-            );
+            elseNode = static_cast<IfStmt*>(elseIf);
         }
     }
-    return new IfStmt(currentRange(),
+    return new IfStmt(ifTok.getRange(),
                       conditionExpr,
                       thenScope,
-                      elseScope);
+                      elseNode);
 }
 
 Stmt* Parser::parseWhileStmt() {
@@ -368,7 +372,7 @@ Stmt* Parser::parseWhileStmt() {
                .range(whileTok.getRange(), "while statement begins here")
         );
     }
-    return new WhileStmt(currentRange(),
+    return new WhileStmt(whileTok.getRange(),
                          conditionExpr,
                          thenScope);
 }

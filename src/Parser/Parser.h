@@ -13,6 +13,7 @@
 
 struct Expr;
 struct Stmt;
+struct IfStmt;
 struct Decl;
 
 class Parser final {
@@ -92,7 +93,7 @@ public:
     Decl* parseDecl();
     StructDecl* parseStructDecl();
     Stmt* parseStmt();
-    Stmt* parseIfStmt();
+    IfStmt* parseIfStmt();
     Stmt* parseWhileStmt();
     Expr* parseDeclRefExpr();
     Expr* parseExpr();

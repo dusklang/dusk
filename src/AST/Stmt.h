@@ -3,6 +3,8 @@
 #pragma once
 
 #include <vector>
+#include <variant>
+#include <optional>
 
 #include "AST.h"
 
@@ -18,35 +20,37 @@ enum class StmtKind {
 // Base class from which each statement node inherits.
 struct Stmt : public ASTNode {
     StmtKind stmtKind;
-    Stmt(SourceRange range, StmtKind stmtKind) : ASTNode(NodeKind::Stmt, range), stmtKind(stmtKind) {}
+    Stmt(StmtKind stmtKind) : ASTNode(NodeKind::Stmt), stmtKind(stmtKind) {}
 };
 
 struct ReturnStmt: public Stmt {
+    SourceRange returnRange;
     Expr* value;
 
-    ReturnStmt(SourceRange range, Expr* value) : Stmt(range, StmtKind::Return), value(value) {}
+    ReturnStmt(SourceRange returnRange, Expr* value) : Stmt(StmtKind::Return), returnRange(returnRange), value(value) {}
 
     ~ReturnStmt() override;
 };
 
 struct IfStmt: public Stmt {
+    SourceRange ifRange;
     Expr* condition;
     Scope* thenScope;
-    Scope* elseScope;
+    std::optional<std::variant<Scope*, IfStmt*>> elseNode;
 
-    IfStmt(SourceRange range, Expr* condition, Scope* thenScope,
-           Scope* elseScope) : Stmt(range, StmtKind::If),
-    condition(condition), thenScope(thenScope), elseScope(elseScope) {}
+    IfStmt(SourceRange ifRange, Expr* condition, Scope* thenScope, std::optional<std::variant<Scope*, IfStmt*>> elseNode) :
+        Stmt(StmtKind::If), ifRange(ifRange), condition(condition), thenScope(thenScope), elseNode(elseNode) {}
 
     ~IfStmt() override;
 };
 
 struct WhileStmt: public Stmt {
+    SourceRange whileRange;
     Expr* condition;
     Scope* thenScope;
 
-    WhileStmt(SourceRange range, Expr* condition, Scope* thenScope) : Stmt(range, StmtKind::While),
-    condition(condition), thenScope(thenScope) {}
+    WhileStmt(SourceRange whileRange, Expr* condition, Scope* thenScope) :
+        Stmt(StmtKind::While), whileRange(whileRange), condition(condition), thenScope(thenScope) {}
 
     ~WhileStmt() override;
 };

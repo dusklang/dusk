@@ -19,36 +19,41 @@ enum class ExprKind {
 struct Expr : public ASTNode {
     ExprKind exprKind;
     Type type;
-    Expr(SourceRange range, ExprKind exprKind, Type type) : ASTNode(NodeKind::Expr, range), exprKind(exprKind), type(type) {}
-    Expr(SourceRange range, ExprKind exprKind) : ASTNode(NodeKind::Expr, range), exprKind(exprKind), type(ErrorTy()) {}
+    Expr(ExprKind exprKind, Type type) : ASTNode(NodeKind::Expr), exprKind(exprKind), type(type) {}
+    Expr(ExprKind exprKind) : ASTNode(NodeKind::Expr), exprKind(exprKind), type(ErrorTy()) {}
     virtual bool isMutable() const { return false; }
 };
 
 struct IntegerLiteralExpr: public Expr {
+    SourceRange range;
     std::string literal;
 
     IntegerLiteralExpr(SourceRange range, std::string const& literal) :
-    Expr(range, ExprKind::IntegerLiteral), literal(literal) {}
+        Expr(ExprKind::IntegerLiteral), range(range), literal(literal) {}
 };
 
 struct DecimalLiteralExpr: public Expr {
+    SourceRange range;
     std::string literal;
-    DecimalLiteralExpr(SourceRange range, std::string const& literal) : Expr(range, ExprKind::DecimalLiteral), literal(literal) {}
+    DecimalLiteralExpr(SourceRange range, std::string const& literal) : Expr(ExprKind::DecimalLiteral), range(range), literal(literal) {}
 };
 
 struct BooleanLiteralExpr: public Expr {
+    SourceRange range;
     bool literal;
-    BooleanLiteralExpr(SourceRange range, bool literal) : Expr(range, ExprKind::BooleanLiteral), literal(literal) {}
+    BooleanLiteralExpr(SourceRange range, bool literal) : Expr(ExprKind::BooleanLiteral), range(range), literal(literal) {}
 };
 
 struct CharLiteralExpr: public Expr {
+    SourceRange range;
     char literal;
-    CharLiteralExpr(SourceRange range, char literal) : Expr(range, ExprKind::CharLiteral), literal(literal) {}
+    CharLiteralExpr(SourceRange range, char literal) : Expr(ExprKind::CharLiteral), range(range), literal(literal) {}
 };
 
 struct StringLiteralExpr: public Expr {
+    SourceRange range;
     std::string literal;
-    StringLiteralExpr(SourceRange range, std::string literal) : Expr(range, ExprKind::StringLiteral), literal(literal) {}
+    StringLiteralExpr(SourceRange range, std::string literal) : Expr(ExprKind::StringLiteral), range(range), literal(literal) {}
 };
 
 enum class BinOp {
@@ -90,7 +95,7 @@ struct BinOpExpr: public Expr {
     Expr* rhs;
     BinOp op;
 
-    BinOpExpr(SourceRange range, Expr* lhs, Expr* rhs, BinOp op) : Expr(range, ExprKind::BinOp), lhs(lhs), rhs(rhs), op(op) {}
+    BinOpExpr(SourceRange range, Expr* lhs, Expr* rhs, BinOp op) : Expr(ExprKind::BinOp), lhs(lhs), rhs(rhs), op(op) {}
 
     bool isMutable() const override { return lhs->isMutable(); }
 };
@@ -99,7 +104,7 @@ struct PreOpExpr: public Expr {
     Expr* operand;
     PreOp op;
 
-    PreOpExpr(SourceRange range, Expr* operand, PreOp op) : Expr(range, ExprKind::PreOp), operand(operand), op(op) {}
+    PreOpExpr(SourceRange range, Expr* operand, PreOp op) : Expr(ExprKind::PreOp), operand(operand), op(op) {}
     bool isMutable() const override {
         switch(op) {
             case PreOp::Deref: return true;
@@ -112,7 +117,7 @@ struct CastExpr: public Expr {
     Expr* operand;
     Type destType;
 
-    CastExpr(SourceRange range, Expr* operand, Type destType) : Expr(range, ExprKind::Cast), operand(operand), destType(destType) {}
+    CastExpr(SourceRange range, Expr* operand, Type destType) : Expr(ExprKind::Cast), operand(operand), destType(destType) {}
 };
 
 struct DeclRefExpr: public Expr {
@@ -121,7 +126,7 @@ struct DeclRefExpr: public Expr {
     Decl* decl = nullptr;
 
     DeclRefExpr(SourceRange range, std::string name,
-                std::vector<Expr*> const& argList) : Expr(range, ExprKind::DeclRef),
+                std::vector<Expr*> const& argList) : Expr(ExprKind::DeclRef),
     name(name), argList(argList) {}
 
     ~DeclRefExpr() override;
@@ -136,7 +141,7 @@ struct MemberRefExpr: public Expr {
     std::string name;
     size_t declIndex = -1;
 
-    MemberRefExpr(SourceRange range, Expr* root, std::string name) : Expr(range, ExprKind::MemberRef),
+    MemberRefExpr(SourceRange range, Expr* root, std::string name) : Expr(ExprKind::MemberRef),
     root(root), name(name) {}
 
     MemberRefExpr& operator=(MemberRefExpr const& other) = default;

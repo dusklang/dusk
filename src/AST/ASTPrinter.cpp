@@ -2,6 +2,8 @@
 
 #include <iostream>
 #include "ASTPrinter.h"
+#include "mpark/patterns.hpp"
+using namespace mpark::patterns;
 
 int constexpr multiplier = 4;
 inline void indent(int level, std::ostream& stream) {
@@ -72,12 +74,12 @@ void ASTPrinter::visitBooleanLiteralExpr(BooleanLiteralExpr* expr, int indentati
 
 void ASTPrinter::visitCharLiteralExpr(CharLiteralExpr* expr, int indentationLevel, std::ostream& stream) {
     indent(indentationLevel, stream);
-    stream << file.substringFromRange(expr->range);
+    stream << '"' << expr->literal << '"';
 }
 
 void ASTPrinter::visitStringLiteralExpr(StringLiteralExpr* expr, int indentationLevel, std::ostream& stream) {
     indent(indentationLevel, stream);
-    stream << file.substringFromRange(expr->range);
+    stream << '"' << expr->literal << '"';
 }
 
 void ASTPrinter::visitPreOpExpr(PreOpExpr* expr, int indentationLevel, std::ostream& stream) {
@@ -226,25 +228,21 @@ void ASTPrinter::visitIfStmt(IfStmt* stmt, int indentationLevel, std::ostream& s
     stream << '\n';
     indent(indentationLevel, stream);
     stream << '}';
-    if(stmt->elseScope) {
-        stream << " else ";
-        // Handle else if.
-        if(stmt->elseScope->nodes.size() == 1) {
-            if(auto elseIf = dynamic_cast<IfStmt*>(stmt->elseScope->nodes[0])) {
-                visitIfStmt(elseIf, indentationLevel, stream, true);
-            } else {
-                // TODO: A goto really shouldn't be necessary here.
-                goto notIfElse;
-            }
-        } else {
-            notIfElse:
-            stream << "{\n";
-            visitScope(stmt->elseScope, indentationLevel, stream);
+
+    match(stmt->elseNode)(
+        pattern(some(as<Scope*>(arg))) = [&](auto scope) {
+            stream << " else {\n";
+            visitScope(scope, indentationLevel, stream);
             stream << '\n';
             indent(indentationLevel, stream);
             stream << '}';
-        }
-    }
+        },
+        pattern(some(as<IfStmt*>(arg))) = [&](auto stmt) {
+            stream << " else ";
+            visitIfStmt(stmt, indentationLevel, stream, true);
+        },
+        pattern(_) = []{}
+    );
 }
 
 void ASTPrinter::visitWhileStmt(WhileStmt* stmt, int indentationLevel, std::ostream& stream) {

@@ -10,7 +10,7 @@ Decl::Decl(SourceRange range,
      bool isExtern,
      std::vector<Decl*> paramList,
      Expr* expression) :
-ASTNode(NodeKind::Decl, range),
+ASTNode(NodeKind::Decl),
 name(name), type(type), isVar(isVar), isExtern(isExtern), paramList(paramList),
 value(expression) {}
 
@@ -21,7 +21,7 @@ Decl::Decl(SourceRange range,
            bool isExtern,
            std::vector<Decl*> paramList,
            Scope* body) :
-ASTNode(NodeKind::Decl, range),
+ASTNode(NodeKind::Decl),
 name(name), type(type), isVar(isVar), isExtern(isExtern), paramList(paramList),
 value(body) {}
 

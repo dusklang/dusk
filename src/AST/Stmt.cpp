@@ -2,6 +2,8 @@
 
 #include "Stmt.h"
 #include "Expr.h"
+#include "mpark/patterns.hpp"
+using namespace mpark::patterns;
 
 ReturnStmt::~ReturnStmt() {
     if(value) {
@@ -12,9 +14,11 @@ ReturnStmt::~ReturnStmt() {
 IfStmt::~IfStmt() {
     delete condition;
     delete thenScope;
-    if(elseScope) {
-        delete elseScope;
-    }
+    match(elseNode)(
+        pattern(some(as<Scope*>(arg))) = [](auto scope) { delete scope; },
+        pattern(some(as<IfStmt*>(arg))) = [](auto stmt) { delete stmt; },
+        pattern(_) = []{}
+    );
 }
 
 WhileStmt::~WhileStmt() {
