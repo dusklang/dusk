@@ -72,7 +72,7 @@ var pedro: Person {
     set {
         printString("Setting the value of pedro")
     }
-}
+}*/
 
 def printString(str: *i8) {
     var curChar = str
@@ -102,7 +102,7 @@ def printInt(val: i32) {
 def performFizzBuzz(end: i32) {
     // Check range.
     if end < 0 {
-        printString("Invalid bounds!\n")
+        printString("Invalid \b bounds!\n")
         return
     }
     var i = 0

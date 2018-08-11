@@ -18,7 +18,6 @@ std::map<char, char> specialEscapeCharacters {
 std::vector<Token> lex(SourceFile* file) {
     auto& source = file->source;
     uint32_t pos = 0;
-    uint32_t lastLineBegin = 0;
     uint32_t curTokBegin = 0;
     std::vector<Token> tokens;
     auto reportDiag = [&](Diagnostic&& diag) {
@@ -50,20 +49,22 @@ std::vector<Token> lex(SourceFile* file) {
         return true;
     };
     auto isBetween = [&](char lower, char higher) -> bool { return lower <= curChar() && curChar() != higher; };
-    auto newLineChars = [&]() -> uint32_t {
-        if(is('\n')) {
-            return 1;
-        } else if(isSubstr("\r\n")) {
-            return 2;
-        } else if(is('\r')) {
-            return 1;
-        } else {
-            return 0;
-        }
-    };
+    auto isNewline = [&]() -> bool { return is('\n') || is('\r'); };
     auto isWhitespace = [&]() -> bool { return is(' ') || is('\t'); };
     auto isLetter = [&]() -> bool { return isBetween('a', 'z') || isBetween('A', 'Z'); };
     auto isNum = [&]() -> bool { return '0' <= curChar() && curChar() <= '9'; };
+
+    while(pos < source.length()) {
+        if(is('\n')) {
+            file->nextLinePosition(pos + 1);
+        } else if(isSubstr("\r\n")) {
+            file->nextLinePosition(++pos + 1);
+        } else if(is('\r')) {
+            file->nextLinePosition(pos + 1);
+        }
+        pos++;
+    }
+    pos = 0;
 
     while(true) {
         std::string tokenText;
@@ -86,14 +87,9 @@ std::vector<Token> lex(SourceFile* file) {
         }
 
         // Lex newlines.
-        uint32_t newLines;
-        while(pos < source.length() && (newLines = newLineChars()) > 0) {
-            file->nextLinePosition(lastLineBegin);
-            for(int i = 0; i < newLines; i++) {
-                tokenText += curChar();
-                pos++;
-            }
-            lastLineBegin = pos;
+        while(pos < source.length() && isNewline()) {
+            tokenText += curChar();
+            pos++;
         }
         if(!tokenText.empty()) PUSH(tok::newline);
 
@@ -104,7 +100,7 @@ std::vector<Token> lex(SourceFile* file) {
         // Lex single-line comments.
         if(isSubstr("//")) {
             tokenText = "//";
-            for(pos += 2; pos < source.length() && newLineChars() == 0; pos++) tokenText += curChar();
+            for(pos += 2; pos < source.length() && !isNewline(); pos++) tokenText += curChar();
         }
         if(!tokenText.empty()) PUSH(tok::comment_single_line);
 
@@ -115,7 +111,6 @@ std::vector<Token> lex(SourceFile* file) {
             int levels = 1;
             for(pos += 2; pos < source.length(); pos++) {
                 tokenText += curChar();
-                auto newLines = newLineChars();
                 if(isSubstr("/*")) {
                     commentBegin = pos;
                     pos++;
@@ -130,19 +125,11 @@ std::vector<Token> lex(SourceFile* file) {
                         tokenText += curChar();
                         break;
                     }
-                } else if(newLines > 0) {
-                    file->nextLinePosition(lastLineBegin);
-                    for(int i = 0; i < newLines - 1; i++) {
-                        pos++;
-                        tokenText += curChar();
-                    }
-                    lastLineBegin = pos + 1;
-                    PUSH_TEXT(tok::comment_multiple_line, tokenText);
                 }
             }
             if(levels > 0) reportDiag(
                 Diagnostic(Diagnostic::Error, *file, "unterminated '/*' comment")
-                    .primaryRange(SourceRange(commentBegin, commentBegin + 2), "comment begins here")
+                    .primaryRange(SourceRange(commentBegin, commentBegin + 2), "last comment begins here")
             );
         }
         if(!tokenText.empty()) PUSH_TEXT(tok::comment_multiple_line, tokenText);
@@ -162,7 +149,7 @@ std::vector<Token> lex(SourceFile* file) {
             bool escapeMode = false;
             tokenText += '"';
             pos++;
-            while(pos < source.length() && newLineChars() == 0) {
+            while(pos < source.length() && !isNewline()) {
                 tokenText += curChar();
 
                 char charToInsert = curChar();
@@ -170,6 +157,12 @@ std::vector<Token> lex(SourceFile* file) {
                     try {
                         charToInsert = specialEscapeCharacters.at(charToInsert);
                     } catch(...) {
+                        reportDiag(
+                            Diagnostic(
+                                Diagnostic::Error, *file,
+                                std::string("invalid escape character \"") + charToInsert + '"')
+                                   .primaryRange(SourceRange(pos,  pos + 1))
+                        );
                         reportError(pos, std::string("Invalid escape character '") + charToInsert + "'");
                     }
                     escapeMode = false;
