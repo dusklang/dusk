@@ -21,7 +21,7 @@ std::vector<LineRange> SourceFile::linesInRange(SourceRange range) const {
     std::vector<LineRange> result;
 
     for(uint32_t i = 0; i < lines.size(); i++) {
-        auto lineBegin = lines[i].pos;
+        uint32_t lineBegin = lines[i].pos;
         uint32_t lineEnd;
         if(i == lines.size() - 1) {
             lineEnd = source.size();
@@ -29,22 +29,24 @@ std::vector<LineRange> SourceFile::linesInRange(SourceRange range) const {
             lineEnd = lines[i + 1].pos;
         }
 
+        uint32_t columnBegin = 0;
+        uint32_t columnEnd = lineEnd - lineBegin;
+
         bool beginInRange = lineBegin <= range.begin.pos && lineEnd > range.begin.pos;
         bool endInRange = lineBegin < range.end.pos && lineEnd >= range.end.pos;
         if(beginInRange || endInRange) {
             if(endInRange) {
-                lineEnd = range.begin.pos - lineBegin;
+                columnEnd = range.end.pos - lineBegin;
             }
             if(beginInRange) {
-                lineBegin = range.begin.pos - lineBegin;
+                columnBegin = range.begin.pos - lineBegin;
             }
-        } else if(range.begin.pos < lineBegin && range.end.pos < lineEnd) {
-            lineEnd -= lineBegin;
-            lineBegin = 0;
-        } else {
+        }
+        // Unless the entire line is inside the range, skip this line.
+        else if(!(range.begin.pos < lineBegin && range.end.pos > lineEnd)) {
             continue;
         }
-        result.push_back(LineRange(i, lineBegin, lineEnd));
+        result.push_back(LineRange(i, columnBegin, columnEnd));
     }
 
     return result;

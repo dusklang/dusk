@@ -72,7 +72,7 @@ var pedro: Person {
     set {
         printString("Setting the value of pedro")
     }
-}*/
+}
 
 def printString(str: *i8) {
     var curChar = str
@@ -156,8 +156,7 @@ def main {
     printChar("\n")
 
     return
-}
-)~";
+})~";
 
 int main() {
     std::cout << "Meda compiler version 0.0.1\n\n";

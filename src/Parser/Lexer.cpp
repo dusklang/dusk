@@ -6,6 +6,7 @@
 #include <optional>
 
 #include "Lexer.h"
+#include "General/Diagnostics.h"
 
 std::map<char, char> specialEscapeCharacters {
     { 'n', '\n' },
@@ -20,10 +21,16 @@ std::vector<Token> lex(SourceFile* file) {
     uint32_t lastLineBegin = 0;
     uint32_t curTokBegin = 0;
     std::vector<Token> tokens;
+    auto reportDiag = [&](Diagnostic&& diag) {
+        diag.print(std::cout);
+        if(diag.kind == Diagnostic::Error) {
+            exit(1);
+        }
+    };
     auto reportError = [&](uint32_t endPos, std::string message) {
-        SourceRange range { SourcePos { pos }, SourcePos { endPos } };
-        std::cout << "LEXING ERROR: " << message << '\n';
-        std::cout << "Offending area: " << file->substringFromRange(range) << "\n\n";
+        SourceRange range(pos, endPos);
+        Diagnostic diag(Diagnostic::Error, *file, message);
+        diag.print(std::cout);
         exit(1);
     };
     auto curChar = [&]() -> char { return source.at(pos); };
@@ -103,12 +110,14 @@ std::vector<Token> lex(SourceFile* file) {
 
         // Lex (optionally-nested) multi-line comments.
         if(isSubstr("/*")) {
+            auto commentBegin = pos;
             tokenText = "/*";
             int levels = 1;
             for(pos += 2; pos < source.length(); pos++) {
                 tokenText += curChar();
                 auto newLines = newLineChars();
                 if(isSubstr("/*")) {
+                    commentBegin = pos;
                     pos++;
                     tokenText += curChar();
                     levels++;
@@ -123,16 +132,18 @@ std::vector<Token> lex(SourceFile* file) {
                     }
                 } else if(newLines > 0) {
                     file->nextLinePosition(lastLineBegin);
-                    pos++;
                     for(int i = 0; i < newLines - 1; i++) {
-                        tokenText += curChar();
                         pos++;
+                        tokenText += curChar();
                     }
-                    lastLineBegin = pos;
+                    lastLineBegin = pos + 1;
                     PUSH_TEXT(tok::comment_multiple_line, tokenText);
                 }
             }
-            if(levels > 0) reportError(pos, "Unterminated /* comment.");
+            if(levels > 0) reportDiag(
+                Diagnostic(Diagnostic::Error, *file, "unterminated '/*' comment")
+                    .primaryRange(SourceRange(commentBegin, commentBegin + 2), "comment begins here")
+            );
         }
         if(!tokenText.empty()) PUSH_TEXT(tok::comment_multiple_line, tokenText);
 

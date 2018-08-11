@@ -25,9 +25,9 @@ struct SourceRange {
 };
 
 struct LineRange {
-    uint32_t const line;
-    SourcePos const startColumn;
-    SourcePos const endColumn;
+    uint32_t line;
+    SourcePos startColumn;
+    SourcePos endColumn;
 
     LineRange(uint32_t line, SourcePos startColumn, SourcePos endColumn) :
         line(line), startColumn(startColumn), endColumn(endColumn) {}
