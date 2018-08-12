@@ -261,7 +261,7 @@ Decl* Parser::parseDecl() {
     auto definitionBeginTok = cur();
     auto checkExtern = [&]() {
         if(externRange) {
-            reportDiag(ERR("'extern' declaration '" + name->text +
+            reportDiag(ERR("'extern' declaration '" + name->getText() +
                            "' may not have a definition.").primaryRange(definitionBeginTok.getRange()));
         }
     };
@@ -271,7 +271,7 @@ Decl* Parser::parseDecl() {
         next();
         auto expr = parseExpr();
         if(!expr) {
-            reportDiag(ERR("expected expression to assign to declaration `" + name->text + '`')
+            reportDiag(ERR("expected expression to assign to declaration `" + name->getText() + '`')
                 .primaryRange(cur().getRange()));
         }
         return new Decl(externRange, keywordRange, *name, type, isVar, paramList, expr);

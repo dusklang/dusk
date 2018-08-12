@@ -15,3 +15,15 @@ std::string operator+(char const* lit, StringRef str) {
     stream << lit << str;
     return stream.str();
 }
+
+std::string operator+(StringRef str, char const* lit) {
+    std::ostringstream stream;
+    stream << str << lit;
+    return stream.str();
+}
+
+std::string operator+(std::string a, StringRef b) {
+    std::ostringstream stream;
+    stream << a << b;
+    return stream.str();
+}

@@ -67,7 +67,7 @@ llvm::Type* CodeGenerator::toLLVMTy(Type type) {
 CodeGenVal CodeGenerator::visitDecl(Decl* decl) {
     if(auto expr = decl->expression()) {
         if(decl->isVar) {
-            decl->codegenVal = builder.CreateAlloca(toLLVMTy(decl->type), 0, decl->name.text.c_str());
+            decl->codegenVal = builder.CreateAlloca(toLLVMTy(decl->type), 0, decl->name.getText().cString());
             builder.CreateStore(toDirect(visitExpr(expr)), decl->codegenVal);
         } else {
             decl->codegenVal = toDirect(visitExpr(expr));
@@ -80,18 +80,18 @@ CodeGenVal CodeGenerator::visitDecl(Decl* decl) {
         }
         llvm::Type* type = toLLVMTy(decl->type);
         if(decl->isVar) {
-            llvm::GlobalVariable* var = new llvm::GlobalVariable(*module, type, false, llvm::GlobalVariable::ExternalLinkage, nullptr, decl->name.text);
+            llvm::GlobalVariable* var = new llvm::GlobalVariable(*module, type, false, llvm::GlobalVariable::ExternalLinkage, nullptr, decl->name.getText().string());
             decl->codegenVal = var;
             return DirectVal { var };
         } else {
             llvm::FunctionType* functionTy = llvm::FunctionType::get(type,
                                                                      arguments,
                                                                      false);
-            llvm::Function* function = llvm::Function::Create(functionTy, llvm::Function::ExternalLinkage, decl->name.text, module);
+            llvm::Function* function = llvm::Function::Create(functionTy, llvm::Function::ExternalLinkage, decl->name.getText().string(), module);
 
             int i = 0;
             for(auto &arg: function->args()) {
-                arg.setName(decl->paramList[i++]->name.text);
+                arg.setName(decl->paramList[i++]->name.getText().string());
             }
             decl->codegenVal = function;
 
