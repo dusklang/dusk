@@ -261,7 +261,7 @@ Decl* Parser::parseDecl() {
     auto definitionBeginTok = cur();
     auto checkExtern = [&]() {
         if(externRange) {
-            reportDiag(ERR("'extern' declaration '" + *name +
+            reportDiag(ERR("'extern' declaration '" + name->text +
                            "' may not have a definition.").primaryRange(definitionBeginTok.getRange()));
         }
     };
@@ -271,7 +271,7 @@ Decl* Parser::parseDecl() {
         next();
         auto expr = parseExpr();
         if(!expr) {
-            reportDiag(ERR("expected expression to assign to declaration `" + *name + '`')
+            reportDiag(ERR("expected expression to assign to declaration `" + name->text + '`')
                 .primaryRange(cur().getRange()));
         }
         return new Decl(externRange, keywordRange, *name, type, isVar, paramList, expr);
@@ -384,12 +384,12 @@ Stmt* Parser::parseWhileStmt() {
 }
 
 Expr* Parser::parseDeclRefExpr() {
-    if(cur().isNot(tok::identifier)) return nullptr;
+    auto name = parseIdentifier();
+    if(!name) return nullptr;
 
-    auto name = cur().getText();
     std::vector<Expr*> argList;
     std::optional<std::pair<SourceRange, SourceRange>> _parenRanges;
-    if(next().is(tok::sym_left_paren)) {
+    if(cur().is(tok::sym_left_paren)) {
         std::pair<SourceRange, SourceRange> parenRanges;
         parenRanges.first = cur().getRange();
         do {
@@ -406,7 +406,7 @@ Expr* Parser::parseDeclRefExpr() {
         _parenRanges = parenRanges;
     }
 
-    return new DeclRefExpr(_parenRanges, name, argList);
+    return new DeclRefExpr(_parenRanges, *name, argList);
 }
 
 Expr* Parser::parseExpr() {

@@ -72,10 +72,15 @@ class Parser final {
     PARSE_METHOD(DecimalLiteral)
     PARSE_METHOD(CharLiteral)
     PARSE_METHOD(StringLiteral)
-    std::optional<std::string> parseIdentifier() {
+    std::optional<Ident> parseIdentifier() {
         auto val = cur().getIdentifier();
-        if(val) next();
-        return val;
+        auto range = cur().getRange();
+        if(val) {
+            next();
+            return Ident(*val, range);
+        } else {
+            return std::nullopt;
+        }
     }
 
     void reportDiag(Diagnostic diag) {

@@ -8,6 +8,7 @@
 
 #include "AST.h"
 #include "Type.h"
+#include "Ident.h"
 
 struct Decl;
 
@@ -128,11 +129,11 @@ struct CastExpr: public Expr {
 
 struct DeclRefExpr: public Expr {
     std::optional<std::pair<SourceRange, SourceRange>> parenRanges;
-    std::string name;
+    Ident name;
     std::vector<Expr*> argList;
     Decl* decl = nullptr;
 
-    DeclRefExpr(std::optional<std::pair<SourceRange, SourceRange>> parenRanges, std::string name, std::vector<Expr*> argList) :
+    DeclRefExpr(std::optional<std::pair<SourceRange, SourceRange>> parenRanges, Ident name, std::vector<Expr*> argList) :
         Expr(ExprKind::DeclRef), parenRanges(parenRanges), name(name), argList(argList) {}
 
     ~DeclRefExpr() override;
@@ -145,10 +146,10 @@ struct DeclRefExpr: public Expr {
 struct MemberRefExpr: public Expr {
     SourceRange dotRange;
     Expr* root;
-    std::string name;
+    Ident name;
     size_t declIndex = -1;
 
-    MemberRefExpr(SourceRange dotRange, Expr* root, std::string name) :
+    MemberRefExpr(SourceRange dotRange, Expr* root, Ident name) :
         Expr(ExprKind::MemberRef), dotRange(dotRange), root(root), name(name) {}
 
     MemberRefExpr& operator=(MemberRefExpr const& other) = default;

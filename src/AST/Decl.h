@@ -16,7 +16,7 @@ namespace llvm {
 struct Decl: public ASTNode {
     std::optional<SourceRange> externRange;
     std::optional<SourceRange> keywordRange;
-    std::string name;
+    Ident name;
     Type type;
     bool isVar;
     std::vector<Decl*> paramList;
@@ -32,16 +32,16 @@ public:
     bool hasDefinition() const { return (bool)value; }
 
     /// Constructor for bare declarations, used for parameters and struct fields.
-    Decl(std::string name, Type type, bool isVar) : ASTNode(NodeKind::Decl), name(name), type(type), isVar(isVar) {}
+    Decl(Ident name, Type type, bool isVar) : ASTNode(NodeKind::Decl), name(name), type(type), isVar(isVar) {}
 
     /// Constructor for stored declarations.
-    Decl(std::optional<SourceRange> externRange, SourceRange keywordRange, std::string name, Type type, bool isVar, std::vector<Decl*> paramList, Expr* expression) : ASTNode(NodeKind::Decl), externRange(externRange), keywordRange(keywordRange), name(name), type(type), isVar(isVar), paramList(paramList), value(expression) {}
+    Decl(std::optional<SourceRange> externRange, SourceRange keywordRange, Ident name, Type type, bool isVar, std::vector<Decl*> paramList, Expr* expression) : ASTNode(NodeKind::Decl), externRange(externRange), keywordRange(keywordRange), name(name), type(type), isVar(isVar), paramList(paramList), value(expression) {}
 
     /// Constructor for computed declarations.
-    Decl(std::optional<SourceRange> externRange, SourceRange keywordRange, std::string name, Type type, bool isVar, std::vector<Decl*> paramList, Scope* body) : ASTNode(NodeKind::Decl), externRange(externRange), keywordRange(keywordRange), name(name), type(type), isVar(isVar), paramList(paramList), value(body) {}
+    Decl(std::optional<SourceRange> externRange, SourceRange keywordRange, Ident name, Type type, bool isVar, std::vector<Decl*> paramList, Scope* body) : ASTNode(NodeKind::Decl), externRange(externRange), keywordRange(keywordRange), name(name), type(type), isVar(isVar), paramList(paramList), value(body) {}
 
     /// Constructor for declaration prototypes.
-    Decl(std::optional<SourceRange> externRange, SourceRange keywordRange, std::string name, Type type, bool isVar, std::vector<Decl*> paramList) : ASTNode(NodeKind::Decl), externRange(externRange), keywordRange(keywordRange), name(name), type(type), isVar(isVar), paramList(paramList) {}
+    Decl(std::optional<SourceRange> externRange, SourceRange keywordRange, Ident name, Type type, bool isVar, std::vector<Decl*> paramList) : ASTNode(NodeKind::Decl), externRange(externRange), keywordRange(keywordRange), name(name), type(type), isVar(isVar), paramList(paramList) {}
 
     // Opposites:
     bool isStored() const;
@@ -53,8 +53,8 @@ public:
 
 struct StructDecl: public ASTNode {
     SourceRange structRange;
-    std::string name;
+    Ident name;
     std::vector<Decl*> fields;
 
-    StructDecl(SourceRange structRange, std::string name, std::vector<Decl*> fields) : ASTNode(NodeKind::StructDecl), structRange(structRange), name(name), fields(fields) {}
+    StructDecl(SourceRange structRange, Ident name, std::vector<Decl*> fields) : ASTNode(NodeKind::StructDecl), structRange(structRange), name(name), fields(fields) {}
 };

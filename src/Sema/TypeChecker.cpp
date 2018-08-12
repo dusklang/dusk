@@ -17,7 +17,7 @@ void TypeChecker::visitType(Type *type) {
                 }
             }
             if(!structDecl) {
-                reportError<ASTNode>("Reference to undeclared type `" + structTy.name + '`', nullptr);
+                reportError<ASTNode>("Reference to undeclared type `" + structTy.name.text + '`', nullptr);
             }
             structTy.decl = structDecl;
         },
@@ -32,7 +32,7 @@ void TypeChecker::visitDecl(Decl* decl) {
     if(declLists.size() > 1 && decl->isComputed()) {
         // TODO: Just report the source range of the prototype, which now is not its own ASTNode
         // so is not possible.
-        reportError("Unexpected nested function '" + decl->name + "'", decl);
+        reportError("Unexpected nested function '" + decl->name.text + "'", decl);
     }
 
     if(decl->isComputed()) {
@@ -110,7 +110,7 @@ void TypeChecker::visitStructDecl(StructDecl* decl) {
     }
     for(auto other: structs) {
         if(decl->name == other->name) {
-            reportError(std::string("Re-declaration of structure `") + decl->name + '`', decl);
+            reportError(std::string("Re-declaration of structure `") + decl->name.text + '`', decl);
         }
     }
     for(auto field: decl->fields) {
@@ -255,7 +255,7 @@ void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
         }
     }
     // We must have failed.
-    std::string errorMessage = "Invalid reference to identifier '" + expr->name + "'";
+    std::string errorMessage = "Invalid reference to identifier '" + expr->name.text + "'";
     if(!nameMatches.empty()) {
         errorMessage += "\n\nHere are some matches that differ only in parameter types:";
         for(auto& match: nameMatches) {
@@ -281,13 +281,13 @@ void TypeChecker::visitMemberRefExpr(MemberRefExpr* expr) {
                 }
             }
             if(!fieldDecl) {
-                reportError("Struct `" + structTy.name + "` has no member `" + expr->name + "`", expr);
+                reportError("Struct `" + structTy.name.text + "` has no member `" + expr->name.text + "`", expr);
             }
             expr->declIndex = *fieldDecl;
             expr->type = fields[*fieldDecl]->type;
         },
         pattern(_) = [&] {
-            reportError("Cannot reference member `" + expr->name + "` of non-struct type", expr);
+            reportError("Cannot reference member `" + expr->name.text + "` of non-struct type", expr);
         }
     );
 }

@@ -6,6 +6,7 @@
 #include <map>
 
 #include "General/SourceInfo.h"
+#include "Ident.h"
 
 struct StructDecl;
 struct Type;
@@ -50,14 +51,17 @@ struct FloatTy {};
 struct DoubleTy {};
 struct ErrorTy {};
 struct StructTy {
-    std::string name;
+    Ident name;
     StructDecl* decl = nullptr;
 
-    bool operator==(StructTy other) const {
+    bool operator==(StructTy& other) const {
         return name == other.name && decl == other.decl;
     }
+    bool operator!=(StructTy& other) const {
+        return !(*this == other);
+    }
 
-    static StructTy get(std::string name) {
+    static StructTy get(Ident name) {
         return StructTy { name };
     }
 };
