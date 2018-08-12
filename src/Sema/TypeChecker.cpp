@@ -6,6 +6,8 @@
 
 using namespace mpark::patterns;
 
+#define ERR(msg) Diagnostic(Diagnostic::Error, file, msg)
+
 void TypeChecker::visitType(Type *type) {
     match(type->data)(
         pattern(as<StructTy>(arg)) = [&](auto& structTy) {
@@ -17,7 +19,8 @@ void TypeChecker::visitType(Type *type) {
                 }
             }
             if(!structDecl) {
-                reportError<ASTNode>("Reference to undeclared type `" + structTy.name.getText() + '`', nullptr);
+                reportDiag(ERR("reference to undeclared type `" + structTy.name.getText() + "`")
+                           .primaryRange(type->range));
             }
             structTy.decl = structDecl;
         },
@@ -28,11 +31,15 @@ void TypeChecker::visitType(Type *type) {
     );
 }
 void TypeChecker::visitDecl(Decl* decl) {
+    auto protoRange = [&]() -> SourceRange {
+        SourceRange range = decl->name.range;
+        if(decl->externRange) range += *decl->externRange;
+        if(decl->keywordRange) range += *decl->keywordRange;
+    };
     // Reject nested functions.
     if(declLists.size() > 1 && decl->isComputed()) {
-        // TODO: Just report the source range of the prototype, which now is not its own ASTNode
-        // so is not possible.
-        reportError("Unexpected nested function '" + decl->name.getText() + "'", decl);
+        reportDiag(ERR("nested functions are not supported")
+                   .primaryRange(protoRange()));
     }
 
     if(decl->isComputed()) {
@@ -77,14 +84,16 @@ void TypeChecker::visitDecl(Decl* decl) {
                 decl->type = decl->expression()->type;
             } else {
                 if(decl->type != decl->expression()->type) {
-                    reportError("Cannot assign value of type '" +
-                                decl->expression()->type.name() +
-                                "' to declaration of type '" +
-                                decl->type.name() + "'",
-                                decl);
+                    reportDiag(ERR("cannot initialize declaration of type `" +
+                                   decl->type.name() + "` with value of type `" +
+                                   decl->expression()->type.name())
+                               .primaryRange(decl->expression()->totalRange()));
                 }
             }
-            if(decl->type == VoidTy()) reportError("Stored declarations can not have type Void", decl);
+            if(decl->type == VoidTy()) {
+                reportDiag(ERR("stored declarations can not have type `void`")
+                           .primaryRange(decl->type.range));
+            }
 
             if(decl->isParameterized()) declLists.pop_back();
 
@@ -96,21 +105,23 @@ void TypeChecker::visitDecl(Decl* decl) {
         if(decl->isExtern()) {
             declLists.back().push_back(decl);
         } else {
-            reportError("Non-extern declarations currently always need definitions", decl);
+            reportDiag(ERR("non-`extern` declaration needs a definition").primaryRange(protoRange()));
         }
 
         if(decl->type == ErrorTy()) {
-            reportError("Standalone decl prototypes need types", decl);
+            reportDiag(ERR("standalone decl prototype needs an explicit type").primaryRange(protoRange()));
         }
     }
 }
 void TypeChecker::visitStructDecl(StructDecl* decl) {
     if(declLists.size() > 1) {
-        reportError("`struct` declarations may not (yet) be nested", decl);
+        reportDiag(ERR("struct declarations may not yet be nested").primaryRange(decl->structRange + decl->name.range));
     }
     for(auto other: structs) {
         if(decl->name == other->name) {
-            reportError("Re-declaration of structure `" + decl->name.getText() + "`", decl);
+            reportDiag(ERR("re-declaration of structure `" + decl->name.getText() + "`")
+                       .range(other->structRange + other->name.range, "previous declaration here")
+                       .primaryRange(decl->structRange + decl->name.range));
         }
     }
     for(auto field: decl->fields) {
@@ -126,7 +137,7 @@ void TypeChecker::visitScope(Scope* scope) {
             visitExpr(expr);
             // Disallow unused expressions.
             if(expr->type != VoidTy()) {
-                reportError("Unused expression", expr);
+                reportDiag(ERR("unused expression").primaryRange(expr->totalRange()));
             }
         } else {
             visit(node);
@@ -180,7 +191,9 @@ void TypeChecker::visitBinOpExpr(BinOpExpr* expr) {
                 };
             },
             pattern(_, _) = [&] {
-                reportError("Mismatched types `" + expr->lhs->type.name() + "` and `" + expr->rhs->type.name() + "` in binary operator expression", expr);
+                reportDiag(ERR("mismatched types `" + expr->lhs->type.name() + "` and `" + expr->rhs->type.name() + "` in binary operator expression")
+                           .primaryRange(expr->lhs->totalRange())
+                           .primaryRange(expr->rhs->totalRange()));
             }
         );
     }
@@ -212,7 +225,7 @@ void TypeChecker::visitBinOpExpr(BinOpExpr* expr) {
         case BinOp::AndAssignment:
         case BinOp::OrAssignment: {
             if(!expr->lhs->isMutable()) {
-                reportError("Cannot assign to immutable expression", expr);
+                reportDiag(ERR("cannot assign to expression").primaryRange(expr->lhs->totalRange(), "expression is immutable"));
             }
             expr->type = VoidTy();
         }
@@ -255,20 +268,23 @@ void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
         }
     }
     // We must have failed.
-    std::string errorMessage = "Invalid reference to identifier '" + expr->name.getText() + "'";
+    auto errorMessage = ERR("invalid reference to identifier `" + expr->name.getText() + "`")
+        .primaryRange(expr->name.range);
     if(!nameMatches.empty()) {
-        errorMessage += "\n\nHere are some matches that differ only in parameter types:";
-        for(auto& match: nameMatches) {
-            //errorMessage += "\n\t" + file.substringFromRange(match->range);
+        for(auto match: nameMatches) {
+            errorMessage.range(match->name.range, "differs only in parameter types");
         }
     }
-    reportError(errorMessage, expr);
+    reportDiag(errorMessage);
 }
 void TypeChecker::visitMemberRefExpr(MemberRefExpr* expr) {
     visitExpr(expr->root);
 
     if_let(pattern(as<PointerTy>(_)) = expr->root->type.data) = [&] {
-        reportError("Cannot reference a member of a pointer type", expr);
+        reportDiag(ERR("cannot yet reference a member of a pointer type")
+                       .primaryRange(expr->dotRange + expr->name.range)
+                       .range(expr->root->totalRange(), "expression is of type `" + expr->root->type.name() + "`")
+                );
     };
     match(expr->root->type.data)(
         pattern(as<StructTy>(arg)) = [&](auto structTy) {
@@ -281,13 +297,15 @@ void TypeChecker::visitMemberRefExpr(MemberRefExpr* expr) {
                 }
             }
             if(!fieldDecl) {
-                reportError("Struct `" + structTy.name.getText() + "` has no member `" + expr->name.getText() + "`", expr);
+                reportDiag(ERR("struct `" + structTy.name.getText() + "` has no member `" + expr->name.getText() + "`")
+                               .primaryRange(expr->dotRange + expr->name.range));
             }
             expr->declIndex = *fieldDecl;
             expr->type = fields[*fieldDecl]->type;
         },
         pattern(_) = [&] {
-            reportError("Cannot reference member `" + expr->name.getText() + "` of non-struct type", expr);
+            reportDiag(ERR("cannot reference member `" + expr->name.getText() + "` of non-struct type `" + expr->type.name() + "`")
+                       .primaryRange(expr->dotRange + expr->name.range));
         }
     );
 }
@@ -298,7 +316,8 @@ void TypeChecker::visitReturnStmt(ReturnStmt* stmt) {
     // Handle returning value in a void computed decl.
     if(returnTypeStack.top() == VoidTy()) {
         if(stmt->value) {
-            reportError("Attempted to return value from Void computed decl '", stmt);
+            reportDiag(ERR("cannot return value from void computed declaration")
+                       .primaryRange(stmt->value->totalRange(), "remove this"));
         } else {
             return;
         }
@@ -306,22 +325,22 @@ void TypeChecker::visitReturnStmt(ReturnStmt* stmt) {
 
     // Handle returning no value in a non-void computed decl.
     if(!stmt->value) {
-        reportError("Computed decl must return a value", stmt);
+        reportDiag(ERR("computed declaration must return a value").primaryRange(stmt->returnRange, "add a return value"));
     }
 
     // Handle returning a value of a type incompatible with the computed decl's type
     // (currently, "incompatible with" just means "not equal to").
     if(stmt->value->type != returnTypeStack.top()) {
         // TODO: Include in the error message the type of the returned expr.
-        reportError("Attempted to return value of incompatible type from computed decl "
-                    "of type " + returnTypeStack.top().name(),
-                    stmt);
+        reportDiag(ERR("cannot return value of type `" + stmt->value->type.name() + "` from computed declaration of type `" + returnTypeStack.top().name())
+                   .primaryRange(stmt->value->totalRange()));
     }
 }
 void TypeChecker::visitIfStmt(IfStmt* stmt) {
     visitExpr(stmt->condition);
     if(stmt->condition->type != BoolTy()) {
-        reportError("Expression in if statement is not of type Bool", stmt);
+        reportDiag(ERR("conditions in if statements must be of type `bool`")
+                   .primaryRange(stmt->condition->totalRange(), "expression is of type `" + stmt->condition->type.name() + "`"));
     }
     visitScope(stmt->thenScope);
     match(stmt->elseNode)(
@@ -333,7 +352,8 @@ void TypeChecker::visitIfStmt(IfStmt* stmt) {
 void TypeChecker::visitWhileStmt(WhileStmt* stmt) {
     visitExpr(stmt->condition);
     if(stmt->condition->type != BoolTy()) {
-        reportError("Expression in while statement is not of type Bool", stmt);
+        reportDiag(ERR("conditions in while statements must be of type `bool`")
+                   .primaryRange(stmt->condition->totalRange(), "expression is of type `" + stmt->condition->type.name() + "`"));
     }
     visitScope(stmt->thenScope);
 }

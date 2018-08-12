@@ -26,6 +26,9 @@ struct SourceRange {
     SourceRange operator+(SourceRange other) const {
         return SourceRange(std::min(begin.pos, other.begin.pos), std::max(end.pos, other.end.pos));
     }
+    void operator+=(SourceRange other) {
+        *this = *this + other;
+    }
 };
 
 struct LineRange {

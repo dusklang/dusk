@@ -7,25 +7,18 @@
 
 #include "AST/ASTVisitor.h"
 #include "General/SourceInfo.h"
+#include "General/Diagnostics.h"
 
 class TypeChecker final: public ASTVisitor<TypeChecker> {
-private:
     SourceFile const& file;
     std::vector<std::vector<Decl*>> declLists;
     std::vector<StructDecl*> structs;
     std::stack<Type> returnTypeStack;
-    template<typename Node>
-    void reportError(std::string message, Node* node) {
-        std::cout << "TYPE-CHECKING ERROR: " << message << '\n';
-        //std::cout << "Offending area: " << file.substringFromRange(node->range) << "\n\n";
-        // TODO: Support multiple errors per file.
-        exit(1);
-    }
-
-    template<typename Node>
-    void reportWarning(std::string message, Node* node) {
-        std::cout << "TYPE-CHECKING WARNING: " << message << '\n';
-        std::cout << "Offending area: " << node->range.getSubstring() << "\n\n";
+    void reportDiag(Diagnostic diag) const {
+        diag.print(std::cout);
+        if(diag.kind == Diagnostic::Error) {
+            exit(1);
+        }
     }
 public:
     TypeChecker(SourceFile const& file) : file(file) {

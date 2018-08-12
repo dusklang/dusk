@@ -1,6 +1,7 @@
 set(SOURCES
     SourceInfo.cpp
     Diagnostics.cpp
+    String.cpp
 )
 set(HEADERS
     SourceInfo.h

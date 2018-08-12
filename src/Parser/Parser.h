@@ -54,10 +54,6 @@ class Parser final {
         savedState.pop();
     }
 
-    SourceRange currentRange() const {
-        return SourceRange(0, 0);
-    }
-
     #define PARSE_METHOD(name) \
     std::optional<Token> parse ## name() { \
         if(cur().is ## name()) { \

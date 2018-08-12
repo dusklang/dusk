@@ -287,6 +287,7 @@ StructDecl* Parser::parseStructDecl() {
     if(cur().isNot(tok::kw_struct)) {
         return nullptr;
     }
+    auto structRange = cur().getRange();
     next();
     auto name = parseIdentifier();
     if(!name) {
@@ -306,7 +307,7 @@ StructDecl* Parser::parseStructDecl() {
         fields.push_back(new Decl(*fieldName, fieldType, /* isVar */ true));
     }
     next();
-    return new StructDecl(currentRange(), *name, fields);
+    return new StructDecl(structRange, *name, fields);
 }
 
 Stmt* Parser::parseStmt() {
@@ -475,17 +476,19 @@ Expr* Parser::parseTerm() {
 
     if(retVal) {
         while(cur().is(tok::sym_dot)) {
+            auto dotRange = cur().getRange();
             next();
             auto memberName = parseIdentifier();
             if(!memberName) {
                 reportDiag(ERR("expected member name after '.'").primaryRange(cur().getRange()));
             }
-            retVal = new MemberRefExpr(currentRange(), retVal, *memberName);
+            retVal = new MemberRefExpr(dotRange, retVal, *memberName);
         }
         while(cur().is(tok::kw_as)) {
+            auto asRange = cur().getRange();
             next();
             auto destType = parseType();
-            retVal = new CastExpr(currentRange(), retVal, destType);
+            retVal = new CastExpr(asRange, retVal, destType);
         }
     }
 

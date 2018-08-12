@@ -26,38 +26,49 @@ struct Expr : public ASTNode {
     Expr(ExprKind exprKind, Type type) : ASTNode(NodeKind::Expr), exprKind(exprKind), type(type) {}
     Expr(ExprKind exprKind) : ASTNode(NodeKind::Expr), exprKind(exprKind), type(ErrorTy()) {}
     virtual bool isMutable() const { return false; }
+    virtual SourceRange totalRange() const = 0;
 };
 
-struct IntegerLiteralExpr: public Expr {
+struct IntegerLiteralExpr final: public Expr {
     SourceRange range;
     std::string literal;
 
     IntegerLiteralExpr(SourceRange range, std::string const& literal) :
         Expr(ExprKind::IntegerLiteral), range(range), literal(literal) {}
+
+    SourceRange totalRange() const override { return range; }
 };
 
-struct DecimalLiteralExpr: public Expr {
+struct DecimalLiteralExpr final: public Expr {
     SourceRange range;
     std::string literal;
     DecimalLiteralExpr(SourceRange range, std::string const& literal) : Expr(ExprKind::DecimalLiteral), range(range), literal(literal) {}
+
+    SourceRange totalRange() const override { return range; }
 };
 
-struct BooleanLiteralExpr: public Expr {
+struct BooleanLiteralExpr final: public Expr {
     SourceRange range;
     bool literal;
     BooleanLiteralExpr(SourceRange range, bool literal) : Expr(ExprKind::BooleanLiteral), range(range), literal(literal) {}
+
+    SourceRange totalRange() const override { return range; }
 };
 
-struct CharLiteralExpr: public Expr {
+struct CharLiteralExpr final: public Expr {
     SourceRange range;
     char literal;
     CharLiteralExpr(SourceRange range, char literal) : Expr(ExprKind::CharLiteral), range(range), literal(literal) {}
+
+    SourceRange totalRange() const override { return range; }
 };
 
-struct StringLiteralExpr: public Expr {
+struct StringLiteralExpr final: public Expr {
     SourceRange range;
     std::string literal;
     StringLiteralExpr(SourceRange range, std::string literal) : Expr(ExprKind::StringLiteral), range(range), literal(literal) {}
+
+    SourceRange totalRange() const override { return range; }
 };
 
 enum class BinOp {
@@ -103,6 +114,8 @@ struct BinOpExpr: public Expr {
     BinOpExpr(SourceRange opRange, Expr* lhs, Expr* rhs, BinOp op) : Expr(ExprKind::BinOp), opRange(opRange), lhs(lhs), rhs(rhs), op(op) {}
 
     bool isMutable() const override { return lhs->isMutable(); }
+
+    SourceRange totalRange() const override { return lhs->totalRange() + rhs->totalRange(); }
 };
 
 struct PreOpExpr: public Expr {
@@ -117,17 +130,21 @@ struct PreOpExpr: public Expr {
             default: return false;
         }
     }
+
+    SourceRange totalRange() const override { return opRange + operand->totalRange(); }
 };
 
-struct CastExpr: public Expr {
+struct CastExpr final: public Expr {
     SourceRange asRange;
     Expr* operand;
     Type destType;
 
     CastExpr(SourceRange asRange, Expr* operand, Type destType) : Expr(ExprKind::Cast), asRange(asRange), operand(operand), destType(destType) {}
+
+    SourceRange totalRange() const override { return operand->totalRange() + destType.range; }
 };
 
-struct DeclRefExpr: public Expr {
+struct DeclRefExpr final: public Expr {
     std::optional<std::pair<SourceRange, SourceRange>> parenRanges;
     Ident name;
     std::vector<Expr*> argList;
@@ -141,9 +158,17 @@ struct DeclRefExpr: public Expr {
     DeclRefExpr& operator=(DeclRefExpr const& other) = default;
 
     bool isMutable() const override;
+
+    SourceRange totalRange() const override {
+        SourceRange range = name.range;
+        if(parenRanges) {
+            range += parenRanges->second;
+        }
+        return range;
+    }
 };
 
-struct MemberRefExpr: public Expr {
+struct MemberRefExpr final: public Expr {
     SourceRange dotRange;
     Expr* root;
     Ident name;
@@ -156,5 +181,9 @@ struct MemberRefExpr: public Expr {
 
     bool isMutable() const override {
         return root->isMutable();
+    }
+
+    SourceRange totalRange() const override {
+        return root->totalRange() + name.range;
     }
 };
