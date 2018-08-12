@@ -15,7 +15,8 @@ enum class ExprKind {
     NUM_EXPRS
 };
 
-// Base class from which each Expression node inherits.
+// TODO: Make Expr a variant.
+/// Base class from which each Expression node inherits.
 struct Expr : public ASTNode {
     ExprKind exprKind;
     Type type;

@@ -93,7 +93,7 @@ void TypeChecker::visitDecl(Decl* decl) {
             declLists.back().push_back(decl);
         }
     } else {
-        if(decl->isExtern) {
+        if(decl->isExtern()) {
             declLists.back().push_back(decl);
         } else {
             reportError("Non-extern declarations currently always need definitions", decl);

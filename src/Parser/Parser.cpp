@@ -189,27 +189,35 @@ Type Parser::parseType() {
 
 Decl* Parser::parseDecl() {
     bool isVar;
-    bool isExtern = false;
+    std::optional<SourceRange> externRange;
     if(cur().is(tok::kw_extern)) {
-        isExtern =  true;
+        externRange = cur().getRange();
         next();
     }
+    SourceRange keywordRange;
     if(cur().is(tok::kw_var)) {
         isVar = true;
+        keywordRange = cur().getRange();
     } else if(cur().is(tok::kw_def)) {
         isVar = false;
+        keywordRange = cur().getRange();
     } else {
-        // Report an error only if we know for a fact that this was supposed to be a declaration.
-        if(isExtern) {
+        // Report an error only if we know for a fact that this was supposed to be a declaration. Otherwise return.
+        if(externRange) {
             reportDiag(ERR("expected def or var keyword to begin declaration").primaryRange(cur().getRange()));
         } else {
             return nullptr;
         }
     }
-    EXPECT_NEXT(tok::identifier, "expected identifier after def");
-    auto name = cur().getText();
+    next();
+    auto name = parseIdentifier();
+    if(!name) {
+        reportDiag(
+            ERR("expected declaration name").primaryRange(cur().getRange())
+        );
+    }
     std::vector<Decl*> paramList;
-    if(next().is(tok::sym_left_paren)) {
+    if(cur().is(tok::sym_left_paren)) {
         auto leftParen = cur();
         bool isFirst = true;
         do {
@@ -229,33 +237,22 @@ Decl* Parser::parseDecl() {
             }
             EXPECT(tok::sym_colon, "expected colon after parameter name");
             next();
-            paramList.push_back(new Decl(currentRange(), *paramName, parseType()));
+            paramList.push_back(new Decl(*paramName, parseType(), /* isVar */ false));
         } while(cur().is(tok::sym_comma));
         EXPECT(tok::sym_right_paren, "expected ')' after parameter list");
         next();
     }
 
     Type type = ErrorTy();
-    // Range of the "prototype", which includes everything from the extern keyword (if it exists) to
-    // the type of the declaration (if it's specified).
-    SourceRange protoRange;
-
     if(cur().is(tok::sym_colon)) {
         next();
-
-        next();
-        protoRange = currentRange();
-        prev();
-
         type = parseType();
-    } else {
-        protoRange = currentRange();
     }
 
     auto definitionBeginTok = cur();
     auto checkExtern = [&]() {
-        if(isExtern) {
-            reportDiag(ERR("'extern' declaration '" + name +
+        if(externRange) {
+            reportDiag(ERR("'extern' declaration '" + *name +
                            "' may not have a definition.").primaryRange(definitionBeginTok.getRange()));
         }
     };
@@ -265,15 +262,15 @@ Decl* Parser::parseDecl() {
         next();
         auto expr = parseExpr();
         if(!expr) {
-            reportDiag(ERR("expected expression to assign to declaration `" + name + '`')
+            reportDiag(ERR("expected expression to assign to declaration `" + *name + '`')
                 .primaryRange(cur().getRange()));
         }
-        return new Decl(SourceRange(0, 0), name, type, isVar, isExtern, paramList, expr);
+        return new Decl(externRange, keywordRange, *name, type, isVar, paramList, expr);
     } else if(auto scope = parseScope()) {
         checkExtern();
-        return new Decl(SourceRange(0, 0), name, type, isVar, isExtern, paramList, scope);
+        return new Decl(externRange, keywordRange, *name, type, isVar, paramList, scope);
     } else {
-        return new Decl(protoRange, name, type, isVar, isExtern, paramList);
+        return new Decl(externRange, keywordRange, *name, type, isVar, paramList);
     }
 }
 
@@ -297,7 +294,7 @@ StructDecl* Parser::parseStructDecl() {
         EXPECT(tok::sym_colon, "expected colon in struct field");
         next();
         auto fieldType = parseType();
-        fields.push_back(new Decl(SourceRange(), *fieldName, fieldType, /*isVar*/ true));
+        fields.push_back(new Decl(*fieldName, fieldType, /* isVar */ true));
     }
     next();
     return new StructDecl(currentRange(), *name, fields);

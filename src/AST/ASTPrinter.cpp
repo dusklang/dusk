@@ -12,7 +12,7 @@ inline void indent(int level, std::ostream& stream) {
 
 void ASTPrinter::visitDecl(Decl* decl, int indentationLevel, std::ostream& stream) {
     indent(indentationLevel, stream);
-    stream << (decl->isVar ? "var " : "") << (decl->isExtern ? "extern " : "");
+    stream << (decl->isVar ? "var " : "") << (decl->isExtern() ? "extern " : "");
     stream << decl->name;
     if(!decl->paramList.empty()) {
         stream << "(";
