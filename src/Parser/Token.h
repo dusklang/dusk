@@ -42,21 +42,17 @@ public:
     std::string getText() const { return text; }
     SourcePos getLoc() const { return range.begin; }
     SourceRange getRange() const { return range; }
-    std::optional<std::string> getStringLiteral() const {
-        if(isNot(tok::string_literal)) return std::nullopt;
-        return text;
+    bool isStringLiteral() const {
+        return is(tok::string_literal);
     }
-    std::optional<char> getCharLiteral() const {
-        if(isNot(tok::char_literal)) return std::nullopt;
-        return text[0];
+    bool isCharLiteral() const {
+        return is(tok::char_literal);
     }
-    std::optional<std::string> getIntegerLiteral() const {
-        if(isNot(tok::integer_literal)) return std::nullopt;
-        return text;
+    bool isIntegerLiteral() const {
+        return is(tok::integer_literal);
     }
-    std::optional<std::string> getDecimalLiteral() const {
-        if(isNot(tok::decimal_literal)) return std::nullopt;
-        return text;
+    bool isDecimalLiteral() const {
+        return is(tok::decimal_literal);
     }
     std::optional<std::string> getIdentifier() const {
         if(isNot(tok::identifier)) return std::nullopt;

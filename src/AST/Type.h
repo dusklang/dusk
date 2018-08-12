@@ -3,7 +3,6 @@
 #pragma once
 
 #include <variant>
-#include <optional>
 #include <map>
 
 #include "General/SourceInfo.h"
@@ -86,18 +85,18 @@ struct Type final {
     typedef std::variant<IntTy, TyVariable, VoidTy, BoolTy, FloatTy, DoubleTy, ErrorTy, StructTy, PointerTy> DataType;
 
     DataType data;
-    std::optional<SourceRange> sourceRange = std::nullopt;
+    SourceRange range;
 
-    Type(DataType data) : data(data) {}
-    Type(IntTy ty) : data(ty) {}
-    Type(ErrorTy ty) : data(ty) {}
-    Type(VoidTy ty) : data(ty) {}
-    Type(BoolTy ty) : data(ty) {}
-    Type(FloatTy ty) : data(ty) {}
-    Type(DoubleTy ty) : data(ty) {}
-    Type(PointerTy ty) : data(ty) {}
-    Type(StructTy ty) : data(ty) {}
-    Type(TyVariable ty) : data(ty) {}
+    Type(DataType data, SourceRange range = SourceRange()) : data(data), range(range) {}
+    Type(IntTy ty, SourceRange range = SourceRange()) : data(ty), range(range) {}
+    Type(ErrorTy ty, SourceRange range = SourceRange()) : data(ty), range(range) {}
+    Type(VoidTy ty, SourceRange range = SourceRange()) : data(ty), range(range) {}
+    Type(BoolTy ty, SourceRange range = SourceRange()) : data(ty), range(range) {}
+    Type(FloatTy ty, SourceRange range = SourceRange()) : data(ty), range(range) {}
+    Type(DoubleTy ty, SourceRange range = SourceRange()) : data(ty), range(range) {}
+    Type(PointerTy ty, SourceRange range = SourceRange()) : data(ty), range(range) {}
+    Type(StructTy ty, SourceRange range = SourceRange()) : data(ty), range(range) {}
+    Type(TyVariable ty, SourceRange range = SourceRange()) : data(ty), range(range) {}
 
     Type* pointeeType() const;
 

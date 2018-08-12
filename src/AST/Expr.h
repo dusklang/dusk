@@ -3,6 +3,8 @@
 #pragma once
 
 #include <string>
+#include <utility> // for std::pair
+#include <optional>
 
 #include "AST.h"
 #include "Type.h"
@@ -92,20 +94,22 @@ enum class PreOp {
 };
 
 struct BinOpExpr: public Expr {
+    SourceRange opRange;
     Expr* lhs;
     Expr* rhs;
     BinOp op;
 
-    BinOpExpr(SourceRange range, Expr* lhs, Expr* rhs, BinOp op) : Expr(ExprKind::BinOp), lhs(lhs), rhs(rhs), op(op) {}
+    BinOpExpr(SourceRange opRange, Expr* lhs, Expr* rhs, BinOp op) : Expr(ExprKind::BinOp), opRange(opRange), lhs(lhs), rhs(rhs), op(op) {}
 
     bool isMutable() const override { return lhs->isMutable(); }
 };
 
 struct PreOpExpr: public Expr {
+    SourceRange opRange;
     Expr* operand;
     PreOp op;
 
-    PreOpExpr(SourceRange range, Expr* operand, PreOp op) : Expr(ExprKind::PreOp), operand(operand), op(op) {}
+    PreOpExpr(SourceRange opRange, Expr* operand, PreOp op) : Expr(ExprKind::PreOp), opRange(opRange), operand(operand), op(op) {}
     bool isMutable() const override {
         switch(op) {
             case PreOp::Deref: return true;
@@ -115,20 +119,21 @@ struct PreOpExpr: public Expr {
 };
 
 struct CastExpr: public Expr {
+    SourceRange asRange;
     Expr* operand;
     Type destType;
 
-    CastExpr(SourceRange range, Expr* operand, Type destType) : Expr(ExprKind::Cast), operand(operand), destType(destType) {}
+    CastExpr(SourceRange asRange, Expr* operand, Type destType) : Expr(ExprKind::Cast), asRange(asRange), operand(operand), destType(destType) {}
 };
 
 struct DeclRefExpr: public Expr {
+    std::optional<std::pair<SourceRange, SourceRange>> parenRanges;
     std::string name;
     std::vector<Expr*> argList;
     Decl* decl = nullptr;
 
-    DeclRefExpr(SourceRange range, std::string name,
-                std::vector<Expr*> const& argList) : Expr(ExprKind::DeclRef),
-    name(name), argList(argList) {}
+    DeclRefExpr(std::optional<std::pair<SourceRange, SourceRange>> parenRanges, std::string name, std::vector<Expr*> argList) :
+        Expr(ExprKind::DeclRef), parenRanges(parenRanges), name(name), argList(argList) {}
 
     ~DeclRefExpr() override;
 
@@ -138,12 +143,13 @@ struct DeclRefExpr: public Expr {
 };
 
 struct MemberRefExpr: public Expr {
+    SourceRange dotRange;
     Expr* root;
     std::string name;
     size_t declIndex = -1;
 
-    MemberRefExpr(SourceRange range, Expr* root, std::string name) : Expr(ExprKind::MemberRef),
-    root(root), name(name) {}
+    MemberRefExpr(SourceRange dotRange, Expr* root, std::string name) :
+        Expr(ExprKind::MemberRef), dotRange(dotRange), root(root), name(name) {}
 
     MemberRefExpr& operator=(MemberRefExpr const& other) = default;
 

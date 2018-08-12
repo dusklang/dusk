@@ -58,17 +58,25 @@ class Parser final {
         return SourceRange(0, 0);
     }
 
-    #define PARSE_METHOD(type, name) \
-    std::optional<type> parse ## name() { \
-        auto val = cur().get ## name(); \
-        if(val) next(); \
-        return val; \
+    #define PARSE_METHOD(name) \
+    std::optional<Token> parse ## name() { \
+        if(cur().is ## name()) { \
+            auto curTok = cur(); \
+            next(); \
+            return curTok; \
+        } else { \
+            return std::nullopt; \
+        } \
     }
-    PARSE_METHOD(std::string, IntegerLiteral)
-    PARSE_METHOD(std::string, DecimalLiteral)
-    PARSE_METHOD(char, CharLiteral)
-    PARSE_METHOD(std::string, StringLiteral)
-    PARSE_METHOD(std::string, Identifier)
+    PARSE_METHOD(IntegerLiteral)
+    PARSE_METHOD(DecimalLiteral)
+    PARSE_METHOD(CharLiteral)
+    PARSE_METHOD(StringLiteral)
+    std::optional<std::string> parseIdentifier() {
+        auto val = cur().getIdentifier();
+        if(val) next();
+        return val;
+    }
 
     void reportDiag(Diagnostic diag) {
         diag.print(std::cout);

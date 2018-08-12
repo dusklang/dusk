@@ -3,6 +3,7 @@
 #include <vector>
 #include <iostream>
 #include <optional>
+#include <utility> // for std::pair
 
 #include "AST/Expr.h"
 #include "AST/Stmt.h"
@@ -162,29 +163,37 @@ ASTNode* Parser::parseNode() {
 
 Type Parser::parseType() {
     if(cur().is(tok::sym_asterisk)) {
+        auto asteriskRange = cur().getRange();
         next();
-        return PointerTy::get(parseType());
+        auto pointedTy = parseType();
+        return Type(PointerTy::get(pointedTy), asteriskRange + pointedTy.range);
     }
+    auto range = cur().getRange();
     auto typeName = parseIdentifier();
     if(!typeName) reportDiag(ERR("expected type name").primaryRange(cur().getRange()));
 
-    if(*typeName == "i8") { return IntTy::I8(); }
-    if(*typeName == "i16") { return IntTy::I16(); }
-    if(*typeName == "i32") { return IntTy::I32(); }
-    if(*typeName == "i64") { return IntTy::I64(); }
+    Type::DataType data;
+    if(*typeName == "i8") { data = IntTy::I8(); }
+    else if(*typeName == "i16") { data = IntTy::I16(); }
+    else if(*typeName == "i32") { data = IntTy::I32(); }
+    else if(*typeName == "i64") { data = IntTy::I64(); }
 
-    if(*typeName == "u8") { return IntTy::U8(); }
-    if(*typeName == "u16") { return IntTy::U16(); }
-    if(*typeName == "u32") { return IntTy::U32(); }
-    if(*typeName == "u64") { return IntTy::U64(); }
+    else if(*typeName == "u8") { data = IntTy::U8(); }
+    else if(*typeName == "u16") { data = IntTy::U16(); }
+    else if(*typeName == "u32") { data = IntTy::U32(); }
+    else if(*typeName == "u64") { data = IntTy::U64(); }
 
-    if(*typeName == "f32") { return FloatTy(); }
-    if(*typeName == "f64") { return DoubleTy(); }
+    else if(*typeName == "f32") { data = FloatTy(); }
+    else if(*typeName == "f64") { data = DoubleTy(); }
 
-    if(*typeName == "bool") { return BoolTy(); }
-    if(*typeName == "void") { return VoidTy(); }
+    else if(*typeName == "bool") { data = BoolTy(); }
+    else if(*typeName == "void") { data = VoidTy(); }
 
-    return StructTy::get(*typeName);
+    else {
+        data = StructTy::get(*typeName);
+    }
+
+    return Type(data, range);
 }
 
 Decl* Parser::parseDecl() {
@@ -379,25 +388,30 @@ Expr* Parser::parseDeclRefExpr() {
 
     auto name = cur().getText();
     std::vector<Expr*> argList;
+    std::optional<std::pair<SourceRange, SourceRange>> _parenRanges;
     if(next().is(tok::sym_left_paren)) {
+        std::pair<SourceRange, SourceRange> parenRanges;
+        parenRanges.first = cur().getRange();
         do {
             next();
-
             auto argument = parseExpr();
             if(!argument) reportDiag(ERR("expected argument").primaryRange(cur().getRange()));
             argList.push_back(argument);
 
         } while(cur().is(tok::sym_comma));
         EXPECT(tok::sym_right_paren, "expected ')' after argument");
+        parenRanges.second = cur().getRange();
         next();
+
+        _parenRanges = parenRanges;
     }
 
-    return new DeclRefExpr(currentRange(), name, argList);
+    return new DeclRefExpr(_parenRanges, name, argList);
 }
 
 Expr* Parser::parseExpr() {
     std::vector<Expr*> exprStack { parseTerm() };
-    std::vector<BinOp> opStack;
+    std::vector<std::pair<BinOp, SourceRange>> opStack;
 
     auto popStacks = [&]() {
         auto rhs = exprStack.back();
@@ -406,18 +420,19 @@ Expr* Parser::parseExpr() {
         exprStack.pop_back();
         auto nextOp = opStack.back();
         opStack.pop_back();
-        exprStack.push_back(new BinOpExpr(SourceRange(), lhs, rhs, nextOp));
+        exprStack.push_back(new BinOpExpr(nextOp.second, lhs, rhs, nextOp.first));
     };
 
     while(true) {
         auto op = parseBinaryOperator(cur().getKind());
+        auto opRange = cur().getRange();
         if(!op) { break; }
         next();
 
-        while(!opStack.empty() && getPrecedence(opStack.back()) <= getPrecedence(*op)) {
+        while(!opStack.empty() && getPrecedence(opStack.back().first) <= getPrecedence(*op)) {
             popStacks();
         }
-        opStack.push_back(*op);
+        opStack.push_back({*op, opRange});
         exprStack.push_back(parseTerm());
     }
     while(!opStack.empty()) {
@@ -435,23 +450,25 @@ Expr* Parser::parseTerm() {
         next();
         retVal = expr;
     } else if(auto preOp = parsePrefixOperator(cur().getKind())) {
+        auto opRange = cur().getRange();
         next();
-        auto range = currentRange();
-        retVal = new PreOpExpr(range, parseTerm(), *preOp);
+        retVal = new PreOpExpr(opRange, parseTerm(), *preOp);
     } else if(cur().is(tok::kw_true)) {
+        auto range = cur().getRange();
         next();
-        retVal = new BooleanLiteralExpr(currentRange(), true);
+        retVal = new BooleanLiteralExpr(range, true);
     } else if(cur().is(tok::kw_false)) {
+        auto range = cur().getRange();
         next();
-        retVal = new BooleanLiteralExpr(currentRange(), false);
+        retVal = new BooleanLiteralExpr(range, false);
     } else if(auto intVal = parseIntegerLiteral()) {
-        retVal = new IntegerLiteralExpr(currentRange(), *intVal);
+        retVal = new IntegerLiteralExpr(intVal->getRange(), intVal->getText());
     } else if(auto decimalVal = parseDecimalLiteral()) {
-        retVal = new DecimalLiteralExpr(currentRange(), *decimalVal);
+        retVal = new DecimalLiteralExpr(decimalVal->getRange(), decimalVal->getText());
     } else if(auto charVal = parseCharLiteral()) {
-        retVal = new CharLiteralExpr(currentRange(), *charVal);
+        retVal = new CharLiteralExpr(charVal->getRange(), charVal->getText()[0]);
     } else if(auto stringVal = parseStringLiteral()) {
-        retVal = new StringLiteralExpr(currentRange(), *stringVal);
+        retVal = new StringLiteralExpr(stringVal->getRange(), stringVal->getText());
     } else {
         retVal = TRY(parseDeclRefExpr());
     }
