@@ -1,13 +1,20 @@
 //  Copyright © 2018 Zach Wolfe. All rights reserved.
 
-#include "CodeGenerator.h"
+#include "LLVMGenerator.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/TargetRegistry.h"
+#include "llvm/Support/TargetSelect.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/TargetOptions.h"
+#include "llvm/IR/LegacyPassManager.h"
 
 #include "mpark/patterns.hpp"
 
 using namespace mpark::patterns;
 
-llvm::Value* CodeGenerator::toDirect(CodeGenVal val) {
+llvm::Value* LLVMGenerator::toDirect(CodeGenVal val) {
     return match(val)(
         pattern(as<DirectVal>(arg)) = [](auto val) { return val.val; },
         pattern(as<IndirectVal>(arg)) = [&](auto val) -> llvm::Value* {
@@ -16,7 +23,7 @@ llvm::Value* CodeGenerator::toDirect(CodeGenVal val) {
         }
     );
 }
-llvm::Value* CodeGenerator::toIndirect(CodeGenVal val) {
+llvm::Value* LLVMGenerator::toIndirect(CodeGenVal val) {
     return match(val)(
         pattern(as<IndirectVal>(arg)) = [](auto val) { return val.val; },
         pattern(as<DirectVal>(arg)) = [&](auto val) -> llvm::Value* {
@@ -27,7 +34,7 @@ llvm::Value* CodeGenerator::toIndirect(CodeGenVal val) {
         }
     );
 }
-llvm::Type* CodeGenerator::toLLVMTy(Type type) {
+llvm::Type* LLVMGenerator::toLLVMTy(Type type) {
     return match(type.data)(
         pattern(as<TyVariable>(_)) = []() -> llvm::Type* {
             assert(false && "Encountered type variable");
@@ -64,7 +71,7 @@ llvm::Type* CodeGenerator::toLLVMTy(Type type) {
         }
     );
 }
-CodeGenVal CodeGenerator::visitDecl(Decl* decl) {
+CodeGenVal LLVMGenerator::visitDecl(Decl* decl) {
     if(auto expr = decl->expression()) {
         if(decl->isVar) {
             decl->codegenVal = builder.CreateAlloca(toLLVMTy(decl->type), 0, decl->name.getText().cString());
@@ -182,30 +189,30 @@ CodeGenVal CodeGenerator::visitDecl(Decl* decl) {
         }
     }
 }
-void CodeGenerator::visitStructDecl(StructDecl* decl) {
+void LLVMGenerator::visitStructDecl(StructDecl* decl) {
     
 }
-void CodeGenerator::visitScope(Scope* scope) {
+void LLVMGenerator::visitScope(Scope* scope) {
     for(auto& node: scope->nodes) {
         visit(node);
     }
 }
-CodeGenVal CodeGenerator::visitIntegerLiteralExpr(IntegerLiteralExpr* expr) {
+CodeGenVal LLVMGenerator::visitIntegerLiteralExpr(IntegerLiteralExpr* expr) {
     return DirectVal { llvm::ConstantInt::get(context, llvm::APInt(32, std::stoi(expr->literal))) };
 }
-CodeGenVal CodeGenerator::visitDecimalLiteralExpr(DecimalLiteralExpr* expr) {
+CodeGenVal LLVMGenerator::visitDecimalLiteralExpr(DecimalLiteralExpr* expr) {
     return DirectVal { llvm::ConstantFP::get(context, llvm::APFloat(std::stod(expr->literal))) };
 }
-CodeGenVal CodeGenerator::visitBooleanLiteralExpr(BooleanLiteralExpr* expr) {
+CodeGenVal LLVMGenerator::visitBooleanLiteralExpr(BooleanLiteralExpr* expr) {
     return DirectVal { llvm::ConstantInt::get(context, llvm::APInt(1, expr->literal ? -1 : 0)) };
 }
-CodeGenVal CodeGenerator::visitCharLiteralExpr(CharLiteralExpr* expr) {
+CodeGenVal LLVMGenerator::visitCharLiteralExpr(CharLiteralExpr* expr) {
     return DirectVal { llvm::ConstantInt::get(context, llvm::APInt(8, expr->literal)) };
 }
-CodeGenVal CodeGenerator::visitStringLiteralExpr(StringLiteralExpr* expr) {
+CodeGenVal LLVMGenerator::visitStringLiteralExpr(StringLiteralExpr* expr) {
     return DirectVal { builder.CreateGlobalStringPtr(expr->literal) };
 }
-CodeGenVal CodeGenerator::visitPreOpExpr(PreOpExpr* expr) {
+CodeGenVal LLVMGenerator::visitPreOpExpr(PreOpExpr* expr) {
     auto operand = visitExpr(expr->operand);
     switch(expr->op) {
         case PreOp::Positive: return operand;
@@ -215,7 +222,7 @@ CodeGenVal CodeGenerator::visitPreOpExpr(PreOpExpr* expr) {
         case PreOp::AddrOf: return DirectVal { toIndirect(operand) };
     }
 }
-CodeGenVal CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
+CodeGenVal LLVMGenerator::visitBinOpExpr(BinOpExpr* expr) {
     auto lhs = visitExpr(expr->lhs);
     auto rhs = visitExpr(expr->rhs);
     auto createAdd = [&]() -> DirectVal {
@@ -369,7 +376,7 @@ CodeGenVal CodeGenerator::visitBinOpExpr(BinOpExpr* expr) {
             return DirectVal { builder.CreateStore(value, lhsInd) };
     }
 }
-CodeGenVal CodeGenerator::visitCastExpr(CastExpr* expr) {
+CodeGenVal LLVMGenerator::visitCastExpr(CastExpr* expr) {
     auto ogType = expr->operand->type;
     auto destType = expr->destType;
     auto ogValue = visitExpr(expr->operand);
@@ -413,7 +420,7 @@ CodeGenVal CodeGenerator::visitCastExpr(CastExpr* expr) {
         }
     );
 }
-CodeGenVal CodeGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
+CodeGenVal LLVMGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
     auto referencedVal = expr->decl->codegenVal;
     if(expr->decl->isComputed()) {
         auto callee = static_cast<llvm::Function*>(referencedVal);
@@ -437,7 +444,7 @@ CodeGenVal CodeGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
         }
     }
 }
-CodeGenVal CodeGenerator::visitMemberRefExpr(MemberRefExpr* expr) {
+CodeGenVal LLVMGenerator::visitMemberRefExpr(MemberRefExpr* expr) {
     llvm::Value* root = toIndirect(visitExpr(expr->root));
     auto firstIndex = llvm::ConstantInt::get(context, llvm::APInt(32, 0));
     auto index = llvm::ConstantInt::get(context, llvm::APInt(32, expr->declIndex));
@@ -445,13 +452,67 @@ CodeGenVal CodeGenerator::visitMemberRefExpr(MemberRefExpr* expr) {
     auto addr = builder.CreateGEP(root, indices);
     return IndirectVal { addr };
 }
-CodeGenVal CodeGenerator::visitReturnStmt(ReturnStmt* stmt) {
+CodeGenVal LLVMGenerator::visitReturnStmt(ReturnStmt* stmt) {
     if(!stmt->value) {
         return DirectVal { builder.CreateRetVoid() };
     } else {
         return DirectVal { builder.CreateRet(toDirect(visitExpr(stmt->value))) };
     }
 }
-CodeGenVal CodeGenerator::visitIfStmt(IfStmt* stmt) {
+CodeGenVal LLVMGenerator::visitIfStmt(IfStmt* stmt) {
     return DirectVal { nullptr };
+}
+void LLVMGenerator::outputObjectFile(char const* fileName) const {
+    // Initialize the target registry etc.
+    llvm::InitializeAllTargetInfos();
+    llvm::InitializeAllTargets();
+    llvm::InitializeAllTargetMCs();
+    llvm::InitializeAllAsmParsers();
+    llvm::InitializeAllAsmPrinters();
+
+    auto triple = llvm::sys::getDefaultTargetTriple();
+    module->setTargetTriple(triple);
+
+    std::string error;
+    auto target = llvm::TargetRegistry::lookupTarget(triple, error);
+
+    // Print an error and exit if we couldn't find the requested target.
+    // This generally occurs if we've forgotten to initialise the
+    // TargetRegistry or we have a bogus target triple.
+    if (!target) {
+        llvm::errs() << error;
+        return;
+    }
+
+    auto cpu = "generic";
+
+    llvm::TargetOptions opt;
+    auto relocationModel = llvm::Optional<llvm::Reloc::Model>();
+    auto machine =
+    target->createTargetMachine(triple, cpu, /*features=*/ "", opt, relocationModel);
+
+    module->setDataLayout(machine->createDataLayout());
+
+    std::error_code errorCode;
+    llvm::raw_fd_ostream dest(fileName, errorCode, llvm::sys::fs::F_None);
+
+    if(errorCode) {
+        llvm::errs() << "Could not open file: " << errorCode.message();
+        return;
+    }
+
+    llvm::legacy::PassManager pass;
+    auto fileType = llvm::TargetMachine::CGFT_ObjectFile;
+
+    if(machine->addPassesToEmitFile(pass, dest, fileType)) {
+        llvm::errs() << "Machine can't emit object files.";
+        return;
+    }
+
+    pass.run(*module);
+    dest.flush();
+}
+
+void LLVMGenerator::printIR() const {
+    module->print(llvm::errs(), nullptr);
 }

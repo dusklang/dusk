@@ -35,6 +35,7 @@ void TypeChecker::visitDecl(Decl* decl) {
         SourceRange range = decl->name.range;
         if(decl->externRange) range += *decl->externRange;
         if(decl->keywordRange) range += *decl->keywordRange;
+        return range;
     };
     // Reject nested functions.
     if(declLists.size() > 1 && decl->isComputed()) {

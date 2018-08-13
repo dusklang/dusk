@@ -21,7 +21,7 @@ struct Decl: public ASTNode {
     bool isVar;
     std::vector<Decl*> paramList;
 
-    // FIXME: Store this information in CodeGenerator.
+    // FIXME: Store this information in LLVMGenerator. Or, just generate LLVM IR from LIR and get rid of this.
     llvm::Value* codegenVal;
 private:
     // FIXME: Make this into a variant.

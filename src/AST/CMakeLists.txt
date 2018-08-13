@@ -4,6 +4,7 @@ set(SOURCES
     Decl.cpp
     Expr.cpp
     Stmt.cpp
+    Ident.cpp
 )
 set(HEADERS
     AST.h
@@ -14,6 +15,7 @@ set(HEADERS
     ASTVisitor.h
     ASTNodes.def
     ASTPrinter.h
+    Ident.h
 )
 
 add_library(AST ${SOURCES} ${HEADERS})

@@ -11,10 +11,7 @@ class ASTPrinter: public ASTVisitor<ASTPrinter,
                                     #include "ASTNodes.def"
                                     /*Arguments*/int, std::ostream&>
 {
-    SourceFile const& file;
 public:
-    ASTPrinter(SourceFile const& file) : file(file) {}
-
     void visitDecl(Decl* decl, int indentationLevel, std::ostream& stream);
     void visitStructDecl(StructDecl* decl, int indentationLevel, std::ostream& stream);
     void visitScope(Scope* scope, int indentationLevel, std::ostream& stream);

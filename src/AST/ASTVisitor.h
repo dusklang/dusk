@@ -37,6 +37,20 @@ public:
         __builtin_unreachable();
     }
 
+    auto visit(std::vector<ASTNode*> nodes, Args... args) {
+        if constexpr(std::is_same_v<void, ASTNodeReturnTy>) {
+            for(auto node: nodes) {
+                visit(node, std::forward(args)...);
+            }
+        } else {
+            std::vector<ASTNodeReturnTy> retVal;
+            for(auto node: nodes) {
+                retVal.push_back(node, visit(std::forward(args)...));
+            }
+            return retVal;
+        }
+    }
+
     #define UNTYPED_AST_NODE(name) name##RetTy visit##name(name* node, Args... args) { \
         return static_cast<Impl*>(this)->visit##name(node, std::forward<Args>(args)...); \
     }

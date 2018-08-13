@@ -39,7 +39,7 @@ struct IndirectVal final {
 ///  - Since `foo` is already an indirect value, `toIndirect` doesn't need to do anything special
 typedef std::variant<DirectVal, IndirectVal> CodeGenVal;
 
-class CodeGenerator final: public ASTVisitor<CodeGenerator,
+class LLVMGenerator final: public ASTVisitor<LLVMGenerator,
                                              void,
                                              CodeGenVal,
                                              void,
@@ -59,10 +59,10 @@ class CodeGenerator final: public ASTVisitor<CodeGenerator,
     llvm::Value* toIndirect(CodeGenVal val);
 public:
     llvm::Module* module;
-    CodeGenerator() : builder(context) {
+    LLVMGenerator() : builder(context) {
         module = new llvm::Module("my module", context);
     }
-    ~CodeGenerator() {
+    ~LLVMGenerator() {
         if(module) {
             delete module;
         }
@@ -85,4 +85,7 @@ public:
     CodeGenVal visitReturnStmt(ReturnStmt* stmt);
     CodeGenVal visitIfStmt(IfStmt* stmt);
     CodeGenVal visitWhileStmt(WhileStmt* stmt) { return DirectVal { nullptr }; }
+
+    void outputObjectFile(char const* fileName) const;
+    void printIR() const;
 };
