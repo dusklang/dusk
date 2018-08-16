@@ -106,10 +106,8 @@ CodeGenVal LLVMGenerator::visitDecl(Decl* decl) {
                 llvm::BasicBlock* block = llvm::BasicBlock::Create(context, "entry", function);
                 builder.SetInsertPoint(block);
 
-                auto param = decl->paramList.begin();
-                auto funcArg = function->args().begin();
-                for(; param != decl->paramList.end() && funcArg != function->args().end(); ++param, ++funcArg) {
-                    (*param)->codegenVal = funcArg;
+                for(auto [param, funcArg]: zip(decl->paramList, function->args())) {
+                    param->codegenVal = &funcArg;
                 }
 
                 std::function<void(Scope*)> visitInnerScope = [&](Scope* scope) {

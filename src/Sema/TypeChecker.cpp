@@ -1,6 +1,7 @@
 //  Copyright © 2018 Zach Wolfe. All rights reserved.
 
 #include "TypeChecker.h"
+#include "General/Array.h"
 
 #include "mpark/patterns.hpp"
 
@@ -247,18 +248,14 @@ void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
     //
     // TODO: Setup a dependency system to allow decls to be referenced before we know about them.
     std::vector<Decl*> nameMatches;
-    for(auto it = declLists.rbegin(); it != declLists.rend(); ++it) {
-        auto& declList = *it;
-
+    for(auto& declList: reverse(declLists)) {
         for(auto* decl: declList) {
             if(decl->name != expr->name) continue;
             nameMatches.push_back(decl);
+
             if(decl->paramList.size() != expr->argList.size()) continue;
-            // Check the types of all parameters.
-            auto param = decl->paramList.begin();
-            auto arg = expr->argList.begin();
-            for(;param != decl->paramList.end(); ++param, ++arg) {
-                if((*param)->type != (*arg)->type) goto failedToFindMatchInCurrentList;
+            for(auto [param, arg]: zip(decl->paramList, expr->argList)) {
+                if(param->type != arg->type) goto failedToFindMatchInCurrentList;
             }
             // We must have succeeded! Add the decl's prototype and type to the declRefExpr and return.
             expr->decl = decl;
