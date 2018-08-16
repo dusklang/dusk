@@ -8,6 +8,7 @@
 #include "Sema/TypeChecker.h"
 #include "LLVMGen/LLVMGenerator.h"
 #include "General/SourceInfo.h"
+#include "LIR/LIRGenerator.h"
 
 constexpr int numberOfPercents(char const* str) {
     int num = 0;
@@ -220,24 +221,25 @@ int main() {
     SourceFile file("main.meda", sourceCode);
     Parser parser(&file);
     TypeChecker tyChecker(file);
-    LLVMGenerator llvmGen;
+    LIRGenerator lirGen;
 
     auto nodes = parser.parseTopLevel();
     tyChecker.visit(nodes);
-    llvmGen.visit(nodes);
-    llvmGen.outputObjectFile("main.o");
+    lirGen.visit(nodes);
+    lirGen.printIR();
+    //llvmGen.outputObjectFile("main.o");
 
+    /*
     std::ofstream stdLibFile;
     stdLibFile.open("stdlib.cpp");
     stdLibFile << standardLibrary;
     stdLibFile.close();
 
-    println("Hi, %!", "Zach");
-
     std::cout << '\n';
     std::system("clang++ main.o stdlib.cpp -o main");
     std::system("./main");
     std::cout << '\n';
+     */
 
     return 0;
 }
