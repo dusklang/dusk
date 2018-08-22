@@ -10,7 +10,12 @@ set(PATTERNS_INCLUDE_DIRS dependencies/patterns/include)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
+else()
+    # MSVC
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /std:c++17")
+endif()
 
 include_directories(src ${LLVM_INCLUDE_DIRS} ${PATTERNS_INCLUDE_DIRS})
 add_definitions(${LLVM_DEFINITIONS})

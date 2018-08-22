@@ -6,6 +6,7 @@
 #include <vector>
 #include <map>
 #include <optional>
+#include <algorithm>
 #include "General/SourceInfo.h"
 
 struct Expr;

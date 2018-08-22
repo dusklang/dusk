@@ -6,6 +6,7 @@
 #include <sstream>
 #include <vector>
 #include <optional>
+#include <algorithm>
 
 #include "String.h"
 
