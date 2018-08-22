@@ -9,6 +9,7 @@
 #include "AST/Stmt.h"
 #include "AST/Decl.h"
 #include "Parser.h"
+#include "General/General.h"
 
 #define ERR(message) Diagnostic(Diagnostic::Error, file, message)
 
@@ -61,12 +62,12 @@ std::vector<std::vector<BinOp>> precedenceLevels {
 };
 
 int getPrecedence(BinOp op) {
-    for(int level = 0; level < precedenceLevels.size(); ++level) {
+    for(size_t level = 0; level < precedenceLevels.size(); ++level) {
         for(auto otherOp: precedenceLevels[level]) {
             if(op == otherOp) { return level; }
         }
     }
-    assert(false && "Undefined precedence for binary operator");
+    panic("Undefined precedence for binary operator");
 }
 
 std::optional<BinOp> parseBinaryOperator(tok token) {
@@ -157,7 +158,7 @@ ASTNode* Parser::parseNode() {
         return decl;
     }
     auto expr = parseExpr();
-    assert(expr && "Failed to parse node");
+    assertTrueMessage(expr, "Failed to parse node");
     return expr;
 }
 

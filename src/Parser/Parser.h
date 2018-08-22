@@ -9,6 +9,7 @@
 #include "AST/Type.h"
 #include "General/SourceInfo.h"
 #include "General/Diagnostics.h"
+#include "General/General.h"
 #include "Lexer.h"
 
 struct Expr;
@@ -49,7 +50,7 @@ class Parser final {
         savedState.push(curTok);
     }
     void recallState() {
-        assert(!savedState.empty());
+        assertTrue(!savedState.empty());
         curTok = savedState.top();
         savedState.pop();
     }

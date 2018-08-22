@@ -9,6 +9,7 @@ set(HEADERS
     String.h
     Diagnostics.h
     Array.h
+	General.h
 )
 
 add_library(General ${SOURCES} ${HEADERS})

@@ -10,6 +10,8 @@
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/IR/LegacyPassManager.h"
 
+#include "General/General.h"
+
 #include "mpark/patterns.hpp"
 
 using namespace mpark::patterns;
@@ -37,11 +39,11 @@ llvm::Value* LLVMGenerator::toIndirect(CodeGenVal val) {
 llvm::Type* LLVMGenerator::toLLVMTy(Type type) {
     return match(type.data)(
         pattern(as<TyVariable>(_)) = []() -> llvm::Type* {
-            assert(false && "Encountered type variable");
+            panic("Encountered type variable");
             return nullptr;
         },
         pattern(as<ErrorTy>(_)) = []() -> llvm::Type* {
-            assert(false && "Encountered error type");
+            panic("Encountered error type");
             return nullptr;
         },
         pattern(as<IntTy>(arg)) = [&](auto properties) -> llvm::Type* {
@@ -238,8 +240,7 @@ CodeGenVal LLVMGenerator::visitBinOpExpr(BinOpExpr* expr) {
                 return DirectVal { builder.CreateGEP(toDirect(lhs), toDirect(rhs)) };
             },
             pattern(_, _) = [&]() -> DirectVal {
-                assert(false && "Can't add values of those types");
-                __builtin_unreachable();
+                panic("Can't add values of those types");
             }
         );
     };
@@ -255,7 +256,7 @@ CodeGenVal LLVMGenerator::visitBinOpExpr(BinOpExpr* expr) {
                 return DirectVal { builder.CreateFSub(toDirect(lhs), toDirect(rhs)) };
             },
             pattern(_) = [&]() -> DirectVal {
-                assert(false && "Can't subtract values of that type");
+                panic("Can't subtract values of that type");
             }
         );
     };
@@ -271,7 +272,7 @@ CodeGenVal LLVMGenerator::visitBinOpExpr(BinOpExpr* expr) {
                 return DirectVal { builder.CreateFMul(toDirect(lhs), toDirect(rhs)) };
             },
             pattern(_) = [&]() -> DirectVal {
-                assert(false && "Can't multiply values of that type");
+                panic("Can't multiply values of that type");
             }
         );
     };
@@ -290,7 +291,7 @@ CodeGenVal LLVMGenerator::visitBinOpExpr(BinOpExpr* expr) {
                 return DirectVal { builder.CreateFDiv(toDirect(lhs), toDirect(rhs)) };
             },
             pattern(_) = [&]() -> DirectVal {
-                assert(false && "Can't divide values of that type");
+                panic("Can't divide values of that type");
             }
         );
     };
@@ -311,7 +312,7 @@ CodeGenVal LLVMGenerator::visitBinOpExpr(BinOpExpr* expr) {
                 return DirectVal { builder.CreateFRem(toDirect(lhs), toDirect(rhs)) };
             },
             pattern(_) = [&]() -> DirectVal {
-                assert(false && "Can't modulo values of that type");
+                panic("Can't modulo values of that type");
             }
         );
     };
@@ -369,7 +370,7 @@ CodeGenVal LLVMGenerator::visitBinOpExpr(BinOpExpr* expr) {
                 case BinOp::OrAssignment:
                     value = builder.CreateOr(toDirect(lhs), toDirect(rhs));
                     break;
-                default: __builtin_unreachable();
+                default: unreachable;
             }
             return DirectVal { builder.CreateStore(value, lhsInd) };
     }
@@ -409,12 +410,10 @@ CodeGenVal LLVMGenerator::visitCastExpr(CastExpr* expr) {
             return DirectVal { builder.CreateFPTrunc(toDirect(ogValue), destTypeLLVM) };
         },
         pattern(as<PointerTy>(_), _) = []() -> DirectVal {
-            assert(false && "pointer casting is not yet supported");
-            __builtin_unreachable();
+            panic("pointer casting is not yet supported");
         },
         pattern(_, as<PointerTy>(_)) = []() -> DirectVal {
-            assert(false && "pointer casting is not yet supported");
-            __builtin_unreachable();
+            panic("pointer casting is not yet supported");
         }
     );
 }
@@ -422,8 +421,10 @@ CodeGenVal LLVMGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
     auto referencedVal = expr->decl->codegenVal;
     if(expr->decl->isComputed()) {
         auto callee = static_cast<llvm::Function*>(referencedVal);
-        assert((callee->arg_size() == expr->argList.size()) &&
-               "Incorrect number of arguments passed to function");
+        assertEqualMessage(
+			callee->arg_size(), expr->argList.size(),
+            "Incorrect number of arguments passed to function"
+		);
 
         std::vector<llvm::Value*> args;
         for(auto* arg: expr->argList) {

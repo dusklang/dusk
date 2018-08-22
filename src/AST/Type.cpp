@@ -1,7 +1,7 @@
 //  Copyright © 2018 Zach Wolfe. All rights reserved.
 
 #include <string>
-#include <cassert>
+#include "General/General.h"
 #include <sstream>
 #include "mpark/patterns.hpp"
 
@@ -57,8 +57,7 @@ Type* Type::pointeeType() const {
     return match(data)(
         pattern(as<PointerTy>(arg)) = [](auto pointer) { return pointer.pointedTy; },
         pattern(_) = []() -> Type* {
-            assert(false && "Attempt to get the pointee type of a non-pointer type");
-            __builtin_unreachable();
+            panic("Attempt to get the pointee type of a non-pointer type");
         }
     );
 }

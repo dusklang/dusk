@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "General/General.h"
+
 #include "AST.h"
 #define AST_NODE(name) struct name;
 #define EXPR_NODE(name) struct name##Expr;
@@ -34,7 +36,7 @@ public:
             #include "ASTNodes.def"
             default: break;
         }
-        __builtin_unreachable();
+        unreachable;
     }
 
     auto visit(std::vector<ASTNode*> nodes, Args... args) {
@@ -63,7 +65,7 @@ public:
             #include "ASTNodes.def"
             default: break;
         }
-        __builtin_unreachable();
+        unreachable;
     }
 
     StmtRetTy visitStmt(Stmt* stmt, Args... args) {
@@ -73,6 +75,6 @@ public:
             #include "ASTNodes.def"
             default: break;
         }
-        __builtin_unreachable();
+        unreachable;
     }
 };
