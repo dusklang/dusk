@@ -179,7 +179,5 @@ int main() {
     std::cout << '\n';
      */
 
-	panic("can't do anything %");
-
     return 0;
 }

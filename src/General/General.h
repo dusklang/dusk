@@ -1,15 +1,18 @@
-//  Copyright © 2018 Zach Wolfe. All rights reserved.
+//  Copyright Â© 2018 Zach Wolfe. All rights reserved.
 
 #pragma once
 
 #include <iostream>
 
 #if defined(_MSC_VER)
-#define never __declspec(noreturn)
-#define unreachable panic("Code at line number % in file % supposed to be unreachable.", __LINE__, __FILE__)
-#elif defined(__clang__) || defined(__GNUC__)
-#define never [[gcc::noreturn]]
-#define unreachable __builtin_unreachable()
+    #define never __declspec(noreturn)
+    #define unreachable panic("Code at line number % in file % supposed to be unreachable.", __LINE__, __FILE__)
+#elif defined(__GNUC__)
+    #define never _Noreturn
+    #define unreachable panic("Code at line number % in file % supposed to be unreachable.", __LINE__, __FILE__)
+#elif defined(__clang__)
+    #define never [[gcc::noreturn]]
+    #define unreachable __builtin_unreachable()
 #endif
 
 constexpr int numberOfPercents(char const* str) {
@@ -82,18 +85,17 @@ constexpr void printlnImpl(char const* str, Arg arg, Args... args) {
     printlnImpl(str, ##__VA_ARGS__); \
 }
 
-template <typename... Args>
-never void panic(char const* str, Args... args) {
-	std::cout << "PANIC: ";
-	println(str, args...);
-	exit(1);
+#define panic(str, ...) { \
+	std::cout << "PANIC: "; \
+    println(str, ##__VA_ARGS__); \
+	exit(1); \
 }
 
-void assertImpl(bool expr, char const* msg, char const* str) {
+inline void assertImpl(bool expr, char const* msg, char const* str) {
 	if (expr) return;
 	panic("ASSERTION FAILED: %\n%", msg, str);
 }
-void assertImpl(bool expr, char const* msg) {
+inline void assertImpl(bool expr, char const* msg) {
 	if (expr) return;
 	panic("ASSERTION FAILED: %", msg);
 }
