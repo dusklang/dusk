@@ -129,3 +129,109 @@ template<typename T, typename U>
 ZipContainer<T, U> zip(T& t, U& u) {
     return ZipContainer<T, U> { t, u };
 }
+
+template<typename T, size_t inlineSize = 0>
+class Array final {
+    T* data;
+    uint32_t size;
+    void deleteData() {
+        for(auto& elem: *this) {
+            elem.~T();
+        }
+        operator delete(data);
+    }
+    static T* newData(uint32_t size) {
+        return reinterpret_cast<T*>(operator new(sizeof(T) * size));
+    }
+
+public:
+    Array() : data(nullptr), size(0) {}
+    Array(std::initializer_list<T>&& list) : data(newData(list.size())), size(list.size()) {
+        auto dest = data;
+        for(auto&& src: list) {
+            std::memmove(dest, &src, sizeof(T));
+
+            dest++;
+        }
+    }
+    Array(Array&& other) : data(nullptr), size(0) {
+        std::swap(*this, other);
+    }
+    Array(Array& other) : size(other.size) {
+        data = newData(size);
+        auto dest = data;
+        // Intentionally call copy constructor so we can just copy the raw bytes.
+        for(T elem: other) {
+            std::memmove(dest, &elem, sizeof(T));
+
+            dest++;
+        }
+    }
+    Array& operator=(Array& other) {
+        deleteData();
+        Array copy(other);
+        std::swap(*this, copy);
+
+        return *this;
+    }
+    Array& operator=(Array&& other) {
+        deleteData();
+        data = nullptr;
+        size = 0;
+        std::swap(*this, other);
+
+        return *this;
+    }
+    ~Array() {
+        deleteData();
+    }
+    void push_back(T&& elem) {
+        T* newBuf = newData(size + 1);
+        std::memmove(newBuf, data, size * sizeof(T));
+        deleteData();
+        data = newBuf;
+        size++;
+    }
+
+    using iterator = T*;
+    using const_iterator = T const*;
+
+    struct reverse_iterator {
+        T* elem;
+
+        T& operator*() {
+            return *elem;
+        }
+        reverse_iterator& operator++() {
+            --elem;
+            return *this;
+        }
+        bool operator!=(reverse_iterator const& other) const {
+            return elem != other.elem;
+        }
+    };
+    struct const_reverse_iterator {
+        T const* elem;
+
+        T const& operator*() {
+            return *elem;
+        }
+        const_reverse_iterator& operator++() {
+            --elem;
+            return *this;
+        }
+        bool operator!=(const_reverse_iterator const& other) const {
+            return elem != other.elem;
+        }
+    };
+
+    iterator begin() { return data; }
+    iterator end() { return data + size; }
+    const_iterator begin() const { return data; }
+    const_iterator end() const { return data + size; }
+
+    reverse_iterator rbegin() { return reverse_iterator { data + ((int)size - 1) }; }
+    reverse_iterator rend() { return reverse_iterator { data - 1 }; }
+    const_reverse_iterator rbegin() const { return const_reverse_iterator { data + ((int)size - 1) }; }
+    const_reverse_iterator rend() const { return const_reverse_iterator { data - 1 }; }
+};
