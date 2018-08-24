@@ -41,10 +41,10 @@ lir::Reg LIRGenerator::visitMemberRefExpr(MemberRefExpr* expr) {
     return -1;
 }
 
-lir::Reg LIRGenerator::visitReturnStmt(ReturnStmt* stmt) {
+lir::Reg LIRGenerator::visitReturnExpr(ReturnExpr* expr) {
     return -1;
 }
-lir::Reg LIRGenerator::visitIfStmt(IfStmt* stmt) {
+lir::Reg LIRGenerator::visitIfExpr(IfExpr* expr) {
     return -1;
 }
 

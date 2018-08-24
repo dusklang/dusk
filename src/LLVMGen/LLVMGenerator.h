@@ -13,7 +13,6 @@
 #include "AST/ASTVisitor.h"
 #include "AST/Expr.h"
 #include "AST/Decl.h"
-#include "AST/Stmt.h"
 
 struct DirectVal final {
     llvm::Value* val;
@@ -45,7 +44,6 @@ class LLVMGenerator final: public ASTVisitor<LLVMGenerator,
                                              CodeGenVal,
                                              void,
                                              void,
-                                             CodeGenVal,
                                              CodeGenVal>
 {
     llvm::LLVMContext context;
@@ -84,9 +82,9 @@ public:
     CodeGenVal visitDeclRefExpr(DeclRefExpr* expr);
     CodeGenVal visitMemberRefExpr(MemberRefExpr* expr);
 
-    CodeGenVal visitReturnStmt(ReturnStmt* stmt);
-    CodeGenVal visitIfStmt(IfStmt* stmt);
-    CodeGenVal visitWhileStmt(WhileStmt* stmt) { return DirectVal { nullptr }; }
+    CodeGenVal visitReturnExpr(ReturnExpr* expr);
+    CodeGenVal visitIfExpr(IfExpr* expr);
+    CodeGenVal visitWhileExpr(WhileExpr* expr) { return DirectVal { nullptr }; }
 
     void outputObjectFile(char const* fileName) const;
     void printIR() const;

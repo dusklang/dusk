@@ -307,51 +307,54 @@ void TypeChecker::visitMemberRefExpr(MemberRefExpr* expr) {
         }
     );
 }
-void TypeChecker::visitReturnStmt(ReturnStmt* stmt) {
-    if(stmt->value) {
-        visitExpr(stmt->value);
+void TypeChecker::visitReturnExpr(ReturnExpr* expr) {
+    expr->type = VoidTy();
+    if(expr->value) {
+        visitExpr(expr->value);
     }
     // Handle returning value in a void computed decl.
     if(returnTypeStack.top() == VoidTy()) {
-        if(stmt->value) {
+        if(expr->value) {
             reportDiag(ERR("cannot return value from void computed declaration")
-                       .primaryRange(stmt->value->totalRange(), "remove this"));
+                       .primaryRange(expr->value->totalRange(), "remove this"));
         } else {
             return;
         }
     }
 
     // Handle returning no value in a non-void computed decl.
-    if(!stmt->value) {
-        reportDiag(ERR("computed declaration must return a value").primaryRange(stmt->returnRange, "add a return value"));
+    if(!expr->value) {
+        reportDiag(ERR("computed declaration must return a value").primaryRange(expr->returnRange, "add a return value"));
     }
 
     // Handle returning a value of a type incompatible with the computed decl's type
     // (currently, "incompatible with" just means "not equal to").
-    if(stmt->value->type != returnTypeStack.top()) {
+    if(expr->value->type != returnTypeStack.top()) {
         // TODO: Include in the error message the type of the returned expr.
-        reportDiag(ERR("cannot return value of type `" + stmt->value->type.name() + "` from computed declaration of type `" + returnTypeStack.top().name())
-                   .primaryRange(stmt->value->totalRange()));
+        reportDiag(ERR("cannot return value of type `" + expr->value->type.name() + "` from computed declaration of type `" + returnTypeStack.top().name())
+                   .primaryRange(expr->value->totalRange()));
     }
 }
-void TypeChecker::visitIfStmt(IfStmt* stmt) {
-    visitExpr(stmt->condition);
-    if(stmt->condition->type != BoolTy()) {
-        reportDiag(ERR("conditions in if statements must be of type `bool`")
-                   .primaryRange(stmt->condition->totalRange(), "expression is of type `" + stmt->condition->type.name() + "`"));
+void TypeChecker::visitIfExpr(IfExpr* expr) {
+    expr->type = VoidTy();
+    visitExpr(expr->condition);
+    if(expr->condition->type != BoolTy()) {
+        reportDiag(ERR("conditions in if expressions must be of type `bool`")
+                   .primaryRange(expr->condition->totalRange(), "expression is of type `" + expr->condition->type.name() + "`"));
     }
-    visitScope(stmt->thenScope);
-    match(stmt->elseNode)(
+    visitScope(expr->thenScope);
+    match(expr->elseNode)(
         pattern(some(as<Scope*>(arg))) = [&](auto scope) { visitScope(scope); },
-        pattern(some(as<IfStmt*>(arg))) = [&](auto stmt) { visitIfStmt(stmt); },
+        pattern(some(as<IfExpr*>(arg))) = [&](auto expr) { visitIfExpr(expr); },
         pattern(_) = []{}
     );
 }
-void TypeChecker::visitWhileStmt(WhileStmt* stmt) {
-    visitExpr(stmt->condition);
-    if(stmt->condition->type != BoolTy()) {
-        reportDiag(ERR("conditions in while statements must be of type `bool`")
-                   .primaryRange(stmt->condition->totalRange(), "expression is of type `" + stmt->condition->type.name() + "`"));
+void TypeChecker::visitWhileExpr(WhileExpr* expr) {
+    expr->type = VoidTy();
+    visitExpr(expr->condition);
+    if(expr->condition->type != BoolTy()) {
+        reportDiag(ERR("conditions in while expressions must be of type `bool`")
+                   .primaryRange(expr->condition->totalRange(), "expression is of type `" + expr->condition->type.name() + "`"));
     }
-    visitScope(stmt->thenScope);
+    visitScope(expr->thenScope);
 }

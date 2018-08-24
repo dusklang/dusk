@@ -13,8 +13,9 @@
 #include "Lexer.h"
 
 struct Expr;
-struct Stmt;
-struct IfStmt;
+struct IfExpr;
+struct WhileExpr;
+struct DeclRefExpr;
 struct Decl;
 
 class Parser final {
@@ -102,10 +103,9 @@ public:
     Type parseType();
     Decl* parseDecl();
     StructDecl* parseStructDecl();
-    Stmt* parseStmt();
-    IfStmt* parseIfStmt();
-    Stmt* parseWhileStmt();
-    Expr* parseDeclRefExpr();
+    IfExpr* parseIfExpr();
+    WhileExpr* parseWhileExpr();
+    DeclRefExpr* parseDeclRefExpr();
     Expr* parseExpr();
     Expr* parseTerm();
 };

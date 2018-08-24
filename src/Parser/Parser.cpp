@@ -6,7 +6,6 @@
 #include <utility> // for std::pair
 
 #include "AST/Expr.h"
-#include "AST/Stmt.h"
 #include "AST/Decl.h"
 #include "Parser.h"
 #include "General/General.h"
@@ -150,9 +149,7 @@ Scope* Parser::parseScope() {
 }
 
 ASTNode* Parser::parseNode() {
-    if(auto stmt = TRY(parseStmt())) {
-        return stmt;
-    } else if(auto decl = TRY(parseDecl())) {
+    if(auto decl = TRY(parseDecl())) {
         return decl;
     } else if(auto decl = TRY(parseStructDecl())) {
         return decl;
@@ -311,81 +308,67 @@ StructDecl* Parser::parseStructDecl() {
     return new StructDecl(structRange, *name, fields);
 }
 
-Stmt* Parser::parseStmt() {
-    if(cur().is(tok::kw_return)) {
-        auto returnTok = cur();
-        next();
-        auto value = parseExpr();
-        if(!value) return new ReturnStmt(returnTok.getRange(), nullptr);
-        return new ReturnStmt(returnTok.getRange(), value);
-    } else if(cur().is(tok::kw_if)) {
-        return parseIfStmt();
-    } else {
-        return parseWhileStmt();
-    }
-}
-
-IfStmt* Parser::parseIfStmt() {
+IfExpr* Parser::parseIfExpr() {
     if(cur().isNot(tok::kw_if)) return nullptr;
     auto ifTok = cur();
     next();
     auto conditionExpr = parseExpr();
     if(!conditionExpr) {
         reportDiag(
-           ERR("expected condition expression for if statement")
+           ERR("expected condition expression for if expression")
                .primaryRange(cur().getRange())
-               .range(ifTok.getRange(), "if statement begins here")
+               .range(ifTok.getRange(), "if expression begins here")
         );
     }
     auto thenScope = parseScope();
     if(!thenScope) {
         reportDiag(
-            ERR("expected opening curly brace for if statement")
+            ERR("expected opening curly brace for if expression")
                 .primaryRange(cur().getRange())
-                .range(ifTok.getRange(), "if statement begins here")
+                .range(ifTok.getRange(), "if expression begins here")
         );
     }
-    std::optional<std::variant<Scope*, IfStmt*>> elseNode = std::nullopt;
+    std::optional<std::variant<Scope*, IfExpr*>> elseNode = std::nullopt;
     if(cur().is(tok::kw_else)) {
         next();
         if(auto scope = parseScope()) {
             elseNode = scope;
-        } else if(auto elseIf = parseIfStmt()) {
-            elseNode = static_cast<IfStmt*>(elseIf);
+        } else if(auto elseIf = parseIfExpr()) {
+            elseNode = static_cast<IfExpr*>(elseIf);
         }
     }
-    return new IfStmt(ifTok.getRange(),
+    return new IfExpr(ifTok.getRange(),
                       conditionExpr,
                       thenScope,
                       elseNode);
 }
 
-Stmt* Parser::parseWhileStmt() {
+WhileExpr* Parser::parseWhileExpr() {
     if(cur().isNot(tok::kw_while)) return nullptr;
     auto whileTok = cur();
     next();
     auto conditionExpr = parseExpr();
     if(!conditionExpr) {
         reportDiag(
-            ERR("expected condition expression for while statement")
+            ERR("expected condition expression for while expression")
                 .primaryRange(cur().getRange())
-                   .range(whileTok.getRange(), "while statement begins here")
+                   .range(whileTok.getRange(), "while expression begins here")
         );
     }
     auto thenScope = parseScope();
     if(!thenScope) {
         reportDiag(
-           ERR("expected opening curly brace for while statement")
+           ERR("expected opening curly brace for while expression")
                .primaryRange(cur().getRange())
-               .range(whileTok.getRange(), "while statement begins here")
+               .range(whileTok.getRange(), "while expression begins here")
         );
     }
-    return new WhileStmt(whileTok.getRange(),
+    return new WhileExpr(whileTok.getRange(),
                          conditionExpr,
                          thenScope);
 }
 
-Expr* Parser::parseDeclRefExpr() {
+DeclRefExpr* Parser::parseDeclRefExpr() {
     auto name = parseIdentifier();
     if(!name) return nullptr;
 
@@ -463,6 +446,16 @@ Expr* Parser::parseTerm() {
         auto range = cur().getRange();
         next();
         retVal = new BooleanLiteralExpr(range, false);
+    } else if(cur().is(tok::kw_return)) {
+        auto returnTok = cur();
+        next();
+        auto value = parseExpr();
+        if(!value) return new ReturnExpr(returnTok.getRange(), nullptr);
+        return new ReturnExpr(returnTok.getRange(), value);
+    } else if(cur().is(tok::kw_if)) {
+        return parseIfExpr();
+    } else if(cur().is(tok::kw_while)) {
+        return parseWhileExpr();
     } else if(auto intVal = parseIntegerLiteral()) {
         retVal = new IntegerLiteralExpr(intVal->getRange(), intVal->getText());
     } else if(auto decimalVal = parseDecimalLiteral()) {

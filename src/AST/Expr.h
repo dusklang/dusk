@@ -187,3 +187,47 @@ struct MemberRefExpr final: public Expr {
         return root->totalRange() + name.range;
     }
 };
+
+struct ReturnExpr: public Expr {
+    SourceRange returnRange;
+    Expr* value;
+
+    ReturnExpr(SourceRange returnRange, Expr* value) : Expr(ExprKind::Return), returnRange(returnRange), value(value) {}
+
+    ~ReturnExpr() override;
+
+    SourceRange totalRange() const override {
+        auto range = returnRange;
+        if(value) range += value->totalRange();
+        return range;
+    }
+};
+
+struct IfExpr: public Expr {
+    SourceRange ifRange;
+    Expr* condition;
+    Scope* thenScope;
+    std::optional<std::variant<Scope*, IfExpr*>> elseNode;
+
+    IfExpr(SourceRange ifRange, Expr* condition, Scope* thenScope, std::optional<std::variant<Scope*, IfExpr*>> elseNode) :
+    Expr(ExprKind::If), ifRange(ifRange), condition(condition), thenScope(thenScope), elseNode(elseNode) {}
+
+    ~IfExpr() override;
+
+    SourceRange totalRange() const override;
+};
+
+struct WhileExpr: public Expr {
+    SourceRange whileRange;
+    Expr* condition;
+    Scope* thenScope;
+
+    WhileExpr(SourceRange whileRange, Expr* condition, Scope* thenScope) :
+        Expr(ExprKind::While), whileRange(whileRange), condition(condition), thenScope(thenScope) {}
+
+    ~WhileExpr() override;
+
+    SourceRange totalRange() const override {
+        return whileRange + condition->totalRange() + thenScope->range.value_or(whileRange);
+    }
+};

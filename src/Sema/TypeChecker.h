@@ -40,7 +40,7 @@ public:
     void visitDeclRefExpr(DeclRefExpr* expr);
     void visitMemberRefExpr(MemberRefExpr* expr);
 
-    void visitReturnStmt(ReturnStmt* stmt);
-    void visitIfStmt(IfStmt* stmt);
-    void visitWhileStmt(WhileStmt* stmt);
+    void visitReturnExpr(ReturnExpr* expr);
+    void visitIfExpr(IfExpr* expr);
+    void visitWhileExpr(WhileExpr* expr);
 };

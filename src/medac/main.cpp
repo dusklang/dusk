@@ -167,7 +167,6 @@ int main() {
     /*lirGen.visit(nodes);
     lirGen.printIR();*/
 
-
     LLVMGenerator llvmGen;
     llvmGen.visit(nodes);
     llvmGen.outputObjectFile("main.o");

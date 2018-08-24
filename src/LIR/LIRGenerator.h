@@ -11,7 +11,6 @@ class LIRGenerator final: public ASTVisitor<LIRGenerator,
                                             lir::Reg,
                                             void,
                                             void,
-                                            lir::Reg,
                                             lir::Reg>
 {
     std::vector<lir::Stmt*> statements;
@@ -32,8 +31,8 @@ public:
     lir::Reg visitDeclRefExpr(DeclRefExpr* expr);
     lir::Reg visitMemberRefExpr(MemberRefExpr* expr);
 
-    lir::Reg visitReturnStmt(ReturnStmt* stmt);
-    lir::Reg visitIfStmt(IfStmt* stmt);
-    lir::Reg visitWhileStmt(WhileStmt* stmt) { return -1; }
+    lir::Reg visitReturnExpr(ReturnExpr* expr);
+    lir::Reg visitIfExpr(IfExpr* expr);
+    lir::Reg visitWhileExpr(WhileExpr* expr) { return -1; }
     void printIR() const;
 };

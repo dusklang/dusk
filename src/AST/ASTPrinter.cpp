@@ -210,26 +210,26 @@ void ASTPrinter::visitMemberRefExpr(MemberRefExpr* expr, int indentationLevel, s
     stream << '.' << expr->name;
 }
 
-void ASTPrinter::visitReturnStmt(ReturnStmt* stmt, int indentationLevel, std::ostream& stream) {
+void ASTPrinter::visitReturnExpr(ReturnExpr* expr, int indentationLevel, std::ostream& stream) {
     indent(indentationLevel, stream);
     stream << "return";
-    if(stmt->value) {
+    if(expr->value) {
         stream << ' ';
-        visitExpr(stmt->value, 0, stream);
+        visitExpr(expr->value, 0, stream);
     }
 }
 
-void ASTPrinter::visitIfStmt(IfStmt* stmt, int indentationLevel, std::ostream& stream, bool isIfElse) {
+void ASTPrinter::visitIfExpr(IfExpr* expr, int indentationLevel, std::ostream& stream, bool isIfElse) {
     if(!isIfElse) indent(indentationLevel, stream);
     stream << "if ";
-    visitExpr(stmt->condition, 0, stream);
+    visitExpr(expr->condition, 0, stream);
     stream << " {\n";
-    visitScope(stmt->thenScope, indentationLevel, stream);
+    visitScope(expr->thenScope, indentationLevel, stream);
     stream << '\n';
     indent(indentationLevel, stream);
     stream << '}';
 
-    match(stmt->elseNode)(
+    match(expr->elseNode)(
         pattern(some(as<Scope*>(arg))) = [&](auto scope) {
             stream << " else {\n";
             visitScope(scope, indentationLevel, stream);
@@ -237,20 +237,20 @@ void ASTPrinter::visitIfStmt(IfStmt* stmt, int indentationLevel, std::ostream& s
             indent(indentationLevel, stream);
             stream << '}';
         },
-        pattern(some(as<IfStmt*>(arg))) = [&](auto stmt) {
+        pattern(some(as<IfExpr*>(arg))) = [&](auto expr) {
             stream << " else ";
-            visitIfStmt(stmt, indentationLevel, stream, true);
+            visitIfExpr(expr, indentationLevel, stream, true);
         },
         pattern(_) = []{}
     );
 }
 
-void ASTPrinter::visitWhileStmt(WhileStmt* stmt, int indentationLevel, std::ostream& stream) {
+void ASTPrinter::visitWhileExpr(WhileExpr* expr, int indentationLevel, std::ostream& stream) {
     indent(indentationLevel, stream);
     stream << "while ";
-    visitExpr(stmt->condition, 0, stream);
+    visitExpr(expr->condition, 0, stream);
     stream << " {\n";
-    visitScope(stmt->thenScope, indentationLevel, stream);
+    visitScope(expr->thenScope, indentationLevel, stream);
     stream << "\n";
     indent(indentationLevel, stream);
     stream << "}";

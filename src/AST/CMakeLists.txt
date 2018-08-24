@@ -3,14 +3,12 @@ set(SOURCES
     Type.cpp
     Decl.cpp
     Expr.cpp
-    Stmt.cpp
     Ident.cpp
 )
 set(HEADERS
     AST.h
     Decl.h
     Expr.h
-    Stmt.h
     Type.h
     ASTVisitor.h
     ASTNodes.def

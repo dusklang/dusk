@@ -10,7 +10,6 @@
 #include "ASTNodes.def"
 
 #include "Expr.h"
-#include "Stmt.h"
 #include "Decl.h"
 
 template<typename Impl,
@@ -62,16 +61,6 @@ public:
         switch(expr->exprKind) {
         #define EXPR_NODE(name) case ExprKind::name: \
             return static_cast<Impl*>(this)->visit##name##Expr(static_cast<name##Expr*>(expr), std::forward<Args>(args)...);
-            #include "ASTNodes.def"
-            default: break;
-        }
-        unreachable;
-    }
-
-    StmtRetTy visitStmt(Stmt* stmt, Args... args) {
-        switch(stmt->stmtKind) {
-            #define STMT_NODE(name) case StmtKind::name: \
-                return static_cast<Impl*>(this)->visit##name##Stmt(static_cast<name##Stmt*>(stmt), std::forward<Args>(args)...);
             #include "ASTNodes.def"
             default: break;
         }
