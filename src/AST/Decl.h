@@ -9,9 +9,6 @@
 
 struct Expr;
 struct Scope;
-namespace llvm {
-    class Value;
-}
 
 struct Decl: public ASTNode {
     std::optional<SourceRange> externRange;
@@ -20,9 +17,6 @@ struct Decl: public ASTNode {
     Type type;
     bool isVar;
     std::vector<Decl*> paramList;
-
-    // FIXME: Store this information in LLVMGenerator. Or, just generate LLVM IR from LIR and get rid of this.
-    llvm::Value* codegenVal;
 private:
     // FIXME: Make this into a variant.
     ASTNode* value = nullptr;

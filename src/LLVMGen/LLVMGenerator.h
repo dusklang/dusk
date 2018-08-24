@@ -4,6 +4,7 @@
 
 #include <iostream>
 #include <variant>
+#include <unordered_map>
 
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/IRBuilder.h"
@@ -49,6 +50,7 @@ class LLVMGenerator final: public ASTVisitor<LLVMGenerator,
 {
     llvm::LLVMContext context;
     llvm::IRBuilder<> builder;
+    std::unordered_map<Decl*, llvm::Value*> declVals;
     llvm::Type* toLLVMTy(Type type);
     /// If `val` is direct, returns its underlying value unchanged.
     /// If `val` is indirect, generates a load instruction to get at the direct value.

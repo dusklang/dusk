@@ -163,11 +163,15 @@ int main() {
 
     auto nodes = parser.parseTopLevel();
     tyChecker.visit(nodes);
-    lirGen.visit(nodes);
-    lirGen.printIR();
-    //llvmGen.outputObjectFile("main.o");
 
-    /*
+    /*lirGen.visit(nodes);
+    lirGen.printIR();*/
+
+
+    LLVMGenerator llvmGen;
+    llvmGen.visit(nodes);
+    llvmGen.outputObjectFile("main.o");
+
     std::ofstream stdLibFile;
     stdLibFile.open("stdlib.cpp");
     stdLibFile << standardLibrary;
@@ -177,7 +181,6 @@ int main() {
     std::system("clang++ main.o stdlib.cpp -o main");
     std::system("./main");
     std::cout << '\n';
-     */
 
     return 0;
 }

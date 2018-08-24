@@ -75,13 +75,14 @@ llvm::Type* LLVMGenerator::toLLVMTy(Type type) {
 }
 CodeGenVal LLVMGenerator::visitDecl(Decl* decl) {
     if(auto expr = decl->expression()) {
+        llvm::Value* val;
         if(decl->isVar) {
-            decl->codegenVal = builder.CreateAlloca(toLLVMTy(decl->type), 0, decl->name.getText().cString());
-            builder.CreateStore(toDirect(visitExpr(expr)), decl->codegenVal);
+            declVals[decl] = val = builder.CreateAlloca(toLLVMTy(decl->type), 0, decl->name.getText().cString());
+            builder.CreateStore(toDirect(visitExpr(expr)), val);
         } else {
-            decl->codegenVal = toDirect(visitExpr(expr));
+            declVals[decl] = val = toDirect(visitExpr(expr));
         }
-        return DirectVal { decl->codegenVal };
+        return DirectVal { val };
     } else {
         std::vector<llvm::Type*> arguments;
         for(auto& param: decl->paramList) {
@@ -90,7 +91,7 @@ CodeGenVal LLVMGenerator::visitDecl(Decl* decl) {
         llvm::Type* type = toLLVMTy(decl->type);
         if(decl->isVar) {
             llvm::GlobalVariable* var = new llvm::GlobalVariable(*module, type, false, llvm::GlobalVariable::ExternalLinkage, nullptr, decl->name.getText().string());
-            decl->codegenVal = var;
+            declVals[decl] = var;
             return DirectVal { var };
         } else {
             llvm::FunctionType* functionTy = llvm::FunctionType::get(type,
@@ -102,14 +103,14 @@ CodeGenVal LLVMGenerator::visitDecl(Decl* decl) {
             for(auto &arg: function->args()) {
                 arg.setName(decl->paramList[i++]->name.getText().string());
             }
-            decl->codegenVal = function;
+            declVals[decl] = function;
 
             if(decl->hasDefinition()) {
                 llvm::BasicBlock* block = llvm::BasicBlock::Create(context, "entry", function);
                 builder.SetInsertPoint(block);
 
                 for(auto [param, funcArg]: zip(decl->paramList, function->args())) {
-                    param->codegenVal = &funcArg;
+                    declVals[param] = &funcArg;
                 }
 
                 std::function<void(Scope*)> visitInnerScope = [&](Scope* scope) {
@@ -418,7 +419,7 @@ CodeGenVal LLVMGenerator::visitCastExpr(CastExpr* expr) {
     );
 }
 CodeGenVal LLVMGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
-    auto referencedVal = expr->decl->codegenVal;
+    auto referencedVal = declVals.at(expr->decl);
     if(expr->decl->isComputed()) {
         auto callee = static_cast<llvm::Function*>(referencedVal);
         assertEqualMessage(
