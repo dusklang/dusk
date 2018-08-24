@@ -3,26 +3,21 @@
 #pragma once
 
 #include <variant>
+#include <string>
+#include "General/Enum.h"
 
 namespace lir {
     typedef int32_t Reg;
-    struct NOP {};
-    struct SAdd { Reg a, b, res; };
-    struct UAdd { Reg a, b, res; };
-    struct SSub { Reg a, b, res; };
-    struct USub { Reg a, b, res; };
-    struct AddrOf { Reg a, res; };
 
-    struct Stmt {
-        typedef std::variant<NOP, SAdd, UAdd, SSub, USub, AddrOf> Data;
-        Data data;
+    #define LIR_STMT_CASES(n, firstCase, case) \
+        firstCase(n, NOP) \
+        case(n, SAdd, Reg a, b, res) \
+        case(n, UAdd, Reg a, b, res) \
+        case(n, SSub, Reg a, b, res) \
+        case(n, USub, Reg a, b, res) \
+        case(n, AddrOf, Reg a, res) \
+        case(n, IfZ, Reg a; std::string label) \
+        case(n, IfNZ, Reg a; std::string label)
 
-        Stmt(Data data) : data(data) {}
-        Stmt(NOP stmt) : data(stmt) {}
-        Stmt(SAdd stmt) : data(stmt) {}
-        Stmt(UAdd stmt) : data(stmt) {}
-        Stmt(SSub stmt) : data(stmt) {}
-        Stmt(USub stmt) : data(stmt) {}
-        Stmt(AddrOf stmt) : data(stmt) {}
-    };
+    DECLARE_ENUM(Stmt, LIR_STMT_CASES)
 }

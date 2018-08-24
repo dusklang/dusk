@@ -10,6 +10,7 @@ set(HEADERS
     Diagnostics.h
     Array.h
 	General.h
+    Enum.h
 )
 
 add_library(General ${SOURCES} ${HEADERS})

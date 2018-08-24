@@ -173,7 +173,7 @@ Type Parser::parseType() {
     auto typeName = parseIdentifier();
     if(!typeName) reportDiag(ERR("expected type name").primaryRange(cur().getRange()));
 
-    Type::DataType data;
+    Type::Data data;
     if(*typeName == "i8") { data = IntTy::I8(); }
     else if(*typeName == "i16") { data = IntTy::I16(); }
     else if(*typeName == "i32") { data = IntTy::I32(); }
