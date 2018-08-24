@@ -26,9 +26,9 @@ struct ASTNode {
 
 // A scope node represents a collection of other nodes.
 struct Scope final : public ASTNode {
-    std::optional<SourceRange> range;
+    SourceRange range;
     std::vector<ASTNode*> nodes;
-    Scope(std::optional<SourceRange> range, std::vector<ASTNode*> nodes) : ASTNode(NodeKind::Scope), range(range), nodes(nodes) {}
+    Scope(SourceRange range, std::vector<ASTNode*> nodes) : ASTNode(NodeKind::Scope), range(range), nodes(nodes) {}
 
     ~Scope() override {
         for (ASTNode* node: nodes) {

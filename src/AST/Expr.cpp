@@ -33,17 +33,15 @@ IfExpr::~IfExpr() {
 }
 
 SourceRange IfExpr::totalRange() const {
-    auto range = ifRange + condition->totalRange();
-    if(thenScope->range) {
-        range += *thenScope->range;
-    }
+    auto range = ifRange + condition->totalRange() + thenScope->range;
     match(elseNode)(
         pattern(some(as<Scope*>(arg))) = [&](auto scope) {
-            if(scope->range) range += *scope->range;
+            range += scope->range;
         },
         pattern(some(as<IfExpr*>(arg))) = [&](auto expr) {
             range += expr->totalRange();
-        }
+        },
+        pattern(_) = [] {}
     );
     return range;
 }

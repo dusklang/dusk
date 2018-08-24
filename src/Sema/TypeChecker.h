@@ -20,12 +20,17 @@ class TypeChecker final: public ASTVisitor<TypeChecker> {
             exit(1);
         }
     }
+    /// Typechecks only the prototype of a declaration. If the declaration is stored
+    /// and has no written type annotation, its assigned value also gets typechecked.
+    void visitDeclPrototype(Decl* decl);
 public:
     TypeChecker(SourceFile const& file) : file(file) {
         declLists.push_back(std::vector<Decl*>());
     }
 
+    void visitTopLevel(std::vector<ASTNode*> nodes);
     void visitType(Type* type);
+    // NOTE: visitDecl assumes that visitDeclPrototype was already called.
     void visitDecl(Decl* decl);
     void visitStructDecl(StructDecl* decl);
     void visitScope(Scope* scope);
@@ -39,7 +44,6 @@ public:
     void visitCastExpr(CastExpr* expr);
     void visitDeclRefExpr(DeclRefExpr* expr);
     void visitMemberRefExpr(MemberRefExpr* expr);
-
     void visitReturnExpr(ReturnExpr* expr);
     void visitIfExpr(IfExpr* expr);
     void visitWhileExpr(WhileExpr* expr);

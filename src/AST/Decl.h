@@ -43,6 +43,13 @@ public:
 
     bool isParameterized() const { return !paramList.empty(); }
     bool isExtern() const { return (bool)externRange; }
+
+    SourceRange protoRange() const {
+        auto range = name.range;
+        if(externRange) range += *externRange;
+        if(keywordRange) range += *keywordRange;
+        return range;
+    }
 };
 
 struct StructDecl: public ASTNode {

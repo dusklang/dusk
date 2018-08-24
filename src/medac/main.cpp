@@ -69,14 +69,6 @@ var pedro: Person {
     }
 }*/
 
-def printString(str: *i8) {
-    var curChar = str
-    while *curChar != "\0" {
-        printChar(*curChar)
-        curChar += 1
-    }
-    return
-}
 def printIntRecursively(val: i32) {
     if val == 0 {
         return
@@ -151,7 +143,16 @@ def main {
     printChar("\n")
 
     return
-})~";
+}
+def printString(str: *i8) {
+    var curChar = str
+    while *curChar != "\0" {
+        printChar(*curChar)
+        curChar += 1
+    }
+    return
+}
+)~";
 
 int main() {
     std::cout << "Meda compiler version 0.0.1\n";
@@ -162,7 +163,7 @@ int main() {
     LIRGenerator lirGen;
 
     auto nodes = parser.parseTopLevel();
-    tyChecker.visit(nodes);
+    tyChecker.visitTopLevel(nodes);
 
     /*lirGen.visit(nodes);
     lirGen.printIR();*/

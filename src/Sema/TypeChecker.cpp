@@ -9,6 +9,76 @@ using namespace mpark::patterns;
 
 #define ERR(msg) Diagnostic(Diagnostic::Error, file, msg)
 
+void TypeChecker::visitDeclPrototype(Decl* decl) {
+    if(decl->type != ErrorTy()) {
+        visitType(&decl->type);
+    }
+    for(auto param: decl->paramList) {
+        visitType(&param->type);
+    }
+
+    if(decl->hasDefinition()) {
+        if(decl->isComputed()) {
+            // Add void type to computed declaration if it doesn't have one.
+            if(decl->type == ErrorTy()) {
+                decl->type = VoidTy();
+            } else {
+                visitType(&decl->type);
+            }
+        } else {
+            visitExpr(decl->expression());
+            if(decl->type == ErrorTy()) {
+                decl->type = decl->expression()->type;
+            } else {
+                if(decl->type != decl->expression()->type) {
+                    reportDiag(ERR("cannot initialize declaration of type `" +
+                                   decl->type.name() + "` with value of type `" +
+                                   decl->expression()->type.name())
+                               .primaryRange(decl->expression()->totalRange()));
+                }
+            }
+            if(decl->type == VoidTy()) {
+                reportDiag(ERR("stored declarations can not have type `void`")
+                           .primaryRange(decl->type.range));
+            }
+        }
+    } else {
+        if(!decl->isExtern()) {
+            reportDiag(ERR("non-`extern` declaration needs a definition").primaryRange(decl->protoRange()));
+        }
+
+        if(decl->type == ErrorTy()) {
+            reportDiag(ERR("standalone decl prototype needs an explicit type").primaryRange(decl->protoRange()));
+        }
+    }
+}
+void TypeChecker::visitTopLevel(std::vector<ASTNode*> nodes) {
+    for(auto node: nodes) {
+        if(auto decl = dynamic_cast<Decl*>(node)) {
+            declLists.back().push_back(decl);
+        } else if(auto decl = dynamic_cast<StructDecl*>(node)) {
+            for(auto other: structs) {
+                if(decl->name == other->name) {
+                    reportDiag(ERR("re-declaration of structure `" + decl->name.getText() + "`")
+                               .range(other->structRange + other->name.range, "previous declaration here")
+                               .primaryRange(decl->structRange + decl->name.range));
+                }
+            }
+            structs.push_back(decl);
+        } else {
+            visit(node);
+        }
+    }
+    for(auto decl: structs) {
+        visitStructDecl(decl);
+    }
+    for(auto decl: declLists.back()) {
+        visitDeclPrototype(decl);
+    }
+    for(auto decl: declLists.back()) {
+        visitDecl(decl);
+    }
+}
 void TypeChecker::visitType(Type *type) {
     match(type->data)(
         pattern(as<StructTy>(arg)) = [&](auto& structTy) {
@@ -32,31 +102,6 @@ void TypeChecker::visitType(Type *type) {
     );
 }
 void TypeChecker::visitDecl(Decl* decl) {
-    auto protoRange = [&]() -> SourceRange {
-        SourceRange range = decl->name.range;
-        if(decl->externRange) range += *decl->externRange;
-        if(decl->keywordRange) range += *decl->keywordRange;
-        return range;
-    };
-    // Reject nested functions.
-    if(declLists.size() > 1 && decl->isComputed()) {
-        reportDiag(ERR("nested functions are not supported")
-                   .primaryRange(protoRange()));
-    }
-
-    if(decl->isComputed()) {
-        // If this is a computed declaration, insert declaration into the enclosing scope now to
-        // enable recursion.
-        declLists.back().push_back(decl);
-    }
-
-    if(decl->type != ErrorTy()) {
-        visitType(&decl->type);
-    }
-    for(auto param: decl->paramList) {
-        visitType(&param->type);
-    }
-
     if(decl->hasDefinition()) {
         // If we have parameters, start a new scope for referencing them.
         if(decl->isParameterized()) {
@@ -66,70 +111,17 @@ void TypeChecker::visitDecl(Decl* decl) {
             }
         }
         if(decl->isComputed()) {
-            // Add Void type to computed declaration if it doesn't have one.
-            if(decl->type == ErrorTy()) {
-                decl->type = VoidTy();
-            } else {
-                visitType(&decl->type);
-            }
-
             returnTypeStack.push(decl->type);
             visitScope(decl->body());
             returnTypeStack.pop();
-
-            if(decl->isParameterized()) {
-                declLists.pop_back();
-            }
-        } else {
-            visitExpr(decl->expression());
-            if(decl->type == ErrorTy()) {
-                decl->type = decl->expression()->type;
-            } else {
-                if(decl->type != decl->expression()->type) {
-                    reportDiag(ERR("cannot initialize declaration of type `" +
-                                   decl->type.name() + "` with value of type `" +
-                                   decl->expression()->type.name())
-                               .primaryRange(decl->expression()->totalRange()));
-                }
-            }
-            if(decl->type == VoidTy()) {
-                reportDiag(ERR("stored declarations can not have type `void`")
-                           .primaryRange(decl->type.range));
-            }
-
-            if(decl->isParameterized()) declLists.pop_back();
-
-            // If this is a stored declaration, add the decl to the enclosing scope now, so we can shadow
-            // declarations from outer scopes.
-            declLists.back().push_back(decl);
         }
-    } else {
-        if(decl->isExtern()) {
-            declLists.back().push_back(decl);
-        } else {
-            reportDiag(ERR("non-`extern` declaration needs a definition").primaryRange(protoRange()));
-        }
-
-        if(decl->type == ErrorTy()) {
-            reportDiag(ERR("standalone decl prototype needs an explicit type").primaryRange(protoRange()));
-        }
+        if(decl->isParameterized()) declLists.pop_back();
     }
 }
 void TypeChecker::visitStructDecl(StructDecl* decl) {
-    if(declLists.size() > 1) {
-        reportDiag(ERR("struct declarations may not yet be nested").primaryRange(decl->structRange + decl->name.range));
-    }
-    for(auto other: structs) {
-        if(decl->name == other->name) {
-            reportDiag(ERR("re-declaration of structure `" + decl->name.getText() + "`")
-                       .range(other->structRange + other->name.range, "previous declaration here")
-                       .primaryRange(decl->structRange + decl->name.range));
-        }
-    }
     for(auto field: decl->fields) {
         visitType(&field->type);
     }
-    structs.push_back(decl);
 }
 void TypeChecker::visitScope(Scope* scope) {
     // Start a new namespace for declarations inside the scope.
@@ -141,6 +133,20 @@ void TypeChecker::visitScope(Scope* scope) {
             if(expr->type != VoidTy()) {
                 reportDiag(ERR("unused expression").primaryRange(expr->totalRange()));
             }
+        } else if(auto decl = dynamic_cast<Decl*>(node)) {
+            visitDeclPrototype(decl);
+            if(decl->isComputed()) {
+                // Reject nested functions.
+                reportDiag(ERR("nested functions are not supported")
+                           .primaryRange(decl->protoRange()));
+                //declLists.back().push_back(decl);
+            }
+            visitDecl(decl);
+            if(decl->isStored()) {
+                declLists.back().push_back(decl);
+            }
+        } else if(auto decl = dynamic_cast<StructDecl*>(node)) {
+            reportDiag(ERR("struct declarations may not yet be nested").primaryRange(decl->structRange + decl->name.range));
         } else {
             visit(node);
         }

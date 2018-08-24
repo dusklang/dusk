@@ -228,6 +228,6 @@ struct WhileExpr: public Expr {
     ~WhileExpr() override;
 
     SourceRange totalRange() const override {
-        return whileRange + condition->totalRange() + thenScope->range.value_or(whileRange);
+        return whileRange + condition->totalRange() + thenScope->range;
     }
 };
