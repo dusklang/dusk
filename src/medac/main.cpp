@@ -38,7 +38,6 @@ extern "C" {
 }
 )~";
 std::string sourceCode = R"~(
-
 def main {
     printPerson(&henry)
     printPerson(&sally)
@@ -132,13 +131,12 @@ extern var henry: Person
 extern var sally: Person
 extern var alexandra: Person
 extern var someNumber: *i32
+extern def putchar(_: i32): void
 
 def printChar(character: i8) {
     putchar(character as i32)
     return
 }
-
-extern def putchar(_: i32): void
 
 )~";
 

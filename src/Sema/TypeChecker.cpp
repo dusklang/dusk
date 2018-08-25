@@ -10,6 +10,17 @@ using namespace mpark::patterns;
 #define ERR(msg) Diagnostic(Diagnostic::Error, file, msg)
 
 void TypeChecker::visitDeclPrototype(Decl* decl) {
+    switch(decl->protoState) {
+        case Decl::Unresolved:
+            decl->protoState = Decl::Resolving;
+            break;
+        case Decl::Resolving:
+            reportDiag(ERR("cyclic dependency"));
+            break;
+        case Decl::Resolved:
+            return;
+    }
+
     if(decl->type != ErrorTy()) {
         visitType(&decl->type);
     }
@@ -43,14 +54,11 @@ void TypeChecker::visitDeclPrototype(Decl* decl) {
             }
         }
     } else {
-        if(!decl->isExtern()) {
-            reportDiag(ERR("non-`extern` declaration needs a definition").primaryRange(decl->protoRange()));
-        }
-
         if(decl->type == ErrorTy()) {
             reportDiag(ERR("standalone decl prototype needs an explicit type").primaryRange(decl->protoRange()));
         }
     }
+    decl->protoState = Decl::Resolved;
 }
 void TypeChecker::visitTopLevel(std::vector<ASTNode*> nodes) {
     for(auto node: nodes) {
@@ -65,43 +73,39 @@ void TypeChecker::visitTopLevel(std::vector<ASTNode*> nodes) {
                 }
             }
             structs.push_back(decl);
-        } else {
-            visit(node);
         }
     }
-    for(auto decl: structs) {
-        visitStructDecl(decl);
-    }
-    for(auto decl: declLists.back()) {
-        visitDeclPrototype(decl);
-    }
-    for(auto decl: declLists.back()) {
-        visitDecl(decl);
+    for(auto node: nodes) {
+        visit(node);
     }
 }
-void TypeChecker::visitType(Type *type) {
+void TypeChecker::visitType(Type *type, bool shouldResolveStructDecls) {
     match(type->data)(
         pattern(as<StructTy>(arg)) = [&](auto& structTy) {
-            StructDecl* structDecl;
-            for(auto decl: structs) {
-                if(structTy.name == decl->name) {
-                    structDecl = decl;
-                    break;
+            if(!structTy.decl) {
+                for(auto decl: structs) {
+                    if(structTy.name == decl->name) {
+                        structTy.decl = decl;
+                        break;
+                    }
+                }
+                if(!structTy.decl) {
+                    reportDiag(ERR("reference to undeclared type `" + structTy.name.getText() + "`")
+                               .primaryRange(type->range));
                 }
             }
-            if(!structDecl) {
-                reportDiag(ERR("reference to undeclared type `" + structTy.name.getText() + "`")
-                           .primaryRange(type->range));
+            if(shouldResolveStructDecls) {
+                visitStructDecl(structTy.decl);
             }
-            structTy.decl = structDecl;
         },
-        pattern(as<PointerTy>(ds(arg))) = [&](auto& pointedTy) {
-            visitType(pointedTy);
+        pattern(as<PointerTy>(ds(arg))) = [&](auto pointedTy) {
+            visitType(pointedTy, false);
         },
         pattern(_) = [] {}
     );
 }
 void TypeChecker::visitDecl(Decl* decl) {
+    visitDeclPrototype(decl);
     if(decl->hasDefinition()) {
         // If we have parameters, start a new scope for referencing them.
         if(decl->isParameterized()) {
@@ -116,12 +120,27 @@ void TypeChecker::visitDecl(Decl* decl) {
             returnTypeStack.pop();
         }
         if(decl->isParameterized()) declLists.pop_back();
+    } else {
+        if(!decl->isExtern()) {
+            reportDiag(ERR("non-`extern` declaration needs a definition").primaryRange(decl->protoRange()));
+        }
     }
 }
 void TypeChecker::visitStructDecl(StructDecl* decl) {
+    switch(decl->state) {
+        case StructDecl::Unresolved:
+            decl->state = StructDecl::Resolving;
+            break;
+        case StructDecl::Resolving:
+            reportDiag(ERR("cyclic dependency"));
+            break;
+        case StructDecl::Resolved:
+            return;
+    }
     for(auto field: decl->fields) {
         visitType(&field->type);
     }
+    decl->state = StructDecl::Resolved;
 }
 void TypeChecker::visitScope(Scope* scope) {
     // Start a new namespace for declarations inside the scope.
@@ -134,14 +153,13 @@ void TypeChecker::visitScope(Scope* scope) {
                 reportDiag(ERR("unused expression").primaryRange(expr->totalRange()));
             }
         } else if(auto decl = dynamic_cast<Decl*>(node)) {
-            visitDeclPrototype(decl);
+            visitDecl(decl);
             if(decl->isComputed()) {
                 // Reject nested functions.
                 reportDiag(ERR("nested functions are not supported")
                            .primaryRange(decl->protoRange()));
                 //declLists.back().push_back(decl);
             }
-            visitDecl(decl);
             if(decl->isStored()) {
                 declLists.back().push_back(decl);
             }
@@ -174,6 +192,7 @@ void TypeChecker::visitPreOpExpr(PreOpExpr* expr) {
     // FIXME: Ensure the given operator is valid for the operand type.
     switch(expr->op) {
         case PreOp::Deref:
+            visitType(expr->operand->type.pointeeType());
             expr->type = *expr->operand->type.pointeeType();
             break;
         case PreOp::AddrOf:
@@ -255,11 +274,11 @@ void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
     // TODO: Setup a dependency system to allow decls to be referenced before we know about them.
     std::vector<Decl*> nameMatches;
     for(auto& declList: reverse(declLists)) {
-        for(auto* decl: declList) {
+        for(auto decl: declList) {
             if(decl->name != expr->name) continue;
             nameMatches.push_back(decl);
-
             if(decl->paramList.size() != expr->argList.size()) continue;
+            visitDeclPrototype(decl);
             for(auto [param, arg]: zip(decl->paramList, expr->argList)) {
                 if(param->type != arg->type) goto failedToFindMatchInCurrentList;
             }

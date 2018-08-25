@@ -17,6 +17,9 @@ struct Decl: public ASTNode {
     Type type;
     bool isVar;
     std::vector<Decl*> paramList;
+    enum {
+        Unresolved, Resolving, Resolved
+    } protoState = Unresolved;
 private:
     // FIXME: Make this into a variant.
     ASTNode* value = nullptr;
@@ -56,6 +59,9 @@ struct StructDecl: public ASTNode {
     SourceRange structRange;
     Ident name;
     std::vector<Decl*> fields;
+    enum {
+        Unresolved, Resolving, Resolved
+    } state = Unresolved;
 
     StructDecl(SourceRange structRange, Ident name, std::vector<Decl*> fields) : ASTNode(NodeKind::StructDecl), structRange(structRange), name(name), fields(fields) {}
 };

@@ -29,7 +29,7 @@ public:
     }
 
     void visitTopLevel(std::vector<ASTNode*> nodes);
-    void visitType(Type* type);
+    void visitType(Type* type, bool dependsOnStructDecls = true);
     // NOTE: visitDecl assumes that visitDeclPrototype was already called.
     void visitDecl(Decl* decl);
     void visitStructDecl(StructDecl* decl);
