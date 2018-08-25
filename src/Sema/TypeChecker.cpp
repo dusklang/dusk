@@ -15,7 +15,8 @@ void TypeChecker::visitDeclPrototype(Decl* decl) {
             decl->protoState = Decl::Resolving;
             break;
         case Decl::Resolving:
-            reportDiag(ERR("cyclic dependency"));
+            reportDiag(ERR("cyclic decl prototype dependency")
+                       .primaryRange(decl->name.range));
             break;
         case Decl::Resolved:
             return;
@@ -132,7 +133,8 @@ void TypeChecker::visitStructDecl(StructDecl* decl) {
             decl->state = StructDecl::Resolving;
             break;
         case StructDecl::Resolving:
-            reportDiag(ERR("cyclic dependency"));
+            reportDiag(ERR("cyclic struct dependency")
+                       .primaryRange(decl->name.range));
             break;
         case StructDecl::Resolved:
             return;
