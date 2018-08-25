@@ -57,6 +57,10 @@ class LLVMGenerator final: public ASTVisitor<LLVMGenerator,
     /// If `val` is direct, generates code to copy the direct value on the stack and returns
     /// a pointer to that copy.
     llvm::Value* toIndirect(CodeGenVal val);
+
+    /// Creates an entry in `declVals`, but doesn't visit the scope of a computed declaration
+    /// or the expression of a stored one.
+    void visitDeclPrototype(Decl* decl);
 public:
     llvm::Module* module;
     LLVMGenerator() : builder(context) {
@@ -68,6 +72,9 @@ public:
         }
     }
 
+    void visitTopLevel(std::vector<ASTNode*> nodes);
+    /// Generates code for the scope of a computed declaration, or for the expression of a stored one.
+    /// NOTE: `visitDeclPrototype` must be called on a declaration before this.
     CodeGenVal visitDecl(Decl* decl);
     void visitScope(Scope* scope);
     void visitStructDecl(StructDecl* decl);

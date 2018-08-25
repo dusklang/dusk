@@ -39,89 +39,6 @@ extern "C" {
 )~";
 std::string sourceCode = R"~(
 
-struct Person {
-    name: *i8
-    age: u8
-    numberOfChildren: u8
-}
-extern var henry: Person
-extern var sally: Person
-extern var alexandra: Person
-extern var someNumber: *i32
-
-extern def putchar(_: i32): void
-def printChar(character: i8) {
-    putchar(character as i32)
-    return
-}
-/*
-var pedro: Person {
-    get {
-        printString("Getting the value of pedro")
-        return Person {
-            name: "Pedro"
-            age: 27 as u8
-            numberOfChildren: 0 as u8
-        }
-    }
-    set {
-        printString("Setting the value of pedro")
-    }
-}*/
-
-def printIntRecursively(val: i32) {
-    if val == 0 {
-        return
-    } else {
-        printIntRecursively(val / 10)
-        printChar("0" + (val % 10) as i8)
-        return
-    }
-}
-def printInt(val: i32) {
-    if val == 0 {
-        printChar("0")
-    } else {
-        printIntRecursively(val)
-    }
-    return
-}
-def performFizzBuzz(end: i32) {
-    // Check range.
-    if end < 0 {
-        printString("Invalid bounds!\n")
-        return
-    }
-    var i = 0
-    while i <= end {
-        def fizz = i % 3 == 0
-        def buzz = i % 5 == 0
-        if fizz { printString("Fizz") }
-        if buzz { printString("Buzz") }
-        if !fizz && !buzz { printInt(i) }
-        printChar("\n")
-        i += 1
-    }
-    return
-}
-def printPerson(person: *Person) {
-    printString((*person).name)
-    printString(" is ")
-    printInt((*person).age as i32)
-    printString(" years old and has ")
-    if (*person).numberOfChildren == 0 as u8 {
-        printString("no")
-    } else {
-        printInt((*person).numberOfChildren as i32)
-    }
-    if (*person).numberOfChildren == 1 as u8 {
-        printString(" child.\n")
-    } else {
-        printString(" children.\n")
-    }
-
-    return
-}
 def main {
     printPerson(&henry)
     printPerson(&sally)
@@ -144,6 +61,41 @@ def main {
 
     return
 }
+def performFizzBuzz(end: i32) {
+    // Check range.
+    if end < 0 {
+        printString("Invalid bounds!\n")
+        return
+    }
+    var i = 0
+    while i <= end {
+        def fizz = i % 3 == 0
+        def buzz = i % 5 == 0
+        if fizz { printString("Fizz") }
+        if buzz { printString("Buzz") }
+        if !fizz && !buzz { printInt(i) }
+        printChar("\n")
+        i += 1
+    }
+    return
+}
+def printInt(val: i32) {
+    if val == 0 {
+        printChar("0")
+    } else {
+        printIntRecursively(val)
+    }
+    return
+}
+def printIntRecursively(val: i32) {
+    if val == 0 {
+        return
+    } else {
+        printIntRecursively(val / 10)
+        printChar("0" + (val % 10) as i8)
+        return
+    }
+}
 def printString(str: *i8) {
     var curChar = str
     while *curChar != "\0" {
@@ -152,6 +104,42 @@ def printString(str: *i8) {
     }
     return
 }
+def printPerson(person: *Person) {
+    printString((*person).name)
+    printString(" is ")
+    printInt((*person).age as i32)
+    printString(" years old and has ")
+    if (*person).numberOfChildren == 0 as u8 {
+        printString("no")
+    } else {
+        printInt((*person).numberOfChildren as i32)
+    }
+    if (*person).numberOfChildren == 1 as u8 {
+        printString(" child.\n")
+    } else {
+        printString(" children.\n")
+    }
+
+    return
+}
+
+struct Person {
+    name: *i8
+    age: u8
+    numberOfChildren: u8
+}
+extern var henry: Person
+extern var sally: Person
+extern var alexandra: Person
+extern var someNumber: *i32
+
+def printChar(character: i8) {
+    putchar(character as i32)
+    return
+}
+
+extern def putchar(_: i32): void
+
 )~";
 
 int main() {
@@ -169,7 +157,7 @@ int main() {
     lirGen.printIR();*/
 
     LLVMGenerator llvmGen;
-    llvmGen.visit(nodes);
+    llvmGen.visitTopLevel(nodes);
     llvmGen.outputObjectFile("main.o");
 
     std::ofstream stdLibFile;
