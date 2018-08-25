@@ -6,30 +6,8 @@
 #include "mpark/patterns.hpp"
 using namespace mpark::patterns;
 
-DeclRefExpr::~DeclRefExpr() {
-    if(decl) {
-        delete decl;
-    }
-}
-
 bool DeclRefExpr::isMutable() const {
     return decl->isVar;
-}
-
-ReturnExpr::~ReturnExpr() {
-    if(value) {
-        delete value;
-    }
-}
-
-IfExpr::~IfExpr() {
-    delete condition;
-    delete thenScope;
-    match(elseNode)(
-        pattern(some(as<Scope*>(arg))) = [](auto scope) { delete scope; },
-        pattern(some(as<IfExpr*>(arg))) = [](auto expr) { delete expr; },
-        pattern(_) = []{}
-    );
 }
 
 SourceRange IfExpr::totalRange() const {
@@ -44,9 +22,4 @@ SourceRange IfExpr::totalRange() const {
         pattern(_) = [] {}
     );
     return range;
-}
-
-WhileExpr::~WhileExpr() {
-    delete condition;
-    delete thenScope;
 }

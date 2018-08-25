@@ -9,18 +9,8 @@
 #include <algorithm>
 #include "General/SourceInfo.h"
 
-struct Expr;
-
-enum class NodeKind {
-    #define AST_NODE(name) name,
-    #include "ASTNodes.def"
-    NUM_NODES
-};
-
 // Abstract class from which each node in the AST inherits.
 struct ASTNode {
-    NodeKind kind;
-    ASTNode(NodeKind kind) : kind(kind) {}
     virtual ~ASTNode() {}
 };
 
@@ -28,11 +18,5 @@ struct ASTNode {
 struct Scope final : public ASTNode {
     SourceRange range;
     std::vector<ASTNode*> nodes;
-    Scope(SourceRange range, std::vector<ASTNode*> nodes) : ASTNode(NodeKind::Scope), range(range), nodes(nodes) {}
-
-    ~Scope() override {
-        for (ASTNode* node: nodes) {
-            delete node;
-        }
-    }
+    Scope(SourceRange range, std::vector<ASTNode*> nodes) : range(range), nodes(nodes) {}
 };

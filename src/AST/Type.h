@@ -84,7 +84,6 @@ struct Type final {
 
     Type* pointeeType() const;
 
-    ~Type() = default;
     Type(Type const& other) = default;
     Type& operator=(Type const& other) = default;
 

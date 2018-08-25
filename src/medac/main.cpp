@@ -137,8 +137,6 @@ def printChar(character: i8) {
     putchar(character as i32)
     return
 }
-struct A { b: B }
-struct B { a: A }
 
 )~";
 

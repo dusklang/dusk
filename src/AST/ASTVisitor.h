@@ -20,21 +20,17 @@ template<typename Impl,
 class ASTVisitor {
 public:
     ASTVisitor() {}
-    ~ASTVisitor() {}
 
     ASTNodeReturnTy visit(ASTNode* node, Args... args) {
-        switch(node->kind) {
-            #define AST_NODE(name) case NodeKind::name: { \
+            #define AST_NODE(name) if(auto val = dynamic_cast<name*>(node)) { \
                 if constexpr(std::is_same<void, ASTNodeReturnTy>::value) { \
-                    static_cast<Impl*>(this)->visit##name(dynamic_cast<name*>(node), std::forward<Args>(args)...); \
+                    static_cast<Impl*>(this)->visit##name(val, std::forward<Args>(args)...); \
                     return; \
                 } else { \
-                    return static_cast<Impl*>(this)->visit##name(dynamic_cast<name*>(node), std::forward<Args>(args)...); \
+                    return static_cast<Impl*>(this)->visit##name(val, std::forward<Args>(args)...); \
                 } \
             }
             #include "ASTNodes.def"
-            default: break;
-        }
         unreachable;
     }
 
@@ -58,12 +54,10 @@ public:
     #include "ASTNodes.def"
 
     ExprRetTy visitExpr(Expr* expr, Args... args) {
-        switch(expr->exprKind) {
-        #define EXPR_NODE(name) case ExprKind::name: \
-            return static_cast<Impl*>(this)->visit##name##Expr(static_cast<name##Expr*>(expr), std::forward<Args>(args)...);
-            #include "ASTNodes.def"
-            default: break;
+        #define EXPR_NODE(name) if(auto val = dynamic_cast<name##Expr*>(expr)) { \
+            return static_cast<Impl*>(this)->visit##name##Expr(val, std::forward<Args>(args)...); \
         }
+        #include "ASTNodes.def"
         unreachable;
     }
 };

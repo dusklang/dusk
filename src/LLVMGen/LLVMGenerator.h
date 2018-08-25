@@ -66,11 +66,6 @@ public:
     LLVMGenerator() : builder(context) {
         module = new llvm::Module("my module", context);
     }
-    ~LLVMGenerator() {
-        if(module) {
-            delete module;
-        }
-    }
 
     void visitTopLevel(std::vector<ASTNode*> nodes);
     /// Generates code for the scope of a computed declaration, or for the expression of a stored one.
