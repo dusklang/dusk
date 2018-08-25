@@ -48,11 +48,6 @@ public:
         }
     }
 
-    #define UNTYPED_AST_NODE(name) name##RetTy visit##name(name* node, Args... args) { \
-        return static_cast<Impl*>(this)->visit##name(node, std::forward<Args>(args)...); \
-    }
-    #include "ASTNodes.def"
-
     ExprRetTy visitExpr(Expr* expr, Args... args) {
         #define EXPR_NODE(name) if(auto val = dynamic_cast<name##Expr*>(expr)) { \
             return static_cast<Impl*>(this)->visit##name##Expr(val, std::forward<Args>(args)...); \
