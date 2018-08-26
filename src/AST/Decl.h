@@ -5,12 +5,14 @@
 #include <string>
 #include <vector>
 
+#include "General/SourceInfo.h"
+
 #include "AST.h"
 
 struct Expr;
 struct Scope;
 
-struct Decl: public ASTNode {
+struct Decl final: public ASTNode {
     std::optional<SourceRange> externRange;
     std::optional<SourceRange> keywordRange;
     Ident name;
@@ -53,9 +55,13 @@ public:
         if(keywordRange) range += *keywordRange;
         return range;
     }
+    SourceRange totalRange() const override {
+        // INCOMPLETE.
+        return protoRange();
+    }
 };
 
-struct StructDecl: public ASTNode {
+struct StructDecl final: public ASTNode {
     SourceRange structRange;
     Ident name;
     std::vector<Decl*> fields;
@@ -64,4 +70,8 @@ struct StructDecl: public ASTNode {
     } state = Unresolved;
 
     StructDecl(SourceRange structRange, Ident name, std::vector<Decl*> fields) : structRange(structRange), name(name), fields(fields) {}
+    SourceRange totalRange() const override {
+        // INCOMPLETE.
+        return structRange;
+    }
 };

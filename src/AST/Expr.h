@@ -16,12 +16,11 @@ struct Decl;
 
 // TODO: Make Expr a variant.
 /// Base class from which each Expression node inherits.
-struct Expr : public ASTNode {
+struct Expr: public ASTNode {
     Type type;
     Expr(Type type) : type(type) {}
     Expr() : type(ErrorTy()) {}
     virtual bool isMutable() const { return false; }
-    virtual SourceRange totalRange() const = 0;
 };
 
 struct IntegerLiteralExpr final: public Expr {
@@ -99,7 +98,7 @@ enum class PreOp {
     Not
 };
 
-struct BinOpExpr: public Expr {
+struct BinOpExpr final: public Expr {
     SourceRange opRange;
     Expr* lhs;
     Expr* rhs;
@@ -112,7 +111,7 @@ struct BinOpExpr: public Expr {
     SourceRange totalRange() const override { return lhs->totalRange() + rhs->totalRange(); }
 };
 
-struct PreOpExpr: public Expr {
+struct PreOpExpr final: public Expr {
     SourceRange opRange;
     Expr* operand;
     PreOp op;
@@ -180,7 +179,7 @@ struct MemberRefExpr final: public Expr {
     }
 };
 
-struct ReturnExpr: public Expr {
+struct ReturnExpr final: public Expr {
     SourceRange returnRange;
     Expr* value;
 
@@ -193,7 +192,7 @@ struct ReturnExpr: public Expr {
     }
 };
 
-struct IfExpr: public Expr {
+struct IfExpr final: public Expr {
     SourceRange ifRange;
     Expr* condition;
     Scope* thenScope;
@@ -205,7 +204,7 @@ struct IfExpr: public Expr {
     SourceRange totalRange() const override;
 };
 
-struct WhileExpr: public Expr {
+struct WhileExpr final: public Expr {
     SourceRange whileRange;
     Expr* condition;
     Scope* thenScope;
@@ -218,7 +217,7 @@ struct WhileExpr: public Expr {
     }
 };
 
-struct DoExpr: public Expr {
+struct DoExpr final: public Expr {
     SourceRange doRange;
     std::variant<Expr*, Scope*> value;
 

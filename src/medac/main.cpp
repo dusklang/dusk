@@ -82,6 +82,7 @@ def performFizzBuzz(end: i32) {
 }
 def printInt(val: i32) {
     if val == 0 {
+        (return)
         printChar("0")
     } else {
         printIntRecursively(val)
@@ -149,9 +150,11 @@ int main() {
     Parser parser(&file);
     TypeChecker tyChecker(file);
     LIRGenerator lirGen;
+    ASTPrinter printer;
 
     auto nodes = parser.parseTopLevel();
     tyChecker.visitTopLevel(nodes);
+    printer.visit(nodes, 0, std::cout);
 
     /*lirGen.visit(nodes);
     lirGen.printIR();*/

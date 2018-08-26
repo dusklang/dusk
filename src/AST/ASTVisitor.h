@@ -37,12 +37,12 @@ public:
     auto visit(std::vector<ASTNode*> nodes, Args... args) {
         if constexpr(std::is_same_v<void, ASTNodeReturnTy>) {
             for(auto node: nodes) {
-                visit(node, std::forward(args)...);
+                visit(node, std::forward<Args>(args)...);
             }
         } else {
             std::vector<ASTNodeReturnTy> retVal;
             for(auto node: nodes) {
-                retVal.push_back(node, visit(std::forward(args)...));
+                retVal.push_back(node, visit(std::forward<Args>(args)...));
             }
             return retVal;
         }

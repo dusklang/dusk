@@ -148,11 +148,19 @@ void TypeChecker::visitStructDecl(StructDecl* decl) {
 void TypeChecker::visitScope(Scope* scope) {
     // Start a new namespace for declarations inside the scope.
     declLists.push_back(std::vector<Decl*>());
-    for(auto node: scope->nodes) {
+
+    std::optional<std::vector<ASTNode*>::iterator> elemToRemoveFrom;
+    for(auto it = scope->nodes.begin(); it != scope->nodes.end(); ++it) {
+        auto node = *it;
         if(auto expr = dynamic_cast<Expr*>(node)) {
             visitExpr(expr);
-            // Disallow unused expressions.
-            if(expr->type != VoidTy() && expr->type != NeverTy()) {
+            if(expr->type == NeverTy()) {
+                scope->terminalExpr = expr;
+                elemToRemoveFrom = it + 1;
+                continue;
+            } else if(!elemToRemoveFrom && scope->nodes.back() == node && expr->type != VoidTy()) {
+                scope->terminalExpr = expr;
+            } else if(expr->type != VoidTy() && expr->type != NeverTy()) {
                 reportDiag(ERR("unused expressions are not allowed. to execute a non-void expression for its side-effect, use a `do` expression").primaryRange(expr->totalRange()));
             }
         } else if(auto decl = dynamic_cast<Decl*>(node)) {
@@ -172,6 +180,20 @@ void TypeChecker::visitScope(Scope* scope) {
             visit(node);
         }
     }
+    // If there's a `never` expression in the middle of a scope, we typecheck the rest of the scope, but also remove it so
+    // code generation won't have to worry about it. Also, report a warning.
+    if(elemToRemoveFrom) {
+        if(*elemToRemoveFrom != scope->nodes.end()) {
+            auto range = (**elemToRemoveFrom)->totalRange();
+            for(auto it = *elemToRemoveFrom; it != scope->nodes.end(); ++it) {
+                range += (*it)->totalRange();
+            }
+            reportDiag(WARN("code will never be executed")
+                       .primaryRange(range));
+        }
+        scope->nodes.erase(*elemToRemoveFrom, scope->nodes.end());
+    }
+
     // End the new namespace.
     declLists.pop_back();
 }

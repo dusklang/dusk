@@ -51,9 +51,17 @@ void ASTPrinter::visitStructDecl(StructDecl* decl, int indentationLevel, std::os
 }
 
 void ASTPrinter::visitScope(Scope* scope, int indentationLevel, std::ostream& stream) {
+
     for(size_t i = 0; i < scope->nodes.size(); ++i) {
         visit(scope->nodes[i], indentationLevel + 1, stream);
-        if(i != scope->nodes.size() - 1) stream << '\n';
+        /*if(i != scope->nodes.size() - 1) */stream << '\n';
+    }
+    indent(indentationLevel + 1, stream);
+    stream << "Terminal expr: ";
+    if(scope->terminalExpr) {
+        visitExpr(scope->terminalExpr, 0, stream);
+    } else {
+        stream << "null";
     }
 }
 
