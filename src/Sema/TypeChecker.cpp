@@ -118,7 +118,26 @@ void TypeChecker::visitDecl(Decl* decl) {
         }
         if(decl->isComputed()) {
             returnTypeStack.push(decl->type);
-            visitScope(decl->body());
+            auto body = decl->body();
+            visitScope(body);
+            auto terminalExpr = body->terminalExpr;
+            auto returnType = decl->type;
+            if(returnType != VoidTy()) {
+                if(terminalExpr && !terminalExpr->type.isConvertibleTo(returnType)) {
+                    reportDiag(ERR("cannot accept terminal expression of type `" + terminalExpr->type.name() + "` in computed declaration of type `" + returnType.name() + "`")
+                               .primaryRange(terminalExpr->totalRange())
+                               .range(returnType.range, "declared as `" + returnType.name() + "` here"));
+                } else if(!terminalExpr) {
+                    reportDiag(ERR("non-void computed declaration `" + decl->name.getText() + "` must return a value")
+                               .primaryRange(returnType.range, "`" + decl->name.getText() + "` type declared here"));
+                }
+            } else {
+                if(terminalExpr && terminalExpr->type != NeverTy()) {
+                    reportDiag(ERR("unused terminal expression of type `" + terminalExpr->type.name() + ", try writing \"do *expression*\" or changing the return type of `" + decl->name.getText() + "`")
+                               .primaryRange(terminalExpr->totalRange()));
+                }
+            }
+
             returnTypeStack.pop();
         }
         if(decl->isParameterized()) declLists.pop_back();
@@ -161,7 +180,7 @@ void TypeChecker::visitScope(Scope* scope) {
             } else if(!elemToRemoveFrom && scope->nodes.back() == node && expr->type != VoidTy()) {
                 scope->terminalExpr = expr;
             } else if(expr->type != VoidTy() && expr->type != NeverTy()) {
-                reportDiag(ERR("unused expressions are not allowed. to execute a non-void expression for its side-effect, use a `do` expression").primaryRange(expr->totalRange()));
+                reportDiag(ERR("unused expression, try writing \"do *expression*\"").primaryRange(expr->totalRange()));
             }
         } else if(auto decl = dynamic_cast<Decl*>(node)) {
             visitDecl(decl);

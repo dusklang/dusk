@@ -63,8 +63,6 @@ def main {
         printInt(*someNumber)
         printChar("\n")
     }
-
-    return
 }
 def performFizzBuzz(end: i32) {
     // Check range.
@@ -82,7 +80,6 @@ def performFizzBuzz(end: i32) {
         printChar("\n")
         i += 1
     }
-    return
 }
 def printInt(val: i32) {
     if val == 0 {
@@ -90,28 +87,21 @@ def printInt(val: i32) {
     } else {
         printIntRecursively(val)
     }
-    return
 }
 def printIntRecursively(val: i32) {
-    if val == 0 {
-        return
-    } else {
-        printIntRecursively(val / 10)
-        printChar("0" + (val % 10) as i8)
-        return
-    }
+    if val == 0 { return }
+    printIntRecursively(val / 10)
+    printChar("0" + (val % 10) as i8)
 }
 def printString(str: *i8) {
     var curChar = str
-    while *curChar != "\0" {
+    while *curChar != 0 as i8 {
         printChar(*curChar)
         curChar += 1
     }
-    return
 }
 def printPerson(person: Person) {
-    printString(person.name)
-    printString(" is ")
+    printString(concat(person.name, " is "))
     printInt(person.age as i32)
     printString(" years old and has ")
     if person.numberOfChildren == 0 as u8 {
@@ -124,8 +114,36 @@ def printPerson(person: Person) {
     } else {
         printString(" children.\n")
     }
+}
 
-    return
+def lengthOfString(str: *i8): i32 {
+    var curChar = str
+    var len = 0
+    while *curChar != 0 as i8 {
+        len += 1
+        curChar += 1
+    }
+    len
+}
+def concat(l: *i8, r: *i8): *i8 {
+    def buf = do {
+        def length = lengthOfString(l) + lengthOfString(r) + 1
+        malloc(length as u32) as *i8
+    }
+    var destChar = buf
+    var fromChar = l
+    while *fromChar != 0 as i8 {
+        *destChar = *fromChar
+        destChar += 1
+        fromChar += 1
+    }
+    fromChar = r
+    while *fromChar != 0 as i8 {
+        *(destChar) = *fromChar
+        destChar += 1
+        fromChar += 1
+    }
+    buf
 }
 
 struct Person {
@@ -139,10 +157,11 @@ extern var alexandra: Person
 extern var someNumber: *i32
 extern var alreadyPrintedHenry: bool
 extern def putchar(_: i32): void
+extern def malloc(_: u32): *void
+extern def free(_: *void): void
 
 def printChar(character: i8) {
     putchar(character as i32)
-    return
 }
 
 )~";

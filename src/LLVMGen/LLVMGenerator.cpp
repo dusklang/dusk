@@ -138,7 +138,20 @@ CodeGenVal LLVMGenerator::visitDecl(Decl* decl) {
         }
 
         functionStack.push(function);
-        visitScope(decl->body());
+        /*boyd*/ auto body /*and glass*/ = decl->body();
+        auto scopeVal = visitScope(body);
+        auto terminalExpr = body->terminalExpr;
+        if(!terminalExpr) {
+            builder.CreateRetVoid();
+        } else if(!dynamic_cast<ReturnExpr*>(terminalExpr)) {
+            // If we called a function that never returns (which technically doesn't exist yet),
+            // terminate the block with an unreachable.
+            if(terminalExpr->type == NeverTy()) {
+                builder.CreateUnreachable();
+            } else {
+                builder.CreateRet(toDirect(scopeVal));
+            }
+        }
         functionStack.pop();
 
         llvm::verifyFunction(*function);
@@ -376,6 +389,9 @@ CodeGenVal LLVMGenerator::visitCastExpr(CastExpr* expr) {
         },
         pattern(as<DoubleTy>(_), as<FloatTy>(_)) = [&]() -> DirectVal {
             return DirectVal { builder.CreateFPTrunc(toDirect(ogValue), destTypeLLVM) };
+        },
+        pattern(as<PointerTy>(_), as<PointerTy>(arg)) = [&](auto rhsTy) {
+            return DirectVal { builder.CreateBitCast(toDirect(ogValue), destTypeLLVM) };
         },
         pattern(as<PointerTy>(_), _) = []() -> DirectVal {
             panic("pointer casting is not yet supported");
