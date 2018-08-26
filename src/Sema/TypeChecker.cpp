@@ -43,15 +43,15 @@ void TypeChecker::visitDeclPrototype(Decl* decl) {
             if(decl->type == ErrorTy()) {
                 decl->type = decl->expression()->type;
             } else {
-                if(decl->type != decl->expression()->type) {
+                if(!decl->expression()->type.isConvertibleTo(decl->type)) {
                     reportDiag(ERR("cannot initialize declaration of type `" +
                                    decl->type.name() + "` with value of type `" +
                                    decl->expression()->type.name())
                                .primaryRange(decl->expression()->totalRange()));
                 }
             }
-            if(decl->type == VoidTy()) {
-                reportDiag(ERR("stored declarations can not have type `void`")
+            if(decl->type == VoidTy() || decl->type == NeverTy()) {
+                reportDiag(ERR("stored declarations can not have type `" + decl->type.name() + "`")
                            .primaryRange(decl->type.range));
             }
         }
@@ -152,8 +152,8 @@ void TypeChecker::visitScope(Scope* scope) {
         if(auto expr = dynamic_cast<Expr*>(node)) {
             visitExpr(expr);
             // Disallow unused expressions.
-            if(expr->type != VoidTy()) {
-                reportDiag(ERR("unused expressions are not allowed. to execute a non-void expression for its side-effect, use do expr").primaryRange(expr->totalRange()));
+            if(expr->type != VoidTy() && expr->type != NeverTy()) {
+                reportDiag(ERR("unused expressions are not allowed. to execute a non-void expression for its side-effect, use a `do` expression").primaryRange(expr->totalRange()));
             }
         } else if(auto decl = dynamic_cast<Decl*>(node)) {
             visitDecl(decl);
@@ -283,7 +283,7 @@ void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
             if(decl->paramList.size() != expr->argList.size()) continue;
             visitDeclPrototype(decl);
             for(auto [param, arg]: zip(decl->paramList, expr->argList)) {
-                if(param->type != arg->type) goto failedToFindMatchInCurrentList;
+                if(!arg->type.isConvertibleTo(param->type)) goto failedToFindMatchInCurrentList;
             }
             // We must have succeeded! Add the decl's prototype and type to the declRefExpr and return.
             expr->decl = decl;
@@ -336,7 +336,7 @@ void TypeChecker::visitMemberRefExpr(MemberRefExpr* expr) {
     );
 }
 void TypeChecker::visitReturnExpr(ReturnExpr* expr) {
-    expr->type = VoidTy();
+    expr->type = NeverTy();
     if(expr->value) {
         visitExpr(expr->value);
     }
@@ -344,7 +344,7 @@ void TypeChecker::visitReturnExpr(ReturnExpr* expr) {
     if(returnTypeStack.top() == VoidTy()) {
         if(expr->value) {
             reportDiag(ERR("cannot return value from void computed declaration")
-                       .primaryRange(expr->value->totalRange(), "remove this"));
+                       .primaryRange(expr->value->totalRange(), "delet this"));
         } else {
             return;
         }
@@ -355,10 +355,8 @@ void TypeChecker::visitReturnExpr(ReturnExpr* expr) {
         reportDiag(ERR("computed declaration must return a value").primaryRange(expr->returnRange, "add a return value"));
     }
 
-    // Handle returning a value of a type incompatible with the computed decl's type
-    // (currently, "incompatible with" just means "not equal to").
+    // Handle returning a value of a type not equal to the computed decl's type.
     if(expr->value->type != returnTypeStack.top()) {
-        // TODO: Include in the error message the type of the returned expr.
         reportDiag(ERR("cannot return value of type `" + expr->value->type.name() + "` from computed declaration of type `" + returnTypeStack.top().name())
                    .primaryRange(expr->value->totalRange()));
     }
@@ -391,8 +389,8 @@ void TypeChecker::visitDoExpr(DoExpr* expr) {
     match(expr->value)(
         pattern(as<Expr*>(arg)) = [&](auto innerExpr) {
             visitExpr(innerExpr);
-            if(innerExpr->type == VoidTy()) {
-                reportDiag(WARN("use of do expression on a void expression doesn't do anything")
+            if(innerExpr->type == VoidTy() || innerExpr->type == NeverTy()) {
+                reportDiag(WARN("use of do expression on a non-value expression doesn't do anything")
                            .primaryRange(expr->doRange)
                            .range(innerExpr->totalRange(), "expression is of type `" + innerExpr->type.name() + "`"));
             }

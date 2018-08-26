@@ -52,14 +52,12 @@ def main {
     printPerson(&henry)
 
     do {
-        def someVariable = 5
         printString("someNumber before: ")
         printInt(*someNumber)
         (*someNumber) |= 5
         printString("\nsomeNumber after: ")
         printInt(*someNumber)
         printChar("\n")
-        printInt(someVariable)
     }
 
     return

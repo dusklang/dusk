@@ -34,6 +34,9 @@ std::string Type::name() const {
         pattern(as<VoidTy>(_)) = [&] {
             stream << "void";
         },
+        pattern(as<NeverTy>(_)) = [&] {
+            stream << "never";
+        },
         pattern(as<BoolTy>(_)) = [&] {
             stream << "bool";
         },
@@ -64,22 +67,27 @@ Type* Type::pointeeType() const {
 
 bool Type::operator==(Type other) const {
     return match(data, other.data)(
-       pattern(as<IntTy>(arg), as<IntTy>(arg))
-           = [](auto lhs, auto rhs) { return lhs == rhs; },
-       pattern(as<TyVariable>(arg), as<TyVariable>(arg))
-           = [](auto lhs, auto rhs) { return lhs == rhs; },
-       pattern(as<StructTy>(arg), as<StructTy>(arg))
-           = [](auto lhs, auto rhs) { return lhs == rhs; },
-       pattern(as<VoidTy>(_), as<VoidTy>(_)) = [] { return true; },
-       pattern(as<BoolTy>(_), as<BoolTy>(_)) = [] { return true; },
-       pattern(as<FloatTy>(_), as<FloatTy>(_)) = [] { return true; },
-       pattern(as<DoubleTy>(_), as<DoubleTy>(_)) = [] { return true; },
-       pattern(as<ErrorTy>(_), as<ErrorTy>(_)) = [] { return true; },
-       pattern(as<PointerTy>(ds(arg)), as<PointerTy>(ds(arg))) = [](auto lhs, auto rhs) {
-           return *lhs == *rhs;
-       },
-       pattern(_, _) = [] { return false; }
+        pattern(as<IntTy>(arg), as<IntTy>(arg))
+            = [](auto lhs, auto rhs) { return lhs == rhs; },
+        pattern(as<TyVariable>(arg), as<TyVariable>(arg))
+            = [](auto lhs, auto rhs) { return lhs == rhs; },
+        pattern(as<StructTy>(arg), as<StructTy>(arg))
+            = [](auto lhs, auto rhs) { return lhs == rhs; },
+        pattern(as<VoidTy>(_), as<VoidTy>(_)) = [] { return true; },
+        pattern(as<NeverTy>(_), as<NeverTy>(_)) = [] { return true; },
+        pattern(as<BoolTy>(_), as<BoolTy>(_)) = [] { return true; },
+        pattern(as<FloatTy>(_), as<FloatTy>(_)) = [] { return true; },
+        pattern(as<DoubleTy>(_), as<DoubleTy>(_)) = [] { return true; },
+        pattern(as<ErrorTy>(_), as<ErrorTy>(_)) = [] { return true; },
+        pattern(as<PointerTy>(ds(arg)), as<PointerTy>(ds(arg))) = [](auto lhs, auto rhs) {
+            return *lhs == *rhs;
+        },
+        pattern(_, _) = [] { return false; }
     );
+}
+
+bool Type::isConvertibleTo(Type other) const {
+    return *this == other || *this == NeverTy();
 }
 
 Type Type::substituting(std::map<int, Type> const& solution) const {

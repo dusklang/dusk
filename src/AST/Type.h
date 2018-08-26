@@ -26,6 +26,7 @@ struct IntTy {
     _U_(8) _U_(16) _U_(32) _U_(64)
 };
 struct VoidTy {};
+struct NeverTy {};
 struct BoolTy {};
 struct FloatTy {};
 struct DoubleTy {};
@@ -66,7 +67,7 @@ struct TyVariable {
 };
 
 struct Type final {
-    typedef std::variant<IntTy, TyVariable, VoidTy, BoolTy, FloatTy, DoubleTy, ErrorTy, StructTy, PointerTy> Data;
+    typedef std::variant<IntTy, TyVariable, VoidTy, NeverTy, BoolTy, FloatTy, DoubleTy, ErrorTy, StructTy, PointerTy> Data;
 
     Data data;
     SourceRange range;
@@ -81,6 +82,7 @@ struct Type final {
     Type(PointerTy ty) : data(ty) {}
     Type(StructTy ty) : data(ty) {}
     Type(TyVariable ty) : data(ty) {}
+    Type(NeverTy ty) : data(ty) {}
 
     Type* pointeeType() const;
 
@@ -89,6 +91,8 @@ struct Type final {
 
     bool operator==(Type other) const;
     bool operator!=(Type other) const { return !(*this == other); }
+
+    bool isConvertibleTo(Type other) const;
 
     std::string name() const;
 
