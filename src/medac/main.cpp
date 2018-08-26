@@ -39,17 +39,21 @@ extern "C" {
 )~";
 std::string sourceCode = R"~(
 def main {
-    printPerson(&henry)
-    printPerson(&sally)
-    printPerson(&alexandra)
+    printPerson(henry)
+    printPerson(sally)
+    printPerson(alexandra)
 
-    var george = henry
-    george.name = "George"
-    george.age = 72 as u8
-    george.numberOfChildren = 1 as u8
-    printPerson(&george)
+    printPerson(
+        do {
+            var george = henry
+            george.name = "George"
+            george.age = 72 as u8
+            george.numberOfChildren = 1 as u8
+            george
+        }
+    )
 
-    printPerson(&henry)
+    printPerson(henry)
 
     do {
         printString("someNumber before: ")
@@ -82,7 +86,6 @@ def performFizzBuzz(end: i32) {
 }
 def printInt(val: i32) {
     if val == 0 {
-        (return)
         printChar("0")
     } else {
         printIntRecursively(val)
@@ -106,17 +109,17 @@ def printString(str: *i8) {
     }
     return
 }
-def printPerson(person: *Person) {
-    printString((*person).name)
+def printPerson(person: Person) {
+    printString(person.name)
     printString(" is ")
-    printInt((*person).age as i32)
+    printInt(person.age as i32)
     printString(" years old and has ")
-    if (*person).numberOfChildren == 0 as u8 {
+    if person.numberOfChildren == 0 as u8 {
         printString("no")
     } else {
-        printInt((*person).numberOfChildren as i32)
+        printInt(person.numberOfChildren as i32)
     }
-    if (*person).numberOfChildren == 1 as u8 {
+    if person.numberOfChildren == 1 as u8 {
         printString(" child.\n")
     } else {
         printString(" children.\n")
@@ -154,13 +157,14 @@ int main() {
 
     auto nodes = parser.parseTopLevel();
     tyChecker.visitTopLevel(nodes);
-    printer.visit(nodes, 0, std::cout);
+    //printer.visit(nodes, 0, std::cout);
 
     /*lirGen.visit(nodes);
     lirGen.printIR();*/
 
     LLVMGenerator llvmGen;
     llvmGen.visitTopLevel(nodes);
+    llvmGen.printIR();
     llvmGen.outputObjectFile("main.o");
 
     std::ofstream stdLibFile;

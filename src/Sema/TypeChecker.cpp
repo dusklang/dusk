@@ -407,16 +407,23 @@ void TypeChecker::visitWhileExpr(WhileExpr* expr) {
     visitScope(expr->thenScope);
 }
 void TypeChecker::visitDoExpr(DoExpr* expr) {
-    expr->type = VoidTy();
-    match(expr->value)(
-        pattern(as<Expr*>(arg)) = [&](auto innerExpr) {
+    expr->type = match(expr->value)(
+        pattern(as<Expr*>(arg)) = [&](auto innerExpr) -> Type {
             visitExpr(innerExpr);
             if(innerExpr->type == VoidTy() || innerExpr->type == NeverTy()) {
                 reportDiag(WARN("use of do expression on a non-value expression doesn't do anything")
                            .primaryRange(expr->doRange)
                            .range(innerExpr->totalRange(), "expression is of type `" + innerExpr->type.name() + "`"));
             }
+            return VoidTy();
         },
-        pattern(as<Scope*>(arg)) = [&](auto scope) { visitScope(scope); }
+        pattern(as<Scope*>(arg)) = [&](auto scope) -> Type {
+            visitScope(scope);
+            if(scope->terminalExpr) {
+                return scope->terminalExpr->type;
+            } else {
+                return VoidTy();
+            }
+        }
     );
 }

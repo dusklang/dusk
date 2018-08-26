@@ -1,5 +1,7 @@
 //  Copyright © 2018 Zach Wolfe. All rights reserved.
 
+#include <optional>
+
 #include "LLVMGenerator.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Support/raw_ostream.h"
@@ -135,94 +137,96 @@ CodeGenVal LLVMGenerator::visitDecl(Decl* decl) {
             declVals[param] = &funcArg;
         }
 
-        std::function<void(Scope*)> visitInnerScope = [&](Scope* scope) {
-            for(auto& node: scope->nodes) {
-                if(auto ifExpr = dynamic_cast<IfExpr*>(node)) {
-                    auto thenBlock = llvm::BasicBlock::Create(context, "if.then", function);
-                    llvm::BasicBlock* elseBlock = nullptr;
-                    if(ifExpr->elseNode) {
-                        elseBlock = llvm::BasicBlock::Create(context, "if.else", function);
-                    }
-                    auto endBlock = llvm::BasicBlock::Create(context, "if.end", function);
-                    builder.CreateCondBr(toDirect(visitExpr(ifExpr->condition)), thenBlock, ifExpr->elseNode ? elseBlock : endBlock);
-
-                    builder.SetInsertPoint(thenBlock);
-                    visitInnerScope(ifExpr->thenScope);
-                    // If the last node in thenScope is a return expression, we need to avoid creating
-                    // a branch after it because a basic block can only have one terminal instruction.
-                    // http://llvm.org/doxygen/classllvm_1_1BasicBlock.html
-                    if(ifExpr->thenScope->nodes.empty() ||
-                       !dynamic_cast<ReturnExpr*>(ifExpr->thenScope->nodes.back())) {
-                        builder.CreateBr(endBlock);
-                    }
-
-                    if(ifExpr->elseNode) {
-                        builder.SetInsertPoint(elseBlock);
-                        match(ifExpr->elseNode)(
-                            pattern(some(as<Scope*>(arg))) = [&](auto scope) {
-                                visitInnerScope(scope);
-                                // Same situation as above.
-                                if(scope->nodes.empty() ||
-                                   !dynamic_cast<ReturnExpr*>(scope->nodes.back())) {
-                                    builder.CreateBr(endBlock);
-                                }
-                            },
-                            pattern(some(as<IfExpr*>(arg))) = [&](auto expr) {
-                                // FIXME: HACK. Make visitInnerScope into regular visitXXX methods
-                                // so we can just call visitIfExpr on expr instead of allocating
-                                // a new Scope.
-                                visitInnerScope(new Scope(SourceRange(), { expr }));
-                            },
-                            pattern(_) = []{}
-                        );
-                    }
-
-                    builder.SetInsertPoint(endBlock);
-                } else if(auto whileExpr = dynamic_cast<WhileExpr*>(node)) {
-                    auto checkBlock = llvm::BasicBlock::Create(context, "while.check", function);
-                    auto thenBlock = llvm::BasicBlock::Create(context, "while.then", function);
-                    auto endBlock = llvm::BasicBlock::Create(context, "while.end", function);
-                    builder.CreateBr(checkBlock);
-
-                    builder.SetInsertPoint(checkBlock);
-                    builder.CreateCondBr(toDirect(visitExpr(whileExpr->condition)), thenBlock, endBlock);
-
-                    builder.SetInsertPoint(thenBlock);
-                    visitInnerScope(whileExpr->thenScope);
-                    // If the last node in thenScope is a return expression, we need to avoid creating
-                    // a branch after it because a basic block can only have one terminal instruction.
-                    // http://llvm.org/doxygen/classllvm_1_1BasicBlock.html
-                    if(whileExpr->thenScope->nodes.empty() ||
-                       !dynamic_cast<ReturnExpr*>(whileExpr->thenScope->nodes.back())) {
-                        builder.CreateBr(checkBlock);
-                    }
-
-                    builder.SetInsertPoint(endBlock);
-                } else if(auto doExpr = dynamic_cast<DoExpr*>(node)) {
-                    match(doExpr->value)(
-                        pattern(as<Expr*>(arg)) = [&](auto expr) { visitExpr(expr); },
-                        pattern(as<Scope*>(arg)) = [&](auto scope) { visitInnerScope(scope); }
-                    );
-                } else if(auto decl = dynamic_cast<Decl*>(node)) {
-                    visitDeclPrototype(decl);
-                    visitDecl(decl);
-                } else {
-                    visit(node);
-                }
-            }
-        };
-        visitInnerScope(decl->body());
+        functionStack.push(function);
+        visitScope(decl->body());
+        functionStack.pop();
 
         llvm::verifyFunction(*function);
 
         return DirectVal { function };
     }
 }
-void LLVMGenerator::visitStructDecl(StructDecl* decl) {}
-void LLVMGenerator::visitScope(Scope* scope) {
-    for(auto& node: scope->nodes) {
-        visit(node);
+CodeGenVal LLVMGenerator::visitStructDecl(StructDecl* decl) {
+    return DirectVal { nullptr };
+}
+CodeGenVal LLVMGenerator::visitScope(Scope* scope) {
+    for(auto node: scope->nodes) {
+        std::optional<CodeGenVal> codeGenVal;
+        if(auto ifExpr = dynamic_cast<IfExpr*>(node)) {
+            auto thenBlock = llvm::BasicBlock::Create(context, "if.then", functionStack.top());
+            llvm::BasicBlock* elseBlock = nullptr;
+            if(ifExpr->elseNode) {
+                elseBlock = llvm::BasicBlock::Create(context, "if.else", functionStack.top());
+            }
+            auto endBlock = llvm::BasicBlock::Create(context, "if.end", functionStack.top());
+            builder.CreateCondBr(toDirect(visitExpr(ifExpr->condition)), thenBlock, ifExpr->elseNode ? elseBlock : endBlock);
+
+            builder.SetInsertPoint(thenBlock);
+            visitScope(ifExpr->thenScope);
+            // If the last node in thenScope is a return expression, we need to avoid creating
+            // a branch after it because a basic block can only have one terminal instruction.
+            // http://llvm.org/doxygen/classllvm_1_1BasicBlock.html
+            if(ifExpr->thenScope->nodes.empty() ||
+               !dynamic_cast<ReturnExpr*>(ifExpr->thenScope->nodes.back())) {
+                builder.CreateBr(endBlock);
+            }
+
+            if(ifExpr->elseNode) {
+                builder.SetInsertPoint(elseBlock);
+                match(ifExpr->elseNode)(
+                    pattern(some(as<Scope*>(arg))) = [&](auto scope) {
+                        visitScope(scope);
+                        // Same situation as above.
+                        if(scope->nodes.empty() ||
+                           !dynamic_cast<ReturnExpr*>(scope->nodes.back())) {
+                            builder.CreateBr(endBlock);
+                        }
+                    },
+                    pattern(some(as<IfExpr*>(arg))) = [&](auto expr) {
+                        // FIXME: HACK. Make visitScope into regular visitXXX methods
+                        // so we can just call visitIfExpr on expr instead of allocating
+                        // a new Scope.
+                        visitScope(new Scope(SourceRange(), { expr }));
+                    },
+                    pattern(_) = []{}
+                );
+            }
+
+            builder.SetInsertPoint(endBlock);
+            codeGenVal = DirectVal { nullptr };
+        } else if(auto whileExpr = dynamic_cast<WhileExpr*>(node)) {
+            auto checkBlock = llvm::BasicBlock::Create(context, "while.check", functionStack.top());
+            auto thenBlock = llvm::BasicBlock::Create(context, "while.then", functionStack.top());
+            auto endBlock = llvm::BasicBlock::Create(context, "while.end", functionStack.top());
+            builder.CreateBr(checkBlock);
+
+            builder.SetInsertPoint(checkBlock);
+            builder.CreateCondBr(toDirect(visitExpr(whileExpr->condition)), thenBlock, endBlock);
+
+            builder.SetInsertPoint(thenBlock);
+            visitScope(whileExpr->thenScope);
+            // If the last node in thenScope is a return expression, we need to avoid creating
+            // a branch after it because a basic block can only have one terminal instruction.
+            // http://llvm.org/doxygen/classllvm_1_1BasicBlock.html
+            if(whileExpr->thenScope->nodes.empty() ||
+               !dynamic_cast<ReturnExpr*>(whileExpr->thenScope->nodes.back())) {
+                builder.CreateBr(checkBlock);
+            }
+
+            builder.SetInsertPoint(endBlock);
+
+            codeGenVal = DirectVal { nullptr };
+        } else if(auto decl = dynamic_cast<Decl*>(node)) {
+            visitDeclPrototype(decl);
+            codeGenVal = visitDecl(decl);
+        } else {
+            codeGenVal = visit(node);
+        }
+        if(scope->terminalExpr == node) {
+            return *codeGenVal;
+        }
     }
+    return DirectVal { nullptr };
 }
 CodeGenVal LLVMGenerator::visitIntegerLiteralExpr(IntegerLiteralExpr* expr) {
     return DirectVal { llvm::ConstantInt::get(context, llvm::APInt(32, std::stoi(expr->literal))) };
@@ -487,6 +491,17 @@ CodeGenVal LLVMGenerator::visitReturnExpr(ReturnExpr* expr) {
 }
 CodeGenVal LLVMGenerator::visitIfExpr(IfExpr* expr) {
     return DirectVal { nullptr };
+}
+CodeGenVal LLVMGenerator::visitDoExpr(DoExpr* expr) {
+    return match(expr->value)(
+        pattern(as<Expr*>(arg)) = [&](auto expr) -> CodeGenVal {
+            visitExpr(expr);
+            return DirectVal { nullptr };
+        },
+        pattern(as<Scope*>(arg)) = [&](auto scope) -> CodeGenVal {
+            return visitScope(scope);
+        }
+    );
 }
 void LLVMGenerator::outputObjectFile(char const* fileName) const {
     // Initialize the target registry etc.

@@ -5,6 +5,7 @@
 #include <iostream>
 #include <variant>
 #include <unordered_map>
+#include <stack>
 
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/IRBuilder.h"
@@ -40,15 +41,16 @@ struct IndirectVal final {
 typedef std::variant<DirectVal, IndirectVal> CodeGenVal;
 
 class LLVMGenerator final: public ASTVisitor<LLVMGenerator,
-                                             void,
                                              CodeGenVal,
-                                             void,
-                                             void,
+                                             CodeGenVal,
+                                             CodeGenVal,
+                                             CodeGenVal,
                                              CodeGenVal>
 {
     llvm::LLVMContext context;
     llvm::IRBuilder<> builder;
     std::unordered_map<Decl*, llvm::Value*> declVals;
+    std::stack<llvm::Function*> functionStack;
     llvm::Type* toLLVMTy(Type type);
     /// If `val` is direct, returns its underlying value unchanged.
     /// If `val` is indirect, generates a load instruction to get at the direct value.
@@ -71,8 +73,8 @@ public:
     /// Generates code for the scope of a computed declaration, or for the expression of a stored one.
     /// NOTE: `visitDeclPrototype` must be called on a declaration before this.
     CodeGenVal visitDecl(Decl* decl);
-    void visitScope(Scope* scope);
-    void visitStructDecl(StructDecl* decl);
+    CodeGenVal visitScope(Scope* scope);
+    CodeGenVal visitStructDecl(StructDecl* decl);
     CodeGenVal visitIntegerLiteralExpr(IntegerLiteralExpr* expr);
     CodeGenVal visitDecimalLiteralExpr(DecimalLiteralExpr* expr);
     CodeGenVal visitBooleanLiteralExpr(BooleanLiteralExpr* expr);
@@ -87,7 +89,7 @@ public:
     CodeGenVal visitReturnExpr(ReturnExpr* expr);
     CodeGenVal visitIfExpr(IfExpr* expr);
     CodeGenVal visitWhileExpr(WhileExpr* expr) { return DirectVal { nullptr }; }
-    CodeGenVal visitDoExpr(DoExpr* expr) { return DirectVal { nullptr }; }
+    CodeGenVal visitDoExpr(DoExpr* expr);
 
     void outputObjectFile(char const* fileName) const;
     void printIR() const;
