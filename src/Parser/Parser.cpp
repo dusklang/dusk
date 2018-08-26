@@ -368,6 +368,27 @@ WhileExpr* Parser::parseWhileExpr() {
                          thenScope);
 }
 
+DoExpr* Parser::parseDoExpr() {
+    if(cur().isNot(tok::kw_do)) return nullptr;
+    auto doTok = cur();
+    next();
+
+    if(auto expr = parseExpr()) {
+        return new DoExpr(doTok.getRange(),
+                          expr);
+    } else if(auto scope = parseScope()) {
+        return new DoExpr(doTok.getRange(),
+                          scope);
+    } else {
+        reportDiag(
+            ERR("expected expression or opening curly brace for do expression")
+            .primaryRange(cur().getRange())
+            .range(doTok.getRange(), "do expression begins here")
+        );
+        return nullptr;
+    }
+}
+
 DeclRefExpr* Parser::parseDeclRefExpr() {
     auto name = parseIdentifier();
     if(!name) return nullptr;
@@ -456,6 +477,8 @@ Expr* Parser::parseTerm() {
         return parseIfExpr();
     } else if(cur().is(tok::kw_while)) {
         return parseWhileExpr();
+    } else if(cur().is(tok::kw_do)) {
+        return parseDoExpr();
     } else if(auto intVal = parseIntegerLiteral()) {
         retVal = new IntegerLiteralExpr(intVal->getRange(), intVal->getText());
     } else if(auto decimalVal = parseDecimalLiteral()) {

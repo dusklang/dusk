@@ -38,6 +38,7 @@ EXPR_NODE(MemberRef)
 EXPR_NODE(Return)
 EXPR_NODE(If)
 EXPR_NODE(While)
+EXPR_NODE(Do)
 
 #undef EXPR_NODE
 #undef UNTYPED_AST_NODE

@@ -15,6 +15,7 @@
 struct Expr;
 struct IfExpr;
 struct WhileExpr;
+struct DoExpr;
 struct DeclRefExpr;
 struct Decl;
 
@@ -105,6 +106,7 @@ public:
     StructDecl* parseStructDecl();
     IfExpr* parseIfExpr();
     WhileExpr* parseWhileExpr();
+    DoExpr* parseDoExpr();
     DeclRefExpr* parseDeclRefExpr();
     Expr* parseExpr();
     Expr* parseTerm();

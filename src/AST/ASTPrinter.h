@@ -29,4 +29,5 @@ public:
     void visitReturnExpr(ReturnExpr* expr, int indentationLevel, std::ostream& stream);
     void visitIfExpr(IfExpr* expr, int indentationLevel, std::ostream& stream, bool isIfElse = false);
     void visitWhileExpr(WhileExpr* expr, int indentationLevel, std::ostream& stream);
+    void visitDoExpr(DoExpr* expr, int indentationLevel, std::ostream& stream);
 };

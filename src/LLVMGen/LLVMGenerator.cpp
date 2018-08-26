@@ -198,6 +198,11 @@ CodeGenVal LLVMGenerator::visitDecl(Decl* decl) {
                     }
 
                     builder.SetInsertPoint(endBlock);
+                } else if(auto doExpr = dynamic_cast<DoExpr*>(node)) {
+                    match(doExpr->value)(
+                        pattern(as<Expr*>(arg)) = [&](auto expr) { visitExpr(expr); },
+                        pattern(as<Scope*>(arg)) = [&](auto scope) { visitInnerScope(scope); }
+                    );
                 } else if(auto decl = dynamic_cast<Decl*>(node)) {
                     visitDeclPrototype(decl);
                     visitDecl(decl);

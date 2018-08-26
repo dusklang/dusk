@@ -47,4 +47,5 @@ public:
     void visitReturnExpr(ReturnExpr* expr);
     void visitIfExpr(IfExpr* expr);
     void visitWhileExpr(WhileExpr* expr);
+    void visitDoExpr(DoExpr* expr);
 };

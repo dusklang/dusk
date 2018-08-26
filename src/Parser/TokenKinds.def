@@ -35,6 +35,7 @@ TOKEN_KEYWORD(else, else)
 TOKEN_KEYWORD(while, while)
 TOKEN_KEYWORD(as, as)
 TOKEN_KEYWORD(struct, struct)
+TOKEN_KEYWORD(do, do)
 
 TOKEN_SYMBOL(colon, ":")
 TOKEN_SYMBOL(comma, ",")

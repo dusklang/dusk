@@ -5,6 +5,7 @@
 #include <string>
 #include <utility> // for std::pair
 #include <optional>
+#include <variant>
 
 #include "AST.h"
 #include "Type.h"
@@ -215,4 +216,14 @@ struct WhileExpr: public Expr {
     SourceRange totalRange() const override {
         return whileRange + condition->totalRange() + thenScope->range;
     }
+};
+
+struct DoExpr: public Expr {
+    SourceRange doRange;
+    std::variant<Expr*, Scope*> value;
+
+    DoExpr(SourceRange doRange, Expr* expression) : doRange(doRange), value(expression) {}
+    DoExpr(SourceRange doRange, Scope* scope) : doRange(doRange), value(scope) {}
+
+    SourceRange totalRange() const override;
 };

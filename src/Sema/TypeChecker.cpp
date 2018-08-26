@@ -8,6 +8,7 @@
 using namespace mpark::patterns;
 
 #define ERR(msg) Diagnostic(Diagnostic::Error, file, msg)
+#define WARN(msg) Diagnostic(Diagnostic::Warning, file, msg)
 
 void TypeChecker::visitDeclPrototype(Decl* decl) {
     switch(decl->protoState) {
@@ -152,7 +153,7 @@ void TypeChecker::visitScope(Scope* scope) {
             visitExpr(expr);
             // Disallow unused expressions.
             if(expr->type != VoidTy()) {
-                reportDiag(ERR("unused expression").primaryRange(expr->totalRange()));
+                reportDiag(ERR("unused expressions are not allowed. to execute a non-void expression for its side-effect, use do expr").primaryRange(expr->totalRange()));
             }
         } else if(auto decl = dynamic_cast<Decl*>(node)) {
             visitDecl(decl);
@@ -384,4 +385,18 @@ void TypeChecker::visitWhileExpr(WhileExpr* expr) {
                    .primaryRange(expr->condition->totalRange(), "expression is of type `" + expr->condition->type.name() + "`"));
     }
     visitScope(expr->thenScope);
+}
+void TypeChecker::visitDoExpr(DoExpr* expr) {
+    expr->type = VoidTy();
+    match(expr->value)(
+        pattern(as<Expr*>(arg)) = [&](auto innerExpr) {
+            visitExpr(innerExpr);
+            if(innerExpr->type == VoidTy()) {
+                reportDiag(WARN("use of do expression on a void expression doesn't do anything")
+                           .primaryRange(expr->doRange)
+                           .range(innerExpr->totalRange(), "expression is of type `" + innerExpr->type.name() + "`"));
+            }
+        },
+        pattern(as<Scope*>(arg)) = [&](auto scope) { visitScope(scope); }
+    );
 }

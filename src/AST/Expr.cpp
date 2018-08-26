@@ -23,3 +23,11 @@ SourceRange IfExpr::totalRange() const {
     );
     return range;
 }
+
+SourceRange DoExpr::totalRange() const {
+    return doRange +
+        match(value)(
+            pattern(as<Expr*>(arg)) = [&](auto expr) { return expr->totalRange(); },
+            pattern(as<Scope*>(arg)) = [&](auto scope) { return scope->range; }
+        );
+}

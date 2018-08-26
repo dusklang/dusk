@@ -255,3 +255,18 @@ void ASTPrinter::visitWhileExpr(WhileExpr* expr, int indentationLevel, std::ostr
     indent(indentationLevel, stream);
     stream << "}";
 }
+
+void ASTPrinter::visitDoExpr(DoExpr* expr, int indentationLevel, std::ostream& stream) {
+    indent(indentationLevel, stream);
+    stream << "do ";
+    match(expr->value)(
+        pattern(as<Expr*>(arg)) = [&](auto expr) { visitExpr(expr, 0, stream); },
+        pattern(as<Scope*>(arg)) = [&](auto scope) {
+            stream << "{\n";
+            visitScope(scope, indentationLevel, stream);
+            stream << '\n';
+            indent(indentationLevel, stream);
+            stream << '}';
+        }
+    );
+}
