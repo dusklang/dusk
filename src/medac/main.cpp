@@ -35,6 +35,7 @@ extern "C" {
         0
     };
     int32_t* someNumber = new int32_t;
+    bool alreadyPrintedHenry = false;
 }
 )~";
 std::string sourceCode = R"~(
@@ -43,15 +44,14 @@ def main {
     printPerson(sally)
     printPerson(alexandra)
 
-    printPerson(
-        do {
-            var george = henry
-            george.name = "George"
-            george.age = 72 as u8
-            george.numberOfChildren = 1 as u8
-            george
-        }
-    )
+    def george = do {
+        var george = henry
+        george.name = "George"
+        george.age = 72 as u8
+        george.numberOfChildren = 1 as u8
+        george
+    }
+    printPerson(george)
 
     printPerson(henry)
 
@@ -137,6 +137,7 @@ extern var henry: Person
 extern var sally: Person
 extern var alexandra: Person
 extern var someNumber: *i32
+extern var alreadyPrintedHenry: bool
 extern def putchar(_: i32): void
 
 def printChar(character: i8) {

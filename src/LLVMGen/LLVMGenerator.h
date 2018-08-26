@@ -88,7 +88,7 @@ public:
 
     CodeGenVal visitReturnExpr(ReturnExpr* expr);
     CodeGenVal visitIfExpr(IfExpr* expr);
-    CodeGenVal visitWhileExpr(WhileExpr* expr) { return DirectVal { nullptr }; }
+    CodeGenVal visitWhileExpr(WhileExpr* expr);
     CodeGenVal visitDoExpr(DoExpr* expr);
 
     void outputObjectFile(char const* fileName) const;
