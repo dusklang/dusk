@@ -100,20 +100,39 @@ def printString(str: *i8) {
         curChar += 1
     }
 }
+def intToString(val: i32): *i8 {
+    // Obviously incomplete.
+    return "420"
+}
 def printPerson(person: Person) {
-    printString(concat(person.name, " is "))
-    printInt(person.age as i32)
-    printString(" years old and has ")
-    if person.numberOfChildren == 0 as u8 {
-        printString("no")
-    } else {
-        printInt(person.numberOfChildren as i32)
-    }
-    if person.numberOfChildren == 1 as u8 {
-        printString(" child.\n")
-    } else {
-        printString(" children.\n")
-    }
+    printString(
+        concat(
+            concat(
+                concat(
+                    concat(
+                        concat(
+                            person.name,
+                            " is "
+                        ),
+                        intToString(person.age as i32)
+                    ),
+                    " years old and has "
+                ),
+                if person.numberOfChildren == 0 as u8 {
+                    "no"
+                } else if person.numberOfChildren == 1 as u8 {
+                    "one"
+                } else {
+                    intToString(person.numberOfChildren as i32)
+                }
+            ),
+            if person.numberOfChildren == 1 as u8 {
+                " child.\n"
+            } else {
+                " children.\n"
+            }
+        )
+    )
 }
 
 def lengthOfString(str: *i8): i32 {

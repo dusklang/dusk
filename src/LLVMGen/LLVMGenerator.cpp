@@ -164,14 +164,13 @@ CodeGenVal LLVMGenerator::visitStructDecl(StructDecl* decl) {
 }
 CodeGenVal LLVMGenerator::visitScope(Scope* scope) {
     for(auto node: scope->nodes) {
-        CodeGenVal nodeCodeGenVal = [&] {
-            if(auto decl = dynamic_cast<Decl*>(node)) {
-                visitDeclPrototype(decl);
-                return visitDecl(decl);
-            } else {
-                return visit(node);
-            }
-        }();
+        CodeGenVal nodeCodeGenVal = DirectVal { nullptr };
+        if(auto decl = dynamic_cast<Decl*>(node)) {
+            visitDeclPrototype(decl);
+            nodeCodeGenVal = visitDecl(decl);
+        } else {
+            nodeCodeGenVal = visit(node);
+        }
         if(scope->terminalExpr == node) {
             return nodeCodeGenVal;
         }
@@ -418,7 +417,7 @@ CodeGenVal LLVMGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
             }
         }
 
-        return DirectVal { builder.CreateCall(callee, args, "calltmp") };
+        return DirectVal { builder.CreateCall(callee, args) };
     } else {
         if(expr->decl->isVar) {
             return IndirectVal { referencedVal };
@@ -452,38 +451,70 @@ CodeGenVal LLVMGenerator::visitIfExpr(IfExpr* expr) {
     builder.CreateCondBr(toDirect(visitExpr(expr->condition)), thenBlock, expr->elseNode ? elseBlock : endBlock);
 
     builder.SetInsertPoint(thenBlock);
-    visitScope(expr->thenScope);
-    // If the last node in thenScope is a return expression, we need to avoid creating
-    // a branch after it because a basic block can only have one terminal instruction.
-    // http://llvm.org/doxygen/classllvm_1_1BasicBlock.html
-    if(expr->thenScope->nodes.empty() ||
-       !dynamic_cast<ReturnExpr*>(expr->thenScope->nodes.back())) {
+    auto thenVal = visitScope(expr->thenScope);
+    thenBlock = builder.GetInsertBlock();
+    Type thenType = VoidTy();
+    if(auto terminalExpr = expr->thenScope->terminalExpr) {
+        thenType = terminalExpr->type;
+        if(!dynamic_cast<ReturnExpr*>(expr->thenScope->terminalExpr)) {
+            // If we called a function that never returns (which technically doesn't exist yet),
+            // terminate the block with an unreachable.
+            if(terminalExpr->type == NeverTy()) {
+                builder.CreateUnreachable();
+            } else {
+                builder.CreateBr(endBlock);
+            }
+        }
+    } else {
         builder.CreateBr(endBlock);
     }
 
+    Type elseType = VoidTy();
+    CodeGenVal elseVal = DirectVal { nullptr };
     if(expr->elseNode) {
         builder.SetInsertPoint(elseBlock);
         match(expr->elseNode)(
             pattern(some(as<Scope*>(arg))) = [&](auto scope) {
-                visitScope(scope);
-                // Same situation as above.
-                if(scope->nodes.empty() ||
-                   !dynamic_cast<ReturnExpr*>(scope->nodes.back())) {
+                elseVal = visitScope(scope);
+                elseBlock = builder.GetInsertBlock();
+                if(auto terminalExpr = scope->terminalExpr) {
+                    elseType = terminalExpr->type;
+                    if(!dynamic_cast<ReturnExpr*>(terminalExpr)) {
+                        // If we called a function that never returns (which technically doesn't exist yet),
+                        // terminate the block with an unreachable.
+                        if(terminalExpr->type == NeverTy()) {
+                            builder.CreateUnreachable();
+                        } else {
+                            builder.CreateBr(endBlock);
+                        }
+                    }
+                } else {
                     builder.CreateBr(endBlock);
                 }
             },
             pattern(some(as<IfExpr*>(arg))) = [&](auto expr) {
-                // FIXME: HACK. Make visitScope into regular visitXXX methods
-                // so we can just call visitIfExpr on expr instead of allocating
-                // a new Scope.
-                visitScope(new Scope(SourceRange(), { expr }));
+                elseVal = visitIfExpr(expr);
+                elseBlock = builder.GetInsertBlock();
+                elseType = expr->type;
+                builder.CreateBr(endBlock);
             },
-            pattern(_) = []{}
+            pattern(none) = []{}
         );
     }
 
     builder.SetInsertPoint(endBlock);
-    return DirectVal { nullptr };
+    if(expr->type.isConvertibleTo(VoidTy())) {
+        return DirectVal { nullptr };
+    } else {
+        llvm::PHINode* phi = builder.CreatePHI(toLLVMTy(expr->type), 2);
+        if(!thenType.isConvertibleTo(VoidTy())) {
+            phi->addIncoming(toDirect(thenVal), thenBlock);
+        }
+        if(!elseType.isConvertibleTo(VoidTy())) {
+            phi->addIncoming(toDirect(elseVal), elseBlock);
+        }
+        return DirectVal { phi };
+    }
 }
 CodeGenVal LLVMGenerator::visitWhileExpr(WhileExpr* expr) {
     auto checkBlock = llvm::BasicBlock::Create(context, "while.check", functionStack.top());

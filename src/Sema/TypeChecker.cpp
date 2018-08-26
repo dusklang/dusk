@@ -1,5 +1,6 @@
 //  Copyright © 2018 Zach Wolfe. All rights reserved.
 
+#include <utility>
 #include "TypeChecker.h"
 #include "General/Array.h"
 
@@ -403,18 +404,38 @@ void TypeChecker::visitReturnExpr(ReturnExpr* expr) {
     }
 }
 void TypeChecker::visitIfExpr(IfExpr* expr) {
-    expr->type = VoidTy();
     visitExpr(expr->condition);
     if(expr->condition->type != BoolTy()) {
         reportDiag(ERR("conditions in if expressions must be of type `bool`")
                    .primaryRange(expr->condition->totalRange(), "expression is of type `" + expr->condition->type.name() + "`"));
     }
     visitScope(expr->thenScope);
-    match(expr->elseNode)(
-        pattern(some(as<Scope*>(arg))) = [&](auto scope) { visitScope(scope); },
-        pattern(some(as<IfExpr*>(arg))) = [&](auto expr) { visitIfExpr(expr); },
-        pattern(_) = []{}
+    auto typeOfScope = [](Scope* scope) -> Type {
+        Type ty = VoidTy();
+        if(scope->terminalExpr) ty = scope->terminalExpr->type;
+        return ty;
+    };
+
+    Type thenTy = typeOfScope(expr->thenScope);
+    Type elseTy = match(expr->elseNode)(
+        pattern(some(as<Scope*>(arg))) = [&](auto scope) {
+            visitScope(scope);
+            return typeOfScope(scope);
+        },
+        pattern(some(as<IfExpr*>(arg))) = [&](auto expr) {
+            visitIfExpr(expr);
+            return expr->type;
+        },
+        pattern(none) = []() -> Type { return VoidTy(); }
     );
+    if(thenTy.isConvertibleTo(elseTy)) {
+        expr->type = elseTy;
+    } else if(elseTy.isConvertibleTo(thenTy)) {
+        expr->type = thenTy;
+    } else {
+        // FIXME: We should have a way better error message here.
+        reportDiag(ERR("if expression branches have incompatible types").primaryRange(expr->ifRange));
+    }
 }
 void TypeChecker::visitWhileExpr(WhileExpr* expr) {
     expr->type = VoidTy();
