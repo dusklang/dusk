@@ -7,32 +7,29 @@
 #include <string>
 
 class LIRGenerator final: public ASTVisitor<LIRGenerator,
-                                            void,
-                                            lir::Reg,
-                                            void,
-                                            void,
-                                            lir::Reg>
+                                            lir::Value*,
+                                            lir::Value*,
+                                            lir::Value*,
+                                            lir::Value*,
+                                            lir::Value*>
 {
-    std::vector<lir::Stmt*> statements;
-    std::map<std::string, lir::Stmt*> entryPoints;
-
 public:
-    lir::Reg visitDecl(Decl* decl);
-    void visitScope(Scope* scope);
-    void visitStructDecl(StructDecl* decl);
-    lir::Reg visitIntegerLiteralExpr(IntegerLiteralExpr* expr);
-    lir::Reg visitDecimalLiteralExpr(DecimalLiteralExpr* expr);
-    lir::Reg visitBooleanLiteralExpr(BooleanLiteralExpr* expr);
-    lir::Reg visitCharLiteralExpr(CharLiteralExpr* expr);
-    lir::Reg visitStringLiteralExpr(StringLiteralExpr* expr);
-    lir::Reg visitPreOpExpr(PreOpExpr* expr);
-    lir::Reg visitBinOpExpr(BinOpExpr* expr);
-    lir::Reg visitCastExpr(CastExpr* expr);
-    lir::Reg visitDeclRefExpr(DeclRefExpr* expr);
-    lir::Reg visitMemberRefExpr(MemberRefExpr* expr);
+    lir::Value* visitDecl(Decl* decl);
+    lir::Value* visitScope(Scope* scope);
+    lir::Value* visitStructDecl(StructDecl* decl);
+    lir::Value* visitIntegerLiteralExpr(IntegerLiteralExpr* expr);
+    lir::Value* visitDecimalLiteralExpr(DecimalLiteralExpr* expr);
+    lir::Value* visitBooleanLiteralExpr(BooleanLiteralExpr* expr);
+    lir::Value* visitCharLiteralExpr(CharLiteralExpr* expr);
+    lir::Value* visitStringLiteralExpr(StringLiteralExpr* expr);
+    lir::Value* visitPreOpExpr(PreOpExpr* expr);
+    lir::Value* visitBinOpExpr(BinOpExpr* expr);
+    lir::Value* visitCastExpr(CastExpr* expr);
+    lir::Value* visitDeclRefExpr(DeclRefExpr* expr);
+    lir::Value* visitMemberRefExpr(MemberRefExpr* expr);
 
-    lir::Reg visitReturnExpr(ReturnExpr* expr);
-    lir::Reg visitIfExpr(IfExpr* expr);
-    lir::Reg visitWhileExpr(WhileExpr* expr) { return -1; }
+    lir::Value* visitReturnExpr(ReturnExpr* expr);
+    lir::Value* visitIfExpr(IfExpr* expr);
+    lir::Value* visitWhileExpr(WhileExpr* expr);
     void printIR() const;
 };

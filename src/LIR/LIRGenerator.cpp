@@ -5,51 +5,53 @@
 
 using namespace mpark::patterns;
 
-lir::Reg LIRGenerator::visitDecl(Decl* decl) {
-    return -1;
+lir::Value* LIRGenerator::visitDecl(Decl* decl) {
+    return nullptr;
 }
-void LIRGenerator::visitScope(Scope* scope) { }
-void LIRGenerator::visitStructDecl(StructDecl* decl) { }
-lir::Reg LIRGenerator::visitIntegerLiteralExpr(IntegerLiteralExpr* expr) {
-    return -1;
+lir::Value* LIRGenerator::visitScope(Scope* scope) {
+    return nullptr;
 }
-lir::Reg LIRGenerator::visitDecimalLiteralExpr(DecimalLiteralExpr* expr) {
-    return -1;
+lir::Value* LIRGenerator::visitStructDecl(StructDecl* decl) {
+    return nullptr;
 }
-lir::Reg LIRGenerator::visitBooleanLiteralExpr(BooleanLiteralExpr* expr) {
-    return -1;
+lir::Value* LIRGenerator::visitIntegerLiteralExpr(IntegerLiteralExpr* expr) {
+    return nullptr;
 }
-lir::Reg LIRGenerator::visitCharLiteralExpr(CharLiteralExpr* expr) {
-    return -1;
+lir::Value* LIRGenerator::visitDecimalLiteralExpr(DecimalLiteralExpr* expr) {
+    return nullptr;
 }
-lir::Reg LIRGenerator::visitStringLiteralExpr(StringLiteralExpr* expr) {
-    return -1;
+lir::Value* LIRGenerator::visitBooleanLiteralExpr(BooleanLiteralExpr* expr) {
+    return nullptr;
 }
-lir::Reg LIRGenerator::visitPreOpExpr(PreOpExpr* expr) {
-    return -1;
+lir::Value* LIRGenerator::visitCharLiteralExpr(CharLiteralExpr* expr) {
+    return nullptr;
 }
-lir::Reg LIRGenerator::visitBinOpExpr(BinOpExpr* expr) {
-    return -1;
+lir::Value* LIRGenerator::visitStringLiteralExpr(StringLiteralExpr* expr) {
+    return nullptr;
 }
-lir::Reg LIRGenerator::visitCastExpr(CastExpr* expr) {
-    return -1;
+lir::Value* LIRGenerator::visitPreOpExpr(PreOpExpr* expr) {
+    return nullptr;
 }
-lir::Reg LIRGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
-    return -1;
+lir::Value* LIRGenerator::visitBinOpExpr(BinOpExpr* expr) {
+    return nullptr;
 }
-lir::Reg LIRGenerator::visitMemberRefExpr(MemberRefExpr* expr) {
-    return -1;
+lir::Value* LIRGenerator::visitCastExpr(CastExpr* expr) {
+    return nullptr;
+}
+lir::Value* LIRGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
+    return nullptr;
+}
+lir::Value* LIRGenerator::visitMemberRefExpr(MemberRefExpr* expr) {
+    return nullptr;
+}
+lir::Value* LIRGenerator::visitReturnExpr(ReturnExpr* expr) {
+    return nullptr;
+}
+lir::Value* LIRGenerator::visitIfExpr(IfExpr* expr) {
+    return nullptr;
+}
+lir::Value* LIRGenerator::visitWhileExpr(WhileExpr* expr) {
+    return nullptr;
 }
 
-lir::Reg LIRGenerator::visitReturnExpr(ReturnExpr* expr) {
-    return -1;
-}
-lir::Reg LIRGenerator::visitIfExpr(IfExpr* expr) {
-    return -1;
-}
-
-void LIRGenerator::printIR() const {
-    for(auto& entryPoint: entryPoints) {
-        std::cout << entryPoint.first << ":\n\n";
-    }
-}
+void LIRGenerator::printIR() const {}
