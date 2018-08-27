@@ -10,6 +10,7 @@
 #include "AST.h"
 #include "Type.h"
 #include "Ident.h"
+#include "General/BigDecimal.h"
 
 struct Decl;
 
@@ -25,17 +26,17 @@ struct Expr: public ASTNode {
 
 struct IntegerLiteralExpr final: public Expr {
     SourceRange range;
-    std::string literal;
+    BigDecimal literal;
 
-    IntegerLiteralExpr(SourceRange range, std::string const& literal) : range(range), literal(literal) {}
+    IntegerLiteralExpr(SourceRange range, BigDecimal literal) : range(range), literal(literal) {}
 
     SourceRange totalRange() const override { return range; }
 };
 
 struct DecimalLiteralExpr final: public Expr {
     SourceRange range;
-    std::string literal;
-    DecimalLiteralExpr(SourceRange range, std::string const& literal) : range(range), literal(literal) {}
+    BigDecimal literal;
+    DecimalLiteralExpr(SourceRange range, BigDecimal literal) : range(range), literal(literal) {}
 
     SourceRange totalRange() const override { return range; }
 };

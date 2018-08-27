@@ -67,12 +67,12 @@ void ASTPrinter::visitScope(Scope* scope, int indentationLevel, std::ostream& st
 
 void ASTPrinter::visitIntegerLiteralExpr(IntegerLiteralExpr* expr, int indentationLevel, std::ostream& stream) {
     indent(indentationLevel, stream);
-    stream << expr->literal;
+    stream << expr->literal.getString();
 }
 
 void ASTPrinter::visitDecimalLiteralExpr(DecimalLiteralExpr* expr, int indentationLevel, std::ostream& stream) {
     indent(indentationLevel, stream);
-    stream << expr->literal;
+    stream << expr->literal.getString();
 }
 
 void ASTPrinter::visitBooleanLiteralExpr(BooleanLiteralExpr* expr, int indentationLevel, std::ostream& stream) {
