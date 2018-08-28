@@ -480,9 +480,9 @@ Expr* Parser::parseTerm() {
     } else if(cur().is(tok::kw_do)) {
         return parseDoExpr();
     } else if(auto intVal = parseIntegerLiteral()) {
-        retVal = new IntegerLiteralExpr(intVal->getRange(), BigDecimal(intVal->getText()));
+        retVal = new IntegerLiteralExpr(intVal->getRange(), std::stoull(intVal->getText()));
     } else if(auto decimalVal = parseDecimalLiteral()) {
-        retVal = new DecimalLiteralExpr(decimalVal->getRange(), BigDecimal(decimalVal->getText()));
+        retVal = new DecimalLiteralExpr(decimalVal->getRange(), decimalVal->getText());
     } else if(auto charVal = parseCharLiteral()) {
         retVal = new CharLiteralExpr(charVal->getRange(), charVal->getText()[0]);
     } else if(auto stringVal = parseStringLiteral()) {

@@ -178,10 +178,10 @@ CodeGenVal LLVMGenerator::visitScope(Scope* scope) {
     return DirectVal { nullptr };
 }
 CodeGenVal LLVMGenerator::visitIntegerLiteralExpr(IntegerLiteralExpr* expr) {
-    return DirectVal { llvm::ConstantInt::get(context, llvm::APInt(32, std::stoi(expr->literal.getString()))) };
+    return DirectVal { llvm::ConstantInt::get(context, llvm::APInt(32, expr->literal)) };
 }
 CodeGenVal LLVMGenerator::visitDecimalLiteralExpr(DecimalLiteralExpr* expr) {
-    return DirectVal { llvm::ConstantFP::get(context, llvm::APFloat(std::stod(expr->literal.getString()))) };
+    return DirectVal { llvm::ConstantFP::get(context, llvm::APFloat(std::stod(expr->literal))) };
 }
 CodeGenVal LLVMGenerator::visitBooleanLiteralExpr(BooleanLiteralExpr* expr) {
     return DirectVal { llvm::ConstantInt::get(context, llvm::APInt(1, expr->literal ? -1 : 0)) };
