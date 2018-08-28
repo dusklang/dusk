@@ -50,7 +50,7 @@ llvm::Value* LLVMGenerator::toIndirect(CodeGenVal val) {
 }
 llvm::Type* LLVMGenerator::toLLVMTy(Type type) {
     return match(type.data)(
-        pattern(as<TyVariable>(_)) = []() -> llvm::Type* {
+        pattern(as<IntLitVariable>(_)) = []() -> llvm::Type* {
             panic("Encountered type variable");
             return nullptr;
         },

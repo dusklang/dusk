@@ -88,7 +88,7 @@ constexpr void printlnImpl(char const* str, Arg arg, Args... args) {
 #define panic(str, ...) { \
 	std::cout << "PANIC: "; \
     println(str, ##__VA_ARGS__); \
-	exit(1); \
+	abort(); \
 }
 
 inline void assertImpl(bool expr, char const* msg, char const* str) {

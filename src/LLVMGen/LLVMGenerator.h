@@ -38,7 +38,7 @@ struct IndirectVal final {
 ///  - `visitBinOpExpr` will also call `toIndirect` on its left operand so that it can store the result
 ///    of the addition back in memory
 ///  - Since `foo` is already an indirect value, `toIndirect` doesn't need to do anything special
-typedef std::variant<DirectVal, IndirectVal> CodeGenVal;
+using CodeGenVal = std::variant<DirectVal, IndirectVal>;
 
 class LLVMGenerator final: public ASTVisitor<LLVMGenerator,
                                              CodeGenVal,

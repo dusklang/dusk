@@ -16,14 +16,8 @@ PointerTy PointerTy::get(Type pointedTy) {
 std::string Type::name() const {
     std::ostringstream stream;
     match(data)(
-        pattern(as<TyVariable>(arg)) = [&](auto typeVariable) {
-            stream << "<T" << typeVariable.num;
-            switch(typeVariable.kind) {
-                case TyVariable::Integer: stream << ": Integer"; break;
-                case TyVariable::Decimal: stream << ": Decimal"; break;
-                default: break;
-            }
-            stream << '>';
+        pattern(as<IntLitVariable>(arg)) = [&](auto typeVariable) {
+            stream << "<INT LITERAL TYPE VARIABLE>";
         },
         pattern(as<IntTy>(arg)) = [&](auto properties) {
             stream << (properties.signedness == Signedness::Signed ? "i" : "u") << properties.bitWidth;
@@ -69,8 +63,6 @@ bool Type::operator==(Type other) const {
     return match(data, other.data)(
         pattern(as<IntTy>(arg), as<IntTy>(arg))
             = [](auto lhs, auto rhs) { return lhs == rhs; },
-        pattern(as<TyVariable>(arg), as<TyVariable>(arg))
-            = [](auto lhs, auto rhs) { return lhs == rhs; },
         pattern(as<StructTy>(arg), as<StructTy>(arg))
             = [](auto lhs, auto rhs) { return lhs == rhs; },
         pattern(as<VoidTy>(_), as<VoidTy>(_)) = [] { return true; },
@@ -79,6 +71,7 @@ bool Type::operator==(Type other) const {
         pattern(as<FloatTy>(_), as<FloatTy>(_)) = [] { return true; },
         pattern(as<DoubleTy>(_), as<DoubleTy>(_)) = [] { return true; },
         pattern(as<ErrorTy>(_), as<ErrorTy>(_)) = [] { return true; },
+        pattern(as<IntLitVariable>(_), as<IntLitVariable>(_)) = [] { return true; },
         pattern(as<PointerTy>(ds(arg)), as<PointerTy>(ds(arg))) = [](auto lhs, auto rhs) {
             return *lhs == *rhs;
         },
@@ -88,18 +81,4 @@ bool Type::operator==(Type other) const {
 
 bool Type::isConvertibleTo(Type other) const {
     return *this == other || *this == NeverTy();
-}
-
-Type Type::substituting(std::map<int, Type> const& solution) const {
-    return match(data)(
-       pattern(as<TyVariable>(arg)) = [&](auto var) -> Type {
-           for(auto const& solution: solution) {
-               if(solution.first == var.num) {
-                   return solution.second;
-               }
-           }
-           return TyVariable::get(var.num, var.kind);
-       },
-       pattern(_) = [&] { return *this; }
-    );
 }

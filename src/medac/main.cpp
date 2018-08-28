@@ -100,9 +100,28 @@ def printString(str: *i8) {
         curChar += 1
     }
 }
+def charToString(val: i8): *i8 {
+    def buf = malloc(2 as u32) as *i8
+    (*buf) = (val)
+    (*(buf + 1)) = 0 as i8
+    buf
+}
 def intToString(val: i32): *i8 {
-    // Obviously incomplete.
-    return "420"
+    if val == 0 {
+        charToString("0")
+    } else {
+        intToStringRecursive(val)
+    }
+}
+def intToStringRecursive(val: i32): *i8 {
+    if val == 0 {
+        ""
+    } else {
+        concat(
+            intToStringRecursive(val / 10),
+            charToString("0" + (val % 10) as i8)
+        )
+    }
 }
 def printPerson(person: Person) {
     printString(
@@ -111,8 +130,15 @@ def printPerson(person: Person) {
                 concat(
                     concat(
                         concat(
-                            person.name,
-                            " is "
+                            concat(
+                                person.name,
+                                " is "
+                            ),
+                            if stringEquals(person.name, "Henry") && alreadyPrintedHenry {
+                                "still "
+                            } else {
+                                ""
+                            }
                         ),
                         intToString(person.age as i32)
                     ),
@@ -133,6 +159,9 @@ def printPerson(person: Person) {
             }
         )
     )
+    if stringEquals(person.name, "Henry") {
+        alreadyPrintedHenry = true
+    }
 }
 
 def lengthOfString(str: *i8): i32 {
@@ -143,6 +172,17 @@ def lengthOfString(str: *i8): i32 {
         curChar += 1
     }
     len
+}
+def stringEquals(lhs: *i8, rhs: *i8): bool {
+    var lhsChar = lhs
+    var rhsChar = rhs
+
+    while *lhsChar != 0 as i8 && *rhsChar != 0 as i8 {
+        if *lhsChar != *rhsChar { return false }
+        lhsChar += 1
+        rhsChar += 1
+    }
+    return true
 }
 def concat(l: *i8, r: *i8): *i8 {
     def buf = do {

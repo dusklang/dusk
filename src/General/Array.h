@@ -8,10 +8,10 @@ template<typename T>
 struct ReverseContainer {
     T& contained;
 
-    typedef typename T::reverse_iterator iterator;
-    typedef typename T::const_reverse_iterator const_iterator;
-    typedef typename T::iterator reverse_iterator;
-    typedef typename T::const_iterator const_reverse_iterator;
+    using iterator = typename T::reverse_iterator;
+    using const_iterator = typename T::const_reverse_iterator;
+    using reverse_iterator = typename T::iterator;
+    using const_reverse_iterator = typename T::const_iterator;
 
     iterator begin() { return contained.rbegin(); }
     iterator end() { return contained.rend(); }

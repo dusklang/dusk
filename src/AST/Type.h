@@ -50,24 +50,10 @@ struct PointerTy {
     Type* pointedTy;
     static PointerTy get(Type pointedTy);
 };
-struct TyVariable {
-    enum Kind {
-        General, Integer, Decimal
-    };
-    uint32_t num;
-    Kind kind;
-
-    bool operator==(TyVariable const& other) const {
-        return num == other.num && kind == other.kind;
-    }
-
-    static TyVariable get(uint32_t num, Kind kind = General) {
-        return TyVariable { num, kind };
-    }
-};
+struct IntLitVariable {};
 
 struct Type final {
-    typedef std::variant<IntTy, TyVariable, VoidTy, NeverTy, BoolTy, FloatTy, DoubleTy, ErrorTy, StructTy, PointerTy> Data;
+    using Data = std::variant<IntTy, IntLitVariable, VoidTy, NeverTy, BoolTy, FloatTy, DoubleTy, ErrorTy, StructTy, PointerTy>;
 
     Data data;
     SourceRange range;
@@ -81,7 +67,7 @@ struct Type final {
     Type(DoubleTy ty) : data(ty) {}
     Type(PointerTy ty) : data(ty) {}
     Type(StructTy ty) : data(ty) {}
-    Type(TyVariable ty) : data(ty) {}
+    Type(IntLitVariable ty) : data(ty) {}
     Type(NeverTy ty) : data(ty) {}
 
     Type* pointeeType() const;
@@ -93,6 +79,7 @@ struct Type final {
     bool operator!=(Type other) const { return !(*this == other); }
 
     bool isConvertibleTo(Type other) const;
+    bool isVariable() const { return std::holds_alternative<IntLitVariable>(data); }
 
     std::string name() const;
 
