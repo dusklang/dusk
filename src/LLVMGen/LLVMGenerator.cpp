@@ -131,6 +131,7 @@ CodeGenVal LLVMGenerator::visitDecl(Decl* decl) {
         if(!decl->hasDefinition()) return DirectVal { function };
 
         llvm::BasicBlock* block = llvm::BasicBlock::Create(context, "entry", function);
+        auto previousPoint = builder.GetInsertBlock();
         builder.SetInsertPoint(block);
 
         for(auto [param, funcArg]: zip(decl->paramList, function->args())) {
@@ -140,21 +141,13 @@ CodeGenVal LLVMGenerator::visitDecl(Decl* decl) {
         functionStack.push(function);
         /*boyd*/ auto body /*and glass*/ = decl->body();
         auto scopeVal = visitScope(body);
-        auto terminalExpr = body->terminalExpr;
-        if(!terminalExpr) {
-            builder.CreateRetVoid();
-        } else if(!dynamic_cast<ReturnExpr*>(terminalExpr)) {
-            // If we called a function that never returns (which technically doesn't exist yet),
-            // terminate the block with an unreachable.
-            if(terminalExpr->type == NeverTy()) {
-                builder.CreateUnreachable();
-            } else {
-                builder.CreateRet(toDirect(scopeVal));
-            }
-        }
+        handleTerminal(decl->body(), [&] { builder.CreateRet(toDirect(scopeVal)); }, [&] { builder.CreateRetVoid(); });
+
         functionStack.pop();
 
         llvm::verifyFunction(*function);
+
+        builder.SetInsertPoint(previousPoint);
 
         return DirectVal { function };
     }
@@ -441,6 +434,23 @@ CodeGenVal LLVMGenerator::visitReturnExpr(ReturnExpr* expr) {
         return DirectVal { builder.CreateRet(toDirect(visitExpr(expr->value))) };
     }
 }
+
+template<typename HasValue, typename HasNoValue>
+void LLVMGenerator::handleTerminal(Scope* scope, HasValue hasValue, HasNoValue hasNoValue) {
+    if(auto terminalExpr = scope->terminalExpr) {
+        if(!dynamic_cast<ReturnExpr*>(scope->terminalExpr)) {
+            // If we called a function that never returns (which technically doesn't exist yet),
+            // terminate the block with an unreachable.
+            if(terminalExpr->type == NeverTy()) {
+                builder.CreateUnreachable();
+            } else {
+                hasValue();
+            }
+        }
+    } else {
+        hasNoValue();
+    }
+}
 CodeGenVal LLVMGenerator::visitIfExpr(IfExpr* expr) {
     auto thenBlock = llvm::BasicBlock::Create(context, "if.then", functionStack.top());
     llvm::BasicBlock* elseBlock = nullptr;
@@ -453,21 +463,8 @@ CodeGenVal LLVMGenerator::visitIfExpr(IfExpr* expr) {
     builder.SetInsertPoint(thenBlock);
     auto thenVal = visitScope(expr->thenScope);
     thenBlock = builder.GetInsertBlock();
-    Type thenType = VoidTy();
-    if(auto terminalExpr = expr->thenScope->terminalExpr) {
-        thenType = terminalExpr->type;
-        if(!dynamic_cast<ReturnExpr*>(expr->thenScope->terminalExpr)) {
-            // If we called a function that never returns (which technically doesn't exist yet),
-            // terminate the block with an unreachable.
-            if(terminalExpr->type == NeverTy()) {
-                builder.CreateUnreachable();
-            } else {
-                builder.CreateBr(endBlock);
-            }
-        }
-    } else {
-        builder.CreateBr(endBlock);
-    }
+    auto thenType = expr->thenScope->terminalType();
+    handleTerminal(expr->thenScope, [&] { builder.CreateBr(endBlock); }, [&] { builder.CreateBr(endBlock); });
 
     Type elseType = VoidTy();
     CodeGenVal elseVal = DirectVal { nullptr };
@@ -477,20 +474,8 @@ CodeGenVal LLVMGenerator::visitIfExpr(IfExpr* expr) {
             pattern(some(as<Scope*>(arg))) = [&](auto scope) {
                 elseVal = visitScope(scope);
                 elseBlock = builder.GetInsertBlock();
-                if(auto terminalExpr = scope->terminalExpr) {
-                    elseType = terminalExpr->type;
-                    if(!dynamic_cast<ReturnExpr*>(terminalExpr)) {
-                        // If we called a function that never returns (which technically doesn't exist yet),
-                        // terminate the block with an unreachable.
-                        if(terminalExpr->type == NeverTy()) {
-                            builder.CreateUnreachable();
-                        } else {
-                            builder.CreateBr(endBlock);
-                        }
-                    }
-                } else {
-                    builder.CreateBr(endBlock);
-                }
+                elseType = scope->terminalType();
+                handleTerminal(scope, [&] { builder.CreateBr(endBlock); }, [&] { builder.CreateBr(endBlock); });
             },
             pattern(some(as<IfExpr*>(arg))) = [&](auto expr) {
                 elseVal = visitIfExpr(expr);

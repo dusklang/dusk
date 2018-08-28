@@ -63,6 +63,9 @@ class LLVMGenerator final: public ASTVisitor<LLVMGenerator,
     /// Creates an entry in `declVals`, but doesn't visit the scope of a computed declaration
     /// or the expression of a stored one.
     void visitDeclPrototype(Decl* decl);
+
+    template<typename HasValue, typename HasNoValue>
+    void handleTerminal(Scope* scope, HasValue hasValue, HasNoValue hasNoValue);
 public:
     llvm::Module* module;
     LLVMGenerator() : builder(context) {

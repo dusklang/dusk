@@ -1,5 +1,6 @@
 set(SOURCES
     ASTPrinter.cpp
+    AST.cpp
     Type.cpp
     Decl.cpp
     Expr.cpp

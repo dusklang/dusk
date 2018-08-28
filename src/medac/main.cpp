@@ -82,16 +82,16 @@ def performFizzBuzz(end: i32) {
     }
 }
 def printInt(val: i32) {
+    def printIntRecursively(val: i32) {
+        if val == 0 { return }
+        printIntRecursively(val / 10)
+        printChar("0" + (val % 10) as i8)
+    }
     if val == 0 {
         printChar("0")
     } else {
         printIntRecursively(val)
     }
-}
-def printIntRecursively(val: i32) {
-    if val == 0 { return }
-    printIntRecursively(val / 10)
-    printChar("0" + (val % 10) as i8)
 }
 def printString(str: *i8) {
     var curChar = str
@@ -107,20 +107,20 @@ def charToString(val: i8): *i8 {
     buf
 }
 def intToString(val: i32): *i8 {
+    def intToStringRecursive(val: i32): *i8 {
+        if val == 0 {
+            ""
+        } else {
+            concat(
+                intToStringRecursive(val / 10),
+                charToString("0" + (val % 10) as i8)
+            )
+        }
+    }
     if val == 0 {
         charToString("0")
     } else {
         intToStringRecursive(val)
-    }
-}
-def intToStringRecursive(val: i32): *i8 {
-    if val == 0 {
-        ""
-    } else {
-        concat(
-            intToStringRecursive(val / 10),
-            charToString("0" + (val % 10) as i8)
-        )
     }
 }
 def printPerson(person: Person) {

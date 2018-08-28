@@ -8,6 +8,7 @@
 #include <optional>
 #include <algorithm>
 #include "General/SourceInfo.h"
+#include "Type.h"
 
 struct Expr;
 
@@ -24,4 +25,6 @@ struct Scope final : public ASTNode {
     Expr* terminalExpr = nullptr;
     Scope(SourceRange range, std::vector<ASTNode*> nodes) : range(range), nodes(nodes) {}
     SourceRange totalRange() const override { return range; }
+    Type terminalType() const;
+    Expr* terminalValueExpr() const;
 };

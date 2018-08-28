@@ -184,13 +184,10 @@ void TypeChecker::visitScope(Scope* scope) {
                 reportDiag(ERR("unused expression, try writing \"do *expression*\"").primaryRange(expr->totalRange()));
             }
         } else if(auto decl = dynamic_cast<Decl*>(node)) {
-            visitDecl(decl);
             if(decl->isComputed()) {
-                // Reject nested functions.
-                reportDiag(ERR("nested functions are not supported")
-                           .primaryRange(decl->protoRange()));
-                //declLists.back().push_back(decl);
+                declLists.back().push_back(decl);
             }
+            visitDecl(decl);
             if(decl->isStored()) {
                 declLists.back().push_back(decl);
             }
@@ -410,17 +407,11 @@ void TypeChecker::visitIfExpr(IfExpr* expr) {
                    .primaryRange(expr->condition->totalRange(), "expression is of type `" + expr->condition->type.name() + "`"));
     }
     visitScope(expr->thenScope);
-    auto typeOfScope = [](Scope* scope) -> Type {
-        Type ty = VoidTy();
-        if(scope->terminalExpr) ty = scope->terminalExpr->type;
-        return ty;
-    };
-
-    Type thenTy = typeOfScope(expr->thenScope);
+    Type thenTy = expr->thenScope->terminalType();
     Type elseTy = match(expr->elseNode)(
         pattern(some(as<Scope*>(arg))) = [&](auto scope) {
             visitScope(scope);
-            return typeOfScope(scope);
+            return scope->terminalType();
         },
         pattern(some(as<IfExpr*>(arg))) = [&](auto expr) {
             visitIfExpr(expr);
