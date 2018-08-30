@@ -110,12 +110,9 @@ void TypeChecker::visitType(Type *type, bool shouldResolveStructDecls) {
 void TypeChecker::visitDecl(Decl* decl) {
     visitDeclPrototype(decl);
     if(decl->hasDefinition()) {
-        // If we have parameters, start a new scope for referencing them.
-        if(decl->isParameterized()) {
-            declLists.push_back(std::vector<Decl*>());
-            for(auto param: decl->paramList) {
-                declLists.back().push_back(param);
-            }
+        declLists.push_back(std::vector<Decl*>());
+        for(auto param: decl->paramList) {
+            declLists.back().push_back(param);
         }
         if(decl->isComputed()) {
             returnTypeStack.push(decl->type);
@@ -141,7 +138,8 @@ void TypeChecker::visitDecl(Decl* decl) {
 
             returnTypeStack.pop();
         }
-        if(decl->isParameterized()) declLists.pop_back();
+        // End the scope for referencing parameters.
+        declLists.pop_back();
     } else {
         if(!decl->isExtern()) {
             reportDiag(ERR("non-`extern` declaration needs a definition").primaryRange(decl->protoRange()));

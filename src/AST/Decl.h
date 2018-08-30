@@ -46,7 +46,6 @@ public:
     bool isStored() const;
     bool isComputed() const;
 
-    bool isParameterized() const { return !paramList.empty(); }
     bool isExtern() const { return (bool)externRange; }
 
     SourceRange protoRange() const {
