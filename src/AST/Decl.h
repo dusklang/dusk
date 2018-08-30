@@ -14,6 +14,7 @@ struct Scope;
 
 struct Decl final: public ASTNode {
     std::optional<SourceRange> externRange;
+    /// The range of the `var` or `def` keyword, if one exists.
     std::optional<SourceRange> keywordRange;
     Ident name;
     Type type;
