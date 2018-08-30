@@ -18,7 +18,7 @@ struct ASTNode {
     virtual SourceRange totalRange() const = 0;
 };
 
-// A scope node represents a collection of other nodes.
+/// Represents a collection of other nodes.
 struct Scope final : public ASTNode {
     SourceRange range;
     std::vector<ASTNode*> nodes;

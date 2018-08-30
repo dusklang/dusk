@@ -196,10 +196,14 @@ struct IfExpr final: public Expr {
     SourceRange ifRange;
     Expr* condition;
     Scope* thenScope;
-    std::optional<std::variant<Scope*, IfExpr*>> elseNode;
+    /// NOTE: Can be null.
+    Scope* elseScope;
 
-    IfExpr(SourceRange ifRange, Expr* condition, Scope* thenScope, std::optional<std::variant<Scope*, IfExpr*>> elseNode) :
-        ifRange(ifRange), condition(condition), thenScope(thenScope), elseNode(elseNode) {}
+    IfExpr(SourceRange ifRange, Expr* condition, Scope* thenScope, Scope* elseScope = nullptr) :
+        ifRange(ifRange), condition(condition), thenScope(thenScope), elseScope(elseScope) {}
+
+    IfExpr(SourceRange ifRange, Expr* condition, Scope* thenScope, IfExpr* elseIf) :
+        IfExpr(ifRange, condition, thenScope, new Scope(elseIf->totalRange(), { elseIf })) {}
 
     SourceRange totalRange() const override;
 };

@@ -310,14 +310,14 @@ StructDecl* Parser::parseStructDecl() {
 
 IfExpr* Parser::parseIfExpr() {
     if(cur().isNot(tok::kw_if)) return nullptr;
-    auto ifTok = cur();
+    auto ifRange = cur().getRange();
     next();
     auto conditionExpr = parseExpr();
     if(!conditionExpr) {
         reportDiag(
            ERR("expected condition expression for if expression")
                .primaryRange(cur().getRange())
-               .range(ifTok.getRange(), "if expression begins here")
+               .range(ifRange, "if expression begins here")
         );
     }
     auto thenScope = parseScope();
@@ -325,22 +325,26 @@ IfExpr* Parser::parseIfExpr() {
         reportDiag(
             ERR("expected opening curly brace for if expression")
                 .primaryRange(cur().getRange())
-                .range(ifTok.getRange(), "if expression begins here")
+                .range(ifRange, "if expression begins here")
         );
     }
-    std::optional<std::variant<Scope*, IfExpr*>> elseNode = std::nullopt;
     if(cur().is(tok::kw_else)) {
         next();
         if(auto scope = parseScope()) {
-            elseNode = scope;
+            return new IfExpr(ifRange,
+                              conditionExpr,
+                              thenScope,
+                              scope);
         } else if(auto elseIf = parseIfExpr()) {
-            elseNode = static_cast<IfExpr*>(elseIf);
+            return new IfExpr(ifRange,
+                              conditionExpr,
+                              thenScope,
+                              elseIf);
         }
     }
-    return new IfExpr(ifTok.getRange(),
+    return new IfExpr(ifRange,
                       conditionExpr,
-                      thenScope,
-                      elseNode);
+                      thenScope);
 }
 
 WhileExpr* Parser::parseWhileExpr() {

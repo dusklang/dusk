@@ -454,11 +454,11 @@ void LLVMGenerator::handleTerminal(Scope* scope, HasValue hasValue, HasNoValue h
 CodeGenVal LLVMGenerator::visitIfExpr(IfExpr* expr) {
     auto thenBlock = llvm::BasicBlock::Create(context, "if.then", functionStack.top());
     llvm::BasicBlock* elseBlock = nullptr;
-    if(expr->elseNode) {
+    if(expr->elseScope) {
         elseBlock = llvm::BasicBlock::Create(context, "if.else", functionStack.top());
     }
     auto endBlock = llvm::BasicBlock::Create(context, "if.end", functionStack.top());
-    builder.CreateCondBr(toDirect(visitExpr(expr->condition)), thenBlock, expr->elseNode ? elseBlock : endBlock);
+    builder.CreateCondBr(toDirect(visitExpr(expr->condition)), thenBlock, expr->elseScope ? elseBlock : endBlock);
 
     builder.SetInsertPoint(thenBlock);
     auto thenVal = visitScope(expr->thenScope);
@@ -468,23 +468,12 @@ CodeGenVal LLVMGenerator::visitIfExpr(IfExpr* expr) {
 
     Type elseType = VoidTy();
     CodeGenVal elseVal = DirectVal { nullptr };
-    if(expr->elseNode) {
+    if(auto scope = expr->elseScope) {
         builder.SetInsertPoint(elseBlock);
-        match(expr->elseNode)(
-            pattern(some(as<Scope*>(arg))) = [&](auto scope) {
-                elseVal = visitScope(scope);
-                elseBlock = builder.GetInsertBlock();
-                elseType = scope->terminalType();
-                handleTerminal(scope, [&] { builder.CreateBr(endBlock); }, [&] { builder.CreateBr(endBlock); });
-            },
-            pattern(some(as<IfExpr*>(arg))) = [&](auto expr) {
-                elseVal = visitIfExpr(expr);
-                elseBlock = builder.GetInsertBlock();
-                elseType = expr->type;
-                builder.CreateBr(endBlock);
-            },
-            pattern(none) = []{}
-        );
+        elseVal = visitScope(scope);
+        elseBlock = builder.GetInsertBlock();
+        elseType = scope->terminalType();
+        handleTerminal(scope, [&] { builder.CreateBr(endBlock); }, [&] { builder.CreateBr(endBlock); });
     }
 
     builder.SetInsertPoint(endBlock);

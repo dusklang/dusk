@@ -236,20 +236,13 @@ void ASTPrinter::visitIfExpr(IfExpr* expr, int indentationLevel, std::ostream& s
     indent(indentationLevel, stream);
     stream << '}';
 
-    match(expr->elseNode)(
-        pattern(some(as<Scope*>(arg))) = [&](auto scope) {
-            stream << " else {\n";
-            visitScope(scope, indentationLevel, stream);
-            stream << '\n';
-            indent(indentationLevel, stream);
-            stream << '}';
-        },
-        pattern(some(as<IfExpr*>(arg))) = [&](auto expr) {
-            stream << " else ";
-            visitIfExpr(expr, indentationLevel, stream, true);
-        },
-        pattern(_) = []{}
-    );
+    if(auto scope = expr->elseScope) {
+        stream << " else {\n";
+        visitScope(scope, indentationLevel, stream);
+        stream << '\n';
+        indent(indentationLevel, stream);
+        stream << '}';
+    }
 }
 
 void ASTPrinter::visitWhileExpr(WhileExpr* expr, int indentationLevel, std::ostream& stream) {

@@ -406,17 +406,11 @@ void TypeChecker::visitIfExpr(IfExpr* expr) {
     }
     visitScope(expr->thenScope);
     Type thenTy = expr->thenScope->terminalType();
-    Type elseTy = match(expr->elseNode)(
-        pattern(some(as<Scope*>(arg))) = [&](auto scope) {
-            visitScope(scope);
-            return scope->terminalType();
-        },
-        pattern(some(as<IfExpr*>(arg))) = [&](auto expr) {
-            visitIfExpr(expr);
-            return expr->type;
-        },
-        pattern(none) = []() -> Type { return VoidTy(); }
-    );
+    Type elseTy = VoidTy();
+    if(auto scope = expr->elseScope) {
+        visitScope(scope);
+        elseTy = scope->terminalType();
+    }
     if(thenTy.isConvertibleTo(elseTy)) {
         expr->type = elseTy;
     } else if(elseTy.isConvertibleTo(thenTy)) {
