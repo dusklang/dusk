@@ -6,5 +6,6 @@
 
 #include "Token.h"
 #include "General/SourceInfo.h"
+#include "General/Array.h"
 
-std::vector<Token> lex(SourceFile* file);
+Array<Token> lex(SourceFile* file);

@@ -29,7 +29,8 @@
     return val;\
 }()
 
-// FIXME: Allocating a multi-dimensional array on the heap for this is silly.
+// FIXME: Allocating a multi-dimensional array on the heap for this shouldn't actually matter, but is still silly.
+// Array<Array<BinOp, 10>, 10> precedenceLevels { <---- better.
 std::vector<std::vector<BinOp>> precedenceLevels {
     { BinOp::Mult, BinOp::Div, BinOp::Mod },
 

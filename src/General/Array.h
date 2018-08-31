@@ -133,7 +133,7 @@ ZipContainer<T, U> zip(T& t, U& u) {
 template<typename T, size_t inlineSize = 0>
 class Array final {
     T* data;
-    uint32_t size;
+    uint32_t _size;
     void deleteData() {
         for(auto& elem: *this) {
             elem.~T();
@@ -145,8 +145,8 @@ class Array final {
     }
 
 public:
-    Array() : data(nullptr), size(0) {}
-    Array(std::initializer_list<T>&& list) : data(newData(list.size())), size(list.size()) {
+    Array() : data(nullptr), _size(0) {}
+    Array(std::initializer_list<T>&& list) : data(newData(list.size())), _size(list.size()) {
         auto dest = data;
         for(auto&& src: list) {
             std::memmove(dest, &src, sizeof(T));
@@ -154,11 +154,12 @@ public:
             dest++;
         }
     }
-    Array(Array&& other) : data(nullptr), size(0) {
-        std::swap(*this, other);
+    Array(Array&& other) : data(nullptr), _size(0) {
+        std::swap(data, other.data);
+        std::swap(_size, other._size);
     }
-    Array(Array& other) : size(other.size) {
-        data = newData(size);
+    Array(Array& other) : _size(other._size) {
+        data = newData(_size);
         auto dest = data;
         // Intentionally call copy constructor so we can just copy the raw bytes.
         for(T elem: other) {
@@ -177,8 +178,9 @@ public:
     Array& operator=(Array&& other) {
         deleteData();
         data = nullptr;
-        size = 0;
-        std::swap(*this, other);
+        _size = 0;
+        std::swap(data, other.data);
+        std::swap(_size, other._size);
 
         return *this;
     }
@@ -186,12 +188,22 @@ public:
         deleteData();
     }
     void push_back(T&& elem) {
-        T* newBuf = newData(size + 1);
-        std::memmove(newBuf, data, size * sizeof(T));
+        T* newBuf = newData(_size + 1);
+        std::memmove(newBuf, data, _size * sizeof(T));
+        std::memmove(newBuf + _size, &elem, sizeof(T));
         deleteData();
         data = newBuf;
-        size++;
+        _size++;
     }
+    T& operator[](size_t i) {
+        assertTrueMessage(i < _size, "index out of bounds");
+        return data[i];
+    }
+    T const& operator[](size_t i) const {
+        assertTrueMessage(i < _size, "index out of bounds");
+        return data[i];
+    }
+    size_t size() const { return _size; }
 
     using iterator = T*;
     using const_iterator = T const*;
@@ -226,12 +238,12 @@ public:
     };
 
     iterator begin() { return data; }
-    iterator end() { return data + size; }
+    iterator end() { return data + _size; }
     const_iterator begin() const { return data; }
-    const_iterator end() const { return data + size; }
+    const_iterator end() const { return data + _size; }
 
-    reverse_iterator rbegin() { return reverse_iterator { data + ((int)size - 1) }; }
+    reverse_iterator rbegin() { return reverse_iterator { data + ((int)_size - 1) }; }
     reverse_iterator rend() { return reverse_iterator { data - 1 }; }
-    const_reverse_iterator rbegin() const { return const_reverse_iterator { data + ((int)size - 1) }; }
+    const_reverse_iterator rbegin() const { return const_reverse_iterator { data + ((int)_size - 1) }; }
     const_reverse_iterator rend() const { return const_reverse_iterator { data - 1 }; }
 };

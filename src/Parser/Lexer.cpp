@@ -1,7 +1,6 @@
 //  Copyright © 2018 Zach Wolfe. All rights reserved.
 
 #include <iostream>
-#include <vector>
 #include <map>
 #include <optional>
 
@@ -15,11 +14,11 @@ std::map<char, char> specialEscapeCharacters {
     { '\\', '\\' }
 };
 
-std::vector<Token> lex(SourceFile* file) {
+Array<Token> lex(SourceFile* file) {
     auto& source = file->source;
     uint32_t pos = 0;
     uint32_t curTokBegin = 0;
-    std::vector<Token> tokens;
+    Array<Token> tokens;
     auto reportDiag = [&](Diagnostic&& diag) {
         diag.print(std::cout);
         if(diag.kind == Diagnostic::Error) {
@@ -217,5 +216,6 @@ std::vector<Token> lex(SourceFile* file) {
             }
         }
     }
+
     return tokens;
 }

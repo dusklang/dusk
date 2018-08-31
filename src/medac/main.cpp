@@ -10,6 +10,7 @@
 #include "General/SourceInfo.h"
 #include "LIR/LIRGenerator.h"
 #include "General/General.h"
+#include "General/Array.h"
 
 std::string standardLibrary = R"~(
 #include <iostream>

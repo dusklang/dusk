@@ -10,6 +10,7 @@
 #include "General/SourceInfo.h"
 #include "General/Diagnostics.h"
 #include "General/General.h"
+#include "General/Array.h"
 #include "Lexer.h"
 
 struct Expr;
@@ -21,7 +22,7 @@ struct Decl;
 
 class Parser final {
     SourceFile const& file;
-    std::vector<Token> tokens;
+    Array<Token> tokens;
     uint32_t curTok = -1;
     std::stack<uint32_t> savedState;
 
