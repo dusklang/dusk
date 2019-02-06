@@ -566,7 +566,7 @@ void LLVMGenerator::outputObjectFile(char const* fileName) const {
     llvm::legacy::PassManager pass;
     auto fileType = llvm::TargetMachine::CGFT_ObjectFile;
 
-    if(machine->addPassesToEmitFile(pass, dest, fileType)) {
+    if(machine->addPassesToEmitFile(pass, dest, nullptr, fileType)) {
         llvm::errs() << "Machine can't emit object files.";
         return;
     }

@@ -4,66 +4,129 @@
 
 #include <variant>
 #include <vector>
+#include <string>
 
 #include "General/General.h"
 
 namespace lir {
-    struct Type;
-    struct VoidTy {};
-    struct NeverTy {};
-    enum class IntTy { I8, I16, I32, I64 };
-    inline IntTy PointerTy() { return IntTy::I64; }
-    struct StructTy {
-        std::vector<Type*> types;
+    /// Variable index, local to a function.
+    using Var = uint16_t;
+    /// Constant index, local to a function.
+    using Const = uint16_t;
+    /// Instruction index, local to a function.
+    using Instr = uint16_t;
+    /// Parameter index, local to a function.
+    using Param = uint16_t;
+    /// Function index.
+    using Func = uint16_t;
+
+    enum class OpCode: uint8_t {
+        GetConstant,        /// dest = constant
+        GetConstantAddress, /// dest = &constant
+        GetParameter,       /// dest = parameter
+        GetAddress,         /// dest = &operand
+        Load,               /// dest = *operand
+        Store,              /// *dest = operand
+        Copy,               /// dest = operand
+
+        Negative,           /// dest = -operand
+        WrappingAdd,        /// dest = a + b
+        WrappingSub,        /// dest = a - b
+        SignExtend,         /// dest = operand as i{dest.bitWidth}
+        ZeroExtend,         /// dest = operand as u{dest.bitWidth}
+        Mult,               /// dest = a * b
+        LTE,                /// dest = a <= b
+        LT,                 /// dest = a < b
+        GTE,                /// dest = a >= b
+        GT,                 /// dest = a > b
+        FLTE,               /// dest = a <= b
+        FLT,                /// dest = a < b
+        FGTE,               /// dest = a >= b
+        FGT,                /// dest = a > b
+        Equal,              /// dest = a == b
+        NotEqual,
+
+        FAdd,               /// dest = a + b
+        FSub,               /// dest = a - b
+        FMult,              /// dest = a * b
+
+        LogicalNot,         /// dest = !operand
+
+        Branch,             /// goto branch
+        CondBranch,         /// if condition { goto trueBranch } else { goto falseBranch }
     };
-    struct Type {
-        using Data = std::variant<VoidTy, NeverTy, IntTy>;
-        Data data;
-
-        Type(Data data) : data(data) {}
-
-        template<typename T>
-        T& get_if() { return std::get_if<T>(&data); }
-
-        template<typename T>
-        T const& get_if() const { return std::get_if<T>(&data); }
+    struct Instruction {
+        union {
+            Var dest;
+            Var condition;
+        };
+        union {
+            struct {
+                Var a, b;
+            } operands;
+            Var operand;
+            lir::Instr branch;
+            struct {
+                lir::Instr trueBranch, falseBranch;
+            };
+            Const constant;
+            Param parameter;
+        };
+        OpCode op;
     };
-
-    struct Value;
-    struct NOPInstr     {                                };
-    struct AllocaInstr  { Value *size;                   };
-    struct StoreInstr   { Value *destPtr, *srcVal;       };
-    struct LoadInstr    { Type destTy;    Value *srcPtr; };
-    struct SAddInstr    { Value *a,       *b;            };
-    struct UAddInstr    { Value *a,       *b;            };
-    struct SSubInstr    { Value *a,       *b;            };
-    struct USubInstr    { Value *a,       *b;            };
-    struct VoidConst    {                                };
-    struct IntConst     { uint64_t val;                  };
 
     struct Value {
-        using Data = std::variant<NOPInstr, AllocaInstr, StoreInstr, LoadInstr, SAddInstr, UAddInstr, SSubInstr, USubInstr, VoidConst, IntConst>;
-        Data data;
-        Type type;
+        /// Size in bytes.
+        uint32_t size;
+        union {
+            /// The inline constant values. Valid iff size <= 64.
+            uint64_t u64;
+            uint32_t u32;
+            uint16_t u16;
+            uint8_t  u8;
+            float    f32;
+            double   f64;
+            bool     boolean;
 
-        Value(NOPInstr instr) : data(instr), type(VoidTy()) {}
-        Value(AllocaInstr instr) : data(instr), type(PointerTy()) {}
-        Value(StoreInstr instr) : data(instr), type(VoidTy()) {}
-        Value(LoadInstr instr) : data(instr), type(instr.destTy) {}
-        Value(SAddInstr instr) : data(instr), type(instr.a->type) {}
-        Value(UAddInstr instr) : data(instr), type(instr.a->type) {}
-        Value(SSubInstr instr) : data(instr), type(instr.a->type) {}
-        Value(USubInstr instr) : data(instr), type(instr.a->type) {}
-        Value(VoidConst val) : data(val), type(VoidTy()) {}
-        template<typename T>
-        T& get_if() { return std::get_if<T>(&data); }
+            /// The buffer that stores the constant value. Valid iff size > 64.
+            uint8_t* buffer;
+        };
+    };
+    struct Variable {
+        uint32_t size;
+    };
 
-        template<typename T>
-        T const& get_if() const { return std::get_if<T>(&data); }
+    struct Parameter {
+        std::string name;
+        uint32_t size;
+    };
+
+    struct Function {
+        std::vector<Parameter> parameters;
+        std::vector<Instruction> instructions;
+        std::vector<Value> constants;
+        std::vector<Variable> variables;
+
+        Const appendConstant(Value constant) {
+            Const konst = constants.size();
+            constants.push_back(constant);
+            return konst;
+        }
+
+        Var appendVariable(Variable variable) {
+            Var var = variables.size();
+            variables.push_back(variable);
+            return var;
+        }
+
+        Instr appendInstruction(Instruction instruction) {
+            Instr instr = instructions.size();
+            instructions.push_back(instruction);
+            return instr;
+        }
+    };
+
+    struct Program {
+        std::vector<Function> functions;
     };
 }
-
-template<>
-struct std::variant_size<lir::Type> {};
-template<>
-struct std::variant_size<lir::Value> {};

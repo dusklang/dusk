@@ -25,6 +25,9 @@ struct Expr: public ASTNode {
 
 struct IntegerLiteralExpr final: public Expr {
     SourceRange range;
+    /// The value of the integer literal encoded as a 64-bit signed or unsigned integer.
+    ///
+    /// TODO: Make a BigInt type to represent this instead.
     uint64_t literal;
 
     IntegerLiteralExpr(SourceRange range, uint64_t literal) : range(range), literal(literal) {}
