@@ -310,8 +310,6 @@ void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
     }
 
     // Find the prototype to reference.
-    //
-    // TODO: Setup a dependency system to allow decls to be referenced before we know about them.
     std::vector<Decl*> nameMatches;
     for(auto& declList: reverse(declLists)) {
         for(auto decl: declList) {

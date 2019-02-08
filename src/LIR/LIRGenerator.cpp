@@ -16,18 +16,17 @@ static uint32_t getStrideForType(Type const& ty) {
     return 0;
 }
 
-Var LIRGenerator::visitDecl(Decl* decl) {
-    return -1;
+ROperand LIRGenerator::visitDecl(Decl* decl) {
+    return {};
 }
-Var LIRGenerator::visitScope(Scope* scope) {
-    return -1;
+ROperand LIRGenerator::visitScope(Scope* scope) {
+    return {};
 }
-Var LIRGenerator::visitStructDecl(StructDecl* decl) {
-    return -1;
+ROperand LIRGenerator::visitStructDecl(StructDecl* decl) {
+    return {};
 }
-Var LIRGenerator::visitIntegerLiteralExpr(IntegerLiteralExpr* expr) {
+ROperand LIRGenerator::visitIntegerLiteralExpr(IntegerLiteralExpr* expr) {
     Value constant {};
-    uint32_t size;
     match(expr->type.data)(
         pattern(as<IntTy>(arg)) = [&](auto ty) {
             // Note: we don't have to worry about signedness because integer literal
@@ -49,108 +48,71 @@ Var LIRGenerator::visitIntegerLiteralExpr(IntegerLiteralExpr* expr) {
                     panic("Invalid integer literal bitWidth");
                 } break;
             }
-            size = ty.bitWidth / 8;
-            constant.size = size;
+            constant.size = ty.bitWidth / 8;
         },
         pattern(as<FloatTy>(arg)) = [&](auto ty) {
-            size = 32;
-            constant.size = size;
+            constant.size = 32 / 8;
             constant.f32 = expr->literal;
         },
         pattern(as<DoubleTy>(arg)) = [&](auto ty) {
-            size = 64;
-            constant.size = size;
+            constant.size = 64 / 8;
             constant.f64 = expr->literal;
         },
         pattern(_) = []() { panic("Invalid integer literal expression"); }
     );
-    Function& func = program.functions[currentFunction];
-    Instruction instr {};
-    instr.op = OpCode::GetConstant;
-    instr.dest = func.appendVariable({size});
-    instr.constant = func.appendConstant(constant);
-    func.appendInstruction(instr);
-    return instr.dest;
+    return program.functions[currentFunction].localConstantOperand(constant);
 }
-Var LIRGenerator::visitDecimalLiteralExpr(DecimalLiteralExpr* expr) {
+ROperand LIRGenerator::visitDecimalLiteralExpr(DecimalLiteralExpr* expr) {
     Value constant {};
-    uint32_t size;
     match(expr->type.data)(
         pattern(as<FloatTy>(arg)) = [&](auto ty) {
-            size = 32;
-            constant.size = size;
+            constant.size = 32 / 8;
             constant.f32 = strtof(expr->literal.c_str(), nullptr);
         },
         pattern(as<DoubleTy>(arg)) = [&](auto ty) {
-            size = 64;
-            constant.size = size;
+            constant.size = 64 / 8;
             constant.f64 = strtod(expr->literal.c_str(), nullptr);
         },
         pattern(_) = []() { panic("Invalid decimal literal expression"); }
     );
 
-    Function& func = program.functions[currentFunction];
-    Instruction instr {};
-    instr.op = OpCode::GetConstant;
-    instr.dest = func.appendVariable({size});
-    instr.constant = func.appendConstant(constant);
-    func.appendInstruction(instr);
-    return instr.dest;
+    return program.functions[currentFunction].localConstantOperand(constant);
 }
-Var LIRGenerator::visitBooleanLiteralExpr(BooleanLiteralExpr* expr) {
+ROperand LIRGenerator::visitBooleanLiteralExpr(BooleanLiteralExpr* expr) {
     Value constant {};
     constant.size = 1;
     constant.boolean = expr->literal;
 
-    Function& func = program.functions[currentFunction];
-    Instruction instr {};
-    instr.op = OpCode::GetConstant;
-    instr.dest = func.appendVariable({1});
-    instr.constant = func.appendConstant(constant);
-    func.appendInstruction(instr);
-    return instr.dest;
+    return program.functions[currentFunction].localConstantOperand(constant);
 }
-Var LIRGenerator::visitCharLiteralExpr(CharLiteralExpr* expr) {
+ROperand LIRGenerator::visitCharLiteralExpr(CharLiteralExpr* expr) {
     Value constant {};
     constant.size = 1;
     constant.u8 = expr->literal;
 
-    Function& func = program.functions[currentFunction];
-    Instruction instr {};
-    instr.op = OpCode::GetConstant;
-    instr.dest = func.appendVariable({1});
-    instr.constant = func.appendConstant(constant);
-    func.appendInstruction(instr);
-    return instr.dest;
+    return program.functions[currentFunction].localConstantOperand(constant);
 }
-Var LIRGenerator::visitStringLiteralExpr(StringLiteralExpr* expr) {
+ROperand LIRGenerator::visitStringLiteralExpr(StringLiteralExpr* expr) {
     Value constant {};
     uint32_t size = expr->literal.size() + 1;
     constant.size = size;
     constant.buffer = new uint8_t[size];
     memcpy(constant.buffer, expr->literal.c_str(), size);
 
-    Function& func = program.functions[currentFunction];
-    Instruction load {};
-    load.op = OpCode::GetConstantAddress;
-    load.dest = func.appendVariable({sizeof(uint8_t*)});
-    load.constant = func.appendConstant(constant);
-    func.appendInstruction(load);
-    return load.dest;
+    return program.functions[currentFunction].globalConstantOperand(program.appendConstant(constant));
 }
-Var LIRGenerator::visitPreOpExpr(PreOpExpr* expr) {
+ROperand LIRGenerator::visitPreOpExpr(PreOpExpr* expr) {
     Function& func = program.functions[currentFunction];
     auto operand = visitExpr(expr->operand);
     Instruction instr {};
     instr.operand = operand;
-    auto opSize = func.variables[operand].size;
     switch(expr->op) {
         case PreOp::Positive: {
             return operand;
         } break;
         case PreOp::Negative: {
             instr.op = OpCode::Negative;
-            instr.dest = func.appendVariable({opSize});
+            instr.dest = func.appendVariable({operand.size});
         } break;
         case PreOp::Deref: {
             instr.op = OpCode::Load;
@@ -158,7 +120,7 @@ Var LIRGenerator::visitPreOpExpr(PreOpExpr* expr) {
         } break;
         case PreOp::AddrOf: {
             instr.op = OpCode::GetAddress;
-            instr.dest = func.appendVariable({opSize});
+            instr.dest = func.appendVariable({operand.size});
         } break;
         case PreOp::Not: {
             instr.op = OpCode::LogicalNot;
@@ -166,7 +128,7 @@ Var LIRGenerator::visitPreOpExpr(PreOpExpr* expr) {
         } break;
     }
     func.appendInstruction(instr);
-    return instr.dest;
+    return func.variableOperand(instr.dest);
 }
 Var LIRGenerator::visitPreOpExprAsLValue(PreOpExpr* expr) {
     switch(expr->op) {
@@ -177,13 +139,15 @@ Var LIRGenerator::visitPreOpExprAsLValue(PreOpExpr* expr) {
             panic("Pre-op expressions other than pointer dereferences can not be taken as lvalues");
         } break;
         case PreOp::Deref: {
-            return visitExpr(expr->operand);
+            auto op = visitExpr(expr->operand);
+            assert(op.kind == ROperand::Variable);
+            return op.variable;
         } break;
     }
 }
-Var LIRGenerator::visitBinOpExpr(BinOpExpr* expr) {
+ROperand LIRGenerator::visitBinOpExpr(BinOpExpr* expr) {
     Function& func = program.functions[currentFunction];
-    Var rvalueA, rvalueB;
+    ROperand rvalueA, rvalueB;
     if(expr->op != BinOp::Assignment) {
         rvalueA = visitExpr(expr->lhs);
     }
@@ -204,7 +168,7 @@ Var LIRGenerator::visitBinOpExpr(BinOpExpr* expr) {
                 instr.op = OpCode::Copy;
                 instr.operand = rvalueB;
                 func.appendInstruction(instr);
-                return instr.dest;
+                return func.variableOperand(instr.dest);
             } else {
                 instr.operands.a = rvalueA;
                 instr.operands.b = rvalueB;
@@ -217,9 +181,8 @@ Var LIRGenerator::visitBinOpExpr(BinOpExpr* expr) {
         case BinOp::Mod:
         case BinOp::BitwiseAnd:
         case BinOp::BitwiseOr: {
-            instr.dest = func.appendVariable({func.variables[rvalueA].size});
-            instr.operands.a = rvalueA;
-            instr.operands.b = rvalueB;
+            instr.dest = func.appendVariable({rvalueA.size});
+            instr.operands = { rvalueA, rvalueB };
         } break;
         case BinOp::Equal:
         case BinOp::NotEqual:
@@ -230,13 +193,13 @@ Var LIRGenerator::visitBinOpExpr(BinOpExpr* expr) {
         case BinOp::Or:
         case BinOp::And: {
             instr.dest = func.appendVariable({1});
-            instr.operands.a = rvalueA;
-            instr.operands.b = rvalueB;
+            instr.operands = { rvalueA, rvalueB };
         } break;
     }
 
-    auto getPointerOffset = [&](PointerTy pointerTy, IntTy intTy) -> Var {
+    auto getPointerOffset = [&](PointerTy pointerTy, IntTy intTy) -> ROperand {
         Var offset = func.appendVariable({sizeof(uint8_t*)});
+        ROperand offsetOperand = func.variableOperand(offset);
         Instruction getOffset {};
         getOffset.dest = offset;
         getOffset.operand = rvalueB;
@@ -257,25 +220,18 @@ Var LIRGenerator::visitBinOpExpr(BinOpExpr* expr) {
         }
         func.appendInstruction(getOffset);
 
-        Value strideVal {};
-        strideVal.size = sizeof(uint8_t*);
-        assertEqual(strideVal.size, 64 / 8);
-        strideVal.u64 = getStrideForType(*pointerTy.pointedTy);
-        Const strideConst = func.appendConstant(strideVal);
-
-        Instruction getStride {};
-        getStride.op = OpCode::GetConstant;
-        auto stride = getStride.dest = func.appendVariable({strideVal.size});
-        getStride.constant = strideConst;
-        func.appendInstruction(getStride);
+        Value stride {};
+        stride.size = sizeof(uint8_t*);
+        assertEqual(stride.size, 64 / 8);
+        stride.u64 = getStrideForType(*pointerTy.pointedTy);
 
         Instruction mult {};
         mult.op = OpCode::Mult;
         mult.dest = offset;
-        mult.operands = { offset, stride };
+        mult.operands = { func.variableOperand(offset), func.localConstantOperand(stride) };
         func.appendInstruction(mult);
 
-        return offset;
+        return offsetOperand;
     };
 
     switch(expr->op) {
@@ -283,7 +239,7 @@ Var LIRGenerator::visitBinOpExpr(BinOpExpr* expr) {
 
         case BinOp::AddAssignment:
         case BinOp::Add: {
-            match(expr->lhs->type, expr->rhs->type)(
+            match(expr->lhs->type.data, expr->rhs->type.data)(
                 pattern(as<IntTy>(arg), as<IntTy>(_)) = [&](auto ty) {
                     switch(ty.signedness) {
                         case Signedness::Signed:
@@ -303,14 +259,14 @@ Var LIRGenerator::visitBinOpExpr(BinOpExpr* expr) {
                     instr.op = OpCode::WrappingAdd;
                     instr.operands.b = getPointerOffset(pointerTy, intTy);
                 },
-                pattern(_) = [] {
+                pattern(_, _) = [] {
                     panic("Can't add values of non-pointer, non-integer, non-floating point types");
                 }
             );
         } break;
         case BinOp::SubAssignment:
         case BinOp::Sub: {
-            match(expr->lhs->type, expr->rhs->type)(
+            match(expr->lhs->type.data, expr->rhs->type.data)(
                 pattern(as<IntTy>(arg), as<IntTy>(_)) = [&](auto ty) {
                     switch(ty.signedness) {
                         case Signedness::Signed:
@@ -335,14 +291,14 @@ Var LIRGenerator::visitBinOpExpr(BinOpExpr* expr) {
 //              pattern(as<PointerTy>(arg), as<PointerTy>(arg)) = [&](auto p1, auto p2) {
 //                  instr.op = OpCode::WrappingSub;
 //              },
-                pattern(_) = [] {
+                pattern(_, _) = [] {
                     panic("Can't subtract values of non-pointer, non-integer, non-floating point types");
                 }
             );
         } break;
         case BinOp::MultAssignment:
         case BinOp::Mult: {
-            match(expr->lhs->type, expr->rhs->type)(
+            match(expr->lhs->type.data, expr->rhs->type.data)(
                 pattern(as<IntTy>(arg), as<IntTy>(_)) = [&](auto ty) {
                     instr.op = OpCode::Mult;
                 },
@@ -352,14 +308,14 @@ Var LIRGenerator::visitBinOpExpr(BinOpExpr* expr) {
                 pattern(as<DoubleTy>(_), as<DoubleTy>(_)) = [&] {
                     instr.op = OpCode::FMult;
                 },
-                pattern(_) = [] {
+                pattern(_, _) = [] {
                     panic("Can't multiply values of non-integer, non-floating point types");
                 }
             );
         } break;
         case BinOp::DivAssignment:
         case BinOp::Div: {
-            match(expr->lhs->type, expr->rhs->type)(
+            match(expr->lhs->type.data, expr->rhs->type.data)(
                 pattern(as<IntTy>(arg), as<IntTy>(_)) = [&](auto ty) {
                     instr.op = OpCode::Div;
                 },
@@ -369,14 +325,14 @@ Var LIRGenerator::visitBinOpExpr(BinOpExpr* expr) {
                 pattern(as<DoubleTy>(_), as<DoubleTy>(_)) = [&] {
                     instr.op = OpCode::FDiv;
                 },
-                pattern(_) = [] {
+                pattern(_, _) = [] {
                     panic("Can't divide values of non-integer, non-floating point types");
                 }
             );
         } break;
         case BinOp::ModAssignment:
         case BinOp::Mod: {
-            match(expr->lhs->type, expr->rhs->type)(
+            match(expr->lhs->type.data, expr->rhs->type.data)(
                 pattern(as<IntTy>(arg), as<IntTy>(_)) = [&](auto ty) {
                     instr.op = OpCode::Mod;
                 },
@@ -386,13 +342,13 @@ Var LIRGenerator::visitBinOpExpr(BinOpExpr* expr) {
                 pattern(as<DoubleTy>(_), as<DoubleTy>(_)) = [&] {
                     instr.op = OpCode::FMod;
                 },
-                pattern(_) = [] {
+                pattern(_, _) = [] {
                     panic("Can't mod values of non-integer, non-floating point types");
                 }
             );
         } break;
         case BinOp::LessThanOrEqual: {
-            match(expr->lhs->type, expr->rhs->type)(
+            match(expr->lhs->type.data, expr->rhs->type.data)(
                 pattern(as<IntTy>(arg), as<IntTy>(_)) = [&](auto ty) {
                     instr.op = OpCode::LTE;
                 },
@@ -402,13 +358,13 @@ Var LIRGenerator::visitBinOpExpr(BinOpExpr* expr) {
                 pattern(as<DoubleTy>(_), as<DoubleTy>(_)) = [&] {
                     instr.op = OpCode::FLTE;
                 },
-                pattern(_) = [] {
+                pattern(_, _) = [] {
                     panic("Can't compare values of non-integer, non-floating point types");
                 }
             );
         } break;
         case BinOp::LessThan: {
-            match(expr->lhs->type, expr->rhs->type)(
+            match(expr->lhs->type.data, expr->rhs->type.data)(
                 pattern(as<IntTy>(arg), as<IntTy>(_)) = [&](auto ty) {
                     instr.op = OpCode::LT;
                 },
@@ -418,13 +374,13 @@ Var LIRGenerator::visitBinOpExpr(BinOpExpr* expr) {
                 pattern(as<DoubleTy>(_), as<DoubleTy>(_)) = [&] {
                     instr.op = OpCode::FLT;
                 },
-                pattern(_) = [] {
+                pattern(_, _) = [] {
                     panic("Can't compare values of non-integer, non-floating point types");
                 }
             );
         } break;
         case BinOp::GreaterThanOrEqual: {
-            match(expr->lhs->type, expr->rhs->type)(
+            match(expr->lhs->type.data, expr->rhs->type.data)(
                 pattern(as<IntTy>(arg), as<IntTy>(_)) = [&](auto ty) {
                     instr.op = OpCode::GTE;
                 },
@@ -434,13 +390,13 @@ Var LIRGenerator::visitBinOpExpr(BinOpExpr* expr) {
                 pattern(as<DoubleTy>(_), as<DoubleTy>(_)) = [&] {
                     instr.op = OpCode::FGTE;
                 },
-                pattern(_) = [] {
+                pattern(_, _) = [] {
                     panic("Can't compare values of non-integer, non-floating point types");
                 }
             );
         } break;
         case BinOp::GreaterThan: {
-            match(expr->lhs->type, expr->rhs->type)(
+            match(expr->lhs->type.data, expr->rhs->type.data)(
                 pattern(as<IntTy>(arg), as<IntTy>(_)) = [&](auto ty) {
                     instr.op = OpCode::GT;
                 },
@@ -450,49 +406,49 @@ Var LIRGenerator::visitBinOpExpr(BinOpExpr* expr) {
                 pattern(as<DoubleTy>(_), as<DoubleTy>(_)) = [&] {
                     instr.op = OpCode::FGT;
                 },
-                pattern(_) = [] {
+                pattern(_, _) = [] {
                     panic("Can't compare values of non-integer, non-floating point types");
                 }
             );
         } break;
         case BinOp::AndAssignment:
         case BinOp::BitwiseAnd: {
-            match(expr->lhs->type, expr->rhs->type)(
+            match(expr->lhs->type.data, expr->rhs->type.data)(
                 pattern(as<IntTy>(arg), as<IntTy>(_)) = [&](auto ty) {
                     instr.op = OpCode::BitwiseAnd;
                 },
-                pattern(_) = [] {
+                pattern(_, _) = [] {
                     panic("Can't bitwise and values of non-integer types");
                 }
             );
         } break;
         case BinOp::OrAssignment:
         case BinOp::BitwiseOr: {
-            match(expr->lhs->type, expr->rhs->type)(
+            match(expr->lhs->type.data, expr->rhs->type.data)(
                 pattern(as<IntTy>(arg), as<IntTy>(_)) = [&](auto ty) {
                     instr.op = OpCode::BitwiseOr;
                 },
-                pattern(_) = [] {
+                pattern(_, _) = [] {
                     panic("Can't bitwise or values of non-integer types");
                 }
             );
         } break;
         case BinOp::And: {
-            match(expr->lhs->type, expr->rhs->type)(
+            match(expr->lhs->type.data, expr->rhs->type.data)(
                 pattern(as<IntTy>(arg), as<IntTy>(_)) = [&](auto ty) {
                     instr.op = OpCode::LogicalAnd;
                 },
-                pattern(_) = [] {
+                pattern(_, _) = [] {
                     panic("Can't logical and values of non-integer types");
                 }
             );
         } break;
         case BinOp::Or: {
-            match(expr->lhs->type, expr->rhs->type)(
+            match(expr->lhs->type.data, expr->rhs->type.data)(
                 pattern(as<IntTy>(arg), as<IntTy>(_)) = [&](auto ty) {
                     instr.op = OpCode::LogicalOr;
                 },
-                pattern(_) = [] {
+                pattern(_, _) = [] {
                     panic("Can't logical or values of non-integer types");
                 }
             );
@@ -507,25 +463,25 @@ Var LIRGenerator::visitBinOpExpr(BinOpExpr* expr) {
         } break;
     }
     func.appendInstruction(instr);
-    return instr.dest;
+    return func.variableOperand(instr.dest);
 }
-Var LIRGenerator::visitCastExpr(CastExpr* expr) {
-    return -1;
+ROperand LIRGenerator::visitCastExpr(CastExpr* expr) {
+    return {};
 }
-Var LIRGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
-    return -1;
+ROperand LIRGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
+    return {};
 }
-Var LIRGenerator::visitMemberRefExpr(MemberRefExpr* expr) {
-    return -1;
+ROperand LIRGenerator::visitMemberRefExpr(MemberRefExpr* expr) {
+    return {};
 }
-Var LIRGenerator::visitReturnExpr(ReturnExpr* expr) {
-    return -1;
+ROperand LIRGenerator::visitReturnExpr(ReturnExpr* expr) {
+    return {};
 }
-Var LIRGenerator::visitIfExpr(IfExpr* expr) {
-    return -1;
+ROperand LIRGenerator::visitIfExpr(IfExpr* expr) {
+    return {};
 }
-Var LIRGenerator::visitWhileExpr(WhileExpr* expr) {
-    return -1;
+ROperand LIRGenerator::visitWhileExpr(WhileExpr* expr) {
+    return {};
 }
 
 void LIRGenerator::printIR() const {}

@@ -7,33 +7,33 @@
 #include <string>
 
 class LIRGenerator final: public ASTVisitor<LIRGenerator,
-                                            lir::Var,
-                                            lir::Var,
-                                            lir::Var,
-                                            lir::Var,
-                                            lir::Var>
+                                            lir::ROperand,
+                                            lir::ROperand,
+                                            lir::ROperand,
+                                            lir::ROperand,
+                                            lir::ROperand>
 {
     lir::Program program;
     lir::Func currentFunction;
 public:
-    lir::Var visitDecl(Decl* decl);
-    lir::Var visitScope(Scope* scope);
-    lir::Var visitStructDecl(StructDecl* decl);
-    lir::Var visitIntegerLiteralExpr(IntegerLiteralExpr* expr);
-    lir::Var visitDecimalLiteralExpr(DecimalLiteralExpr* expr);
-    lir::Var visitBooleanLiteralExpr(BooleanLiteralExpr* expr);
-    lir::Var visitCharLiteralExpr(CharLiteralExpr* expr);
-    lir::Var visitStringLiteralExpr(StringLiteralExpr* expr);
-    lir::Var visitPreOpExpr(PreOpExpr* expr);
-    lir::Var visitBinOpExpr(BinOpExpr* expr);
-    lir::Var visitCastExpr(CastExpr* expr);
-    lir::Var visitDeclRefExpr(DeclRefExpr* expr);
-    lir::Var visitMemberRefExpr(MemberRefExpr* expr);
+    lir::ROperand visitDecl(Decl* decl);
+    lir::ROperand visitScope(Scope* scope);
+    lir::ROperand visitStructDecl(StructDecl* decl);
+    lir::ROperand visitIntegerLiteralExpr(IntegerLiteralExpr* expr);
+    lir::ROperand visitDecimalLiteralExpr(DecimalLiteralExpr* expr);
+    lir::ROperand visitBooleanLiteralExpr(BooleanLiteralExpr* expr);
+    lir::ROperand visitCharLiteralExpr(CharLiteralExpr* expr);
+    lir::ROperand visitStringLiteralExpr(StringLiteralExpr* expr);
+    lir::ROperand visitPreOpExpr(PreOpExpr* expr);
+    lir::ROperand visitBinOpExpr(BinOpExpr* expr);
+    lir::ROperand visitCastExpr(CastExpr* expr);
+    lir::ROperand visitDeclRefExpr(DeclRefExpr* expr);
+    lir::ROperand visitMemberRefExpr(MemberRefExpr* expr);
 
-    lir::Var visitReturnExpr(ReturnExpr* expr);
-    lir::Var visitIfExpr(IfExpr* expr);
-    lir::Var visitWhileExpr(WhileExpr* expr);
-    lir::Var visitDoExpr(DoExpr* expr);
+    lir::ROperand visitReturnExpr(ReturnExpr* expr);
+    lir::ROperand visitIfExpr(IfExpr* expr);
+    lir::ROperand visitWhileExpr(WhileExpr* expr);
+    lir::ROperand visitDoExpr(DoExpr* expr);
 
     lir::Var visitPreOpExprAsLValue(PreOpExpr* expr);
     lir::Var visitDeclRefExprAsLValue(DeclRefExpr* expr);
