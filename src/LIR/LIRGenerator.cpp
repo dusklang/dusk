@@ -6,14 +6,69 @@
 using namespace mpark::patterns;
 using namespace lir;
 
+static uint32_t getAlignmentForType(Type const&);
+
 static uint32_t getSizeForType(Type const& ty) {
-    // TODO: IMPLEMENT
-    return 0;
+    return match(ty.data)(
+        pattern(as<IntTy>(arg)) = [](auto ty) -> uint32_t {
+            return ty.bitWidth / 8;
+        },
+        pattern(as<IntLitVariable>(arg)) = [](auto ty) -> uint32_t {
+            panic("Found int literal variable type in lirgen!");
+        },
+        pattern(as<VoidTy>(_)) = []() -> uint32_t {
+            return 0;
+        },
+        pattern(as<NeverTy>(_)) = []() -> uint32_t {
+            return 0;
+        },
+        pattern(as<BoolTy>(_)) = []() -> uint32_t {
+            return 1;
+        },
+        pattern(as<FloatTy>(_)) = []() -> uint32_t {
+            return 32 / 8;
+        },
+        pattern(as<DoubleTy>(_)) = []() -> uint32_t {
+            return 64 / 8;
+        },
+        pattern(as<ErrorTy>(_)) = []() -> uint32_t {
+            panic("Found error type!");
+        },
+        pattern(as<PointerTy>(_)) = []() -> uint32_t {
+            return sizeof(uint8_t*);
+        },
+        pattern(as<StructTy>(arg)) = [](auto ty) -> uint32_t {
+            uint32_t size = 0;
+            for(auto field: ty.decl->fields) {
+                auto alignment = getAlignmentForType(field->type);
+                size += (alignment - (size % alignment)) % alignment;
+                size += getSizeForType(field->type);
+            }
+            return size;
+        }
+    );
+}
+
+static uint32_t getAlignmentForType(Type const& ty) {
+    return match(ty.data)(
+        pattern(as<StructTy>(arg)) = [](auto ty) -> uint32_t {
+            uint32_t maxAlignment = 0;
+            for(auto field: ty.decl->fields) {
+                auto alignment = getAlignmentForType(field->type);
+                if(alignment > maxAlignment) maxAlignment = alignment;
+            }
+            return maxAlignment;
+        },
+        pattern(_) = [&]() -> uint32_t {
+            return getSizeForType(ty);
+        }
+    );
 }
 
 static uint32_t getStrideForType(Type const& ty) {
-    // TODO: IMPLEMENT
-    return 0;
+    auto alignment = getAlignmentForType(ty);
+    auto size = getSizeForType(ty);
+    return (alignment - (size % alignment)) % alignment;
 }
 
 ROperand LIRGenerator::visitDecl(Decl* decl) {
