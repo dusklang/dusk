@@ -225,8 +225,7 @@ ROperand LIRGenerator::visitBinOpExpr(BinOpExpr* expr) {
                 func.appendInstruction(instr);
                 return func.variableOperand(instr.dest);
             } else {
-                instr.operands.a = rvalueA;
-                instr.operands.b = rvalueB;
+                instr.operands = { rvalueA, rvalueB };
             }
         } break;
         case BinOp::Add:

@@ -10,8 +10,11 @@
 #include "General/General.h"
 
 namespace lir {
-    /// Variable index, local to a function.
-    using Var = uint16_t;
+    /// Variable index.
+    struct Var {
+        uint16_t index;
+        bool isGlobal;
+    };
     /// Constant index, local to a function.
     using Const = uint16_t;
     /// Instruction index, local to a function.
@@ -130,7 +133,7 @@ namespace lir {
         std::vector<Variable> variables;
 
         Var appendVariable(Variable variable) {
-            Var var = variables.size();
+            Var var = { (uint16_t)variables.size(), false };
             variables.push_back(variable);
             return var;
         }
@@ -152,7 +155,7 @@ namespace lir {
             if(size) {
                 res.size = *size;
             } else {
-                res.size = variables[variable].size;
+                res.size = variables[variable.index].size;
             }
             return res;
         }
@@ -191,11 +194,18 @@ namespace lir {
     struct Program {
         std::vector<Function> functions;
         std::vector<Value> constants;
+        std::vector<Variable> globals;
 
         Const appendConstant(Value val) {
             Const konst = constants.size();
             constants.push_back(val);
             return konst;
+        }
+
+        Var appendGlobal(Variable var) {
+            Var variable = { (uint16_t)globals.size(), true };
+            globals.push_back(var);
+            return variable;
         }
     };
 }
