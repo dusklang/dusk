@@ -4,5 +4,5 @@ set(SOURCES
 set(HEADERS
 )
 
-add_executable(medac ${SOURCES} ${HEADERS})
-target_link_libraries(medac Parser AST LLVMGen Sema LIR ${llvm_libs})
+add_executable(meda ${SOURCES} ${HEADERS})
+target_link_libraries(meda Parser AST LLVMGen Sema LIR ${llvm_libs})
