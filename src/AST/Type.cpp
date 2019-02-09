@@ -5,6 +5,9 @@
 #include <sstream>
 #include "mpark/patterns.hpp"
 
+#include "Expr.h"
+#include "Decl.h"
+
 using namespace mpark::patterns;
 
 #include "Type.h"
@@ -81,4 +84,56 @@ bool Type::operator==(Type other) const {
 
 bool Type::isConvertibleTo(Type other) const {
     return *this == other || *this == NeverTy();
+}
+
+TypeLayout const& Type::layout() {
+    if(!_layout) {
+        TypeLayout layout {};
+        match(data)(
+            pattern(as<IntTy>(arg)) = [&](auto ty) {
+                layout.alignment = layout.size = ty.bitWidth / 8;
+            },
+            pattern(as<IntLitVariable>(arg)) = [](auto ty) {
+                panic("Found int literal variable type in lirgen!");
+            },
+            pattern(as<VoidTy>(_)) = [&]() {
+                layout.alignment = layout.size = 0;
+            },
+            pattern(as<NeverTy>(_)) = [&]() {
+                layout.alignment = layout.size = 0;
+            },
+            pattern(as<BoolTy>(_)) = [&]() {
+                layout.alignment = layout.size = 1;
+            },
+            pattern(as<FloatTy>(_)) = [&]() {
+                layout.alignment = layout.size = 32 / 8;
+            },
+            pattern(as<DoubleTy>(_)) = [&]() {
+                layout.alignment = layout.size = 64 / 8;
+            },
+            pattern(as<ErrorTy>(_)) = []() {
+                panic("Found error type!");
+            },
+            pattern(as<PointerTy>(_)) = [&]() {
+                layout.alignment = layout.size = sizeof(uint8_t*);
+            },
+            pattern(as<StructTy>(arg)) = [&](auto ty) {
+                uint32_t offset = 0;
+                uint32_t maxAlignment = 0;
+                for(auto field: ty.decl->fields) {
+                    auto fieldLayout = field->type.layout();
+                    if(fieldLayout.alignment > maxAlignment) {
+                        maxAlignment = fieldLayout.alignment;
+                    }
+                    offset += (fieldLayout.alignment - (offset % fieldLayout.alignment)) % fieldLayout.alignment;
+                    layout.fieldOffsets.push_back(offset);
+                    offset += fieldLayout.size;
+                }
+                layout.size = offset;
+                layout.alignment = maxAlignment;
+            }
+        );
+        _layout = std::move(layout);
+    }
+    return *_layout;
 }

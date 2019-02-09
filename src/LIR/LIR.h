@@ -82,6 +82,14 @@ namespace lir {
         };
     };
 
+    /// A mutable operand to an instruction.
+    struct RWOperand {
+        /// `offset` and `size` should be used for indexing into arrays or referencing
+        /// the fields of structs. Both are in bytes.
+        uint32_t offset, size;
+        Var variable;
+    };
+
     /// A read-only operand to an instruction.
     struct ROperand {
         enum {
@@ -94,7 +102,7 @@ namespace lir {
             /// with this type of operand.
             GlobalConstantAddress
         } kind;
-        /// `offset` and `size` should be used for indexing into constant arrays or referencing
+        /// `offset` and `size` should be used for indexing into arrays or referencing
         /// the fields of structs. Both are in bytes.
         uint32_t offset, size;
         union {
@@ -107,7 +115,7 @@ namespace lir {
 
     struct Instruction {
         union {
-            Var dest;
+            RWOperand dest;
             Var condition;
         };
         union {
@@ -142,52 +150,6 @@ namespace lir {
             Instr instr = instructions.size();
             instructions.push_back(instruction);
             return instr;
-        }
-
-        ROperand variableOperand(Var variable, std::optional<uint32_t> offset = std::nullopt, std::optional<uint32_t> size = std::nullopt) {
-            ROperand res { ROperand::Variable };
-            res.variable = variable;
-            if(offset) {
-                res.offset = *offset;
-            } else {
-                res.offset = 0;
-            }
-            if(size) {
-                res.size = *size;
-            } else {
-                res.size = variables[variable.index].size;
-            }
-            return res;
-        }
-        ROperand localConstantOperand(Value value, std::optional<uint32_t> offset = std::nullopt, std::optional<uint32_t> size = std::nullopt) {
-            ROperand res { ROperand::LocalConstant };
-            res.localConstant = value;
-            if(offset) {
-                res.offset = *offset;
-            } else {
-                res.offset = 0;
-            }
-            if(size) {
-                res.size = *size;
-            } else {
-                res.size = value.size;
-            }
-            return res;
-        }
-        ROperand globalConstantOperand(Const constant, std::optional<uint32_t> offset = std::nullopt, std::optional<uint32_t> size = std::nullopt) {
-            ROperand res { ROperand::GlobalConstantAddress };
-            res.globalConstant = constant;
-            if(offset) {
-                res.offset = *offset;
-            } else {
-                res.offset = 0;
-            }
-            if(size) {
-                res.size = *size;
-            } else {
-                res.size = sizeof(uint8_t*);
-            }
-            return res;
         }
     };
 

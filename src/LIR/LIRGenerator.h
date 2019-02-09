@@ -15,6 +15,11 @@ class LIRGenerator final: public ASTVisitor<LIRGenerator,
 {
     lir::Program program;
     lir::Func currentFunction;
+    lir::ROperand variableOperand(lir::Var variable);
+    lir::ROperand variableOperand(lir::RWOperand operand);
+    lir::RWOperand mutableVariableOperand(lir::Var variable);
+    lir::ROperand localConstantOperand(lir::Value value);
+    lir::ROperand globalConstantOperand(lir::Const constant);
 public:
     lir::ROperand visitDecl(Decl* decl);
     lir::ROperand visitScope(Scope* scope);
@@ -35,44 +40,43 @@ public:
     lir::ROperand visitWhileExpr(WhileExpr* expr);
     lir::ROperand visitDoExpr(DoExpr* expr);
 
-    lir::Var visitPreOpExprAsLValue(PreOpExpr* expr);
-    lir::Var visitDeclRefExprAsLValue(DeclRefExpr* expr);
-    lir::Var visitMemberRefExprAsLValue(MemberRefExpr* expr);
-    lir::Var visitIntegerLiteralExprAsLValue(IntegerLiteralExpr* expr) {
+    lir::RWOperand visitPreOpExprAsLValue(PreOpExpr* expr);
+    lir::RWOperand visitDeclRefExprAsLValue(DeclRefExpr* expr);
+    lir::RWOperand visitMemberRefExprAsLValue(MemberRefExpr* expr);
+    lir::RWOperand visitIntegerLiteralExprAsLValue(IntegerLiteralExpr* expr) {
         panic("Integer literal expression can not be taken as an lvalue");
     }
-    lir::Var visitDecimalLiteralExprAsLValue(DecimalLiteralExpr* expr) {
+    lir::RWOperand visitDecimalLiteralExprAsLValue(DecimalLiteralExpr* expr) {
         panic("Decimal literal expression can not be taken as an lvalue");
     }
-    lir::Var visitBooleanLiteralExprAsLValue(BooleanLiteralExpr* expr) {
+    lir::RWOperand visitBooleanLiteralExprAsLValue(BooleanLiteralExpr* expr) {
         panic("Boolean literal expression can not be taken as an lvalue");
     }
-    lir::Var visitCharLiteralExprAsLValue(CharLiteralExpr* expr) {
+    lir::RWOperand visitCharLiteralExprAsLValue(CharLiteralExpr* expr) {
         panic("Char literal expression can not be taken as an lvalue");
     }
-    lir::Var visitStringLiteralExprAsLValue(StringLiteralExpr* expr) {
+    lir::RWOperand visitStringLiteralExprAsLValue(StringLiteralExpr* expr) {
         panic("String literal expression can not be taken as an lvalue");
     }
-    lir::Var visitBinOpExprAsLValue(BinOpExpr* expr) {
+    lir::RWOperand visitBinOpExprAsLValue(BinOpExpr* expr) {
         panic("Binary operator expression can not be taken as an lvalue");
     }
-    lir::Var visitCastExprAsLValue(CastExpr* expr) {
+    lir::RWOperand visitCastExprAsLValue(CastExpr* expr) {
         panic("Cast expression can not be taken as an lvalue");
     }
-    lir::Var visitReturnExprAsLValue(ReturnExpr* expr) {
+    lir::RWOperand visitReturnExprAsLValue(ReturnExpr* expr) {
         panic("Return expression can not be taken as an lvalue");
     }
-    lir::Var visitIfExprAsLValue(IfExpr* expr) {
+    lir::RWOperand visitIfExprAsLValue(IfExpr* expr) {
         panic("If expression can not be taken as an lvalue");
     }
-    lir::Var visitWhileExprAsLValue(WhileExpr* expr) {
+    lir::RWOperand visitWhileExprAsLValue(WhileExpr* expr) {
         panic("While expression can not be taken as an lvalue");
     }
-    lir::Var visitDoExprAsLValue(DoExpr* expr) {
+    lir::RWOperand visitDoExprAsLValue(DoExpr* expr) {
         panic("Do expression can not be taken as an lvalue");
     }
-
-    lir::Var visitExprAsLValue(Expr* expr) {
+    lir::RWOperand visitExprAsLValue(Expr* expr) {
         #define EXPR_NODE(name) if(auto val = dynamic_cast<name##Expr*>(expr)) { \
             return this->visit##name##ExprAsLValue(val); \
         }

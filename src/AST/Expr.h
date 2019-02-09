@@ -13,7 +13,6 @@
 
 struct Decl;
 
-
 // TODO: Make Expr a variant.
 /// Base class from which each Expression node inherits.
 struct Expr: public ASTNode {

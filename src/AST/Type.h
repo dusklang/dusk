@@ -3,7 +3,7 @@
 #pragma once
 
 #include <variant>
-#include <map>
+#include <unordered_map>
 
 #include "General/SourceInfo.h"
 #include "Ident.h"
@@ -52,9 +52,20 @@ struct PointerTy {
 };
 struct IntLitVariable {};
 
-struct Type final {
-    using Data = std::variant<IntTy, IntLitVariable, VoidTy, NeverTy, BoolTy, FloatTy, DoubleTy, ErrorTy, StructTy, PointerTy>;
+struct TypeLayout {
+    uint32_t size, alignment;
+    std::vector<uint32_t> fieldOffsets;
 
+    uint32_t stride() const {
+        return (alignment - (size % alignment)) % alignment;
+    }
+};
+
+struct Type final {
+private:
+    std::optional<TypeLayout> _layout = std::nullopt;
+public:
+    using Data = std::variant<IntTy, IntLitVariable, VoidTy, NeverTy, BoolTy, FloatTy, DoubleTy, ErrorTy, StructTy, PointerTy>;
     Data data;
     SourceRange range;
 
@@ -83,8 +94,11 @@ struct Type final {
 
     std::string name() const;
 
-    Type substituting(std::map<int, Type> const& solution) const;
-    void substitute(std::map<int, Type> const& solution) {
+    // TODO: Move layout code into LIR.
+    TypeLayout const& layout();
+
+    Type substituting(std::unordered_map<int, Type> const& solution) const;
+    void substitute(std::unordered_map<int, Type> const& solution) {
         *this = substituting(solution);
     }
 };

@@ -6,69 +6,48 @@
 using namespace mpark::patterns;
 using namespace lir;
 
-static uint32_t getAlignmentForType(Type const&);
-
-static uint32_t getSizeForType(Type const& ty) {
-    return match(ty.data)(
-        pattern(as<IntTy>(arg)) = [](auto ty) -> uint32_t {
-            return ty.bitWidth / 8;
-        },
-        pattern(as<IntLitVariable>(arg)) = [](auto ty) -> uint32_t {
-            panic("Found int literal variable type in lirgen!");
-        },
-        pattern(as<VoidTy>(_)) = []() -> uint32_t {
-            return 0;
-        },
-        pattern(as<NeverTy>(_)) = []() -> uint32_t {
-            return 0;
-        },
-        pattern(as<BoolTy>(_)) = []() -> uint32_t {
-            return 1;
-        },
-        pattern(as<FloatTy>(_)) = []() -> uint32_t {
-            return 32 / 8;
-        },
-        pattern(as<DoubleTy>(_)) = []() -> uint32_t {
-            return 64 / 8;
-        },
-        pattern(as<ErrorTy>(_)) = []() -> uint32_t {
-            panic("Found error type!");
-        },
-        pattern(as<PointerTy>(_)) = []() -> uint32_t {
-            return sizeof(uint8_t*);
-        },
-        pattern(as<StructTy>(arg)) = [](auto ty) -> uint32_t {
-            uint32_t size = 0;
-            for(auto field: ty.decl->fields) {
-                auto alignment = getAlignmentForType(field->type);
-                size += (alignment - (size % alignment)) % alignment;
-                size += getSizeForType(field->type);
-            }
-            return size;
-        }
-    );
+ROperand LIRGenerator::variableOperand(Var variable) {
+    ROperand res { ROperand::Variable };
+    res.variable = variable;
+    res.offset = 0;
+    if(variable.isGlobal) {
+        res.size = program.globals[variable.index].size;
+    } else {
+        res.size = program.functions[currentFunction].variables[variable.index].size;
+    }
+    return res;
 }
-
-static uint32_t getAlignmentForType(Type const& ty) {
-    return match(ty.data)(
-        pattern(as<StructTy>(arg)) = [](auto ty) -> uint32_t {
-            uint32_t maxAlignment = 0;
-            for(auto field: ty.decl->fields) {
-                auto alignment = getAlignmentForType(field->type);
-                if(alignment > maxAlignment) maxAlignment = alignment;
-            }
-            return maxAlignment;
-        },
-        pattern(_) = [&]() -> uint32_t {
-            return getSizeForType(ty);
-        }
-    );
+ROperand LIRGenerator::variableOperand(RWOperand operand) {
+    ROperand res { ROperand::Variable };
+    res.variable = operand.variable;
+    res.offset = operand.offset;
+    res.size = operand.size;
+    return res;
 }
-
-static uint32_t getStrideForType(Type const& ty) {
-    auto alignment = getAlignmentForType(ty);
-    auto size = getSizeForType(ty);
-    return (alignment - (size % alignment)) % alignment;
+RWOperand LIRGenerator::mutableVariableOperand(Var variable) {
+    RWOperand res { };
+    res.variable = variable;
+    res.offset = 0;
+    if(variable.isGlobal) {
+        res.size = program.globals[variable.index].size;
+    } else {
+        res.size = program.functions[currentFunction].variables[variable.index].size;
+    }
+    return res;
+}
+ROperand LIRGenerator::localConstantOperand(Value value) {
+    ROperand res { ROperand::LocalConstant };
+    res.localConstant = value;
+    res.offset = 0;
+    res.size = value.size;
+    return res;
+}
+ROperand LIRGenerator::globalConstantOperand(Const constant) {
+    ROperand res { ROperand::GlobalConstantAddress };
+    res.globalConstant = constant;
+    res.offset = 0;
+    res.size = sizeof(uint8_t*);
+    return res;
 }
 
 ROperand LIRGenerator::visitDecl(Decl* decl) {
@@ -115,7 +94,7 @@ ROperand LIRGenerator::visitIntegerLiteralExpr(IntegerLiteralExpr* expr) {
         },
         pattern(_) = []() { panic("Invalid integer literal expression"); }
     );
-    return program.functions[currentFunction].localConstantOperand(constant);
+    return localConstantOperand(constant);
 }
 ROperand LIRGenerator::visitDecimalLiteralExpr(DecimalLiteralExpr* expr) {
     Value constant {};
@@ -131,21 +110,21 @@ ROperand LIRGenerator::visitDecimalLiteralExpr(DecimalLiteralExpr* expr) {
         pattern(_) = []() { panic("Invalid decimal literal expression"); }
     );
 
-    return program.functions[currentFunction].localConstantOperand(constant);
+    return localConstantOperand(constant);
 }
 ROperand LIRGenerator::visitBooleanLiteralExpr(BooleanLiteralExpr* expr) {
     Value constant {};
     constant.size = 1;
     constant.boolean = expr->literal;
 
-    return program.functions[currentFunction].localConstantOperand(constant);
+    return localConstantOperand(constant);
 }
 ROperand LIRGenerator::visitCharLiteralExpr(CharLiteralExpr* expr) {
     Value constant {};
     constant.size = 1;
     constant.u8 = expr->literal;
 
-    return program.functions[currentFunction].localConstantOperand(constant);
+    return localConstantOperand(constant);
 }
 ROperand LIRGenerator::visitStringLiteralExpr(StringLiteralExpr* expr) {
     Value constant {};
@@ -154,7 +133,7 @@ ROperand LIRGenerator::visitStringLiteralExpr(StringLiteralExpr* expr) {
     constant.buffer = new uint8_t[size];
     memcpy(constant.buffer, expr->literal.c_str(), size);
 
-    return program.functions[currentFunction].globalConstantOperand(program.appendConstant(constant));
+    return globalConstantOperand(program.appendConstant(constant));
 }
 ROperand LIRGenerator::visitPreOpExpr(PreOpExpr* expr) {
     Function& func = program.functions[currentFunction];
@@ -167,25 +146,25 @@ ROperand LIRGenerator::visitPreOpExpr(PreOpExpr* expr) {
         } break;
         case PreOp::Negative: {
             instr.op = OpCode::Negative;
-            instr.dest = func.appendVariable({operand.size});
+            instr.dest = mutableVariableOperand(func.appendVariable({operand.size}));
         } break;
         case PreOp::Deref: {
             instr.op = OpCode::Load;
-            instr.dest = func.appendVariable({getSizeForType(expr->operand->type)});
+            instr.dest = mutableVariableOperand(func.appendVariable({expr->operand->type.layout().size}));
         } break;
         case PreOp::AddrOf: {
             instr.op = OpCode::GetAddress;
-            instr.dest = func.appendVariable({operand.size});
+            instr.dest = mutableVariableOperand(func.appendVariable({operand.size}));
         } break;
         case PreOp::Not: {
             instr.op = OpCode::LogicalNot;
-            instr.dest = func.appendVariable({1});
+            instr.dest = mutableVariableOperand(func.appendVariable({1}));
         } break;
     }
     func.appendInstruction(instr);
-    return func.variableOperand(instr.dest);
+    return variableOperand(instr.dest);
 }
-Var LIRGenerator::visitPreOpExprAsLValue(PreOpExpr* expr) {
+RWOperand LIRGenerator::visitPreOpExprAsLValue(PreOpExpr* expr) {
     switch(expr->op) {
         case PreOp::Positive:
         case PreOp::Negative:
@@ -196,7 +175,7 @@ Var LIRGenerator::visitPreOpExprAsLValue(PreOpExpr* expr) {
         case PreOp::Deref: {
             auto op = visitExpr(expr->operand);
             assert(op.kind == ROperand::Variable);
-            return op.variable;
+            return mutableVariableOperand(op.variable);
         } break;
     }
 }
@@ -223,7 +202,7 @@ ROperand LIRGenerator::visitBinOpExpr(BinOpExpr* expr) {
                 instr.op = OpCode::Copy;
                 instr.operand = rvalueB;
                 func.appendInstruction(instr);
-                return func.variableOperand(instr.dest);
+                return variableOperand(instr.dest);
             } else {
                 instr.operands = { rvalueA, rvalueB };
             }
@@ -235,7 +214,7 @@ ROperand LIRGenerator::visitBinOpExpr(BinOpExpr* expr) {
         case BinOp::Mod:
         case BinOp::BitwiseAnd:
         case BinOp::BitwiseOr: {
-            instr.dest = func.appendVariable({rvalueA.size});
+            instr.dest = mutableVariableOperand(func.appendVariable({rvalueA.size}));
             instr.operands = { rvalueA, rvalueB };
         } break;
         case BinOp::Equal:
@@ -246,16 +225,16 @@ ROperand LIRGenerator::visitBinOpExpr(BinOpExpr* expr) {
         case BinOp::GreaterThan:
         case BinOp::Or:
         case BinOp::And: {
-            instr.dest = func.appendVariable({1});
+            instr.dest = mutableVariableOperand(func.appendVariable({1}));
             instr.operands = { rvalueA, rvalueB };
         } break;
     }
 
     auto getPointerOffset = [&](PointerTy pointerTy, IntTy intTy) -> ROperand {
         Var offset = func.appendVariable({sizeof(uint8_t*)});
-        ROperand offsetOperand = func.variableOperand(offset);
+        ROperand offsetOperand = variableOperand(offset);
         Instruction getOffset {};
-        getOffset.dest = offset;
+        getOffset.dest = mutableVariableOperand(offset);
         getOffset.operand = rvalueB;
 
         auto pointerBitWidth = sizeof(uint8_t*) * 8;
@@ -277,12 +256,12 @@ ROperand LIRGenerator::visitBinOpExpr(BinOpExpr* expr) {
         Value stride {};
         stride.size = sizeof(uint8_t*);
         assertEqual(stride.size, 64 / 8);
-        stride.u64 = getStrideForType(*pointerTy.pointedTy);
+        stride.u64 = pointerTy.pointedTy->layout().stride();
 
         Instruction mult {};
         mult.op = OpCode::Mult;
-        mult.dest = offset;
-        mult.operands = { func.variableOperand(offset), func.localConstantOperand(stride) };
+        mult.dest = mutableVariableOperand(offset);
+        mult.operands = { variableOperand(offset), localConstantOperand(stride) };
         func.appendInstruction(mult);
 
         return offsetOperand;
@@ -517,7 +496,7 @@ ROperand LIRGenerator::visitBinOpExpr(BinOpExpr* expr) {
         } break;
     }
     func.appendInstruction(instr);
-    return func.variableOperand(instr.dest);
+    return variableOperand(instr.dest);
 }
 ROperand LIRGenerator::visitCastExpr(CastExpr* expr) {
     return {};
@@ -526,8 +505,20 @@ ROperand LIRGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
     return {};
 }
 ROperand LIRGenerator::visitMemberRefExpr(MemberRefExpr* expr) {
-    return {};
+    Expr* root = expr->root;
+    ROperand member = visitExpr(root);
+    member.size = expr->type.layout().size;
+    member.offset += root->type.layout().fieldOffsets[expr->declIndex];
+    return member;
 }
+RWOperand LIRGenerator::visitMemberRefExprAsLValue(MemberRefExpr* expr) {
+    Expr* root = expr->root;
+    RWOperand member = visitExprAsLValue(root);
+    member.size = expr->type.layout().size;
+    member.offset += root->type.layout().fieldOffsets[expr->declIndex];
+    return member;
+}
+
 ROperand LIRGenerator::visitReturnExpr(ReturnExpr* expr) {
     return {};
 }
