@@ -7,7 +7,7 @@
 #include <string>
 
 class LIRGenerator final: public ASTVisitor<LIRGenerator,
-                                            lir::ROperand,
+                                            void,
                                             lir::ROperand,
                                             lir::ROperand,
                                             lir::ROperand,
@@ -21,6 +21,7 @@ class LIRGenerator final: public ASTVisitor<LIRGenerator,
     lir::ROperand localConstantOperand(lir::Value value);
     lir::ROperand globalConstantOperand(lir::Const constant);
 public:
+    void visit(std::vector<ASTNode*> const& nodes);
     lir::ROperand visitDecl(Decl* decl);
     lir::ROperand visitScope(Scope* scope);
     lir::ROperand visitStructDecl(StructDecl* decl);

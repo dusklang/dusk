@@ -239,8 +239,8 @@ int main() {
     tyChecker.visitTopLevel(nodes);
     //printer.visit(nodes, 0, std::cout);
 
-    /*lirGen.visit(nodes);
-    lirGen.printIR();*/
+    lirGen.visit(nodes);
+    lirGen.printIR();
 
     LLVMGenerator llvmGen;
     llvmGen.visitTopLevel(nodes);

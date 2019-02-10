@@ -107,7 +107,8 @@ namespace lir {
         uint32_t offset, size;
         union {
             Var variable;
-            // TODO: maybe local constants should be stored in a vector on Function and indexed into?
+            // TODO: maybe local constants should be stored in an array on Function and indexed into?
+            // Or just have global constants be the only kind?
             Value localConstant;
             Const globalConstant;
         };
