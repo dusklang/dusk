@@ -215,6 +215,15 @@ public:
         std::memmove(data + _count, &elem, sizeof(T));
         _count++;
     }
+    void reserve(size_t cap) {
+        if(cap > _capacity) {
+            _capacity = cap;
+            T* newBuf = newData(_capacity);
+            std::memmove(newBuf, data, _count * sizeof(T));
+            deleteData();
+            data = newBuf;
+        }
+    }
     T& operator[](size_t i) {
         assert(i < _count && "index out of bounds");
         return data[i];

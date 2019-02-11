@@ -142,11 +142,11 @@ struct CastExpr final: public Expr {
 struct DeclRefExpr final: public Expr {
     std::optional<std::pair<SourceRange, SourceRange>> parenRanges;
     Ident name;
-    Array<Expr*> argList;
+    Array<Expr*> arguments;
     Decl* decl = nullptr;
 
     DeclRefExpr(std::optional<std::pair<SourceRange, SourceRange>> parenRanges, Ident name, Array<Expr*> argList) :
-        parenRanges(parenRanges), name(name), argList(argList) {}
+        parenRanges(parenRanges), name(name), arguments(argList) {}
 
     DeclRefExpr& operator=(DeclRefExpr const& other) = default;
 

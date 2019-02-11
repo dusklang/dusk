@@ -61,6 +61,8 @@ namespace lir {
 
         Branch,             /// goto branch
         CondBranch,         /// if condition { goto trueBranch } else { goto falseBranch }
+
+        Call,               /// dest = function(arguments...)
     };
 
     /// A bag of bits, used to represent constant values (and hopefully constexpr values as well)
@@ -130,6 +132,10 @@ namespace lir {
                 lir::Instr trueBranch, falseBranch;
             };
             Const constant;
+            struct {
+                Func function;
+                Array<ROperand> arguments;
+            };
         };
         OpCode op;
     };
@@ -138,6 +144,7 @@ namespace lir {
     };
 
     struct Function {
+        std::string name;
         Array<Instruction> instructions;
         Array<Variable> variables;
         bool isExtern;

@@ -398,12 +398,12 @@ CodeGenVal LLVMGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
     if(expr->decl->isComputed()) {
         auto callee = static_cast<llvm::Function*>(referencedVal);
         assertEqualMessage(
-			callee->arg_size(), expr->argList.count(),
+			callee->arg_size(), expr->arguments.count(),
             "Incorrect number of arguments passed to function"
 		);
 
         Array<llvm::Value*> args;
-        for(auto* arg: expr->argList) {
+        for(auto* arg: expr->arguments) {
             args.append(toDirect(visitExpr(arg)));
             if(!args.last()) {
                 return DirectVal { nullptr };

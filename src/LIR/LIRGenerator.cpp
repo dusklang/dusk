@@ -60,16 +60,17 @@ DeclVal LIRGenerator::visitDecl(Decl* decl) {
     auto valIt = declMap.find(decl);
     if(valIt != declMap.end()) return valIt->second;
 
+    std::optional<DeclVal> retVal;
     if(decl->isExtern()) {
         if(decl->isVar) {
-            return program.appendExternGlobal(decl->type.layout().size);
+            retVal = program.appendExternGlobal(decl->type.layout().size);
         } else {
             Function function {};
             function.isExtern = true;
-            return program.appendFunction(function);
+            function.name = decl->name.getText().string();
+            retVal = program.appendFunction(function);
         }
-    }
-    if(auto expr = decl->expression()) {
+    } else if(auto expr = decl->expression()) {
         Var var;
         ROperand val = visitExpr(decl->expression());
         if(functionStack.isEmpty()) {
@@ -85,25 +86,33 @@ DeclVal LIRGenerator::visitDecl(Decl* decl) {
             curFunction.appendInstruction(copy);
         }
 
-        return var;
+        retVal = var;
     } else {
         Function function {};
+        function.name = decl->name.getText().string();
         for(auto param: decl->paramList) {
             declMap[param] = function.appendVariable({param->type.layout().size});
         }
-        functionStack.append(program.appendFunction(function));
+        Func func = program.appendFunction(function);
+        functionStack.append(func);
+        declMap[decl] = func;
         visitScope(decl->body());
 
-        return functionStack.removeLast();
+        retVal = functionStack.removeLast();
     }
+    declMap[decl] = *retVal;
+    return *retVal;
 }
-void LIRGenerator::visitScope(Scope* scope) {
+std::optional<ROperand> LIRGenerator::visitScope(Scope* scope) {
+    std::optional<ROperand> terminalValue;
     for(auto node: scope->nodes) {
-        ASTVisitor::visit(node);
+        if(auto expr = dynamic_cast<Expr*>(node)) {
+            terminalValue = visitExpr(expr);
+        } else if(auto decl = dynamic_cast<Decl*>(node)) {
+            visitDecl(decl);
+        }
     }
-}
-ROperand LIRGenerator::visitStructDecl(StructDecl* decl) {
-    return {};
+    return terminalValue;
 }
 ROperand LIRGenerator::visitIntegerLiteralExpr(IntegerLiteralExpr* expr) {
     Value constant {};
@@ -551,10 +560,46 @@ ROperand LIRGenerator::visitCastExpr(CastExpr* expr) {
     return {};
 }
 ROperand LIRGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
-    return {};
+    auto val = visitDecl(expr->decl);
+    Function& curFunc = program.functions[*functionStack.last()];
+    Instruction instr {};
+    instr.dest = mutableVariableOperand(
+        curFunc.appendVariable({expr->type.layout().size})
+    );
+
+    match(val)(
+        pattern(as<Var>(arg)) = [&](auto var) {
+            instr.op = OpCode::Copy;
+            instr.operand = variableOperand(var);
+        },
+        pattern(as<Func>(arg)) = [&](auto func) {
+            instr.op = OpCode::Call;
+            instr.function = func;
+            Array<ROperand> arguments {};
+            arguments.reserve(expr->arguments.count());
+            for(auto arg: expr->arguments) {
+                auto argument = visitExpr(arg);
+                arguments.append(argument);
+            }
+            
+            instr.arguments = arguments;
+        }
+    );
+
+    curFunc.appendInstruction(instr);
+
+    ROperand retVal {};
+    retVal.kind = ROperand::Variable;
+    retVal.variable = instr.dest.variable;
+    retVal.offset = instr.dest.offset;
+    retVal.size = instr.dest.size;
+
+    return retVal;
 }
 RWOperand LIRGenerator::visitDeclRefExprAsLValue(DeclRefExpr* expr) {
-    return {};
+    auto val = visitDecl(expr->decl);
+
+    return mutableVariableOperand(std::get<Var>(val));
 }
 ROperand LIRGenerator::visitMemberRefExpr(MemberRefExpr* expr) {
     Expr* root = expr->root;
@@ -582,8 +627,9 @@ ROperand LIRGenerator::visitWhileExpr(WhileExpr* expr) {
 }
 
 void LIRGenerator::printIR() const {
-    for(auto& function: program.functions) {
-        std::cout << "FUNCTION:\n";
+    for(size_t j: program.functions.indices()) {
+        Function const& function = program.functions[j];
+        std::cout << function.name << ":\n";
         for(size_t i: function.instructions.indices()) {
             Instruction const& instruction = function.instructions[i];
             auto printVariable = [&](Var variable) {
@@ -735,6 +781,20 @@ void LIRGenerator::printIR() const {
                     printInstructionBeginning("CondBranch");
                     printVariable(instruction.condition);
                     std::cout << ", " << instruction.branch;
+                    break;
+                case OpCode::Call:
+                    printInstructionBeginning("Call");
+                    std::cout << instruction.function << "(";
+                    bool first = true;
+                    for(auto& argument: instruction.arguments) {
+                        if(first) {
+                            first = false;
+                        } else {
+                            std::cout << ", ";
+                        }
+                        printROperand(argument);
+                    }
+                    std::cout << ")";
                     break;
             }
             std::cout << "\n";

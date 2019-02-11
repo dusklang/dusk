@@ -306,7 +306,7 @@ void TypeChecker::visitCastExpr(CastExpr* expr) {
 }
 void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
     // Type-check arguments.
-    for(auto arg: expr->argList) {
+    for(auto arg: expr->arguments) {
         visitExpr(arg);
     }
 
@@ -316,9 +316,9 @@ void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
         for(auto decl: declList) {
             if(decl->name != expr->name) continue;
             nameMatches.append(decl);
-            if(decl->paramList.count() != expr->argList.count()) continue;
+            if(decl->paramList.count() != expr->arguments.count()) continue;
             visitDeclPrototype(decl);
-            for(auto [param, arg]: zip(decl->paramList, expr->argList)) {
+            for(auto [param, arg]: zip(decl->paramList, expr->arguments)) {
                 if(!arg->type.isConvertibleTo(param->type)) goto failedToFindMatchInCurrentList;
             }
             // We must have succeeded! Add the decl's prototype and type to the declRefExpr and return.

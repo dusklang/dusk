@@ -193,10 +193,10 @@ void ASTPrinter::visitCastExpr(CastExpr* expr, int indentationLevel, std::ostrea
 void ASTPrinter::visitDeclRefExpr(DeclRefExpr* expr, int indentationLevel, std::ostream& stream) {
     indent(indentationLevel, stream);
     stream << expr->name;
-    if(!expr->argList.isEmpty()) {
+    if(!expr->arguments.isEmpty()) {
         stream << '(';
         bool first = true;
-        for(auto* arg: expr->argList) {
+        for(auto* arg: expr->arguments) {
             if(!first) stream << ", ";
             else first = false;
 
