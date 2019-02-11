@@ -237,11 +237,11 @@ int main() {
 
     auto nodes = parser.parseTopLevel();
     tyChecker.visitTopLevel(nodes);
-    //printer.visit(nodes, 0, std::cout);
+    printer.visit(nodes, 0, std::cout);
 
     lirGen.visit(nodes);
     lirGen.printIR();
-
+/*
     LLVMGenerator llvmGen;
     llvmGen.visitTopLevel(nodes);
     llvmGen.printIR();
@@ -255,7 +255,7 @@ int main() {
     std::cout << '\n';
     std::system("clang++ main.o stdlib.cpp -o main");
     std::system("./main");
-    std::cout << '\n';
+    std::cout << '\n';*/
 
     return 0;
 }

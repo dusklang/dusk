@@ -15,7 +15,7 @@ void Diagnostic::print(std::ostream& stream)  {
             break;
     }
     stream << message << "\033[0m\n";
-    std::vector<std::vector<LineRange>> lineRangeLists;
+    Array<Array<LineRange>> lineRangeLists;
     auto numDigits = [](uint32_t num) -> uint32_t {
         uint32_t digits = 0;
         while(num > 0) {
@@ -34,8 +34,8 @@ void Diagnostic::print(std::ostream& stream)  {
     };
     uint32_t maxLineNumberSize = 0;
     for(auto& range: ranges) {
-        lineRangeLists.push_back(file.linesInRange(range.range));
-        for(auto& range: lineRangeLists.back()) {
+        lineRangeLists.append(file.linesInRange(range.range));
+        for(auto& range: *lineRangeLists.last()) {
             maxLineNumberSize = std::max(maxLineNumberSize, numDigits(range.line));
         }
     }
@@ -55,11 +55,11 @@ void Diagnostic::print(std::ostream& stream)  {
     };
     printEmptyLine();
     stream << '\n';
-    for(uint32_t rnge = 0; rnge < ranges.size(); rnge++) {
+    for(uint32_t rnge = 0; rnge < ranges.count(); rnge++) {
         auto& range = ranges[rnge];
         auto& lines = lineRangeLists[rnge];
-        std::optional<std::vector<LineRange>> nextLines;
-        if((rnge + 1) < ranges.size()) {
+        std::optional<Array<LineRange>> nextLines;
+        if((rnge + 1) < ranges.count()) {
             nextLines = lineRangeLists[rnge + 1];
         }
         bool first = true;
@@ -85,8 +85,8 @@ void Diagnostic::print(std::ostream& stream)  {
             stream << ' ' << *range.message;
         }
         stream << '\n';
-        if(nextLines && nextLines->front().line <= lines.back().line + 2) {
-            for(auto i = lines.back().line + 1; i < nextLines->front().line; i++) {
+        if(nextLines && nextLines->first()->line <= lines.last()->line + 2) {
+            for(auto i = lines.last()->line + 1; i < nextLines->first()->line; i++) {
                 printSourceLine(i);
             }
         } else if(!nextLines) {

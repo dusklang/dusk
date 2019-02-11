@@ -11,8 +11,8 @@
 
 class TypeChecker final: public ASTVisitor<TypeChecker> {
     SourceFile const& file;
-    std::vector<std::vector<Decl*>> declLists;
-    std::vector<StructDecl*> structs;
+    Array<Array<Decl*>> declLists;
+    Array<StructDecl*> structs;
     std::stack<Type> returnTypeStack;
     void reportDiag(Diagnostic diag) const {
         diag.print(std::cout);
@@ -25,10 +25,10 @@ class TypeChecker final: public ASTVisitor<TypeChecker> {
     void visitDeclPrototype(Decl* decl);
 public:
     TypeChecker(SourceFile const& file) : file(file) {
-        declLists.push_back(std::vector<Decl*>());
+        declLists.append(Array<Decl*>());
     }
 
-    void visitTopLevel(std::vector<ASTNode*> nodes);
+    void visitTopLevel(Array<ASTNode*> nodes);
     void visitType(Type* type, bool dependsOnStructDecls = true);
     // NOTE: visitDecl assumes that visitDeclPrototype was already called.
     void visitDecl(Decl* decl);

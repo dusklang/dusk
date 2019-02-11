@@ -21,9 +21,9 @@ struct ASTNode {
 /// Represents a collection of other nodes.
 struct Scope final : public ASTNode {
     SourceRange range;
-    std::vector<ASTNode*> nodes;
+    Array<ASTNode*> nodes;
     Expr* terminalExpr = nullptr;
-    Scope(SourceRange range, std::vector<ASTNode*> nodes) : range(range), nodes(nodes) {}
+    Scope(SourceRange range, Array<ASTNode*> nodes) : range(range), nodes(nodes) {}
     SourceRange totalRange() const override { return range; }
     Type terminalType() const;
     Expr* terminalValueExpr() const;

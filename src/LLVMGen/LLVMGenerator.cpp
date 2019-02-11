@@ -18,7 +18,7 @@
 
 using namespace mpark::patterns;
 
-void LLVMGenerator::visitTopLevel(std::vector<ASTNode*> nodes) {
+void LLVMGenerator::visitTopLevel(Array<ASTNode*> nodes) {
     for(auto node: nodes) {
         if(auto decl = dynamic_cast<Decl*>(node)) {
             visitDeclPrototype(decl);
@@ -62,11 +62,11 @@ llvm::Type* LLVMGenerator::toLLVMTy(Type type) {
             return llvm::Type::getIntNTy(context, properties.bitWidth);
         },
         pattern(as<StructTy>(arg)) = [&](auto structTy) -> llvm::Type* {
-            std::vector<llvm::Type*> types;
+            Array<llvm::Type*> types;
             for(auto field: structTy.decl->fields) {
-                types.push_back(toLLVMTy(field->type));
+                types.append(toLLVMTy(field->type));
             }
-            return llvm::StructType::get(context, types);
+            return llvm::StructType::get(context, types.llvmArrayRef());
         },
         pattern(as<VoidTy>(_)) = [&]() -> llvm::Type* {
             return llvm::Type::getVoidTy(context);
@@ -93,16 +93,16 @@ void LLVMGenerator::visitDeclPrototype(Decl* decl) {
             declVals[decl] = nullptr;
         }
     } else {
-        std::vector<llvm::Type*> arguments;
+        Array<llvm::Type*> arguments;
         for(auto& param: decl->paramList) {
-            arguments.push_back(toLLVMTy(param->type));
+            arguments.append(toLLVMTy(param->type));
         }
         llvm::Type* type = toLLVMTy(decl->type);
         if(decl->isVar) {
             declVals[decl] = new llvm::GlobalVariable(*module, type, false, llvm::GlobalVariable::ExternalLinkage, nullptr, decl->name.getText().string());
         } else {
             llvm::FunctionType* functionTy = llvm::FunctionType::get(type,
-                                                                     arguments,
+                                                                     arguments.llvmArrayRef(),
                                                                      false);
             llvm::Function* function = llvm::Function::Create(functionTy, llvm::Function::ExternalLinkage, decl->name.getText().string(), module);
 
@@ -398,19 +398,19 @@ CodeGenVal LLVMGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
     if(expr->decl->isComputed()) {
         auto callee = static_cast<llvm::Function*>(referencedVal);
         assertEqualMessage(
-			callee->arg_size(), expr->argList.size(),
+			callee->arg_size(), expr->argList.count(),
             "Incorrect number of arguments passed to function"
 		);
 
-        std::vector<llvm::Value*> args;
+        Array<llvm::Value*> args;
         for(auto* arg: expr->argList) {
-            args.push_back(toDirect(visitExpr(arg)));
-            if(!args.back()) {
+            args.append(toDirect(visitExpr(arg)));
+            if(!args.last()) {
                 return DirectVal { nullptr };
             }
         }
 
-        return DirectVal { builder.CreateCall(callee, args) };
+        return DirectVal { builder.CreateCall(callee, args.llvmArrayRef()) };
     } else {
         if(expr->decl->isVar) {
             return IndirectVal { referencedVal };
@@ -423,8 +423,8 @@ CodeGenVal LLVMGenerator::visitMemberRefExpr(MemberRefExpr* expr) {
     llvm::Value* root = toIndirect(visitExpr(expr->root));
     auto firstIndex = llvm::ConstantInt::get(context, llvm::APInt(32, 0));
     auto index = llvm::ConstantInt::get(context, llvm::APInt(32, expr->declIndex));
-    std::vector<llvm::Value*> indices { firstIndex, index };
-    auto addr = builder.CreateGEP(root, indices);
+    Array<llvm::Value*> indices { firstIndex, index };
+    auto addr = builder.CreateGEP(root, indices.llvmArrayRef());
     return IndirectVal { addr };
 }
 CodeGenVal LLVMGenerator::visitReturnExpr(ReturnExpr* expr) {
@@ -503,9 +503,8 @@ CodeGenVal LLVMGenerator::visitWhileExpr(WhileExpr* expr) {
     visitScope(expr->thenScope);
     // If the last node in thenScope is a return expression, we need to avoid creating
     // a branch after it because a basic block can only have one terminal instruction.
-    // http://llvm.org/doxygen/classllvm_1_1BasicBlock.html
-    if(expr->thenScope->nodes.empty() ||
-       !dynamic_cast<ReturnExpr*>(expr->thenScope->nodes.back())) {
+    if(expr->thenScope->nodes.isEmpty() ||
+       !dynamic_cast<ReturnExpr*>(*expr->thenScope->nodes.last())) {
         builder.CreateBr(checkBlock);
     }
 

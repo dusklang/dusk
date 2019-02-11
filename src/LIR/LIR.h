@@ -8,6 +8,7 @@
 #include <string>
 
 #include "General/General.h"
+#include "General/Array.h"
 
 namespace lir {
     /// Variable index.
@@ -138,36 +139,36 @@ namespace lir {
     };
 
     struct Function {
-        std::vector<Instruction> instructions;
-        std::vector<Variable> variables;
+        Array<Instruction> instructions;
+        Array<Variable> variables;
 
         Var appendVariable(Variable variable) {
-            Var var = { (uint16_t)variables.size(), false };
-            variables.push_back(variable);
+            Var var = { (uint16_t)variables.count(), false };
+            variables.append(variable);
             return var;
         }
 
         Instr appendInstruction(Instruction instruction) {
-            Instr instr = instructions.size();
-            instructions.push_back(instruction);
+            Instr instr = instructions.count();
+            instructions.append(instruction);
             return instr;
         }
     };
 
     struct Program {
-        std::vector<Function> functions;
-        std::vector<Value> constants;
-        std::vector<Variable> globals;
+        Array<Function> functions;
+        Array<Value> constants;
+        Array<Variable> globals;
 
         Const appendConstant(Value val) {
-            Const konst = constants.size();
-            constants.push_back(val);
+            Const konst = constants.count();
+            constants.append(val);
             return konst;
         }
 
         Var appendGlobal(Variable var) {
-            Var variable = { (uint16_t)globals.size(), true };
-            globals.push_back(var);
+            Var variable = { (uint16_t)globals.count(), true };
+            globals.append(var);
             return variable;
         }
     };

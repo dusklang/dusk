@@ -50,7 +50,7 @@ ROperand LIRGenerator::globalConstantOperand(Const constant) {
     return res;
 }
 
-void LIRGenerator::visit(std::vector<ASTNode*> const& nodes) {
+void LIRGenerator::visit(Array<ASTNode*> const& nodes) {
     for(auto node: nodes) {
         ASTVisitor::visit(node);
     }
@@ -544,7 +544,7 @@ ROperand LIRGenerator::visitWhileExpr(WhileExpr* expr) {
 void LIRGenerator::printIR() const {
     for(auto& function: program.functions) {
         std::cout << "FUNCTION:\n";
-        for(size_t i = 0; i < function.instructions.size(); i++) {
+        for(size_t i: function.instructions.indices()) {
             Instruction const& instruction = function.instructions[i];
             auto printVariable = [&](Var variable) {
                 std::cout << (variable.isGlobal ? "G" : "L");

@@ -126,7 +126,7 @@ TypeLayout const& Type::layout() {
                         maxAlignment = fieldLayout.alignment;
                     }
                     offset += (fieldLayout.alignment - (offset % fieldLayout.alignment)) % fieldLayout.alignment;
-                    layout.fieldOffsets.push_back(offset);
+                    layout.fieldOffsets.append(offset);
                     offset += fieldLayout.size;
                 }
                 layout.size = offset;

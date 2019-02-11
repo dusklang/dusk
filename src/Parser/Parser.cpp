@@ -31,7 +31,7 @@
 
 // FIXME: Allocating a multi-dimensional array on the heap for this shouldn't actually matter, but is still silly.
 // Array<Array<BinOp, 10>, 10> precedenceLevels { <---- better.
-std::vector<std::vector<BinOp>> precedenceLevels {
+Array<Array<BinOp>> precedenceLevels {
     { BinOp::Mult, BinOp::Div, BinOp::Mod },
 
     { BinOp::Add, BinOp::Sub },
@@ -62,7 +62,7 @@ std::vector<std::vector<BinOp>> precedenceLevels {
 };
 
 int getPrecedence(BinOp op) {
-    for(size_t level = 0; level < precedenceLevels.size(); ++level) {
+    for(size_t level = 0; level < precedenceLevels.count(); ++level) {
         for(auto otherOp: precedenceLevels[level]) {
             if(op == otherOp) { return level; }
         }
@@ -114,14 +114,14 @@ std::optional<PreOp> parsePrefixOperator(tok token) {
 }
 
 #include "AST/ASTPrinter.h"
-std::vector<ASTNode*> Parser::parseTopLevel() {
-    std::vector<ASTNode*> nodes;
+Array<ASTNode*> Parser::parseTopLevel() {
+    Array<ASTNode*> nodes;
     while(true) {
         if(cur().is(tok::eof)) break;
         if(cur().is(tok::sym_right_curly)) {
             reportDiag(ERR("extraneous closing brace '}'").primaryRange(cur().getRange()));
         }
-        nodes.push_back(parseNode());
+        nodes.append(parseNode());
     }
     return nodes;
 }
@@ -131,7 +131,7 @@ Scope* Parser::parseScope() {
     Token openingCurly = cur();
     std::optional<Token> closingCurly;
     next();
-    std::vector<ASTNode*> nodes;
+    Array<ASTNode*> nodes;
     while(true) {
         if(cur().is(tok::sym_right_curly)) {
             closingCurly = cur();
@@ -144,7 +144,7 @@ Scope* Parser::parseScope() {
                 ERR("unexpected eof before end of scope").range(openingCurly.getRange(), "scope begins here")
             );
         }
-        nodes.push_back(parseNode());
+        nodes.append(parseNode());
     }
     return new Scope(openingCurly.getRange() + closingCurly->getRange(), nodes);
 }
@@ -224,7 +224,7 @@ Decl* Parser::parseDecl() {
             ERR("expected declaration name").primaryRange(cur().getRange())
         );
     }
-    std::vector<Decl*> paramList;
+    Array<Decl*> paramList;
     if(cur().is(tok::sym_left_paren)) {
         auto leftParen = cur();
         bool isFirst = true;
@@ -245,7 +245,7 @@ Decl* Parser::parseDecl() {
             }
             EXPECT(tok::sym_colon, "expected colon after parameter name");
             next();
-            paramList.push_back(new Decl(*paramName, parseType(), /* isVar */ false));
+            paramList.append(new Decl(*paramName, parseType(), /* isVar */ false));
         } while(cur().is(tok::sym_comma));
         EXPECT(tok::sym_right_paren, "expected ')' after parameter list");
         next();
@@ -294,7 +294,7 @@ StructDecl* Parser::parseStructDecl() {
     }
     EXPECT(tok::sym_left_curly, "expected opening curly brace to begin struct declaration");
     next();
-    std::vector<Decl*> fields;
+    Array<Decl*> fields;
     while(cur().isNot(tok::sym_right_curly)) {
         auto fieldName = parseIdentifier();
         if(!fieldName) {
@@ -303,7 +303,7 @@ StructDecl* Parser::parseStructDecl() {
         EXPECT(tok::sym_colon, "expected colon in struct field");
         next();
         auto fieldType = parseType();
-        fields.push_back(new Decl(*fieldName, fieldType, /* isVar */ true));
+        fields.append(new Decl(*fieldName, fieldType, /* isVar */ true));
     }
     next();
     return new StructDecl(structRange, *name, fields);
@@ -398,7 +398,7 @@ DeclRefExpr* Parser::parseDeclRefExpr() {
     auto name = parseIdentifier();
     if(!name) return nullptr;
 
-    std::vector<Expr*> argList;
+    Array<Expr*> argList;
     std::optional<std::pair<SourceRange, SourceRange>> _parenRanges;
     if(cur().is(tok::sym_left_paren)) {
         std::pair<SourceRange, SourceRange> parenRanges;
@@ -407,7 +407,7 @@ DeclRefExpr* Parser::parseDeclRefExpr() {
             next();
             auto argument = parseExpr();
             if(!argument) reportDiag(ERR("expected argument").primaryRange(cur().getRange()));
-            argList.push_back(argument);
+            argList.append(argument);
 
         } while(cur().is(tok::sym_comma));
         EXPECT(tok::sym_right_paren, "expected ')' after argument");
@@ -421,17 +421,14 @@ DeclRefExpr* Parser::parseDeclRefExpr() {
 }
 
 Expr* Parser::parseExpr() {
-    std::vector<Expr*> exprStack { parseTerm() };
-    std::vector<std::pair<BinOp, SourceRange>> opStack;
+    Array<Expr*> exprStack { parseTerm() };
+    Array<std::pair<BinOp, SourceRange>> opStack;
 
     auto popStacks = [&]() {
-        auto rhs = exprStack.back();
-        exprStack.pop_back();
-        auto lhs = exprStack.back();
-        exprStack.pop_back();
-        auto nextOp = opStack.back();
-        opStack.pop_back();
-        exprStack.push_back(new BinOpExpr(nextOp.second, lhs, rhs, nextOp.first));
+        auto rhs = exprStack.removeLast();
+        auto lhs = exprStack.removeLast();
+        auto nextOp = opStack.removeLast();
+        exprStack.append(new BinOpExpr(nextOp.second, lhs, rhs, nextOp.first));
     };
 
     while(true) {
@@ -440,16 +437,16 @@ Expr* Parser::parseExpr() {
         if(!op) { break; }
         next();
 
-        while(!opStack.empty() && getPrecedence(opStack.back().first) <= getPrecedence(*op)) {
+        while(!opStack.isEmpty() && getPrecedence(opStack.last()->first) <= getPrecedence(*op)) {
             popStacks();
         }
-        opStack.push_back({*op, opRange});
-        exprStack.push_back(parseTerm());
+        opStack.append({*op, opRange});
+        exprStack.append(parseTerm());
     }
-    while(!opStack.empty()) {
+    while(!opStack.isEmpty()) {
         popStacks();
     }
-    return exprStack.front();
+    return *exprStack.first();
 }
 
 Expr* Parser::parseTerm() {

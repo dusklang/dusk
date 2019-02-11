@@ -63,7 +63,7 @@ Array<Token> lex(SourceFile* file) {
         std::string tokenText;
 
         #define PUSH_TEXT(tokenKind, literal) { \
-            tokens.push_back( \
+            tokens.append( \
                 Token(tokenKind, SourceRange(curTokBegin, pos), literal) \
             ); \
             curTokBegin = pos;\

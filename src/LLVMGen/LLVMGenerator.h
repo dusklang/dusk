@@ -72,7 +72,7 @@ public:
         module = new llvm::Module("my module", context);
     }
 
-    void visitTopLevel(std::vector<ASTNode*> nodes);
+    void visitTopLevel(Array<ASTNode*> nodes);
     /// Generates code for the scope of a computed declaration, or for the expression of a stored one.
     /// NOTE: `visitDeclPrototype` must be called on a declaration before this.
     CodeGenVal visitDecl(Decl* decl);

@@ -3,6 +3,9 @@
 #pragma once
 
 #include <utility>
+// TODO: Is there any way to remove this dependency while still allowing llvm::ArrayRefs to be constructed from
+// instances of our Array type?
+#include "llvm/ADT/ArrayRef.h"
 
 template<typename T>
 struct ReverseContainer {
@@ -130,23 +133,65 @@ ZipContainer<T, U> zip(T& t, U& u) {
     return ZipContainer<T, U> { t, u };
 }
 
-template<typename T, size_t inlineSize = 0>
+template<typename Bound>
+struct Range {
+    Bound lowerBound, upperBound;
+
+    struct iterator {
+        Bound currentBound;
+
+        Bound operator*() {
+            return currentBound;
+        }
+        iterator operator++() {
+            currentBound++;
+            return *this;
+        }
+        bool operator != (iterator other) const {
+            return currentBound != other.currentBound;
+        }
+    };
+    iterator begin() const {
+        return { lowerBound };
+    }
+    iterator end() const {
+        return { upperBound };
+    }
+};
+
+template<typename Bound>
+Range<Bound> makeRange(Bound lowerBound, Bound upperBound) {
+    return Range<Bound> { lowerBound, upperBound };
+}
+
+template<typename Bound>
+struct InfiniteRange {
+    Bound lowerBound;
+};
+
+template<typename Bound>
+InfiniteRange<Bound> makeRange(Bound lowerBound) {
+    return InfiniteRange<Bound> { lowerBound };
+}
+
+template<typename T>
 class Array final {
     T* data;
-    uint32_t _size;
+    size_t _count;
+    size_t _capacity;
     void deleteData() {
         for(auto& elem: *this) {
             elem.~T();
         }
         operator delete(data);
     }
-    static T* newData(uint32_t size) {
+    static T* newData(size_t size) {
         return reinterpret_cast<T*>(operator new(sizeof(T) * size));
     }
 
 public:
-    Array() : data(nullptr), _size(0) {}
-    Array(std::initializer_list<T>&& list) : data(newData(list.size())), _size(list.size()) {
+    Array() : data(nullptr), _count(0), _capacity(0) {}
+    Array(std::initializer_list<T>&& list) : data(newData(list.size())), _count(list.size()) {
         auto dest = data;
         for(auto&& src: list) {
             std::memmove(dest, &src, sizeof(T));
@@ -154,56 +199,67 @@ public:
             dest++;
         }
     }
-    Array(Array&& other) : data(nullptr), _size(0) {
-        std::swap(data, other.data);
-        std::swap(_size, other._size);
+    void destroy() {
+        deleteData();
+        _count = _capacity = 0;
     }
-    Array(Array& other) : _size(other._size) {
-        data = newData(_size);
-        auto dest = data;
-        // Intentionally call copy constructor so we can just copy the raw bytes.
-        for(T elem: other) {
-            std::memmove(dest, &elem, sizeof(T));
-
-            dest++;
+    void append(T elem) {
+        if(_count == _capacity) {
+            if(_capacity == 0) {
+                _capacity = 20;
+            } else {
+                _capacity *= 2;
+            }
+            T* newBuf = newData(_capacity);
+            std::memmove(newBuf, data, _count * sizeof(T));
+            deleteData();
+            data = newBuf;
         }
-    }
-    Array& operator=(Array& other) {
-        deleteData();
-        Array copy(other);
-        std::swap(*this, copy);
-
-        return *this;
-    }
-    Array& operator=(Array&& other) {
-        deleteData();
-        data = nullptr;
-        _size = 0;
-        std::swap(data, other.data);
-        std::swap(_size, other._size);
-
-        return *this;
-    }
-    ~Array() {
-        deleteData();
-    }
-    void push_back(T&& elem) {
-        T* newBuf = newData(_size + 1);
-        std::memmove(newBuf, data, _size * sizeof(T));
-        std::memmove(newBuf + _size, &elem, sizeof(T));
-        deleteData();
-        data = newBuf;
-        _size++;
+        std::memmove(data + _count, &elem, sizeof(T));
+        _count++;
     }
     T& operator[](size_t i) {
-        assertTrueMessage(i < _size, "index out of bounds");
+        assert(i < _count && "index out of bounds");
         return data[i];
     }
     T const& operator[](size_t i) const {
-        assertTrueMessage(i < _size, "index out of bounds");
+        assert(i < _count && "index out of bounds");
         return data[i];
     }
-    size_t size() const { return _size; }
+    size_t count() const { return _count; }
+    size_t capacity() const { return _capacity; }
+    bool isEmpty() const { return _count == 0; }
+    T* first() {
+        if(isEmpty()) {
+            return nullptr;
+        } else {
+            return data;
+        }
+    }
+    T* last() {
+        if(isEmpty()) {
+            return nullptr;
+        } else {
+            return &data[_count - 1];
+        }
+    }
+    T removeLast() {
+        assert(!isEmpty() && "empty Array");
+        _count--;
+        return std::move(data[_count]);
+    }
+    Range<size_t> indices() const {
+        return { 0, _count };
+    }
+    void removeRange(InfiniteRange<size_t> range) {
+        for(size_t i: makeRange(range.lowerBound, _count)) {
+            data[i].~T();
+        }
+        _count = range.lowerBound;
+    }
+    llvm::ArrayRef<T> llvmArrayRef() const {
+        return llvm::ArrayRef<T>(data, _count);
+    }
 
     using iterator = T*;
     using const_iterator = T const*;
@@ -237,13 +293,15 @@ public:
         }
     };
 
+    using reference = T&;
+    using const_reference = T const&;
     iterator begin() { return data; }
-    iterator end() { return data + _size; }
+    iterator end() { return data + _count; }
     const_iterator begin() const { return data; }
-    const_iterator end() const { return data + _size; }
+    const_iterator end() const { return data + _count; }
 
-    reverse_iterator rbegin() { return reverse_iterator { data + ((int)_size - 1) }; }
+    reverse_iterator rbegin() { return reverse_iterator { data + ((int)_count - 1) }; }
     reverse_iterator rend() { return reverse_iterator { data - 1 }; }
-    const_reverse_iterator rbegin() const { return const_reverse_iterator { data + ((int)_size - 1) }; }
+    const_reverse_iterator rbegin() const { return const_reverse_iterator { data + ((int)_count - 1) }; }
     const_reverse_iterator rend() const { return const_reverse_iterator { data - 1 }; }
 };

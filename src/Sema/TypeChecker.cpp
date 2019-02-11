@@ -63,10 +63,10 @@ void TypeChecker::visitDeclPrototype(Decl* decl) {
     }
     decl->protoState = Decl::Resolved;
 }
-void TypeChecker::visitTopLevel(std::vector<ASTNode*> nodes) {
+void TypeChecker::visitTopLevel(Array<ASTNode*> nodes) {
     for(auto node: nodes) {
         if(auto decl = dynamic_cast<Decl*>(node)) {
-            declLists.back().push_back(decl);
+            declLists.last()->append(decl);
         } else if(auto decl = dynamic_cast<StructDecl*>(node)) {
             for(auto other: structs) {
                 if(decl->name == other->name) {
@@ -75,7 +75,7 @@ void TypeChecker::visitTopLevel(std::vector<ASTNode*> nodes) {
                                .primaryRange(decl->structRange + decl->name.range));
                 }
             }
-            structs.push_back(decl);
+            structs.append(decl);
         }
     }
     for(auto node: nodes) {
@@ -110,9 +110,9 @@ void TypeChecker::visitType(Type *type, bool shouldResolveStructDecls) {
 void TypeChecker::visitDecl(Decl* decl) {
     visitDeclPrototype(decl);
     if(decl->hasDefinition()) {
-        declLists.push_back(std::vector<Decl*>());
+        declLists.append(Array<Decl*>());
         for(auto param: decl->paramList) {
-            declLists.back().push_back(param);
+            declLists.last()->append(param);
         }
         if(decl->isComputed()) {
             returnTypeStack.push(decl->type);
@@ -139,13 +139,14 @@ void TypeChecker::visitDecl(Decl* decl) {
             returnTypeStack.pop();
         }
         // End the scope for referencing parameters.
-        declLists.pop_back();
+        declLists.removeLast();
     } else {
         if(!decl->isExtern()) {
             reportDiag(ERR("non-`extern` declaration needs a definition").primaryRange(decl->protoRange()));
         }
     }
 }
+
 void TypeChecker::visitStructDecl(StructDecl* decl) {
     switch(decl->state) {
         case StructDecl::Unresolved:
@@ -165,29 +166,29 @@ void TypeChecker::visitStructDecl(StructDecl* decl) {
 }
 void TypeChecker::visitScope(Scope* scope) {
     // Start a new namespace for declarations inside the scope.
-    declLists.push_back(std::vector<Decl*>());
+    declLists.append(Array<Decl*>());
 
-    std::optional<std::vector<ASTNode*>::iterator> elemToRemoveFrom;
-    for(auto it = scope->nodes.begin(); it != scope->nodes.end(); ++it) {
-        auto node = *it;
+    std::optional<size_t> indexToRemoveFrom;
+    for(size_t i: scope->nodes.indices()) {
+        auto node = scope->nodes[i];
         if(auto expr = dynamic_cast<Expr*>(node)) {
             visitExpr(expr);
             if(expr->type == NeverTy()) {
                 scope->terminalExpr = expr;
-                elemToRemoveFrom = it + 1;
+                indexToRemoveFrom = i + 1;
                 continue;
-            } else if(!elemToRemoveFrom && scope->nodes.back() == node && expr->type != VoidTy()) {
+            } else if(!indexToRemoveFrom && *scope->nodes.last() == node && expr->type != VoidTy()) {
                 scope->terminalExpr = expr;
             } else if(expr->type != VoidTy() && expr->type != NeverTy()) {
                 reportDiag(ERR("unused expression, try writing \"do *expression*\"").primaryRange(expr->totalRange()));
             }
         } else if(auto decl = dynamic_cast<Decl*>(node)) {
             if(decl->isComputed()) {
-                declLists.back().push_back(decl);
+                declLists.last()->append(decl);
             }
             visitDecl(decl);
             if(decl->isStored()) {
-                declLists.back().push_back(decl);
+                declLists.last()->append(decl);
             }
         } else if(auto decl = dynamic_cast<StructDecl*>(node)) {
             reportDiag(ERR("struct declarations may not yet be nested").primaryRange(decl->structRange + decl->name.range));
@@ -197,20 +198,20 @@ void TypeChecker::visitScope(Scope* scope) {
     }
     // If there's a `never` expression in the middle of a scope, we typecheck the rest of the scope, but also remove it so
     // code generation won't have to worry about it. Also, report a warning.
-    if(elemToRemoveFrom) {
-        if(*elemToRemoveFrom != scope->nodes.end()) {
-            auto range = (**elemToRemoveFrom)->totalRange();
-            for(auto it = *elemToRemoveFrom; it != scope->nodes.end(); ++it) {
-                range += (*it)->totalRange();
+    if(indexToRemoveFrom) {
+        if(*indexToRemoveFrom != scope->nodes.count()) {
+            auto range = scope->nodes[*indexToRemoveFrom]->totalRange();
+            for(size_t i: makeRange(*indexToRemoveFrom, scope->nodes.count())) {
+                range += scope->nodes[i]->totalRange();
             }
             reportDiag(WARN("code will never be executed")
                        .primaryRange(range));
         }
-        scope->nodes.erase(*elemToRemoveFrom, scope->nodes.end());
+        scope->nodes.removeRange(makeRange(*indexToRemoveFrom));
     }
 
     // End the new namespace.
-    declLists.pop_back();
+    declLists.removeLast();
 }
 void TypeChecker::visitIntegerLiteralExpr(IntegerLiteralExpr* expr) {
     expr->type = IntTy::I32();
@@ -310,12 +311,12 @@ void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
     }
 
     // Find the prototype to reference.
-    std::vector<Decl*> nameMatches;
+    Array<Decl*> nameMatches;
     for(auto& declList: reverse(declLists)) {
         for(auto decl: declList) {
             if(decl->name != expr->name) continue;
-            nameMatches.push_back(decl);
-            if(decl->paramList.size() != expr->argList.size()) continue;
+            nameMatches.append(decl);
+            if(decl->paramList.count() != expr->argList.count()) continue;
             visitDeclPrototype(decl);
             for(auto [param, arg]: zip(decl->paramList, expr->argList)) {
                 if(!arg->type.isConvertibleTo(param->type)) goto failedToFindMatchInCurrentList;
@@ -331,7 +332,7 @@ void TypeChecker::visitDeclRefExpr(DeclRefExpr* expr) {
     // We must have failed.
     auto errorMessage = ERR("invalid reference to identifier `" + expr->name.getText() + "`")
         .primaryRange(expr->name.range);
-    if(!nameMatches.empty()) {
+    if(!nameMatches.isEmpty()) {
         for(auto match: nameMatches) {
             errorMessage.range(match->name.range, "differs only in parameter types");
         }
@@ -352,7 +353,7 @@ void TypeChecker::visitMemberRefExpr(MemberRefExpr* expr) {
             std::optional<size_t> fieldDecl = std::nullopt;
 
             auto& fields = structTy.decl->fields;
-            for(size_t field = 0; field < fields.size(); ++field) {
+            for(size_t field: fields.indices()) {
                 if(expr->name == fields[field]->name) {
                     fieldDecl = field;
                 }

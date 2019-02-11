@@ -34,15 +34,15 @@ public:
         unreachable;
     }
 
-    auto visit(std::vector<ASTNode*> nodes, Args... args) {
+    auto visit(Array<ASTNode*> nodes, Args... args) {
         if constexpr(std::is_same_v<void, ASTNodeReturnTy>) {
             for(auto node: nodes) {
                 visit(node, std::forward<Args>(args)...);
             }
         } else {
-            std::vector<ASTNodeReturnTy> retVal;
+            Array<ASTNodeReturnTy> retVal;
             for(auto node: nodes) {
-                retVal.push_back(node, visit(std::forward<Args>(args)...));
+                retVal.append(node, visit(std::forward<Args>(args)...));
             }
             return retVal;
         }

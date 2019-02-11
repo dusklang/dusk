@@ -99,7 +99,7 @@ public:
         next();
     }
 
-    std::vector<ASTNode*> parseTopLevel();
+    Array<ASTNode*> parseTopLevel();
     Scope* parseScope();
     ASTNode* parseNode();
     Type parseType();

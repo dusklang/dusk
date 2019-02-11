@@ -9,7 +9,7 @@ StringRef SourceFile::substringFromRange(SourceRange range) const {
 StringRef SourceFile::substringFromLine(uint32_t lineNum) const {
     uint32_t length;
     uint32_t begin = lines[lineNum].pos;
-    if(lineNum == lines.size() - 1) {
+    if(lineNum == lines.count() - 1) {
         length = source.size() - begin;
     } else {
         length = lines[lineNum + 1].pos - begin;
@@ -17,13 +17,13 @@ StringRef SourceFile::substringFromLine(uint32_t lineNum) const {
     return StringRef(source.data() + begin, length);
 }
 
-std::vector<LineRange> SourceFile::linesInRange(SourceRange range) const {
-    std::vector<LineRange> result;
+Array<LineRange> SourceFile::linesInRange(SourceRange range) const {
+    Array<LineRange> result;
 
-    for(uint32_t i = 0; i < lines.size(); i++) {
+    for(uint32_t i = 0; i < lines.count(); i++) {
         uint32_t lineBegin = lines[i].pos;
         uint32_t lineEnd;
-        if(i == lines.size() - 1) {
+        if(i == lines.count() - 1) {
             lineEnd = source.size();
         } else {
             lineEnd = lines[i + 1].pos;
@@ -46,7 +46,7 @@ std::vector<LineRange> SourceFile::linesInRange(SourceRange range) const {
         else if(!(range.begin.pos < lineBegin && range.end.pos > lineEnd)) {
             continue;
         }
-        result.push_back(LineRange(i, columnBegin, columnEnd));
+        result.append(LineRange(i, columnBegin, columnEnd));
     }
 
     return result;

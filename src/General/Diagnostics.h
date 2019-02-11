@@ -18,7 +18,7 @@ struct ErrorRange {
 };
 
 class Diagnostic {
-    std::vector<ErrorRange> ranges;
+    Array<ErrorRange> ranges;
 
 public:
     enum Kind {
@@ -30,11 +30,11 @@ public:
 
     Diagnostic(Kind kind, SourceFile const& file, std::string message) : kind(kind), file(file), message(message) {}
     Diagnostic range(SourceRange range, std::optional<std::string> message = std::nullopt) {
-        ranges.push_back(ErrorRange(range, false, message));
+        ranges.append(ErrorRange(range, false, message));
         return *this;
     }
     Diagnostic primaryRange(SourceRange range, std::optional<std::string> message = std::nullopt) {
-        ranges.push_back(ErrorRange(range, true, message));
+        ranges.append(ErrorRange(range, true, message));
         return *this;
     }
 

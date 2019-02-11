@@ -54,7 +54,7 @@ struct IntLitVariable {};
 
 struct TypeLayout {
     uint32_t size, alignment;
-    std::vector<uint32_t> fieldOffsets;
+    Array<uint32_t> fieldOffsets;
 
     uint32_t stride() const {
         return (alignment - (size % alignment)) % alignment;

@@ -8,6 +8,7 @@
 #include <optional>
 #include <algorithm>
 
+#include "Array.h"
 #include "String.h"
 
 struct SourcePos {
@@ -42,7 +43,7 @@ struct LineRange {
 };
 
 class SourceFile {
-    std::vector<SourcePos> lines;
+    Array<SourcePos> lines;
 
 public:
     std::string const name;
@@ -51,9 +52,9 @@ public:
     SourceFile(std::string name, std::string source) : name(name), source(source) {}
 
     void nextLinePosition(SourcePos linePos) {
-        lines.push_back(linePos);
+        lines.append(linePos);
     }
     StringRef substringFromRange(SourceRange range) const;
     StringRef substringFromLine(uint32_t lineNum) const;
-    std::vector<LineRange> linesInRange(SourceRange range) const;
+    Array<LineRange> linesInRange(SourceRange range) const;
 };

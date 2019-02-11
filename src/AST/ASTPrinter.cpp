@@ -14,7 +14,7 @@ void ASTPrinter::visitDecl(Decl* decl, int indentationLevel, std::ostream& strea
     indent(indentationLevel, stream);
     stream << (decl->isVar ? "var " : "") << (decl->isExtern() ? "extern " : "");
     stream << decl->name;
-    if(!decl->paramList.empty()) {
+    if(!decl->paramList.isEmpty()) {
         stream << "(";
         bool first = true;
         for(auto& param: decl->paramList) {
@@ -51,17 +51,11 @@ void ASTPrinter::visitStructDecl(StructDecl* decl, int indentationLevel, std::os
 }
 
 void ASTPrinter::visitScope(Scope* scope, int indentationLevel, std::ostream& stream) {
-    for(size_t i = 0; i < scope->nodes.size(); ++i) {
+    for(size_t i = 0; i < scope->nodes.count(); ++i) {
         visit(scope->nodes[i], indentationLevel + 1, stream);
         /*if(i != scope->nodes.size() - 1) */stream << '\n';
     }
     indent(indentationLevel + 1, stream);
-    stream << "Terminal expr: ";
-    if(scope->terminalExpr) {
-        visitExpr(scope->terminalExpr, 0, stream);
-    } else {
-        stream << "null";
-    }
 }
 
 void ASTPrinter::visitIntegerLiteralExpr(IntegerLiteralExpr* expr, int indentationLevel, std::ostream& stream) {
@@ -199,7 +193,7 @@ void ASTPrinter::visitCastExpr(CastExpr* expr, int indentationLevel, std::ostrea
 void ASTPrinter::visitDeclRefExpr(DeclRefExpr* expr, int indentationLevel, std::ostream& stream) {
     indent(indentationLevel, stream);
     stream << expr->name;
-    if(!expr->argList.empty()) {
+    if(!expr->argList.isEmpty()) {
         stream << '(';
         bool first = true;
         for(auto* arg: expr->argList) {
@@ -263,9 +257,9 @@ void ASTPrinter::visitDoExpr(DoExpr* expr, int indentationLevel, std::ostream& s
         pattern(as<Expr*>(arg)) = [&](auto expr) { visitExpr(expr, 0, stream); },
         pattern(as<Scope*>(arg)) = [&](auto scope) {
             stream << "{\n";
-            visitScope(scope, indentationLevel, stream);
+            visitScope(scope, indentationLevel + 1, stream);
             stream << '\n';
-            indent(indentationLevel, stream);
+            indent(indentationLevel + 1, stream);
             stream << '}';
         }
     );
