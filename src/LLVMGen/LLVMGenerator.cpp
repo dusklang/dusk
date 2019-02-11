@@ -138,12 +138,12 @@ CodeGenVal LLVMGenerator::visitDecl(Decl* decl) {
             declVals[param] = &funcArg;
         }
 
-        functionStack.push(function);
+        functionStack.append(function);
         /*boyd*/ auto body /*and glass*/ = decl->body();
         auto scopeVal = visitScope(body);
         handleTerminal(decl->body(), [&] { builder.CreateRet(toDirect(scopeVal)); }, [&] { builder.CreateRetVoid(); });
 
-        functionStack.pop();
+        functionStack.removeLast();
 
         llvm::verifyFunction(*function);
 
@@ -452,12 +452,12 @@ void LLVMGenerator::handleTerminal(Scope* scope, HasValue hasValue, HasNoValue h
     }
 }
 CodeGenVal LLVMGenerator::visitIfExpr(IfExpr* expr) {
-    auto thenBlock = llvm::BasicBlock::Create(context, "if.then", functionStack.top());
+    auto thenBlock = llvm::BasicBlock::Create(context, "if.then", *functionStack.last());
     llvm::BasicBlock* elseBlock = nullptr;
     if(expr->elseScope) {
-        elseBlock = llvm::BasicBlock::Create(context, "if.else", functionStack.top());
+        elseBlock = llvm::BasicBlock::Create(context, "if.else", *functionStack.last());
     }
-    auto endBlock = llvm::BasicBlock::Create(context, "if.end", functionStack.top());
+    auto endBlock = llvm::BasicBlock::Create(context, "if.end", *functionStack.last());
     builder.CreateCondBr(toDirect(visitExpr(expr->condition)), thenBlock, expr->elseScope ? elseBlock : endBlock);
 
     builder.SetInsertPoint(thenBlock);
@@ -491,9 +491,9 @@ CodeGenVal LLVMGenerator::visitIfExpr(IfExpr* expr) {
     }
 }
 CodeGenVal LLVMGenerator::visitWhileExpr(WhileExpr* expr) {
-    auto checkBlock = llvm::BasicBlock::Create(context, "while.check", functionStack.top());
-    auto thenBlock = llvm::BasicBlock::Create(context, "while.then", functionStack.top());
-    auto endBlock = llvm::BasicBlock::Create(context, "while.end", functionStack.top());
+    auto checkBlock = llvm::BasicBlock::Create(context, "while.check", *functionStack.last());
+    auto thenBlock = llvm::BasicBlock::Create(context, "while.then", *functionStack.last());
+    auto endBlock = llvm::BasicBlock::Create(context, "while.end", *functionStack.last());
     builder.CreateBr(checkBlock);
 
     builder.SetInsertPoint(checkBlock);

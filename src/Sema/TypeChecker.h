@@ -3,7 +3,6 @@
 #pragma once
 
 #include <iostream>
-#include <stack>
 
 #include "AST/ASTVisitor.h"
 #include "General/SourceInfo.h"
@@ -13,7 +12,7 @@ class TypeChecker final: public ASTVisitor<TypeChecker> {
     SourceFile const& file;
     Array<Array<Decl*>> declLists;
     Array<StructDecl*> structs;
-    std::stack<Type> returnTypeStack;
+    Array<Type> returnTypeStack;
     void reportDiag(Diagnostic diag) const {
         diag.print(std::cout);
         if(diag.kind == Diagnostic::Error) {

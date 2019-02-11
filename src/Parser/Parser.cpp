@@ -1,6 +1,5 @@
 //  Copyright © 2019 Zach Wolfe. All rights reserved.
 
-#include <vector>
 #include <iostream>
 #include <optional>
 #include <utility> // for std::pair

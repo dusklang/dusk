@@ -1,7 +1,6 @@
 //  Copyright © 2019 Zach Wolfe. All rights reserved.
 
 #include <string>
-#include <vector>
 
 #include "General/SourceInfo.h"
 

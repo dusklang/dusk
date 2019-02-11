@@ -4,7 +4,6 @@
 
 #include <variant>
 #include <optional>
-#include <vector>
 #include <string>
 
 #include "General/General.h"

@@ -3,7 +3,6 @@
 #pragma once
 
 #include <string>
-#include <vector>
 
 #include "General/SourceInfo.h"
 

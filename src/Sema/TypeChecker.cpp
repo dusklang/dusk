@@ -115,7 +115,7 @@ void TypeChecker::visitDecl(Decl* decl) {
             declLists.last()->append(param);
         }
         if(decl->isComputed()) {
-            returnTypeStack.push(decl->type);
+            returnTypeStack.append(decl->type);
             auto body = decl->body();
             visitScope(body);
             auto terminalExpr = body->terminalExpr;
@@ -136,7 +136,7 @@ void TypeChecker::visitDecl(Decl* decl) {
                 }
             }
 
-            returnTypeStack.pop();
+            returnTypeStack.removeLast();
         }
         // End the scope for referencing parameters.
         declLists.removeLast();
@@ -377,7 +377,7 @@ void TypeChecker::visitReturnExpr(ReturnExpr* expr) {
         visitExpr(expr->value);
     }
     // Handle returning value in a void computed decl.
-    if(returnTypeStack.top() == VoidTy()) {
+    if(*returnTypeStack.last() == VoidTy()) {
         if(expr->value) {
             reportDiag(ERR("cannot return value from void computed declaration")
                        .primaryRange(expr->value->totalRange(), "delet this"));
@@ -392,8 +392,8 @@ void TypeChecker::visitReturnExpr(ReturnExpr* expr) {
     }
 
     // Handle returning a value of a type not equal to the computed decl's type.
-    if(expr->value->type != returnTypeStack.top()) {
-        reportDiag(ERR("cannot return value of type `" + expr->value->type.name() + "` from computed declaration of type `" + returnTypeStack.top().name())
+    if(expr->value->type != *returnTypeStack.last()) {
+        reportDiag(ERR("cannot return value of type `" + expr->value->type.name() + "` from computed declaration of type `" + returnTypeStack.last()->name())
                    .primaryRange(expr->value->totalRange()));
     }
 }

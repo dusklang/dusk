@@ -3,7 +3,6 @@
 #pragma once
 
 #include <optional>
-#include <stack>
 
 #include "AST/AST.h"
 #include "AST/Type.h"
@@ -24,7 +23,7 @@ class Parser final {
     SourceFile const& file;
     Array<Token> tokens;
     uint32_t curTok = -1;
-    std::stack<uint32_t> savedState;
+    Array<uint32_t> savedState;
 
     Token cur() {
         return tokens[curTok];
@@ -50,12 +49,11 @@ class Parser final {
         return std::nullopt;
     }
     void saveState() {
-        savedState.push(curTok);
+        savedState.append(curTok);
     }
     void recallState() {
-        assertTrue(!savedState.empty());
-        curTok = savedState.top();
-        savedState.pop();
+        assertTrue(!savedState.isEmpty());
+        curTok = savedState.removeLast();
     }
 
     #define PARSE_METHOD(name) \
