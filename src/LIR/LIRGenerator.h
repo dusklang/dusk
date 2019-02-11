@@ -5,16 +5,21 @@
 #include "LIR.h"
 #include "AST/ASTVisitor.h"
 #include <string>
+#include <unordered_map>
+#include <variant>
 
+using DeclVal = std::variant<lir::Var, lir::Func>;
 class LIRGenerator final: public ASTVisitor<LIRGenerator,
                                             void,
-                                            lir::ROperand,
-                                            lir::ROperand,
+                                            DeclVal,
+                                            void,
                                             lir::ROperand,
                                             lir::ROperand>
 {
     lir::Program program;
-    lir::Func currentFunction;
+    Array<lir::Func> functionStack;
+    std::unordered_map<Decl*, DeclVal> declMap;
+
     lir::ROperand variableOperand(lir::Var variable);
     lir::ROperand variableOperand(lir::RWOperand operand);
     lir::RWOperand mutableVariableOperand(lir::Var variable);
@@ -22,8 +27,8 @@ class LIRGenerator final: public ASTVisitor<LIRGenerator,
     lir::ROperand globalConstantOperand(lir::Const constant);
 public:
     void visit(Array<ASTNode*> const& nodes);
-    lir::ROperand visitDecl(Decl* decl);
-    lir::ROperand visitScope(Scope* scope);
+    DeclVal visitDecl(Decl* decl);
+    void visitScope(Scope* scope);
     lir::ROperand visitStructDecl(StructDecl* decl);
     lir::ROperand visitIntegerLiteralExpr(IntegerLiteralExpr* expr);
     lir::ROperand visitDecimalLiteralExpr(DecimalLiteralExpr* expr);

@@ -180,9 +180,6 @@ class Array final {
     size_t _count;
     size_t _capacity;
     void deleteData() {
-        for(auto& elem: *this) {
-            elem.~T();
-        }
         operator delete(data);
     }
     static T* newData(size_t size) {

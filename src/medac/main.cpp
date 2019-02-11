@@ -40,6 +40,7 @@ extern "C" {
 }
 )~";
 std::string sourceCode = R"~(
+
 def main {
     printPerson(henry)
     printPerson(sally)
@@ -223,7 +224,6 @@ extern def free(_: *void): void
 def printChar(character: i8) {
     putchar(character as i32)
 }
-
 )~";
 
 int main() {
@@ -238,6 +238,7 @@ int main() {
     auto nodes = parser.parseTopLevel();
     tyChecker.visitTopLevel(nodes);
     //printer.visit(nodes, 0, std::cout);
+
 
     lirGen.visit(nodes);
     lirGen.printIR();

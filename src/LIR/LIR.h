@@ -140,24 +140,43 @@ namespace lir {
     struct Function {
         Array<Instruction> instructions;
         Array<Variable> variables;
+        bool isExtern;
 
         Var appendVariable(Variable variable) {
+            assert(!isExtern);
             Var var = { (uint16_t)variables.count(), false };
             variables.append(variable);
             return var;
         }
 
         Instr appendInstruction(Instruction instruction) {
+            assert(!isExtern);
             Instr instr = instructions.count();
             instructions.append(instruction);
             return instr;
         }
     };
 
+    struct Global {
+        /// Only valid if isExtern is false.
+        union {
+            Value initialValue;
+            uint32_t size;
+        };
+
+        bool isExtern;
+    };
+
     struct Program {
         Array<Function> functions;
         Array<Value> constants;
-        Array<Variable> globals;
+        Array<Global> globals;
+
+        Func appendFunction(Function function) {
+            Func func = functions.count();
+            functions.append(function);
+            return func;
+        }
 
         Const appendConstant(Value val) {
             Const konst = constants.count();
@@ -165,9 +184,20 @@ namespace lir {
             return konst;
         }
 
-        Var appendGlobal(Variable var) {
+        Var appendExternGlobal(uint32_t size) {
+            Var variable = { (uint16_t) globals.count(), true };
+            Global global {};
+            global.isExtern = true;
+            global.size = size;
+            globals.append(global);
+            return variable;
+        }
+        Var appendGlobal(Value initialValue) {
             Var variable = { (uint16_t)globals.count(), true };
-            globals.append(var);
+            Global global {};
+            global.isExtern = false;
+            global.initialValue = initialValue;
+            globals.append(global);
             return variable;
         }
     };

@@ -13,7 +13,7 @@ ROperand LIRGenerator::variableOperand(Var variable) {
     if(variable.isGlobal) {
         res.size = program.globals[variable.index].size;
     } else {
-        res.size = program.functions[currentFunction].variables[variable.index].size;
+        res.size = program.functions[*functionStack.last()].variables[variable.index].size;
     }
     return res;
 }
@@ -31,7 +31,7 @@ RWOperand LIRGenerator::mutableVariableOperand(Var variable) {
     if(variable.isGlobal) {
         res.size = program.globals[variable.index].size;
     } else {
-        res.size = program.functions[currentFunction].variables[variable.index].size;
+        res.size = program.functions[*functionStack.last()].variables[variable.index].size;
     }
     return res;
 }
@@ -56,11 +56,51 @@ void LIRGenerator::visit(Array<ASTNode*> const& nodes) {
     }
 }
 
-ROperand LIRGenerator::visitDecl(Decl* decl) {
-    return {};
+DeclVal LIRGenerator::visitDecl(Decl* decl) {
+    auto valIt = declMap.find(decl);
+    if(valIt != declMap.end()) return valIt->second;
+
+    if(decl->isExtern()) {
+        if(decl->isVar) {
+            return program.appendExternGlobal(decl->type.layout().size);
+        } else {
+            Function function {};
+            function.isExtern = true;
+            return program.appendFunction(function);
+        }
+    }
+    if(auto expr = decl->expression()) {
+        Var var;
+        ROperand val = visitExpr(decl->expression());
+        if(functionStack.isEmpty()) {
+            assert(val.kind == ROperand::LocalConstant);
+            var = program.appendGlobal(val.localConstant);
+        } else {
+            Function& curFunction = program.functions[*functionStack.last()];
+            var = curFunction.appendVariable({decl->type.layout().size});
+            Instruction copy {};
+            copy.op = OpCode::Copy;
+            copy.dest = mutableVariableOperand(var);
+            copy.operand = val;
+            curFunction.appendInstruction(copy);
+        }
+
+        return var;
+    } else {
+        Function function {};
+        for(auto param: decl->paramList) {
+            declMap[param] = function.appendVariable({param->type.layout().size});
+        }
+        functionStack.append(program.appendFunction(function));
+        visitScope(decl->body());
+
+        return functionStack.removeLast();
+    }
 }
-ROperand LIRGenerator::visitScope(Scope* scope) {
-    return {};
+void LIRGenerator::visitScope(Scope* scope) {
+    for(auto node: scope->nodes) {
+        ASTVisitor::visit(node);
+    }
 }
 ROperand LIRGenerator::visitStructDecl(StructDecl* decl) {
     return {};
@@ -145,7 +185,7 @@ ROperand LIRGenerator::visitDoExpr(DoExpr* expr) {
     return {};
 }
 ROperand LIRGenerator::visitPreOpExpr(PreOpExpr* expr) {
-    Function& func = program.functions[currentFunction];
+    Function& func = program.functions[*functionStack.last()];
     auto operand = visitExpr(expr->operand);
     Instruction instr {};
     instr.operand = operand;
@@ -189,7 +229,7 @@ RWOperand LIRGenerator::visitPreOpExprAsLValue(PreOpExpr* expr) {
     }
 }
 ROperand LIRGenerator::visitBinOpExpr(BinOpExpr* expr) {
-    Function& func = program.functions[currentFunction];
+    Function& func = program.functions[*functionStack.last()];
     ROperand rvalueA, rvalueB;
     if(expr->op != BinOp::Assignment) {
         rvalueA = visitExpr(expr->lhs);
@@ -572,7 +612,7 @@ void LIRGenerator::printIR() const {
                 printRange(operand);
             };
             auto printInstructionBeginning = [&](auto name) {
-                printf("%04zul: ", i);
+                printf("%04zu: ", i);
                 std::cout << name << " ";
             };
             auto printTwoAddressCode = [&](auto name) {
@@ -582,10 +622,11 @@ void LIRGenerator::printIR() const {
                 printROperand(instruction.operand);
             };
             auto printThreeAddressCode = [&](auto name) {
-                std::cout << name << " ";
+                printInstructionBeginning(name);
                 printDest();
                 std::cout << ", ";
                 printROperand(instruction.operands.a);
+                std::cout << ", ";
                 printROperand(instruction.operands.b);
             };
             std::cout << "    ";
@@ -696,6 +737,7 @@ void LIRGenerator::printIR() const {
                     std::cout << ", " << instruction.branch;
                     break;
             }
+            std::cout << "\n";
         }
     }
 }
