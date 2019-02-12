@@ -63,6 +63,10 @@ namespace lir {
         CondBranch,         /// if condition { goto trueBranch } else { goto falseBranch }
 
         Call,               /// dest = function(arguments...)
+        Return,             /// return operand
+        ReturnVoid,         /// return
+
+        Unreachable,        /// Signals that we should never get to this point in execution.
     };
 
     /// A bag of bits, used to represent constant values (and hopefully constexpr values as well)

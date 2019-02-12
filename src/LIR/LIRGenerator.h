@@ -11,12 +11,14 @@
 enum class RCKind {
     /// We don't care about the result of this expression.
     DontCare,
+    /// We need to return the result of this expression from the current function.
+    Return,
     /// We need the result of this expression to be put in a specific location.
     Copy,
     /// We need to read the result of this expression.
     Read,
     /// We need be able to read and modify the result of this expression.
-    Write
+    Write,
 };
 
 /// What we want to do with the result of visiting an expression.
@@ -30,6 +32,9 @@ struct ResultContext {
 
     static ResultContext DontCare() {
         return ResultContext { RCKind::DontCare };
+    }
+    static ResultContext Return() {
+        return ResultContext { RCKind::Return };
     }
     static ResultContext Copy(lir::RWOperand copy) {
         ResultContext ctx { RCKind::Copy };
@@ -52,9 +57,9 @@ using DeclVal = std::variant<lir::Var, lir::Func>;
 class LIRGenerator final: public ASTVisitor<LIRGenerator,
                                             void,
                                             DeclVal,
-                                            std::optional<lir::ROperand>,
                                             void,
-                                            lir::ROperand>
+                                            void,
+                                            void>
 {
     lir::Program program;
     Array<lir::Func> functionStack;
@@ -65,66 +70,31 @@ class LIRGenerator final: public ASTVisitor<LIRGenerator,
     lir::RWOperand mutableVariableOperand(lir::Var variable);
     lir::ROperand localConstantOperand(lir::Value value);
     lir::ROperand globalConstantOperand(lir::Const constant);
+
+    void placeConstant(lir::ROperand operand, ResultContext ctx);
 public:
     void visit(Array<ASTNode*> const& nodes);
     DeclVal visitDecl(Decl* decl);
-    std::optional<lir::ROperand> visitScope(Scope* scope);
+    void visitScope(Scope* scope, ResultContext ctx);
     void visitStructDecl(StructDecl* decl) {}
-    lir::ROperand visitIntegerLiteralExpr(IntegerLiteralExpr* expr);
-    lir::ROperand visitDecimalLiteralExpr(DecimalLiteralExpr* expr);
-    lir::ROperand visitBooleanLiteralExpr(BooleanLiteralExpr* expr);
-    lir::ROperand visitCharLiteralExpr(CharLiteralExpr* expr);
-    lir::ROperand visitStringLiteralExpr(StringLiteralExpr* expr);
-    lir::ROperand visitPreOpExpr(PreOpExpr* expr);
-    lir::ROperand visitBinOpExpr(BinOpExpr* expr);
-    lir::ROperand visitCastExpr(CastExpr* expr);
-    lir::ROperand visitDeclRefExpr(DeclRefExpr* expr);
-    lir::ROperand visitMemberRefExpr(MemberRefExpr* expr);
+    void visitIntegerLiteralExpr(IntegerLiteralExpr* expr, ResultContext ctx);
+    void visitDecimalLiteralExpr(DecimalLiteralExpr* expr, ResultContext ctx);
+    void visitBooleanLiteralExpr(BooleanLiteralExpr* expr, ResultContext ctx);
+    void visitCharLiteralExpr(CharLiteralExpr* expr, ResultContext ctx);
+    void visitStringLiteralExpr(StringLiteralExpr* expr, ResultContext ctx);
+    void visitPreOpExpr(PreOpExpr* expr, ResultContext ctx);
+    void visitBinOpExpr(BinOpExpr* expr, ResultContext ctx);
+    void visitCastExpr(CastExpr* expr, ResultContext ctx);
+    void visitDeclRefExpr(DeclRefExpr* expr, ResultContext ctx);
+    void visitMemberRefExpr(MemberRefExpr* expr, ResultContext ctx);
+    void visitReturnExpr(ReturnExpr* expr, ResultContext ctx);
+    void visitIfExpr(IfExpr* expr, ResultContext ctx);
+    void visitWhileExpr(WhileExpr* expr, ResultContext ctx);
+    void visitDoExpr(DoExpr* expr, ResultContext ctx);
 
-    lir::ROperand visitReturnExpr(ReturnExpr* expr);
-    lir::ROperand visitIfExpr(IfExpr* expr);
-    lir::ROperand visitWhileExpr(WhileExpr* expr);
-    lir::ROperand visitDoExpr(DoExpr* expr);
-
-    lir::RWOperand visitPreOpExprAsLValue(PreOpExpr* expr);
-    lir::RWOperand visitDeclRefExprAsLValue(DeclRefExpr* expr);
-    lir::RWOperand visitMemberRefExprAsLValue(MemberRefExpr* expr);
-    lir::RWOperand visitIntegerLiteralExprAsLValue(IntegerLiteralExpr* expr) {
-        panic("Integer literal expression can not be taken as an lvalue");
-    }
-    lir::RWOperand visitDecimalLiteralExprAsLValue(DecimalLiteralExpr* expr) {
-        panic("Decimal literal expression can not be taken as an lvalue");
-    }
-    lir::RWOperand visitBooleanLiteralExprAsLValue(BooleanLiteralExpr* expr) {
-        panic("Boolean literal expression can not be taken as an lvalue");
-    }
-    lir::RWOperand visitCharLiteralExprAsLValue(CharLiteralExpr* expr) {
-        panic("Char literal expression can not be taken as an lvalue");
-    }
-    lir::RWOperand visitStringLiteralExprAsLValue(StringLiteralExpr* expr) {
-        panic("String literal expression can not be taken as an lvalue");
-    }
-    lir::RWOperand visitBinOpExprAsLValue(BinOpExpr* expr) {
-        panic("Binary operator expression can not be taken as an lvalue");
-    }
-    lir::RWOperand visitCastExprAsLValue(CastExpr* expr) {
-        panic("Cast expression can not be taken as an lvalue");
-    }
-    lir::RWOperand visitReturnExprAsLValue(ReturnExpr* expr) {
-        panic("Return expression can not be taken as an lvalue");
-    }
-    lir::RWOperand visitIfExprAsLValue(IfExpr* expr) {
-        panic("If expression can not be taken as an lvalue");
-    }
-    lir::RWOperand visitWhileExprAsLValue(WhileExpr* expr) {
-        panic("While expression can not be taken as an lvalue");
-    }
-    lir::RWOperand visitDoExprAsLValue(DoExpr* expr) {
-        panic("Do expression can not be taken as an lvalue");
-    }
-    lir::RWOperand visitExprAsLValue(Expr* expr) {
+    void visitExpr(Expr* expr, ResultContext ctx = ResultContext::DontCare()) {
         #define EXPR_NODE(name) if(auto val = dynamic_cast<name##Expr*>(expr)) { \
-            return this->visit##name##ExprAsLValue(val); \
+            return visit##name##Expr(val, ctx); \
         }
         #include "AST/ASTNodes.def"
         unreachable;

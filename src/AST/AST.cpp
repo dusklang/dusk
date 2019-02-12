@@ -8,8 +8,3 @@ Type Scope::terminalType() const {
     if(terminalExpr) ty = terminalExpr->type;
     return ty;
 }
-Expr* Scope::terminalValueExpr() const {
-    if(!terminalExpr) return nullptr;
-    if(terminalExpr->type == NeverTy()) return nullptr;
-    return terminalExpr;
-}

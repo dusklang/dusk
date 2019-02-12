@@ -25,5 +25,4 @@ struct Scope final : public ASTNode {
     Scope(SourceRange range, Array<ASTNode*> nodes) : range(range), nodes(nodes) {}
     SourceRange totalRange() const override { return range; }
     Type terminalType() const;
-    Expr* terminalValueExpr() const;
 };
