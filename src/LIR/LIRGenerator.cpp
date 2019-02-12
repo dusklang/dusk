@@ -175,6 +175,23 @@ void LIRGenerator::call(Func function, Array<Argument> arguments) {
     instr.arguments = arguments;
     currentBasicBlock().instructions.append(instr);
 }
+void LIRGenerator::returnValue(Operand operand, Type& type) {
+    Instruction instr {};
+    instr.op = OpCode::Return;
+    instr.operand = operand;
+    instr.size = type.layout().size;
+    currentBasicBlock().instructions.append(instr);
+}
+void LIRGenerator::returnVoid() {
+    Instruction instr {};
+    instr.op = OpCode::ReturnVoid;
+    currentBasicBlock().instructions.append(instr);
+}
+void LIRGenerator::unreachableInstr() {
+    Instruction instr {};
+    instr.op = OpCode::Unreachable;
+    currentBasicBlock().instructions.append(instr);
+}
 
 void LIRGenerator::visit(Array<ASTNode*> const& nodes) {
     for(auto node: nodes) {

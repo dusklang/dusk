@@ -93,6 +93,9 @@ class LIRGenerator final: public ASTVisitor<LIRGenerator,
     void branch(lir::BB branch);
     void condBranch(lir::Operand condition, lir::BB trueBranch, lir::BB falseBranch);
     void call(lir::Func function, Array<lir::Argument> arguments);
+    void returnValue(lir::Operand operand, Type& type);
+    void returnVoid();
+    void unreachableInstr();
 public:
     void visit(Array<ASTNode*> const& nodes);
     DeclVal visitDecl(Decl* decl);
