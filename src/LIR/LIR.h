@@ -20,7 +20,7 @@ namespace lir {
         GetAddress,
         /// dest = *operand
         Load,
-        /// *dest = operand
+        /// *a = b
         Store,
         /// dest = operand
         Copy,
@@ -100,11 +100,9 @@ namespace lir {
         Unreachable,
     };
 
-    /// Memory location, expressed as a byte offset from a specified base.
+    /// Statically-known memory location, expressed as a byte offset from a specified base.
     struct MemoryLoc {
         enum {
-            /// Offset from zero, that is, a raw pointer.
-            Zero,
             /// Offset from the beginning of the current stack frame.
             StackFrame,
             /// Offset from the beginning of the global variables.

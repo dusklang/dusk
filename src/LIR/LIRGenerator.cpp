@@ -115,6 +115,13 @@ void LIRGenerator::endFunction() {
     insertionState.removeLast();
 }
 
+void LIRGenerator::store(lir::Operand addr, lir::Operand value, Type& type) {
+    Instruction instr {};
+    instr.op = OpCode::Store;
+    instr.operands = { addr, value };
+    instr.size = type.layout().size;
+    currentBasicBlock().instructions.append(instr);
+}
 void LIRGenerator::twoAddressCode(OpCode op, MemoryLoc dest, Operand operand, Type& meaningfulType) {
     Instruction instr {};
     instr.op = op;
@@ -345,7 +352,7 @@ void LIRGenerator::visitStringLiteralExpr(StringLiteralExpr* expr, ResultContext
         } break;
         case RCKind::Write: {
             panic("Cannot write to string literal");
-        }
+        } break;
     }
 }
 void LIRGenerator::visitDoExpr(DoExpr* expr, ResultContext ctx) {
@@ -359,46 +366,116 @@ void LIRGenerator::visitDoExpr(DoExpr* expr, ResultContext ctx) {
     );
 }
 void LIRGenerator::visitPreOpExpr(PreOpExpr* expr, ResultContext ctx) {
-    Function& func = program.functions[*functionStack.last()];
-    auto operand = visitExpr(expr->operand);
-    Instruction instr {};
-    instr.operand = operand;
     switch(expr->op) {
         case PreOp::Positive: {
-            return operand;
+            assert(ctx.kind != RCKind::Write && "Can't write to constant expression");
+            visitExpr(expr->operand, ctx);
         } break;
         case PreOp::Negative: {
-            instr.op = OpCode::Negative;
-            instr.dest = mutableVariableOperand(func.appendVariable({operand.size}));
+            switch(ctx.kind) {
+                case RCKind::DontCare: {
+                    visitExpr(expr->operand, ctx);
+                } break;
+                case RCKind::Return: {
+                    MemoryLoc res = variable(expr->type);
+                    visitExpr(expr->operand, ResultContext::Copy(res));
+                    twoAddressCode(OpCode::Negative, res, res, expr->type);
+                    returnValue(res, expr->type);
+                } break;
+                case RCKind::Copy: {
+                    visitExpr(expr->operand, ctx);
+                    twoAddressCode(OpCode::Negative, ctx.copy, ctx.copy, expr->type);
+                } break;
+                case RCKind::Read: {
+                    MemoryLoc res = variable(expr->type);
+                    visitExpr(expr->operand, ResultContext::Copy(res));
+                    twoAddressCode(OpCode::Negative, res, res, expr->type);
+                    *ctx.read = res;
+                } break;
+                case RCKind::Write: {
+                    panic("Can't write to constant expression");
+                } break;
+            }
         } break;
         case PreOp::Deref: {
-            instr.op = OpCode::Load;
-            instr.dest = mutableVariableOperand(func.appendVariable({expr->operand->type.layout().size}));
+            switch(ctx.kind) {
+                case RCKind::DontCare: {
+                    visitExpr(expr->operand, ctx);
+                } break;
+                case RCKind::Return: {
+                    Operand addr;
+                    visitExpr(expr->operand, ResultContext::Read(&addr));
+                    MemoryLoc res = variable(expr->type);
+                    twoAddressCode(OpCode::Load, res, addr, expr->type);
+                    returnValue(res, expr->type);
+                } break;
+                case RCKind::Copy: {
+                    Operand addr;
+                    visitExpr(expr->operand, ResultContext::Read(&addr));
+                    twoAddressCode(OpCode::Load, ctx.copy, addr, expr->type);
+                } break;
+                case RCKind::Read: {
+                    Operand addr;
+                    visitExpr(expr->operand, ResultContext::Read(&addr));
+                    MemoryLoc res = variable(expr->type);
+                    twoAddressCode(OpCode::Load, res, addr, expr->type);
+                    *ctx.read = res;
+                } break;
+                case RCKind::Write: {
+                    visitExpr(expr->operand, ResultContext::Read(ctx.write));
+                } break;
+            }
         } break;
         case PreOp::AddrOf: {
-            instr.op = OpCode::GetAddress;
-            instr.dest = mutableVariableOperand(func.appendVariable({operand.size}));
+            switch(ctx.kind) {
+                case RCKind::DontCare: {
+                    visitExpr(expr->operand, ctx);
+                } break;
+                case RCKind::Return: {
+                    Operand addr;
+                    visitExpr(expr->operand, ResultContext::Write(&addr));
+                    returnValue(addr, expr->type);
+                } break;
+                case RCKind::Copy: {
+                    Operand addr;
+                    visitExpr(expr->operand, ResultContext::Write(&addr));
+                    twoAddressCode(OpCode::Copy, ctx.copy, addr, expr->type);
+                } break;
+                case RCKind::Read: {
+                    Operand addr;
+                    visitExpr(expr->operand, ResultContext::Write(&addr));
+                    *ctx.read = addr;
+                } break;
+                case RCKind::Write: {
+                    panic("Can't write to constant expression");
+                } break;
+            }
         } break;
         case PreOp::Not: {
-            instr.op = OpCode::LogicalNot;
-            instr.dest = mutableVariableOperand(func.appendVariable({1}));
-        } break;
-    }
-    func.appendInstruction(instr);
-    return variableOperand(instr.dest);
-}
-RWOperand LIRGenerator::visitPreOpExprAsLValue(PreOpExpr* expr) {
-    switch(expr->op) {
-        case PreOp::Positive:
-        case PreOp::Negative:
-        case PreOp::AddrOf:
-        case PreOp::Not: {
-            panic("Pre-op expressions other than pointer dereferences can not be taken as lvalues");
-        } break;
-        case PreOp::Deref: {
-            auto op = visitExpr(expr->operand);
-            assert(op.kind == ROperand::Variable);
-            return mutableVariableOperand(op.variable);
+            switch(ctx.kind) {
+                case RCKind::DontCare: {
+                    visitExpr(expr->operand, ctx);
+                } break;
+                case RCKind::Return: {
+                    MemoryLoc res = variable(expr->type);
+                    visitExpr(expr->operand, ResultContext::Copy(res));
+                    twoAddressCode(OpCode::LogicalNot, res, res, expr->type);
+                    returnValue(res, expr->type);
+                } break;
+                case RCKind::Copy: {
+                    visitExpr(expr->operand, ctx);
+                    twoAddressCode(OpCode::LogicalNot, ctx.copy, ctx.copy, expr->type);
+                } break;
+                case RCKind::Read: {
+                    MemoryLoc res = variable(expr->type);
+                    visitExpr(expr->operand, ResultContext::Copy(res));
+                    twoAddressCode(OpCode::LogicalNot, res, res, expr->type);
+                    *ctx.read = res;
+                } break;
+                case RCKind::Write: {
+                    panic("Can't write to constant expression");
+                } break;
+            }
         } break;
     }
 }
