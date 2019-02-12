@@ -10,71 +10,131 @@
 #include "General/Array.h"
 
 namespace lir {
-    /// Variable index.
-    struct Var {
-        uint16_t index;
-        bool isGlobal;
-    };
     /// Constant index, local to a function.
     using Const = uint16_t;
-    /// Instruction index, local to a function.
-    using Instr = uint16_t;
+    /// Basic block index, local to a function.
+    using BB = uint16_t;
     /// Function index.
     using Func = uint16_t;
 
     enum class OpCode: uint8_t {
-        GetAddress,         /// dest = &operand
-        Load,               /// dest = *operand
-        Store,              /// *dest = operand
-        Copy,               /// dest = operand
+        /// dest = &operand
+        GetAddress,
+        /// dest = *operand
+        Load,
+        /// *dest = operand
+        Store,
+        /// dest = operand
 
-        Negative,           /// dest = -operand
-        WrappingAdd,        /// dest = a + b
-        WrappingSub,        /// dest = a - b
-        Mult,               /// dest = a * b
-        Div,                /// dest = a / b
-        Mod,                /// dest = a % b
-        SignExtend,         /// dest = operand as i{dest.bitWidth}
-        ZeroExtend,         /// dest = operand as u{dest.bitWidth}
-        LTE,                /// dest = a <= b
-        LT,                 /// dest = a < b
-        GTE,                /// dest = a >= b
-        GT,                 /// dest = a > b
-        FLTE,               /// dest = a <= b
-        FLT,                /// dest = a < b
-        FGTE,               /// dest = a >= b
-        FGT,                /// dest = a > b
-        Equal,              /// dest = a == b
+        /// dest = -operand
+        Negative,
+        /// dest = a + b
+        WrappingAdd,
+        /// dest = a - b
+        WrappingSub,
+        /// dest = a * b
+        Mult,
+        /// dest = a / b
+        Div,
+        /// dest = a % b
+        Mod,
+        /// dest = operand as i{dest bit width}
+        SignExtend,
+        /// dest = operand as u{dest bit width}
+        ZeroExtend,
+        /// dest = a <= b
+        LTE,
+        /// dest = a < b
+        LT,
+        /// dest = a >= b
+        GTE,
+        /// dest = a > b
+        GT,
+        /// dest = a <= b
+        FLTE,
+        /// dest = a < b
+        FLT,
+        /// dest = a >= b
+        FGTE,
+        /// dest = a > b
+        FGT,
+        /// dest = a == b
+        Equal,
+        /// dest = a != b
         NotEqual,
 
-        FAdd,               /// dest = a + b
-        FSub,               /// dest = a - b
-        FMult,              /// dest = a * b
-        FDiv,               /// dest = a / b
-        FMod,               /// dest = a % b
+        /// dest = a + b
+        FAdd,
+        /// dest = a - b
+        FSub,
+        /// dest = a * b
+        FMult,
+        /// dest = a / b
+        FDiv,
+        /// dest = a % b
+        FMod,
 
-        LogicalNot,         /// dest = !operand
-        LogicalAnd,         /// dest = a && b
-        LogicalOr,          /// dest = a || b
-        BitwiseAnd,         /// dest = a & b
-        BitwiseOr,          /// dest = a | b
+        /// dest = !operand
+        LogicalNot,
+        /// dest = a && b
+        LogicalAnd,
+        /// dest = a || b
+        LogicalOr,
+        /// dest = a & b
+        BitwiseAnd,
+        /// dest = a | b
+        BitwiseOr,
 
-        Branch,             /// goto branch
-        CondBranch,         /// if condition { goto trueBranch } else { goto falseBranch }
+        /// goto branch
+        Branch,
+        /// if !condition { goto branch }
+        CondBranch,
 
-        Call,               /// dest = function(arguments...)
-        Return,             /// return operand
-        ReturnVoid,         /// return
+        /// dest = function(arguments...)
+        Call,
+        /// return operand
+        Return,
+        /// return
+        ReturnVoid,
 
-        Unreachable,        /// Signals that we should never get to this point in execution.
+        /// Signals that we should never get to this point in execution.
+        Unreachable,
     };
 
-    /// A bag of bits, used to represent constant values (and hopefully constexpr values as well)
+    /// Memory location, expressed as a byte offset from a specified base.
+    struct MemoryLoc {
+        enum {
+            /// Offset from zero, that is, a raw pointer.
+            Zero,
+            /// Offset from the beginning of the current stack frame.
+            StackFrame,
+            /// Offset from the beginning of the global variables.
+            GlobalVariable,
+            /// Offset from the beginning of the global constants.
+            GlobalConstant,
+        } base;
+        /// The offset in bytes from base.
+        uint64_t offset;
+    };
+
+    /// An operand of an instruction. Either a memory location or a constant.
+    struct Operand {
+        enum {
+            Location,
+            Constant,
+        } kind;
+        union {
+            MemoryLoc location;
+            Const constant;
+        };
+    };
+
+    /// A small constant value that can be passed directly to instructions.
     struct Value {
         /// Size in bytes.
-        uint32_t size;
+        uint64_t size;
         union {
-            /// The inline constant values. Valid iff size <= 64 / 8.
+            /// Valid iff size <= 64 / 8
             uint64_t u64;
             uint32_t u32;
             uint16_t u16;
@@ -83,133 +143,62 @@ namespace lir {
             double   f64;
             bool     boolean;
 
-            /// The buffer that stores the constant value. Valid iff size > 64 / 8.
-            uint8_t* buffer;
+            /// Valid iff size > 64 / 8
+            uint8_t* data;
         };
     };
 
-    /// A mutable operand to an instruction.
-    struct RWOperand {
-        /// `offset` and `size` should be used for indexing into arrays or referencing
-        /// the fields of structs. Both are in bytes.
-        uint32_t offset, size;
-        Var variable;
-    };
-
-    /// A read-only operand to an instruction.
-    struct ROperand {
-        enum {
-            /// Represents a variable stored on the stack (or, eventually, globals)
-            Variable,
-            /// Represents a constant stored inline in IR instructions
-            LocalConstant,
-            /// Represents the address of the beginning of a constant buffer stored in
-            /// a program (offset by `offset`). Also `size` is just the size of a pointer
-            /// with this type of operand.
-            GlobalConstantAddress
-        } kind;
-        /// `offset` and `size` should be used for indexing into arrays or referencing
-        /// the fields of structs. Both are in bytes.
-        uint32_t offset, size;
-        union {
-            Var variable;
-            // TODO: maybe local constants should be stored in an array on Function and indexed into?
-            // Or just have global constants be the only kind?
-            Value localConstant;
-            Const globalConstant;
-        };
+    struct Argument {
+        Operand operand;
+        uint64_t size;
     };
 
     struct Instruction {
         union {
-            RWOperand dest;
-            Var condition;
+            MemoryLoc dest;
+            Operand condition;
         };
         union {
-            ROperand operand;
             struct {
-                ROperand a, b;
-            } operands;
-            Var mutableOperand;
-            lir::Instr branch;
-            struct {
-                lir::Instr trueBranch, falseBranch;
+                union {
+                    Operand operand;
+                    struct {
+                        Operand a, b;
+                    } operands;
+                };
+                /// Used only for ZeroExtend and SignExtend instructions.
+                uint64_t destSize;
+                uint64_t size;
             };
-            Const constant;
+            lir::BB branch;
+            struct {
+                lir::BB trueBranch, falseBranch;
+            };
             struct {
                 Func function;
-                Array<ROperand> arguments;
+                Array<Argument> arguments;
             };
         };
         OpCode op;
     };
-    struct Variable {
-        uint32_t size;
+
+    struct BasicBlock {
+        Array<Instruction> instructions;
     };
 
     struct Function {
         std::string name;
-        Array<Instruction> instructions;
-        Array<Variable> variables;
-        bool isExtern;
-
-        Var appendVariable(Variable variable) {
-            assert(!isExtern);
-            Var var = { (uint16_t)variables.count(), false };
-            variables.append(variable);
-            return var;
-        }
-
-        Instr appendInstruction(Instruction instruction) {
-            assert(!isExtern);
-            Instr instr = instructions.count();
-            instructions.append(instruction);
-            return instr;
-        }
-    };
-
-    struct Global {
-        /// Only valid if isExtern is false.
-        union {
-            Value initialValue;
-            uint32_t size;
-        };
-
+        Array<BasicBlock> basicBlocks;
+        Array<Value> constants;
+        uint64_t frameSize = 0;
+        uint64_t returnValueSize;
         bool isExtern;
     };
 
     struct Program {
         Array<Function> functions;
-        Array<Value> constants;
-        Array<Global> globals;
-
-        Func appendFunction(Function function) {
-            Func func = functions.count();
-            functions.append(function);
-            return func;
-        }
-
-        Const appendConstant(Value val) {
-            Const konst = constants.count();
-            constants.append(val);
-            return konst;
-        }
-
-        Var appendExternGlobal(uint32_t size) {
-            Var variable = { (uint16_t) globals.count(), true };
-            Global global {};
-            global.isExtern = true;
-            global.size = size;
-            globals.append(global);
-            return variable;
-        }
-        Var appendGlobal(Value initialValue) {
-            Var variable = { (uint16_t)globals.count(), true };
-            Global global {};
-            global.isExtern = false;
-            global.initialValue = initialValue;
-            globals.append(global);
-            return variable;
-        }
+        Array<uint8_t> constants;
+        /// The initial values of all the globals in the program.
+        Array<uint8_t> globals;
     };
 }

@@ -25,9 +25,9 @@ enum class RCKind {
 struct ResultContext {
     RCKind kind;
     union {
-        lir::RWOperand copy;
-        lir::ROperand* read;
-        lir::RWOperand* write;
+        lir::MemoryLoc copy;
+        lir::Operand* read;
+        lir::MemoryLoc* write;
     };
 
     static ResultContext DontCare() {
@@ -36,24 +36,29 @@ struct ResultContext {
     static ResultContext Return() {
         return ResultContext { RCKind::Return };
     }
-    static ResultContext Copy(lir::RWOperand copy) {
+    static ResultContext Copy(lir::MemoryLoc copy) {
         ResultContext ctx { RCKind::Copy };
         ctx.copy = copy;
         return ctx;
     }
-    static ResultContext Read(lir::ROperand* read) {
+    static ResultContext Read(lir::Operand* read) {
         ResultContext ctx { RCKind::Read };
         ctx.read = read;
         return ctx;
     }
-    static ResultContext Write(lir::RWOperand* write) {
+    static ResultContext Write(lir::MemoryLoc* write) {
         ResultContext ctx { RCKind::Write };
         ctx.write = write;
         return ctx;
     }
 };
 
-using DeclVal = std::variant<lir::Var, lir::Func>;
+struct InsertionState {
+    lir::Func function;
+    lir::BB basicBlock;
+};
+
+using DeclVal = std::variant<lir::MemoryLoc, lir::Func>;
 class LIRGenerator final: public ASTVisitor<LIRGenerator,
                                             void,
                                             DeclVal,
@@ -62,16 +67,32 @@ class LIRGenerator final: public ASTVisitor<LIRGenerator,
                                             void>
 {
     lir::Program program;
-    Array<lir::Func> functionStack;
+    Array<InsertionState> insertionState;
     std::unordered_map<Decl*, DeclVal> declMap;
 
-    lir::ROperand variableOperand(lir::Var variable);
-    lir::ROperand variableOperand(lir::RWOperand operand);
-    lir::RWOperand mutableVariableOperand(lir::Var variable);
-    lir::ROperand localConstantOperand(lir::Value value);
-    lir::ROperand globalConstantOperand(lir::Const constant);
+    lir::Function& currentFunction();
+    lir::BasicBlock& currentBasicBlock();
+    void setBasicBlock(lir::BB bb);
+    lir::BB createBasicBlock();
+    lir::Operand U64Constant(uint64_t constant);
+    lir::Operand U32Constant(uint32_t constant);
+    lir::Operand U16Constant(uint16_t constant);
+    lir::Operand U8Constant(uint16_t constant);
+    lir::Operand globalStringConstant(char const* data, uint64_t size);
 
-    void placeConstant(lir::ROperand operand, ResultContext ctx);
+    lir::MemoryLoc variable(Type& type);
+    lir::MemoryLoc global(lir::Value initialValue);
+
+    lir::Func beginFunction(std::string name, Type& returnType, bool isExtern);
+    void endFunction();
+
+    void twoAddressCode(lir::OpCode op, lir::MemoryLoc dest, lir::Operand operand, Type& meaningfulType);
+    void threeAddressCode(lir::OpCode op, lir::MemoryLoc dest, lir::Operand operandA, lir::Operand operandB, Type& meaningfulType);
+    void zeroExtend(lir::MemoryLoc dest, Type& destType, lir::Operand operand, Type& operandType);
+    void signExtend(lir::MemoryLoc dest, Type& destType, lir::Operand operand, Type& operandType);
+    void branch(lir::BB branch);
+    void condBranch(lir::Operand condition, lir::BB trueBranch, lir::BB falseBranch);
+    void call(lir::Func function, Array<lir::Argument> arguments);
 public:
     void visit(Array<ASTNode*> const& nodes);
     DeclVal visitDecl(Decl* decl);

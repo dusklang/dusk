@@ -6,48 +6,174 @@
 using namespace mpark::patterns;
 using namespace lir;
 
-ROperand LIRGenerator::variableOperand(Var variable) {
-    ROperand res { ROperand::Variable };
-    res.variable = variable;
-    res.offset = 0;
-    if(variable.isGlobal) {
-        res.size = program.globals[variable.index].size;
-    } else {
-        res.size = program.functions[*functionStack.last()].variables[variable.index].size;
+lir::Function& LIRGenerator::currentFunction() {
+    return program.functions[insertionState.last()->function];
+}
+lir::BasicBlock& LIRGenerator::currentBasicBlock() {
+    return currentFunction().basicBlocks[insertionState.last()->basicBlock];
+}
+lir::BB LIRGenerator::createBasicBlock() {
+    auto& basicBlocks = currentFunction().basicBlocks;
+    basicBlocks.append({});
+    return basicBlocks.count() - 1;
+}
+void LIRGenerator::setBasicBlock(lir::BB bb) {
+    insertionState.last()->basicBlock = bb;
+}
+Operand LIRGenerator::U64Constant(uint64_t constant) {
+    auto& func = currentFunction();
+
+    Value val { 64 / 8 };
+    val.u64 = constant;
+    func.constants.append(val);
+
+    Operand operand { Operand::Constant };
+    operand.constant = func.constants.count() - 1;
+
+    return operand;
+}
+Operand LIRGenerator::U32Constant(uint32_t constant) {
+    auto& func = currentFunction();
+
+    Value val { 32 / 8 };
+    val.u32 = constant;
+    func.constants.append(val);
+
+    Operand operand { Operand::Constant };
+    operand.constant = func.constants.count() - 1;
+
+    return operand;
+}
+Operand LIRGenerator::U16Constant(uint16_t constant) {
+    auto& func = currentFunction();
+
+    Value val { 16 / 8 };
+    val.u16 = constant;
+    func.constants.append(val);
+
+    Operand operand { Operand::Constant };
+    operand.constant = func.constants.count() - 1;
+
+    return operand;
+}
+Operand LIRGenerator::U8Constant(uint16_t constant) {
+    auto& func = currentFunction();
+
+    Value val { 8 / 8 };
+    val.u8 = constant;
+    func.constants.append(val);
+
+    Operand operand { Operand::Constant };
+    operand.constant = func.constants.count() - 1;
+
+    return operand;
+}
+Operand LIRGenerator::globalStringConstant(char const* data, uint64_t size) {
+    MemoryLoc loc { MemoryLoc::GlobalConstant, program.constants.count() };
+    // TODO: Add a method to Array for quickly appending from a buffer.
+    program.constants.reserve(program.constants.count() + size + 1);
+    for(uint64_t i: Range<uint64_t> {0, size}) {
+        program.constants.append(data[i]);
     }
-    return res;
+    program.constants.append(0);
+    Operand operand { Operand::Location };
+    operand.location = loc;
+    return operand;
 }
-ROperand LIRGenerator::variableOperand(RWOperand operand) {
-    ROperand res { ROperand::Variable };
-    res.variable = operand.variable;
-    res.offset = operand.offset;
-    res.size = operand.size;
-    return res;
+
+MemoryLoc LIRGenerator::variable(Type& type) {
+    auto& func = currentFunction();
+    // TODO: alignment!
+    MemoryLoc loc { MemoryLoc::StackFrame, func.frameSize };
+    func.frameSize += type.layout().size;
+    return loc;
 }
-RWOperand LIRGenerator::mutableVariableOperand(Var variable) {
-    RWOperand res { };
-    res.variable = variable;
-    res.offset = 0;
-    if(variable.isGlobal) {
-        res.size = program.globals[variable.index].size;
+MemoryLoc LIRGenerator::global(Value initialValue) {
+    MemoryLoc loc { MemoryLoc::GlobalVariable, program.globals.count() };
+    // TODO: Add a method to Array for quickly appending from a buffer.
+    program.globals.reserve(program.globals.count() + initialValue.size);
+    uint8_t* buf;
+    if(initialValue.size <= 64 / 8) {
+        buf = reinterpret_cast<uint8_t*>(&initialValue.u64);
     } else {
-        res.size = program.functions[*functionStack.last()].variables[variable.index].size;
+        buf = initialValue.data;
     }
-    return res;
+    for(uint64_t i: Range<uint64_t> {0, initialValue.size}) {
+        program.globals.append(buf[i]);
+    }
+    return loc;
 }
-ROperand LIRGenerator::localConstantOperand(Value value) {
-    ROperand res { ROperand::LocalConstant };
-    res.localConstant = value;
-    res.offset = 0;
-    res.size = value.size;
-    return res;
+
+Func LIRGenerator::beginFunction(std::string name, Type& returnType, bool isExtern) {
+    Function func {};
+    func.name = name;
+    func.returnValueSize = returnType.layout().size;
+    func.isExtern = isExtern;
+    func.basicBlocks.append({});
+    program.functions.append(func);
+    Func function = program.functions.count() - 1;
+    insertionState.append({function, 0});
+    return function;
 }
-ROperand LIRGenerator::globalConstantOperand(Const constant) {
-    ROperand res { ROperand::GlobalConstantAddress };
-    res.globalConstant = constant;
-    res.offset = 0;
-    res.size = sizeof(uint8_t*);
-    return res;
+
+void LIRGenerator::endFunction() {
+    insertionState.removeLast();
+}
+
+void LIRGenerator::twoAddressCode(OpCode op, MemoryLoc dest, Operand operand, Type& meaningfulType) {
+    Instruction instr {};
+    instr.op = op;
+    instr.dest = dest;
+    instr.operand = operand;
+    instr.size = meaningfulType.layout().size;
+    currentBasicBlock().instructions.append(instr);
+}
+void LIRGenerator::threeAddressCode(OpCode op, MemoryLoc dest, Operand operandA, Operand operandB, Type& meaningfulType) {
+    Instruction instr {};
+    instr.op = op;
+    instr.dest = dest;
+    instr.operands = { operandA, operandB };
+    instr.size = meaningfulType.layout().size;
+    currentBasicBlock().instructions.append(instr);
+}
+// TODO: the xExtend methods can be removed and written in terms of twoAddressCode by adding a destType pointer parameter to it with a default value of nullptr.
+void LIRGenerator::zeroExtend(MemoryLoc dest, Type& destType, Operand operand, Type& operandType) {
+    Instruction instr {};
+    instr.op = OpCode::ZeroExtend;
+    instr.dest = dest;
+    instr.operand = operand;
+    instr.destSize = destType.layout().size;
+    instr.size = operandType.layout().size;
+    currentBasicBlock().instructions.append(instr);
+}
+void LIRGenerator::signExtend(MemoryLoc dest, Type& destType, Operand operand, Type& operandType) {
+    Instruction instr {};
+    instr.op = OpCode::SignExtend;
+    instr.dest = dest;
+    instr.operand = operand;
+    instr.destSize = destType.layout().size;
+    instr.size = operandType.layout().size;
+    currentBasicBlock().instructions.append(instr);
+}
+void LIRGenerator::branch(lir::BB branch) {
+    Instruction instr {};
+    instr.op = OpCode::Branch;
+    instr.branch = branch;
+    currentBasicBlock().instructions.append(instr);
+}
+void LIRGenerator::condBranch(Operand condition, lir::BB trueBranch, lir::BB falseBranch) {
+    Instruction instr {};
+    instr.op = OpCode::CondBranch;
+    instr.trueBranch = trueBranch;
+    instr.falseBranch = falseBranch;
+    currentBasicBlock().instructions.append(instr);
+}
+void LIRGenerator::call(Func function, Array<Argument> arguments) {
+    Instruction instr {};
+    instr.op = OpCode::Call;
+    instr.function = function;
+    instr.arguments = arguments;
+    currentBasicBlock().instructions.append(instr);
 }
 
 void LIRGenerator::visit(Array<ASTNode*> const& nodes) {
