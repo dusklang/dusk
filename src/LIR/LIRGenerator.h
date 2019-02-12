@@ -82,7 +82,9 @@ class LIRGenerator final: public ASTVisitor<LIRGenerator,
 
     lir::MemoryLoc variable(Type& type);
     lir::MemoryLoc global(lir::Value initialValue);
+    lir::MemoryLoc externGlobal(std::string name, Type& type);
 
+    lir::Func function(std::string name, Type& returnType, bool isExtern);
     lir::Func beginFunction(std::string name, Type& returnType, bool isExtern);
     void endFunction();
 

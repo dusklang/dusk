@@ -10,8 +10,6 @@
 #include "General/Array.h"
 
 namespace lir {
-    /// Constant index, local to a function.
-    using Const = uint16_t;
     /// Basic block index, local to a function.
     using BB = uint16_t;
     /// Function index.
@@ -25,6 +23,7 @@ namespace lir {
         /// *dest = operand
         Store,
         /// dest = operand
+        Copy,
 
         /// dest = -operand
         Negative,
@@ -110,23 +109,15 @@ namespace lir {
             StackFrame,
             /// Offset from the beginning of the global variables.
             GlobalVariable,
+            /// Index into the extern global variable array.
+            ExternGlobalVariable,
             /// Offset from the beginning of the global constants.
             GlobalConstant,
         } base;
-        /// The offset in bytes from base.
+        /// The offset in bytes* from base.
+        ///     *unless base is ExternGlobalVariable, in which case offset is an index into the
+        ///     extern global variable array.
         uint64_t offset;
-    };
-
-    /// An operand of an instruction. Either a memory location or a constant.
-    struct Operand {
-        enum {
-            Location,
-            Constant,
-        } kind;
-        union {
-            MemoryLoc location;
-            Const constant;
-        };
     };
 
     /// A small constant value that can be passed directly to instructions.
@@ -145,6 +136,18 @@ namespace lir {
 
             /// Valid iff size > 64 / 8
             uint8_t* data;
+        };
+    };
+
+    /// An operand of an instruction. Either a memory location or a constant.
+    struct Operand {
+        enum {
+            Location,
+            Constant,
+        } kind;
+        union {
+            MemoryLoc location;
+            Value constant;
         };
     };
 
@@ -189,10 +192,14 @@ namespace lir {
     struct Function {
         std::string name;
         Array<BasicBlock> basicBlocks;
-        Array<Value> constants;
         uint64_t frameSize = 0;
         uint64_t returnValueSize;
         bool isExtern;
+    };
+
+    struct ExternGlobal {
+        std::string name;
+        uint64_t size;
     };
 
     struct Program {
@@ -200,5 +207,6 @@ namespace lir {
         Array<uint8_t> constants;
         /// The initial values of all the globals in the program.
         Array<uint8_t> globals;
+        Array<ExternGlobal> externGlobals;
     };
 }

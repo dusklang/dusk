@@ -21,50 +21,38 @@ void LIRGenerator::setBasicBlock(lir::BB bb) {
     insertionState.last()->basicBlock = bb;
 }
 Operand LIRGenerator::U64Constant(uint64_t constant) {
-    auto& func = currentFunction();
-
     Value val { 64 / 8 };
     val.u64 = constant;
-    func.constants.append(val);
 
     Operand operand { Operand::Constant };
-    operand.constant = func.constants.count() - 1;
+    operand.constant = val;
 
     return operand;
 }
 Operand LIRGenerator::U32Constant(uint32_t constant) {
-    auto& func = currentFunction();
-
     Value val { 32 / 8 };
     val.u32 = constant;
-    func.constants.append(val);
 
     Operand operand { Operand::Constant };
-    operand.constant = func.constants.count() - 1;
+    operand.constant = val;
 
     return operand;
 }
 Operand LIRGenerator::U16Constant(uint16_t constant) {
-    auto& func = currentFunction();
-
     Value val { 16 / 8 };
     val.u16 = constant;
-    func.constants.append(val);
 
     Operand operand { Operand::Constant };
-    operand.constant = func.constants.count() - 1;
+    operand.constant = val;
 
     return operand;
 }
 Operand LIRGenerator::U8Constant(uint16_t constant) {
-    auto& func = currentFunction();
-
     Value val { 8 / 8 };
     val.u8 = constant;
-    func.constants.append(val);
 
     Operand operand { Operand::Constant };
-    operand.constant = func.constants.count() - 1;
+    operand.constant = val;
 
     return operand;
 }
@@ -103,17 +91,27 @@ MemoryLoc LIRGenerator::global(Value initialValue) {
     }
     return loc;
 }
+MemoryLoc LIRGenerator::externGlobal(std::string name, Type& type) {
+    MemoryLoc loc { MemoryLoc::ExternGlobalVariable, program.externGlobals.count() };
+    program.externGlobals.append({name, type.layout().size});
+    return loc;
+}
 
-Func LIRGenerator::beginFunction(std::string name, Type& returnType, bool isExtern) {
+Func LIRGenerator::function(std::string name, Type& returnType, bool isExtern) {
     Function func {};
     func.name = name;
     func.returnValueSize = returnType.layout().size;
     func.isExtern = isExtern;
-    func.basicBlocks.append({});
     program.functions.append(func);
     Func function = program.functions.count() - 1;
-    insertionState.append({function, 0});
     return function;
+}
+
+Func LIRGenerator::beginFunction(std::string name, Type& returnType, bool isExtern) {
+    auto func = function(name, returnType, isExtern);
+    program.functions[func].basicBlocks.append({});
+    insertionState.append({func, 0});
+    return func;
 }
 
 void LIRGenerator::endFunction() {
@@ -206,56 +204,59 @@ DeclVal LIRGenerator::visitDecl(Decl* decl) {
     std::optional<DeclVal> retVal;
     if(decl->isExtern()) {
         if(decl->isVar) {
-            retVal = program.appendExternGlobal(decl->type.layout().size);
+            retVal = externGlobal(decl->name.getText().string(), decl->type);
         } else {
-            Function function {};
-            function.isExtern = true;
-            function.name = decl->name.getText().string();
-            retVal = program.appendFunction(function);
+            retVal = function(decl->name.getText().string(), decl->type, true);
         }
     } else if(auto expr = decl->expression()) {
-        Var var;
-        ROperand val = visitExpr(decl->expression());
-        if(functionStack.isEmpty()) {
-            assert(val.kind == ROperand::LocalConstant);
-            var = program.appendGlobal(val.localConstant);
+        MemoryLoc var;
+        if(insertionState.isEmpty()) {
+            Operand operand {};
+            visitExpr(expr, ResultContext::Read(&operand));
+            assert(operand.kind == Operand::Constant);
+            var = global(operand.constant);
+            return var;
         } else {
-            Function& curFunction = program.functions[*functionStack.last()];
-            var = curFunction.appendVariable({decl->type.layout().size});
-            Instruction copy {};
-            copy.op = OpCode::Copy;
-            copy.dest = mutableVariableOperand(var);
-            copy.operand = val;
-            curFunction.appendInstruction(copy);
+            var = variable(decl->type);
+            visitExpr(expr, ResultContext::Copy(var));
+            return var;
         }
-
         retVal = var;
     } else {
-        Function function {};
-        function.name = decl->name.getText().string();
+        retVal = declMap[decl] = beginFunction(decl->name.getText().string(), decl->type, false);
         for(auto param: decl->paramList) {
-            declMap[param] = function.appendVariable({param->type.layout().size});
+            declMap[param] = variable(param->type);
         }
-        Func func = program.appendFunction(function);
-        functionStack.append(func);
-        declMap[decl] = func;
-        visitScope(decl->body());
-
-        retVal = functionStack.removeLast();
+        visitScope(decl->body(), ResultContext::Return());
+        endFunction();
     }
     declMap[decl] = *retVal;
     return *retVal;
 }
-std::optional<ROperand> LIRGenerator::visitScope(Scope* scope) {
-    std::optional<ROperand> terminalValue;
+void LIRGenerator::visitScope(Scope* scope, ResultContext ctx) {
     for(auto node: scope->nodes) {
         if(auto expr = dynamic_cast<Expr*>(node)) {
-            terminalValue = visitExpr(expr);
+            if(expr == scope->terminalExpr) {
+                if(expr->type == NeverTy()) {
+                    visitExpr(expr, ResultContext::DontCare());
+                    unreachableInstr();
+                } else if(ctx.kind == RCKind::Return) {
+                    if(expr->type == VoidTy()) {
+                        visitExpr(expr, ResultContext::DontCare());
+                        returnVoid();
+                    } else {
+                        visitExpr(expr, ResultContext::Return());
+                    }
+                } else {
+                    visitExpr(expr, ctx);
+                }
+            } else {
+                visitExpr(expr, ResultContext::DontCare());
+            }
         } else if(auto decl = dynamic_cast<Decl*>(node)) {
             visitDecl(decl);
         }
     }
-    return terminalValue;
 }
 ROperand LIRGenerator::visitIntegerLiteralExpr(IntegerLiteralExpr* expr) {
     Value constant {};
