@@ -23,38 +23,37 @@ void LIRGenerator::setBasicBlock(lir::BB bb) {
 Operand LIRGenerator::U64Constant(uint64_t constant) {
     Value val { 64 / 8 };
     val.u64 = constant;
-
-    Operand operand { Operand::Constant };
-    operand.constant = val;
-
-    return operand;
+    return val;
 }
 Operand LIRGenerator::U32Constant(uint32_t constant) {
     Value val { 32 / 8 };
     val.u32 = constant;
-
-    Operand operand { Operand::Constant };
-    operand.constant = val;
-
-    return operand;
+    return val;
 }
 Operand LIRGenerator::U16Constant(uint16_t constant) {
     Value val { 16 / 8 };
     val.u16 = constant;
-
-    Operand operand { Operand::Constant };
-    operand.constant = val;
-
-    return operand;
+    return val;
 }
-Operand LIRGenerator::U8Constant(uint16_t constant) {
+Operand LIRGenerator::U8Constant(uint8_t constant) {
     Value val { 8 / 8 };
     val.u8 = constant;
-
-    Operand operand { Operand::Constant };
-    operand.constant = val;
-
-    return operand;
+    return val;
+}
+Operand LIRGenerator::F64Constant(double constant) {
+    Value val { 64 / 8 };
+    val.f64 = constant;
+    return val;
+}
+Operand LIRGenerator::F32Constant(float constant) {
+    Value val { 32 / 8 };
+    val.f32 = constant;
+    return val;
+}
+Operand LIRGenerator::boolConstant(bool constant) {
+    Value val { 8 / 8 };
+    val.boolean = constant;
+    return val;
 }
 Operand LIRGenerator::globalStringConstant(char const* data, uint64_t size) {
     MemoryLoc loc { MemoryLoc::GlobalConstant, program.constants.count() };
@@ -64,9 +63,7 @@ Operand LIRGenerator::globalStringConstant(char const* data, uint64_t size) {
         program.constants.append(data[i]);
     }
     program.constants.append(0);
-    Operand operand { Operand::Location };
-    operand.location = loc;
-    return operand;
+    return loc;
 }
 
 MemoryLoc LIRGenerator::variable(Type& type) {
@@ -191,6 +188,24 @@ void LIRGenerator::unreachableInstr() {
     currentBasicBlock().instructions.append(instr);
 }
 
+void LIRGenerator::placeConstant(Operand val, Type& type, ResultContext ctx) {
+    switch(ctx.kind) {
+        case RCKind::DontCare: return;
+        case RCKind::Return: {
+            returnValue(val, type);
+        } return;
+        case RCKind::Copy: {
+            twoAddressCode(OpCode::Copy, ctx.copy, val, type);
+        } break;
+        case RCKind::Read: {
+            *ctx.read = val;
+        } break;
+        case RCKind::Write: {
+            panic("Cannot write to constant");
+        }
+    }
+}
+
 void LIRGenerator::visit(Array<ASTNode*> const& nodes) {
     for(auto node: nodes) {
         ASTVisitor::visit(node);
@@ -211,7 +226,7 @@ DeclVal LIRGenerator::visitDecl(Decl* decl) {
     } else if(auto expr = decl->expression()) {
         MemoryLoc var;
         if(insertionState.isEmpty()) {
-            Operand operand {};
+            Operand operand;
             visitExpr(expr, ResultContext::Read(&operand));
             assert(operand.kind == Operand::Constant);
             var = global(operand.constant);
@@ -258,86 +273,92 @@ void LIRGenerator::visitScope(Scope* scope, ResultContext ctx) {
         }
     }
 }
-ROperand LIRGenerator::visitIntegerLiteralExpr(IntegerLiteralExpr* expr) {
-    Value constant {};
+void LIRGenerator::visitIntegerLiteralExpr(IntegerLiteralExpr* expr, ResultContext ctx) {
+    Operand constant;
     match(expr->type.data)(
         pattern(as<IntTy>(arg)) = [&](auto ty) {
             // Note: we don't have to worry about signedness because integer literal
             // expressions are always positive.
             switch(ty.bitWidth) {
                 case 8: {
-                    constant.u8 = expr->literal;
+                    constant = U8Constant(expr->literal);
                 } break;
                 case 16: {
-                    constant.u16 = expr->literal;
+                    constant = U16Constant(expr->literal);
                 } break;
                 case 32: {
-                    constant.u32 = expr->literal;
+                    constant = U32Constant(expr->literal);
                 } break;
                 case 64: {
-                    constant.u64 = expr->literal;
+                    constant = U64Constant(expr->literal);
                 } break;
                 default: {
                     panic("Invalid integer literal bitWidth");
                 } break;
             }
-            constant.size = ty.bitWidth / 8;
         },
         pattern(as<FloatTy>(arg)) = [&](auto ty) {
-            constant.size = 32 / 8;
-            constant.f32 = expr->literal;
+            constant = F32Constant(expr->literal);
         },
         pattern(as<DoubleTy>(arg)) = [&](auto ty) {
-            constant.size = 64 / 8;
-            constant.f64 = expr->literal;
+            constant = F64Constant(expr->literal);
         },
         pattern(_) = []() { panic("Invalid integer literal expression"); }
     );
-    return localConstantOperand(constant);
+    placeConstant(constant, expr->type, ctx);
 }
-ROperand LIRGenerator::visitDecimalLiteralExpr(DecimalLiteralExpr* expr) {
-    Value constant {};
+void LIRGenerator::visitDecimalLiteralExpr(DecimalLiteralExpr* expr, ResultContext ctx) {
+    Operand constant;
     match(expr->type.data)(
         pattern(as<FloatTy>(arg)) = [&](auto ty) {
-            constant.size = 32 / 8;
-            constant.f32 = strtof(expr->literal.c_str(), nullptr);
+            constant = F32Constant(strtof(expr->literal.c_str(), nullptr));
         },
         pattern(as<DoubleTy>(arg)) = [&](auto ty) {
-            constant.size = 64 / 8;
-            constant.f64 = strtod(expr->literal.c_str(), nullptr);
+            constant = F64Constant(strtod(expr->literal.c_str(), nullptr));
         },
         pattern(_) = []() { panic("Invalid decimal literal expression"); }
     );
-
-    return localConstantOperand(constant);
+    placeConstant(constant, expr->type, ctx);
 }
-ROperand LIRGenerator::visitBooleanLiteralExpr(BooleanLiteralExpr* expr) {
-    Value constant {};
-    constant.size = 1;
-    constant.boolean = expr->literal;
-
-    return localConstantOperand(constant);
+void LIRGenerator::visitBooleanLiteralExpr(BooleanLiteralExpr* expr, ResultContext ctx) {
+    placeConstant(boolConstant(expr->literal), expr->type, ctx);
 }
-ROperand LIRGenerator::visitCharLiteralExpr(CharLiteralExpr* expr) {
-    Value constant {};
-    constant.size = 1;
-    constant.u8 = expr->literal;
-
-    return localConstantOperand(constant);
+void LIRGenerator::visitCharLiteralExpr(CharLiteralExpr* expr, ResultContext ctx) {
+    placeConstant(U8Constant(expr->literal), expr->type, ctx);
 }
-ROperand LIRGenerator::visitStringLiteralExpr(StringLiteralExpr* expr) {
-    Value constant {};
-    uint32_t size = expr->literal.size() + 1;
-    constant.size = size;
-    constant.buffer = new uint8_t[size];
-    memcpy(constant.buffer, expr->literal.c_str(), size);
-
-    return globalConstantOperand(program.appendConstant(constant));
+void LIRGenerator::visitStringLiteralExpr(StringLiteralExpr* expr, ResultContext ctx) {
+    Operand str = globalStringConstant(expr->literal.c_str(), expr->literal.size() + 1);
+    switch(ctx.kind) {
+        case RCKind::DontCare: return;
+        case RCKind::Return: {
+            MemoryLoc addr = variable(expr->type);
+            twoAddressCode(OpCode::GetAddress, addr, str, *expr->type.pointeeType());
+            returnValue(addr, expr->type);
+        } return;
+        case RCKind::Copy: {
+            twoAddressCode(OpCode::GetAddress, ctx.copy, str, *expr->type.pointeeType());
+        } break;
+        case RCKind::Read: {
+            MemoryLoc addr = variable(expr->type);
+            twoAddressCode(OpCode::GetAddress, addr, str, *expr->type.pointeeType());
+            *ctx.read = addr;
+        } break;
+        case RCKind::Write: {
+            panic("Cannot write to string literal");
+        }
+    }
 }
-ROperand LIRGenerator::visitDoExpr(DoExpr* expr) {
-    return {};
+void LIRGenerator::visitDoExpr(DoExpr* expr, ResultContext ctx) {
+    match(expr->value)(
+        pattern(as<Expr*>(arg)) = [&](auto expr) {
+            visitExpr(expr, ResultContext::DontCare());
+        },
+        pattern(as<Scope*>(arg)) = [&](auto scope) {
+            visitScope(scope, ctx);
+        }
+    );
 }
-ROperand LIRGenerator::visitPreOpExpr(PreOpExpr* expr) {
+void LIRGenerator::visitPreOpExpr(PreOpExpr* expr, ResultContext ctx) {
     Function& func = program.functions[*functionStack.last()];
     auto operand = visitExpr(expr->operand);
     Instruction instr {};

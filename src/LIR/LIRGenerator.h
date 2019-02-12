@@ -77,7 +77,10 @@ class LIRGenerator final: public ASTVisitor<LIRGenerator,
     lir::Operand U64Constant(uint64_t constant);
     lir::Operand U32Constant(uint32_t constant);
     lir::Operand U16Constant(uint16_t constant);
-    lir::Operand U8Constant(uint16_t constant);
+    lir::Operand U8Constant(uint8_t constant);
+    lir::Operand F64Constant(double constant);
+    lir::Operand F32Constant(float constant);
+    lir::Operand boolConstant(bool constant);
     lir::Operand globalStringConstant(char const* data, uint64_t size);
 
     lir::MemoryLoc variable(Type& type);
@@ -98,6 +101,8 @@ class LIRGenerator final: public ASTVisitor<LIRGenerator,
     void returnValue(lir::Operand operand, Type& type);
     void returnVoid();
     void unreachableInstr();
+
+    void placeConstant(lir::Operand val, Type& type, ResultContext ctx);
 public:
     void visit(Array<ASTNode*> const& nodes);
     DeclVal visitDecl(Decl* decl);

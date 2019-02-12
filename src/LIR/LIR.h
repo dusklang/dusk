@@ -149,6 +149,10 @@ namespace lir {
             MemoryLoc location;
             Value constant;
         };
+
+        Operand() {}
+        Operand(MemoryLoc location) : kind(Location), location(location) {}
+        Operand(Value constant) : kind(Constant), constant(constant) {}
     };
 
     struct Argument {
