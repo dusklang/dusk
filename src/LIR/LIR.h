@@ -100,7 +100,9 @@ namespace lir {
         Unreachable,
     };
 
-    /// Statically-known memory location, expressed as a byte offset from a specified base.
+    struct Operand;
+
+    /// Memory location, expressed either as a byte offset from a specified base or a raw pointer.
     struct MemoryLoc {
         enum {
             /// Offset from the beginning of the current stack frame.
@@ -111,11 +113,21 @@ namespace lir {
             ExternGlobalVariable,
             /// Offset from the beginning of the global constants.
             GlobalConstant,
+            /// A pointer.
+            Indirect,
         } base;
-        /// The offset in bytes* from base.
-        ///     *unless base is ExternGlobalVariable, in which case offset is an index into the
-        ///     extern global variable array.
-        uint64_t offset;
+        union {
+            /// The offset in bytes* from base.
+            ///     *unless base is ExternGlobalVariable, in which case offset is an index into the
+            ///     extern global variable array.
+            uint64_t offset;
+
+            /// The pointer. This must be dynamically allocated because Operand contains a MemoryLoc.
+            ///
+            /// TODO: We probably only ever have one layer of indirection, so we should be able to
+            /// break the recursion without dynamic allocation.
+            Operand* pointer;
+        };
     };
 
     /// A small constant value that can be passed directly to instructions.

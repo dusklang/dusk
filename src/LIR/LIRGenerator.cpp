@@ -56,7 +56,7 @@ Operand LIRGenerator::boolConstant(bool constant) {
     return val;
 }
 Operand LIRGenerator::globalStringConstant(char const* data, uint64_t size) {
-    MemoryLoc loc { MemoryLoc::GlobalConstant, program.constants.count() };
+    MemoryLoc loc { MemoryLoc::GlobalConstant, { program.constants.count() } };
     // TODO: Add a method to Array for quickly appending from a buffer.
     program.constants.reserve(program.constants.count() + size + 1);
     for(uint64_t i: Range<uint64_t> {0, size}) {
@@ -65,16 +65,21 @@ Operand LIRGenerator::globalStringConstant(char const* data, uint64_t size) {
     program.constants.append(0);
     return loc;
 }
+MemoryLoc LIRGenerator::indirectMemoryLoc(Operand pointer) {
+    MemoryLoc loc { MemoryLoc::Indirect };
+    loc.pointer = new Operand(pointer);
+    return loc;
+}
 
 MemoryLoc LIRGenerator::variable(Type& type) {
     auto& func = currentFunction();
     // TODO: alignment!
-    MemoryLoc loc { MemoryLoc::StackFrame, func.frameSize };
+    MemoryLoc loc { MemoryLoc::StackFrame, { func.frameSize } };
     func.frameSize += type.layout().size;
     return loc;
 }
 MemoryLoc LIRGenerator::global(Value initialValue) {
-    MemoryLoc loc { MemoryLoc::GlobalVariable, program.globals.count() };
+    MemoryLoc loc { MemoryLoc::GlobalVariable, { program.globals.count() } };
     // TODO: Add a method to Array for quickly appending from a buffer.
     program.globals.reserve(program.globals.count() + initialValue.size);
     uint8_t* buf;
@@ -89,7 +94,7 @@ MemoryLoc LIRGenerator::global(Value initialValue) {
     return loc;
 }
 MemoryLoc LIRGenerator::externGlobal(std::string name, Type& type) {
-    MemoryLoc loc { MemoryLoc::ExternGlobalVariable, program.externGlobals.count() };
+    MemoryLoc loc { MemoryLoc::ExternGlobalVariable, { program.externGlobals.count() } };
     program.externGlobals.append({name, type.layout().size});
     return loc;
 }
@@ -422,7 +427,9 @@ void LIRGenerator::visitPreOpExpr(PreOpExpr* expr, ResultContext ctx) {
                     *ctx.read = res;
                 } break;
                 case RCKind::Write: {
-                    visitExpr(expr->operand, ResultContext::Read(ctx.write));
+                    Operand addr;
+                    visitExpr(expr->operand, ResultContext::Read(&addr));
+                    *ctx.write = indirectMemoryLoc(addr);
                 } break;
             }
         } break;
@@ -432,18 +439,23 @@ void LIRGenerator::visitPreOpExpr(PreOpExpr* expr, ResultContext ctx) {
                     visitExpr(expr->operand, ctx);
                 } break;
                 case RCKind::Return: {
-                    Operand addr;
-                    visitExpr(expr->operand, ResultContext::Write(&addr));
+                    MemoryLoc loc;
+                    visitExpr(expr->operand, ResultContext::Write(&loc));
+                    MemoryLoc addr = variable(expr->type);
+                    twoAddressCode(OpCode::GetAddress, addr, loc, expr->operand->type);
                     returnValue(addr, expr->type);
                 } break;
                 case RCKind::Copy: {
-                    Operand addr;
-                    visitExpr(expr->operand, ResultContext::Write(&addr));
-                    twoAddressCode(OpCode::Copy, ctx.copy, addr, expr->type);
+                    MemoryLoc loc;
+                    visitExpr(expr->operand, ResultContext::Write(&loc));
+                    twoAddressCode(OpCode::GetAddress, ctx.copy, loc, expr->operand->type);
                 } break;
                 case RCKind::Read: {
-                    Operand addr;
-                    visitExpr(expr->operand, ResultContext::Write(&addr));
+                    MemoryLoc loc;
+                    visitExpr(expr->operand, ResultContext::Write(&loc));
+                    MemoryLoc addr = variable(expr->type);
+                    twoAddressCode(OpCode::GetAddress, addr, loc, expr->operand->type);
+                    returnValue(addr, expr->type);
                     *ctx.read = addr;
                 } break;
                 case RCKind::Write: {
@@ -479,15 +491,22 @@ void LIRGenerator::visitPreOpExpr(PreOpExpr* expr, ResultContext ctx) {
         } break;
     }
 }
-ROperand LIRGenerator::visitBinOpExpr(BinOpExpr* expr) {
-    Function& func = program.functions[*functionStack.last()];
-    ROperand rvalueA, rvalueB;
-    if(expr->op != BinOp::Assignment) {
-        rvalueA = visitExpr(expr->lhs);
-    }
-    rvalueB = visitExpr(expr->rhs);
+void LIRGenerator::visitBinOpExpr(BinOpExpr* expr, ResultContext ctx) {
+    switch(ctx.kind) {
+        case RCKind::DontCare: {
+            switch(expr->op) {
+                case BinOp::Assignment:
+                case BinOp::AddAssignment:
+                case BinOp::SubAssignment:
+                case BinOp::MultAssignment:
+                case BinOp::ModAssignment:
+                case BinOp::AndAssignment:
+                case BinOp::OrAssignment:
+                case BinOp::DivAssignment:
+            }
+        }
 
-    Instruction instr {};
+    }
     switch(expr->op) {
         case BinOp::Assignment:
         case BinOp::AddAssignment:
@@ -497,6 +516,7 @@ ROperand LIRGenerator::visitBinOpExpr(BinOpExpr* expr) {
         case BinOp::AndAssignment:
         case BinOp::OrAssignment:
         case BinOp::DivAssignment: {
+            switch(
             instr.dest = visitExprAsLValue(expr->lhs);
             if(expr->op == BinOp::Assignment) {
                 instr.op = OpCode::Copy;

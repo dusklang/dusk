@@ -17,7 +17,7 @@ enum class RCKind {
     Copy,
     /// We need to read the result of this expression.
     Read,
-    /// We need the address of the result of this expression.
+    /// We need the memory location of this expression so that can write to it.
     Write,
 };
 
@@ -27,7 +27,7 @@ struct ResultContext {
     union {
         lir::MemoryLoc copy;
         lir::Operand* read;
-        lir::Operand* write;
+        lir::MemoryLoc* write;
     };
 
     static ResultContext DontCare() {
@@ -46,7 +46,7 @@ struct ResultContext {
         ctx.read = read;
         return ctx;
     }
-    static ResultContext Write(lir::Operand* write) {
+    static ResultContext Write(lir::MemoryLoc* write) {
         ResultContext ctx { RCKind::Write };
         ctx.write = write;
         return ctx;
@@ -83,6 +83,7 @@ class LIRGenerator final: public ASTVisitor<LIRGenerator,
     lir::Operand boolConstant(bool constant);
     lir::Operand globalStringConstant(char const* data, uint64_t size);
 
+    lir::MemoryLoc indirectMemoryLoc(Operand pointer);
     lir::MemoryLoc variable(Type& type);
     lir::MemoryLoc global(lir::Value initialValue);
     lir::MemoryLoc externGlobal(std::string name, Type& type);
