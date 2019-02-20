@@ -66,14 +66,14 @@ struct StringLiteralExpr final: public Expr {
     SourceRange totalRange() const override { return range; }
 };
 
-enum class BinOp {
+enum class BinOp: uint8_t {
     AddAssignment,
     SubAssignment,
     MultAssignment,
     DivAssignment,
     ModAssignment,
-    AndAssignment,
-    OrAssignment,
+    BitwiseAndAssignment,
+    BitwiseOrAssignment,
     Add,
     Sub,
     Mult,
@@ -92,7 +92,7 @@ enum class BinOp {
     Assignment
 };
 
-enum class PreOp {
+enum class PreOp: uint8_t {
     Positive,
     Negative,
     Deref,

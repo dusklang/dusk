@@ -71,7 +71,7 @@ MemoryLoc LIRGenerator::indirectMemoryLoc(Operand pointer) {
     return loc;
 }
 
-MemoryLoc LIRGenerator::variable(Type& type) {
+MemoryLoc LIRGenerator::variable(Type type) {
     auto& func = currentFunction();
     // TODO: alignment!
     MemoryLoc loc { MemoryLoc::StackFrame, { func.frameSize } };
@@ -93,13 +93,13 @@ MemoryLoc LIRGenerator::global(Value initialValue) {
     }
     return loc;
 }
-MemoryLoc LIRGenerator::externGlobal(std::string name, Type& type) {
+MemoryLoc LIRGenerator::externGlobal(std::string name, Type type) {
     MemoryLoc loc { MemoryLoc::ExternGlobalVariable, { program.externGlobals.count() } };
     program.externGlobals.append({name, type.layout().size});
     return loc;
 }
 
-Func LIRGenerator::function(std::string name, Type& returnType, bool isExtern) {
+Func LIRGenerator::function(std::string name, Type returnType, bool isExtern) {
     Function func {};
     func.name = name;
     func.returnValueSize = returnType.layout().size;
@@ -109,7 +109,7 @@ Func LIRGenerator::function(std::string name, Type& returnType, bool isExtern) {
     return function;
 }
 
-Func LIRGenerator::beginFunction(std::string name, Type& returnType, bool isExtern) {
+Func LIRGenerator::beginFunction(std::string name, Type returnType, bool isExtern) {
     auto func = function(name, returnType, isExtern);
     program.functions[func].basicBlocks.append({});
     insertionState.append({func, 0});
@@ -120,14 +120,7 @@ void LIRGenerator::endFunction() {
     insertionState.removeLast();
 }
 
-void LIRGenerator::store(lir::Operand addr, lir::Operand value, Type& type) {
-    Instruction instr {};
-    instr.op = OpCode::Store;
-    instr.operands = { addr, value };
-    instr.size = type.layout().size;
-    currentBasicBlock().instructions.append(instr);
-}
-void LIRGenerator::twoAddressCode(OpCode op, MemoryLoc dest, Operand operand, Type& meaningfulType) {
+void LIRGenerator::twoAddressCode(OpCode op, MemoryLoc dest, Operand operand, Type meaningfulType) {
     Instruction instr {};
     instr.op = op;
     instr.dest = dest;
@@ -135,7 +128,7 @@ void LIRGenerator::twoAddressCode(OpCode op, MemoryLoc dest, Operand operand, Ty
     instr.size = meaningfulType.layout().size;
     currentBasicBlock().instructions.append(instr);
 }
-void LIRGenerator::threeAddressCode(OpCode op, MemoryLoc dest, Operand operandA, Operand operandB, Type& meaningfulType) {
+void LIRGenerator::threeAddressCode(OpCode op, MemoryLoc dest, Operand operandA, Operand operandB, Type meaningfulType) {
     Instruction instr {};
     instr.op = op;
     instr.dest = dest;
@@ -144,7 +137,7 @@ void LIRGenerator::threeAddressCode(OpCode op, MemoryLoc dest, Operand operandA,
     currentBasicBlock().instructions.append(instr);
 }
 // TODO: the xExtend methods can be removed and written in terms of twoAddressCode by adding a destType pointer parameter to it with a default value of nullptr.
-void LIRGenerator::zeroExtend(MemoryLoc dest, Type& destType, Operand operand, Type& operandType) {
+void LIRGenerator::zeroExtend(MemoryLoc dest, Type destType, Operand operand, Type operandType) {
     Instruction instr {};
     instr.op = OpCode::ZeroExtend;
     instr.dest = dest;
@@ -153,7 +146,7 @@ void LIRGenerator::zeroExtend(MemoryLoc dest, Type& destType, Operand operand, T
     instr.size = operandType.layout().size;
     currentBasicBlock().instructions.append(instr);
 }
-void LIRGenerator::signExtend(MemoryLoc dest, Type& destType, Operand operand, Type& operandType) {
+void LIRGenerator::signExtend(MemoryLoc dest, Type destType, Operand operand, Type operandType) {
     Instruction instr {};
     instr.op = OpCode::SignExtend;
     instr.dest = dest;
@@ -182,7 +175,7 @@ void LIRGenerator::call(Func function, Array<Argument> arguments) {
     instr.arguments = arguments;
     currentBasicBlock().instructions.append(instr);
 }
-void LIRGenerator::returnValue(Operand operand, Type& type) {
+void LIRGenerator::returnValue(Operand operand, Type type) {
     Instruction instr {};
     instr.op = OpCode::Return;
     instr.operand = operand;
@@ -200,7 +193,7 @@ void LIRGenerator::unreachableInstr() {
     currentBasicBlock().instructions.append(instr);
 }
 
-void LIRGenerator::placeConstant(Operand val, Type& type, ResultContext ctx) {
+void LIRGenerator::placeConstant(Operand val, Type type, ResultContext ctx) {
     switch(ctx.kind) {
         case RCKind::DontCare: return;
         case RCKind::Return: {
@@ -491,52 +484,22 @@ void LIRGenerator::visitPreOpExpr(PreOpExpr* expr, ResultContext ctx) {
         } break;
     }
 }
-void LIRGenerator::visitBinOpExpr(BinOpExpr* expr, ResultContext ctx) {
-    switch(ctx.kind) {
-        case RCKind::DontCare: {
-            switch(expr->op) {
-                case BinOp::Assignment:
-                case BinOp::AddAssignment:
-                case BinOp::SubAssignment:
-                case BinOp::MultAssignment:
-                case BinOp::ModAssignment:
-                case BinOp::AndAssignment:
-                case BinOp::OrAssignment:
-                case BinOp::DivAssignment:
-            }
-        }
-
-    }
-    switch(expr->op) {
+static bool isAssignment(BinOp op) {
+    switch(op) {
         case BinOp::Assignment:
         case BinOp::AddAssignment:
         case BinOp::SubAssignment:
         case BinOp::MultAssignment:
+        case BinOp::DivAssignment:
         case BinOp::ModAssignment:
-        case BinOp::AndAssignment:
-        case BinOp::OrAssignment:
-        case BinOp::DivAssignment: {
-            switch(
-            instr.dest = visitExprAsLValue(expr->lhs);
-            if(expr->op == BinOp::Assignment) {
-                instr.op = OpCode::Copy;
-                instr.operand = rvalueB;
-                func.appendInstruction(instr);
-                return variableOperand(instr.dest);
-            } else {
-                instr.operands = { rvalueA, rvalueB };
-            }
-        } break;
+        case BinOp::BitwiseAndAssignment:
+        case BinOp::BitwiseOrAssignment:
+            return true;
         case BinOp::Add:
         case BinOp::Sub:
         case BinOp::Mult:
         case BinOp::Div:
         case BinOp::Mod:
-        case BinOp::BitwiseAnd:
-        case BinOp::BitwiseOr: {
-            instr.dest = mutableVariableOperand(func.appendVariable({rvalueA.size}));
-            instr.operands = { rvalueA, rvalueB };
-        } break;
         case BinOp::Equal:
         case BinOp::NotEqual:
         case BinOp::LessThanOrEqual:
@@ -544,279 +507,434 @@ void LIRGenerator::visitBinOpExpr(BinOpExpr* expr, ResultContext ctx) {
         case BinOp::GreaterThanOrEqual:
         case BinOp::GreaterThan:
         case BinOp::Or:
-        case BinOp::And: {
-            instr.dest = mutableVariableOperand(func.appendVariable({1}));
-            instr.operands = { rvalueA, rvalueB };
+        case BinOp::And:
+        case BinOp::BitwiseAnd:
+        case BinOp::BitwiseOr:
+            return false;
+    }
+}
+
+/// BinOp with no assignment.
+enum class PureBinOp {
+    Add,
+    Sub,
+    Mult,
+    Div,
+    Mod,
+    BitwiseAnd,
+    BitwiseOr,
+    Equal,
+    NotEqual,
+    LessThanOrEqual,
+    LessThan,
+    GreaterThanOrEqual,
+    GreaterThan,
+    Or,
+    And,
+    IdentityRHS
+};
+static PureBinOp pureOperation(BinOp op) {
+    switch(op) {
+        case BinOp::AddAssignment:
+        case BinOp::Add:
+            return PureBinOp::Add;
+        case BinOp::SubAssignment:
+        case BinOp::Sub:
+            return PureBinOp::Sub;
+        case BinOp::MultAssignment:
+        case BinOp::Mult:
+            return PureBinOp::Mult;
+        case BinOp::DivAssignment:
+        case BinOp::Div:
+            return PureBinOp::Div;
+        case BinOp::ModAssignment:
+        case BinOp::Mod:
+            return PureBinOp::Mod;
+        case BinOp::BitwiseAndAssignment:
+        case BinOp::BitwiseAnd:
+            return PureBinOp::BitwiseAnd;
+        case BinOp::BitwiseOrAssignment:
+        case BinOp::BitwiseOr:
+            return PureBinOp::BitwiseOr;
+        case BinOp::Equal:
+            return PureBinOp::Equal;
+        case BinOp::NotEqual:
+            return PureBinOp::NotEqual;
+        case BinOp::LessThanOrEqual:
+            return PureBinOp::LessThanOrEqual;
+        case BinOp::LessThan:
+            return PureBinOp::LessThan;
+        case BinOp::GreaterThanOrEqual:
+            return PureBinOp::GreaterThanOrEqual;
+        case BinOp::GreaterThan:
+            return PureBinOp::GreaterThan;
+        case BinOp::Or:
+            return PureBinOp::Or;
+        case BinOp::And:
+            return PureBinOp::And;
+        case BinOp::Assignment:
+            return PureBinOp::IdentityRHS;
+    }
+}
+void LIRGenerator::visitBinOpExpr(BinOpExpr* expr, ResultContext _ctx) {
+    ResultContext ctx = _ctx;
+    switch(_ctx.kind) {
+        case RCKind::DontCare: {
+            if(isAssignment(expr->op)) {
+                MemoryLoc loc;
+                visitExpr(expr->lhs, ResultContext::Write(&loc));
+                ctx = ResultContext::Copy(loc);
+            }
+        } break;
+
+        case RCKind::Return:
+        case RCKind::Copy:
+        case RCKind::Read:
+        case RCKind::Write: {
+            assert(!isAssignment(expr->op));
         } break;
     }
 
-    auto getPointerOffset = [&](PointerTy pointerTy, IntTy intTy) -> ROperand {
-        Var offset = func.appendVariable({sizeof(uint8_t*)});
-        ROperand offsetOperand = variableOperand(offset);
-        Instruction getOffset {};
-        getOffset.dest = mutableVariableOperand(offset);
-        getOffset.operand = rvalueB;
-
-        auto pointerBitWidth = sizeof(uint8_t*) * 8;
-        assertTrueMessage(intTy.bitWidth <= pointerBitWidth, "Can't perform pointer arithmetic where the int type is bigger than the pointer type");
-        if(intTy.bitWidth < pointerBitWidth) {
+    PureBinOp pureOp = pureOperation(expr->op);
+    auto getPointerOffset = [&](Operand offset, PointerTy pointerTy, IntTy intTy) -> MemoryLoc {
+        assert(intTy.bitWidth <= sizeof(uint8_t*) * 8);
+        MemoryLoc val = variable(pointerTy);
+        Type offsetType;
+        if(intTy.bitWidth < sizeof(uint8_t*) * 8) {
             switch(intTy.signedness) {
-                case Signedness::Signed:
-                    getOffset.op = OpCode::SignExtend;
-                    break;
-                case Signedness::Unsigned:
-                    getOffset.op = OpCode::ZeroExtend;
-                    break;
+                case Signedness::Unsigned: {
+                    offsetType = IntTy::U64();
+                    zeroExtend(val, offsetType, offset, expr->rhs->type);
+                } break;
+                case Signedness::Signed: {
+                    offsetType = IntTy::I64();
+                    signExtend(val, offsetType, offset, expr->rhs->type);
+                } break;
             }
-        } else {
-            getOffset.op = OpCode::Copy;
         }
-        func.appendInstruction(getOffset);
-
-        Value stride {};
-        stride.size = sizeof(uint8_t*);
-        assertEqual(stride.size, 64 / 8);
-        stride.u64 = pointerTy.pointedTy->layout().stride();
-
-        Instruction mult {};
-        mult.op = OpCode::Mult;
-        mult.dest = mutableVariableOperand(offset);
-        mult.operands = { variableOperand(offset), localConstantOperand(stride) };
-        func.appendInstruction(mult);
-
-        return offsetOperand;
+        threeAddressCode(OpCode::Mult, val, val, U64Constant(expr->lhs->type.pointeeType()->layout().stride()), offsetType);
+        return val;
     };
-
-    switch(expr->op) {
-        case BinOp::Assignment: unreachable;
-
-        case BinOp::AddAssignment:
-        case BinOp::Add: {
+    auto doBinOp = [&](OpCode opcode) {
+        switch(ctx.kind) {
+            case RCKind::DontCare: {
+                visitExpr(expr->lhs, ResultContext::DontCare());
+                visitExpr(expr->rhs, ResultContext::DontCare());
+            } break;
+            case RCKind::Return: {
+                Operand lhs, rhs;
+                visitExpr(expr->lhs, ResultContext::Read(&lhs));
+                visitExpr(expr->rhs, ResultContext::Read(&rhs));
+                MemoryLoc val = variable(expr->type);
+                threeAddressCode(opcode, val, lhs, rhs, expr->lhs->type);
+                returnValue(val, expr->type);
+            } break;
+            case RCKind::Copy: {
+                Operand lhs, rhs;
+                visitExpr(expr->lhs, ResultContext::Read(&lhs));
+                visitExpr(expr->rhs, ResultContext::Read(&rhs));
+                threeAddressCode(opcode, ctx.copy, lhs, rhs, expr->lhs->type);
+            } break;
+            case RCKind::Read: {
+                Operand lhs, rhs;
+                visitExpr(expr->lhs, ResultContext::Read(&lhs));
+                visitExpr(expr->rhs, ResultContext::Read(&rhs));
+                MemoryLoc val = variable(expr->type);
+                threeAddressCode(opcode, val, lhs, rhs, expr->lhs->type);
+                *ctx.read = val;
+            } break;
+            case RCKind::Write: {
+                panic("Can't write to constant expression");
+            } break;
+        }
+    };
+    switch(pureOp) {
+        case PureBinOp::Add: {
             match(expr->lhs->type.data, expr->rhs->type.data)(
-                pattern(as<IntTy>(arg), as<IntTy>(_)) = [&](auto ty) {
-                    switch(ty.signedness) {
-                        case Signedness::Signed:
-                            instr.op = OpCode::WrappingAdd;
-                            break;
-                        case Signedness::Unsigned:
-                            instr.op = OpCode::WrappingAdd;
-                    }
+                pattern(as<IntTy>(_), as<IntTy>(_)) = [&] {
+                    doBinOp(OpCode::WrappingAdd);
                 },
                 pattern(as<FloatTy>(_), as<FloatTy>(_)) = [&] {
-                    instr.op = OpCode::FAdd;
+                    doBinOp(OpCode::FAdd);
                 },
                 pattern(as<DoubleTy>(_), as<DoubleTy>(_)) = [&] {
-                    instr.op = OpCode::FAdd;
+                    doBinOp(OpCode::FAdd);
                 },
                 pattern(as<PointerTy>(arg), as<IntTy>(arg)) = [&](auto pointerTy, auto intTy) {
-                    instr.op = OpCode::WrappingAdd;
-                    instr.operands.b = getPointerOffset(pointerTy, intTy);
+                    OpCode opcode = OpCode::WrappingAdd;
+                    switch(ctx.kind) {
+                        case RCKind::DontCare: {
+                            visitExpr(expr->lhs, ResultContext::DontCare());
+                            visitExpr(expr->rhs, ResultContext::DontCare());
+                        } break;
+                        case RCKind::Return: {
+                            Operand lhs, rhs;
+                            visitExpr(expr->lhs, ResultContext::Read(&lhs));
+                            visitExpr(expr->rhs, ResultContext::Read(&rhs));
+
+                            MemoryLoc val = getPointerOffset(rhs, pointerTy, intTy);
+                            threeAddressCode(opcode, val, val, lhs, expr->type);
+                            returnValue(val, expr->type);
+                        } break;
+                        case RCKind::Copy: {
+                            Operand lhs, rhs;
+                            visitExpr(expr->lhs, ResultContext::Read(&lhs));
+                            visitExpr(expr->rhs, ResultContext::Read(&rhs));
+
+                            MemoryLoc val = getPointerOffset(rhs, pointerTy, intTy);
+                            threeAddressCode(opcode, ctx.copy, val, lhs, expr->type);
+                        } break;
+                        case RCKind::Read: {
+                            Operand lhs, rhs;
+                            visitExpr(expr->lhs, ResultContext::Read(&lhs));
+                            visitExpr(expr->rhs, ResultContext::Read(&rhs));
+
+                            MemoryLoc val = getPointerOffset(rhs, pointerTy, intTy);
+                            threeAddressCode(opcode, val, val, lhs, expr->type);
+                            *ctx.read = val;
+                        } break;
+                        case RCKind::Write: {
+                            panic("Can't write to constant expression");
+                        } break;
+                    }
+                    return;
                 },
                 pattern(_, _) = [] {
                     panic("Can't add values of non-pointer, non-integer, non-floating point types");
                 }
             );
         } break;
-        case BinOp::SubAssignment:
-        case BinOp::Sub: {
+        case PureBinOp::Sub: {
             match(expr->lhs->type.data, expr->rhs->type.data)(
-                pattern(as<IntTy>(arg), as<IntTy>(_)) = [&](auto ty) {
-                    switch(ty.signedness) {
-                        case Signedness::Signed:
-                            instr.op = OpCode::WrappingSub;
-                            break;
-                        case Signedness::Unsigned:
-                            instr.op = OpCode::WrappingSub;
-                    }
+                pattern(as<IntTy>(_), as<IntTy>(_)) = [&] {
+                    doBinOp(OpCode::WrappingSub);
                 },
                 pattern(as<FloatTy>(_), as<FloatTy>(_)) = [&] {
-                    instr.op = OpCode::FSub;
+                    doBinOp(OpCode::FSub);
                 },
                 pattern(as<DoubleTy>(_), as<DoubleTy>(_)) = [&] {
-                    instr.op = OpCode::FSub;
+                    doBinOp(OpCode::FSub);
                 },
                 pattern(as<PointerTy>(arg), as<IntTy>(arg)) = [&](auto pointerTy, auto intTy) {
-                    instr.op = OpCode::WrappingSub;
-                    instr.operands.b = getPointerOffset(pointerTy, intTy);
+                    OpCode opcode = OpCode::WrappingSub;
+                    switch(ctx.kind) {
+                        case RCKind::DontCare: {
+                            visitExpr(expr->lhs, ResultContext::DontCare());
+                            visitExpr(expr->rhs, ResultContext::DontCare());
+                        } break;
+                        case RCKind::Return: {
+                            Operand lhs, rhs;
+                            visitExpr(expr->lhs, ResultContext::Read(&lhs));
+                            visitExpr(expr->rhs, ResultContext::Read(&rhs));
+
+                            MemoryLoc val = getPointerOffset(rhs, pointerTy, intTy);
+                            threeAddressCode(opcode, val, val, lhs, expr->type);
+                            returnValue(val, expr->type);
+                        } break;
+                        case RCKind::Copy: {
+                            Operand lhs, rhs;
+                            visitExpr(expr->lhs, ResultContext::Read(&lhs));
+                            visitExpr(expr->rhs, ResultContext::Read(&rhs));
+
+                            MemoryLoc val = getPointerOffset(rhs, pointerTy, intTy);
+                            threeAddressCode(opcode, ctx.copy, val, lhs, expr->type);
+                        } break;
+                        case RCKind::Read: {
+                            Operand lhs, rhs;
+                            visitExpr(expr->lhs, ResultContext::Read(&lhs));
+                            visitExpr(expr->rhs, ResultContext::Read(&rhs));
+
+                            MemoryLoc val = getPointerOffset(rhs, pointerTy, intTy);
+                            threeAddressCode(opcode, val, val, lhs, expr->type);
+                            *ctx.read = val;
+                        } break;
+                        case RCKind::Write: {
+                            panic("Can't write to constant expression");
+                        } break;
+                    }
                 },
-                // Pointer subtraction should be supported, but we need to divide by the alignment and I don't feel
-                // like writing that code right now.
-//              pattern(as<PointerTy>(arg), as<PointerTy>(arg)) = [&](auto p1, auto p2) {
-//                  instr.op = OpCode::WrappingSub;
-//              },
+                pattern(as<PointerTy>(arg), as<PointerTy>(_)) = [&](auto pointerTy) {
+                    switch(ctx.kind) {
+                        case RCKind::DontCare: {
+                            visitExpr(expr->lhs, ResultContext::DontCare());
+                            visitExpr(expr->rhs, ResultContext::DontCare());
+                        } break;
+                        case RCKind::Return: {
+                            Operand lhs, rhs;
+                            visitExpr(expr->lhs, ResultContext::Read(&lhs));
+                            visitExpr(expr->rhs, ResultContext::Read(&rhs));
+
+                            MemoryLoc val = variable(IntTy::I64());
+                            threeAddressCode(OpCode::WrappingSub, val, lhs, rhs, IntTy::I64());
+                            threeAddressCode(OpCode::Div, val, val, U64Constant(pointerTy.pointedTy->layout().stride()), IntTy::I64());
+                            returnValue(val, expr->type);
+                        } break;
+                        case RCKind::Copy: {
+                            Operand lhs, rhs;
+                            visitExpr(expr->lhs, ResultContext::Read(&lhs));
+                            visitExpr(expr->rhs, ResultContext::Read(&rhs));
+
+                            MemoryLoc val = variable(IntTy::I64());
+                            threeAddressCode(OpCode::WrappingSub, val, lhs, rhs, IntTy::I64());
+                            threeAddressCode(OpCode::Div, ctx.copy, val, U64Constant(pointerTy.pointedTy->layout().stride()), IntTy::I64());
+                        } break;
+                        case RCKind::Read: {
+                            Operand lhs, rhs;
+                            visitExpr(expr->lhs, ResultContext::Read(&lhs));
+                            visitExpr(expr->rhs, ResultContext::Read(&rhs));
+
+                            MemoryLoc val = variable(IntTy::I64());
+                            threeAddressCode(OpCode::WrappingSub, val, lhs, rhs, IntTy::I64());
+                            threeAddressCode(OpCode::Div, val, val, U64Constant(pointerTy.pointedTy->layout().stride()), IntTy::I64());
+                            *ctx.read = val;
+                        } break;
+                        case RCKind::Write: {
+                            panic("Can't write to constant expression");
+                        } break;
+                    }
+                },
                 pattern(_, _) = [] {
                     panic("Can't subtract values of non-pointer, non-integer, non-floating point types");
                 }
             );
         } break;
-        case BinOp::MultAssignment:
-        case BinOp::Mult: {
+        case PureBinOp::Mult: {
             match(expr->lhs->type.data, expr->rhs->type.data)(
-                pattern(as<IntTy>(arg), as<IntTy>(_)) = [&](auto ty) {
-                    instr.op = OpCode::Mult;
+                pattern(as<IntTy>(_), as<IntTy>(_)) = [&] {
+                    doBinOp(OpCode::Mult);
                 },
                 pattern(as<FloatTy>(_), as<FloatTy>(_)) = [&] {
-                    instr.op = OpCode::FMult;
+                    doBinOp(OpCode::FMult);
                 },
                 pattern(as<DoubleTy>(_), as<DoubleTy>(_)) = [&] {
-                    instr.op = OpCode::FMult;
-                },
-                pattern(_, _) = [] {
-                    panic("Can't multiply values of non-integer, non-floating point types");
-                }
-            );
-        } break;
-        case BinOp::DivAssignment:
-        case BinOp::Div: {
-            match(expr->lhs->type.data, expr->rhs->type.data)(
-                pattern(as<IntTy>(arg), as<IntTy>(_)) = [&](auto ty) {
-                    instr.op = OpCode::Div;
-                },
-                pattern(as<FloatTy>(_), as<FloatTy>(_)) = [&] {
-                    instr.op = OpCode::FDiv;
-                },
-                pattern(as<DoubleTy>(_), as<DoubleTy>(_)) = [&] {
-                    instr.op = OpCode::FDiv;
-                },
-                pattern(_, _) = [] {
-                    panic("Can't divide values of non-integer, non-floating point types");
-                }
-            );
-        } break;
-        case BinOp::ModAssignment:
-        case BinOp::Mod: {
-            match(expr->lhs->type.data, expr->rhs->type.data)(
-                pattern(as<IntTy>(arg), as<IntTy>(_)) = [&](auto ty) {
-                    instr.op = OpCode::Mod;
-                },
-                pattern(as<FloatTy>(_), as<FloatTy>(_)) = [&] {
-                    instr.op = OpCode::FMod;
-                },
-                pattern(as<DoubleTy>(_), as<DoubleTy>(_)) = [&] {
-                    instr.op = OpCode::FMod;
+                    doBinOp(OpCode::FMult);
                 },
                 pattern(_, _) = [] {
                     panic("Can't mod values of non-integer, non-floating point types");
                 }
             );
         } break;
-        case BinOp::LessThanOrEqual: {
+        case PureBinOp::Div: {
             match(expr->lhs->type.data, expr->rhs->type.data)(
-                pattern(as<IntTy>(arg), as<IntTy>(_)) = [&](auto ty) {
-                    instr.op = OpCode::LTE;
+                pattern(as<IntTy>(_), as<IntTy>(_)) = [&] {
+                    doBinOp(OpCode::Div);
                 },
                 pattern(as<FloatTy>(_), as<FloatTy>(_)) = [&] {
-                    instr.op = OpCode::FLTE;
+                    doBinOp(OpCode::FDiv);
                 },
                 pattern(as<DoubleTy>(_), as<DoubleTy>(_)) = [&] {
-                    instr.op = OpCode::FLTE;
+                    doBinOp(OpCode::FDiv);
+                },
+                pattern(_, _) = [] {
+                    panic("Can't divide values of non-integer, non-floating point types");
+                }
+            );
+        } break;
+        case PureBinOp::Mod: {
+            match(expr->lhs->type.data, expr->rhs->type.data)(
+                pattern(as<IntTy>(_), as<IntTy>(_)) = [&] {
+                    doBinOp(OpCode::Mod);
+                },
+                pattern(as<FloatTy>(_), as<FloatTy>(_)) = [&] {
+                    doBinOp(OpCode::FMod);
+                },
+                pattern(as<DoubleTy>(_), as<DoubleTy>(_)) = [&] {
+                    doBinOp(OpCode::FMod);
+                },
+                pattern(_, _) = [] {
+                    panic("Can't mod values of non-integer, non-floating point types");
+                }
+            );
+        } break;
+        case PureBinOp::BitwiseAnd: {
+            doBinOp(OpCode::BitwiseAnd);
+        } break;
+        case PureBinOp::BitwiseOr: {
+            doBinOp(OpCode::BitwiseOr);
+        } break;
+        case PureBinOp::Equal: {
+            // TODO: handle (at least) structure and floating point types in a specialized way.
+            doBinOp(OpCode::Equal);
+        } break;
+        case PureBinOp::NotEqual: {
+            // TODO: handle (at least) structure and floating point types in a specialized way.
+            doBinOp(OpCode::NotEqual);
+        } break;
+        case PureBinOp::LessThanOrEqual: {
+            match(expr->lhs->type.data, expr->rhs->type.data)(
+                pattern(as<IntTy>(arg), as<IntTy>(_)) = [&](auto ty) {
+                    doBinOp(OpCode::LTE);
+                },
+                pattern(as<FloatTy>(_), as<FloatTy>(_)) = [&] {
+                    doBinOp(OpCode::FLTE);
+                },
+                pattern(as<DoubleTy>(_), as<DoubleTy>(_)) = [&] {
+                    doBinOp(OpCode::FLTE);
                 },
                 pattern(_, _) = [] {
                     panic("Can't compare values of non-integer, non-floating point types");
                 }
             );
         } break;
-        case BinOp::LessThan: {
+        case PureBinOp::LessThan: {
             match(expr->lhs->type.data, expr->rhs->type.data)(
                 pattern(as<IntTy>(arg), as<IntTy>(_)) = [&](auto ty) {
-                    instr.op = OpCode::LT;
+                    doBinOp(OpCode::LT);
                 },
                 pattern(as<FloatTy>(_), as<FloatTy>(_)) = [&] {
-                    instr.op = OpCode::FLT;
+                    doBinOp(OpCode::FLT);
                 },
                 pattern(as<DoubleTy>(_), as<DoubleTy>(_)) = [&] {
-                    instr.op = OpCode::FLT;
+                    doBinOp(OpCode::FLT);
                 },
                 pattern(_, _) = [] {
                     panic("Can't compare values of non-integer, non-floating point types");
                 }
             );
         } break;
-        case BinOp::GreaterThanOrEqual: {
+        case PureBinOp::GreaterThanOrEqual: {
             match(expr->lhs->type.data, expr->rhs->type.data)(
                 pattern(as<IntTy>(arg), as<IntTy>(_)) = [&](auto ty) {
-                    instr.op = OpCode::GTE;
+                    doBinOp(OpCode::GTE);
                 },
                 pattern(as<FloatTy>(_), as<FloatTy>(_)) = [&] {
-                    instr.op = OpCode::FGTE;
+                    doBinOp(OpCode::FGTE);
                 },
                 pattern(as<DoubleTy>(_), as<DoubleTy>(_)) = [&] {
-                    instr.op = OpCode::FGTE;
+                    doBinOp(OpCode::FGTE);
                 },
                 pattern(_, _) = [] {
                     panic("Can't compare values of non-integer, non-floating point types");
                 }
             );
         } break;
-        case BinOp::GreaterThan: {
+        case PureBinOp::GreaterThan: {
             match(expr->lhs->type.data, expr->rhs->type.data)(
                 pattern(as<IntTy>(arg), as<IntTy>(_)) = [&](auto ty) {
-                    instr.op = OpCode::GT;
+                    doBinOp(OpCode::GT);
                 },
                 pattern(as<FloatTy>(_), as<FloatTy>(_)) = [&] {
-                    instr.op = OpCode::FGT;
+                    doBinOp(OpCode::FGT);
                 },
                 pattern(as<DoubleTy>(_), as<DoubleTy>(_)) = [&] {
-                    instr.op = OpCode::FGT;
+                    doBinOp(OpCode::FGT);
                 },
                 pattern(_, _) = [] {
                     panic("Can't compare values of non-integer, non-floating point types");
                 }
             );
         } break;
-        case BinOp::AndAssignment:
-        case BinOp::BitwiseAnd: {
-            match(expr->lhs->type.data, expr->rhs->type.data)(
-                pattern(as<IntTy>(arg), as<IntTy>(_)) = [&](auto ty) {
-                    instr.op = OpCode::BitwiseAnd;
-                },
-                pattern(_, _) = [] {
-                    panic("Can't bitwise and values of non-integer types");
-                }
-            );
+        case PureBinOp::Or: {
+            doBinOp(OpCode::LogicalOr);
         } break;
-        case BinOp::OrAssignment:
-        case BinOp::BitwiseOr: {
-            match(expr->lhs->type.data, expr->rhs->type.data)(
-                pattern(as<IntTy>(arg), as<IntTy>(_)) = [&](auto ty) {
-                    instr.op = OpCode::BitwiseOr;
-                },
-                pattern(_, _) = [] {
-                    panic("Can't bitwise or values of non-integer types");
-                }
-            );
+        case PureBinOp::And: {
+            doBinOp(OpCode::LogicalAnd);
         } break;
-        case BinOp::And: {
-            match(expr->lhs->type.data, expr->rhs->type.data)(
-                pattern(as<IntTy>(arg), as<IntTy>(_)) = [&](auto ty) {
-                    instr.op = OpCode::LogicalAnd;
-                },
-                pattern(_, _) = [] {
-                    panic("Can't logical and values of non-integer types");
-                }
-            );
-        } break;
-        case BinOp::Or: {
-            match(expr->lhs->type.data, expr->rhs->type.data)(
-                pattern(as<IntTy>(arg), as<IntTy>(_)) = [&](auto ty) {
-                    instr.op = OpCode::LogicalOr;
-                },
-                pattern(_, _) = [] {
-                    panic("Can't logical or values of non-integer types");
-                }
-            );
-        } break;
-        case BinOp::Equal: {
-            // TODO: Handle (at least) struct and floating point types in a special way
-            instr.op = OpCode::Equal;
-        } break;
-        case BinOp::NotEqual: {
-            // TODO: Handle (at least) struct and floating point types in a special way
-            instr.op = OpCode::NotEqual;
+        case PureBinOp::IdentityRHS: {
+            assert(ctx.kind == RCKind::Copy);
+            visitExpr(expr->rhs, ctx);
         } break;
     }
-    func.appendInstruction(instr);
-    return variableOperand(instr.dest);
 }
 ROperand LIRGenerator::visitCastExpr(CastExpr* expr) {
     return {};

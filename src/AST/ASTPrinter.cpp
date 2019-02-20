@@ -155,10 +155,10 @@ void ASTPrinter::visitBinOpExpr(BinOpExpr* expr, int indentationLevel, std::ostr
         case BinOp::ModAssignment:
             stream << "%=";
             break;
-        case BinOp::AndAssignment:
+        case BinOp::BitwiseAndAssignment:
             stream << "&=";
             break;
-        case BinOp::OrAssignment:
+        case BinOp::BitwiseOrAssignment:
             stream << "|=";
             break;
         case BinOp::Equal:

@@ -20,8 +20,6 @@ namespace lir {
         GetAddress,
         /// dest = *operand
         Load,
-        /// *a = b
-        Store,
         /// dest = operand
         Copy,
 

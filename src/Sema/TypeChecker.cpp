@@ -290,8 +290,8 @@ void TypeChecker::visitBinOpExpr(BinOpExpr* expr) {
         case BinOp::MultAssignment:
         case BinOp::DivAssignment:
         case BinOp::ModAssignment:
-        case BinOp::AndAssignment:
-        case BinOp::OrAssignment: {
+        case BinOp::BitwiseAndAssignment:
+        case BinOp::BitwiseOrAssignment: {
             if(!expr->lhs->isMutable()) {
                 reportDiag(ERR("cannot assign to expression").primaryRange(expr->lhs->totalRange(), "expression is immutable"));
             }

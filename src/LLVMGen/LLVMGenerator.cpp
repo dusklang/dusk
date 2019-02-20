@@ -314,8 +314,8 @@ CodeGenVal LLVMGenerator::visitBinOpExpr(BinOpExpr* expr) {
         case BinOp::MultAssignment:
         case BinOp::DivAssignment:
         case BinOp::ModAssignment:
-        case BinOp::AndAssignment:
-        case BinOp::OrAssignment:
+        case BinOp::BitwiseAndAssignment:
+        case BinOp::BitwiseOrAssignment:
             llvm::Value* lhsInd = toIndirect(lhs);
             llvm::Value* value;
             switch(expr->op) {
@@ -337,10 +337,10 @@ CodeGenVal LLVMGenerator::visitBinOpExpr(BinOpExpr* expr) {
                 case BinOp::ModAssignment:
                     value = createMod().val;
                     break;
-                case BinOp::AndAssignment:
+                case BinOp::BitwiseAndAssignment:
                     value = builder.CreateAnd(toDirect(lhs), toDirect(rhs));
                     break;
-                case BinOp::OrAssignment:
+                case BinOp::BitwiseOrAssignment:
                     value = builder.CreateOr(toDirect(lhs), toDirect(rhs));
                     break;
                 default: unreachable;

@@ -55,8 +55,8 @@ Array<Array<BinOp>> precedenceLevels {
         BinOp::MultAssignment,
         BinOp::DivAssignment,
         BinOp::ModAssignment,
-        BinOp::AndAssignment,
-        BinOp::OrAssignment
+        BinOp::BitwiseAndAssignment,
+        BinOp::BitwiseOrAssignment
     }
 };
 
@@ -83,8 +83,8 @@ std::optional<BinOp> parseBinaryOperator(tok token) {
         MATCH(mult_assignment, MultAssignment);
         MATCH(div_assignment, DivAssignment);
         MATCH(mod_assignment, ModAssignment);
-        MATCH(and_assignment, AndAssignment);
-        MATCH(or_assignment, OrAssignment);
+        MATCH(and_assignment, BitwiseAndAssignment);
+        MATCH(or_assignment, BitwiseOrAssignment);
         MATCH(equal, Equal);
         MATCH(not_equal, NotEqual);
         MATCH(less_than, LessThan);

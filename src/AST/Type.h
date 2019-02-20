@@ -69,6 +69,7 @@ public:
     Data data;
     SourceRange range;
 
+    Type() = default;
     Type(Data data, SourceRange range = SourceRange()) : data(data), range(range) {}
     Type(IntTy ty) : data(ty) {}
     Type(ErrorTy ty) : data(ty) {}

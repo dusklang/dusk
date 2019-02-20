@@ -83,28 +83,27 @@ class LIRGenerator final: public ASTVisitor<LIRGenerator,
     lir::Operand boolConstant(bool constant);
     lir::Operand globalStringConstant(char const* data, uint64_t size);
 
-    lir::MemoryLoc indirectMemoryLoc(Operand pointer);
-    lir::MemoryLoc variable(Type& type);
+    lir::MemoryLoc indirectMemoryLoc(lir::Operand pointer);
+    lir::MemoryLoc variable(Type type);
     lir::MemoryLoc global(lir::Value initialValue);
-    lir::MemoryLoc externGlobal(std::string name, Type& type);
+    lir::MemoryLoc externGlobal(std::string name, Type type);
 
-    lir::Func function(std::string name, Type& returnType, bool isExtern);
-    lir::Func beginFunction(std::string name, Type& returnType, bool isExtern);
+    lir::Func function(std::string name, Type returnType, bool isExtern);
+    lir::Func beginFunction(std::string name, Type returnType, bool isExtern);
     void endFunction();
 
-    void store(lir::Operand addr, lir::Operand value, Type& type);
-    void twoAddressCode(lir::OpCode op, lir::MemoryLoc dest, lir::Operand operand, Type& meaningfulType);
-    void threeAddressCode(lir::OpCode op, lir::MemoryLoc dest, lir::Operand operandA, lir::Operand operandB, Type& meaningfulType);
-    void zeroExtend(lir::MemoryLoc dest, Type& destType, lir::Operand operand, Type& operandType);
-    void signExtend(lir::MemoryLoc dest, Type& destType, lir::Operand operand, Type& operandType);
+    void twoAddressCode(lir::OpCode op, lir::MemoryLoc dest, lir::Operand operand, Type meaningfulType);
+    void threeAddressCode(lir::OpCode op, lir::MemoryLoc dest, lir::Operand operandA, lir::Operand operandB, Type meaningfulType);
+    void zeroExtend(lir::MemoryLoc dest, Type destType, lir::Operand operand, Type operandType);
+    void signExtend(lir::MemoryLoc dest, Type destType, lir::Operand operand, Type operandType);
     void branch(lir::BB branch);
     void condBranch(lir::Operand condition, lir::BB trueBranch, lir::BB falseBranch);
     void call(lir::Func function, Array<lir::Argument> arguments);
-    void returnValue(lir::Operand operand, Type& type);
+    void returnValue(lir::Operand operand, Type type);
     void returnVoid();
     void unreachableInstr();
 
-    void placeConstant(lir::Operand val, Type& type, ResultContext ctx);
+    void placeConstant(lir::Operand val, Type type, ResultContext ctx);
 public:
     void visit(Array<ASTNode*> const& nodes);
     DeclVal visitDecl(Decl* decl);
