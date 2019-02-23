@@ -1,5 +1,3 @@
-//  Copyright © 2019 Zach Wolfe. All rights reserved.
-
 #include <iostream>
 #include "ASTPrinter.h"
 #include "mpark/patterns.hpp"

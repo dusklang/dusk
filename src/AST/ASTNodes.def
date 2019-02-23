@@ -1,5 +1,3 @@
-//  Copyright © 2019 Zach Wolfe. All rights reserved.
-
 #ifndef AST_NODE
 #define AST_NODE(name)
 #endif

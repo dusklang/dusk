@@ -1,5 +1,3 @@
-//  Copyright © 2019 Zach Wolfe. All rights reserved.
-
 #include "Expr.h"
 #include "Decl.h"
 

@@ -1,5 +1,3 @@
-//  Copyright © 2019 Zach Wolfe. All rights reserved.
-
 #include "Diagnostics.h"
 
 void Diagnostic::print(std::ostream& stream)  {
