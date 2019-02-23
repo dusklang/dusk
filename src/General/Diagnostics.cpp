@@ -82,7 +82,7 @@ void Diagnostic::print(std::ostream& stream)  {
         }
         if(range.message) {
             // FIXME: Wrap the range message on to multiple lines if necessary.
-            stream << ' ' << *range.message;
+            stream << ' ' << range.message;
         }
         stream << '\n';
         if(nextLines && nextLines->first()->line <= lines.last()->line + 2) {

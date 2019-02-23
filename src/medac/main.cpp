@@ -40,7 +40,16 @@ extern "C" {
 }
 )~";
 std::string sourceCode = R"~(
+extern def putchar(_: i32): void
 
+def main {
+    var number = 5
+    def condition = number == number - 1
+    putchar(number)
+    number += number
+    putchar(number)
+}
+/*
 def main {
     printPerson(henry)
     printPerson(sally)
@@ -224,6 +233,7 @@ extern def free(_: *void): void
 def printChar(character: i8) {
     putchar(character as i32)
 }
+ */
 )~";
 
 int main() {

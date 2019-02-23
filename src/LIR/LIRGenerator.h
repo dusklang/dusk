@@ -91,6 +91,9 @@ class LIRGenerator final: public ASTVisitor<LIRGenerator,
     lir::Func function(std::string name, Type returnType, bool isExtern);
     lir::Func beginFunction(std::string name, Type returnType, bool isExtern);
     void endFunction();
+    lir::Argument argument(lir::Operand operand, Type type);
+
+    lir::MemoryLoc offsetLocation(lir::MemoryLoc base, uint64_t offset);
 
     void twoAddressCode(lir::OpCode op, lir::MemoryLoc dest, lir::Operand operand, Type meaningfulType);
     void threeAddressCode(lir::OpCode op, lir::MemoryLoc dest, lir::Operand operandA, lir::Operand operandB, Type meaningfulType);
@@ -98,6 +101,7 @@ class LIRGenerator final: public ASTVisitor<LIRGenerator,
     void signExtend(lir::MemoryLoc dest, Type destType, lir::Operand operand, Type operandType);
     void branch(lir::BB branch);
     void condBranch(lir::Operand condition, lir::BB trueBranch, lir::BB falseBranch);
+    void call(lir::Func function, Array<lir::Argument> arguments, lir::MemoryLoc dest);
     void call(lir::Func function, Array<lir::Argument> arguments);
     void returnValue(lir::Operand operand, Type type);
     void returnVoid();
@@ -107,7 +111,7 @@ class LIRGenerator final: public ASTVisitor<LIRGenerator,
 public:
     void visit(Array<ASTNode*> const& nodes);
     DeclVal visitDecl(Decl* decl);
-    void visitScope(Scope* scope, ResultContext ctx);
+    void visitScope(Scope* scope, ResultContext ctx = ResultContext::DontCare());
     void visitStructDecl(StructDecl* decl) {}
     void visitIntegerLiteralExpr(IntegerLiteralExpr* expr, ResultContext ctx);
     void visitDecimalLiteralExpr(DecimalLiteralExpr* expr, ResultContext ctx);

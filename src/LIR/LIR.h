@@ -111,21 +111,21 @@ namespace lir {
             ExternGlobalVariable,
             /// Offset from the beginning of the global constants.
             GlobalConstant,
-            /// A pointer.
+            /// Offset from a pointer.
             Indirect,
         } base;
-        union {
-            /// The offset in bytes* from base.
-            ///     *unless base is ExternGlobalVariable, in which case offset is an index into the
-            ///     extern global variable array.
-            uint64_t offset;
 
-            /// The pointer. This must be dynamically allocated because Operand contains a MemoryLoc.
-            ///
-            /// TODO: We probably only ever have one layer of indirection, so we should be able to
-            /// break the recursion without dynamic allocation.
-            Operand* pointer;
-        };
+        /// The offset in bytes* from base.
+        ///     *unless base is ExternGlobalVariable, in which case offset is an index into the
+        ///     extern global variable array.
+        uint64_t offset;
+
+        /// The pointer, valid iff base == Indirect. This must be dynamically allocated right now
+        /// because Operand contains a MemoryLoc.
+        ///
+        /// TODO: We probably only ever have one layer of indirection, so we should be able to
+        /// break the recursion without dynamic allocation.
+        Operand* pointer;
     };
 
     /// A small constant value that can be passed directly to instructions.
@@ -168,6 +168,13 @@ namespace lir {
         uint64_t size;
     };
 
+    enum class FuncRetKind {
+        /// Return value gets written into dest.
+        Value,
+        /// No return value (or no return). dest is invalid.
+        NoValue,
+    };
+
     struct Instruction {
         union {
             MemoryLoc dest;
@@ -183,6 +190,7 @@ namespace lir {
                 };
                 /// Used only for ZeroExtend and SignExtend instructions.
                 uint64_t destSize;
+
                 uint64_t size;
             };
             lir::BB branch;
@@ -192,6 +200,7 @@ namespace lir {
             struct {
                 Func function;
                 Array<Argument> arguments;
+                FuncRetKind retKind;
             };
         };
         OpCode op;

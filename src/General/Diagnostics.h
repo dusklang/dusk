@@ -10,10 +10,10 @@
 
 struct ErrorRange {
     SourceRange range;
-    std::optional<std::string> message;
+    const char* message;
     bool isPrimary;
 
-    ErrorRange(SourceRange range, bool isPrimary, std::optional<std::string> message = std::nullopt)
+    ErrorRange(SourceRange range, bool isPrimary, const char* message = nullptr)
         : range(range), message(message), isPrimary(isPrimary) {};
 };
 
@@ -29,11 +29,11 @@ public:
     std::string const message;
 
     Diagnostic(Kind kind, SourceFile const& file, std::string message) : kind(kind), file(file), message(message) {}
-    Diagnostic range(SourceRange range, std::optional<std::string> message = std::nullopt) {
+    Diagnostic range(SourceRange range, const char* message = nullptr) {
         ranges.append(ErrorRange(range, false, message));
         return *this;
     }
-    Diagnostic primaryRange(SourceRange range, std::optional<std::string> message = std::nullopt) {
+    Diagnostic primaryRange(SourceRange range, const char* message = nullptr) {
         ranges.append(ErrorRange(range, true, message));
         return *this;
     }

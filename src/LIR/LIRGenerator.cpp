@@ -56,7 +56,7 @@ Operand LIRGenerator::boolConstant(bool constant) {
     return val;
 }
 Operand LIRGenerator::globalStringConstant(char const* data, uint64_t size) {
-    MemoryLoc loc { MemoryLoc::GlobalConstant, { program.constants.count() } };
+    MemoryLoc loc { MemoryLoc::GlobalConstant, program.constants.count() };
     // TODO: Add a method to Array for quickly appending from a buffer.
     program.constants.reserve(program.constants.count() + size + 1);
     for(uint64_t i: Range<uint64_t> {0, size}) {
@@ -66,20 +66,18 @@ Operand LIRGenerator::globalStringConstant(char const* data, uint64_t size) {
     return loc;
 }
 MemoryLoc LIRGenerator::indirectMemoryLoc(Operand pointer) {
-    MemoryLoc loc { MemoryLoc::Indirect };
-    loc.pointer = new Operand(pointer);
-    return loc;
+    return { MemoryLoc::Indirect, 0, new Operand(pointer) };
 }
 
 MemoryLoc LIRGenerator::variable(Type type) {
     auto& func = currentFunction();
     // TODO: alignment!
-    MemoryLoc loc { MemoryLoc::StackFrame, { func.frameSize } };
+    MemoryLoc loc { MemoryLoc::StackFrame, func.frameSize };
     func.frameSize += type.layout().size;
     return loc;
 }
 MemoryLoc LIRGenerator::global(Value initialValue) {
-    MemoryLoc loc { MemoryLoc::GlobalVariable, { program.globals.count() } };
+    MemoryLoc loc { MemoryLoc::GlobalVariable, program.globals.count() };
     // TODO: Add a method to Array for quickly appending from a buffer.
     program.globals.reserve(program.globals.count() + initialValue.size);
     uint8_t* buf;
@@ -94,9 +92,13 @@ MemoryLoc LIRGenerator::global(Value initialValue) {
     return loc;
 }
 MemoryLoc LIRGenerator::externGlobal(std::string name, Type type) {
-    MemoryLoc loc { MemoryLoc::ExternGlobalVariable, { program.externGlobals.count() } };
+    MemoryLoc loc { MemoryLoc::ExternGlobalVariable, program.externGlobals.count() };
     program.externGlobals.append({name, type.layout().size});
     return loc;
+}
+MemoryLoc LIRGenerator::offsetLocation(MemoryLoc base, uint64_t offset) {
+    base.offset += offset;
+    return base;
 }
 
 Func LIRGenerator::function(std::string name, Type returnType, bool isExtern) {
@@ -118,6 +120,10 @@ Func LIRGenerator::beginFunction(std::string name, Type returnType, bool isExter
 
 void LIRGenerator::endFunction() {
     insertionState.removeLast();
+}
+
+Argument LIRGenerator::argument(Operand operand, Type type) {
+    return { operand, type.layout().size };
 }
 
 void LIRGenerator::twoAddressCode(OpCode op, MemoryLoc dest, Operand operand, Type meaningfulType) {
@@ -168,11 +174,21 @@ void LIRGenerator::condBranch(Operand condition, lir::BB trueBranch, lir::BB fal
     instr.falseBranch = falseBranch;
     currentBasicBlock().instructions.append(instr);
 }
+void LIRGenerator::call(Func function, Array<Argument> arguments, MemoryLoc dest) {
+    Instruction instr {};
+    instr.dest = dest;
+    instr.op = OpCode::Call;
+    instr.function = function;
+    instr.arguments = arguments;
+    instr.retKind = FuncRetKind::Value;
+    currentBasicBlock().instructions.append(instr);
+}
 void LIRGenerator::call(Func function, Array<Argument> arguments) {
     Instruction instr {};
     instr.op = OpCode::Call;
     instr.function = function;
     instr.arguments = arguments;
+    instr.retKind = FuncRetKind::NoValue;
     currentBasicBlock().instructions.append(instr);
 }
 void LIRGenerator::returnValue(Operand operand, Type type) {
@@ -239,7 +255,6 @@ DeclVal LIRGenerator::visitDecl(Decl* decl) {
         } else {
             var = variable(decl->type);
             visitExpr(expr, ResultContext::Copy(var));
-            return var;
         }
         retVal = var;
     } else {
@@ -936,248 +951,300 @@ void LIRGenerator::visitBinOpExpr(BinOpExpr* expr, ResultContext _ctx) {
         } break;
     }
 }
-ROperand LIRGenerator::visitCastExpr(CastExpr* expr) {
-    return {};
-}
-ROperand LIRGenerator::visitDeclRefExpr(DeclRefExpr* expr) {
-    auto val = visitDecl(expr->decl);
-    Function& curFunc = program.functions[*functionStack.last()];
-    Instruction instr {};
-    instr.dest = mutableVariableOperand(
-        curFunc.appendVariable({expr->type.layout().size})
-    );
+void LIRGenerator::visitCastExpr(CastExpr* expr, ResultContext ctx) {
 
+}
+void LIRGenerator::visitDeclRefExpr(DeclRefExpr* expr, ResultContext ctx) {
+    auto val = visitDecl(expr->decl);
     match(val)(
-        pattern(as<Var>(arg)) = [&](auto var) {
-            instr.op = OpCode::Copy;
-            instr.operand = variableOperand(var);
+        pattern(as<MemoryLoc>(arg)) = [&](auto loc) {
+            switch(ctx.kind) {
+                case RCKind::DontCare: break;
+                case RCKind::Return: {
+                    returnValue(loc, expr->type);
+                } break;
+                case RCKind::Copy: {
+                    twoAddressCode(OpCode::Copy, ctx.copy, loc, expr->type);
+                } break;
+                case RCKind::Read: {
+                    *ctx.read = loc;
+                } break;
+                case RCKind::Write: {
+                    assert(expr->isMutable());
+                    *ctx.write = loc;
+                } break;
+            }
         },
         pattern(as<Func>(arg)) = [&](auto func) {
-            instr.op = OpCode::Call;
-            instr.function = func;
-            Array<ROperand> arguments {};
+            Array<Argument> arguments;
             arguments.reserve(expr->arguments.count());
-            for(auto arg: expr->arguments) {
-                auto argument = visitExpr(arg);
-                arguments.append(argument);
+            for(auto argExpr: expr->arguments) {
+                Operand arg;
+                visitExpr(argExpr, ResultContext::Read(&arg));
+                arguments.append(argument(arg, argExpr->type));
             }
-            
-            instr.arguments = arguments;
+            switch(ctx.kind) {
+                case RCKind::DontCare: {
+                    if(expr->type == VoidTy() || expr->type == NeverTy()) {
+                        call(func, arguments);
+                    } else {
+                        MemoryLoc res = variable(expr->type);
+                        call(func, arguments, res);
+                    }
+                } break;
+                case RCKind::Return: {
+                    assert(expr->type != VoidTy() && expr->type != NeverTy());
+                    MemoryLoc res = variable(expr->type);
+                    call(func, arguments, res);
+                    returnValue(res, expr->type);
+                } break;
+                case RCKind::Copy: {
+                    assert(expr->type != VoidTy() && expr->type != NeverTy());
+                    call(func, arguments, ctx.copy);
+                } break;
+                case RCKind::Read: {
+                    assert(expr->type != VoidTy() && expr->type != NeverTy());
+                    MemoryLoc res = variable(expr->type);
+                    call(func, arguments, res);
+                    *ctx.read = res;
+                } break;
+                case RCKind::Write: {
+                    panic("Mutable computed declarations not yet supported!");
+                } break;
+            }
         }
     );
+}
+void LIRGenerator::visitMemberRefExpr(MemberRefExpr* expr, ResultContext ctx) {
+    uint64_t offset = expr->type.layout().fieldOffsets[expr->declIndex];
+    switch(ctx.kind) {
+        case RCKind::DontCare: {
+            visitExpr(expr->root, ResultContext::DontCare());
+        } break;
+        case RCKind::Return: {
+            MemoryLoc res = variable(expr->root->type);
+            visitExpr(expr->root, ResultContext::Copy(res));
+            returnValue(offsetLocation(res, offset), expr->type);
+        } break;
+        case RCKind::Copy: {
+            MemoryLoc res = variable(expr->root->type);
+            visitExpr(expr->root, ResultContext::Copy(res));
+            twoAddressCode(OpCode::Copy, ctx.copy, offsetLocation(res, offset), expr->type);
+        } break;
+        case RCKind::Read: {
+            MemoryLoc res = variable(expr->root->type);
+            visitExpr(expr->root, ResultContext::Copy(res));
+            *ctx.read = offsetLocation(res, offset);
+        } break;
+        case RCKind::Write: {
+            MemoryLoc res;
+            visitExpr(expr->root, ResultContext::Write(&res));
+            *ctx.write = offsetLocation(res, offset);
+        } break;
+    }
+}
+void LIRGenerator::visitReturnExpr(ReturnExpr* expr, ResultContext ctx) {
 
-    curFunc.appendInstruction(instr);
+}
+void LIRGenerator::visitIfExpr(IfExpr* expr, ResultContext ctx) {
 
-    ROperand retVal {};
-    retVal.kind = ROperand::Variable;
-    retVal.variable = instr.dest.variable;
-    retVal.offset = instr.dest.offset;
-    retVal.size = instr.dest.size;
+}
+void LIRGenerator::visitWhileExpr(WhileExpr* expr, ResultContext ctx) {
 
-    return retVal;
-}
-RWOperand LIRGenerator::visitDeclRefExprAsLValue(DeclRefExpr* expr) {
-    auto val = visitDecl(expr->decl);
-
-    return mutableVariableOperand(std::get<Var>(val));
-}
-ROperand LIRGenerator::visitMemberRefExpr(MemberRefExpr* expr) {
-    Expr* root = expr->root;
-    ROperand member = visitExpr(root);
-    member.size = expr->type.layout().size;
-    member.offset += root->type.layout().fieldOffsets[expr->declIndex];
-    return member;
-}
-RWOperand LIRGenerator::visitMemberRefExprAsLValue(MemberRefExpr* expr) {
-    Expr* root = expr->root;
-    RWOperand member = visitExprAsLValue(root);
-    member.size = expr->type.layout().size;
-    member.offset += root->type.layout().fieldOffsets[expr->declIndex];
-    return member;
-}
-
-ROperand LIRGenerator::visitReturnExpr(ReturnExpr* expr) {
-    return {};
-}
-ROperand LIRGenerator::visitIfExpr(IfExpr* expr) {
-    return {};
-}
-ROperand LIRGenerator::visitWhileExpr(WhileExpr* expr) {
-    return {};
 }
 
+static void printOperand(Operand operand);
+static void printLoc(MemoryLoc loc) {
+    switch(loc.base) {
+        case lir::MemoryLoc::StackFrame: {
+            std::cout << "SF+";
+        } break;
+        case lir::MemoryLoc::GlobalVariable: {
+            std::cout << "GV+";
+        } break;
+        case lir::MemoryLoc::ExternGlobalVariable: {
+            std::cout << "EV#";
+        } break;
+        case lir::MemoryLoc::GlobalConstant: {
+            std::cout << "GC+";
+        } break;
+        case lir::MemoryLoc::Indirect: {
+            std::cout << "*(";
+            printOperand(*loc.pointer);
+            std::cout << ")+";
+        } break;
+    }
+    std::cout << loc.offset;
+}
+static void printOperand(Operand operand) {
+    switch(operand.kind) {
+        case Operand::Location: {
+            printLoc(operand.location);
+        } break;
+        case Operand::Constant: {
+            std::cout << "Constant(size: " << operand.constant.size << ")";
+        } break;
+    }
+}
 void LIRGenerator::printIR() const {
     for(size_t j: program.functions.indices()) {
         Function const& function = program.functions[j];
         std::cout << function.name << ":\n";
-        for(size_t i: function.instructions.indices()) {
-            Instruction const& instruction = function.instructions[i];
-            auto printVariable = [&](Var variable) {
-                std::cout << (variable.isGlobal ? "G" : "L");
-                std::cout << "V" << variable.index;
-            };
-            auto printRange = [&](auto& operand) {
-                std::cout << "[" << operand.offset << "..<" << (operand.offset + operand.size) << "]";
-            };
-            auto printDest = [&] {
-                printVariable(instruction.dest.variable);
-                printRange(instruction.dest);
-            };
-            auto printROperand = [&](ROperand operand) {
-                switch(operand.kind) {
-                    case ROperand::LocalConstant:
-                        std::cout << "LC";
+        for(size_t i: function.basicBlocks.indices()) {
+            BasicBlock const& bb = function.basicBlocks[i];
+            std::cout << "BB" << i << ":\n";
+            for(size_t j: bb.instructions.indices()) {
+                Instruction const& instruction = bb.instructions[j];
+
+                auto printInstructionBeginning = [&](auto name) {
+                    printf("%04zu: ", j);
+                    std::cout << name << " ";
+                };
+                auto printTwoAddressCode = [&](auto name) {
+                    printInstructionBeginning(name);
+                    printLoc(instruction.dest);
+                    std::cout << ", ";
+                    printOperand(instruction.operand);
+                };
+                auto printThreeAddressCode = [&](auto name) {
+                    printInstructionBeginning(name);
+                    printLoc(instruction.dest);
+                    std::cout << ", ";
+                    printOperand(instruction.operands.a);
+                    std::cout << ", ";
+                    printOperand(instruction.operands.b);
+                };
+                std::cout << "    ";
+                switch(instruction.op) {
+                    case OpCode::GetAddress:
+                        printTwoAddressCode("GetAddress");
                         break;
-                    case ROperand::GlobalConstantAddress:
-                        std::cout << "GC" << operand.globalConstant;
+                    case OpCode::Load:
+                        printTwoAddressCode("Load");
                         break;
-                    case ROperand::Variable:
-                        printVariable(operand.variable);
+                    case OpCode::Copy:
+                        printTwoAddressCode("Copy");
+                        break;
+                    case OpCode::Negative:
+                        printTwoAddressCode("Negative");
+                        break;
+                    case OpCode::WrappingAdd:
+                        printThreeAddressCode("WrappingAdd");
+                        break;
+                    case OpCode::WrappingSub:
+                        printThreeAddressCode("WrappingSub");
+                        break;
+                    case OpCode::Mult:
+                        printThreeAddressCode("Mult");
+                        break;
+                    case OpCode::Div:
+                        printThreeAddressCode("Div");
+                        break;
+                    case OpCode::Mod:
+                        printThreeAddressCode("Mod");
+                        break;
+                    case OpCode::SignExtend:
+                        printTwoAddressCode("SignExtend");
+                        break;
+                    case OpCode::ZeroExtend:
+                        printTwoAddressCode("ZeroExtend");
+                        break;
+                    case OpCode::LTE:
+                        printThreeAddressCode("LTE");
+                        break;
+                    case OpCode::LT:
+                        printThreeAddressCode("LT");
+                        break;
+                    case OpCode::GTE:
+                        printThreeAddressCode("GTE");
+                        break;
+                    case OpCode::GT:
+                        printThreeAddressCode("GT");
+                        break;
+                    case OpCode::FLTE:
+                        printThreeAddressCode("FLTE");
+                        break;
+                    case OpCode::FLT:
+                        printThreeAddressCode("FLT");
+                        break;
+                    case OpCode::FGTE:
+                        printThreeAddressCode("FGTE");
+                        break;
+                    case OpCode::FGT:
+                        printThreeAddressCode("FGT");
+                        break;
+                    case OpCode::Equal:
+                        printThreeAddressCode("Equal");
+                        break;
+                    case OpCode::NotEqual:
+                        printThreeAddressCode("NotEqual");
+                        break;
+                    case OpCode::FAdd:
+                        printThreeAddressCode("FAdd");
+                        break;
+                    case OpCode::FSub:
+                        printThreeAddressCode("FSub");
+                        break;
+                    case OpCode::FMult:
+                        printThreeAddressCode("FMult");
+                        break;
+                    case OpCode::FDiv:
+                        printThreeAddressCode("FDiv");
+                        break;
+                    case OpCode::FMod:
+                        printThreeAddressCode("FMod");
+                        break;
+                    case OpCode::LogicalNot:
+                        printTwoAddressCode("LogicalNot");
+                        break;
+                    case OpCode::LogicalAnd:
+                        printThreeAddressCode("LogicalAnd");
+                        break;
+                    case OpCode::LogicalOr:
+                        printThreeAddressCode("LogicalOr");
+                        break;
+                    case OpCode::BitwiseAnd:
+                        printThreeAddressCode("BitwiseAnd");
+                        break;
+                    case OpCode::BitwiseOr:
+                        printThreeAddressCode("BitwiseOr");
+                        break;
+                    case OpCode::Branch:
+                        printInstructionBeginning("Branch");
+                        std::cout << instruction.branch;
+                        break;
+                    case OpCode::CondBranch:
+                        printInstructionBeginning("CondBranch");
+                        printOperand(instruction.condition);
+                        std::cout << ", " << instruction.branch;
+                        break;
+                    case OpCode::Call: {
+                        printInstructionBeginning("Call");
+                        std::cout << instruction.function << "(";
+                        bool first = true;
+                        for(auto& argument: instruction.arguments) {
+                            if(first) {
+                                first = false;
+                            } else {
+                                std::cout << ", ";
+                            }
+                            printOperand(argument.operand);
+                        }
+                        std::cout << ")";
+                    } break;
+                    case lir::OpCode::Return:
+                        printInstructionBeginning("Return");
+                        printOperand(instruction.operand);
+                        break;
+                    case lir::OpCode::ReturnVoid:
+                        printInstructionBeginning("Return");
+                        break;
+                    case lir::OpCode::Unreachable:
+                        printInstructionBeginning("Unreachable");
                         break;
                 }
-                printRange(operand);
-            };
-            auto printInstructionBeginning = [&](auto name) {
-                printf("%04zu: ", i);
-                std::cout << name << " ";
-            };
-            auto printTwoAddressCode = [&](auto name) {
-                printInstructionBeginning(name);
-                printDest();
-                std::cout << ", ";
-                printROperand(instruction.operand);
-            };
-            auto printThreeAddressCode = [&](auto name) {
-                printInstructionBeginning(name);
-                printDest();
-                std::cout << ", ";
-                printROperand(instruction.operands.a);
-                std::cout << ", ";
-                printROperand(instruction.operands.b);
-            };
-            std::cout << "    ";
-            switch(instruction.op) {
-                case OpCode::GetAddress:
-                    printTwoAddressCode("GetAddress");
-                    break;
-                case OpCode::Load:
-                    printTwoAddressCode("Load");
-                    break;
-                case OpCode::Store:
-                    printTwoAddressCode("Store");
-                    break;
-                case OpCode::Copy:
-                    printTwoAddressCode("Copy");
-                    break;
-                case OpCode::Negative:
-                    printTwoAddressCode("Negative");
-                    break;
-                case OpCode::WrappingAdd:
-                    printThreeAddressCode("WrappingAdd");
-                    break;
-                case OpCode::WrappingSub:
-                    printThreeAddressCode("WrappingSub");
-                    break;
-                case OpCode::Mult:
-                    printThreeAddressCode("Mult");
-                    break;
-                case OpCode::Div:
-                    printThreeAddressCode("Div");
-                    break;
-                case OpCode::Mod:
-                    printThreeAddressCode("Mod");
-                    break;
-                case OpCode::SignExtend:
-                    printTwoAddressCode("SignExtend");
-                    break;
-                case OpCode::ZeroExtend:
-                    printTwoAddressCode("ZeroExtend");
-                    break;
-                case OpCode::LTE:
-                    printThreeAddressCode("LTE");
-                    break;
-                case OpCode::LT:
-                    printThreeAddressCode("LT");
-                    break;
-                case OpCode::GTE:
-                    printThreeAddressCode("GTE");
-                    break;
-                case OpCode::GT:
-                    printThreeAddressCode("GT");
-                    break;
-                case OpCode::FLTE:
-                    printThreeAddressCode("FLTE");
-                    break;
-                case OpCode::FLT:
-                    printThreeAddressCode("FLT");
-                    break;
-                case OpCode::FGTE:
-                    printThreeAddressCode("FGTE");
-                    break;
-                case OpCode::FGT:
-                    printThreeAddressCode("FGT");
-                    break;
-                case OpCode::Equal:
-                    printThreeAddressCode("Equal");
-                    break;
-                case OpCode::NotEqual:
-                    printThreeAddressCode("NotEqual");
-                    break;
-                case OpCode::FAdd:
-                    printThreeAddressCode("FAdd");
-                    break;
-                case OpCode::FSub:
-                    printThreeAddressCode("FSub");
-                    break;
-                case OpCode::FMult:
-                    printThreeAddressCode("FMult");
-                    break;
-                case OpCode::FDiv:
-                    printThreeAddressCode("FDiv");
-                    break;
-                case OpCode::FMod:
-                    printThreeAddressCode("FMod");
-                    break;
-                case OpCode::LogicalNot:
-                    printTwoAddressCode("LogicalNot");
-                    break;
-                case OpCode::LogicalAnd:
-                    printThreeAddressCode("LogicalAnd");
-                    break;
-                case OpCode::LogicalOr:
-                    printThreeAddressCode("LogicalOr");
-                    break;
-                case OpCode::BitwiseAnd:
-                    printThreeAddressCode("BitwiseAnd");
-                    break;
-                case OpCode::BitwiseOr:
-                    printThreeAddressCode("BitwiseOr");
-                    break;
-                case OpCode::Branch:
-                    printInstructionBeginning("Branch");
-                    std::cout << instruction.branch;
-                    break;
-                case OpCode::CondBranch:
-                    printInstructionBeginning("CondBranch");
-                    printVariable(instruction.condition);
-                    std::cout << ", " << instruction.branch;
-                    break;
-                case OpCode::Call:
-                    printInstructionBeginning("Call");
-                    std::cout << instruction.function << "(";
-                    bool first = true;
-                    for(auto& argument: instruction.arguments) {
-                        if(first) {
-                            first = false;
-                        } else {
-                            std::cout << ", ";
-                        }
-                        printROperand(argument);
-                    }
-                    std::cout << ")";
-                    break;
+                std::cout << "\n";
             }
-            std::cout << "\n";
         }
     }
 }

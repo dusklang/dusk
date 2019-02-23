@@ -124,10 +124,10 @@ void TypeChecker::visitDecl(Decl* decl) {
                 if(terminalExpr && !terminalExpr->type.isConvertibleTo(returnType)) {
                     reportDiag(ERR("cannot accept terminal expression of type `" + terminalExpr->type.name() + "` in computed declaration of type `" + returnType.name() + "`")
                                .primaryRange(terminalExpr->totalRange())
-                               .range(returnType.range, "declared as `" + returnType.name() + "` here"));
+                               .range(returnType.range, ("declared as `" + returnType.name() + "` here").c_str()));
                 } else if(!terminalExpr) {
                     reportDiag(ERR("non-void computed declaration `" + decl->name.getText() + "` must return a value")
-                               .primaryRange(returnType.range, "`" + decl->name.getText() + "` type declared here"));
+                               .primaryRange(returnType.range, ("`" + decl->name.getText() + "` type declared here").c_str()));
                 }
             } else {
                 if(terminalExpr && terminalExpr->type != NeverTy()) {
@@ -345,7 +345,7 @@ void TypeChecker::visitMemberRefExpr(MemberRefExpr* expr) {
     if_let(pattern(as<PointerTy>(_)) = expr->root->type.data) = [&] {
         reportDiag(ERR("cannot yet reference a member of a pointer type")
                        .primaryRange(expr->dotRange + expr->name.range)
-                       .range(expr->root->totalRange(), "expression is of type `" + expr->root->type.name() + "`")
+                       .range(expr->root->totalRange(), ("expression is of type `" + expr->root->type.name() + "`").c_str())
                 );
     };
     match(expr->root->type.data)(
@@ -401,7 +401,7 @@ void TypeChecker::visitIfExpr(IfExpr* expr) {
     visitExpr(expr->condition);
     if(expr->condition->type != BoolTy()) {
         reportDiag(ERR("conditions in if expressions must be of type `bool`")
-                   .primaryRange(expr->condition->totalRange(), "expression is of type `" + expr->condition->type.name() + "`"));
+                   .primaryRange(expr->condition->totalRange(), ("expression is of type `" + expr->condition->type.name() + "`").c_str()));
     }
     visitScope(expr->thenScope);
     Type thenTy = expr->thenScope->terminalType();
@@ -424,7 +424,7 @@ void TypeChecker::visitWhileExpr(WhileExpr* expr) {
     visitExpr(expr->condition);
     if(expr->condition->type != BoolTy()) {
         reportDiag(ERR("conditions in while expressions must be of type `bool`")
-                   .primaryRange(expr->condition->totalRange(), "expression is of type `" + expr->condition->type.name() + "`"));
+                   .primaryRange(expr->condition->totalRange(), ("expression is of type `" + expr->condition->type.name() + "`").c_str()));
     }
     visitScope(expr->thenScope);
 }
@@ -435,7 +435,7 @@ void TypeChecker::visitDoExpr(DoExpr* expr) {
             if(innerExpr->type == VoidTy() || innerExpr->type == NeverTy()) {
                 reportDiag(WARN("use of do expression on a non-value expression doesn't do anything")
                            .primaryRange(expr->doRange)
-                           .range(innerExpr->totalRange(), "expression is of type `" + innerExpr->type.name() + "`"));
+                           .range(innerExpr->totalRange(), ("expression is of type `" + innerExpr->type.name() + "`").c_str()));
             }
             return VoidTy();
         },
