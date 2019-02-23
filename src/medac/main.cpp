@@ -43,10 +43,14 @@ std::string sourceCode = R"~(
 extern def putchar(_: i32): void
 
 def main {
-    var number = 5
-    def condition = number == number - 1
-    putchar(number)
-    number += number
+    def number = if true {
+        var number = 75
+        number += 2
+        number *= number
+        number
+    } else {
+        return
+    }
     putchar(number)
 }
 /*
@@ -242,16 +246,14 @@ int main() {
     SourceFile file("main.meda", sourceCode);
     Parser parser(&file);
     TypeChecker tyChecker(file);
-    LIRGenerator lirGen;
     ASTPrinter printer;
 
     auto nodes = parser.parseTopLevel();
     tyChecker.visitTopLevel(nodes);
     //printer.visit(nodes, 0, std::cout);
 
-
-    lirGen.visit(nodes);
-    lirGen.printIR();
+    auto program = generateLIR(nodes);
+    program.print();
 /*
     LLVMGenerator llvmGen;
     llvmGen.visitTopLevel(nodes);

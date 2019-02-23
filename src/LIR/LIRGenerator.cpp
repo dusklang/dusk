@@ -6,6 +6,143 @@
 using namespace mpark::patterns;
 using namespace lir;
 
+Program generateLIR(Array<ASTNode*> nodes) {
+    return {};
+}
+/*
+enum class RCKind {
+    /// We don't care about the result of this expression.
+    DontCare,
+    /// We need to return the result of this expression from the current function.
+    Return,
+    /// We need the result of this expression to be put in a specific location.
+    Copy,
+    /// We need to read the result of this expression.
+    Read,
+    /// We need the memory location of this expression so that can write to it.
+    Write,
+};
+
+/// What we want to do with the result of visiting an expression.
+struct ResultContext {
+    RCKind kind;
+    union {
+        lir::MemoryLoc copy;
+        lir::Operand* read;
+        lir::MemoryLoc* write;
+    };
+
+    static ResultContext DontCare() {
+        return ResultContext { RCKind::DontCare };
+    }
+    static ResultContext Return() {
+        return ResultContext { RCKind::Return };
+    }
+    static ResultContext Copy(lir::MemoryLoc copy) {
+        ResultContext ctx { RCKind::Copy };
+        ctx.copy = copy;
+        return ctx;
+    }
+    static ResultContext Read(lir::Operand* read) {
+        ResultContext ctx { RCKind::Read };
+        ctx.read = read;
+        return ctx;
+    }
+    static ResultContext Write(lir::MemoryLoc* write) {
+        ResultContext ctx { RCKind::Write };
+        ctx.write = write;
+        return ctx;
+    }
+};
+
+struct InsertionState {
+    lir::Func function;
+    lir::BB basicBlock;
+};
+
+
+
+using DeclVal = std::variant<lir::MemoryLoc, lir::Func>;
+class LIRGenerator final: public ASTVisitor<LIRGenerator,
+void,
+DeclVal,
+void,
+void,
+void>
+{
+    lir::Program program;
+    Array<InsertionState> insertionState;
+    std::unordered_map<Decl*, DeclVal> declMap;
+
+    lir::Function& currentFunction();
+    lir::BasicBlock& currentBasicBlock();
+    void setBasicBlock(lir::BB bb);
+    lir::BB createBasicBlock();
+    lir::Operand U64Constant(uint64_t constant);
+    lir::Operand U32Constant(uint32_t constant);
+    lir::Operand U16Constant(uint16_t constant);
+    lir::Operand U8Constant(uint8_t constant);
+    lir::Operand F64Constant(double constant);
+    lir::Operand F32Constant(float constant);
+    lir::Operand boolConstant(bool constant);
+    lir::Operand globalStringConstant(char const* data, uint64_t size);
+
+    lir::MemoryLoc indirectMemoryLoc(lir::Operand pointer);
+    lir::MemoryLoc variable(Type type);
+    lir::MemoryLoc global(lir::OLD_Value initialValue);
+    lir::MemoryLoc externGlobal(std::string name, Type type);
+
+    lir::Func function(std::string name, Type returnType, bool isExtern);
+    lir::Func beginFunction(std::string name, Type returnType, bool isExtern);
+    void endFunction();
+    lir::Argument argument(lir::Operand operand, Type type);
+
+    lir::MemoryLoc offsetLocation(lir::MemoryLoc base, uint64_t offset);
+
+    void twoAddressCode(lir::OpCode op, lir::MemoryLoc dest, lir::Operand operand, Type meaningfulType);
+    void threeAddressCode(lir::OpCode op, lir::MemoryLoc dest, lir::Operand operandA, lir::Operand operandB, Type meaningfulType);
+    void zeroExtend(lir::MemoryLoc dest, Type destType, lir::Operand operand, Type operandType);
+    void signExtend(lir::MemoryLoc dest, Type destType, lir::Operand operand, Type operandType);
+    void branch(lir::BB branch);
+    void condBranch(lir::Operand condition, lir::BB trueBranch, lir::BB falseBranch);
+    void call(lir::Func function, Array<lir::Argument> arguments, lir::MemoryLoc dest);
+    void call(lir::Func function, Array<lir::Argument> arguments);
+    void returnValue(lir::Operand operand, Type type);
+    void returnVoid();
+    void unreachableInstr();
+
+    void placeConstant(lir::Operand val, Type type, ResultContext ctx);
+public:
+    void visit(Array<ASTNode*> const& nodes);
+    DeclVal visitDecl(Decl* decl);
+    void visitScope(Scope* scope, ResultContext ctx = ResultContext::DontCare());
+    void visitStructDecl(StructDecl* decl) {}
+    void visitIntegerLiteralExpr(IntegerLiteralExpr* expr, ResultContext ctx);
+    void visitDecimalLiteralExpr(DecimalLiteralExpr* expr, ResultContext ctx);
+    void visitBooleanLiteralExpr(BooleanLiteralExpr* expr, ResultContext ctx);
+    void visitCharLiteralExpr(CharLiteralExpr* expr, ResultContext ctx);
+    void visitStringLiteralExpr(StringLiteralExpr* expr, ResultContext ctx);
+    void visitPreOpExpr(PreOpExpr* expr, ResultContext ctx);
+    void visitBinOpExpr(BinOpExpr* expr, ResultContext ctx);
+    void visitCastExpr(CastExpr* expr, ResultContext ctx);
+    void visitDeclRefExpr(DeclRefExpr* expr, ResultContext ctx);
+    void visitMemberRefExpr(MemberRefExpr* expr, ResultContext ctx);
+    void visitReturnExpr(ReturnExpr* expr, ResultContext ctx);
+    void visitIfExpr(IfExpr* expr, ResultContext ctx);
+    void visitWhileExpr(WhileExpr* expr, ResultContext ctx);
+    void visitDoExpr(DoExpr* expr, ResultContext ctx);
+
+    void visitExpr(Expr* expr, ResultContext ctx = ResultContext::DontCare()) {
+#define EXPR_NODE(name) if(auto val = dynamic_cast<name##Expr*>(expr)) { \
+return visit##name##Expr(val, ctx); \
+}
+#include "AST/ASTNodes.def"
+        unreachable;
+    }
+    void printIR() const;
+};
+
+
 lir::Function& LIRGenerator::currentFunction() {
     return program.functions[insertionState.last()->function];
 }
@@ -21,37 +158,37 @@ void LIRGenerator::setBasicBlock(lir::BB bb) {
     insertionState.last()->basicBlock = bb;
 }
 Operand LIRGenerator::U64Constant(uint64_t constant) {
-    Value val { 64 / 8 };
+    OLD_Value val { 64 / 8 };
     val.u64 = constant;
     return val;
 }
 Operand LIRGenerator::U32Constant(uint32_t constant) {
-    Value val { 32 / 8 };
+    OLD_Value val { 32 / 8 };
     val.u32 = constant;
     return val;
 }
 Operand LIRGenerator::U16Constant(uint16_t constant) {
-    Value val { 16 / 8 };
+    OLD_Value val { 16 / 8 };
     val.u16 = constant;
     return val;
 }
 Operand LIRGenerator::U8Constant(uint8_t constant) {
-    Value val { 8 / 8 };
+    OLD_Value val { 8 / 8 };
     val.u8 = constant;
     return val;
 }
 Operand LIRGenerator::F64Constant(double constant) {
-    Value val { 64 / 8 };
+    OLD_Value val { 64 / 8 };
     val.f64 = constant;
     return val;
 }
 Operand LIRGenerator::F32Constant(float constant) {
-    Value val { 32 / 8 };
+    OLD_Value val { 32 / 8 };
     val.f32 = constant;
     return val;
 }
 Operand LIRGenerator::boolConstant(bool constant) {
-    Value val { 8 / 8 };
+    OLD_Value val { 8 / 8 };
     val.boolean = constant;
     return val;
 }
@@ -76,7 +213,7 @@ MemoryLoc LIRGenerator::variable(Type type) {
     func.frameSize += type.layout().size;
     return loc;
 }
-MemoryLoc LIRGenerator::global(Value initialValue) {
+MemoryLoc LIRGenerator::global(OLD_Value initialValue) {
     MemoryLoc loc { MemoryLoc::GlobalVariable, program.globals.count() };
     // TODO: Add a method to Array for quickly appending from a buffer.
     program.globals.reserve(program.globals.count() + initialValue.size);
@@ -1044,207 +1181,26 @@ void LIRGenerator::visitMemberRefExpr(MemberRefExpr* expr, ResultContext ctx) {
     }
 }
 void LIRGenerator::visitReturnExpr(ReturnExpr* expr, ResultContext ctx) {
-
+    assert(ctx.kind == RCKind::DontCare);
+    if(expr->value) {
+        Operand val;
+        visitExpr(expr->value, ResultContext::Read(&val));
+        returnValue(val, expr->value->type);
+    } else {
+        returnVoid();
+    }
 }
 void LIRGenerator::visitIfExpr(IfExpr* expr, ResultContext ctx) {
+    BB thenBranch = createBasicBlock();
+    setBasicBlock(thenBranch);
+    visitScope(expr->thenScope, ctx);
+    expr->thenScope->terminalType();
 
+    if(expr->elseScope) {
+
+    }
 }
 void LIRGenerator::visitWhileExpr(WhileExpr* expr, ResultContext ctx) {
 
 }
-
-static void printOperand(Operand operand);
-static void printLoc(MemoryLoc loc) {
-    switch(loc.base) {
-        case lir::MemoryLoc::StackFrame: {
-            std::cout << "SF+";
-        } break;
-        case lir::MemoryLoc::GlobalVariable: {
-            std::cout << "GV+";
-        } break;
-        case lir::MemoryLoc::ExternGlobalVariable: {
-            std::cout << "EV#";
-        } break;
-        case lir::MemoryLoc::GlobalConstant: {
-            std::cout << "GC+";
-        } break;
-        case lir::MemoryLoc::Indirect: {
-            std::cout << "*(";
-            printOperand(*loc.pointer);
-            std::cout << ")+";
-        } break;
-    }
-    std::cout << loc.offset;
-}
-static void printOperand(Operand operand) {
-    switch(operand.kind) {
-        case Operand::Location: {
-            printLoc(operand.location);
-        } break;
-        case Operand::Constant: {
-            std::cout << "Constant(size: " << operand.constant.size << ")";
-        } break;
-    }
-}
-void LIRGenerator::printIR() const {
-    for(size_t j: program.functions.indices()) {
-        Function const& function = program.functions[j];
-        std::cout << function.name << ":\n";
-        for(size_t i: function.basicBlocks.indices()) {
-            BasicBlock const& bb = function.basicBlocks[i];
-            std::cout << "BB" << i << ":\n";
-            for(size_t j: bb.instructions.indices()) {
-                Instruction const& instruction = bb.instructions[j];
-
-                auto printInstructionBeginning = [&](auto name) {
-                    printf("%04zu: ", j);
-                    std::cout << name << " ";
-                };
-                auto printTwoAddressCode = [&](auto name) {
-                    printInstructionBeginning(name);
-                    printLoc(instruction.dest);
-                    std::cout << ", ";
-                    printOperand(instruction.operand);
-                };
-                auto printThreeAddressCode = [&](auto name) {
-                    printInstructionBeginning(name);
-                    printLoc(instruction.dest);
-                    std::cout << ", ";
-                    printOperand(instruction.operands.a);
-                    std::cout << ", ";
-                    printOperand(instruction.operands.b);
-                };
-                std::cout << "    ";
-                switch(instruction.op) {
-                    case OpCode::GetAddress:
-                        printTwoAddressCode("GetAddress");
-                        break;
-                    case OpCode::Load:
-                        printTwoAddressCode("Load");
-                        break;
-                    case OpCode::Copy:
-                        printTwoAddressCode("Copy");
-                        break;
-                    case OpCode::Negative:
-                        printTwoAddressCode("Negative");
-                        break;
-                    case OpCode::WrappingAdd:
-                        printThreeAddressCode("WrappingAdd");
-                        break;
-                    case OpCode::WrappingSub:
-                        printThreeAddressCode("WrappingSub");
-                        break;
-                    case OpCode::Mult:
-                        printThreeAddressCode("Mult");
-                        break;
-                    case OpCode::Div:
-                        printThreeAddressCode("Div");
-                        break;
-                    case OpCode::Mod:
-                        printThreeAddressCode("Mod");
-                        break;
-                    case OpCode::SignExtend:
-                        printTwoAddressCode("SignExtend");
-                        break;
-                    case OpCode::ZeroExtend:
-                        printTwoAddressCode("ZeroExtend");
-                        break;
-                    case OpCode::LTE:
-                        printThreeAddressCode("LTE");
-                        break;
-                    case OpCode::LT:
-                        printThreeAddressCode("LT");
-                        break;
-                    case OpCode::GTE:
-                        printThreeAddressCode("GTE");
-                        break;
-                    case OpCode::GT:
-                        printThreeAddressCode("GT");
-                        break;
-                    case OpCode::FLTE:
-                        printThreeAddressCode("FLTE");
-                        break;
-                    case OpCode::FLT:
-                        printThreeAddressCode("FLT");
-                        break;
-                    case OpCode::FGTE:
-                        printThreeAddressCode("FGTE");
-                        break;
-                    case OpCode::FGT:
-                        printThreeAddressCode("FGT");
-                        break;
-                    case OpCode::Equal:
-                        printThreeAddressCode("Equal");
-                        break;
-                    case OpCode::NotEqual:
-                        printThreeAddressCode("NotEqual");
-                        break;
-                    case OpCode::FAdd:
-                        printThreeAddressCode("FAdd");
-                        break;
-                    case OpCode::FSub:
-                        printThreeAddressCode("FSub");
-                        break;
-                    case OpCode::FMult:
-                        printThreeAddressCode("FMult");
-                        break;
-                    case OpCode::FDiv:
-                        printThreeAddressCode("FDiv");
-                        break;
-                    case OpCode::FMod:
-                        printThreeAddressCode("FMod");
-                        break;
-                    case OpCode::LogicalNot:
-                        printTwoAddressCode("LogicalNot");
-                        break;
-                    case OpCode::LogicalAnd:
-                        printThreeAddressCode("LogicalAnd");
-                        break;
-                    case OpCode::LogicalOr:
-                        printThreeAddressCode("LogicalOr");
-                        break;
-                    case OpCode::BitwiseAnd:
-                        printThreeAddressCode("BitwiseAnd");
-                        break;
-                    case OpCode::BitwiseOr:
-                        printThreeAddressCode("BitwiseOr");
-                        break;
-                    case OpCode::Branch:
-                        printInstructionBeginning("Branch");
-                        std::cout << instruction.branch;
-                        break;
-                    case OpCode::CondBranch:
-                        printInstructionBeginning("CondBranch");
-                        printOperand(instruction.condition);
-                        std::cout << ", " << instruction.branch;
-                        break;
-                    case OpCode::Call: {
-                        printInstructionBeginning("Call");
-                        std::cout << instruction.function << "(";
-                        bool first = true;
-                        for(auto& argument: instruction.arguments) {
-                            if(first) {
-                                first = false;
-                            } else {
-                                std::cout << ", ";
-                            }
-                            printOperand(argument.operand);
-                        }
-                        std::cout << ")";
-                    } break;
-                    case lir::OpCode::Return:
-                        printInstructionBeginning("Return");
-                        printOperand(instruction.operand);
-                        break;
-                    case lir::OpCode::ReturnVoid:
-                        printInstructionBeginning("Return");
-                        break;
-                    case lir::OpCode::Unreachable:
-                        printInstructionBeginning("Unreachable");
-                        break;
-                }
-                std::cout << "\n";
-            }
-        }
-    }
-}
+*/
