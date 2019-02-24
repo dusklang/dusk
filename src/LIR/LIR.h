@@ -14,70 +14,70 @@ namespace lir {
     using Func = size_t;
 
     enum class OpCode: uint8_t {
-        /// &operand
+        /// dest = &operand
         GetAddress,
-        /// *operand
+        /// dest = *operand
         Load,
-        /// *a = b
-        Store,
+        /// dest = operand
+        Copy,
 
-        /// -operand
+        /// dest = -operand
         Negative,
-        /// a + b
+        /// dest = a + b
         WrappingAdd,
-        /// a - b
+        /// dest = a - b
         WrappingSub,
-        /// a * b
+        /// dest = a * b
         Mult,
-        /// a / b
+        /// dest = a / b
         Div,
-        /// a % b
+        /// dest = a % b
         Mod,
-        /// operand as type
+        /// dest = operand as dest type
         SignExtend,
-        /// operand as type
+        /// dest = operand as dest type
         ZeroExtend,
-        /// a <= b
+        /// dest = a <= b
         LTE,
-        /// a < b
+        /// dest = a < b
         LT,
-        /// a >= b
+        /// dest = a >= b
         GTE,
-        /// a > b
+        /// dest = a > b
         GT,
-        /// a <= b
+        /// dest = a <= b
         FLTE,
-        /// a < b
+        /// dest = a < b
         FLT,
-        /// a >= b
+        /// dest = a >= b
         FGTE,
-        /// a > b
+        /// dest = a > b
         FGT,
-        /// a == b
+        /// dest = a == b
         Equal,
-        /// a != b
+        /// dest = a != b
         NotEqual,
 
-        /// a + b
+        /// dest = a + b
         FAdd,
-        /// a - b
+        /// dest = a - b
         FSub,
-        /// a * b
+        /// dest = a * b
         FMult,
-        /// a / b
+        /// dest = a / b
         FDiv,
-        /// a % b
+        /// dest = a % b
         FMod,
 
-        /// !operand
+        /// dest = !operand
         LogicalNot,
-        /// a && b
+        /// dest = a && b
         LogicalAnd,
-        /// a || b
+        /// dest = a || b
         LogicalOr,
-        /// a & b
+        /// dest = a & b
         BitwiseAnd,
-        /// a | b
+        /// dest = a | b
         BitwiseOr,
 
         /// goto branch
@@ -85,7 +85,7 @@ namespace lir {
         /// if !condition { goto branch }
         CondBranch,
 
-        /// function(arguments...)
+        /// dest = function(arguments...)
         Call,
         /// return operand
         Return,
@@ -94,6 +94,143 @@ namespace lir {
 
         /// Signals that we should never get to this point in execution.
         Unreachable,
+    };
+
+    struct Operand;
+
+    
+
+    /// Memory location, expressed either as a byte offset from a specified base or a raw pointer.
+    struct MemoryLoc {
+        enum {
+            /// Offset from the beginning of the current stack frame.
+            StackFrame,
+            /// Offset from the beginning of the global variables.
+            GlobalVariable,
+            /// Index into the extern global variable array.
+            ExternGlobalVariable,
+            /// Offset from the beginning of the global constants.
+            GlobalConstant,
+            /// Offset from a pointer.
+            Indirect,
+        } base;
+
+        /// The offset in bytes* from base.
+        ///     *unless base is ExternGlobalVariable, in which case offset is an index into the
+        ///     extern global variable array.
+        uint64_t offset;
+
+        /// The pointer, valid iff base == Indirect. This must be dynamically allocated right now
+        /// because Operand contains a MemoryLoc.
+        ///
+        /// TODO: We probably only ever have one layer of indirection, so we should be able to
+        /// break the recursion without dynamic allocation.
+        Operand* pointer;
+    };
+
+    /// A small constant value that can be passed directly to instructions.
+    struct Value {
+        /// Size in bytes.
+        uint64_t size;
+        union {
+            /// Valid iff size <= 64 / 8
+            uint64_t u64;
+            uint32_t u32;
+            uint16_t u16;
+            uint8_t  u8;
+            float    f32;
+            double   f64;
+            bool     boolean;
+
+            /// Valid iff size > 64 / 8
+            uint8_t* data;
+        };
+    };
+
+    /// An operand of an instruction. Either a memory location or a constant.
+    struct Operand {
+        enum {
+            Location,
+            Constant,
+        } kind;
+        union {
+            MemoryLoc location;
+            Value constant;
+        };
+
+        Operand() {}
+        Operand(MemoryLoc location) : kind(Location), location(location) {}
+        Operand(Value constant) : kind(Constant), constant(constant) {}
+    };
+
+    struct Argument {
+        Operand operand;
+        uint64_t size;
+    };
+
+    enum class FuncRetKind {
+        /// Return value gets written into dest.
+        Value,
+        /// No return value (or no return). dest is invalid.
+        NoValue,
+    };
+
+    struct Instruction {
+        union {
+            MemoryLoc dest;
+            Operand condition;
+        };
+        union {
+            struct {
+                union {
+                    Operand operand;
+                    struct {
+                        Operand a, b;
+                    } operands;
+                };
+                /// Used only for ZeroExtend and SignExtend instructions.
+                uint64_t destSize;
+
+                uint64_t size;
+            };
+            lir::BB branch;
+            struct {
+                lir::BB trueBranch, falseBranch;
+            };
+            struct {
+                Func function;
+                Array<Argument> arguments;
+                FuncRetKind retKind;
+            };
+        };
+        OpCode op;
+    };
+
+    struct BasicBlock {
+        Array<Instruction> instructions;
+    };
+
+    struct Function {
+        std::string name;
+        Array<BasicBlock> basicBlocks;
+        uint64_t frameSize = 0;
+        uint64_t returnValueSize;
+        bool isExtern;
+    };
+
+    struct ExternGlobal {
+        std::string name;
+        uint64_t size;
+    };
+
+    struct Program {
+        Array<Function> functions;
+        Array<uint8_t> constants;
+        /// The initial values of all the globals in the program.
+        Array<uint8_t> globals;
+        Array<ExternGlobal> externGlobals;
+
+        void print() const;
     };
 
     /// A LIR type.
@@ -129,11 +266,6 @@ namespace lir {
         };
     };
 
-    struct ValueBase {
-        size_t index;
-        LIRType const* type;
-    };
-
     /// A value known at compile-time.
     struct ConstantValue {
         LIRType const* type;
@@ -148,87 +280,5 @@ namespace lir {
             Array<ConstantValue> fields;
             Array<ConstantValue> elements;
         };
-    };
-
-    struct Value {
-        enum {
-            /// An argument value.
-            Argument,
-            /// The result of executing an instruction.
-            Instr,
-            /// Pointer to a global variable.
-            GlobalVariable,
-            /// Pointer to C global variable.
-            ExternGlobalVariable,
-            /// Pointer to a global constant.
-            GlobalConstant,
-            /// Inline constant.
-            InlineConstant,
-        } kind;
-
-        union {
-            struct {
-                /// For qualifying instr.
-                BB bb;
-                size_t index;
-            };
-            ConstantValue inlineConstant;
-        };
-
-        Value(struct Parameter);
-        Value(struct Instr);
-        Value(struct GlobalVariable);
-        Value(struct ExternGlobalVariable);
-        Value(struct GlobalConstant);
-        Value(struct ConstantValue inlineConstant) : kind(InlineConstant), inlineConstant(inlineConstant) {}
-    };
-
-    struct Parameter: public ValueBase {};
-    struct Instr: public ValueBase {
-        BB basicBlock;
-        OpCode op;
-        union {
-            Value operand;
-            struct { Value a, b; } operands;
-            BB branch;
-            struct {
-                Value condition;
-                BB trueBranch, elseBranch;
-            };
-            struct {
-                Func func;
-                Array<Value> arguments;
-            };
-        };
-    };
-    struct GlobalVariable: public ValueBase {
-        std::optional<ConstantValue> initialValue;
-    };
-    struct ExternGlobalVariable: public ValueBase {
-        std::string name;
-    };
-    struct GlobalConstant: public ValueBase {
-        ConstantValue value;
-    };
-
-    struct BasicBlock {
-        Array<Instr> instructions;
-    };
-
-    struct Function {
-        std::string name;
-        LIRType const* returnType;
-        Array<Parameter> parameters;
-        Array<BasicBlock> basicBlocks;
-        bool isExtern;
-    };
-
-    struct Program {
-        Array<Function> functions;
-        Array<GlobalConstant> constants;
-        Array<GlobalVariable> globals;
-        Array<ExternGlobalVariable> externGlobals;
-
-        void print() const;
     };
 }

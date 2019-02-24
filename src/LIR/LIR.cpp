@@ -2,11 +2,6 @@
 
 using namespace lir;
 
-Value::Value(struct Instr instr) : kind(Instr), bb(instr.basicBlock), index(instr.index) {}
-Value::Value(struct GlobalVariable var) : kind(GlobalVariable), index(var.index) {}
-Value::Value(struct ExternGlobalVariable var) : kind(ExternGlobalVariable), index(var.index) {}
-Value::Value(struct GlobalConstant constant) : kind(GlobalConstant), index(constant.index) {}
-
 static void printType(LIRType const* type) {
     switch(type->kind) {
         case LIRType::Terminal: {
@@ -107,53 +102,66 @@ static void printConstant(ConstantValue val) {
     }
 }
 
-static void printValue(Value val, Program const& prog, Func func, BB bb) {
-    switch(val.kind) {
-        case Value::Argument: {
-            std::cout << "arg" << val.index;
+static void printOperand(Operand operand);
+static void printLoc(MemoryLoc loc) {
+    switch(loc.base) {
+        case lir::MemoryLoc::StackFrame: {
+            std::cout << "SF+";
         } break;
-        case Value::Instr: {
-            std::cout << "%" << val.bb << "." << val.index;
+        case lir::MemoryLoc::GlobalVariable: {
+            std::cout << "GV+";
         } break;
-        case Value::GlobalVariable: {
-            std::cout << "G" << val.index;
+        case lir::MemoryLoc::ExternGlobalVariable: {
+            std::cout << "EV#";
         } break;
-        case Value::ExternGlobalVariable: {
-            std::cout << "@" << prog.externGlobals[val.index].name;
+        case lir::MemoryLoc::GlobalConstant: {
+            std::cout << "GC+";
         } break;
-        case Value::GlobalConstant:
-            std::cout << "GC" << val.index;
-            break;
-        case Value::InlineConstant: {
-            printConstant(val.inlineConstant);
+        case lir::MemoryLoc::Indirect: {
+            std::cout << "*(";
+            printOperand(*loc.pointer);
+            std::cout << ")+";
+        } break;
+    }
+    std::cout << loc.offset;
+}
+static void printOperand(Operand operand) {
+    switch(operand.kind) {
+        case Operand::Location: {
+            printLoc(operand.location);
+        } break;
+        case Operand::Constant: {
+            std::cout << "Constant(size: " << operand.constant.size << ")";
         } break;
     }
 }
-
 void Program::print() const {
-    for(size_t i: functions.indices()) {
-        Function const& function = functions[i];
+    for(size_t j: functions.indices()) {
+        Function const& function = functions[j];
         std::cout << function.name << ":\n";
-        for(size_t j: function.basicBlocks.indices()) {
-            BasicBlock const& bb = function.basicBlocks[j];
-            std::cout << "BB" << j << ":\n";
-            for(size_t k: bb.instructions.indices()) {
-                Instr const& instruction = bb.instructions[k];
+        for(size_t i: function.basicBlocks.indices()) {
+            BasicBlock const& bb = function.basicBlocks[i];
+            std::cout << "BB" << i << ":\n";
+            for(size_t j: bb.instructions.indices()) {
+                Instruction const& instruction = bb.instructions[j];
+
                 auto printInstructionBeginning = [&](auto name) {
-                    if(instruction.type->kind != LIRType::Void && instruction.type->kind != LIRType::Terminal) {
-                        std::cout << "%" << k << " = ";
-                    }
+                    printf("%04zu: ", j);
                     std::cout << name << " ";
                 };
                 auto printTwoAddressCode = [&](auto name) {
                     printInstructionBeginning(name);
-                    printValue(instruction.operand, *this, i, j);
+                    printLoc(instruction.dest);
+                    std::cout << ", ";
+                    printOperand(instruction.operand);
                 };
                 auto printThreeAddressCode = [&](auto name) {
                     printInstructionBeginning(name);
-                    printValue(instruction.operands.a, *this, i, j);
+                    printLoc(instruction.dest);
                     std::cout << ", ";
-                    printValue(instruction.operands.b, *this, i, j);
+                    printOperand(instruction.operands.a);
+                    std::cout << ", ";
+                    printOperand(instruction.operands.b);
                 };
                 std::cout << "    ";
                 switch(instruction.op) {
@@ -163,8 +171,8 @@ void Program::print() const {
                     case OpCode::Load:
                         printTwoAddressCode("Load");
                         break;
-                    case OpCode::Store:
-                        printTwoAddressCode("Store");
+                    case OpCode::Copy:
+                        printTwoAddressCode("Copy");
                         break;
                     case OpCode::Negative:
                         printTwoAddressCode("Negative");
@@ -256,12 +264,12 @@ void Program::print() const {
                         break;
                     case OpCode::CondBranch:
                         printInstructionBeginning("CondBranch");
-                        printValue(instruction.condition, *this, i, j);
+                        printOperand(instruction.condition);
                         std::cout << ", " << instruction.branch;
                         break;
                     case OpCode::Call: {
                         printInstructionBeginning("Call");
-                        std::cout << instruction.func << "(";
+                        std::cout << instruction.function << "(";
                         bool first = true;
                         for(auto& argument: instruction.arguments) {
                             if(first) {
@@ -269,13 +277,13 @@ void Program::print() const {
                             } else {
                                 std::cout << ", ";
                             }
-                            printValue(argument, *this, i, j);
+                            printOperand(argument.operand);
                         }
                         std::cout << ")";
                     } break;
                     case lir::OpCode::Return:
                         printInstructionBeginning("Return");
-                        printValue(instruction.operand, *this, i, j);
+                        printOperand(instruction.operand);
                         break;
                     case lir::OpCode::ReturnVoid:
                         printInstructionBeginning("Return");

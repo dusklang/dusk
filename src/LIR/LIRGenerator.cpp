@@ -1,13 +1,12 @@
 #include "LIRGenerator.h"
 #include "mpark/patterns.hpp"
+#include "AST/Expr.h"
+#include "AST/Decl.h"
 
 using namespace mpark::patterns;
 using namespace lir;
 
-Program generateLIR(Array<ASTNode*> nodes) {
-    return {};
-}
-/*
+
 enum class RCKind {
     /// We don't care about the result of this expression.
     DontCare,
@@ -61,13 +60,7 @@ struct InsertionState {
 
 
 using DeclVal = std::variant<lir::MemoryLoc, lir::Func>;
-class LIRGenerator final: public ASTVisitor<LIRGenerator,
-void,
-DeclVal,
-void,
-void,
-void>
-{
+struct LIRGenerator final {
     lir::Program program;
     Array<InsertionState> insertionState;
     std::unordered_map<Decl*, DeclVal> declMap;
@@ -87,7 +80,7 @@ void>
 
     lir::MemoryLoc indirectMemoryLoc(lir::Operand pointer);
     lir::MemoryLoc variable(Type type);
-    lir::MemoryLoc global(lir::OLD_Value initialValue);
+    lir::MemoryLoc global(lir::Value initialValue);
     lir::MemoryLoc externGlobal(std::string name, Type type);
 
     lir::Func function(std::string name, Type returnType, bool isExtern);
@@ -110,8 +103,7 @@ void>
     void unreachableInstr();
 
     void placeConstant(lir::Operand val, Type type, ResultContext ctx);
-public:
-    void visit(Array<ASTNode*> const& nodes);
+
     DeclVal visitDecl(Decl* decl);
     void visitScope(Scope* scope, ResultContext ctx = ResultContext::DontCare());
     void visitStructDecl(StructDecl* decl) {}
@@ -137,9 +129,29 @@ return visit##name##Expr(val, ctx); \
 #include "AST/ASTNodes.def"
         unreachable;
     }
-    void printIR() const;
 };
 
+static void visit(LIRGenerator* gen, ASTNode* node) {
+    if(auto decl = dynamic_cast<Decl*>(node)) {
+        gen->visitDecl(decl);
+    } else if(auto scope = dynamic_cast<Scope*>(node)) {
+        gen->visitScope(scope);
+    } else if(auto strukt = dynamic_cast<StructDecl*>(node)) {
+        gen->visitStructDecl(strukt);
+    } else if(auto expr = dynamic_cast<Expr*>(node)) {
+        gen->visitExpr(expr);
+    } else {
+        panic("Unrecognized node");
+    }
+}
+
+Program generateLIR(Array<ASTNode*> nodes) {
+    LIRGenerator generator;
+    for(auto node: nodes) {
+        visit(&generator, node);
+    }
+    return generator.program;
+}
 
 lir::Function& LIRGenerator::currentFunction() {
     return program.functions[insertionState.last()->function];
@@ -156,37 +168,37 @@ void LIRGenerator::setBasicBlock(lir::BB bb) {
     insertionState.last()->basicBlock = bb;
 }
 Operand LIRGenerator::U64Constant(uint64_t constant) {
-    OLD_Value val { 64 / 8 };
+    Value val { 64 / 8 };
     val.u64 = constant;
     return val;
 }
 Operand LIRGenerator::U32Constant(uint32_t constant) {
-    OLD_Value val { 32 / 8 };
+    Value val { 32 / 8 };
     val.u32 = constant;
     return val;
 }
 Operand LIRGenerator::U16Constant(uint16_t constant) {
-    OLD_Value val { 16 / 8 };
+    Value val { 16 / 8 };
     val.u16 = constant;
     return val;
 }
 Operand LIRGenerator::U8Constant(uint8_t constant) {
-    OLD_Value val { 8 / 8 };
+    Value val { 8 / 8 };
     val.u8 = constant;
     return val;
 }
 Operand LIRGenerator::F64Constant(double constant) {
-    OLD_Value val { 64 / 8 };
+    Value val { 64 / 8 };
     val.f64 = constant;
     return val;
 }
 Operand LIRGenerator::F32Constant(float constant) {
-    OLD_Value val { 32 / 8 };
+    Value val { 32 / 8 };
     val.f32 = constant;
     return val;
 }
 Operand LIRGenerator::boolConstant(bool constant) {
-    OLD_Value val { 8 / 8 };
+    Value val { 8 / 8 };
     val.boolean = constant;
     return val;
 }
@@ -211,7 +223,7 @@ MemoryLoc LIRGenerator::variable(Type type) {
     func.frameSize += type.layout().size;
     return loc;
 }
-MemoryLoc LIRGenerator::global(OLD_Value initialValue) {
+MemoryLoc LIRGenerator::global(Value initialValue) {
     MemoryLoc loc { MemoryLoc::GlobalVariable, program.globals.count() };
     // TODO: Add a method to Array for quickly appending from a buffer.
     program.globals.reserve(program.globals.count() + initialValue.size);
@@ -359,12 +371,6 @@ void LIRGenerator::placeConstant(Operand val, Type type, ResultContext ctx) {
         case RCKind::Write: {
             panic("Cannot write to constant");
         }
-    }
-}
-
-void LIRGenerator::visit(Array<ASTNode*> const& nodes) {
-    for(auto node: nodes) {
-        ASTVisitor::visit(node);
     }
 }
 
@@ -1201,4 +1207,3 @@ void LIRGenerator::visitIfExpr(IfExpr* expr, ResultContext ctx) {
 void LIRGenerator::visitWhileExpr(WhileExpr* expr, ResultContext ctx) {
 
 }
-*/
