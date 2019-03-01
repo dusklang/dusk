@@ -1,28 +1,28 @@
 #include "SourceInfo.h"
 
-StringRef SourceFile::substringFromRange(SourceRange range) const {
-    return StringRef(source.data() + range.begin.pos, range.end.pos - range.begin.pos);
+StringSlice SourceFile::substringFromRange(SourceRange range) const {
+    return source[Range<>(range.begin.pos, range.end.pos)];
 }
 
-StringRef SourceFile::substringFromLine(uint32_t lineNum) const {
-    uint32_t length;
+StringSlice SourceFile::substringFromLine(uint32_t lineNum) const {
     uint32_t begin = lines[lineNum].pos;
+    uint32_t end;
     if(lineNum == lines.count() - 1) {
-        length = source.size() - begin;
+        end = source.count();
     } else {
-        length = lines[lineNum + 1].pos - begin;
+        end = lines[lineNum + 1].pos;
     }
-    return StringRef(source.data() + begin, length);
+    return source[Range<>(begin, end)];
 }
 
-Array<LineRange> SourceFile::linesInRange(SourceRange range) const {
+Array<LineRange, 2> SourceFile::linesInRange(SourceRange range) const {
     Array<LineRange> result;
 
     for(uint32_t i = 0; i < lines.count(); i++) {
         uint32_t lineBegin = lines[i].pos;
         uint32_t lineEnd;
         if(i == lines.count() - 1) {
-            lineEnd = source.size();
+            lineEnd = source.count();
         } else {
             lineEnd = lines[i + 1].pos;
         }

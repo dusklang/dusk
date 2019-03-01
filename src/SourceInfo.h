@@ -1,12 +1,10 @@
 #pragma once
 
-#include <string>
 #include <sstream>
 #include <optional>
 #include <algorithm>
 
-#include "Array.h"
-#include "String.h"
+#include "Collections.h"
 
 struct SourcePos {
     uint32_t pos;
@@ -35,6 +33,7 @@ struct LineRange {
     SourcePos startColumn;
     SourcePos endColumn;
 
+    LineRange() : line(-1) {}
     LineRange(uint32_t line, SourcePos startColumn, SourcePos endColumn) :
         line(line), startColumn(startColumn), endColumn(endColumn) {}
 };
@@ -43,15 +42,15 @@ class SourceFile {
     Array<SourcePos> lines;
 
 public:
-    std::string const name;
-    std::string const source;
+    String<20> const name;
+    String<> const source;
 
-    SourceFile(std::string name, std::string source) : name(name), source(source) {}
+    SourceFile(String<20> name, String<> source) : name(name), source(source) {}
 
     void nextLinePosition(SourcePos linePos) {
         lines.append(linePos);
     }
-    StringRef substringFromRange(SourceRange range) const;
-    StringRef substringFromLine(uint32_t lineNum) const;
-    Array<LineRange> linesInRange(SourceRange range) const;
+    StringSlice substringFromRange(SourceRange range) const;
+    StringSlice substringFromLine(uint32_t lineNum) const;
+    Array<LineRange, 2> linesInRange(SourceRange range) const;
 };

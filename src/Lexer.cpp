@@ -3,7 +3,7 @@
 #include <optional>
 
 #include "Lexer.h"
-#include "General/Diagnostics.h"
+#include "Diagnostics.h"
 
 std::map<char, char> specialEscapeCharacters {
     { 'n', '\n' },
@@ -23,19 +23,19 @@ Array<Token> lex(SourceFile* file) {
             exit(1);
         }
     };
-    auto curChar = [&]() -> char { return source.at(pos); };
+    auto curChar = [&]() -> char { return source[pos]; };
     auto is = [&](char character) -> bool {
-        if(pos >= source.length()) {
+        if(pos >= source.count()) {
             return false;
         } else {
             return curChar() == character;
         }
     };
-    auto isSubstr = [&](std::string const& substring) -> bool {
-        if(pos >= source.length()) return false;
+    auto isSubstr = [&](String<10> substring) -> bool {
+        if(pos >= source.count()) return false;
         auto j = [&](int i) { return i + pos; };
-        for(int i = 0; i < substring.length() && j(i) < source.length(); i++) {
-            if(substring.at(i) != source.at(j(i))) return false;
+        for(int i = 0; i < substring.count() && j(i) < source.count(); i++) {
+            if(substring[i] != source[j(i)]) return false;
         }
         return true;
     };
@@ -45,7 +45,7 @@ Array<Token> lex(SourceFile* file) {
     auto isLetter = [&]() -> bool { return isBetween('a', 'z') || isBetween('A', 'Z'); };
     auto isNum = [&]() -> bool { return '0' <= curChar() && curChar() <= '9'; };
 
-    while(pos < source.length()) {
+    while(pos < source.count()) {
         if(is('\n')) {
             file->nextLinePosition(pos + 1);
         } else if(isSubstr("\r\n")) {
@@ -58,7 +58,7 @@ Array<Token> lex(SourceFile* file) {
     pos = 0;
 
     while(true) {
-        std::string tokenText;
+        String<> tokenText;
 
         #define PUSH_TEXT(tokenKind, literal) { \
             tokens.append( \
@@ -72,48 +72,48 @@ Array<Token> lex(SourceFile* file) {
         }
 
         // Return eof if at the end.
-        if(pos == source.length()) {
+        if(pos == source.count()) {
             PUSH(tok::eof);
             break;
         }
 
         // Lex newlines.
-        while(pos < source.length() && isNewline()) {
-            tokenText += curChar();
+        while(pos < source.count() && isNewline()) {
+            tokenText.append(curChar());
             pos++;
         }
-        if(!tokenText.empty()) PUSH(tok::newline);
+        if(!tokenText.isEmpty()) PUSH(tok::newline);
 
         // Lex whitespace.
-        for(;pos < source.length() && isWhitespace(); pos++) tokenText += curChar();
-        if(!tokenText.empty()) PUSH(tok::whitespace);
+        for(;pos < source.count() && isWhitespace(); pos++) tokenText.append(curChar());
+        if(!tokenText.isEmpty()) PUSH(tok::whitespace);
 
         // Lex single-line comments.
         if(isSubstr("//")) {
             tokenText = "//";
-            for(pos += 2; pos < source.length() && !isNewline(); pos++) tokenText += curChar();
+            for(pos += 2; pos < source.count() && !isNewline(); pos++) tokenText.append(curChar());
         }
-        if(!tokenText.empty()) PUSH(tok::comment_single_line);
+        if(!tokenText.isEmpty()) PUSH(tok::comment_single_line);
 
         // Lex (optionally-nested) multi-line comments.
         if(isSubstr("/*")) {
             auto commentBegin = pos;
             tokenText = "/*";
             int levels = 1;
-            for(pos += 2; pos < source.length(); pos++) {
-                tokenText += curChar();
+            for(pos += 2; pos < source.count(); pos++) {
+                tokenText.append(curChar());
                 if(isSubstr("/*")) {
                     commentBegin = pos;
                     pos++;
-                    tokenText += curChar();
+                    tokenText.append(curChar());
                     levels++;
                 } else if(isSubstr("*/")) {
                     pos++;
-                    tokenText += curChar();
+                    tokenText.append(curChar());
                     levels--;
                     if(levels == 0) {
                         pos++;
-                        tokenText += curChar();
+                        tokenText.append(curChar());
                         break;
                     }
                 }
@@ -123,25 +123,25 @@ Array<Token> lex(SourceFile* file) {
                     .primaryRange(SourceRange(commentBegin, commentBegin + 2), "last comment begins here")
             );
         }
-        if(!tokenText.empty()) PUSH_TEXT(tok::comment_multiple_line, tokenText);
+        if(!tokenText.isEmpty()) PUSH_TEXT(tok::comment_multiple_line, tokenText);
 
 
         // Lex symbols.
         if(false) {}
         #define TOKEN_SYMBOL(name, text) else if(isSubstr(text)) { \
-            pos += std::string(text).size();\
+            pos += strlen(text);\
             PUSH(tok::sym_ ## name); \
         }
-        #include "TokenKinds.def"
+        #include "TokenKinds.h"
 
         // Lex a string or character literal.
         if(is('"')) {
-            std::string literal = "";
+            String<3> literal = "";
             bool escapeMode = false;
-            tokenText += '"';
+            tokenText.append('"');
             pos++;
-            while(pos < source.length() && !isNewline()) {
-                tokenText += curChar();
+            while(pos < source.count() && !isNewline()) {
+                tokenText.append(curChar());
 
                 char charToInsert = curChar();
                 if(escapeMode) {
@@ -151,8 +151,8 @@ Array<Token> lex(SourceFile* file) {
                         reportDiag(
                             Diagnostic(
                                 Diagnostic::Error, *file,
-                                std::string("invalid escape character \"") + charToInsert + '"')
-                                   .primaryRange(SourceRange(pos,  pos + 1))
+                                    StringSlice("invalid escape character \"") + String<2> { charToInsert, '"' }
+                            ).primaryRange(SourceRange(pos,  pos + 1))
                         );
                     }
                     escapeMode = false;
@@ -163,7 +163,7 @@ Array<Token> lex(SourceFile* file) {
                     escapeMode = true;
                 } else if(is('"') && !escapeMode) {
                     pos++;
-                    if(literal.size() == 1) {
+                    if(literal.count() == 1) {
                         PUSH_TEXT(tok::char_literal, literal);
                         goto afterStrings;
                     } else {
@@ -171,7 +171,7 @@ Array<Token> lex(SourceFile* file) {
                         goto afterStrings;
                     }
                 } else {
-                    literal += charToInsert;
+                    literal.append(charToInsert);
                     pos++;
                 }
             }
@@ -184,32 +184,32 @@ Array<Token> lex(SourceFile* file) {
         afterStrings:
 
         // Lex an identifier or a keyword.
-        if(pos < source.length() && (isLetter() || is('_')))
-            while(pos < source.length() && (isLetter() || isNum() || is('_')))
-                tokenText += source.at(pos++);
-        if(!tokenText.empty()) {
+        if(pos < source.count() && (isLetter() || is('_')))
+            while(pos < source.count() && (isLetter() || isNum() || is('_')))
+                tokenText.append(source[pos++]);
+        if(!tokenText.isEmpty()) {
             #define TOKEN_KEYWORD(name, sourcerepr) if(tokenText == #sourcerepr) { \
                 PUSH(tok::kw_ ## name); \
                 goto afterIdentifiers;\
             }
-            #include "TokenKinds.def"
+            #include "TokenKinds.h"
 
             PUSH_TEXT(tok::identifier, tokenText);
         }
         afterIdentifiers:
 
         // Lex an integer or decimal literal.
-        if(pos < source.length() && isNum()) {
+        if(pos < source.count() && isNum()) {
             auto hasDot = false;
             do {
                 if(is('.')) {
                     if(hasDot) break;
                     hasDot = true;
                 }
-                tokenText += source.at(pos++);
-            } while(pos < source.length() && (isNum() || is('.')));
+                tokenText.append(source[pos++]);
+            } while(pos < source.count() && (isNum() || is('.')));
 
-            if(!tokenText.empty()) {
+            if(!tokenText.isEmpty()) {
                 PUSH_TEXT(hasDot ? tok::decimal_literal : tok::integer_literal, tokenText);
             }
         }

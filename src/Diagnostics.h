@@ -1,7 +1,6 @@
 #pragma once
 
 #include <optional>
-#include <string>
 #include <iostream>
 
 #include "SourceInfo.h"
@@ -24,9 +23,9 @@ public:
     };
     Kind const kind;
     SourceFile const& file;
-    std::string const message;
+    StringSlice message;
 
-    Diagnostic(Kind kind, SourceFile const& file, std::string message) : kind(kind), file(file), message(message) {}
+    Diagnostic(Kind kind, SourceFile const& file, StringSlice message) : kind(kind), file(file), message(message) {}
     Diagnostic range(SourceRange range, const char* message = nullptr) {
         ranges.append(ErrorRange(range, false, message));
         return *this;

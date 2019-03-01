@@ -1,16 +1,11 @@
 #include <iostream>
 #include <fstream>
-#include <array>
-#include "Parser/Parser.h"
-#include "AST/ASTPrinter.h"
-#include "Sema/TypeChecker.h"
-#include "LLVMGen/LLVMGenerator.h"
-#include "General/SourceInfo.h"
-#include "LIR/LIRGenerator.h"
-#include "General/General.h"
-#include "General/Array.h"
+#include "SourceInfo.h"
+#include "Misc.h"
+#include "Collections.h"
+#include "Lexer.h"
 
-std::string standardLibrary = R"~(
+String<> standardLibrary = R"~(
 #include <iostream>
 extern "C" {
     struct Person {
@@ -37,7 +32,7 @@ extern "C" {
     bool alreadyPrintedHenry = false;
 }
 )~";
-std::string sourceCode = R"~(
+String<> sourceCode = R"~(
 extern def putchar(_: i32): void
 
 def main {
@@ -242,27 +237,21 @@ int main() {
     std::cout << "Meda compiler version 0.0.1\n";
 
     SourceFile file("main.meda", sourceCode);
-    Parser parser(&file);
-    TypeChecker tyChecker(file);
-    ASTPrinter printer;
+    for(auto tok: lex(&file)) {
+        std::cout << tok.prettyPrint() << "\n";
+    }
 
-    auto nodes = parser.parseTopLevel();
-    tyChecker.visitTopLevel(nodes);
-    //printer.visit(nodes, 0, std::cout);
-
-    auto program = generateLIR(nodes);
-    program.print();
-/*
-    LLVMGenerator llvmGen;
-    llvmGen.visitTopLevel(nodes);
-    llvmGen.printIR();
-    llvmGen.outputObjectFile("main.o");
+    Array<int, 100> array { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+    for(auto& num: array[Range<>(5, 11)]) {
+        num += 1;
+    }
+    for(auto num: array) std::cout << num << "\n";
 
     std::ofstream stdLibFile;
     stdLibFile.open("stdlib.cpp");
     stdLibFile << standardLibrary;
     stdLibFile.close();
-
+/*
     std::cout << '\n';
     std::system("clang++ main.o stdlib.cpp -o main");
     std::system("./main");

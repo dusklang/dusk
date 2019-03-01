@@ -1,10 +1,8 @@
-#include <string>
-
-#include "General/SourceInfo.h"
+#include "SourceInfo.h"
 
 enum class tok {
     #define TOKEN(name) name,
-    #include "TokenKinds.def"
+    #include "TokenKinds.h"
     NUM_TOKENS
 };
 
@@ -13,10 +11,10 @@ class Token {
     SourceRange range;
 
     // Used to get the actual text of a string, character, or numeric literal, or identifier.
-    std::string text;
+    String<> text;
 
 public:
-    Token(tok kind, SourceRange range, std::string text) : kind(kind), range(range), text(text) {}
+    Token(tok kind, SourceRange range, String<> text) : kind(kind), range(range), text(text) {}
     Token& operator=(Token const& otherTok) = default;
 
     bool is(tok k) const { return kind == k; }
@@ -36,7 +34,7 @@ public:
     bool isSignificant() const { return !isInsignificant(); }
 
     tok getKind() const { return kind; }
-    std::string getText() const { return text; }
+    String<> getText() const { return text; }
     SourcePos getLoc() const { return range.begin; }
     SourceRange getRange() const { return range; }
     bool isStringLiteral() const {
@@ -51,10 +49,10 @@ public:
     bool isDecimalLiteral() const {
         return is(tok::decimal_literal);
     }
-    std::optional<std::string> getIdentifier() const {
+    std::optional<String<>> getIdentifier() const {
         if(isNot(tok::identifier)) return std::nullopt;
         return text;
     }
 
-    std::string prettyPrint();
+    Slice<char> prettyPrint();
 };
