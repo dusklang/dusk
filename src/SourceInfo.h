@@ -1,9 +1,8 @@
 #pragma once
 
-#include <sstream>
 #include <optional>
-#include <algorithm>
 
+#include "Misc.h"
 #include "Collections.h"
 
 struct SourcePos {
@@ -21,7 +20,7 @@ struct SourceRange {
     SourceRange() : begin(0), end(0) {}
 
     SourceRange operator+(SourceRange other) const {
-        return SourceRange(std::min(begin.pos, other.begin.pos), std::max(end.pos, other.end.pos));
+        return SourceRange(std::min(begin.pos, other.begin.pos), max(end.pos, other.end.pos));
     }
     void operator+=(SourceRange other) {
         *this = *this + other;

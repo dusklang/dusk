@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Misc.h"
+
 template<typename First, typename Second>
 struct Pair final {
     First first;
@@ -358,7 +360,7 @@ public:
     }
     Array(std::initializer_list<T>&& list) : Array() {
         this->_count = list.size();
-        this->_capacity = std::max(list.size(), SmallCapacity);
+        this->_capacity = max(list.size(), SmallCapacity);
         if(this->_capacity > SmallCapacity) {
             this->_data = newData(this->_capacity);
         }
@@ -372,7 +374,7 @@ public:
     Array(char const* literal) : Array() {
         static_assert(std::is_same_v<T, char>, "can't construct non-string with char*");
         this->_count = strlen(literal);
-        this->_capacity = std::max(this->_count, SmallCapacity);
+        this->_capacity = max(this->_count, SmallCapacity);
         if(this->_capacity > SmallCapacity) {
             this->_data = this->newData(this->_capacity);
         }
@@ -387,7 +389,7 @@ public:
     void append(T elem) override {
         if(this->_count == this->_capacity) {
             if(this->_capacity == SmallCapacity) {
-                this->_capacity = std::max(SmallCapacity + 20, SmallCapacity * 2);
+                this->_capacity = max(SmallCapacity + 20, SmallCapacity * 2);
             } else {
                 this->_capacity *= 2;
             }

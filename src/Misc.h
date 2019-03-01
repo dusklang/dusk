@@ -2,6 +2,18 @@
 
 #include <iostream>
 
+template<typename T>
+T min(T a, T b) {
+    if(a < b) return a;
+    return b;
+}
+
+template<typename T>
+T max(T a, T b) {
+    if(a > b) return a;
+    return b;
+}
+
 constexpr int numberOfPercents(char const* str) {
     int num = 0;
     for (int i = 0; str[i] != '\0'; i++) {

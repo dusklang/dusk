@@ -34,7 +34,7 @@ void Diagnostic::print(std::ostream& stream)  {
     for(auto& range: ranges) {
         lineRangeLists.append(file.linesInRange(range.range));
         for(auto& range: *lineRangeLists.last()) {
-            maxLineNumberSize = std::max(maxLineNumberSize, numDigits(range.line));
+            maxLineNumberSize = max(maxLineNumberSize, numDigits(range.line));
         }
     }
     auto printLineNum = [&](auto num) {
