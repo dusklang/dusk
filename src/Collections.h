@@ -1,6 +1,10 @@
 #pragma once
 
-#include <utility> // pair
+template<typename First, typename Second>
+struct Pair final {
+    First first;
+    Second second;
+};
 
 template<typename T>
 struct ReverseContainer {
@@ -33,10 +37,10 @@ struct ZipContainer {
     U& u;
 
     struct iterator {
-        std::pair<typename T::iterator, typename U::iterator> its;
+        Pair<typename T::iterator, typename U::iterator> its;
 
-        std::pair<typename T::reference, typename U::reference> operator*() {
-            return std::pair<typename T::reference, typename U::reference>{ *its.first, *its.second };
+        Pair<typename T::reference, typename U::reference> operator*() {
+            return Pair<typename T::reference, typename U::reference>{ *its.first, *its.second };
         }
         iterator& operator++() {
             ++its.first; ++its.second;
@@ -47,10 +51,10 @@ struct ZipContainer {
         }
     };
     struct const_iterator {
-        std::pair<typename T::const_iterator, typename U::const_iterator> its;
+        Pair<typename T::const_iterator, typename U::const_iterator> its;
 
-        std::pair<typename T::const_reference, typename U::const_reference> operator*() const {
-            return std::pair { *its.first, *its.second };
+        Pair<typename T::const_reference, typename U::const_reference> operator*() const {
+            return Pair { *its.first, *its.second };
         }
         const_iterator& operator++() {
             ++its.first; ++its.second;
@@ -61,10 +65,10 @@ struct ZipContainer {
     };
 
     struct reverse_iterator {
-        std::pair<typename T::reverse_iterator, typename U::reverse_iterator> its;
+        Pair<typename T::reverse_iterator, typename U::reverse_iterator> its;
 
-        std::pair<typename T::reference, typename U::reference> operator*() {
-            return std::pair { *its.first, *its.second };
+        Pair<typename T::reference, typename U::reference> operator*() {
+            return Pair { *its.first, *its.second };
         }
         reverse_iterator& operator++() {
             ++its.first; ++its.second;
@@ -74,10 +78,10 @@ struct ZipContainer {
         }
     };
     struct const_reverse_iterator {
-        std::pair<typename T::const_reverse_iterator, typename U::const_reverse_iterator> its;
+        Pair<typename T::const_reverse_iterator, typename U::const_reverse_iterator> its;
 
-        std::pair<typename T::const_reference, typename U::const_reference> operator*() const {
-            return std::pair { *its.first, *its.second };
+        Pair<typename T::const_reference, typename U::const_reference> operator*() const {
+            return Pair { *its.first, *its.second };
         }
         const_reverse_iterator& operator++() {
             ++its.first; ++its.second;
@@ -88,12 +92,12 @@ struct ZipContainer {
     };
 
     template<typename IterT, typename IterU>
-    std::pair<IterT, IterU> realEndIters(IterT tBegin, IterT tEnd, IterU uBegin, IterU uEnd) {
+    Pair<IterT, IterU> realEndIters(IterT tBegin, IterT tEnd, IterU uBegin, IterU uEnd) {
         while(tBegin != tEnd && uBegin != uEnd) {
             ++tBegin;
             ++uBegin;
         }
-        return std::pair { tBegin, uBegin };
+        return Pair<IterT, IterU> { tBegin, uBegin };
     }
 
     iterator begin() { return iterator {{t.begin(), u.begin()}}; }
