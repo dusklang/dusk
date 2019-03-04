@@ -1,3 +1,5 @@
+#pragma once
+
 #include "SourceInfo.h"
 
 enum class tok {

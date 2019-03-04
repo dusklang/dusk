@@ -35,8 +35,8 @@ ReverseContainer<T> reverse(T& contained) {
 
 template<typename T, typename U>
 struct ZipContainer {
-    T& t;
-    U& u;
+    T t;
+    U u;
 
     struct iterator {
         Pair<typename T::iterator, typename U::iterator> its;
@@ -130,7 +130,7 @@ struct ZipContainer {
 };
 
 template<typename T, typename U>
-ZipContainer<T, U> zip(T& t, U& u) {
+ZipContainer<T, U> zip(T t, U u) {
     return ZipContainer<T, U> { t, u };
 }
 
@@ -154,6 +154,8 @@ public:
         return _lowerBound <= other._lowerBound && other._upperBound <= _upperBound;
     }
 
+    using reference = Bound;
+    using const_reference = Bound;
     struct iterator {
         Bound currentBound;
 
@@ -299,9 +301,13 @@ public:
         }
     };
 
+    using Slice<T>::begin;
+    using Slice<T>::end;
     iterator begin() { return data(); }
     iterator end() { return data() + this->_count; }
 
+    using Slice<T>::rbegin;
+    using Slice<T>::rend;
     reverse_iterator rbegin() { return reverse_iterator { data() + ((int)this->_count - 1) }; }
     reverse_iterator rend() { return reverse_iterator { data() - 1 }; }
 };
@@ -366,7 +372,7 @@ public:
         }
         auto dest = this->data();
         for(auto&& src: list) {
-            std::memmove(dest, &src, sizeof(T));
+            std::memmove((void*)dest, (void*)&src, sizeof(T));
 
             dest++;
         }

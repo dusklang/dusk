@@ -4,6 +4,8 @@
 #include "Misc.h"
 #include "Collections.h"
 #include "Lexer.h"
+#include "HIR.h"
+#include "Parser.h"
 
 String<> standardLibrary = R"~(
 #include <iostream>
@@ -237,15 +239,9 @@ int main() {
     std::cout << "Meda compiler version 0.0.1\n";
 
     SourceFile file("main.meda", sourceCode);
-    for(auto tok: lex(&file)) {
-        std::cout << tok.prettyPrint() << "\n";
-    }
-
-    Array<int, 100> array { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
-    for(auto& num: array[Range<>(5, 11)]) {
-        num += 1;
-    }
-    for(auto num: array) std::cout << num << "\n";
+    auto toks = lex(&file);
+    hir::Builder builder;
+    parse(toks, &builder);
 
     std::ofstream stdLibFile;
     stdLibFile.open("stdlib.cpp");
