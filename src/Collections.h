@@ -331,7 +331,7 @@ public:
     T removeLast() {
         assert(!this->isEmpty() && "empty Array");
         this->_count--;
-        return std::move(this->data[this->_count]);
+        return std::move(this->data()[this->_count]);
     }
     void removeRange(InfiniteRange<> range) {
         for(size_t i: makeRange(range.lowerBound, this->_count)) {

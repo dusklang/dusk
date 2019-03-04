@@ -5,16 +5,19 @@ set(SOURCES
     main.cpp
     SourceInfo.cpp
     String.cpp
+    HIR.cpp
+    Parser.cpp
 )
 set(HEADERS
-    Array.h
+    Collections.h
     Diagnostics.h
     Lexer.h
     Misc.h
     SourceInfo.h
-    String.h
     Token.h
     TokenKinds.h
+    HIR.h
+    Parser.h
 )
 
 add_executable(meda ${SOURCES} ${HEADERS})

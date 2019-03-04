@@ -35,6 +35,10 @@ extern "C" {
 }
 )~";
 String<> sourceCode = R"~(
+4 + 5 * 3 - 2
+//25.2 - 3 * 27.124 & 3 - 2 / 2 + 254623
+
+/*
 extern def putchar(_: i32): void
 
 def main {
@@ -48,7 +52,7 @@ def main {
     }
     putchar(number)
 }
-/*
+
 def main {
     printPerson(henry)
     printPerson(sally)
@@ -241,7 +245,8 @@ int main() {
     SourceFile file("main.meda", sourceCode);
     auto toks = lex(&file);
     hir::Builder builder;
-    parse(toks, &builder);
+    parse(file, toks, &builder);
+    builder.debugPrint();
 
     std::ofstream stdLibFile;
     stdLibFile.open("stdlib.cpp");

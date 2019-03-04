@@ -5,6 +5,8 @@
 
 #include "SourceInfo.h"
 
+#define ERR(message, file) Diagnostic(Diagnostic::Error, file, message)
+
 struct ErrorRange {
     SourceRange range;
     const char* message;
@@ -36,4 +38,13 @@ public:
     }
 
     void print(std::ostream& stream);
+    void report() {
+        print(std::cout);
+        switch(kind) {
+            case Diagnostic::Error:
+                exit(1);
+            case Diagnostic::Warning:
+                break;
+        }
+    }
 };
