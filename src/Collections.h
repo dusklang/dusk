@@ -1,5 +1,6 @@
 #pragma once
 
+#include <experimental/memory_resource>
 #include "Misc.h"
 
 template<typename First, typename Second>
@@ -312,6 +313,7 @@ public:
     reverse_iterator rend() { return reverse_iterator { data() - 1 }; }
 };
 
+
 template<typename T>
 class AnyArray: public MutSlice<T> {
 protected:
@@ -325,6 +327,13 @@ public:
     virtual void destroy() = 0;
     virtual void append(T elem) = 0;
     virtual void reserve(size_t cap) = 0;
+    virtual void clear() = 0;
+
+    void fill(T elem, size_t count) {
+        for(size_t i = 0; i < count; i++) {
+            append(elem);
+        }
+    }
 
     size_t capacity() const { return _capacity; }
 
@@ -415,6 +424,9 @@ public:
             this->_capacity = cap;
             this->_data = newBuf;
         }
+    }
+    void clear() override {
+        this->_count = 0;
     }
 };
 

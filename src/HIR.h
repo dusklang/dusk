@@ -2,6 +2,7 @@
 
 #include "Collections.h"
 #include "Misc.h"
+#include "SourceInfo.h"
 
 /// HIR (high-level intermediate representation) is the data structure output by the parser and read
 /// by the type checker.
@@ -84,15 +85,21 @@ namespace hir {
         }
     };
 
-    class Builder {
-        Array<Array<Expr>> expressions {Array<Expr>()};
-        Array<size_t> levels;
-
-    public:
-        ExprID intLit(uint64_t literal);
-        ExprID decLit(double literal);
-        ExprID binOp(BinOp op, ExprID lhs, ExprID rhs);
+    struct Program {
+        Array<Array<Expr>> expressions;
+        SourceFile const& file;
+        size_t numExpressions;
 
         void debugPrint() const;
     };
+
+    struct Builder {
+        Array<Array<Expr>> expressions {Array<Expr>()};
+        Array<size_t> levels;
+
+        ExprID intLit(uint64_t literal);
+        ExprID decLit(double literal);
+        ExprID binOp(BinOp op, ExprID lhs, ExprID rhs);
+    };
+
 };

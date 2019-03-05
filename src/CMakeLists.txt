@@ -7,6 +7,7 @@ set(SOURCES
     String.cpp
     HIR.cpp
     Parser.cpp
+    TypeChecker.cpp
 )
 set(HEADERS
     Collections.h
@@ -18,6 +19,7 @@ set(HEADERS
     TokenKinds.h
     HIR.h
     Parser.h
+    TypeChecker.h
 )
 
 add_executable(meda ${SOURCES} ${HEADERS})

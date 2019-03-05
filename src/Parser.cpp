@@ -7,11 +7,17 @@ namespace {
     struct Parser {
         SourceFile const& file;
         Slice<Token> tokens;
-        hir::Builder* builder;
+        hir::Builder builder;
 
         uint32_t curTok = -1;
     };
 }
+
+#define EXPECT(token, message) if(cur(parser).isNot(token)) { \
+    ERR(message, parser->file).primaryRange(cur(parser).getRange()) \
+        .report(); \
+}
+
 
 static Token const& cur(Parser const* parser) {
     return parser->tokens[parser->curTok];
@@ -114,15 +120,22 @@ static std::optional<hir::BinOp> parseBinaryOperator(tok token) {
     #undef MATCH
 }
 
+static hir::ExprID parseExpr(Parser* parser);
 static hir::ExprID parseTerm(Parser* parser) {
-    if(cur(parser).is(tok::integer_literal)) {
+    if(cur(parser).is(tok::sym_left_paren)) {
+        next(parser);
+        auto expr = parseExpr(parser);
+        EXPECT(tok::sym_right_paren, "unclosed parentheses");
+        next(parser);
+        return expr;
+    } else if(cur(parser).is(tok::integer_literal)) {
         // TODO: actually, y'know, parse the number.
-        auto lit = parser->builder->intLit(2400);
+        auto lit = parser->builder.intLit(2400);
         next(parser);
         return lit;
     } else if(cur(parser).is(tok::decimal_literal)) {
         // TODO: actually, y'know, parse the number.
-        auto lit = parser->builder->decLit(1.3);
+        auto lit = parser->builder.decLit(1.3);
         next(parser);
         return lit;
     } else {
@@ -138,7 +151,7 @@ static hir::ExprID parseExpr(Parser* parser) {
         auto rhs = exprStack.removeLast();
         auto lhs = exprStack.removeLast();
         auto nextOp = opStack.removeLast();
-        exprStack.append(parser->builder->binOp(nextOp, lhs, rhs));
+        exprStack.append(parser->builder.binOp(nextOp, lhs, rhs));
     };
 
     while(true) {
@@ -174,7 +187,8 @@ static void parseTopLevel(Parser* parser) {
     }
 }
 
-void parse(SourceFile const& file, Slice<Token> tokens, hir::Builder* builder) {
-    Parser parser { file, tokens, builder };
+hir::Program parse(SourceFile const& file, Slice<Token> tokens) {
+    Parser parser { file, tokens };
     parseTopLevel(&parser);
+    return { parser.builder.expressions, file, parser.builder.levels.count() };
 }

@@ -27,7 +27,7 @@ ExprID Builder::binOp(BinOp op, ExprID lhs, ExprID rhs) {
     return id;
 }
 
-void Builder::debugPrint() const {
+void Program::debugPrint() const {
     for(auto [i, level]: zip(expressions.indices(), expressions)) {
         std::cout << "Level " << i << ":\n";
         for(auto expr: level) {
