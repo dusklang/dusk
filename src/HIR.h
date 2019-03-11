@@ -90,7 +90,7 @@ namespace hir {
         SourceFile const& file;
         size_t numExpressions;
 
-        void debugPrint() const;
+        void debugPrint();
     };
 
     struct Builder {

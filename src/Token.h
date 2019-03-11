@@ -13,10 +13,10 @@ class Token {
     SourceRange range;
 
     // Used to get the actual text of a string, character, or numeric literal, or identifier.
-    String<> text;
+    StringSlice text;
 
 public:
-    Token(tok kind, SourceRange range, String<> text) : kind(kind), range(range), text(text) {}
+    Token(tok kind, SourceRange range, StringSlice text) : kind(kind), range(range), text(text) {}
     Token& operator=(Token const& otherTok) = default;
 
     bool is(tok k) const { return kind == k; }
@@ -36,7 +36,7 @@ public:
     bool isSignificant() const { return !isInsignificant(); }
 
     tok getKind() const { return kind; }
-    String<> getText() const { return text; }
+    StringSlice getText() const { return text; }
     SourcePos getLoc() const { return range.begin; }
     SourceRange getRange() const { return range; }
     bool isStringLiteral() const {
@@ -51,7 +51,7 @@ public:
     bool isDecimalLiteral() const {
         return is(tok::decimal_literal);
     }
-    std::optional<String<>> getIdentifier() const {
+    std::optional<StringSlice> getIdentifier() {
         if(isNot(tok::identifier)) return std::nullopt;
         return text;
     }

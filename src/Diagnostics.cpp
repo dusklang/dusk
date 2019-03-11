@@ -13,7 +13,7 @@ void Diagnostic::print(std::ostream& stream)  {
             break;
     }
     stream << message << "\033[0m\n";
-    Array<Array<LineRange, 2>, 2> lineRangeLists;
+    Array<Array<LineRange>> lineRangeLists;
     auto numDigits = [](uint32_t num) -> uint32_t {
         uint32_t digits = 0;
         while(num > 0) {

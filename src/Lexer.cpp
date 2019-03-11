@@ -31,7 +31,7 @@ Array<Token> lex(SourceFile* file) {
             return curChar() == character;
         }
     };
-    auto isSubstr = [&](String<10> substring) -> bool {
+    auto isSubstr = [&](StringSlice substring) -> bool {
         if(pos >= source.count()) return false;
         auto j = [&](int i) { return i + pos; };
         for(int i = 0; i < substring.count() && j(i) < source.count(); i++) {
@@ -57,9 +57,8 @@ Array<Token> lex(SourceFile* file) {
     }
     pos = 0;
 
+    String tokenText;
     while(true) {
-        String<> tokenText;
-
         #define PUSH_TEXT(tokenKind, literal) { \
             tokens.append( \
                 Token(tokenKind, SourceRange(curTokBegin, pos), literal) \
@@ -136,7 +135,7 @@ Array<Token> lex(SourceFile* file) {
 
         // Lex a string or character literal.
         if(is('"')) {
-            String<3> literal = "";
+            String literal = StringSlice("");
             bool escapeMode = false;
             tokenText.append('"');
             pos++;
@@ -151,7 +150,7 @@ Array<Token> lex(SourceFile* file) {
                         reportDiag(
                             Diagnostic(
                                 Diagnostic::Error, *file,
-                                    StringSlice("invalid escape character \"") + String<2> { charToInsert, '"' }
+                                    StringSlice("invalid escape character \"") + String{ charToInsert, '"' }
                             ).primaryRange(SourceRange(pos,  pos + 1))
                         );
                     }

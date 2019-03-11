@@ -1,3 +1,6 @@
+# Rust stuff
+**/target/*
+
 # CMake stuff
 build/*
 

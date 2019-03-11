@@ -1,6 +1,5 @@
 #pragma once
 
-#include <experimental/memory_resource>
 #include "Misc.h"
 
 template<typename First, typename Second>
@@ -10,8 +9,15 @@ struct Pair final {
 };
 
 template<typename T>
-struct ReverseContainer {
-    T& contained;
+class ConstReverseContainer {
+
+}
+
+template<typename T>
+class ReverseContainer {
+    iterator _begin, _end;
+public:
+    explicit ReverseContainer(T& contained) : _begin(contained.rbegin()), _end(contained.rend()) {}
 
     using iterator = typename T::reverse_iterator;
     using const_iterator = typename T::const_reverse_iterator;
@@ -190,9 +196,6 @@ protected:
     T const* _data;
     size_t _count;
 
-    template<typename U, size_t SmallCapacity>
-    friend class Array;
-
     Slice(T const* data, size_t count) : _data(data), _count(count) {}
 public:
     Range<> indices() const {
@@ -262,8 +265,6 @@ template<typename T>
 class MutSlice: public Slice<T> {
 protected:
     T* data() { return const_cast<T*>(this->_data); }
-    template<typename U, size_t SmallCapacity>
-    friend class Array;
 
     MutSlice(T* data, size_t count) : Slice<T>(data, count) {}
 public:
@@ -313,26 +314,72 @@ public:
     reverse_iterator rend() { return reverse_iterator { data() - 1 }; }
 };
 
+constexpr size_t KB = 1024;
+constexpr size_t MB = 1024 * KB;
+constexpr size_t GB = 1024 * MB;
 
+/// A collection of owned, growable data allocated from a fixed-size blob of bytes
 template<typename T>
-class AnyArray: public MutSlice<T> {
-protected:
+class Array: public MutSlice<T> {
     size_t _capacity;
 
-    template<typename U, size_t SmallCapacity>
-    friend class Array;
+    /// The number of bytes we had to advance to get from the buffer to our aligned data pointer.
+    uint8_t offset;
 
-    AnyArray(T* data, size_t count, size_t capacity) : MutSlice<T>(data, count), _capacity(capacity) {}
+    void deleteData() {
+        operator delete(this->data());
+    }
+    static T* newData(size_t size) {
+        return reinterpret_cast<T*>(operator new(sizeof(T) * size));
+    }
 public:
-    virtual void destroy() = 0;
-    virtual void append(T elem) = 0;
-    virtual void reserve(size_t cap) = 0;
-    virtual void clear() = 0;
+    Array(size_t maxSize) : MutSlice<T>(nullptr, 0) {
+        _capacity = maxSize;
+        void *buf = mmap(nullptr, (maxSize + 1) * sizeof(T), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        assert(buf != MAP_FAILED);
+        std::cout << "buf is " << buf << '\n';
+        uint8_t* alignedBuf = (uint8_t*)(((uintptr_t)buf + (uintptr_t)(alignof(T) - 1)) & ~((uintptr_t)(alignof(T) - 1)));
+        offset = alignedBuf - (uint8_t*)buf;
+        this->_data = (T*)alignedBuf;
+        this->_count = 0;
+    }
+    Array() : Array((8 * GB) / sizeof(T)) {}
+    Array(Array<T>& other) : MutSlice<T>(other.data(), other.count()), _capacity(other._capacity) {}
+    Array(std::initializer_list<T>&& list) : Array() {
+        this->_count = list.size();
+        T* dest = this->data();
+        for(auto&& src: list) std::memmove(dest++, &src, sizeof(T));
+    }
+    Array(Slice<T> slice) : Array() {
+        this->_count = slice.count();
+        T* dest = this->data();
+        for(auto src: slice) std::memmove(dest++, &src, sizeof(T));
+    }
 
+    void destroy() {
+        munmap(this->data() - offset, (_capacity + 1) * sizeof(T));
+        this->_count = this->_capacity = 0;
+    }
+    void append(T const& elem) {
+        assert(this->_count < this->_capacity && "ran out of space!");
+        std::memmove(this->data() + this->_count, &elem, sizeof(T));
+        this->_count++;
+    }
+    void clear() {
+        this->_count = 0;
+    }
     void fill(T elem, size_t count) {
         for(size_t i = 0; i < count; i++) {
             append(elem);
         }
+    }
+    Array<T>& operator=(Slice<T> slice) {
+        assert(slice.count() < this->_capacity && "slice too big");
+        this->_count = slice.count();
+        T* dest = this->data();
+        for(auto elem: slice) std::memmove(dest++, &elem, sizeof(T));
+
+        return *this;
     }
 
     size_t capacity() const { return _capacity; }
@@ -350,98 +397,16 @@ public:
     }
 };
 
-/// A collection of owned, growable data.
-template<typename T, size_t SmallCapacity = 0>
-class Array: public AnyArray<T> {
-    // TODO: don't know how, but it would be cool to make this occupy the same memory as
-    // _data, since they are mutually exclusive.
-    T smallData[SmallCapacity];
-    void deleteData() {
-        operator delete(this->data());
-    }
-protected:
-    static T* newData(size_t size) {
-        return reinterpret_cast<T*>(operator new(sizeof(T) * size));
-    }
-public:
-    Array() : AnyArray<T>(smallData, 0, SmallCapacity) {}
-    Array(AnyArray<T>& other) : AnyArray<T>(nullptr, other._count, other._capacity) {
-        memset(smallData, 0, SmallCapacity * sizeof(T));
-        if(this->_capacity > SmallCapacity) {
-            this->_data = other.data();
-        } else {
-            memcpy(smallData, other.data(), sizeof(T) * this->count());
-        }
-    }
-    Array(std::initializer_list<T>&& list) : Array() {
-        this->_count = list.size();
-        this->_capacity = max(list.size(), SmallCapacity);
-        if(this->_capacity > SmallCapacity) {
-            this->_data = newData(this->_capacity);
-        }
-        auto dest = this->data();
-        for(auto&& src: list) {
-            std::memmove((void*)dest, (void*)&src, sizeof(T));
-
-            dest++;
-        }
-    }
-    Array(char const* literal) : Array() {
-        static_assert(std::is_same_v<T, char>, "can't construct non-string with char*");
-        this->_count = strlen(literal);
-        this->_capacity = max(this->_count, SmallCapacity);
-        if(this->_capacity > SmallCapacity) {
-            this->_data = this->newData(this->_capacity);
-        }
-        memcpy(this->data(), literal, this->_count * sizeof(char));
-    }
-    virtual ~Array() {}
-
-    void destroy() override {
-        if(this->_capacity > SmallCapacity) deleteData();
-        this->_count = this->_capacity = 0;
-    }
-    void append(T elem) override {
-        if(this->_count == this->_capacity) {
-            if(this->_capacity == SmallCapacity) {
-                this->_capacity = max(SmallCapacity + 20, SmallCapacity * 2);
-            } else {
-                this->_capacity *= 2;
-            }
-            T* newBuf = newData(this->_capacity);
-            std::memmove((void*)newBuf, (void*)this->data(), this->_count * sizeof(T));
-            if(this->_count > SmallCapacity) deleteData();
-            this->_data = newBuf;
-        }
-        std::memmove((void*)(this->data() + this->_count), (void*)&elem, sizeof(T));
-        this->_count++;
-    }
-    void reserve(size_t cap) override {
-        if(cap > this->_capacity) {
-            T* newBuf = newData(cap);
-            std::memmove((void*)newBuf, (void*)this->data(), this->_count * sizeof(T));
-            if(this->_capacity > SmallCapacity) deleteData();
-            this->_capacity = cap;
-            this->_data = newBuf;
-        }
-    }
-    void clear() override {
-        this->_count = 0;
-    }
-};
-
 template<typename T>
 Slice<T> Slice<T>::operator+ (Slice<T> other) const {
-    Array<T> result;
-    result.reserve(_count + other._count);
+    Array<T> result(_count + other._count);
     // TODO: Speed.
     for(auto elem: *this) result.append(elem);
     for(auto elem: other) result.append(elem);
     return result;
 }
 
-template<size_t SmallCapacity = 0>
-using String = Array<char, SmallCapacity>;
+using String = Array<char>;
 
 using StringSlice = Slice<char>;
 using MutStringSlice = MutSlice<char>;

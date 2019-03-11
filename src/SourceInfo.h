@@ -41,15 +41,15 @@ class SourceFile {
     Array<SourcePos> lines;
 
 public:
-    String<20> const name;
-    String<> const source;
+    StringSlice name;
+    StringSlice source;
 
-    SourceFile(String<20> name, String<> source) : name(name), source(source) {}
+    SourceFile(StringSlice name, StringSlice source) : name(name), source(source) {}
 
     void nextLinePosition(SourcePos linePos) {
         lines.append(linePos);
     }
     StringSlice substringFromRange(SourceRange range) const;
     StringSlice substringFromLine(uint32_t lineNum) const;
-    Array<LineRange, 2> linesInRange(SourceRange range) const;
+    Array<LineRange> linesInRange(SourceRange range) const;
 };

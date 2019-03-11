@@ -4,10 +4,10 @@ set(SOURCES
     Lexer.cpp
     main.cpp
     SourceInfo.cpp
-    String.cpp
     HIR.cpp
     Parser.cpp
     TypeChecker.cpp
+    Collections.cpp
 )
 set(HEADERS
     Collections.h

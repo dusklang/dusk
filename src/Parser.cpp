@@ -34,18 +34,6 @@ static Token const& next(Parser* parser) {
     }
 }
 
-static std::optional<Token> prevIncludingInsignificant(Parser* parser) {
-    if(parser->curTok == 1) return std::nullopt;
-    return parser->tokens[--parser->curTok];
-}
-
-static std::optional<Token> prev(Parser* parser) {
-    while(auto prev = prevIncludingInsignificant(parser)) {
-        if(prev->isSignificant()) return prev;
-    }
-    return std::nullopt;
-}
-
 namespace {
     using namespace hir;
     Array<Array<BinOp>> precedenceLevels {
@@ -144,8 +132,10 @@ static hir::ExprID parseTerm(Parser* parser) {
 }
 
 static hir::ExprID parseExpr(Parser* parser) {
-    Array<hir::ExprID> exprStack { parseTerm(parser) };
-    Array<hir::BinOp> opStack;
+    // TODO: is 1000 too many/not enough?
+    Array<hir::ExprID> exprStack(1000);
+    Array<hir::BinOp> opStack(1000);
+    exprStack.append(parseTerm(parser));
 
     auto popStacks = [&]() {
         auto rhs = exprStack.removeLast();
@@ -167,7 +157,11 @@ static hir::ExprID parseExpr(Parser* parser) {
     while(!opStack.isEmpty()) {
         popStacks();
     }
-    return *exprStack.first();
+    hir::ExprID id = *exprStack.first();
+    exprStack.destroy();
+    opStack.destroy();
+    return id;
+
 }
 
 static void parseNode(Parser* parser) {

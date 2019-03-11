@@ -7,6 +7,7 @@ using namespace hir;
 ExprID Builder::intLit(uint64_t literal) {
     ExprID id(levels.count());
     levels.append(0);
+    assert(!expressions.isEmpty());
     expressions.first()->append(Expr(ExprKind::IntLit, id));
     return id;
 }
@@ -27,7 +28,7 @@ ExprID Builder::binOp(BinOp op, ExprID lhs, ExprID rhs) {
     return id;
 }
 
-void Program::debugPrint() const {
+void Program::debugPrint() {
     for(auto [i, level]: zip(expressions.indices(), expressions)) {
         std::cout << "Level " << i << ":\n";
         for(auto expr: level) {

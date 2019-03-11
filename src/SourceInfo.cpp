@@ -15,7 +15,7 @@ StringSlice SourceFile::substringFromLine(uint32_t lineNum) const {
     return source[Range<>(begin, end)];
 }
 
-Array<LineRange, 2> SourceFile::linesInRange(SourceRange range) const {
+Array<LineRange> SourceFile::linesInRange(SourceRange range) const {
     Array<LineRange> result;
 
     for(uint32_t i = 0; i < lines.count(); i++) {
