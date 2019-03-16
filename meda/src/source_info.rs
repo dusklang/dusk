@@ -1,7 +1,9 @@
+use std::str;
 use std::cmp::{min, max};
+use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 
-pub type SourceRange = std::ops::Range<u32>;
+pub type SourceRange = Range<u32>;
 
 pub fn concat(a: SourceRange, b: SourceRange) -> SourceRange {
     min(a.start, b.start)..max(a.end, b.end)
@@ -14,37 +16,36 @@ pub struct LineRange {
     pub line: u32,
 }
 
-pub struct SourceFile<'src> {
+pub struct SourceFile {
     pub name: String,
-    pub src: Vec<&'src str>,
+    pub src: String,
     /// The starting position of each line.
-    lines: Vec<u32>,
+    pub lines: Vec<u32>,
 }
 
-impl<'src> SourceFile<'src> {
-    pub fn new(name: String, source: &str) -> SourceFile {
+impl SourceFile {
+    pub fn new(name: String, source: String) -> SourceFile {
         SourceFile {
             name,
-            src: UnicodeSegmentation::graphemes(source, true).collect(),
+            src: source,
             lines: Vec::new(),
         }
     }
 
-    pub fn next_line_position(&mut self, pos: u32) { self.lines.push(pos); }
-
-    pub fn substring_from_range(&self, range: SourceRange) -> &[&str] {
-        &self.src[(range.start as usize)..(range.end as usize)]
+    pub fn substring_from_range(&self, range: SourceRange) -> &str {
+        let slice = &self.src.as_bytes()[(range.start as usize)..(range.end as usize)];
+        str::from_utf8(slice).unwrap()
     }
 
-    pub fn substring_from_line(&self, line: u32) -> &[&str] {
+    pub fn substring_from_line(&self, line: u32) -> &str {
         let line = line as usize;
-        let start = self.lines[line] as usize;
+        let start = self.lines[line];
         let end = if line == self.lines.len() - 1 {
-            self.src.len()
+            self.src.len() as u32
         } else {
-            self.lines[line + 1] as usize
+            self.lines[line + 1]
         };
-        &self.src[start..end]
+        self.substring_from_range(start..end)
     }
 
     pub fn lines_in_range(&self, range: SourceRange) -> Vec<LineRange> {

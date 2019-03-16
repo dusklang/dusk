@@ -70,7 +70,11 @@ pub struct Token<'src> {
     pub range: SourceRange,
 }
 
-impl Token<'_> {
+impl<'src> Token<'src> {
+    pub fn new(kind: TokenKind<'src>, range: SourceRange) -> Token<'src> {
+        Self { kind, range }
+    }
+
     pub fn is_insignificant(&self) -> bool {
         use TokenKind::*;
         match self.kind {
