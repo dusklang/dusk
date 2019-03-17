@@ -25,13 +25,17 @@ impl Error {
         }
     }
 
-    pub fn range(&mut self, range: SourceRange, message: impl Into<Cow<'static, str>>) -> &mut Error {
+    pub fn add_range(&mut self, range: SourceRange, message: impl Into<Cow<'static, str>>) {
         self.secondary_ranges.push(
             ErrorRange {
                 range,
                 message: message.into(),
             }
         );
+    }
+
+    pub fn with_range(mut self, range: SourceRange, message: impl Into<Cow<'static, str>>) -> Error {
+        self.add_range(range, message);
         self
     }
 

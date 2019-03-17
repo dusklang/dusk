@@ -111,10 +111,10 @@ impl<'src> Lexer<'src> {
     pub fn lex(mut self) -> Result<Vec<Token<'src>>, Error> {
         let special_escape_characters = {
             let mut map = HashMap::new();
-            map.insert('n', '\n');
-            map.insert('"', '"');
-            map.insert('0', '\0');
-            map.insert('\\', '\\');
+            map.insert("n", "\n");
+            map.insert("\"", "\"");
+            map.insert("0", "\0");
+            map.insert("\\", "\\");
             map
         };
 
@@ -245,6 +245,63 @@ impl<'src> Lexer<'src> {
                 Ampersand           "&"
                 Pipe                "|"
             );
+
+            // String and character literals.
+            if self.is('"') {
+                self.pos += 1;
+                let mut in_escape_mode = false;
+                let mut lit = String::new();
+                let mut terminated = false;
+                while self.has_chars() && !self.is_newline() {
+                    let char_to_insert = if in_escape_mode {
+                        if let Some(character) = special_escape_characters.get(self.cur()) {
+                            character
+                        } else {
+                            return Err(
+                                Error::new(
+                                    format!("invalid escape character '{}'", self.cur()),
+                                    self.pos..(self.pos + 1), 
+                                    ""
+                                )
+                            )
+                        }
+                    } else {
+                        // This is literally the exact same expression that self.cur() returns, but calling that method makes
+                        // the borrow checker complain. :(
+                        self.gr[self.pos].1
+                    };
+
+                    match char_to_insert {
+                        "\\" => {
+                            self.pos += 1;
+                            in_escape_mode = true;
+                        },
+                        "\"" => {
+                            self.pos += 1;
+                            if lit.len() == 1 {
+                                self.push(TokenKind::CharLit(lit.as_bytes()[0]));
+                            } else {
+                                self.push(TokenKind::StrLit(lit));
+                            }
+                            terminated = true;
+                            break;
+                        },
+                        char_to_insert => {
+                            lit += char_to_insert;
+                            self.pos += 1;
+                        }
+                    }
+                }
+                if !terminated {
+                    return Err(
+                        Error::new(
+                            "unterminated string literal",
+                            self.gr_index_to_src_index(self.tok_start_pos)..self.gr_index_to_src_index(self.tok_start_pos + 1), 
+                            "literal begins here"
+                        )
+                    );
+                }
+            }
         }
 
         Ok(self.tokens)

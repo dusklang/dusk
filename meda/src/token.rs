@@ -5,8 +5,8 @@ pub enum TokenKind<'src> {
     Ident(&'src str),
     IntLit(u64),
     DecLit(f64),
-    StrLit(&'src str),
-    CharLit(i8),
+    StrLit(String),
+    CharLit(u8),
 
     // Special
     Eof,
