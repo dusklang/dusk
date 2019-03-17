@@ -12,6 +12,7 @@ pub struct Lexer<'src> {
     pos: usize,
     tok_start_pos: usize,
     lines: &'src mut Vec<usize>,
+    tokens: Vec<Token<'src>>,
 }
 
 impl<'src> Lexer<'src> {
@@ -22,6 +23,7 @@ impl<'src> Lexer<'src> {
             pos: 0,
             tok_start_pos: 0,
             lines,
+            tokens: Vec::new(),
         }
     }
 
@@ -40,14 +42,18 @@ impl<'src> Lexer<'src> {
             false
         }
     }
+
+    /// NOTE: Assumes `slice` is ASCII!
     fn is_str(&self, slice: &str) -> bool {
         if self.has_chars() {
-            let mut slice = UnicodeSegmentation::graphemes(slice, true);
+            let mut slice = slice.bytes();
             let mut src = self.gr[self.pos..].iter().map(|(_, c)| c);
             loop {
                 match (slice.next(), src.next()) {
-                    (Some(c1), Some(c2)) => if c1 != *c2 {
-                        return false;
+                    (Some(c1), Some(c2)) => {
+                        if std::str::from_utf8(&[c1]).unwrap() != *c2 {
+                            return false;
+                        }
                     },
                     (Some(_), None) => return false,
                     (None, Some(_)) | (None, None) => return true
@@ -94,16 +100,15 @@ impl<'src> Lexer<'src> {
             ..self.gr_index_to_src_index(range.end)
     }
 
-    /// Makes a new token with given kind and source range of
-    /// tok_start_pos..pos, and sets tok_start_pos = pos.
-    fn make_tok(&mut self, kind: TokenKind<'src>) -> Token<'src> {
+    /// Pushes a new token with given kind and source range of `tok_start_pos`..`pos`
+    /// to `tokens`, then sets `tok_start_pos` to `pos`.
+    fn push(&mut self, kind: TokenKind<'src>) {
         let range = self.gr_range_to_src_range(self.tok_start_pos..self.pos);
         self.tok_start_pos = self.pos;
-        Token::new(kind, range)
+        self.tokens.push(Token::new(kind, range))
     }
 
-    // TODO: Lex one token at a time.
-    pub fn lex(&'src mut self) -> Result<Vec<Token<'src>>, Error> {
+    pub fn lex(mut self) -> Result<Vec<Token<'src>>, Error> {
         let special_escape_characters = {
             let mut map = HashMap::new();
             map.insert('n', '\n');
@@ -112,8 +117,6 @@ impl<'src> Lexer<'src> {
             map.insert('\\', '\\');
             map
         };
-
-        let mut result = Vec::new();
 
         // This was in the old lexer, but I don't know why?
         while self.has_chars() {
@@ -132,7 +135,7 @@ impl<'src> Lexer<'src> {
         loop {
             // EOF.
             if self.pos == self.gr.len() { 
-                result.push(self.make_tok(TokenKind::Eof));
+                self.push(TokenKind::Eof);
                 break;
             }
 
@@ -142,7 +145,7 @@ impl<'src> Lexer<'src> {
                 found_tok = true;
                 self.pos += 1; 
             }
-            if found_tok { result.push(self.make_tok(TokenKind::Newline)); }
+            if found_tok { self.push(TokenKind::Newline); }
 
             // Whitespace.
             found_tok = false;
@@ -150,7 +153,7 @@ impl<'src> Lexer<'src> {
                 found_tok = true;
                 self.pos += 1;
             }
-            if found_tok { result.push(self.make_tok(TokenKind::Whitespace)); }
+            if found_tok { self.push(TokenKind::Whitespace); }
 
             // Single-line comments.
             if self.is_str("//") {
@@ -158,7 +161,7 @@ impl<'src> Lexer<'src> {
                 while self.has_chars() && !self.is_newline() {
                     self.pos += 1;
                 }
-                result.push(self.make_tok(TokenKind::SingleLineComment));
+                self.push(TokenKind::SingleLineComment);
             }
 
             // Multi-line comments.
@@ -191,10 +194,59 @@ impl<'src> Lexer<'src> {
                         )
                     );
                 }
-                result.push(self.make_tok(TokenKind::MultiLineComment));
+                self.push(TokenKind::MultiLineComment);
             }
+
+            macro_rules! lex_symbols {
+                ($($kind: ident $symbol: expr)+) => {
+                    if false {}
+                    $(
+                        else if self.is_str($symbol) {
+                            if $symbol == "/" {
+                                println!("range: {:?}", self.gr_range_to_src_range(self.tok_start_pos..self.pos));
+                            }
+                            self.pos += UnicodeSegmentation::graphemes($symbol, true).count();
+                            self.push(TokenKind::$kind);
+                        }
+                    )+
+                }
+            }
+            lex_symbols!(
+                Colon               ":"
+                Comma               ","
+                LeftParen           "("
+                RightParen          ")"
+                LeftCurly           "{"
+                RightCurly          "}"
+                Dot                 "."
+
+                AddAssign           "+="
+                SubAssign           "-="
+                MultAssign          "*="
+                DivAssign           "/="
+                ModAssign           "%="
+                BitwiseOrAssign     "|="
+                BitwiseAndAssign    "&="
+                Add                 "+"
+                Sub                 "-"
+                Asterisk            "*"
+                Div                 "/"
+                Mod                 "%"
+                Equal               "=="
+                NotEqual            "!="
+                LTE                 "<="
+                LT                  "<"
+                GTE                 ">="
+                GT                  ">"
+                LogicalOr           "||"
+                LogicalAnd          "&&"
+                LogicalNot          "!"
+                Assign              "="
+                Ampersand           "&"
+                Pipe                "|"
+            );
         }
 
-        Ok(result)
+        Ok(self.tokens)
     }
 }
