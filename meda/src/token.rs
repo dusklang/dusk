@@ -65,6 +65,7 @@ pub enum TokenKind<'src> {
     Pipe,
 }
 
+#[derive(Debug)]
 pub struct Token<'src> {
     pub kind: TokenKind<'src>,
     pub range: SourceRange,

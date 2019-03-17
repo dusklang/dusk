@@ -1,18 +1,20 @@
+use std::borrow::Cow;
+
 use crate::source_info::{SourceFile, SourceRange};
 
-struct ErrorRange {
+struct ErrorRange{
     range: SourceRange,
-    message: String
+    message: Cow<'static, str>,
 }
 
 pub struct Error {
-    message: String,
+    message: Cow<'static, str>,
     primary_range: ErrorRange,
-    secondary_ranges: Vec<ErrorRange>
+    secondary_ranges: Vec<ErrorRange>,
 }
 
 impl Error {
-    pub fn new(message: impl Into<String>, primary_range: SourceRange, primary_message: impl Into<String>) -> Error {
+    pub fn new(message: impl Into<Cow<'static, str>>, primary_range: SourceRange, primary_message: impl Into<Cow<'static, str>>) -> Error {
         Error {
             message: message.into(),
             primary_range: ErrorRange {
@@ -23,7 +25,7 @@ impl Error {
         }
     }
 
-    pub fn range(&mut self, range: SourceRange, message: impl Into<String>) -> &mut Error {
+    pub fn range(&mut self, range: SourceRange, message: impl Into<Cow<'static, str>>) -> &mut Error {
         self.secondary_ranges.push(
             ErrorRange {
                 range,
@@ -33,7 +35,7 @@ impl Error {
         self
     }
 
-    pub fn report(&mut self, file: &SourceFile) -> ! {
+    pub fn report(&self, file: &SourceFile) -> ! {
         print!("\033[31merror: {}", &self.message);
         panic!("Compilation terminated with error.");
     }

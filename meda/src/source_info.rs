@@ -3,7 +3,7 @@ use std::cmp::{min, max};
 use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 
-pub type SourceRange = Range<u32>;
+pub type SourceRange = Range<usize>;
 
 pub fn concat(a: SourceRange, b: SourceRange) -> SourceRange {
     min(a.start, b.start)..max(a.end, b.end)
@@ -11,16 +11,16 @@ pub fn concat(a: SourceRange, b: SourceRange) -> SourceRange {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LineRange {
-    pub start_column: u32,
-    pub end_column: u32,
-    pub line: u32,
+    pub start_column: usize,
+    pub end_column: usize,
+    pub line: usize,
 }
 
 pub struct SourceFile {
     pub name: String,
     pub src: String,
     /// The starting position of each line.
-    pub lines: Vec<u32>,
+    pub lines: Vec<usize>,
 }
 
 impl SourceFile {
@@ -33,15 +33,14 @@ impl SourceFile {
     }
 
     pub fn substring_from_range(&self, range: SourceRange) -> &str {
-        let slice = &self.src.as_bytes()[(range.start as usize)..(range.end as usize)];
+        let slice = &self.src.as_bytes()[range];
         str::from_utf8(slice).unwrap()
     }
 
-    pub fn substring_from_line(&self, line: u32) -> &str {
-        let line = line as usize;
+    pub fn substring_from_line(&self, line: usize) -> &str {
         let start = self.lines[line];
         let end = if line == self.lines.len() - 1 {
-            self.src.len() as u32
+            self.src.len()
         } else {
             self.lines[line + 1]
         };
@@ -49,15 +48,12 @@ impl SourceFile {
     }
 
     pub fn lines_in_range(&self, range: SourceRange) -> Vec<LineRange> {
-        let range = (range.start as usize)..(range.end as usize);
         let mut result = Vec::new();
         for (i, &line_start) in self.lines.iter().enumerate() {
-            let line_start = line_start as usize;
-
             let line_end = if i == self.lines.len() - 1 {
                 self.src.len()
             } else {
-                self.lines[i + 1] as usize
+                self.lines[i + 1]
             };
 
             let mut start_column = 0;
@@ -77,9 +73,9 @@ impl SourceFile {
             }
 
             result.push(LineRange { 
-                start_column: start_column as u32,
-                end_column: end_column as u32,
-                line: i as u32,
+                start_column: start_column,
+                end_column: end_column,
+                line: i,
             });
         }
         result
