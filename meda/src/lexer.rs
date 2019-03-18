@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::ops::Range;
-use unicode_segmentation::{UnicodeSegmentation, GraphemeIndices};
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::token::{Token, TokenKind};
 use crate::source_info::SourceRange;
