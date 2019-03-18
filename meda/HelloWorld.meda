@@ -1,3 +1,6 @@
 fn main {
-    var := 30..member_reference2
+    var := 30..member_reference2 "hi there! this \5 is a totally invalid string! \6
 }
+/* /* */
+
+joy_to_the_world("the", "lord", is + come)

@@ -7,14 +7,16 @@ use std::fs;
 
 fn main() {
     let contents = fs::read_to_string("HelloWorld.meda")
-        .expect("Something went wrong reading the file");
+        .expect("unable to read input file");
     let mut file = source_info::SourceFile::new(
         String::from("HelloWorld.meda"), 
         contents
     );
-    let mut lexer = lexer::Lexer::new(&file.src, &mut file.lines);
-    match lexer.lex() {
-        Ok(tokens) => println!("{:#?}", &tokens),
-        Err(error) => error.report(&file),
-    };
+    let (toks, errs) = lexer::lex(&file.src, &mut file.lines);
+    println!("Tokens:"); 
+    println!("{:#?}", &toks);
+    for err in &errs { err.report(&mut file); }
+    if !errs.is_empty() {
+        println!("\n\u{001B}[31mcompilation failed due to previous {} errors\u{001B}[0m", errs.len());
+    }
 }
