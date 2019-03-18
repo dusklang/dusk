@@ -1,8 +1,10 @@
 use crate::source_info::SourceRange;
 
 #[derive(Debug)]
-pub enum TokenKind<'src> {
-    Ident(&'src str),
+pub enum TokenKind {
+    // TODO: Interning!
+    Ident(String),
+
     IntLit(u64),
     DecLit(f64),
     StrLit(String),
@@ -16,9 +18,7 @@ pub enum TokenKind<'src> {
     MultiLineComment,
 
     // Keywords
-    Def,
-    Var,
-    Extern,
+    Fn,
     Return,
     True,
     False,
@@ -66,13 +66,13 @@ pub enum TokenKind<'src> {
 }
 
 #[derive(Debug)]
-pub struct Token<'src> {
-    pub kind: TokenKind<'src>,
+pub struct Token {
+    pub kind: TokenKind,
     pub range: SourceRange,
 }
 
-impl<'src> Token<'src> {
-    pub fn new(kind: TokenKind<'src>, range: SourceRange) -> Token<'src> {
+impl Token {
+    pub fn new(kind: TokenKind, range: SourceRange) -> Token {
         Self { kind, range }
     }
 

@@ -12,7 +12,7 @@ pub struct Lexer<'src> {
     pos: usize,
     tok_start_pos: usize,
     lines: &'src mut Vec<usize>,
-    tokens: Vec<Token<'src>>,
+    tokens: Vec<Token>,
 }
 
 impl<'src> Lexer<'src> {
@@ -102,13 +102,13 @@ impl<'src> Lexer<'src> {
 
     /// Pushes a new token with given kind and source range of `tok_start_pos`..`pos`
     /// to `tokens`, then sets `tok_start_pos` to `pos`.
-    fn push(&mut self, kind: TokenKind<'src>) {
+    fn push(&mut self, kind: TokenKind) {
         let range = self.gr_range_to_src_range(self.tok_start_pos..self.pos);
         self.tok_start_pos = self.pos;
         self.tokens.push(Token::new(kind, range))
     }
 
-    pub fn lex(mut self) -> Result<Vec<Token<'src>>, Error> {
+    pub fn lex(mut self) -> Result<Vec<Token>, Error> {
         let special_escape_characters = {
             let mut map = HashMap::new();
             map.insert("n", "\n");
@@ -196,8 +196,7 @@ impl<'src> Lexer<'src> {
                 }
                 self.push(TokenKind::MultiLineComment);
             }
-
-            macro_rules! lex_symbols {
+            macro_rules! match_tokens {
                 ($($kind: ident $symbol: expr)+) => {
                     if false {}
                     $(
@@ -211,7 +210,7 @@ impl<'src> Lexer<'src> {
                     )+
                 }
             }
-            lex_symbols!(
+            match_tokens!(
                 Colon               ":"
                 Comma               ","
                 LeftParen           "("
@@ -245,7 +244,6 @@ impl<'src> Lexer<'src> {
                 Ampersand           "&"
                 Pipe                "|"
             );
-
             // String and character literals.
             if self.is('"') {
                 self.pos += 1;
@@ -302,7 +300,64 @@ impl<'src> Lexer<'src> {
                     );
                 }
             }
+            // Identifiers and keywords.
+            let mut text = String::new();
+            if self.has_chars() && (self.is_letter() || self.is('_')) {
+                loop {
+                    text += self.cur();
+                    self.pos += 1;
+
+                    if !self.has_chars() || (!self.is_letter() && !self.is('_') && !self.is_num()) {
+                        break;
+                    }
+                }
+
+                use TokenKind::*;
+                let kind = match &*text {
+                    "fn" => Fn,
+                    "return" => Return,
+                    "true" => True,
+                    "false" => False,
+                    "if" => If,
+                    "else" => Else,
+                    "while" => While,
+                    "as" => As,
+                    "struct" => Struct,
+                    "do" => Do,
+                    _ => Ident(text),
+                };
+                self.push(kind);
+            }
+            // Integer and decimal literals.
+            if self.has_chars() && self.is_num() {
+                let mut has_dot = false;
+                loop {
+                    // TODO: When the char after the '.' is not a number,
+                    // we should output the '.' as its own token so something
+                    // like 5.member would work. Not a priority right now though,
+                    // obviously.
+                    if self.is('.') {
+                        if has_dot {
+                            break;
+                        } else {
+                            has_dot = true;
+                        }
+                    }
+                    if !self.has_chars() || (!self.is_num() && !self.is('.')) {
+                        break;
+                    }
+                    self.pos += 1;
+                }
+
+                let lit = &self.src[self.gr_range_to_src_range(self.tok_start_pos..self.pos)];
+                if has_dot {
+                    self.push(TokenKind::DecLit(lit.parse().unwrap()));
+                } else {
+                    self.push(TokenKind::IntLit(lit.parse().unwrap()));
+                }
+            }
         }
+
 
         Ok(self.tokens)
     }
