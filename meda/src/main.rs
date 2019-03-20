@@ -12,9 +12,9 @@ fn main() {
         String::from("HelloWorld.meda"), 
         contents
     );
-    let (toks, errs) = lexer::lex(&file.src, &mut file.lines);
+    let (tok_tree, errs) = lexer::lex(&file.src, &mut file.lines);
     println!("Tokens:"); 
-    println!("{:#?}", &toks);
+    println!("{:#?}", &tok_tree);
     for err in &errs { err.report(&mut file); }
     if !errs.is_empty() {
         println!("\n\u{001B}[31mcompilation failed due to previous {} errors\u{001B}[0m", errs.len());

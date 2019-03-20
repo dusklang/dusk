@@ -1,6 +1,7 @@
 fn main {
-    var := 30..member_reference2 "hi there! this \5 is a totally invalid string! \6
+    if hello {
+        doSomething("with this string")
+    } else {
+        doSomethingElse
+    }
 }
-/* /* */
-
-joy_to_the_world("the", "lord", is + come)

@@ -2,9 +2,14 @@ use std::collections::HashMap;
 use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::token::{Token, TokenKind};
+use crate::token::{Token, TokenKind, TokenTree};
 use crate::source_info::SourceRange;
 use crate::error::Error;
+
+struct InsertionState {
+    scope: usize,
+    start_pos: usize,
+}
 
 struct Lexer<'src> {
     src: &'src str,
@@ -12,7 +17,8 @@ struct Lexer<'src> {
     pos: usize,
     tok_start_pos: usize,
     lines: &'src mut Vec<usize>,
-    tokens: Vec<Token>,
+    token_tree: TokenTree,
+    insertion_stack: Vec<InsertionState>,
 }
 
 impl<'src> Lexer<'src> {
@@ -90,15 +96,16 @@ impl<'src> Lexer<'src> {
     }
 
     /// Pushes a new token with given kind and source range of `tok_start_pos`..`pos`
-    /// to `tokens`, then sets `tok_start_pos` to `pos`.
+    /// to token tree, then sets `tok_start_pos` to `pos`.
     fn push(&mut self, kind: TokenKind) {
         let range = self.gr_range_to_src_range(self.tok_start_pos..self.pos);
         self.tok_start_pos = self.pos;
-        self.tokens.push(Token::new(kind, range))
+        self.token_tree.scopes[self.insertion_stack.last().unwrap().scope]
+            .push(Token::new(kind, range));
     }
 }
 
-pub fn lex<'src>(src: &'src str, lines: &'src mut Vec<usize>) -> (Vec<Token>, Vec<Error>) {
+pub fn lex<'src>(src: &'src str, lines: &'src mut Vec<usize>) -> (TokenTree, Vec<Error>) {
     let special_escape_characters = {
         let mut map = HashMap::new();
         map.insert("n", "\n");
@@ -114,7 +121,8 @@ pub fn lex<'src>(src: &'src str, lines: &'src mut Vec<usize>) -> (Vec<Token>, Ve
         pos: 0,
         tok_start_pos: 0,
         lines,
-        tokens: Vec::new(),
+        token_tree: TokenTree::new(),
+        insertion_stack: vec![InsertionState { scope: 0, start_pos: 0 }],
     };
     
     let mut errs = Vec::new();
@@ -133,9 +141,21 @@ pub fn lex<'src>(src: &'src str, lines: &'src mut Vec<usize>) -> (Vec<Token>, Ve
     }
     l.pos = 0;
 
+    let mut prev_open_curly = None;
+
     loop {
         // EOF.
-        if l.pos == l.gr.len() { 
+        if l.pos == l.gr.len() {
+            if l.insertion_stack.len() > 1 {
+                let prev_open_curly = prev_open_curly.unwrap();
+                errs.push(
+                    Error::new("unclosed curly brace")
+                        .adding_primary_range(
+                            l.gr_range_to_src_range(prev_open_curly..(prev_open_curly + 1)), 
+                            "previous open curly brace here"
+                        )
+                );
+            }
             l.push(TokenKind::Eof);
             break;
         }
@@ -236,8 +256,6 @@ pub fn lex<'src>(src: &'src str, lines: &'src mut Vec<usize>) -> (Vec<Token>, Ve
             Comma               ","
             LeftParen           "("
             RightParen          ")"
-            LeftCurly           "{"
-            RightCurly          "}"
             Dot                 "."
 
             AddAssign           "+="
@@ -265,6 +283,36 @@ pub fn lex<'src>(src: &'src str, lines: &'src mut Vec<usize>) -> (Vec<Token>, Ve
             Ampersand           "&"
             Pipe                "|"
         );
+
+        // Scopes.
+        if l.is('{') {
+            l.insertion_stack.push(InsertionState {
+                scope: l.token_tree.scopes.len(),
+                start_pos: l.pos
+            });
+            prev_open_curly = Some(l.pos);
+            l.pos += 1;
+            l.tok_start_pos = l.pos;
+            l.token_tree.scopes.push(Vec::new());
+        }
+        if l.is('}') {
+            if l.insertion_stack.len() <= 1 {
+                let mut err = Error::new("unmatched '}'")
+                    .adding_primary_range(l.gr_range_to_src_range(l.pos..(l.pos + 1)), "no matching '{'");
+                if let Some(prev_open_curly) = prev_open_curly {
+                    err.add_primary_range(l.gr_range_to_src_range(prev_open_curly..(prev_open_curly + 1)), "previous '{' here");
+                }
+                errs.push(err);
+            } else {
+                let scope = l.insertion_stack.pop().unwrap();
+                l.tok_start_pos = scope.start_pos;
+                l.push(
+                    TokenKind::Scope(scope.scope)
+                );
+            }
+            l.pos += 1;
+        }
+
         // String and character literals.
         if l.is('"') {
             l.pos += 1;
@@ -388,5 +436,5 @@ pub fn lex<'src>(src: &'src str, lines: &'src mut Vec<usize>) -> (Vec<Token>, Ve
         }
     }
 
-    (l.tokens, errs)
+    (l.token_tree, errs)
 }

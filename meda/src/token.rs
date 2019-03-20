@@ -9,6 +9,7 @@ pub enum TokenKind {
     DecLit(f64),
     StrLit(String),
     CharLit(u8),
+    Scope(usize),
 
     // Special
     Eof,
@@ -34,8 +35,6 @@ pub enum TokenKind {
     Comma,
     LeftParen,
     RightParen,
-    LeftCurly,
-    RightCurly,
     Dot,
 
     // Operators
@@ -71,6 +70,11 @@ pub struct Token {
     pub range: SourceRange,
 }
 
+#[derive(Debug)]
+pub struct TokenTree {
+    pub scopes: Vec<Vec<Token>>,
+}
+
 impl Token {
     pub fn new(kind: TokenKind, range: SourceRange) -> Token {
         Self { kind, range }
@@ -85,4 +89,12 @@ impl Token {
     }
 
     pub fn is_significant(&self) -> bool { !self.is_insignificant() }
+}
+
+impl TokenTree {
+    pub fn new() -> TokenTree {
+        TokenTree {
+            scopes: vec![Vec::new()],
+        }
+    }
 }
