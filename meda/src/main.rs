@@ -3,6 +3,7 @@ mod token;
 mod source_info;
 mod error;
 mod hir;
+mod parser;
 
 use std::fs;
 

@@ -65,24 +65,34 @@ pub enum TokenKind {
 }
 
 #[derive(Debug)]
-pub struct Token {
-    pub kind: TokenKind,
-    pub range: SourceRange,
+pub struct TokenVec {
+    pub kinds: Vec<TokenKind>,
+    pub ranges: Vec<SourceRange>,
 }
 
 #[derive(Debug)]
 pub struct TokenTree {
-    pub scopes: Vec<Vec<Token>>,
+    pub scopes: Vec<TokenVec>,
 }
 
-impl Token {
-    pub fn new(kind: TokenKind, range: SourceRange) -> Token {
-        Self { kind, range }
+impl TokenVec {
+    pub fn new() -> Self {
+        Self {
+            kinds: Vec::new(),
+            ranges: Vec::new(),
+        }
     }
 
+    pub fn push(&mut self, kind: TokenKind, range: SourceRange) {
+        self.kinds.push(kind);
+        self.ranges.push(range);
+    }
+}
+
+impl TokenKind {
     pub fn is_insignificant(&self) -> bool {
         use TokenKind::*;
-        match self.kind {
+        match self {
             Whitespace | SingleLineComment | MultiLineComment | Newline => true,
             _ => false,
         }
@@ -94,7 +104,7 @@ impl Token {
 impl TokenTree {
     pub fn new() -> TokenTree {
         TokenTree {
-            scopes: vec![Vec::new()],
+            scopes: vec![TokenVec::new()],
         }
     }
 }

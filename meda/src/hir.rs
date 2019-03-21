@@ -54,7 +54,7 @@ impl Builder {
         }
     }
 
-    pub fn intLit(&mut self, lit: u64) -> ExprID {
+    pub fn int_lit(&mut self, lit: u64) -> ExprID {
         let id = self.levels.len();
         self.levels.push(0);
         self.expressions.first_mut().unwrap()
@@ -66,7 +66,7 @@ impl Builder {
         id
     }
 
-    pub fn decLit(&mut self, lit: f64) -> ExprID {
+    pub fn dec_lit(&mut self, lit: f64) -> ExprID {
         let id = self.levels.len();
         self.levels.push(0);
         self.expressions.first_mut().unwrap()
@@ -78,7 +78,7 @@ impl Builder {
         id
     }
 
-    pub fn binOp(&mut self, op: BinOp, lhs: ExprID, rhs: ExprID) -> ExprID {
+    pub fn bin_op(&mut self, op: BinOp, lhs: ExprID, rhs: ExprID) -> ExprID {
         let id = self.levels.len();
         let level = max(self.levels[lhs], self.levels[rhs]);
         self.levels.push(level);

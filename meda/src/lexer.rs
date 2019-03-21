@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::token::{Token, TokenKind, TokenTree};
+use crate::token::{TokenVec, TokenKind, TokenTree};
 use crate::source_info::SourceRange;
 use crate::error::Error;
 
@@ -101,7 +101,7 @@ impl<'src> Lexer<'src> {
         let range = self.gr_range_to_src_range(self.tok_start_pos..self.pos);
         self.tok_start_pos = self.pos;
         self.token_tree.scopes[self.insertion_stack.last().unwrap().scope]
-            .push(Token::new(kind, range));
+            .push(kind, range);
     }
 }
 
@@ -293,7 +293,7 @@ pub fn lex<'src>(src: &'src str, lines: &'src mut Vec<usize>) -> (TokenTree, Vec
             prev_open_curly = Some(l.pos);
             l.pos += 1;
             l.tok_start_pos = l.pos;
-            l.token_tree.scopes.push(Vec::new());
+            l.token_tree.scopes.push(TokenVec::new());
         }
         if l.is('}') {
             if l.insertion_stack.len() <= 1 {
