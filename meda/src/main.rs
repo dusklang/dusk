@@ -2,6 +2,7 @@ mod lexer;
 mod token;
 mod source_info;
 mod error;
+mod hir;
 
 use std::fs;
 
