@@ -4,6 +4,7 @@ mod source_info;
 mod error;
 mod hir;
 mod parser;
+mod mir;
 
 use std::fs;
 
