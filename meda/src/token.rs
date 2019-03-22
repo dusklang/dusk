@@ -36,6 +36,8 @@ pub enum TokenKind {
     LeftParen,
     RightParen,
     Dot,
+    OpenCurly,
+    CloseCurly,
 
     // Operators
     AddAssign,
@@ -70,9 +72,9 @@ pub struct TokenVec {
     pub ranges: Vec<SourceRange>,
 }
 
-#[derive(Debug)]
-pub struct TokenTree {
-    pub scopes: Vec<TokenVec>,
+pub struct Token<'a> {
+    pub kind: &'a TokenKind,
+    pub range: &'a SourceRange,
 }
 
 impl TokenVec {
@@ -87,6 +89,13 @@ impl TokenVec {
         self.kinds.push(kind);
         self.ranges.push(range);
     }
+
+    pub fn at(&self, i: usize) -> Token {
+        Token {
+            kind: &self.kinds[i],
+            range: &self.ranges[i],
+        }
+    }
 }
 
 impl TokenKind {
@@ -99,12 +108,4 @@ impl TokenKind {
     }
 
     pub fn is_significant(&self) -> bool { !self.is_insignificant() }
-}
-
-impl TokenTree {
-    pub fn new() -> TokenTree {
-        TokenTree {
-            scopes: vec![TokenVec::new()],
-        }
-    }
 }

@@ -1,7 +1,4 @@
-fn main {
-    if hello {
-        doSomething("with this string")
-    } else {
-        doSomethingElse
-    }
-}
+5 + 2 + 12 - 3 == 7
+7 + 8 - 12 
+23
+5 - 12
