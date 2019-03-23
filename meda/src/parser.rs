@@ -106,31 +106,30 @@ impl Parser {
         let mut op_stack: Vec<BinOp> = Vec::new();
         expr_stack.push(self.parse_term());
 
-        loop {
-            if let Some(op) = self.parse_binary_operator() {
-                self.next();
-                while let Some(other_op) = op_stack.last() {
-                    if other_op.precedence() > op.precedence() {
-                        break;
-                    }
-
-                    let rhs = expr_stack.pop().unwrap();
-                    let lhs = expr_stack.pop().unwrap();
-                    let next_op = op_stack.pop().unwrap();
-                    expr_stack.push(self.builder.bin_op(next_op, lhs, rhs));
-                }
-                op_stack.push(op);
-                expr_stack.push(self.parse_term());
-            } else {
-                break;
+        // It's kind of silly that this is a macro, but I'm not aware of any other
+        // way to do it without upsetting the borrow checker?
+        macro_rules! pop_stacks {
+            () => {
+                let rhs = expr_stack.pop().unwrap();
+                let lhs = expr_stack.pop().unwrap();
+                let next_op = op_stack.pop().unwrap();
+                expr_stack.push(self.builder.bin_op(next_op, lhs, rhs));
             }
         }
-        while !op_stack.is_empty() {
-            let rhs = expr_stack.pop().unwrap();
-            let lhs = expr_stack.pop().unwrap();
-            let next_op = op_stack.pop().unwrap();
-            expr_stack.push(self.builder.bin_op(next_op, lhs, rhs));
+
+        while let Some(op) = self.parse_binary_operator() {
+            self.next();
+            while let Some(other_op) = op_stack.last() {
+                if other_op.precedence() > op.precedence() {
+                    break;
+                }
+
+                pop_stacks!();
+            }
+            op_stack.push(op);
+            expr_stack.push(self.parse_term());
         }
+        while !op_stack.is_empty() { pop_stacks!(); }
 
         expr_stack.pop().unwrap()
     }

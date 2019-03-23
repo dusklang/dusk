@@ -35,6 +35,15 @@ pub struct TypeVar {
     pub ty: Type,
 }
 
+impl TypeVar {
+    pub fn new(location: usize, ty: Type) -> Self {
+        Self {
+            locations: vec![location],
+            ty,
+        }
+    }
+}
+
 impl Default for Type {
     fn default() -> Self {
         Self {

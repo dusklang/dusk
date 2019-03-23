@@ -5,6 +5,7 @@ mod error;
 mod hir;
 mod parser;
 mod mir;
+mod type_checker;
 
 use std::fs;
 
@@ -24,7 +25,7 @@ fn main() {
     println!("HIR:");
     println!("{:#?}", &hir);
 
-    for err in &errs { err.report(&mut file); }
+    for err in &errs { err.report(&file); }
     if !errs.is_empty() {
         println!("\n\u{001B}[31mcompilation failed due to previous {} errors\u{001B}[0m", errs.len());
     }

@@ -60,7 +60,7 @@ impl Builder {
         self.expressions.first_mut().unwrap().push(
             Expr {
                 kind: ExprKind::IntLit,
-                id: id,
+                id,
             }
         );
 
@@ -73,7 +73,7 @@ impl Builder {
         self.expressions.first_mut().unwrap().push(
             Expr {
                 kind: ExprKind::DecLit,
-                id: id,
+                id,
             }
         );
 
@@ -91,7 +91,7 @@ impl Builder {
         self.expressions[level].push(
             Expr {
                 kind: ExprKind::BinOp { op, lhs, rhs },
-                id: id,
+                id,
             }
         );
 

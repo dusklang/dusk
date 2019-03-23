@@ -1,7 +1,6 @@
 use std::str;
 use std::cmp::{min, max};
 use std::ops::Range;
-use unicode_segmentation::UnicodeSegmentation;
 
 pub type SourceRange = Range<usize>;
 
@@ -73,8 +72,8 @@ impl SourceFile {
             }
 
             result.push(LineRange { 
-                start_column: start_column,
-                end_column: end_column,
+                start_column,
+                end_column,
                 line: i,
             });
         }

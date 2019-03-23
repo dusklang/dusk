@@ -61,10 +61,7 @@ impl<'src> Lexer<'src> {
     fn is_letter(&self) -> bool {
         let mut chars = self.cur().chars();
         if let Some(character) = chars.next() {
-            if let Some(_) = chars.next() { false }
-            else {
-                character.is_alphabetic()
-            }
+            chars.next().is_none() && character.is_alphabetic()
         } else {
             false
         }
@@ -74,10 +71,7 @@ impl<'src> Lexer<'src> {
     fn is_num(&self) -> bool {
         let mut chars = self.cur().chars();
         if let Some(character) = chars.next() {
-            if let Some(_) = chars.next() { false }
-            else {
-                character.is_numeric()
-            }
+            chars.next().is_none() && character.is_numeric()
         } else {
             false
         }
@@ -138,6 +132,13 @@ impl<'src> Lexer<'src> {
         }
         l.pos = 0;
 
+        // TODO: This loop would likely be an excellent candidate for conversion to a finite
+        // state machine. However, implementing it in the obvious Rusty way (a state variable and a
+        // loop that matches over and mutates it) would unnecessarily pessimize performance
+        // because--save for heroic optimizations that rustc doesn't do--when we enter a state,
+        // we wouldn't be able to enter a tight loop. Instead we'd have to jump to the beginning
+        // of the match statement every time, thrashing the instruction cache and performing unnecessary
+        // checks.
         loop {
             // EOF.
             if l.pos == l.gr.len() {
@@ -287,7 +288,7 @@ impl<'src> Lexer<'src> {
                                 Error::new(
                                     format!("invalid escape character '{}'", l.cur())
                                 ).adding_primary_range(
-                                    l.pos..(l.pos + 1), 
+                                    l.pos .. (l.pos + 1), 
                                     "escaped here"
                                 )
                             );
