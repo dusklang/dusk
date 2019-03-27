@@ -46,7 +46,7 @@ impl Parser {
                 TokenKind::Add => BinOp::Add,
                 TokenKind::Sub => BinOp::Sub,
                 TokenKind::Asterisk => BinOp::Mult,
-                TokenKind::Div => BinOp::Mod,
+                TokenKind::Div => BinOp::Div,
                 TokenKind::Assign => BinOp::Assign,
                 TokenKind::AddAssign => BinOp::AddAssign,
                 TokenKind::SubAssign => BinOp::SubAssign,

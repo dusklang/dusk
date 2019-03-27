@@ -39,11 +39,13 @@ pub struct Program {
     /// Lists of expressions in the entire program, ordered by typechecking dependency
     pub expressions: Vec<Vec<Expr>>,
     pub num_expressions: usize,
+    pub num_operator_exprs: usize,
 }
 
 pub struct Builder {
     expressions: Vec<Vec<Expr>>,
     levels: Vec<usize>,
+    num_operator_exprs: usize,
 }
 
 impl Builder {
@@ -51,6 +53,7 @@ impl Builder {
         Self {
             expressions: vec![Vec::new()],
             levels: Vec::new(),
+            num_operator_exprs: 0,
         }
     }
 
@@ -83,7 +86,6 @@ impl Builder {
     pub fn bin_op(&mut self, op: BinOp, lhs: ExprID, rhs: ExprID) -> ExprID {
         let id = self.levels.len();
         let level = max(self.levels[lhs], self.levels[rhs]) + 1;
-        println!("Level is {}", level);
         self.levels.push(level);
         while self.expressions.len() < level + 1 {
             self.expressions.push(Vec::new());
@@ -94,6 +96,7 @@ impl Builder {
                 id,
             }
         );
+        self.num_operator_exprs += 1;
 
         id
     }
@@ -102,6 +105,7 @@ impl Builder {
         Program {
             expressions: self.expressions,
             num_expressions: self.levels.len(),
+            num_operator_exprs: self.num_operator_exprs,
         }
     }
 }

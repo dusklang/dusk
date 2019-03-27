@@ -7,13 +7,8 @@ struct Overload {
     ret_ty: Type,
 }
 
-struct OverloadConstraints {
-    param_tys: Vec<usize>,
-    ret_ty: usize,
-    viable_overloads: Vec<Overload>,
-}
-
-enum TypeConstraint {
+#[derive(Debug)]
+enum Constraint {
     IsIntLit,
     IsDecLit,
     OneOf(Vec<Type>),
@@ -34,69 +29,169 @@ struct TypeChecker {
     /// The type of each expression
     types: Vec<Type>,
     /// The constraints on each expression's type
-    constraints: Vec<Vec<TypeConstraint>>,
+    constraints: Vec<Vec<Constraint>>,
     /// The constraints on each function call or operator expression's overload choices
-    overload_constraints: Vec<OverloadConstraints>,
+    overloads: Vec<Vec<Overload>>,
     /// The selected overload for each function call or operator expression
-    overloads: Vec<Overload>,
+    selected_overloads: Vec<Overload>,
 }
 
-/*
+impl Overload {
+    fn bin_op(lhs_ty: Type, rhs_ty: Type, ret_ty: Type) -> Self {
+        Self {
+            param_tys: vec![lhs_ty, rhs_ty],
+            ret_ty
+        }
+    }
+}
+
+impl Default for Overload {
+    fn default() -> Self {
+        Self {
+            param_tys: Vec::new(),
+            ret_ty: Type::Error,
+        }
+    }
+}
+
 pub fn type_check(prog: Program) -> Vec<Error> {
     let mut tc = TypeChecker {
         prog,
         types: Vec::new(),
-        type_vars: Vec::new(),
+        constraints: Vec::new(),
+        overloads: Vec::new(),
+        selected_overloads: Vec::new(),
     };
     let mut errs = Vec::new();
     tc.types.resize_with(tc.prog.num_expressions, Default::default);
+    tc.constraints.resize_with(tc.prog.num_expressions, Default::default);
+    tc.overloads.resize_with(tc.prog.num_operator_exprs, Default::default);
+    tc.selected_overloads.resize_with(tc.prog.num_operator_exprs, Default::default);
 
-    for level in tc.prog.expressions {
+    for level in &tc.prog.expressions {
         for expr in level {
             use ExprKind::*;
             match expr.kind {
                 IntLit => {
-                    tc.types[expr.id] = Type {
-                        kind: TypeKind::IntVar,
-                        id: Some(tc.type_vars.len()),
-                    };
-                    tc.type_vars.push(TypeVar::new(expr.id, DEFAULT_INT_TY));
+                    tc.constraints[expr.id].push(Constraint::IsIntLit);
                 },
                 DecLit => {
-                    tc.types[expr.id] = Type {
-                        kind: TypeKind::FloatVar,
-                        id: Some(tc.type_vars.len()),
-                    };
-                    tc.type_vars.push(TypeVar::new(expr.id, DEFAULT_FLOAT_TY));
+                    tc.constraints[expr.id].push(Constraint::IsDecLit);
                 },
                 BinOp { op, lhs, rhs } => {
                     use crate::hir::BinOp::*;
-                    assert_ne!(lhs, rhs);
-                    assert!(lhs < tc.types.len() && rhs < tc.types.len());
-                    let buf = tc.types.as_mut_ptr();
-                    // This is safe because:
-                    //     - we asserted above that lhs and rhs are both in range
-                    //     - we asserted above that lhs are rhs are different indices
-                    //     - we know that tc.types outlives the scope of this function, and 
-                    //       will never grow
-                    // TODO: It would be nice to refactor the code to not require this pattern
-                    let (lhs_ty, rhs_ty) = unsafe { (&mut *buf.offset(lhs as isize), &*buf.offset(rhs as isize)) };
-                    macro_rules! both {
-                        
-                    }
-                    let ty = match op {
-                        Mult => match (&lhs_ty.kind, &rhs_ty.kind) {
-                            both!(TypeKind::Int { .. })
-                            both!(TypeKind::Float(_))
-                            //both!(TypeKind::IntVar) => 
-                            _ => Type::default(),
-                        },
-                        _ => Type::default(),
+
+                    let mut overloads = match op {
+                        Mult | Div | Mod | Add | Sub => vec![
+                            Overload::bin_op(Type::i8(), Type::i8(), Type::i8()),
+                            Overload::bin_op(Type::i16(), Type::i16(), Type::i16()),
+                            Overload::bin_op(Type::i32(), Type::i32(), Type::i32()),
+                            Overload::bin_op(Type::i64(), Type::i64(), Type::i64()),
+                            Overload::bin_op(Type::u8(), Type::u8(), Type::u8()),
+                            Overload::bin_op(Type::u16(), Type::u16(), Type::u16()),
+                            Overload::bin_op(Type::u32(), Type::u32(), Type::u32()),
+                            Overload::bin_op(Type::u64(), Type::u64(), Type::u64()),
+                            Overload::bin_op(Type::f32(), Type::f32(), Type::f32()),
+                            Overload::bin_op(Type::f64(), Type::f64(), Type::f64()),
+                        ],
+                        MultAssign | DivAssign | ModAssign | AddAssign | SubAssign => vec![
+                            Overload::bin_op(Type::i8(), Type::i8(), Type::Void),
+                            Overload::bin_op(Type::i16(), Type::i16(), Type::Void),
+                            Overload::bin_op(Type::i32(), Type::i32(), Type::Void),
+                            Overload::bin_op(Type::i64(), Type::i64(), Type::Void),
+                            Overload::bin_op(Type::u8(), Type::u8(), Type::Void),
+                            Overload::bin_op(Type::u16(), Type::u16(), Type::Void),
+                            Overload::bin_op(Type::u32(), Type::u32(), Type::Void),
+                            Overload::bin_op(Type::u64(), Type::u64(), Type::Void),
+                            Overload::bin_op(Type::f32(), Type::f32(), Type::Void),
+                            Overload::bin_op(Type::f64(), Type::f64(), Type::Void),
+                        ],
+                        Less | LessOrEq | Greater | GreaterOrEq => vec![
+                            Overload::bin_op(Type::i8(), Type::i8(), Type::Bool),
+                            Overload::bin_op(Type::i16(), Type::i16(), Type::Bool),
+                            Overload::bin_op(Type::i32(), Type::i32(), Type::Bool),
+                            Overload::bin_op(Type::i64(), Type::i64(), Type::Bool),
+                            Overload::bin_op(Type::u8(), Type::u8(), Type::Bool),
+                            Overload::bin_op(Type::u16(), Type::u16(), Type::Bool),
+                            Overload::bin_op(Type::u32(), Type::u32(), Type::Bool),
+                            Overload::bin_op(Type::u64(), Type::u64(), Type::Bool),
+                            Overload::bin_op(Type::f32(), Type::f32(), Type::Bool),
+                            Overload::bin_op(Type::f64(), Type::f64(), Type::Bool),
+                        ],
+                        Eq | NotEq => vec![
+                            Overload::bin_op(Type::i8(), Type::i8(), Type::Bool),
+                            Overload::bin_op(Type::i16(), Type::i16(), Type::Bool),
+                            Overload::bin_op(Type::i32(), Type::i32(), Type::Bool),
+                            Overload::bin_op(Type::i64(), Type::i64(), Type::Bool),
+                            Overload::bin_op(Type::u8(), Type::u8(), Type::Bool),
+                            Overload::bin_op(Type::u16(), Type::u16(), Type::Bool),
+                            Overload::bin_op(Type::u32(), Type::u32(), Type::Bool),
+                            Overload::bin_op(Type::u64(), Type::u64(), Type::Bool),
+                            Overload::bin_op(Type::f32(), Type::f32(), Type::Bool),
+                            Overload::bin_op(Type::f64(), Type::f64(), Type::Bool),
+                            Overload::bin_op(Type::Bool, Type::Bool, Type::Bool),
+                        ],
+                        BitwiseAnd | BitwiseOr => vec![
+                            Overload::bin_op(Type::i8(), Type::i8(), Type::i8()),
+                            Overload::bin_op(Type::i16(), Type::i16(), Type::i16()),
+                            Overload::bin_op(Type::i32(), Type::i32(), Type::i32()),
+                            Overload::bin_op(Type::i64(), Type::i64(), Type::i64()),
+                            Overload::bin_op(Type::u8(), Type::u8(), Type::u8()),
+                            Overload::bin_op(Type::u16(), Type::u16(), Type::u16()),
+                            Overload::bin_op(Type::u32(), Type::u32(), Type::u32()),
+                            Overload::bin_op(Type::u64(), Type::u64(), Type::u64()),
+                        ],
+                        BitwiseAndAssign | BitwiseOrAssign => vec![
+                            Overload::bin_op(Type::i8(), Type::i8(), Type::Void),
+                            Overload::bin_op(Type::i16(), Type::i16(), Type::Void),
+                            Overload::bin_op(Type::i32(), Type::i32(), Type::Void),
+                            Overload::bin_op(Type::i64(), Type::i64(), Type::Void),
+                            Overload::bin_op(Type::u8(), Type::u8(), Type::Void),
+                            Overload::bin_op(Type::u16(), Type::u16(), Type::Void),
+                            Overload::bin_op(Type::u32(), Type::u32(), Type::Void),
+                            Overload::bin_op(Type::u64(), Type::u64(), Type::Void),
+                        ],
+                        LogicalAnd | LogicalOr => vec![Overload::bin_op(Type::Bool, Type::Bool, Type::Bool)],
+                        Assign => vec![
+                            Overload::bin_op(Type::i8(), Type::i8(), Type::Void),
+                            Overload::bin_op(Type::i16(), Type::i16(), Type::Void),
+                            Overload::bin_op(Type::i32(), Type::i32(), Type::Void),
+                            Overload::bin_op(Type::i64(), Type::i64(), Type::Void),
+                            Overload::bin_op(Type::u8(), Type::u8(), Type::Void),
+                            Overload::bin_op(Type::u16(), Type::u16(), Type::Void),
+                            Overload::bin_op(Type::u32(), Type::u32(), Type::Void),
+                            Overload::bin_op(Type::u64(), Type::u64(), Type::Void),
+                            Overload::bin_op(Type::f32(), Type::f32(), Type::Void),
+                            Overload::bin_op(Type::f64(), Type::f64(), Type::Void),
+                            Overload::bin_op(Type::Bool, Type::Bool, Type::Void),
+                        ],
                     };
+
+                    overloads.retain(|overload| {
+                        for (constraints, ty) in [&tc.constraints[lhs], &tc.constraints[rhs]].iter().zip(&overload.param_tys) {
+                            for constraint in *constraints {
+                                match (constraint, ty) {
+                                    (Constraint::IsIntLit, x) if !x.expressible_by_int_lit()    => return false,
+                                    (Constraint::IsDecLit, x) if !x.expressible_by_dec_lit()    => return false,
+                                    (Constraint::OneOf(tys), x) if !tys.contains(x)             => return false,
+                                    (Constraint::ConvertibleTo(ty), x) if !x.convertible_to(ty) => return false,
+                                    (Constraint::Is(ty), x) if ty != x                          => return false,
+                                    _ => {},
+                                }
+                            }
+                        }
+                        true
+                    });
+
+                    tc.constraints[expr.id].push(
+                        Constraint::OneOf(
+                            overloads.iter().map(|overload| overload.ret_ty.clone()).collect()
+                        )
+                    );
                 }
             }
         }
     }
+    println!("Constraints: {:#?}", tc.constraints);
     errs
 }
-*/
