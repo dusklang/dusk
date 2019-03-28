@@ -167,8 +167,11 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                         ],
                     };
 
+                    // Filter overloads that don't match the constraints of the parameters.
                     overloads.retain(|overload| {
+                        // For each parameter:
                         for (constraints, ty) in [&tc.constraints[lhs], &tc.constraints[rhs]].iter().zip(&overload.param_tys) {
+                            // Verify all the constraints match the parameter type.
                             for constraint in *constraints {
                                 match (constraint, ty) {
                                     (Constraint::IsIntLit, x) if !x.expressible_by_int_lit()    => return false,
