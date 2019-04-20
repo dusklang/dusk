@@ -72,7 +72,6 @@ impl Parser {
 
     fn parse_term(&mut self) -> ExprID {
         use TokenKind::*;
-        println!("tok: {:#?}", self.cur().kind);
         match self.cur().kind {
             LeftParen => {
                 self.next();
@@ -87,13 +86,13 @@ impl Parser {
                 self.next();
                 expr
             },
-            IntLit(val) => {
-                let lit = self.builder.int_lit(*val);
+            &IntLit(val) => {
+                let lit = self.builder.int_lit(val);
                 self.next();
                 lit
             },
-            DecLit(val) => {
-                let lit = self.builder.dec_lit(*val);
+            &DecLit(val) => {
+                let lit = self.builder.dec_lit(val);
                 self.next();
                 lit
             },
@@ -136,9 +135,10 @@ impl Parser {
 
     fn parse_node(&mut self) {
         match self.cur().kind {
-            TokenKind::Ident(_) => {
+            TokenKind::Ident(name) => {
                 if let TokenKind::Colon = self.peek_next().kind {
-                    self.parse_decl();
+                    // TODO: Intern strings so we don't have to copy here
+                    self.parse_decl(name.clone());
                 } else {
                     self.parse_expr();
                 }
@@ -147,8 +147,23 @@ impl Parser {
         }
     }
 
-    fn parse_decl(&mut self) {
-        println!("parsing declaration!");
+    fn parse_decl(&mut self, name: String) {
+        // Skip to colon, get range.
+        let colon_range = self.next().range.clone();
+        let mutable = match self.next().kind {
+            TokenKind::Assign => true,
+            TokenKind::Colon => false,
+            _ => {
+                self.errs.push(
+                    Error::new("expected '=' or ':' after ':' when parsing declaration")
+                        .adding_primary_range(colon_range, "':' here")
+                );
+                true
+            }
+        };
+
+        self.next();
+        dbg!(self.parse_expr());
     }
 
     fn cur(&self) -> Token {
