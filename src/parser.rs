@@ -150,6 +150,7 @@ impl Parser {
     fn parse_decl(&mut self, name: String) {
         // Skip to colon, get range.
         let colon_range = self.next().range.clone();
+        let mut found_separator = true;
         let mutable = match self.next().kind {
             TokenKind::Assign => true,
             TokenKind::Colon => false,
@@ -158,11 +159,16 @@ impl Parser {
                     Error::new("expected '=' or ':' after ':' when parsing declaration")
                         .adding_primary_range(colon_range, "':' here")
                 );
+                found_separator = false;
+
                 true
             }
         };
 
-        self.next();
+        if found_separator {
+            self.next();
+        }
+
         dbg!(self.parse_expr());
     }
 
