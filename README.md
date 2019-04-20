@@ -1,7 +1,7 @@
-#Meda
+# Meda
 Meda is a systems programming language. Right now all I've got is a bunch of disorganized ideas about how it should be and the beginnings of an implementation.
 
-##Rich type system
+## Rich type system
 Must-haves:
 - Discriminated unions
 - Pattern matching
@@ -9,7 +9,7 @@ Must-haves:
 - Parametric polymorphism
 - Optional values in place of null pointers and sentinels
 
-##Arbitrary compile-time code execution
+## Arbitrary compile-time code execution
 I believe the benefits of this feature are obvious if you look at languages that have it, like D, Zig and Jai. Code introspection, code generation, and custom tools are examples of things made way better with compile-time code execution. However, I'd like to take the concept even further than those languages, by enabling users to write things like:
 - code optimizations
 - backends
@@ -18,7 +18,7 @@ I believe the benefits of this feature are obvious if you look at languages that
 
 There may also be implementation-related benefits to thinking of types as mere compile-time evaluated expressions.
 
-##Refinement types and/or typestate
+## Refinement types and/or typestate
 I'm not 100% sure about this yet, but I think it would be valuable for both expressivity and correctness to track statically-known information about values over time (at compile-time). For example, let's say we need to add 1 to a number, like so:
 ```
 fn addOne(n: u8): u8 {
