@@ -135,7 +135,20 @@ impl Parser {
     }
 
     fn parse_node(&mut self) {
-        self.parse_expr();
+        match self.cur().kind {
+            TokenKind::Ident(_) => {
+                if let TokenKind::Colon = self.peek_next().kind {
+                    self.parse_decl();
+                } else {
+                    self.parse_expr();
+                }
+            },
+            _ => { self.parse_expr(); }
+        }
+    }
+
+    fn parse_decl(&mut self) {
+        println!("parsing declaration!");
     }
 
     fn cur(&self) -> Token {
@@ -154,5 +167,15 @@ impl Parser {
                 return self.cur();
             }
         }
+    }
+
+    fn peek_next(&self) -> Token {
+        for i in (self.cur+1)..self.toks.len() {
+            let cur = self.toks.at(i);
+            if cur.kind.is_significant() {
+                return cur
+            }
+        }
+        panic!("No significant token found");
     }
 }

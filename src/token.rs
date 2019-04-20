@@ -72,6 +72,7 @@ pub struct TokenVec {
     pub ranges: Vec<SourceRange>,
 }
 
+#[derive(Debug)]
 pub struct Token<'a> {
     pub kind: &'a TokenKind,
     pub range: &'a SourceRange,
@@ -96,6 +97,8 @@ impl TokenVec {
             range: &self.ranges[i],
         }
     }
+
+    pub fn len(&self) -> usize { self.kinds.len() }
 }
 
 impl TokenKind {
