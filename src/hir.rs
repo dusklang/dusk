@@ -1,6 +1,6 @@
 use std::cmp::max;
 
-pub type ExprID = usize;
+pub type ItemId = usize;
 
 #[derive(Clone, Copy, Debug)]
 pub enum BinOp {
@@ -22,47 +22,53 @@ pub enum UnOp {
 }
 
 #[derive(Debug)]
-pub enum ExprKind {
+pub enum ItemKind {
     IntLit,
     DecLit,
-    BinOp { op: BinOp, lhs: ExprID, rhs: ExprID },
+    BinOp { op: BinOp, lhs: ItemId, rhs: ItemId },
 }
 
+/// An expression or declaration
 #[derive(Debug)]
-pub struct Expr {
-    pub kind: ExprKind,
-    pub id: ExprID,
+pub struct Item {
+    pub kind: ItemKind,
+    pub id: ItemId,
 }
 
 #[derive(Debug)]
 pub struct Program {
-    /// Lists of expressions in the entire program, ordered by typechecking dependency
-    pub expressions: Vec<Vec<Expr>>,
-    pub num_expressions: usize,
+    /// Lists of items in the entire program, ordered by typechecking dependency
+    pub items: Vec<Vec<Item>>,
+    /// Number of items in the entire program
+    pub num_items: usize,
+    /// Number of operator expressions in the entire program
     pub num_operator_exprs: usize,
 }
 
 pub struct Builder {
-    expressions: Vec<Vec<Expr>>,
+    /// Lists of items in the entire program so far, ordered by typechecking dependency
+    items: Vec<Vec<Item>>,
+    /// The levels of each item so far
     levels: Vec<usize>,
+    /// Number of operator expressions so far
     num_operator_exprs: usize,
 }
 
 impl Builder {
     pub fn new() -> Self {
         Self {
-            expressions: vec![Vec::new()],
+            items: vec![Vec::new()],
             levels: Vec::new(),
             num_operator_exprs: 0,
         }
     }
 
-    pub fn int_lit(&mut self, lit: u64) -> ExprID {
+    pub fn int_lit(&mut self, lit: u64) -> ItemId {
         let id = self.levels.len();
         self.levels.push(0);
-        self.expressions.first_mut().unwrap().push(
-            Expr {
-                kind: ExprKind::IntLit,
+        self.items.first_mut().unwrap().push(
+            Item {
+                kind: ItemKind::IntLit,
                 id,
             }
         );
@@ -70,12 +76,12 @@ impl Builder {
         id
     }
 
-    pub fn dec_lit(&mut self, lit: f64) -> ExprID {
+    pub fn dec_lit(&mut self, lit: f64) -> ItemId {
         let id = self.levels.len();
         self.levels.push(0);
-        self.expressions.first_mut().unwrap().push(
-            Expr {
-                kind: ExprKind::DecLit,
+        self.items.first_mut().unwrap().push(
+            Item {
+                kind: ItemKind::DecLit,
                 id,
             }
         );
@@ -83,16 +89,16 @@ impl Builder {
         id
     }
 
-    pub fn bin_op(&mut self, op: BinOp, lhs: ExprID, rhs: ExprID) -> ExprID {
+    pub fn bin_op(&mut self, op: BinOp, lhs: ItemId, rhs: ItemId) -> ItemId {
         let id = self.levels.len();
         let level = max(self.levels[lhs], self.levels[rhs]) + 1;
         self.levels.push(level);
-        while self.expressions.len() < level + 1 {
-            self.expressions.push(Vec::new());
+        while self.items.len() < level + 1 {
+            self.items.push(Vec::new());
         }
-        self.expressions[level].push(
-            Expr {
-                kind: ExprKind::BinOp { op, lhs, rhs },
+        self.items[level].push(
+            Item {
+                kind: ItemKind::BinOp { op, lhs, rhs },
                 id,
             }
         );
@@ -103,8 +109,8 @@ impl Builder {
 
     pub fn program(self) -> Program {
         Program {
-            expressions: self.expressions,
-            num_expressions: self.levels.len(),
+            items: self.items,
+            num_items: self.levels.len(),
             num_operator_exprs: self.num_operator_exprs,
         }
     }

@@ -1,5 +1,5 @@
 use crate::token::{TokenVec, TokenKind, Token};
-use crate::hir::{Program, Builder, ExprID, BinOp};
+use crate::hir::{Program, Builder, ItemId, BinOp};
 use crate::error::Error;
 use crate::source_info::SourceRange;
 
@@ -70,7 +70,7 @@ impl Parser {
         )
     }
 
-    fn parse_term(&mut self) -> ExprID {
+    fn parse_term(&mut self) -> ItemId {
         use TokenKind::*;
         match self.cur().kind {
             LeftParen => {
@@ -100,7 +100,7 @@ impl Parser {
         }
     }
 
-    fn parse_expr(&mut self) -> ExprID {
+    fn parse_expr(&mut self) -> ItemId {
         let mut expr_stack = Vec::new();
         let mut op_stack: Vec<BinOp> = Vec::new();
         expr_stack.push(self.parse_term());
@@ -138,7 +138,8 @@ impl Parser {
             TokenKind::Ident(name) => {
                 if let TokenKind::Colon = self.peek_next().kind {
                     // TODO: Intern strings so we don't have to copy here
-                    self.parse_decl(name.clone());
+                    let name = name.clone();
+                    self.parse_decl(name);
                 } else {
                     self.parse_expr();
                 }

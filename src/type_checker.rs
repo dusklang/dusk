@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::hir::{Program, ExprKind, BinOp};
+use crate::hir::{Program, ItemKind, BinOp};
 use crate::mir::{Type, IntWidth, FloatWidth};
 
 struct Overload {
@@ -26,9 +26,9 @@ const DEFAULT_FLOAT_TY: Type = Type::Float(FloatWidth::W64);
 struct TypeChecker {
     /// The input HIR program
     prog: Program,
-    /// The type of each expression
+    /// The type of each item
     types: Vec<Type>,
-    /// The constraints on each expression's type
+    /// The constraints on each items's type
     constraints: Vec<Vec<Constraint>>,
     /// The constraints on each function call or operator expression's overload choices
     overloads: Vec<Vec<Overload>>,
@@ -63,20 +63,20 @@ pub fn type_check(prog: Program) -> Vec<Error> {
         selected_overloads: Vec::new(),
     };
     let mut errs = Vec::new();
-    tc.types.resize_with(tc.prog.num_expressions, Default::default);
-    tc.constraints.resize_with(tc.prog.num_expressions, Default::default);
+    tc.types.resize_with(tc.prog.num_items, Default::default);
+    tc.constraints.resize_with(tc.prog.num_items, Default::default);
     tc.overloads.resize_with(tc.prog.num_operator_exprs, Default::default);
     tc.selected_overloads.resize_with(tc.prog.num_operator_exprs, Default::default);
 
-    for level in &tc.prog.expressions {
-        for expr in level {
-            use ExprKind::*;
-            match expr.kind {
+    for level in &tc.prog.items {
+        for item in level {
+            use ItemKind::*;
+            match item.kind {
                 IntLit => {
-                    tc.constraints[expr.id].push(Constraint::IsIntLit);
+                    tc.constraints[item.id].push(Constraint::IsIntLit);
                 },
                 DecLit => {
-                    tc.constraints[expr.id].push(Constraint::IsDecLit);
+                    tc.constraints[item.id].push(Constraint::IsDecLit);
                 },
                 BinOp { op, lhs, rhs } => {
                     use crate::hir::BinOp::*;
@@ -186,7 +186,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                         true
                     });
 
-                    tc.constraints[expr.id].push(
+                    tc.constraints[item.id].push(
                         Constraint::OneOf(
                             overloads.iter().map(|overload| overload.ret_ty.clone()).collect()
                         )
