@@ -13,7 +13,6 @@ enum Constraint {
     IsDecLit,
     OneOf(Vec<Type>),
     ConvertibleTo(Type),
-    Is(Type),
 }
 
 const DEFAULT_INT_TY: Type = Type::Int {
@@ -91,12 +90,11 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                                 types[0].clone()
                             },
                             ConvertibleTo(ref ty) => ty.clone(),
-                            Is(ref ty) => ty.clone() 
                         };
                     }
                     assert_ne!(guess, Type::Error);
 
-                    tc.constraints[item.id].push(Constraint::Is(guess));
+                    tc.constraints[item.id].push(Constraint::OneOf(vec![guess]));
                 }
                 &BinOp { op, lhs, rhs } => {
                     use crate::hir::BinOp::*;
@@ -198,7 +196,6 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                                     (Constraint::IsDecLit, x) if !x.expressible_by_dec_lit()    => return false,
                                     (Constraint::OneOf(tys), x) if !tys.contains(x)             => return false,
                                     (Constraint::ConvertibleTo(ty), x) if !x.convertible_to(ty) => return false,
-                                    (Constraint::Is(ty), x) if ty != x                          => return false,
                                     _ => {},
                                 }
                             }
