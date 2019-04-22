@@ -6,6 +6,7 @@ mod hir;
 mod parser;
 mod mir;
 mod type_checker;
+mod dependent_vec;
 
 use std::fs;
 

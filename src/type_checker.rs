@@ -68,8 +68,8 @@ pub fn type_check(prog: Program) -> Vec<Error> {
     tc.overloads.resize_with(tc.prog.num_operator_exprs, Default::default);
     tc.selected_overloads.resize_with(tc.prog.num_operator_exprs, Default::default);
 
-    for level in &tc.prog.items {
-        for item in level {
+    for level in tc.prog.items.levels() {
+        for item in tc.prog.items.get_level(level) {
             use ItemKind::*;
             match item.kind {
                 IntLit => {

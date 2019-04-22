@@ -1,4 +1,5 @@
 use std::cmp::max;
+use crate::dependent_vec::DependentVec;
 
 pub type ItemId = usize;
 
@@ -37,8 +38,8 @@ pub struct Item {
 
 #[derive(Debug)]
 pub struct Program {
-    /// Lists of items in the entire program, ordered by typechecking dependency
-    pub items: Vec<Vec<Item>>,
+    /// All the items in the entire program
+    pub items: DependentVec<Item>,
     /// Number of items in the entire program
     pub num_items: usize,
     /// Number of operator expressions in the entire program
@@ -46,10 +47,10 @@ pub struct Program {
 }
 
 pub struct Builder {
-    /// Lists of items in the entire program so far, ordered by typechecking dependency
-    items: Vec<Vec<Item>>,
+    /// All the items in the entire program so far
+    items: DependentVec<Item>,
     /// The levels of each item so far
-    levels: Vec<usize>,
+    levels: Vec<u32>,
     /// Number of operator expressions so far
     num_operator_exprs: usize,
 }
@@ -57,7 +58,7 @@ pub struct Builder {
 impl Builder {
     pub fn new() -> Self {
         Self {
-            items: vec![Vec::new()],
+            items: DependentVec::new(),
             levels: Vec::new(),
             num_operator_exprs: 0,
         }
@@ -65,43 +66,41 @@ impl Builder {
 
     pub fn int_lit(&mut self, lit: u64) -> ItemId {
         let id = self.levels.len();
-        self.levels.push(0);
-        self.items.first_mut().unwrap().push(
-            Item {
+        let level = self.items.insert(
+            &[],
+            Item { 
                 kind: ItemKind::IntLit,
                 id,
-            }
+            },
         );
-
+        self.levels.push(level);
         id
     }
 
     pub fn dec_lit(&mut self, lit: f64) -> ItemId {
         let id = self.levels.len();
-        self.levels.push(0);
-        self.items.first_mut().unwrap().push(
+        let level = self.items.insert(
+            &[],
             Item {
                 kind: ItemKind::DecLit,
                 id,
-            }
+            },
         );
+        self.levels.push(level);
 
         id
     }
 
     pub fn bin_op(&mut self, op: BinOp, lhs: ItemId, rhs: ItemId) -> ItemId {
         let id = self.levels.len();
-        let level = max(self.levels[lhs], self.levels[rhs]) + 1;
-        self.levels.push(level);
-        while self.items.len() < level + 1 {
-            self.items.push(Vec::new());
-        }
-        self.items[level].push(
+        let level = self.items.insert(
+            &[self.levels[lhs], self.levels[rhs]],
             Item {
                 kind: ItemKind::BinOp { op, lhs, rhs },
                 id,
-            }
+            },
         );
+        self.levels.push(level);
         self.num_operator_exprs += 1;
 
         id
