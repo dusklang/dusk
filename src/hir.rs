@@ -27,6 +27,7 @@ pub enum ItemKind {
     IntLit,
     DecLit,
     BinOp { op: BinOp, lhs: ItemId, rhs: ItemId },
+    StoredDecl { name: String, root_expr: ItemId },
 }
 
 /// An expression or declaration
@@ -103,6 +104,20 @@ impl Builder {
         self.levels.push(level);
         self.num_operator_exprs += 1;
 
+        id
+    }
+
+    pub fn stored_decl(&mut self, name: String, root_expr: ItemId) -> ItemId {
+        let id = self.levels.len();
+        let level = self.items.insert(
+            &[self.levels[root_expr]],
+            Item {
+                kind: ItemKind::StoredDecl { name, root_expr },
+                id,
+            },
+        );
+        self.levels.push(level);
+        
         id
     }
 

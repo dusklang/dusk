@@ -170,7 +170,8 @@ impl Parser {
             self.next();
         }
 
-        dbg!(self.parse_expr());
+        let root = self.parse_expr();
+        self.builder.stored_decl(name, root);
     }
 
     fn cur(&self) -> Token {

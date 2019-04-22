@@ -71,14 +71,34 @@ pub fn type_check(prog: Program) -> Vec<Error> {
     for level in tc.prog.items.levels() {
         for item in tc.prog.items.get_level(level) {
             use ItemKind::*;
-            match item.kind {
+            match &item.kind {
                 IntLit => {
                     tc.constraints[item.id].push(Constraint::IsIntLit);
                 },
                 DecLit => {
                     tc.constraints[item.id].push(Constraint::IsDecLit);
                 },
-                BinOp { op, lhs, rhs } => {
+                &StoredDecl { ref name, root_expr } => {
+                    let mut guess = Type::Error;
+                    for constraint in &tc.constraints[root_expr] {
+                        use Constraint::*;
+                        guess = match constraint {
+                            IsIntLit => Type::i32(),
+                            IsDecLit => Type::f64(),
+                            OneOf(ref types) => if types.contains(&guess) { 
+                                continue
+                            } else {
+                                types[0].clone()
+                            },
+                            ConvertibleTo(ref ty) => ty.clone(),
+                            Is(ref ty) => ty.clone() 
+                        };
+                    }
+                    assert_ne!(guess, Type::Error);
+
+                    tc.constraints[item.id].push(Constraint::Is(guess));
+                }
+                &BinOp { op, lhs, rhs } => {
                     use crate::hir::BinOp::*;
 
                     let mut overloads = match op {
