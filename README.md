@@ -7,16 +7,29 @@ Must-haves:
 - Pattern matching
 - Traits
 - Parametric polymorphism
-- Optional values in place of null pointers and sentinels
+- Optional type instead of null pointers or sentinels
 
 ## Arbitrary compile-time code execution
-I believe the benefits of this feature are obvious if you look at languages that have it, like D, Zig and Jai. Code introspection, code generation, and custom tools are examples of things made way better with compile-time code execution. However, I'd like to take the concept even further than those languages, by enabling users to write things like:
-- code optimizations
+I believe the benefits of this feature are obvious if you look at languages that have it, like D, Zig and Jai. Code introspection, code generation, and custom tools are examples of things made way better with compile-time code execution. However, in addition to those areas, I'd like to take the concept even further, by enabling users to write things like:
+- optimizations
 - backends
-- their own primitive metatypes, with fine-grained control over layout (like struct, class, enum, bitfield, etc.)
-- importers/exporters of APIs to/from other languages, like (Objective-)C(++)
+- calling conventions
+- importers/exporters of APIs to/from other languages
+- primitive data abstractions like struct, class, enum, etc., with fine-grained control over their layout
 
 There may also be implementation-related benefits to thinking of types as mere compile-time evaluated expressions.
+
+## Simple, stupid, modular compiler
+Taking advantage of the previous thing (arbitrary compile-time code execution), I hope we will be able to keep the compiler itself unusually simple and stable for a language as complex as Meda. Most of the complexity should be in user-level libraries. This would have numerous benefits, such as:
+- no dependencies
+- minimal new features needed in the compiler over time, freeing up compiler developers to fix bugs and optimize
+- easier to port the compiler to new host platforms
+- easier to standardize the compiler
+- easier to write new compilers that implement the standard
+- easier to prove correctness of the compiler
+As an example of a way in which complexity could be moved out of the compiler and into libraries, perhaps the base "compiler" won't actually know how to compile anything at all. Perhaps it will only be able to interpret bytecode (because it will already need to do that to enable the compile-time code execution stuff). Backends could then be implemented in libraries. For example, there might be an LLVM backend (for generating optimized code) and an x64 backend and an arm64 backend (for generating working code quickly), all implemented as their own libraries. For particularly important backends like those, they should be part of the official project as standard libraries.
+
+Another example of the type of thing that could be in its own library is an importer/exporter of APIs to/from other languages. These would allow Meda to dethrone C as the new lingua franca of the programming world. Other than the modularity angle, Swift sets a great example with its ClangImporter, a part of its compiler that uses Clang to import C and Objective-C APIs. Something similar should be provided as a standard library for Meda. In addition, if Meda ends up supporting custom data abstractions, we could have an advantage over Swift in the sense that we wouldn't have to bolt the abstractions offered by Objective-C or C++ onto the similar, but distinct abstractions of a language like Swift (or vice versa). Instead, CStruct, CUnion, CxxClass, CxxEnumClass, ObjCClass, etc. could all be defined as metatypes in the ClangImporter library. These would then be free to work exactly as they do in the language from which they came.
 
 ## Refinement types and/or typestate
 I'm not 100% sure about this yet, but I think it would be valuable for both expressivity and correctness to track statically-known information about values over time (at compile-time). For example, let's say we need to add 1 to a number, like so:
@@ -56,6 +69,6 @@ fn addOne(n: u8): u8 where n < 'max {
 }
 ```
 
-Then, as you'd expect, when the caller tries to pass in a value of `n` that may be equal to `u8.max`, they would get an error message. 
+Then, as you'd expect, when the caller tries to pass in a value of `n` that may be equal to `u8.max`, they would get an error message.
 
-It's possible that this stuff will be too pedantic for general use. I honestly won't know until I have the chance to use it for a real project. I'm hopeful that perhaps something like Rust's borrow-checker could be expressed in terms of this system one day.
+It's possible that this stuff will be too pedantic for general use. It's equally possible that it won't provide much tangible benefit due to limitations in what kinds of analysis are decidable at compile-time. I can't know until I've had the chance to use it for a real project.
