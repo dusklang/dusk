@@ -26,7 +26,7 @@ fn addOne(n: u8): u8 {
 }
 ```
 
-On first glance, this may seem like no big deal. But what if you call this function with the value `n = 255`? In C or C++, I believe this would technically be undefined behaviour, but in practice you'll probably get an overflow. This is bad. In safer languages like Rust or Swift, your program would crash at runtime. This is arguably much less bad, but it's still bad. Instead, what if we could statically guarantee that this condition will never happen? That's where refinement types come in. The above code wouldn't compile, hopefully with a helpful error message on the expression `n + 1` that says that overflow could occur if n == 255. To fix, we would have at least two options. The first option is to use control flow to guarantee that the expression is never executed in the exceptional case:
+On first glance, it may seem like there's nothing worth talking about with regards this function. But what if you call it with the value `n = 255`? In C or C++, the result would overflow and the function would return 0. This is bad. In safer languages like Rust or Swift, your program would crash at runtime. This is arguably less bad, but it's still bad. Instead, what if we could statically guarantee that this condition will never happen? That's where refinement types come in. The above code wouldn't compile, hopefully with a helpful error message on the expression `n + 1` that says that overflow could occur if n == 255. To fix, we would have at least two options. The first option is to use control flow to guarantee that the expression is never executed in the exceptional case:
 ```
 // Example #1
 fn addOne(n: u8): u8 {
@@ -56,6 +56,6 @@ fn addOne(n: u8): u8 where n < 'max {
 }
 ```
 
-Then, as you'd expect, when the caller tries to pass in a value of `n` that may be equal to `u8.max`, they would get an error message. This stuff may be too pedantic for general use. I honestly won't know until I have the chance to use it for a real project.
+Then, as you'd expect, when the caller tries to pass in a value of `n` that may be equal to `u8.max`, they would get an error message. 
 
-I'm hopeful that perhaps something like Rust's borrow-checker could be expressed in terms of this system one day.
+It's possible that this stuff will be too pedantic for general use. I honestly won't know until I have the chance to use it for a real project. I'm hopeful that perhaps something like Rust's borrow-checker could be expressed in terms of this system one day.
