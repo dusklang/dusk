@@ -1,7 +1,7 @@
 use crate::token::{TokenVec, TokenKind, Token};
 use crate::hir::{Program, Builder, ItemId, BinOp};
 use crate::error::Error;
-use crate::source_info::SourceRange;
+use crate::source_info::{self, SourceRange};
 
 #[inline]
 pub fn parse(toks: TokenVec) -> (Program, Vec<Error>) {
@@ -87,12 +87,12 @@ impl Parser {
                 expr
             },
             &IntLit(val) => {
-                let lit = self.builder.int_lit(val);
+                let lit = self.builder.int_lit(val, self.cur().range.clone());
                 self.next();
                 lit
             },
             &DecLit(val) => {
-                let lit = self.builder.dec_lit(val);
+                let lit = self.builder.dec_lit(val, self.cur().range.clone());
                 self.next();
                 lit
             },
@@ -112,7 +112,11 @@ impl Parser {
                 let rhs = expr_stack.pop().unwrap();
                 let lhs = expr_stack.pop().unwrap();
                 let next_op = op_stack.pop().unwrap();
-                expr_stack.push(self.builder.bin_op(next_op, lhs, rhs));
+                let range = source_info::concat(
+                    self.builder.get_range(lhs),
+                    self.builder.get_range(rhs),
+                );
+                expr_stack.push(self.builder.bin_op(next_op, lhs, rhs, range));
             }
         }
 
@@ -149,6 +153,7 @@ impl Parser {
     }
 
     fn parse_decl(&mut self, name: String) {
+        let name_range = self.cur().range.clone();
         // Skip to colon, get range.
         let colon_range = self.next().range.clone();
         let mut found_separator = true;
@@ -171,7 +176,8 @@ impl Parser {
         }
 
         let root = self.parse_expr();
-        self.builder.stored_decl(name, root);
+        let root_range = self.builder.get_range(root);
+        self.builder.stored_decl(name, root, source_info::concat(name_range, root_range));
     }
 
     fn cur(&self) -> Token {

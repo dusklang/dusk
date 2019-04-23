@@ -1,5 +1,6 @@
 use std::cmp::max;
 use crate::dependent_vec::DependentVec;
+use crate::source_info::SourceRange;
 
 pub type ItemId = usize;
 
@@ -41,6 +42,8 @@ pub struct Item {
 pub struct Program {
     /// All the items in the entire program
     pub items: DependentVec<Item>,
+    /// The source ranges of each item in the entire program
+    pub source_ranges: Vec<SourceRange>,
     /// Number of items in the entire program
     pub num_items: usize,
     /// Number of operator expressions in the entire program
@@ -50,6 +53,8 @@ pub struct Program {
 pub struct Builder {
     /// All the items in the entire program so far
     items: DependentVec<Item>,
+    /// The source ranges of each item so far
+    source_ranges: Vec<SourceRange>,
     /// The levels of each item so far
     levels: Vec<u32>,
     /// Number of operator expressions so far
@@ -60,12 +65,13 @@ impl Builder {
     pub fn new() -> Self {
         Self {
             items: DependentVec::new(),
+            source_ranges: Vec::new(),
             levels: Vec::new(),
             num_operator_exprs: 0,
         }
     }
 
-    pub fn int_lit(&mut self, lit: u64) -> ItemId {
+    pub fn int_lit(&mut self, lit: u64, range: SourceRange) -> ItemId {
         let id = self.levels.len();
         let level = self.items.insert(
             &[],
@@ -75,10 +81,11 @@ impl Builder {
             },
         );
         self.levels.push(level);
+        self.source_ranges.push(range);
         id
     }
 
-    pub fn dec_lit(&mut self, lit: f64) -> ItemId {
+    pub fn dec_lit(&mut self, lit: f64, range: SourceRange) -> ItemId {
         let id = self.levels.len();
         let level = self.items.insert(
             &[],
@@ -88,11 +95,12 @@ impl Builder {
             },
         );
         self.levels.push(level);
+        self.source_ranges.push(range);
 
         id
     }
 
-    pub fn bin_op(&mut self, op: BinOp, lhs: ItemId, rhs: ItemId) -> ItemId {
+    pub fn bin_op(&mut self, op: BinOp, lhs: ItemId, rhs: ItemId, range: SourceRange) -> ItemId {
         let id = self.levels.len();
         let level = self.items.insert(
             &[self.levels[lhs], self.levels[rhs]],
@@ -102,12 +110,13 @@ impl Builder {
             },
         );
         self.levels.push(level);
+        self.source_ranges.push(range);
         self.num_operator_exprs += 1;
 
         id
     }
 
-    pub fn stored_decl(&mut self, name: String, root_expr: ItemId) -> ItemId {
+    pub fn stored_decl(&mut self, name: String, root_expr: ItemId, range: SourceRange) -> ItemId {
         let id = self.levels.len();
         let level = self.items.insert(
             &[self.levels[root_expr]],
@@ -117,13 +126,19 @@ impl Builder {
             },
         );
         self.levels.push(level);
+        self.source_ranges.push(range);
         
         id
+    }
+
+    pub fn get_range(&self, id: ItemId) -> SourceRange {
+        self.source_ranges[id].clone()
     }
 
     pub fn program(self) -> Program {
         Program {
             items: self.items,
+            source_ranges: self.source_ranges,
             num_items: self.levels.len(),
             num_operator_exprs: self.num_operator_exprs,
         }
