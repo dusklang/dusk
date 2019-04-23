@@ -8,11 +8,12 @@ struct Overload {
 }
 
 #[derive(Debug)]
-enum Constraint {
-    IsIntLit,
-    IsDecLit,
-    OneOf(Vec<Type>),
-    ConvertibleTo(Type),
+enum LiteralType { Int, Dec }
+
+#[derive(Debug, Default)]
+struct ConstraintList {
+    literal: Option<LiteralType>,
+    one_of: Vec<Type>,
 }
 
 const DEFAULT_INT_TY: Type = Type::Int {
@@ -28,7 +29,7 @@ struct TypeChecker {
     /// The type of each item
     types: Vec<Type>,
     /// The constraints on each items's type
-    constraints: Vec<Vec<Constraint>>,
+    constraints: Vec<ConstraintList>,
     /// The constraints on each function call or operator expression's overload choices
     overloads: Vec<Vec<Overload>>,
     /// The selected overload for each function call or operator expression
@@ -71,30 +72,19 @@ pub fn type_check(prog: Program) -> Vec<Error> {
         for item in tc.prog.items.get_level(level) {
             use ItemKind::*;
             match &item.kind {
-                IntLit => {
-                    tc.constraints[item.id].push(Constraint::IsIntLit);
-                },
-                DecLit => {
-                    tc.constraints[item.id].push(Constraint::IsDecLit);
-                },
+                IntLit => tc.constraints[item.id].literal = Some(LiteralType::Int),
+                DecLit => tc.constraints[item.id].literal = Some(LiteralType::Dec),
                 &StoredDecl { ref name, root_expr } => {
-                    let mut guess = Type::Error;
-                    for constraint in &tc.constraints[root_expr] {
-                        use Constraint::*;
-                        guess = match constraint {
-                            IsIntLit => Type::i32(),
-                            IsDecLit => Type::f64(),
-                            OneOf(ref types) => if types.contains(&guess) { 
-                                continue
-                            } else {
-                                types[0].clone()
-                            },
-                            ConvertibleTo(ref ty) => ty.clone(),
-                        };
-                    }
-                    assert_ne!(guess, Type::Error);
-
-                    tc.constraints[item.id].push(Constraint::OneOf(vec![guess]));
+                    let constraints = &tc.constraints[root_expr];
+                    let mut guess = match constraints.literal {
+                        Some(LiteralType::Int) => Type::i32(),
+                        Some(LiteralType::Dec) => Type::f64(),
+                        None => {
+                            assert!(!constraints.one_of.is_empty());
+                            constraints.one_of[0].clone()
+                        }
+                    };
+                    tc.constraints[item.id].one_of = vec![guess];
                 }
                 &BinOp { op, lhs, rhs } => {
                     use crate::hir::BinOp::*;
@@ -190,24 +180,18 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                         // For each parameter:
                         for (constraints, ty) in [&tc.constraints[lhs], &tc.constraints[rhs]].iter().zip(&overload.param_tys) {
                             // Verify all the constraints match the parameter type.
-                            for constraint in *constraints {
-                                match (constraint, ty) {
-                                    (Constraint::IsIntLit, x) if !x.expressible_by_int_lit()    => return false,
-                                    (Constraint::IsDecLit, x) if !x.expressible_by_dec_lit()    => return false,
-                                    (Constraint::OneOf(tys), x) if !tys.contains(x)             => return false,
-                                    (Constraint::ConvertibleTo(ty), x) if !x.convertible_to(ty) => return false,
-                                    _ => {},
-                                }
+                            match constraints.literal {
+                                Some(LiteralType::Int) => if !ty.expressible_by_int_lit() { return false },
+                                Some(LiteralType::Dec) => if !ty.expressible_by_dec_lit() { return false },
+                                None => if !constraints.one_of.contains(ty) { return false },
                             }
                         }
                         true
                     });
 
-                    tc.constraints[item.id].push(
-                        Constraint::OneOf(
-                            overloads.iter().map(|overload| overload.ret_ty.clone()).collect()
-                        )
-                    );
+                    tc.constraints[item.id].one_of = overloads.iter()
+                        .map(|overload| overload.ret_ty.clone())
+                        .collect();
                 }
             }
         }
