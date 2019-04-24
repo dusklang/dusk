@@ -1,8 +1,8 @@
-use std::cmp::max;
 use crate::dependent_vec::DependentVec;
 use crate::source_info::SourceRange;
 
 pub type ItemId = usize;
+pub type OpId = usize;
 
 #[derive(Clone, Copy, Debug)]
 pub enum BinOp {
@@ -27,7 +27,7 @@ pub enum UnOp {
 pub enum ItemKind {
     IntLit,
     DecLit,
-    BinOp { op: BinOp, lhs: ItemId, rhs: ItemId },
+    BinOp { op: BinOp, lhs: ItemId, rhs: ItemId, op_id: OpId },
     StoredDecl { name: String, root_expr: ItemId },
 }
 
@@ -105,7 +105,7 @@ impl Builder {
         let level = self.items.insert(
             &[self.levels[lhs], self.levels[rhs]],
             Item {
-                kind: ItemKind::BinOp { op, lhs, rhs },
+                kind: ItemKind::BinOp { op, lhs, rhs, op_id: self.num_operator_exprs },
                 id,
             },
         );

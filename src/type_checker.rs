@@ -86,7 +86,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                     };
                     tc.constraints[item.id].one_of = vec![guess];
                 }
-                &BinOp { op, lhs, rhs } => {
+                &BinOp { op, lhs, rhs, op_id } => {
                     use crate::hir::BinOp::*;
 
                     let mut overloads = match op {
@@ -192,6 +192,8 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                     tc.constraints[item.id].one_of = overloads.iter()
                         .map(|overload| overload.ret_ty.clone())
                         .collect();
+                    
+                    tc.overloads[op_id] = overloads;
                 }
             }
         }

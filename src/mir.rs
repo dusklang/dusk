@@ -34,10 +34,6 @@ impl Type {
         if let Type::Float(_) = self { true } else { false }
     }
 
-    pub fn convertible_to(&self, other: &Type) -> bool {
-        self == other
-    }
-
     pub fn u8() -> Self {
         Type::Int { width: IntWidth::W8, is_signed: false }
     }
