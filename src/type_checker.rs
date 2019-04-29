@@ -2,6 +2,7 @@ use crate::error::Error;
 use crate::hir::{Program, ItemKind, BinOp};
 use crate::mir::{Type, IntWidth, FloatWidth};
 
+#[derive(Clone)]
 struct Overload {
     param_tys: Vec<Type>,
     ret_ty: Type,
@@ -76,7 +77,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                 DecLit => tc.constraints[item.id].literal = Some(LiteralType::Dec),
                 &StoredDecl { ref name, root_expr } => {
                     let constraints = &tc.constraints[root_expr];
-                    let mut guess = match constraints.literal {
+                    let guess = match constraints.literal {
                         Some(LiteralType::Int) => Type::i32(),
                         Some(LiteralType::Dec) => Type::f64(),
                         None => {
@@ -198,6 +199,82 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             }
         }
     }
-    println!("Constraints: {:#?}", tc.constraints);
+
+    for level in tc.prog.items.levels().rev() {
+        for item in tc.prog.items.get_level(level) {
+            use ItemKind::*;
+            match &item.kind {
+                IntLit => {
+                    let constraints = &tc.constraints[item.id];
+                    tc.types[item.id] = if constraints.one_of.len() != 1 {
+                        errs.push(
+                            Error::new("ambiguous type for expression")
+                                .adding_primary_range(tc.prog.source_ranges[item.id].clone(), "int literal here")
+                        );
+                        Type::Error
+                    } else {
+                        constraints.one_of[0].clone()
+                    };
+                },
+                DecLit => {
+                    let constraints = &tc.constraints[item.id];
+                    tc.types[item.id] = if constraints.one_of.len() != 1 {
+                        errs.push(
+                            Error::new("ambiguous type for expression")
+                                .adding_primary_range(tc.prog.source_ranges[item.id].clone(), "dec literal here")
+                        );
+                        Type::Error
+                    } else {
+                        constraints.one_of[0].clone()
+                    };
+                },
+                &StoredDecl { ref name, root_expr } => {
+                    let constraints = &tc.constraints[item.id];
+                    let ty = if constraints.one_of.len() != 1 {
+                        errs.push(
+                            Error::new(format!("ambiguous type for declaration '{}'", name))
+                                .adding_primary_range(tc.prog.source_ranges[item.id].clone(), "declaration here")
+                        );
+                        Type::Error
+                    } else {
+                        constraints.one_of[0].clone()
+                    };
+                    tc.types[item.id] = ty.clone();
+                    tc.constraints[root_expr].one_of = vec![ty];
+                }
+                &BinOp { op: _, lhs, rhs, op_id } => {
+                    let constraints = &tc.constraints[item.id];
+                    let ty = if constraints.one_of.len() != 1 {
+                        errs.push(
+                            Error::new("ambiguous type for expression")
+                                .adding_primary_range(tc.prog.source_ranges[item.id].clone(), "expression here")
+                        );
+                        Type::Error
+                    } else {
+                        constraints.one_of[0].clone()
+                    };
+                    tc.types[item.id] = ty.clone();
+
+                    let overloads = &mut tc.overloads[op_id];
+                    overloads.retain(|overload| overload.ret_ty == ty);
+                    
+                    let overload = if overloads.len() != 1 {
+                        errs.push(
+                            Error::new("ambiguous overload for binary operator")
+                                .adding_primary_range(tc.prog.source_ranges[item.id].clone(), "expression here")
+                        );
+                        Overload::bin_op(Type::Error, Type::Error, ty)
+                    } else {
+                        overloads[0].clone()
+                    };
+                    tc.constraints[lhs].one_of = vec![overload.param_tys[0].clone()];
+                    tc.constraints[rhs].one_of = vec![overload.param_tys[1].clone()];
+                    tc.selected_overloads[op_id] = overload;
+                }
+            }
+        }
+    }
+    println!("Types: {:#?}", tc.types);
+    //println!("Constraints: {:#?}", tc.constraints);
     errs
 }
