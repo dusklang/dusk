@@ -13,7 +13,9 @@ impl<T> DependentVec<T> {
 
     /// Insert an element into the vector at the level above the maximum level in `dependencies`. Returns the level the element was inserted at.
     pub fn insert(&mut self, dependencies: &[u32], element: T) -> u32 {
-        let level = dependencies.iter().max().unwrap_or_else(|| &0) + 1;
+        let level = dependencies.iter().max()
+            .map(|val| val + 1)
+            .unwrap_or_else(|| 0);
         let level_usize = level as usize;
         for _ in self.storage.len()..=level_usize {
             self.storage.push(Vec::new());
