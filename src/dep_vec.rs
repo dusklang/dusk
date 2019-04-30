@@ -2,13 +2,13 @@ use std::ops::Range;
 
 /// A growable array for encoding data dependencies
 #[derive(Debug)]
-pub struct DependentVec<T> {
+pub struct DepVec<T> {
     storage: Vec<Vec<T>>,
 }
 
-impl<T> DependentVec<T> {
+impl<T> DepVec<T> {
     pub fn new() -> Self {
-        Self { storage: Vec::new(), }
+        DepVec { storage: Vec::new(), }
     }
 
     /// Insert an element into the vector at the level above the maximum level in `dependencies`. Returns the level the element was inserted at.

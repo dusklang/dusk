@@ -1,4 +1,4 @@
-use crate::dependent_vec::DependentVec;
+use crate::dep_vec::DepVec;
 use crate::source_info::SourceRange;
 
 pub type ItemId = usize;
@@ -41,7 +41,7 @@ pub struct Item {
 #[derive(Debug)]
 pub struct Program {
     /// All the items in the entire program
-    pub items: DependentVec<Item>,
+    pub items: DepVec<Item>,
     /// The source ranges of each item in the entire program
     pub source_ranges: Vec<SourceRange>,
     /// Number of items in the entire program
@@ -52,7 +52,7 @@ pub struct Program {
 
 pub struct Builder {
     /// All the items in the entire program so far
-    items: DependentVec<Item>,
+    items: DepVec<Item>,
     /// The source ranges of each item so far
     source_ranges: Vec<SourceRange>,
     /// The levels of each item so far
@@ -64,7 +64,7 @@ pub struct Builder {
 impl Builder {
     pub fn new() -> Self {
         Self {
-            items: DependentVec::new(),
+            items: DepVec::new(),
             source_ranges: Vec::new(),
             levels: Vec::new(),
             num_operator_exprs: 0,
