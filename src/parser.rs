@@ -99,6 +99,7 @@ impl Parser {
             Ident(name) => {
                 let name = name.clone();
                 let decl_ref = self.builder.decl_ref(name, self.cur().range.clone());
+                self.next();
                 decl_ref
             },
             x => panic!("UNHANDLED TERM {:#?}", &x)
