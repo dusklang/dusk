@@ -1,6 +1,8 @@
 use crate::dep_vec::DepVec;
 use crate::source_info::SourceRange;
 
+use arrayvec::ArrayVec;
+
 pub type ItemId = usize;
 pub type OpId = usize;
 
@@ -29,6 +31,7 @@ pub enum ItemKind {
     DecLit,
     BinOp { op: BinOp, lhs: ItemId, rhs: ItemId, op_id: OpId },
     StoredDecl { name: String, root_expr: ItemId },
+    DeclRef { decl: Option<ItemId> }
 }
 
 /// An expression or declaration
@@ -40,7 +43,7 @@ pub struct Item {
 
 #[derive(Debug)]
 pub struct Program {
-    /// All the items in the entire program
+    /// All items in the entire program
     pub items: DepVec<Item>,
     /// The source ranges of each item in the entire program
     pub source_ranges: Vec<SourceRange>,
@@ -50,8 +53,13 @@ pub struct Program {
     pub num_operator_exprs: usize,
 }
 
+struct StoredDecl {
+    name: String,
+    decl: ItemId,
+}
+
 pub struct Builder {
-    /// All the items in the entire program so far
+    /// All items in the entire program so far
     items: DepVec<Item>,
     /// The source ranges of each item so far
     source_ranges: Vec<SourceRange>,
@@ -59,6 +67,9 @@ pub struct Builder {
     levels: Vec<u32>,
     /// Number of operator expressions so far
     num_operator_exprs: usize,
+
+    /// All stored declarations in the current scope (not indexed like the other collections; for convenient lookup of declarations)
+    stored_decls: Vec<StoredDecl>,
 }
 
 impl Builder {
@@ -68,6 +79,7 @@ impl Builder {
             source_ranges: Vec::new(),
             levels: Vec::new(),
             num_operator_exprs: 0,
+            stored_decls: Vec::new(),
         }
     }
 
@@ -121,13 +133,41 @@ impl Builder {
         let level = self.items.insert(
             &[self.levels[root_expr]],
             Item {
-                kind: ItemKind::StoredDecl { name, root_expr },
+                kind: ItemKind::StoredDecl { name: name.clone(), root_expr },
                 id,
             },
         );
         self.levels.push(level);
         self.source_ranges.push(range);
+
+        self.stored_decls.push(StoredDecl { name, decl: id });
         
+        id
+    }
+
+    pub fn decl_ref(&mut self, name: String, range: SourceRange) -> ItemId {
+        let id = self.levels.len();
+
+        let mut decl: Option<ItemId> = None;
+        for &StoredDecl { name: ref other_name, decl: other_decl } in self.stored_decls.iter().rev() {
+            if &name == other_name {
+                decl = Some(other_decl);
+                break;
+            }
+        }
+
+        let mut deps = ArrayVec::<[u32; 1]>::new();
+        if let Some(decl) = decl { deps.push(self.levels[decl]); }
+        let level = self.items.insert(
+            &deps[..],
+            Item {
+                kind: ItemKind::DeclRef { decl },
+                id,
+            },
+        );
+        self.levels.push(level);
+        self.source_ranges.push(range);
+
         id
     }
 

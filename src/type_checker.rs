@@ -75,7 +75,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             match &item.kind {
                 IntLit => tc.constraints[item.id].literal = Some(LiteralType::Int),
                 DecLit => tc.constraints[item.id].literal = Some(LiteralType::Dec),
-                &StoredDecl { ref name, root_expr } => {
+                &StoredDecl { name: _, root_expr } => {
                     let constraints = &tc.constraints[root_expr];
                     let guess = match constraints.literal {
                         Some(LiteralType::Int) => Type::i32(),
@@ -87,6 +87,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                     };
                     tc.constraints[item.id].one_of = vec![guess];
                 }
+                &DeclRef { decl } => { panic!("UNHANDLED CASE") }
                 &BinOp { op, lhs, rhs, op_id } => {
                     use crate::hir::BinOp::*;
 
@@ -242,6 +243,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                     tc.types[item.id] = ty.clone();
                     tc.constraints[root_expr].one_of = vec![ty];
                 }
+                &DeclRef { decl } => { panic!("UNHANDLED CASE") }
                 &BinOp { op: _, lhs, rhs, op_id } => {
                     let constraints = &tc.constraints[item.id];
                     let ty = if constraints.one_of.len() != 1 {

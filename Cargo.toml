@@ -6,3 +6,4 @@ edition = "2018"
 
 [dependencies]
 unicode-segmentation = "1.2.1"
+arrayvec = "0.4"

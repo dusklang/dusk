@@ -1,7 +1,7 @@
 use crate::token::{TokenVec, TokenKind, Token};
 use crate::hir::{Program, Builder, ItemId, BinOp};
 use crate::error::Error;
-use crate::source_info::{self, SourceRange};
+use crate::source_info;
 
 #[inline]
 pub fn parse(toks: TokenVec) -> (Program, Vec<Error>) {
@@ -95,6 +95,11 @@ impl Parser {
                 let lit = self.builder.dec_lit(val, self.cur().range.clone());
                 self.next();
                 lit
+            },
+            Ident(name) => {
+                let name = name.clone();
+                let decl_ref = self.builder.decl_ref(name, self.cur().range.clone());
+                decl_ref
             },
             x => panic!("UNHANDLED TERM {:#?}", &x)
         }
