@@ -69,6 +69,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
     tc.overloads.resize_with(tc.prog.num_operator_exprs, Default::default);
     tc.selected_overloads.resize_with(tc.prog.num_operator_exprs, Default::default);
 
+    // Pass 1: propagate info down from leaves to roots
     for level in tc.prog.items.levels() {
         for item in tc.prog.items.get_level(level) {
             use ItemKind::*;
@@ -85,7 +86,8 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                             constraints.one_of[0].clone()
                         }
                     };
-                    tc.constraints[item.id].one_of = vec![guess];
+                    tc.constraints[item.id].one_of = vec![guess.clone()];
+                    tc.types[item.id] = guess;
                 }
                 &DeclRef { decl } => { panic!("UNHANDLED CASE") }
                 &BinOp { op, lhs, rhs, op_id } => {
@@ -201,6 +203,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
         }
     }
 
+    // Pass 2: propagate info up from roots to leaves
     for level in tc.prog.items.levels().rev() {
         for item in tc.prog.items.get_level(level) {
             use ItemKind::*;
@@ -230,18 +233,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                     };
                 },
                 &StoredDecl { ref name, root_expr } => {
-                    let constraints = &tc.constraints[item.id];
-                    let ty = if constraints.one_of.len() != 1 {
-                        errs.push(
-                            Error::new(format!("ambiguous type for declaration '{}'", name))
-                                .adding_primary_range(tc.prog.source_ranges[item.id].clone(), "declaration here")
-                        );
-                        Type::Error
-                    } else {
-                        constraints.one_of[0].clone()
-                    };
-                    tc.types[item.id] = ty.clone();
-                    tc.constraints[root_expr].one_of = vec![ty];
+                    tc.constraints[root_expr].one_of = vec![tc.types[item.id].clone()];
                 }
                 &DeclRef { decl } => { panic!("UNHANDLED CASE") }
                 &BinOp { op: _, lhs, rhs, op_id } => {
