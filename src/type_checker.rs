@@ -89,7 +89,13 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                     tc.constraints[item.id].one_of = vec![guess.clone()];
                     tc.types[item.id] = guess;
                 }
-                &DeclRef { decl } => { panic!("UNHANDLED CASE") }
+                &DeclRef { decl } => {
+                    if let Some(decl) = decl {
+                        let ty = tc.types[decl].clone();
+                        tc.types[item.id] = ty.clone();
+                        tc.constraints[item.id].one_of = vec![ty];
+                    }
+                }
                 &BinOp { op, lhs, rhs, op_id } => {
                     use crate::hir::BinOp::*;
 
@@ -235,7 +241,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                 &StoredDecl { ref name, root_expr } => {
                     tc.constraints[root_expr].one_of = vec![tc.types[item.id].clone()];
                 }
-                &DeclRef { decl } => { panic!("UNHANDLED CASE") }
+                DeclRef { .. } => {}
                 &BinOp { op: _, lhs, rhs, op_id } => {
                     let constraints = &tc.constraints[item.id];
                     let ty = if constraints.one_of.len() != 1 {
