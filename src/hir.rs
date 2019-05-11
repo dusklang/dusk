@@ -1,10 +1,11 @@
 use crate::dep_vec::DepVec;
 use crate::source_info::SourceRange;
+use crate::index_vec::{Idx, IdxVec};
 
 use arrayvec::ArrayVec;
 
-pub type ItemId = usize;
-pub type OpId = usize;
+newtype_index!(ItemId);
+newtype_index!(OpId);
 
 #[derive(Clone, Copy, Debug)]
 pub enum BinOp {
@@ -46,7 +47,7 @@ pub struct Program {
     /// All items in the entire program
     pub items: DepVec<Item>,
     /// The source ranges of each item in the entire program
-    pub source_ranges: Vec<SourceRange>,
+    pub source_ranges: IdxVec<SourceRange, ItemId>,
     /// Number of items in the entire program
     pub num_items: usize,
     /// Number of operator expressions in the entire program
@@ -62,9 +63,9 @@ pub struct Builder {
     /// All items in the entire program so far
     items: DepVec<Item>,
     /// The source ranges of each item so far
-    source_ranges: Vec<SourceRange>,
+    source_ranges: IdxVec<SourceRange, ItemId>,
     /// The levels of each item so far
-    levels: Vec<u32>,
+    levels: IdxVec<u32, ItemId>,
     /// Number of operator expressions so far
     num_operator_exprs: usize,
 
@@ -76,15 +77,15 @@ impl Builder {
     pub fn new() -> Self {
         Self {
             items: DepVec::new(),
-            source_ranges: Vec::new(),
-            levels: Vec::new(),
+            source_ranges: IdxVec::new(),
+            levels: IdxVec::new(),
             num_operator_exprs: 0,
             stored_decls: Vec::new(),
         }
     }
 
     pub fn int_lit(&mut self, lit: u64, range: SourceRange) -> ItemId {
-        let id = self.levels.len();
+        let id = ItemId::new(self.levels.len());
         let level = self.items.insert(
             &[],
             Item { 
@@ -98,7 +99,7 @@ impl Builder {
     }
 
     pub fn dec_lit(&mut self, lit: f64, range: SourceRange) -> ItemId {
-        let id = self.levels.len();
+        let id = ItemId::new(self.levels.len());
         let level = self.items.insert(
             &[],
             Item {
@@ -113,11 +114,11 @@ impl Builder {
     }
 
     pub fn bin_op(&mut self, op: BinOp, lhs: ItemId, rhs: ItemId, range: SourceRange) -> ItemId {
-        let id = self.levels.len();
+        let id = ItemId::new(self.levels.len());
         let level = self.items.insert(
             &[self.levels[lhs], self.levels[rhs]],
             Item {
-                kind: ItemKind::BinOp { op, lhs, rhs, op_id: self.num_operator_exprs },
+                kind: ItemKind::BinOp { op, lhs, rhs, op_id: OpId::new(self.num_operator_exprs as usize) },
                 id,
             },
         );
@@ -129,7 +130,7 @@ impl Builder {
     }
 
     pub fn stored_decl(&mut self, name: String, root_expr: ItemId, range: SourceRange) -> ItemId {
-        let id = self.levels.len();
+        let id = ItemId::new(self.levels.len());
         let level = self.items.insert(
             &[self.levels[root_expr]],
             Item {
@@ -146,7 +147,7 @@ impl Builder {
     }
 
     pub fn decl_ref(&mut self, name: String, range: SourceRange) -> ItemId {
-        let id = self.levels.len();
+        let id = ItemId::new(self.levels.len());
 
         let mut decl: Option<ItemId> = None;
         for &StoredDecl { name: ref other_name, decl: other_decl } in self.stored_decls.iter().rev() {

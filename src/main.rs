@@ -1,3 +1,6 @@
+mod dep_vec;
+#[macro_use]
+mod index_vec;
 mod lexer;
 mod token;
 mod source_info;
@@ -6,7 +9,6 @@ mod hir;
 mod parser;
 mod mir;
 mod type_checker;
-mod dep_vec;
 
 use std::fs;
 

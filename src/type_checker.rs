@@ -1,6 +1,7 @@
 use crate::error::Error;
-use crate::hir::{Program, ItemKind, BinOp};
+use crate::hir::{Program, ItemKind, BinOp, ItemId, OpId};
 use crate::mir::{Type, IntWidth, FloatWidth};
+use crate::index_vec::IdxVec;
 
 #[derive(Clone)]
 struct Overload {
@@ -28,13 +29,13 @@ struct TypeChecker {
     /// The input HIR program
     prog: Program,
     /// The type of each item
-    types: Vec<Type>,
+    types: IdxVec<Type, ItemId>,
     /// The constraints on each items's type
-    constraints: Vec<ConstraintList>,
+    constraints: IdxVec<ConstraintList, ItemId>,
     /// The constraints on each function call or operator expression's overload choices
-    overloads: Vec<Vec<Overload>>,
+    overloads: IdxVec<Vec<Overload>, OpId>,
     /// The selected overload for each function call or operator expression
-    selected_overloads: Vec<Overload>,
+    selected_overloads: IdxVec<Overload, OpId>,
 }
 
 impl Overload {
@@ -58,10 +59,10 @@ impl Default for Overload {
 pub fn type_check(prog: Program) -> Vec<Error> {
     let mut tc = TypeChecker {
         prog,
-        types: Vec::new(),
-        constraints: Vec::new(),
-        overloads: Vec::new(),
-        selected_overloads: Vec::new(),
+        types: IdxVec::new(),
+        constraints: IdxVec::new(),
+        overloads: IdxVec::new(),
+        selected_overloads: IdxVec::new(),
     };
     let mut errs = Vec::new();
     tc.types.resize_with(tc.prog.num_items, Default::default);
