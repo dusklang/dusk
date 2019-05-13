@@ -7,7 +7,7 @@ mod source_info;
 mod error;
 mod hir;
 mod parser;
-mod mir;
+mod ty;
 mod type_checker;
 
 use std::fs;

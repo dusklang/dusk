@@ -1,11 +1,13 @@
 use crate::dep_vec::DepVec;
 use crate::source_info::SourceRange;
 use crate::index_vec::{Idx, IdxVec};
+use crate::ty::Type;
 
 use arrayvec::ArrayVec;
 
 newtype_index!(ItemId);
 newtype_index!(OpId);
+newtype_index!(DeclId);
 
 #[derive(Clone, Copy, Debug)]
 pub enum BinOp {
@@ -43,11 +45,26 @@ pub struct Item {
 }
 
 #[derive(Debug)]
+pub struct ComputedDecl {
+    pub name: String,
+    pub param_tys: Vec<Type>,
+    pub ret_ty: Type,
+}
+
+impl ComputedDecl {
+    fn new(name: String, param_tys: Vec<Type>, ret_ty: Type) -> ComputedDecl {
+        ComputedDecl { name, param_tys, ret_ty }
+    }
+}
+
+#[derive(Debug)]
 pub struct Program {
     /// All items in the entire program
     pub items: DepVec<Item>,
     /// The source ranges of each item in the entire program
     pub source_ranges: IdxVec<SourceRange, ItemId>,
+    /// The global declarations in the entire program
+    pub decls: IdxVec<ComputedDecl, DeclId>,
     /// Number of items in the entire program
     pub num_items: usize,
     /// Number of operator expressions in the entire program
@@ -66,19 +83,62 @@ pub struct Builder {
     source_ranges: IdxVec<SourceRange, ItemId>,
     /// The levels of each item so far
     levels: IdxVec<u32, ItemId>,
+    /// The global declarations so far
+    decls: IdxVec<ComputedDecl, DeclId>,
     /// Number of operator expressions so far
     num_operator_exprs: usize,
 
-    /// All stored declarations in the current scope (not indexed like the other collections; for convenient lookup of declarations)
+    /// All stored declarations in the current scope (not indexed like the other collections; just for convenient lookup of declarations)
     stored_decls: Vec<StoredDecl>,
 }
 
 impl Builder {
     pub fn new() -> Self {
+        let mut decls: IdxVec<ComputedDecl, DeclId> = IdxVec::new();
+        // Integers, floats and bool
+        let values = &[
+            Type::i8(), Type::i16(), Type::i32(), Type::i64(),
+            Type::u8(), Type::u16(), Type::u32(), Type::u64(),
+            Type::f32(), Type::f64(), Type::Bool
+        ];
+        let numerics = &values[0..10];
+        let integers = &numerics[0..8];
+        for op in &["*", "/", "%", "+", "-"] {
+            for ty in numerics {
+                decls.push(ComputedDecl::new(op.to_string(), vec![ty.clone(), ty.clone()], ty.clone()));
+            }
+        }
+        for op in &["<", "<=", ">", ">="] {
+            for ty in numerics {
+                decls.push(ComputedDecl::new(op.to_string(), vec![ty.clone(), ty.clone()], Type::Bool));
+            }
+        }
+        for op in &["==", "!="] {
+            for ty in values {
+                decls.push(ComputedDecl::new(op.to_string(), vec![ty.clone(), ty.clone()], Type::Bool));
+            }
+        }
+        for op in &["&", "|"] {
+            for ty in integers {
+                decls.push(ComputedDecl::new(op.to_string(), vec![ty.clone(), ty.clone()], ty.clone()));
+            }
+        }
+        for op in &["&=", "|="] {
+            for ty in integers {
+                decls.push(ComputedDecl::new(op.to_string(), vec![ty.clone(), ty.clone()], Type::Void));
+            }
+        }
+        for op in &["&&", "||"] {
+            decls.push(ComputedDecl::new(op.to_string(), vec![Type::Bool, Type::Bool], Type::Bool));
+        }
+        for ty in values {
+            decls.push(ComputedDecl::new("=".to_string(), vec![ty.clone(), ty.clone()], Type::Void));
+        }
         Self {
             items: DepVec::new(),
             source_ranges: IdxVec::new(),
             levels: IdxVec::new(),
+            decls,
             num_operator_exprs: 0,
             stored_decls: Vec::new(),
         }

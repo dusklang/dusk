@@ -1,6 +1,6 @@
 use crate::error::Error;
 use crate::hir::{Program, ItemKind, BinOp, ItemId, OpId};
-use crate::mir::{Type, IntWidth, FloatWidth};
+use crate::ty::{Type, IntWidth, FloatWidth};
 use crate::index_vec::IdxVec;
 
 #[derive(Clone)]
