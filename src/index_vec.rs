@@ -1,6 +1,6 @@
 // NOTE: basically copied from librustc_data_structures
 
-use std::ops::{Index, IndexMut, Deref, DerefMut};
+use std::ops::{Index, IndexMut};
 use std::marker::{Send, PhantomData};
 use std::fmt::Debug;
 
@@ -41,6 +41,15 @@ impl<T, I: Idx> IdxVec<T, I> {
     pub fn push(&mut self, value: T) { self.raw.push(value) }
     pub fn resize_with(&mut self, new_len: usize, f: impl FnMut() -> T) {
         self.raw.resize_with(new_len, f);
+    }
+    pub fn indices_satisfying(&self, mut condition: impl FnMut(&T) -> bool) -> Vec<I> {
+        let mut indices = Vec::new();
+        for (i, val) in self.raw.iter().enumerate() {
+            if condition(val) {
+                indices.push(I::new(i));
+            }
+        }
+        indices
     }
 }
 

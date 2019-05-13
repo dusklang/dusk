@@ -6,8 +6,8 @@ use crate::ty::Type;
 use arrayvec::ArrayVec;
 
 newtype_index!(ItemId);
-newtype_index!(OpId);
-newtype_index!(DeclId);
+newtype_index!(ComputedDeclId);
+newtype_index!(ComputedDeclRefId);
 
 #[derive(Clone, Copy, Debug)]
 pub enum BinOp {
@@ -32,8 +32,8 @@ pub enum UnOp {
 pub enum ItemKind {
     IntLit,
     DecLit,
-    BinOp { op: BinOp, lhs: ItemId, rhs: ItemId, op_id: OpId },
     StoredDecl { name: String, root_expr: ItemId },
+    ComputedDeclRef { name: String, lhs: ItemId, rhs: ItemId, id: ComputedDeclRefId },
     DeclRef { decl: Option<ItemId> }
 }
 
@@ -52,8 +52,8 @@ pub struct ComputedDecl {
 }
 
 impl ComputedDecl {
-    fn new(name: String, param_tys: Vec<Type>, ret_ty: Type) -> ComputedDecl {
-        ComputedDecl { name, param_tys, ret_ty }
+    fn new(name: String, param_tys: Vec<Type>, ret_ty: Type) -> Self {
+        Self { name, param_tys, ret_ty }
     }
 }
 
@@ -64,7 +64,7 @@ pub struct Program {
     /// The source ranges of each item in the entire program
     pub source_ranges: IdxVec<SourceRange, ItemId>,
     /// The global declarations in the entire program
-    pub decls: IdxVec<ComputedDecl, DeclId>,
+    pub decls: IdxVec<ComputedDecl, ComputedDeclId>,
     /// Number of items in the entire program
     pub num_items: usize,
     /// Number of operator expressions in the entire program
@@ -84,7 +84,7 @@ pub struct Builder {
     /// The levels of each item so far
     levels: IdxVec<u32, ItemId>,
     /// The global declarations so far
-    decls: IdxVec<ComputedDecl, DeclId>,
+    decls: IdxVec<ComputedDecl, ComputedDeclId>,
     /// Number of operator expressions so far
     num_operator_exprs: usize,
 
@@ -94,7 +94,7 @@ pub struct Builder {
 
 impl Builder {
     pub fn new() -> Self {
-        let mut decls: IdxVec<ComputedDecl, DeclId> = IdxVec::new();
+        let mut decls: IdxVec<ComputedDecl, ComputedDeclId> = IdxVec::new();
         // Integers, floats and bool
         let values = &[
             Type::i8(), Type::i16(), Type::i32(), Type::i64(),
@@ -178,7 +178,7 @@ impl Builder {
         let level = self.items.insert(
             &[self.levels[lhs], self.levels[rhs]],
             Item {
-                kind: ItemKind::BinOp { op, lhs, rhs, op_id: OpId::new(self.num_operator_exprs as usize) },
+                kind: ItemKind::ComputedDeclRef { name: op.symbol().to_string(), lhs, rhs, id: ComputedDeclRefId::new(self.num_operator_exprs as usize) },
                 id,
             },
         );
@@ -240,6 +240,7 @@ impl Builder {
         Program {
             items: self.items,
             source_ranges: self.source_ranges,
+            decls: self.decls,
             num_items: self.levels.len(),
             num_operator_exprs: self.num_operator_exprs,
         }
