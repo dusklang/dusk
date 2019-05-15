@@ -73,13 +73,14 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                         tc.constraints[item.id].one_of = vec![ty];
                     }
                 }
-                &ComputedDeclRef { ref name, lhs, rhs, id } => {
+                &ComputedDeclRef { ref name, ref args, id } => {
                     let mut overloads = tc.prog.decls.indices_satisfying(|decl| &decl.name == name);
 
                     // Filter overloads that don't match the constraints of the parameters.
                     overloads.retain(|&overload| {
                         // For each parameter:
-                        for (constraints, ty) in [&tc.constraints[lhs], &tc.constraints[rhs]].iter().zip(&tc.prog.decls[overload].param_tys) {
+                        assert_eq!(tc.prog.decls[overload].param_tys.len(), args.len());
+                        for (constraints, ty) in args.iter().map(|&arg| &tc.constraints[arg]).zip(&tc.prog.decls[overload].param_tys) {
                             // Verify all the constraints match the parameter type.
                             match constraints.literal {
                                 Some(LiteralType::Int) => if !ty.expressible_by_int_lit() { return false },
@@ -133,7 +134,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                     tc.constraints[root_expr].one_of = vec![tc.types[item.id].clone()];
                 }
                 DeclRef { .. } => {}
-                &ComputedDeclRef { name: _, lhs, rhs, id } => {
+                &ComputedDeclRef { name: _, ref args, id } => {
                     let constraints = &tc.constraints[item.id];
                     let ty = if constraints.one_of.len() != 1 {
                         errs.push(
@@ -155,13 +156,15 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                             Error::new("ambiguous overload for binary operator")
                                 .adding_primary_range(tc.prog.source_ranges[item.id].clone(), "expression here")
                         );
-                        tc.constraints[lhs].one_of = vec![Type::Error];
-                        tc.constraints[rhs].one_of = vec![Type::Error];
+                        for &arg in args {
+                            tc.constraints[arg].one_of = vec![Type::Error];
+                        }
                         None
                     } else {
                         let overload = tc.overloads[id][0];
-                        tc.constraints[lhs].one_of = vec![tc.prog.decls[overload].param_tys[0].clone()];
-                        tc.constraints[rhs].one_of = vec![tc.prog.decls[overload].param_tys[1].clone()];
+                        for (i, &arg) in args.iter().enumerate() {
+                            tc.constraints[arg].one_of = vec![tc.prog.decls[overload].param_tys[i].clone()];
+                        }
                         Some(overload)
                     };
                     tc.selected_overloads[id] = overload;

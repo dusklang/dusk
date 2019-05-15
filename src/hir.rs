@@ -33,7 +33,7 @@ pub enum ItemKind {
     IntLit,
     DecLit,
     StoredDecl { name: String, root_expr: ItemId },
-    ComputedDeclRef { name: String, lhs: ItemId, rhs: ItemId, id: ComputedDeclRefId },
+    ComputedDeclRef { name: String, args: Vec<ItemId>, id: ComputedDeclRefId },
     DeclRef { decl: Option<ItemId> }
 }
 
@@ -178,7 +178,7 @@ impl Builder {
         let level = self.items.insert(
             &[self.levels[lhs], self.levels[rhs]],
             Item {
-                kind: ItemKind::ComputedDeclRef { name: op.symbol().to_string(), lhs, rhs, id: ComputedDeclRefId::new(self.num_operator_exprs as usize) },
+                kind: ItemKind::ComputedDeclRef { name: op.symbol().to_string(), args: vec![lhs, rhs], id: ComputedDeclRefId::new(self.num_operator_exprs as usize) },
                 id,
             },
         );
