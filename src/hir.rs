@@ -32,8 +32,8 @@ pub enum UnOp {
 pub enum ItemKind {
     IntLit,
     DecLit,
-    StoredDecl { name: String, root_expr: ItemId },
-    ComputedDeclRef { name: String, args: Vec<ItemId>, id: ComputedDeclRefId },
+    StoredDecl { root_expr: ItemId },
+    ComputedDeclRef { args: Vec<ItemId>, id: ComputedDeclRefId },
     DeclRef { decl: Option<ItemId> }
 }
 
@@ -63,17 +63,22 @@ pub struct Program {
     pub items: DepVec<Item>,
     /// The source ranges of each item in the entire program
     pub source_ranges: IdxVec<SourceRange, ItemId>,
-    /// The global declarations in the entire program
+    /// The computed declarations in the entire program
     pub decls: IdxVec<ComputedDecl, ComputedDeclId>,
+    /// Each function call or operator expression's overload choices
+    pub overloads: IdxVec<Vec<ComputedDeclId>, ComputedDeclRefId>,
     /// Number of items in the entire program
     pub num_items: usize,
-    /// Number of operator expressions in the entire program
-    pub num_operator_exprs: usize,
 }
 
 struct StoredDecl {
     name: String,
     decl: ItemId,
+}
+
+struct ComputedDeclRef {
+    name: String,
+    num_arguments: u32,
 }
 
 pub struct Builder {
@@ -83,10 +88,10 @@ pub struct Builder {
     source_ranges: IdxVec<SourceRange, ItemId>,
     /// The levels of each item so far
     levels: IdxVec<u32, ItemId>,
-    /// The global declarations so far
+    /// The computed declarations so far
     decls: IdxVec<ComputedDecl, ComputedDeclId>,
-    /// Number of operator expressions so far
-    num_operator_exprs: usize,
+    /// The names of the computed declarations references so far
+    computed_decl_refs: IdxVec<ComputedDeclRef, ComputedDeclRefId>,
 
     /// All stored declarations in the current scope (not indexed like the other collections; just for convenient lookup of declarations)
     stored_decls: Vec<StoredDecl>,
@@ -139,7 +144,7 @@ impl Builder {
             source_ranges: IdxVec::new(),
             levels: IdxVec::new(),
             decls,
-            num_operator_exprs: 0,
+            computed_decl_refs: IdxVec::new(),
             stored_decls: Vec::new(),
         }
     }
@@ -175,16 +180,16 @@ impl Builder {
 
     pub fn bin_op(&mut self, op: BinOp, lhs: ItemId, rhs: ItemId, range: SourceRange) -> ItemId {
         let id = ItemId::new(self.levels.len());
+        let decl_ref_id = self.computed_decl_refs.push(ComputedDeclRef { name: op.symbol().to_string(), num_arguments: 2 });
         let level = self.items.insert(
             &[self.levels[lhs], self.levels[rhs]],
             Item {
-                kind: ItemKind::ComputedDeclRef { name: op.symbol().to_string(), args: vec![lhs, rhs], id: ComputedDeclRefId::new(self.num_operator_exprs as usize) },
+                kind: ItemKind::ComputedDeclRef { args: vec![lhs, rhs], id: decl_ref_id },
                 id,
             },
         );
         self.levels.push(level);
         self.source_ranges.push(range);
-        self.num_operator_exprs += 1;
 
         id
     }
@@ -194,7 +199,7 @@ impl Builder {
         let level = self.items.insert(
             &[self.levels[root_expr]],
             Item {
-                kind: ItemKind::StoredDecl { name: name.clone(), root_expr },
+                kind: ItemKind::StoredDecl { root_expr },
                 id,
             },
         );
@@ -237,12 +242,21 @@ impl Builder {
     }
 
     pub fn program(self) -> Program {
+        let mut overloads = IdxVec::new();
+        overloads.resize_with(self.computed_decl_refs.len(), Default::default);
+        for (i, decl_ref) in self.computed_decl_refs.indices().zip(&self.computed_decl_refs) {
+            overloads[i] = self.decls.indices_satisfying(|decl| {
+                decl.name == decl_ref.name && 
+                decl.param_tys.len() == decl_ref.num_arguments as usize
+            });
+        }
+        
         Program {
             items: self.items,
             source_ranges: self.source_ranges,
             decls: self.decls,
+            overloads,
             num_items: self.levels.len(),
-            num_operator_exprs: self.num_operator_exprs,
         }
     }
 }

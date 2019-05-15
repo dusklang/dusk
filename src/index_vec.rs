@@ -38,7 +38,11 @@ impl<T, I: Idx> IdxVec<T, I> {
     }
 
     pub fn len(&self) -> usize { self.raw.len() }
-    pub fn push(&mut self, value: T) { self.raw.push(value) }
+    pub fn push(&mut self, value: T) -> I { 
+        let i = self.raw.len();
+        self.raw.push(value);
+        I::new(i)
+    }
     pub fn resize_with(&mut self, new_len: usize, f: impl FnMut() -> T) {
         self.raw.resize_with(new_len, f);
     }
@@ -50,6 +54,41 @@ impl<T, I: Idx> IdxVec<T, I> {
             }
         }
         indices
+    }
+    pub fn iter<'a>(&'a self) -> std::slice::Iter<'a, T> { self.raw.iter() }
+    pub fn iter_mut<'a>(&'a mut self) -> std::slice::IterMut<'a, T> { self.raw.iter_mut() }
+    pub fn indices(&self) -> impl Iterator<Item=I> {
+        // HACK: Unfortunately empty ranges in Rust (for example 0..0) appear to actually yield one element.
+        // Filtering is a silly way to get around this.
+        let empty = self.raw.is_empty();
+        (0..self.raw.len()).filter(move |_| !empty).map(|i| I::new(i))
+    }
+}
+
+impl<T, I: Idx> IntoIterator for IdxVec<T, I> {
+    type Item = T;
+    type IntoIter = std::vec::IntoIter<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.raw.into_iter()
+    }
+}
+
+impl<'a, T, I: Idx> IntoIterator for &'a IdxVec<T, I> {
+    type Item = &'a T;
+    type IntoIter = std::slice::Iter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a, T, I: Idx> IntoIterator for &'a mut IdxVec<T, I> {
+    type Item = &'a mut T;
+    type IntoIter = std::slice::IterMut<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
     }
 }
 

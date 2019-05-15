@@ -26,8 +26,6 @@ struct TypeChecker {
     types: IdxVec<Type, ItemId>,
     /// The constraints on each items's type
     constraints: IdxVec<ConstraintList, ItemId>,
-    /// The constraints on each function call or operator expression's overload choices
-    overloads: IdxVec<Vec<ComputedDeclId>, ComputedDeclRefId>,
     /// The selected overload for each function call or operator expression
     selected_overloads: IdxVec<Option<ComputedDeclId>, ComputedDeclRefId>,
 }
@@ -37,14 +35,12 @@ pub fn type_check(prog: Program) -> Vec<Error> {
         prog,
         types: IdxVec::new(),
         constraints: IdxVec::new(),
-        overloads: IdxVec::new(),
         selected_overloads: IdxVec::new(),
     };
     let mut errs = Vec::new();
     tc.types.resize_with(tc.prog.num_items, Default::default);
     tc.constraints.resize_with(tc.prog.num_items, Default::default);
-    tc.overloads.resize_with(tc.prog.num_operator_exprs, Default::default);
-    tc.selected_overloads.resize_with(tc.prog.num_operator_exprs, || None);
+    tc.selected_overloads.resize_with(tc.prog.overloads.len(), || None);
 
     // Pass 1: propagate info down from leaves to roots
     for level in tc.prog.items.levels() {
@@ -53,7 +49,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             match &item.kind {
                 IntLit => tc.constraints[item.id].literal = Some(LiteralType::Int),
                 DecLit => tc.constraints[item.id].literal = Some(LiteralType::Dec),
-                &StoredDecl { name: _, root_expr } => {
+                &StoredDecl { root_expr } => {
                     let constraints = &tc.constraints[root_expr];
                     let guess = match constraints.literal {
                         Some(LiteralType::Int) => Type::i32(),
@@ -73,14 +69,15 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                         tc.constraints[item.id].one_of = vec![ty];
                     }
                 }
-                &ComputedDeclRef { ref name, ref args, id } => {
-                    let mut overloads = tc.prog.decls.indices_satisfying(|decl| &decl.name == name);
-
+                &ComputedDeclRef { ref args, id } => {
                     // Filter overloads that don't match the constraints of the parameters.
-                    overloads.retain(|&overload| {
+                    // P.S. These borrows are only here because the borrow checker is dumb
+                    let decls = &tc.prog.decls;
+                    let constraints = &tc.constraints;
+                    tc.prog.overloads[id].retain(|&overload| {
+                        assert_eq!(decls[overload].param_tys.len(), args.len());
                         // For each parameter:
-                        assert_eq!(tc.prog.decls[overload].param_tys.len(), args.len());
-                        for (constraints, ty) in args.iter().map(|&arg| &tc.constraints[arg]).zip(&tc.prog.decls[overload].param_tys) {
+                        for (constraints, ty) in args.iter().map(|&arg| &constraints[arg]).zip(&decls[overload].param_tys) {
                             // Verify all the constraints match the parameter type.
                             match constraints.literal {
                                 Some(LiteralType::Int) => if !ty.expressible_by_int_lit() { return false },
@@ -91,11 +88,9 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                         true
                     });
 
-                    tc.constraints[item.id].one_of = overloads.iter()
+                    tc.constraints[item.id].one_of = tc.prog.overloads[id].iter()
                         .map(|&overload| tc.prog.decls[overload].ret_ty.clone())
                         .collect();
-                    
-                    tc.overloads[id] = overloads;
                 }
             }
         }
@@ -130,11 +125,11 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                         constraints.one_of[0].clone()
                     };
                 },
-                &StoredDecl { name: _, root_expr } => {
+                &StoredDecl { root_expr } => {
                     tc.constraints[root_expr].one_of = vec![tc.types[item.id].clone()];
                 }
                 DeclRef { .. } => {}
-                &ComputedDeclRef { name: _, ref args, id } => {
+                &ComputedDeclRef { ref args, id } => {
                     let constraints = &tc.constraints[item.id];
                     let ty = if constraints.one_of.len() != 1 {
                         errs.push(
@@ -149,9 +144,9 @@ pub fn type_check(prog: Program) -> Vec<Error> {
 
                     // This line is necessary because the borrow checker is dumb
                     let decls = &tc.prog.decls;
-                    tc.overloads[id].retain(|&overload| decls[overload].ret_ty == ty);
+                    tc.prog.overloads[id].retain(|&overload| decls[overload].ret_ty == ty);
                     
-                    let overload = if tc.overloads[id].len() != 1 {
+                    let overload = if tc.prog.overloads[id].len() != 1 {
                         errs.push(
                             Error::new("ambiguous overload for binary operator")
                                 .adding_primary_range(tc.prog.source_ranges[item.id].clone(), "expression here")
@@ -161,7 +156,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                         }
                         None
                     } else {
-                        let overload = tc.overloads[id][0];
+                        let overload = tc.prog.overloads[id][0];
                         for (i, &arg) in args.iter().enumerate() {
                             tc.constraints[arg].one_of = vec![tc.prog.decls[overload].param_tys[i].clone()];
                         }
