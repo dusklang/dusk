@@ -6,8 +6,15 @@ use crate::ty::Type;
 use arrayvec::ArrayVec;
 
 newtype_index!(ItemId);
-newtype_index!(ComputedDeclId);
-newtype_index!(ComputedDeclRefId);
+newtype_index!(DeclRefId);
+newtype_index!(GlobalDeclId);
+newtype_index!(LocalDeclId);
+
+#[derive(Copy, Clone, Debug)]
+pub enum DeclId {
+    Global(GlobalDeclId),
+    Local(LocalDeclId),
+}
 
 #[derive(Clone, Copy, Debug)]
 pub enum BinOp {
@@ -32,9 +39,8 @@ pub enum UnOp {
 pub enum ItemKind {
     IntLit,
     DecLit,
-    StoredDecl { root_expr: ItemId },
-    ComputedDeclRef { args: Vec<ItemId>, id: ComputedDeclRefId },
-    DeclRef { decl: Option<ItemId> }
+    StoredDecl { root_expr: ItemId, id: DeclId },
+    DeclRef { args: Vec<ItemId>, id: DeclRefId },
 }
 
 /// An expression or declaration
@@ -45,15 +51,15 @@ pub struct Item {
 }
 
 #[derive(Debug)]
-pub struct ComputedDecl {
+pub struct Decl {
     pub name: String,
     pub param_tys: Vec<Type>,
     pub ret_ty: Type,
 }
 
-impl ComputedDecl {
+impl Decl {
     fn new(name: String, param_tys: Vec<Type>, ret_ty: Type) -> Self {
-        Self { name, param_tys, ret_ty }
+        Decl { name, param_tys, ret_ty }
     }
 }
 
@@ -63,20 +69,40 @@ pub struct Program {
     pub items: DepVec<Item>,
     /// The source ranges of each item in the entire program
     pub source_ranges: IdxVec<SourceRange, ItemId>,
-    /// The computed declarations in the entire program
-    pub decls: IdxVec<ComputedDecl, ComputedDeclId>,
-    /// Each function call or operator expression's overload choices
-    pub overloads: IdxVec<Vec<ComputedDeclId>, ComputedDeclRefId>,
+    /// The global declarations in the entire program
+    pub global_decls: IdxVec<Decl, GlobalDeclId>,
+    /// The local declarations in the entire program
+    pub local_decls: IdxVec<Decl, LocalDeclId>,
+    /// Each declref's overload choices
+    pub overloads: IdxVec<Vec<DeclId>, DeclRefId>,
     /// Number of items in the entire program
     pub num_items: usize,
 }
 
-struct StoredDecl {
-    name: String,
-    decl: ItemId,
+impl Program {
+    pub fn decl(&self, id: DeclId) -> &Decl { 
+        match id {
+            DeclId::Global(id) => &self.global_decls[id],
+            DeclId::Local(id) => &self.local_decls[id],
+        }
+    }
+
+    pub fn decl_mut(&mut self, id: DeclId) -> &mut Decl { 
+        match id {
+            DeclId::Global(id) => &mut self.global_decls[id],
+            DeclId::Local(id) => &mut self.local_decls[id],
+        }
+    }
 }
 
-struct ComputedDeclRef {
+struct StoredDecl {
+    name: String,
+    item: ItemId,
+    decl: DeclId,
+}
+
+struct GlobalDeclRef {
+    id: DeclRefId,
     name: String,
     num_arguments: u32,
 }
@@ -88,18 +114,22 @@ pub struct Builder {
     source_ranges: IdxVec<SourceRange, ItemId>,
     /// The levels of each item so far
     levels: IdxVec<u32, ItemId>,
-    /// The computed declarations so far
-    decls: IdxVec<ComputedDecl, ComputedDeclId>,
-    /// The names of the computed declarations references so far
-    computed_decl_refs: IdxVec<ComputedDeclRef, ComputedDeclRefId>,
+    /// The global declarations so far
+    global_decls: IdxVec<Decl, GlobalDeclId>,
+    /// The local declarations so far
+    local_decls: IdxVec<Decl, LocalDeclId>,
+    /// Each declref's overload choices so far
+    overloads: IdxVec<Vec<DeclId>, DeclRefId>,
 
-    /// All stored declarations in the current scope (not indexed like the other collections; just for convenient lookup of declarations)
+    /// The names and arities of the global declaration references so far
+    global_decl_refs: Vec<GlobalDeclRef>,
+    /// All stored declarations in the current scope
     stored_decls: Vec<StoredDecl>,
 }
 
 impl Builder {
     pub fn new() -> Self {
-        let mut decls: IdxVec<ComputedDecl, ComputedDeclId> = IdxVec::new();
+        let mut global_decls: IdxVec<Decl, GlobalDeclId> = IdxVec::new();
         // Integers, floats and bool
         let values = &[
             Type::i8(), Type::i16(), Type::i32(), Type::i64(),
@@ -110,41 +140,43 @@ impl Builder {
         let integers = &numerics[0..8];
         for op in &["*", "/", "%", "+", "-"] {
             for ty in numerics {
-                decls.push(ComputedDecl::new(op.to_string(), vec![ty.clone(), ty.clone()], ty.clone()));
+                global_decls.push(Decl::new(op.to_string(), vec![ty.clone(), ty.clone()], ty.clone()));
             }
         }
         for op in &["<", "<=", ">", ">="] {
             for ty in numerics {
-                decls.push(ComputedDecl::new(op.to_string(), vec![ty.clone(), ty.clone()], Type::Bool));
+                global_decls.push(Decl::new(op.to_string(), vec![ty.clone(), ty.clone()], Type::Bool));
             }
         }
         for op in &["==", "!="] {
             for ty in values {
-                decls.push(ComputedDecl::new(op.to_string(), vec![ty.clone(), ty.clone()], Type::Bool));
+                global_decls.push(Decl::new(op.to_string(), vec![ty.clone(), ty.clone()], Type::Bool));
             }
         }
         for op in &["&", "|"] {
             for ty in integers {
-                decls.push(ComputedDecl::new(op.to_string(), vec![ty.clone(), ty.clone()], ty.clone()));
+                global_decls.push(Decl::new(op.to_string(), vec![ty.clone(), ty.clone()], ty.clone()));
             }
         }
         for op in &["&=", "|="] {
             for ty in integers {
-                decls.push(ComputedDecl::new(op.to_string(), vec![ty.clone(), ty.clone()], Type::Void));
+                global_decls.push(Decl::new(op.to_string(), vec![ty.clone(), ty.clone()], Type::Void));
             }
         }
         for op in &["&&", "||"] {
-            decls.push(ComputedDecl::new(op.to_string(), vec![Type::Bool, Type::Bool], Type::Bool));
+            global_decls.push(Decl::new(op.to_string(), vec![Type::Bool, Type::Bool], Type::Bool));
         }
         for ty in values {
-            decls.push(ComputedDecl::new("=".to_string(), vec![ty.clone(), ty.clone()], Type::Void));
+            global_decls.push(Decl::new("=".to_string(), vec![ty.clone(), ty.clone()], Type::Void));
         }
         Self {
             items: DepVec::new(),
             source_ranges: IdxVec::new(),
             levels: IdxVec::new(),
-            decls,
-            computed_decl_refs: IdxVec::new(),
+            global_decls,
+            local_decls: IdxVec::new(),
+            overloads: IdxVec::new(),
+            global_decl_refs: Vec::new(),
             stored_decls: Vec::new(),
         }
     }
@@ -180,54 +212,64 @@ impl Builder {
 
     pub fn bin_op(&mut self, op: BinOp, lhs: ItemId, rhs: ItemId, range: SourceRange) -> ItemId {
         let id = ItemId::new(self.levels.len());
-        let decl_ref_id = self.computed_decl_refs.push(ComputedDeclRef { name: op.symbol().to_string(), num_arguments: 2 });
+        let decl_ref_id = DeclRefId::new(self.global_decl_refs.len());
+        self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name: op.symbol().to_string(), num_arguments: 2 });
+        self.overloads.push(Vec::new());
         let level = self.items.insert(
             &[self.levels[lhs], self.levels[rhs]],
             Item {
-                kind: ItemKind::ComputedDeclRef { args: vec![lhs, rhs], id: decl_ref_id },
+                kind: ItemKind::DeclRef { args: vec![lhs, rhs], id: decl_ref_id },
                 id,
             },
         );
         self.levels.push(level);
         self.source_ranges.push(range);
+
 
         id
     }
 
     pub fn stored_decl(&mut self, name: String, root_expr: ItemId, range: SourceRange) -> ItemId {
         let id = ItemId::new(self.levels.len());
+        let decl_id = self.local_decls.push(Decl { name: name.clone(), param_tys: Vec::new(), ret_ty: Type::Error });
+        let decl_id = DeclId::Local(decl_id);
         let level = self.items.insert(
             &[self.levels[root_expr]],
             Item {
-                kind: ItemKind::StoredDecl { root_expr },
+                kind: ItemKind::StoredDecl { root_expr, id: decl_id },
                 id,
             },
         );
         self.levels.push(level);
         self.source_ranges.push(range);
 
-        self.stored_decls.push(StoredDecl { name, decl: id });
-        
+        self.stored_decls.push(StoredDecl { name, item: id, decl: decl_id });
+
         id
     }
 
     pub fn decl_ref(&mut self, name: String, range: SourceRange) -> ItemId {
         let id = ItemId::new(self.levels.len());
 
-        let mut decl: Option<ItemId> = None;
-        for &StoredDecl { name: ref other_name, decl: other_decl } in self.stored_decls.iter().rev() {
+        let mut decl: Option<(ItemId, DeclId)> = None;
+        for &StoredDecl { name: ref other_name, item: other_item, decl: other_decl } in self.stored_decls.iter().rev() {
             if &name == other_name {
-                decl = Some(other_decl);
+                decl = Some((other_item, other_decl));
                 break;
             }
         }
 
         let mut deps = ArrayVec::<[u32; 1]>::new();
-        if let Some(decl) = decl { deps.push(self.levels[decl]); }
+        let decl_ref = if let Some((item, decl)) = decl {
+            deps.push(self.levels[item]);
+            self.overloads.push(vec![decl])
+        } else {
+            self.overloads.push(Vec::new())
+        };
         let level = self.items.insert(
             &deps[..],
             Item {
-                kind: ItemKind::DeclRef { decl },
+                kind: ItemKind::DeclRef { args: Vec::new(), id: decl_ref },
                 id,
             },
         );
@@ -241,21 +283,20 @@ impl Builder {
         self.source_ranges[id].clone()
     }
 
-    pub fn program(self) -> Program {
-        let mut overloads = IdxVec::new();
-        overloads.resize_with(self.computed_decl_refs.len(), Default::default);
-        for (i, decl_ref) in self.computed_decl_refs.indices().zip(&self.computed_decl_refs) {
-            overloads[i] = self.decls.indices_satisfying(|decl| {
-                decl.name == decl_ref.name && 
-                decl.param_tys.len() == decl_ref.num_arguments as usize
-            });
+    pub fn program(mut self) -> Program {
+        assert_eq!(self.stored_decls.len(), self.local_decls.len());
+        for decl_ref in self.global_decl_refs {
+            self.overloads[decl_ref.id] = self.global_decls.indices_satisfying(|decl| {
+                decl.name == decl_ref.name && decl.param_tys.len() == decl_ref.num_arguments as usize
+            }).iter().map(|&i| DeclId::Global(i)).collect();
         }
-        
+
         Program {
             items: self.items,
             source_ranges: self.source_ranges,
-            decls: self.decls,
-            overloads,
+            local_decls: self.local_decls,
+            global_decls: self.global_decls,
+            overloads: self.overloads,
             num_items: self.levels.len(),
         }
     }
