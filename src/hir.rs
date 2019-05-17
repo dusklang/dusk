@@ -81,7 +81,7 @@ pub struct Program {
     /// All decimal literals in the entire program
     pub dec_lits: Vec<Item<DecLit>>,
     /// All assigned decls in the entire program
-    pub assigned_decls: DepVec<Item<AssignedDecl>>,
+    pub assigned_decls: DepVec<AssignedDecl>,
     /// All decl refs in the entire program
     pub decl_refs: DepVec<Item<DeclRef>>,
 
@@ -115,7 +115,7 @@ impl Program {
 
 struct StoredDecl {
     name: String,
-    item: ItemId,
+    level: u32,
     decl: DeclId,
 }
 
@@ -131,7 +131,7 @@ pub struct Builder {
     /// All decimal literals in the entire program so far
     dec_lits: Vec<Item<DecLit>>,
     /// All assigned decls in the entire program so far
-    assigned_decls: DepVec<Item<AssignedDecl>>,
+    assigned_decls: DepVec<AssignedDecl>,
     /// All decl refs in the entire program so far
     decl_refs: DepVec<Item<DeclRef>>,
 
@@ -244,14 +244,10 @@ impl Builder {
         let id = ItemId::new(self.levels.len());
         let decl_id = self.local_decls.push(Decl { name: name.clone(), param_tys: Vec::new(), ret_ty: Type::Error });
         let decl_id = DeclId::Local(decl_id);
-        let level = self.assigned_decls.insert(
-            &[self.levels[root_expr]],
-            Item { id, data: AssignedDecl { root_expr, decl_id } },
-        );
-        self.levels.push(level);
+        let level = self.assigned_decls.insert(&[self.levels[root_expr]], AssignedDecl { root_expr, decl_id });
         self.source_ranges.push(range);
 
-        self.stored_decls.push(StoredDecl { name, item: id, decl: decl_id });
+        self.stored_decls.push(StoredDecl { name, level, decl: decl_id });
 
         id
     }
@@ -259,17 +255,17 @@ impl Builder {
     pub fn decl_ref(&mut self, name: String, range: SourceRange) -> ItemId {
         let id = ItemId::new(self.levels.len());
 
-        let mut decl: Option<(ItemId, DeclId)> = None;
-        for &StoredDecl { name: ref other_name, item: other_item, decl: other_decl } in self.stored_decls.iter().rev() {
+        let mut decl: Option<(u32, DeclId)> = None;
+        for &StoredDecl { name: ref other_name, level: other_level, decl: other_decl } in self.stored_decls.iter().rev() {
             if &name == other_name {
-                decl = Some((other_item, other_decl));
+                decl = Some((other_level, other_decl));
                 break;
             }
         }
 
         let mut deps = ArrayVec::<[u32; 1]>::new();
-        let decl_ref_id = if let Some((item, decl)) = decl {
-            deps.push(self.levels[item]);
+        let decl_ref_id = if let Some((level, decl)) = decl {
+            deps.push(level);
             self.overloads.push(vec![decl])
         } else {
             self.overloads.push(Vec::new())
