@@ -177,6 +177,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
         }
     }
     println!("Types: {:#?}", tc.types);
+    println!("Decl types: {:#?}", tc.prog.local_decls);
     //println!("Constraints: {:#?}", tc.constraints);
     errs
 }

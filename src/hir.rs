@@ -212,9 +212,8 @@ impl Builder {
 
     pub fn bin_op(&mut self, op: BinOp, lhs: ItemId, rhs: ItemId, range: SourceRange) -> ItemId {
         let id = ItemId::new(self.levels.len());
-        let decl_ref_id = DeclRefId::new(self.global_decl_refs.len());
+        let decl_ref_id = self.overloads.push(Vec::new());
         self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name: op.symbol().to_string(), num_arguments: 2 });
-        self.overloads.push(Vec::new());
         let level = self.items.insert(
             &[self.levels[lhs], self.levels[rhs]],
             Item {
