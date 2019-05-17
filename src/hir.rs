@@ -1,3 +1,5 @@
+use std::ops::{Deref, DerefMut};
+
 use crate::dep_vec::DepVec;
 use crate::source_info::SourceRange;
 use crate::index_vec::{Idx, IdxVec};
@@ -36,18 +38,27 @@ pub enum UnOp {
 }
 
 #[derive(Debug)]
-pub enum ItemKind {
-    IntLit,
-    DecLit,
-    StoredDecl { root_expr: ItemId, id: DeclId },
-    DeclRef { args: Vec<ItemId>, id: DeclRefId },
+pub struct IntLit;
+#[derive(Debug)]
+pub struct DecLit;
+#[derive(Debug)]
+pub struct AssignedDecl { pub root_expr: ItemId, pub decl_id: DeclId }
+#[derive(Debug)]
+pub struct DeclRef { pub args: Vec<ItemId>, pub decl_ref_id: DeclRefId }
+
+#[derive(Debug)]
+pub struct Item<T> {
+    pub id: ItemId,
+    pub data: T,
 }
 
-/// An expression or declaration
-#[derive(Debug)]
-pub struct Item {
-    pub kind: ItemKind,
-    pub id: ItemId,
+impl<T> Deref for Item<T> {
+    type Target = T;
+    fn deref(&self) -> &T { &self.data }
+}
+
+impl<T> DerefMut for Item<T> {
+    fn deref_mut(&mut self) -> &mut T { &mut self.data }
 }
 
 #[derive(Debug)]
@@ -65,8 +76,15 @@ impl Decl {
 
 #[derive(Debug)]
 pub struct Program {
-    /// All items in the entire program
-    pub items: DepVec<Item>,
+    /// All integer literals in the entire program
+    pub int_lits: Vec<Item<IntLit>>,
+    /// All decimal literals in the entire program
+    pub dec_lits: Vec<Item<DecLit>>,
+    /// All assigned decls in the entire program
+    pub assigned_decls: DepVec<Item<AssignedDecl>>,
+    /// All decl refs in the entire program
+    pub decl_refs: DepVec<Item<DeclRef>>,
+
     /// The source ranges of each item in the entire program
     pub source_ranges: IdxVec<SourceRange, ItemId>,
     /// The global declarations in the entire program
@@ -108,8 +126,15 @@ struct GlobalDeclRef {
 }
 
 pub struct Builder {
-    /// All items in the entire program so far
-    items: DepVec<Item>,
+    /// All integer literals in the entire program so far
+    int_lits: Vec<Item<IntLit>>,
+    /// All decimal literals in the entire program so far
+    dec_lits: Vec<Item<DecLit>>,
+    /// All assigned decls in the entire program so far
+    assigned_decls: DepVec<Item<AssignedDecl>>,
+    /// All decl refs in the entire program so far
+    decl_refs: DepVec<Item<DeclRef>>,
+
     /// The source ranges of each item so far
     source_ranges: IdxVec<SourceRange, ItemId>,
     /// The levels of each item so far
@@ -170,7 +195,10 @@ impl Builder {
             global_decls.push(Decl::new("=".to_string(), vec![ty.clone(), ty.clone()], Type::Void));
         }
         Self {
-            items: DepVec::new(),
+            int_lits: Vec::new(),
+            dec_lits: Vec::new(),
+            assigned_decls: DepVec::new(),
+            decl_refs: DepVec::new(),
             source_ranges: IdxVec::new(),
             levels: IdxVec::new(),
             global_decls,
@@ -183,28 +211,16 @@ impl Builder {
 
     pub fn int_lit(&mut self, lit: u64, range: SourceRange) -> ItemId {
         let id = ItemId::new(self.levels.len());
-        let level = self.items.insert(
-            &[],
-            Item { 
-                kind: ItemKind::IntLit,
-                id,
-            },
-        );
-        self.levels.push(level);
+        self.int_lits.push(Item { id, data: IntLit });
+        self.levels.push(0);
         self.source_ranges.push(range);
         id
     }
 
     pub fn dec_lit(&mut self, lit: f64, range: SourceRange) -> ItemId {
         let id = ItemId::new(self.levels.len());
-        let level = self.items.insert(
-            &[],
-            Item {
-                kind: ItemKind::DecLit,
-                id,
-            },
-        );
-        self.levels.push(level);
+        self.dec_lits.push(Item { id, data: DecLit });
+        self.levels.push(0);
         self.source_ranges.push(range);
 
         id
@@ -214,16 +230,12 @@ impl Builder {
         let id = ItemId::new(self.levels.len());
         let decl_ref_id = self.overloads.push(Vec::new());
         self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name: op.symbol().to_string(), num_arguments: 2 });
-        let level = self.items.insert(
+        let level = self.decl_refs.insert(
             &[self.levels[lhs], self.levels[rhs]],
-            Item {
-                kind: ItemKind::DeclRef { args: vec![lhs, rhs], id: decl_ref_id },
-                id,
-            },
+            Item { id, data: DeclRef { args: vec![lhs, rhs], decl_ref_id } },
         );
         self.levels.push(level);
         self.source_ranges.push(range);
-
 
         id
     }
@@ -232,12 +244,9 @@ impl Builder {
         let id = ItemId::new(self.levels.len());
         let decl_id = self.local_decls.push(Decl { name: name.clone(), param_tys: Vec::new(), ret_ty: Type::Error });
         let decl_id = DeclId::Local(decl_id);
-        let level = self.items.insert(
+        let level = self.assigned_decls.insert(
             &[self.levels[root_expr]],
-            Item {
-                kind: ItemKind::StoredDecl { root_expr, id: decl_id },
-                id,
-            },
+            Item { id, data: AssignedDecl { root_expr, decl_id } },
         );
         self.levels.push(level);
         self.source_ranges.push(range);
@@ -259,18 +268,15 @@ impl Builder {
         }
 
         let mut deps = ArrayVec::<[u32; 1]>::new();
-        let decl_ref = if let Some((item, decl)) = decl {
+        let decl_ref_id = if let Some((item, decl)) = decl {
             deps.push(self.levels[item]);
             self.overloads.push(vec![decl])
         } else {
             self.overloads.push(Vec::new())
         };
-        let level = self.items.insert(
+        let level = self.decl_refs.insert(
             &deps[..],
-            Item {
-                kind: ItemKind::DeclRef { args: Vec::new(), id: decl_ref },
-                id,
-            },
+            Item { id, data: DeclRef { args: Vec::new(), decl_ref_id } },
         );
         self.levels.push(level);
         self.source_ranges.push(range);
@@ -291,7 +297,10 @@ impl Builder {
         }
 
         Program {
-            items: self.items,
+            int_lits: self.int_lits,
+            dec_lits: self.dec_lits,
+            assigned_decls: self.assigned_decls,
+            decl_refs: self.decl_refs,
             source_ranges: self.source_ranges,
             local_decls: self.local_decls,
             global_decls: self.global_decls,

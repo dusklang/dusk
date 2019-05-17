@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::cmp::max;
 
 /// A growable array for encoding data dependencies
 #[derive(Debug)]
@@ -29,13 +29,25 @@ impl<T> DepVec<T> {
     pub fn get_level(&self, level: u32) -> &[T] {
         &self.storage[level as usize]
     }
+}
 
-    /// Get mutable slice containing the specified level of elements
-    pub fn get_level_mut(&mut self, level: u32) -> &mut [T] {
-        &mut self.storage[level as usize]
-    }
+// Type eraser for DepVecs with different Ts.
+pub trait AnyDepVec {
+    fn num_levels(&self) -> u32;
+    fn extend_to(&mut self, num_levels: u32);
+}
 
-    pub fn levels(&self) -> Range<u32> {
-        0..(self.storage.len() as u32)
+impl<T> AnyDepVec for DepVec<T> {
+    fn num_levels(&self) -> u32 { self.storage.len() as u32 }
+    fn extend_to(&mut self, num_levels: u32) {
+        self.storage.resize_with(max(num_levels as usize, self.storage.len()), Default::default);
     }
+}
+
+pub fn unify_sizes(vecs: &mut [&mut dyn AnyDepVec]) -> u32 {
+    let max = vecs.iter().map(|dv| dv.num_levels()).max().unwrap_or_else(|| 0);
+    for dv in vecs {
+        dv.extend_to(max);
+    }
+    max
 }
