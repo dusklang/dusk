@@ -117,7 +117,6 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             };
             tc.types[item.id] = ty.clone();
 
-            // This line is necessary because the borrow checker is dumb
             // P.S. These borrows are only here because the borrow checker is dumb
             let local_decls = &tc.prog.local_decls;
             let global_decls = &tc.prog.global_decls;
