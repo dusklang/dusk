@@ -194,6 +194,7 @@ impl Builder {
         for ty in values {
             global_decls.push(Decl::new("=".to_string(), vec![ty.clone(), ty.clone()], Type::Void));
         }
+        global_decls.push(Decl::new("pi".to_string(), Vec::new(), Type::f64()));
         Self {
             int_lits: Vec::new(),
             dec_lits: Vec::new(),
@@ -265,10 +266,14 @@ impl Builder {
 
         let mut deps = ArrayVec::<[u32; 1]>::new();
         let decl_ref_id = if let Some((level, decl)) = decl {
+            // Local decl
             deps.push(level);
             self.overloads.push(vec![decl])
         } else {
-            self.overloads.push(Vec::new())
+            // Global decl
+            let decl_ref_id = self.overloads.push(Vec::new());
+            self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name: name, num_arguments: 0 });
+            decl_ref_id
         };
         let level = self.decl_refs.insert(
             &deps[..],
