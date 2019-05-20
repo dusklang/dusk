@@ -195,6 +195,7 @@ impl Builder {
             global_decls.push(Decl::new("=".to_string(), vec![ty.clone(), ty.clone()], Type::Void));
         }
         global_decls.push(Decl::new("pi".to_string(), Vec::new(), Type::f64()));
+        global_decls.push(Decl::new("abs".to_string(), vec![Type::f32()], Type::f64()));
         Self {
             int_lits: Vec::new(),
             dec_lits: Vec::new(),
@@ -253,7 +254,7 @@ impl Builder {
         id
     }
 
-    pub fn decl_ref(&mut self, name: String, range: SourceRange) -> ItemId {
+    pub fn decl_ref(&mut self, name: String, arguments: Vec<ItemId>, range: SourceRange) -> ItemId {
         let id = ItemId::new(self.levels.len());
 
         let mut decl: Option<(u32, DeclId)> = None;
@@ -267,17 +268,21 @@ impl Builder {
         let mut deps = ArrayVec::<[u32; 1]>::new();
         let decl_ref_id = if let Some((level, decl)) = decl {
             // Local decl
+
+            // Local decls must be stored atm, so if there are arguments it's a compile error (or right now, a panic)
+            assert!(arguments.is_empty());
             deps.push(level);
             self.overloads.push(vec![decl])
         } else {
             // Global decl
             let decl_ref_id = self.overloads.push(Vec::new());
-            self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name: name, num_arguments: 0 });
+            self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name: name, num_arguments: arguments.len() as u32 });
+            deps.push(arguments.iter().map(|&id| self.levels[id]).max().unwrap_or_else(|| 0));
             decl_ref_id
         };
         let level = self.decl_refs.insert(
             &deps[..],
-            Item { id, data: DeclRef { args: Vec::new(), decl_ref_id } },
+            Item { id, data: DeclRef { args: arguments, decl_ref_id } },
         );
         self.levels.push(level);
         self.source_ranges.push(range);

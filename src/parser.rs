@@ -98,7 +98,8 @@ impl Parser {
             },
             Ident(name) => {
                 let name = name.clone();
-                let decl_ref = self.builder.decl_ref(name, self.cur().range.clone());
+                let test_arg = self.builder.dec_lit(56.2, 0..0);
+                let decl_ref = self.builder.decl_ref(name, vec![test_arg], self.cur().range.clone());
                 self.next();
                 decl_ref
             },
