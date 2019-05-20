@@ -2,4 +2,4 @@ foo := 5 - 12.0
 
 bar := 25.2
 
-baz := abs * 2 //bar + 25 * pi
+baz := abs(12 + 16 * 2) * (bar + 12) - 25

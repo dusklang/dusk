@@ -33,7 +33,7 @@ impl Parser {
                             .adding_primary_range(p.cur().range.clone(), "brace here")
                     );
                 },
-                _ => p.parse_node()
+                _ => p.parse_node(),
             }
         }
 
@@ -98,9 +98,34 @@ impl Parser {
             },
             Ident(name) => {
                 let name = name.clone();
-                let test_arg = self.builder.dec_lit(56.2, 0..0);
-                let decl_ref = self.builder.decl_ref(name, vec![test_arg], self.cur().range.clone());
-                self.next();
+                let name_range = self.cur().range.clone();
+                let mut args = Vec::new();
+                let mut end_range = name_range.clone();
+                if let TokenKind::LeftParen = self.next().kind {
+                    self.next();
+                    loop {
+                        // TODO: actually implement proper comma and newline handling like I've thought about
+                        match self.cur().kind {
+                            TokenKind::RightParen => {
+                                end_range = self.next().range.clone();
+                                break;
+                            }
+                            TokenKind::Comma => { self.next(); }
+                            TokenKind::Eof => {
+                                panic!("Reached eof in middle of decl ref");
+                            }
+                            _ => { args.push(self.parse_expr()); }
+                        }
+                    }
+                }
+                let decl_ref = self.builder.decl_ref(
+                    name,
+                    args,
+                    source_info::concat(
+                        name_range,
+                        end_range,
+                    )
+                );
                 decl_ref
             },
             x => panic!("UNHANDLED TERM {:#?}", &x)
