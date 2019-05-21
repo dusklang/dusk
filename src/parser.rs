@@ -32,6 +32,7 @@ impl Parser {
             0..0
         );
 
+        p.skip_insignificant();
         loop {
             match p.cur().kind {
                 TokenKind::Eof => break,
@@ -225,18 +226,21 @@ impl Parser {
         self.toks.at(self.cur)
     }
 
+    fn skip_insignificant(&mut self) {
+        while self.cur().kind.is_insignificant() {
+            self.next_including_insignificant();
+        }
+    }
+
     fn next_including_insignificant(&mut self) -> Token {
         self.cur += 1;
         self.cur()
     }
 
     fn next(&mut self) -> Token {
-        loop {
-            self.next_including_insignificant();
-            if self.cur().kind.is_significant() {
-                return self.cur();
-            }
-        }
+        self.next_including_insignificant();
+        self.skip_insignificant();
+        self.cur()
     }
 
     fn peek_next(&self) -> Token {
