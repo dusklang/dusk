@@ -1,5 +1,6 @@
 use crate::token::{TokenVec, TokenKind, Token};
 use crate::hir::{Program, Builder, ItemId, BinOp};
+use crate::ty::Type;
 use crate::error::Error;
 use crate::source_info;
 
@@ -23,6 +24,13 @@ impl Parser {
             cur: 0,
             errs: Vec::new(),
         };
+        p.builder.begin_computed_decl(
+            "do_something_really_cool".to_string(),
+            vec!["something".to_string()],
+            vec![Type::i32()],
+            Type::i32(),
+            0..0
+        );
 
         loop {
             match p.cur().kind {
@@ -36,6 +44,7 @@ impl Parser {
                 _ => p.parse_node(),
             }
         }
+        p.builder.end_computed_decl();
 
         (p.builder.program(), p.errs)
     }

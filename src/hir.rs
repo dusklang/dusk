@@ -113,10 +113,21 @@ impl Program {
     }
 }
 
-struct StoredDecl {
+#[derive(Clone)]
+struct LocalDecl {
     name: String,
     level: u32,
     decl: DeclId,
+}
+
+struct LocalDeclList {
+    decls: Vec<LocalDecl>,
+}
+
+impl LocalDeclList {
+    fn new() -> Self {
+        Self { decls: Vec::new() }
+    }
 }
 
 struct GlobalDeclRef {
@@ -148,8 +159,8 @@ pub struct Builder {
 
     /// The names and arities of the global declaration references so far
     global_decl_refs: Vec<GlobalDeclRef>,
-    /// All stored declarations in the current scope
-    stored_decls: Vec<StoredDecl>,
+    /// List of local declarations for each nested function
+    local_decl_stack: Vec<LocalDeclList>,
 }
 
 impl Builder {
@@ -207,7 +218,7 @@ impl Builder {
             local_decls: IdxVec::new(),
             overloads: IdxVec::new(),
             global_decl_refs: Vec::new(),
-            stored_decls: Vec::new(),
+            local_decl_stack: vec![LocalDeclList::new()],
         }
     }
 
@@ -249,35 +260,56 @@ impl Builder {
         let level = self.assigned_decls.insert(&[self.levels[root_expr]], AssignedDecl { root_expr, decl_id });
         self.source_ranges.push(range);
 
-        self.stored_decls.push(StoredDecl { name, level, decl: decl_id });
+        self.local_decl_stack.last_mut().unwrap().decls.push(LocalDecl { name, level, decl: decl_id });
 
         id
+    }
+
+    pub fn begin_computed_decl(&mut self, name: String, param_names: Vec<String>, param_tys: Vec<Type>, ret_ty: Type, proto_range: SourceRange) {
+        assert_eq!(param_names.len(), param_tys.len());
+        let decl_id = self.local_decls.push(Decl { name: name.clone(), param_tys: param_tys.clone(), ret_ty: ret_ty.clone() });
+        let decl_id = DeclId::Local(decl_id);
+        let local_decl = LocalDecl { name: name.clone(), level: 0, decl: decl_id };
+        // Add decl to enclosing scope
+        self.local_decl_stack.last_mut().unwrap().decls.push(local_decl.clone());
+        let mut decl_list = LocalDeclList::new();
+        // Add decl to its own scope to enable recursion
+        decl_list.decls.push(local_decl);
+        // Add parameters to scope
+        for (name, ty) in param_names.iter().zip(&param_tys) {
+            let id = self.local_decls.push(Decl { name: name.clone(), param_tys: Vec::new(), ret_ty: ty.clone() });
+            decl_list.decls.push(LocalDecl { name: name.clone(), level: 0, decl: DeclId::Local(id) });
+        }
+        self.local_decl_stack.push(decl_list);
+    }
+
+    pub fn end_computed_decl(&mut self) {
+        self.local_decl_stack.pop().unwrap();
     }
 
     pub fn decl_ref(&mut self, name: String, arguments: Vec<ItemId>, range: SourceRange) -> ItemId {
         let id = ItemId::new(self.levels.len());
 
         let mut decl: Option<(u32, DeclId)> = None;
-        for &StoredDecl { name: ref other_name, level: other_level, decl: other_decl } in self.stored_decls.iter().rev() {
+        for &LocalDecl { name: ref other_name, level: other_level, decl: other_decl } in self.local_decl_stack.last().unwrap().decls.iter().rev() {
             if &name == other_name {
                 decl = Some((other_level, other_decl));
                 break;
             }
         }
 
-        let mut deps = ArrayVec::<[u32; 1]>::new();
+        let mut deps = ArrayVec::<[u32; 2]>::new();
+        deps.push(arguments.iter().map(|&id| self.levels[id]).max().unwrap_or_else(|| 0));
         let decl_ref_id = if let Some((level, decl)) = decl {
             // Local decl
 
             // Local decls must be stored atm, so if there are arguments it's a compile error (or right now, a panic)
-            assert!(arguments.is_empty());
             deps.push(level);
             self.overloads.push(vec![decl])
         } else {
             // Global decl
             let decl_ref_id = self.overloads.push(Vec::new());
             self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name: name, num_arguments: arguments.len() as u32 });
-            deps.push(arguments.iter().map(|&id| self.levels[id]).max().unwrap_or_else(|| 0));
             decl_ref_id
         };
         let level = self.decl_refs.insert(
@@ -295,7 +327,6 @@ impl Builder {
     }
 
     pub fn program(mut self) -> Program {
-        assert_eq!(self.stored_decls.len(), self.local_decls.len());
         for decl_ref in self.global_decl_refs {
             self.overloads[decl_ref.id] = self.global_decls.indices_satisfying(|decl| {
                 decl.name == decl_ref.name && decl.param_tys.len() == decl_ref.num_arguments as usize
