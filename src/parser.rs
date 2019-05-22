@@ -2,7 +2,7 @@ use crate::token::{TokenVec, TokenKind, Token};
 use crate::hir::{Program, Builder, ItemId, BinOp};
 use crate::ty::Type;
 use crate::error::Error;
-use crate::source_info;
+use crate::source_info::{self, SourceRange};
 
 #[inline]
 pub fn parse(toks: TokenVec) -> (Program, Vec<Error>) {
@@ -24,14 +24,6 @@ impl Parser {
             cur: 0,
             errs: Vec::new(),
         };
-        p.builder.begin_computed_decl(
-            "do_something_really_cool".to_string(),
-            vec!["something".to_string()],
-            vec![Type::i32()],
-            Type::i32(),
-            0..0
-        );
-
         p.skip_insignificant();
         loop {
             match p.cur().kind {
@@ -45,7 +37,6 @@ impl Parser {
                 _ => p.parse_node(),
             }
         }
-        p.builder.end_computed_decl();
 
         (p.builder.program(), p.errs)
     }
@@ -190,6 +181,7 @@ impl Parser {
                     self.parse_expr();
                 }
             },
+            TokenKind::Fn => self.parse_comp_decl(),
             _ => { self.parse_expr(); }
         }
     }
@@ -220,6 +212,94 @@ impl Parser {
         let root = self.parse_expr();
         let root_range = self.builder.get_range(root);
         self.builder.stored_decl(name, root, source_info::concat(name_range, root_range));
+    }
+
+    fn parse_comp_decl(&mut self) {
+        assert_eq!(self.cur().kind, &TokenKind::Fn);
+        let mut proto_range = self.cur().range.clone();
+        let name = match self.next().kind {
+            TokenKind::Ident(name) => name.clone(),
+            _ => panic!("expected identifier after 'fn'")
+        };
+        proto_range = source_info::concat(proto_range, self.cur().range.clone());
+        let mut param_names = Vec::new();
+        let mut param_tys = Vec::new();
+        if let TokenKind::LeftParen = self.next().kind {
+            self.next();
+            while let TokenKind::Ident(name) = self.cur().kind {
+                let name = name.clone();
+                param_names.push(name);
+                assert_eq!(self.next().kind, &TokenKind::Colon);
+                self.next();
+                let (ty, _range) = self.parse_type();
+                param_tys.push(ty);
+                while let TokenKind::Comma = self.cur().kind {
+                    self.next();
+                }
+            }
+            assert_eq!(self.cur().kind, &TokenKind::RightParen);
+            proto_range = source_info::concat(proto_range, self.cur().range.clone());
+        }
+        let ty = if let TokenKind::Colon = self.next().kind {
+            self.next();
+            let (ty, range) = self.parse_type();
+            proto_range = source_info::concat(proto_range, range);
+            ty
+        } else {
+            Type::Void
+        };
+        assert_eq!(self.cur().kind, &TokenKind::OpenCurly);
+        self.next();
+
+        self.builder.begin_computed_decl(name, param_names, param_tys, ty, proto_range);
+        loop {
+            match self.cur().kind {
+                TokenKind::Eof => panic!("Unexpected eof when parsing computed decl"),
+                TokenKind::CloseCurly => {
+                    self.next();
+                    break;
+                },
+                _ => self.parse_node(),
+            }
+        }
+        
+        self.builder.end_computed_decl();
+    }
+
+    fn parse_type(&mut self) -> (Type, SourceRange) {
+        let val = (
+            match self.cur().kind {
+                TokenKind::Ident(ident) => match &**ident {
+                    "i8" => Type::i8(),
+                    "i16" => Type::i16(),
+                    "i32" => Type::i32(),
+                    "i64" => Type::i64(),
+                    "u8" => Type::u8(),
+                    "u16" => Type::u16(),
+                    "u32" => Type::u32(),
+                    "u64" => Type::u64(),
+                    "f32" => Type::f32(),
+                    "f64" => Type::f64(),
+                    _ => {
+                        self.errs.push(
+                            Error::new("Unrecognized type")
+                                .adding_primary_range(self.cur().range.clone(), "")
+                        );
+                        Type::Error
+                    }
+                },
+                _ => {
+                    self.errs.push(
+                        Error::new("Unrecognized type")
+                            .adding_primary_range(self.cur().range.clone(), "")
+                    );
+                    Type::Error
+                }
+            }, 
+            self.cur().range.clone()
+        );
+        self.next();
+        val
     }
 
     fn cur(&self) -> Token {

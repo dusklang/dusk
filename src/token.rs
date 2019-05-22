@@ -1,6 +1,6 @@
 use crate::source_info::SourceRange;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum TokenKind {
     // TODO: Interning!
     Ident(String),

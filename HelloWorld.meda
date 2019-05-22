@@ -1,9 +1,9 @@
-// fn do_something_really_cool(something: i32): i32 {
+fn do_something_really_cool(something: i32): i32 {
     foo := 5 - 12.0
 
     bar := 25.2
 
     baz := abs(12 + 16 * 2) * (bar + 12) - 25
 
-    bax := do_something_really_cool(do_something_really_cool(something) + 25)
-// }
+    the_result := do_something_really_cool(do_something_really_cool(something) + 25)
+}
