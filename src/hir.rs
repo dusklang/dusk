@@ -42,6 +42,8 @@ pub struct IntLit;
 #[derive(Debug)]
 pub struct DecLit;
 #[derive(Debug)]
+pub struct Stmt { pub root_expr: ItemId }
+#[derive(Debug)]
 pub struct AssignedDecl { pub root_expr: ItemId, pub decl_id: DeclId }
 #[derive(Debug)]
 pub struct DeclRef { pub args: Vec<ItemId>, pub decl_ref_id: DeclRefId }
@@ -84,6 +86,8 @@ pub struct Program {
     pub assigned_decls: DepVec<AssignedDecl>,
     /// All decl refs in the entire program
     pub decl_refs: DepVec<Item<DeclRef>>,
+    /// All statements in the entire program
+    pub stmts: DepVec<Stmt>,
 
     /// The source ranges of each item in the entire program
     pub source_ranges: IdxVec<SourceRange, ItemId>,
@@ -145,6 +149,8 @@ pub struct Builder {
     assigned_decls: DepVec<AssignedDecl>,
     /// All decl refs in the entire program so far
     decl_refs: DepVec<Item<DeclRef>>,
+    /// All statements in the entire program so far
+    stmts: DepVec<Stmt>,
 
     /// The source ranges of each item so far
     source_ranges: IdxVec<SourceRange, ItemId>,
@@ -212,6 +218,7 @@ impl Builder {
             dec_lits: Vec::new(),
             assigned_decls: DepVec::new(),
             decl_refs: DepVec::new(),
+            stmts: DepVec::new(),
             source_ranges: IdxVec::new(),
             levels: IdxVec::new(),
             global_decls,
@@ -263,6 +270,10 @@ impl Builder {
         self.local_decl_stack.last_mut().unwrap().decls.push(LocalDecl { name, level, decl: decl_id });
 
         id
+    }
+
+    pub fn stmt(&mut self, root_expr: ItemId) {
+        self.stmts.insert(&[self.levels[root_expr]], Stmt { root_expr });
     }
 
     pub fn begin_computed_decl(&mut self, name: String, param_names: Vec<String>, param_tys: Vec<Type>, ret_ty: Type, proto_range: SourceRange) {
@@ -338,6 +349,7 @@ impl Builder {
             dec_lits: self.dec_lits,
             assigned_decls: self.assigned_decls,
             decl_refs: self.decl_refs,
+            stmts: self.stmts,
             source_ranges: self.source_ranges,
             local_decls: self.local_decls,
             global_decls: self.global_decls,

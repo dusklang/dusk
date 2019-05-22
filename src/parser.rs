@@ -34,7 +34,7 @@ impl Parser {
                             .adding_primary_range(p.cur().range.clone(), "brace here")
                     );
                 },
-                _ => p.parse_node(),
+                _ => { p.parse_node(); }
             }
         }
 
@@ -170,19 +170,24 @@ impl Parser {
         expr_stack.pop().unwrap()
     }
 
-    fn parse_node(&mut self) {
+    /// Parses any node. Iff the node is an expression, returns its ItemId.
+    fn parse_node(&mut self) -> Option<ItemId> {
         match self.cur().kind {
             TokenKind::Ident(name) => {
                 if let TokenKind::Colon = self.peek_next().kind {
                     // TODO: Intern strings so we don't have to copy here
                     let name = name.clone();
                     self.parse_decl(name);
+                    None
                 } else {
-                    self.parse_expr();
+                    Some(self.parse_expr())
                 }
             },
-            TokenKind::Fn => self.parse_comp_decl(),
-            _ => { self.parse_expr(); }
+            TokenKind::Fn => {
+                self.parse_comp_decl();
+                None
+            }
+            _ => Some(self.parse_expr())
         }
     }
 
@@ -259,10 +264,16 @@ impl Parser {
                     self.next();
                     break;
                 },
-                _ => self.parse_node(),
+                _ => {
+                    let node = self.parse_node();
+
+                    // If the node was a standalone expression, make it a statement
+                    if let Some(expr) = node {
+                        self.builder.stmt(expr);
+                    }
+                }
             }
         }
-        
         self.builder.end_computed_decl();
     }
 

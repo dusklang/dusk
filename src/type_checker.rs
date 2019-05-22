@@ -44,7 +44,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
     tc.selected_overloads.resize_with(tc.prog.overloads.len(), || None);
 
     let levels = dep_vec::unify_sizes(&mut [
-        &mut tc.prog.assigned_decls, &mut tc.prog.decl_refs,
+        &mut tc.prog.assigned_decls, &mut tc.prog.decl_refs, &mut tc.prog.stmts
     ]);
 
     // Pass 1: propagate info down from leaves to roots
@@ -96,7 +96,11 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                 .map(|&overload| get_decl(overload).ret_ty.clone())
                 .collect();
         }
-        
+        for item in tc.prog.stmts.get_level(level) {
+            if !tc.constraints[item.root_expr].one_of.contains(&Type::Void) {
+                panic!("standalone expressions must return void");
+            }
+        }
     }
 
     // Pass 2: propagate info up from roots to leaves
@@ -145,6 +149,9 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                 Some(overload)
             };
             tc.selected_overloads[item.decl_ref_id] = overload;
+        }
+        for item in tc.prog.stmts.get_level(level) {
+            tc.constraints[item.root_expr].one_of.retain(|ty| ty == &Type::Void);
         }
     }
     for item in &tc.prog.int_lits {
