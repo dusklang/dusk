@@ -9,7 +9,6 @@ pub enum TokenKind {
     DecLit(f64),
     StrLit(String),
     CharLit(u8),
-    Scope(usize),
 
     // Special
     Eof,
