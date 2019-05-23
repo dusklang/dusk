@@ -219,6 +219,40 @@ impl Parser {
         self.builder.stored_decl(name, root, source_info::concat(name_range, root_range));
     }
 
+    // Parses an open curly brace, then a list of nodes, then a closing curly brace
+    // Returns the id of the final node if it exists and is an expression. Otherwise returns `None`.
+    fn parse_scope(&mut self) -> Option<ItemId> {
+        let mut stmts = Vec::new();
+        let mut last_was_expr = false;
+        loop {
+            match self.cur().kind {
+                TokenKind::Eof => panic!("Unexpected eof while parsing scope"),
+                TokenKind::CloseCurly => {
+                    self.next();
+                    break;
+                },
+                _ => {
+                    let node = self.parse_node();
+
+                    // If the node was a standalone expression, make it a statement
+                    if let Some(expr) = node {
+                        last_was_expr = true;
+                        stmts.push(expr);
+                    } else {
+                        last_was_expr = false;
+                    }
+                }
+            }
+        }
+        let terminal_expr = if last_was_expr {
+            stmts.pop()
+        } else {
+            None
+        };
+        self.builder.stmts(&stmts);
+        terminal_expr
+    }
+
     fn parse_comp_decl(&mut self) {
         assert_eq!(self.cur().kind, &TokenKind::Fn);
         let mut proto_range = self.cur().range.clone();
@@ -256,23 +290,9 @@ impl Parser {
         assert_eq!(self.cur().kind, &TokenKind::OpenCurly);
         self.next();
 
-        self.builder.begin_computed_decl(name, param_names, param_tys, ty, proto_range);
-        loop {
-            match self.cur().kind {
-                TokenKind::Eof => panic!("Unexpected eof when parsing computed decl"),
-                TokenKind::CloseCurly => {
-                    self.next();
-                    break;
-                },
-                _ => {
-                    let node = self.parse_node();
-
-                    // If the node was a standalone expression, make it a statement
-                    if let Some(expr) = node {
-                        self.builder.stmt(expr);
-                    }
-                }
-            }
+        self.builder.begin_computed_decl(name, param_names, param_tys, ty.clone(), proto_range);
+        if let Some(terminal_expr) = self.parse_scope() {
+            self.builder.ret(terminal_expr, ty);
         }
         self.builder.end_computed_decl();
     }

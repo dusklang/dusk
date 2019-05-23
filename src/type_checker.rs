@@ -44,7 +44,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
     tc.selected_overloads.resize_with(tc.prog.overloads.len(), || None);
 
     let levels = dep_vec::unify_sizes(&mut [
-        &mut tc.prog.assigned_decls, &mut tc.prog.decl_refs, &mut tc.prog.stmts
+        &mut tc.prog.assigned_decls, &mut tc.prog.decl_refs, &mut tc.prog.stmts, &mut tc.prog.rets,
     ]);
 
     // Pass 1: propagate info down from leaves to roots
@@ -101,6 +101,19 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                 panic!("standalone expressions must return void");
             }
         }
+        for item in tc.prog.rets.get_level(level) {
+            match tc.constraints[item.expr].literal {
+                Some(LiteralType::Dec) => if !item.ty.expressible_by_dec_lit() {
+                    panic!("expected return value of {:?}, found decimal literal", item.ty);
+                },
+                Some(LiteralType::Int) => if !item.ty.expressible_by_int_lit() {
+                    panic!("expected return value of {:?}, found integer literal", item.ty);
+                },
+                None => if !tc.constraints[item.expr].one_of.contains(&item.ty) {
+                    panic!("expected return value of {:?}, found {:?}", item.ty, tc.constraints[item.expr].one_of);
+                }
+            }
+        }
     }
 
     // Pass 2: propagate info up from roots to leaves
@@ -152,6 +165,23 @@ pub fn type_check(prog: Program) -> Vec<Error> {
         }
         for item in tc.prog.stmts.get_level(level) {
             tc.constraints[item.root_expr].one_of.retain(|ty| ty == &Type::Void);
+        }
+        for item in tc.prog.rets.get_level(level) {
+            match tc.constraints[item.expr].literal {
+                Some(LiteralType::Dec) => 
+                    tc.constraints[item.expr].one_of = if item.ty.expressible_by_dec_lit() {
+                        vec![item.ty.clone()]
+                    } else {
+                        Vec::new()
+                    },
+                Some(LiteralType::Int) => 
+                    tc.constraints[item.expr].one_of = if item.ty.expressible_by_int_lit() {
+                        vec![item.ty.clone()]
+                    } else {
+                        Vec::new()
+                    },
+                None => tc.constraints[item.expr].one_of.retain(|ty| ty == &item.ty),
+            }
         }
     }
     for item in &tc.prog.int_lits {

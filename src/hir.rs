@@ -44,6 +44,8 @@ pub struct DecLit;
 #[derive(Debug)]
 pub struct Stmt { pub root_expr: ItemId }
 #[derive(Debug)]
+pub struct Ret { pub expr: ItemId, pub ty: Type }
+#[derive(Debug)]
 pub struct AssignedDecl { pub root_expr: ItemId, pub decl_id: DeclId }
 #[derive(Debug)]
 pub struct DeclRef { pub args: Vec<ItemId>, pub decl_ref_id: DeclRefId }
@@ -88,6 +90,8 @@ pub struct Program {
     pub decl_refs: DepVec<Item<DeclRef>>,
     /// All statements in the entire program
     pub stmts: DepVec<Stmt>,
+    /// All returns in the entire program
+    pub rets: DepVec<Ret>,
 
     /// The source ranges of each item in the entire program
     pub source_ranges: IdxVec<SourceRange, ItemId>,
@@ -151,6 +155,8 @@ pub struct Builder {
     decl_refs: DepVec<Item<DeclRef>>,
     /// All statements in the entire program so far
     stmts: DepVec<Stmt>,
+    /// All returns in the entire program so far
+    rets: DepVec<Ret>,
 
     /// The source ranges of each item so far
     source_ranges: IdxVec<SourceRange, ItemId>,
@@ -219,6 +225,7 @@ impl Builder {
             assigned_decls: DepVec::new(),
             decl_refs: DepVec::new(),
             stmts: DepVec::new(),
+            rets: DepVec::new(),
             source_ranges: IdxVec::new(),
             levels: IdxVec::new(),
             global_decls,
@@ -272,8 +279,14 @@ impl Builder {
         id
     }
 
-    pub fn stmt(&mut self, root_expr: ItemId) {
-        self.stmts.insert(&[self.levels[root_expr]], Stmt { root_expr });
+    pub fn ret(&mut self, expr: ItemId, ty: Type) {
+        self.rets.insert(&[self.levels[expr]], Ret { expr, ty });
+    }
+
+    pub fn stmts(&mut self, root_exprs: &[ItemId]) {
+        for &root_expr in root_exprs {
+            self.stmts.insert(&[self.levels[root_expr]], Stmt { root_expr });
+        }
     }
 
     pub fn begin_computed_decl(&mut self, name: String, param_names: Vec<String>, param_tys: Vec<Type>, ret_ty: Type, proto_range: SourceRange) {
@@ -350,6 +363,7 @@ impl Builder {
             assigned_decls: self.assigned_decls,
             decl_refs: self.decl_refs,
             stmts: self.stmts,
+            rets: self.rets,
             source_ranges: self.source_ranges,
             local_decls: self.local_decls,
             global_decls: self.global_decls,
