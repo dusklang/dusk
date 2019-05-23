@@ -7,5 +7,5 @@ fn do_something_really_cool(something: i32, something_else: f64): f64 {
 
     bax := something_else + 2500
 
-    do_something_really_cool
+    //do_something_really_cool(2, 2)
 }

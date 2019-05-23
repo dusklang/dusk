@@ -292,7 +292,9 @@ impl Parser {
 
         self.builder.begin_computed_decl(name, param_names, param_tys, ty.clone(), proto_range);
         if let Some(terminal_expr) = self.parse_scope() {
-            self.builder.ret(terminal_expr, ty);
+            self.builder.ret(terminal_expr, ty.clone());
+        } else {
+            assert_eq!(ty, Type::Void, "no expression to return in non-void computed decl");
         }
         self.builder.end_computed_decl();
     }
