@@ -103,6 +103,8 @@ pub struct Program {
     pub overloads: IdxVec<Vec<DeclId>, DeclRefId>,
     /// Number of items in the entire program
     pub num_items: usize,
+    // An expression to universally represent the void value
+    pub void_expr: ItemId,
 }
 
 impl Program {
@@ -130,11 +132,12 @@ struct LocalDecl {
 
 struct LocalDeclList {
     decls: Vec<LocalDecl>,
+    scope_stack: Vec<usize>,
 }
 
 impl LocalDeclList {
     fn new() -> Self {
-        Self { decls: Vec::new() }
+        Self { decls: Vec::new(), scope_stack: vec![0] }
     }
 }
 
@@ -157,6 +160,8 @@ pub struct Builder {
     stmts: DepVec<Stmt>,
     /// All returns in the entire program so far
     rets: DepVec<Ret>,
+    // An expression to universally represent the void value
+    void_expr: ItemId,
 
     /// The source ranges of each item so far
     source_ranges: IdxVec<SourceRange, ItemId>,
@@ -219,6 +224,13 @@ impl Builder {
         }
         global_decls.push(Decl::new("pi".to_string(), Vec::new(), Type::f64()));
         global_decls.push(Decl::new("abs".to_string(), vec![Type::f32()], Type::f64()));
+
+        // Create the void expression
+        let mut levels = IdxVec::new();
+        let mut source_ranges = IdxVec::new();
+        let void_expr = levels.push(0);
+        source_ranges.push(0..0);
+
         Self {
             int_lits: Vec::new(),
             dec_lits: Vec::new(),
@@ -226,8 +238,9 @@ impl Builder {
             decl_refs: DepVec::new(),
             stmts: DepVec::new(),
             rets: DepVec::new(),
-            source_ranges: IdxVec::new(),
-            levels: IdxVec::new(),
+            void_expr,
+            source_ranges,
+            levels,
             global_decls,
             local_decls: IdxVec::new(),
             overloads: IdxVec::new(),
@@ -235,6 +248,8 @@ impl Builder {
             local_decl_stack: vec![LocalDeclList::new()],
         }
     }
+
+    pub fn void_expr(&self) -> ItemId { self.void_expr }
 
     pub fn int_lit(&mut self, lit: u64, range: SourceRange) -> ItemId {
         let id = ItemId::new(self.levels.len());
@@ -287,6 +302,17 @@ impl Builder {
         for &root_expr in root_exprs {
             self.stmts.insert(&[self.levels[root_expr]], Stmt { root_expr });
         }
+    }
+
+    pub fn begin_scope(&mut self) {
+        let stack = self.local_decl_stack.last_mut().unwrap();
+        stack.scope_stack.push(stack.decls.len());
+    }
+
+    pub fn end_scope(&mut self) {
+        let stack = self.local_decl_stack.last_mut().unwrap();
+        let scope = stack.scope_stack.pop().unwrap();
+        stack.decls.truncate(scope);
     }
 
     pub fn begin_computed_decl(&mut self, name: String, param_names: Vec<String>, param_tys: Vec<Type>, ret_ty: Type, proto_range: SourceRange) {
@@ -364,6 +390,7 @@ impl Builder {
             decl_refs: self.decl_refs,
             stmts: self.stmts,
             rets: self.rets,
+            void_expr: self.void_expr,
             source_ranges: self.source_ranges,
             local_decls: self.local_decls,
             global_decls: self.global_decls,

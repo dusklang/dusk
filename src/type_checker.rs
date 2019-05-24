@@ -47,6 +47,10 @@ pub fn type_check(prog: Program) -> Vec<Error> {
         &mut tc.prog.assigned_decls, &mut tc.prog.decl_refs, &mut tc.prog.stmts, &mut tc.prog.rets,
     ]);
 
+    // Assign the type of the void expression to be void.
+    tc.constraints[tc.prog.void_expr].one_of = vec![Type::Void];
+    tc.types[tc.prog.void_expr] = Type::Void;
+
     // Pass 1: propagate info down from leaves to roots
     for item in &tc.prog.int_lits { tc.constraints[item.id].literal = Some(LiteralType::Int); }
     for item in &tc.prog.dec_lits { tc.constraints[item.id].literal = Some(LiteralType::Dec); }
