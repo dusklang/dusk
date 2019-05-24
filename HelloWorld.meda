@@ -1,11 +1,7 @@
-fn do_something_really_cool: i32 {
-    // Imagine foo requires a very complicated computation
-    foo := do {
-        foo := 25
-        bar := foo + 25
-        baz := bar * 25
-        baz
+fn do_something_really_cool(n: u8): u8 {
+    if n > 2 {
+        n + 5
+    } else {
+        0 - n
     }
-
-    foo + 25
 }
