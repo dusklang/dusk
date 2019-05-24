@@ -49,6 +49,8 @@ pub struct Ret { pub expr: ItemId, pub ty: Type }
 pub struct AssignedDecl { pub root_expr: ItemId, pub decl_id: DeclId }
 #[derive(Debug)]
 pub struct DeclRef { pub args: Vec<ItemId>, pub decl_ref_id: DeclRefId }
+#[derive(Debug)]
+pub struct If { pub condition: ItemId, pub then_expr: ItemId, pub else_expr: ItemId }
 
 #[derive(Debug)]
 pub struct Item<T> {
@@ -92,6 +94,10 @@ pub struct Program {
     pub stmts: DepVec<Stmt>,
     /// All returns in the entire program
     pub rets: DepVec<Ret>,
+    /// All if expressions in the entire program
+    pub ifs: DepVec<Item<If>>,
+    // An expression to universally represent the void value
+    pub void_expr: ItemId,
 
     /// The source ranges of each item in the entire program
     pub source_ranges: IdxVec<SourceRange, ItemId>,
@@ -103,8 +109,6 @@ pub struct Program {
     pub overloads: IdxVec<Vec<DeclId>, DeclRefId>,
     /// Number of items in the entire program
     pub num_items: usize,
-    // An expression to universally represent the void value
-    pub void_expr: ItemId,
 }
 
 impl Program {
@@ -160,6 +164,8 @@ pub struct Builder {
     stmts: DepVec<Stmt>,
     /// All returns in the entire program so far
     rets: DepVec<Ret>,
+    /// All if expressions in the entire program so far
+    ifs: DepVec<Item<If>>,
     // An expression to universally represent the void value
     void_expr: ItemId,
 
@@ -238,6 +244,7 @@ impl Builder {
             decl_refs: DepVec::new(),
             stmts: DepVec::new(),
             rets: DepVec::new(),
+            ifs: DepVec::new(),
             void_expr,
             source_ranges,
             levels,
@@ -302,6 +309,18 @@ impl Builder {
         for &root_expr in root_exprs {
             self.stmts.insert(&[self.levels[root_expr]], Stmt { root_expr });
         }
+    }
+
+    pub fn if_expr(&mut self, condition: ItemId, then_expr: ItemId, else_expr: ItemId, range: SourceRange) -> ItemId {
+        let id = ItemId::new(self.levels.len());
+        let level = self.ifs.insert(
+            &[self.levels[condition], self.levels[then_expr], self.levels[else_expr]],
+            Item { id, data: If { condition, then_expr, else_expr } }
+        );
+        self.levels.push(level);
+        self.source_ranges.push(range);
+
+        id
     }
 
     pub fn begin_scope(&mut self) {
@@ -390,6 +409,7 @@ impl Builder {
             decl_refs: self.decl_refs,
             stmts: self.stmts,
             rets: self.rets,
+            ifs: self.ifs,
             void_expr: self.void_expr,
             source_ranges: self.source_ranges,
             local_decls: self.local_decls,

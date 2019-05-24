@@ -1,10 +1,11 @@
 fn do_something_really_cool: i32 {
-    foo := 25
-    bar := foo + 25
-    do {
-        baz := bar + 25
+    // Imagine foo requires a very complicated computation
+    foo := do {
+        foo := 25
+        bar := foo + 25
+        baz := bar * 25
+        baz
     }
 
-    // Shouldn't work.
-    baz
+    foo + 25
 }

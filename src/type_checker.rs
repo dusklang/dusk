@@ -4,13 +4,60 @@ use crate::ty::{Type, IntWidth, FloatWidth};
 use crate::index_vec::IdxVec;
 use crate::dep_vec::{self, AnyDepVec};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum LiteralType { Int, Dec }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct ConstraintList {
     literal: Option<LiteralType>,
     one_of: Vec<Type>,
+}
+
+enum UnificationError<'a> {
+    /// The expression was constrained to be a literal that can't be unified to the requested type
+    Literal(LiteralType),
+    /// The expression didn't have the requested type in its list of type choices
+    InvalidChoice(&'a [Type]),
+}
+
+impl ConstraintList {
+    fn can_unify_to(&self, ty: &Type) -> Result<(), UnificationError> {
+        use UnificationError::*;
+        match self.literal {
+            Some(ref lit) => if ty.expressible_by_int_lit() {
+                Ok(())
+            } else {
+                Err(Literal(lit.clone()))
+            },
+            None => if self.one_of.contains(ty) {
+                Ok(())
+            } else {
+                Err(InvalidChoice(&self.one_of))
+            },
+        }
+    }
+
+    fn intersect_with(&self, other: &ConstraintList) -> ConstraintList {
+        let mut constraints = ConstraintList::default();
+        match self.literal {
+            Some(LiteralType::Dec) => match other.literal {
+                Some(LiteralType::Dec) | Some(LiteralType::Int) => constraints.literal = Some(LiteralType::Dec),
+                None => constraints.literal = None,
+            },
+            Some(LiteralType::Int) => match other.literal {
+                Some(LiteralType::Dec) | Some(LiteralType::Int) => constraints.literal = other.literal.clone(),
+                None => constraints.literal = None,
+            },
+            None => constraints.literal = None,
+        }
+        for ty in &self.one_of {
+            if other.one_of.contains(ty) {
+                constraints.one_of.push(ty.clone());
+            }
+        }
+
+        constraints
+    }
 }
 
 const DEFAULT_INT_TY: Type = Type::Int {
@@ -44,7 +91,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
     tc.selected_overloads.resize_with(tc.prog.overloads.len(), || None);
 
     let levels = dep_vec::unify_sizes(&mut [
-        &mut tc.prog.assigned_decls, &mut tc.prog.decl_refs, &mut tc.prog.stmts, &mut tc.prog.rets,
+        &mut tc.prog.assigned_decls, &mut tc.prog.decl_refs, &mut tc.prog.stmts, &mut tc.prog.rets, &mut tc.prog.ifs,
     ]);
 
     // Assign the type of the void expression to be void.
@@ -84,14 +131,8 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             let constraints = &tc.constraints;
             tc.prog.overloads[item.decl_ref_id].retain(|&overload| {
                 assert_eq!(get_decl(overload).param_tys.len(), item.args.len());
-                // For each parameter:
                 for (constraints, ty) in item.args.iter().map(|&arg| &constraints[arg]).zip(&get_decl(overload).param_tys) {
-                    // Verify all the constraints match the parameter type.
-                    match constraints.literal {
-                        Some(LiteralType::Int) => if !ty.expressible_by_int_lit() { return false },
-                        Some(LiteralType::Dec) => if !ty.expressible_by_dec_lit() { return false },
-                        None => if !constraints.one_of.contains(ty) { return false },
-                    }
+                    if let Err(_) = constraints.can_unify_to(ty) { return false; }
                 }
                 true
             });
@@ -101,22 +142,29 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                 .collect();
         }
         for item in tc.prog.stmts.get_level(level) {
-            if !tc.constraints[item.root_expr].one_of.contains(&Type::Void) {
+            if let Err(_) = tc.constraints[item.root_expr].can_unify_to(&Type::Void) {
                 panic!("standalone expressions must return void");
             }
         }
         for item in tc.prog.rets.get_level(level) {
-            match tc.constraints[item.expr].literal {
-                Some(LiteralType::Dec) => if !item.ty.expressible_by_dec_lit() {
-                    panic!("expected return value of {:?}, found decimal literal", item.ty);
-                },
-                Some(LiteralType::Int) => if !item.ty.expressible_by_int_lit() {
-                    panic!("expected return value of {:?}, found integer literal", item.ty);
-                },
-                None => if !tc.constraints[item.expr].one_of.contains(&item.ty) {
-                    panic!("expected return value of {:?}, found {:?}", item.ty, tc.constraints[item.expr].one_of);
-                }
+            use UnificationError::*;
+            use LiteralType::*;
+            match tc.constraints[item.expr].can_unify_to(&item.ty) {
+                Ok(()) => {}
+                Err(Literal(Dec)) => panic!("expected return value of {:?}, found decimal literal", item.ty),
+                Err(Literal(Int)) => panic!("expected return value of {:?}, found integer literal", item.ty),
+                Err(InvalidChoice(choices)) => panic!("expected return value of {:?}, found {:?}", item.ty, choices),
             }
+        }
+        for item in tc.prog.ifs.get_level(level) {
+            if let Err(_) = tc.constraints[item.condition].can_unify_to(&Type::Bool) {
+                panic!("Expected boolean condition in if expression");
+            }
+            let constraints = tc.constraints[item.then_expr].intersect_with(&tc.constraints[item.else_expr]);
+            if constraints.one_of.is_empty() && constraints.literal.is_none() {
+                panic!("Failed to unify branches of if expression");
+            }
+            tc.constraints[item.id] = constraints;
         }
     }
 
@@ -186,6 +234,21 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                     },
                 None => tc.constraints[item.expr].one_of.retain(|ty| ty == &item.ty),
             }
+        }
+        for item in tc.prog.ifs.get_level(level) {
+            tc.constraints[item.condition].one_of.retain(|ty| ty == &Type::Bool);
+            let ty = if tc.constraints[item.id].one_of.len() != 1 {
+                errs.push(
+                    Error::new("ambiguous type for if expression")
+                        .adding_primary_range(tc.prog.source_ranges[item.id].clone(), "expression here")
+                );
+                Type::Error
+            } else {
+                tc.constraints[item.id].one_of[0].clone()
+            };
+            tc.types[item.id] = ty.clone();
+            tc.constraints[item.then_expr].one_of = vec![ty.clone()];
+            tc.constraints[item.else_expr].one_of = vec![ty];
         }
     }
     for item in &tc.prog.int_lits {
