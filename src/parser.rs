@@ -135,21 +135,26 @@ impl Parser {
 
                 terminal_expr
             },
-            TokenKind::If => {
-                self.next();
-                let condition = self.parse_expr();
-                let then_expr = self.parse_scope().unwrap_or(self.builder.void_expr());
-                let else_expr = if let TokenKind::Else = self.cur().kind {
-                    self.next();
-                    let expr = self.parse_scope().unwrap_or(self.builder.void_expr());
-                    expr
-                } else {
-                    self.builder.void_expr()
-                };
-                self.builder.if_expr(condition, then_expr, else_expr, 0..0)
-            }
+            TokenKind::If => self.parse_if(),
             x => panic!("UNHANDLED TERM {:#?}", &x)
         }
+    }
+
+    fn parse_if(&mut self) -> ItemId {
+        assert_eq!(self.cur().kind, &TokenKind::If);
+        self.next();
+        let condition = self.parse_expr();
+        let then_expr = self.parse_scope().unwrap_or(self.builder.void_expr());
+        let else_expr = if let TokenKind::Else = self.cur().kind {
+            match self.next().kind {
+                TokenKind::If => self.parse_if(),
+                TokenKind::OpenCurly => self.parse_scope().unwrap_or(self.builder.void_expr()),
+                _ => panic!("Expected '{' or 'if' after 'else'"),
+            }
+        } else {
+            self.builder.void_expr()
+        };
+        self.builder.if_expr(condition, then_expr, else_expr, 0..0)
     }
 
     fn parse_expr(&mut self) -> ItemId {
