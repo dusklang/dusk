@@ -134,15 +134,10 @@ struct LocalDecl {
     decl: DeclId,
 }
 
+#[derive(Default)]
 struct LocalDeclList {
     decls: Vec<LocalDecl>,
     scope_stack: Vec<usize>,
-}
-
-impl LocalDeclList {
-    fn new() -> Self {
-        Self { decls: Vec::new(), scope_stack: vec![0] }
-    }
 }
 
 struct GlobalDeclRef {
@@ -252,7 +247,7 @@ impl Builder {
             local_decls: IdxVec::new(),
             overloads: IdxVec::new(),
             global_decl_refs: Vec::new(),
-            local_decl_stack: vec![LocalDeclList::new()],
+            local_decl_stack: vec![LocalDeclList::default()],
         }
     }
 
@@ -341,7 +336,7 @@ impl Builder {
         let local_decl = LocalDecl { name: name.clone(), level: 0, decl: decl_id };
         // Add decl to enclosing scope
         self.local_decl_stack.last_mut().unwrap().decls.push(local_decl.clone());
-        let mut decl_list = LocalDeclList::new();
+        let mut decl_list = LocalDeclList::default();
         // Add decl to its own scope to enable recursion
         decl_list.decls.push(local_decl);
         // Add parameters to scope

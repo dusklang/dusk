@@ -131,23 +131,17 @@ impl Parser {
             },
             TokenKind::Do => {
                 self.next();
-                self.builder.begin_scope();
                 let terminal_expr = self.parse_scope().unwrap_or(self.builder.void_expr());
-                self.builder.end_scope();
 
                 terminal_expr
             },
             TokenKind::If => {
                 self.next();
                 let condition = self.parse_expr();
-                self.builder.begin_scope();
                 let then_expr = self.parse_scope().unwrap_or(self.builder.void_expr());
-                self.builder.end_scope();
                 let else_expr = if let TokenKind::Else = self.cur().kind {
                     self.next();
-                    self.builder.begin_scope();
                     let expr = self.parse_scope().unwrap_or(self.builder.void_expr());
-                    self.builder.end_scope();
                     expr
                 } else {
                     self.builder.void_expr()
@@ -247,6 +241,7 @@ impl Parser {
     // Parses an open curly brace, then a list of nodes, then a closing curly brace
     // Returns the id of the final node if it exists and is an expression. Otherwise returns `None`.
     fn parse_scope(&mut self) -> Option<ItemId> {
+        self.builder.begin_scope();
         let mut stmts = Vec::new();
         let mut last_was_expr = false;
         assert_eq!(self.cur().kind, &TokenKind::OpenCurly);
@@ -277,6 +272,7 @@ impl Parser {
             None
         };
         self.builder.stmts(&stmts);
+        self.builder.end_scope();
         terminal_expr
     }
 
