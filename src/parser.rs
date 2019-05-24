@@ -129,6 +129,14 @@ impl Parser {
                 );
                 decl_ref
             },
+            TokenKind::Do => {
+                self.next();
+                self.builder.begin_scope();
+                let terminal_expr = self.parse_scope().unwrap_or(self.builder.void_expr());
+                self.builder.end_scope();
+
+                terminal_expr
+            },
             x => panic!("UNHANDLED TERM {:#?}", &x)
         }
     }

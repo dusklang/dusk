@@ -1,13 +1,10 @@
-fn do_something_really_cool(something: i32, something_else: f64): i8 {
-    foo := 5 - 12.0
+fn do_something_really_cool: i32 {
+    foo := 25
+    bar := foo + 25
+    do {
+        baz := bar + 25
+    }
 
-    bar := 25.2
-
-    baz := abs(12 + 16 * 2) * (bar + 12) - 25
-
-    bax := something_else + 2500
-
-    fn twenty_four: i8 { 24 }
-
-    twenty_four + 24
+    // Shouldn't work.
+    baz
 }
