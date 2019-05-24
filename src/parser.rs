@@ -224,6 +224,8 @@ impl Parser {
     fn parse_scope(&mut self) -> Option<ItemId> {
         let mut stmts = Vec::new();
         let mut last_was_expr = false;
+        assert_eq!(self.cur().kind, &TokenKind::OpenCurly);
+        self.next();
         loop {
             match self.cur().kind {
                 TokenKind::Eof => panic!("Unexpected eof while parsing scope"),
@@ -278,8 +280,9 @@ impl Parser {
             }
             assert_eq!(self.cur().kind, &TokenKind::RightParen);
             proto_range = source_info::concat(proto_range, self.cur().range.clone());
+            self.next();
         }
-        let ty = if let TokenKind::Colon = self.next().kind {
+        let ty = if let TokenKind::Colon = self.cur().kind {
             self.next();
             let (ty, range) = self.parse_type();
             proto_range = source_info::concat(proto_range, range);
@@ -288,8 +291,6 @@ impl Parser {
             Type::Void
         };
         assert_eq!(self.cur().kind, &TokenKind::OpenCurly);
-        self.next();
-
         self.builder.begin_computed_decl(name, param_names, param_tys, ty.clone(), proto_range);
         if let Some(terminal_expr) = self.parse_scope() {
             self.builder.ret(terminal_expr, ty.clone());

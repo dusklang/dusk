@@ -1,4 +1,4 @@
-fn do_something_really_cool(something: i32, something_else: f64): f64 {
+fn do_something_really_cool(something: i32, something_else: f64): i8 {
     foo := 5 - 12.0
 
     bar := 25.2
@@ -7,5 +7,7 @@ fn do_something_really_cool(something: i32, something_else: f64): f64 {
 
     bax := something_else + 2500
 
-    //do_something_really_cool(2, 2)
+    fn twenty_four: i8 { 24 }
+
+    twenty_four + 24
 }
