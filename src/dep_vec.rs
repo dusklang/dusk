@@ -15,7 +15,7 @@ impl<T> DepVec<T> {
     pub fn insert(&mut self, dependencies: &[u32], element: T) -> u32 {
         let level = dependencies.iter().max()
             .map(|val| val + 1)
-            .unwrap_or_else(|| 0);
+            .unwrap_or(0);
         let level_usize = level as usize;
         for _ in self.storage.len()..=level_usize {
             self.storage.push(Vec::new());
@@ -45,7 +45,7 @@ impl<T> AnyDepVec for DepVec<T> {
 }
 
 pub fn unify_sizes(vecs: &mut [&mut dyn AnyDepVec]) -> u32 {
-    let max = vecs.iter().map(|dv| dv.num_levels()).max().unwrap_or_else(|| 0);
+    let max = vecs.iter().map(|dv| dv.num_levels()).max().unwrap_or(0);
     for dv in vecs {
         dv.extend_to(max);
     }

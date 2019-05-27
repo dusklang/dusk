@@ -5,8 +5,6 @@ use crate::source_info::SourceRange;
 use crate::index_vec::{Idx, IdxVec};
 use crate::ty::Type;
 
-use arrayvec::ArrayVec;
-
 newtype_index!(ExprId);
 newtype_index!(DeclRefId);
 newtype_index!(GlobalDeclId);
@@ -362,24 +360,23 @@ impl Builder {
             }
         }
 
-        let mut deps = ArrayVec::<[u32; 2]>::new();
-        deps.push(arguments.iter().map(|&id| self.levels[id]).max().unwrap_or_else(|| 0));
-        let decl_ref_id = if let Some((level, decl)) = decl {
+        let arguments_max_level = arguments.iter().map(|&id| self.levels[id]).max().unwrap_or(0);
+        let level = if let Some((level, decl)) = decl {
             // Local decl
-
-            // Local decls must be stored atm, so if there are arguments it's a compile error (or right now, a panic)
-            deps.push(level);
-            self.overloads.push(vec![decl])
+            let decl_ref_id = self.overloads.push(vec![decl]);
+            self.decl_refs.insert(
+                &[arguments_max_level, level],
+                Expr { id, data: DeclRef { args: arguments, decl_ref_id } },
+            )
         } else {
             // Global decl
             let decl_ref_id = self.overloads.push(Vec::new());
             self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name: name, num_arguments: arguments.len() as u32 });
-            decl_ref_id
+            self.decl_refs.insert(
+                &[arguments_max_level],
+                Expr { id, data: DeclRef { args: arguments, decl_ref_id } },
+            )
         };
-        let level = self.decl_refs.insert(
-            &deps[..],
-            Expr { id, data: DeclRef { args: arguments, decl_ref_id } },
-        );
         self.levels.push(level);
         self.source_ranges.push(range);
 
