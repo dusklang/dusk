@@ -191,8 +191,6 @@ pub fn type_check(prog: Program) -> Vec<Error> {
         }
     }
 
-
-
     // Pass 2: propagate info up from roots to leaves
     for level in (0..levels).rev() {
         for item in tc.prog.assigned_decls.get_level(level) {
