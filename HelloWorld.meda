@@ -1,9 +1,7 @@
 fn do_something_really_cool(n: u8): u8 {
     if n > 2 {
         n + 5
-    } else if n < 2 {
-        0 - n
     } else {
-        2500
+        0
     }
 }

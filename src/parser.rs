@@ -1,5 +1,5 @@
 use crate::token::{TokenVec, TokenKind, Token};
-use crate::hir::{Program, Builder, ItemId, BinOp};
+use crate::hir::{Program, Builder, ExprId, BinOp};
 use crate::ty::Type;
 use crate::error::Error;
 use crate::source_info::{self, SourceRange};
@@ -71,7 +71,7 @@ impl Parser {
         )
     }
 
-    fn parse_term(&mut self) -> ItemId {
+    fn parse_term(&mut self) -> ExprId {
         use TokenKind::*;
         match self.cur().kind {
             LeftParen => {
@@ -140,7 +140,7 @@ impl Parser {
         }
     }
 
-    fn parse_if(&mut self) -> ItemId {
+    fn parse_if(&mut self) -> ExprId {
         assert_eq!(self.cur().kind, &TokenKind::If);
         self.next();
         let condition = self.parse_expr();
@@ -157,7 +157,7 @@ impl Parser {
         self.builder.if_expr(condition, then_expr, else_expr, 0..0)
     }
 
-    fn parse_expr(&mut self) -> ItemId {
+    fn parse_expr(&mut self) -> ExprId {
         let mut expr_stack = Vec::new();
         let mut op_stack: Vec<BinOp> = Vec::new();
         expr_stack.push(self.parse_term());
@@ -194,8 +194,8 @@ impl Parser {
         expr_stack.pop().unwrap()
     }
 
-    /// Parses any node. Iff the node is an expression, returns its ItemId.
-    fn parse_node(&mut self) -> Option<ItemId> {
+    /// Parses any node. Iff the node is an expression, returns its ExprId.
+    fn parse_node(&mut self) -> Option<ExprId> {
         match self.cur().kind {
             TokenKind::Ident(name) => {
                 if let TokenKind::Colon = self.peek_next().kind {
@@ -245,7 +245,7 @@ impl Parser {
 
     // Parses an open curly brace, then a list of nodes, then a closing curly brace
     // Returns the id of the final node if it exists and is an expression. Otherwise returns `None`.
-    fn parse_scope(&mut self) -> Option<ItemId> {
+    fn parse_scope(&mut self) -> Option<ExprId> {
         self.builder.begin_scope();
         let mut stmts = Vec::new();
         let mut last_was_expr = false;

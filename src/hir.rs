@@ -7,7 +7,7 @@ use crate::ty::Type;
 
 use arrayvec::ArrayVec;
 
-newtype_index!(ItemId);
+newtype_index!(ExprId);
 newtype_index!(DeclRefId);
 newtype_index!(GlobalDeclId);
 newtype_index!(LocalDeclId);
@@ -42,28 +42,28 @@ pub struct IntLit;
 #[derive(Debug)]
 pub struct DecLit;
 #[derive(Debug)]
-pub struct Stmt { pub root_expr: ItemId }
+pub struct Stmt { pub root_expr: ExprId }
 #[derive(Debug)]
-pub struct Ret { pub expr: ItemId, pub ty: Type }
+pub struct Ret { pub expr: ExprId, pub ty: Type }
 #[derive(Debug)]
-pub struct AssignedDecl { pub root_expr: ItemId, pub decl_id: DeclId }
+pub struct AssignedDecl { pub root_expr: ExprId, pub decl_id: DeclId }
 #[derive(Debug)]
-pub struct DeclRef { pub args: Vec<ItemId>, pub decl_ref_id: DeclRefId }
+pub struct DeclRef { pub args: Vec<ExprId>, pub decl_ref_id: DeclRefId }
 #[derive(Debug)]
-pub struct If { pub condition: ItemId, pub then_expr: ItemId, pub else_expr: ItemId }
+pub struct If { pub condition: ExprId, pub then_expr: ExprId, pub else_expr: ExprId }
 
 #[derive(Debug)]
-pub struct Item<T> {
-    pub id: ItemId,
+pub struct Expr<T> {
+    pub id: ExprId,
     pub data: T,
 }
 
-impl<T> Deref for Item<T> {
+impl<T> Deref for Expr<T> {
     type Target = T;
     fn deref(&self) -> &T { &self.data }
 }
 
-impl<T> DerefMut for Item<T> {
+impl<T> DerefMut for Expr<T> {
     fn deref_mut(&mut self) -> &mut T { &mut self.data }
 }
 
@@ -83,32 +83,32 @@ impl Decl {
 #[derive(Debug)]
 pub struct Program {
     /// All integer literals in the entire program
-    pub int_lits: Vec<Item<IntLit>>,
+    pub int_lits: Vec<Expr<IntLit>>,
     /// All decimal literals in the entire program
-    pub dec_lits: Vec<Item<DecLit>>,
+    pub dec_lits: Vec<Expr<DecLit>>,
     /// All assigned decls in the entire program
     pub assigned_decls: DepVec<AssignedDecl>,
     /// All decl refs in the entire program
-    pub decl_refs: DepVec<Item<DeclRef>>,
+    pub decl_refs: DepVec<Expr<DeclRef>>,
     /// All statements in the entire program
     pub stmts: DepVec<Stmt>,
     /// All returns in the entire program
     pub rets: DepVec<Ret>,
     /// All if expressions in the entire program
-    pub ifs: DepVec<Item<If>>,
+    pub ifs: DepVec<Expr<If>>,
     // An expression to universally represent the void value
-    pub void_expr: ItemId,
+    pub void_expr: ExprId,
 
-    /// The source ranges of each item in the entire program
-    pub source_ranges: IdxVec<SourceRange, ItemId>,
+    /// The source ranges of each expression in the entire program
+    pub source_ranges: IdxVec<SourceRange, ExprId>,
     /// The global declarations in the entire program
     pub global_decls: IdxVec<Decl, GlobalDeclId>,
     /// The local declarations in the entire program
     pub local_decls: IdxVec<Decl, LocalDeclId>,
     /// Each declref's overload choices
     pub overloads: IdxVec<Vec<DeclId>, DeclRefId>,
-    /// Number of items in the entire program
-    pub num_items: usize,
+    /// Number of expressions in the entire program
+    pub num_exprs: usize,
 }
 
 impl Program {
@@ -148,26 +148,26 @@ struct GlobalDeclRef {
 
 pub struct Builder {
     /// All integer literals in the entire program so far
-    int_lits: Vec<Item<IntLit>>,
+    int_lits: Vec<Expr<IntLit>>,
     /// All decimal literals in the entire program so far
-    dec_lits: Vec<Item<DecLit>>,
+    dec_lits: Vec<Expr<DecLit>>,
     /// All assigned decls in the entire program so far
     assigned_decls: DepVec<AssignedDecl>,
     /// All decl refs in the entire program so far
-    decl_refs: DepVec<Item<DeclRef>>,
+    decl_refs: DepVec<Expr<DeclRef>>,
     /// All statements in the entire program so far
     stmts: DepVec<Stmt>,
     /// All returns in the entire program so far
     rets: DepVec<Ret>,
     /// All if expressions in the entire program so far
-    ifs: DepVec<Item<If>>,
+    ifs: DepVec<Expr<If>>,
     // An expression to universally represent the void value
-    void_expr: ItemId,
+    void_expr: ExprId,
 
-    /// The source ranges of each item so far
-    source_ranges: IdxVec<SourceRange, ItemId>,
-    /// The levels of each item so far
-    levels: IdxVec<u32, ItemId>,
+    /// The source ranges of each expression so far
+    source_ranges: IdxVec<SourceRange, ExprId>,
+    /// The levels of each expression so far
+    levels: IdxVec<u32, ExprId>,
     /// The global declarations so far
     global_decls: IdxVec<Decl, GlobalDeclId>,
     /// The local declarations so far
@@ -251,32 +251,32 @@ impl Builder {
         }
     }
 
-    pub fn void_expr(&self) -> ItemId { self.void_expr }
+    pub fn void_expr(&self) -> ExprId { self.void_expr }
 
-    pub fn int_lit(&mut self, lit: u64, range: SourceRange) -> ItemId {
-        let id = ItemId::new(self.levels.len());
-        self.int_lits.push(Item { id, data: IntLit });
+    pub fn int_lit(&mut self, lit: u64, range: SourceRange) -> ExprId {
+        let id = ExprId::new(self.levels.len());
+        self.int_lits.push(Expr { id, data: IntLit });
         self.levels.push(0);
         self.source_ranges.push(range);
         id
     }
 
-    pub fn dec_lit(&mut self, lit: f64, range: SourceRange) -> ItemId {
-        let id = ItemId::new(self.levels.len());
-        self.dec_lits.push(Item { id, data: DecLit });
+    pub fn dec_lit(&mut self, lit: f64, range: SourceRange) -> ExprId {
+        let id = ExprId::new(self.levels.len());
+        self.dec_lits.push(Expr { id, data: DecLit });
         self.levels.push(0);
         self.source_ranges.push(range);
 
         id
     }
 
-    pub fn bin_op(&mut self, op: BinOp, lhs: ItemId, rhs: ItemId, range: SourceRange) -> ItemId {
-        let id = ItemId::new(self.levels.len());
+    pub fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId {
+        let id = ExprId::new(self.levels.len());
         let decl_ref_id = self.overloads.push(Vec::new());
         self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name: op.symbol().to_string(), num_arguments: 2 });
         let level = self.decl_refs.insert(
             &[self.levels[lhs], self.levels[rhs]],
-            Item { id, data: DeclRef { args: vec![lhs, rhs], decl_ref_id } },
+            Expr { id, data: DeclRef { args: vec![lhs, rhs], decl_ref_id } },
         );
         self.levels.push(level);
         self.source_ranges.push(range);
@@ -284,8 +284,8 @@ impl Builder {
         id
     }
 
-    pub fn stored_decl(&mut self, name: String, root_expr: ItemId, range: SourceRange) -> ItemId {
-        let id = ItemId::new(self.levels.len());
+    pub fn stored_decl(&mut self, name: String, root_expr: ExprId, range: SourceRange) -> ExprId {
+        let id = ExprId::new(self.levels.len());
         let decl_id = self.local_decls.push(Decl { name: name.clone(), param_tys: Vec::new(), ret_ty: Type::Error });
         let decl_id = DeclId::Local(decl_id);
         let level = self.assigned_decls.insert(&[self.levels[root_expr]], AssignedDecl { root_expr, decl_id });
@@ -296,21 +296,21 @@ impl Builder {
         id
     }
 
-    pub fn ret(&mut self, expr: ItemId, ty: Type) {
+    pub fn ret(&mut self, expr: ExprId, ty: Type) {
         self.rets.insert(&[self.levels[expr]], Ret { expr, ty });
     }
 
-    pub fn stmts(&mut self, root_exprs: &[ItemId]) {
+    pub fn stmts(&mut self, root_exprs: &[ExprId]) {
         for &root_expr in root_exprs {
             self.stmts.insert(&[self.levels[root_expr]], Stmt { root_expr });
         }
     }
 
-    pub fn if_expr(&mut self, condition: ItemId, then_expr: ItemId, else_expr: ItemId, range: SourceRange) -> ItemId {
-        let id = ItemId::new(self.levels.len());
+    pub fn if_expr(&mut self, condition: ExprId, then_expr: ExprId, else_expr: ExprId, range: SourceRange) -> ExprId {
+        let id = ExprId::new(self.levels.len());
         let level = self.ifs.insert(
             &[self.levels[condition], self.levels[then_expr], self.levels[else_expr]],
-            Item { id, data: If { condition, then_expr, else_expr } }
+            Expr { id, data: If { condition, then_expr, else_expr } }
         );
         self.levels.push(level);
         self.source_ranges.push(range);
@@ -351,8 +351,8 @@ impl Builder {
         self.local_decl_stack.pop().unwrap();
     }
 
-    pub fn decl_ref(&mut self, name: String, arguments: Vec<ItemId>, range: SourceRange) -> ItemId {
-        let id = ItemId::new(self.levels.len());
+    pub fn decl_ref(&mut self, name: String, arguments: Vec<ExprId>, range: SourceRange) -> ExprId {
+        let id = ExprId::new(self.levels.len());
 
         let mut decl: Option<(u32, DeclId)> = None;
         for &LocalDecl { name: ref other_name, level: other_level, decl: other_decl } in self.local_decl_stack.last().unwrap().decls.iter().rev() {
@@ -378,7 +378,7 @@ impl Builder {
         };
         let level = self.decl_refs.insert(
             &deps[..],
-            Item { id, data: DeclRef { args: arguments, decl_ref_id } },
+            Expr { id, data: DeclRef { args: arguments, decl_ref_id } },
         );
         self.levels.push(level);
         self.source_ranges.push(range);
@@ -386,7 +386,7 @@ impl Builder {
         id
     }
 
-    pub fn get_range(&self, id: ItemId) -> SourceRange {
+    pub fn get_range(&self, id: ExprId) -> SourceRange {
         self.source_ranges[id].clone()
     }
 
@@ -410,7 +410,7 @@ impl Builder {
             local_decls: self.local_decls,
             global_decls: self.global_decls,
             overloads: self.overloads,
-            num_items: self.levels.len(),
+            num_exprs: self.levels.len(),
         }
     }
 }

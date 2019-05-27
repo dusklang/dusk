@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::hir::{Program, ItemId, Decl, DeclId, DeclRefId};
+use crate::hir::{Program, ExprId, Decl, DeclId, DeclRefId};
 use crate::ty::{Type, IntWidth, FloatWidth};
 use crate::index_vec::IdxVec;
 use crate::dep_vec::{self, AnyDepVec};
@@ -70,11 +70,11 @@ const DEFAULT_FLOAT_TY: Type = Type::Float(FloatWidth::W64);
 struct TypeChecker {
     /// The input HIR program
     prog: Program,
-    /// The type of each item
-    types: IdxVec<Type, ItemId>,
-    /// The constraints on each items's type
-    constraints: IdxVec<ConstraintList, ItemId>,
-    /// The selected overload for each function call or operator expression
+    /// The type of each expression
+    types: IdxVec<Type, ExprId>,
+    /// The constraints on each expression's type
+    constraints: IdxVec<ConstraintList, ExprId>,
+    /// The selected overload for each decl ref
     selected_overloads: IdxVec<Option<DeclId>, DeclRefId>,
 }
 
@@ -86,8 +86,8 @@ pub fn type_check(prog: Program) -> Vec<Error> {
         selected_overloads: IdxVec::new(),
     };
     let mut errs = Vec::new();
-    tc.types.resize_with(tc.prog.num_items, Default::default);
-    tc.constraints.resize_with(tc.prog.num_items, Default::default);
+    tc.types.resize_with(tc.prog.num_exprs, Default::default);
+    tc.constraints.resize_with(tc.prog.num_exprs, Default::default);
     tc.selected_overloads.resize_with(tc.prog.overloads.len(), || None);
 
     let levels = dep_vec::unify_sizes(&mut [
