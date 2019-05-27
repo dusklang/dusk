@@ -12,7 +12,7 @@ Must-haves:
 ## Arbitrary compile-time code execution
 The more I program, the more convinced I become that this is an essential feature of any serious programming language. The idea is pretty simple: as programmers our job is to solve problems using computers. So why not apply our problem-solving skills to the problems we experience every day as programmers?
 
-This isn't just a theoretical discussion, thanfully. Just look at what is possible with languages that have it, like D, Zig and Jai. Code introspection, code generation, and custom tools are great examples of things made way better with compile-time code execution. However, I'd like to take the concept even further, enabling users to write things like:
+This isn't just a theoretical discussion, thankfully. Just look at what is possible with languages that have it, like D, Zig and Jai. Code introspection, code generation, and custom tools are great examples of things made way better with compile-time code execution. However, I'd like to take the concept even further, enabling users to write things like:
 - optimizations
 - backends
 - calling conventions
