@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::hir::{Program, ExprId, Decl, DeclId, DeclRefId};
+use crate::tir::{Program, ExprId, Decl, DeclId, DeclRefId};
 use crate::ty::{Type, IntWidth, FloatWidth};
 use crate::index_vec::IdxVec;
 use crate::dep_vec::{self, AnyDepVec};
@@ -90,7 +90,7 @@ const DEFAULT_INT_TY: Type = Type::Int {
 const DEFAULT_FLOAT_TY: Type = Type::Float(FloatWidth::W64);
 
 struct TypeChecker {
-    /// The input HIR program
+    /// The input TIR program
     prog: Program,
     /// The type of each expression
     types: IdxVec<Type, ExprId>,

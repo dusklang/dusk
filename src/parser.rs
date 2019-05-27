@@ -1,5 +1,5 @@
 use crate::token::{TokenVec, TokenKind, Token};
-use crate::hir::{Program, Builder, ExprId, BinOp};
+use crate::tir::{Program, Builder, ExprId, BinOp};
 use crate::ty::Type;
 use crate::error::Error;
 use crate::source_info::{self, SourceRange};
