@@ -20,7 +20,6 @@ pub enum Type {
     Float(FloatWidth),
     Bool,
     Void,
-    Never,
 }
 
 impl Type {
@@ -107,7 +106,6 @@ impl fmt::Debug for Type {
             ),
             Type::Bool => write!(f, "bool"),
             Type::Void => write!(f, "void"),
-            Type::Never => write!(f, "never"),
         }
     }
 }
