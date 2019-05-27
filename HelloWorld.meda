@@ -1,7 +1,11 @@
-fn do_something_really_cool(n: u8): u8 {
+fn do_something_really_cool(n: u64): u64 {
     if n > 2 {
         n + 5
-    } else {
+    } else if n < 2 {
         0
+    } else if n == 2 {
+        25 - n
+    } else {
+        123457214
     }
 }

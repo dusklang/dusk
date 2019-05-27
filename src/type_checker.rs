@@ -39,20 +39,42 @@ impl ConstraintList {
 
     fn intersect_with(&self, other: &ConstraintList) -> ConstraintList {
         let mut constraints = ConstraintList::default();
+        fn filtered_tys(tys: &[Type], mut f: impl FnMut(&Type) -> bool) -> Vec<Type> {
+            tys.iter().filter_map(|ty| 
+                    if f(ty) { 
+                        Some(ty.clone())
+                    } else { 
+                        None 
+                    }
+                )
+                .collect()
+        }
         match self.literal {
             Some(LiteralType::Dec) => match other.literal {
                 Some(LiteralType::Dec) | Some(LiteralType::Int) => constraints.literal = Some(LiteralType::Dec),
-                None => constraints.literal = None,
+                None => {
+                    constraints.literal = None;
+                    constraints.one_of = filtered_tys(&other.one_of, Type::expressible_by_dec_lit);
+                }
             },
             Some(LiteralType::Int) => match other.literal {
                 Some(LiteralType::Dec) | Some(LiteralType::Int) => constraints.literal = other.literal.clone(),
-                None => constraints.literal = None,
+                None => {
+                    constraints.literal = None;
+                    constraints.one_of = filtered_tys(&other.one_of, Type::expressible_by_int_lit);
+                }
             },
-            None => constraints.literal = None,
-        }
-        for ty in &self.one_of {
-            if other.one_of.contains(ty) {
-                constraints.one_of.push(ty.clone());
+            None => {
+                constraints.literal = None;
+                match other.literal {
+                    Some(LiteralType::Dec) => constraints.one_of = filtered_tys(&self.one_of, Type::expressible_by_dec_lit),
+                    Some(LiteralType::Int) => constraints.one_of = filtered_tys(&self.one_of, Type::expressible_by_int_lit),
+                    None => for ty in &self.one_of {
+                        if other.one_of.contains(ty) {
+                            constraints.one_of.push(ty.clone());
+                        }
+                    },
+                }
             }
         }
 
@@ -165,8 +187,11 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                 panic!("Failed to unify branches of if expression");
             }
             tc.constraints[item.id] = constraints;
+
         }
     }
+
+
 
     // Pass 2: propagate info up from roots to leaves
     for level in (0..levels).rev() {
