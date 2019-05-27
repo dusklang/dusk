@@ -10,11 +10,13 @@ Must-haves:
 - Optional type instead of null pointers or sentinels
 
 ## Arbitrary compile-time code execution
-I believe the benefits of this feature are obvious if you look at languages that have it, like D, Zig and Jai. Code introspection, code generation, and custom tools are examples of things made way better with compile-time code execution. However, in addition to those areas, I'd like to take the concept even further, by enabling users to write things like:
+The more I program, the more convinced I become that this is an essential feature of any serious programming language. The idea is pretty simple: as programmers our job is to solve problems using computers. So why not apply our problem-solving skills to the problems we experience every day as programmers?
+
+This isn't just a theoretical discussion, thanfully. Just look at what is possible with languages that have it, like D, Zig and Jai. Code introspection, code generation, and custom tools are great examples of things made way better with compile-time code execution. However, I'd like to take the concept even further, enabling users to write things like:
 - optimizations
 - backends
 - calling conventions
-- importers/exporters of APIs to/from other languages
+- automated importers/exporters of APIs to/from other languages
 - primitive data abstractions like struct, class, enum, etc., with fine-grained control over their layout
 
 There may also be implementation-related benefits to thinking of types as mere compile-time evaluated expressions.
@@ -26,7 +28,7 @@ Taking advantage of the previous thing (arbitrary compile-time code execution), 
 - easier to port the compiler to new host platforms
 - easier to standardize the compiler
 - easier to write new compilers that implement the standard
-- easier to prove correctness of the compiler
+- easier to prove correctness of a compiler implementation
 
 As an example of a way in which complexity could be moved out of the compiler and into libraries, perhaps the base "compiler" won't actually know how to compile anything at all. Perhaps it will only be able to interpret bytecode (because it will already need to do that to enable the compile-time code execution stuff). Backends could then be implemented in libraries. For example, there might be an LLVM backend (for generating optimized code) and an x64 backend and an arm64 backend (for generating working code quickly), all implemented as their own libraries. For particularly important backends like those, they should be part of the official project as standard libraries.
 
