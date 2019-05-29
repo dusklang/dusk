@@ -2,15 +2,25 @@ use crate::error::Error;
 use crate::tir::{Program, ExprId, Decl, DeclId, DeclRefId};
 use crate::ty::{Type, IntWidth, FloatWidth};
 use crate::index_vec::IdxVec;
-use crate::dep_vec::{self, AnyDepVec};
+use crate::dep_vec;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum LiteralType { Int, Dec }
+
+impl LiteralType {
+    fn preferred_type(&self) -> Type {
+        match self {
+            LiteralType::Int => Type::i32(),
+            LiteralType::Dec => Type::f64(),
+        }
+    }
+}
 
 #[derive(Debug, Default, Clone)]
 struct ConstraintList {
     literal: Option<LiteralType>,
     one_of: Vec<Type>,
+    preferred_type: Option<Type>,
 }
 
 enum UnificationError<'a> {
@@ -23,12 +33,10 @@ enum UnificationError<'a> {
 impl ConstraintList {
     fn can_unify_to(&self, ty: &Type) -> Result<(), UnificationError> {
         use UnificationError::*;
-        match self.literal {
-            Some(ref lit) => if ty.expressible_by_int_lit() {
-                Ok(())
-            } else {
-                Err(Literal(lit.clone()))
-            },
+        match &self.literal {
+            Some(LiteralType::Dec) if ty.expressible_by_dec_lit() => Ok(()),
+            Some(LiteralType::Int) if ty.expressible_by_int_lit() => Ok(()),
+            Some(lit) => Err(Literal(lit.clone())),
             None => if self.one_of.contains(ty) {
                 Ok(())
             } else {
@@ -78,6 +86,25 @@ impl ConstraintList {
             }
         }
 
+        if self.preferred_type == other.preferred_type {
+            constraints.preferred_type = self.preferred_type.clone();
+        } else {
+            if let Some(preferred_type) = &self.preferred_type {
+                // I don't actually know if it's possible for an expression to not be able to unify to its preferred type?
+                assert!(self.can_unify_to(preferred_type).is_ok());
+                if other.can_unify_to(preferred_type).is_ok() {
+                    constraints.preferred_type = Some(preferred_type.clone());
+                }
+            } 
+            if let Some(preferred_type) = &other.preferred_type {
+                // I don't actually know if it's possible for an expression to not be able to unify to its preferred type?
+                assert!(other.can_unify_to(preferred_type).is_ok());
+                if self.can_unify_to(preferred_type).is_ok() {
+                    constraints.preferred_type = Some(preferred_type.clone());
+                }
+            }
+        }
+
         constraints
     }
 }
@@ -96,6 +123,8 @@ struct TypeChecker {
     types: IdxVec<Type, ExprId>,
     /// The constraints on each expression's type
     constraints: IdxVec<ConstraintList, ExprId>,
+    /// The preferred overload for each decl ref (currently only ever originates from literals)
+    preferred_overloads: IdxVec<Option<DeclId>, DeclRefId>,
     /// The selected overload for each decl ref
     selected_overloads: IdxVec<Option<DeclId>, DeclRefId>,
 }
@@ -105,13 +134,16 @@ pub fn type_check(prog: Program) -> Vec<Error> {
         prog,
         types: IdxVec::new(),
         constraints: IdxVec::new(),
+        preferred_overloads: IdxVec::new(),
         selected_overloads: IdxVec::new(),
     };
     let mut errs = Vec::new();
     tc.types.resize_with(tc.prog.num_exprs, Default::default);
     tc.constraints.resize_with(tc.prog.num_exprs, Default::default);
     tc.selected_overloads.resize_with(tc.prog.overloads.len(), || None);
+    tc.preferred_overloads.resize_with(tc.prog.overloads.len(), || None);
 
+    // Extend arrays as needed so they all have the same number of levels.
     let levels = dep_vec::unify_sizes(&mut [
         &mut tc.prog.assigned_decls, &mut tc.prog.decl_refs, &mut tc.prog.stmts, &mut tc.prog.rets, &mut tc.prog.ifs,
     ]);
@@ -121,18 +153,27 @@ pub fn type_check(prog: Program) -> Vec<Error> {
     tc.types[tc.prog.void_expr] = Type::Void;
 
     // Pass 1: propagate info down from leaves to roots
-    for item in &tc.prog.int_lits { tc.constraints[item.id].literal = Some(LiteralType::Int); }
-    for item in &tc.prog.dec_lits { tc.constraints[item.id].literal = Some(LiteralType::Dec); }
+    for item in &tc.prog.int_lits { 
+        let constraints = &mut tc.constraints[item.id];
+        let lit = LiteralType::Int;
+        constraints.preferred_type = Some(lit.preferred_type());
+        constraints.literal = Some(lit);
+    }
+    for item in &tc.prog.dec_lits {
+        let constraints = &mut tc.constraints[item.id];
+        let lit = LiteralType::Dec;
+        constraints.preferred_type = Some(lit.preferred_type());
+        constraints.literal = Some(lit);
+    }
     for level in 0..levels {
         for item in tc.prog.assigned_decls.get_level(level) {
             let constraints = &tc.constraints[item.root_expr];
-            let guess = match constraints.literal {
-                Some(LiteralType::Int) => Type::i32(),
-                Some(LiteralType::Dec) => Type::f64(),
-                None => {
-                    assert!(!constraints.one_of.is_empty());
-                    constraints.one_of[0].clone()
-                }
+            let guess = if let Some(pref) = &constraints.preferred_type {
+                // I don't actually know if it's possible for an expression to not be able to unify to its preferred type?
+                assert!(constraints.can_unify_to(pref).is_ok());
+                pref.clone()
+            } else {
+                constraints.one_of[0].clone()
             };
             match item.decl_id {
                 DeclId::Global(id) => &mut tc.prog.global_decls[id],
@@ -162,6 +203,19 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             tc.constraints[item.id].one_of = tc.prog.overloads[item.decl_ref_id].iter()
                 .map(|&overload| get_decl(overload).ret_ty.clone())
                 .collect();
+
+            'find_preference: for (i, &arg) in item.args.iter().enumerate() {
+                if let Some(ty) = &tc.constraints[arg].preferred_type {
+                    for &overload in &tc.prog.overloads[item.decl_ref_id] {
+                        let decl = get_decl(overload);
+                        if &decl.param_tys[i] == ty {
+                            tc.constraints[item.id].preferred_type = Some(decl.ret_ty.clone());
+                            tc.preferred_overloads[item.decl_ref_id] = Some(overload);
+                            break 'find_preference;
+                        }
+                    }
+                }
+            }
         }
         for item in tc.prog.stmts.get_level(level) {
             if let Err(_) = tc.constraints[item.root_expr].can_unify_to(&Type::Void) {
@@ -187,7 +241,6 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                 panic!("Failed to unify branches of if expression");
             }
             tc.constraints[item.id] = constraints;
-
         }
     }
 
@@ -242,21 +295,12 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             tc.constraints[item.root_expr].one_of.retain(|ty| ty == &Type::Void);
         }
         for item in tc.prog.rets.get_level(level) {
-            match tc.constraints[item.expr].literal {
-                Some(LiteralType::Dec) => 
-                    tc.constraints[item.expr].one_of = if item.ty.expressible_by_dec_lit() {
-                        vec![item.ty.clone()]
-                    } else {
-                        Vec::new()
-                    },
-                Some(LiteralType::Int) => 
-                    tc.constraints[item.expr].one_of = if item.ty.expressible_by_int_lit() {
-                        vec![item.ty.clone()]
-                    } else {
-                        Vec::new()
-                    },
-                None => tc.constraints[item.expr].one_of.retain(|ty| ty == &item.ty),
-            }
+            let constraints = &mut tc.constraints[item.expr];
+            constraints.one_of = if constraints.can_unify_to(&item.ty).is_ok() {
+                vec![item.ty.clone()]
+            } else {
+                Vec::new()
+            };
         }
         for item in tc.prog.ifs.get_level(level) {
             tc.constraints[item.condition].one_of.retain(|ty| ty == &Type::Bool);

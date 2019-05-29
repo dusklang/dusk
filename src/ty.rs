@@ -34,43 +34,43 @@ impl Type {
         if let Type::Float(_) = self { true } else { false }
     }
 
-    pub fn u8() -> Self {
+    pub const fn u8() -> Self {
         Type::Int { width: IntWidth::W8, is_signed: false }
     }
 
-    pub fn u16() -> Self {
+    pub const fn u16() -> Self {
         Type::Int { width: IntWidth::W16, is_signed: false }
     }
 
-    pub fn u32() -> Self {
+    pub const fn u32() -> Self {
         Type::Int { width: IntWidth::W32, is_signed: false }
     }
 
-    pub fn u64() -> Self {
+    pub const fn u64() -> Self {
         Type::Int { width: IntWidth::W64, is_signed: false }
     }
 
-    pub fn i8() -> Self {
+    pub const fn i8() -> Self {
         Type::Int { width: IntWidth::W8, is_signed: true }
     }
 
-    pub fn i16() -> Self {
+    pub const fn i16() -> Self {
         Type::Int { width: IntWidth::W16, is_signed: true }
     }
 
-    pub fn i32() -> Self {
+    pub const fn i32() -> Self {
         Type::Int { width: IntWidth::W32, is_signed: true }
     }
 
-    pub fn i64() -> Self {
+    pub const fn i64() -> Self {
         Type::Int { width: IntWidth::W64, is_signed: true }
     }
 
-    pub fn f32() -> Self {
+    pub const fn f32() -> Self {
         Type::Float(FloatWidth::W32)
     }
 
-    pub fn f64() -> Self {
+    pub const fn f64() -> Self {
         Type::Float(FloatWidth::W64)
     }
 }

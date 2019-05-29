@@ -1,11 +1,16 @@
-fn do_something_really_cool(n: u64): u64 {
-    if n > 2 {
-        n + 5
-    } else if n < 2 {
-        0
-    } else if n == 2 {
-        25 - n
-    } else {
-        123457214
-    }
+fn do_something_really_cool {
+    // i32
+    hello := 2
+    // i32
+    hello := 2 + 2
+    // f64
+    hello := 2.5
+    // f64 
+    hello := 2.5 + 2.5
+    // f64
+    hello := 2 + 2 + 2.5
+    // f64
+    hello := 2.5 + 2 + 2
+    // f64
+    hello := (2 + 2) * (2.7 + 2) * (2.2 + 2) + 2
 }
