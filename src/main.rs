@@ -20,13 +20,9 @@ fn main() {
         contents
     );
     let (toks, mut errs) = lexer::lex(&file.src, &mut file.lines);
-    // println!("Tokens:"); 
-    // println!("{:#?}", &toks);
 
     let (tir, other_errs) = parser::parse(toks);
     errs.extend(other_errs);
-    println!("TIR:");
-    println!("{:#?}", &tir);
 
     errs.extend(type_checker::type_check(tir));
 

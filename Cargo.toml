@@ -4,5 +4,8 @@ version = "0.1.0"
 authors = ["Zach <zachrwolfe@me.com>"]
 edition = "2018"
 
+[profile.release]
+debug = true
+
 [dependencies]
 unicode-segmentation = "1.2.1"

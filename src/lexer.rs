@@ -228,9 +228,6 @@ impl<'src> Lexer<'src> {
                     if false {}
                     $(
                         else if l.is_str($symbol) {
-                            if $symbol == "/" {
-                                println!("range: {:?}", l.gr_range_to_src_range(l.tok_start_pos..l.pos));
-                            }
                             l.pos += UnicodeSegmentation::graphemes($symbol, true).count();
                             l.push(TokenKind::$kind);
                         }

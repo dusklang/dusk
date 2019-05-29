@@ -57,32 +57,28 @@ impl ConstraintList {
                 )
                 .collect()
         }
-        match self.literal {
-            Some(LiteralType::Dec) => match other.literal {
-                Some(LiteralType::Dec) | Some(LiteralType::Int) => constraints.literal = Some(LiteralType::Dec),
-                None => {
-                    constraints.literal = None;
-                    constraints.one_of = filtered_tys(&other.one_of, Type::expressible_by_dec_lit);
+        match (&self.literal, &self.one_of, &other.literal, &other.one_of) {
+            (None, lhs, None, rhs) => for ty in lhs {
+                if rhs.contains(ty) {
+                    constraints.one_of.push(ty.clone());
                 }
             },
-            Some(LiteralType::Int) => match other.literal {
-                Some(LiteralType::Dec) | Some(LiteralType::Int) => constraints.literal = other.literal.clone(),
-                None => {
-                    constraints.literal = None;
-                    constraints.one_of = filtered_tys(&other.one_of, Type::expressible_by_int_lit);
-                }
-            },
-            None => {
+            (Some(lhs_lit), _, None, rhs) | (None, rhs, Some(lhs_lit), _) => {
                 constraints.literal = None;
-                match other.literal {
-                    Some(LiteralType::Dec) => constraints.one_of = filtered_tys(&self.one_of, Type::expressible_by_dec_lit),
-                    Some(LiteralType::Int) => constraints.one_of = filtered_tys(&self.one_of, Type::expressible_by_int_lit),
-                    None => for ty in &self.one_of {
-                        if other.one_of.contains(ty) {
-                            constraints.one_of.push(ty.clone());
-                        }
+                constraints.one_of = filtered_tys(
+                    rhs,
+                    match lhs_lit {
+                        LiteralType::Dec => Type::expressible_by_dec_lit,
+                        LiteralType::Int => Type::expressible_by_int_lit,
                     },
-                }
+                );
+            }
+            (Some(LiteralType::Dec), _, Some(rhs), _) => match rhs {
+                LiteralType::Int | LiteralType::Dec => constraints.literal = Some(LiteralType::Dec),
+            },
+            (Some(LiteralType::Int), _, Some(rhs), _) => match rhs {
+                LiteralType::Int => constraints.literal = Some(LiteralType::Int),
+                LiteralType::Dec => constraints.literal = Some(LiteralType::Dec),
             }
         }
 
@@ -343,8 +339,8 @@ pub fn type_check(prog: Program) -> Vec<Error> {
         };
     }
 
-    println!("Types: {:#?}", tc.types);
-    println!("Decl types: {:#?}", tc.prog.local_decls);
+    // println!("Types: {:#?}", tc.types);
+    // println!("Decl types: {:#?}", tc.prog.local_decls);
     //println!("Constraints: {:#?}", tc.constraints);
     errs
 }
