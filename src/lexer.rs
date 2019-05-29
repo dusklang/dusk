@@ -38,15 +38,17 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    /// NOTE: Assumes `slice` is ASCII!
+    #[inline(never)]
     fn is_str(&self, slice: &str) -> bool {
+        debug_assert!(slice.is_ascii());
         if self.has_chars() {
             let mut slice = slice.bytes();
-            let mut src = self.gr[self.pos..].iter().map(|(_, c)| c);
+            let mut src = self.gr[self.pos..].iter();
             loop {
                 match (slice.next(), src.next()) {
-                    (Some(c1), Some(c2)) => {
-                        if std::str::from_utf8(&[c1]).unwrap() != *c2 {
+                    (Some(c1), Some((_, c2))) => {
+                        // Safe if slice is ASCII, as is asserted above
+                        if unsafe { std::str::from_utf8_unchecked(&[c1]) } != *c2 {
                             return false;
                         }
                     },
