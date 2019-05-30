@@ -1,9 +1,7 @@
 use std::collections::HashMap;
-use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::token::{TokenVec, TokenKind};
-use crate::source_info::SourceRange;
 use crate::error::Error;
 
 #[inline]
@@ -15,15 +13,18 @@ struct Lexer<'src> {
     src: &'src str,
     gr: Vec<(usize, &'src str)>,
     pos: usize,
-    tok_start_pos: usize,
+    tok_start_loc: usize,
     lines: &'src mut Vec<usize>,
     toks: TokenVec,
 }
 
-
 impl<'src> Lexer<'src> {
     fn cur(&self) -> &str {
         self.gr[self.pos].1
+    }
+
+    fn cur_loc(&self) -> usize {
+        self.gr[self.pos].0
     }
 
     fn has_chars(&self) -> bool {
@@ -79,23 +80,11 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    fn gr_index_to_src_index(&self, index: usize) -> usize {
-        if index < self.gr.len() {
-            self.gr[index].0
-        } else {
-            self.src.len()
-        }
-    }
-    fn gr_range_to_src_range(&self, range: Range<usize>) -> SourceRange {
-        self.gr_index_to_src_index(range.start)
-            ..self.gr_index_to_src_index(range.end)
-    }
-
-    /// Pushes a new token with given kind and source range of `tok_start_pos`..`pos`
-    /// to token tree, then sets `tok_start_pos` to `pos`.
+    /// Pushes a new token with given kind and source range of `tok_start_loc`..`cur_loc()`
+    /// to token tree, then sets `tok_start_loc` to `cur_loc()`.
     fn push(&mut self, kind: TokenKind) {
-        let range = self.gr_range_to_src_range(self.tok_start_pos..self.pos);
-        self.tok_start_pos = self.pos;
+        let range = self.tok_start_loc..self.cur_loc();
+        self.tok_start_loc = self.cur_loc();
         self.toks.push(kind, range);
     }
 
@@ -113,22 +102,22 @@ impl<'src> Lexer<'src> {
             src,
             gr: UnicodeSegmentation::grapheme_indices(src, true).collect(),
             pos: 0,
-            tok_start_pos: 0,
+            tok_start_loc: 0,
             lines,
             toks: TokenVec::new(),
         };
         
         let mut errs = Vec::new();
 
-        // This was in the old lexer, but I don't know why?
+        // Find line breaks.
         while l.has_chars() {
             if l.is('\n') {
-                l.lines.push(l.pos + 1);
+                l.lines.push(l.cur_loc() + 1);
             } else if l.is_str("\r\n") {
                 l.pos += 1;
-                l.lines.push(l.pos + 1);
+                l.lines.push(l.cur_loc() + 1);
             } else if l.is('\r') {
-                l.lines.push(l.pos + 1);
+                l.lines.push(l.cur_loc() + 1);
             }
             l.pos += 1;
         }
@@ -175,17 +164,17 @@ impl<'src> Lexer<'src> {
 
             // Multi-line comments.
             if l.is_str("/*") {
-                let mut comment_begin = l.pos;
+                let mut comment_begin = l.cur_loc();
                 let mut levels = 1;
                 l.pos += 2;
                 let mut prev_ending_delimiter = None;
                 while l.has_chars() {
                     if l.is_str("/*") {
                         levels += 1;
-                        comment_begin = l.pos;
+                        comment_begin = l.cur_loc();
                         l.pos += 1;
                     } else if l.is_str("*/") {
-                        prev_ending_delimiter = Some(l.pos);
+                        prev_ending_delimiter = Some(l.cur_loc());
                         levels -= 1;
                         l.pos += 1;
                         assert!(levels >= 0);
@@ -200,11 +189,11 @@ impl<'src> Lexer<'src> {
                     let mut err = Error::new(
                         "unterminated '/*' comment"
                     ).adding_primary_range(
-                        l.gr_range_to_src_range(comment_begin..l.pos),
+                        comment_begin..l.cur_loc(),
                         "previous '/*' delimiter here"
                     );
                     if let Some(prev_ending_delimiter) = prev_ending_delimiter {
-                        err.add_primary_range(l.gr_range_to_src_range(prev_ending_delimiter..(prev_ending_delimiter + 2)), "previous '*/' delimiter here");
+                        err.add_primary_range(prev_ending_delimiter..(prev_ending_delimiter + 2), "previous '*/' delimiter here");
                         // Reset the position to the position right after the previous ending delimiter so we can keep lexing.
                         // This might be a terrible idea, we'll just have to wait and see.
                         l.pos = prev_ending_delimiter + 2;
@@ -219,7 +208,7 @@ impl<'src> Lexer<'src> {
                     Error::new(
                         "unexpected '*/' delimiter"
                     ).adding_primary_range(
-                        l.gr_range_to_src_range(l.tok_start_pos..l.pos),
+                        l.tok_start_loc..l.cur_loc(),
                         "no previous '/*' to match"
                     )
                 );
@@ -230,7 +219,8 @@ impl<'src> Lexer<'src> {
                     if false {}
                     $(
                         else if l.is_str($symbol) {
-                            l.pos += UnicodeSegmentation::graphemes($symbol, true).count();
+                            // symbols are all ASCII, so it's safe to assume that number of grapheme clusters == number of bytes
+                            l.pos += $symbol.len();
                             l.push(TokenKind::$kind);
                         }
                     )+
@@ -325,7 +315,7 @@ impl<'src> Lexer<'src> {
                         Error::new(
                             msg
                         ).adding_primary_range(
-                            l.gr_index_to_src_index(l.tok_start_pos)..l.gr_index_to_src_index(l.tok_start_pos + 1), 
+                            l.tok_start_loc..l.tok_start_loc + 1,
                             "literal begins here"
                         )
                     );
@@ -385,7 +375,7 @@ impl<'src> Lexer<'src> {
                     l.pos += 1;
                 }
 
-                let lit = &l.src[l.gr_range_to_src_range(l.tok_start_pos..l.pos)];
+                let lit = &l.src[l.tok_start_loc..l.cur_loc()];
                 if has_dot {
                     l.push(TokenKind::DecLit(lit.parse().unwrap()));
                 } else {
