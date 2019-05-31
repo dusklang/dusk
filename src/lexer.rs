@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use unicode_segmentation::{UnicodeSegmentation, GraphemeCursor};
+use unicode_segmentation::GraphemeCursor;
 
 use crate::token::{TokenVec, TokenKind};
 use crate::error::Error;
@@ -16,13 +16,17 @@ struct Lexer<'src> {
     toks: TokenVec,
 }
 
-#[derive(Clone)]
 struct GraphemeState<'src> {
     src: &'src str,
     /// Start of current grapheme
     start: usize,
     /// End of current grapheme
     end: GraphemeCursor,
+}
+
+struct SavedGraphemeState {
+    start: usize,
+    end: usize,
 }
 
 impl<'src> GraphemeState<'src> {
@@ -46,7 +50,7 @@ impl<'src> GraphemeState<'src> {
     }
 
     fn has_chars(&self) -> bool {
-        self.start != self.end.cur_cursor()
+        self.start < self.end.cur_cursor()
     }
 
     fn set_pos(&mut self, pos: usize) {
@@ -55,17 +59,29 @@ impl<'src> GraphemeState<'src> {
         self.end.next_boundary(self.src, 0).unwrap();
     }
 
-    fn advance_by(&mut self, n: usize) {
-        let mut prev = self.start;
-        for _ in 0..n {
-            prev = self.end.cur_cursor();
-            self.end.next_boundary(self.src, 0).unwrap();
-        }
-        self.start = prev;
+    /// Skip to next grapheme.
+    fn advance(&mut self) {
+        self.start = self.end.cur_cursor();
+        self.end.next_boundary(self.src, 0).unwrap();
     }
 
-    fn advance(&mut self) {
-        self.advance_by(1);
+    /// Skip over `n` bytes of ASCII
+    unsafe fn advance_by_ascii(&mut self, n: usize) {
+        self.start = std::cmp::min(self.start + n, self.src.len());
+        self.end.set_cursor(std::cmp::min(self.end.cur_cursor() + n - 1, self.src.len()));
+        self.end.next_boundary(self.src, 0).unwrap();
+    }
+
+    fn save_state(&self) -> SavedGraphemeState {
+        SavedGraphemeState {
+            start: self.start,
+            end: self.end.cur_cursor(),
+        }
+    }
+
+    fn restore_state(&mut self, state: SavedGraphemeState) {
+        self.start = state.start;
+        self.end.set_cursor(state.end);
     }
 }
 
@@ -84,12 +100,12 @@ impl<'src> Lexer<'src> {
     fn is_str(&mut self, slice: &str) -> bool {
         debug_assert!(slice.is_ascii() && !slice.is_empty());
         if self.gr.has_chars() {
-            let mut cursor = self.gr.clone();
+            let saved = self.gr.save_state();
             let mut slice = slice.bytes();
-            let mut equal = cursor.has_chars();
-            while cursor.has_chars() {
+            let mut equal = self.gr.has_chars();
+            while self.gr.has_chars() {
                 if let Some(c1) = slice.next() {
-                    let c2 = cursor.cur();
+                    let c2 = self.gr.cur();
                     // Safe if slice is ASCII, as is asserted above
                     if unsafe { std::str::from_utf8_unchecked(&[c1]) } != c2 {
                         equal = false;
@@ -98,8 +114,9 @@ impl<'src> Lexer<'src> {
                 } else {
                     break;
                 }
-                cursor.advance();
+                self.gr.advance();
             }
+            self.gr.restore_state(saved);
             equal
         } else {
             false
@@ -154,14 +171,17 @@ impl<'src> Lexer<'src> {
         // Find line breaks.
         while l.gr.has_chars() {
             if l.is('\n') {
-                l.lines.push(l.gr.cur_loc() + 1);
-            } else if l.is_str("\r\n") {
                 l.gr.advance();
-                l.lines.push(l.gr.cur_loc() + 1);
+                l.lines.push(l.gr.cur_loc());
+            } else if l.is_str("\r\n") {
+                unsafe { l.gr.advance_by_ascii(2); }
+                l.lines.push(l.gr.cur_loc());
             } else if l.is('\r') {
-                l.lines.push(l.gr.cur_loc() + 1);
+                l.gr.advance();
+                l.lines.push(l.gr.cur_loc());
+            } else {
+                l.gr.advance();
             }
-            l.gr.advance();
         }
         l.gr.set_pos(0);
 
@@ -197,7 +217,7 @@ impl<'src> Lexer<'src> {
 
             // Single-line comments.
             if l.is_str("//") {
-                l.gr.advance_by(2);
+                unsafe { l.gr.advance_by_ascii(2); }
                 while l.gr.has_chars() && !l.is_newline() {
                     l.gr.advance();
                 }
@@ -208,7 +228,7 @@ impl<'src> Lexer<'src> {
             if l.is_str("/*") {
                 let mut comment_begin = l.gr.cur_loc();
                 let mut levels = 1;
-                l.gr.advance_by(2);
+                unsafe { l.gr.advance_by_ascii(2); }
                 let mut prev_ending_delimiter = None;
                 while l.gr.has_chars() {
                     if l.is_str("/*") {
@@ -245,7 +265,7 @@ impl<'src> Lexer<'src> {
                 l.push(TokenKind::MultiLineComment);
             }
             if l.is_str("*/") {
-                l.gr.advance_by(2);
+                unsafe { l.gr.advance_by_ascii(2); }
                 errs.push(
                     Error::new(
                         "unexpected '*/' delimiter"
@@ -262,7 +282,7 @@ impl<'src> Lexer<'src> {
                     $(
                         else if l.is_str($symbol) {
                             // symbols are all ASCII, so it's safe to assume that number of grapheme clusters == number of bytes
-                            l.gr.advance_by($symbol.len());
+                            unsafe { l.gr.advance_by_ascii($symbol.len()); }
                             l.push(TokenKind::$kind);
                         }
                     )+

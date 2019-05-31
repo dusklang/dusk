@@ -4,13 +4,13 @@
 name = "meda"
 version = "0.1.0"
 dependencies = [
- "unicode-segmentation 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "unicode-segmentation 1.3.0 (git+https://github.com/unicode-rs/unicode-segmentation)",
 ]
 
 [[package]]
 name = "unicode-segmentation"
-version = "1.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+version = "1.3.0"
+source = "git+https://github.com/unicode-rs/unicode-segmentation#23771de9c7c3d402e527811934e47623a4ebd8b7"
 
 [metadata]
-"checksum unicode-segmentation 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)" = "aa6024fc12ddfd1c6dbc14a80fa2324d4568849869b779f6bd37e5e4c03344d1"
+"checksum unicode-segmentation 1.3.0 (git+https://github.com/unicode-rs/unicode-segmentation)" = "<none>"
