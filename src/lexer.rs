@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use unicode_segmentation::GraphemeCursor;
+use string_interner::DefaultStringInterner;
 
 use crate::token::{TokenVec, TokenKind};
 use crate::error::Error;
 
 #[inline]
-pub fn lex<'src>(src: &'src str, lines: &'src mut Vec<usize>) -> (TokenVec, Vec<Error>) {
+pub fn lex<'src>(src: &'src str, lines: &'src mut Vec<usize>) -> (TokenVec, DefaultStringInterner, Vec<Error>) {
     Lexer::lex(src, lines)
 }
 
@@ -13,6 +14,7 @@ struct Lexer<'src> {
     gr: GraphemeState<'src>,
     tok_start_loc: usize,
     lines: &'src mut Vec<usize>,
+    interner: DefaultStringInterner,
     toks: TokenVec,
 }
 
@@ -149,7 +151,7 @@ impl<'src> Lexer<'src> {
         self.toks.push(kind, range);
     }
 
-    fn lex(src: &'src str, lines: &'src mut Vec<usize>) -> (TokenVec, Vec<Error>) {
+    fn lex(src: &'src str, lines: &'src mut Vec<usize>) -> (TokenVec, DefaultStringInterner, Vec<Error>) {
         let special_escape_characters = {
             let mut map = HashMap::new();
             map.insert("n", "\n");
@@ -163,6 +165,7 @@ impl<'src> Lexer<'src> {
             gr: GraphemeState::new(src),
             tok_start_loc: 0,
             lines,
+            interner: DefaultStringInterner::default(),
             toks: TokenVec::new(),
         };
 
@@ -412,7 +415,7 @@ impl<'src> Lexer<'src> {
                     "as" => As,
                     "struct" => Struct,
                     "do" => Do,
-                    _ => Ident(text),
+                    _ => Ident(l.interner.get_or_intern(text)),
                 };
                 l.push(kind);
             }
@@ -446,6 +449,6 @@ impl<'src> Lexer<'src> {
             }
         }
 
-        (l.toks, errs)
+        (l.toks, l.interner, errs)
     }
 }

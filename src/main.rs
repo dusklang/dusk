@@ -19,9 +19,9 @@ fn main() {
         String::from("HelloWorld.meda"), 
         contents
     );
-    let (toks, mut errs) = lexer::lex(&file.src, &mut file.lines);
+    let (toks, interner, mut errs) = lexer::lex(&file.src, &mut file.lines);
 
-    let (tir, other_errs) = parser::parse(toks);
+    let (tir, other_errs) = parser::parse(toks, interner);
     errs.extend(other_errs);
 
     errs.extend(type_checker::type_check(tir));

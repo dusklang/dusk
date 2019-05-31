@@ -1,4 +1,5 @@
 use std::ops::{Deref, DerefMut};
+use string_interner::{Sym, DefaultStringInterner};
 
 use crate::dep_vec::DepVec;
 use crate::source_info::SourceRange;
@@ -67,13 +68,13 @@ impl<T> DerefMut for Expr<T> {
 
 #[derive(Debug)]
 pub struct Decl {
-    pub name: String,
+    pub name: Sym,
     pub param_tys: Vec<Type>,
     pub ret_ty: Type,
 }
 
 impl Decl {
-    fn new(name: String, param_tys: Vec<Type>, ret_ty: Type) -> Self {
+    fn new(name: Sym, param_tys: Vec<Type>, ret_ty: Type) -> Self {
         Decl { name, param_tys, ret_ty }
     }
 }
@@ -127,7 +128,7 @@ impl Program {
 
 #[derive(Clone)]
 struct LocalDecl {
-    name: String,
+    name: Sym,
     level: u32,
     decl: DeclId,
 }
@@ -140,7 +141,7 @@ struct LocalDeclList {
 
 struct GlobalDeclRef {
     id: DeclRefId,
-    name: String,
+    name: Sym,
     num_arguments: u32,
 }
 
@@ -177,10 +178,12 @@ pub struct Builder {
     global_decl_refs: Vec<GlobalDeclRef>,
     /// List of local declarations for each nested function
     local_decl_stack: Vec<LocalDeclList>,
+
+    pub interner: DefaultStringInterner,
 }
 
 impl Builder {
-    pub fn new() -> Self {
+    pub fn new(mut interner: DefaultStringInterner) -> Self {
         let mut global_decls: IdxVec<Decl, GlobalDeclId> = IdxVec::new();
         // Integers, floats and bool
         let values = &[
@@ -190,39 +193,48 @@ impl Builder {
         ];
         let numerics = &values[0..10];
         let integers = &numerics[0..8];
-        for op in &["*", "/", "%", "+", "-"] {
-            for ty in numerics {
-                global_decls.push(Decl::new(op.to_string(), vec![ty.clone(), ty.clone()], ty.clone()));
+        macro_rules! intern {
+            ($($op:expr),*) => {
+                {
+                    let ops: &[&str] = &[ $($op),*];
+                    ops.iter().map(|&op| interner.get_or_intern(op))
+                }
             }
         }
-        for op in &["<", "<=", ">", ">="] {
+        for op in intern!("*", "/", "%", "+", "-") {
             for ty in numerics {
-                global_decls.push(Decl::new(op.to_string(), vec![ty.clone(), ty.clone()], Type::Bool));
+                global_decls.push(Decl::new(op, vec![ty.clone(), ty.clone()], ty.clone()));
             }
         }
-        for op in &["==", "!="] {
+        for op in intern!("<", "<=", ">", ">=") {
+            for ty in numerics {
+                global_decls.push(Decl::new(op, vec![ty.clone(), ty.clone()], Type::Bool));
+            }
+        }
+        for op in intern!("==", "!=") {
             for ty in values {
-                global_decls.push(Decl::new(op.to_string(), vec![ty.clone(), ty.clone()], Type::Bool));
+                global_decls.push(Decl::new(op, vec![ty.clone(), ty.clone()], Type::Bool));
             }
         }
-        for op in &["&", "|"] {
+        for op in intern!("&", "|") {
             for ty in integers {
-                global_decls.push(Decl::new(op.to_string(), vec![ty.clone(), ty.clone()], ty.clone()));
+                global_decls.push(Decl::new(op, vec![ty.clone(), ty.clone()], ty.clone()));
             }
         }
-        for op in &["&=", "|="] {
+        for op in intern!("&=", "|=") {
             for ty in integers {
-                global_decls.push(Decl::new(op.to_string(), vec![ty.clone(), ty.clone()], Type::Void));
+                global_decls.push(Decl::new(op, vec![ty.clone(), ty.clone()], Type::Void));
             }
         }
-        for op in &["&&", "||"] {
-            global_decls.push(Decl::new(op.to_string(), vec![Type::Bool, Type::Bool], Type::Bool));
+        for op in intern!("&&", "||") {
+            global_decls.push(Decl::new(op, vec![Type::Bool, Type::Bool], Type::Bool));
         }
+        let eq = interner.get_or_intern("=");
         for ty in values {
-            global_decls.push(Decl::new("=".to_string(), vec![ty.clone(), ty.clone()], Type::Void));
+            global_decls.push(Decl::new(eq, vec![ty.clone(), ty.clone()], Type::Void));
         }
-        global_decls.push(Decl::new("pi".to_string(), Vec::new(), Type::f64()));
-        global_decls.push(Decl::new("abs".to_string(), vec![Type::f32()], Type::f64()));
+        global_decls.push(Decl::new(interner.get_or_intern("pi"), Vec::new(), Type::f64()));
+        global_decls.push(Decl::new(interner.get_or_intern("abs"), vec![Type::f32()], Type::f64()));
 
         // Create the void expression
         let mut levels = IdxVec::new();
@@ -246,6 +258,8 @@ impl Builder {
             overloads: IdxVec::new(),
             global_decl_refs: Vec::new(),
             local_decl_stack: vec![LocalDeclList::default()],
+
+            interner,
         }
     }
 
@@ -271,7 +285,7 @@ impl Builder {
     pub fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
         let decl_ref_id = self.overloads.push(Vec::new());
-        self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name: op.symbol().to_string(), num_arguments: 2 });
+        self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name: self.interner.get_or_intern(op.symbol()), num_arguments: 2 });
         let level = self.decl_refs.insert(
             &[self.levels[lhs], self.levels[rhs]],
             Expr { id, data: DeclRef { args: vec![lhs, rhs], decl_ref_id } },
@@ -282,9 +296,9 @@ impl Builder {
         id
     }
 
-    pub fn stored_decl(&mut self, name: String, root_expr: ExprId, range: SourceRange) -> ExprId {
+    pub fn stored_decl(&mut self, name: Sym, root_expr: ExprId, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
-        let decl_id = self.local_decls.push(Decl { name: name.clone(), param_tys: Vec::new(), ret_ty: Type::Error });
+        let decl_id = self.local_decls.push(Decl { name: name, param_tys: Vec::new(), ret_ty: Type::Error });
         let decl_id = DeclId::Local(decl_id);
         let level = self.assigned_decls.insert(&[self.levels[root_expr]], AssignedDecl { root_expr, decl_id });
         self.source_ranges.push(range);
@@ -327,20 +341,20 @@ impl Builder {
         stack.decls.truncate(scope);
     }
 
-    pub fn begin_computed_decl(&mut self, name: String, param_names: Vec<String>, param_tys: Vec<Type>, ret_ty: Type, proto_range: SourceRange) {
+    pub fn begin_computed_decl(&mut self, name: Sym, param_names: Vec<Sym>, param_tys: Vec<Type>, ret_ty: Type, proto_range: SourceRange) {
         assert_eq!(param_names.len(), param_tys.len());
-        let decl_id = self.local_decls.push(Decl { name: name.clone(), param_tys: param_tys.clone(), ret_ty: ret_ty.clone() });
+        let decl_id = self.local_decls.push(Decl { name: name, param_tys: param_tys.clone(), ret_ty: ret_ty.clone() });
         let decl_id = DeclId::Local(decl_id);
-        let local_decl = LocalDecl { name: name.clone(), level: 0, decl: decl_id };
+        let local_decl = LocalDecl { name: name, level: 0, decl: decl_id };
         // Add decl to enclosing scope
         self.local_decl_stack.last_mut().unwrap().decls.push(local_decl.clone());
         let mut decl_list = LocalDeclList::default();
         // Add decl to its own scope to enable recursion
         decl_list.decls.push(local_decl);
         // Add parameters to scope
-        for (name, ty) in param_names.iter().zip(&param_tys) {
-            let id = self.local_decls.push(Decl { name: name.clone(), param_tys: Vec::new(), ret_ty: ty.clone() });
-            decl_list.decls.push(LocalDecl { name: name.clone(), level: 0, decl: DeclId::Local(id) });
+        for (&name, ty) in param_names.iter().zip(&param_tys) {
+            let id = self.local_decls.push(Decl { name, param_tys: Vec::new(), ret_ty: ty.clone() });
+            decl_list.decls.push(LocalDecl { name, level: 0, decl: DeclId::Local(id) });
         }
         self.local_decl_stack.push(decl_list);
     }
@@ -349,12 +363,12 @@ impl Builder {
         self.local_decl_stack.pop().unwrap();
     }
 
-    pub fn decl_ref(&mut self, name: String, arguments: Vec<ExprId>, range: SourceRange) -> ExprId {
+    pub fn decl_ref(&mut self, name: Sym, arguments: Vec<ExprId>, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
 
         let mut decl: Option<(u32, DeclId)> = None;
-        for &LocalDecl { name: ref other_name, level: other_level, decl: other_decl } in self.local_decl_stack.last().unwrap().decls.iter().rev() {
-            if &name == other_name {
+        for &LocalDecl { name: other_name, level: other_level, decl: other_decl } in self.local_decl_stack.last().unwrap().decls.iter().rev() {
+            if name == other_name {
                 decl = Some((other_level, other_decl));
                 break;
             }

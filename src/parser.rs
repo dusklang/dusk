@@ -1,3 +1,5 @@
+use string_interner::{DefaultStringInterner, Sym};
+
 use crate::token::{TokenVec, TokenKind, Token};
 use crate::tir::{Program, Builder, ExprId, BinOp};
 use crate::ty::Type;
@@ -5,8 +7,8 @@ use crate::error::Error;
 use crate::source_info::{self, SourceRange};
 
 #[inline]
-pub fn parse(toks: TokenVec) -> (Program, Vec<Error>) {
-    Parser::parse(toks)
+pub fn parse(toks: TokenVec, interner: DefaultStringInterner) -> (Program, Vec<Error>) {
+    Parser::parse(toks, interner)
 }
 
 struct Parser {
@@ -17,10 +19,10 @@ struct Parser {
 }
 
 impl Parser {
-    fn parse(toks: TokenVec) -> (Program, Vec<Error>) {
+    fn parse(toks: TokenVec, interner: DefaultStringInterner) -> (Program, Vec<Error>) {
         let mut p = Parser {
             toks,
-            builder: Builder::new(),
+            builder: Builder::new(interner),
             cur: 0,
             errs: Vec::new(),
         };
@@ -215,7 +217,7 @@ impl Parser {
         }
     }
 
-    fn parse_decl(&mut self, name: String) {
+    fn parse_decl(&mut self, name: Sym) {
         let name_range = self.cur().range.clone();
         // Skip to colon, get range.
         let colon_range = self.next().range.clone();
@@ -327,9 +329,10 @@ impl Parser {
     }
 
     fn parse_type(&mut self) -> (Type, SourceRange) {
+        let i = &self.builder.interner;
         let val = (
             match self.cur().kind {
-                TokenKind::Ident(ident) => match &**ident {
+                &TokenKind::Ident(ident) => match i.resolve(ident).unwrap() {
                     "i8" => Type::i8(),
                     "i16" => Type::i16(),
                     "i32" => Type::i32(),

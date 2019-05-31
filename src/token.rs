@@ -1,9 +1,9 @@
 use crate::source_info::SourceRange;
+use string_interner::Sym;
 
 #[derive(Debug, PartialEq)]
 pub enum TokenKind {
-    // TODO: Interning!
-    Ident(String),
+    Ident(Sym),
 
     IntLit(u64),
     DecLit(f64),
