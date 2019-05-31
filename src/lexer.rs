@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use unicode_segmentation::UnicodeSegmentation;
+use unicode_segmentation::{UnicodeSegmentation, GraphemeCursor};
 
 use crate::token::{TokenVec, TokenKind};
 use crate::error::Error;
@@ -10,69 +10,113 @@ pub fn lex<'src>(src: &'src str, lines: &'src mut Vec<usize>) -> (TokenVec, Vec<
 }
 
 struct Lexer<'src> {
-    src: &'src str,
-    gr: Vec<(usize, &'src str)>,
-    pos: usize,
+    gr: GraphemeState<'src>,
     tok_start_loc: usize,
     lines: &'src mut Vec<usize>,
     toks: TokenVec,
 }
 
-impl<'src> Lexer<'src> {
+#[derive(Clone)]
+struct GraphemeState<'src> {
+    src: &'src str,
+    /// Start of current grapheme
+    start: usize,
+    /// End of current grapheme
+    end: GraphemeCursor,
+}
+
+impl<'src> GraphemeState<'src> {
+    fn new(src: &'src str) -> Self {
+        let mut new = GraphemeState {
+            src,
+            start: 0,
+            end:   GraphemeCursor::new(0, src.len(), true),
+        };
+        new.end.next_boundary(src, 0).unwrap();
+
+        new
+    }
+
     fn cur(&self) -> &str {
-        self.gr[self.pos].1
+        &self.src[self.start..self.end.cur_cursor()]
     }
 
     fn cur_loc(&self) -> usize {
-        self.gr[self.pos].0
+        self.start
     }
 
     fn has_chars(&self) -> bool {
-        self.pos < self.gr.len()
+        self.start != self.end.cur_cursor()
     }
 
+    fn set_pos(&mut self, pos: usize) {
+        self.start = pos;
+        self.end.set_cursor(pos);
+        self.end.next_boundary(self.src, 0).unwrap();
+    }
+
+    fn advance_by(&mut self, n: usize) {
+        let mut prev = self.start;
+        for _ in 0..n {
+            prev = self.end.cur_cursor();
+            self.end.next_boundary(self.src, 0).unwrap();
+        }
+        self.start = prev;
+    }
+
+    fn advance(&mut self) {
+        self.advance_by(1);
+    }
+}
+
+impl<'src> Lexer<'src> {
     fn is(&self, character: char) -> bool {
-        if self.has_chars() {
-            self.cur() == character.encode_utf8(&mut [0; 4])
+        if self.gr.has_chars() {
+            self.gr.cur() == character.encode_utf8(&mut [0; 4])
         } else {
             false
         }
     }
 
+    // TODO: this method only requires a mutable ref to self because it uses the unicode helper methods above
+    //       I should instead factor them out into a separate struct so I can reuse them here
     #[inline(never)]
-    fn is_str(&self, slice: &str) -> bool {
-        debug_assert!(slice.is_ascii());
-        if self.has_chars() {
+    fn is_str(&mut self, slice: &str) -> bool {
+        debug_assert!(slice.is_ascii() && !slice.is_empty());
+        if self.gr.has_chars() {
+            let mut cursor = self.gr.clone();
             let mut slice = slice.bytes();
-            let mut src = self.gr[self.pos..].iter();
-            loop {
-                match (slice.next(), src.next()) {
-                    (Some(c1), Some((_, c2))) => {
-                        // Safe if slice is ASCII, as is asserted above
-                        if unsafe { std::str::from_utf8_unchecked(&[c1]) } != *c2 {
-                            return false;
-                        }
-                    },
-                    (Some(_), None) => return false,
-                    (None, Some(_)) | (None, None) => return true
+            let mut equal = cursor.has_chars();
+            while cursor.has_chars() {
+                if let Some(c1) = slice.next() {
+                    let c2 = cursor.cur();
+                    // Safe if slice is ASCII, as is asserted above
+                    if unsafe { std::str::from_utf8_unchecked(&[c1]) } != c2 {
+                        equal = false;
+                        break;
+                    }
+                } else {
+                    break;
                 }
+                cursor.advance();
             }
+            equal
         } else {
             false
         }
     }
     fn is_letter(&self) -> bool {
-        let mut chars = self.cur().chars();
+        let mut chars = self.gr.cur().chars();
         if let Some(character) = chars.next() {
             chars.next().is_none() && character.is_alphabetic()
         } else {
             false
         }
     }
-    fn is_newline(&self) -> bool { self.is('\n') || self.is('\r') || self.is_str("\r\n") }
+    fn is_newline(&mut self) -> bool { self.is('\n') || self.is('\r') || self.is_str("\r\n") }
     fn is_whitespace(&self) -> bool { self.is(' ') || self.is('\t') }
     fn is_num(&self) -> bool {
-        let mut chars = self.cur().chars();
+        let mut chars = self.gr.cur().chars();
         if let Some(character) = chars.next() {
             chars.next().is_none() && character.is_numeric()
         } else {
@@ -83,8 +127,8 @@ impl<'src> Lexer<'src> {
     /// Pushes a new token with given kind and source range of `tok_start_loc`..`cur_loc()`
     /// to token tree, then sets `tok_start_loc` to `cur_loc()`.
     fn push(&mut self, kind: TokenKind) {
-        let range = self.tok_start_loc..self.cur_loc();
-        self.tok_start_loc = self.cur_loc();
+        let range = self.tok_start_loc..self.gr.cur_loc();
+        self.tok_start_loc = self.gr.cur_loc();
         self.toks.push(kind, range);
     }
 
@@ -99,29 +143,27 @@ impl<'src> Lexer<'src> {
         };
 
         let mut l = Lexer {
-            src,
-            gr: UnicodeSegmentation::grapheme_indices(src, true).collect(),
-            pos: 0,
+            gr: GraphemeState::new(src),
             tok_start_loc: 0,
             lines,
             toks: TokenVec::new(),
         };
-        
+
         let mut errs = Vec::new();
 
         // Find line breaks.
-        while l.has_chars() {
+        while l.gr.has_chars() {
             if l.is('\n') {
-                l.lines.push(l.cur_loc() + 1);
+                l.lines.push(l.gr.cur_loc() + 1);
             } else if l.is_str("\r\n") {
-                l.pos += 1;
-                l.lines.push(l.cur_loc() + 1);
+                l.gr.advance();
+                l.lines.push(l.gr.cur_loc() + 1);
             } else if l.is('\r') {
-                l.lines.push(l.cur_loc() + 1);
+                l.lines.push(l.gr.cur_loc() + 1);
             }
-            l.pos += 1;
+            l.gr.advance();
         }
-        l.pos = 0;
+        l.gr.set_pos(0);
 
         // TODO: This loop would likely be an excellent candidate for conversion to a finite
         // state machine. However, implementing it in the obvious Rusty way (a state variable and a
@@ -132,83 +174,83 @@ impl<'src> Lexer<'src> {
         // checks.
         loop {
             // EOF.
-            if l.pos == l.gr.len() {
+            if !l.gr.has_chars() {
                 l.push(TokenKind::Eof);
                 break;
             }
 
             // Newlines.
             let mut found_tok = false;
-            while l.has_chars() && l.is_newline() { 
+            while l.gr.has_chars() && l.is_newline() { 
                 found_tok = true;
-                l.pos += 1; 
+                l.gr.advance(); 
             }
             if found_tok { l.push(TokenKind::Newline); }
 
             // Whitespace.
             found_tok = false;
-            while l.has_chars() && l.is_whitespace() {
+            while l.gr.has_chars() && l.is_whitespace() {
                 found_tok = true;
-                l.pos += 1;
+                l.gr.advance();
             }
             if found_tok { l.push(TokenKind::Whitespace); }
 
             // Single-line comments.
             if l.is_str("//") {
-                l.pos += 2;
-                while l.has_chars() && !l.is_newline() {
-                    l.pos += 1;
+                l.gr.advance_by(2);
+                while l.gr.has_chars() && !l.is_newline() {
+                    l.gr.advance();
                 }
                 l.push(TokenKind::SingleLineComment);
             }
 
             // Multi-line comments.
             if l.is_str("/*") {
-                let mut comment_begin = l.cur_loc();
+                let mut comment_begin = l.gr.cur_loc();
                 let mut levels = 1;
-                l.pos += 2;
+                l.gr.advance_by(2);
                 let mut prev_ending_delimiter = None;
-                while l.has_chars() {
+                while l.gr.has_chars() {
                     if l.is_str("/*") {
                         levels += 1;
-                        comment_begin = l.cur_loc();
-                        l.pos += 1;
+                        comment_begin = l.gr.cur_loc();
+                        l.gr.advance();
                     } else if l.is_str("*/") {
-                        prev_ending_delimiter = Some(l.cur_loc());
+                        prev_ending_delimiter = Some(l.gr.cur_loc());
                         levels -= 1;
-                        l.pos += 1;
+                        l.gr.advance();
                         assert!(levels >= 0);
                         if levels == 0 {
-                            l.pos += 1;
+                            l.gr.advance();
                             break;
                         }
                     }
-                    l.pos += 1;
+                    l.gr.advance();
                 }
                 if levels > 0 {
                     let mut err = Error::new(
                         "unterminated '/*' comment"
                     ).adding_primary_range(
-                        comment_begin..l.cur_loc(),
+                        comment_begin..l.gr.cur_loc(),
                         "previous '/*' delimiter here"
                     );
                     if let Some(prev_ending_delimiter) = prev_ending_delimiter {
                         err.add_primary_range(prev_ending_delimiter..(prev_ending_delimiter + 2), "previous '*/' delimiter here");
                         // Reset the position to the position right after the previous ending delimiter so we can keep lexing.
                         // This might be a terrible idea, we'll just have to wait and see.
-                        l.pos = prev_ending_delimiter + 2;
+                        l.gr.set_pos(prev_ending_delimiter + 2);
                     }
                     errs.push(err);
                 }
                 l.push(TokenKind::MultiLineComment);
             }
             if l.is_str("*/") {
-                l.pos += 2;
+                l.gr.advance_by(2);
                 errs.push(
                     Error::new(
                         "unexpected '*/' delimiter"
                     ).adding_primary_range(
-                        l.tok_start_loc..l.cur_loc(),
+                        l.tok_start_loc..l.gr.cur_loc(),
                         "no previous '/*' to match"
                     )
                 );
@@ -220,7 +262,7 @@ impl<'src> Lexer<'src> {
                     $(
                         else if l.is_str($symbol) {
                             // symbols are all ASCII, so it's safe to assume that number of grapheme clusters == number of bytes
-                            l.pos += $symbol.len();
+                            l.gr.advance_by($symbol.len());
                             l.push(TokenKind::$kind);
                         }
                     )+
@@ -263,45 +305,45 @@ impl<'src> Lexer<'src> {
 
             // String and character literals.
             if l.is('"') {
-                l.pos += 1;
+                l.gr.advance();
                 let mut in_escape_mode = false;
                 let mut lit = String::new();
                 let mut terminated = false;
-                while l.has_chars() && !l.is_newline() {
+                while l.gr.has_chars() && !l.is_newline() {
                     let char_to_insert = if in_escape_mode {
                         in_escape_mode = false;
-                        if let Some(character) = special_escape_characters.get(l.cur()) {
+                        if let Some(character) = special_escape_characters.get(l.gr.cur()) {
                             character
                         } else {
                             errs.push(
                                 Error::new(
-                                    format!("invalid escape character '{}'", l.cur())
+                                    format!("invalid escape character '{}'", l.gr.cur())
                                 ).adding_primary_range(
-                                    l.pos .. (l.pos + 1), 
+                                    l.gr.cur_loc()..(l.gr.cur_loc() + 1), 
                                     "escaped here"
                                 )
                             );
-                            l.cur()
+                            l.gr.cur()
                         }
                     } else {
-                        // This is same expression that l.cur() returns, but calling that method makes
+                        // This is same expression that l.gr.cur() returns, but calling that method makes
                         // the borrow checker complain. :(
-                        l.gr[l.pos].1
+                        l.gr.cur()
                     };
 
                     match char_to_insert {
                         "\\" => {
-                            l.pos += 1;
+                            l.gr.advance();
                             in_escape_mode = true;
                         },
                         "\"" => {
-                            l.pos += 1;
+                            l.gr.advance();
                             terminated = true;
                             break;
                         },
                         char_to_insert => {
                             lit += char_to_insert;
-                            l.pos += 1;
+                            l.gr.advance();
                         }
                     }
                 }
@@ -328,12 +370,12 @@ impl<'src> Lexer<'src> {
             }
             // Identifiers and keywords.
             let mut text = String::new();
-            if l.has_chars() && (l.is_letter() || l.is('_')) {
+            if l.gr.has_chars() && (l.is_letter() || l.is('_')) {
                 loop {
-                    text += l.cur();
-                    l.pos += 1;
+                    text += l.gr.cur();
+                    l.gr.advance();
 
-                    if !l.has_chars() || (!l.is_letter() && !l.is('_') && !l.is_num()) {
+                    if !l.gr.has_chars() || (!l.is_letter() && !l.is('_') && !l.is_num()) {
                         break;
                     }
                 }
@@ -355,7 +397,7 @@ impl<'src> Lexer<'src> {
                 l.push(kind);
             }
             // Integer and decimal literals.
-            if l.has_chars() && l.is_num() {
+            if l.gr.has_chars() && l.is_num() {
                 let mut has_dot = false;
                 loop {
                     // TODO: When the char after the '.' is not a number,
@@ -369,13 +411,13 @@ impl<'src> Lexer<'src> {
                             has_dot = true;
                         }
                     }
-                    if !l.has_chars() || (!l.is_num() && !l.is('.')) {
+                    if !l.gr.has_chars() || (!l.is_num() && !l.is('.')) {
                         break;
                     }
-                    l.pos += 1;
+                    l.gr.advance();
                 }
 
-                let lit = &l.src[l.tok_start_loc..l.cur_loc()];
+                let lit = &l.gr.src[l.tok_start_loc..l.gr.cur_loc()];
                 if has_dot {
                     l.push(TokenKind::DecLit(lit.parse().unwrap()));
                 } else {
