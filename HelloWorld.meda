@@ -1,4 +1,4 @@
-fn do_something_really_cool: f32 {
+fn do_something_really_cool {
     hello := 2
     hello := 2 + 2
     hello := 2.5
@@ -7,7 +7,7 @@ fn do_something_really_cool: f32 {
     hello := 2.5 + 2 + 2
     hello := (2 + 2) * (2.7 + 2) * (2.2 + 2) + 2 * (2 + 2) * (2.7 + 2) * (2.2 + 2) + 2
     hello := hello + 25 + 333
-    if hello > 2 {
+    hello := if hello > 2 {
         2
     } else {
         2.5

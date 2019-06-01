@@ -320,11 +320,12 @@ impl Parser {
         };
         assert_eq!(self.cur().kind, &TokenKind::OpenCurly);
         self.builder.begin_computed_decl(name, param_names, param_tys, ty.clone(), proto_range);
-        if let Some(terminal_expr) = self.parse_scope() {
-            self.builder.ret(terminal_expr, ty.clone(), 0..0);
-        } else {
+
+        let terminal_expr = self.parse_scope().unwrap_or_else(|| {
             assert_eq!(ty, Type::Void, "no expression to return in non-void computed decl");
-        }
+            self.builder.void_expr()
+        });
+        self.builder.ret(terminal_expr, ty.clone(), 0..0);
         self.builder.end_computed_decl();
     }
 
