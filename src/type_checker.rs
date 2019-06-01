@@ -21,6 +21,7 @@ struct ConstraintList {
     literal: Option<LiteralType>,
     one_of: Vec<Type>,
     preferred_type: Option<Type>,
+    never: bool,
 }
 
 enum UnificationError<'a> {
