@@ -33,6 +33,9 @@ enum UnificationError<'a> {
 
 impl ConstraintList {
     fn can_unify_to(&self, ty: &Type) -> Result<(), UnificationError> {
+        // Never is the "bottom type", so it unifies to anything.
+        if self.never { return Ok(()); }
+
         use UnificationError::*;
         match &self.literal {
             Some(LiteralType::Dec) if ty.expressible_by_dec_lit() => Ok(()),
@@ -48,6 +51,8 @@ impl ConstraintList {
 
     fn intersect_with(&self, other: &ConstraintList) -> ConstraintList {
         let mut constraints = ConstraintList::default();
+        constraints.never = self.never && other.never;
+
         fn filtered_tys(tys: &[Type], mut f: impl FnMut(&Type) -> bool) -> Vec<Type> {
             tys.iter().filter_map(|ty| 
                     if f(ty) { 
@@ -215,6 +220,12 @@ pub fn type_check(prog: Program) -> Vec<Error> {
         for item in tc.prog.rets.get_level(level) {
             use UnificationError::*;
             use LiteralType::*;
+
+            let constraints = &mut tc.constraints[item.id];
+            constraints.never = true;
+            constraints.one_of = vec![Type::Never];
+            tc.types[item.id] = Type::Never;
+
             match tc.constraints[item.expr].can_unify_to(&item.ty) {
                 Ok(()) => {}
                 Err(Literal(Dec)) => panic!("expected return value of {:?}, found decimal literal", item.ty),
@@ -333,7 +344,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
         };
     }
 
-    // println!("Types: {:#?}", tc.types);
+    println!("Types: {:#?}", tc.types);
     // println!("Decl types: {:#?}", tc.prog.local_decls);
     //println!("Constraints: {:#?}", tc.constraints);
     errs
