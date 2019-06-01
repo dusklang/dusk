@@ -117,13 +117,6 @@ impl Program {
             DeclId::Local(id) => &self.local_decls[id],
         }
     }
-
-    pub fn decl_mut(&mut self, id: DeclId) -> &mut Decl { 
-        match id {
-            DeclId::Global(id) => &mut self.global_decls[id],
-            DeclId::Local(id) => &mut self.local_decls[id],
-        }
-    }
 }
 
 #[derive(Clone)]

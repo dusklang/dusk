@@ -1,6 +1,6 @@
 use crate::error::Error;
 use crate::tir::{Program, ExprId, Decl, DeclId, DeclRefId};
-use crate::ty::{Type, IntWidth, FloatWidth};
+use crate::ty::Type;
 use crate::index_vec::IdxVec;
 use crate::dep_vec;
 
@@ -105,13 +105,6 @@ impl ConstraintList {
         constraints
     }
 }
-
-const DEFAULT_INT_TY: Type = Type::Int {
-    width: IntWidth::W64,
-    is_signed: true,
-};
-
-const DEFAULT_FLOAT_TY: Type = Type::Float(FloatWidth::W64);
 
 struct TypeChecker {
     /// The input TIR program
