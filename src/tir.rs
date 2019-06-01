@@ -41,9 +41,9 @@ pub struct IntLit;
 #[derive(Debug)]
 pub struct DecLit;
 #[derive(Debug)]
-pub struct Stmt { pub root_expr: ExprId }
-#[derive(Debug)]
 pub struct Ret { pub expr: ExprId, pub ty: Type }
+#[derive(Debug)]
+pub struct Stmt { pub root_expr: ExprId }
 #[derive(Debug)]
 pub struct AssignedDecl { pub root_expr: ExprId, pub decl_id: DeclId }
 #[derive(Debug)]
@@ -89,10 +89,10 @@ pub struct Program {
     pub assigned_decls: DepVec<AssignedDecl>,
     /// All decl refs in the entire program
     pub decl_refs: DepVec<Expr<DeclRef>>,
+    /// All returns in the entire program
+    pub rets: DepVec<Expr<Ret>>,
     /// All statements in the entire program
     pub stmts: DepVec<Stmt>,
-    /// All returns in the entire program
-    pub rets: DepVec<Ret>,
     /// All if expressions in the entire program
     pub ifs: DepVec<Expr<If>>,
     // An expression to universally represent the void value
@@ -157,7 +157,7 @@ pub struct Builder {
     /// All statements in the entire program so far
     stmts: DepVec<Stmt>,
     /// All returns in the entire program so far
-    rets: DepVec<Ret>,
+    rets: DepVec<Expr<Ret>>,
     /// All if expressions in the entire program so far
     ifs: DepVec<Expr<If>>,
     // An expression to universally represent the void value
@@ -247,8 +247,8 @@ impl Builder {
             dec_lits: Vec::new(),
             assigned_decls: DepVec::new(),
             decl_refs: DepVec::new(),
-            stmts: DepVec::new(),
             rets: DepVec::new(),
+            stmts: DepVec::new(),
             ifs: DepVec::new(),
             void_expr,
             source_ranges,
@@ -308,8 +308,17 @@ impl Builder {
         id
     }
 
-    pub fn ret(&mut self, expr: ExprId, ty: Type) {
-        self.rets.insert(&[self.levels[expr]], Ret { expr, ty });
+    pub fn ret(&mut self, expr: ExprId, ty: Type, range: SourceRange) {
+        let id = ExprId::new(self.levels.len());
+        let level = self.rets.insert(
+            &[self.levels[expr]],
+            Expr {
+                id,
+                data: Ret { expr, ty },
+            },
+        );
+        self.levels.push(level);
+        self.source_ranges.push(range);
     }
 
     pub fn stmts(&mut self, root_exprs: &[ExprId]) {
