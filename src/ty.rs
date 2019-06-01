@@ -20,6 +20,7 @@ pub enum Type {
     Float(FloatWidth),
     Bool,
     Void,
+    Never,
 }
 
 impl Type {
@@ -85,6 +86,9 @@ impl fmt::Debug for Type {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
             Type::Error => write!(f, "<ERROR>"),
+            Type::Never => write!(f, "never"),
+            Type::Bool => write!(f, "bool"),
+            Type::Void => write!(f, "void"),
             Type::Int { width, is_signed } => write!(
                 f,
                 "{}{}", 
@@ -104,8 +108,6 @@ impl fmt::Debug for Type {
                     FloatWidth::W64 => 64,
                 }
             ),
-            Type::Bool => write!(f, "bool"),
-            Type::Void => write!(f, "void"),
         }
     }
 }
