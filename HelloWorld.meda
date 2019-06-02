@@ -1,3 +1,7 @@
+fn panic: never {
+    return
+}
+
 fn do_something_really_cool: i32 {
     hello := 2
     hello := 2 + 2
@@ -13,5 +17,5 @@ fn do_something_really_cool: i32 {
         2.5
     }
 
-    return 2
+    panic
 }

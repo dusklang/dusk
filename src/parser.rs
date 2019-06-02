@@ -350,6 +350,9 @@ impl Parser {
                     "u64" => Type::u64(),
                     "f32" => Type::f32(),
                     "f64" => Type::f64(),
+                    "never" => Type::Never,
+                    "bool" => Type::Bool,
+                    "void" => Type::Void,
                     _ => {
                         self.errs.push(
                             Error::new("Unrecognized type")

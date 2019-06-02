@@ -52,6 +52,10 @@ impl ConstraintList {
     fn intersect_with(&self, other: &ConstraintList) -> ConstraintList {
         let mut constraints = ConstraintList::default();
         constraints.never = self.never && other.never;
+        if constraints.never {
+            constraints.one_of = vec![Type::Never];
+            return constraints;
+        }
 
         fn filtered_tys(tys: &[Type], mut f: impl FnMut(&Type) -> bool) -> Vec<Type> {
             tys.iter().filter_map(|ty| 
