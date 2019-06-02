@@ -1,5 +1,5 @@
 fn do_something_really_cool(n: u32): u32 {
-    if 2 > n {
+    if 2 > 5 {
         23 + n
     } else if n > 256 {
         panic

@@ -68,9 +68,7 @@ impl ConstraintList {
                 )
                 .collect()
         }
-        dbg!(&self.preferred_type);
-        dbg!(&other.preferred_type);
-        match (dbg!(self.literal), dbg!(&self.one_of), dbg!(other.literal), dbg!(&other.one_of)) {
+        match (self.literal, &self.one_of, other.literal, &other.one_of) {
             (None, lhs, None, rhs) => {
                 if lhs == &[Type::Never] {
                     constraints.one_of = rhs.clone();
@@ -126,7 +124,6 @@ impl ConstraintList {
                 }
             }
         }
-        dbg!(&constraints.preferred_type);
 
         constraints
     }
@@ -292,12 +289,23 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                     DeclId::Local(id) => &local_decls[id]
                 }
             };
-            tc.prog.overloads[item.decl_ref_id].retain(|&overload| {
+            let overloads = &mut tc.prog.overloads[item.decl_ref_id];
+            overloads.retain(|&overload| {
                 let ret_ty = &get_decl(overload).ret_ty;
                 ret_ty == &ty || ret_ty == &Type::Never
             });
-            
-            let overload = if tc.prog.overloads[item.decl_ref_id].len() != 1 {
+            let pref = tc.preferred_overloads[item.decl_ref_id];
+
+            let overload = if !overloads.is_empty() {
+                let overload = pref
+                    .filter(|overload| overloads.contains(overload))
+                    .unwrap_or_else(|| overloads[0]);
+                let decl = get_decl(overload);
+                for (i, &arg) in item.args.iter().enumerate() {
+                    tc.constraints[arg].set_to(decl.param_tys[i].clone());
+                }
+                Some(overload)
+            } else {
                 errs.push(
                     Error::new("ambiguous overload for declaration")
                         .adding_primary_range(tc.prog.source_ranges[item.id].clone(), "expression here")
@@ -306,12 +314,6 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                     tc.constraints[arg].one_of = vec![Type::Error];
                 }
                 None
-            } else {
-                let overload = tc.prog.overloads[item.decl_ref_id][0];
-                for (i, &arg) in item.args.iter().enumerate() {
-                    tc.constraints[arg].set_to(get_decl(overload).param_tys[i].clone());
-                }
-                Some(overload)
             };
             tc.selected_overloads[item.decl_ref_id] = overload;
         }
@@ -327,7 +329,8 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             }
         }
         for item in tc.prog.ifs.get_level(level) {
-            tc.constraints[item.condition].one_of.retain(|ty| ty == &Type::Bool);
+            // We already verified that the condition unifies to bool in pass 1
+            tc.constraints[item.condition].set_to(Type::Bool);
             let ty = if tc.constraints[item.id].one_of.len() != 1 {
                 errs.push(
                     Error::new("ambiguous type for if expression")

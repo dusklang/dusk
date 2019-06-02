@@ -11,7 +11,7 @@ newtype_index!(DeclRefId);
 newtype_index!(GlobalDeclId);
 newtype_index!(LocalDeclId);
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum DeclId {
     Global(GlobalDeclId),
     Local(LocalDeclId),
