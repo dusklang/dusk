@@ -238,6 +238,7 @@ impl Builder {
         }
         global_decls.push(Decl::new(interner.get_or_intern("pi"), Vec::new(), Type::f64()));
         global_decls.push(Decl::new(interner.get_or_intern("abs"), vec![Type::f32()], Type::f64()));
+        global_decls.push(Decl::new(interner.get_or_intern("panic"), Vec::new(), Type::Never));
 
         // Create the void expression
         let mut levels = IdxVec::new();

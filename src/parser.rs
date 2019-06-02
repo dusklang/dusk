@@ -184,7 +184,7 @@ impl Parser {
     }
 
     fn parse_expr(&mut self) -> ExprId {
-        self.try_parse_expr().unwrap_or_else(|tok| panic!("UNHANDLED TERM {:#?}", tok))
+        self.try_parse_expr().unwrap_or_else(|tok| panic!("UNHANDLED TERM: {:#?}", tok))
     }
 
     fn parse_if(&mut self) -> ExprId {

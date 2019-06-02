@@ -21,7 +21,6 @@ struct ConstraintList {
     literal: Option<LiteralType>,
     one_of: Vec<Type>,
     preferred_type: Option<Type>,
-    never: bool,
 }
 
 enum UnificationError<'a> {
@@ -34,7 +33,7 @@ enum UnificationError<'a> {
 impl ConstraintList {
     fn can_unify_to(&self, ty: &Type) -> Result<(), UnificationError> {
         // Never is the "bottom type", so it unifies to anything.
-        if self.never { return Ok(()); }
+        if self.one_of.contains(&Type::Never) { return Ok(()); }
 
         use UnificationError::*;
         match self.literal {
@@ -49,13 +48,15 @@ impl ConstraintList {
         }
     }
 
+    fn set_to(&mut self, ty: Type) {
+        // If we're never, we should stay never.
+        if self.one_of != &[Type::Never] {
+            self.one_of = vec![ty];
+        }
+    }
+
     fn intersect_with(&self, other: &ConstraintList) -> ConstraintList {
         let mut constraints = ConstraintList::default();
-        constraints.never = self.never && other.never;
-        if constraints.never {
-            constraints.one_of = vec![Type::Never];
-            return constraints;
-        }
 
         fn filtered_tys(tys: &[Type], mut f: impl FnMut(&Type) -> bool) -> Vec<Type> {
             tys.iter().filter_map(|ty| 
@@ -67,21 +68,36 @@ impl ConstraintList {
                 )
                 .collect()
         }
-        match (&self.literal, &self.one_of, &other.literal, &other.one_of) {
-            (None, lhs, None, rhs) => for ty in lhs {
-                if rhs.contains(ty) {
-                    constraints.one_of.push(ty.clone());
+        dbg!(&self.preferred_type);
+        dbg!(&other.preferred_type);
+        match (dbg!(self.literal), dbg!(&self.one_of), dbg!(other.literal), dbg!(&other.one_of)) {
+            (None, lhs, None, rhs) => {
+                if lhs == &[Type::Never] {
+                    constraints.one_of = rhs.clone();
+                } else if rhs == &[Type::Never] {
+                    constraints.one_of = lhs.clone();
+                } else {
+                    for ty in lhs {
+                        if rhs.contains(ty) {
+                            constraints.one_of.push(ty.clone());
+                        }
+                    }
                 }
             },
-            (Some(lhs_lit), _, None, rhs) | (None, rhs, Some(lhs_lit), _) => {
-                constraints.literal = None;
-                constraints.one_of = filtered_tys(
-                    rhs,
-                    match lhs_lit {
-                        LiteralType::Dec => Type::expressible_by_dec_lit,
-                        LiteralType::Int => Type::expressible_by_int_lit,
-                    },
-                );
+            (Some(lhs_lit), lhs, None, rhs) | (None, rhs, Some(lhs_lit), lhs) => {
+                if rhs == &[Type::Never] {
+                    constraints.literal = Some(lhs_lit);
+                    constraints.one_of = lhs.clone();
+                } else {
+                    constraints.literal = None;
+                    constraints.one_of = filtered_tys(
+                        rhs,
+                        match lhs_lit {
+                            LiteralType::Dec => Type::expressible_by_dec_lit,
+                            LiteralType::Int => Type::expressible_by_int_lit,
+                        },
+                    );
+                }
             }
             (Some(LiteralType::Dec), _, Some(rhs), _) => match rhs {
                 LiteralType::Int | LiteralType::Dec => constraints.literal = Some(LiteralType::Dec),
@@ -110,6 +126,7 @@ impl ConstraintList {
                 }
             }
         }
+        dbg!(&constraints.preferred_type);
 
         constraints
     }
@@ -226,7 +243,6 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             use LiteralType::*;
 
             let constraints = &mut tc.constraints[item.id];
-            constraints.never = true;
             constraints.one_of = vec![Type::Never];
             tc.types[item.id] = Type::Never;
 
@@ -252,7 +268,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
     // Pass 2: propagate info up from roots to leaves
     for level in (0..levels).rev() {
         for item in tc.prog.assigned_decls.get_level(level) {
-            tc.constraints[item.root_expr].one_of = vec![tc.prog.decl(item.decl_id).ret_ty.clone()];
+            tc.constraints[item.root_expr].set_to(tc.prog.decl(item.decl_id).ret_ty.clone());
         }
         for item in tc.prog.decl_refs.get_level(level) {
             let constraints = &tc.constraints[item.id];
@@ -276,11 +292,14 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                     DeclId::Local(id) => &local_decls[id]
                 }
             };
-            tc.prog.overloads[item.decl_ref_id].retain(|&overload| get_decl(overload).ret_ty == ty);
+            tc.prog.overloads[item.decl_ref_id].retain(|&overload| {
+                let ret_ty = &get_decl(overload).ret_ty;
+                ret_ty == &ty || ret_ty == &Type::Never
+            });
             
             let overload = if tc.prog.overloads[item.decl_ref_id].len() != 1 {
                 errs.push(
-                    Error::new("ambiguous overload for binary operator")
+                    Error::new("ambiguous overload for declaration")
                         .adding_primary_range(tc.prog.source_ranges[item.id].clone(), "expression here")
                 );
                 for &arg in &item.args {
@@ -290,7 +309,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             } else {
                 let overload = tc.prog.overloads[item.decl_ref_id][0];
                 for (i, &arg) in item.args.iter().enumerate() {
-                    tc.constraints[arg].one_of = vec![get_decl(overload).param_tys[i].clone()];
+                    tc.constraints[arg].set_to(get_decl(overload).param_tys[i].clone());
                 }
                 Some(overload)
             };
@@ -301,11 +320,11 @@ pub fn type_check(prog: Program) -> Vec<Error> {
         }
         for item in tc.prog.rets.get_level(level) {
             let constraints = &mut tc.constraints[item.expr];
-            constraints.one_of = if constraints.can_unify_to(&item.ty).is_ok() {
-                vec![item.ty.clone()]
+            if constraints.can_unify_to(&item.ty).is_ok() {
+                constraints.set_to(item.ty.clone())
             } else {
-                Vec::new()
-            };
+                constraints.one_of = Vec::new();
+            }
         }
         for item in tc.prog.ifs.get_level(level) {
             tc.constraints[item.condition].one_of.retain(|ty| ty == &Type::Bool);
@@ -319,8 +338,8 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                 tc.constraints[item.id].one_of[0].clone()
             };
             tc.types[item.id] = ty.clone();
-            tc.constraints[item.then_expr].one_of = vec![ty.clone()];
-            tc.constraints[item.else_expr].one_of = vec![ty];
+            tc.constraints[item.then_expr].set_to(ty.clone());
+            tc.constraints[item.else_expr].set_to(ty);
         }
     }
     for item in &tc.prog.int_lits {
