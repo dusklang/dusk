@@ -4,7 +4,7 @@ use crate::ty::Type;
 use crate::index_vec::IdxVec;
 use crate::dep_vec;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum LiteralType { Int, Dec }
 
 impl LiteralType {
@@ -37,10 +37,10 @@ impl ConstraintList {
         if self.never { return Ok(()); }
 
         use UnificationError::*;
-        match &self.literal {
+        match self.literal {
             Some(LiteralType::Dec) if ty.expressible_by_dec_lit() => Ok(()),
             Some(LiteralType::Int) if ty.expressible_by_int_lit() => Ok(()),
-            Some(lit) => Err(Literal(lit.clone())),
+            Some(lit) => Err(Literal(lit)),
             None => if self.one_of.contains(ty) {
                 Ok(())
             } else {

@@ -99,8 +99,7 @@ impl Parser {
                 self.next();
                 Ok(lit)
             },
-            Ident(name) => {
-                let name = name.clone();
+            &Ident(name) => {
                 let name_range = self.cur().range.clone();
                 let mut args = Vec::new();
                 let mut end_range = name_range.clone();
@@ -208,10 +207,8 @@ impl Parser {
     /// Parses any node. Iff the node is an expression, returns its ExprId.
     fn parse_node(&mut self) -> Option<ExprId> {
         match self.cur().kind {
-            TokenKind::Ident(name) => {
+            &TokenKind::Ident(name) => {
                 if let TokenKind::Colon = self.peek_next().kind {
-                    // TODO: Intern strings so we don't have to copy here
-                    let name = name.clone();
                     self.parse_decl(name);
                     None
                 } else {
@@ -295,17 +292,17 @@ impl Parser {
     fn parse_comp_decl(&mut self) {
         assert_eq!(self.cur().kind, &TokenKind::Fn);
         let mut proto_range = self.cur().range.clone();
-        let name = match self.next().kind {
-            TokenKind::Ident(name) => name.clone(),
-            _ => panic!("expected identifier after 'fn'")
+        let name = if let &TokenKind::Ident(name) = self.next().kind {
+            name
+        } else {
+            panic!("expected identifier after 'fn'")
         };
         proto_range = source_info::concat(proto_range, self.cur().range.clone());
         let mut param_names = Vec::new();
         let mut param_tys = Vec::new();
         if let TokenKind::LeftParen = self.next().kind {
             self.next();
-            while let TokenKind::Ident(name) = self.cur().kind {
-                let name = name.clone();
+            while let &TokenKind::Ident(name) = self.cur().kind {
                 param_names.push(name);
                 assert_eq!(self.next().kind, &TokenKind::Colon);
                 self.next();
