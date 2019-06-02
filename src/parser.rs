@@ -73,7 +73,7 @@ impl Parser {
         )
     }
 
-    fn parse_term(&mut self) -> ExprId {
+    fn try_parse_term(&mut self) -> Result<ExprId, TokenKind> {
         use TokenKind::*;
         match self.cur().kind {
             LeftParen => {
@@ -87,17 +87,17 @@ impl Parser {
                     );
                 }
                 self.next();
-                expr
+                Ok(expr)
             },
             &IntLit(val) => {
                 let lit = self.builder.int_lit(val, self.cur().range.clone());
                 self.next();
-                lit
+                Ok(lit)
             },
             &DecLit(val) => {
                 let lit = self.builder.dec_lit(val, self.cur().range.clone());
                 self.next();
-                lit
+                Ok(lit)
             },
             Ident(name) => {
                 let name = name.clone();
@@ -129,40 +129,28 @@ impl Parser {
                         end_range,
                     )
                 );
-                decl_ref
+                Ok(decl_ref)
             },
             TokenKind::Do => {
                 self.next();
                 let terminal_expr = self.parse_scope().unwrap_or(self.builder.void_expr());
 
-                terminal_expr
+                Ok(terminal_expr)
             },
-            TokenKind::If => self.parse_if(),
-            x => panic!("UNHANDLED TERM {:#?}", &x)
+            TokenKind::If => Ok(self.parse_if()),
+            TokenKind::Return => {
+                self.next();
+                let ret_expr = self.try_parse_expr().unwrap_or_else(|_| self.builder.void_expr());
+                Ok(self.builder.ret(ret_expr, 0..0))
+            },
+            x => Err(x.clone())
         }
     }
 
-    fn parse_if(&mut self) -> ExprId {
-        assert_eq!(self.cur().kind, &TokenKind::If);
-        self.next();
-        let condition = self.parse_expr();
-        let then_expr = self.parse_scope().unwrap_or(self.builder.void_expr());
-        let else_expr = if let TokenKind::Else = self.cur().kind {
-            match self.next().kind {
-                TokenKind::If => self.parse_if(),
-                TokenKind::OpenCurly => self.parse_scope().unwrap_or(self.builder.void_expr()),
-                _ => panic!("Expected '{' or 'if' after 'else'"),
-            }
-        } else {
-            self.builder.void_expr()
-        };
-        self.builder.if_expr(condition, then_expr, else_expr, 0..0)
-    }
-
-    fn parse_expr(&mut self) -> ExprId {
+    fn try_parse_expr(&mut self) -> Result<ExprId, TokenKind> {
         let mut expr_stack = Vec::new();
         let mut op_stack: Vec<BinOp> = Vec::new();
-        expr_stack.push(self.parse_term());
+        expr_stack.push(self.try_parse_term()?);
 
         // It's kind of silly that this is a macro, but I'm not aware of any other
         // way to do it without upsetting the borrow checker?
@@ -189,11 +177,32 @@ impl Parser {
                 pop_stacks!();
             }
             op_stack.push(op);
-            expr_stack.push(self.parse_term());
+            expr_stack.push(self.try_parse_term()?);
         }
         while !op_stack.is_empty() { pop_stacks!(); }
 
-        expr_stack.pop().unwrap()
+        Ok(expr_stack.pop().unwrap())
+    }
+
+    fn parse_expr(&mut self) -> ExprId {
+        self.try_parse_expr().unwrap_or_else(|tok| panic!("UNHANDLED TERM {:#?}", tok))
+    }
+
+    fn parse_if(&mut self) -> ExprId {
+        assert_eq!(self.cur().kind, &TokenKind::If);
+        self.next();
+        let condition = self.parse_expr();
+        let then_expr = self.parse_scope().unwrap_or(self.builder.void_expr());
+        let else_expr = if let TokenKind::Else = self.cur().kind {
+            match self.next().kind {
+                TokenKind::If => self.parse_if(),
+                TokenKind::OpenCurly => self.parse_scope().unwrap_or(self.builder.void_expr()),
+                _ => panic!("Expected '{' or 'if' after 'else'"),
+            }
+        } else {
+            self.builder.void_expr()
+        };
+        self.builder.if_expr(condition, then_expr, else_expr, 0..0)
     }
 
     /// Parses any node. Iff the node is an expression, returns its ExprId.
@@ -325,7 +334,7 @@ impl Parser {
             assert_eq!(ty, Type::Void, "no expression to return in non-void computed decl");
             self.builder.void_expr()
         });
-        self.builder.ret(terminal_expr, ty.clone(), 0..0);
+        self.builder.ret(terminal_expr, 0..0);
         self.builder.end_computed_decl();
     }
 

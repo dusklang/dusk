@@ -126,10 +126,20 @@ struct LocalDecl {
     decl: DeclId,
 }
 
-#[derive(Default)]
-struct LocalDeclList {
+struct CompDeclState {
+    ret_ty: Type,
     decls: Vec<LocalDecl>,
     scope_stack: Vec<usize>,
+}
+
+impl CompDeclState {
+    fn new(ret_ty: Type) -> Self {
+        Self {
+            ret_ty,
+            decls: Vec::new(),
+            scope_stack: Vec::new(),
+        }
+    }
 }
 
 struct GlobalDeclRef {
@@ -169,8 +179,8 @@ pub struct Builder {
 
     /// The names and arities of the global declaration references so far
     global_decl_refs: Vec<GlobalDeclRef>,
-    /// List of local declarations for each nested function
-    local_decl_stack: Vec<LocalDeclList>,
+    /// State related to each nested computed decl
+    comp_decl_stack: Vec<CompDeclState>,
 
     pub interner: DefaultStringInterner,
 }
@@ -250,7 +260,7 @@ impl Builder {
             local_decls: IdxVec::new(),
             overloads: IdxVec::new(),
             global_decl_refs: Vec::new(),
-            local_decl_stack: vec![LocalDeclList::default()],
+            comp_decl_stack: vec![CompDeclState::new(Type::Void)],
 
             interner,
         }
@@ -296,13 +306,14 @@ impl Builder {
         let level = self.assigned_decls.insert(&[self.levels[root_expr]], AssignedDecl { root_expr, decl_id });
         self.source_ranges.push(range);
 
-        self.local_decl_stack.last_mut().unwrap().decls.push(LocalDecl { name, level, decl: decl_id });
+        self.comp_decl_stack.last_mut().unwrap().decls.push(LocalDecl { name, level, decl: decl_id });
 
         id
     }
 
-    pub fn ret(&mut self, expr: ExprId, ty: Type, range: SourceRange) {
+    pub fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
+        let ty = self.comp_decl_stack.last().unwrap().ret_ty.clone();
         let level = self.rets.insert(
             &[self.levels[expr]],
             Expr {
@@ -312,6 +323,8 @@ impl Builder {
         );
         self.levels.push(level);
         self.source_ranges.push(range);
+
+        id
     }
 
     pub fn stmts(&mut self, root_exprs: &[ExprId]) {
@@ -333,12 +346,12 @@ impl Builder {
     }
 
     pub fn begin_scope(&mut self) {
-        let stack = self.local_decl_stack.last_mut().unwrap();
+        let stack = self.comp_decl_stack.last_mut().unwrap();
         stack.scope_stack.push(stack.decls.len());
     }
 
     pub fn end_scope(&mut self) {
-        let stack = self.local_decl_stack.last_mut().unwrap();
+        let stack = self.comp_decl_stack.last_mut().unwrap();
         let scope = stack.scope_stack.pop().unwrap();
         stack.decls.truncate(scope);
     }
@@ -349,27 +362,27 @@ impl Builder {
         let decl_id = DeclId::Local(decl_id);
         let local_decl = LocalDecl { name: name, level: 0, decl: decl_id };
         // Add decl to enclosing scope
-        self.local_decl_stack.last_mut().unwrap().decls.push(local_decl.clone());
-        let mut decl_list = LocalDeclList::default();
+        self.comp_decl_stack.last_mut().unwrap().decls.push(local_decl.clone());
+        let mut decl_state = CompDeclState::new(ret_ty);
         // Add decl to its own scope to enable recursion
-        decl_list.decls.push(local_decl);
+        decl_state.decls.push(local_decl);
         // Add parameters to scope
         for (&name, ty) in param_names.iter().zip(&param_tys) {
             let id = self.local_decls.push(Decl { name, param_tys: Vec::new(), ret_ty: ty.clone() });
-            decl_list.decls.push(LocalDecl { name, level: 0, decl: DeclId::Local(id) });
+            decl_state.decls.push(LocalDecl { name, level: 0, decl: DeclId::Local(id) });
         }
-        self.local_decl_stack.push(decl_list);
+        self.comp_decl_stack.push(decl_state);
     }
 
     pub fn end_computed_decl(&mut self) {
-        self.local_decl_stack.pop().unwrap();
+        self.comp_decl_stack.pop().unwrap();
     }
 
     pub fn decl_ref(&mut self, name: Sym, arguments: Vec<ExprId>, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
 
         let mut decl: Option<(u32, DeclId)> = None;
-        for &LocalDecl { name: other_name, level: other_level, decl: other_decl } in self.local_decl_stack.last().unwrap().decls.iter().rev() {
+        for &LocalDecl { name: other_name, level: other_level, decl: other_decl } in self.comp_decl_stack.last().unwrap().decls.iter().rev() {
             if name == other_name {
                 decl = Some((other_level, other_decl));
                 break;

@@ -1,7 +1,7 @@
 use crate::source_info::SourceRange;
 use string_interner::Sym;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum TokenKind {
     Ident(Sym),
 
