@@ -158,7 +158,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
 
     // Extend arrays as needed so they all have the same number of levels.
     let levels = dep_vec::unify_sizes(&mut [
-        &mut tc.prog.assigned_decls, &mut tc.prog.decl_refs, &mut tc.prog.stmts, &mut tc.prog.rets, &mut tc.prog.ifs,
+        &mut tc.prog.assigned_decls, &mut tc.prog.decl_refs, &mut tc.prog.rets, &mut tc.prog.ifs,
     ]);
 
     // Assign the type of the void expression to be void.
@@ -230,11 +230,6 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                 }
             }
         }
-        for item in tc.prog.stmts.get_level(level) {
-            if let Err(_) = tc.constraints[item.root_expr].can_unify_to(&Type::Void) {
-                panic!("standalone expressions must return void");
-            }
-        }
         for item in tc.prog.rets.get_level(level) {
             use UnificationError::*;
             use LiteralType::*;
@@ -260,6 +255,13 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             }
             tc.constraints[item.id] = constraints;
         }
+    }
+    for item in &tc.prog.stmts {
+        let constraints = &mut tc.constraints[item.root_expr];
+        if let Err(_) = constraints.can_unify_to(&Type::Void) {
+            panic!("standalone expressions must return void");
+        }
+        constraints.set_to(Type::Void);
     }
 
     // Pass 2: propagate info up from roots to leaves
@@ -316,9 +318,6 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                 None
             };
             tc.selected_overloads[item.decl_ref_id] = overload;
-        }
-        for item in tc.prog.stmts.get_level(level) {
-            tc.constraints[item.root_expr].one_of.retain(|ty| ty == &Type::Void);
         }
         for item in tc.prog.rets.get_level(level) {
             let constraints = &mut tc.constraints[item.expr];

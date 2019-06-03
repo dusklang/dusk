@@ -85,14 +85,14 @@ pub struct Program {
     pub int_lits: Vec<Expr<IntLit>>,
     /// All decimal literals in the entire program
     pub dec_lits: Vec<Expr<DecLit>>,
+    /// All statements in the entire program
+    pub stmts: Vec<Stmt>,
     /// All assigned decls in the entire program
     pub assigned_decls: DepVec<AssignedDecl>,
     /// All decl refs in the entire program
     pub decl_refs: DepVec<Expr<DeclRef>>,
     /// All returns in the entire program
     pub rets: DepVec<Expr<Ret>>,
-    /// All statements in the entire program
-    pub stmts: DepVec<Stmt>,
     /// All if expressions in the entire program
     pub ifs: DepVec<Expr<If>>,
     // An expression to universally represent the void value
@@ -153,12 +153,12 @@ pub struct Builder {
     int_lits: Vec<Expr<IntLit>>,
     /// All decimal literals in the entire program so far
     dec_lits: Vec<Expr<DecLit>>,
+    /// All statements in the entire program so far
+    stmts: Vec<Stmt>,
     /// All assigned decls in the entire program so far
     assigned_decls: DepVec<AssignedDecl>,
     /// All decl refs in the entire program so far
     decl_refs: DepVec<Expr<DeclRef>>,
-    /// All statements in the entire program so far
-    stmts: DepVec<Stmt>,
     /// All returns in the entire program so far
     rets: DepVec<Expr<Ret>>,
     /// All if expressions in the entire program so far
@@ -249,10 +249,10 @@ impl Builder {
         Self {
             int_lits: Vec::new(),
             dec_lits: Vec::new(),
+            stmts: Vec::new(),
             assigned_decls: DepVec::new(),
             decl_refs: DepVec::new(),
             rets: DepVec::new(),
-            stmts: DepVec::new(),
             ifs: DepVec::new(),
             void_expr,
             source_ranges,
@@ -330,7 +330,7 @@ impl Builder {
 
     pub fn stmts(&mut self, root_exprs: &[ExprId]) {
         for &root_expr in root_exprs {
-            self.stmts.insert(&[self.levels[root_expr]], Stmt { root_expr });
+            self.stmts.push(Stmt { root_expr });
         }
     }
 
@@ -427,9 +427,9 @@ impl Builder {
         Program {
             int_lits: self.int_lits,
             dec_lits: self.dec_lits,
+            stmts: self.stmts,
             assigned_decls: self.assigned_decls,
             decl_refs: self.decl_refs,
-            stmts: self.stmts,
             rets: self.rets,
             ifs: self.ifs,
             void_expr: self.void_expr,
