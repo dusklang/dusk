@@ -10,6 +10,7 @@ newtype_index!(ExprId);
 newtype_index!(DeclRefId);
 newtype_index!(GlobalDeclId);
 newtype_index!(LocalDeclId);
+newtype_index!(RetId);
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum DeclId {
@@ -41,7 +42,7 @@ pub struct IntLit;
 #[derive(Debug)]
 pub struct DecLit;
 #[derive(Debug)]
-pub struct Ret { pub expr: ExprId, pub ty: Type }
+pub struct Ret { pub expr: ExprId, pub ty: Type, pub ret_id: RetId }
 #[derive(Debug)]
 pub struct Stmt { pub root_expr: ExprId }
 #[derive(Debug)]
@@ -108,6 +109,8 @@ pub struct Program {
     pub overloads: IdxVec<Vec<DeclId>, DeclRefId>,
     /// Number of expressions in the entire program
     pub num_exprs: usize,
+    /// Number of return expressions in the entire program
+    pub num_rets: usize,
 }
 
 impl Program {
@@ -181,6 +184,9 @@ pub struct Builder {
     global_decl_refs: Vec<GlobalDeclRef>,
     /// State related to each nested computed decl
     comp_decl_stack: Vec<CompDeclState>,
+
+    /// The number of return expressions so far
+    num_rets: usize,
 
     pub interner: DefaultStringInterner,
 }
@@ -262,6 +268,7 @@ impl Builder {
             overloads: IdxVec::new(),
             global_decl_refs: Vec::new(),
             comp_decl_stack: vec![CompDeclState::new(Type::Void)],
+            num_rets: 0,
 
             interner,
         }
@@ -314,12 +321,14 @@ impl Builder {
 
     pub fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
+        let ret_id = RetId::new(self.num_rets);
+        self.num_rets += 1;
         let ty = self.comp_decl_stack.last().unwrap().ret_ty.clone();
         let level = self.rets.insert(
             &[self.levels[expr]],
             Expr {
                 id,
-                data: Ret { expr, ty },
+                data: Ret { expr, ty, ret_id },
             },
         );
         self.levels.push(level);
@@ -438,6 +447,7 @@ impl Builder {
             global_decls: self.global_decls,
             overloads: self.overloads,
             num_exprs: self.levels.len(),
+            num_rets: self.num_rets,
         }
     }
 }

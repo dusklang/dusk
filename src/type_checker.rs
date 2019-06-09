@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::tir::{Program, ExprId, Decl, DeclId, DeclRefId};
+use crate::tir::{Program, ExprId, Decl, DeclId, DeclRefId, RetId};
 use crate::ty::Type;
 use crate::index_vec::IdxVec;
 use crate::dep_vec;
@@ -140,6 +140,9 @@ struct TypeChecker {
     preferred_overloads: IdxVec<Option<DeclId>, DeclRefId>,
     /// The selected overload for each decl ref
     selected_overloads: IdxVec<Option<DeclId>, DeclRefId>,
+    /// Whether or not each return expression is disabled
+    // TODO: More efficient layout!
+    disabled: IdxVec<bool, RetId>,
 }
 
 pub fn type_check(prog: Program) -> Vec<Error> {
@@ -149,12 +152,14 @@ pub fn type_check(prog: Program) -> Vec<Error> {
         constraints: IdxVec::new(),
         preferred_overloads: IdxVec::new(),
         selected_overloads: IdxVec::new(),
+        disabled: IdxVec::new(),
     };
     let mut errs = Vec::new();
     tc.types.resize_with(tc.prog.num_exprs, Default::default);
     tc.constraints.resize_with(tc.prog.num_exprs, Default::default);
     tc.selected_overloads.resize_with(tc.prog.overloads.len(), || None);
     tc.preferred_overloads.resize_with(tc.prog.overloads.len(), || None);
+    tc.disabled.resize_with(tc.prog.num_rets, || false);
 
     // Extend arrays as needed so they all have the same number of levels.
     let levels = dep_vec::unify_sizes(&mut [
@@ -243,6 +248,9 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                 Err(Literal(Dec)) => panic!("expected return value of {:?}, found decimal literal", item.ty),
                 Err(Literal(Int)) => panic!("expected return value of {:?}, found integer literal", item.ty),
                 Err(InvalidChoice(choices)) => panic!("expected return value of {:?}, found {:?}", item.ty, choices),
+            }
+            if tc.constraints[item.expr].can_unify_to(&Type::Never).is_ok() {
+                tc.disabled[item.ret_id] = true;
             }
         }
         for item in tc.prog.ifs.get_level(level) {
@@ -370,6 +378,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
     }
 
     println!("Types: {:#?}", tc.types);
+    println!("Returns disabled: {:#?}", tc.disabled);
     // println!("Decl types: {:#?}", tc.prog.local_decls);
     //println!("Constraints: {:#?}", tc.constraints);
     errs

@@ -2,9 +2,9 @@ fn do_something_really_cool(n: u32): u32 {
     hello := if 2 > 5 {
         23 + n
     } else if n > 256 {
-        panic
+        return panic
     } else {
         25 + 6 * (2 * panic - n)
     }
-    panic
+    return 3
 }
