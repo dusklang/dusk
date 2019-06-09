@@ -5,37 +5,7 @@ use crate::dep_vec::DepVec;
 use crate::source_info::SourceRange;
 use crate::index_vec::{Idx, IdxVec};
 use crate::ty::Type;
-
-newtype_index!(ExprId);
-newtype_index!(DeclRefId);
-newtype_index!(GlobalDeclId);
-newtype_index!(LocalDeclId);
-newtype_index!(RetId);
-
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub enum DeclId {
-    Global(GlobalDeclId),
-    Local(LocalDeclId),
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum BinOp {
-    Mult, Div, Mod,
-    Add, Sub,
-    Less, LessOrEq, Greater, GreaterOrEq,
-    Eq, NotEq,
-    BitwiseAnd, BitwiseOr,
-    LogicalAnd, LogicalOr,
-    Assign,
-    MultAssign, DivAssign, ModAssign,
-    AddAssign, SubAssign,
-    BitwiseAndAssign, BitwiseOrAssign,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum UnOp {
-    Not, Deref, Neg, Plus
-}
+use crate::builder::{self, *};
 
 #[derive(Debug)]
 pub struct IntLit;
@@ -273,10 +243,14 @@ impl Builder {
             interner,
         }
     }
+}
 
-    pub fn void_expr(&self) -> ExprId { self.void_expr }
+impl builder::Builder for Builder {
+    type Output = Program;
 
-    pub fn int_lit(&mut self, lit: u64, range: SourceRange) -> ExprId {
+    fn void_expr(&self) -> ExprId { self.void_expr }
+
+    fn int_lit(&mut self, lit: u64, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
         self.int_lits.push(Expr { id, data: IntLit });
         self.levels.push(0);
@@ -284,7 +258,7 @@ impl Builder {
         id
     }
 
-    pub fn dec_lit(&mut self, lit: f64, range: SourceRange) -> ExprId {
+    fn dec_lit(&mut self, lit: f64, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
         self.dec_lits.push(Expr { id, data: DecLit });
         self.levels.push(0);
@@ -293,7 +267,7 @@ impl Builder {
         id
     }
 
-    pub fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId {
+    fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
         let decl_ref_id = self.overloads.push(Vec::new());
         self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name: self.interner.get_or_intern(op.symbol()), num_arguments: 2 });
@@ -307,7 +281,7 @@ impl Builder {
         id
     }
 
-    pub fn stored_decl(&mut self, name: Sym, root_expr: ExprId, range: SourceRange) -> ExprId {
+    fn stored_decl(&mut self, name: Sym, root_expr: ExprId, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
         let decl_id = self.local_decls.push(Decl { name: name, param_tys: Vec::new(), ret_ty: Type::Error });
         let decl_id = DeclId::Local(decl_id);
@@ -319,7 +293,7 @@ impl Builder {
         id
     }
 
-    pub fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
+    fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
         let ret_id = RetId::new(self.num_rets);
         self.num_rets += 1;
@@ -337,13 +311,13 @@ impl Builder {
         id
     }
 
-    pub fn stmts(&mut self, root_exprs: &[ExprId]) {
+    fn stmts(&mut self, root_exprs: &[ExprId]) {
         for &root_expr in root_exprs {
             self.stmts.push(Stmt { root_expr });
         }
     }
 
-    pub fn if_expr(&mut self, condition: ExprId, then_expr: ExprId, else_expr: ExprId, range: SourceRange) -> ExprId {
+    fn if_expr(&mut self, condition: ExprId, then_expr: ExprId, else_expr: ExprId, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
         let level = self.ifs.insert(
             &[self.levels[condition], self.levels[then_expr], self.levels[else_expr]],
@@ -355,18 +329,18 @@ impl Builder {
         id
     }
 
-    pub fn begin_scope(&mut self) {
+    fn begin_scope(&mut self) {
         let stack = self.comp_decl_stack.last_mut().unwrap();
         stack.scope_stack.push(stack.decls.len());
     }
 
-    pub fn end_scope(&mut self) {
+    fn end_scope(&mut self) {
         let stack = self.comp_decl_stack.last_mut().unwrap();
         let scope = stack.scope_stack.pop().unwrap();
         stack.decls.truncate(scope);
     }
 
-    pub fn begin_computed_decl(&mut self, name: Sym, param_names: Vec<Sym>, param_tys: Vec<Type>, ret_ty: Type, proto_range: SourceRange) {
+    fn begin_computed_decl(&mut self, name: Sym, param_names: Vec<Sym>, param_tys: Vec<Type>, ret_ty: Type, proto_range: SourceRange) {
         assert_eq!(param_names.len(), param_tys.len());
         let decl_id = self.local_decls.push(Decl { name: name, param_tys: param_tys.clone(), ret_ty: ret_ty.clone() });
         let decl_id = DeclId::Local(decl_id);
@@ -384,11 +358,11 @@ impl Builder {
         self.comp_decl_stack.push(decl_state);
     }
 
-    pub fn end_computed_decl(&mut self) {
+    fn end_computed_decl(&mut self) {
         self.comp_decl_stack.pop().unwrap();
     }
 
-    pub fn decl_ref(&mut self, name: Sym, arguments: Vec<ExprId>, range: SourceRange) -> ExprId {
+    fn decl_ref(&mut self, name: Sym, arguments: Vec<ExprId>, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
 
         let mut decl: Option<(u32, DeclId)> = None;
@@ -422,11 +396,11 @@ impl Builder {
         id
     }
 
-    pub fn get_range(&self, id: ExprId) -> SourceRange {
+    fn get_range(&self, id: ExprId) -> SourceRange {
         self.source_ranges[id].clone()
     }
 
-    pub fn program(mut self) -> Program {
+    fn output(mut self) -> Program {
         for decl_ref in self.global_decl_refs {
             self.overloads[decl_ref.id] = self.global_decls.indices_satisfying(|decl| {
                 decl.name == decl_ref.name && decl.param_tys.len() == decl_ref.num_arguments as usize
@@ -451,62 +425,3 @@ impl Builder {
         }
     }
 }
-
-impl BinOp {
-    pub fn symbol(self) -> &'static str {
-        use BinOp::*;
-        match self {
-            Mult => "*",
-            Div => "/",
-            Mod => "%",
-            Add => "+",
-            Sub => "-",
-            Less => "<",
-            LessOrEq => "<=",
-            Greater => ">",
-            GreaterOrEq => ">=",
-            Eq => "==",
-            NotEq => "!=",
-            BitwiseAnd => "&",
-            BitwiseOr => "|",
-            LogicalAnd => "&&",
-            LogicalOr => "||",
-            Assign => "=",
-            MultAssign => "*=",
-            DivAssign => "/=",
-            ModAssign => "%=",
-            AddAssign => "+=",
-            SubAssign => "-=",
-            BitwiseAndAssign => "&=",
-            BitwiseOrAssign => "|=",
-        }
-    }
-
-    pub fn precedence(self) -> u8 {
-        use BinOp::*;
-        match self {
-            Mult | Div | Mod => 0,
-            Add | Sub => 1,
-            Less | LessOrEq | Greater | GreaterOrEq => 2,
-            Eq | NotEq => 3,
-            BitwiseAnd | BitwiseOr => 4,
-            LogicalAnd | LogicalOr => 5,
-            Assign | AddAssign | SubAssign | MultAssign |
-                DivAssign | ModAssign | BitwiseAndAssign | 
-                BitwiseOrAssign => 6
-        }
-    }
-}
-
-impl UnOp {
-    pub fn symbol(self) -> &'static str {
-        use UnOp::*;
-        match self {
-            Not => "!",
-            Deref => "*",
-            Neg => "-",
-            Plus => "+",
-        }
-    }
-}
-

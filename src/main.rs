@@ -5,8 +5,9 @@ mod lexer;
 mod token;
 mod source_info;
 mod error;
-mod tir;
+mod builder;
 mod parser;
+mod tir;
 mod ty;
 mod type_checker;
 

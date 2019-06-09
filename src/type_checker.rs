@@ -1,5 +1,6 @@
 use crate::error::Error;
-use crate::tir::{Program, ExprId, Decl, DeclId, DeclRefId, RetId};
+use crate::tir::{Program, Decl};
+use crate::builder::{ExprId, DeclId, DeclRefId, RetId};
 use crate::ty::Type;
 use crate::index_vec::IdxVec;
 use crate::dep_vec;

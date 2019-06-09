@@ -1,7 +1,8 @@
 use string_interner::{DefaultStringInterner, Sym};
 
 use crate::token::{TokenVec, TokenKind, Token};
-use crate::tir::{Program, Builder, ExprId, BinOp};
+use crate::tir::{self, Program};
+use crate::builder::{ExprId, BinOp, Builder};
 use crate::ty::Type;
 use crate::error::Error;
 use crate::source_info::{self, SourceRange};
@@ -13,7 +14,7 @@ pub fn parse(toks: TokenVec, interner: DefaultStringInterner) -> (Program, Vec<E
 
 struct Parser {
     toks: TokenVec,
-    builder: Builder,
+    builder: tir::Builder,
     cur: usize,
     errs: Vec<Error>,
 }
@@ -22,7 +23,7 @@ impl Parser {
     fn parse(toks: TokenVec, interner: DefaultStringInterner) -> (Program, Vec<Error>) {
         let mut p = Parser {
             toks,
-            builder: Builder::new(interner),
+            builder: tir::Builder::new(interner),
             cur: 0,
             errs: Vec::new(),
         };
@@ -40,7 +41,7 @@ impl Parser {
             }
         }
 
-        (p.builder.program(), p.errs)
+        (p.builder.output(), p.errs)
     }
 
     fn parse_binary_operator(&self) -> Option<BinOp> {
