@@ -1,4 +1,4 @@
-use string_interner::Sym;
+use string_interner::{DefaultStringInterner, Sym};
 
 use crate::index_vec::Idx;
 use crate::source_info::SourceRange;
@@ -95,6 +95,8 @@ impl UnOp {
 
 pub trait Builder {
     type Output;
+    fn new(interner: DefaultStringInterner) -> Self;
+    fn interner(&self) -> &DefaultStringInterner;
     fn void_expr(&self) -> ExprId;
     fn int_lit(&mut self, lit: u64, range: SourceRange) -> ExprId;
     fn dec_lit(&mut self, lit: f64, range: SourceRange) -> ExprId;

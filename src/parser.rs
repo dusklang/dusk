@@ -1,29 +1,28 @@
 use string_interner::{DefaultStringInterner, Sym};
 
 use crate::token::{TokenVec, TokenKind, Token};
-use crate::tir::{self, Program};
 use crate::builder::{ExprId, BinOp, Builder};
 use crate::ty::Type;
 use crate::error::Error;
 use crate::source_info::{self, SourceRange};
 
 #[inline]
-pub fn parse(toks: TokenVec, interner: DefaultStringInterner) -> (Program, Vec<Error>) {
-    Parser::parse(toks, interner)
+pub fn parse<B: Builder>(toks: TokenVec, interner: DefaultStringInterner) -> (B::Output, Vec<Error>) {
+    Parser::<B>::parse(toks, interner)
 }
 
-struct Parser {
+struct Parser<B: Builder> {
     toks: TokenVec,
-    builder: tir::Builder,
+    builder: B,
     cur: usize,
     errs: Vec<Error>,
 }
 
-impl Parser {
-    fn parse(toks: TokenVec, interner: DefaultStringInterner) -> (Program, Vec<Error>) {
+impl<B: Builder> Parser<B> {
+    fn parse(toks: TokenVec, interner: DefaultStringInterner) -> (B::Output, Vec<Error>) {
         let mut p = Parser {
             toks,
-            builder: tir::Builder::new(interner),
+            builder: B::new(interner),
             cur: 0,
             errs: Vec::new(),
         };
@@ -337,7 +336,7 @@ impl Parser {
     }
 
     fn parse_type(&mut self) -> (Type, SourceRange) {
-        let i = &self.builder.interner;
+        let i = self.builder.interner();
         let val = (
             match self.cur().kind {
                 &TokenKind::Ident(ident) => match i.resolve(ident).unwrap() {

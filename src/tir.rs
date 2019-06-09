@@ -161,8 +161,10 @@ pub struct Builder {
     pub interner: DefaultStringInterner,
 }
 
-impl Builder {
-    pub fn new(mut interner: DefaultStringInterner) -> Self {
+impl builder::Builder for Builder {
+    type Output = Program;
+
+    fn new(mut interner: DefaultStringInterner) -> Self {
         let mut global_decls: IdxVec<Decl, GlobalDeclId> = IdxVec::new();
         // Integers, floats and bool
         let values = &[
@@ -243,10 +245,8 @@ impl Builder {
             interner,
         }
     }
-}
 
-impl builder::Builder for Builder {
-    type Output = Program;
+    fn interner(&self) -> &DefaultStringInterner { &self.interner }
 
     fn void_expr(&self) -> ExprId { self.void_expr }
 
