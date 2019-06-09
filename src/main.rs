@@ -8,6 +8,7 @@ mod error;
 mod builder;
 mod parser;
 mod tir;
+mod hir;
 mod ty;
 mod type_checker;
 
