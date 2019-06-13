@@ -191,17 +191,22 @@ impl<B: Builder> Parser<B> {
         assert_eq!(self.cur().kind, &TokenKind::If);
         self.next();
         let condition = self.parse_expr();
-        let then_expr = self.parse_scope().unwrap_or(self.builder.void_expr());
-        let else_expr = if let TokenKind::Else = self.cur().kind {
+        let then_scope = self.parse_scope_new();
+        let else_scope = if let TokenKind::Else = self.cur().kind {
             match self.next().kind {
-                TokenKind::If => self.parse_if(),
-                TokenKind::OpenCurly => self.parse_scope().unwrap_or(self.builder.void_expr()),
+                TokenKind::If => {
+                    let scope = self.builder.begin_scope();
+                    let if_expr = self.parse_if();
+                    self.builder.end_scope(&[], if_expr);
+                    Some(scope)
+                },
+                TokenKind::OpenCurly => Some(self.parse_scope_new()),
                 _ => panic!("Expected '{' or 'if' after 'else'"),
             }
         } else {
-            self.builder.void_expr()
+            None
         };
-        self.builder.if_expr(condition, then_expr, else_expr, 0..0)
+        self.builder.if_expr(condition, then_scope, else_scope, 0..0)
     }
 
     /// Parses any node. Iff the node is an expression, returns its ExprId.

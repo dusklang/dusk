@@ -1,3 +1,7 @@
-fn do_something_really_cool {
-    foo := 5
+fn do_something_really_cool(n: u32) {
+    foo := if n > 2 {
+        n
+    } else {
+        76
+    }
 }

@@ -40,7 +40,7 @@ impl builder::Builder for Builder {
     fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId { panic!() }
     fn stored_decl(&mut self, name: Sym, root_expr: ExprId, range: SourceRange) -> ExprId { panic!() }
     fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId { panic!() }
-    fn if_expr(&mut self, condition: ExprId, then_expr: ExprId, else_expr: ExprId, range: SourceRange) -> ExprId { panic!() }
+    fn if_expr(&mut self, condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId>, range: SourceRange) -> ExprId { panic!() }
     fn begin_scope(&mut self) -> ScopeId { panic!() }
     fn end_scope(&mut self, stmts: &[ExprId], terminal_expr: ExprId) { panic!() }
     fn begin_computed_decl(&mut self, name: Sym, param_names: Vec<Sym>, param_tys: Vec<Type>, ret_ty: Type, proto_range: SourceRange) { panic!() }

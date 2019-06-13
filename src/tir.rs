@@ -315,8 +315,10 @@ impl builder::Builder for Builder {
         id
     }
 
-    fn if_expr(&mut self, condition: ExprId, then_expr: ExprId, else_expr: ExprId, range: SourceRange) -> ExprId {
+    fn if_expr(&mut self, condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId>, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
+        let then_expr = self.terminal_exprs[then_scope];
+        let else_expr = else_scope.map_or_else(|| self.void_expr(), |scope| self.terminal_exprs[scope]);
         let level = self.ifs.insert(
             &[self.levels[condition], self.levels[then_expr], self.levels[else_expr]],
             Expr { id, data: If { condition, then_expr, else_expr } }
