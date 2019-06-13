@@ -132,9 +132,7 @@ impl<B: Builder> Parser<B> {
             },
             TokenKind::Do => {
                 self.next();
-                let terminal_expr = self.parse_scope().unwrap_or(self.builder.void_expr());
-
-                Ok(terminal_expr)
+                Ok(self.parse_scope_expr())
             },
             TokenKind::If => Ok(self.parse_if()),
             TokenKind::Return => {
@@ -191,11 +189,11 @@ impl<B: Builder> Parser<B> {
         assert_eq!(self.cur().kind, &TokenKind::If);
         self.next();
         let condition = self.parse_expr();
-        let then_expr = self.parse_scope().unwrap_or(self.builder.void_expr());
+        let then_expr = self.parse_scope_expr();
         let else_expr = if let TokenKind::Else = self.cur().kind {
             match self.next().kind {
                 TokenKind::If => self.parse_if(),
-                TokenKind::OpenCurly => self.parse_scope().unwrap_or(self.builder.void_expr()),
+                TokenKind::OpenCurly => self.parse_scope_expr(),
                 _ => panic!("Expected '{' or 'if' after 'else'"),
             }
         } else {
@@ -252,7 +250,7 @@ impl<B: Builder> Parser<B> {
     }
 
     // Parses an open curly brace, then a list of nodes, then a closing curly brace.
-    fn parse_scope_new(&mut self) -> ScopeId {
+    fn parse_scope(&mut self) -> ScopeId {
         let scope = self.builder.begin_scope();
         let mut stmts = Vec::new();
         let mut last_was_expr = false;
@@ -287,14 +285,9 @@ impl<B: Builder> Parser<B> {
         scope
     }
 
-    fn parse_scope(&mut self) -> Option<ExprId> {
-        let scope = self.parse_scope_new();
-        let expr = self.builder.terminal_expr(scope);
-        if expr == self.builder.void_expr() {
-            None
-        } else {
-            Some(expr)
-        }
+    fn parse_scope_expr(&mut self) -> ExprId {
+        let scope = self.parse_scope();
+        self.builder.terminal_expr(scope)
     }
 
     fn parse_comp_decl(&mut self) {
@@ -335,10 +328,10 @@ impl<B: Builder> Parser<B> {
         assert_eq!(self.cur().kind, &TokenKind::OpenCurly);
         self.builder.begin_computed_decl(name, param_names, param_tys, ty.clone(), proto_range);
 
-        let terminal_expr = self.parse_scope().unwrap_or_else(|| {
-            assert_eq!(ty, Type::Void, "no expression to return in non-void computed decl");
-            self.builder.void_expr()
-        });
+        let terminal_expr = self.parse_scope_expr();
+        if terminal_expr == self.builder.void_expr() {
+            assert_eq!(ty, Type::Void, "expected expression to return in non-void computed decl");
+        }
         self.builder.ret(terminal_expr, 0..0);
         self.builder.end_computed_decl();
     }
