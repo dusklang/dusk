@@ -1,7 +1,7 @@
 use string_interner::{DefaultStringInterner, Sym};
 
 use crate::token::{TokenVec, TokenKind, Token};
-use crate::builder::{ExprId, BinOp, Builder};
+use crate::builder::{ExprId, ScopeId, BinOp, Builder};
 use crate::ty::Type;
 use crate::error::Error;
 use crate::source_info::{self, SourceRange};
@@ -251,10 +251,9 @@ impl<B: Builder> Parser<B> {
         self.builder.stored_decl(name, root, source_info::concat(name_range, root_range));
     }
 
-    // Parses an open curly brace, then a list of nodes, then a closing curly brace
-    // Returns the id of the final node if it exists and is an expression. Otherwise returns `None`.
-    fn parse_scope(&mut self) -> Option<ExprId> {
-        self.builder.begin_scope();
+    // Parses an open curly brace, then a list of nodes, then a closing curly brace.
+    fn parse_scope_new(&mut self) -> ScopeId {
+        let scope = self.builder.begin_scope();
         let mut stmts = Vec::new();
         let mut last_was_expr = false;
         assert_eq!(self.cur().kind, &TokenKind::OpenCurly);
@@ -280,13 +279,22 @@ impl<B: Builder> Parser<B> {
             }
         }
         let terminal_expr = if last_was_expr {
-            stmts.pop()
+            stmts.pop().unwrap()
         } else {
-            None
+            self.builder.void_expr()
         };
-        self.builder.stmts(&stmts);
-        self.builder.end_scope();
-        terminal_expr
+        self.builder.end_scope(&stmts, terminal_expr);
+        scope
+    }
+
+    fn parse_scope(&mut self) -> Option<ExprId> {
+        let scope = self.parse_scope_new();
+        let expr = self.builder.terminal_expr(scope);
+        if expr == self.builder.void_expr() {
+            None
+        } else {
+            Some(expr)
+        }
     }
 
     fn parse_comp_decl(&mut self) {

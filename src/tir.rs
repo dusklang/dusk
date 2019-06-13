@@ -157,6 +157,9 @@ pub struct Builder {
 
     /// The number of return expressions so far
     num_rets: usize,
+    /// The terminal expression for each scope so far 
+    /// (or the void expression if there is no terminal expression)
+    pub terminal_exprs: IdxVec<ExprId, ScopeId>,
 
     pub interner: DefaultStringInterner,
 }
@@ -241,6 +244,7 @@ impl builder::Builder for Builder {
             global_decl_refs: Vec::new(),
             comp_decl_stack: vec![CompDeclState::new(Type::Void)],
             num_rets: 0,
+            terminal_exprs: IdxVec::new(),
 
             interner,
         }
@@ -311,12 +315,6 @@ impl builder::Builder for Builder {
         id
     }
 
-    fn stmts(&mut self, root_exprs: &[ExprId]) {
-        for &root_expr in root_exprs {
-            self.stmts.push(Stmt { root_expr });
-        }
-    }
-
     fn if_expr(&mut self, condition: ExprId, then_expr: ExprId, else_expr: ExprId, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
         let level = self.ifs.insert(
@@ -329,12 +327,17 @@ impl builder::Builder for Builder {
         id
     }
 
-    fn begin_scope(&mut self) {
+    fn begin_scope(&mut self) -> ScopeId {
+        let scope = self.terminal_exprs.push(self.void_expr());
         let stack = self.comp_decl_stack.last_mut().unwrap();
         stack.scope_stack.push(stack.decls.len());
+        scope
     }
 
-    fn end_scope(&mut self) {
+    fn end_scope(&mut self, stmts: &[ExprId], terminal_expr: ExprId) {
+        for &stmt in stmts  {
+            self.stmts.push(Stmt { root_expr: stmt });
+        }
         let stack = self.comp_decl_stack.last_mut().unwrap();
         let scope = stack.scope_stack.pop().unwrap();
         stack.decls.truncate(scope);
@@ -398,6 +401,10 @@ impl builder::Builder for Builder {
 
     fn get_range(&self, id: ExprId) -> SourceRange {
         self.source_ranges[id].clone()
+    }
+
+    fn terminal_expr(&self, scope: ScopeId) -> ExprId {
+        self.terminal_exprs[scope]
     }
 
     fn output(mut self) -> Program {

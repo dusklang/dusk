@@ -9,6 +9,7 @@ newtype_index!(DeclRefId);
 newtype_index!(GlobalDeclId);
 newtype_index!(LocalDeclId);
 newtype_index!(RetId);
+newtype_index!(ScopeId);
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum DeclId {
@@ -103,13 +104,13 @@ pub trait Builder {
     fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId;
     fn stored_decl(&mut self, name: Sym, root_expr: ExprId, range: SourceRange) -> ExprId;
     fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId;
-    fn stmts(&mut self, root_exprs: &[ExprId]);
     fn if_expr(&mut self, condition: ExprId, then_expr: ExprId, else_expr: ExprId, range: SourceRange) -> ExprId;
-    fn begin_scope(&mut self);
-    fn end_scope(&mut self);
+    fn begin_scope(&mut self) -> ScopeId;
+    fn end_scope(&mut self, stmts: &[ExprId], terminal_expr: ExprId);
     fn begin_computed_decl(&mut self, name: Sym, param_names: Vec<Sym>, param_tys: Vec<Type>, ret_ty: Type, proto_range: SourceRange);
     fn end_computed_decl(&mut self);
     fn decl_ref(&mut self, name: Sym, arguments: Vec<ExprId>, range: SourceRange) -> ExprId;
     fn get_range(&self, id: ExprId) -> SourceRange;
+    fn terminal_expr(&self, scope: ScopeId) -> ExprId;
     fn output(self) -> Self::Output;
 }
