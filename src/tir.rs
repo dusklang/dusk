@@ -99,10 +99,15 @@ struct LocalDecl {
     decl: DeclId,
 }
 
+struct ScopeState {
+    id: ScopeId,
+    previous_decls: usize,
+}
+
 struct CompDeclState {
     ret_ty: Type,
     decls: Vec<LocalDecl>,
-    scope_stack: Vec<usize>,
+    scope_stack: Vec<ScopeState>,
 }
 
 impl CompDeclState {
@@ -332,7 +337,12 @@ impl builder::Builder for Builder {
     fn begin_scope(&mut self) -> ScopeId {
         let scope = self.terminal_exprs.push(self.void_expr());
         let stack = self.comp_decl_stack.last_mut().unwrap();
-        stack.scope_stack.push(stack.decls.len());
+        stack.scope_stack.push(
+            ScopeState {
+                id: scope,
+                previous_decls: stack.decls.len(),
+            }
+        );
         scope
     }
 
@@ -342,7 +352,8 @@ impl builder::Builder for Builder {
         }
         let stack = self.comp_decl_stack.last_mut().unwrap();
         let scope = stack.scope_stack.pop().unwrap();
-        stack.decls.truncate(scope);
+        self.terminal_exprs[scope.id] = terminal_expr;
+        stack.decls.truncate(scope.previous_decls);
     }
 
     fn begin_computed_decl(&mut self, name: Sym, param_names: Vec<Sym>, param_tys: Vec<Type>, ret_ty: Type, proto_range: SourceRange) {

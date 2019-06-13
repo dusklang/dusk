@@ -1,7 +1,7 @@
-fn do_something_really_cool(n: u32) {
-    foo := if n > 2 {
-        n
+fn do_something_really_cool {
+    foo := if 5 < 2 {
+        2
     } else {
-        76
+        89
     }
 }
