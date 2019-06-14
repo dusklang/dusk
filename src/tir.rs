@@ -290,16 +290,13 @@ impl builder::Builder for Builder {
         id
     }
 
-    fn stored_decl(&mut self, name: Sym, root_expr: ExprId, range: SourceRange) -> ExprId {
-        let id = ExprId::new(self.levels.len());
+    fn stored_decl(&mut self, name: Sym, root_expr: ExprId, range: SourceRange) {
         let decl_id = self.local_decls.push(Decl { name: name, param_tys: Vec::new(), ret_ty: Type::Error });
         let decl_id = DeclId::Local(decl_id);
         let level = self.assigned_decls.insert(&[self.levels[root_expr]], AssignedDecl { root_expr, decl_id });
         self.source_ranges.push(range);
 
         self.comp_decl_stack.last_mut().unwrap().decls.push(LocalDecl { name, level, decl: decl_id });
-
-        id
     }
 
     fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
