@@ -160,35 +160,33 @@ impl<'src> Lexer<'src> {
         let mut l = Lexer::new(src, lines);
         let mut toks = TokenVec::new();
         loop {
-            let (tok, range) = l.next().unwrap();
-            if tok == TokenKind::Eof { break; }
+            let (tok, range) = l.next();
+            let should_break = tok == TokenKind::Eof;
             toks.push(tok, range);
+            if should_break { break; }
         }
         (toks, l.interner, l.errs)
     }
-}
 
-impl<'src> Iterator for Lexer<'src> {
-    type Item = (TokenKind, SourceRange);
-    fn next(&mut self) -> Option<(TokenKind, SourceRange)> {
+    fn next(&mut self) -> (TokenKind, SourceRange) {
         if !self.has_chars() {
-            Some(self.pack_tok(TokenKind::Eof))
+            self.pack_tok(TokenKind::Eof)
         } else if self.is_newline() {
             while self.has_chars() && self.is_newline() {
                 self.advance();
             }
-            Some(self.pack_tok(TokenKind::Newline))
+            self.pack_tok(TokenKind::Newline)
         } else if self.is_whitespace() {
             while self.has_chars() && self.is_whitespace() {
                 self.advance();
             }
-            Some(self.pack_tok(TokenKind::Whitespace))
+            self.pack_tok(TokenKind::Whitespace)
         } else if self.is_str(b"//") {
             unsafe { self.advance_by_ascii(2); }
             while self.has_chars() && !self.is_newline() {
                 self.advance();
             }
-            Some(self.pack_tok(TokenKind::SingleLineComment))
+            self.pack_tok(TokenKind::SingleLineComment)
         } else if self.is_str(b"/*") {
             let mut comment_begin = self.cur_loc();
             let mut levels = 1;
@@ -226,7 +224,7 @@ impl<'src> Iterator for Lexer<'src> {
                 }
                 self.errs.push(err);
             }
-            Some(self.pack_tok(TokenKind::MultiLineComment))
+            self.pack_tok(TokenKind::MultiLineComment)
         } else if self.is_str(b"*/") {
             unsafe { self.advance_by_ascii(2); }
             self.errs.push(
@@ -237,7 +235,7 @@ impl<'src> Iterator for Lexer<'src> {
                     "no previous '/*' to match"
                 )
             );
-            self.next()
+            return self.next();
         } else if self.is(b'"') {
             self.advance();
             let mut in_escape_mode = false;
@@ -297,9 +295,9 @@ impl<'src> Iterator for Lexer<'src> {
                 );
             }
             if lit.len() == 1 {
-                Some(self.pack_tok(TokenKind::CharLit(lit.as_bytes()[0])))
+                self.pack_tok(TokenKind::CharLit(lit.as_bytes()[0]))
             } else {
-                Some(self.pack_tok(TokenKind::StrLit(lit)))
+                self.pack_tok(TokenKind::StrLit(lit))
             }
         } else if self.has_chars() && (self.is_letter() || self.is(b'_')) {
             let ident_start = self.cur_loc();
@@ -330,7 +328,7 @@ impl<'src> Iterator for Lexer<'src> {
                 "do" => Do,
                 _ => Ident(self.interner.get_or_intern(ident)),
             };
-            Some(self.pack_tok(kind))
+            self.pack_tok(kind)
         } else if self.has_chars() && self.is_num() {
             let mut has_dot = false;
             loop {
@@ -353,9 +351,9 @@ impl<'src> Iterator for Lexer<'src> {
 
             let lit = &self.src[self.tok_start_loc..self.cur_loc()];
             if has_dot {
-                Some(self.pack_tok(TokenKind::DecLit(lit.parse().unwrap())))
+                self.pack_tok(TokenKind::DecLit(lit.parse().unwrap()))
             } else {
-                Some(self.pack_tok(TokenKind::IntLit(lit.parse().unwrap())))
+                self.pack_tok(TokenKind::IntLit(lit.parse().unwrap()))
             }
         } else {
             macro_rules! match_tokens {
@@ -365,7 +363,7 @@ impl<'src> Iterator for Lexer<'src> {
                         else if self.is_str($symbol) {
                             // symbols are all ASCII, so it's safe to assume that number of grapheme clusters == number of bytes
                             unsafe { self.advance_by_ascii($symbol.len()); }
-                            Some(self.pack_tok(TokenKind::$kind))
+                            self.pack_tok(TokenKind::$kind)
                         }
                     )+
                     else { 
