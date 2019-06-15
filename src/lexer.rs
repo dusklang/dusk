@@ -359,19 +359,23 @@ impl<'src> Lexer<'src> {
                 }
             }
             // Identifiers and keywords.
-            let mut text = String::new();
             if l.has_chars() && (l.is_letter() || l.is(b'_')) {
+                let ident_start = l.cur_loc();
+                let ident_end;
                 loop {
-                    text += l.cur();
                     l.advance();
 
                     if !l.has_chars() || (!l.is_letter() && !l.is(b'_') && !l.is_num()) {
+                        ident_end = l.cur_loc();
                         break;
                     }
                 }
 
+                let ident_bytes = &l.src.as_bytes()[ident_start..ident_end];
+                let ident = unsafe { std::str::from_utf8_unchecked(ident_bytes) };
+
                 use TokenKind::*;
-                let kind = match &*text {
+                let kind = match ident {
                     "fn" => Fn,
                     "return" => Return,
                     "true" => True,
@@ -382,7 +386,7 @@ impl<'src> Lexer<'src> {
                     "as" => As,
                     "struct" => Struct,
                     "do" => Do,
-                    _ => Ident(l.interner.get_or_intern(text)),
+                    _ => Ident(l.interner.get_or_intern(ident)),
                 };
                 l.push(kind);
             }
