@@ -6,6 +6,7 @@ edition = "2018"
 
 [profile.release]
 debug = true
+lto = true
 
 [dependencies]
 unicode-segmentation = { git = "https://github.com/unicode-rs/unicode-segmentation" }
