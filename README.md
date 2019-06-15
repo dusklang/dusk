@@ -27,7 +27,7 @@ Taking advantage of the previous thing (arbitrary compile-time code execution), 
 - minimal new features needed in the compiler over time, freeing up compiler developers to fix bugs and optimize
 - easier to port the compiler to new host platforms
 - easier to standardize the compiler
-- easier to write new compilers that implement the standard
+- easier to write new compiler implementations
 - easier to prove correctness of a compiler implementation
 
 As an example of a way in which complexity could be moved out of the compiler and into libraries, perhaps the base "compiler" won't actually know how to compile anything at all. Perhaps it will only be able to interpret bytecode (because it will already need to do that to enable the compile-time code execution stuff). Backends could then be implemented in libraries. For example, there might be an LLVM backend (for generating optimized code) and an x64 backend and an arm64 backend (for generating working code quickly), all implemented as their own libraries. For particularly important backends like those, they should be part of the official project as standard libraries.
