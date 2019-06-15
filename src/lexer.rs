@@ -6,7 +6,7 @@ use crate::token::{TokenVec, TokenKind};
 use crate::error::Error;
 use crate::source_info::SourceRange;
 
-#[inline]
+#[inline(always)]
 pub fn lex<'src>(src: &'src str, lines: &'src mut Vec<usize>) -> (TokenVec, DefaultStringInterner, Vec<Error>) {
     Lexer::lex(src, lines)
 }
@@ -156,6 +156,7 @@ impl<'src> Lexer<'src> {
         (kind, range)
     }
 
+    #[inline(never)]
     fn lex(src: &'src str, lines: &'src mut Vec<usize>) -> (TokenVec, DefaultStringInterner, Vec<Error>) {
         let mut l = Lexer::new(src, lines);
         let mut toks = TokenVec::new();

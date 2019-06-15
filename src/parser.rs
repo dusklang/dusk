@@ -20,6 +20,7 @@ struct Parser<B: Builder> {
 }
 
 impl<B: Builder> Parser<B> {
+    #[inline(never)]
     fn parse(toks: TokenVec, interner: DefaultStringInterner) -> (B::Output, Vec<Error>) {
         let mut p = Parser {
             toks,

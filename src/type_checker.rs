@@ -148,6 +148,7 @@ struct TypeChecker {
     disabled: IdxVec<bool, RetId>,
 }
 
+#[inline(never)]
 pub fn type_check(prog: Program) -> Vec<Error> {
     let mut tc = TypeChecker {
         prog,
