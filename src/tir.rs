@@ -1,5 +1,6 @@
 use std::ops::{Deref, DerefMut};
 use string_interner::{Sym, DefaultStringInterner};
+use smallvec::{SmallVec, smallvec};
 
 use crate::dep_vec::DepVec;
 use crate::source_info::SourceRange;
@@ -18,7 +19,7 @@ pub struct Stmt { pub root_expr: ExprId }
 #[derive(Debug)]
 pub struct AssignedDecl { pub root_expr: ExprId, pub decl_id: DeclId }
 #[derive(Debug)]
-pub struct DeclRef { pub args: Vec<ExprId>, pub decl_ref_id: DeclRefId }
+pub struct DeclRef { pub args: SmallVec<[ExprId; 2]>, pub decl_ref_id: DeclRefId }
 #[derive(Debug)]
 pub struct If { pub condition: ExprId, pub then_expr: ExprId, pub else_expr: ExprId }
 
@@ -40,12 +41,12 @@ impl<T> DerefMut for Expr<T> {
 #[derive(Debug)]
 pub struct Decl {
     pub name: Sym,
-    pub param_tys: Vec<Type>,
+    pub param_tys: SmallVec<[Type; 2]>,
     pub ret_ty: Type,
 }
 
 impl Decl {
-    fn new(name: Sym, param_tys: Vec<Type>, ret_ty: Type) -> Self {
+    fn new(name: Sym, param_tys: SmallVec<[Type; 2]>, ret_ty: Type) -> Self {
         Decl { name, param_tys, ret_ty }
     }
 }
@@ -192,39 +193,39 @@ impl builder::Builder for Builder {
         }
         for op in intern!("*", "/", "%", "+", "-") {
             for ty in numerics {
-                global_decls.push(Decl::new(op, vec![ty.clone(), ty.clone()], ty.clone()));
+                global_decls.push(Decl::new(op, smallvec![ty.clone(), ty.clone()], ty.clone()));
             }
         }
         for op in intern!("<", "<=", ">", ">=") {
             for ty in numerics {
-                global_decls.push(Decl::new(op, vec![ty.clone(), ty.clone()], Type::Bool));
+                global_decls.push(Decl::new(op, smallvec![ty.clone(), ty.clone()], Type::Bool));
             }
         }
         for op in intern!("==", "!=") {
             for ty in values {
-                global_decls.push(Decl::new(op, vec![ty.clone(), ty.clone()], Type::Bool));
+                global_decls.push(Decl::new(op, smallvec![ty.clone(), ty.clone()], Type::Bool));
             }
         }
         for op in intern!("&", "|") {
             for ty in integers {
-                global_decls.push(Decl::new(op, vec![ty.clone(), ty.clone()], ty.clone()));
+                global_decls.push(Decl::new(op, smallvec![ty.clone(), ty.clone()], ty.clone()));
             }
         }
         for op in intern!("&=", "|=") {
             for ty in integers {
-                global_decls.push(Decl::new(op, vec![ty.clone(), ty.clone()], Type::Void));
+                global_decls.push(Decl::new(op, smallvec![ty.clone(), ty.clone()], Type::Void));
             }
         }
         for op in intern!("&&", "||") {
-            global_decls.push(Decl::new(op, vec![Type::Bool, Type::Bool], Type::Bool));
+            global_decls.push(Decl::new(op, smallvec![Type::Bool, Type::Bool], Type::Bool));
         }
         let eq = interner.get_or_intern("=");
         for ty in values {
-            global_decls.push(Decl::new(eq, vec![ty.clone(), ty.clone()], Type::Void));
+            global_decls.push(Decl::new(eq, smallvec![ty.clone(), ty.clone()], Type::Void));
         }
-        global_decls.push(Decl::new(interner.get_or_intern("pi"), Vec::new(), Type::f64()));
-        global_decls.push(Decl::new(interner.get_or_intern("abs"), vec![Type::f32()], Type::f64()));
-        global_decls.push(Decl::new(interner.get_or_intern("panic"), Vec::new(), Type::Never));
+        global_decls.push(Decl::new(interner.get_or_intern("pi"), SmallVec::new(), Type::f64()));
+        global_decls.push(Decl::new(interner.get_or_intern("abs"), smallvec![Type::f32()], Type::f64()));
+        global_decls.push(Decl::new(interner.get_or_intern("panic"), SmallVec::new(), Type::Never));
 
         // Create the void expression
         let mut levels = IdxVec::new();
@@ -282,7 +283,7 @@ impl builder::Builder for Builder {
         self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name: self.interner.get_or_intern(op.symbol()), num_arguments: 2 });
         let level = self.decl_refs.insert(
             &[self.levels[lhs], self.levels[rhs]],
-            Expr { id, data: DeclRef { args: vec![lhs, rhs], decl_ref_id } },
+            Expr { id, data: DeclRef { args: smallvec![lhs, rhs], decl_ref_id } },
         );
         self.levels.push(level);
         self.source_ranges.push(range);
@@ -291,7 +292,7 @@ impl builder::Builder for Builder {
     }
 
     fn stored_decl(&mut self, name: Sym, root_expr: ExprId, range: SourceRange) {
-        let decl_id = self.local_decls.push(Decl { name: name, param_tys: Vec::new(), ret_ty: Type::Error });
+        let decl_id = self.local_decls.push(Decl { name: name, param_tys: SmallVec::new(), ret_ty: Type::Error });
         let decl_id = DeclId::Local(decl_id);
         let level = self.assigned_decls.insert(&[self.levels[root_expr]], AssignedDecl { root_expr, decl_id });
         self.source_ranges.push(range);
@@ -353,7 +354,7 @@ impl builder::Builder for Builder {
         stack.decls.truncate(scope.previous_decls);
     }
 
-    fn begin_computed_decl(&mut self, name: Sym, param_names: Vec<Sym>, param_tys: Vec<Type>, ret_ty: Type, proto_range: SourceRange) {
+    fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Type, proto_range: SourceRange) {
         assert_eq!(param_names.len(), param_tys.len());
         let decl_id = self.local_decls.push(Decl { name: name, param_tys: param_tys.clone(), ret_ty: ret_ty.clone() });
         let decl_id = DeclId::Local(decl_id);
@@ -365,7 +366,7 @@ impl builder::Builder for Builder {
         decl_state.decls.push(local_decl);
         // Add parameters to scope
         for (&name, ty) in param_names.iter().zip(&param_tys) {
-            let id = self.local_decls.push(Decl { name, param_tys: Vec::new(), ret_ty: ty.clone() });
+            let id = self.local_decls.push(Decl { name, param_tys: SmallVec::new(), ret_ty: ty.clone() });
             decl_state.decls.push(LocalDecl { name, level: 0, decl: DeclId::Local(id) });
         }
         self.comp_decl_stack.push(decl_state);
@@ -375,7 +376,7 @@ impl builder::Builder for Builder {
         self.comp_decl_stack.pop().unwrap();
     }
 
-    fn decl_ref(&mut self, name: Sym, arguments: Vec<ExprId>, range: SourceRange) -> ExprId {
+    fn decl_ref(&mut self, name: Sym, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
 
         let mut decl: Option<(u32, DeclId)> = None;

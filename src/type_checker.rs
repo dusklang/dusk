@@ -1,3 +1,5 @@
+use smallvec::{SmallVec, smallvec};
+
 use crate::error::Error;
 use crate::tir::{Program, Decl};
 use crate::builder::{ExprId, DeclId, DeclRefId, RetId};
@@ -20,7 +22,7 @@ impl LiteralType {
 #[derive(Debug, Default, Clone)]
 struct ConstraintList {
     literal: Option<LiteralType>,
-    one_of: Vec<Type>,
+    one_of: SmallVec<[Type; 1]>,
     preferred_type: Option<Type>,
 }
 
@@ -51,15 +53,15 @@ impl ConstraintList {
 
     fn set_to(&mut self, ty: Type) {
         // If we're never, we should stay never.
-        if self.one_of != &[Type::Never] {
-            self.one_of = vec![ty];
+        if self.one_of.as_slice() != &[Type::Never] {
+            self.one_of = smallvec![ty];
         }
     }
 
     fn intersect_with(&self, other: &ConstraintList) -> ConstraintList {
         let mut constraints = ConstraintList::default();
 
-        fn filtered_tys(tys: &[Type], mut f: impl FnMut(&Type) -> bool) -> Vec<Type> {
+        fn filtered_tys(tys: &[Type], mut f: impl FnMut(&Type) -> bool) -> SmallVec<[Type; 1]> {
             tys.iter().filter_map(|ty| 
                     if f(ty) { 
                         Some(ty.clone())
@@ -71,9 +73,9 @@ impl ConstraintList {
         }
         match (self.literal, &self.one_of, other.literal, &other.one_of) {
             (None, lhs, None, rhs) => {
-                if lhs == &[Type::Never] {
+                if lhs.as_slice() == &[Type::Never] {
                     constraints.one_of = rhs.clone();
-                } else if rhs == &[Type::Never] {
+                } else if rhs.as_slice() == &[Type::Never] {
                     constraints.one_of = lhs.clone();
                 } else {
                     for ty in lhs {
@@ -84,7 +86,7 @@ impl ConstraintList {
                 }
             },
             (Some(lhs_lit), lhs, None, rhs) | (None, rhs, Some(lhs_lit), lhs) => {
-                if rhs == &[Type::Never] {
+                if rhs.as_slice() == &[Type::Never] {
                     constraints.literal = Some(lhs_lit);
                     constraints.one_of = lhs.clone();
                 } else {
@@ -168,7 +170,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
     ]);
 
     // Assign the type of the void expression to be void.
-    tc.constraints[tc.prog.void_expr].one_of = vec![Type::Void];
+    tc.constraints[tc.prog.void_expr].one_of = smallvec![Type::Void];
     tc.types[tc.prog.void_expr] = Type::Void;
 
     // Pass 1: propagate info down from leaves to roots
@@ -241,7 +243,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             use LiteralType::*;
 
             let constraints = &mut tc.constraints[item.id];
-            constraints.one_of = vec![Type::Never];
+            constraints.one_of = smallvec![Type::Never];
             tc.types[item.id] = Type::Never;
 
             match tc.constraints[item.expr].can_unify_to(&item.ty) {
@@ -322,7 +324,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                         .adding_primary_range(tc.prog.source_ranges[item.id].clone(), "expression here")
                 );
                 for &arg in &item.args {
-                    tc.constraints[arg].one_of = vec![Type::Error];
+                    tc.constraints[arg].one_of = smallvec![Type::Error];
                 }
                 None
             };
@@ -333,7 +335,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             if constraints.can_unify_to(&item.ty).is_ok() {
                 constraints.set_to(item.ty.clone())
             } else {
-                constraints.one_of = Vec::new();
+                constraints.one_of = SmallVec::new();
             }
         }
         for item in tc.prog.ifs.get_level(level) {

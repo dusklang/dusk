@@ -1,4 +1,5 @@
 use string_interner::{DefaultStringInterner, Sym};
+use smallvec::SmallVec;
 
 use crate::token::{TokenVec, TokenKind, Token};
 use crate::builder::{ExprId, ScopeId, BinOp, Builder};
@@ -101,7 +102,7 @@ impl<B: Builder> Parser<B> {
             },
             &Ident(name) => {
                 let name_range = self.cur().range.clone();
-                let mut args = Vec::new();
+                let mut args = SmallVec::new();
                 let mut end_range = name_range.clone();
                 if let TokenKind::LeftParen = self.next().kind {
                     self.next();
@@ -145,8 +146,9 @@ impl<B: Builder> Parser<B> {
     }
 
     fn try_parse_expr(&mut self) -> Result<ExprId, TokenKind> {
-        let mut expr_stack = Vec::new();
-        let mut op_stack: Vec<BinOp> = Vec::new();
+        const INLINE: usize = 5;
+        let mut expr_stack = SmallVec::<[ExprId; INLINE]>::new();
+        let mut op_stack = SmallVec::<[BinOp; INLINE]>::new();
         expr_stack.push(self.try_parse_term()?);
 
         // It's kind of silly that this is a macro, but I'm not aware of any other
@@ -304,8 +306,8 @@ impl<B: Builder> Parser<B> {
             panic!("expected identifier after 'fn'")
         };
         proto_range = source_info::concat(proto_range, self.cur().range.clone());
-        let mut param_names = Vec::new();
-        let mut param_tys = Vec::new();
+        let mut param_names = SmallVec::new();
+        let mut param_tys = SmallVec::new();
         if let TokenKind::LeftParen = self.next().kind {
             self.next();
             while let &TokenKind::Ident(name) = self.cur().kind {

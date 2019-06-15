@@ -1,4 +1,5 @@
 use string_interner::{DefaultStringInterner, Sym};
+use smallvec::{SmallVec, smallvec};
 
 use crate::index_vec::{Idx, IdxVec};
 use crate::builder::{self, BinOp, ExprId, ScopeId, DeclRefId};
@@ -9,7 +10,7 @@ pub enum Expr {
     Void,
     IntLit { lit: u64 },
     DecLit { lit: f64 },
-    DeclRef { arguments: Vec<ExprId>, id: DeclRefId },
+    DeclRef { arguments: SmallVec<[ExprId; 2]>, id: DeclRefId },
     If { condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId> },
     Ret { expr: ExprId }
 }
@@ -53,7 +54,7 @@ impl builder::Builder for Builder {
     }
     fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId {
         let name = self.interner.get_or_intern(op.symbol());
-        self.decl_ref(name, vec![lhs, rhs], range)
+        self.decl_ref(name, smallvec![lhs, rhs], range)
     }
     fn stored_decl(&mut self, name: Sym, root_expr: ExprId, range: SourceRange) {}
     fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
@@ -74,13 +75,13 @@ impl builder::Builder for Builder {
         let scope = self.scope_stack.pop().unwrap();
         self.terminal_exprs[scope] = terminal_expr;
     }
-    fn begin_computed_decl(&mut self, name: Sym, param_names: Vec<Sym>, param_tys: Vec<Type>, ret_ty: Type, proto_range: SourceRange) {
+    fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Type, proto_range: SourceRange) {
 
     }
     fn end_computed_decl(&mut self) {
 
     }
-    fn decl_ref(&mut self, name: Sym, arguments: Vec<ExprId>, range: SourceRange) -> ExprId {
+    fn decl_ref(&mut self, name: Sym, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
         let decl_ref_id = DeclRefId::new(self.num_decl_refs);
         self.num_decl_refs += 1;
         self.exprs.push(Expr::DeclRef { arguments, id: decl_ref_id })

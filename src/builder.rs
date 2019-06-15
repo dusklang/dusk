@@ -1,4 +1,5 @@
 use string_interner::{DefaultStringInterner, Sym};
+use smallvec::SmallVec;
 
 use crate::index_vec::Idx;
 use crate::source_info::SourceRange;
@@ -107,9 +108,9 @@ pub trait Builder {
     fn if_expr(&mut self, condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId>, range: SourceRange) -> ExprId;
     fn begin_scope(&mut self) -> ScopeId;
     fn end_scope(&mut self, stmts: &[ExprId], terminal_expr: ExprId);
-    fn begin_computed_decl(&mut self, name: Sym, param_names: Vec<Sym>, param_tys: Vec<Type>, ret_ty: Type, proto_range: SourceRange);
+    fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Type, proto_range: SourceRange);
     fn end_computed_decl(&mut self);
-    fn decl_ref(&mut self, name: Sym, arguments: Vec<ExprId>, range: SourceRange) -> ExprId;
+    fn decl_ref(&mut self, name: Sym, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId;
     fn get_range(&self, id: ExprId) -> SourceRange;
     fn terminal_expr(&self, scope: ScopeId) -> ExprId;
     fn output(self) -> Self::Output;
