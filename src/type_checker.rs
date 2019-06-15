@@ -383,10 +383,10 @@ pub fn type_check(prog: Program) -> Vec<Error> {
 
     println!("Types: {:#?}", tc.types);
     println!("Returns disabled: {:#?}", tc.disabled);
+    //println!("Decl types: {:#?}", tc.prog.local_decls);
+    //println!("Constraints: {:#?}", tc.constraints);
 
     std::mem::forget(tc);
 
-    // println!("Decl types: {:#?}", tc.prog.local_decls);
-    //println!("Constraints: {:#?}", tc.constraints);
     errs
 }
