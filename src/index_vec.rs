@@ -10,9 +10,9 @@ pub trait Idx: Copy + 'static + Eq + Debug {
 }
 
 macro_rules! newtype_index {
-    ($name:ident) => {
+    ($name:ident $($access:tt)*) => {
         #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
-        pub struct $name(usize);
+        $($access)* struct $name(usize);
 
         impl Idx for $name {
             fn new(raw: usize) -> Self { $name(raw) }

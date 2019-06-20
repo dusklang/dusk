@@ -5,12 +5,12 @@ use crate::index_vec::Idx;
 use crate::source_info::SourceRange;
 use crate::ty::Type;
 
-newtype_index!(ExprId);
-newtype_index!(DeclRefId);
-newtype_index!(GlobalDeclId);
-newtype_index!(LocalDeclId);
-newtype_index!(RetId);
-newtype_index!(ScopeId);
+newtype_index!(ExprId pub);
+newtype_index!(DeclRefId pub);
+newtype_index!(GlobalDeclId pub);
+newtype_index!(LocalDeclId pub);
+newtype_index!(RetId pub);
+newtype_index!(ScopeId pub);
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum DeclId {

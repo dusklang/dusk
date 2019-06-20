@@ -2,9 +2,13 @@ use string_interner::{DefaultStringInterner, Sym};
 use smallvec::{SmallVec, smallvec};
 
 use crate::index_vec::{Idx, IdxVec};
-use crate::builder::{self, BinOp, ExprId, ScopeId, DeclRefId};
+use crate::builder::{self, BinOp, ExprId, DeclId, ScopeId, DeclRefId};
 use crate::source_info::SourceRange;
 use crate::ty::Type;
+
+newtype_index!(InstrId);
+newtype_index!(BasicBlockId);
+newtype_index!(TerminationId);
 
 pub enum Expr {
     Void,
@@ -15,8 +19,20 @@ pub enum Expr {
     Ret { expr: ExprId }
 }
 
-pub enum Instr {
+/// An action to perform with a value
+pub enum ValueAction {
+    Set { arguments: SmallVec<[InstrId; 2]>, id: DeclRefId },
+    Ret,
+}
 
+pub enum Instr {
+    IntConst { lit: u64, expr: ExprId },
+    FloatConst { lit: f64, expr: ExprId },
+    Alloca { root_value: InstrId, decl: DeclId },
+    Get { arguments: SmallVec<[InstrId; 2]>, id: DeclRefId },
+    ValueAction { action: ValueAction, value: InstrId, expr: ExprId },
+    Terminate { action: TerminationId, value: InstrId, expr: ExprId },
+    CondBr { condition: InstrId, true_bb: BasicBlockId, false_bb: BasicBlockId },
 }
 
 pub struct Program {}
@@ -28,6 +44,9 @@ struct ScopeState {
 
 struct CompDeclState {
     scope_stack: Vec<ScopeState>,
+    code: IdxVec<Instr, InstrId>,
+    basic_blocks: IdxVec<InstrId, BasicBlockId>,
+    termination_actions: IdxVec<ValueAction, TerminationId>,
 }
 
 pub struct Builder {
@@ -103,6 +122,9 @@ impl builder::Builder for Builder {
         self.comp_decl_stack.push(
             CompDeclState {
                 scope_stack: Vec::new(),
+                code: IdxVec::new(),
+                basic_blocks: IdxVec::new(),
+                termination_actions: IdxVec::new(),
             }
         );
     }
