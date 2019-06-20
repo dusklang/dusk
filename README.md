@@ -10,21 +10,19 @@ Must-haves:
 - Optional type instead of null pointers or sentinels
 
 ## Arbitrary compile-time code execution
-The more I program, the more convinced I become that this is an essential feature of any serious programming language. The idea is pretty simple: as programmers our job is to solve problems using computers. So why not apply our problem-solving skills to the problems we experience every day as programmers?
+The more I program, the more convinced I become that this is an essential feature of any serious programming language. The idea is pretty simple: as programmers our job is to solve problems using computers. So why shouldn't we be able to apply our problem-solving skills to the problems we experience every day as programmers?
 
-This isn't just a theoretical discussion, thankfully. Just look at what is possible with languages that have it, like D, Zig and Jai. Code introspection, code generation, and custom tools are great examples of things made way better with compile-time code execution. However, I'd like to take the concept even further, enabling users to write things like:
+This isn't just a theoretical discussion anymore, either. Just look at what is possible with languages that have it, like D, Zig and Jai. Code introspection, code generation, and custom tools are great examples of things made way better with compile-time code execution. However, I'd like to take the concept even further, enabling users to write things like:
 - optimizations
 - backends
 - calling conventions
 - automated importers/exporters of APIs to/from other languages
 - primitive data abstractions like struct, class, enum, etc., with fine-grained control over their layout
 
-There may also be implementation-related benefits to thinking of types as mere compile-time evaluated expressions.
-
 ## Simple, stupid, modular compiler
-Taking advantage of the previous thing (arbitrary compile-time code execution), I hope we will be able to keep the compiler itself unusually simple and stable for a language as complex as Meda. Most of the complexity should be in user-level libraries. This would have numerous benefits, such as:
-- no dependencies
-- minimal new features needed in the compiler over time, freeing up compiler developers to fix bugs and optimize
+Taking arbitrary compile-time code execution to its logical conclusion, one could imagine an unusually simple and stable compiler for a language as complex as Meda. By allowing users to write code that fundamentally changes the way the compiler works, the burden of accommodating every imaginable use case of the language would be transferred onto the backs of library authors. Instead of stacking more and more features on to the language over time, the compiler would stay relatively stable. This would have numerous benefits, such as:
+- dependency-free compiler
+- few new features needed in the compiler over time, freeing up compiler developers to fix bugs and optimize
 - easier to port the compiler to new host platforms
 - easier to standardize the compiler
 - easier to write new compiler implementations
@@ -42,7 +40,7 @@ fn addOne(n: u8): u8 {
 }
 ```
 
-On first glance, it may seem like there's nothing worth talking about with regards this function. But what if you call it with the value `n = 255`? In C or C++, the result would overflow and the function would return 0. This is bad. In safer languages like Rust or Swift, your program would crash at runtime. This is arguably less bad, but it's still bad. Instead, what if we could statically guarantee that this condition will never happen? That's where refinement types come in. The above code wouldn't compile, hopefully with a helpful error message on the expression `n + 1` that says that overflow could occur if n == 255. To fix, we would have at least two options. The first option is to use control flow to guarantee that the expression is never executed in the exceptional case:
+This seems like a pretty simple function. But what if you call it with the value `n = 255`? In C or C++, the result would overflow and the function would return 0. This is bad. In safer languages like Rust or Swift, your program would crash at runtime. This is arguably less bad, but it's still bad. Instead, what if we could statically guarantee that this condition will never happen? That's where refinement types come in. The above code wouldn't compile, hopefully with a helpful error message on the expression `n + 1` that says that overflow could occur if n == 255. To fix, we would have at least two options. The first option is to use control flow to guarantee that the expression is never executed in the exceptional case:
 ```
 // Example #1
 fn addOne(n: u8): u8 {
@@ -65,7 +63,7 @@ fn addOne(n: u8): u8 {
 }
 ```
 
-In either case, the compiler should be smart enough to accept the code. Alternatively, we could choose to shift the responsibility of handling this case onto the caller of the function by adding a precondition to the interface:
+In either case, the compiler should be smart enough to accept the code. The second option is to shift the responsibility of handling this case onto the caller of the function by adding a precondition to the interface:
 ```
 fn addOne(n: u8): u8 where n < 'max {
     n + 1
@@ -74,4 +72,4 @@ fn addOne(n: u8): u8 where n < 'max {
 
 Then, as you'd expect, when the caller tries to pass in a value of `n` that may be equal to `u8.max`, they would get an error message.
 
-It's possible that this stuff will be too pedantic for general use. It's equally possible that it won't provide much tangible benefit due to limitations in what kinds of analysis are decidable at compile-time. I can't know until I've had the chance to use it for a real project.
+It's possible that this technology will be too pedantic for general use. It's equally possible that it won't provide much in the way of tangible benefits due to limitations in what kinds of analysis are decidable at compile-time. I'm also concerned about the feasibility of providing easy-to-understand error messages. I can't know for sure until I've had the chance to implement it and use it in a real project.
