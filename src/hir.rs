@@ -26,11 +26,15 @@ struct ScopeState {
     stmt_buffer: Option<ExprId>,
 }
 
+struct CompDeclState {
+    scope_stack: Vec<ScopeState>,
+}
+
 pub struct Builder {
     exprs: IdxVec<Expr, ExprId>,
     num_decl_refs: usize,
     terminal_exprs: IdxVec<ExprId, ScopeId>,
-    scope_stack: Vec<ScopeState>,
+    comp_decl_stack: Vec<CompDeclState>,
     void_expr: ExprId,
     interner: DefaultStringInterner,
 }
@@ -44,7 +48,7 @@ impl builder::Builder for Builder {
             exprs: IdxVec::new(),
             num_decl_refs: 0,
             terminal_exprs: IdxVec::new(),
-            scope_stack: Vec::new(),
+            comp_decl_stack: Vec::new(),
             void_expr,
             interner,
         }
@@ -71,7 +75,7 @@ impl builder::Builder for Builder {
         )
     }
     fn stmt(&mut self, expr: ExprId) {
-        let scope = self.scope_stack.last_mut().unwrap();
+        let scope = self.comp_decl_stack.last_mut().unwrap().scope_stack.last_mut().unwrap();
         if let Some(stmt) = scope.stmt_buffer {
             // Do something with the statement
         }
@@ -79,7 +83,7 @@ impl builder::Builder for Builder {
     }
     fn begin_scope(&mut self) -> ScopeId { 
         let id = self.terminal_exprs.push(self.void_expr());
-        self.scope_stack.push(
+        self.comp_decl_stack.last_mut().unwrap().scope_stack.push(
             ScopeState {
                 id,
                 stmt_buffer: None,
@@ -89,17 +93,21 @@ impl builder::Builder for Builder {
         id
     }
     fn end_scope(&mut self, has_terminal_expr: bool) {
-        let scope = self.scope_stack.pop().unwrap();
+        let scope = self.comp_decl_stack.last_mut().unwrap().scope_stack.pop().unwrap();
         if has_terminal_expr {
             let terminal_expr = scope.stmt_buffer.expect("must pass terminal expression via Builder::stmt()");
             self.terminal_exprs[scope.id] = terminal_expr;
         }
     }
     fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Type, proto_range: SourceRange) {
-
+        self.comp_decl_stack.push(
+            CompDeclState {
+                scope_stack: Vec::new(),
+            }
+        );
     }
     fn end_computed_decl(&mut self) {
-
+        self.comp_decl_stack.pop();
     }
     fn decl_ref(&mut self, name: Sym, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
         let decl_ref_id = DeclRefId::new(self.num_decl_refs);
