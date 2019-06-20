@@ -198,7 +198,8 @@ impl<B: Builder> Parser<B> {
                 TokenKind::If => {
                     let scope = self.builder.begin_scope();
                     let if_expr = self.parse_if();
-                    self.builder.end_scope(&[], if_expr);
+                    self.builder.stmt(if_expr);
+                    self.builder.end_scope(true);
                     Some(scope)
                 },
                 TokenKind::OpenCurly => Some(self.parse_scope()),
@@ -260,7 +261,6 @@ impl<B: Builder> Parser<B> {
     // Parses an open curly brace, then a list of nodes, then a closing curly brace.
     fn parse_scope(&mut self) -> ScopeId {
         let scope = self.builder.begin_scope();
-        let mut stmts = Vec::new();
         let mut last_was_expr = false;
         assert_eq!(self.cur().kind, &TokenKind::OpenCurly);
         self.next();
@@ -277,19 +277,14 @@ impl<B: Builder> Parser<B> {
                     // If the node was a standalone expression, make it a statement
                     if let Some(expr) = node {
                         last_was_expr = true;
-                        stmts.push(expr);
+                        self.builder.stmt(expr);
                     } else {
                         last_was_expr = false;
                     }
                 }
             }
         }
-        let terminal_expr = if last_was_expr {
-            stmts.pop().unwrap()
-        } else {
-            self.builder.void_expr()
-        };
-        self.builder.end_scope(&stmts, terminal_expr);
+        self.builder.end_scope(last_was_expr);
         scope
     }
 

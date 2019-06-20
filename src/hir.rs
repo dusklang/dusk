@@ -21,11 +21,16 @@ pub enum Instr {
 
 pub struct Program {}
 
+struct ScopeState {
+    id: ScopeId,
+    stmt_buffer: Option<ExprId>,
+}
+
 pub struct Builder {
     exprs: IdxVec<Expr, ExprId>,
     num_decl_refs: usize,
     terminal_exprs: IdxVec<ExprId, ScopeId>,
-    scope_stack: Vec<ScopeId>,
+    scope_stack: Vec<ScopeState>,
     void_expr: ExprId,
     interner: DefaultStringInterner,
 }
@@ -65,15 +70,30 @@ impl builder::Builder for Builder {
             Expr::If { condition, then_scope, else_scope }
         )
     }
+    fn stmt(&mut self, expr: ExprId) {
+        let scope = self.scope_stack.last_mut().unwrap();
+        if let Some(stmt) = scope.stmt_buffer {
+            // Do something with the statement
+        }
+        scope.stmt_buffer = Some(expr);
+    }
     fn begin_scope(&mut self) -> ScopeId { 
         let id = self.terminal_exprs.push(self.void_expr());
-        self.scope_stack.push(id);
+        self.scope_stack.push(
+            ScopeState {
+                id,
+                stmt_buffer: None,
+            }
+        );
 
         id
     }
-    fn end_scope(&mut self, stmts: &[ExprId], terminal_expr: ExprId) {
+    fn end_scope(&mut self, has_terminal_expr: bool) {
         let scope = self.scope_stack.pop().unwrap();
-        self.terminal_exprs[scope] = terminal_expr;
+        if has_terminal_expr {
+            let terminal_expr = scope.stmt_buffer.expect("must pass terminal expression via Builder::stmt()");
+            self.terminal_exprs[scope.id] = terminal_expr;
+        }
     }
     fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Type, proto_range: SourceRange) {
 

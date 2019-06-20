@@ -103,6 +103,7 @@ struct LocalDecl {
 struct ScopeState {
     id: ScopeId,
     previous_decls: usize,
+    stmt_buffer: Option<ExprId>,
 }
 
 struct CompDeclState {
@@ -332,6 +333,14 @@ impl builder::Builder for Builder {
         id
     }
 
+    fn stmt(&mut self, expr: ExprId) {
+        let scope_state = self.comp_decl_stack.last_mut().unwrap().scope_stack.last_mut().unwrap();
+        if let Some(stmt) = scope_state.stmt_buffer {
+            self.stmts.push(Stmt { root_expr: stmt });
+        }
+        scope_state.stmt_buffer = Some(expr);
+    }
+
     fn begin_scope(&mut self) -> ScopeId {
         let scope = self.terminal_exprs.push(self.void_expr());
         let stack = self.comp_decl_stack.last_mut().unwrap();
@@ -339,18 +348,21 @@ impl builder::Builder for Builder {
             ScopeState {
                 id: scope,
                 previous_decls: stack.decls.len(),
+                stmt_buffer: None,
             }
         );
         scope
     }
 
-    fn end_scope(&mut self, stmts: &[ExprId], terminal_expr: ExprId) {
-        for &stmt in stmts  {
-            self.stmts.push(Stmt { root_expr: stmt });
-        }
+    fn end_scope(&mut self, has_terminal_expr: bool) {
         let stack = self.comp_decl_stack.last_mut().unwrap();
         let scope = stack.scope_stack.pop().unwrap();
-        self.terminal_exprs[scope.id] = terminal_expr;
+        if has_terminal_expr {
+            let terminal_expr = scope.stmt_buffer.expect("must pass terminal expression via Builder::stmt()");
+            self.terminal_exprs[scope.id] = terminal_expr;
+        } else if let Some(stmt) = scope.stmt_buffer {
+            self.stmts.push(Stmt { root_expr: stmt });
+        }
         stack.decls.truncate(scope.previous_decls);
     }
 
