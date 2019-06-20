@@ -112,6 +112,6 @@ pub trait Builder {
     fn end_computed_decl(&mut self);
     fn decl_ref(&mut self, name: Sym, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId;
     fn get_range(&self, id: ExprId) -> SourceRange;
-    fn terminal_expr(&self, scope: ScopeId) -> ExprId;
+    fn get_terminal_expr(&self, scope: ScopeId) -> ExprId;
     fn output(self) -> Self::Output;
 }

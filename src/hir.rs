@@ -88,7 +88,7 @@ impl builder::Builder for Builder {
     }
     // TODO: Refactor so this method doesn't need to be exposed by HIR
     fn get_range(&self, id: ExprId) -> SourceRange { 0..0 }
-    fn terminal_expr(&self, scope: ScopeId) -> ExprId { 
+    fn get_terminal_expr(&self, scope: ScopeId) -> ExprId { 
         self.terminal_exprs[scope]
     }
     fn output(self) -> Program {

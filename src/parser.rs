@@ -295,7 +295,7 @@ impl<B: Builder> Parser<B> {
 
     fn parse_scope_expr(&mut self) -> ExprId {
         let scope = self.parse_scope();
-        self.builder.terminal_expr(scope)
+        self.builder.get_terminal_expr(scope)
     }
 
     fn parse_comp_decl(&mut self) {

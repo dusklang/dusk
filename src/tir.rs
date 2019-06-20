@@ -414,7 +414,7 @@ impl builder::Builder for Builder {
         self.source_ranges[id].clone()
     }
 
-    fn terminal_expr(&self, scope: ScopeId) -> ExprId {
+    fn get_terminal_expr(&self, scope: ScopeId) -> ExprId {
         self.terminal_exprs[scope]
     }
 
