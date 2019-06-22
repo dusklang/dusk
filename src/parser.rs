@@ -134,7 +134,9 @@ impl<B: Builder> Parser<B> {
             },
             TokenKind::Do => {
                 self.next();
-                Ok(self.parse_scope_expr())
+                let scope = self.parse_scope();
+                self.builder.do_expr(scope);
+                Ok(self.builder.get_terminal_expr(scope))
             },
             TokenKind::If => Ok(self.parse_if()),
             TokenKind::Return => {

@@ -107,6 +107,7 @@ pub trait Builder {
     fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId;
     fn if_expr(&mut self, condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId>, range: SourceRange) -> ExprId;
     fn stmt(&mut self, expr: ExprId);
+    fn do_expr(&mut self, scope: ScopeId) {}
     fn begin_scope(&mut self) -> ScopeId;
     fn end_scope(&mut self, has_terminal_expr: bool);
     fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Type, proto_range: SourceRange);
