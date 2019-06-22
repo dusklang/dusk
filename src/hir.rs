@@ -19,19 +19,16 @@ pub enum Expr {
     Ret { expr: ExprId }
 }
 
-/// An action to perform with a value
-pub enum ValueAction {
-    Set { arguments: SmallVec<[InstrId; 2]>, id: DeclRefId },
-    Ret,
-}
-
 pub enum Instr {
+    Void,
     IntConst { lit: u64, expr: ExprId },
     FloatConst { lit: f64, expr: ExprId },
-    Alloca { root_value: InstrId, decl: DeclId },
+    Alloca { expr: ExprId },
     Get { arguments: SmallVec<[InstrId; 2]>, id: DeclRefId },
-    ValueAction { action: ValueAction, value: InstrId, expr: ExprId },
-    Terminate { action: TerminationId, value: InstrId, expr: ExprId },
+    Set { arguments: SmallVec<[InstrId; 2]>, id: DeclRefId, expr: ExprId },
+    Load { location: InstrId, expr: ExprId },
+    Store { location: InstrId, value: InstrId, expr: ExprId },
+    Ret { value: InstrId, expr: ExprId },
     CondBr { condition: InstrId, true_bb: BasicBlockId, false_bb: BasicBlockId },
 }
 
@@ -48,11 +45,18 @@ struct CompDeclState {
     scope_stack: Vec<ScopeState>,
 }
 
+// TODO: store IdxVec of these
+enum LocalDecl {
+    Stored { location: InstrId },
+    Computed
+}
+
+#[derive(Copy, Clone)]
 enum Item {
     Stmt(ExprId),
     // TODO: make do expressions real, actual expressions instead of just passthrough for the terminal expression contained within their scope
     HACK_AbsorbItemsFromDoScope(ScopeId),
-    StoredDecl(DeclId, ExprId),
+    StoredDecl(ExprId),
 }
 
 struct Scope {
@@ -76,6 +80,252 @@ pub struct Builder {
     interner: DefaultStringInterner,
 }
 
+/// What to do with a value
+#[derive(Clone)]
+enum DataDestination {
+    /// This value needs to be returned from the current function
+    Ret,
+    /// This value needs to be assigned to a particular declref
+    Set { arguments: SmallVec<[InstrId; 2]>, id: DeclRefId },
+    /// This value needs to be written to a particular memory location
+    Store { location: InstrId },
+    /// This value just needs to be read
+    Read,
+    /// This value is a statement and therefore will never be used
+    Stmt,
+}
+
+/// Where to go after the current value is computed (whether implicitly or explicitly, such as via a `break` in a loop)
+#[derive(Clone)]
+enum ControlDestination {
+    RetVoid,
+    Continue,
+    Unreachable,
+    Block(BasicBlockId),
+}
+
+#[derive(Clone)]
+struct Destination {
+    data: DataDestination,
+    control: ControlDestination,
+}
+
+#[derive(Clone)]
+struct Context {
+    main: Destination,
+}
+
+struct CompDeclBuilder<'a> {
+    builder: &'a Builder,
+    void_instr: InstrId,
+    code: IdxVec<Instr, InstrId>,
+    basic_blocks: IdxVec<InstrId, BasicBlockId>,
+}
+
+impl<'a> CompDeclBuilder<'a> {
+    fn new(builder: &'a Builder) -> Self {
+        let mut code = IdxVec::new();
+        let void_instr = code.push(Instr::Void);
+        let mut basic_blocks = IdxVec::new();
+        basic_blocks.push(InstrId::new(0));
+        CompDeclBuilder::<'a> {
+            builder,
+            void_instr,
+            code,
+            basic_blocks,
+        }
+    }
+
+    fn item(&mut self, item: Item) {
+        match item {
+            Item::Stmt(expr) => {
+                self.expr(
+                    expr,
+                    Context {
+                        main: Destination {
+                            data: DataDestination::Stmt,
+                            control: ControlDestination::Continue,
+                        }
+                    }
+                );
+            },
+            Item::HACK_AbsorbItemsFromDoScope(scope) => for &item in &self.builder.scopes[scope].items {
+                self.item(item);
+            },
+            Item::StoredDecl(expr) => {
+                let location = self.code.push(Instr::Alloca { expr });
+                self.expr(
+                    expr,
+                    Context {
+                        main: Destination {
+                            data: DataDestination::Store { location },
+                            control: ControlDestination::Continue,
+                        }
+                    }
+                );
+            },
+        }
+    }
+
+    fn void_instr(&self) -> InstrId { self.void_instr }
+
+    fn expr(&mut self, expr: ExprId, ctx: Context) -> InstrId {
+        let instr = match self.builder.exprs[expr] {
+            Expr::Void => self.void_instr(),
+            Expr::IntLit { lit } => self.code.push(Instr::IntConst { lit, expr }),
+            Expr::DecLit { lit } => self.code.push(Instr::FloatConst { lit, expr }),
+            Expr::DeclRef { ref arguments, id } => {
+                let mut instr_args = SmallVec::new();
+                instr_args.reserve(arguments.len());
+                for &argument in arguments {
+                    instr_args.push(
+                        self.expr(
+                            argument,
+                            Context {
+                                main: Destination {
+                                    data: DataDestination::Read,
+                                    control: ControlDestination::Continue,
+                                }
+                            }
+                        )
+                    );
+                }
+                self.code.push(
+                    Instr::Get { arguments: instr_args, id }
+                )
+            },
+            Expr::If { condition, then_scope, else_scope } => {
+                // Placeholders
+                let true_bb = self.basic_blocks.push(InstrId::new(0));
+                let false_bb = self.basic_blocks.push(InstrId::new(0));
+                let post_bb = if else_scope.is_some() {
+                    self.basic_blocks.push(InstrId::new(0))
+                } else {
+                    false_bb
+                };
+
+                let result_location = match (&ctx.main.data, else_scope) {
+                    (DataDestination::Read, Some(_)) => Some(
+                        self.code.push(Instr::Alloca { expr })
+                    ),
+                    _ => None,
+                };
+                let condition_instr = self.expr(
+                    condition,
+                    Context {
+                        main: Destination {
+                            data: DataDestination::Read,
+                            control: ControlDestination::Continue,
+                        }
+                    },
+                );
+                self.code.push(Instr::CondBr { condition: condition_instr, true_bb, false_bb });
+                self.basic_blocks[true_bb] = InstrId::new(self.code.len());
+                for &item in &self.builder.scopes[then_scope].items {
+                    self.item(item);
+                }
+                self.expr(
+                    self.builder.scopes[then_scope].terminal_expr,
+                    Context {
+                        main: Destination {
+                            data: if let Some(location) = result_location {
+                                DataDestination::Store { location }
+                            } else {
+                                ctx.main.data.clone()
+                            },
+                            control: match &ctx.main.control {
+                                ControlDestination::Continue => ControlDestination::Block(post_bb),
+                                x => x.clone(),
+                            }
+                        },
+                    }
+                );
+                if let Some(else_scope) = else_scope {
+                    self.basic_blocks[false_bb] = InstrId::new(self.code.len());
+                    for &item in &self.builder.scopes[else_scope].items {
+                        self.item(item);
+                    }
+                    self.expr(
+                        self.builder.scopes[else_scope].terminal_expr,
+                        Context {
+                            main: Destination {
+                                data: if let Some(location) = result_location {
+                                    DataDestination::Store { location }
+                                } else {
+                                    ctx.main.data.clone()
+                                },
+                                control: match &ctx.main.control {
+                                    ControlDestination::Continue => ControlDestination::Block(post_bb),
+                                    x => x.clone(),
+                                }
+                            },
+                        }
+                    );
+                }
+                self.basic_blocks[post_bb] = InstrId::new(self.code.len());
+                return match ctx.main.data {
+                    DataDestination::Read => if else_scope.is_some() {
+                        self.code.push(Instr::Load { location: result_location.unwrap(), expr })
+                    } else {
+                        self.void_instr()
+                    },
+                    DataDestination::Ret => if else_scope.is_some() {
+                        self.void_instr()
+                    } else {
+                        self.code.push(Instr::Ret { value: self.void_instr(), expr })
+                    },
+                    DataDestination::Set { arguments, id } => if else_scope.is_some() {
+                        self.void_instr()
+                    } else {
+                        self.code.push(Instr::Set { arguments, id, expr })
+                    },
+                    DataDestination::Store { location } => if else_scope.is_some() {
+                        self.void_instr()
+                    } else {
+                        self.code.push(Instr::Store { location, value: self.void_instr(), expr })
+                    },
+                    DataDestination::Stmt => self.void_instr(),
+                };
+            },
+            Expr::Ret { expr } => {
+                return self.expr(
+                    expr,
+                    Context {
+                        main: Destination {
+                            data: DataDestination::Ret,
+                            control: ctx.main.control,
+                        }
+                    }
+                );
+            }
+        };
+        // TODO: handle data destinations
+
+        instr
+    }
+
+    fn build(mut self, scope: ScopeId) -> CompDecl {
+        let scope = &self.builder.scopes[scope];
+        for &item in &scope.items {
+            self.item(item);
+        }
+        self.expr(
+            scope.terminal_expr,
+            Context {
+                main: Destination {
+                    data: DataDestination::Ret,
+                    control: ControlDestination::Unreachable,
+                }
+            }
+        );
+        CompDecl {
+            code: self.code,
+            basic_blocks: self.basic_blocks,
+        }
+    }
+}
+
+
 impl Builder {
     fn flush_stmt_buffer(&mut self) {
         let scope_state = self.comp_decl_stack.last_mut().unwrap().scope_stack.last_mut().unwrap();
@@ -84,20 +334,14 @@ impl Builder {
             scope_state.stmt_buffer = None;
         }
     }
+
     fn item(&mut self, item: Item) {
         let scope = self.comp_decl_stack.last().unwrap().scope_stack.last().unwrap().id;
         self.scopes[scope].items.push(item);
     }
 
     fn gen_comp_decl(&self, scope: ScopeId) -> CompDecl {
-        let mut func = CompDecl {
-            code: IdxVec::new(),
-            basic_blocks: IdxVec::new(),
-        };
-
-
-
-        func
+        CompDeclBuilder::new(&self).build(scope)
     }
 }
 
@@ -133,7 +377,7 @@ impl builder::Builder for Builder {
         self.flush_stmt_buffer();
         let id = LocalDeclId::new(self.num_local_decls);
         self.num_local_decls += 1;
-        self.item(Item::StoredDecl(DeclId::Local(id), root_expr));
+        self.item(Item::StoredDecl(root_expr));
     }
     fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
         self.exprs.push(Expr::Ret { expr })
