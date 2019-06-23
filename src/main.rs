@@ -21,10 +21,13 @@ fn main() {
         String::from("HelloWorld.meda"), 
         contents
     );
-    let (toks, interner, mut errs) = lexer::lex(&file.src, &mut file.lines);
+    let (toks, mut interner, mut errs) = lexer::lex(&file.src, &mut file.lines);
 
-    let (tir, other_errs) = parser::parse::<tir::Builder>(toks, interner);
-    errs.extend(other_errs);
+    let (tir, tir_errs) = parser::parse::<tir::Builder>(&toks, &mut interner);
+    errs.extend(tir_errs);
+    let (hir, hir_errs) = parser::parse::<hir::Builder>(&toks, &mut interner);
+    errs.extend(hir_errs);
+    println!("{:#?}", hir);
 
     errs.extend(type_checker::type_check(tir));
 

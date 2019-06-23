@@ -95,9 +95,9 @@ impl UnOp {
     }
 }
 
-pub trait Builder {
+pub trait Builder<'a> {
     type Output;
-    fn new(interner: DefaultStringInterner) -> Self;
+    fn new(interner: &'a mut DefaultStringInterner) -> Self;
     fn interner(&self) -> &DefaultStringInterner;
     fn void_expr(&self) -> ExprId;
     fn int_lit(&mut self, lit: u64, range: SourceRange) -> ExprId;

@@ -128,7 +128,7 @@ struct GlobalDeclRef {
     num_arguments: u32,
 }
 
-pub struct Builder {
+pub struct Builder<'a> {
     /// All integer literals in the entire program so far
     int_lits: Vec<Expr<IntLit>>,
     /// All decimal literals in the entire program so far
@@ -166,15 +166,15 @@ pub struct Builder {
     num_rets: usize,
     /// The terminal expression for each scope so far 
     /// (or the void expression if there is no terminal expression)
-    pub terminal_exprs: IdxVec<ExprId, ScopeId>,
+    terminal_exprs: IdxVec<ExprId, ScopeId>,
 
-    pub interner: DefaultStringInterner,
+    interner: &'a mut DefaultStringInterner,
 }
 
-impl builder::Builder for Builder {
+impl<'a> builder::Builder<'a> for Builder<'a> {
     type Output = Program;
 
-    fn new(mut interner: DefaultStringInterner) -> Self {
+    fn new(interner: &'a mut DefaultStringInterner) -> Self {
         let mut global_decls: IdxVec<Decl, GlobalDeclId> = IdxVec::new();
         // Integers, floats and bool
         let values = &[

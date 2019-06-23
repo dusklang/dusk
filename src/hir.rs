@@ -19,6 +19,7 @@ pub enum Expr {
     Ret { expr: ExprId }
 }
 
+#[derive(Debug)]
 pub enum Instr {
     Void,
     IntConst { lit: u64, expr: ExprId },
@@ -32,7 +33,10 @@ pub enum Instr {
     CondBr { condition: InstrId, true_bb: BasicBlockId, false_bb: BasicBlockId },
 }
 
-pub struct Program {}
+#[derive(Debug)]
+pub struct Program {
+    comp_decls: Vec<CompDecl>,
+}
 
 struct ScopeState {
     id: ScopeId,
@@ -64,12 +68,13 @@ struct Scope {
     terminal_expr: ExprId,
 }
 
+#[derive(Debug)]
 struct CompDecl {
     code: IdxVec<Instr, InstrId>,
     basic_blocks: IdxVec<InstrId, BasicBlockId>,
 }
 
-pub struct Builder {
+pub struct Builder<'a> {
     exprs: IdxVec<Expr, ExprId>,
     num_decl_refs: usize,
     num_local_decls: usize,
@@ -77,7 +82,7 @@ pub struct Builder {
     scopes: IdxVec<Scope, ScopeId>,
     comp_decl_stack: Vec<CompDeclState>,
     void_expr: ExprId,
-    interner: DefaultStringInterner,
+    interner: &'a mut DefaultStringInterner,
 }
 
 /// What to do with a value
@@ -116,7 +121,7 @@ struct Context {
 }
 
 struct CompDeclBuilder<'a> {
-    builder: &'a Builder,
+    builder: &'a Builder<'a>,
     void_instr: InstrId,
     code: IdxVec<Instr, InstrId>,
     basic_blocks: IdxVec<InstrId, BasicBlockId>,
@@ -326,7 +331,7 @@ impl<'a> CompDeclBuilder<'a> {
 }
 
 
-impl Builder {
+impl<'a> Builder<'a> {
     fn flush_stmt_buffer(&mut self) {
         let scope_state = self.comp_decl_stack.last_mut().unwrap().scope_stack.last_mut().unwrap();
         if let Some(stmt) = scope_state.stmt_buffer {
@@ -343,11 +348,17 @@ impl Builder {
     fn gen_comp_decl(&self, scope: ScopeId) -> CompDecl {
         CompDeclBuilder::new(&self).build(scope)
     }
+
+    fn decl_ref_no_name(&mut self, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
+        let decl_ref_id = DeclRefId::new(self.num_decl_refs);
+        self.num_decl_refs += 1;
+        self.exprs.push(Expr::DeclRef { arguments, id: decl_ref_id })
+    }
 }
 
-impl builder::Builder for Builder {
+impl<'a> builder::Builder<'a> for Builder<'a> {
     type Output = Program;
-    fn new(interner: DefaultStringInterner) -> Self {
+    fn new(interner: &'a mut DefaultStringInterner) -> Self {
         let mut exprs = IdxVec::new();
         let void_expr = exprs.push(Expr::Void);
         Self {
@@ -370,8 +381,7 @@ impl builder::Builder for Builder {
         self.exprs.push(Expr::DecLit { lit })
     }
     fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId {
-        let name = self.interner.get_or_intern(op.symbol());
-        self.decl_ref(name, smallvec![lhs, rhs], range)
+        self.decl_ref_no_name(smallvec![lhs, rhs], range)
     }
     fn stored_decl(&mut self, name: Sym, root_expr: ExprId, range: SourceRange) {
         self.flush_stmt_buffer();
@@ -442,9 +452,7 @@ impl builder::Builder for Builder {
         self.comp_decls.push(self.gen_comp_decl(scope));
     }
     fn decl_ref(&mut self, name: Sym, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
-        let decl_ref_id = DeclRefId::new(self.num_decl_refs);
-        self.num_decl_refs += 1;
-        self.exprs.push(Expr::DeclRef { arguments, id: decl_ref_id })
+        self.decl_ref_no_name(arguments, range)
     }
     // TODO: Refactor so this method doesn't need to be exposed by HIR
     fn get_range(&self, id: ExprId) -> SourceRange { 0..0 }
@@ -452,6 +460,8 @@ impl builder::Builder for Builder {
         self.scopes[scope].terminal_expr
     }
     fn output(self) -> Program {
-        Program { }
+        Program {
+            comp_decls: self.comp_decls,
+        }
     }
 }

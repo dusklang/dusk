@@ -8,20 +8,20 @@ use crate::error::Error;
 use crate::source_info::{self, SourceRange};
 
 #[inline]
-pub fn parse<B: Builder>(toks: TokenVec, interner: DefaultStringInterner) -> (B::Output, Vec<Error>) {
-    Parser::<B>::parse(toks, interner)
+pub fn parse<'a, B: Builder<'a>>(toks: &'a TokenVec, interner: &'a mut DefaultStringInterner) -> (B::Output, Vec<Error>) {
+    Parser::<'a, B>::parse(toks, interner)
 }
 
-struct Parser<B: Builder> {
-    toks: TokenVec,
+struct Parser<'a, B: Builder<'a>> {
+    toks: &'a TokenVec,
     builder: B,
     cur: usize,
     errs: Vec<Error>,
 }
 
-impl<B: Builder> Parser<B> {
+impl<'a, B: Builder<'a>> Parser<'a, B> {
     #[inline(never)]
-    fn parse(toks: TokenVec, interner: DefaultStringInterner) -> (B::Output, Vec<Error>) {
+    fn parse(toks: &'a TokenVec, interner: &'a mut DefaultStringInterner) -> (B::Output, Vec<Error>) {
         let mut p = Parser {
             toks,
             builder: B::new(interner),
