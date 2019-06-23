@@ -26,10 +26,11 @@ pub enum Instr {
     FloatConst { lit: f64, expr: ExprId },
     Alloca { expr: ExprId },
     Get { arguments: SmallVec<[InstrId; 2]>, id: DeclRefId },
-    Set { arguments: SmallVec<[InstrId; 2]>, id: DeclRefId, expr: ExprId },
+    Set { arguments: SmallVec<[InstrId; 2]>, id: DeclRefId, value: InstrId, expr: ExprId },
     Load { location: InstrId, expr: ExprId },
     Store { location: InstrId, value: InstrId, expr: ExprId },
     Ret { value: InstrId, expr: ExprId },
+    Br(BasicBlockId),
     CondBr { condition: InstrId, true_bb: BasicBlockId, false_bb: BasicBlockId },
 }
 
@@ -268,6 +269,8 @@ impl<'a> CompDeclBuilder<'a> {
                     );
                 }
                 self.basic_blocks[post_bb] = InstrId::new(self.code.len());
+
+                // It's ok to return early here because control destinations are handled above
                 return match ctx.main.data {
                     DataDestination::Read => if else_scope.is_some() {
                         self.code.push(Instr::Load { location: result_location.unwrap(), expr })
@@ -282,7 +285,7 @@ impl<'a> CompDeclBuilder<'a> {
                     DataDestination::Set { arguments, id } => if else_scope.is_some() {
                         self.void_instr()
                     } else {
-                        self.code.push(Instr::Set { arguments, id, expr })
+                        self.code.push(Instr::Set { arguments, id, value: self.void_instr(), expr })
                     },
                     DataDestination::Store { location } => if else_scope.is_some() {
                         self.void_instr()
@@ -304,9 +307,27 @@ impl<'a> CompDeclBuilder<'a> {
                 );
             }
         };
-        // TODO: handle data destinations
+        
+        match ctx.main.data {
+            DataDestination::Read => return instr,
+            DataDestination::Ret => return self.code.push(Instr::Ret { value: instr, expr }),
+            DataDestination::Set { arguments, id } => {
+                self.code.push(Instr::Set { arguments, id, value: instr, expr });
+            },
+            DataDestination::Store { location } => {
+                self.code.push(Instr::Store { location, value: instr, expr });
+            }
+            DataDestination::Stmt => {},
+        }
 
-        instr
+        // For Builder::void_expr()
+        use builder::Builder;
+        match ctx.main.control {
+            ControlDestination::Block(block) => self.code.push(Instr::Br(block)),
+            ControlDestination::Continue => instr,
+            ControlDestination::RetVoid => self.code.push(Instr::Ret { value: self.void_instr(), expr: self.builder.void_expr() }),
+            ControlDestination::Unreachable => self.void_instr(),
+        }
     }
 
     fn build(mut self, scope: ScopeId) -> CompDecl {
@@ -362,7 +383,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         let mut exprs = IdxVec::new();
         let void_expr = exprs.push(Expr::Void);
         Self {
-            exprs: IdxVec::new(),
+            exprs,
             num_decl_refs: 0,
             num_local_decls: 0,
             comp_decls: Vec::new(),
