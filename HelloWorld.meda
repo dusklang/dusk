@@ -1,3 +1,13 @@
-fn do_something_really_cool: u8 {
-    if 5 < 2 { 89 } else { 2 }
+fn do_something_really_cool: bool {
+    if 5 < 2 {
+        panic
+    } else {
+        24
+    } < if 24 > 25 {
+        23
+    } else if 45 >= 23423 {
+        4
+    } else {
+        0
+    }
 }

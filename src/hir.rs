@@ -10,6 +10,7 @@ newtype_index!(InstrId);
 newtype_index!(BasicBlockId);
 newtype_index!(TerminationId);
 
+#[derive(Debug)]
 pub enum Expr {
     Void,
     IntLit { lit: u64 },
@@ -39,11 +40,13 @@ pub struct Program {
     comp_decls: Vec<CompDecl>,
 }
 
+#[derive(Debug)]
 struct ScopeState {
     id: ScopeId,
     stmt_buffer: Option<ExprId>,
 }
 
+#[derive(Debug)]
 struct CompDeclState {
     has_scope: Option<ScopeId>,
     id: DeclId,
@@ -51,12 +54,13 @@ struct CompDeclState {
 }
 
 // TODO: store IdxVec of these
+#[derive(Debug)]
 enum LocalDecl {
     Stored { location: InstrId },
     Computed
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 enum Item {
     Stmt(ExprId),
     // TODO: make do expressions real, actual expressions instead of just passthrough for the terminal expression contained within their scope
@@ -64,6 +68,7 @@ enum Item {
     StoredDecl(ExprId),
 }
 
+#[derive(Debug)]
 struct Scope {
     items: Vec<Item>,
     terminal_expr: ExprId,
@@ -75,6 +80,7 @@ struct CompDecl {
     basic_blocks: IdxVec<InstrId, BasicBlockId>,
 }
 
+#[derive(Debug)]
 pub struct Builder<'a> {
     exprs: IdxVec<Expr, ExprId>,
     num_decl_refs: usize,
@@ -201,7 +207,7 @@ impl<'a> CompDeclBuilder<'a> {
                 )
             },
             Expr::If { condition, then_scope, else_scope } => {
-                // Placeholders
+                // At this point we don't know where these basic blocks are supposed to begin, so make them 0 for now
                 let true_bb = self.basic_blocks.push(InstrId::new(0));
                 let false_bb = self.basic_blocks.push(InstrId::new(0));
                 let post_bb = if else_scope.is_some() {
@@ -436,7 +442,9 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         );
         let comp_decl = self.comp_decl_stack.last_mut().unwrap();
         assert!(!comp_decl.scope_stack.is_empty() || comp_decl.has_scope.is_none(), "Can't add multiple top-level scopes to a computed decl");
-        comp_decl.has_scope = Some(id);
+        if comp_decl.scope_stack.is_empty() {
+            comp_decl.has_scope = Some(id);
+        }
 
         comp_decl.scope_stack.push(
             ScopeState {
