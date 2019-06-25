@@ -1,8 +1,17 @@
 fn do_something_really_cool: bool {
+    /*
+    fn do_some_really_expensive_work {}
+    fn other_stuff {}
     if 5 < 2 {
         panic
     } else {
-        do { 24 }
+        the_results_of_doing_some_very_expensive_work := do {
+            other_stuff
+            do_some_really_expensive_work
+            24
+        }
+        other_stuff
+        the_results_of_doing_some_very_expensive_work
     } < if 24 > 25 {
         23
     } else if 45 >= 23423 {
@@ -10,4 +19,6 @@ fn do_something_really_cool: bool {
     } else {
         0
     }
+    */
+    return return return return 5 < 2
 }

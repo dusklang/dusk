@@ -9,7 +9,6 @@ newtype_index!(ExprId pub);
 newtype_index!(DeclRefId pub);
 newtype_index!(GlobalDeclId pub);
 newtype_index!(LocalDeclId pub);
-newtype_index!(RetId pub);
 newtype_index!(ScopeId pub);
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
