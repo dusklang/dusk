@@ -167,7 +167,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
 
     // Extend arrays as needed so they all have the same number of levels.
     let levels = dep_vec::unify_sizes(&mut [
-        &mut tc.prog.assigned_decls, &mut tc.prog.decl_refs, &mut tc.prog.rets, &mut tc.prog.ifs,
+        &mut tc.prog.assigned_decls, &mut tc.prog.decl_refs, &mut tc.prog.rets, &mut tc.prog.ifs, &mut tc.prog.dos,
     ]);
 
     // Assign the type of the void expression to be void.
@@ -217,7 +217,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             tc.prog.overloads[item.decl_ref_id].retain(|&overload| {
                 assert_eq!(get_decl(overload).param_tys.len(), item.args.len());
                 for (constraints, ty) in item.args.iter().map(|&arg| &constraints[arg]).zip(&get_decl(overload).param_tys) {
-                    if let Err(_) = constraints.can_unify_to(ty) { return false; }
+                    if constraints.can_unify_to(ty).is_err() { return false; }
                 }
                 true
             });
@@ -258,7 +258,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             }
         }
         for item in tc.prog.ifs.get_level(level) {
-            if let Err(_) = tc.constraints[item.condition].can_unify_to(&Type::Bool) {
+            if tc.constraints[item.condition].can_unify_to(&Type::Bool).is_err() {
                 panic!("Expected boolean condition in if expression");
             }
             let constraints = tc.constraints[item.then_expr].intersect_with(&tc.constraints[item.else_expr]);
@@ -267,10 +267,13 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             }
             tc.constraints[item.id] = constraints;
         }
+        for item in tc.prog.dos.get_level(level) {
+            tc.constraints[item.id] = tc.constraints[item.terminal_expr].clone();
+        }
     }
     for item in &tc.prog.stmts {
         let constraints = &mut tc.constraints[item.root_expr];
-        if let Err(_) = constraints.can_unify_to(&Type::Void) {
+        if constraints.can_unify_to(&Type::Void).is_err() {
             panic!("standalone expressions must return void");
         }
         constraints.set_to(Type::Void);
@@ -354,6 +357,19 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             tc.types[item.id] = ty.clone();
             tc.constraints[item.then_expr].set_to(ty.clone());
             tc.constraints[item.else_expr].set_to(ty);
+        }
+        for item in tc.prog.dos.get_level(level) {
+            let ty = if tc.constraints[item.id].one_of.len() != 1 {
+                errs.push(
+                    Error::new("ambiguous type for do expression")
+                        .adding_primary_range(tc.prog.source_ranges[item.id].clone(), "expression here")
+                );
+                Type::Error
+            } else {
+                tc.constraints[item.id].one_of[0].clone()
+            };
+            tc.types[item.id] = ty.clone();
+            tc.constraints[item.terminal_expr].set_to(ty);
         }
     }
     for item in &tc.prog.int_lits {

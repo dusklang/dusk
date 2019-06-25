@@ -2,7 +2,7 @@ fn do_something_really_cool: bool {
     if 5 < 2 {
         panic
     } else {
-        24
+        do { 24 }
     } < if 24 > 25 {
         23
     } else if 45 >= 23423 {

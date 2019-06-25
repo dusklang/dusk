@@ -17,6 +17,8 @@ pub struct Ret { pub expr: ExprId, pub ty: Type, pub ret_id: RetId }
 #[derive(Debug)]
 pub struct Stmt { pub root_expr: ExprId }
 #[derive(Debug)]
+pub struct Do { pub terminal_expr: ExprId }
+#[derive(Debug)]
 pub struct AssignedDecl { pub root_expr: ExprId, pub decl_id: DeclId }
 #[derive(Debug)]
 pub struct DeclRef { pub args: SmallVec<[ExprId; 2]>, pub decl_ref_id: DeclRefId }
@@ -59,6 +61,8 @@ pub struct Program {
     pub dec_lits: Vec<Expr<DecLit>>,
     /// All statements in the entire program
     pub stmts: Vec<Stmt>,
+    /// All do expressions in the entire program
+    pub dos: DepVec<Expr<Do>>,
     /// All assigned decls in the entire program
     pub assigned_decls: DepVec<AssignedDecl>,
     /// All decl refs in the entire program
@@ -135,6 +139,8 @@ pub struct Builder<'a> {
     dec_lits: Vec<Expr<DecLit>>,
     /// All statements in the entire program so far
     stmts: Vec<Stmt>,
+    /// All do expressions in the entire program so far
+    dos: DepVec<Expr<Do>>,
     /// All assigned decls in the entire program so far
     assigned_decls: DepVec<AssignedDecl>,
     /// All decl refs in the entire program so far
@@ -238,6 +244,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             int_lits: Vec::new(),
             dec_lits: Vec::new(),
             stmts: Vec::new(),
+            dos: DepVec::new(),
             assigned_decls: DepVec::new(),
             decl_refs: DepVec::new(),
             rets: DepVec::new(),
@@ -341,6 +348,19 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         scope_state.stmt_buffer = Some(expr);
     }
 
+    fn do_expr(&mut self, scope: ScopeId) -> ExprId {
+        let id = ExprId::new(self.levels.len());
+        let terminal_expr = self.terminal_exprs[scope];
+        let level = self.dos.insert(
+            &[self.levels[terminal_expr]],
+            Expr { id, data: Do { terminal_expr } }
+        );
+        self.levels.push(level);
+        self.source_ranges.push(0..0);
+
+        id
+    }
+
     fn begin_scope(&mut self) -> ScopeId {
         let scope = self.terminal_exprs.push(self.void_expr());
         let stack = self.comp_decl_stack.last_mut().unwrap();
@@ -441,6 +461,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             int_lits: self.int_lits,
             dec_lits: self.dec_lits,
             stmts: self.stmts,
+            dos: self.dos,
             assigned_decls: self.assigned_decls,
             decl_refs: self.decl_refs,
             rets: self.rets,

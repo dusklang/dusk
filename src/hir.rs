@@ -16,6 +16,7 @@ pub enum Expr {
     IntLit { lit: u64 },
     DecLit { lit: f64 },
     DeclRef { arguments: SmallVec<[ExprId; 2]>, id: DeclRefId },
+    Do { scope: ScopeId },
     If { condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId> },
     Ret { expr: ExprId }
 }
@@ -63,8 +64,6 @@ enum LocalDecl {
 #[derive(Copy, Clone, Debug)]
 enum Item {
     Stmt(ExprId),
-    // TODO: make do expressions real, actual expressions instead of just passthrough for the terminal expression contained within their scope
-    HACK_AbsorbItemsFromDoScope(ScopeId),
     StoredDecl(ExprId),
 }
 
@@ -161,9 +160,6 @@ impl<'a> CompDeclBuilder<'a> {
                     }
                 );
             },
-            Item::HACK_AbsorbItemsFromDoScope(scope) => for &item in &self.builder.scopes[scope].items {
-                self.item(item);
-            },
             Item::StoredDecl(expr) => {
                 let location = self.code.push(Instr::Alloca { expr });
                 self.expr(
@@ -205,6 +201,13 @@ impl<'a> CompDeclBuilder<'a> {
                 self.code.push(
                     Instr::Get { arguments: instr_args, id }
                 )
+            },
+            Expr::Do { scope } => {
+                let scope = &self.builder.scopes[scope];
+                for &item in &scope.items {
+                    self.item(item);
+                }
+                return self.expr(scope.terminal_expr, ctx);
             },
             Expr::If { condition, then_scope, else_scope } => {
                 // At this point we don't know where these basic blocks are supposed to begin, so make them 0 for now
@@ -326,8 +329,9 @@ impl<'a> CompDeclBuilder<'a> {
             DataDestination::Stmt => {},
         }
 
-        // For Builder::void_expr()
+        // For the use of Builder::void_expr() below:
         use builder::Builder;
+
         match ctx.main.control {
             ControlDestination::Block(block) => self.code.push(Instr::Br(block)),
             ControlDestination::Continue => instr,
@@ -429,9 +433,8 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         let scope = self.comp_decl_stack.last_mut().unwrap().scope_stack.last_mut().unwrap();
         scope.stmt_buffer = Some(expr);
     }
-    fn do_expr(&mut self, scope: ScopeId) {
-        self.flush_stmt_buffer();
-        self.item(Item::HACK_AbsorbItemsFromDoScope(scope));
+    fn do_expr(&mut self, scope: ScopeId) -> ExprId {
+        self.exprs.push(Expr::Do { scope })
     }
     fn begin_scope(&mut self) -> ScopeId { 
         let id = self.scopes.push(
