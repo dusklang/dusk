@@ -162,7 +162,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
 
     // Extend arrays as needed so they all have the same number of levels.
     let levels = dep_vec::unify_sizes(&mut [
-        &mut tc.prog.assigned_decls, &mut tc.prog.decl_refs, &mut tc.prog.rets, &mut tc.prog.ifs, &mut tc.prog.dos,
+        &mut tc.prog.assigned_decls, &mut tc.prog.assignments, &mut tc.prog.decl_refs, &mut tc.prog.rets, &mut tc.prog.ifs, &mut tc.prog.dos,
     ]);
 
     // Assign the type of the void expression to be void.
@@ -196,6 +196,10 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                 DeclId::Global(id) => &mut tc.prog.global_decls[id],
                 DeclId::Local(id) => &mut tc.prog.local_decls[id],
             }.ret_ty = guess;
+        }
+        for item in tc.prog.assignments.get_level(level) {
+            tc.constraints[item.id].set_to(Type::Void);
+            tc.types[item.id] = Type::Void;
         }
         for item in tc.prog.decl_refs.get_level(level) {
             // Filter overloads that don't match the constraints of the parameters.
@@ -275,6 +279,11 @@ pub fn type_check(prog: Program) -> Vec<Error> {
     for level in (0..levels).rev() {
         for item in tc.prog.assigned_decls.get_level(level) {
             tc.constraints[item.root_expr].set_to(tc.prog.decl(item.decl_id).ret_ty.clone());
+        }
+        for item in tc.prog.assignments.get_level(level) {
+            let constraints = tc.constraints[item.lhs].intersect_with(&tc.constraints[item.rhs]);
+            tc.constraints[item.lhs] = constraints.clone();
+            tc.constraints[item.rhs] = constraints;
         }
         for item in tc.prog.decl_refs.get_level(level) {
             let constraints = &tc.constraints[item.id];

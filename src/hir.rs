@@ -6,9 +6,9 @@ use crate::builder::{self, BinOp, ExprId, DeclId, ScopeId, LocalDeclId, DeclRefI
 use crate::source_info::SourceRange;
 use crate::ty::Type;
 
-newtype_index!(InstrId);
-newtype_index!(BasicBlockId);
-newtype_index!(TerminationId);
+newtype_index!(InstrId pub);
+newtype_index!(BasicBlockId pub);
+newtype_index!(TerminationId pub);
 
 #[derive(Debug)]
 pub enum Expr {
@@ -16,6 +16,7 @@ pub enum Expr {
     IntLit { lit: u64 },
     DecLit { lit: f64 },
     DeclRef { arguments: SmallVec<[ExprId; 2]>, id: DeclRefId },
+    Set { lhs: ExprId, rhs: ExprId },
     Do { scope: ScopeId },
     If { condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId> },
     Ret { expr: ExprId }
@@ -96,8 +97,10 @@ pub struct Builder<'a> {
 enum DataDestination {
     /// This value needs to be returned from the current function
     Ret,
-    /// This value needs to be assigned to a particular declref
-    Set { arguments: SmallVec<[InstrId; 2]>, id: DeclRefId },
+    /// A particular value needs to be assigned to this value
+    Receive { value: InstrId, expr: ExprId },
+    /// This value needs to be assigned to a particular expression
+    Set { dest: ExprId },
     /// This value needs to be written to a particular memory location
     Store { location: InstrId },
     /// This value just needs to be read
@@ -109,7 +112,6 @@ enum DataDestination {
 /// Where to go after the current value is computed (whether implicitly or explicitly, such as via a `break` in a loop)
 #[derive(Clone)]
 enum ControlDestination {
-    RetVoid,
     Continue,
     Unreachable,
     Block(BasicBlockId),
@@ -178,11 +180,26 @@ impl<'a> CompDeclBuilder<'a> {
     fn void_instr(&self) -> InstrId { self.void_instr }
 
     fn expr(&mut self, expr: ExprId, ctx: Context) -> InstrId {
+        // HACK!!!!
+        let mut should_allow_set = false;
+
         let instr = match self.builder.exprs[expr] {
             Expr::Void => self.void_instr(),
             Expr::IntLit { lit } => self.code.push(Instr::IntConst { lit, expr }),
             Expr::DecLit { lit } => self.code.push(Instr::FloatConst { lit, expr }),
+            Expr::Set { lhs, rhs } => {
+                self.expr(
+                    rhs,
+                    Context {
+                        main: Destination {
+                            data: DataDestination::Set { dest: lhs },
+                            control: ctx.main.control.clone(),
+                        }
+                    }
+                )
+            },
             Expr::DeclRef { ref arguments, id } => {
+                should_allow_set = true;
                 let mut instr_args = SmallVec::new();
                 instr_args.reserve(arguments.len());
                 for &argument in arguments {
@@ -199,7 +216,11 @@ impl<'a> CompDeclBuilder<'a> {
                     );
                 }
                 self.code.push(
-                    Instr::Get { arguments: instr_args, id }
+                    match ctx.main.data {
+                        DataDestination::Receive { value, expr } => 
+                            Instr::Set { arguments: instr_args, id, value, expr },
+                        _ => Instr::Get { arguments: instr_args, id },
+                    }
                 )
             },
             Expr::Do { scope } => {
@@ -291,10 +312,23 @@ impl<'a> CompDeclBuilder<'a> {
                     } else {
                         self.code.push(Instr::Ret { value: self.void_instr(), expr })
                     },
-                    DataDestination::Set { arguments, id } => if else_scope.is_some() {
+                    DataDestination::Receive { .. } => if else_scope.is_some() {
                         self.void_instr()
                     } else {
-                        self.code.push(Instr::Set { arguments, id, value: self.void_instr(), expr })
+                        panic!("Can't set a void if expression to a value")
+                    },
+                    DataDestination::Set { dest } => if else_scope.is_some() {
+                        self.void_instr()
+                    } else {
+                        self.expr(
+                            dest,
+                            Context {
+                                main: Destination {
+                                    data: DataDestination::Receive { value: self.void_instr(), expr },
+                                    control: ctx.main.control.clone(),
+                                }
+                            },
+                        )
                     },
                     DataDestination::Store { location } => if else_scope.is_some() {
                         self.void_instr()
@@ -320,22 +354,29 @@ impl<'a> CompDeclBuilder<'a> {
         match ctx.main.data {
             DataDestination::Read => return instr,
             DataDestination::Ret => return self.code.push(Instr::Ret { value: instr, expr }),
-            DataDestination::Set { arguments, id } => {
-                self.code.push(Instr::Set { arguments, id, value: instr, expr });
+            DataDestination::Receive { .. } => {
+                assert!(should_allow_set, "can't set constant expression!");
             },
             DataDestination::Store { location } => {
                 self.code.push(Instr::Store { location, value: instr, expr });
+            },
+            DataDestination::Set { dest } => {
+                self.expr(
+                    dest,
+                    Context {
+                        main: Destination {
+                            data: DataDestination::Receive { value: instr, expr },
+                            control: ctx.main.control.clone(),
+                        }
+                    },
+                );
             }
             DataDestination::Stmt => {},
         }
 
-        // For the use of Builder::void_expr() below:
-        use builder::Builder;
-
         match ctx.main.control {
             ControlDestination::Block(block) => self.code.push(Instr::Br(block)),
             ControlDestination::Continue => instr,
-            ControlDestination::RetVoid => self.code.push(Instr::Ret { value: self.void_instr(), expr: self.builder.void_expr() }),
             ControlDestination::Unreachable => self.void_instr(),
         }
     }
@@ -412,7 +453,10 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         self.exprs.push(Expr::DecLit { lit })
     }
     fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId {
-        self.decl_ref_no_name(smallvec![lhs, rhs], range)
+        match op {
+            BinOp::Assign => self.exprs.push(Expr::Set { lhs, rhs }),
+            _ => self.decl_ref_no_name(smallvec![lhs, rhs], range),
+        }
     }
     fn stored_decl(&mut self, name: Sym, root_expr: ExprId, range: SourceRange) {
         self.flush_stmt_buffer();

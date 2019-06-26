@@ -1,7 +1,13 @@
 fn do_something_really_cool: bool {
-    /*
-    fn do_some_really_expensive_work {}
+    foo := 5
+    foo = 4
+    foo = if 4 > 4 {
+        2
+    } else {
+        panic
+    }
     fn other_stuff {}
+    fn do_some_really_expensive_work {}
     if 5 < 2 {
         panic
     } else {
@@ -19,6 +25,4 @@ fn do_something_really_cool: bool {
     } else {
         0
     }
-    */
-    return return return return 5 < 2
 }

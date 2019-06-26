@@ -21,6 +21,8 @@ pub struct Do { pub terminal_expr: ExprId }
 #[derive(Debug)]
 pub struct AssignedDecl { pub root_expr: ExprId, pub decl_id: DeclId }
 #[derive(Debug)]
+pub struct Assignment { pub lhs: ExprId, pub rhs: ExprId }
+#[derive(Debug)]
 pub struct DeclRef { pub args: SmallVec<[ExprId; 2]>, pub decl_ref_id: DeclRefId }
 #[derive(Debug)]
 pub struct If { pub condition: ExprId, pub then_expr: ExprId, pub else_expr: ExprId }
@@ -65,6 +67,8 @@ pub struct Program {
     pub dos: DepVec<Expr<Do>>,
     /// All assigned decls in the entire program
     pub assigned_decls: DepVec<AssignedDecl>,
+    /// All assignment expressions in the entire program
+    pub assignments: DepVec<Expr<Assignment>>,
     /// All decl refs in the entire program
     pub decl_refs: DepVec<Expr<DeclRef>>,
     /// All returns in the entire program
@@ -141,6 +145,8 @@ pub struct Builder<'a> {
     dos: DepVec<Expr<Do>>,
     /// All assigned decls in the entire program so far
     assigned_decls: DepVec<AssignedDecl>,
+    /// All assignment expressions in the entire program so far
+    assignments: DepVec<Expr<Assignment>>,
     /// All decl refs in the entire program so far
     decl_refs: DepVec<Expr<DeclRef>>,
     /// All returns in the entire program so far
@@ -222,10 +228,6 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         for op in intern!("&&", "||") {
             global_decls.push(Decl::new(op, smallvec![Type::Bool, Type::Bool], Type::Bool));
         }
-        let eq = interner.get_or_intern("=");
-        for ty in values {
-            global_decls.push(Decl::new(eq, smallvec![ty.clone(), ty.clone()], Type::Void));
-        }
         global_decls.push(Decl::new(interner.get_or_intern("pi"), SmallVec::new(), Type::f64()));
         global_decls.push(Decl::new(interner.get_or_intern("abs"), smallvec![Type::f32()], Type::f64()));
         global_decls.push(Decl::new(interner.get_or_intern("panic"), SmallVec::new(), Type::Never));
@@ -242,6 +244,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             stmts: Vec::new(),
             dos: DepVec::new(),
             assigned_decls: DepVec::new(),
+            assignments: DepVec::new(),
             decl_refs: DepVec::new(),
             rets: DepVec::new(),
             ifs: DepVec::new(),
@@ -282,12 +285,22 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
 
     fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
-        let decl_ref_id = self.overloads.push(Vec::new());
-        self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name: self.interner.get_or_intern(op.symbol()), num_arguments: 2 });
-        let level = self.decl_refs.insert(
-            &[self.levels[lhs], self.levels[rhs]],
-            Expr { id, data: DeclRef { args: smallvec![lhs, rhs], decl_ref_id } },
-        );
+        let level = match op {
+            BinOp::Assign => {
+                self.assignments.insert(
+                    &[self.levels[lhs], self.levels[rhs]],
+                    Expr { id, data: Assignment { lhs, rhs } },
+                )
+            }, 
+            _ => {
+                let decl_ref_id = self.overloads.push(Vec::new());
+                self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name: self.interner.get_or_intern(op.symbol()), num_arguments: 2 });
+                self.decl_refs.insert(
+                    &[self.levels[lhs], self.levels[rhs]],
+                    Expr { id, data: DeclRef { args: smallvec![lhs, rhs], decl_ref_id } },
+                )
+            }
+        };
         self.levels.push(level);
         self.source_ranges.push(range);
 
@@ -456,6 +469,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             stmts: self.stmts,
             dos: self.dos,
             assigned_decls: self.assigned_decls,
+            assignments: self.assignments,
             decl_refs: self.decl_refs,
             rets: self.rets,
             ifs: self.ifs,
