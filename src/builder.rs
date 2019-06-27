@@ -33,7 +33,7 @@ pub enum BinOp {
 
 #[derive(Clone, Copy, Debug)]
 pub enum UnOp {
-    Not, Deref, Neg, Plus
+    Not, Deref, AddrOf, Neg, Plus
 }
 
 impl BinOp {
@@ -90,6 +90,7 @@ impl UnOp {
             Deref => "*",
             Neg => "-",
             Plus => "+",
+            AddrOf => "&",
         }
     }
 }
@@ -102,6 +103,7 @@ pub trait Builder<'a> {
     fn int_lit(&mut self, lit: u64, range: SourceRange) -> ExprId;
     fn dec_lit(&mut self, lit: f64, range: SourceRange) -> ExprId;
     fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId;
+    fn un_op(&mut self, op: UnOp, expr: ExprId, range: SourceRange) -> ExprId;
     fn stored_decl(&mut self, name: Sym, root_expr: ExprId, range: SourceRange);
     fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId;
     fn if_expr(&mut self, condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId>, range: SourceRange) -> ExprId;

@@ -307,6 +307,24 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         id
     }
 
+    fn un_op(&mut self, op: UnOp, expr: ExprId, range: SourceRange) -> ExprId {
+        let id = ExprId::new(self.levels.len());
+        let level = match op {
+            _ => {
+                let decl_ref_id = self.overloads.push(Vec::new());
+                self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name: self.interner.get_or_intern(op.symbol()), num_arguments: 1 });
+                self.decl_refs.insert(
+                    &[self.levels[expr]],
+                    Expr { id, data: DeclRef { args: smallvec![expr], decl_ref_id } },
+                )
+            }
+        };
+        self.levels.push(level);
+        self.source_ranges.push(range);
+
+        id
+    }
+
     fn stored_decl(&mut self, name: Sym, root_expr: ExprId, range: SourceRange) {
         let decl_id = self.local_decls.push(Decl { name: name, param_tys: SmallVec::new(), ret_ty: Type::Error });
         let decl_id = DeclId::Local(decl_id);

@@ -2,7 +2,7 @@ use string_interner::{DefaultStringInterner, Sym};
 use smallvec::SmallVec;
 
 use crate::token::{TokenVec, TokenKind, Token};
-use crate::builder::{ExprId, ScopeId, BinOp, Builder};
+use crate::builder::{ExprId, ScopeId, BinOp, UnOp, Builder};
 use crate::ty::Type;
 use crate::error::Error;
 use crate::source_info::{self, SourceRange};
@@ -142,6 +142,31 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
                 self.next();
                 let ret_expr = self.try_parse_expr().unwrap_or_else(|_| self.builder.void_expr());
                 Ok(self.builder.ret(ret_expr, 0..0))
+            },
+            TokenKind::Sub => {
+                self.next();
+                let expr = self.parse_expr();
+                Ok(self.builder.un_op(UnOp::Neg, expr, 0..0))
+            },
+            TokenKind::Add => {
+                self.next();
+                let expr = self.parse_expr();
+                Ok(self.builder.un_op(UnOp::Plus, expr, 0..0))
+            },
+            TokenKind::LogicalNot => {
+                self.next();
+                let expr = self.parse_expr();
+                Ok(self.builder.un_op(UnOp::Not, expr, 0..0))
+            },
+            TokenKind::Asterisk => {
+                self.next();
+                let expr = self.parse_expr();
+                Ok(self.builder.un_op(UnOp::Deref, expr, 0..0))
+            },
+            TokenKind::Ampersand => {
+                self.next();
+                let expr = self.parse_expr();
+                Ok(self.builder.un_op(UnOp::AddrOf, expr, 0..0))
             },
             x => Err(x.clone())
         }

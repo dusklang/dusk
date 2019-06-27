@@ -2,7 +2,7 @@ use string_interner::{DefaultStringInterner, Sym};
 use smallvec::{SmallVec, smallvec};
 
 use crate::index_vec::{Idx, IdxVec};
-use crate::builder::{self, BinOp, ExprId, DeclId, ScopeId, LocalDeclId, DeclRefId};
+use crate::builder::{self, BinOp, UnOp, ExprId, DeclId, ScopeId, LocalDeclId, DeclRefId};
 use crate::source_info::SourceRange;
 use crate::ty::Type;
 
@@ -456,6 +456,11 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         match op {
             BinOp::Assign => self.exprs.push(Expr::Set { lhs, rhs }),
             _ => self.decl_ref_no_name(smallvec![lhs, rhs], range),
+        }
+    }
+    fn un_op(&mut self, op: UnOp, expr: ExprId, range: SourceRange) -> ExprId {
+        match op {
+            _ => self.decl_ref_no_name(smallvec![expr], range),
         }
     }
     fn stored_decl(&mut self, name: Sym, root_expr: ExprId, range: SourceRange) {
