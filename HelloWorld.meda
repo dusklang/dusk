@@ -1,6 +1,5 @@
 fn do_something_really_cool: bool {
     foo := 5
-    foo = 4
     foo = if 4 > 4 {
         2
     } else {

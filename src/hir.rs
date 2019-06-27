@@ -361,7 +361,7 @@ impl<'a> CompDeclBuilder<'a> {
                 self.code.push(Instr::Store { location, value: instr, expr });
             },
             DataDestination::Set { dest } => {
-                self.expr(
+                return self.expr(
                     dest,
                     Context {
                         main: Destination {
