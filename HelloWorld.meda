@@ -3,9 +3,9 @@ fn do_something_really_cool: bool {
         if condition { panic }
         //if condition { } else { panic }
     }
-    foo := 5
+    foo := -(1 + 2) + -(3.0 + 4) + 5
     foo = if 4 > 4 {
-        2
+        2 + -2
     } else {
         panic
     }

@@ -186,11 +186,12 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         let mut global_decls: IdxVec<Decl, GlobalDeclId> = IdxVec::new();
         // Integers, floats and bool
         let values = &[
-            Type::i8(), Type::i16(), Type::i32(), Type::i64(),
             Type::u8(), Type::u16(), Type::u32(), Type::u64(),
+            Type::i8(), Type::i16(), Type::i32(), Type::i64(),
             Type::f32(), Type::f64(), Type::Bool
         ];
         let numerics = &values[0..10];
+        let signed_numerics = &numerics[4..];
         let integers = &numerics[0..8];
         macro_rules! intern {
             ($($op:expr),*) => {
@@ -228,6 +229,15 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         for op in intern!("&&", "||") {
             global_decls.push(Decl::new(op, smallvec![Type::Bool, Type::Bool], Type::Bool));
         }
+        let minus = interner.get_or_intern("-");
+        for ty in signed_numerics {
+            global_decls.push(Decl::new(minus, smallvec![ty.clone()], ty.clone()));
+        }
+        let plus = interner.get_or_intern("+");
+        for ty in numerics {
+            global_decls.push(Decl::new(plus, smallvec![ty.clone()], ty.clone()));
+        }
+        global_decls.push(Decl::new(interner.get_or_intern("!"), smallvec![Type::Bool], Type::Bool));
         global_decls.push(Decl::new(interner.get_or_intern("pi"), SmallVec::new(), Type::f64()));
         global_decls.push(Decl::new(interner.get_or_intern("abs"), smallvec![Type::f32()], Type::f64()));
         global_decls.push(Decl::new(interner.get_or_intern("panic"), SmallVec::new(), Type::Never));
