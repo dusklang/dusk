@@ -18,6 +18,8 @@ pub enum Type {
         is_signed: bool,
     },
     Float(FloatWidth),
+    // TODO: Eliminate this separate heap allocation by interning all types into an IdxVec
+    Pointer(Box<Type>),
     Bool,
     Void,
     Never,
@@ -108,6 +110,10 @@ impl fmt::Debug for Type {
                     FloatWidth::W64 => 64,
                 }
             ),
+            Type::Pointer(pointee) => {
+                pointee.fmt(f)?;
+                write!(f, "*")
+            }
         }
     }
 }

@@ -361,7 +361,7 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
 
     fn parse_type(&mut self) -> (Type, SourceRange) {
         let i = self.builder.interner();
-        let val = (
+        let (mut ty, mut range) = (
             match self.cur().kind {
                 &TokenKind::Ident(ident) => match i.resolve(ident).unwrap() {
                     "i8" => Type::i8(),
@@ -395,8 +395,11 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
             }, 
             self.cur().range.clone()
         );
-        self.next();
-        val
+        while let TokenKind::Asterisk = self.next().kind {
+            ty = Type::Pointer(Box::new(ty));
+            range = source_info::concat(range, self.cur().range.clone());
+        }
+        (ty, range)
     }
 
     fn cur(&self) -> Token {
