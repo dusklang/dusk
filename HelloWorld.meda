@@ -1,14 +1,14 @@
 fn do_something_really_cool: bool {
     fn assert(condition: bool) {
-        if condition { panic }
-        //if condition { } else { panic }
+        if !condition { panic }
     }
-    foo := -(1 + 2) + -(3.0 + 4) + 5
+    foo := -(1 + 2) + -(3 + 4) + 5
     foo = if 4 > 4 {
         2 + -2
     } else {
         panic
     }
+    assert(foo >= 0)
     fn other_stuff {}
     fn do_some_really_expensive_work {}
     if 5 < 2 {
