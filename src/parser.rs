@@ -77,11 +77,12 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
 
     fn parse_unary_operator(&mut self) -> Option<UnOp> {
         let op = match self.cur().kind {
-            TokenKind::Sub => UnOp::Neg,
-            TokenKind::Add => UnOp::Plus,
+            TokenKind::Sub        => UnOp::Neg,
+            TokenKind::Add        => UnOp::Plus,
             TokenKind::LogicalNot => UnOp::Not,
-            TokenKind::Asterisk => UnOp::Deref,
-            TokenKind::Ampersand => UnOp::AddrOf,
+            TokenKind::Asterisk   => UnOp::Deref,
+            TokenKind::Ampersand  => UnOp::AddrOf,
+
             _ => return None,
         };
         self.next();
