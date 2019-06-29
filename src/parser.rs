@@ -75,7 +75,26 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
         )
     }
 
+    fn parse_unary_operator(&mut self) -> Option<UnOp> {
+        let op = match self.cur().kind {
+            TokenKind::Sub => UnOp::Neg,
+            TokenKind::Add => UnOp::Plus,
+            TokenKind::LogicalNot => UnOp::Not,
+            TokenKind::Asterisk => UnOp::Deref,
+            TokenKind::Ampersand => UnOp::AddrOf,
+            _ => return None,
+        };
+        self.next();
+        Some(op)
+    }
+
     fn try_parse_term(&mut self) -> Result<ExprId, TokenKind> {
+        if let Some(op) = self.parse_unary_operator() {
+            let term = self.try_parse_term()
+                .unwrap_or_else(|tok| panic!("Expected expression after unary operator, found {:?}", tok));
+            return Ok(self.builder.un_op(op, term, 0..0));
+        }
+
         use TokenKind::*;
         match self.cur().kind {
             LeftParen => {
@@ -142,31 +161,6 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
                 self.next();
                 let ret_expr = self.try_parse_expr().unwrap_or_else(|_| self.builder.void_expr());
                 Ok(self.builder.ret(ret_expr, 0..0))
-            },
-            TokenKind::Sub => {
-                self.next();
-                let expr = self.parse_expr();
-                Ok(self.builder.un_op(UnOp::Neg, expr, 0..0))
-            },
-            TokenKind::Add => {
-                self.next();
-                let expr = self.parse_expr();
-                Ok(self.builder.un_op(UnOp::Plus, expr, 0..0))
-            },
-            TokenKind::LogicalNot => {
-                self.next();
-                let expr = self.parse_expr();
-                Ok(self.builder.un_op(UnOp::Not, expr, 0..0))
-            },
-            TokenKind::Asterisk => {
-                self.next();
-                let expr = self.parse_expr();
-                Ok(self.builder.un_op(UnOp::Deref, expr, 0..0))
-            },
-            TokenKind::Ampersand => {
-                self.next();
-                let expr = self.parse_expr();
-                Ok(self.builder.un_op(UnOp::AddrOf, expr, 0..0))
             },
             x => Err(x.clone())
         }
