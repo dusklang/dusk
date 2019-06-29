@@ -45,34 +45,34 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
         (p.builder.output(), p.errs)
     }
 
-    fn parse_binary_operator(&self) -> Option<BinOp> {
-        Some(
-            match self.cur().kind {
-                TokenKind::Add => BinOp::Add,
-                TokenKind::Sub => BinOp::Sub,
-                TokenKind::Asterisk => BinOp::Mult,
-                TokenKind::Div => BinOp::Div,
-                TokenKind::Assign => BinOp::Assign,
-                TokenKind::AddAssign => BinOp::AddAssign,
-                TokenKind::SubAssign => BinOp::SubAssign,
-                TokenKind::MultAssign => BinOp::MultAssign,
-                TokenKind::DivAssign => BinOp::DivAssign,
-                TokenKind::ModAssign => BinOp::ModAssign,
-                TokenKind::BitwiseAndAssign => BinOp::BitwiseAndAssign,
-                TokenKind::BitwiseOrAssign => BinOp::BitwiseOrAssign,
-                TokenKind::Equal => BinOp::Eq,
-                TokenKind::NotEqual => BinOp::NotEq,
-                TokenKind::LT => BinOp::Less,
-                TokenKind::LTE => BinOp::LessOrEq,
-                TokenKind::GT => BinOp::Greater,
-                TokenKind::GTE => BinOp::GreaterOrEq,
-                TokenKind::LogicalOr => BinOp::LogicalOr,
-                TokenKind::LogicalAnd => BinOp::LogicalAnd,
-                TokenKind::Pipe => BinOp::BitwiseOr,
-                TokenKind::Ampersand => BinOp::BitwiseAnd,
-                _ => return None,
-            }
-        )
+    fn parse_binary_operator(&mut self) -> Option<BinOp> {
+        let op = match self.cur().kind {
+            TokenKind::Add => BinOp::Add,
+            TokenKind::Sub => BinOp::Sub,
+            TokenKind::Asterisk => BinOp::Mult,
+            TokenKind::Div => BinOp::Div,
+            TokenKind::Assign => BinOp::Assign,
+            TokenKind::AddAssign => BinOp::AddAssign,
+            TokenKind::SubAssign => BinOp::SubAssign,
+            TokenKind::MultAssign => BinOp::MultAssign,
+            TokenKind::DivAssign => BinOp::DivAssign,
+            TokenKind::ModAssign => BinOp::ModAssign,
+            TokenKind::BitwiseAndAssign => BinOp::BitwiseAndAssign,
+            TokenKind::BitwiseOrAssign => BinOp::BitwiseOrAssign,
+            TokenKind::Equal => BinOp::Eq,
+            TokenKind::NotEqual => BinOp::NotEq,
+            TokenKind::LT => BinOp::Less,
+            TokenKind::LTE => BinOp::LessOrEq,
+            TokenKind::GT => BinOp::Greater,
+            TokenKind::GTE => BinOp::GreaterOrEq,
+            TokenKind::LogicalOr => BinOp::LogicalOr,
+            TokenKind::LogicalAnd => BinOp::LogicalAnd,
+            TokenKind::Pipe => BinOp::BitwiseOr,
+            TokenKind::Ampersand => BinOp::BitwiseAnd,
+            _ => return None,
+        };
+        self.next();
+        Some(op)
     }
 
     fn parse_unary_operator(&mut self) -> Option<UnOp> {
@@ -189,7 +189,6 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
         }
 
         while let Some(op) = self.parse_binary_operator() {
-            self.next();
             while let Some(other_op) = op_stack.last() {
                 if other_op.precedence() > op.precedence() {
                     break;
