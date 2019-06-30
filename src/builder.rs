@@ -104,7 +104,7 @@ pub trait Builder<'a> {
     fn dec_lit(&mut self, lit: f64, range: SourceRange) -> ExprId;
     fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId;
     fn un_op(&mut self, op: UnOp, expr: ExprId, range: SourceRange) -> ExprId;
-    fn stored_decl(&mut self, name: Sym, root_expr: ExprId, range: SourceRange);
+    fn stored_decl(&mut self, name: Sym, is_mut: bool, root_expr: ExprId, range: SourceRange);
     fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId;
     fn if_expr(&mut self, condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId>, range: SourceRange) -> ExprId;
     fn stmt(&mut self, expr: ExprId);

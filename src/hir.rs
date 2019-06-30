@@ -463,7 +463,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             _ => self.decl_ref_no_name(smallvec![expr], range),
         }
     }
-    fn stored_decl(&mut self, name: Sym, root_expr: ExprId, range: SourceRange) {
+    fn stored_decl(&mut self, name: Sym, is_mut: bool, root_expr: ExprId, range: SourceRange) {
         self.flush_stmt_buffer();
         let id = LocalDeclId::new(self.num_local_decls);
         self.num_local_decls += 1;

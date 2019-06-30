@@ -3,7 +3,7 @@ use smallvec::SmallVec;
 
 use crate::token::{TokenVec, TokenKind, Token};
 use crate::builder::{ExprId, ScopeId, BinOp, UnOp, Builder};
-use crate::ty::Type;
+use crate::ty::{Type, QualType};
 use crate::error::Error;
 use crate::source_info::{self, SourceRange};
 
@@ -255,7 +255,7 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
         // Skip to colon, get range.
         let colon_range = self.next().range.clone();
         let mut found_separator = true;
-        let mutable = match self.next().kind {
+        let is_mut = match self.next().kind {
             TokenKind::Assign => true,
             TokenKind::Colon => false,
             _ => {
@@ -275,7 +275,7 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
 
         let root = self.parse_expr();
         let root_range = self.builder.get_range(root);
-        self.builder.stored_decl(name, root, source_info::concat(name_range, root_range));
+        self.builder.stored_decl(name, is_mut, root, source_info::concat(name_range, root_range));
     }
 
     // Parses an open curly brace, then a list of nodes, then a closing curly brace.
@@ -396,7 +396,14 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
             self.cur().range.clone()
         );
         while let TokenKind::Asterisk = self.next().kind {
-            ty = Type::Pointer(Box::new(ty));
+            let is_mut = if let TokenKind::Mut = self.peek_next().kind {
+                true
+            } else {
+                false
+            };
+            ty = Type::Pointer(
+                Box::new(QualType { ty, is_mut })
+            );
             range = source_info::concat(range, self.cur().range.clone());
         }
         (ty, range)

@@ -5,7 +5,7 @@ use smallvec::{SmallVec, smallvec};
 use crate::dep_vec::DepVec;
 use crate::source_info::SourceRange;
 use crate::index_vec::{Idx, IdxVec};
-use crate::ty::Type;
+use crate::ty::{Type, QualType};
 use crate::builder::{self, *};
 
 #[derive(Debug)]
@@ -46,12 +46,12 @@ impl<T> DerefMut for Expr<T> {
 pub struct Decl {
     pub name: Sym,
     pub param_tys: SmallVec<[Type; 2]>,
-    pub ret_ty: Type,
+    pub ret_ty: QualType,
 }
 
 impl Decl {
-    fn new(name: Sym, param_tys: SmallVec<[Type; 2]>, ret_ty: Type) -> Self {
-        Decl { name, param_tys, ret_ty }
+    fn new(name: Sym, param_tys: SmallVec<[Type; 2]>, ret_ty: impl Into<QualType>) -> Self {
+        Decl { name, param_tys, ret_ty: ret_ty.into() }
     }
 }
 
@@ -335,8 +335,10 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         id
     }
 
-    fn stored_decl(&mut self, name: Sym, root_expr: ExprId, range: SourceRange) {
-        let decl_id = self.local_decls.push(Decl { name: name, param_tys: SmallVec::new(), ret_ty: Type::Error });
+    fn stored_decl(&mut self, name: Sym, is_mut: bool, root_expr: ExprId, range: SourceRange) {
+        let decl_id = self.local_decls.push(
+            Decl::new(name, SmallVec::new(), QualType { ty: Type::Error, is_mut }),
+        );
         let decl_id = DeclId::Local(decl_id);
         let level = self.assigned_decls.insert(&[self.levels[root_expr]], AssignedDecl { root_expr, decl_id });
         self.source_ranges.push(range);
@@ -422,7 +424,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
 
     fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Type, proto_range: SourceRange) {
         assert_eq!(param_names.len(), param_tys.len());
-        let decl_id = self.local_decls.push(Decl { name: name, param_tys: param_tys.clone(), ret_ty: ret_ty.clone() });
+        let decl_id = self.local_decls.push(Decl::new(name, param_tys.clone(), ret_ty.clone()));
         let decl_id = DeclId::Local(decl_id);
         let local_decl = LocalDecl { name: name, level: 0, decl: decl_id };
         // Add decl to enclosing scope
@@ -432,7 +434,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         decl_state.decls.push(local_decl);
         // Add parameters to scope
         for (&name, ty) in param_names.iter().zip(&param_tys) {
-            let id = self.local_decls.push(Decl { name, param_tys: SmallVec::new(), ret_ty: ty.clone() });
+            let id = self.local_decls.push(Decl::new(name, SmallVec::new(), ty.clone()));
             decl_state.decls.push(LocalDecl { name, level: 0, decl: DeclId::Local(id) });
         }
         self.comp_decl_stack.push(decl_state);

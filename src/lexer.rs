@@ -327,6 +327,7 @@ impl<'src> Lexer<'src> {
                 "as" => As,
                 "struct" => Struct,
                 "do" => Do,
+                "mut" => Mut,
                 _ => Ident(self.interner.get_or_intern(ident)),
             };
             self.pack_tok(kind)

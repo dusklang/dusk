@@ -195,7 +195,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             match item.decl_id {
                 DeclId::Global(id) => &mut tc.prog.global_decls[id],
                 DeclId::Local(id) => &mut tc.prog.local_decls[id],
-            }.ret_ty = guess;
+            }.ret_ty.ty = guess;
         }
         for item in tc.prog.assignments.get_level(level) {
             tc.constraints[item.id].set_to(Type::Void);
@@ -222,7 +222,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             });
 
             tc.constraints[item.id].one_of = tc.prog.overloads[item.decl_ref_id].iter()
-                .map(|&overload| get_decl(overload).ret_ty.clone())
+                .map(|&overload| get_decl(overload).ret_ty.ty.clone())
                 .collect();
 
             'find_preference: for (i, &arg) in item.args.iter().enumerate() {
@@ -230,7 +230,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                     for &overload in &tc.prog.overloads[item.decl_ref_id] {
                         let decl = get_decl(overload);
                         if &decl.param_tys[i] == ty {
-                            tc.constraints[item.id].preferred_type = Some(decl.ret_ty.clone());
+                            tc.constraints[item.id].preferred_type = Some(decl.ret_ty.ty.clone());
                             tc.preferred_overloads[item.decl_ref_id] = Some(overload);
                             break 'find_preference;
                         }
@@ -278,7 +278,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
     // Pass 2: propagate info up from roots to leaves
     for level in (0..levels).rev() {
         for item in tc.prog.assigned_decls.get_level(level) {
-            tc.constraints[item.root_expr].set_to(tc.prog.decl(item.decl_id).ret_ty.clone());
+            tc.constraints[item.root_expr].set_to(tc.prog.decl(item.decl_id).ret_ty.ty.clone());
         }
         for item in tc.prog.assignments.get_level(level) {
             let constraints = tc.constraints[item.lhs].intersect_with(&tc.constraints[item.rhs]);
@@ -309,7 +309,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             };
             let overloads = &mut tc.prog.overloads[item.decl_ref_id];
             overloads.retain(|&overload| {
-                let ret_ty = &get_decl(overload).ret_ty;
+                let ret_ty = &get_decl(overload).ret_ty.ty;
                 ret_ty == &ty || ret_ty == &Type::Never
             });
             let pref = tc.preferred_overloads[item.decl_ref_id];

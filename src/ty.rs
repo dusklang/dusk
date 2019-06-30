@@ -10,6 +10,12 @@ pub enum FloatWidth {
     W32, W64,
 }
 
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct QualType {
+    pub ty: Type,
+    pub is_mut: bool,
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub enum Type {
     Error,
@@ -19,10 +25,19 @@ pub enum Type {
     },
     Float(FloatWidth),
     // TODO: Eliminate this separate heap allocation by interning all types into an IdxVec
-    Pointer(Box<Type>),
+    Pointer(Box<QualType>),
     Bool,
     Void,
     Never,
+}
+
+impl From<Type> for QualType {
+    fn from(ty: Type) -> Self {
+        Self {
+            ty, 
+            is_mut: false,
+        }
+    }
 }
 
 impl Type {
@@ -111,8 +126,12 @@ impl fmt::Debug for Type {
                 }
             ),
             Type::Pointer(pointee) => {
-                pointee.fmt(f)?;
-                write!(f, "*")
+                pointee.ty.fmt(f)?;
+                if pointee.is_mut { 
+                    write!(f, " *mut")
+                } else {
+                    write!(f, "*")
+                }
             }
         }
     }
