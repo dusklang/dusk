@@ -179,6 +179,14 @@ impl<'a> CompDeclBuilder<'a> {
 
     fn void_instr(&self) -> InstrId { self.void_instr }
 
+    fn scope(&mut self, scope: ScopeId, ctx: Context) -> InstrId {
+        let scope = &self.builder.scopes[scope];
+        for &item in &scope.items {
+            self.item(item);
+        }
+        self.expr(scope.terminal_expr, ctx)
+    }
+
     fn expr(&mut self, expr: ExprId, ctx: Context) -> InstrId {
         // HACK!!!!
         let mut should_allow_set = false;
@@ -188,7 +196,7 @@ impl<'a> CompDeclBuilder<'a> {
             Expr::IntLit { lit } => self.code.push(Instr::IntConst { lit, expr }),
             Expr::DecLit { lit } => self.code.push(Instr::FloatConst { lit, expr }),
             Expr::Set { lhs, rhs } => {
-                self.expr(
+                return self.expr(
                     rhs,
                     Context {
                         main: Destination {
@@ -223,15 +231,9 @@ impl<'a> CompDeclBuilder<'a> {
                     }
                 )
             },
-            Expr::Do { scope } => {
-                let scope = &self.builder.scopes[scope];
-                for &item in &scope.items {
-                    self.item(item);
-                }
-                return self.expr(scope.terminal_expr, ctx);
-            },
+            Expr::Do { scope } => return self.scope(scope, ctx),
             Expr::If { condition, then_scope, else_scope } => {
-                // At this point we don't know where these basic blocks are supposed to begin, so make them 0 for now
+                // At this point it's impossible to know where these basic blocks are supposed to begin, so make them 0 for now
                 let true_bb = self.basic_blocks.push(InstrId::new(0));
                 let false_bb = self.basic_blocks.push(InstrId::new(0));
                 let post_bb = if else_scope.is_some() {
@@ -257,46 +259,23 @@ impl<'a> CompDeclBuilder<'a> {
                 );
                 self.code.push(Instr::CondBr { condition: condition_instr, true_bb, false_bb });
                 self.basic_blocks[true_bb] = InstrId::new(self.code.len());
-                for &item in &self.builder.scopes[then_scope].items {
-                    self.item(item);
-                }
-                self.expr(
-                    self.builder.scopes[then_scope].terminal_expr,
-                    Context {
-                        main: Destination {
-                            data: if let Some(location) = result_location {
-                                DataDestination::Store { location }
-                            } else {
-                                ctx.main.data.clone()
-                            },
-                            control: match &ctx.main.control {
-                                ControlDestination::Continue => ControlDestination::Block(post_bb),
-                                x => x.clone(),
-                            }
+                let scope_ctx = Context {
+                    main: Destination {
+                        data: if let Some(location) = result_location {
+                            DataDestination::Store { location }
+                        } else {
+                            ctx.main.data.clone()
                         },
-                    }
-                );
+                        control: match &ctx.main.control {
+                            ControlDestination::Continue => ControlDestination::Block(post_bb),
+                            x => x.clone(),
+                        }
+                    },
+                };
+                self.scope(then_scope, scope_ctx.clone());
                 if let Some(else_scope) = else_scope {
                     self.basic_blocks[false_bb] = InstrId::new(self.code.len());
-                    for &item in &self.builder.scopes[else_scope].items {
-                        self.item(item);
-                    }
-                    self.expr(
-                        self.builder.scopes[else_scope].terminal_expr,
-                        Context {
-                            main: Destination {
-                                data: if let Some(location) = result_location {
-                                    DataDestination::Store { location }
-                                } else {
-                                    ctx.main.data.clone()
-                                },
-                                control: match &ctx.main.control {
-                                    ControlDestination::Continue => ControlDestination::Block(post_bb),
-                                    x => x.clone(),
-                                }
-                            },
-                        }
-                    );
+                    self.scope(else_scope, scope_ctx);
                 }
                 self.basic_blocks[post_bb] = InstrId::new(self.code.len());
 
@@ -382,12 +361,8 @@ impl<'a> CompDeclBuilder<'a> {
     }
 
     fn build(mut self, scope: ScopeId) -> CompDecl {
-        let scope = &self.builder.scopes[scope];
-        for &item in &scope.items {
-            self.item(item);
-        }
-        self.expr(
-            scope.terminal_expr,
+        self.scope(
+            scope,
             Context {
                 main: Destination {
                     data: DataDestination::Ret,

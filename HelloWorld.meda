@@ -1,31 +1,12 @@
-fn do_something_really_cool: bool {
+fn do_something_really_cool {
     fn assert(condition: bool) {
         if !condition { panic }
     }
-    foo := -(1 + 2) + -(3 + 4) + 5
-    foo = if 4 > 4 {
-        2 + -2
+    foo := 5
+    if foo == 12 {
+        foo = 4
     } else {
-        panic
+        foo = 42
     }
-    assert(foo >= 0)
-    fn other_stuff {}
-    fn do_some_really_expensive_work {}
-    if 5 < 2 {
-        panic
-    } else {
-        the_results_of_doing_some_very_expensive_work := do {
-            other_stuff
-            do_some_really_expensive_work
-            24
-        }
-        other_stuff
-        the_results_of_doing_some_very_expensive_work
-    } < if 24 > 25 {
-        23
-    } else if 45 >= 23423 {
-        4
-    } else {
-        0
-    }
+    return
 }
