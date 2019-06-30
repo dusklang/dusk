@@ -107,6 +107,8 @@ enum DataDestination {
     Read,
     /// This value is a statement and therefore will never be used
     Stmt,
+    /// If this value is true, branch to true_bb, otherwise branch to false_bb
+    Branch { true_bb: BasicBlockId, false_bb: BasicBlockId },
 }
 
 /// Where to go after the current value is computed (whether implicitly or explicitly, such as via a `break` in a loop)
@@ -248,16 +250,15 @@ impl<'a> CompDeclBuilder<'a> {
                     ),
                     _ => None,
                 };
-                let condition_instr = self.expr(
+                self.expr(
                     condition,
                     Context {
                         main: Destination {
-                            data: DataDestination::Read,
+                            data: DataDestination::Branch { true_bb, false_bb },
                             control: ControlDestination::Continue,
                         }
                     },
                 );
-                self.code.push(Instr::CondBr { condition: condition_instr, true_bb, false_bb });
                 self.basic_blocks[true_bb] = InstrId::new(self.code.len());
                 let scope_ctx = Context {
                     main: Destination {
@@ -314,6 +315,11 @@ impl<'a> CompDeclBuilder<'a> {
                     } else {
                         self.code.push(Instr::Store { location, value: self.void_instr(), expr })
                     },
+                    DataDestination::Branch { true_bb, false_bb } => if else_scope.is_some() {
+                        self.void_instr()
+                    } else {
+                        self.code.push(Instr::CondBr { condition: self.void_instr(), true_bb, false_bb })
+                    },
                     DataDestination::Stmt => self.void_instr(),
                 };
             },
@@ -333,6 +339,8 @@ impl<'a> CompDeclBuilder<'a> {
         match ctx.main.data {
             DataDestination::Read => return instr,
             DataDestination::Ret => return self.code.push(Instr::Ret { value: instr, expr }),
+            DataDestination::Branch { true_bb, false_bb }
+                => return self.code.push(Instr::CondBr { condition: instr, true_bb, false_bb }),
             DataDestination::Receive { .. } => {
                 assert!(should_allow_set, "can't set constant expression!");
             },
