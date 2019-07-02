@@ -297,43 +297,11 @@ impl<'a> CompDeclBuilder<'a> {
                 }
 
                 self.basic_blocks[post_bb] = InstrId::new(self.code.len());
-                // It's ok to return early here because control destinations are handled above
-                return match ctx.data {
-                    DataDest::Read => if else_scope.is_some() {
-                        self.code.push(Instr::Load { location: result_location.unwrap(), expr })
-                    } else {
-                        self.void_instr()
-                    },
-                    DataDest::Ret => if else_scope.is_some() {
-                        self.void_instr()
-                    } else {
-                        self.code.push(Instr::Ret { value: self.void_instr(), expr })
-                    },
-                    DataDest::Receive { .. } => if else_scope.is_some() {
-                        self.void_instr()
-                    } else {
-                        panic!("Can't set a void if expression to a value")
-                    },
-                    DataDest::Set { dest } => if else_scope.is_some() {
-                        self.void_instr()
-                    } else {
-                        self.expr(
-                            dest,
-                            Context::new(DataDest::Receive { value: self.void_instr(), expr }, ctx.control.clone()),
-                        )
-                    },
-                    DataDest::Store { location } => if else_scope.is_some() {
-                        self.void_instr()
-                    } else {
-                        self.code.push(Instr::Store { location, value: self.void_instr(), expr })
-                    },
-                    DataDest::Branch(true_bb, false_bb) => if else_scope.is_some() {
-                        self.void_instr()
-                    } else {
-                        self.code.push(Instr::CondBr { condition: self.void_instr(), true_bb, false_bb })
-                    },
-                    DataDest::Stmt => self.void_instr(),
-                };
+                if let Some(location) = result_location {
+                    return self.code.push(Instr::Load { location, expr })
+                } else {
+                    self.void_instr()
+                }
             },
             Expr::Ret { expr } => {
                 return self.expr(
