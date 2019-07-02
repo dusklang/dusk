@@ -97,7 +97,7 @@ pub struct Builder<'a> {
 
 /// What to do with a value
 #[derive(Clone)]
-enum DataDestination {
+enum DataDest {
     /// This value needs to be returned from the current function
     Ret,
     /// A particular value needs to be assigned to this value
@@ -116,21 +116,35 @@ enum DataDestination {
 
 /// Where to go after the current value is computed (whether implicitly or explicitly, such as via a `break` in a loop)
 #[derive(Clone)]
-enum ControlDestination {
+enum ControlDest {
     Continue,
     Unreachable,
     Block(BasicBlockId),
 }
 
 #[derive(Clone)]
-struct Destination {
-    data: DataDestination,
-    control: ControlDestination,
+struct Context {
+    data: DataDest,
+    control: ControlDest,
 }
 
-#[derive(Clone)]
-struct Context {
-    main: Destination,
+impl Context {
+    fn new(data: DataDest, control: ControlDest) -> Context {
+        Context { data, control }
+    }
+
+    fn redirect(&self, read: Option<InstrId>, kontinue: Option<BasicBlockId>) -> Context {
+        Context::new(
+            match (&self.data, read) {
+                (DataDest::Read, Some(location)) => DataDest::Store { location },
+                (x, _) => x.clone(),
+            },
+            match(&self.control, kontinue) {
+                (ControlDest::Continue, Some(block)) => ControlDest::Block(block),
+                (x, _) => x.clone(),
+            }
+        )
+    }
 }
 
 struct CompDeclBuilder<'a> {
@@ -157,27 +171,11 @@ impl<'a> CompDeclBuilder<'a> {
     fn item(&mut self, item: Item) {
         match item {
             Item::Stmt(expr) => {
-                self.expr(
-                    expr,
-                    Context {
-                        main: Destination {
-                            data: DataDestination::Stmt,
-                            control: ControlDestination::Continue,
-                        }
-                    }
-                );
+                self.expr(expr, Context::new(DataDest::Stmt, ControlDest::Continue));
             },
             Item::StoredDecl(expr) => {
                 let location = self.code.push(Instr::Alloca { expr });
-                self.expr(
-                    expr,
-                    Context {
-                        main: Destination {
-                            data: DataDestination::Store { location },
-                            control: ControlDestination::Continue,
-                        }
-                    }
-                );
+                self.expr(expr, Context::new(DataDest::Store { location }, ControlDest::Continue));
             },
         }
     }
@@ -203,12 +201,7 @@ impl<'a> CompDeclBuilder<'a> {
             Expr::Set { lhs, rhs } => {
                 return self.expr(
                     rhs,
-                    Context {
-                        main: Destination {
-                            data: DataDestination::Set { dest: lhs },
-                            control: ctx.main.control.clone(),
-                        }
-                    }
+                    Context::new(DataDest::Set { dest: lhs }, ctx.control.clone()),
                 )
             },
             Expr::DeclRef { ref arguments, id } => {
@@ -217,88 +210,54 @@ impl<'a> CompDeclBuilder<'a> {
                 instr_args.reserve(arguments.len());
                 for &argument in arguments {
                     instr_args.push(
-                        self.expr(
-                            argument,
-                            Context {
-                                main: Destination {
-                                    data: DataDestination::Read,
-                                    control: ControlDestination::Continue,
-                                }
-                            }
-                        )
+                        self.expr(argument, Context::new(DataDest::Read, ControlDest::Continue)),
                     );
                 }
                 self.code.push(
-                    match ctx.main.data {
-                        DataDestination::Receive { value, expr } => 
+                    match ctx.data {
+                        DataDest::Receive { value, expr } => 
                             Instr::Set { arguments: instr_args, id, value, expr },
                         _ => Instr::Get { arguments: instr_args, id },
                     }
                 )
             },
             Expr::LogicalAnd { lhs, rhs } => {
-                if let DataDestination::Branch { true_bb, false_bb } = ctx.main.data {
-                    let left_true_bb = self.basic_blocks.push(InstrId::new(0));
+                let left_true_bb = self.basic_blocks.push(InstrId::new(0));
+                let location = if let DataDest::Read = ctx.data {
+                    Some(self.code.push(Instr::Alloca { expr }))
+                } else {
+                    None
+                };
+                if let DataDest::Branch { true_bb, false_bb } = ctx.data {
                     self.expr(
                         lhs,
-                        Context {
-                            main: Destination {
-                                data: DataDestination::Branch { true_bb: left_true_bb, false_bb },
-                                control: ControlDestination::Continue,
-                            }
-                        }
+                        Context::new(DataDest::Branch { true_bb: left_true_bb, false_bb }, ControlDest::Continue),
                     );
+
                     self.basic_blocks[left_true_bb] = InstrId::new(self.code.len());
                     return self.expr(
                         rhs,
-                        Context {
-                            main: Destination {
-                                data: DataDestination::Branch { true_bb, false_bb },
-                                control: ControlDestination::Continue,
-                            }
-                        }
+                        Context::new(DataDest::Branch { true_bb, false_bb }, ControlDest::Continue),
                     );
                 } else {
-                    let location = if let DataDestination::Read = ctx.main.data {
-                        Some(self.code.push(Instr::Alloca { expr }))
-                    } else {
-                        None
-                    };
-                    let left_true_bb = self.basic_blocks.push(InstrId::new(0));
                     let left_false_bb = self.basic_blocks.push(InstrId::new(0));
                     let after_bb = self.basic_blocks.push(InstrId::new(0));
                     self.expr(
                         lhs,
-                        Context {
-                            main: Destination {
-                                data: DataDestination::Branch { true_bb: left_true_bb, false_bb: left_false_bb },
-                                control: ControlDestination::Continue,
-                            }
-                        }
+                        Context::new(
+                            DataDest::Branch { true_bb: left_true_bb, false_bb: left_false_bb },
+                            ControlDest::Continue,
+                        ),
                     );
 
                     self.basic_blocks[left_true_bb] = InstrId::new(self.code.len());
                     // No further branching required, because (true && foo) <=> foo
-                    let branch_ctx = Context {
-                        main: Destination {
-                            data: if let Some(location) = location {
-                                DataDestination::Store { location }
-                            } else {
-                                ctx.main.data.clone()
-                            },
-                            control: if let ControlDestination::Continue = ctx.main.control {
-                                ControlDestination::Block(after_bb)
-                            } else {
-                                ctx.main.control.clone()
-                            },
-                        }
-                    };
+                    let branch_ctx = ctx.redirect(location, Some(after_bb));
                     self.expr(rhs, branch_ctx.clone());
 
                     self.basic_blocks[left_false_bb] = InstrId::new(self.code.len());
                     let false_val = self.code.push(Instr::BoolConst(false));
                     self.handle_context(false_val, expr, branch_ctx, false);
-
 
                     self.basic_blocks[after_bb] = InstrId::new(self.code.len());
                     if let Some(location) = location {
@@ -322,94 +281,67 @@ impl<'a> CompDeclBuilder<'a> {
                     false_bb
                 };
 
-                let result_location = match (&ctx.main.data, else_scope) {
-                    (DataDestination::Read, Some(_)) => Some(
+                let result_location = match (&ctx.data, else_scope) {
+                    (DataDest::Read, Some(_)) => Some(
                         self.code.push(Instr::Alloca { expr })
                     ),
                     _ => None,
                 };
                 self.expr(
                     condition,
-                    Context {
-                        main: Destination {
-                            data: DataDestination::Branch { true_bb, false_bb },
-                            control: ControlDestination::Continue,
-                        }
-                    },
+                    Context::new(DataDest::Branch { true_bb, false_bb }, ControlDest::Continue),
                 );
                 self.basic_blocks[true_bb] = InstrId::new(self.code.len());
-                let scope_ctx = Context {
-                    main: Destination {
-                        data: if let Some(location) = result_location {
-                            DataDestination::Store { location }
-                        } else {
-                            ctx.main.data.clone()
-                        },
-                        control: match &ctx.main.control {
-                            ControlDestination::Continue => ControlDestination::Block(post_bb),
-                            x => x.clone(),
-                        }
-                    },
-                };
+                let scope_ctx = ctx.redirect(result_location, Some(post_bb));
                 self.scope(then_scope, scope_ctx.clone());
                 if let Some(else_scope) = else_scope {
                     self.basic_blocks[false_bb] = InstrId::new(self.code.len());
                     self.scope(else_scope, scope_ctx);
                 }
-                self.basic_blocks[post_bb] = InstrId::new(self.code.len());
 
+                self.basic_blocks[post_bb] = InstrId::new(self.code.len());
                 // It's ok to return early here because control destinations are handled above
-                return match ctx.main.data {
-                    DataDestination::Read => if else_scope.is_some() {
+                return match ctx.data {
+                    DataDest::Read => if else_scope.is_some() {
                         self.code.push(Instr::Load { location: result_location.unwrap(), expr })
                     } else {
                         self.void_instr()
                     },
-                    DataDestination::Ret => if else_scope.is_some() {
+                    DataDest::Ret => if else_scope.is_some() {
                         self.void_instr()
                     } else {
                         self.code.push(Instr::Ret { value: self.void_instr(), expr })
                     },
-                    DataDestination::Receive { .. } => if else_scope.is_some() {
+                    DataDest::Receive { .. } => if else_scope.is_some() {
                         self.void_instr()
                     } else {
                         panic!("Can't set a void if expression to a value")
                     },
-                    DataDestination::Set { dest } => if else_scope.is_some() {
+                    DataDest::Set { dest } => if else_scope.is_some() {
                         self.void_instr()
                     } else {
                         self.expr(
                             dest,
-                            Context {
-                                main: Destination {
-                                    data: DataDestination::Receive { value: self.void_instr(), expr },
-                                    control: ctx.main.control.clone(),
-                                }
-                            },
+                            Context::new(DataDest::Receive { value: self.void_instr(), expr }, ctx.control.clone()),
                         )
                     },
-                    DataDestination::Store { location } => if else_scope.is_some() {
+                    DataDest::Store { location } => if else_scope.is_some() {
                         self.void_instr()
                     } else {
                         self.code.push(Instr::Store { location, value: self.void_instr(), expr })
                     },
-                    DataDestination::Branch { true_bb, false_bb } => if else_scope.is_some() {
+                    DataDest::Branch { true_bb, false_bb } => if else_scope.is_some() {
                         self.void_instr()
                     } else {
                         self.code.push(Instr::CondBr { condition: self.void_instr(), true_bb, false_bb })
                     },
-                    DataDestination::Stmt => self.void_instr(),
+                    DataDest::Stmt => self.void_instr(),
                 };
             },
             Expr::Ret { expr } => {
                 return self.expr(
                     expr,
-                    Context {
-                        main: Destination {
-                            data: DataDestination::Ret,
-                            control: ctx.main.control,
-                        }
-                    }
+                    Context::new(DataDest::Ret, ctx.control),
                 );
             }
         };
@@ -418,48 +350,35 @@ impl<'a> CompDeclBuilder<'a> {
     }
 
     fn handle_context(&mut self, instr: InstrId, expr: ExprId, ctx: Context, should_allow_set: bool) -> InstrId {
-        match ctx.main.data {
-            DataDestination::Read => return instr,
-            DataDestination::Ret => return self.code.push(Instr::Ret { value: instr, expr }),
-            DataDestination::Branch { true_bb, false_bb }
+        match ctx.data {
+            DataDest::Read => return instr,
+            DataDest::Ret => return self.code.push(Instr::Ret { value: instr, expr }),
+            DataDest::Branch { true_bb, false_bb }
                 => return self.code.push(Instr::CondBr { condition: instr, true_bb, false_bb }),
-            DataDestination::Receive { .. } => {
+            DataDest::Receive { .. } => {
                 assert!(should_allow_set, "can't set constant expression!");
             },
-            DataDestination::Store { location } => {
+            DataDest::Store { location } => {
                 self.code.push(Instr::Store { location, value: instr, expr });
             },
-            DataDestination::Set { dest } => {
+            DataDest::Set { dest } => {
                 return self.expr(
                     dest,
-                    Context {
-                        main: Destination {
-                            data: DataDestination::Receive { value: instr, expr },
-                            control: ctx.main.control.clone(),
-                        }
-                    },
+                    Context::new(DataDest::Receive { value: instr, expr }, ctx.control.clone()),
                 );
             }
-            DataDestination::Stmt => {},
+            DataDest::Stmt => {},
         }
 
-        match ctx.main.control {
-            ControlDestination::Block(block) => self.code.push(Instr::Br(block)),
-            ControlDestination::Continue => instr,
-            ControlDestination::Unreachable => self.void_instr(),
+        match ctx.control {
+            ControlDest::Block(block) => self.code.push(Instr::Br(block)),
+            ControlDest::Continue => instr,
+            ControlDest::Unreachable => self.void_instr(),
         }
     }
 
     fn build(mut self, scope: ScopeId) -> CompDecl {
-        self.scope(
-            scope,
-            Context {
-                main: Destination {
-                    data: DataDestination::Ret,
-                    control: ControlDestination::Unreachable,
-                }
-            }
-        );
+        self.scope(scope, Context::new(DataDest::Ret, ControlDest::Unreachable));
         CompDecl {
             code: self.code,
             basic_blocks: self.basic_blocks,
