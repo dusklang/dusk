@@ -16,6 +16,8 @@ pub enum Expr {
     IntLit { lit: u64 },
     DecLit { lit: f64 },
     DeclRef { arguments: SmallVec<[ExprId; 2]>, id: DeclRefId },
+    LogicalOr { lhs: ExprId, rhs: ExprId },
+    LogicalAnd { lhs: ExprId, rhs: ExprId },
     Set { lhs: ExprId, rhs: ExprId },
     Do { scope: ScopeId },
     If { condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId> },
@@ -27,6 +29,7 @@ pub enum Instr {
     Void,
     IntConst { lit: u64, expr: ExprId },
     FloatConst { lit: f64, expr: ExprId },
+    BoolConst(bool),
     Alloca { expr: ExprId },
     Get { arguments: SmallVec<[InstrId; 2]>, id: DeclRefId },
     Set { arguments: SmallVec<[InstrId; 2]>, id: DeclRefId, value: InstrId, expr: ExprId },
@@ -233,6 +236,81 @@ impl<'a> CompDeclBuilder<'a> {
                     }
                 )
             },
+            Expr::LogicalAnd { lhs, rhs } => {
+                if let DataDestination::Branch { true_bb, false_bb } = ctx.main.data {
+                    let left_true_bb = self.basic_blocks.push(InstrId::new(0));
+                    self.expr(
+                        lhs,
+                        Context {
+                            main: Destination {
+                                data: DataDestination::Branch { true_bb: left_true_bb, false_bb },
+                                control: ControlDestination::Continue,
+                            }
+                        }
+                    );
+                    self.basic_blocks[left_true_bb] = InstrId::new(self.code.len());
+                    return self.expr(
+                        rhs,
+                        Context {
+                            main: Destination {
+                                data: DataDestination::Branch { true_bb, false_bb },
+                                control: ControlDestination::Continue,
+                            }
+                        }
+                    );
+                } else {
+                    let location = if let DataDestination::Read = ctx.main.data {
+                        Some(self.code.push(Instr::Alloca { expr }))
+                    } else {
+                        None
+                    };
+                    let left_true_bb = self.basic_blocks.push(InstrId::new(0));
+                    let left_false_bb = self.basic_blocks.push(InstrId::new(0));
+                    let after_bb = self.basic_blocks.push(InstrId::new(0));
+                    self.expr(
+                        lhs,
+                        Context {
+                            main: Destination {
+                                data: DataDestination::Branch { true_bb: left_true_bb, false_bb: left_false_bb },
+                                control: ControlDestination::Continue,
+                            }
+                        }
+                    );
+
+                    self.basic_blocks[left_true_bb] = InstrId::new(self.code.len());
+                    // No further branching required, because (true && foo) <=> foo
+                    let branch_ctx = Context {
+                        main: Destination {
+                            data: if let Some(location) = location {
+                                DataDestination::Store { location }
+                            } else {
+                                ctx.main.data.clone()
+                            },
+                            control: if let ControlDestination::Continue = ctx.main.control {
+                                ControlDestination::Block(after_bb)
+                            } else {
+                                ctx.main.control.clone()
+                            },
+                        }
+                    };
+                    self.expr(rhs, branch_ctx.clone());
+
+                    self.basic_blocks[left_false_bb] = InstrId::new(self.code.len());
+                    let false_val = self.code.push(Instr::BoolConst(false));
+                    self.handle_context(false_val, expr, branch_ctx, false);
+
+
+                    self.basic_blocks[after_bb] = InstrId::new(self.code.len());
+                    if let Some(location) = location {
+                        self.code.push(Instr::Load { location, expr })
+                    } else {
+                        return self.void_instr()
+                    }
+                }
+            },
+            Expr::LogicalOr { lhs, rhs } => {
+                self.void_instr()
+            }
             Expr::Do { scope } => return self.scope(scope, ctx),
             Expr::If { condition, then_scope, else_scope } => {
                 // At this point it's impossible to know where these basic blocks are supposed to begin, so make them 0 for now
@@ -336,6 +414,10 @@ impl<'a> CompDeclBuilder<'a> {
             }
         };
         
+        self.handle_context(instr, expr, ctx, should_allow_set)
+    }
+
+    fn handle_context(&mut self, instr: InstrId, expr: ExprId, ctx: Context, should_allow_set: bool) -> InstrId {
         match ctx.main.data {
             DataDestination::Read => return instr,
             DataDestination::Ret => return self.code.push(Instr::Ret { value: instr, expr }),
@@ -438,6 +520,8 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
     fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId {
         match op {
             BinOp::Assign => self.exprs.push(Expr::Set { lhs, rhs }),
+            BinOp::LogicalAnd => self.exprs.push(Expr::LogicalAnd { lhs, rhs }),
+            BinOp::LogicalOr => self.exprs.push(Expr::LogicalOr { lhs, rhs }),
             _ => self.decl_ref_no_name(smallvec![lhs, rhs], range),
         }
     }
