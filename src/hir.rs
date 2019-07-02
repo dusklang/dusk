@@ -110,8 +110,8 @@ enum DataDest {
     Read,
     /// This value is a statement and therefore will never be used
     Stmt,
-    /// If this value is true, branch to true_bb, otherwise branch to false_bb
-    Branch { true_bb: BasicBlockId, false_bb: BasicBlockId },
+    /// If this value is true, branch to the first basic block, otherwise branch to the second
+    Branch(BasicBlockId, BasicBlockId),
 }
 
 /// Where to go after the current value is computed (whether implicitly or explicitly, such as via a `break` in a loop)
@@ -228,26 +228,23 @@ impl<'a> CompDeclBuilder<'a> {
                 } else {
                     None
                 };
-                if let DataDest::Branch { true_bb, false_bb } = ctx.data {
+                if let DataDest::Branch(true_bb, false_bb) = ctx.data {
                     self.expr(
                         lhs,
-                        Context::new(DataDest::Branch { true_bb: left_true_bb, false_bb }, ControlDest::Continue),
+                        Context::new(DataDest::Branch(left_true_bb, false_bb), ControlDest::Continue),
                     );
 
                     self.basic_blocks[left_true_bb] = InstrId::new(self.code.len());
                     return self.expr(
                         rhs,
-                        Context::new(DataDest::Branch { true_bb, false_bb }, ControlDest::Continue),
+                        Context::new(DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
                     );
                 } else {
                     let left_false_bb = self.basic_blocks.push(InstrId::new(0));
                     let after_bb = self.basic_blocks.push(InstrId::new(0));
                     self.expr(
                         lhs,
-                        Context::new(
-                            DataDest::Branch { true_bb: left_true_bb, false_bb: left_false_bb },
-                            ControlDest::Continue,
-                        ),
+                        Context::new(DataDest::Branch(left_true_bb, left_false_bb), ControlDest::Continue),
                     );
 
                     self.basic_blocks[left_true_bb] = InstrId::new(self.code.len());
@@ -289,7 +286,7 @@ impl<'a> CompDeclBuilder<'a> {
                 };
                 self.expr(
                     condition,
-                    Context::new(DataDest::Branch { true_bb, false_bb }, ControlDest::Continue),
+                    Context::new(DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
                 );
                 self.basic_blocks[true_bb] = InstrId::new(self.code.len());
                 let scope_ctx = ctx.redirect(result_location, Some(post_bb));
@@ -330,7 +327,7 @@ impl<'a> CompDeclBuilder<'a> {
                     } else {
                         self.code.push(Instr::Store { location, value: self.void_instr(), expr })
                     },
-                    DataDest::Branch { true_bb, false_bb } => if else_scope.is_some() {
+                    DataDest::Branch(true_bb, false_bb) => if else_scope.is_some() {
                         self.void_instr()
                     } else {
                         self.code.push(Instr::CondBr { condition: self.void_instr(), true_bb, false_bb })
@@ -353,7 +350,7 @@ impl<'a> CompDeclBuilder<'a> {
         match ctx.data {
             DataDest::Read => return instr,
             DataDest::Ret => return self.code.push(Instr::Ret { value: instr, expr }),
-            DataDest::Branch { true_bb, false_bb }
+            DataDest::Branch(true_bb, false_bb)
                 => return self.code.push(Instr::CondBr { condition: instr, true_bb, false_bb }),
             DataDest::Receive { .. } => {
                 assert!(should_allow_set, "can't set constant expression!");
