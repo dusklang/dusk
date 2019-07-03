@@ -2,7 +2,8 @@ fn do_something_really_cool {
     fn assert(condition: bool) {
         if !condition { panic }
     }
-    foo := if 13 == 12 && 5 > 14 {
+    foo := 13 == 12 || 5 > 14
+    foo := if 13 == 12 || 5 > 14 {
         4
     } else {
         42

@@ -190,6 +190,14 @@ impl<'a> CompDeclBuilder<'a> {
         self.expr(scope.terminal_expr, ctx)
     }
 
+    fn new_bb(&mut self) -> BasicBlockId {
+        self.basic_blocks.push(InstrId::new(0))
+    }
+
+    fn begin_bb(&mut self, bb: BasicBlockId) {
+        self.basic_blocks[bb] = InstrId::new(self.code.len())
+    }
+
     fn expr(&mut self, expr: ExprId, ctx: Context) -> InstrId {
         // HACK!!!!
         let mut should_allow_set = false;
@@ -222,7 +230,7 @@ impl<'a> CompDeclBuilder<'a> {
                 )
             },
             Expr::LogicalAnd { lhs, rhs } => {
-                let left_true_bb = self.basic_blocks.push(InstrId::new(0));
+                let left_true_bb = self.new_bb();
                 let location = if let DataDest::Read = ctx.data {
                     Some(self.code.push(Instr::Alloca { expr }))
                 } else {
@@ -234,29 +242,29 @@ impl<'a> CompDeclBuilder<'a> {
                         Context::new(DataDest::Branch(left_true_bb, false_bb), ControlDest::Continue),
                     );
 
-                    self.basic_blocks[left_true_bb] = InstrId::new(self.code.len());
+                    self.begin_bb(left_true_bb);
                     return self.expr(
                         rhs,
                         Context::new(DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
                     );
                 } else {
-                    let left_false_bb = self.basic_blocks.push(InstrId::new(0));
-                    let after_bb = self.basic_blocks.push(InstrId::new(0));
+                    let left_false_bb = self.new_bb();
+                    let after_bb = self.new_bb();
                     self.expr(
                         lhs,
                         Context::new(DataDest::Branch(left_true_bb, left_false_bb), ControlDest::Continue),
                     );
 
-                    self.basic_blocks[left_true_bb] = InstrId::new(self.code.len());
+                    self.begin_bb(left_true_bb);
                     // No further branching required, because (true && foo) <=> foo
                     let branch_ctx = ctx.redirect(location, Some(after_bb));
                     self.expr(rhs, branch_ctx.clone());
 
-                    self.basic_blocks[left_false_bb] = InstrId::new(self.code.len());
+                    self.begin_bb(left_false_bb);
                     let false_val = self.code.push(Instr::BoolConst(false));
                     self.handle_context(false_val, expr, branch_ctx, false);
 
-                    self.basic_blocks[after_bb] = InstrId::new(self.code.len());
+                    self.begin_bb(after_bb);
                     if let Some(location) = location {
                         self.code.push(Instr::Load { location, expr })
                     } else {
@@ -265,15 +273,54 @@ impl<'a> CompDeclBuilder<'a> {
                 }
             },
             Expr::LogicalOr { lhs, rhs } => {
-                self.void_instr()
+                let left_false_bb = self.new_bb();
+                if let DataDest::Branch(true_bb, false_bb) = ctx.data {
+                    self.expr(
+                        lhs,
+                        Context::new(DataDest::Branch(true_bb, left_false_bb), ControlDest::Continue),
+                    );
+
+                    self.begin_bb(left_false_bb);
+                    return self.expr(
+                        rhs,
+                        Context::new(DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
+                    );
+                } else {
+                    let left_true_bb = self.new_bb();
+                    let after_bb = self.new_bb();
+                    let location = if let DataDest::Read = ctx.data {
+                        Some(self.code.push(Instr::Alloca { expr }))
+                    } else {
+                        None
+                    };
+                    self.expr(
+                        lhs,
+                        Context::new(DataDest::Branch(left_true_bb, left_false_bb), ControlDest::Continue),
+                    );
+
+                    self.begin_bb(left_true_bb);
+                    let true_val = self.code.push(Instr::BoolConst(true));
+                    let branch_ctx = ctx.redirect(location, Some(after_bb));
+                    self.handle_context(true_val, expr, branch_ctx.clone(), false);
+
+                    self.begin_bb(left_false_bb);
+                    self.expr(rhs, branch_ctx);
+
+                    self.begin_bb(after_bb);
+                    if let Some(location) = location {
+                        self.code.push(Instr::Load { location, expr })
+                    } else {
+                        return self.void_instr()
+                    }
+                }
             }
             Expr::Do { scope } => return self.scope(scope, ctx),
             Expr::If { condition, then_scope, else_scope } => {
                 // At this point it's impossible to know where these basic blocks are supposed to begin, so make them 0 for now
-                let true_bb = self.basic_blocks.push(InstrId::new(0));
-                let false_bb = self.basic_blocks.push(InstrId::new(0));
+                let true_bb = self.new_bb();
+                let false_bb = self.new_bb();
                 let post_bb = if else_scope.is_some() {
-                    self.basic_blocks.push(InstrId::new(0))
+                    self.new_bb()
                 } else {
                     false_bb
                 };
@@ -288,15 +335,15 @@ impl<'a> CompDeclBuilder<'a> {
                     condition,
                     Context::new(DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
                 );
-                self.basic_blocks[true_bb] = InstrId::new(self.code.len());
+                self.begin_bb(true_bb);
                 let scope_ctx = ctx.redirect(result_location, Some(post_bb));
                 self.scope(then_scope, scope_ctx.clone());
                 if let Some(else_scope) = else_scope {
-                    self.basic_blocks[false_bb] = InstrId::new(self.code.len());
+                    self.begin_bb(false_bb);
                     self.scope(else_scope, scope_ctx);
                 }
 
-                self.basic_blocks[post_bb] = InstrId::new(self.code.len());
+                self.begin_bb(post_bb);
                 if let Some(location) = result_location {
                     return self.code.push(Instr::Load { location, expr })
                 } else {
