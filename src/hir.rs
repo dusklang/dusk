@@ -18,6 +18,7 @@ pub enum Expr {
     DeclRef { arguments: SmallVec<[ExprId; 2]>, id: DeclRefId },
     LogicalOr { lhs: ExprId, rhs: ExprId },
     LogicalAnd { lhs: ExprId, rhs: ExprId },
+    LogicalNot(ExprId),
     Set { lhs: ExprId, rhs: ExprId },
     Do { scope: ScopeId },
     If { condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId> },
@@ -32,6 +33,7 @@ pub enum Instr {
     BoolConst(bool),
     Alloca { expr: ExprId },
     Get { arguments: SmallVec<[InstrId; 2]>, id: DeclRefId },
+    LogicalNot(InstrId),
     Set { arguments: SmallVec<[InstrId; 2]>, id: DeclRefId, value: InstrId, expr: ExprId },
     Load { location: InstrId, expr: ExprId },
     Store { location: InstrId, value: InstrId, expr: ExprId },
@@ -313,7 +315,15 @@ impl<'a> CompDeclBuilder<'a> {
                         return self.void_instr()
                     }
                 }
-            }
+            },
+            Expr::LogicalNot(operand) => {
+                if let DataDest::Branch(true_bb, false_bb) = ctx.data {
+                    return self.expr(operand, Context::new(DataDest::Branch(false_bb, true_bb), ctx.control))
+                } else {
+                    let operand = self.expr(operand, Context::new(DataDest::Read, ControlDest::Continue));
+                    self.code.push(Instr::LogicalNot(operand))
+                }
+            },
             Expr::Do { scope } => return self.scope(scope, ctx),
             Expr::If { condition, then_scope, else_scope } => {
                 // At this point it's impossible to know where these basic blocks are supposed to begin, so make them 0 for now
@@ -458,6 +468,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
     }
     fn un_op(&mut self, op: UnOp, expr: ExprId, range: SourceRange) -> ExprId {
         match op {
+            UnOp::Not => self.exprs.push(Expr::LogicalNot(expr)),
             _ => self.decl_ref_no_name(smallvec![expr], range),
         }
     }
