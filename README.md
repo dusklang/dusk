@@ -76,8 +76,10 @@ In addition to refinement types, it should be possible to declare *typestate* fo
 
 One example where typestate would be useful is in enabling memory safety features like Rust's borrow checker to be implemented in user-level code:
 ```
-// Strawman typestate declaration syntax, inspired by Rust's `impl` syntax. This adds the typestate enclosed in curly braces to every instance of the specified type (in this case, every type).
-// Think of it like appending struct field. These can be accessed on an instance using `instance.typestate.insert_field_name_here`
+// Strawman typestate declaration syntax, inspired by Rust's `impl` syntax. This adds the typestate
+// enclosed in curly braces to every instance of the specified type (in this case, every type).
+// Think of it like appending a struct field. These can be accessed on an instance using
+// `instance.typestate.insert_field_name_here`
 typestate[T] T {
     // Same rules as the Rust memory model: you can have aliasing or mutability, but not both.
     borrow_status: enum {
@@ -100,7 +102,8 @@ impl[T] ImplicitCast[T*] for Ref[T] {
 
 impl[T] Drop for Ref[T] {
     fn drop(&mut self) where 
-        // It's a bug in this borrow checker implementation if a reference is in scope while its referenced value is not tracking it
+        // It's a bug in this borrow checker implementation if a reference is in scope while
+        // its referenced value is not tracking it
         (*self.ptr).typestate.borrow_status matches 'borrowed &&
         (*self.ptr).typestate.borrow_status.ref_count > 0
     {
@@ -121,14 +124,16 @@ impl[T] ImplicitCast[T *mut] for MutRef[T] {
 }
 
 impl[T] Drop for MutRef[T] {
-    // It's a bug in this borrow checker implementation if a reference is in scope while its referenced value is not tracking it
+    // It's a bug in this borrow checker implementation if a reference is in scope while its referenced
+    // value is not tracking it
     fn drop(&mut self) where (*self.ptr).typestate.borrow_status == 'mutablyBorrowed {
         (*self.ptr).typestate.borrow_status = 'borrowed { ref_count: 0 }
     }
 }
 
 // Example usage:
-// Strawman keyword for specifying language defaults. `pointer_type` and `mut_pointer_type` must implement ImplicitCast[T]
+// Strawman keyword for specifying language defaults. `pointer_type` and `mut_pointer_type` must
+// implement ImplicitCast[T]
 defaults {
     pointer_type[T]: Ref[T]
     mut_pointer_type[T]: MutRef[T]
@@ -136,8 +141,11 @@ defaults {
 
 foo := 5
 foo_ref = &foo
-foo_mut_ref = &mut foo // Error: "can't instantiate `Ref[int]` from pointer because it requires typestate `borrow_status` to be 'borrowed { ref_count: 0 }, found 'borrowed { ref_count: 1 }"
-// (Obviously there needs to be a way for the library author to provide specialized, helpful error messages)
+foo_mut_ref = &mut foo // Error: "can't instantiate `Ref[int]` from pointer because it requires
+                       //         typestate `borrow_status` to be 'borrowed { ref_count: 0 },
+                       //         found 'borrowed { ref_count: 1 }"
+                       // (Obviously there needs to be a way for the library author to provide
+                       // specialized, helpful error messages)
 ```
 Note: There are two really important omissions in the code above: dereferences, and what Rust calls non-lexical lifetimes. The former is trivial, while the latter could be imitated by allowing references to be invalidated/dropped as new, conflicting references are created. This differs from the Rust model in that it would be legal to create as many conflicting references as you want, but illegal to use the invalidated ones. The code examples below assume that model is implemented.
 
