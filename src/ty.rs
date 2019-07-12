@@ -10,12 +10,6 @@ pub enum FloatWidth {
     W32, W64,
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct QualType {
-    pub ty: Type,
-    pub is_mut: bool,
-}
-
 #[derive(Clone, PartialEq, Eq)]
 pub enum Type {
     Error,
@@ -29,15 +23,6 @@ pub enum Type {
     Bool,
     Void,
     Never,
-}
-
-impl From<Type> for QualType {
-    fn from(ty: Type) -> Self {
-        Self {
-            ty, 
-            is_mut: false,
-        }
-    }
 }
 
 impl Type {
@@ -91,6 +76,14 @@ impl Type {
     pub const fn f64() -> Self {
         Type::Float(FloatWidth::W64)
     }
+
+    pub fn trivially_convertible_to(&self, other: &Type) -> bool {
+        match (self, other) {
+            (Type::Never, other) => true,
+            (Type::Pointer(a), Type::Pointer(b)) => a.trivially_convertible_to(b),
+            (a, b) => a == b,
+        }
+    }
 }
 
 impl Default for Type {
@@ -134,5 +127,41 @@ impl fmt::Debug for Type {
                 }
             }
         }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct QualType {
+    pub ty: Type,
+    pub is_mut: bool,
+}
+
+impl QualType {
+    pub fn trivially_convertible_to(&self, other: &QualType) -> bool {
+        if !self.is_mut && other.is_mut {
+            return false;
+        }
+        self.ty.trivially_convertible_to(&other.ty)
+    }
+}
+
+impl From<Type> for QualType {
+    fn from(ty: Type) -> Self {
+        Self {
+            ty, 
+            is_mut: false,
+        }
+    }
+}
+
+impl<'a> From<Type> for &QualType {
+    fn from(ty: Type) -> Self {
+        &QualType::from(ty)
+    }
+}
+
+impl<'a> From<&Type> for &QualType {
+    fn from(ty: &Type) -> Self {
+        &QualType::from(ty.clone())
     }
 }

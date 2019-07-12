@@ -3,7 +3,7 @@ use smallvec::{SmallVec, smallvec};
 use crate::error::Error;
 use crate::tir::{Program, Decl};
 use crate::builder::{ExprId, DeclId, DeclRefId};
-use crate::ty::Type;
+use crate::ty::{Type, QualType};
 use crate::index_vec::IdxVec;
 use crate::dep_vec;
 
@@ -22,28 +22,52 @@ impl LiteralType {
 #[derive(Debug, Default, Clone)]
 struct ConstraintList {
     literal: Option<LiteralType>,
-    one_of: SmallVec<[Type; 1]>,
-    preferred_type: Option<Type>,
+    one_of: SmallVec<[QualType; 1]>,
+    preferred_type: Option<QualType>,
 }
 
 enum UnificationError<'a> {
     /// The expression was constrained to be a literal that can't be unified to the requested type
     Literal(LiteralType),
     /// The expression didn't have the requested type in its list of type choices
-    InvalidChoice(&'a [Type]),
+    InvalidChoice(&'a [QualType]),
+    /// The requested type was mutable but the expression was immutable
+    Immutable,
 }
 
 impl ConstraintList {
-    fn can_unify_to(&self, ty: &Type) -> Result<(), UnificationError> {
+    fn one_of_exists(&self, mut condition: impl FnMut(&QualType) -> bool) -> bool {
+        for ty in &self.one_of {
+            if condition(ty) { return true; }
+        }
+        false
+    }
+
+    fn is_never(&self) -> bool {
+        self.one_of.len() == 1 
+            && &self.one_of.first().unwrap().ty == &Type::Never
+    }
+
+    fn can_unify_to<'a>(&self, ty: impl Into<&'a QualType>) -> Result<(), UnificationError> {
         // Never is the "bottom type", so it unifies to anything.
-        if self.one_of.contains(&Type::Never) { return Ok(()); }
+        if self.one_of_exists(|ty| &ty.ty == &Type::Never) { return Ok(()); }
+
+        let ty = ty.into();
 
         use UnificationError::*;
         match self.literal {
-            Some(LiteralType::Dec) if ty.expressible_by_dec_lit() => Ok(()),
-            Some(LiteralType::Int) if ty.expressible_by_int_lit() => Ok(()),
+            Some(LiteralType::Dec) if ty.ty.expressible_by_dec_lit() => if ty.is_mut {
+                Err(UnificationError::Immutable)
+            } else {
+                Ok(())
+            },
+            Some(LiteralType::Int) if ty.ty.expressible_by_int_lit() => if ty.is_mut {
+                Err(UnificationError::Immutable)
+            } else {
+                Ok(())
+            },
             Some(lit) => Err(Literal(lit)),
-            None => if self.one_of.contains(ty) {
+            None => if self.one_of_exists(|oty| oty.trivially_convertible_to(ty)) {
                 Ok(())
             } else {
                 Err(InvalidChoice(&self.one_of))
@@ -51,51 +75,60 @@ impl ConstraintList {
         }
     }
 
-    fn set_to(&mut self, ty: Type) {
+    fn set_to(&mut self, ty: impl Into<QualType>) {
         // If we're never, we should stay never.
-        if self.one_of.as_slice() != &[Type::Never] {
-            self.one_of = smallvec![ty];
+        if !self.is_never() {
+            self.one_of = smallvec![ty.into()];
         }
     }
 
     fn intersect_with(&self, other: &ConstraintList) -> ConstraintList {
         let mut constraints = ConstraintList::default();
 
-        fn filtered_tys(tys: &[Type], mut f: impl FnMut(&Type) -> bool) -> SmallVec<[Type; 1]> {
-            tys.iter().filter_map(|ty| 
-                    if f(ty) { 
+        fn filtered_tys(tys: &[QualType], mut f: impl FnMut(&QualType) -> bool) -> SmallVec<[QualType; 1]> {
+            tys.iter().filter_map(|ty|
+                    if f(ty) {
                         Some(ty.clone())
-                    } else { 
-                        None 
+                    } else {
+                        None
                     }
                 )
                 .collect()
         }
-        match (self.literal, &self.one_of, other.literal, &other.one_of) {
+        match (self.literal, self, other.literal, other) {
             (None, lhs, None, rhs) => {
-                if lhs.as_slice() == &[Type::Never] {
-                    constraints.one_of = rhs.clone();
-                } else if rhs.as_slice() == &[Type::Never] {
-                    constraints.one_of = lhs.clone();
+                if lhs.is_never() {
+                    constraints.one_of = rhs.one_of.clone();
+                } else if rhs.is_never() {
+                    constraints.one_of = lhs.one_of.clone();
                 } else {
-                    for ty in lhs {
-                        if rhs.contains(ty) {
-                            constraints.one_of.push(ty.clone());
+                    for lty in &lhs.one_of {
+                        for rty in &rhs.one_of {
+                            // TODO: would it be ok to break from the inner loop after finding a match here?
+                            if lty.trivially_convertible_to(rty) {
+                                constraints.one_of.push(rty.clone());
+                            } else if rty.trivially_convertible_to(lty) {
+                                constraints.one_of.push(lty.clone());
+                            }
                         }
                     }
                 }
             },
-            (Some(lhs_lit), lhs, None, rhs) | (None, rhs, Some(lhs_lit), lhs) => {
-                if rhs.as_slice() == &[Type::Never] {
-                    constraints.literal = Some(lhs_lit);
-                    constraints.one_of = lhs.clone();
+            (Some(lit_lit), lit, None, non_lit) | (None, non_lit, Some(lit_lit), lit) => {
+                if non_lit.is_never() {
+                    constraints.literal = Some(lit_lit);
+                    constraints.one_of = lit.one_of.clone();
                 } else {
                     constraints.literal = None;
                     constraints.one_of = filtered_tys(
-                        rhs,
-                        match lhs_lit {
-                            LiteralType::Dec => Type::expressible_by_dec_lit,
-                            LiteralType::Int => Type::expressible_by_int_lit,
+                        &non_lit.one_of,
+                        {
+                            fn dec_lit(ty: &QualType) -> bool { ty.ty.expressible_by_dec_lit() }
+                            fn int_lit(ty: &QualType) -> bool { ty.ty.expressible_by_int_lit() }
+                            match lit_lit {
+                                LiteralType::Dec => dec_lit,
+                                LiteralType::Int => int_lit,
+                            }
                         },
                     );
                 }
@@ -112,23 +145,88 @@ impl ConstraintList {
         if self.preferred_type == other.preferred_type {
             constraints.preferred_type = self.preferred_type.clone();
         } else {
-            if let Some(preferred_type) = &self.preferred_type {
-                // I don't actually know if it's possible for an expression to not be able to unify to its preferred type?
-                assert!(self.can_unify_to(preferred_type).is_ok());
-                if other.can_unify_to(preferred_type).is_ok() {
-                    constraints.preferred_type = Some(preferred_type.clone());
-                }
-            } 
-            if let Some(preferred_type) = &other.preferred_type {
-                // I don't actually know if it's possible for an expression to not be able to unify to its preferred type?
-                assert!(other.can_unify_to(preferred_type).is_ok());
-                if self.can_unify_to(preferred_type).is_ok() {
-                    constraints.preferred_type = Some(preferred_type.clone());
+            for (a, b) in &[(self, other), (other, self)] {
+                if let Some(preferred_type) = &a.preferred_type {
+                    // I don't actually know if it's possible for an expression to not be able to unify to its preferred type?
+                    assert!(a.can_unify_to(preferred_type).is_ok());
+                    if b.can_unify_to(preferred_type).is_ok() {
+                        constraints.preferred_type = Some(preferred_type.clone());
+                    }
                 }
             }
         }
 
         constraints
+    }
+
+    // Same as intersect_with, but: 
+    //  - mutates `self` and `other` in-place instead of creating a new `ConstraintList`
+    //  - evaluates mutability independently between the arguments, with precedence given to self
+    //  - is literally just used for assignment expressions
+    //  - terrible abstraction :(
+    fn lopsided_intersect_with(&mut self, other: &mut ConstraintList) {
+        match (self.literal, other.literal) {
+            (None, None) => {
+                if !self.is_never() && !other.is_never() {
+                    self.one_of.retain(|lty|
+                        other.one_of_exists(|rty| rty.ty.trivially_convertible_to(&lty.ty))
+                    );
+                    other.one_of.retain(|rty|
+                        self.one_of_exists(|lty| rty.ty.trivially_convertible_to(&lty.ty))
+                    );
+                }
+            },
+            (Some(lhs_lit), None) => {
+                // Can't assign to a literal
+                self.one_of = SmallVec::new();
+
+                fn dec_lit(ty: &mut QualType) -> bool { ty.ty.expressible_by_dec_lit() }
+                fn int_lit(ty: &mut QualType) -> bool { ty.ty.expressible_by_int_lit() }
+                other.one_of.retain(
+                    match lhs_lit {
+                        LiteralType::Dec => dec_lit,
+                        LiteralType::Int => int_lit,
+                    }
+                );
+            },
+            (None, Some(rhs_lit)) => {
+                let lit_test = match rhs_lit {
+                    LiteralType::Dec => Type::expressible_by_dec_lit,
+                    LiteralType::Int => Type::expressible_by_int_lit,
+                };
+                if !self.is_never() {
+                    self.one_of.retain(|lty|
+                        lit_test(&lty.ty) || other.one_of_exists(|rty| rty.ty.trivially_convertible_to(&lty.ty))
+                    );
+                    other.one_of.retain(|rty|
+                        self.one_of_exists(|lty| lit_test(&lty.ty) || rty.ty.trivially_convertible_to(&lty.ty))
+                    );
+                }
+            }
+            (Some(LiteralType::Dec), Some(_)) | (Some(LiteralType::Int), Some(_)) => self.one_of = SmallVec::new(),
+        }
+
+        if self.preferred_type.as_ref().map(|ty| &ty.ty) != other.preferred_type.as_ref().map(|ty| &ty.ty) {
+            if let Some(preferred_type) = &other.preferred_type {
+                // I don't actually know if it's possible for an expression to not be able to unify to its preferred type?
+                assert!(other.can_unify_to(preferred_type).is_ok());
+                let preferred_type = QualType {
+                    ty: preferred_type.ty.clone(),
+                    is_mut: true,
+                };
+                if self.can_unify_to(&preferred_type).is_ok() {
+                    self.preferred_type = Some(preferred_type);
+                }
+            }
+            if let Some(preferred_type) = &self.preferred_type {
+                // I don't actually know if it's possible for an expression to not be able to unify to its preferred type?
+                assert!(self.can_unify_to(preferred_type).is_ok());
+                let preferred_type = QualType::from(preferred_type.ty.clone());
+                if other.can_unify_to(&preferred_type).is_ok() {
+                    other.preferred_type = Some(preferred_type);
+                }
+            }
+        }
     }
 }
 
@@ -166,20 +264,20 @@ pub fn type_check(prog: Program) -> Vec<Error> {
     ]);
 
     // Assign the type of the void expression to be void.
-    tc.constraints[tc.prog.void_expr].one_of = smallvec![Type::Void];
+    tc.constraints[tc.prog.void_expr].one_of = smallvec![Type::Void.into()];
     tc.types[tc.prog.void_expr] = Type::Void;
 
     // Pass 1: propagate info down from leaves to roots
     for item in &tc.prog.int_lits { 
         let constraints = &mut tc.constraints[item.id];
         let lit = LiteralType::Int;
-        constraints.preferred_type = Some(lit.preferred_type());
+        constraints.preferred_type = Some(lit.preferred_type().into());
         constraints.literal = Some(lit);
     }
     for item in &tc.prog.dec_lits {
         let constraints = &mut tc.constraints[item.id];
         let lit = LiteralType::Dec;
-        constraints.preferred_type = Some(lit.preferred_type());
+        constraints.preferred_type = Some(lit.preferred_type().into());
         constraints.literal = Some(lit);
     }
     for level in 0..levels {
@@ -188,9 +286,9 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             let guess = if let Some(pref) = &constraints.preferred_type {
                 // I don't actually know if it's possible for an expression to not be able to unify to its preferred type?
                 assert!(constraints.can_unify_to(pref).is_ok());
-                pref.clone()
+                pref.ty.clone()
             } else {
-                constraints.one_of[0].clone()
+                constraints.one_of[0].ty.clone()
             };
             match item.decl_id {
                 DeclId::Global(id) => &mut tc.prog.global_decls[id],
@@ -213,6 +311,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                 }
             };
             let constraints = &tc.constraints;
+            // Rule out overloads that don't match the arguments
             tc.prog.overloads[item.decl_ref_id].retain(|&overload| {
                 assert_eq!(get_decl(overload).param_tys.len(), item.args.len());
                 for (constraints, ty) in item.args.iter().map(|&arg| &constraints[arg]).zip(&get_decl(overload).param_tys) {
@@ -222,15 +321,15 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             });
 
             tc.constraints[item.id].one_of = tc.prog.overloads[item.decl_ref_id].iter()
-                .map(|&overload| get_decl(overload).ret_ty.ty.clone())
+                .map(|&overload| get_decl(overload).ret_ty.clone())
                 .collect();
 
             'find_preference: for (i, &arg) in item.args.iter().enumerate() {
                 if let Some(ty) = &tc.constraints[arg].preferred_type {
                     for &overload in &tc.prog.overloads[item.decl_ref_id] {
                         let decl = get_decl(overload);
-                        if &decl.param_tys[i] == ty {
-                            tc.constraints[item.id].preferred_type = Some(decl.ret_ty.ty.clone());
+                        if ty.ty.trivially_convertible_to(&decl.param_tys[i]) {
+                            tc.constraints[item.id].preferred_type = Some(decl.ret_ty.clone());
                             tc.preferred_overloads[item.decl_ref_id] = Some(overload);
                             break 'find_preference;
                         }
@@ -243,7 +342,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             use LiteralType::*;
 
             let constraints = &mut tc.constraints[item.id];
-            constraints.one_of = smallvec![Type::Never];
+            constraints.one_of = smallvec![Type::Never.into()];
             tc.types[item.id] = Type::Never;
 
             match tc.constraints[item.expr].can_unify_to(&item.ty) {
@@ -251,6 +350,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                 Err(Literal(Dec)) => panic!("expected return value of {:?}, found decimal literal", item.ty),
                 Err(Literal(Int)) => panic!("expected return value of {:?}, found integer literal", item.ty),
                 Err(InvalidChoice(choices)) => panic!("expected return value of {:?}, found {:?}", item.ty, choices),
+                Err(Immutable) => panic!("COMPILER BUG: unexpected mutable return type"),
             }
         }
         for item in tc.prog.ifs.get_level(level) {
@@ -292,11 +392,11 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                     Error::new("ambiguous type for expression")
                         .adding_primary_range(tc.prog.source_ranges[item.id].clone(), "expression here")
                 );
-                Type::Error
+                QualType::from(Type::Error)
             } else {
                 constraints.one_of[0].clone()
             };
-            tc.types[item.id] = ty.clone();
+            tc.types[item.id] = ty.ty.clone();
 
             // P.S. These borrows are only here because the borrow checker is dumb
             let local_decls = &tc.prog.local_decls;
@@ -309,8 +409,8 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             };
             let overloads = &mut tc.prog.overloads[item.decl_ref_id];
             overloads.retain(|&overload| {
-                let ret_ty = &get_decl(overload).ret_ty.ty;
-                ret_ty == &ty || ret_ty == &Type::Never
+                get_decl(overload).ret_ty
+                    .trivially_convertible_to(&ty)
             });
             let pref = tc.preferred_overloads[item.decl_ref_id];
 
@@ -329,7 +429,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                         .adding_primary_range(tc.prog.source_ranges[item.id].clone(), "expression here")
                 );
                 for &arg in &item.args {
-                    tc.constraints[arg].one_of = smallvec![Type::Error];
+                    tc.constraints[arg].set_to(Type::Error);
                 }
                 None
             };
@@ -351,11 +451,11 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                     Error::new("ambiguous type for if expression")
                         .adding_primary_range(tc.prog.source_ranges[item.id].clone(), "expression here")
                 );
-                Type::Error
+                QualType::from(Type::Error)
             } else {
                 tc.constraints[item.id].one_of[0].clone()
             };
-            tc.types[item.id] = ty.clone();
+            tc.types[item.id] = ty.ty.clone();
             tc.constraints[item.then_expr].set_to(ty.clone());
             tc.constraints[item.else_expr].set_to(ty);
         }
@@ -365,11 +465,11 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                     Error::new("ambiguous type for do expression")
                         .adding_primary_range(tc.prog.source_ranges[item.id].clone(), "expression here")
                 );
-                Type::Error
+                QualType::from(Type::Error)
             } else {
                 tc.constraints[item.id].one_of[0].clone()
             };
-            tc.types[item.id] = ty.clone();
+            tc.types[item.id] = ty.ty.clone();
             tc.constraints[item.terminal_expr].set_to(ty);
         }
     }
@@ -382,7 +482,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             );
             Type::Error
         } else {
-            constraints.one_of[0].clone()
+            constraints.one_of[0].ty.clone()
         };
     }
     for item in &tc.prog.dec_lits {
@@ -394,7 +494,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             );
             Type::Error
         } else {
-            constraints.one_of[0].clone()
+            constraints.one_of[0].ty.clone()
         };
     }
 
