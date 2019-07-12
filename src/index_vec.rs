@@ -63,6 +63,16 @@ impl<T, I: Idx> IdxVec<T, I> {
         let empty = self.raw.is_empty();
         (0..self.raw.len()).filter(move |_| !empty).map(|i| I::new(i))
     }
+    pub fn index_mut(&mut self, a: I, b: I) -> (&mut T, &mut T) {
+        assert_ne!(a, b);
+        if a.idx() < b.idx() {
+            let (section_a, section_b) = self.raw.split_at_mut(b.idx());
+            (&mut section_a[a.idx()], &mut section_b[0])
+        } else {
+            let (section_b, section_a) = self.raw.split_at_mut(a.idx());
+            (&mut section_a[0], &mut section_b[b.idx()])
+        }
+    }
 }
 
 impl<T, I: Idx> IntoIterator for IdxVec<T, I> {

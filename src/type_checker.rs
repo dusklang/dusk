@@ -48,11 +48,9 @@ impl ConstraintList {
             && &self.one_of.first().unwrap().ty == &Type::Never
     }
 
-    fn can_unify_to<'a>(&self, ty: impl Into<&'a QualType>) -> Result<(), UnificationError> {
+    fn can_unify_to(&self, ty: &QualType) -> Result<(), UnificationError> {
         // Never is the "bottom type", so it unifies to anything.
         if self.one_of_exists(|ty| &ty.ty == &Type::Never) { return Ok(()); }
-
-        let ty = ty.into();
 
         use UnificationError::*;
         match self.literal {
@@ -195,12 +193,17 @@ impl ConstraintList {
                     LiteralType::Int => Type::expressible_by_int_lit,
                 };
                 if !self.is_never() {
-                    self.one_of.retain(|lty|
-                        lit_test(&lty.ty) || other.one_of_exists(|rty| rty.ty.trivially_convertible_to(&lty.ty))
-                    );
-                    other.one_of.retain(|rty|
-                        self.one_of_exists(|lty| lit_test(&lty.ty) || rty.ty.trivially_convertible_to(&lty.ty))
-                    );
+                    let (mut lhs_one_of, mut rhs_one_of) = (SmallVec::new(), SmallVec::new());
+                    for lty in &self.one_of {
+                        for rty in &other.one_of {
+                            if lit_test(&lty.ty) || rty.ty.trivially_convertible_to(&lty.ty) {
+                                lhs_one_of.push(lty.clone());
+                                rhs_one_of.push(rty.clone());
+                            }
+                        }
+                    }
+                    self.one_of = dbg!(lhs_one_of);
+                    other.one_of = dbg!(rhs_one_of);
                 }
             }
             (Some(LiteralType::Dec), Some(_)) | (Some(LiteralType::Int), Some(_)) => self.one_of = SmallVec::new(),
@@ -315,7 +318,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             tc.prog.overloads[item.decl_ref_id].retain(|&overload| {
                 assert_eq!(get_decl(overload).param_tys.len(), item.args.len());
                 for (constraints, ty) in item.args.iter().map(|&arg| &constraints[arg]).zip(&get_decl(overload).param_tys) {
-                    if constraints.can_unify_to(ty).is_err() { return false; }
+                    if constraints.can_unify_to(&ty.into()).is_err() { return false; }
                 }
                 true
             });
@@ -345,7 +348,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             constraints.one_of = smallvec![Type::Never.into()];
             tc.types[item.id] = Type::Never;
 
-            match tc.constraints[item.expr].can_unify_to(&item.ty) {
+            match tc.constraints[item.expr].can_unify_to(&QualType::from(&item.ty)) {
                 Ok(()) => {}
                 Err(Literal(Dec)) => panic!("expected return value of {:?}, found decimal literal", item.ty),
                 Err(Literal(Int)) => panic!("expected return value of {:?}, found integer literal", item.ty),
@@ -354,7 +357,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             }
         }
         for item in tc.prog.ifs.get_level(level) {
-            if tc.constraints[item.condition].can_unify_to(&Type::Bool).is_err() {
+            if tc.constraints[item.condition].can_unify_to(&Type::Bool.into()).is_err() {
                 panic!("Expected boolean condition in if expression");
             }
             let constraints = tc.constraints[item.then_expr].intersect_with(&tc.constraints[item.else_expr]);
@@ -369,7 +372,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
     }
     for item in &tc.prog.stmts {
         let constraints = &mut tc.constraints[item.root_expr];
-        if constraints.can_unify_to(&Type::Void).is_err() {
+        if constraints.can_unify_to(&Type::Void.into()).is_err() {
             panic!("standalone expressions must return void");
         }
         constraints.set_to(Type::Void);
@@ -381,9 +384,8 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             tc.constraints[item.root_expr].set_to(tc.prog.decl(item.decl_id).ret_ty.ty.clone());
         }
         for item in tc.prog.assignments.get_level(level) {
-            let constraints = tc.constraints[item.lhs].intersect_with(&tc.constraints[item.rhs]);
-            tc.constraints[item.lhs] = constraints.clone();
-            tc.constraints[item.rhs] = constraints;
+            let (lhs, rhs) = tc.constraints.index_mut(item.lhs, item.rhs);
+            lhs.lopsided_intersect_with(rhs);
         }
         for item in tc.prog.decl_refs.get_level(level) {
             let constraints = &tc.constraints[item.id];
@@ -437,7 +439,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
         }
         for item in tc.prog.rets.get_level(level) {
             let constraints = &mut tc.constraints[item.expr];
-            if constraints.can_unify_to(&item.ty).is_ok() {
+            if constraints.can_unify_to(&QualType::from(&item.ty)).is_ok() {
                 constraints.set_to(item.ty.clone())
             } else {
                 constraints.one_of = SmallVec::new();
@@ -498,7 +500,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
         };
     }
 
-    //println!("Types: {:#?}", tc.types);
+    println!("Types: {:#?}", tc.types);
     //println!("Program: {:#?}", tc.prog);
     //println!("Decl types: {:#?}", tc.prog.local_decls);
     //println!("Constraints: {:#?}", tc.constraints);
