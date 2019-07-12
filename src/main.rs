@@ -10,6 +10,7 @@ mod parser;
 mod tir;
 mod hir;
 mod ty;
+mod constraints;
 mod type_checker;
 
 use std::fs;
