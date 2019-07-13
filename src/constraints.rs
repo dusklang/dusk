@@ -190,15 +190,20 @@ impl ConstraintList {
                 if !self.is_never() {
                     let (mut lhs_one_of, mut rhs_one_of) = (SmallVec::new(), SmallVec::new());
                     for lty in &self.one_of {
-                        for rty in &other.one_of {
-                            if lit_test(&lty.ty) || rty.ty.trivially_convertible_to(&lty.ty) {
-                                lhs_one_of.push(lty.clone());
-                                rhs_one_of.push(rty.clone());
+                        if lit_test(&lty.ty) {
+                            lhs_one_of.push(lty.clone());
+                            rhs_one_of.push(QualType::from(lty.ty.clone()));
+                        } else {
+                            for rty in &other.one_of {
+                                if rty.ty.trivially_convertible_to(&lty.ty) {
+                                    lhs_one_of.push(lty.clone());
+                                    rhs_one_of.push(rty.clone());
+                                }
                             }
                         }
                     }
-                    self.one_of = dbg!(lhs_one_of);
-                    other.one_of = dbg!(rhs_one_of);
+                    self.one_of = lhs_one_of;
+                    other.one_of = rhs_one_of;
                 }
             }
             (Some(LiteralType::Dec), Some(_)) | (Some(LiteralType::Int), Some(_)) => self.one_of = SmallVec::new(),
