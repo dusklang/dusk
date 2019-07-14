@@ -31,7 +31,7 @@ pub enum UnificationError<'a> {
 }
 
 impl ConstraintList {
-    fn one_of_exists(&self, mut condition: impl FnMut(&QualType) -> bool) -> bool {
+    pub fn one_of_exists(&self, mut condition: impl FnMut(&QualType) -> bool) -> bool {
         for ty in &self.one_of {
             if condition(ty) { return true; }
         }

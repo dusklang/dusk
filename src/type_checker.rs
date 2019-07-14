@@ -161,6 +161,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
         for item in tc.prog.assignments.get_level(level) {
             let (lhs, rhs) = tc.constraints.index_mut(item.lhs, item.rhs);
             lhs.lopsided_intersect_with(rhs);
+            assert!(lhs.one_of.is_empty() || lhs.one_of_exists(|ty| ty.is_mut), "can't assign to immutable expression");
         }
         for item in tc.prog.decl_refs.get_level(level) {
             let constraints = &tc.constraints[item.id];
