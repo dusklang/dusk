@@ -2,12 +2,17 @@ fn do_something_really_cool {
     fn assert(condition: bool) {
         if !condition { panic }
     }
-    foo := !(13 == 12) || 5 > 14
+    /*foo := !(13 == 12) || 5 > 14
     foo := if !(13 == 12) || 5 > 14 {
         4
     } else {
         42
+    }*/
+    foo := 5
+    bar := &mut if 13 == 2 {
+        foo
+    } else {
+        5
     }
-    foo = -2
     return
 }

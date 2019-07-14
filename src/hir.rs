@@ -19,6 +19,7 @@ pub enum Expr {
     LogicalOr { lhs: ExprId, rhs: ExprId },
     LogicalAnd { lhs: ExprId, rhs: ExprId },
     LogicalNot(ExprId),
+    AddrOf(ExprId),
     Set { lhs: ExprId, rhs: ExprId },
     Do { scope: ScopeId },
     If { condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId> },
@@ -32,9 +33,10 @@ pub enum Instr {
     FloatConst { lit: f64, expr: ExprId },
     BoolConst(bool),
     Alloca { expr: ExprId },
-    Get { arguments: SmallVec<[InstrId; 2]>, id: DeclRefId },
     LogicalNot(InstrId),
+    Get { arguments: SmallVec<[InstrId; 2]>, id: DeclRefId },
     Set { arguments: SmallVec<[InstrId; 2]>, id: DeclRefId, value: InstrId, expr: ExprId },
+    Modify { arguments: SmallVec<[InstrId; 2]>, id: DeclRefId },
     Load { location: InstrId, expr: ExprId },
     Store { location: InstrId, value: InstrId, expr: ExprId },
     Ret { value: InstrId, expr: ExprId },
@@ -126,17 +128,22 @@ enum ControlDest {
 
 #[derive(Clone)]
 struct Context {
+    /// The number of levels of indirection we are removed from the type of the expression
+    /// Positive numbers indicate more layers of indirection, negative numbers indicate more
+    /// dereferences
+    indirection: i8,
     data: DataDest,
     control: ControlDest,
 }
 
 impl Context {
-    fn new(data: DataDest, control: ControlDest) -> Context {
-        Context { data, control }
+    fn new(indirection: i8, data: DataDest, control: ControlDest) -> Context {
+        Context { indirection, data, control }
     }
 
     fn redirect(&self, read: Option<InstrId>, kontinue: Option<BasicBlockId>) -> Context {
         Context::new(
+            self.indirection,
             match (&self.data, read) {
                 (DataDest::Read, Some(location)) => DataDest::Store { location },
                 (x, _) => x.clone(),
@@ -173,11 +180,11 @@ impl<'a> CompDeclBuilder<'a> {
     fn item(&mut self, item: Item) {
         match item {
             Item::Stmt(expr) => {
-                self.expr(expr, Context::new(DataDest::Stmt, ControlDest::Continue));
+                self.expr(expr, Context::new(0, DataDest::Stmt, ControlDest::Continue));
             },
             Item::StoredDecl(expr) => {
                 let location = self.code.push(Instr::Alloca { expr });
-                self.expr(expr, Context::new(DataDest::Store { location }, ControlDest::Continue));
+                self.expr(expr, Context::new(0, DataDest::Store { location }, ControlDest::Continue));
             },
         }
     }
@@ -200,7 +207,7 @@ impl<'a> CompDeclBuilder<'a> {
         self.basic_blocks[bb] = InstrId::new(self.code.len())
     }
 
-    fn expr(&mut self, expr: ExprId, ctx: Context) -> InstrId {
+    fn expr(&mut self, expr: ExprId, mut ctx: Context) -> InstrId {
         // HACK!!!!
         let mut should_allow_set = false;
 
@@ -211,27 +218,30 @@ impl<'a> CompDeclBuilder<'a> {
             Expr::Set { lhs, rhs } => {
                 return self.expr(
                     rhs,
-                    Context::new(DataDest::Set { dest: lhs }, ctx.control.clone()),
+                    Context::new(0, DataDest::Set { dest: lhs }, ctx.control.clone()),
                 )
             },
             Expr::DeclRef { ref arguments, id } => {
                 should_allow_set = true;
-                let mut instr_args = SmallVec::new();
-                instr_args.reserve(arguments.len());
-                for &argument in arguments {
-                    instr_args.push(
-                        self.expr(argument, Context::new(DataDest::Read, ControlDest::Continue)),
-                    );
-                }
+                let arguments = arguments.iter().map(|&argument|
+                    self.expr(argument, Context::new(0, DataDest::Read, ControlDest::Continue))
+                ).collect();
+
                 self.code.push(
-                    match ctx.data {
-                        DataDest::Receive { value, expr } => 
-                            Instr::Set { arguments: instr_args, id, value, expr },
-                        _ => Instr::Get { arguments: instr_args, id },
+                    if ctx.indirection > 0 {
+                        ctx.indirection -= 1;
+                        Instr::Modify { arguments, id }
+                    } else {
+                        match ctx.data {
+                            DataDest::Receive { value, expr } => 
+                                Instr::Set { arguments, id, value, expr },
+                            _ => Instr::Get { arguments, id },
+                        }
                     }
                 )
             },
             Expr::LogicalAnd { lhs, rhs } => {
+                assert_eq!(ctx.indirection, 0);
                 let left_true_bb = self.new_bb();
                 let location = if let DataDest::Read = ctx.data {
                     Some(self.code.push(Instr::Alloca { expr }))
@@ -241,20 +251,20 @@ impl<'a> CompDeclBuilder<'a> {
                 if let DataDest::Branch(true_bb, false_bb) = ctx.data {
                     self.expr(
                         lhs,
-                        Context::new(DataDest::Branch(left_true_bb, false_bb), ControlDest::Continue),
+                        Context::new(0, DataDest::Branch(left_true_bb, false_bb), ControlDest::Continue),
                     );
 
                     self.begin_bb(left_true_bb);
                     return self.expr(
                         rhs,
-                        Context::new(DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
+                        Context::new(0, DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
                     );
                 } else {
                     let left_false_bb = self.new_bb();
                     let after_bb = self.new_bb();
                     self.expr(
                         lhs,
-                        Context::new(DataDest::Branch(left_true_bb, left_false_bb), ControlDest::Continue),
+                        Context::new(0, DataDest::Branch(left_true_bb, left_false_bb), ControlDest::Continue),
                     );
 
                     self.begin_bb(left_true_bb);
@@ -275,17 +285,18 @@ impl<'a> CompDeclBuilder<'a> {
                 }
             },
             Expr::LogicalOr { lhs, rhs } => {
+                assert_eq!(ctx.indirection, 0);
                 let left_false_bb = self.new_bb();
                 if let DataDest::Branch(true_bb, false_bb) = ctx.data {
                     self.expr(
                         lhs,
-                        Context::new(DataDest::Branch(true_bb, left_false_bb), ControlDest::Continue),
+                        Context::new(0, DataDest::Branch(true_bb, left_false_bb), ControlDest::Continue),
                     );
 
                     self.begin_bb(left_false_bb);
                     return self.expr(
                         rhs,
-                        Context::new(DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
+                        Context::new(0, DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
                     );
                 } else {
                     let left_true_bb = self.new_bb();
@@ -297,7 +308,7 @@ impl<'a> CompDeclBuilder<'a> {
                     };
                     self.expr(
                         lhs,
-                        Context::new(DataDest::Branch(left_true_bb, left_false_bb), ControlDest::Continue),
+                        Context::new(0, DataDest::Branch(left_true_bb, left_false_bb), ControlDest::Continue),
                     );
 
                     self.begin_bb(left_true_bb);
@@ -317,13 +328,15 @@ impl<'a> CompDeclBuilder<'a> {
                 }
             },
             Expr::LogicalNot(operand) => {
+                assert_eq!(ctx.indirection, 0);
                 if let DataDest::Branch(true_bb, false_bb) = ctx.data {
-                    return self.expr(operand, Context::new(DataDest::Branch(false_bb, true_bb), ctx.control))
+                    return self.expr(operand, Context::new(0, DataDest::Branch(false_bb, true_bb), ctx.control))
                 } else {
-                    let operand = self.expr(operand, Context::new(DataDest::Read, ControlDest::Continue));
+                    let operand = self.expr(operand, Context::new(0, DataDest::Read, ControlDest::Continue));
                     self.code.push(Instr::LogicalNot(operand))
                 }
             },
+            Expr::AddrOf(operand) => return self.expr(operand, Context::new(ctx.indirection + 1, ctx.data, ctx.control)),
             Expr::Do { scope } => return self.scope(scope, ctx),
             Expr::If { condition, then_scope, else_scope } => {
                 // At this point it's impossible to know where these basic blocks are supposed to begin, so make them 0 for now
@@ -343,7 +356,7 @@ impl<'a> CompDeclBuilder<'a> {
                 };
                 self.expr(
                     condition,
-                    Context::new(DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
+                    Context::new(0, DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
                 );
                 self.begin_bb(true_bb);
                 let scope_ctx = ctx.redirect(result_location, Some(post_bb));
@@ -354,16 +367,16 @@ impl<'a> CompDeclBuilder<'a> {
                 }
 
                 self.begin_bb(post_bb);
-                if let Some(location) = result_location {
-                    return self.code.push(Instr::Load { location, expr })
+                return if let Some(location) = result_location {
+                    self.code.push(Instr::Load { location, expr })
                 } else {
-                    self.void_instr()
-                }
+                    self.handle_control(self.void_instr(), ctx.control)
+                };
             },
             Expr::Ret { expr } => {
                 return self.expr(
                     expr,
-                    Context::new(DataDest::Ret, ctx.control),
+                    Context::new(0, DataDest::Ret, ctx.control),
                 );
             }
         };
@@ -371,14 +384,44 @@ impl<'a> CompDeclBuilder<'a> {
         self.handle_context(instr, expr, ctx, should_allow_set)
     }
 
+    fn handle_indirection(&mut self, mut instr: InstrId, expr: ExprId, mut indirection: i8) -> InstrId {
+        if indirection < 0 {
+            while indirection < 0 {
+                // TODO: expr below is supposed to correspond to the dereference expression, not the root expression.
+                // So right now this ends up with totally the wrong type!
+                instr = self.code.push(Instr::Load { location: instr, expr });
+                indirection += 1;
+            }
+        } else if indirection > 0 {
+            while indirection > 0 {
+                // TODO: same as above!
+                let location = self.code.push(Instr::Alloca { expr });
+                // TODO: same as above!
+                self.code.push(Instr::Store { location, value: instr, expr });
+                instr = location;
+                indirection -= 1;
+            }
+        }
+        instr
+    }
+
+    fn handle_control(&mut self, instr: InstrId, control: ControlDest) -> InstrId {
+        match control {
+            ControlDest::Block(block) => self.code.push(Instr::Br(block)),
+            ControlDest::Continue => instr,
+            ControlDest::Unreachable => self.void_instr(),
+        }
+    }
+
     fn handle_context(&mut self, instr: InstrId, expr: ExprId, ctx: Context, should_allow_set: bool) -> InstrId {
+        let instr = self.handle_indirection(instr, expr, ctx.indirection);
         match ctx.data {
             DataDest::Read => return instr,
             DataDest::Ret => return self.code.push(Instr::Ret { value: instr, expr }),
             DataDest::Branch(true_bb, false_bb)
                 => return self.code.push(Instr::CondBr { condition: instr, true_bb, false_bb }),
             DataDest::Receive { .. } => {
-                assert!(should_allow_set, "can't set constant expression!");
+                assert!(should_allow_set || ctx.indirection > 0, "can't set constant expression!");
             },
             DataDest::Store { location } => {
                 self.code.push(Instr::Store { location, value: instr, expr });
@@ -386,21 +429,17 @@ impl<'a> CompDeclBuilder<'a> {
             DataDest::Set { dest } => {
                 return self.expr(
                     dest,
-                    Context::new(DataDest::Receive { value: instr, expr }, ctx.control.clone()),
+                    Context::new(0, DataDest::Receive { value: instr, expr }, ctx.control.clone()),
                 );
             }
             DataDest::Stmt => {},
         }
 
-        match ctx.control {
-            ControlDest::Block(block) => self.code.push(Instr::Br(block)),
-            ControlDest::Continue => instr,
-            ControlDest::Unreachable => self.void_instr(),
-        }
+        self.handle_control(instr, ctx.control)
     }
 
     fn build(mut self, scope: ScopeId) -> CompDecl {
-        self.scope(scope, Context::new(DataDest::Ret, ControlDest::Unreachable));
+        self.scope(scope, Context::new(0, DataDest::Ret, ControlDest::Unreachable));
         CompDecl {
             code: self.code,
             basic_blocks: self.basic_blocks,
@@ -486,6 +525,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
                 // Unary plus is a no-op
                 expr
             },
+            UnOp::AddrOf | UnOp::AddrOfMut => self.exprs.push(Expr::AddrOf(expr)),
             UnOp::Not => self.push_op_expr(Expr::LogicalNot(expr)),
             _ => self.decl_ref_no_name(smallvec![expr], range),
         }

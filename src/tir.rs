@@ -15,6 +15,8 @@ pub struct DecLit;
 #[derive(Debug)]
 pub struct Ret { pub expr: ExprId, pub ty: Type }
 #[derive(Debug)]
+pub struct AddrOf { pub expr: ExprId, pub is_mut: bool }
+#[derive(Debug)]
 pub struct Stmt { pub root_expr: ExprId }
 #[derive(Debug)]
 pub struct Do { pub terminal_expr: ExprId }
@@ -71,6 +73,8 @@ pub struct Program {
     pub assignments: DepVec<Expr<Assignment>>,
     /// All decl refs in the entire program
     pub decl_refs: DepVec<Expr<DeclRef>>,
+    /// All address of operators in the entire program
+    pub addr_ofs: DepVec<Expr<AddrOf>>,
     /// All returns in the entire program
     pub rets: DepVec<Expr<Ret>>,
     /// All if expressions in the entire program
@@ -149,6 +153,8 @@ pub struct Builder<'a> {
     assignments: DepVec<Expr<Assignment>>,
     /// All decl refs in the entire program so far
     decl_refs: DepVec<Expr<DeclRef>>,
+    /// All address of operators in the entire program so far
+    addr_ofs: DepVec<Expr<AddrOf>>,
     /// All returns in the entire program so far
     rets: DepVec<Expr<Ret>>,
     /// All if expressions in the entire program so far
@@ -256,6 +262,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             assigned_decls: DepVec::new(),
             assignments: DepVec::new(),
             decl_refs: DepVec::new(),
+            addr_ofs: DepVec::new(),
             rets: DepVec::new(),
             ifs: DepVec::new(),
             void_expr,
@@ -320,6 +327,14 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
     fn un_op(&mut self, op: UnOp, expr: ExprId, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
         let level = match op {
+            UnOp::AddrOf => self.addr_ofs.insert(
+                &[self.levels[expr]],
+                Expr { id, data: AddrOf { expr, is_mut: false } }
+            ),
+            UnOp::AddrOfMut => self.addr_ofs.insert(
+                &[self.levels[expr]],
+                Expr { id, data: AddrOf { expr, is_mut: true } }
+            ),
             _ => {
                 let decl_ref_id = self.overloads.push(Vec::new());
                 self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name: self.interner.get_or_intern(op.symbol()), num_arguments: 1 });
@@ -501,6 +516,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             assigned_decls: self.assigned_decls,
             assignments: self.assignments,
             decl_refs: self.decl_refs,
+            addr_ofs: self.addr_ofs,
             rets: self.rets,
             ifs: self.ifs,
             void_expr: self.void_expr,

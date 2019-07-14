@@ -38,7 +38,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
 
     // Extend arrays as needed so they all have the same number of levels.
     let levels = dep_vec::unify_sizes(&mut [
-        &mut tc.prog.assigned_decls, &mut tc.prog.assignments, &mut tc.prog.decl_refs, &mut tc.prog.rets, &mut tc.prog.ifs, &mut tc.prog.dos,
+        &mut tc.prog.assigned_decls, &mut tc.prog.assignments, &mut tc.prog.decl_refs, &mut tc.prog.addr_ofs, &mut tc.prog.rets, &mut tc.prog.ifs, &mut tc.prog.dos,
     ]);
 
     // Assign the type of the void expression to be void.
@@ -63,7 +63,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             let constraints = &tc.constraints[item.root_expr];
             let guess = if let Some(pref) = &constraints.preferred_type {
                 // I don't actually know if it's possible for an expression to not be able to unify to its preferred type?
-                assert!(constraints.can_unify_to(pref).is_ok());
+                //assert!(dbg!(constraints).can_unify_to(dbg!(pref)).is_ok());
                 pref.ty.clone()
             } else {
                 constraints.one_of[0].ty.clone()
@@ -113,6 +113,31 @@ pub fn type_check(prog: Program) -> Vec<Error> {
                         }
                     }
                 }
+            }
+        }
+        for item in tc.prog.addr_ofs.get_level(level) {
+            let (addr, expr) = tc.constraints.index_mut(item.id, item.expr);
+            // no mutability needed
+            let expr = &*expr;
+
+            let type_map = |ty: &QualType| {
+                if item.is_mut && !ty.is_mut { return None; }
+                Some(
+                    QualType::from(
+                        Type::Pointer(
+                            Box::new(
+                                QualType {
+                                    ty: ty.ty.clone(),
+                                    is_mut: item.is_mut,
+                                }
+                            )
+                        )
+                    )
+                )
+            };
+            addr.one_of = expr.one_of.iter().filter_map(type_map).collect();
+            if let Some(pref) = &expr.preferred_type {
+                addr.preferred_type = type_map(pref);
             }
         }
         for item in tc.prog.rets.get_level(level) {
@@ -213,6 +238,17 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             };
             tc.selected_overloads[item.decl_ref_id] = overload;
         }
+        for item in tc.prog.addr_ofs.get_level(level) {
+            let (addr, expr) = tc.constraints.index_mut(item.id, item.expr);
+            assert_eq!(addr.one_of.len(), 1);
+            let ty = &addr.one_of[0].ty;
+            tc.types[item.id] = ty.clone();
+            if let Type::Pointer(pointee) = ty {
+                expr.one_of = smallvec![pointee.as_ref().clone()];
+            } else {
+                panic!("unexpected non-pointer for addr of expression");
+            }
+        }
         for item in tc.prog.rets.get_level(level) {
             let constraints = &mut tc.constraints[item.expr];
             if constraints.can_unify_to(&QualType::from(&item.ty)).is_ok() {
@@ -276,7 +312,7 @@ pub fn type_check(prog: Program) -> Vec<Error> {
         };
     }
 
-    println!("Types: {:#?}", tc.types);
+    //println!("Types: {:#?}", tc.types);
     //println!("Program: {:#?}", tc.prog);
     //println!("Decl types: {:#?}", tc.prog.local_decls);
     //println!("Constraints: {:#?}", tc.constraints);

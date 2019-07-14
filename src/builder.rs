@@ -33,7 +33,7 @@ pub enum BinOp {
 
 #[derive(Clone, Copy, Debug)]
 pub enum UnOp {
-    Not, Deref, AddrOf, Neg, Plus
+    Not, Deref, AddrOf, Neg, Plus, AddrOfMut
 }
 
 impl BinOp {
@@ -91,6 +91,7 @@ impl UnOp {
             Neg => "-",
             Plus => "+",
             AddrOf => "&",
+            AddrOfMut => "&mut",
         }
     }
 }

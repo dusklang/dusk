@@ -81,8 +81,12 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
             TokenKind::Add        => UnOp::Plus,
             TokenKind::LogicalNot => UnOp::Not,
             TokenKind::Asterisk   => UnOp::Deref,
-            TokenKind::Ampersand  => UnOp::AddrOf,
-
+            TokenKind::Ampersand  => if let TokenKind::Mut = self.peek_next().kind {
+                self.next();
+                UnOp::AddrOfMut
+            } else {
+                UnOp::AddrOf
+            },
             _ => return None,
         };
         self.next();
