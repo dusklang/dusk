@@ -427,10 +427,23 @@ impl<'a> Builder<'a> {
         CompDeclBuilder::new(&self).build(scope)
     }
 
-    fn decl_ref_no_name(&mut self, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
+    fn allocate_decl_ref_id(&mut self) -> DeclRefId {
         let decl_ref_id = DeclRefId::new(self.num_decl_refs);
         self.num_decl_refs += 1;
+        decl_ref_id
+    }
+
+    fn decl_ref_no_name(&mut self, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
+        let decl_ref_id = self.allocate_decl_ref_id();
         self.exprs.push(Expr::DeclRef { arguments, id: decl_ref_id })
+    }
+
+    /// Allocates a new DeclRefId, then pushes `expr`.
+    /// Background: some operators are represented as decl refs in TIR but are built-in in 
+    /// HIR. So this is a hack to preserve synchronization between the two representations.
+    fn push_op_expr(&mut self, expr: Expr) -> ExprId {
+        self.allocate_decl_ref_id();
+        self.exprs.push(expr)
     }
 }
 
@@ -461,14 +474,19 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
     fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId {
         match op {
             BinOp::Assign => self.exprs.push(Expr::Set { lhs, rhs }),
-            BinOp::LogicalAnd => self.exprs.push(Expr::LogicalAnd { lhs, rhs }),
-            BinOp::LogicalOr => self.exprs.push(Expr::LogicalOr { lhs, rhs }),
+            BinOp::LogicalAnd => self.push_op_expr(Expr::LogicalAnd { lhs, rhs }),
+            BinOp::LogicalOr => self.push_op_expr(Expr::LogicalOr { lhs, rhs }),
             _ => self.decl_ref_no_name(smallvec![lhs, rhs], range),
         }
     }
     fn un_op(&mut self, op: UnOp, expr: ExprId, range: SourceRange) -> ExprId {
         match op {
-            UnOp::Not => self.exprs.push(Expr::LogicalNot(expr)),
+            UnOp::Plus => {
+                self.allocate_decl_ref_id();
+                // Unary plus is a no-op
+                expr
+            },
+            UnOp::Not => self.push_op_expr(Expr::LogicalNot(expr)),
             _ => self.decl_ref_no_name(smallvec![expr], range),
         }
     }

@@ -8,6 +8,6 @@ fn do_something_really_cool {
     } else {
         42
     }
-    foo = 2
+    foo = -2
     return
 }
