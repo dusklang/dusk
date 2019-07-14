@@ -217,10 +217,15 @@ impl<'a> CompDeclBuilder<'a> {
             Expr::IntLit { lit } => self.code.push(Instr::IntConst { lit, expr }),
             Expr::DecLit { lit } => self.code.push(Instr::FloatConst { lit, expr }),
             Expr::Set { lhs, rhs } => {
-                return self.expr(
+                self.expr(
                     rhs,
                     Context::new(0, DataDest::Set { dest: lhs }, ctx.control.clone()),
-                )
+                );
+                // Because we override the data destination above, we need to handle it ourselves
+                return match ctx.data {
+                    DataDest::Ret => self.code.push(Instr::Ret { value: self.void_instr(), expr }),
+                    _ => self.void_instr(),
+                };
             },
             Expr::DeclRef { ref arguments, id } => {
                 should_allow_set = true;
