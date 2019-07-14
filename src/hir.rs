@@ -20,6 +20,7 @@ pub enum Expr {
     LogicalAnd { lhs: ExprId, rhs: ExprId },
     LogicalNot(ExprId),
     AddrOf(ExprId),
+    Deref(ExprId),
     Set { lhs: ExprId, rhs: ExprId },
     Do { scope: ScopeId },
     If { condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId> },
@@ -337,6 +338,7 @@ impl<'a> CompDeclBuilder<'a> {
                 }
             },
             Expr::AddrOf(operand) => return self.expr(operand, Context::new(ctx.indirection + 1, ctx.data, ctx.control)),
+            Expr::Deref(operand) => return self.expr(operand, Context::new(ctx.indirection - 1, ctx.data, ctx.control)),
             Expr::Do { scope } => return self.scope(scope, ctx),
             Expr::If { condition, then_scope, else_scope } => {
                 // At this point it's impossible to know where these basic blocks are supposed to begin, so make them 0 for now
@@ -525,6 +527,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
                 // Unary plus is a no-op
                 expr
             },
+            UnOp::Deref => self.exprs.push(Expr::Deref(expr)),
             UnOp::AddrOf | UnOp::AddrOfMut => self.exprs.push(Expr::AddrOf(expr)),
             UnOp::Not => self.push_op_expr(Expr::LogicalNot(expr)),
             _ => self.decl_ref_no_name(smallvec![expr], range),

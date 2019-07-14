@@ -38,7 +38,8 @@ pub fn type_check(prog: Program) -> Vec<Error> {
 
     // Extend arrays as needed so they all have the same number of levels.
     let levels = dep_vec::unify_sizes(&mut [
-        &mut tc.prog.assigned_decls, &mut tc.prog.assignments, &mut tc.prog.decl_refs, &mut tc.prog.addr_ofs, &mut tc.prog.rets, &mut tc.prog.ifs, &mut tc.prog.dos,
+        &mut tc.prog.assigned_decls, &mut tc.prog.assignments, &mut tc.prog.decl_refs, 
+        &mut tc.prog.addr_ofs, &mut tc.prog.derefs, &mut tc.prog.rets, &mut tc.prog.ifs, &mut tc.prog.dos,
     ]);
 
     // Assign the type of the void expression to be void.
@@ -138,6 +139,22 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             addr.one_of = expr.one_of.iter().filter_map(type_map).collect();
             if let Some(pref) = &expr.preferred_type {
                 addr.preferred_type = type_map(pref);
+            }
+        }
+        for item in tc.prog.derefs.get_level(level) {
+            let (expr, addr) = tc.constraints.index_mut(item.id, item.expr);
+            // no mutability needed
+            let addr = &*addr;
+
+            expr.one_of = addr.one_of.iter().filter_map(|ty| {
+                if let Type::Pointer(pointee) = &ty.ty {
+                    Some(pointee.as_ref().clone())
+                } else {
+                    None
+                }
+            }).collect();
+            if let Some(QualType { ty: Type::Pointer(pointee), .. }) = &addr.preferred_type {
+                expr.preferred_type = Some(pointee.as_ref().clone());
             }
         }
         for item in tc.prog.rets.get_level(level) {
@@ -248,6 +265,19 @@ pub fn type_check(prog: Program) -> Vec<Error> {
             } else {
                 panic!("unexpected non-pointer for addr of expression");
             }
+        }
+        for item in tc.prog.derefs.get_level(level) {
+            let (expr, addr) = tc.constraints.index_mut(item.id, item.expr);
+            assert_eq!(expr.one_of.len(), 1);
+            let ty = &expr.one_of[0];
+            tc.types[item.id] = ty.ty.clone();
+            addr.one_of = smallvec![
+                QualType::from(
+                    Type::Pointer(
+                        Box::new(ty.clone())
+                    )
+                )
+            ];
         }
         for item in tc.prog.rets.get_level(level) {
             let constraints = &mut tc.constraints[item.expr];

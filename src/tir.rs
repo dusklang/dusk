@@ -17,6 +17,8 @@ pub struct Ret { pub expr: ExprId, pub ty: Type }
 #[derive(Debug)]
 pub struct AddrOf { pub expr: ExprId, pub is_mut: bool }
 #[derive(Debug)]
+pub struct Dereference { pub expr: ExprId }
+#[derive(Debug)]
 pub struct Stmt { pub root_expr: ExprId }
 #[derive(Debug)]
 pub struct Do { pub terminal_expr: ExprId }
@@ -75,6 +77,8 @@ pub struct Program {
     pub decl_refs: DepVec<Expr<DeclRef>>,
     /// All address of operators in the entire program
     pub addr_ofs: DepVec<Expr<AddrOf>>,
+    /// All dereference operators in the entire program
+    pub derefs: DepVec<Expr<Dereference>>,
     /// All returns in the entire program
     pub rets: DepVec<Expr<Ret>>,
     /// All if expressions in the entire program
@@ -155,6 +159,8 @@ pub struct Builder<'a> {
     decl_refs: DepVec<Expr<DeclRef>>,
     /// All address of operators in the entire program so far
     addr_ofs: DepVec<Expr<AddrOf>>,
+    /// All dereference operators in the entire program so far
+    derefs: DepVec<Expr<Dereference>>,
     /// All returns in the entire program so far
     rets: DepVec<Expr<Ret>>,
     /// All if expressions in the entire program so far
@@ -263,6 +269,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             assignments: DepVec::new(),
             decl_refs: DepVec::new(),
             addr_ofs: DepVec::new(),
+            derefs: DepVec::new(),
             rets: DepVec::new(),
             ifs: DepVec::new(),
             void_expr,
@@ -329,11 +336,15 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         let level = match op {
             UnOp::AddrOf => self.addr_ofs.insert(
                 &[self.levels[expr]],
-                Expr { id, data: AddrOf { expr, is_mut: false } }
+                Expr { id, data: AddrOf { expr, is_mut: false } },
             ),
             UnOp::AddrOfMut => self.addr_ofs.insert(
                 &[self.levels[expr]],
-                Expr { id, data: AddrOf { expr, is_mut: true } }
+                Expr { id, data: AddrOf { expr, is_mut: true } },
+            ),
+            UnOp::Deref => self.derefs.insert(
+                &[self.levels[expr]],
+                Expr { id, data: Dereference { expr } },
             ),
             _ => {
                 let decl_ref_id = self.overloads.push(Vec::new());
@@ -517,6 +528,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             assignments: self.assignments,
             decl_refs: self.decl_refs,
             addr_ofs: self.addr_ofs,
+            derefs: self.derefs,
             rets: self.rets,
             ifs: self.ifs,
             void_expr: self.void_expr,
