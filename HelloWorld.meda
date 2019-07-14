@@ -9,9 +9,6 @@ fn do_something_really_cool {
         42
     }*/
     foo := 5
-    bar := * * * & & & if 13 == 2 {
-        foo
-    } else {
-        5
-    }
+    bar := (&mut foo)
+    (*bar) = 2
 }

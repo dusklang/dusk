@@ -228,18 +228,23 @@ impl<'a> CompDeclBuilder<'a> {
                     self.expr(argument, Context::new(0, DataDest::Read, ControlDest::Continue))
                 ).collect();
 
-                self.code.push(
-                    if ctx.indirection > 0 {
-                        ctx.indirection -= 1;
-                        Instr::Modify { arguments, id }
-                    } else {
-                        match ctx.data {
-                            DataDest::Receive { value, expr } => 
-                                Instr::Set { arguments, id, value, expr },
-                            _ => Instr::Get { arguments, id },
-                        }
+                let instr = if ctx.indirection < 0 {
+                    ctx.indirection += 1;
+                    Instr::Modify { arguments, id }
+                } else {
+                    match ctx.data {
+                        DataDest::Receive { value, expr } => if ctx.indirection > 0 {
+                            let mut location = self.code.push(Instr::Get { arguments, id });
+                            location = self.handle_indirection(location, expr, ctx.indirection, 1);
+                            ctx.indirection = 0;
+                            Instr::Store { location, value, expr }
+                        } else {
+                            Instr::Set { arguments, id, value, expr }
+                        },
+                        _ => Instr::Get { arguments, id },
                     }
-                )
+                };
+                self.code.push(instr)
             },
             Expr::LogicalAnd { lhs, rhs } => {
                 assert_eq!(ctx.indirection, 0);
@@ -337,8 +342,8 @@ impl<'a> CompDeclBuilder<'a> {
                     self.code.push(Instr::LogicalNot(operand))
                 }
             },
-            Expr::AddrOf(operand) => return self.expr(operand, Context::new(ctx.indirection + 1, ctx.data, ctx.control)),
-            Expr::Deref(operand) => return self.expr(operand, Context::new(ctx.indirection - 1, ctx.data, ctx.control)),
+            Expr::AddrOf(operand) => return self.expr(operand, Context::new(ctx.indirection - 1, ctx.data, ctx.control)),
+            Expr::Deref(operand) => return self.expr(operand, Context::new(ctx.indirection + 1, ctx.data, ctx.control)),
             Expr::Do { scope } => return self.scope(scope, ctx),
             Expr::If { condition, then_scope, else_scope } => {
                 // At this point it's impossible to know where these basic blocks are supposed to begin, so make them 0 for now
@@ -386,22 +391,22 @@ impl<'a> CompDeclBuilder<'a> {
         self.handle_context(instr, expr, ctx, should_allow_set)
     }
 
-    fn handle_indirection(&mut self, mut instr: InstrId, expr: ExprId, mut indirection: i8) -> InstrId {
-        if indirection < 0 {
-            while indirection < 0 {
+    fn handle_indirection(&mut self, mut instr: InstrId, expr: ExprId, mut indirection: i8, target: i8) -> InstrId {
+        if indirection > target {
+            while indirection > target {
                 // TODO: expr below is supposed to correspond to the dereference expression, not the root expression.
                 // So right now this ends up with totally the wrong type!
                 instr = self.code.push(Instr::Load { location: instr, expr });
-                indirection += 1;
+                indirection -= 1;
             }
-        } else if indirection > 0 {
-            while indirection > 0 {
+        } else if indirection < target {
+            while indirection < target {
                 // TODO: same as above!
                 let location = self.code.push(Instr::Alloca { expr });
                 // TODO: same as above!
                 self.code.push(Instr::Store { location, value: instr, expr });
                 instr = location;
-                indirection -= 1;
+                indirection += 1;
             }
         }
         instr
@@ -416,14 +421,14 @@ impl<'a> CompDeclBuilder<'a> {
     }
 
     fn handle_context(&mut self, instr: InstrId, expr: ExprId, ctx: Context, should_allow_set: bool) -> InstrId {
-        let instr = self.handle_indirection(instr, expr, ctx.indirection);
+        let instr = self.handle_indirection(instr, expr, ctx.indirection, 0);
         match ctx.data {
             DataDest::Read => return instr,
             DataDest::Ret => return self.code.push(Instr::Ret { value: instr, expr }),
             DataDest::Branch(true_bb, false_bb)
                 => return self.code.push(Instr::CondBr { condition: instr, true_bb, false_bb }),
             DataDest::Receive { .. } => {
-                assert!(should_allow_set || ctx.indirection > 0, "can't set constant expression!");
+                assert!(should_allow_set, "can't set constant expression!");
             },
             DataDest::Store { location } => {
                 self.code.push(Instr::Store { location, value: instr, expr });
