@@ -63,6 +63,9 @@ impl<T, I: Idx> IdxVec<T, I> {
         let empty = self.raw.is_empty();
         (0..self.raw.len()).filter(move |_| !empty).map(|i| I::new(i))
     }
+    pub fn reserve(&mut self, additional: usize) {
+        self.raw.reserve(additional);
+    }
     pub fn index_mut(&mut self, a: I, b: I) -> (&mut T, &mut T) {
         assert_ne!(a, b);
         if a.idx() < b.idx() {

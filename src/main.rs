@@ -9,6 +9,7 @@ mod builder;
 mod parser;
 mod tir;
 mod hir;
+mod mir;
 mod ty;
 mod constraints;
 mod type_checker;
@@ -28,7 +29,8 @@ fn main() {
     errs.extend(tir_errs);
     let (hir, hir_errs) = parser::parse::<hir::Builder>(&toks, &mut interner);
     errs.extend(hir_errs);
-    println!("{:#?}", hir);
+    let mir = mir::Program::build(&hir);
+    println!("{:#?}", mir);
 
     errs.extend(type_checker::type_check(tir));
 
