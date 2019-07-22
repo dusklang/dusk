@@ -1,7 +1,7 @@
 use smallvec::{SmallVec, smallvec};
 
 use crate::error::Error;
-use crate::tir::{Program, Decl};
+use crate::tir::{self, Decl};
 use crate::builder::{ExprId, DeclId, DeclRefId};
 use crate::ty::{Type, QualType};
 use crate::index_vec::IdxVec;
@@ -10,7 +10,7 @@ use crate::constraints::{ConstraintList, LiteralType, UnificationError};
 
 struct TypeChecker {
     /// The input TIR program
-    prog: Program,
+    prog: tir::Program,
     /// The type of each expression
     types: IdxVec<Type, ExprId>,
     /// The constraints on each expression's type
@@ -21,8 +21,13 @@ struct TypeChecker {
     selected_overloads: IdxVec<Option<DeclId>, DeclRefId>,
 }
 
+pub struct Program {
+    pub types: IdxVec<Type, ExprId>,
+    pub overloads: IdxVec<Option<DeclId>, DeclRefId>,
+}
+
 #[inline(never)]
-pub fn type_check(prog: Program) -> Vec<Error> {
+pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     let mut tc = TypeChecker {
         prog,
         types: IdxVec::new(),
@@ -347,7 +352,9 @@ pub fn type_check(prog: Program) -> Vec<Error> {
     //println!("Decl types: {:#?}", tc.prog.local_decls);
     //println!("Constraints: {:#?}", tc.constraints);
 
-    std::mem::forget(tc);
-
-    errs
+    let prog = Program {
+        types: tc.types,
+        overloads: tc.selected_overloads,
+    };
+    (prog, errs)
 }

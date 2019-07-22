@@ -29,10 +29,12 @@ fn main() {
     errs.extend(tir_errs);
     let (hir, hir_errs) = parser::parse::<hir::Builder>(&toks, &mut interner);
     errs.extend(hir_errs);
+    let (tc, tc_errs) = type_checker::type_check(tir);
+    errs.extend(tc_errs);
+
     let mir = mir::Program::build(&hir);
     println!("{:#?}", mir);
 
-    errs.extend(type_checker::type_check(tir));
 
     for err in &errs { err.report(&file); }
     if !errs.is_empty() {
