@@ -1,5 +1,7 @@
 use smallvec::SmallVec;
 
+use crate::ty::Type;
+use crate::type_checker as tc;
 use crate::index_vec::{Idx, IdxVec};
 use crate::builder::{ExprId, DeclRefId, ScopeId};
 use crate::hir::{self, Expr, Item, Decl};
@@ -11,17 +13,17 @@ newtype_index!(TerminationId pub);
 #[derive(Debug)]
 pub enum Instr {
     Void,
-    IntConst { lit: u64, expr: ExprId },
-    FloatConst { lit: f64, expr: ExprId },
+    IntConst { lit: u64, ty: Type },
+    FloatConst { lit: f64, ty: Type },
     BoolConst(bool),
-    Alloca { expr: ExprId },
+    Alloca(Type),
     LogicalNot(InstrId),
     Get { arguments: SmallVec<[InstrId; 2]>, id: DeclRefId },
-    Set { arguments: SmallVec<[InstrId; 2]>, id: DeclRefId, value: InstrId, expr: ExprId },
+    Set { arguments: SmallVec<[InstrId; 2]>, id: DeclRefId, value: InstrId },
     Modify { arguments: SmallVec<[InstrId; 2]>, id: DeclRefId },
-    Load { location: InstrId, expr: ExprId },
-    Store { location: InstrId, value: InstrId, expr: ExprId },
-    Ret { value: InstrId, expr: ExprId },
+    Load(InstrId),
+    Store { location: InstrId, value: InstrId },
+    Ret(InstrId),
     Br(BasicBlockId),
     CondBr { condition: InstrId, true_bb: BasicBlockId, false_bb: BasicBlockId },
 }
@@ -102,11 +104,11 @@ pub struct Program {
 }
 
 impl Program {
-    pub fn build(prog: &hir::Program) -> Self {
+    pub fn build(prog: &hir::Program, tc: &tc::Program) -> Self {
         Program {
             comp_decls: prog.local_decls.iter().chain(&prog.global_decls)
                 .filter_map(|decl| if let &Decl::Computed(scope) = decl {
-                    Some(FunctionBuilder::new(prog, scope).build())
+                    Some(FunctionBuilder::new(prog, tc, scope).build())
                 } else {
                     None
                 }).collect()
@@ -116,6 +118,7 @@ impl Program {
 
 struct FunctionBuilder<'a> {
     prog: &'a hir::Program,
+    tc: &'a tc::Program,
     scope: ScopeId,
     void_instr: InstrId,
     code: IdxVec<Instr, InstrId>,
@@ -123,18 +126,23 @@ struct FunctionBuilder<'a> {
 }
 
 impl<'a> FunctionBuilder<'a> {
-    fn new(prog: &'a hir::Program, scope: ScopeId) -> Self {
+    fn new(prog: &'a hir::Program, tc: &'a tc::Program, scope: ScopeId) -> Self {
         let mut code = IdxVec::new();
         let void_instr = code.push(Instr::Void);
         let mut basic_blocks = IdxVec::new();
         basic_blocks.push(InstrId::new(0));
         FunctionBuilder::<'a> {
             prog,
+            tc,
             scope,
             void_instr,
             code,
             basic_blocks,
         }
+    }
+
+    fn type_of(&self, expr: ExprId) -> Type {
+        self.tc.types[expr].clone()
     }
 
     fn item(&mut self, item: Item) {
@@ -143,7 +151,8 @@ impl<'a> FunctionBuilder<'a> {
                 self.expr(expr, Context::new(0, DataDest::Stmt, ControlDest::Continue));
             },
             Item::StoredDecl(expr) => {
-                let location = self.code.push(Instr::Alloca { expr });
+                let ty = self.type_of(expr);
+                let location = self.code.push(Instr::Alloca(ty));
                 self.expr(expr, Context::new(0, DataDest::Store { location }, ControlDest::Continue));
             },
         }
@@ -171,10 +180,12 @@ impl<'a> FunctionBuilder<'a> {
         // HACK!!!!
         let mut should_allow_set = false;
 
+        let ty = self.type_of(expr);
+
         let instr = match self.prog.exprs[expr] {
             Expr::Void => self.void_instr(),
-            Expr::IntLit { lit } => self.code.push(Instr::IntConst { lit, expr }),
-            Expr::DecLit { lit } => self.code.push(Instr::FloatConst { lit, expr }),
+            Expr::IntLit { lit } => self.code.push(Instr::IntConst { lit, ty: ty.clone() }),
+            Expr::DecLit { lit } => self.code.push(Instr::FloatConst { lit, ty: ty.clone() }),
             Expr::Set { lhs, rhs } => {
                 self.expr(
                     rhs,
@@ -182,7 +193,7 @@ impl<'a> FunctionBuilder<'a> {
                 );
                 // Because we override the data destination above, we need to handle it ourselves
                 return match ctx.data {
-                    DataDest::Ret => self.code.push(Instr::Ret { value: self.void_instr(), expr }),
+                    DataDest::Ret => self.code.push(Instr::Ret(self.void_instr())),
                     _ => self.void_instr(),
                 };
             },
@@ -197,13 +208,13 @@ impl<'a> FunctionBuilder<'a> {
                     Instr::Modify { arguments, id }
                 } else {
                     match ctx.data {
-                        DataDest::Receive { value, expr } => if ctx.indirection > 0 {
+                        DataDest::Receive { value, .. } => if ctx.indirection > 0 {
                             let mut location = self.code.push(Instr::Get { arguments, id });
-                            location = self.handle_indirection(location, expr, ctx.indirection, 1);
+                            location = self.handle_indirection(location, ty.clone(), ctx.indirection, 1);
                             ctx.indirection = 0;
-                            Instr::Store { location, value, expr }
+                            Instr::Store { location, value }
                         } else {
-                            Instr::Set { arguments, id, value, expr }
+                            Instr::Set { arguments, id, value }
                         },
                         _ => Instr::Get { arguments, id },
                     }
@@ -214,7 +225,7 @@ impl<'a> FunctionBuilder<'a> {
                 assert_eq!(ctx.indirection, 0);
                 let left_true_bb = self.new_bb();
                 let location = if let DataDest::Read = ctx.data {
-                    Some(self.code.push(Instr::Alloca { expr }))
+                    Some(self.code.push(Instr::Alloca(ty.clone())))
                 } else {
                     None
                 };
@@ -244,11 +255,11 @@ impl<'a> FunctionBuilder<'a> {
 
                     self.begin_bb(left_false_bb);
                     let false_val = self.code.push(Instr::BoolConst(false));
-                    self.handle_context(false_val, expr, branch_ctx, false);
+                    self.handle_context(false_val, expr, Type::Bool, branch_ctx, false);
 
                     self.begin_bb(after_bb);
                     if let Some(location) = location {
-                        self.code.push(Instr::Load { location, expr })
+                        self.code.push(Instr::Load(location))
                     } else {
                         return self.void_instr()
                     }
@@ -272,7 +283,7 @@ impl<'a> FunctionBuilder<'a> {
                     let left_true_bb = self.new_bb();
                     let after_bb = self.new_bb();
                     let location = if let DataDest::Read = ctx.data {
-                        Some(self.code.push(Instr::Alloca { expr }))
+                        Some(self.code.push(Instr::Alloca(ty.clone())))
                     } else {
                         None
                     };
@@ -284,14 +295,14 @@ impl<'a> FunctionBuilder<'a> {
                     self.begin_bb(left_true_bb);
                     let true_val = self.code.push(Instr::BoolConst(true));
                     let branch_ctx = ctx.redirect(location, Some(after_bb));
-                    self.handle_context(true_val, expr, branch_ctx.clone(), false);
+                    self.handle_context(true_val, expr, Type::Bool, branch_ctx.clone(), false);
 
                     self.begin_bb(left_false_bb);
                     self.expr(rhs, branch_ctx);
 
                     self.begin_bb(after_bb);
                     if let Some(location) = location {
-                        self.code.push(Instr::Load { location, expr })
+                        self.code.push(Instr::Load(location))
                     } else {
                         return self.void_instr()
                     }
@@ -321,7 +332,8 @@ impl<'a> FunctionBuilder<'a> {
 
                 let result_location = match (&ctx.data, else_scope) {
                     (DataDest::Read, Some(_)) => Some(
-                        self.code.push(Instr::Alloca { expr })
+                        // TODO: this will be the wrong type if indirection != 0
+                        self.code.push(Instr::Alloca(ty.clone()))
                     ),
                     _ => None,
                 };
@@ -339,7 +351,7 @@ impl<'a> FunctionBuilder<'a> {
 
                 self.begin_bb(post_bb);
                 return if let Some(location) = result_location {
-                    self.code.push(Instr::Load { location, expr })
+                    self.code.push(Instr::Load(location))
                 } else {
                     self.handle_control(self.void_instr(), ctx.control)
                 };
@@ -352,23 +364,20 @@ impl<'a> FunctionBuilder<'a> {
             }
         };
         
-        self.handle_context(instr, expr, ctx, should_allow_set)
+        self.handle_context(instr, expr, ty, ctx, should_allow_set)
     }
 
-    fn handle_indirection(&mut self, mut instr: InstrId, expr: ExprId, mut indirection: i8, target: i8) -> InstrId {
+    fn handle_indirection(&mut self, mut instr: InstrId, ty: Type, mut indirection: i8, target: i8) -> InstrId {
         if indirection > target {
             while indirection > target {
-                // TODO: expr below is supposed to correspond to the dereference expression, not the root expression.
-                // So right now this ends up with totally the wrong type!
-                instr = self.code.push(Instr::Load { location: instr, expr });
+                instr = self.code.push(Instr::Load(instr));
                 indirection -= 1;
             }
         } else if indirection < target {
             while indirection < target {
-                // TODO: same as above!
-                let location = self.code.push(Instr::Alloca { expr });
-                // TODO: same as above!
-                self.code.push(Instr::Store { location, value: instr, expr });
+                // TODO: this will be the wrong type if indirection != 0
+                let location = self.code.push(Instr::Alloca(ty.clone()));
+                self.code.push(Instr::Store { location, value: instr });
                 instr = location;
                 indirection += 1;
             }
@@ -384,18 +393,18 @@ impl<'a> FunctionBuilder<'a> {
         }
     }
 
-    fn handle_context(&mut self, instr: InstrId, expr: ExprId, ctx: Context, should_allow_set: bool) -> InstrId {
-        let instr = self.handle_indirection(instr, expr, ctx.indirection, 0);
+    fn handle_context(&mut self, instr: InstrId, expr: ExprId, ty: Type, ctx: Context, should_allow_set: bool) -> InstrId {
+        let instr = self.handle_indirection(instr, ty, ctx.indirection, 0);
         match ctx.data {
             DataDest::Read => return instr,
-            DataDest::Ret => return self.code.push(Instr::Ret { value: instr, expr }),
+            DataDest::Ret => return self.code.push(Instr::Ret(instr)),
             DataDest::Branch(true_bb, false_bb)
                 => return self.code.push(Instr::CondBr { condition: instr, true_bb, false_bb }),
             DataDest::Receive { .. } => {
                 assert!(should_allow_set, "can't set constant expression!");
             },
             DataDest::Store { location } => {
-                self.code.push(Instr::Store { location, value: instr, expr });
+                self.code.push(Instr::Store { location, value: instr });
             },
             DataDest::Set { dest } => {
                 return self.expr(

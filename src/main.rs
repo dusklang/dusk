@@ -32,7 +32,7 @@ fn main() {
     let (tc, tc_errs) = type_checker::type_check(tir);
     errs.extend(tc_errs);
 
-    let mir = mir::Program::build(&hir);
+    let mir = mir::Program::build(&hir, &tc);
     println!("{:#?}", mir);
 
 
