@@ -3,12 +3,13 @@ use smallvec::SmallVec;
 use crate::ty::Type;
 use crate::type_checker as tc;
 use crate::index_vec::{Idx, IdxVec};
-use crate::builder::{ExprId, DeclRefId, ScopeId};
-use crate::hir::{self, Expr, Item, Decl};
+use crate::builder::{LocalDeclId, GlobalDeclId, ExprId, DeclRefId, ScopeId};
+use crate::hir::{self, Expr, Item};
 
 newtype_index!(InstrId pub);
 newtype_index!(BasicBlockId pub);
 newtype_index!(TerminationId pub);
+newtype_index!(FuncId pub);
 
 #[derive(Debug)]
 pub enum Instr {
@@ -30,9 +31,9 @@ pub enum Instr {
 
 // TODO: store IdxVec of these
 #[derive(Debug)]
-enum LocalDecl {
+enum Decl {
     Stored { location: InstrId },
-    Computed
+    Computed { get: FuncId },
 }
 
 #[derive(Debug)]
@@ -100,25 +101,54 @@ impl Context {
 
 #[derive(Debug)]
 pub struct Program {
-    comp_decls: Vec<Function>,
+    comp_decls: IdxVec<Function, FuncId>,
 }
 
 impl Program {
     pub fn build(prog: &hir::Program, tc: &tc::Program) -> Self {
-        Program {
-            comp_decls: prog.local_decls.iter().chain(&prog.global_decls)
-                .filter_map(|decl| if let &Decl::Computed(scope) = decl {
-                    Some(FunctionBuilder::new(prog, tc, scope).build())
-                } else {
-                    None
-                }).collect()
+        let mut local_decls = IdxVec::<Decl, LocalDeclId>::new();
+        let mut global_decls = IdxVec::<Decl, GlobalDeclId>::new();
+        let mut num_functions = 0usize;
+        for decl in &prog.local_decls {
+            local_decls.push(
+                match decl {
+                    hir::Decl::Computed(_) => {
+                        num_functions += 1;
+                        Decl::Computed { get: FuncId::new(num_functions - 1) }
+                    },
+                    hir::Decl::Stored => Decl::Stored { location: InstrId::new(std::usize::MAX) },
+                }
+            );
         }
+        for decl in &prog.global_decls {
+            global_decls.push(
+                match decl {
+                    hir::Decl::Computed(_) => {
+                        num_functions += 1;
+                        Decl::Computed { get: FuncId::new(num_functions - 1) }
+                    },
+                    hir::Decl::Stored => panic!("globals not yet supported!"),
+                }
+            );
+        }
+        let mut comp_decls = IdxVec::<Function, FuncId>::new();
+        for decl in prog.local_decls.iter().chain(&prog.global_decls) {
+            if let &hir::Decl::Computed(scope) = decl {
+                comp_decls.push(
+                    FunctionBuilder::new(prog, tc, &mut local_decls, &mut global_decls, scope).build()
+                );
+            }
+        }
+        assert_eq!(num_functions, comp_decls.len());
+        Program { comp_decls }
     }
 }
 
 struct FunctionBuilder<'a> {
     prog: &'a hir::Program,
     tc: &'a tc::Program,
+    local_decls: &'a mut IdxVec<Decl, LocalDeclId>,
+    global_decls: &'a mut IdxVec<Decl, GlobalDeclId>,
     scope: ScopeId,
     void_instr: InstrId,
     code: IdxVec<Instr, InstrId>,
@@ -126,7 +156,7 @@ struct FunctionBuilder<'a> {
 }
 
 impl<'a> FunctionBuilder<'a> {
-    fn new(prog: &'a hir::Program, tc: &'a tc::Program, scope: ScopeId) -> Self {
+    fn new(prog: &'a hir::Program, tc: &'a tc::Program, local_decls: &'a mut IdxVec<Decl, LocalDeclId>, global_decls: &'a mut IdxVec<Decl, GlobalDeclId>, scope: ScopeId) -> Self {
         let mut code = IdxVec::new();
         let void_instr = code.push(Instr::Void);
         let mut basic_blocks = IdxVec::new();
@@ -134,6 +164,8 @@ impl<'a> FunctionBuilder<'a> {
         FunctionBuilder::<'a> {
             prog,
             tc,
+            local_decls,
+            global_decls,
             scope,
             void_instr,
             code,
@@ -150,10 +182,11 @@ impl<'a> FunctionBuilder<'a> {
             Item::Stmt(expr) => {
                 self.expr(expr, Context::new(0, DataDest::Stmt, ControlDest::Continue));
             },
-            Item::StoredDecl(expr) => {
-                let ty = self.type_of(expr);
+            Item::StoredDecl { id, root_expr } => {
+                let ty = self.type_of(root_expr);
                 let location = self.code.push(Instr::Alloca(ty));
-                self.expr(expr, Context::new(0, DataDest::Store { location }, ControlDest::Continue));
+                self.local_decls[id] = Decl::Stored { location };
+                self.expr(root_expr, Context::new(0, DataDest::Store { location }, ControlDest::Continue));
             },
         }
     }
