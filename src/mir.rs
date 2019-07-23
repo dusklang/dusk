@@ -3,7 +3,7 @@ use smallvec::SmallVec;
 use crate::ty::Type;
 use crate::type_checker as tc;
 use crate::index_vec::{Idx, IdxVec};
-use crate::builder::{LocalDeclId, GlobalDeclId, ExprId, DeclRefId, ScopeId};
+use crate::builder::{DeclId, LocalDeclId, GlobalDeclId, ExprId, DeclRefId, ScopeId};
 use crate::hir::{self, Expr, Item};
 
 newtype_index!(InstrId pub);
@@ -19,9 +19,7 @@ pub enum Instr {
     BoolConst(bool),
     Alloca(Type),
     LogicalNot(InstrId),
-    Get { arguments: SmallVec<[InstrId; 2]>, id: DeclRefId },
-    Set { arguments: SmallVec<[InstrId; 2]>, id: DeclRefId, value: InstrId },
-    Modify { arguments: SmallVec<[InstrId; 2]>, id: DeclRefId },
+    Call { arguments: SmallVec<[InstrId; 2]>, func: FuncId },
     Load(InstrId),
     Store { location: InstrId, value: InstrId },
     Ret(InstrId),
@@ -209,6 +207,53 @@ impl<'a> FunctionBuilder<'a> {
         self.basic_blocks[bb] = InstrId::new(self.code.len())
     }
 
+    fn get_decl(&self, id: DeclId) -> &Decl {
+        match id {
+            DeclId::Global(id) => &self.global_decls[id],
+            DeclId::Local(id) => &self.local_decls[id],
+        }
+    }
+
+    fn get(&mut self, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId) -> InstrId {
+        let id = self.tc.overloads[id].expect("No overload found!");
+        let decl = self.get_decl(id);
+        self.code.push(
+            match decl {
+                &Decl::Computed { get } => Instr::Call { arguments, func: get },
+                &Decl::Stored { location } => {
+                    assert!(arguments.is_empty());
+                    Instr::Load(location)
+                }
+            }
+        )
+    }
+
+    fn set(&mut self, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId, value: InstrId) -> InstrId {
+        let id = self.tc.overloads[id].expect("No overload found!");
+        let decl = self.get_decl(id);
+        self.code.push(
+            match decl {
+                &Decl::Computed { .. } => panic!("setters not yet implemented!"),
+                &Decl::Stored { location } => {
+                    assert!(arguments.is_empty());
+                    Instr::Store { location, value }
+                }
+            }
+        )
+    }
+
+    fn modify(&mut self, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId) -> InstrId {
+        let id = self.tc.overloads[id].expect("No overload found!");
+        let decl = self.get_decl(id);
+        match decl {
+            &Decl::Computed { .. } => panic!("modify accessors not yet implemented!"),
+            &Decl::Stored { location } => {
+                assert!(arguments.is_empty());
+                location
+            }
+        }
+    }
+
     fn expr(&mut self, expr: ExprId, mut ctx: Context) -> InstrId {
         // HACK!!!!
         let mut should_allow_set = false;
@@ -236,23 +281,22 @@ impl<'a> FunctionBuilder<'a> {
                     self.expr(argument, Context::new(0, DataDest::Read, ControlDest::Continue))
                 ).collect();
 
-                let instr = if ctx.indirection < 0 {
+                if ctx.indirection < 0 {
                     ctx.indirection += 1;
-                    Instr::Modify { arguments, id }
+                    self.modify(arguments, id)
                 } else {
                     match ctx.data {
                         DataDest::Receive { value, .. } => if ctx.indirection > 0 {
-                            let mut location = self.code.push(Instr::Get { arguments, id });
+                            let mut location = self.get(arguments, id);
                             location = self.handle_indirection(location, ty.clone(), ctx.indirection, 1);
                             ctx.indirection = 0;
-                            Instr::Store { location, value }
+                            self.code.push(Instr::Store { location, value })
                         } else {
-                            Instr::Set { arguments, id, value }
+                            self.set(arguments, id, value)
                         },
-                        _ => Instr::Get { arguments, id },
+                        _ => self.get(arguments, id),
                     }
-                };
-                self.code.push(instr)
+                }
             },
             Expr::LogicalAnd { lhs, rhs } => {
                 assert_eq!(ctx.indirection, 0);
