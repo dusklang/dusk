@@ -45,7 +45,7 @@ struct Function {
 }
 
 /// What to do with a value
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum DataDest {
     /// This value needs to be returned from the current function
     Ret,
@@ -64,14 +64,14 @@ enum DataDest {
 }
 
 /// Where to go after the current value is computed (whether implicitly or explicitly, such as via a `break` in a loop)
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum ControlDest {
     Continue,
     Unreachable,
     Block(BasicBlockId),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Context {
     /// The number of levels of indirection we are removed from the type of the expression
     /// Positive numbers indicate more layers of indirection, negative numbers indicate more
@@ -421,7 +421,6 @@ impl<'a> FunctionBuilder<'a> {
             Expr::Deref(operand) => return self.expr(operand, Context::new(ctx.indirection + 1, ctx.data, ctx.control)),
             Expr::Do { scope } => return self.scope(scope, ctx),
             Expr::If { condition, then_scope, else_scope } => {
-                // At this point it's impossible to know where these basic blocks are supposed to begin, so make them 0 for now
                 let true_bb = self.new_bb();
                 let false_bb = self.new_bb();
                 let post_bb = if else_scope.is_some() {
@@ -450,11 +449,13 @@ impl<'a> FunctionBuilder<'a> {
                 }
 
                 self.begin_bb(post_bb);
-                return if let Some(location) = result_location {
-                    self.code.push(Instr::Load(location))
+                if let Some(location) = result_location {
+                    return self.code.push(Instr::Load(location))
+                } else if else_scope.is_some() {
+                    return self.handle_control(self.void_instr(), ctx.control)
                 } else {
-                    self.handle_control(self.void_instr(), ctx.control)
-                };
+                    self.void_instr()
+                }
             },
             Expr::Ret { expr } => {
                 return self.expr(
