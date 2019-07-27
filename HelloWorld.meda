@@ -2,6 +2,13 @@ fn do_something_really_cool {
     fn assert(condition: bool) {
         if !condition { /*panic*/ }
     }
+    fn switch_between_two_numbers(switch: bool, a: i32, b: i32): i32 {
+        if !switch {
+            a
+        } else {
+            b
+        }
+    }
     /*foo := !(13 == 12) || 5 > 14
     foo := if !(13 == 12) || 5 > 14 {
         4

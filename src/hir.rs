@@ -50,8 +50,9 @@ pub struct Scope {
 
 #[derive(Debug)]
 pub enum Decl {
+    Computed { params: SmallVec<[LocalDeclId; 2]>, scope: ScopeId },
     Stored,
-    Computed(ScopeId),
+    Parameter(Type),
 }
 
 #[derive(Debug)]
@@ -206,19 +207,22 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         }
     }
     fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Type, proto_range: SourceRange) {
-        // The scope has to be created by a subsequent call to `begin_scope`, so just fill in an obviously invalid one.
-        // `end_computed_decl` will attach the scope to this decl.
-        let id = self.local_decls.push(Decl::Computed(ScopeId::new(std::usize::MAX)));
-        let id = DeclId::Local(id);
-
-        self.local_decls.reserve(param_names.len());
-        for _ in 0..param_names.len() {
-            self.local_decls.push(Decl::Stored);
-        }
+        // This is a placeholder value that gets replaced once the parameter declarations are allocated.
+        let id = self.local_decls.push(Decl::Stored);
+        assert_eq!(param_names.len(), param_tys.len());
+        self.local_decls.reserve(param_tys.len());
+        let params = param_tys.into_iter()
+            .map(|ty| self.local_decls.push(Decl::Parameter(ty)))
+            .collect();
+        // `end_computed_decl` will attach the real scope to this decl; we don't have it yet
+        self.local_decls[id] = Decl::Computed {
+            params: params,
+            scope: ScopeId::new(std::usize::MAX)
+        };
         self.comp_decl_stack.push(
             CompDeclState {
                 has_scope: None,
-                id,
+                id: DeclId::Local(id),
                 scope_stack: Vec::new(),
             }
         );
@@ -230,8 +234,9 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             DeclId::Local(id) => &mut self.local_decls[id],
         };
         match decl {
-            Decl::Computed(scope) => *scope = decl_state.has_scope.unwrap(),
-            Decl::Stored          => panic!("unexpected stored decl"),
+            Decl::Computed { scope, .. } => *scope = decl_state.has_scope.unwrap(),
+            Decl::Stored                 => panic!("unexpected stored decl"),
+            Decl::Parameter(_)           => panic!("unexpected parameter"),
         }
     }
     fn decl_ref(&mut self, name: Sym, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
@@ -243,7 +248,6 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         self.scopes[scope].terminal_expr
     }
     fn output(self) -> Program {
-        
         Program {
             exprs: self.exprs,
             num_decl_refs: self.num_decl_refs,

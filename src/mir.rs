@@ -25,6 +25,8 @@ pub enum Instr {
     Ret(InstrId),
     Br(BasicBlockId),
     CondBr { condition: InstrId, true_bb: BasicBlockId, false_bb: BasicBlockId },
+    /// Only valid at the beginning of a function, right after the void instruction
+    Parameter(Type),
 }
 
 #[derive(Debug)]
@@ -111,30 +113,32 @@ impl Program {
         for decl in &prog.local_decls {
             local_decls.push(
                 match decl {
-                    hir::Decl::Computed(_) => {
+                    hir::Decl::Computed { .. } => {
                         num_functions += 1;
                         Decl::Computed { get: FuncId::new(num_functions - 1) }
                     },
                     hir::Decl::Stored => Decl::Stored { location: InstrId::new(std::usize::MAX) },
+                    hir::Decl::Parameter(_) => Decl::LocalConst { value: InstrId::new(std::usize::MAX) },
                 }
             );
         }
         for decl in &prog.global_decls {
             global_decls.push(
                 match decl {
-                    hir::Decl::Computed(_) => {
+                    hir::Decl::Computed { .. } => {
                         num_functions += 1;
                         Decl::Computed { get: FuncId::new(num_functions - 1) }
                     },
                     hir::Decl::Stored => panic!("globals not yet supported!"),
+                    hir::Decl::Parameter(_) => panic!("global parameters are invalid!"),
                 }
             );
         }
         let mut comp_decls = IdxVec::<Function, FuncId>::new();
         for decl in prog.local_decls.iter().chain(&prog.global_decls) {
-            if let &hir::Decl::Computed(scope) = decl {
+            if let &hir::Decl::Computed { ref params, scope } = decl {
                 comp_decls.push(
-                    FunctionBuilder::new(prog, tc, &mut local_decls, &mut global_decls, scope).build()
+                    FunctionBuilder::new(prog, tc, &mut local_decls, &mut global_decls, scope, &params[..]).build()
                 );
             }
         }
@@ -155,9 +159,17 @@ struct FunctionBuilder<'a> {
 }
 
 impl<'a> FunctionBuilder<'a> {
-    fn new(prog: &'a hir::Program, tc: &'a tc::Program, local_decls: &'a mut IdxVec<Decl, LocalDeclId>, global_decls: &'a mut IdxVec<Decl, GlobalDeclId>, scope: ScopeId) -> Self {
+    fn new(prog: &'a hir::Program, tc: &'a tc::Program, local_decls: &'a mut IdxVec<Decl, LocalDeclId>, global_decls: &'a mut IdxVec<Decl, GlobalDeclId>, scope: ScopeId, params: &[LocalDeclId]) -> Self {
         let mut code = IdxVec::new();
         let void_instr = code.push(Instr::Void);
+        for &param in params {
+            if let hir::Decl::Parameter(ty) = &prog.local_decls[param] {
+                let value = code.push(Instr::Parameter(ty.clone()));
+                local_decls[param] = Decl::LocalConst { value };
+            } else {
+                panic!("unexpected non-parameter as parameter decl");
+            }
+        }
         let mut basic_blocks = IdxVec::new();
         basic_blocks.push(InstrId::new(0));
         FunctionBuilder::<'a> {
