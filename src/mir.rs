@@ -27,11 +27,11 @@ pub enum Instr {
     CondBr { condition: InstrId, true_bb: BasicBlockId, false_bb: BasicBlockId },
 }
 
-// TODO: store IdxVec of these
 #[derive(Debug)]
 enum Decl {
     Stored { location: InstrId },
     Computed { get: FuncId },
+    LocalConst { value: InstrId },
 }
 
 #[derive(Debug)]
@@ -107,6 +107,7 @@ impl Program {
         let mut local_decls = IdxVec::<Decl, LocalDeclId>::new();
         let mut global_decls = IdxVec::<Decl, GlobalDeclId>::new();
         let mut num_functions = 0usize;
+
         for decl in &prog.local_decls {
             local_decls.push(
                 match decl {
@@ -223,7 +224,8 @@ impl<'a> FunctionBuilder<'a> {
                 &Decl::Stored { location } => {
                     assert!(arguments.is_empty());
                     Instr::Load(location)
-                }
+                },
+                &Decl::LocalConst { value } => return value,
             }
         )
     }
@@ -237,7 +239,8 @@ impl<'a> FunctionBuilder<'a> {
                 &Decl::Stored { location } => {
                     assert!(arguments.is_empty());
                     Instr::Store { location, value }
-                }
+                },
+                &Decl::LocalConst { .. } => panic!("can't set a constant!"),
             }
         )
     }
@@ -250,7 +253,8 @@ impl<'a> FunctionBuilder<'a> {
             &Decl::Stored { location } => {
                 assert!(arguments.is_empty());
                 location
-            }
+            },
+            &Decl::LocalConst { .. } => panic!("can't modify constant!"),
         }
     }
 
