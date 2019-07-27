@@ -36,6 +36,58 @@ pub enum UnOp {
     Not, Deref, AddrOf, Neg, Plus, AddrOfMut
 }
 
+#[derive(Copy, Clone, Debug)]
+pub enum Intrinsic {
+    Mult,
+    Div,
+    Mod,
+    Add,
+    Sub,
+    Less,
+    LessOrEq,
+    Greater,
+    GreaterOrEq,
+    Eq,
+    NotEq,
+    BitwiseAnd,
+    BitwiseOr,
+    LogicalAnd,
+    LogicalOr,
+    LogicalNot,
+    Neg,
+    Pos,
+    Pi,
+    Panic,
+}
+
+impl Intrinsic {
+    pub fn name(&self) -> &str {
+        use Intrinsic::*;
+        match self {
+            Mult => "*",
+            Div => "/",
+            Mod => "%",
+            Add => "+",
+            Sub => "-",
+            Less => "<",
+            LessOrEq => "<=",
+            Greater => ">",
+            GreaterOrEq => ">=",
+            Eq => "==",
+            NotEq => "!=",
+            BitwiseAnd => "&",
+            BitwiseOr => "|",
+            LogicalAnd => "&&",
+            LogicalOr => "||",
+            LogicalNot => "!",
+            Neg => "-",
+            Pos => "+",
+            Pi => "pi",
+            Panic => "panic",
+        }
+    }
+}
+
 impl BinOp {
     pub fn symbol(self) -> &'static str {
         use BinOp::*;
@@ -114,6 +166,7 @@ pub trait Builder<'a> {
     fn end_scope(&mut self, has_terminal_expr: bool);
     fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Type, proto_range: SourceRange);
     fn end_computed_decl(&mut self);
+    fn add_intrinsic(&mut self, intrinsic: Intrinsic, param_tys: SmallVec<[Type; 2]>, ret_ty: Type);
     fn decl_ref(&mut self, name: Sym, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId;
     fn get_range(&self, id: ExprId) -> SourceRange;
     fn get_terminal_expr(&self, scope: ScopeId) -> ExprId;

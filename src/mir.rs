@@ -3,7 +3,7 @@ use smallvec::SmallVec;
 use crate::ty::Type;
 use crate::type_checker as tc;
 use crate::index_vec::{Idx, IdxVec};
-use crate::builder::{DeclId, LocalDeclId, GlobalDeclId, ExprId, DeclRefId, ScopeId};
+use crate::builder::{DeclId, LocalDeclId, GlobalDeclId, ExprId, DeclRefId, ScopeId, Intrinsic};
 use crate::hir::{self, Expr, Item};
 
 newtype_index!(InstrId pub);
@@ -20,6 +20,7 @@ pub enum Instr {
     Alloca(Type),
     LogicalNot(InstrId),
     Call { arguments: SmallVec<[InstrId; 2]>, func: FuncId },
+    Intrinsic { arguments: SmallVec<[InstrId; 2]>, intr: Intrinsic },
     Load(InstrId),
     Store { location: InstrId, value: InstrId },
     Ret(InstrId),
@@ -34,6 +35,7 @@ enum Decl {
     Stored { location: InstrId },
     Computed { get: FuncId },
     LocalConst { value: InstrId },
+    Intrinsic(Intrinsic),
 }
 
 #[derive(Debug)]
@@ -119,6 +121,7 @@ impl Program {
                     },
                     hir::Decl::Stored => Decl::Stored { location: InstrId::new(std::usize::MAX) },
                     hir::Decl::Parameter(_) => Decl::LocalConst { value: InstrId::new(std::usize::MAX) },
+                    hir::Decl::Intrinsic(_) => panic!("Unexpected local intrinisic"),
                 }
             );
         }
@@ -131,6 +134,7 @@ impl Program {
                     },
                     hir::Decl::Stored => panic!("globals not yet supported!"),
                     hir::Decl::Parameter(_) => panic!("global parameters are invalid!"),
+                    &hir::Decl::Intrinsic(intr) => Decl::Intrinsic(intr),
                 }
             );
         }
@@ -238,6 +242,7 @@ impl<'a> FunctionBuilder<'a> {
                     Instr::Load(location)
                 },
                 &Decl::LocalConst { value } => return value,
+                &Decl::Intrinsic(intr) => Instr::Intrinsic { arguments, intr }
             }
         )
     }
@@ -253,6 +258,7 @@ impl<'a> FunctionBuilder<'a> {
                     Instr::Store { location, value }
                 },
                 &Decl::LocalConst { .. } => panic!("can't set a constant!"),
+                &Decl::Intrinsic(_) => panic!("can't set an intrinsic! (yet?)"),
             }
         )
     }
@@ -266,7 +272,8 @@ impl<'a> FunctionBuilder<'a> {
                 assert!(arguments.is_empty());
                 location
             },
-            &Decl::LocalConst { .. } => panic!("can't modify constant!"),
+            &Decl::LocalConst { .. } => panic!("can't modify a constant!"),
+            &Decl::Intrinsic(_) => panic!("can't modify an intrinsic! (yet?)"),
         }
     }
 

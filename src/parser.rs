@@ -1,8 +1,8 @@
 use string_interner::{DefaultStringInterner, Sym};
-use smallvec::SmallVec;
+use smallvec::{SmallVec, smallvec};
 
 use crate::token::{TokenVec, TokenKind, Token};
-use crate::builder::{ExprId, ScopeId, BinOp, UnOp, Builder};
+use crate::builder::{ExprId, ScopeId, BinOp, UnOp, Builder, Intrinsic};
 use crate::ty::{Type, QualType};
 use crate::error::Error;
 use crate::source_info::{self, SourceRange};
@@ -28,6 +28,54 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
             cur: 0,
             errs: Vec::new(),
         };
+
+        // Add intrinsics
+        {
+            // Integers, floats and bool
+            let values = &[
+                Type::u8(), Type::u16(), Type::u32(), Type::u64(),
+                Type::i8(), Type::i16(), Type::i32(), Type::i64(),
+                Type::f32(), Type::f64(), Type::Bool
+            ];
+            let numerics = &values[0..10];
+            let signed_numerics = &numerics[4..];
+            let integers = &numerics[0..8];
+
+            use Intrinsic::*;
+            for &intr in &[Mult, Div, Mod, Add, Sub] {
+                for ty in numerics {
+                    p.builder.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], ty.clone());
+                }
+            }
+            for &intr in &[Less, LessOrEq, Greater, GreaterOrEq] {
+                for ty in numerics {
+                    p.builder.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], Type::Bool);
+                }
+            }
+            for &intr in &[Eq, NotEq] {
+                for ty in values {
+                    p.builder.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], Type::Bool);
+                }
+            }
+            for &intr in &[BitwiseAnd, BitwiseOr] {
+                for ty in integers {
+                    p.builder.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], ty.clone());
+                }
+            }
+            for &intr in &[LogicalAnd, LogicalOr] {
+                p.builder.add_intrinsic(intr, smallvec![Type::Bool, Type::Bool], Type::Bool);
+            }
+            for ty in signed_numerics {
+                p.builder.add_intrinsic(Neg, smallvec![ty.clone()], ty.clone());
+            }
+            for ty in numerics {
+                p.builder.add_intrinsic(Pos, smallvec![ty.clone()], ty.clone());
+            }
+            p.builder.add_intrinsic(LogicalNot, smallvec![Type::Bool], Type::Bool);
+            p.builder.add_intrinsic(Pi, SmallVec::new(), Type::f64());
+            p.builder.add_intrinsic(Panic, SmallVec::new(), Type::Never);
+        }
+
         p.skip_insignificant();
         loop {
             match p.cur().kind {

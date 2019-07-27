@@ -2,7 +2,7 @@ use string_interner::{DefaultStringInterner, Sym};
 use smallvec::{SmallVec, smallvec};
 
 use crate::index_vec::{Idx, IdxVec};
-use crate::builder::{self, BinOp, UnOp, ExprId, DeclId, ScopeId, LocalDeclId, GlobalDeclId, DeclRefId};
+use crate::builder::{self, BinOp, UnOp, ExprId, DeclId, ScopeId, LocalDeclId, GlobalDeclId, DeclRefId, Intrinsic};
 use crate::source_info::SourceRange;
 use crate::ty::Type;
 
@@ -53,6 +53,7 @@ pub enum Decl {
     Computed { params: SmallVec<[LocalDeclId; 2]>, scope: ScopeId },
     Stored,
     Parameter(Type),
+    Intrinsic(Intrinsic),
 }
 
 #[derive(Debug)]
@@ -126,6 +127,9 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             void_expr,
             interner,
         }
+    }
+    fn add_intrinsic(&mut self, intrinsic: Intrinsic, param_tys: SmallVec<[Type; 2]>, ret_ty: Type) {
+        self.global_decls.push(Decl::Intrinsic(intrinsic));
     }
     fn interner(&self) -> &DefaultStringInterner { &self.interner }
     fn void_expr(&self) -> ExprId { self.void_expr }
@@ -237,6 +241,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             Decl::Computed { scope, .. } => *scope = decl_state.has_scope.unwrap(),
             Decl::Stored                 => panic!("unexpected stored decl"),
             Decl::Parameter(_)           => panic!("unexpected parameter"),
+            Decl::Intrinsic(_)           => panic!("unexpected intrinsic"),
         }
     }
     fn decl_ref(&mut self, name: Sym, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
