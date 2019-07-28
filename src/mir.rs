@@ -10,12 +10,14 @@ newtype_index!(InstrId pub);
 newtype_index!(BasicBlockId pub);
 newtype_index!(TerminationId pub);
 newtype_index!(FuncId pub);
+newtype_index!(StrId pub);
 
 #[derive(Debug)]
 pub enum Instr {
     Void,
     IntConst { lit: u64, ty: Type },
     FloatConst { lit: f64, ty: Type },
+    StringConst { id: StrId },
     BoolConst(bool),
     Alloca(Type),
     LogicalNot(InstrId),
@@ -104,6 +106,7 @@ impl Context {
 #[derive(Debug)]
 pub struct Program {
     comp_decls: IdxVec<Function, FuncId>,
+    strings: IdxVec<String, StrId>,
 }
 
 impl Program {
@@ -139,15 +142,16 @@ impl Program {
             );
         }
         let mut comp_decls = IdxVec::<Function, FuncId>::new();
+        let mut strings = IdxVec::<String, StrId>::new();
         for decl in prog.local_decls.iter().chain(&prog.global_decls) {
             if let &hir::Decl::Computed { ref params, scope } = decl {
                 comp_decls.push(
-                    FunctionBuilder::new(prog, tc, &mut local_decls, &mut global_decls, scope, &params[..]).build()
+                    FunctionBuilder::new(prog, tc, &mut local_decls, &mut global_decls, &mut strings, scope, &params[..]).build()
                 );
             }
         }
         assert_eq!(num_functions, comp_decls.len());
-        Program { comp_decls }
+        Program { comp_decls, strings }
     }
 }
 
@@ -156,6 +160,7 @@ struct FunctionBuilder<'a> {
     tc: &'a tc::Program,
     local_decls: &'a mut IdxVec<Decl, LocalDeclId>,
     global_decls: &'a mut IdxVec<Decl, GlobalDeclId>,
+    strings: &'a mut IdxVec<String, StrId>,
     scope: ScopeId,
     void_instr: InstrId,
     code: IdxVec<Instr, InstrId>,
@@ -163,7 +168,15 @@ struct FunctionBuilder<'a> {
 }
 
 impl<'a> FunctionBuilder<'a> {
-    fn new(prog: &'a hir::Program, tc: &'a tc::Program, local_decls: &'a mut IdxVec<Decl, LocalDeclId>, global_decls: &'a mut IdxVec<Decl, GlobalDeclId>, scope: ScopeId, params: &[LocalDeclId]) -> Self {
+    fn new(
+        prog: &'a hir::Program,
+        tc: &'a tc::Program,
+        local_decls: &'a mut IdxVec<Decl, LocalDeclId>,
+        global_decls: &'a mut IdxVec<Decl, GlobalDeclId>,
+        strings: &'a mut IdxVec<String, StrId>,
+        scope: ScopeId,
+        params: &[LocalDeclId]
+    ) -> Self {
         let mut code = IdxVec::new();
         let void_instr = code.push(Instr::Void);
         for &param in params {
@@ -181,6 +194,7 @@ impl<'a> FunctionBuilder<'a> {
             tc,
             local_decls,
             global_decls,
+            strings,
             scope,
             void_instr,
             code,
@@ -287,6 +301,10 @@ impl<'a> FunctionBuilder<'a> {
             Expr::Void => self.void_instr(),
             Expr::IntLit { lit } => self.code.push(Instr::IntConst { lit, ty: ty.clone() }),
             Expr::DecLit { lit } => self.code.push(Instr::FloatConst { lit, ty: ty.clone() }),
+            Expr::StrLit { ref lit } => {
+                let id = self.strings.push(lit.clone());
+                self.code.push(Instr::StringConst { id })
+            },
             Expr::Set { lhs, rhs } => {
                 self.expr(
                     rhs,

@@ -148,12 +148,11 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
             return Ok(self.builder.un_op(op, term, 0..0));
         }
 
-        use TokenKind::*;
         match self.cur().kind {
-            LeftParen => {
+            TokenKind::LeftParen => {
                 self.next();
                 let expr = self.parse_expr();
-                if let RightParen = self.cur().kind {}
+                if let TokenKind::RightParen = self.cur().kind {}
                 else {
                     self.errs.push(
                         Error::new("unclosed parentheses")
@@ -163,17 +162,22 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
                 self.next();
                 Ok(expr)
             },
-            &IntLit(val) => {
+            &TokenKind::IntLit(val) => {
                 let lit = self.builder.int_lit(val, self.cur().range.clone());
                 self.next();
                 Ok(lit)
             },
-            &DecLit(val) => {
+            &TokenKind::DecLit(val) => {
                 let lit = self.builder.dec_lit(val, self.cur().range.clone());
                 self.next();
                 Ok(lit)
             },
-            &Ident(name) => {
+            TokenKind::StrLit(val) => {
+                let lit = self.builder.str_lit(val.clone(), self.cur().range.clone());
+                self.next();
+                Ok(lit)
+            },
+            &TokenKind::Ident(name) => {
                 let name_range = self.cur().range.clone();
                 let mut args = SmallVec::new();
                 let mut end_range = name_range.clone();
@@ -449,6 +453,7 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
         );
         while let TokenKind::Asterisk = self.next().kind {
             let is_mut = if let TokenKind::Mut = self.peek_next().kind {
+                self.next();
                 true
             } else {
                 false

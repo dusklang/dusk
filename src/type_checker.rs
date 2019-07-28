@@ -1,10 +1,11 @@
 use smallvec::{SmallVec, smallvec};
 
 use crate::error::Error;
-use crate::tir::{self, Decl};
+use crate::tir::{self, Decl, Expr};
 use crate::builder::{ExprId, DeclId, DeclRefId};
 use crate::ty::{Type, QualType};
 use crate::index_vec::IdxVec;
+use crate::source_info::SourceRange;
 use crate::dep_vec;
 use crate::constraints::{ConstraintList, LiteralType, UnificationError};
 
@@ -44,7 +45,8 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     // Extend arrays as needed so they all have the same number of levels.
     let levels = dep_vec::unify_sizes(&mut [
         &mut tc.prog.assigned_decls, &mut tc.prog.assignments, &mut tc.prog.decl_refs, 
-        &mut tc.prog.addr_ofs, &mut tc.prog.derefs, &mut tc.prog.rets, &mut tc.prog.ifs, &mut tc.prog.dos,
+        &mut tc.prog.addr_ofs, &mut tc.prog.derefs, &mut tc.prog.rets, &mut tc.prog.ifs,
+        &mut tc.prog.dos,
     ]);
 
     // Assign the type of the void expression to be void.
@@ -52,18 +54,16 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     tc.types[tc.prog.void_expr] = Type::Void;
 
     // Pass 1: propagate info down from leaves to roots
-    for item in &tc.prog.int_lits { 
-        let constraints = &mut tc.constraints[item.id];
-        let lit = LiteralType::Int;
-        constraints.preferred_type = Some(lit.preferred_type().into());
-        constraints.literal = Some(lit);
+    fn lit_pass_1<T>(constraints: &mut IdxVec<ConstraintList, ExprId>, lits: &Vec<Expr<T>>, lit_ty: LiteralType) {
+        for item in lits {
+            let constraints = &mut constraints[item.id];
+            constraints.preferred_type = Some(lit_ty.preferred_type().into());
+            constraints.literal = Some(lit_ty);
+        }
     }
-    for item in &tc.prog.dec_lits {
-        let constraints = &mut tc.constraints[item.id];
-        let lit = LiteralType::Dec;
-        constraints.preferred_type = Some(lit.preferred_type().into());
-        constraints.literal = Some(lit);
-    }
+    lit_pass_1(&mut tc.constraints, &tc.prog.int_lits, LiteralType::Int);
+    lit_pass_1(&mut tc.constraints, &tc.prog.dec_lits, LiteralType::Dec);
+    lit_pass_1(&mut tc.constraints, &tc.prog.str_lits, LiteralType::Str);
     for level in 0..levels {
         for item in tc.prog.assigned_decls.get_level(level) {
             let constraints = &tc.constraints[item.root_expr];
@@ -174,6 +174,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
                 Ok(()) => {}
                 Err(Literal(Dec)) => panic!("expected return value of {:?}, found decimal literal", item.ty),
                 Err(Literal(Int)) => panic!("expected return value of {:?}, found integer literal", item.ty),
+                Err(Literal(Str)) => panic!("expected return value of {:?}, found string literal", item.ty),
                 Err(InvalidChoice(choices)) => panic!("expected return value of {:?}, found {:?}", item.ty, choices),
                 Err(Immutable) => panic!("COMPILER BUG: unexpected mutable return type"),
             }
@@ -322,30 +323,30 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
             tc.constraints[item.terminal_expr].set_to(ty);
         }
     }
-    for item in &tc.prog.int_lits {
-        let constraints = &tc.constraints[item.id];
-        tc.types[item.id] = if constraints.one_of.len() != 1 {
-            errs.push(
-                Error::new("ambiguous type for expression")
-                    .adding_primary_range(tc.prog.source_ranges[item.id].clone(), "int literal here")
-            );
-            Type::Error
-        } else {
-            constraints.one_of[0].ty.clone()
-        };
+    fn lit_pass_2<T>(
+        constraints: &IdxVec<ConstraintList, ExprId>,
+        types: &mut IdxVec<Type, ExprId>,
+        errs: &mut Vec<Error>,
+        source_ranges: &IdxVec<SourceRange, ExprId>,
+        lits: &Vec<Expr<T>>,
+        lit_ty: &str
+    ) {
+        for item in lits {
+            let constraints = &constraints[item.id];
+            types[item.id] = if constraints.one_of.len() != 1 {
+                errs.push(
+                    Error::new("ambiguous type for expression")
+                        .adding_primary_range(source_ranges[item.id].clone(), format!("{} literal here", lit_ty))
+                );
+                Type::Error
+            } else {
+                constraints.one_of[0].ty.clone()
+            };
+        }
     }
-    for item in &tc.prog.dec_lits {
-        let constraints = &tc.constraints[item.id];
-        tc.types[item.id] = if constraints.one_of.len() != 1 {
-            errs.push(
-                Error::new("ambiguous type for expression")
-                    .adding_primary_range(tc.prog.source_ranges[item.id].clone(), "dec literal here")
-            );
-            Type::Error
-        } else {
-            constraints.one_of[0].ty.clone()
-        };
-    }
+    lit_pass_2(&tc.constraints, &mut tc.types, &mut errs, &tc.prog.source_ranges, &tc.prog.int_lits, "integer");
+    lit_pass_2(&tc.constraints, &mut tc.types, &mut errs, &tc.prog.source_ranges, &tc.prog.dec_lits, "decimal");
+    lit_pass_2(&tc.constraints, &mut tc.types, &mut errs, &tc.prog.source_ranges, &tc.prog.str_lits, "string");
 
     //println!("Types: {:#?}", tc.types);
     //println!("Program: {:#?}", tc.prog);

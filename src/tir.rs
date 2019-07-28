@@ -13,6 +13,8 @@ pub struct IntLit;
 #[derive(Debug)]
 pub struct DecLit;
 #[derive(Debug)]
+pub struct StrLit;
+#[derive(Debug)]
 pub struct Ret { pub expr: ExprId, pub ty: Type }
 #[derive(Debug)]
 pub struct AddrOf { pub expr: ExprId, pub is_mut: bool }
@@ -65,6 +67,8 @@ pub struct Program {
     pub int_lits: Vec<Expr<IntLit>>,
     /// All decimal literals in the entire program
     pub dec_lits: Vec<Expr<DecLit>>,
+    /// All string literals in the entire program
+    pub str_lits: Vec<Expr<StrLit>>,
     /// All statements in the entire program
     pub stmts: Vec<Stmt>,
     /// All do expressions in the entire program
@@ -147,6 +151,8 @@ pub struct Builder<'a> {
     int_lits: Vec<Expr<IntLit>>,
     /// All decimal literals in the entire program so far
     dec_lits: Vec<Expr<DecLit>>,
+    /// All string literals in the entire program so far
+    str_lits: Vec<Expr<StrLit>>,
     /// All statements in the entire program so far
     stmts: Vec<Stmt>,
     /// All do expressions in the entire program so far
@@ -204,6 +210,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         Self {
             int_lits: Vec::new(),
             dec_lits: Vec::new(),
+            str_lits: Vec::new(),
             stmts: Vec::new(),
             dos: DepVec::new(),
             assigned_decls: DepVec::new(),
@@ -247,6 +254,15 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
     fn dec_lit(&mut self, lit: f64, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
         self.dec_lits.push(Expr { id, data: DecLit });
+        self.levels.push(0);
+        self.source_ranges.push(range);
+
+        id
+    }
+
+    fn str_lit(&mut self, lit: String, range: SourceRange) -> ExprId {
+        let id = ExprId::new(self.levels.len());
+        self.str_lits.push(Expr { id, data: StrLit });
         self.levels.push(0);
         self.source_ranges.push(range);
 
@@ -468,6 +484,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         Program {
             int_lits: self.int_lits,
             dec_lits: self.dec_lits,
+            str_lits: self.str_lits,
             stmts: self.stmts,
             dos: self.dos,
             assigned_decls: self.assigned_decls,

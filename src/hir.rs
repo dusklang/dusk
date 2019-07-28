@@ -11,6 +11,7 @@ pub enum Expr {
     Void,
     IntLit { lit: u64 },
     DecLit { lit: f64 },
+    StrLit { lit: String },
     DeclRef { arguments: SmallVec<[ExprId; 2]>, id: DeclRefId },
     LogicalOr { lhs: ExprId, rhs: ExprId },
     LogicalAnd { lhs: ExprId, rhs: ExprId },
@@ -138,6 +139,9 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
     }
     fn dec_lit(&mut self, lit: f64, range: SourceRange) -> ExprId { 
         self.exprs.push(Expr::DecLit { lit })
+    }
+    fn str_lit(&mut self, lit: String, range: SourceRange) -> ExprId { 
+        self.exprs.push(Expr::StrLit { lit })
     }
     fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId {
         match op {

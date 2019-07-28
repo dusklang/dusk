@@ -37,6 +37,18 @@ impl Type {
         if let Type::Float(_) = self { true } else { false }
     }
 
+    pub fn expressible_by_str_lit(&self) -> bool {
+        if let Type::Pointer(pointee) = self {
+            if let Type::Int { width: IntWidth::W8, is_signed: _ } = &pointee.ty {
+                !pointee.is_mut
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    }
+
     pub const fn u8() -> Self {
         Type::Int { width: IntWidth::W8, is_signed: false }
     }
