@@ -8,7 +8,7 @@ pub enum TokenKind {
     IntLit(u64),
     DecLit(f64),
     StrLit(String),
-    CharLit(u8),
+    CharLit(i8),
 
     // Special
     Eof,

@@ -64,6 +64,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     lit_pass_1(&mut tc.constraints, &tc.prog.int_lits, LiteralType::Int);
     lit_pass_1(&mut tc.constraints, &tc.prog.dec_lits, LiteralType::Dec);
     lit_pass_1(&mut tc.constraints, &tc.prog.str_lits, LiteralType::Str);
+    lit_pass_1(&mut tc.constraints, &tc.prog.char_lits, LiteralType::Char);
     for level in 0..levels {
         for item in tc.prog.assigned_decls.get_level(level) {
             let constraints = &tc.constraints[item.root_expr];
@@ -175,6 +176,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
                 Err(Literal(Dec)) => panic!("expected return value of {:?}, found decimal literal", item.ty),
                 Err(Literal(Int)) => panic!("expected return value of {:?}, found integer literal", item.ty),
                 Err(Literal(Str)) => panic!("expected return value of {:?}, found string literal", item.ty),
+                Err(Literal(Char)) => panic!("expected return value of {:?}, found character literal", item.ty),
                 Err(InvalidChoice(choices)) => panic!("expected return value of {:?}, found {:?}", item.ty, choices),
                 Err(Immutable) => panic!("COMPILER BUG: unexpected mutable return type"),
             }
@@ -347,6 +349,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     lit_pass_2(&tc.constraints, &mut tc.types, &mut errs, &tc.prog.source_ranges, &tc.prog.int_lits, "integer");
     lit_pass_2(&tc.constraints, &mut tc.types, &mut errs, &tc.prog.source_ranges, &tc.prog.dec_lits, "decimal");
     lit_pass_2(&tc.constraints, &mut tc.types, &mut errs, &tc.prog.source_ranges, &tc.prog.str_lits, "string");
+    lit_pass_2(&tc.constraints, &mut tc.types, &mut errs, &tc.prog.source_ranges, &tc.prog.char_lits, "character");
 
     //println!("Types: {:#?}", tc.types);
     //println!("Program: {:#?}", tc.prog);

@@ -49,6 +49,14 @@ impl Type {
         }
     }
 
+    pub fn expressible_by_char_lit(&self) -> bool {
+        if let Type::Int { width: IntWidth::W8, is_signed: _ } = self {
+            true
+        } else {
+            self.expressible_by_str_lit()
+        }
+    }
+
     pub const fn u8() -> Self {
         Type::Int { width: IntWidth::W8, is_signed: false }
     }

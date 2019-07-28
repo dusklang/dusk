@@ -17,7 +17,7 @@ pub enum Instr {
     Void,
     IntConst { lit: u64, ty: Type },
     FloatConst { lit: f64, ty: Type },
-    StringConst { id: StrId },
+    StringConst { id: StrId, ty: Type },
     BoolConst(bool),
     Alloca(Type),
     LogicalNot(InstrId),
@@ -303,7 +303,17 @@ impl<'a> FunctionBuilder<'a> {
             Expr::DecLit { lit } => self.code.push(Instr::FloatConst { lit, ty: ty.clone() }),
             Expr::StrLit { ref lit } => {
                 let id = self.strings.push(lit.clone());
-                self.code.push(Instr::StringConst { id })
+                self.code.push(Instr::StringConst { id, ty: ty.clone() })
+            },
+            Expr::CharLit { lit } => {
+                match ty {
+                    Type::Int { .. } => self.code.push(Instr::IntConst { lit: lit as u64, ty: ty.clone() }),
+                    Type::Pointer(_) => {
+                        let id = self.strings.push(String::from_utf8(vec![lit as u8]).unwrap());
+                        self.code.push(Instr::StringConst { id, ty: ty.clone() })
+                    },
+                    _ => panic!("unexpected type for character")
+                }
             },
             Expr::Set { lhs, rhs } => {
                 self.expr(

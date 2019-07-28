@@ -296,7 +296,7 @@ impl<'src> Lexer<'src> {
                 );
             }
             if lit.len() == 1 {
-                self.pack_tok(TokenKind::CharLit(lit.as_bytes()[0]))
+                self.pack_tok(TokenKind::CharLit(lit.as_bytes()[0] as i8))
             } else {
                 self.pack_tok(TokenKind::StrLit(lit))
             }

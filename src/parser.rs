@@ -177,6 +177,11 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
                 self.next();
                 Ok(lit)
             },
+            &TokenKind::CharLit(val) => {
+                let lit = self.builder.char_lit(val, self.cur().range.clone());
+                self.next();
+                Ok(lit)
+            }
             &TokenKind::Ident(name) => {
                 let name_range = self.cur().range.clone();
                 let mut args = SmallVec::new();

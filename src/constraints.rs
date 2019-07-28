@@ -3,7 +3,7 @@ use smallvec::{SmallVec, smallvec};
 use crate::ty::{Type, QualType};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum LiteralType { Int, Dec, Str }
+pub enum LiteralType { Int, Dec, Str, Char }
 
 impl LiteralType {
     pub fn preferred_type(&self) -> Type {
@@ -11,6 +11,11 @@ impl LiteralType {
             LiteralType::Int => Type::i32(),
             LiteralType::Dec => Type::f64(),
             LiteralType::Str => Type::Pointer(
+                Box::new(QualType::from(Type::i8()))
+            ),
+            // Because a char literal has the same syntax as a string literal, it would feel
+            // inconsistent if one-byte string literals defaulted to `i8`
+            LiteralType::Char => Type::Pointer(
                 Box::new(QualType::from(Type::i8()))
             ),
         }
@@ -63,6 +68,11 @@ impl ConstraintList {
                 Ok(())
             },
             Some(LiteralType::Str) if ty.ty.expressible_by_str_lit() => if ty.is_mut {
+                Err(UnificationError::Immutable)
+            } else {
+                Ok(())
+            },
+            Some(LiteralType::Char) if ty.ty.expressible_by_char_lit() => if ty.is_mut {
                 Err(UnificationError::Immutable)
             } else {
                 Ok(())
@@ -127,10 +137,12 @@ impl ConstraintList {
                             fn dec_lit(ty: &QualType) -> bool { ty.ty.expressible_by_dec_lit() }
                             fn int_lit(ty: &QualType) -> bool { ty.ty.expressible_by_int_lit() }
                             fn str_lit(ty: &QualType) -> bool { ty.ty.expressible_by_str_lit() }
+                            fn char_lit(ty: &QualType) -> bool { ty.ty.expressible_by_char_lit() }
                             match lit_lit {
                                 LiteralType::Dec => dec_lit,
                                 LiteralType::Int => int_lit,
                                 LiteralType::Str => str_lit,
+                                LiteralType::Char => char_lit,
                             }
                         },
                     );
@@ -138,15 +150,18 @@ impl ConstraintList {
             }
             (Some(LiteralType::Dec), _, Some(rhs), _) => match rhs {
                 LiteralType::Int | LiteralType::Dec => constraints.literal = Some(LiteralType::Dec),
-                LiteralType::Str => constraints.literal = None,
+                LiteralType::Str | LiteralType::Char => constraints.literal = None,
             },
             (Some(LiteralType::Int), _, Some(rhs), _) => match rhs {
-                LiteralType::Int => constraints.literal = Some(LiteralType::Int),
-                LiteralType::Dec => constraints.literal = Some(LiteralType::Dec),
-                LiteralType::Str => constraints.literal = None,
+                LiteralType::Int | LiteralType::Dec => constraints.literal = Some(rhs),
+                LiteralType::Str | LiteralType::Char => constraints.literal = None,
             },
             (Some(LiteralType::Str), _, Some(rhs), _) => match rhs {
-                LiteralType::Str => constraints.literal = Some(LiteralType::Str),
+                LiteralType::Str | LiteralType::Char => constraints.literal = Some(LiteralType::Str),
+                LiteralType::Int | LiteralType::Dec => constraints.literal = None,
+            }
+            (Some(LiteralType::Char), _, Some(rhs), _) => match rhs {
+                LiteralType::Str | LiteralType::Char => constraints.literal = Some(rhs),
                 LiteralType::Int | LiteralType::Dec => constraints.literal = None,
             }
         }
@@ -192,11 +207,13 @@ impl ConstraintList {
                 fn dec_lit(ty: &mut QualType) -> bool { ty.ty.expressible_by_dec_lit() }
                 fn int_lit(ty: &mut QualType) -> bool { ty.ty.expressible_by_int_lit() }
                 fn str_lit(ty: &mut QualType) -> bool { ty.ty.expressible_by_str_lit() }
+                fn char_lit(ty: &mut QualType) -> bool { ty.ty.expressible_by_char_lit() }
                 other.one_of.retain(
                     match lhs_lit {
                         LiteralType::Dec => dec_lit,
                         LiteralType::Int => int_lit,
                         LiteralType::Str => str_lit,
+                        LiteralType::Char => char_lit,
                     }
                 );
             },
@@ -205,6 +222,7 @@ impl ConstraintList {
                     LiteralType::Dec => Type::expressible_by_dec_lit,
                     LiteralType::Int => Type::expressible_by_int_lit,
                     LiteralType::Str => Type::expressible_by_str_lit,
+                    LiteralType::Char => Type::expressible_by_char_lit,
                 };
                 if !self.is_never() {
                     let (mut lhs_one_of, mut rhs_one_of) = (SmallVec::new(), SmallVec::new());

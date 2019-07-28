@@ -9,12 +9,6 @@ use crate::ty::{Type, QualType};
 use crate::builder::{self, *};
 
 #[derive(Debug)]
-pub struct IntLit;
-#[derive(Debug)]
-pub struct DecLit;
-#[derive(Debug)]
-pub struct StrLit;
-#[derive(Debug)]
 pub struct Ret { pub expr: ExprId, pub ty: Type }
 #[derive(Debug)]
 pub struct AddrOf { pub expr: ExprId, pub is_mut: bool }
@@ -64,11 +58,13 @@ impl Decl {
 #[derive(Debug)]
 pub struct Program {
     /// All integer literals in the entire program
-    pub int_lits: Vec<Expr<IntLit>>,
+    pub int_lits: Vec<Expr<()>>,
     /// All decimal literals in the entire program
-    pub dec_lits: Vec<Expr<DecLit>>,
+    pub dec_lits: Vec<Expr<()>>,
     /// All string literals in the entire program
-    pub str_lits: Vec<Expr<StrLit>>,
+    pub str_lits: Vec<Expr<()>>,
+    /// All character literals in the entire program
+    pub char_lits: Vec<Expr<()>>,
     /// All statements in the entire program
     pub stmts: Vec<Stmt>,
     /// All do expressions in the entire program
@@ -148,11 +144,13 @@ struct GlobalDeclRef {
 
 pub struct Builder<'a> {
     /// All integer literals in the entire program so far
-    int_lits: Vec<Expr<IntLit>>,
+    int_lits: Vec<Expr<()>>,
     /// All decimal literals in the entire program so far
-    dec_lits: Vec<Expr<DecLit>>,
+    dec_lits: Vec<Expr<()>>,
     /// All string literals in the entire program so far
-    str_lits: Vec<Expr<StrLit>>,
+    str_lits: Vec<Expr<()>>,
+    /// All character literals in the entire program so far
+    char_lits: Vec<Expr<()>>,
     /// All statements in the entire program so far
     stmts: Vec<Stmt>,
     /// All do expressions in the entire program so far
@@ -211,6 +209,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             int_lits: Vec::new(),
             dec_lits: Vec::new(),
             str_lits: Vec::new(),
+            char_lits: Vec::new(),
             stmts: Vec::new(),
             dos: DepVec::new(),
             assigned_decls: DepVec::new(),
@@ -245,7 +244,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
 
     fn int_lit(&mut self, lit: u64, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
-        self.int_lits.push(Expr { id, data: IntLit });
+        self.int_lits.push(Expr { id, data: () });
         self.levels.push(0);
         self.source_ranges.push(range);
         id
@@ -253,7 +252,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
 
     fn dec_lit(&mut self, lit: f64, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
-        self.dec_lits.push(Expr { id, data: DecLit });
+        self.dec_lits.push(Expr { id, data: () });
         self.levels.push(0);
         self.source_ranges.push(range);
 
@@ -262,7 +261,16 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
 
     fn str_lit(&mut self, lit: String, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
-        self.str_lits.push(Expr { id, data: StrLit });
+        self.str_lits.push(Expr { id, data: () });
+        self.levels.push(0);
+        self.source_ranges.push(range);
+
+        id
+    }
+
+    fn char_lit(&mut self, lit: i8, range: SourceRange) -> ExprId {
+        let id = ExprId::new(self.levels.len());
+        self.char_lits.push(Expr { id, data: () });
         self.levels.push(0);
         self.source_ranges.push(range);
 
@@ -485,6 +493,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             int_lits: self.int_lits,
             dec_lits: self.dec_lits,
             str_lits: self.str_lits,
+            char_lits: self.char_lits,
             stmts: self.stmts,
             dos: self.dos,
             assigned_decls: self.assigned_decls,
