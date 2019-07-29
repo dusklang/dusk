@@ -22,6 +22,7 @@ pub enum Expr {
     Set { lhs: ExprId, rhs: ExprId },
     Do { scope: ScopeId },
     If { condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId> },
+    While { condition: ExprId, scope: ScopeId },
     Ret { expr: ExprId }
 }
 
@@ -180,6 +181,9 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         self.exprs.push(
             Expr::If { condition, then_scope, else_scope }
         )
+    }
+    fn while_expr(&mut self, condition: ExprId, scope: ScopeId, range: SourceRange) -> ExprId {
+        self.exprs.push(Expr::While { condition, scope })
     }
     fn stmt(&mut self, expr: ExprId) {
         self.flush_stmt_buffer();

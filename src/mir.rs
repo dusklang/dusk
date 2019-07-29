@@ -485,6 +485,21 @@ impl<'a> FunctionBuilder<'a> {
                     self.void_instr()
                 }
             },
+            Expr::While { condition, scope } => {
+                assert_eq!(ctx.indirection, 0);
+                let test_bb = self.new_bb();
+                let loop_bb = self.new_bb();
+                let post_bb = match ctx.control {
+                    ControlDest::Continue | ControlDest::Unreachable => self.new_bb(),
+                    ControlDest::Block(block) => block,
+                };
+
+                self.begin_bb(test_bb);
+                self.expr(condition, Context::new(0, DataDest::Branch(loop_bb, post_bb), ControlDest::Continue));
+
+                self.begin_bb(loop_bb);
+                self.scope(scope, Context::new(0, DataDest::Read, ControlDest::Block(test_bb)))
+            },
             Expr::Ret { expr } => {
                 return self.expr(
                     expr,

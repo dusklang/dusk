@@ -26,6 +26,8 @@ pub struct Assignment { pub lhs: ExprId, pub rhs: ExprId }
 pub struct DeclRef { pub args: SmallVec<[ExprId; 2]>, pub decl_ref_id: DeclRefId }
 #[derive(Debug)]
 pub struct If { pub condition: ExprId, pub then_expr: ExprId, pub else_expr: ExprId }
+#[derive(Debug)]
+pub struct While { pub condition: ExprId }
 
 #[derive(Debug)]
 pub struct Expr<T> {
@@ -52,58 +54,6 @@ pub struct Decl {
 impl Decl {
     fn new(name: Sym, param_tys: SmallVec<[Type; 2]>, ret_ty: impl Into<QualType>) -> Self {
         Decl { name, param_tys, ret_ty: ret_ty.into() }
-    }
-}
-
-#[derive(Debug)]
-pub struct Program {
-    /// All integer literals in the entire program
-    pub int_lits: Vec<Expr<()>>,
-    /// All decimal literals in the entire program
-    pub dec_lits: Vec<Expr<()>>,
-    /// All string literals in the entire program
-    pub str_lits: Vec<Expr<()>>,
-    /// All character literals in the entire program
-    pub char_lits: Vec<Expr<()>>,
-    /// All statements in the entire program
-    pub stmts: Vec<Stmt>,
-    /// All do expressions in the entire program
-    pub dos: DepVec<Expr<Do>>,
-    /// All assigned decls in the entire program
-    pub assigned_decls: DepVec<AssignedDecl>,
-    /// All assignment expressions in the entire program
-    pub assignments: DepVec<Expr<Assignment>>,
-    /// All decl refs in the entire program
-    pub decl_refs: DepVec<Expr<DeclRef>>,
-    /// All address of operators in the entire program
-    pub addr_ofs: DepVec<Expr<AddrOf>>,
-    /// All dereference operators in the entire program
-    pub derefs: DepVec<Expr<Dereference>>,
-    /// All returns in the entire program
-    pub rets: DepVec<Expr<Ret>>,
-    /// All if expressions in the entire program
-    pub ifs: DepVec<Expr<If>>,
-    // An expression to universally represent the void value
-    pub void_expr: ExprId,
-
-    /// The source ranges of each expression in the entire program
-    pub source_ranges: IdxVec<SourceRange, ExprId>,
-    /// The global declarations in the entire program
-    pub global_decls: IdxVec<Decl, GlobalDeclId>,
-    /// The local declarations in the entire program
-    pub local_decls: IdxVec<Decl, LocalDeclId>,
-    /// Each declref's overload choices
-    pub overloads: IdxVec<Vec<DeclId>, DeclRefId>,
-    /// Number of expressions in the entire program
-    pub num_exprs: usize,
-}
-
-impl Program {
-    pub fn decl(&self, id: DeclId) -> &Decl { 
-        match id {
-            DeclId::Global(id) => &self.global_decls[id],
-            DeclId::Local(id) => &self.local_decls[id],
-        }
     }
 }
 
@@ -142,6 +92,61 @@ struct GlobalDeclRef {
     num_arguments: u32,
 }
 
+#[derive(Debug)]
+pub struct Program {
+    /// All integer literals in the entire program
+    pub int_lits: Vec<Expr<()>>,
+    /// All decimal literals in the entire program
+    pub dec_lits: Vec<Expr<()>>,
+    /// All string literals in the entire program
+    pub str_lits: Vec<Expr<()>>,
+    /// All character literals in the entire program
+    pub char_lits: Vec<Expr<()>>,
+    /// All statements in the entire program
+    pub stmts: Vec<Stmt>,
+    /// All do expressions in the entire program
+    pub dos: DepVec<Expr<Do>>,
+    /// All assigned decls in the entire program
+    pub assigned_decls: DepVec<AssignedDecl>,
+    /// All assignment expressions in the entire program
+    pub assignments: DepVec<Expr<Assignment>>,
+    /// All decl refs in the entire program
+    pub decl_refs: DepVec<Expr<DeclRef>>,
+    /// All address of operators in the entire program
+    pub addr_ofs: DepVec<Expr<AddrOf>>,
+    /// All dereference operators in the entire program
+    pub derefs: DepVec<Expr<Dereference>>,
+    /// All returns in the entire program
+    /// TODO: Because the type of a return expression is always Never, this doesn't need to be a DepVec!
+    pub rets: DepVec<Expr<Ret>>,
+    /// All if expressions in the entire program
+    pub ifs: DepVec<Expr<If>>,
+    /// All while expressions in the entire program
+    pub whiles: Vec<Expr<While>>,
+    // An expression to universally represent the void value
+    pub void_expr: ExprId,
+
+    /// The source ranges of each expression in the entire program
+    pub source_ranges: IdxVec<SourceRange, ExprId>,
+    /// The global declarations in the entire program
+    pub global_decls: IdxVec<Decl, GlobalDeclId>,
+    /// The local declarations in the entire program
+    pub local_decls: IdxVec<Decl, LocalDeclId>,
+    /// Each declref's overload choices
+    pub overloads: IdxVec<Vec<DeclId>, DeclRefId>,
+    /// Number of expressions in the entire program
+    pub num_exprs: usize,
+}
+
+impl Program {
+    pub fn decl(&self, id: DeclId) -> &Decl { 
+        match id {
+            DeclId::Global(id) => &self.global_decls[id],
+            DeclId::Local(id) => &self.local_decls[id],
+        }
+    }
+}
+
 pub struct Builder<'a> {
     /// All integer literals in the entire program so far
     int_lits: Vec<Expr<()>>,
@@ -166,9 +171,12 @@ pub struct Builder<'a> {
     /// All dereference operators in the entire program so far
     derefs: DepVec<Expr<Dereference>>,
     /// All returns in the entire program so far
+    /// TODO: Because the type of a return expression is always Never, this doesn't need to be a DepVec!
     rets: DepVec<Expr<Ret>>,
     /// All if expressions in the entire program so far
     ifs: DepVec<Expr<If>>,
+    /// All while expressions in the entire program so far
+    whiles: Vec<Expr<While>>,
     // An expression to universally represent the void value
     void_expr: ExprId,
 
@@ -219,6 +227,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             derefs: DepVec::new(),
             rets: DepVec::new(),
             ifs: DepVec::new(),
+            whiles: Vec::new(),
             void_expr,
             source_ranges,
             levels,
@@ -230,6 +239,37 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             terminal_exprs: IdxVec::new(),
 
             interner,
+        }
+    }
+
+    fn output(mut self) -> Program {
+        for decl_ref in self.global_decl_refs {
+            self.overloads[decl_ref.id] = self.global_decls.indices_satisfying(|decl| {
+                decl.name == decl_ref.name && decl.param_tys.len() == decl_ref.num_arguments as usize
+            }).iter().map(|&i| DeclId::Global(i)).collect();
+        }
+
+        Program {
+            int_lits: self.int_lits,
+            dec_lits: self.dec_lits,
+            str_lits: self.str_lits,
+            char_lits: self.char_lits,
+            stmts: self.stmts,
+            dos: self.dos,
+            assigned_decls: self.assigned_decls,
+            assignments: self.assignments,
+            decl_refs: self.decl_refs,
+            addr_ofs: self.addr_ofs,
+            derefs: self.derefs,
+            rets: self.rets,
+            ifs: self.ifs,
+            whiles: self.whiles,
+            void_expr: self.void_expr,
+            source_ranges: self.source_ranges,
+            local_decls: self.local_decls,
+            global_decls: self.global_decls,
+            overloads: self.overloads,
+            num_exprs: self.levels.len(),
         }
     }
 
@@ -372,6 +412,15 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         id
     }
 
+    fn while_expr(&mut self, condition: ExprId, scope: ScopeId, range: SourceRange) -> ExprId {
+        let id = ExprId::new(self.levels.len());
+        self.whiles.push(Expr { id, data: While { condition }});
+        self.levels.push(0);
+        self.source_ranges.push(range);
+
+        id
+    }
+
     fn stmt(&mut self, expr: ExprId) {
         let scope_state = self.comp_decl_stack.last_mut().unwrap().scope_stack.last_mut().unwrap();
         if let Some(stmt) = scope_state.stmt_buffer {
@@ -480,35 +529,5 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
 
     fn get_terminal_expr(&self, scope: ScopeId) -> ExprId {
         self.terminal_exprs[scope]
-    }
-
-    fn output(mut self) -> Program {
-        for decl_ref in self.global_decl_refs {
-            self.overloads[decl_ref.id] = self.global_decls.indices_satisfying(|decl| {
-                decl.name == decl_ref.name && decl.param_tys.len() == decl_ref.num_arguments as usize
-            }).iter().map(|&i| DeclId::Global(i)).collect();
-        }
-
-        Program {
-            int_lits: self.int_lits,
-            dec_lits: self.dec_lits,
-            str_lits: self.str_lits,
-            char_lits: self.char_lits,
-            stmts: self.stmts,
-            dos: self.dos,
-            assigned_decls: self.assigned_decls,
-            assignments: self.assignments,
-            decl_refs: self.decl_refs,
-            addr_ofs: self.addr_ofs,
-            derefs: self.derefs,
-            rets: self.rets,
-            ifs: self.ifs,
-            void_expr: self.void_expr,
-            source_ranges: self.source_ranges,
-            local_decls: self.local_decls,
-            global_decls: self.global_decls,
-            overloads: self.overloads,
-            num_exprs: self.levels.len(),
-        }
     }
 }

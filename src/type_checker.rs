@@ -54,6 +54,11 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     tc.types[tc.prog.void_expr] = Type::Void;
 
     // Pass 1: propagate info down from leaves to roots
+    for item in &tc.prog.whiles {
+        let constraints = &mut tc.constraints[item.id];
+        constraints.one_of = smallvec![Type::Void.into()];
+        tc.types[item.id] = Type::Void;
+    }
     fn lit_pass_1<T>(constraints: &mut IdxVec<ConstraintList, ExprId>, lits: &Vec<Expr<T>>, lit_ty: LiteralType) {
         for item in lits {
             let constraints = &mut constraints[item.id];
@@ -188,6 +193,8 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
             tc.constraints[item.id] = tc.constraints[item.terminal_expr].clone();
         }
     }
+
+    // Pass 2: propagate info up from roots to leaves
     for item in &tc.prog.stmts {
         let constraints = &mut tc.constraints[item.root_expr];
         if constraints.can_unify_to(&Type::Void.into()).is_err() {
@@ -195,8 +202,13 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
         }
         constraints.set_to(Type::Void);
     }
-
-    // Pass 2: propagate info up from roots to leaves
+    for item in &tc.prog.whiles {
+        if tc.constraints[item.condition].can_unify_to(&Type::Bool.into()).is_ok() {
+            tc.constraints[item.condition].set_to(Type::Bool);
+        } else {
+            panic!("Expected boolean condition in while expression");
+        }
+    }
     for level in (0..levels).rev() {
         for item in tc.prog.assigned_decls.get_level(level) {
             tc.constraints[item.root_expr].set_to(tc.prog.decl(item.decl_id).ret_ty.ty.clone());

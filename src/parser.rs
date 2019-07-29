@@ -222,6 +222,12 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
                 Ok(self.builder.do_expr(scope))
             },
             TokenKind::If => Ok(self.parse_if()),
+            TokenKind::While => {
+                self.next();
+                let condition = self.parse_expr();
+                let scope = self.parse_scope();
+                Ok(self.builder.while_expr(condition, scope, 0..0))
+            },
             TokenKind::Return => {
                 self.next();
                 let ret_expr = self.try_parse_expr().unwrap_or_else(|_| self.builder.void_expr());
