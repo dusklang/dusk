@@ -2,10 +2,10 @@ fn do_something_really_cool {
     fn assert(condition: bool) {
         if !condition { panic }
     }
-    fn add_three_numbers(a: i32, b: i32, c: i32): i32 {
-        a + b + c
+    fn remainder_three_numbers(a: i32, b: i32, c: i32): i32 {
+        a % b % c
     }
-    foo := add_three_numbers(1, 2, 3)
+    foo := remainder_three_numbers(1, 2, 3)
     foo = foo + 2
 
     fn print_u8_string(str: u8*) {

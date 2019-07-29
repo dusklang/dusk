@@ -101,6 +101,7 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
             TokenKind::Sub => BinOp::Sub,
             TokenKind::Asterisk => BinOp::Mult,
             TokenKind::Div => BinOp::Div,
+            TokenKind::Mod => BinOp::Mod,
             TokenKind::Assign => BinOp::Assign,
             TokenKind::AddAssign => BinOp::AddAssign,
             TokenKind::SubAssign => BinOp::SubAssign,
