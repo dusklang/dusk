@@ -3,7 +3,7 @@ use smallvec::{SmallVec, smallvec};
 
 use crate::token::{TokenVec, TokenKind, Token};
 use crate::builder::{ExprId, ScopeId, BinOp, UnOp, Builder, Intrinsic};
-use crate::ty::{Type, QualType};
+use crate::ty::Type;
 use crate::error::Error;
 use crate::source_info::{self, SourceRange};
 
@@ -74,6 +74,8 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
             p.builder.add_intrinsic(LogicalNot, smallvec![Type::Bool], Type::Bool);
             p.builder.add_intrinsic(Pi, SmallVec::new(), Type::f64());
             p.builder.add_intrinsic(Panic, SmallVec::new(), Type::Never);
+            p.builder.add_intrinsic(Print, smallvec![Type::i8().ptr()], Type::Void);
+            p.builder.add_intrinsic(Print, smallvec![Type::u8().ptr()], Type::Void);
         }
 
         p.skip_insignificant();
@@ -463,9 +465,7 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
             } else {
                 false
             };
-            ty = Type::Pointer(
-                Box::new(QualType { ty, is_mut })
-            );
+            ty = ty.ptr_with_mut(is_mut);
             range = source_info::concat(range, self.cur().range.clone());
         }
         (ty, range)

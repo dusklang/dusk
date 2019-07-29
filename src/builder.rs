@@ -58,6 +58,7 @@ pub enum Intrinsic {
     Pos,
     Pi,
     Panic,
+    Print,
 }
 
 impl Intrinsic {
@@ -84,6 +85,7 @@ impl Intrinsic {
             Pos => "+",
             Pi => "pi",
             Panic => "panic",
+            Print => "print",
         }
     }
 }

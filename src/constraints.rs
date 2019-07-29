@@ -10,14 +10,10 @@ impl LiteralType {
         match self {
             LiteralType::Int => Type::i32(),
             LiteralType::Dec => Type::f64(),
-            LiteralType::Str => Type::Pointer(
-                Box::new(QualType::from(Type::i8()))
-            ),
+            LiteralType::Str => Type::i8().ptr(),
             // Because a char literal has the same syntax as a string literal, it would feel
             // inconsistent if one-byte string literals defaulted to `i8`
-            LiteralType::Char => Type::Pointer(
-                Box::new(QualType::from(Type::i8()))
-            ),
+            LiteralType::Char => Type::i8().ptr(),
         }
     }
 }

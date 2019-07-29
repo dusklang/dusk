@@ -131,14 +131,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
                 if item.is_mut && !ty.is_mut { return None; }
                 Some(
                     QualType::from(
-                        Type::Pointer(
-                            Box::new(
-                                QualType {
-                                    ty: ty.ty.clone(),
-                                    is_mut: item.is_mut,
-                                }
-                            )
-                        )
+                        ty.ty.clone().ptr_with_mut(item.is_mut)
                     )
                 )
             };
@@ -280,11 +273,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
             let ty = &expr.one_of[0];
             tc.types[item.id] = ty.ty.clone();
             addr.one_of = smallvec![
-                QualType::from(
-                    Type::Pointer(
-                        Box::new(ty.clone())
-                    )
-                )
+                QualType::from(ty.clone().ptr())
             ];
         }
         for item in tc.prog.rets.get_level(level) {

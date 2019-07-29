@@ -57,6 +57,20 @@ impl Type {
         }
     }
 
+    pub fn ptr(self) -> Self {
+        self.ptr_with_mut(false)
+    }
+
+    pub fn mut_ptr(self) -> Self {
+        self.ptr_with_mut(true)
+    }
+
+    pub fn ptr_with_mut(self, is_mut: bool) -> Self {
+        Type::Pointer(
+            Box::new(QualType { ty: self, is_mut })
+        )
+    }
+
     pub const fn u8() -> Self {
         Type::Int { width: IntWidth::W8, is_signed: false }
     }
@@ -162,6 +176,10 @@ impl QualType {
             return false;
         }
         self.ty.trivially_convertible_to(&other.ty)
+    }
+
+    pub fn ptr(self) -> Type {
+        Type::Pointer(Box::new(self))
     }
 }
 

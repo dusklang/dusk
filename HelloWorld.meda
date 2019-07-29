@@ -8,8 +8,14 @@ fn do_something_really_cool {
     foo := add_three_numbers(1, 2, 3)
     foo = foo + 2
 
-    fn print_str(str: i8*) {}
-    fn print_char(char: i8) {}
-    print_str("h")
-    print_char("h")
+    fn print_u8_string(str: u8*) {
+        print(str)
+    }
+
+    fn print_i8_string(str: i8*) {
+        print(str)
+    }
+
+    print_u8_string("Hello, unsigned world!")
+    print_i8_string("Hello, signed world! (again)")
 }
