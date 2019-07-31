@@ -101,7 +101,7 @@ impl<'a> Builder<'a> {
         decl_ref_id
     }
 
-    fn decl_ref_no_name(&mut self, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
+    fn decl_ref_no_name(&mut self, arguments: SmallVec<[ExprId; 2]>, _range: SourceRange) -> ExprId {
         let decl_ref_id = self.allocate_decl_ref_id();
         self.exprs.push(Expr::DeclRef { arguments, id: decl_ref_id })
     }
@@ -131,21 +131,21 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             interner,
         }
     }
-    fn add_intrinsic(&mut self, intrinsic: Intrinsic, param_tys: SmallVec<[Type; 2]>, ret_ty: Type) {
+    fn add_intrinsic(&mut self, intrinsic: Intrinsic, _param_tys: SmallVec<[Type; 2]>, _ret_ty: Type) {
         self.global_decls.push(Decl::Intrinsic(intrinsic));
     }
     fn interner(&self) -> &DefaultStringInterner { &self.interner }
     fn void_expr(&self) -> ExprId { self.void_expr }
-    fn int_lit(&mut self, lit: u64, range: SourceRange) -> ExprId {
+    fn int_lit(&mut self, lit: u64, _range: SourceRange) -> ExprId {
         self.exprs.push(Expr::IntLit { lit })
     }
-    fn dec_lit(&mut self, lit: f64, range: SourceRange) -> ExprId { 
+    fn dec_lit(&mut self, lit: f64, _range: SourceRange) -> ExprId { 
         self.exprs.push(Expr::DecLit { lit })
     }
-    fn str_lit(&mut self, lit: String, range: SourceRange) -> ExprId { 
+    fn str_lit(&mut self, lit: String, _range: SourceRange) -> ExprId { 
         self.exprs.push(Expr::StrLit { lit })
     }
-    fn char_lit(&mut self, lit: i8, range: SourceRange) -> ExprId { 
+    fn char_lit(&mut self, lit: i8, _range: SourceRange) -> ExprId { 
         self.exprs.push(Expr::CharLit { lit })
     }
     fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId {
@@ -169,21 +169,21 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             _ => self.decl_ref_no_name(smallvec![expr], range),
         }
     }
-    fn stored_decl(&mut self, name: Sym, is_mut: bool, root_expr: ExprId, range: SourceRange) {
+    fn stored_decl(&mut self, _name: Sym, _is_mut: bool, root_expr: ExprId, _range: SourceRange) {
         self.flush_stmt_buffer();
         let id = self.local_decls.push(Decl::Stored);
         self.item(Item::StoredDecl { id, root_expr });
     }
-    fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
+    fn ret(&mut self, expr: ExprId, _range: SourceRange) -> ExprId {
         self.exprs.push(Expr::Ret { expr })
     }
-    fn implicit_ret(&mut self, expr: ExprId) {}
-    fn if_expr(&mut self, condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId>, range: SourceRange) -> ExprId {
+    fn implicit_ret(&mut self, _expr: ExprId) {}
+    fn if_expr(&mut self, condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId>, _range: SourceRange) -> ExprId {
         self.exprs.push(
             Expr::If { condition, then_scope, else_scope }
         )
     }
-    fn while_expr(&mut self, condition: ExprId, scope: ScopeId, range: SourceRange) -> ExprId {
+    fn while_expr(&mut self, condition: ExprId, scope: ScopeId, _range: SourceRange) -> ExprId {
         self.exprs.push(Expr::While { condition, scope })
     }
     fn stmt(&mut self, expr: ExprId) {
@@ -223,7 +223,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             self.scopes[scope.id].terminal_expr = terminal_expr;
         }
     }
-    fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Type, proto_range: SourceRange) {
+    fn begin_computed_decl(&mut self, _name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[Type; 2]>, _ret_ty: Type, _proto_range: SourceRange) {
         // This is a placeholder value that gets replaced once the parameter declarations are allocated.
         let id = self.local_decls.push(Decl::Stored);
         assert_eq!(param_names.len(), param_tys.len());
@@ -257,11 +257,11 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             Decl::Intrinsic(_)           => panic!("unexpected intrinsic"),
         }
     }
-    fn decl_ref(&mut self, name: Sym, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
+    fn decl_ref(&mut self, _name: Sym, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
         self.decl_ref_no_name(arguments, range)
     }
     // TODO: Refactor so this method doesn't need to be exposed by HIR
-    fn get_range(&self, id: ExprId) -> SourceRange { 0..0 }
+    fn get_range(&self, _id: ExprId) -> SourceRange { 0..0 }
     fn get_terminal_expr(&self, scope: ScopeId) -> ExprId { 
         self.scopes[scope].terminal_expr
     }

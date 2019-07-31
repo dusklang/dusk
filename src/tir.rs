@@ -248,7 +248,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
 
     fn void_expr(&self) -> ExprId { self.void_expr }
 
-    fn int_lit(&mut self, lit: u64, range: SourceRange) -> ExprId {
+    fn int_lit(&mut self, _lit: u64, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
         self.int_lits.push(Expr { id, data: () });
         self.levels.push(0);
@@ -256,7 +256,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         id
     }
 
-    fn dec_lit(&mut self, lit: f64, range: SourceRange) -> ExprId {
+    fn dec_lit(&mut self, _lit: f64, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
         self.dec_lits.push(Expr { id, data: () });
         self.levels.push(0);
@@ -265,7 +265,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         id
     }
 
-    fn str_lit(&mut self, lit: String, range: SourceRange) -> ExprId {
+    fn str_lit(&mut self, _lit: String, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
         self.str_lits.push(Expr { id, data: () });
         self.levels.push(0);
@@ -274,7 +274,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         id
     }
 
-    fn char_lit(&mut self, lit: i8, range: SourceRange) -> ExprId {
+    fn char_lit(&mut self, _lit: i8, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
         self.char_lits.push(Expr { id, data: () });
         self.levels.push(0);
@@ -377,7 +377,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         id
     }
 
-    fn while_expr(&mut self, condition: ExprId, scope: ScopeId, range: SourceRange) -> ExprId {
+    fn while_expr(&mut self, condition: ExprId, _scope: ScopeId, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
         self.whiles.push(Expr { id, data: While { condition }});
         self.levels.push(0);
@@ -432,7 +432,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         stack.decls.truncate(scope.previous_decls);
     }
 
-    fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Type, proto_range: SourceRange) {
+    fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Type, _proto_range: SourceRange) {
         assert_eq!(param_names.len(), param_tys.len());
         let decl_id = self.local_decls.push(Decl::new(name, param_tys.clone(), ret_ty.clone()));
         let decl_id = DeclId::Local(decl_id);

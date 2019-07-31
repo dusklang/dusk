@@ -61,10 +61,6 @@ impl Type {
         self.ptr_with_mut(false)
     }
 
-    pub fn mut_ptr(self) -> Self {
-        self.ptr_with_mut(true)
-    }
-
     pub fn ptr_with_mut(self, is_mut: bool) -> Self {
         Type::Pointer(
             Box::new(QualType { ty: self, is_mut })
@@ -113,7 +109,7 @@ impl Type {
 
     pub fn trivially_convertible_to(&self, other: &Type) -> bool {
         match (self, other) {
-            (Type::Never, other) => true,
+            (Type::Never, _other) => true,
             (Type::Pointer(a), Type::Pointer(b)) => a.trivially_convertible_to(b),
             (a, b) => a == b,
         }
