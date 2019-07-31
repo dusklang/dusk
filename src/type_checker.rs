@@ -45,7 +45,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     // Extend arrays as needed so they all have the same number of levels.
     let levels = dep_vec::unify_sizes(&mut [
         &mut tc.prog.assigned_decls, &mut tc.prog.assignments, &mut tc.prog.decl_refs, 
-        &mut tc.prog.addr_ofs, &mut tc.prog.derefs, &mut tc.prog.rets, &mut tc.prog.ifs,
+        &mut tc.prog.addr_ofs, &mut tc.prog.derefs, &mut tc.prog.ifs,
         &mut tc.prog.dos,
     ]);
 
@@ -54,6 +54,11 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     tc.types[tc.prog.void_expr] = Type::Void;
 
     // Pass 1: propagate info down from leaves to roots
+    for item in &tc.prog.rets {
+        let constraints = &mut tc.constraints[item.id];
+        constraints.one_of = smallvec![Type::Never.into()];
+        tc.types[item.id] = Type::Never;
+    }
     for item in &tc.prog.whiles {
         let constraints = &mut tc.constraints[item.id];
         constraints.one_of = smallvec![Type::Void.into()];
@@ -161,24 +166,6 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
                 expr.preferred_type = Some(pointee.as_ref().clone());
             }
         }
-        for item in tc.prog.rets.get_level(level) {
-            use UnificationError::*;
-            use LiteralType::*;
-
-            let constraints = &mut tc.constraints[item.id];
-            constraints.one_of = smallvec![Type::Never.into()];
-            tc.types[item.id] = Type::Never;
-
-            match tc.constraints[item.expr].can_unify_to(&QualType::from(&item.ty)) {
-                Ok(()) => {}
-                Err(Literal(Dec)) => panic!("expected return value of {:?}, found decimal literal", item.ty),
-                Err(Literal(Int)) => panic!("expected return value of {:?}, found integer literal", item.ty),
-                Err(Literal(Str)) => panic!("expected return value of {:?}, found string literal", item.ty),
-                Err(Literal(Char)) => panic!("expected return value of {:?}, found character literal", item.ty),
-                Err(InvalidChoice(choices)) => panic!("expected return value of {:?}, found {:?}", item.ty, choices),
-                Err(Immutable) => panic!("COMPILER BUG: unexpected mutable return type"),
-            }
-        }
         for item in tc.prog.ifs.get_level(level) {
             if tc.constraints[item.condition].can_unify_to(&Type::Bool.into()).is_err() {
                 panic!("Expected boolean condition in if expression");
@@ -201,6 +188,23 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
             panic!("standalone expressions must return void");
         }
         constraints.set_to(Type::Void);
+    }
+    for item in &tc.prog.rets {
+        use UnificationError::*;
+        use LiteralType::*;
+
+        match tc.constraints[item.expr].can_unify_to(&QualType::from(&item.ty)) {
+            Ok(()) => {}
+            Err(Literal(Dec)) => panic!("expected return value of {:?}, found decimal literal", item.ty),
+            Err(Literal(Int)) => panic!("expected return value of {:?}, found integer literal", item.ty),
+            Err(Literal(Str)) => panic!("expected return value of {:?}, found string literal", item.ty),
+            Err(Literal(Char)) => panic!("expected return value of {:?}, found character literal", item.ty),
+            Err(InvalidChoice(choices)) => panic!("expected return value of {:?}, found {:?}", item.ty, choices),
+            Err(Immutable) => panic!("COMPILER BUG: unexpected mutable return type"),
+        }
+
+        // Assume we panic above unless the returned expr can unify to the return type
+        tc.constraints[item.expr].set_to(item.ty.clone());
     }
     for item in &tc.prog.whiles {
         if tc.constraints[item.condition].can_unify_to(&Type::Bool.into()).is_ok() {
@@ -287,14 +291,6 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
             addr.one_of = smallvec![
                 QualType::from(ty.clone().ptr())
             ];
-        }
-        for item in tc.prog.rets.get_level(level) {
-            let constraints = &mut tc.constraints[item.expr];
-            if constraints.can_unify_to(&QualType::from(&item.ty)).is_ok() {
-                constraints.set_to(item.ty.clone())
-            } else {
-                constraints.one_of = SmallVec::new();
-            }
         }
         for item in tc.prog.ifs.get_level(level) {
             // We already verified that the condition unifies to bool in pass 1

@@ -117,8 +117,7 @@ pub struct Program {
     /// All dereference operators in the entire program
     pub derefs: DepVec<Expr<Dereference>>,
     /// All returns in the entire program
-    /// TODO: Because the type of a return expression is always Never, this doesn't need to be a DepVec!
-    pub rets: DepVec<Expr<Ret>>,
+    pub rets: Vec<Expr<Ret>>,
     /// All if expressions in the entire program
     pub ifs: DepVec<Expr<If>>,
     /// All while expressions in the entire program
@@ -171,8 +170,7 @@ pub struct Builder<'a> {
     /// All dereference operators in the entire program so far
     derefs: DepVec<Expr<Dereference>>,
     /// All returns in the entire program so far
-    /// TODO: Because the type of a return expression is always Never, this doesn't need to be a DepVec!
-    rets: DepVec<Expr<Ret>>,
+    rets: Vec<Expr<Ret>>,
     /// All if expressions in the entire program so far
     ifs: DepVec<Expr<If>>,
     /// All while expressions in the entire program so far
@@ -225,7 +223,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             decl_refs: DepVec::new(),
             addr_ofs: DepVec::new(),
             derefs: DepVec::new(),
-            rets: DepVec::new(),
+            rets: Vec::new(),
             ifs: DepVec::new(),
             whiles: Vec::new(),
             void_expr,
@@ -385,14 +383,8 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
     fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
         let ty = self.comp_decl_stack.last().unwrap().ret_ty.clone();
-        let level = self.rets.insert(
-            &[self.levels[expr]],
-            Expr {
-                id,
-                data: Ret { expr, ty },
-            },
-        );
-        self.levels.push(level);
+        self.rets.push(Expr { id, data: Ret { expr, ty }});
+        self.levels.push(0);
         self.source_ranges.push(range);
 
         id
