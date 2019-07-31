@@ -36,7 +36,7 @@ pub enum UnOp {
     Not, Deref, AddrOf, Neg, Plus, AddrOfMut
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Intrinsic {
     Mult,
     Div,

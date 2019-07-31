@@ -62,4 +62,8 @@ fn do_something_really_cool {
         print("\n")
         i = i + 1
     }
+
+    fn float_const {
+        blah := 5.2
+    }
 }

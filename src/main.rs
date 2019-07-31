@@ -33,7 +33,7 @@ fn main() {
     errs.extend(tc_errs);
 
     let mir = mir::Program::build(&hir, &tc);
-    println!("{:#?}", mir);
+    println!("{}", mir);
 
 
     for err in &errs { err.report(&file); }

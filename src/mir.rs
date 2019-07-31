@@ -1,3 +1,5 @@
+use std::fmt;
+
 use smallvec::SmallVec;
 
 use crate::ty::Type;
@@ -12,7 +14,7 @@ newtype_index!(TerminationId pub);
 newtype_index!(FuncId pub);
 newtype_index!(StrId pub);
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Instr {
     Void,
     IntConst { lit: u64, ty: Type },
@@ -104,7 +106,6 @@ impl Context {
     }
 }
 
-#[derive(Debug)]
 pub struct Program {
     comp_decls: IdxVec<Function, FuncId>,
     strings: IdxVec<String, StrId>,
@@ -165,6 +166,85 @@ impl Program {
     }
 }
 
+impl fmt::Display for Program {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for func in &self.comp_decls {
+            write!(f, "fn {}", &func.name)?;
+            assert_eq!(&func.code.raw[0], &Instr::Void);
+            let mut first = true;
+            for i in 1..func.code.len() {
+                if let Instr::Parameter(ty) = &func.code.raw[i] {
+                    if first {
+                        write!(f, "(")?;
+                        first = false;
+                    } else {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "%{}: {:?}", i, ty)?;
+                } else {
+                    if !first {
+                        write!(f, ")")?;
+                    }
+                    break;
+                }
+            }
+            writeln!(f, ": TODO {{")?;
+            struct BB {
+                id: BasicBlockId,
+                instr: InstrId,
+            }
+            let mut basic_blocks: Vec<BB> = func.basic_blocks.iter().enumerate()
+                .map(|(id, &instr)| BB { id: BasicBlockId::new(id), instr })
+                .collect();
+            basic_blocks.sort_by_key(|bb| bb.instr.idx());
+            for i in 0..basic_blocks.len() {
+                let lower_bound = basic_blocks[i].instr.idx();
+                let upper_bound = if i + 1 < basic_blocks.len() {
+                    basic_blocks[i + 1].instr.idx()
+                } else {
+                    func.code.len()
+                };
+                writeln!(f, "%bb{}:", basic_blocks[i].id.idx())?;
+                if lower_bound == upper_bound { continue }
+                
+                for i in lower_bound..upper_bound {
+                    let instr = &func.code.raw[i];
+                    write!(f, "    ")?;
+                    match instr {
+                        Instr::Alloca(ty) => writeln!(f, "%{} = alloca {:?}", i, ty)?,
+                        Instr::BoolConst(val) => writeln!(f, "%{} = {}", i, val)?,
+                        Instr::Br(block) => writeln!(f, "br %bb{}", block.idx())?,
+                        &Instr::Call { ref arguments, func: callee } => {
+                            let name = &self.comp_decls[callee].name;
+                            write!(f, "%{} = call {}", i, name)?;
+                            let mut first = true;
+                            for arg in arguments {
+                                if first {
+                                    write!(f, "(")?;
+                                    first = false;
+                                } else {
+                                    write!(f, ", ")?;
+                                }
+                                write!(f, "%{}", arg.idx())?;
+                            }
+                            if !first {
+                                write!(f, ")")?;
+                            }
+                            writeln!(f)?;
+                        },
+                        &Instr::CondBr { condition, true_bb, false_bb } 
+                            => writeln!(f, "condbr %{}, %bb{}, %bb{}", condition.idx(), true_bb.idx(), false_bb.idx())?,
+                        Instr::FloatConst { lit, ty } => writeln!(f, "%{} = {} as {:?}", i, lit, ty)?,
+                        unhandled => writeln!(f, "{:?}", unhandled)?,
+                    };
+                }
+            }
+            writeln!(f, "}}")?;
+        }
+        Ok(())
+    }
+}
+
 struct FunctionBuilder<'a> {
     prog: &'a hir::Program,
     tc: &'a tc::Program,
@@ -200,7 +280,7 @@ impl<'a> FunctionBuilder<'a> {
             }
         }
         let mut basic_blocks = IdxVec::new();
-        basic_blocks.push(InstrId::new(0));
+        basic_blocks.push(InstrId::new(code.len()));
         FunctionBuilder::<'a> {
             prog,
             tc,
