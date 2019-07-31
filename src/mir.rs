@@ -351,6 +351,17 @@ impl<'a> FunctionBuilder<'a> {
     }
 
     fn begin_bb(&mut self, bb: BasicBlockId) {
+        let last_instr = self.code.raw.last().unwrap();
+        assert!(
+            match last_instr {
+                Instr::Void | Instr::Parameter(_) | Instr::Br(_) | Instr::CondBr { .. } | Instr::Ret { .. } => true,
+                _ => false,
+            },
+            "expected terminal instruction before moving on to next block, found {:?}",
+            last_instr,
+        );
+        assert_eq!(self.basic_blocks[bb].idx(), 0);
+
         self.basic_blocks[bb] = InstrId::new(self.code.len())
     }
 
@@ -606,6 +617,7 @@ impl<'a> FunctionBuilder<'a> {
                     ControlDest::Block(block) => block,
                 };
 
+                self.code.push(Instr::Br(test_bb));
                 self.begin_bb(test_bb);
                 self.expr(condition, Context::new(0, DataDest::Branch(loop_bb, post_bb), ControlDest::Continue));
 
