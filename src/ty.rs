@@ -61,6 +61,10 @@ impl Type {
         self.ptr_with_mut(false)
     }
 
+    pub fn mut_ptr(self) -> Self {
+        self.ptr_with_mut(true)
+    }
+
     pub fn ptr_with_mut(self, is_mut: bool) -> Self {
         Type::Pointer(
             Box::new(QualType { ty: self, is_mut })

@@ -72,10 +72,16 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
                 p.builder.add_intrinsic(Pos, smallvec![ty.clone()], ty.clone());
             }
             p.builder.add_intrinsic(LogicalNot, smallvec![Type::Bool], Type::Bool);
-            p.builder.add_intrinsic(Pi, SmallVec::new(), Type::f64());
+
             p.builder.add_intrinsic(Panic, SmallVec::new(), Type::Never);
+            p.builder.add_intrinsic(Panic, smallvec![Type::i8().ptr()], Type::Never);
+
+            p.builder.add_intrinsic(Malloc, smallvec![Type::u64()], Type::Void.mut_ptr());
+            p.builder.add_intrinsic(Calloc, smallvec![Type::u64()], Type::Void.mut_ptr());
+            p.builder.add_intrinsic(Realloc, smallvec![Type::Void.mut_ptr(), Type::u64()], Type::Void.mut_ptr());
+            p.builder.add_intrinsic(Free, smallvec![Type::Void.mut_ptr()], Type::Void);
+
             p.builder.add_intrinsic(Print, smallvec![Type::i8().ptr()], Type::Void);
-            p.builder.add_intrinsic(Print, smallvec![Type::u8().ptr()], Type::Void);
         }
 
         p.skip_insignificant();

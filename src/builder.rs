@@ -56,9 +56,12 @@ pub enum Intrinsic {
     LogicalNot,
     Neg,
     Pos,
-    Pi,
     Panic,
     Print,
+    Malloc,
+    Calloc,
+    Realloc,
+    Free,
 }
 
 impl Intrinsic {
@@ -83,9 +86,12 @@ impl Intrinsic {
             LogicalNot => "!",
             Neg => "-",
             Pos => "+",
-            Pi => "pi",
             Panic => "panic",
             Print => "print",
+            Malloc => "malloc",
+            Calloc => "calloc",
+            Realloc => "realloc",
+            Free => "free",
         }
     }
 }

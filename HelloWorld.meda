@@ -1,6 +1,6 @@
 fn do_something_really_cool {
     fn assert(condition: bool) {
-        if !condition { panic }
+        if !condition { panic("assertion failed") }
     }
     fn remainder_three_numbers(a: i32, b: i32, c: i32): i32 {
         a % b % c
@@ -62,6 +62,11 @@ fn do_something_really_cool {
         print("\n")
         i = i + 1
     }
+
+    // Allocate 24MiB buffer
+    buffer :: malloc(1024 * 1024 * 24)
+    // We can't do anything interesting with it yet because we don't have pointer casts :(
+    free(buffer)
 
     fn float_const {
         blah := 5.2
