@@ -42,6 +42,7 @@ enum Decl {
 
 #[derive(Debug)]
 struct Function {
+    name: String,
     code: IdxVec<Instr, InstrId>,
     basic_blocks: IdxVec<InstrId, BasicBlockId>,
 }
@@ -144,9 +145,18 @@ impl Program {
         let mut comp_decls = IdxVec::<Function, FuncId>::new();
         let mut strings = IdxVec::<String, StrId>::new();
         for decl in prog.local_decls.iter().chain(&prog.global_decls) {
-            if let &hir::Decl::Computed { ref params, scope } = decl {
+            if let &hir::Decl::Computed { ref name, ref params, scope } = decl {
                 comp_decls.push(
-                    FunctionBuilder::new(prog, tc, &mut local_decls, &mut global_decls, &mut strings, scope, &params[..]).build()
+                    FunctionBuilder::new(
+                        prog,
+                        tc,
+                        &mut local_decls,
+                        &mut global_decls,
+                        &mut strings,
+                        name.clone(),
+                        scope,
+                        &params[..]
+                    ).build()
                 );
             }
         }
@@ -161,6 +171,7 @@ struct FunctionBuilder<'a> {
     local_decls: &'a mut IdxVec<Decl, LocalDeclId>,
     global_decls: &'a mut IdxVec<Decl, GlobalDeclId>,
     strings: &'a mut IdxVec<String, StrId>,
+    name: String,
     scope: ScopeId,
     void_instr: InstrId,
     code: IdxVec<Instr, InstrId>,
@@ -174,6 +185,7 @@ impl<'a> FunctionBuilder<'a> {
         local_decls: &'a mut IdxVec<Decl, LocalDeclId>,
         global_decls: &'a mut IdxVec<Decl, GlobalDeclId>,
         strings: &'a mut IdxVec<String, StrId>,
+        name: String,
         scope: ScopeId,
         params: &[LocalDeclId]
     ) -> Self {
@@ -195,6 +207,7 @@ impl<'a> FunctionBuilder<'a> {
             local_decls,
             global_decls,
             strings,
+            name,
             scope,
             void_instr,
             code,
@@ -561,6 +574,7 @@ impl<'a> FunctionBuilder<'a> {
     fn build(mut self) -> Function {
         self.scope(self.scope, Context::new(0, DataDest::Ret, ControlDest::Unreachable));
         Function {
+            name: self.name,
             code: self.code,
             basic_blocks: self.basic_blocks,
         }
