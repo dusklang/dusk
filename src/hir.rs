@@ -177,6 +177,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
     fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
         self.exprs.push(Expr::Ret { expr })
     }
+    fn implicit_ret(&mut self, expr: ExprId) {}
     fn if_expr(&mut self, condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId>, range: SourceRange) -> ExprId {
         self.exprs.push(
             Expr::If { condition, then_scope, else_scope }

@@ -163,6 +163,7 @@ pub trait Builder<'a> {
     fn un_op(&mut self, op: UnOp, expr: ExprId, range: SourceRange) -> ExprId;
     fn stored_decl(&mut self, name: Sym, is_mut: bool, root_expr: ExprId, range: SourceRange);
     fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId;
+    fn implicit_ret(&mut self, expr: ExprId);
     fn if_expr(&mut self, condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId>, range: SourceRange) -> ExprId;
     fn while_expr(&mut self, condition: ExprId, scope: ScopeId, range: SourceRange) -> ExprId;
     fn stmt(&mut self, expr: ExprId);

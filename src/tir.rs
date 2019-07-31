@@ -116,8 +116,10 @@ pub struct Program {
     pub addr_ofs: DepVec<Expr<AddrOf>>,
     /// All dereference operators in the entire program
     pub derefs: DepVec<Expr<Dereference>>,
-    /// All returns in the entire program
+    /// All return expressions in the entire program
     pub rets: Vec<Expr<Ret>>,
+    /// All implicit returns in the entire program
+    pub implicit_rets: Vec<Ret>,
     /// All if expressions in the entire program
     pub ifs: DepVec<Expr<If>>,
     /// All while expressions in the entire program
@@ -169,8 +171,10 @@ pub struct Builder<'a> {
     addr_ofs: DepVec<Expr<AddrOf>>,
     /// All dereference operators in the entire program so far
     derefs: DepVec<Expr<Dereference>>,
-    /// All returns in the entire program so far
+    /// All return expressions in the entire program so far
     rets: Vec<Expr<Ret>>,
+    /// All implicit returns in the entire program so far
+    implicit_rets: Vec<Ret>,
     /// All if expressions in the entire program so far
     ifs: DepVec<Expr<If>>,
     /// All while expressions in the entire program so far
@@ -224,6 +228,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             addr_ofs: DepVec::new(),
             derefs: DepVec::new(),
             rets: Vec::new(),
+            implicit_rets: Vec::new(),
             ifs: DepVec::new(),
             whiles: Vec::new(),
             void_expr,
@@ -260,6 +265,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             addr_ofs: self.addr_ofs,
             derefs: self.derefs,
             rets: self.rets,
+            implicit_rets: self.implicit_rets,
             ifs: self.ifs,
             whiles: self.whiles,
             void_expr: self.void_expr,
@@ -388,6 +394,11 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         self.source_ranges.push(range);
 
         id
+    }
+    
+    fn implicit_ret(&mut self, expr: ExprId) {
+        let ty = self.comp_decl_stack.last().unwrap().ret_ty.clone();
+        self.implicit_rets.push(Ret { expr, ty });
     }
 
     fn if_expr(&mut self, condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId>, range: SourceRange) -> ExprId {

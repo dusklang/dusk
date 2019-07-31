@@ -189,7 +189,9 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
         }
         constraints.set_to(Type::Void);
     }
-    for item in &tc.prog.rets {
+    // Chain explicit and implicit rets together.
+    let rets = tc.prog.rets.iter().map(|item| &item.data).chain(&tc.prog.implicit_rets);
+    for item in rets {
         use UnificationError::*;
         use LiteralType::*;
 

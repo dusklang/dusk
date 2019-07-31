@@ -378,11 +378,6 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
         scope
     }
 
-    fn parse_scope_expr(&mut self) -> ExprId {
-        let scope = self.parse_scope();
-        self.builder.get_terminal_expr(scope)
-    }
-
     fn parse_comp_decl(&mut self) {
         assert_eq!(self.cur().kind, &TokenKind::Fn);
         let mut proto_range = self.cur().range.clone();
@@ -421,11 +416,15 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
         assert_eq!(self.cur().kind, &TokenKind::OpenCurly);
         self.builder.begin_computed_decl(name, param_names, param_tys, ty.clone(), proto_range);
 
-        let terminal_expr = self.parse_scope_expr();
+        let scope = self.parse_scope();
+        let terminal_expr = self.builder.get_terminal_expr(scope);
+        // TODO: Do this check in TIR builder?
         if terminal_expr == self.builder.void_expr() {
             assert_eq!(ty, Type::Void, "expected expression to return in non-void computed decl");
         }
-        self.builder.ret(terminal_expr, 0..0);
+        // TODO: Handle implicit rets transparently in TIR builder and get rid of this builder method
+        self.builder.implicit_ret(terminal_expr);
+
         self.builder.end_computed_decl();
     }
 
