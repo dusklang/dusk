@@ -168,7 +168,7 @@ impl Program {
 
 impl fmt::Display for Program {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for func in &self.comp_decls {
+        for (i, func) in self.comp_decls.iter().enumerate() {
             write!(f, "fn {}", &func.name)?;
             assert_eq!(&func.code.raw[0], &Instr::Void);
             let mut first = true;
@@ -210,15 +210,10 @@ impl fmt::Display for Program {
                 for i in lower_bound..upper_bound {
                     let instr = &func.code.raw[i];
                     write!(f, "    ")?;
-                    match instr {
-                        Instr::Alloca(ty) => writeln!(f, "%{} = alloca {:?}", i, ty)?,
-                        Instr::BoolConst(val) => writeln!(f, "%{} = {}", i, val)?,
-                        Instr::Br(block) => writeln!(f, "br %bb{}", block.idx())?,
-                        &Instr::Call { ref arguments, func: callee } => {
-                            let name = &self.comp_decls[callee].name;
-                            write!(f, "%{} = call {}", i, name)?;
+                    macro_rules! write_args {
+                        ($args:expr) => {{
                             let mut first = true;
-                            for arg in arguments {
+                            for arg in $args {
                                 if first {
                                     write!(f, "(")?;
                                     first = false;
@@ -230,16 +225,39 @@ impl fmt::Display for Program {
                             if !first {
                                 write!(f, ")")?;
                             }
-                            writeln!(f)?;
-                        },
-                        &Instr::CondBr { condition, true_bb, false_bb } 
+                            writeln!(f)
+                        }}
+                    }
+                    match instr {
+                        Instr::Alloca(ty) => writeln!(f, "%{} = alloca {:?}", i, ty)?,
+                        Instr::BoolConst(val) => writeln!(f, "%{} = {}", i, val)?,
+                        Instr::Br(block) => writeln!(f, "br %bb{}", block.idx())?,
+                        &Instr::CondBr { condition, true_bb, false_bb }
                             => writeln!(f, "condbr %{}, %bb{}, %bb{}", condition.idx(), true_bb.idx(), false_bb.idx())?,
+                        &Instr::Call { ref arguments, func: callee } => {
+                            write!(f, "%{} = call `{}`", i, self.comp_decls[callee].name)?;
+                            write_args!(arguments)?
+                        },
                         Instr::FloatConst { lit, ty } => writeln!(f, "%{} = {} as {:?}", i, lit, ty)?,
-                        unhandled => writeln!(f, "{:?}", unhandled)?,
+                        Instr::IntConst { lit, ty } => writeln!(f, "%{} = {} as {:?}", i, lit, ty)?,
+                        Instr::Intrinsic { arguments, intr } => {
+                            write!(f, "%{} = intrinsic `{}`", i, intr.name())?;
+                            write_args!(arguments)?
+                        }
+                        Instr::Load(location) => writeln!(f, "%{} = load %{}", i, location.idx())?,
+                        Instr::LogicalNot(op) => writeln!(f, "%{} = not %{}", i, op.idx())?,
+                        Instr::Ret(val) => writeln!(f,  "return %{}", val.idx())?,
+                        Instr::Store { location, value } => writeln!(f, "store %{} in %{}", value.idx(), location.idx())?,
+                        &Instr::StringConst { id, ref ty } => writeln!(f, "%{} = %str{} ({:?}) as {:?}", i, id.idx(), self.strings[id], ty)?,
+                        Instr::Parameter(_) => panic!("unexpected parameter!"),
+                        Instr::Void => panic!("unexpected void!"),
                     };
                 }
             }
-            writeln!(f, "}}")?;
+            write!(f, "}}")?;
+            if i + 1 < self.comp_decls.len() {
+                writeln!(f, "\n")?;
+            }
         }
         Ok(())
     }
@@ -587,7 +605,15 @@ impl<'a> FunctionBuilder<'a> {
                 self.expr(condition, Context::new(0, DataDest::Branch(loop_bb, post_bb), ControlDest::Continue));
 
                 self.begin_bb(loop_bb);
-                self.scope(scope, Context::new(0, DataDest::Read, ControlDest::Block(test_bb)))
+                let val = self.scope(scope, Context::new(0, DataDest::Void, ControlDest::Block(test_bb)));
+
+                match ctx.control {
+                    ControlDest::Continue | ControlDest::Unreachable => {
+                        self.begin_bb(post_bb);
+                        val
+                    },
+                    ControlDest::Block(_) => return val,
+                }
             },
             Expr::Ret { expr } => {
                 return self.expr(
