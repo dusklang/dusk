@@ -247,34 +247,30 @@ impl<'a> FunctionBuilder<'a> {
 
     fn get(&mut self, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId) -> InstrId {
         let id = self.tc.overloads[id].expect("No overload found!");
-        let decl = self.get_decl(id);
-        self.code.push(
-            match decl {
-                &Decl::Computed { get } => Instr::Call { arguments, func: get },
-                &Decl::Stored { location } => {
-                    assert!(arguments.is_empty());
-                    Instr::Load(location)
-                },
-                &Decl::LocalConst { value } => return value,
-                &Decl::Intrinsic(intr) => Instr::Intrinsic { arguments, intr }
-            }
-        )
+        let instr = match self.get_decl(id) {
+            &Decl::Computed { get } => Instr::Call { arguments, func: get },
+            &Decl::Stored { location } => {
+                assert!(arguments.is_empty());
+                Instr::Load(location)
+            },
+            &Decl::LocalConst { value } => return value,
+            &Decl::Intrinsic(intr) => Instr::Intrinsic { arguments, intr }
+        };
+        self.code.push(instr)
     }
 
     fn set(&mut self, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId, value: InstrId) -> InstrId {
         let id = self.tc.overloads[id].expect("No overload found!");
-        let decl = self.get_decl(id);
-        self.code.push(
-            match decl {
-                &Decl::Computed { .. } => panic!("setters not yet implemented!"),
-                &Decl::Stored { location } => {
-                    assert!(arguments.is_empty());
-                    Instr::Store { location, value }
-                },
-                &Decl::LocalConst { .. } => panic!("can't set a constant!"),
-                &Decl::Intrinsic(_) => panic!("can't set an intrinsic! (yet?)"),
-            }
-        )
+        let instr = match self.get_decl(id) {
+            &Decl::Computed { .. } => panic!("setters not yet implemented!"),
+            &Decl::Stored { location } => {
+                assert!(arguments.is_empty());
+                Instr::Store { location, value }
+            },
+            &Decl::LocalConst { .. } => panic!("can't set a constant!"),
+            &Decl::Intrinsic(_) => panic!("can't set an intrinsic! (yet?)"),
+        };
+        self.code.push(instr)
     }
 
     fn modify(&mut self, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId) -> InstrId {

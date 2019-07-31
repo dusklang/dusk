@@ -176,7 +176,8 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
                 Ok(lit)
             },
             TokenKind::StrLit(val) => {
-                let lit = self.builder.str_lit(val.clone(), self.cur().range.clone());
+                let val = val.clone();
+                let lit = self.builder.str_lit(val, self.cur().range.clone());
                 self.next();
                 Ok(lit)
             },
