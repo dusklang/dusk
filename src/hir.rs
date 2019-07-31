@@ -107,8 +107,8 @@ impl<'a> Builder<'a> {
     }
 
     /// Allocates a new DeclRefId, then pushes `expr`.
-    /// Background: some operators are represented as decl refs in TIR but are built-in in 
-    /// HIR. So this is a hack to preserve synchronization between the two representations.
+    /// Some operators are represented as decl refs in TIR but are built-in in HIR. So this is a
+    /// hack to preserve synchronization between the two representations.
     fn push_op_expr(&mut self, expr: Expr) -> ExprId {
         self.allocate_decl_ref_id();
         self.exprs.push(expr)

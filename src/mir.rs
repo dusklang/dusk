@@ -59,8 +59,8 @@ enum DataDest {
     Store { location: InstrId },
     /// This value just needs to be read
     Read,
-    /// This value is a statement and therefore will never be used
-    Stmt,
+    /// This value will never be used
+    Void,
     /// If this value is true, branch to the first basic block, otherwise branch to the second
     Branch(BasicBlockId, BasicBlockId),
 }
@@ -209,7 +209,7 @@ impl<'a> FunctionBuilder<'a> {
     fn item(&mut self, item: Item) {
         match item {
             Item::Stmt(expr) => {
-                self.expr(expr, Context::new(0, DataDest::Stmt, ControlDest::Continue));
+                self.expr(expr, Context::new(0, DataDest::Void, ControlDest::Continue));
             },
             Item::StoredDecl { id, root_expr } => {
                 let ty = self.type_of(root_expr);
@@ -556,7 +556,7 @@ impl<'a> FunctionBuilder<'a> {
                     Context::new(0, DataDest::Receive { value: instr, expr }, ctx.control.clone()),
                 );
             }
-            DataDest::Stmt => {},
+            DataDest::Void => {},
         }
 
         self.handle_control(instr, ctx.control)

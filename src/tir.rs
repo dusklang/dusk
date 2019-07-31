@@ -94,44 +94,26 @@ struct GlobalDeclRef {
 
 #[derive(Debug)]
 pub struct Program {
-    /// All integer literals in the entire program
     pub int_lits: Vec<Expr<()>>,
-    /// All decimal literals in the entire program
     pub dec_lits: Vec<Expr<()>>,
-    /// All string literals in the entire program
     pub str_lits: Vec<Expr<()>>,
-    /// All character literals in the entire program
     pub char_lits: Vec<Expr<()>>,
-    /// All statements in the entire program
     pub stmts: Vec<Stmt>,
-    /// All do expressions in the entire program
     pub dos: DepVec<Expr<Do>>,
-    /// All assigned decls in the entire program
     pub assigned_decls: DepVec<AssignedDecl>,
-    /// All assignment expressions in the entire program
     pub assignments: DepVec<Expr<Assignment>>,
-    /// All decl refs in the entire program
     pub decl_refs: DepVec<Expr<DeclRef>>,
-    /// All address of operators in the entire program
     pub addr_ofs: DepVec<Expr<AddrOf>>,
-    /// All dereference operators in the entire program
     pub derefs: DepVec<Expr<Dereference>>,
-    /// All return expressions in the entire program
     pub rets: Vec<Expr<Ret>>,
-    /// All implicit returns in the entire program
     pub implicit_rets: Vec<Ret>,
-    /// All if expressions in the entire program
     pub ifs: DepVec<Expr<If>>,
-    /// All while expressions in the entire program
     pub whiles: Vec<Expr<While>>,
-    // An expression to universally represent the void value
+    /// An expression to uniquely represent the void value
     pub void_expr: ExprId,
 
-    /// The source ranges of each expression in the entire program
     pub source_ranges: IdxVec<SourceRange, ExprId>,
-    /// The global declarations in the entire program
     pub global_decls: IdxVec<Decl, GlobalDeclId>,
-    /// The local declarations in the entire program
     pub local_decls: IdxVec<Decl, LocalDeclId>,
     /// Each declref's overload choices
     pub overloads: IdxVec<Vec<DeclId>, DeclRefId>,
@@ -149,51 +131,31 @@ impl Program {
 }
 
 pub struct Builder<'a> {
-    /// All integer literals in the entire program so far
     int_lits: Vec<Expr<()>>,
-    /// All decimal literals in the entire program so far
     dec_lits: Vec<Expr<()>>,
-    /// All string literals in the entire program so far
     str_lits: Vec<Expr<()>>,
-    /// All character literals in the entire program so far
     char_lits: Vec<Expr<()>>,
-    /// All statements in the entire program so far
     stmts: Vec<Stmt>,
-    /// All do expressions in the entire program so far
     dos: DepVec<Expr<Do>>,
-    /// All assigned decls in the entire program so far
     assigned_decls: DepVec<AssignedDecl>,
-    /// All assignment expressions in the entire program so far
     assignments: DepVec<Expr<Assignment>>,
-    /// All decl refs in the entire program so far
     decl_refs: DepVec<Expr<DeclRef>>,
-    /// All address of operators in the entire program so far
     addr_ofs: DepVec<Expr<AddrOf>>,
-    /// All dereference operators in the entire program so far
     derefs: DepVec<Expr<Dereference>>,
-    /// All return expressions in the entire program so far
     rets: Vec<Expr<Ret>>,
-    /// All implicit returns in the entire program so far
     implicit_rets: Vec<Ret>,
-    /// All if expressions in the entire program so far
     ifs: DepVec<Expr<If>>,
-    /// All while expressions in the entire program so far
     whiles: Vec<Expr<While>>,
-    // An expression to universally represent the void value
+    // An expression to uniquely represent the void value
     void_expr: ExprId,
 
-    /// The source ranges of each expression so far
     source_ranges: IdxVec<SourceRange, ExprId>,
-    /// The levels of each expression so far
     levels: IdxVec<u32, ExprId>,
-    /// The global declarations so far
     global_decls: IdxVec<Decl, GlobalDeclId>,
-    /// The local declarations so far
     local_decls: IdxVec<Decl, LocalDeclId>,
-    /// Each declref's overload choices so far
+    /// Each declref's overload choices
     overloads: IdxVec<Vec<DeclId>, DeclRefId>,
 
-    /// The names and arities of the global declaration references so far
     global_decl_refs: Vec<GlobalDeclRef>,
     /// State related to each nested computed decl
     comp_decl_stack: Vec<CompDeclState>,

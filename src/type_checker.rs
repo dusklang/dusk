@@ -1,4 +1,4 @@
-use smallvec::{SmallVec, smallvec};
+use smallvec::smallvec;
 
 use crate::error::Error;
 use crate::tir::{self, Decl, Expr};
