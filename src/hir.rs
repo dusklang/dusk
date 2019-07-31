@@ -53,7 +53,7 @@ pub struct Scope {
 
 #[derive(Debug)]
 pub enum Decl {
-    Computed { name: String, params: SmallVec<[LocalDeclId; 2]>, scope: ScopeId },
+    Computed { name: String, params: SmallVec<[LocalDeclId; 2]>, ret_ty: Type, scope: ScopeId },
     Stored,
     Parameter(Type),
     Intrinsic(Intrinsic),
@@ -223,7 +223,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             self.scopes[scope.id].terminal_expr = terminal_expr;
         }
     }
-    fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[Type; 2]>, _ret_ty: Type, _proto_range: SourceRange) {
+    fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Type, _proto_range: SourceRange) {
         // This is a placeholder value that gets replaced once the parameter declarations are allocated.
         let id = self.local_decls.push(Decl::Stored);
         assert_eq!(param_names.len(), param_tys.len());
@@ -236,6 +236,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         self.local_decls[id] = Decl::Computed {
             name,
             params: params,
+            ret_ty,
             scope: ScopeId::new(std::usize::MAX)
         };
         self.comp_decl_stack.push(

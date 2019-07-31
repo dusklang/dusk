@@ -45,6 +45,7 @@ enum Decl {
 #[derive(Debug)]
 struct Function {
     name: String,
+    ret_ty: Type,
     code: IdxVec<Instr, InstrId>,
     basic_blocks: IdxVec<InstrId, BasicBlockId>,
 }
@@ -146,7 +147,7 @@ impl Program {
         let mut comp_decls = IdxVec::<Function, FuncId>::new();
         let mut strings = IdxVec::<String, StrId>::new();
         for decl in prog.local_decls.iter().chain(&prog.global_decls) {
-            if let &hir::Decl::Computed { ref name, ref params, scope } = decl {
+            if let &hir::Decl::Computed { ref name, ref params, ref ret_ty, scope } = decl {
                 comp_decls.push(
                     FunctionBuilder::new(
                         prog,
@@ -155,6 +156,7 @@ impl Program {
                         &mut global_decls,
                         &mut strings,
                         name.clone(),
+                        ret_ty.clone(),
                         scope,
                         &params[..]
                     ).build()
@@ -188,7 +190,7 @@ impl fmt::Display for Program {
                     break;
                 }
             }
-            writeln!(f, ": TODO {{")?;
+            writeln!(f, ": {:?} {{", func.ret_ty)?;
             struct BB {
                 id: BasicBlockId,
                 instr: InstrId,
@@ -270,6 +272,7 @@ struct FunctionBuilder<'a> {
     global_decls: &'a mut IdxVec<Decl, GlobalDeclId>,
     strings: &'a mut IdxVec<String, StrId>,
     name: String,
+    ret_ty: Type,
     scope: ScopeId,
     void_instr: InstrId,
     code: IdxVec<Instr, InstrId>,
@@ -284,6 +287,7 @@ impl<'a> FunctionBuilder<'a> {
         global_decls: &'a mut IdxVec<Decl, GlobalDeclId>,
         strings: &'a mut IdxVec<String, StrId>,
         name: String,
+        ret_ty: Type,
         scope: ScopeId,
         params: &[LocalDeclId]
     ) -> Self {
@@ -306,6 +310,7 @@ impl<'a> FunctionBuilder<'a> {
             global_decls,
             strings,
             name,
+            ret_ty,
             scope,
             void_instr,
             code,
@@ -681,6 +686,7 @@ impl<'a> FunctionBuilder<'a> {
         self.scope(self.scope, Context::new(0, DataDest::Ret, ControlDest::Unreachable));
         Function {
             name: self.name,
+            ret_ty: self.ret_ty,
             code: self.code,
             basic_blocks: self.basic_blocks,
         }
