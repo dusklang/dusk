@@ -2,7 +2,7 @@ use std::fmt;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum IntWidth {
-    W8, W16, W32, W64,
+    W8, W16, W32, W64, Pointer,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -87,6 +87,10 @@ impl Type {
         Type::Int { width: IntWidth::W64, is_signed: false }
     }
 
+    pub const fn usize() -> Self {
+        Type::Int { width: IntWidth::Pointer, is_signed: false }
+    }
+
     pub const fn i8() -> Self {
         Type::Int { width: IntWidth::W8, is_signed: true }
     }
@@ -101,6 +105,10 @@ impl Type {
 
     pub const fn i64() -> Self {
         Type::Int { width: IntWidth::W64, is_signed: true }
+    }
+
+    pub const fn isize() -> Self {
+        Type::Int { width: IntWidth::Pointer, is_signed: true }
     }
 
     pub const fn f32() -> Self {
@@ -138,10 +146,11 @@ impl fmt::Debug for Type {
                 "{}{}", 
                 if *is_signed { 'i' } else { 'u' },
                 match width {
-                    IntWidth::W8 => 8,
-                    IntWidth::W16 => 16,
-                    IntWidth::W32 => 32,
-                    IntWidth::W64 => 64,
+                    IntWidth::W8 => "8",
+                    IntWidth::W16 => "16",
+                    IntWidth::W32 => "32",
+                    IntWidth::W64 => "64",
+                    IntWidth::Pointer => "size",
                 }
             ),
             Type::Float(width) => write!(
