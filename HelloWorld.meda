@@ -69,6 +69,6 @@ fn do_something_really_cool {
     free(buffer)
 
     fn float_const {
-        blah := 5.2
+        blah: f32 = 5.2
     }
 }

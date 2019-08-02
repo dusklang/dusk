@@ -167,7 +167,7 @@ pub trait Builder<'a> {
     fn char_lit(&mut self, lit: i8, range: SourceRange) -> ExprId;
     fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId;
     fn un_op(&mut self, op: UnOp, expr: ExprId, range: SourceRange) -> ExprId;
-    fn stored_decl(&mut self, name: Sym, is_mut: bool, root_expr: ExprId, range: SourceRange);
+    fn stored_decl(&mut self, name: Sym, explicit_ty: Option<Type>, is_mut: bool, root_expr: ExprId, range: SourceRange);
     fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId;
     fn implicit_ret(&mut self, expr: ExprId);
     fn if_expr(&mut self, condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId>, range: SourceRange) -> ExprId;

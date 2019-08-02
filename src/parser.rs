@@ -332,7 +332,11 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
         // Skip to colon, get range.
         let colon_range = self.next().range.clone();
         let mut found_separator = true;
-        let is_mut = match self.next().kind {
+        let explicit_ty = match self.next().kind {
+            TokenKind::Ident(_) => Some(self.parse_type().0),
+            _ => None,
+        };
+        let is_mut = match self.cur().kind {
             TokenKind::Assign => true,
             TokenKind::Colon => false,
             _ => {
@@ -352,7 +356,7 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
 
         let root = self.parse_expr();
         let root_range = self.builder.get_range(root);
-        self.builder.stored_decl(name, is_mut, root, source_info::concat(name_range, root_range));
+        self.builder.stored_decl(name, explicit_ty, is_mut, root, source_info::concat(name_range, root_range));
     }
 
     // Parses an open curly brace, then a list of nodes, then a closing curly brace.

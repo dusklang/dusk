@@ -19,7 +19,7 @@ pub struct Stmt { pub root_expr: ExprId }
 #[derive(Debug)]
 pub struct Do { pub terminal_expr: ExprId }
 #[derive(Debug)]
-pub struct AssignedDecl { pub root_expr: ExprId, pub decl_id: DeclId }
+pub struct AssignedDecl { pub explicit_ty: Option<Type>, pub root_expr: ExprId, pub decl_id: DeclId }
 #[derive(Debug)]
 pub struct Assignment { pub lhs: ExprId, pub rhs: ExprId }
 #[derive(Debug)]
@@ -337,12 +337,12 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         id
     }
 
-    fn stored_decl(&mut self, name: Sym, is_mut: bool, root_expr: ExprId, range: SourceRange) {
+    fn stored_decl(&mut self, name: Sym, explicit_ty: Option<Type>, is_mut: bool, root_expr: ExprId, range: SourceRange) {
         let decl_id = self.local_decls.push(
             Decl::new(name, SmallVec::new(), QualType { ty: Type::Error, is_mut }),
         );
         let decl_id = DeclId::Local(decl_id);
-        let level = self.assigned_decls.insert(&[self.levels[root_expr]], AssignedDecl { root_expr, decl_id });
+        let level = self.assigned_decls.insert(&[self.levels[root_expr]], AssignedDecl { explicit_ty, root_expr, decl_id });
         self.source_ranges.push(range);
 
         self.comp_decl_stack.last_mut().unwrap().decls.push(LocalDecl { name, level, decl: decl_id });

@@ -169,7 +169,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             _ => self.decl_ref_no_name(smallvec![expr], range),
         }
     }
-    fn stored_decl(&mut self, _name: Sym, _is_mut: bool, root_expr: ExprId, _range: SourceRange) {
+    fn stored_decl(&mut self, _name: Sym, _explicit_ty: Option<Type>, _is_mut: bool, root_expr: ExprId, _range: SourceRange) {
         self.flush_stmt_buffer();
         let id = self.local_decls.push(Decl::Stored);
         self.item(Item::StoredDecl { id, root_expr });
