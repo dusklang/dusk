@@ -64,7 +64,7 @@ fn do_something_really_cool {
     }
 
     // Allocate 24MiB buffer
-    buffer :: malloc(1024 * 1024 * 24)
+    buffer: void *mut : malloc(1024 * 1024 * 24)
     // We can't do anything interesting with it yet because we don't have pointer casts :(
     free(buffer)
 

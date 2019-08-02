@@ -78,7 +78,10 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     for level in 0..levels {
         for item in tc.prog.assigned_decls.get_level(level) {
             let constraints = &tc.constraints[item.root_expr];
-            let guess = if let Some(pref) = &constraints.preferred_type {
+            let ty = if let Some(explicit_ty) = &item.explicit_ty {
+                assert!(constraints.can_unify_to(&explicit_ty.into()).is_ok());
+                explicit_ty.clone()
+            } else if let Some(pref) = &constraints.preferred_type {
                 // I don't actually know if it's possible for an expression to not be able to unify to its preferred type?
                 //assert!(dbg!(constraints).can_unify_to(dbg!(pref)).is_ok());
                 pref.ty.clone()
@@ -88,7 +91,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
             match item.decl_id {
                 DeclId::Global(id) => &mut tc.prog.global_decls[id],
                 DeclId::Local(id) => &mut tc.prog.local_decls[id],
-            }.ret_ty.ty = guess;
+            }.ret_ty.ty = ty;
         }
         for item in tc.prog.assignments.get_level(level) {
             tc.constraints[item.id].set_to(Type::Void);
