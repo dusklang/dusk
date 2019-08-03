@@ -568,6 +568,10 @@ impl<'a> FunctionBuilder<'a> {
                     self.code.push(Instr::LogicalNot(operand))
                 }
             },
+            Expr::Cast { expr, ty: _ } => {
+                // TODO: Casting code
+                return self.expr(expr, ctx);
+            },
             Expr::AddrOf(operand) => return self.expr(operand, Context::new(ctx.indirection - 1, ctx.data, ctx.control)),
             Expr::Deref(operand) => return self.expr(operand, Context::new(ctx.indirection + 1, ctx.data, ctx.control)),
             Expr::Do { scope } => return self.scope(scope, ctx),

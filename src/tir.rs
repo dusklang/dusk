@@ -11,6 +11,8 @@ use crate::builder::{self, *};
 #[derive(Debug)]
 pub struct Ret { pub expr: ExprId, pub ty: Type }
 #[derive(Debug)]
+pub struct Cast { pub expr: ExprId, pub ty: Type }
+#[derive(Debug)]
 pub struct AddrOf { pub expr: ExprId, pub is_mut: bool }
 #[derive(Debug)]
 pub struct Dereference { pub expr: ExprId }
@@ -107,6 +109,7 @@ pub struct Program {
     pub derefs: DepVec<Expr<Dereference>>,
     pub rets: Vec<Expr<Ret>>,
     pub implicit_rets: Vec<Ret>,
+    pub casts: Vec<Expr<Cast>>,
     pub ifs: DepVec<Expr<If>>,
     pub whiles: Vec<Expr<While>>,
     /// An expression to uniquely represent the void value
@@ -144,6 +147,7 @@ pub struct Builder<'a> {
     derefs: DepVec<Expr<Dereference>>,
     rets: Vec<Expr<Ret>>,
     implicit_rets: Vec<Ret>,
+    casts: Vec<Expr<Cast>>,
     ifs: DepVec<Expr<If>>,
     whiles: Vec<Expr<While>>,
     // An expression to uniquely represent the void value
@@ -191,6 +195,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             derefs: DepVec::new(),
             rets: Vec::new(),
             implicit_rets: Vec::new(),
+            casts: Vec::new(),
             ifs: DepVec::new(),
             whiles: Vec::new(),
             void_expr,
@@ -228,6 +233,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             derefs: self.derefs,
             rets: self.rets,
             implicit_rets: self.implicit_rets,
+            casts: self.casts,
             ifs: self.ifs,
             whiles: self.whiles,
             void_expr: self.void_expr,
@@ -302,6 +308,15 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             }
         };
         self.levels.push(level);
+        self.source_ranges.push(range);
+
+        id
+    }
+
+    fn cast(&mut self, expr: ExprId, ty: Type, range: SourceRange) -> ExprId {
+        let id = ExprId::new(self.levels.len());
+        self.casts.push(Expr { id, data: Cast { expr, ty }});
+        self.levels.push(0);
         self.source_ranges.push(range);
 
         id

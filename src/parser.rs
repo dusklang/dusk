@@ -151,8 +151,20 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
     }
 
     fn try_parse_term(&mut self) -> Result<ExprId, TokenKind> {
+        let mut term = self.try_parse_non_cast_term()?;
+        let mut range = self.builder.get_range(term);
+        while let TokenKind::As = self.cur().kind {
+            self.next();
+            let (ty, ty_range) = self.parse_type();
+            range = source_info::concat(range, ty_range);
+            term = self.builder.cast(term, ty, range.clone());
+        }
+        Ok(term)
+    }
+
+    fn try_parse_non_cast_term(&mut self) -> Result<ExprId, TokenKind> {
         if let Some(op) = self.parse_unary_operator() {
-            let term = self.try_parse_term()
+            let term = self.try_parse_non_cast_term()
                 .unwrap_or_else(|tok| panic!("Expected expression after unary operator, found {:?}", tok));
             return Ok(self.builder.un_op(op, term, 0..0));
         }

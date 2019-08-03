@@ -63,6 +63,8 @@ fn do_something_really_cool {
         i = i + 1
     }
 
+    h := "h" as u8
+
     // Allocate 24MiB buffer
     buffer: void *mut : malloc(1024 * 1024 * 24)
     // We can't do anything interesting with it yet because we don't have pointer casts :(

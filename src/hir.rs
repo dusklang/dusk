@@ -23,6 +23,7 @@ pub enum Expr {
     Do { scope: ScopeId },
     If { condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId> },
     While { condition: ExprId, scope: ScopeId },
+    Cast { expr: ExprId, ty: Type },
     Ret { expr: ExprId }
 }
 
@@ -155,6 +156,9 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             BinOp::LogicalOr => self.push_op_expr(Expr::LogicalOr { lhs, rhs }),
             _ => self.decl_ref_no_name(smallvec![lhs, rhs], range),
         }
+    }
+    fn cast(&mut self, expr: ExprId, ty: Type, _range: SourceRange) -> ExprId {
+        self.exprs.push(Expr::Cast { expr, ty })
     }
     fn un_op(&mut self, op: UnOp, expr: ExprId, range: SourceRange) -> ExprId {
         match op {
