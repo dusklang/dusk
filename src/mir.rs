@@ -109,6 +109,7 @@ impl Context {
     }
 }
 
+#[derive(Debug)]
 pub struct Program {
     comp_decls: IdxVec<Function, FuncId>,
     strings: IdxVec<String, StrId>,

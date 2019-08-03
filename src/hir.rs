@@ -85,7 +85,11 @@ pub struct Builder<'a> {
 
 impl<'a> Builder<'a> {
     fn flush_stmt_buffer(&mut self) {
-        let scope_state = self.comp_decl_stack.last_mut().unwrap().scope_stack.last_mut().unwrap();
+        let comp_decl = self.comp_decl_stack.last_mut();
+        if comp_decl.is_none() { return }
+        let scope_state = comp_decl.unwrap().scope_stack.last_mut();
+        if scope_state.is_none() { return }
+        let scope_state = scope_state.unwrap();
         if let Some(stmt) = scope_state.stmt_buffer {
             self.scopes[scope_state.id].items.push(Item::Stmt(stmt));
             scope_state.stmt_buffer = None;
@@ -232,6 +236,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         }
     }
     fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Type, _proto_range: SourceRange) {
+        self.flush_stmt_buffer();
         // This is a placeholder value that gets replaced once the parameter declarations are allocated.
         let id = self.local_decls.push(Decl::Stored);
         assert_eq!(param_names.len(), param_tys.len());
