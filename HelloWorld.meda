@@ -65,10 +65,10 @@ fn do_something_really_cool {
 
     h := "h" as u8
 
-    // Allocate 24MiB buffer
-    buffer: void *mut : malloc(1024 * 1024 * 24)
-    // We can't do anything interesting with it yet because we don't have pointer casts :(
-    free(buffer)
+    // Allocate a single 8-bit integer on the heap
+    num :: malloc(1) as u8 *mut
+    (*num) = 12
+    free(num as void *mut)
 
     fn float_const {
         blah: f32 = 5.2

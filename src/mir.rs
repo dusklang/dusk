@@ -4,6 +4,7 @@ use smallvec::SmallVec;
 
 use crate::ty::Type;
 use crate::type_checker as tc;
+use tc::CastMethod;
 use crate::index_vec::{Idx, IdxVec};
 use crate::builder::{DeclId, LocalDeclId, GlobalDeclId, ExprId, DeclRefId, ScopeId, Intrinsic};
 use crate::hir::{self, Expr, Item};
@@ -25,6 +26,7 @@ pub enum Instr {
     LogicalNot(InstrId),
     Call { arguments: SmallVec<[InstrId; 2]>, func: FuncId },
     Intrinsic { arguments: SmallVec<[InstrId; 2]>, intr: Intrinsic },
+    Reinterpret(InstrId, Type),
     Load(InstrId),
     Store { location: InstrId, value: InstrId },
     Ret(InstrId),
@@ -251,6 +253,7 @@ impl fmt::Display for Program {
                         Instr::Ret(val) => writeln!(f,  "return %{}", val.idx())?,
                         Instr::Store { location, value } => writeln!(f, "store %{} in %{}", value.idx(), location.idx())?,
                         &Instr::StringConst { id, ref ty } => writeln!(f, "%{} = %str{} ({:?}) as {:?}", i, id.idx(), self.strings[id], ty)?,
+                        &Instr::Reinterpret(val, ref ty) => writeln!(f, "%{} = reinterpret %{} as {:?}", i, val.idx(), ty)?,
                         Instr::Parameter(_) => panic!("unexpected parameter!"),
                         Instr::Void => panic!("unexpected void!"),
                     };
@@ -568,9 +571,12 @@ impl<'a> FunctionBuilder<'a> {
                     self.code.push(Instr::LogicalNot(operand))
                 }
             },
-            Expr::Cast { expr, ty: _ } => {
-                // TODO: Casting code
-                return self.expr(expr, ctx);
+            Expr::Cast { expr, ref ty, cast_id } => match &self.tc.cast_methods[cast_id] {
+                CastMethod::Noop => return self.expr(expr, ctx),
+                CastMethod::Reinterpret => {
+                    let value = self.expr(expr, Context::new(0, DataDest::Read, ControlDest::Continue));
+                    self.code.push(Instr::Reinterpret(value, ty.clone()))
+                }
             },
             Expr::AddrOf(operand) => return self.expr(operand, Context::new(ctx.indirection - 1, ctx.data, ctx.control)),
             Expr::Deref(operand) => return self.expr(operand, Context::new(ctx.indirection + 1, ctx.data, ctx.control)),

@@ -2,7 +2,7 @@ use string_interner::{DefaultStringInterner, Sym};
 use smallvec::{SmallVec, smallvec};
 
 use crate::index_vec::{Idx, IdxVec};
-use crate::builder::{self, BinOp, UnOp, ExprId, DeclId, ScopeId, LocalDeclId, GlobalDeclId, DeclRefId, Intrinsic};
+use crate::builder::{self, BinOp, UnOp, ExprId, DeclId, ScopeId, LocalDeclId, GlobalDeclId, DeclRefId, CastId, Intrinsic};
 use crate::source_info::SourceRange;
 use crate::ty::Type;
 
@@ -23,7 +23,7 @@ pub enum Expr {
     Do { scope: ScopeId },
     If { condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId> },
     While { condition: ExprId, scope: ScopeId },
-    Cast { expr: ExprId, ty: Type },
+    Cast { expr: ExprId, ty: Type, cast_id: CastId },
     Ret { expr: ExprId }
 }
 
@@ -74,6 +74,7 @@ pub struct Program {
 pub struct Builder<'a> {
     exprs: IdxVec<Expr, ExprId>,
     num_decl_refs: usize,
+    num_casts: usize,
     global_decls: IdxVec<Decl, GlobalDeclId>,
     local_decls: IdxVec<Decl, LocalDeclId>,
     scopes: IdxVec<Scope, ScopeId>,
@@ -124,6 +125,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         Self {
             exprs,
             num_decl_refs: 0,
+            num_casts: 0,
             global_decls: IdxVec::new(),
             local_decls: IdxVec::new(),
             scopes: IdxVec::new(),
@@ -158,7 +160,9 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         }
     }
     fn cast(&mut self, expr: ExprId, ty: Type, _range: SourceRange) -> ExprId {
-        self.exprs.push(Expr::Cast { expr, ty })
+        let cast_id = CastId::new(self.num_casts);
+        self.num_casts += 1;
+        self.exprs.push(Expr::Cast { expr, ty, cast_id })
     }
     fn un_op(&mut self, op: UnOp, expr: ExprId, range: SourceRange) -> ExprId {
         match op {

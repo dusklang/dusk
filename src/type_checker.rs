@@ -2,12 +2,17 @@ use smallvec::smallvec;
 
 use crate::error::Error;
 use crate::tir::{self, Decl, Expr};
-use crate::builder::{ExprId, DeclId, DeclRefId};
+use crate::builder::{ExprId, DeclId, DeclRefId, CastId};
 use crate::ty::{Type, QualType};
 use crate::index_vec::IdxVec;
 use crate::source_info::SourceRange;
 use crate::dep_vec;
 use crate::constraints::{ConstraintList, LiteralType, UnificationError};
+
+pub enum CastMethod {
+    Noop,
+    Reinterpret,
+}
 
 struct TypeChecker {
     /// The input TIR program
@@ -20,11 +25,14 @@ struct TypeChecker {
     preferred_overloads: IdxVec<Option<DeclId>, DeclRefId>,
     /// The selected overload for each decl ref
     selected_overloads: IdxVec<Option<DeclId>, DeclRefId>,
+    /// The cast method for each cast expression
+    cast_methods: IdxVec<CastMethod, CastId>,
 }
 
 pub struct Program {
     pub types: IdxVec<Type, ExprId>,
     pub overloads: IdxVec<Option<DeclId>, DeclRefId>,
+    pub cast_methods: IdxVec<CastMethod, CastId>,
 }
 
 #[inline(never)]
@@ -35,12 +43,14 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
         constraints: IdxVec::new(),
         preferred_overloads: IdxVec::new(),
         selected_overloads: IdxVec::new(),
+        cast_methods: IdxVec::new(),
     };
     let mut errs = Vec::new();
     tc.types.resize_with(tc.prog.num_exprs, Default::default);
     tc.constraints.resize_with(tc.prog.num_exprs, Default::default);
     tc.selected_overloads.resize_with(tc.prog.overloads.len(), || None);
     tc.preferred_overloads.resize_with(tc.prog.overloads.len(), || None);
+    tc.cast_methods.resize_with(tc.prog.casts.len(), || CastMethod::Noop);
 
     // Extend arrays as needed so they all have the same number of levels.
     let levels = dep_vec::unify_sizes(&mut [
@@ -220,8 +230,23 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
         }
     }
     for item in &tc.prog.casts {
-        if tc.constraints[item.expr].can_unify_to(&item.ty.clone().into()).is_ok() {
-            tc.constraints[item.expr].set_to(item.ty.clone());
+        let constraints = &mut tc.constraints[item.expr];
+        if constraints.can_unify_to(&item.ty.clone().into()).is_ok() {
+            constraints.set_to(item.ty.clone());
+        } else if let Type::Pointer(dest_pointee_ty) = &item.ty {
+            let dest_pointee_ty = dest_pointee_ty.as_ref();
+            let mut pointee_ty = None;
+            for ty in &constraints.one_of {
+                if let Type::Pointer(pointee) = &ty.ty {
+                    assert!(pointee_ty.is_none(), "Ambiguous pointer type in cast");
+                    pointee_ty = Some(pointee.as_ref().clone());
+                }
+            }
+            let pointee_ty = pointee_ty.expect("Invalid cast!");
+            if !pointee_ty.is_mut && dest_pointee_ty.is_mut {
+                panic!("Invalid cast!");
+            }
+            tc.cast_methods[item.cast_id] = CastMethod::Reinterpret;
         } else {
             panic!("Invalid cast!");
         }
@@ -369,6 +394,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     let prog = Program {
         types: tc.types,
         overloads: tc.selected_overloads,
+        cast_methods: tc.cast_methods,
     };
     (prog, errs)
 }

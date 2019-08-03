@@ -33,9 +33,9 @@ fn main() {
     let (tc, tc_errs) = type_checker::type_check(tir);
     errs.extend(tc_errs);
 
-    let _mir = mir::Program::build(&hir, &tc);
-    // println!("{}", mir);
-    println!("Succeeded!");
+    let mir = mir::Program::build(&hir, &tc);
+    println!("{}", mir);
+    //println!("Succeeded!");
 
 
     for err in &errs { err.report(&file); }

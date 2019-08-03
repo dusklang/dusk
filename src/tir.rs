@@ -11,7 +11,7 @@ use crate::builder::{self, *};
 #[derive(Debug)]
 pub struct Ret { pub expr: ExprId, pub ty: Type }
 #[derive(Debug)]
-pub struct Cast { pub expr: ExprId, pub ty: Type }
+pub struct Cast { pub expr: ExprId, pub ty: Type, pub cast_id: CastId }
 #[derive(Debug)]
 pub struct AddrOf { pub expr: ExprId, pub is_mut: bool }
 #[derive(Debug)]
@@ -315,7 +315,8 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
 
     fn cast(&mut self, expr: ExprId, ty: Type, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
-        self.casts.push(Expr { id, data: Cast { expr, ty }});
+        let cast_id = CastId::new(self.casts.len());
+        self.casts.push(Expr { id, data: Cast { expr, ty, cast_id }});
         self.levels.push(0);
         self.source_ranges.push(range);
 
