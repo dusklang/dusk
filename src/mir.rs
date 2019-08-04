@@ -27,6 +27,8 @@ pub enum Instr {
     Call { arguments: SmallVec<[InstrId; 2]>, func: FuncId },
     Intrinsic { arguments: SmallVec<[InstrId; 2]>, intr: Intrinsic },
     Reinterpret(InstrId, Type),
+    SignExtend(InstrId, Type),
+    ZeroExtend(InstrId, Type),
     Load(InstrId),
     Store { location: InstrId, value: InstrId },
     Ret(InstrId),
@@ -255,6 +257,8 @@ impl fmt::Display for Program {
                         Instr::Store { location, value } => writeln!(f, "store %{} in %{}", value.idx(), location.idx())?,
                         &Instr::StringConst { id, ref ty } => writeln!(f, "%{} = %str{} ({:?}) as {:?}", i, id.idx(), self.strings[id], ty)?,
                         &Instr::Reinterpret(val, ref ty) => writeln!(f, "%{} = reinterpret %{} as {:?}", i, val.idx(), ty)?,
+                        &Instr::SignExtend(val, ref ty) => writeln!(f, "%{} = sign-extend %{} as {:?}", i, val.idx(), ty)?,
+                        &Instr::ZeroExtend(val, ref ty) => writeln!(f, "%{} = zero-extend %{} as {:?}", i, val.idx(), ty)?,
                         Instr::Parameter(_) => panic!("unexpected parameter!"),
                         Instr::Void => panic!("unexpected void!"),
                     };
@@ -577,7 +581,15 @@ impl<'a> FunctionBuilder<'a> {
                 CastMethod::Reinterpret => {
                     let value = self.expr(expr, Context::new(0, DataDest::Read, ControlDest::Continue));
                     self.code.push(Instr::Reinterpret(value, ty.clone()))
-                }
+                },
+                CastMethod::SignExtend => {
+                    let value = self.expr(expr, Context::new(0, DataDest::Read, ControlDest::Continue));
+                    self.code.push(Instr::SignExtend(value, ty.clone()))
+                },
+                CastMethod::ZeroExtend => {
+                    let value = self.expr(expr, Context::new(0, DataDest::Read, ControlDest::Continue));
+                    self.code.push(Instr::ZeroExtend(value, ty.clone()))
+                },
             },
             Expr::AddrOf(operand) => return self.expr(operand, Context::new(ctx.indirection - 1, ctx.data, ctx.control)),
             Expr::Deref(operand) => return self.expr(operand, Context::new(ctx.indirection + 1, ctx.data, ctx.control)),

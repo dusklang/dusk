@@ -13,6 +13,8 @@ use crate::constraints::{ConstraintList, LiteralType, UnificationError};
 pub enum CastMethod {
     Noop,
     Reinterpret,
+    SignExtend,
+    ZeroExtend,
 }
 
 struct TypeChecker {
@@ -249,7 +251,7 @@ pub fn type_check(prog: tir::Program, arch: Arch) -> (Program, Vec<Error>) {
             }
             constraints.set_to(Type::Pointer(Box::new(pointee_ty)));
             tc.cast_methods[item.cast_id] = CastMethod::Reinterpret;
-        } else if let Type::Int { width: ref dest_width, is_signed: _ } = item.ty {
+        } else if let Type::Int { width: ref dest_width, is_signed: dest_is_signed } = item.ty {
             let dest_bit_width = dest_width.bit_width(arch);
             let mut src_ty = None;
             for ty in &constraints.one_of {
@@ -264,9 +266,24 @@ pub fn type_check(prog: tir::Program, arch: Arch) -> (Program, Vec<Error>) {
             }
             let (src_width, src_is_signed) = src_ty.expect("Invalid cast!");
             let src_bit_width = src_width.bit_width(arch);
-            assert_eq!(src_bit_width, dest_bit_width, "Invalid cast!");
             constraints.set_to(Type::Int { width: src_width, is_signed: src_is_signed });
-            tc.cast_methods[item.cast_id] = CastMethod::Reinterpret;
+            if src_bit_width == dest_bit_width {
+                tc.cast_methods[item.cast_id] = CastMethod::Reinterpret;
+            } else if src_is_signed && dest_is_signed {
+                if src_bit_width < dest_bit_width {
+                    tc.cast_methods[item.cast_id] = CastMethod::SignExtend;
+                } else {
+                    panic!("Invalid cast!");
+                }
+            } else if !src_is_signed && !dest_is_signed {
+                if src_bit_width < dest_bit_width {
+                    tc.cast_methods[item.cast_id] = CastMethod::ZeroExtend;
+                } else {
+                    panic!("Invalid cast!");
+                }
+            } else {
+                panic!("Invalid cast!");
+            }
         } else {
             panic!("Invalid cast!");
         }
