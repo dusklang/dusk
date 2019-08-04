@@ -1,6 +1,6 @@
 use std::fmt;
 
-use smallvec::SmallVec;
+use smallvec::{SmallVec, smallvec};
 
 use crate::ty::Type;
 use crate::type_checker as tc;
@@ -362,7 +362,7 @@ impl<'a> FunctionBuilder<'a> {
         let last_instr = self.code.raw.last().unwrap();
         assert!(
             match last_instr {
-                Instr::Void | Instr::Parameter(_) | Instr::Br(_) | Instr::CondBr { .. } | Instr::Ret { .. } => true,
+                Instr::Void | Instr::Parameter(_) | Instr::Br(_) | Instr::CondBr { .. } | Instr::Ret { .. } | Instr::Intrinsic { intr: Intrinsic::Panic, .. } => true,
                 _ => false,
             },
             "expected terminal instruction before moving on to next block, found {:?}",
@@ -422,6 +422,11 @@ impl<'a> FunctionBuilder<'a> {
         }
     }
 
+    fn string_const(&mut self, val: String, ty: Type) -> InstrId {
+        let id = self.strings.push(val.clone());
+        self.code.push(Instr::StringConst { id, ty })
+    }
+
     fn expr(&mut self, expr: ExprId, mut ctx: Context) -> InstrId {
         // HACK!!!!
         let mut should_allow_set = false;
@@ -432,17 +437,11 @@ impl<'a> FunctionBuilder<'a> {
             Expr::Void => self.void_instr(),
             Expr::IntLit { lit } => self.code.push(Instr::IntConst { lit, ty: ty.clone() }),
             Expr::DecLit { lit } => self.code.push(Instr::FloatConst { lit, ty: ty.clone() }),
-            Expr::StrLit { ref lit } => {
-                let id = self.strings.push(lit.clone());
-                self.code.push(Instr::StringConst { id, ty: ty.clone() })
-            },
+            Expr::StrLit { ref lit } => self.string_const(lit.clone(), ty.clone()),
             Expr::CharLit { lit } => {
                 match ty {
                     Type::Int { .. } => self.code.push(Instr::IntConst { lit: lit as u64, ty: ty.clone() }),
-                    Type::Pointer(_) => {
-                        let id = self.strings.push(String::from_utf8(vec![lit as u8]).unwrap());
-                        self.code.push(Instr::StringConst { id, ty: ty.clone() })
-                    },
+                    Type::Pointer(_) => self.string_const(String::from_utf8(vec![lit as u8]).unwrap(), ty.clone()),
                     _ => panic!("unexpected type for character")
                 }
             },
@@ -576,19 +575,51 @@ impl<'a> FunctionBuilder<'a> {
                     self.code.push(Instr::LogicalNot(operand))
                 }
             },
-            Expr::Cast { expr, ref ty, cast_id } => match &self.tc.cast_methods[cast_id] {
+            Expr::Cast { expr, ty: ref dest_ty, cast_id } => match &self.tc.cast_methods[cast_id] {
                 CastMethod::Noop => return self.expr(expr, ctx),
                 CastMethod::Reinterpret => {
                     let value = self.expr(expr, Context::new(0, DataDest::Read, ControlDest::Continue));
-                    self.code.push(Instr::Reinterpret(value, ty.clone()))
+                    self.code.push(Instr::Reinterpret(value, dest_ty.clone()))
                 },
                 CastMethod::SignExtend => {
                     let value = self.expr(expr, Context::new(0, DataDest::Read, ControlDest::Continue));
-                    self.code.push(Instr::SignExtend(value, ty.clone()))
+                    self.code.push(Instr::SignExtend(value, dest_ty.clone()))
                 },
                 CastMethod::ZeroExtend => {
                     let value = self.expr(expr, Context::new(0, DataDest::Read, ControlDest::Continue));
-                    self.code.push(Instr::ZeroExtend(value, ty.clone()))
+                    self.code.push(Instr::ZeroExtend(value, dest_ty.clone()))
+                },
+                CastMethod::ReinterpretAndSignExtend => {
+                    let value = self.expr(expr, Context::new(0, DataDest::Read, ControlDest::Continue));
+                    let src_ty = &self.tc.types[expr];
+                    let width = if let &Type::Int { ref width, is_signed: _ } = src_ty {
+                        width.clone()
+                    } else {
+                        panic!("Internal compiler error: invalid cast method");
+                    };
+                    let reinterpreted = self.code.push(Instr::Reinterpret(value, Type::Int { width, is_signed: true }));
+                    self.code.push(Instr::SignExtend(reinterpreted, dest_ty.clone()))
+                },
+                CastMethod::ReinterpretAndSafeZeroExtend => {
+                    let value = self.expr(expr, Context::new(0, DataDest::Read, ControlDest::Continue));
+                    let src_ty = &self.tc.types[expr];
+                    let width = if let &Type::Int { ref width, is_signed: _ } = src_ty {
+                        width.clone()
+                    } else {
+                        panic!("Internal compiler error: invalid cast method");
+                    };
+                    let zero = self.code.push(Instr::IntConst { lit: 0, ty: src_ty.clone() });
+                    let comparison = self.code.push(Instr::Intrinsic { arguments: smallvec![value, zero], intr: Intrinsic::Less });
+                    let negative_bb = self.new_bb();
+                    let positive_bb = self.new_bb();
+                    self.code.push(Instr::CondBr { condition: comparison, true_bb: negative_bb, false_bb: positive_bb });
+                    self.begin_bb(negative_bb);
+                    let panic_msg = self.string_const(format!("Failed to cast `{:?}` to `{:?}`: encountered negative value", src_ty, dest_ty), Type::i8().ptr());
+                    self.code.push(Instr::Intrinsic { arguments: smallvec![panic_msg], intr: Intrinsic::Panic });
+
+                    self.begin_bb(positive_bb);
+                    let reinterpreted = self.code.push(Instr::Reinterpret(value, Type::Int { width, is_signed: false }));
+                    self.code.push(Instr::ZeroExtend(reinterpreted, dest_ty.clone()))
                 },
             },
             Expr::AddrOf(operand) => return self.expr(operand, Context::new(ctx.indirection - 1, ctx.data, ctx.control)),

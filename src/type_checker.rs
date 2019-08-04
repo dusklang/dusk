@@ -15,6 +15,10 @@ pub enum CastMethod {
     Reinterpret,
     SignExtend,
     ZeroExtend,
+    /// Unsigned int -> bigger signed int
+    ReinterpretAndSignExtend,
+    /// Positive signed int -> bigger unsigned int (crash if negative)
+    ReinterpretAndSafeZeroExtend,
 }
 
 struct TypeChecker {
@@ -234,8 +238,9 @@ pub fn type_check(prog: tir::Program, arch: Arch) -> (Program, Vec<Error>) {
     }
     for item in &tc.prog.casts {
         let constraints = &mut tc.constraints[item.expr];
-        if constraints.can_unify_to(&item.ty.clone().into()).is_ok() {
+        tc.cast_methods[item.cast_id] = if constraints.can_unify_to(&item.ty.clone().into()).is_ok() {
             constraints.set_to(item.ty.clone());
+            CastMethod::Noop
         } else if let Type::Pointer(dest_pointee_ty) = &item.ty {
             let dest_pointee_ty = dest_pointee_ty.as_ref();
             let mut pointee_ty = None;
@@ -250,7 +255,7 @@ pub fn type_check(prog: tir::Program, arch: Arch) -> (Program, Vec<Error>) {
                 panic!("Invalid cast!");
             }
             constraints.set_to(Type::Pointer(Box::new(pointee_ty)));
-            tc.cast_methods[item.cast_id] = CastMethod::Reinterpret;
+            CastMethod::Reinterpret
         } else if let Type::Int { width: ref dest_width, is_signed: dest_is_signed } = item.ty {
             let dest_bit_width = dest_width.bit_width(arch);
             let mut src_ty = None;
@@ -268,25 +273,25 @@ pub fn type_check(prog: tir::Program, arch: Arch) -> (Program, Vec<Error>) {
             let src_bit_width = src_width.bit_width(arch);
             constraints.set_to(Type::Int { width: src_width, is_signed: src_is_signed });
             if src_bit_width == dest_bit_width {
-                tc.cast_methods[item.cast_id] = CastMethod::Reinterpret;
-            } else if src_is_signed && dest_is_signed {
-                if src_bit_width < dest_bit_width {
-                    tc.cast_methods[item.cast_id] = CastMethod::SignExtend;
+                CastMethod::Reinterpret
+            } else if src_bit_width < dest_bit_width {
+                if src_is_signed && dest_is_signed {
+                    CastMethod::SignExtend
+                } else if !src_is_signed && !dest_is_signed {
+                    CastMethod::ZeroExtend
+                } else if !src_is_signed && dest_is_signed {
+                    CastMethod::ReinterpretAndSignExtend
+                } else if src_is_signed && !dest_is_signed {
+                    CastMethod::ReinterpretAndSafeZeroExtend
                 } else {
-                    panic!("Invalid cast!");
-                }
-            } else if !src_is_signed && !dest_is_signed {
-                if src_bit_width < dest_bit_width {
-                    tc.cast_methods[item.cast_id] = CastMethod::ZeroExtend;
-                } else {
-                    panic!("Invalid cast!");
+                    panic!("Invalid cast!")
                 }
             } else {
-                panic!("Invalid cast!");
+                panic!("Invalid cast!")
             }
         } else {
-            panic!("Invalid cast!");
-        }
+            panic!("Invalid cast!")
+        };
     }
     for level in (0..levels).rev() {
         for item in tc.prog.assigned_decls.get_level(level) {
