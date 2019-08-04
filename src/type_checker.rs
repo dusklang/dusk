@@ -1,5 +1,6 @@
 use smallvec::smallvec;
 
+use crate::arch::Arch;
 use crate::error::Error;
 use crate::tir::{self, Decl, Expr};
 use crate::builder::{ExprId, DeclId, DeclRefId, CastId};
@@ -36,7 +37,7 @@ pub struct Program {
 }
 
 #[inline(never)]
-pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
+pub fn type_check(prog: tir::Program, arch: Arch) -> (Program, Vec<Error>) {
     let mut tc = TypeChecker {
         prog,
         types: IdxVec::new(),
@@ -246,6 +247,25 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
             if !pointee_ty.is_mut && dest_pointee_ty.is_mut {
                 panic!("Invalid cast!");
             }
+            constraints.set_to(Type::Pointer(Box::new(pointee_ty)));
+            tc.cast_methods[item.cast_id] = CastMethod::Reinterpret;
+        } else if let Type::Int { width: ref dest_width, is_signed: _ } = item.ty {
+            let dest_bit_width = dest_width.bit_width(arch);
+            let mut src_ty = None;
+            for ty in &constraints.one_of {
+                if let Type::Int { ref width, is_signed } = ty.ty {
+                    // TODO: Give preference to integers that are the same size to resolve ambiguity.
+                    // For example, consider an identifier `foo` that has an overload for every signed
+                    // integer type. If you write `foo as u8`, that should reference the `i8` overload
+                    // and reinterpret it as unsigned. Right now it wouldn't compile.
+                    assert!(src_ty.is_none(), "Ambiguous integer type in cast");
+                    src_ty = Some((width.clone(), is_signed));
+                }
+            }
+            let (src_width, src_is_signed) = src_ty.expect("Invalid cast!");
+            let src_bit_width = src_width.bit_width(arch);
+            assert_eq!(src_bit_width, dest_bit_width, "Invalid cast!");
+            constraints.set_to(Type::Int { width: src_width, is_signed: src_is_signed });
             tc.cast_methods[item.cast_id] = CastMethod::Reinterpret;
         } else {
             panic!("Invalid cast!");

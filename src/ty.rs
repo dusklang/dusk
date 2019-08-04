@@ -1,8 +1,22 @@
 use std::fmt;
 
+use crate::arch::Arch;
+
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum IntWidth {
     W8, W16, W32, W64, Pointer,
+}
+
+impl IntWidth {
+    pub fn bit_width(&self, arch: Arch) -> usize {
+        match self {
+            IntWidth::W8 => 8,
+            IntWidth::W16 => 16,
+            IntWidth::W32 => 32,
+            IntWidth::W64 => 64,
+            IntWidth::Pointer => arch.pointer_size(),
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]

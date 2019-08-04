@@ -63,7 +63,9 @@ fn do_something_really_cool {
         i = i + 1
     }
 
-    h := "h" as u8
+    h := "h" as u8 as u8 as i8 as i8 as u8 as i8
+    h: u64 = 24
+    i := h as usize
 
     // Allocate a single 8-bit integer on the heap
     num :: malloc(1) as u8 *mut
