@@ -30,10 +30,10 @@ fn main() {
     errs.extend(tir_errs);
     let (hir, hir_errs) = parser::parse::<hir::Builder>(&toks, &mut interner);
     errs.extend(hir_errs);
-    let (tc, tc_errs) = type_checker::type_check(tir, arch::Arch::X86_64);
+    let (tc, tc_errs) = type_checker::type_check(tir);
     errs.extend(tc_errs);
 
-    let mir = mir::Program::build(&hir, &tc);
+    let mir = mir::Program::build(&hir, &tc, arch::Arch::X86_64);
     println!("{}", mir);
     //println!("Succeeded!");
 

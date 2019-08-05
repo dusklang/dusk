@@ -70,6 +70,7 @@ fn do_something_really_cool {
     l := k as u16
     m := l as i32
     n := m as u64
+    o := n as i16
 
     // Allocate a single 8-bit integer on the heap
     num :: malloc(1) as u8 *mut

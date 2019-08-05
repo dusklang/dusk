@@ -1,7 +1,8 @@
 use std::fmt;
 
-use smallvec::{SmallVec, smallvec};
+use smallvec::SmallVec;
 
+use crate::arch::Arch;
 use crate::ty::Type;
 use crate::type_checker as tc;
 use tc::CastMethod;
@@ -29,6 +30,7 @@ pub enum Instr {
     Reinterpret(InstrId, Type),
     SignExtend(InstrId, Type),
     ZeroExtend(InstrId, Type),
+    Truncate(InstrId, Type),
     Load(InstrId),
     Store { location: InstrId, value: InstrId },
     Ret(InstrId),
@@ -118,7 +120,7 @@ pub struct Program {
 }
 
 impl Program {
-    pub fn build(prog: &hir::Program, tc: &tc::Program) -> Self {
+    pub fn build(prog: &hir::Program, tc: &tc::Program, arch: Arch) -> Self {
         let mut local_decls = IdxVec::<Decl, LocalDeclId>::new();
         let mut global_decls = IdxVec::<Decl, GlobalDeclId>::new();
         let mut num_functions = 0usize;
@@ -163,7 +165,8 @@ impl Program {
                         name.clone(),
                         ret_ty.clone(),
                         scope,
-                        &params[..]
+                        &params[..],
+                        arch,
                     ).build()
                 );
             }
@@ -259,6 +262,7 @@ impl fmt::Display for Program {
                         &Instr::Reinterpret(val, ref ty) => writeln!(f, "%{} = reinterpret %{} as {:?}", i, val.idx(), ty)?,
                         &Instr::SignExtend(val, ref ty) => writeln!(f, "%{} = sign-extend %{} as {:?}", i, val.idx(), ty)?,
                         &Instr::ZeroExtend(val, ref ty) => writeln!(f, "%{} = zero-extend %{} as {:?}", i, val.idx(), ty)?,
+                        &Instr::Truncate(val, ref ty) => writeln!(f, "%{} = truncate %{} as {:?}", i, val.idx(), ty)?,
                         Instr::Parameter(_) => panic!("unexpected parameter!"),
                         Instr::Void => panic!("unexpected void!"),
                     };
@@ -285,6 +289,7 @@ struct FunctionBuilder<'a> {
     void_instr: InstrId,
     code: IdxVec<Instr, InstrId>,
     basic_blocks: IdxVec<InstrId, BasicBlockId>,
+    arch: Arch,
 }
 
 impl<'a> FunctionBuilder<'a> {
@@ -297,7 +302,8 @@ impl<'a> FunctionBuilder<'a> {
         name: String,
         ret_ty: Type,
         scope: ScopeId,
-        params: &[LocalDeclId]
+        params: &[LocalDeclId],
+        arch: Arch,
     ) -> Self {
         let mut code = IdxVec::new();
         let void_instr = code.push(Instr::Void);
@@ -323,6 +329,7 @@ impl<'a> FunctionBuilder<'a> {
             void_instr,
             code,
             basic_blocks,
+            arch,
         }
     }
 
@@ -581,45 +588,37 @@ impl<'a> FunctionBuilder<'a> {
                     let value = self.expr(expr, Context::new(0, DataDest::Read, ControlDest::Continue));
                     self.code.push(Instr::Reinterpret(value, dest_ty.clone()))
                 },
-                CastMethod::SignExtend => {
-                    let value = self.expr(expr, Context::new(0, DataDest::Read, ControlDest::Continue));
-                    self.code.push(Instr::SignExtend(value, dest_ty.clone()))
-                },
-                CastMethod::ZeroExtend => {
-                    let value = self.expr(expr, Context::new(0, DataDest::Read, ControlDest::Continue));
-                    self.code.push(Instr::ZeroExtend(value, dest_ty.clone()))
-                },
-                CastMethod::ReinterpretAndSignExtend => {
-                    let value = self.expr(expr, Context::new(0, DataDest::Read, ControlDest::Continue));
-                    let src_ty = &self.tc.types[expr];
-                    let width = if let &Type::Int { ref width, is_signed: _ } = src_ty {
-                        width.clone()
-                    } else {
-                        panic!("Internal compiler error: invalid cast method");
+                CastMethod::Int => {
+                    let (src_width, _src_is_signed, dest_width, dest_is_signed) = match (&self.tc.types[expr], dest_ty) {
+                        (&Type::Int { width: ref src_width, is_signed: src_is_signed }, &Type::Int { width: ref dest_width, is_signed: dest_is_signed })
+                            => (src_width.clone(), src_is_signed, dest_width.clone(), dest_is_signed),
+                        _ => panic!("Internal compiler error: found invalid cast types while generating MIR")
                     };
-                    let reinterpreted = self.code.push(Instr::Reinterpret(value, Type::Int { width, is_signed: true }));
-                    self.code.push(Instr::SignExtend(reinterpreted, dest_ty.clone()))
-                },
-                CastMethod::ReinterpretAndSafeZeroExtend => {
+                    let (src_bit_width, dest_bit_width) = (src_width.bit_width(self.arch), dest_width.bit_width(self.arch));
                     let value = self.expr(expr, Context::new(0, DataDest::Read, ControlDest::Continue));
-                    let src_ty = &self.tc.types[expr];
-                    let width = if let &Type::Int { ref width, is_signed: _ } = src_ty {
-                        width.clone()
-                    } else {
-                        panic!("Internal compiler error: invalid cast method");
-                    };
-                    let zero = self.code.push(Instr::IntConst { lit: 0, ty: src_ty.clone() });
-                    let comparison = self.code.push(Instr::Intrinsic { arguments: smallvec![value, zero], intr: Intrinsic::Less });
-                    let negative_bb = self.new_bb();
-                    let positive_bb = self.new_bb();
-                    self.code.push(Instr::CondBr { condition: comparison, true_bb: negative_bb, false_bb: positive_bb });
-                    self.begin_bb(negative_bb);
-                    let panic_msg = self.string_const(format!("Failed to cast `{:?}` to `{:?}`: encountered negative value", src_ty, dest_ty), Type::i8().ptr());
-                    self.code.push(Instr::Intrinsic { arguments: smallvec![panic_msg], intr: Intrinsic::Panic });
 
-                    self.begin_bb(positive_bb);
-                    let reinterpreted = self.code.push(Instr::Reinterpret(value, Type::Int { width, is_signed: false }));
-                    self.code.push(Instr::ZeroExtend(reinterpreted, dest_ty.clone()))
+                    if src_bit_width == dest_bit_width {
+                        // TODO: Bounds checking
+                        self.code.push(Instr::Reinterpret(value, dest_ty.clone()))
+                    } else if src_bit_width < dest_bit_width {
+                        if dest_is_signed {
+                            // TODO: Bounds checking
+                            self.code.push(Instr::SignExtend(value, dest_ty.clone()))
+                        } else {
+                            // TODO: Bounds checking
+                            self.code.push(Instr::ZeroExtend(value, dest_ty.clone()))
+                        }
+                    } else if src_bit_width > dest_bit_width {
+                        if dest_is_signed {
+                            // TODO: Bounds checking
+                            self.code.push(Instr::Truncate(value, dest_ty.clone()))
+                        } else {
+                            // TODO: Bounds checking
+                            self.code.push(Instr::Truncate(value, dest_ty.clone()))
+                        }
+                    } else {
+                        unreachable!()
+                    }
                 },
             },
             Expr::AddrOf(operand) => return self.expr(operand, Context::new(ctx.indirection - 1, ctx.data, ctx.control)),
