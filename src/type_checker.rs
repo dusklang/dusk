@@ -13,6 +13,9 @@ pub enum CastMethod {
     Noop,
     Reinterpret,
     Int,
+    Float,
+    FloatToInt,
+    IntToFloat,
 }
 
 struct TypeChecker {
@@ -252,18 +255,38 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
             CastMethod::Reinterpret
         } else if let Type::Int { .. } = item.ty {
             let mut src_ty = None;
+            let mut method = CastMethod::Noop;
+            // TODO: Don't just pick the first valid overload; rank them
             for ty in &constraints.one_of {
                 if let Type::Int { .. } = ty.ty {
-                    // TODO: Give preference to integers that are the same size to resolve ambiguity.
-                    // For example, consider an identifier `foo` that has an overload for every signed
-                    // integer type. If you write `foo as u8`, that should reference the `i8` overload
-                    // and reinterpret it as unsigned. Right now it wouldn't compile.
-                    assert!(src_ty.is_none(), "Ambiguous integer type in cast");
+                    assert!(src_ty.is_none(), "Ambiguous type in cast");
                     src_ty = Some(ty.ty.clone());
+                    method = CastMethod::Int;
+                } else if let Type::Float { .. } = ty.ty {
+                    assert!(src_ty.is_none(), "Ambiguous type in cast");
+                    src_ty = Some(ty.ty.clone());
+                    method = CastMethod::FloatToInt;
                 }
             }
             constraints.set_to(src_ty.expect("Invalid cast!"));
-            CastMethod::Int
+            method
+        } else if let Type::Float { .. } = item.ty {
+            let mut src_ty = None;
+            let mut method = CastMethod::Noop;
+            // TODO: Don't just pick the first valid overload; rank them
+            for ty in &constraints.one_of {
+                if let Type::Float { .. } = ty.ty {
+                    assert!(src_ty.is_none(), "Ambiguous type in cast");
+                    src_ty = Some(ty.ty.clone());
+                    method = CastMethod::Float;
+                } else if let Type::Int { .. } = ty.ty {
+                    assert!(src_ty.is_none(), "Ambiguous type in cast");
+                    src_ty = Some(ty.ty.clone());
+                    method = CastMethod::IntToFloat;
+                }
+            }
+            constraints.set_to(src_ty.expect("Invalid cast!"));
+            method
         } else {
             panic!("Invalid cast!")
         };
