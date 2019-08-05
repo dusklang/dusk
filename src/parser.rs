@@ -82,6 +82,7 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
             p.builder.add_intrinsic(Free, smallvec![Type::Void.mut_ptr()], Type::Void);
 
             p.builder.add_intrinsic(Print, smallvec![Type::i8().ptr()], Type::Void);
+            p.builder.add_intrinsic(Print, smallvec![Type::i8()], Type::Void);
         }
 
         p.skip_insignificant();
