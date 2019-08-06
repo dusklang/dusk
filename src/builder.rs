@@ -7,16 +7,9 @@ use crate::ty::Type;
 
 newtype_index!(ExprId pub);
 newtype_index!(DeclRefId pub);
-newtype_index!(GlobalDeclId pub);
-newtype_index!(LocalDeclId pub);
+newtype_index!(DeclId pub);
 newtype_index!(ScopeId pub);
 newtype_index!(CastId pub);
-
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub enum DeclId {
-    Global(GlobalDeclId),
-    Local(LocalDeclId),
-}
 
 #[derive(Clone, Copy, Debug)]
 pub enum BinOp {

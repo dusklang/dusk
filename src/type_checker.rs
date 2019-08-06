@@ -1,7 +1,7 @@
 use smallvec::smallvec;
 
 use crate::error::Error;
-use crate::tir::{self, Decl, Expr};
+use crate::tir::{self, Expr};
 use crate::builder::{ExprId, DeclId, DeclRefId, CastId};
 use crate::ty::{Type, QualType, IntWidth};
 use crate::index_vec::IdxVec;
@@ -103,10 +103,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
             } else {
                 constraints.one_of[0].ty.clone()
             };
-            match item.decl_id {
-                DeclId::Global(id) => &mut tc.prog.global_decls[id],
-                DeclId::Local(id) => &mut tc.prog.local_decls[id],
-            }.ret_ty.ty = ty;
+            tc.prog.decls[item.decl_id].ret_ty.ty = ty;
         }
         for item in tc.prog.assignments.get_level(level) {
             tc.constraints[item.id].set_to(Type::Void);
@@ -115,32 +112,25 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
         for item in tc.prog.decl_refs.get_level(level) {
             // Filter overloads that don't match the constraints of the parameters.
             // P.S. These borrows are only here because the borrow checker is dumb
-            let local_decls = &tc.prog.local_decls;
-            let global_decls = &tc.prog.global_decls;
-            let get_decl = |id: DeclId| -> &Decl {
-                match id {
-                    DeclId::Global(id) => &global_decls[id],
-                    DeclId::Local(id) => &local_decls[id]
-                }
-            };
+            let decls = &tc.prog.decls;
             let constraints = &tc.constraints;
             // Rule out overloads that don't match the arguments
             tc.prog.overloads[item.decl_ref_id].retain(|&overload| {
-                assert_eq!(get_decl(overload).param_tys.len(), item.args.len());
-                for (constraints, ty) in item.args.iter().map(|&arg| &constraints[arg]).zip(&get_decl(overload).param_tys) {
+                assert_eq!(decls[overload].param_tys.len(), item.args.len());
+                for (constraints, ty) in item.args.iter().map(|&arg| &constraints[arg]).zip(&decls[overload].param_tys) {
                     if constraints.can_unify_to(&ty.into()).is_err() { return false; }
                 }
                 true
             });
 
             tc.constraints[item.id].one_of = tc.prog.overloads[item.decl_ref_id].iter()
-                .map(|&overload| get_decl(overload).ret_ty.clone())
+                .map(|&overload| decls[overload].ret_ty.clone())
                 .collect();
 
             'find_preference: for (i, &arg) in item.args.iter().enumerate() {
                 if let Some(ty) = &tc.constraints[arg].preferred_type {
                     for &overload in &tc.prog.overloads[item.decl_ref_id] {
-                        let decl = get_decl(overload);
+                        let decl = &decls[overload];
                         if ty.ty.trivially_convertible_to(&decl.param_tys[i]) {
                             tc.constraints[item.id].preferred_type = Some(decl.ret_ty.clone());
                             tc.preferred_overloads[item.decl_ref_id] = Some(overload);
@@ -304,7 +294,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     }
     for level in (0..levels).rev() {
         for item in tc.prog.assigned_decls.get_level(level) {
-            tc.constraints[item.root_expr].set_to(tc.prog.decl(item.decl_id).ret_ty.ty.clone());
+            tc.constraints[item.root_expr].set_to(tc.prog.decls[item.decl_id].ret_ty.ty.clone());
         }
         for item in tc.prog.assignments.get_level(level) {
             let (lhs, rhs) = tc.constraints.index_mut(item.lhs, item.rhs);
@@ -325,17 +315,10 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
             tc.types[item.id] = ty.ty.clone();
 
             // P.S. These borrows are only here because the borrow checker is dumb
-            let local_decls = &tc.prog.local_decls;
-            let global_decls = &tc.prog.global_decls;
-            let get_decl = |id: DeclId| -> &Decl {
-                match id {
-                    DeclId::Global(id) => &global_decls[id],
-                    DeclId::Local(id) => &local_decls[id]
-                }
-            };
+            let decls = &tc.prog.decls;
             let overloads = &mut tc.prog.overloads[item.decl_ref_id];
             overloads.retain(|&overload| {
-                get_decl(overload).ret_ty
+                decls[overload].ret_ty
                     .trivially_convertible_to(&ty)
             });
             let pref = tc.preferred_overloads[item.decl_ref_id];
@@ -344,7 +327,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
                 let overload = pref
                     .filter(|overload| overloads.contains(overload))
                     .unwrap_or_else(|| overloads[0]);
-                let decl = get_decl(overload);
+                let decl = &decls[overload];
                 for (i, &arg) in item.args.iter().enumerate() {
                     tc.constraints[arg].set_to(decl.param_tys[i].clone());
                 }

@@ -2,7 +2,7 @@ use string_interner::{DefaultStringInterner, Sym};
 use smallvec::{SmallVec, smallvec};
 
 use crate::index_vec::{Idx, IdxVec};
-use crate::builder::{self, BinOp, UnOp, ExprId, DeclId, ScopeId, LocalDeclId, GlobalDeclId, DeclRefId, CastId, Intrinsic};
+use crate::builder::{self, BinOp, UnOp, ExprId, DeclId, ScopeId, DeclRefId, CastId, Intrinsic};
 use crate::source_info::SourceRange;
 use crate::ty::Type;
 
@@ -43,7 +43,7 @@ struct CompDeclState {
 #[derive(Copy, Clone, Debug)]
 pub enum Item {
     Stmt(ExprId),
-    StoredDecl { id: LocalDeclId, root_expr: ExprId },
+    StoredDecl { id: DeclId, root_expr: ExprId },
 }
 
 #[derive(Debug)]
@@ -54,7 +54,7 @@ pub struct Scope {
 
 #[derive(Debug)]
 pub enum Decl {
-    Computed { name: String, params: SmallVec<[LocalDeclId; 2]>, ret_ty: Type, scope: ScopeId },
+    Computed { name: String, params: SmallVec<[DeclId; 2]>, ret_ty: Type, scope: ScopeId },
     Stored,
     Parameter(Type),
     Intrinsic(Intrinsic),
@@ -64,8 +64,7 @@ pub enum Decl {
 pub struct Program {
     pub exprs: IdxVec<Expr, ExprId>,
     pub num_decl_refs: usize,
-    pub global_decls: IdxVec<Decl, GlobalDeclId>,
-    pub local_decls: IdxVec<Decl, LocalDeclId>,
+    pub decls: IdxVec<Decl, DeclId>,
     pub scopes: IdxVec<Scope, ScopeId>,
     pub void_expr: ExprId,
 }
@@ -75,8 +74,8 @@ pub struct Builder<'a> {
     exprs: IdxVec<Expr, ExprId>,
     num_decl_refs: usize,
     num_casts: usize,
-    global_decls: IdxVec<Decl, GlobalDeclId>,
-    local_decls: IdxVec<Decl, LocalDeclId>,
+
+    decls: IdxVec<Decl, DeclId>,
     scopes: IdxVec<Scope, ScopeId>,
     comp_decl_stack: Vec<CompDeclState>,
     void_expr: ExprId,
@@ -130,8 +129,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             exprs,
             num_decl_refs: 0,
             num_casts: 0,
-            global_decls: IdxVec::new(),
-            local_decls: IdxVec::new(),
+            decls: IdxVec::new(),
             scopes: IdxVec::new(),
             comp_decl_stack: Vec::new(),
             void_expr,
@@ -139,7 +137,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         }
     }
     fn add_intrinsic(&mut self, intrinsic: Intrinsic, _param_tys: SmallVec<[Type; 2]>, _ret_ty: Type) {
-        self.global_decls.push(Decl::Intrinsic(intrinsic));
+        self.decls.push(Decl::Intrinsic(intrinsic));
     }
     fn interner(&self) -> &DefaultStringInterner { &self.interner }
     fn void_expr(&self) -> ExprId { self.void_expr }
@@ -183,7 +181,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
     }
     fn stored_decl(&mut self, _name: Sym, _explicit_ty: Option<Type>, _is_mut: bool, root_expr: ExprId, _range: SourceRange) {
         self.flush_stmt_buffer();
-        let id = self.local_decls.push(Decl::Stored);
+        let id = self.decls.push(Decl::Stored);
         self.item(Item::StoredDecl { id, root_expr });
     }
     fn ret(&mut self, expr: ExprId, _range: SourceRange) -> ExprId {
@@ -238,15 +236,15 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
     fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Type, _proto_range: SourceRange) {
         self.flush_stmt_buffer();
         // This is a placeholder value that gets replaced once the parameter declarations are allocated.
-        let id = self.local_decls.push(Decl::Stored);
+        let id = self.decls.push(Decl::Stored);
         assert_eq!(param_names.len(), param_tys.len());
-        self.local_decls.reserve(param_tys.len());
+        self.decls.reserve(param_tys.len());
         let params = param_tys.into_iter()
-            .map(|ty| self.local_decls.push(Decl::Parameter(ty)))
+            .map(|ty| self.decls.push(Decl::Parameter(ty)))
             .collect();
         // `end_computed_decl` will attach the real scope to this decl; we don't have it yet
         let name = self.interner.resolve(name).unwrap().to_owned();
-        self.local_decls[id] = Decl::Computed {
+        self.decls[id] = Decl::Computed {
             name,
             params: params,
             ret_ty,
@@ -255,18 +253,14 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         self.comp_decl_stack.push(
             CompDeclState {
                 has_scope: None,
-                id: DeclId::Local(id),
+                id,
                 scope_stack: Vec::new(),
             }
         );
     }
     fn end_computed_decl(&mut self) {
         let decl_state = self.comp_decl_stack.pop().unwrap();
-        let decl = match decl_state.id {
-            DeclId::Global(id) => &mut self.global_decls[id],
-            DeclId::Local(id) => &mut self.local_decls[id],
-        };
-        match decl {
+        match &mut self.decls[decl_state.id] {
             Decl::Computed { scope, .. } => *scope = decl_state.has_scope.unwrap(),
             Decl::Stored                 => panic!("unexpected stored decl"),
             Decl::Parameter(_)           => panic!("unexpected parameter"),
@@ -285,8 +279,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         Program {
             exprs: self.exprs,
             num_decl_refs: self.num_decl_refs,
-            global_decls: self.global_decls,
-            local_decls: self.local_decls,
+            decls: self.decls,
             scopes: self.scopes,
             void_expr: self.void_expr,
         }

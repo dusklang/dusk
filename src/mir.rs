@@ -7,7 +7,7 @@ use crate::ty::Type;
 use crate::type_checker as tc;
 use tc::CastMethod;
 use crate::index_vec::{Idx, IdxVec};
-use crate::builder::{DeclId, LocalDeclId, GlobalDeclId, ExprId, DeclRefId, ScopeId, Intrinsic};
+use crate::builder::{DeclId, ExprId, DeclRefId, ScopeId, Intrinsic};
 use crate::hir::{self, Expr, Item};
 
 newtype_index!(InstrId pub);
@@ -124,12 +124,11 @@ pub struct Program {
 
 impl Program {
     pub fn build(prog: &hir::Program, tc: &tc::Program, arch: Arch) -> Self {
-        let mut local_decls = IdxVec::<Decl, LocalDeclId>::new();
-        let mut global_decls = IdxVec::<Decl, GlobalDeclId>::new();
+        let mut decls = IdxVec::<Decl, DeclId>::new();
         let mut num_functions = 0usize;
 
-        for decl in &prog.local_decls {
-            local_decls.push(
+        for decl in &prog.decls {
+            decls.push(
                 match decl {
                     hir::Decl::Computed { .. } => {
                         num_functions += 1;
@@ -137,33 +136,19 @@ impl Program {
                     },
                     hir::Decl::Stored => Decl::Stored { location: InstrId::new(std::usize::MAX) },
                     hir::Decl::Parameter(_) => Decl::LocalConst { value: InstrId::new(std::usize::MAX) },
-                    hir::Decl::Intrinsic(_) => panic!("Unexpected local intrinisic"),
-                }
-            );
-        }
-        for decl in &prog.global_decls {
-            global_decls.push(
-                match decl {
-                    hir::Decl::Computed { .. } => {
-                        num_functions += 1;
-                        Decl::Computed { get: FuncId::new(num_functions - 1) }
-                    },
-                    hir::Decl::Stored => panic!("globals not yet supported!"),
-                    hir::Decl::Parameter(_) => panic!("global parameters are invalid!"),
                     &hir::Decl::Intrinsic(intr) => Decl::Intrinsic(intr),
                 }
             );
         }
         let mut comp_decls = IdxVec::<Function, FuncId>::new();
         let mut strings = IdxVec::<String, StrId>::new();
-        for decl in prog.local_decls.iter().chain(&prog.global_decls) {
+        for decl in &prog.decls {
             if let &hir::Decl::Computed { ref name, ref params, ref ret_ty, scope } = decl {
                 comp_decls.push(
                     FunctionBuilder::new(
                         prog,
                         tc,
-                        &mut local_decls,
-                        &mut global_decls,
+                        &mut decls,
                         &mut strings,
                         name.clone(),
                         ret_ty.clone(),
@@ -286,8 +271,7 @@ impl fmt::Display for Program {
 struct FunctionBuilder<'a> {
     prog: &'a hir::Program,
     tc: &'a tc::Program,
-    local_decls: &'a mut IdxVec<Decl, LocalDeclId>,
-    global_decls: &'a mut IdxVec<Decl, GlobalDeclId>,
+    decls: &'a mut IdxVec<Decl, DeclId>,
     strings: &'a mut IdxVec<String, StrId>,
     name: String,
     ret_ty: Type,
@@ -302,21 +286,20 @@ impl<'a> FunctionBuilder<'a> {
     fn new(
         prog: &'a hir::Program,
         tc: &'a tc::Program,
-        local_decls: &'a mut IdxVec<Decl, LocalDeclId>,
-        global_decls: &'a mut IdxVec<Decl, GlobalDeclId>,
+        decls: &'a mut IdxVec<Decl, DeclId>,
         strings: &'a mut IdxVec<String, StrId>,
         name: String,
         ret_ty: Type,
         scope: ScopeId,
-        params: &[LocalDeclId],
+        params: &[DeclId],
         arch: Arch,
     ) -> Self {
         let mut code = IdxVec::new();
         let void_instr = code.push(Instr::Void);
         for &param in params {
-            if let hir::Decl::Parameter(ty) = &prog.local_decls[param] {
+            if let hir::Decl::Parameter(ty) = &prog.decls[param] {
                 let value = code.push(Instr::Parameter(ty.clone()));
-                local_decls[param] = Decl::LocalConst { value };
+                decls[param] = Decl::LocalConst { value };
             } else {
                 panic!("unexpected non-parameter as parameter decl");
             }
@@ -326,8 +309,7 @@ impl<'a> FunctionBuilder<'a> {
         FunctionBuilder::<'a> {
             prog,
             tc,
-            local_decls,
-            global_decls,
+            decls,
             strings,
             name,
             ret_ty,
@@ -351,7 +333,7 @@ impl<'a> FunctionBuilder<'a> {
             Item::StoredDecl { id, root_expr } => {
                 let ty = self.type_of(root_expr);
                 let location = self.code.push(Instr::Alloca(ty));
-                self.local_decls[id] = Decl::Stored { location };
+                self.decls[id] = Decl::Stored { location };
                 self.expr(root_expr, Context::new(0, DataDest::Store { location }, ControlDest::Continue));
             },
         }
@@ -386,16 +368,9 @@ impl<'a> FunctionBuilder<'a> {
         self.basic_blocks[bb] = InstrId::new(self.code.len())
     }
 
-    fn get_decl(&self, id: DeclId) -> &Decl {
-        match id {
-            DeclId::Global(id) => &self.global_decls[id],
-            DeclId::Local(id) => &self.local_decls[id],
-        }
-    }
-
     fn get(&mut self, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId) -> InstrId {
         let id = self.tc.overloads[id].expect("No overload found!");
-        let instr = match self.get_decl(id) {
+        let instr = match &self.decls[id] {
             &Decl::Computed { get } => Instr::Call { arguments, func: get },
             &Decl::Stored { location } => {
                 assert!(arguments.is_empty());
@@ -409,7 +384,7 @@ impl<'a> FunctionBuilder<'a> {
 
     fn set(&mut self, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId, value: InstrId) -> InstrId {
         let id = self.tc.overloads[id].expect("No overload found!");
-        let instr = match self.get_decl(id) {
+        let instr = match &self.decls[id] {
             &Decl::Computed { .. } => panic!("setters not yet implemented!"),
             &Decl::Stored { location } => {
                 assert!(arguments.is_empty());
@@ -423,7 +398,7 @@ impl<'a> FunctionBuilder<'a> {
 
     fn modify(&mut self, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId) -> InstrId {
         let id = self.tc.overloads[id].expect("No overload found!");
-        let decl = self.get_decl(id);
+        let decl = &self.decls[id];
         match decl {
             &Decl::Computed { .. } => panic!("modify accessors not yet implemented!"),
             &Decl::Stored { location } => {
