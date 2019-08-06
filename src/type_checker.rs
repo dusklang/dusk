@@ -3,7 +3,7 @@ use smallvec::smallvec;
 use crate::error::Error;
 use crate::tir::{self, Decl, Expr};
 use crate::builder::{ExprId, DeclId, DeclRefId, CastId};
-use crate::ty::{Type, QualType};
+use crate::ty::{Type, QualType, IntWidth};
 use crate::index_vec::IdxVec;
 use crate::source_info::SourceRange;
 use crate::dep_vec;
@@ -240,20 +240,25 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
             CastMethod::Noop
         } else if let Type::Pointer(dest_pointee_ty) = &item.ty {
             let dest_pointee_ty = dest_pointee_ty.as_ref();
-            let mut pointee_ty = None;
+            let mut src_ty = None;
+            // TODO: Don't just pick the first valid overload; rank them
             for ty in &constraints.one_of {
                 if let Type::Pointer(pointee) = &ty.ty {
-                    assert!(pointee_ty.is_none(), "Ambiguous pointer type in cast");
-                    pointee_ty = Some(pointee.as_ref().clone());
+                    assert!(src_ty.is_none(), "Ambiguous type in cast");
+                    if pointee.is_mut || !dest_pointee_ty.is_mut {
+                        src_ty = Some(ty.ty.clone());
+                    }
+                } else if let Type::Int { width, is_signed: _ } = &ty.ty {
+                    assert!(src_ty.is_none(), "Ambiguous type in cast");
+                    if let IntWidth::Pointer = width {
+                        src_ty = Some(ty.ty.clone());
+                    }
                 }
             }
-            let pointee_ty = pointee_ty.expect("Invalid cast!");
-            if !pointee_ty.is_mut && dest_pointee_ty.is_mut {
-                panic!("Invalid cast!");
-            }
-            constraints.set_to(Type::Pointer(Box::new(pointee_ty)));
+            let src_ty = src_ty.expect("Invalid cast!");
+            constraints.set_to(src_ty);
             CastMethod::Reinterpret
-        } else if let Type::Int { .. } = item.ty {
+        } else if let Type::Int { ref width, is_signed: _ } = item.ty {
             let mut src_ty = None;
             let mut method = CastMethod::Noop;
             // TODO: Don't just pick the first valid overload; rank them
@@ -266,6 +271,12 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
                     assert!(src_ty.is_none(), "Ambiguous type in cast");
                     src_ty = Some(ty.ty.clone());
                     method = CastMethod::FloatToInt;
+                } else if let Type::Pointer(_) = ty.ty {
+                    assert!(src_ty.is_none(), "Ambiguous type in cast");
+                    if let IntWidth::Pointer = width {
+                        src_ty = Some(ty.ty.clone());
+                        method = CastMethod::Reinterpret;
+                    }
                 }
             }
             constraints.set_to(src_ty.expect("Invalid cast!"));

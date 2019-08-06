@@ -38,7 +38,7 @@ fn do_something_really_cool {
 
     h := "h" as u8 as u8 as i8 as i8 as u8 as i8 as isize as u64
     i: u64 = 24
-    j := h as usize
+    j := h as usize as u8*
     k := 5 as u8
     l := k as u16
     m := l as i32
