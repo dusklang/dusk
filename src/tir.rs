@@ -456,7 +456,6 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         match op {
             BinOp::Assign => self.insert_assignment(Assignment { lhs, rhs }), 
             _ => {
-                let id = ExprId::new(self.levels.len());
                 let decl_ref_id = self.overloads.push(Vec::new());
                 self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name: self.interner.get_or_intern(op.symbol()), num_arguments: 2 });
                 self.insert_decl_ref(DeclRef { args: smallvec![lhs, rhs], decl_ref_id }, None)
@@ -475,7 +474,6 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
     }
 
     fn un_op(&mut self, op: UnOp, expr: ExprId, range: SourceRange) -> ExprId {
-        let id = ExprId::new(self.levels.len());
         self.source_ranges.push(range);
         match op {
             UnOp::AddrOf => self.insert_addr_of(AddrOf { expr, is_mut: false }),
@@ -489,7 +487,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         }
     }
 
-    fn stored_decl(&mut self, name: Sym, explicit_ty: Option<Type>, is_mut: bool, root_expr: ExprId, range: SourceRange) {
+    fn stored_decl(&mut self, name: Sym, explicit_ty: Option<Type>, is_mut: bool, root_expr: ExprId, _range: SourceRange) {
         let decl_id = self.decls.push(
             Decl::new(name, SmallVec::new(), QualType { ty: Type::Error, is_mut }),
         );
@@ -507,14 +505,13 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
 
         id
     }
-    
+
     fn implicit_ret(&mut self, expr: ExprId) {
         let ty = self.comp_decl_stack.last().unwrap().ret_ty.clone();
         self.implicit_rets.push(Ret { expr, ty });
     }
 
     fn if_expr(&mut self, condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId>, range: SourceRange) -> ExprId {
-        let id = ExprId::new(self.levels.len());
         let then_expr = self.terminal_exprs[then_scope];
         let else_expr = else_scope.map_or_else(|| self.void_expr(), |scope| self.terminal_exprs[scope]);
         self.source_ranges.push(range);
@@ -590,8 +587,6 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
     }
 
     fn decl_ref(&mut self, name: Sym, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
-        let id = ExprId::new(self.levels.len());
-
         let mut decl: Option<(Level, DeclId)> = None;
         for &LocalDecl { name: other_name, level: other_level, decl: other_decl } in self.comp_decl_stack.last().unwrap().decls.iter().rev() {
             if name == other_name {
