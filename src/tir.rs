@@ -51,14 +51,13 @@ impl<T> DerefMut for Expr<T> {
 
 #[derive(Debug)]
 pub struct Decl {
-    pub name: Sym,
     pub param_tys: SmallVec<[Type; 2]>,
     pub ret_ty: QualType,
 }
 
 impl Decl {
-    fn new(name: Sym, param_tys: SmallVec<[Type; 2]>, ret_ty: impl Into<QualType>) -> Self {
-        Decl { name, param_tys, ret_ty: ret_ty.into() }
+    fn new(param_tys: SmallVec<[Type; 2]>, ret_ty: impl Into<QualType>) -> Self {
+        Decl { param_tys, ret_ty: ret_ty.into() }
     }
 }
 
@@ -66,6 +65,13 @@ impl Decl {
 struct LocalDecl {
     name: Sym,
     level: Level,
+    decl: DeclId,
+}
+
+#[derive(Debug)]
+struct GlobalDecl {
+    name: Sym, 
+    num_params: u32,
     decl: DeclId,
 }
 
@@ -163,7 +169,6 @@ pub struct Program {
     pub local_trees: IdxVec<LocalTree, TreeId>,
 
     pub source_ranges: IdxVec<SourceRange, ExprId>,
-    pub global_decls: Vec<DeclId>,
     pub decls: IdxVec<Decl, DeclId>,
     /// Each declref's overload choices
     pub overloads: IdxVec<Vec<DeclId>, DeclRefId>,
@@ -189,7 +194,7 @@ pub struct Builder<'a> {
 
     source_ranges: IdxVec<SourceRange, ExprId>,
     levels: IdxVec<Level, ExprId>,
-    global_decls: Vec<DeclId>,
+    global_decls: Vec<GlobalDecl>,
     decls: IdxVec<Decl, DeclId>,
     /// Each declref's overload choices
     overloads: IdxVec<Vec<DeclId>, DeclRefId>,
@@ -208,9 +213,6 @@ pub struct Builder<'a> {
 impl<'a> Builder<'a> {
     fn insert_item<T: Item>(&mut self, item: T) -> Level {
         self._insert_item(item, None)
-    }
-    fn insert_item_with_extra_dep<T: Item>(&mut self, item: T, extra_dep: Level) -> Level {
-        self._insert_item(item, Some(extra_dep))
     }
     fn _insert_item<T: Item>(&mut self, item: T, extra_dep: Option<Level>) -> Level {
         macro_rules! insert_local {
@@ -416,12 +418,10 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
     }
 
     fn output(mut self) -> Program {
-        let decls = &self.decls;
         for decl_ref in self.global_decl_refs {
-            self.overloads[decl_ref.id] = self.global_decls.iter().filter_map(|&id| {
-                let decl = &decls[id];
-                if decl.name == decl_ref.name && decl.param_tys.len() == decl_ref.num_arguments as usize {
-                    Some(id)
+            self.overloads[decl_ref.id] = self.global_decls.iter().filter_map(|decl| {
+                if decl.name == decl_ref.name && decl.num_params == decl_ref.num_arguments {
+                    Some(decl.decl)
                 } else {
                     None
                 }
@@ -443,7 +443,6 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             local_trees: self.local_trees,
             source_ranges: self.source_ranges,
             decls: self.decls,
-            global_decls: self.global_decls,
             overloads: self.overloads,
             num_exprs: self.levels.len(),
         }
@@ -451,8 +450,9 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
 
     fn add_intrinsic(&mut self, intrinsic: Intrinsic, param_tys: SmallVec<[Type; 2]>, ret_ty: Type) {
         let name = self.interner.get_or_intern(intrinsic.name());
-        let id = self.decls.push(Decl::new(name, param_tys, ret_ty));
-        self.global_decls.push(id);
+        let num_params = param_tys.len() as u32;
+        let id = self.decls.push(Decl::new(param_tys, ret_ty));
+        self.global_decls.push(GlobalDecl { name, num_params, decl: id });
     }
 
     fn interner(&self) -> &DefaultStringInterner { &self.interner }
@@ -532,7 +532,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
 
     fn stored_decl(&mut self, name: Sym, explicit_ty: Option<Type>, is_mut: bool, root_expr: ExprId, _range: SourceRange) {
         let decl_id = self.decls.push(
-            Decl::new(name, SmallVec::new(), QualType { ty: Type::Error, is_mut }),
+            Decl::new(SmallVec::new(), QualType { ty: Type::Error, is_mut }),
         );
         let level = self.insert_item(AssignedDecl { explicit_ty, root_expr, decl_id });
 
@@ -610,7 +610,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
 
     fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Type, _proto_range: SourceRange) {
         assert_eq!(param_names.len(), param_tys.len());
-        let decl_id = self.decls.push(Decl::new(name, param_tys.clone(), ret_ty.clone()));
+        let decl_id = self.decls.push(Decl::new(param_tys.clone(), ret_ty.clone()));
         let local_decl = LocalDecl { name, level: Level::Global(0), decl: decl_id };
         // Add decl to enclosing scope
         self.comp_decl_stack.last_mut().unwrap().decls.push(local_decl.clone());
@@ -619,7 +619,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         decl_state.decls.push(local_decl);
         // Add parameters to scope
         for (&name, ty) in param_names.iter().zip(&param_tys) {
-            let id = self.decls.push(Decl::new(name, SmallVec::new(), ty.clone()));
+            let id = self.decls.push(Decl::new(SmallVec::new(), ty.clone()));
             decl_state.decls.push(LocalDecl { name, level: Level::Global(0), decl: id });
         }
         self.comp_decl_stack.push(decl_state);
