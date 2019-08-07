@@ -55,7 +55,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     tc.selected_overloads.resize_with(tc.prog.overloads.len(), || None);
     tc.preferred_overloads.resize_with(tc.prog.overloads.len(), || None);
     tc.cast_methods.resize_with(tc.prog.casts.len(), || CastMethod::Noop);
-
+/*
     // Extend arrays as needed so they all have the same number of levels.
     let levels = dep_vec::unify_sizes(&mut [
         &mut tc.prog.assigned_decls, &mut tc.prog.assignments, &mut tc.prog.decl_refs, 
@@ -424,7 +424,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     //println!("Program: {:#?}", tc.prog);
     //println!("Decl types: {:#?}", tc.prog.local_decls);
     //println!("Constraints: {:#?}", tc.constraints);
-
+*/
     let prog = Program {
         types: tc.types,
         overloads: tc.selected_overloads,
