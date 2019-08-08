@@ -241,7 +241,7 @@ impl<'src> Builder<'src> {
             decls: IdxVec::new(),
             overloads: IdxVec::new(),
             global_decl_refs: Vec::new(),
-            comp_decl_stack: vec![CompDeclState::new(Type::Void)],
+            comp_decl_stack: vec![],
             terminal_exprs: IdxVec::new(),
             interner: DefaultStringInterner::default(),
 
@@ -676,11 +676,16 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
         let decl_id = self.decls.push(Decl::new(param_tys.clone(), ret_ty.clone(), Level::Global(0)));
         let name = self.interner.get_or_intern(name);
         let local_decl = LocalDecl { name, level: Level::Global(0), decl: decl_id };
-        // Add decl to enclosing scope
-        self.comp_decl_stack.last_mut().unwrap().decls.push(local_decl.clone());
         let mut decl_state = CompDeclState::new(ret_ty);
         // Add decl to its own scope to enable recursion
-        decl_state.decls.push(local_decl);
+        decl_state.decls.push(local_decl.clone());
+        if let Some(comp_decl_state) = self.comp_decl_stack.last_mut() {
+            // Add decl to enclosing scope
+            comp_decl_state.decls.push(local_decl);
+        } else {
+            // Add decl to global scope
+            self.global_decls.push(GlobalDecl { name, num_params: param_tys.len() as u32, decl: decl_id });
+        }
         // Add parameters to scope
         for (&name, ty) in param_names.iter().zip(&param_tys) {
             let name = self.interner.get_or_intern(name);
