@@ -130,20 +130,9 @@ impl Tree {
 }
 
 #[derive(Debug)]
-pub struct LocalTree {
-    pub tree: Tree,
+pub struct TreeDependency {
     pub global_dependency: u32,
     pub local_dependencies: Vec<(TreeId, u32)>,
-}
-
-impl LocalTree {
-    fn new(global_dependency: u32, local_dependencies: Vec<(TreeId, u32)>) -> Self {
-        Self {
-            tree: Tree::new(),
-            global_dependency,
-            local_dependencies,
-        }
-    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -167,7 +156,7 @@ pub struct Program {
     pub void_expr: ExprId,
 
     pub global_tree: Tree,
-    pub local_trees: IdxVec<LocalTree, TreeId>,
+    pub local_trees: IdxVec<Tree, TreeId>,
 
     pub source_ranges: IdxVec<SourceRange, ExprId>,
     pub decls: IdxVec<Decl, DeclId>,
@@ -191,7 +180,8 @@ pub struct Builder<'src> {
     void_expr: ExprId,
 
     global_tree: Tree,
-    local_trees: IdxVec<LocalTree, TreeId>,
+    local_trees: IdxVec<Tree, TreeId>,
+    tree_dependencies: IdxVec<TreeDependency, TreeId>,
 
     source_ranges: IdxVec<SourceRange, ExprId>,
     levels: IdxVec<Level, ExprId>,
@@ -234,6 +224,7 @@ impl<'src> Builder<'src> {
             void_expr,
             global_tree: Tree::new(),
             local_trees: IdxVec::new(),
+            tree_dependencies: IdxVec::new(),
             source_ranges,
             levels,
             global_decls: Vec::new(),
@@ -254,7 +245,7 @@ impl<'src> Builder<'src> {
     fn _insert_item<T: Item>(&mut self, item: T, extra_dep: Option<Level>) -> Level {
         macro_rules! insert_local {
             ($tree:expr, $level:expr) => {{
-                Item::storage_mut(&mut self.local_trees[$tree].tree).insert($level, item);
+                Item::storage_mut(&mut self.local_trees[$tree]).insert($level, item);
                 Level::Local($tree, $level)
             }};
         }
@@ -336,7 +327,9 @@ impl<'src> Builder<'src> {
                         Level::Local(tree, level) => local_dependencies.push((tree, level)),
                     }
                 }
-                let new_tree = self.local_trees.push(LocalTree::new(global_dependency, local_dependencies));
+                let new_tree = self.local_trees.push(Tree::new());
+                let dependencies = self.tree_dependencies.push(TreeDependency { global_dependency, local_dependencies });
+                assert_eq!(new_tree, dependencies);
                 insert_local!(new_tree, 0)
             }
         }
