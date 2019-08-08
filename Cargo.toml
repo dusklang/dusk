@@ -12,3 +12,4 @@ lto = true
 unicode-segmentation = { git = "https://github.com/unicode-rs/unicode-segmentation" }
 string-interner = "0.7.0"
 smallvec = "0.6.10"
+crossbeam-utils = "0.6"

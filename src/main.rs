@@ -16,6 +16,8 @@ mod constraints;
 mod type_checker;
 
 use std::fs;
+use crossbeam_utils::thread;
+
 
 fn main() {
     let contents = fs::read_to_string("HelloWorld.meda")
@@ -26,17 +28,27 @@ fn main() {
     );
     let (toks, mut errs) = lexer::lex(&file.src, &mut file.lines);
 
-    let (tir, tir_errs) = parser::parse(&toks, tir::Builder::new());
-    errs.extend(tir_errs);
-    let (hir, hir_errs) = parser::parse(&toks, hir::Builder::new());
-    errs.extend(hir_errs);
-    let (tc, tc_errs) = type_checker::type_check(tir);
-    errs.extend(tc_errs);
+    let (tc, hir, mid_errs) = thread::scope(|s| {
+        let tc = s.spawn(|_| {
+            let (tir, mut errs) = parser::parse(&toks, tir::Builder::new());
+            let (tc, tc_errs) = type_checker::type_check(tir);
+            errs.extend(tc_errs);
+
+            (tc, errs)
+        });
+        let hir = s.spawn(|_| parser::parse(&toks, hir::Builder::new()));
+
+        let (tc, mut errs) = tc.join().unwrap();
+        let (hir, hir_errs) = hir.join().unwrap();
+        errs.extend(hir_errs);
+
+        (tc, hir, errs)
+    }).unwrap();
+    errs.extend(mid_errs);
 
     let mir = mir::Program::build(&hir, &tc, arch::Arch::X86_64);
     println!("{}", mir);
     //println!("Succeeded!");
-
 
     for err in &errs { err.report(&file); }
     if !errs.is_empty() {
