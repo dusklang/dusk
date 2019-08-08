@@ -1,4 +1,3 @@
-use string_interner::{DefaultStringInterner, Sym};
 use smallvec::{SmallVec, smallvec};
 
 use crate::token::{TokenVec, TokenKind, Token};
@@ -8,23 +7,23 @@ use crate::error::Error;
 use crate::source_info::{self, SourceRange};
 
 #[inline]
-pub fn parse<'a, B: Builder<'a>>(toks: &'a TokenVec, interner: &'a mut DefaultStringInterner) -> (B::Output, Vec<Error>) {
-    Parser::<'a, B>::parse(toks, interner)
+pub fn parse<'src, B: Builder<'src>>(toks: &'src TokenVec, builder: B) -> (B::Output, Vec<Error>) {
+    Parser::<'src, B>::parse(toks, builder)
 }
 
-struct Parser<'a, B: Builder<'a>> {
-    toks: &'a TokenVec,
+struct Parser<'src, B: Builder<'src>> {
+    toks: &'src TokenVec<'src>,
     builder: B,
     cur: usize,
     errs: Vec<Error>,
 }
 
-impl<'a, B: Builder<'a>> Parser<'a, B> {
+impl<'src, B: Builder<'src>> Parser<'src, B> {
     #[inline(never)]
-    fn parse(toks: &'a TokenVec, interner: &'a mut DefaultStringInterner) -> (B::Output, Vec<Error>) {
+    fn parse(toks: &'src TokenVec, builder: B) -> (B::Output, Vec<Error>) {
         let mut p = Parser {
             toks,
-            builder: B::new(interner),
+            builder,
             cur: 0,
             errs: Vec::new(),
         };
@@ -151,7 +150,7 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
         Some(op)
     }
 
-    fn try_parse_term(&mut self) -> Result<ExprId, TokenKind> {
+    fn try_parse_term(&mut self) -> Result<ExprId, TokenKind<'src>> {
         let mut term = self.try_parse_non_cast_term()?;
         let mut range = self.builder.get_range(term);
         while let TokenKind::As = self.cur().kind {
@@ -163,7 +162,7 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
         Ok(term)
     }
 
-    fn try_parse_non_cast_term(&mut self) -> Result<ExprId, TokenKind> {
+    fn try_parse_non_cast_term(&mut self) -> Result<ExprId, TokenKind<'src>> {
         if let Some(op) = self.parse_unary_operator() {
             let term = self.try_parse_non_cast_term()
                 .unwrap_or_else(|tok| panic!("Expected expression after unary operator, found {:?}", tok));
@@ -257,7 +256,7 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
         }
     }
 
-    fn try_parse_expr(&mut self) -> Result<ExprId, TokenKind> {
+    fn try_parse_expr(&mut self) -> Result<ExprId, TokenKind<'src>> {
         const INLINE: usize = 5;
         let mut expr_stack = SmallVec::<[ExprId; INLINE]>::new();
         let mut op_stack = SmallVec::<[BinOp; INLINE]>::new();
@@ -340,7 +339,7 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
         }
     }
 
-    fn parse_decl(&mut self, name: Sym) {
+    fn parse_decl(&mut self, name: &'src str) {
         let name_range = self.cur().range.clone();
         // Skip to colon, get range.
         let colon_range = self.next().range.clone();
@@ -453,10 +452,9 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
     }
 
     fn parse_type(&mut self) -> (Type, SourceRange) {
-        let i = self.builder.interner();
         let (mut ty, mut range) = (
             match self.cur().kind {
-                &TokenKind::Ident(ident) => match i.resolve(ident).unwrap() {
+                &TokenKind::Ident(ident) => match ident {
                     "i8" => Type::i8(),
                     "i16" => Type::i16(),
                     "i32" => Type::i32(),
@@ -503,7 +501,7 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
         (ty, range)
     }
 
-    fn cur(&self) -> Token {
+    fn cur(&self) -> Token<'src> {
         self.toks.at(self.cur)
     }
 
@@ -513,18 +511,18 @@ impl<'a, B: Builder<'a>> Parser<'a, B> {
         }
     }
 
-    fn next_including_insignificant(&mut self) -> Token {
+    fn next_including_insignificant(&mut self) -> Token<'src> {
         self.cur += 1;
         self.cur()
     }
 
-    fn next(&mut self) -> Token {
+    fn next(&mut self) -> Token<'src> {
         self.next_including_insignificant();
         self.skip_insignificant();
         self.cur()
     }
 
-    fn peek_next(&self) -> Token {
+    fn peek_next(&self) -> Token<'src> {
         for i in (self.cur+1)..self.toks.len() {
             let cur = self.toks.at(i);
             if cur.kind.is_significant() {

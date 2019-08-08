@@ -1,13 +1,12 @@
 use std::collections::HashMap;
 use unicode_segmentation::GraphemeCursor;
-use string_interner::DefaultStringInterner;
 
 use crate::token::{TokenVec, TokenKind};
 use crate::error::Error;
 use crate::source_info::SourceRange;
 
 #[inline(always)]
-pub fn lex<'src>(src: &'src str, lines: &'src mut Vec<usize>) -> (TokenVec, DefaultStringInterner, Vec<Error>) {
+pub fn lex<'src>(src: &'src str, lines: &'src mut Vec<usize>) -> (TokenVec<'src>, Vec<Error>) {
     Lexer::lex(src, lines)
 }
 
@@ -19,7 +18,6 @@ struct Lexer<'src> {
     end: GraphemeCursor,
 
     tok_start_loc: usize,
-    interner: DefaultStringInterner,
     errs: Vec<Error>,
 
     special_escape_characters: HashMap<&'static str, &'static str>,
@@ -41,7 +39,6 @@ impl<'src> Lexer<'src> {
             start: 0,
             end:   GraphemeCursor::new(0, src.len(), true),
             tok_start_loc: 0,
-            interner: DefaultStringInterner::default(),
             special_escape_characters,
             errs: Vec::new(),
         };
@@ -150,14 +147,14 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    fn pack_tok(&mut self, kind: TokenKind) -> (TokenKind, SourceRange) {
+    fn pack_tok(&mut self, kind: TokenKind<'src>) -> (TokenKind<'src>, SourceRange) {
         let range = self.tok_start_loc..self.cur_loc();
         self.tok_start_loc = self.cur_loc();
         (kind, range)
     }
 
     #[inline(never)]
-    fn lex(src: &'src str, lines: &'src mut Vec<usize>) -> (TokenVec, DefaultStringInterner, Vec<Error>) {
+    fn lex(src: &'src str, lines: &'src mut Vec<usize>) -> (TokenVec<'src>, Vec<Error>) {
         let mut l = Lexer::new(src, lines);
         let mut toks = TokenVec::new();
         loop {
@@ -166,10 +163,10 @@ impl<'src> Lexer<'src> {
             toks.push(tok, range);
             if should_break { break; }
         }
-        (toks, l.interner, l.errs)
+        (toks, l.errs)
     }
 
-    fn next(&mut self) -> (TokenKind, SourceRange) {
+    fn next(&mut self) -> (TokenKind<'src>, SourceRange) {
         if !self.has_chars() {
             self.pack_tok(TokenKind::Eof)
         } else if self.is_newline() {
@@ -312,11 +309,11 @@ impl<'src> Lexer<'src> {
                 }
             }
 
-            let ident_bytes = &self.src.as_bytes()[ident_start..ident_end];
-            let ident = unsafe { std::str::from_utf8_unchecked(ident_bytes) };
+            let ident_bytes: &'src [u8] = &self.src.as_bytes()[ident_start..ident_end];
+            let ident: &'src str = unsafe { std::str::from_utf8_unchecked(ident_bytes) };
 
             use TokenKind::*;
-            let kind = match ident {
+            let kind: TokenKind<'src> = match ident {
                 "fn" => Fn,
                 "return" => Return,
                 "true" => True,
@@ -328,7 +325,7 @@ impl<'src> Lexer<'src> {
                 "struct" => Struct,
                 "do" => Do,
                 "mut" => Mut,
-                _ => Ident(self.interner.get_or_intern(ident)),
+                _ => Ident(ident),
             };
             self.pack_tok(kind)
         } else if self.has_chars() && self.is_num() {

@@ -1,5 +1,6 @@
 use std::ops::{Deref, DerefMut};
 use std::cmp::max;
+use std::marker::PhantomData;
 use string_interner::{Sym, DefaultStringInterner};
 use smallvec::{SmallVec, smallvec};
 
@@ -176,7 +177,7 @@ pub struct Program {
     pub num_exprs: usize,
 }
 
-pub struct Builder<'a> {
+pub struct Builder<'src> {
     int_lits: Vec<Expr<()>>,
     dec_lits: Vec<Expr<()>>,
     str_lits: Vec<Expr<()>>,
@@ -207,10 +208,46 @@ pub struct Builder<'a> {
     /// (or the void expression if there is no terminal expression)
     terminal_exprs: IdxVec<ExprId, ScopeId>,
 
-    interner: &'a mut DefaultStringInterner,
+    interner: DefaultStringInterner,
+
+    _phantom_src_lifetime: PhantomData<&'src str>,
 }
 
-impl<'a> Builder<'a> {
+impl<'src> Builder<'src> {
+    pub fn new() -> Self {
+        // Create the void expression
+        let mut levels = IdxVec::new();
+        let mut source_ranges = IdxVec::new();
+        let void_expr = levels.push(Level::Global(0));
+        source_ranges.push(0..0);
+
+        Self {
+            int_lits: Vec::new(),
+            dec_lits: Vec::new(),
+            str_lits: Vec::new(),
+            char_lits: Vec::new(),
+            stmts: Vec::new(),
+            rets: Vec::new(),
+            implicit_rets: Vec::new(),
+            casts: Vec::new(),
+            whiles: Vec::new(),
+            void_expr,
+            global_tree: Tree::new(),
+            local_trees: IdxVec::new(),
+            source_ranges,
+            levels,
+            global_decls: Vec::new(),
+            decls: IdxVec::new(),
+            overloads: IdxVec::new(),
+            global_decl_refs: Vec::new(),
+            comp_decl_stack: vec![CompDeclState::new(Type::Void)],
+            terminal_exprs: IdxVec::new(),
+            interner: DefaultStringInterner::default(),
+
+            _phantom_src_lifetime: PhantomData,
+        }
+    }
+
     fn insert_item<T: Item>(&mut self, item: T) -> Level {
         self._insert_item(item, None)
     }
@@ -320,7 +357,7 @@ impl<'a> Builder<'a> {
 }
 
 impl Item for Expr<Do> {
-    fn dependencies<'a>(&'a self, b: &'a Builder<'a>) -> SmallVec<[Level; 3]> {
+    fn dependencies<'src>(&'src self, b: &'src Builder<'src>) -> SmallVec<[Level; 3]> {
         smallvec![b.levels[self.terminal_expr]]
     }
     fn storage(tree: &Tree) -> &DepVec<Self> { &tree.dos }
@@ -328,7 +365,7 @@ impl Item for Expr<Do> {
 }
 
 impl Item for Expr<Assignment> {
-    fn dependencies<'a>(&'a self, b: &'a Builder<'a>) -> SmallVec<[Level; 3]> {
+    fn dependencies<'src>(&'src self, b: &'src Builder<'src>) -> SmallVec<[Level; 3]> {
         smallvec![b.levels[self.lhs], b.levels[self.rhs]]
     }
     fn storage(tree: &Tree) -> &DepVec<Self> { &tree.assignments }
@@ -336,7 +373,7 @@ impl Item for Expr<Assignment> {
 }
 
 impl Item for Expr<DeclRef> {
-    fn dependencies<'a>(&'a self, b: &'a Builder<'a>) -> SmallVec<[Level; 3]> {
+    fn dependencies<'src>(&'src self, b: &'src Builder<'src>) -> SmallVec<[Level; 3]> {
         self.args.iter().map(|&id| b.levels[id]).collect()
     }
     fn storage(tree: &Tree) -> &DepVec<Self> { &tree.decl_refs }
@@ -344,7 +381,7 @@ impl Item for Expr<DeclRef> {
 }
 
 impl Item for Expr<AddrOf> {
-    fn dependencies<'a>(&'a self, b: &'a Builder<'a>) -> SmallVec<[Level; 3]> {
+    fn dependencies<'src>(&'src self, b: &'src Builder<'src>) -> SmallVec<[Level; 3]> {
         smallvec![b.levels[self.expr]]
     }
     fn storage(tree: &Tree) -> &DepVec<Self> { &tree.addr_ofs }
@@ -352,7 +389,7 @@ impl Item for Expr<AddrOf> {
 }
 
 impl Item for Expr<Dereference> {
-    fn dependencies<'a>(&'a self, b: &'a Builder<'a>) -> SmallVec<[Level; 3]> {
+    fn dependencies<'src>(&'src self, b: &'src Builder<'src>) -> SmallVec<[Level; 3]> {
         smallvec![b.levels[self.expr]]
     }
     fn storage(tree: &Tree) -> &DepVec<Self> { &tree.derefs }
@@ -360,7 +397,7 @@ impl Item for Expr<Dereference> {
 }
 
 impl Item for Expr<If> {
-    fn dependencies<'a>(&'a self, b: &'a Builder<'a>) -> SmallVec<[Level; 3]> {
+    fn dependencies<'src>(&'src self, b: &'src Builder<'src>) -> SmallVec<[Level; 3]> {
         smallvec![b.levels[self.condition], b.levels[self.then_expr], b.levels[self.else_expr]]
     }
     fn storage(tree: &Tree) -> &DepVec<Self> { &tree.ifs }
@@ -368,7 +405,7 @@ impl Item for Expr<If> {
 }
 
 impl Item for AssignedDecl {
-    fn dependencies<'a>(&'a self, b: &'a Builder<'a>) -> SmallVec<[Level; 3]> {
+    fn dependencies<'src>(&'src self, b: &'src Builder<'src>) -> SmallVec<[Level; 3]> {
         smallvec![b.levels[self.root_expr]]
     }
     fn storage(tree: &Tree) -> &DepVec<Self> { &tree.assigned_decls }
@@ -376,46 +413,13 @@ impl Item for AssignedDecl {
 }
 
 pub trait Item: Sized {
-    fn dependencies<'a>(&'a self, builder: &'a Builder<'a>) -> SmallVec<[Level; 3]>;
+    fn dependencies<'src>(&'src self, builder: &'src Builder<'src>) -> SmallVec<[Level; 3]>;
     fn storage(tree: &Tree) -> &DepVec<Self>;
     fn storage_mut(tree: &mut Tree) -> &mut DepVec<Self>;
 }
 
-impl<'a> builder::Builder<'a> for Builder<'a> {
+impl<'src> builder::Builder<'src> for Builder<'src> {
     type Output = Program;
-
-    fn new(interner: &'a mut DefaultStringInterner) -> Self {
-        // Create the void expression
-        let mut levels = IdxVec::new();
-        let mut source_ranges = IdxVec::new();
-        let void_expr = levels.push(Level::Global(0));
-        source_ranges.push(0..0);
-
-        Self {
-            int_lits: Vec::new(),
-            dec_lits: Vec::new(),
-            str_lits: Vec::new(),
-            char_lits: Vec::new(),
-            stmts: Vec::new(),
-            rets: Vec::new(),
-            implicit_rets: Vec::new(),
-            casts: Vec::new(),
-            whiles: Vec::new(),
-            void_expr,
-            global_tree: Tree::new(),
-            local_trees: IdxVec::new(),
-            source_ranges,
-            levels,
-            global_decls: Vec::new(),
-            decls: IdxVec::new(),
-            overloads: IdxVec::new(),
-            global_decl_refs: Vec::new(),
-            comp_decl_stack: vec![CompDeclState::new(Type::Void)],
-            terminal_exprs: IdxVec::new(),
-
-            interner,
-        }
-    }
 
     fn output(mut self) -> Program {
         for decl_ref in self.global_decl_refs {
@@ -454,8 +458,6 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         let id = self.decls.push(Decl::new(param_tys, ret_ty));
         self.global_decls.push(GlobalDecl { name, num_params, decl: id });
     }
-
-    fn interner(&self) -> &DefaultStringInterner { &self.interner }
 
     fn void_expr(&self) -> ExprId { self.void_expr }
 
@@ -530,12 +532,12 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         }
     }
 
-    fn stored_decl(&mut self, name: Sym, explicit_ty: Option<Type>, is_mut: bool, root_expr: ExprId, _range: SourceRange) {
+    fn stored_decl(&mut self, name: &'src str, explicit_ty: Option<Type>, is_mut: bool, root_expr: ExprId, _range: SourceRange) {
         let decl_id = self.decls.push(
             Decl::new(SmallVec::new(), QualType { ty: Type::Error, is_mut }),
         );
         let level = self.insert_item(AssignedDecl { explicit_ty, root_expr, decl_id });
-
+        let name = self.interner.get_or_intern(name);
         self.comp_decl_stack.last_mut().unwrap().decls.push(LocalDecl { name, level, decl: decl_id });
     }
 
@@ -608,9 +610,10 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         stack.decls.truncate(scope.previous_decls);
     }
 
-    fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Type, _proto_range: SourceRange) {
+    fn begin_computed_decl(&mut self, name: &'src str, param_names: SmallVec<[&'src str; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Type, _proto_range: SourceRange) {
         assert_eq!(param_names.len(), param_tys.len());
         let decl_id = self.decls.push(Decl::new(param_tys.clone(), ret_ty.clone()));
+        let name = self.interner.get_or_intern(name);
         let local_decl = LocalDecl { name, level: Level::Global(0), decl: decl_id };
         // Add decl to enclosing scope
         self.comp_decl_stack.last_mut().unwrap().decls.push(local_decl.clone());
@@ -619,6 +622,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         decl_state.decls.push(local_decl);
         // Add parameters to scope
         for (&name, ty) in param_names.iter().zip(&param_tys) {
+            let name = self.interner.get_or_intern(name);
             let id = self.decls.push(Decl::new(SmallVec::new(), ty.clone()));
             decl_state.decls.push(LocalDecl { name, level: Level::Global(0), decl: id });
         }
@@ -629,8 +633,9 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         self.comp_decl_stack.pop().unwrap();
     }
 
-    fn decl_ref(&mut self, name: Sym, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
+    fn decl_ref(&mut self, name: &'src str, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
         let mut decl: Option<(Level, DeclId)> = None;
+        let name = self.interner.get_or_intern(name);
         for &LocalDecl { name: other_name, level: other_level, decl: other_decl } in self.comp_decl_stack.last().unwrap().decls.iter().rev() {
             if name == other_name {
                 decl = Some((other_level, other_decl));
@@ -646,7 +651,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
         } else {
             // Global decl
             let decl_ref_id = self.overloads.push(Vec::new());
-            self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name: name, num_arguments: arguments.len() as u32 });
+            self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name, num_arguments: arguments.len() as u32 });
             self.insert_expr(DeclRef { args: arguments, decl_ref_id })
         }
     }

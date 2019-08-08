@@ -1,5 +1,5 @@
-use string_interner::{DefaultStringInterner, Sym};
 use smallvec::{SmallVec, smallvec};
+use std::marker::PhantomData;
 
 use crate::index_vec::{Idx, IdxVec};
 use crate::builder::{self, BinOp, UnOp, ExprId, DeclId, ScopeId, DeclRefId, CastId, Intrinsic};
@@ -70,7 +70,7 @@ pub struct Program {
 }
 
 #[derive(Debug)]
-pub struct Builder<'a> {
+pub struct Builder<'src> {
     exprs: IdxVec<Expr, ExprId>,
     num_decl_refs: usize,
     num_casts: usize,
@@ -79,10 +79,26 @@ pub struct Builder<'a> {
     scopes: IdxVec<Scope, ScopeId>,
     comp_decl_stack: Vec<CompDeclState>,
     void_expr: ExprId,
-    interner: &'a mut DefaultStringInterner,
+    
+    _phantom_src_lifetime: PhantomData<&'src str>,
 }
 
-impl<'a> Builder<'a> {
+impl<'src> Builder<'src> {
+    pub fn new() -> Self {
+        let mut exprs = IdxVec::new();
+        let void_expr = exprs.push(Expr::Void);
+        Self {
+            exprs,
+            num_decl_refs: 0,
+            num_casts: 0,
+            decls: IdxVec::new(),
+            scopes: IdxVec::new(),
+            comp_decl_stack: Vec::new(),
+            void_expr,
+            _phantom_src_lifetime: PhantomData,
+        }
+    }
+
     fn flush_stmt_buffer(&mut self) {
         let comp_decl = self.comp_decl_stack.last_mut();
         if comp_decl.is_none() { return }
@@ -120,26 +136,11 @@ impl<'a> Builder<'a> {
     }
 }
 
-impl<'a> builder::Builder<'a> for Builder<'a> {
+impl<'src> builder::Builder<'src> for Builder<'src> {
     type Output = Program;
-    fn new(interner: &'a mut DefaultStringInterner) -> Self {
-        let mut exprs = IdxVec::new();
-        let void_expr = exprs.push(Expr::Void);
-        Self {
-            exprs,
-            num_decl_refs: 0,
-            num_casts: 0,
-            decls: IdxVec::new(),
-            scopes: IdxVec::new(),
-            comp_decl_stack: Vec::new(),
-            void_expr,
-            interner,
-        }
-    }
     fn add_intrinsic(&mut self, intrinsic: Intrinsic, _param_tys: SmallVec<[Type; 2]>, _ret_ty: Type) {
         self.decls.push(Decl::Intrinsic(intrinsic));
     }
-    fn interner(&self) -> &DefaultStringInterner { &self.interner }
     fn void_expr(&self) -> ExprId { self.void_expr }
     fn int_lit(&mut self, lit: u64, _range: SourceRange) -> ExprId {
         self.exprs.push(Expr::IntLit { lit })
@@ -179,7 +180,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             _ => self.decl_ref_no_name(smallvec![expr], range),
         }
     }
-    fn stored_decl(&mut self, _name: Sym, _explicit_ty: Option<Type>, _is_mut: bool, root_expr: ExprId, _range: SourceRange) {
+    fn stored_decl(&mut self, _name: &'src str, _explicit_ty: Option<Type>, _is_mut: bool, root_expr: ExprId, _range: SourceRange) {
         self.flush_stmt_buffer();
         let id = self.decls.push(Decl::Stored);
         self.item(Item::StoredDecl { id, root_expr });
@@ -233,7 +234,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             self.scopes[scope.id].terminal_expr = terminal_expr;
         }
     }
-    fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Type, _proto_range: SourceRange) {
+    fn begin_computed_decl(&mut self, name: &'src str, param_names: SmallVec<[&'src str; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Type, _proto_range: SourceRange) {
         self.flush_stmt_buffer();
         // This is a placeholder value that gets replaced once the parameter declarations are allocated.
         let id = self.decls.push(Decl::Stored);
@@ -243,9 +244,8 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             .map(|ty| self.decls.push(Decl::Parameter(ty)))
             .collect();
         // `end_computed_decl` will attach the real scope to this decl; we don't have it yet
-        let name = self.interner.resolve(name).unwrap().to_owned();
         self.decls[id] = Decl::Computed {
-            name,
+            name: name.to_owned(),
             params: params,
             ret_ty,
             scope: ScopeId::new(std::usize::MAX)
@@ -267,7 +267,7 @@ impl<'a> builder::Builder<'a> for Builder<'a> {
             Decl::Intrinsic(_)           => panic!("unexpected intrinsic"),
         }
     }
-    fn decl_ref(&mut self, _name: Sym, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
+    fn decl_ref(&mut self, _name: &'src str, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
         self.decl_ref_no_name(arguments, range)
     }
     // TODO: Refactor so this method doesn't need to be exposed by HIR

@@ -24,11 +24,11 @@ fn main() {
         String::from("HelloWorld.meda"), 
         contents
     );
-    let (toks, mut interner, mut errs) = lexer::lex(&file.src, &mut file.lines);
+    let (toks, mut errs) = lexer::lex(&file.src, &mut file.lines);
 
-    let (tir, tir_errs) = parser::parse::<tir::Builder>(&toks, &mut interner);
+    let (tir, tir_errs) = parser::parse(&toks, tir::Builder::new());
     errs.extend(tir_errs);
-    let (hir, hir_errs) = parser::parse::<hir::Builder>(&toks, &mut interner);
+    let (hir, hir_errs) = parser::parse(&toks, hir::Builder::new());
     errs.extend(hir_errs);
     let (tc, tc_errs) = type_checker::type_check(tir);
     errs.extend(tc_errs);

@@ -1,4 +1,3 @@
-use string_interner::{DefaultStringInterner, Sym};
 use smallvec::SmallVec;
 
 use crate::index_vec::Idx;
@@ -150,10 +149,8 @@ impl UnOp {
     }
 }
 
-pub trait Builder<'a> {
+pub trait Builder<'src> {
     type Output;
-    fn new(interner: &'a mut DefaultStringInterner) -> Self;
-    fn interner(&self) -> &DefaultStringInterner;
     fn void_expr(&self) -> ExprId;
     fn int_lit(&mut self, lit: u64, range: SourceRange) -> ExprId;
     fn dec_lit(&mut self, lit: f64, range: SourceRange) -> ExprId;
@@ -162,7 +159,7 @@ pub trait Builder<'a> {
     fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId;
     fn cast(&mut self, expr: ExprId, ty: Type, range: SourceRange) -> ExprId;
     fn un_op(&mut self, op: UnOp, expr: ExprId, range: SourceRange) -> ExprId;
-    fn stored_decl(&mut self, name: Sym, explicit_ty: Option<Type>, is_mut: bool, root_expr: ExprId, range: SourceRange);
+    fn stored_decl(&mut self, name: &'src str, explicit_ty: Option<Type>, is_mut: bool, root_expr: ExprId, range: SourceRange);
     fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId;
     fn implicit_ret(&mut self, expr: ExprId);
     fn if_expr(&mut self, condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId>, range: SourceRange) -> ExprId;
@@ -171,10 +168,10 @@ pub trait Builder<'a> {
     fn do_expr(&mut self, scope: ScopeId) -> ExprId;
     fn begin_scope(&mut self) -> ScopeId;
     fn end_scope(&mut self, has_terminal_expr: bool);
-    fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Type, proto_range: SourceRange);
+    fn begin_computed_decl(&mut self, name: &'src str, param_names: SmallVec<[&'src str; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Type, proto_range: SourceRange);
     fn end_computed_decl(&mut self);
     fn add_intrinsic(&mut self, intrinsic: Intrinsic, param_tys: SmallVec<[Type; 2]>, ret_ty: Type);
-    fn decl_ref(&mut self, name: Sym, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId;
+    fn decl_ref(&mut self, name: &'src str, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId;
     fn get_range(&self, id: ExprId) -> SourceRange;
     fn get_terminal_expr(&self, scope: ScopeId) -> ExprId;
     fn output(self) -> Self::Output;
