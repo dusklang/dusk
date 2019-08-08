@@ -131,9 +131,11 @@ impl Tree {
 }
 
 #[derive(Debug)]
-pub struct TreeDependency {
-    pub global_dependency: u32,
-    pub local_dependencies: Vec<(TreeId, u32)>,
+pub struct TreeDependencies {
+    pub global: u32,
+    pub local: Vec<(TreeId, u32)>,
+    /// Depend on the deepest overload of a decl ref
+    pub decl_ref: Option<DeclRefId>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -158,6 +160,7 @@ pub struct Program {
 
     pub global_tree: Tree,
     pub local_trees: IdxVec<Tree, TreeId>,
+    pub tree_offsets: IdxVec<u32, TreeId>,
 
     pub source_ranges: IdxVec<SourceRange, ExprId>,
     pub decls: IdxVec<Decl, DeclId>,
@@ -182,7 +185,7 @@ pub struct Builder<'src> {
 
     global_tree: Tree,
     local_trees: IdxVec<Tree, TreeId>,
-    tree_dependencies: IdxVec<TreeDependency, TreeId>,
+    tree_dependencies: IdxVec<TreeDependencies, TreeId>,
 
     source_ranges: IdxVec<SourceRange, ExprId>,
     levels: IdxVec<Level, ExprId>,
@@ -241,9 +244,9 @@ impl<'src> Builder<'src> {
     }
 
     fn insert_item<T: Item>(&mut self, item: T) -> Level {
-        self._insert_item(item, None)
+        self._insert_item(item, None, None)
     }
-    fn _insert_item<T: Item>(&mut self, item: T, extra_dep: Option<Level>) -> Level {
+    fn _insert_item<T: Item>(&mut self, item: T, extra_dep: Option<Level>, decl_ref: Option<DeclRefId>) -> Level {
         macro_rules! insert_local {
             ($tree:expr, $level:expr) => {{
                 Item::storage_mut(&mut self.local_trees[$tree]).insert($level, item);
@@ -285,8 +288,30 @@ impl<'src> Builder<'src> {
                 }
             }
 
-            // If the item depends only on items from one tree, put it in that tree
-            if depended_trees.len() == 1 {
+            macro_rules! fresh_tree {
+                () => {{
+                    let mut global = 0;
+                    let mut local = Vec::new();
+                    for dep in depended_trees {
+                        match dep {
+                            Level::Global(level) => global = level,
+                            Level::Local(tree, level) => local.push((tree, level)),
+                        }
+                    }
+                    let new_tree = self.local_trees.push(Tree::new());
+                    let dependencies = self.tree_dependencies.push(TreeDependencies { global, local, decl_ref });
+                    assert_eq!(new_tree, dependencies);
+                    insert_local!(new_tree, 0)
+                }};
+            }
+
+            if decl_ref.is_some() {
+                // If the tree depends on the deepest overload of a declref, it can't yet be related to any other item and must go
+                // in a fresh tree of its own
+                fresh_tree!()
+            }
+            else if depended_trees.len() == 1 {
+                // If the item depends only on items from one tree, put it in that tree
                 match depended_trees[0] {
                     Level::Global(level) => {
                         insert_global!(level + 1)
@@ -320,31 +345,21 @@ impl<'src> Builder<'src> {
                 }
 
                 // If the item depends on items from multiple local trees, create a fresh tree to put it in
-                let mut global_dependency = 0;
-                let mut local_dependencies = Vec::new();
-                for dep in depended_trees {
-                    match dep {
-                        Level::Global(level) => global_dependency = level,
-                        Level::Local(tree, level) => local_dependencies.push((tree, level)),
-                    }
-                }
-                let new_tree = self.local_trees.push(Tree::new());
-                let dependencies = self.tree_dependencies.push(TreeDependency { global_dependency, local_dependencies });
-                assert_eq!(new_tree, dependencies);
-                insert_local!(new_tree, 0)
+                fresh_tree!()
             }
         }
     }
 
     fn insert_expr<T>(&mut self, data: T) -> ExprId where Expr<T>: Item {
-        self._insert_expr(data, None)
+        self._insert_expr(data, None, None)
     }
-    fn insert_expr_with_extra_dep<T>(&mut self, data: T, extra_dep: Level) -> ExprId where Expr<T>: Item {
-        self._insert_expr(data, Some(extra_dep))
+    fn insert_decl_ref(&mut self, data: DeclRef, extra_dep: Option<Level>) -> ExprId {
+        let decl_ref = data.decl_ref_id;
+        self._insert_expr(data, extra_dep, Some(decl_ref))
     }
-    fn _insert_expr<T>(&mut self, data: T, extra_dep: Option<Level>) -> ExprId where Expr<T>: Item {
+    fn _insert_expr<T>(&mut self, data: T, extra_dep: Option<Level>, decl_ref: Option<DeclRefId>) -> ExprId where Expr<T>: Item {
         let id = ExprId::new(self.levels.len());
-        let level = self._insert_item(Expr { id, data }, extra_dep);
+        let level = self._insert_item(Expr { id, data }, extra_dep, decl_ref);
         self.levels.push(level);
         id
     }
@@ -412,11 +427,42 @@ pub trait Item: Sized {
     fn storage_mut(tree: &mut Tree) -> &mut DepVec<Self>;
 }
 
+impl<'src> Builder<'src> {
+    fn compute_tree_offset(&self, tree: TreeId, tree_offsets: &mut IdxVec<u32, TreeId>) {
+        if tree_offsets[tree] != std::u32::MAX {
+            return;
+        }
+
+        let deps = &self.tree_dependencies[tree];
+        let mut result = deps.global;
+        for &(tree, offset) in &deps.local {
+            self.compute_tree_offset(tree, tree_offsets);
+            let local_offset = tree_offsets[tree] + offset;
+            result = max(result, local_offset);
+        }
+        if let Some(decl_ref) = deps.decl_ref {
+            for &overload in &self.overloads[decl_ref] {
+                let level = self.decls[overload].level;
+                match level {
+                    Level::Global(offset) => result = max(result, offset),
+                    Level::Local(tree, offset) => {
+                        self.compute_tree_offset(tree, tree_offsets);
+                        let local_offset = tree_offsets[tree] + offset;
+                        result = max(result, local_offset);
+                    },
+                }
+            }
+        }
+        tree_offsets[tree] = result;
+    }
+}
+
 impl<'src> builder::Builder<'src> for Builder<'src> {
     type Output = Program;
 
     fn output(mut self) -> Program {
-        for decl_ref in self.global_decl_refs {
+        // Enumerate overloads for all the decl refs
+        for decl_ref in &self.global_decl_refs {
             self.overloads[decl_ref.id] = self.global_decls.iter().filter_map(|decl| {
                 if decl.name == decl_ref.name && decl.num_params == decl_ref.num_arguments {
                     Some(decl.decl)
@@ -424,6 +470,13 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
                     None
                 }
             }).collect();
+        }
+
+        // Compute base tree offsets using dynamic programming
+        let mut tree_offsets = IdxVec::<u32, TreeId>::new();
+        tree_offsets.raw.resize(self.local_trees.len(), std::u32::MAX);
+        for i in 0..tree_offsets.len() {
+            self.compute_tree_offset(TreeId::new(i), &mut tree_offsets);
         }
 
         Program {
@@ -439,6 +492,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             void_expr: self.void_expr,
             global_tree: self.global_tree,
             local_trees: self.local_trees,
+            tree_offsets,
             source_ranges: self.source_ranges,
             decls: self.decls,
             overloads: self.overloads,
@@ -497,7 +551,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             _ => {
                 let decl_ref_id = self.overloads.push(Vec::new());
                 self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name: self.interner.get_or_intern(op.symbol()), num_arguments: 2 });
-                self.insert_expr(DeclRef { args: smallvec![lhs, rhs], decl_ref_id })
+                self.insert_decl_ref(DeclRef { args: smallvec![lhs, rhs], decl_ref_id }, None)
             }
         }
     }
@@ -521,7 +575,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             _ => {
                 let decl_ref_id = self.overloads.push(Vec::new());
                 self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name: self.interner.get_or_intern(op.symbol()), num_arguments: 1 });
-                self.insert_expr(DeclRef { args: smallvec![expr], decl_ref_id })
+                self.insert_decl_ref(DeclRef { args: smallvec![expr], decl_ref_id }, None)
             }
         }
     }
@@ -642,12 +696,12 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
         if let Some((level, decl)) = decl {
             // Local decl
             let decl_ref_id = self.overloads.push(vec![decl]);
-            self.insert_expr_with_extra_dep(DeclRef { args: arguments, decl_ref_id }, level)
+            self.insert_decl_ref(DeclRef { args: arguments, decl_ref_id }, Some(level))
         } else {
             // Global decl
             let decl_ref_id = self.overloads.push(Vec::new());
             self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name, num_arguments: arguments.len() as u32 });
-            self.insert_expr(DeclRef { args: arguments, decl_ref_id })
+            self.insert_decl_ref(DeclRef { args: arguments, decl_ref_id }, None)
         }
     }
 
