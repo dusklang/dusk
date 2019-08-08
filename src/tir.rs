@@ -353,9 +353,12 @@ impl<'src> Builder<'src> {
     fn insert_expr<T>(&mut self, data: T) -> ExprId where Expr<T>: Item {
         self._insert_expr(data, None, None)
     }
-    fn insert_decl_ref(&mut self, data: DeclRef, extra_dep: Option<Level>) -> ExprId {
+    fn insert_global_decl_ref(&mut self, data: DeclRef) -> ExprId {
         let decl_ref = data.decl_ref_id;
-        self._insert_expr(data, extra_dep, Some(decl_ref))
+        self._insert_expr(data, None, Some(decl_ref))
+    }
+    fn insert_local_decl_ref(&mut self, data: DeclRef, extra_dep: Level) -> ExprId {
+        self._insert_expr(data, Some(extra_dep), None)
     }
     fn _insert_expr<T>(&mut self, data: T, extra_dep: Option<Level>, decl_ref: Option<DeclRefId>) -> ExprId where Expr<T>: Item {
         let id = ExprId::new(self.levels.len());
@@ -551,7 +554,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             _ => {
                 let decl_ref_id = self.overloads.push(Vec::new());
                 self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name: self.interner.get_or_intern(op.symbol()), num_arguments: 2 });
-                self.insert_decl_ref(DeclRef { args: smallvec![lhs, rhs], decl_ref_id }, None)
+                self.insert_global_decl_ref(DeclRef { args: smallvec![lhs, rhs], decl_ref_id })
             }
         }
     }
@@ -575,7 +578,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             _ => {
                 let decl_ref_id = self.overloads.push(Vec::new());
                 self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name: self.interner.get_or_intern(op.symbol()), num_arguments: 1 });
-                self.insert_decl_ref(DeclRef { args: smallvec![expr], decl_ref_id }, None)
+                self.insert_global_decl_ref(DeclRef { args: smallvec![expr], decl_ref_id })
             }
         }
     }
@@ -696,12 +699,12 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
         if let Some((level, decl)) = decl {
             // Local decl
             let decl_ref_id = self.overloads.push(vec![decl]);
-            self.insert_decl_ref(DeclRef { args: arguments, decl_ref_id }, Some(level))
+            self.insert_local_decl_ref(DeclRef { args: arguments, decl_ref_id }, level)
         } else {
             // Global decl
             let decl_ref_id = self.overloads.push(Vec::new());
             self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name, num_arguments: arguments.len() as u32 });
-            self.insert_decl_ref(DeclRef { args: arguments, decl_ref_id }, None)
+            self.insert_global_decl_ref(DeclRef { args: arguments, decl_ref_id })
         }
     }
 
