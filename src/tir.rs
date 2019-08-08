@@ -128,6 +128,16 @@ impl Tree {
             ifs: DepVec::new(),
         }
     }
+
+    fn extend(&mut self, offset: u32, other: Tree) {
+        self.dos.extend(offset, other.dos);
+        self.assigned_decls.extend(offset, other.assigned_decls);
+        self.assignments.extend(offset, other.assignments);
+        self.decl_refs.extend(offset, other.decl_refs);
+        self.addr_ofs.extend(offset, other.addr_ofs);
+        self.derefs.extend(offset, other.derefs);
+        self.ifs.extend(offset, other.ifs);
+    }
 }
 
 #[derive(Debug)]
@@ -158,9 +168,7 @@ pub struct Program {
     /// An expression to uniquely represent the void value
     pub void_expr: ExprId,
 
-    pub global_tree: Tree,
-    pub local_trees: IdxVec<Tree, TreeId>,
-    pub tree_offsets: IdxVec<u32, TreeId>,
+    pub tree: Tree,
 
     pub source_ranges: IdxVec<SourceRange, ExprId>,
     pub decls: IdxVec<Decl, DeclId>,
@@ -482,6 +490,11 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             self.compute_tree_offset(TreeId::new(i), &mut tree_offsets);
         }
 
+        let mut global_tree = self.global_tree;
+        for (tree, offset) in self.local_trees.into_iter().zip(tree_offsets) {
+            global_tree.extend(offset, tree);
+        }
+
         Program {
             int_lits: self.int_lits,
             dec_lits: self.dec_lits,
@@ -493,9 +506,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             casts: self.casts,
             whiles: self.whiles,
             void_expr: self.void_expr,
-            global_tree: self.global_tree,
-            local_trees: self.local_trees,
-            tree_offsets,
+            tree: global_tree,
             source_ranges: self.source_ranges,
             decls: self.decls,
             overloads: self.overloads,
