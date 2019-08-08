@@ -15,14 +15,20 @@ newtype_index!(BasicBlockId pub);
 newtype_index!(TerminationId pub);
 newtype_index!(FuncId pub);
 newtype_index!(StrId pub);
+newtype_index!(StaticId pub);
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Const {
+    Int { lit: u64, ty: Type },
+    Float { lit: f64, ty: Type },
+    Str { id: StrId, ty: Type },
+    Bool(bool),
+}
 
 #[derive(Debug, PartialEq)]
 pub enum Instr {
     Void,
-    IntConst { lit: u64, ty: Type },
-    FloatConst { lit: f64, ty: Type },
-    StringConst { id: StrId, ty: Type },
-    BoolConst(bool),
+    Const(Const),
     Alloca(Type),
     LogicalNot(InstrId),
     Call { arguments: SmallVec<[InstrId; 2]>, func: FuncId },
@@ -36,6 +42,7 @@ pub enum Instr {
     IntToFloat(InstrId, Type),
     Load(InstrId),
     Store { location: InstrId, value: InstrId },
+    AddressOfStatic(StaticId),
     Ret(InstrId),
     Br(BasicBlockId),
     CondBr { condition: InstrId, true_bb: BasicBlockId, false_bb: BasicBlockId },
@@ -49,6 +56,8 @@ enum Decl {
     Computed { get: FuncId },
     LocalConst { value: InstrId },
     Intrinsic(Intrinsic),
+    Static(StaticId),
+    Const(Const),
 }
 
 #[derive(Debug)]
@@ -122,9 +131,33 @@ pub struct Program {
     strings: IdxVec<String, StrId>,
 }
 
+fn expr_to_const(expr: &Expr, ty: Type, strings: &mut IdxVec<String, StrId>) -> Const {
+    match *expr {
+        Expr::IntLit { lit } => Const::Int { lit, ty },
+        Expr::DecLit { lit } => Const::Float { lit, ty },
+        Expr::StrLit { ref lit } => {
+            let id = strings.push(lit.clone());
+            Const::Str { id, ty }
+        },
+        Expr::CharLit { lit } => {
+            match ty {
+                Type::Int { .. } => Const::Int { lit: lit as u64, ty },
+                Type::Pointer(_) => {
+                    let id = strings.push(String::from_utf8(vec![lit as u8]).unwrap());
+                    Const::Str { id, ty }
+                },
+                _ => panic!("unexpected type for character")
+            }
+        },
+        _ => panic!("Cannot convert expression to constant: {:#?}", expr),
+    }
+}
+
 impl Program {
     pub fn build(prog: &hir::Program, tc: &tc::Program, arch: Arch) -> Self {
         let mut decls = IdxVec::<Decl, DeclId>::new();
+        let mut statics = IdxVec::<Const, StaticId>::new();
+        let mut strings = IdxVec::<String, StrId>::new();
         let mut num_functions = 0usize;
 
         for decl in &prog.decls {
@@ -137,11 +170,19 @@ impl Program {
                     hir::Decl::Stored => Decl::Stored { location: InstrId::new(std::usize::MAX) },
                     hir::Decl::Parameter(_) => Decl::LocalConst { value: InstrId::new(std::usize::MAX) },
                     &hir::Decl::Intrinsic(intr) => Decl::Intrinsic(intr),
+                    &hir::Decl::Static(root_expr) => {
+                        let konst = expr_to_const(&prog.exprs[root_expr], tc.types[root_expr].clone(), &mut strings);
+                        let statik = statics.push(konst);
+                        Decl::Static(statik)
+                    },
+                    &hir::Decl::Const(root_expr) => {
+                        let konst = expr_to_const(&prog.exprs[root_expr], tc.types[root_expr].clone(), &mut strings);
+                        Decl::Const(konst)
+                    },
                 }
             );
         }
         let mut comp_decls = IdxVec::<Function, FuncId>::new();
-        let mut strings = IdxVec::<String, StrId>::new();
         for decl in &prog.decls {
             if let &hir::Decl::Computed { ref name, ref params, ref ret_ty, scope } = decl {
                 comp_decls.push(
@@ -150,6 +191,7 @@ impl Program {
                         tc,
                         &mut decls,
                         &mut strings,
+                        &statics,
                         name.clone(),
                         ret_ty.clone(),
                         scope,
@@ -228,7 +270,6 @@ impl fmt::Display for Program {
                     }
                     match instr {
                         Instr::Alloca(ty) => writeln!(f, "%{} = alloca {:?}", i, ty)?,
-                        Instr::BoolConst(val) => writeln!(f, "%{} = {}", i, val)?,
                         Instr::Br(block) => writeln!(f, "br %bb{}", block.idx())?,
                         &Instr::CondBr { condition, true_bb, false_bb }
                             => writeln!(f, "condbr %{}, %bb{}, %bb{}", condition.idx(), true_bb.idx(), false_bb.idx())?,
@@ -236,8 +277,12 @@ impl fmt::Display for Program {
                             write!(f, "%{} = call `{}`", i, self.comp_decls[callee].name)?;
                             write_args!(arguments)?
                         },
-                        Instr::FloatConst { lit, ty } => writeln!(f, "%{} = {} as {:?}", i, lit, ty)?,
-                        Instr::IntConst { lit, ty } => writeln!(f, "%{} = {} as {:?}", i, lit, ty)?,
+                        Instr::Const(konst) => match *konst {
+                            Const::Bool(val) => writeln!(f, "%{} = {}", i, val)?,
+                            Const::Float { lit, ref ty } => writeln!(f, "%{} = {} as {:?}", i, lit, ty)?,
+                            Const::Int { lit, ref ty } => writeln!(f, "%{} = {} as {:?}", i, lit, ty)?,
+                            Const::Str { id, ref ty } => writeln!(f, "%{} = %str{} ({:?}) as {:?}", i, id.idx(), self.strings[id], ty)?,
+                        },
                         Instr::Intrinsic { arguments, intr } => {
                             write!(f, "%{} = intrinsic `{}`", i, intr.name())?;
                             write_args!(arguments)?
@@ -246,7 +291,7 @@ impl fmt::Display for Program {
                         Instr::LogicalNot(op) => writeln!(f, "%{} = not %{}", i, op.idx())?,
                         Instr::Ret(val) => writeln!(f,  "return %{}", val.idx())?,
                         Instr::Store { location, value } => writeln!(f, "store %{} in %{}", value.idx(), location.idx())?,
-                        &Instr::StringConst { id, ref ty } => writeln!(f, "%{} = %str{} ({:?}) as {:?}", i, id.idx(), self.strings[id], ty)?,
+                        Instr::AddressOfStatic(statik) => writeln!(f, "%{} = address of %static{}", i, statik.idx())?,
                         &Instr::Reinterpret(val, ref ty) => writeln!(f, "%{} = reinterpret %{} as {:?}", i, val.idx(), ty)?,
                         &Instr::SignExtend(val, ref ty) => writeln!(f, "%{} = sign-extend %{} as {:?}", i, val.idx(), ty)?,
                         &Instr::ZeroExtend(val, ref ty) => writeln!(f, "%{} = zero-extend %{} as {:?}", i, val.idx(), ty)?,
@@ -273,6 +318,7 @@ struct FunctionBuilder<'a> {
     tc: &'a tc::Program,
     decls: &'a mut IdxVec<Decl, DeclId>,
     strings: &'a mut IdxVec<String, StrId>,
+    statics: &'a IdxVec<Const, StaticId>,
     name: String,
     ret_ty: Type,
     scope: ScopeId,
@@ -288,6 +334,7 @@ impl<'a> FunctionBuilder<'a> {
         tc: &'a tc::Program,
         decls: &'a mut IdxVec<Decl, DeclId>,
         strings: &'a mut IdxVec<String, StrId>,
+        statics: &'a IdxVec<Const, StaticId>,
         name: String,
         ret_ty: Type,
         scope: ScopeId,
@@ -311,6 +358,7 @@ impl<'a> FunctionBuilder<'a> {
             tc,
             decls,
             strings,
+            statics,
             name,
             ret_ty,
             scope,
@@ -370,49 +418,52 @@ impl<'a> FunctionBuilder<'a> {
 
     fn get(&mut self, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId) -> InstrId {
         let id = self.tc.overloads[id].expect("No overload found!");
-        let instr = match &self.decls[id] {
-            &Decl::Computed { get } => Instr::Call { arguments, func: get },
+        match &self.decls[id] {
+            &Decl::Computed { get } => self.code.push(Instr::Call { arguments, func: get }),
             &Decl::Stored { location } => {
                 assert!(arguments.is_empty());
-                Instr::Load(location)
+                self.code.push(Instr::Load(location))
             },
             &Decl::LocalConst { value } => return value,
-            &Decl::Intrinsic(intr) => Instr::Intrinsic { arguments, intr }
-        };
-        self.code.push(instr)
+            &Decl::Intrinsic(intr) => self.code.push(Instr::Intrinsic { arguments, intr }),
+            Decl::Const(konst) => self.code.push(Instr::Const(konst.clone())),
+            &Decl::Static(statik) => {
+                let location = self.code.push(Instr::AddressOfStatic(statik));
+                self.code.push(Instr::Load(location))
+            },
+        }
     }
 
     fn set(&mut self, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId, value: InstrId) -> InstrId {
         let id = self.tc.overloads[id].expect("No overload found!");
-        let instr = match &self.decls[id] {
-            &Decl::Computed { .. } => panic!("setters not yet implemented!"),
+        match &self.decls[id] {
+            Decl::Computed { .. } => panic!("setters not yet implemented!"),
             &Decl::Stored { location } => {
                 assert!(arguments.is_empty());
-                Instr::Store { location, value }
+                self.code.push(Instr::Store { location, value })
             },
-            &Decl::LocalConst { .. } => panic!("can't set a constant!"),
-            &Decl::Intrinsic(_) => panic!("can't set an intrinsic! (yet?)"),
-        };
-        self.code.push(instr)
+            Decl::LocalConst { .. } | Decl::Const(_) => panic!("can't set a constant!"),
+            Decl::Intrinsic(_) => panic!("can't set an intrinsic! (yet?)"),
+            &Decl::Static(statik) => {
+                let location = self.code.push(Instr::AddressOfStatic(statik));
+                self.code.push(Instr::Store { location, value })
+            }
+        }
     }
 
     fn modify(&mut self, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId) -> InstrId {
         let id = self.tc.overloads[id].expect("No overload found!");
         let decl = &self.decls[id];
         match decl {
-            &Decl::Computed { .. } => panic!("modify accessors not yet implemented!"),
+            Decl::Computed { .. } => panic!("modify accessors not yet implemented!"),
             &Decl::Stored { location } => {
                 assert!(arguments.is_empty());
                 location
             },
-            &Decl::LocalConst { .. } => panic!("can't modify a constant!"),
-            &Decl::Intrinsic(_) => panic!("can't modify an intrinsic! (yet?)"),
+            Decl::LocalConst { .. } | Decl::Const(_) => panic!("can't modify a constant!"),
+            Decl::Intrinsic(_) => panic!("can't modify an intrinsic! (yet?)"),
+            &Decl::Static(statik) => self.code.push(Instr::AddressOfStatic(statik)),
         }
-    }
-
-    fn string_const(&mut self, val: String, ty: Type) -> InstrId {
-        let id = self.strings.push(val.clone());
-        self.code.push(Instr::StringConst { id, ty })
     }
 
     fn expr(&mut self, expr: ExprId, mut ctx: Context) -> InstrId {
@@ -423,15 +474,9 @@ impl<'a> FunctionBuilder<'a> {
 
         let instr = match self.prog.exprs[expr] {
             Expr::Void => self.void_instr(),
-            Expr::IntLit { lit } => self.code.push(Instr::IntConst { lit, ty: ty.clone() }),
-            Expr::DecLit { lit } => self.code.push(Instr::FloatConst { lit, ty: ty.clone() }),
-            Expr::StrLit { ref lit } => self.string_const(lit.clone(), ty.clone()),
-            Expr::CharLit { lit } => {
-                match ty {
-                    Type::Int { .. } => self.code.push(Instr::IntConst { lit: lit as u64, ty: ty.clone() }),
-                    Type::Pointer(_) => self.string_const(String::from_utf8(vec![lit as u8]).unwrap(), ty.clone()),
-                    _ => panic!("unexpected type for character")
-                }
+            Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::StrLit { .. } | Expr::CharLit { .. } => {
+                let konst = expr_to_const(&self.prog.exprs[expr], ty.clone(), &mut self.strings);
+                self.code.push(Instr::Const(konst))
             },
             Expr::Set { lhs, rhs } => {
                 self.expr(
@@ -500,7 +545,7 @@ impl<'a> FunctionBuilder<'a> {
                     self.expr(rhs, branch_ctx.clone());
 
                     self.begin_bb(left_false_bb);
-                    let false_val = self.code.push(Instr::BoolConst(false));
+                    let false_val = self.code.push(Instr::Const(Const::Bool(false)));
                     self.handle_context(false_val, expr, Type::Bool, branch_ctx, false);
 
                     self.begin_bb(after_bb);
@@ -539,7 +584,7 @@ impl<'a> FunctionBuilder<'a> {
                     );
 
                     self.begin_bb(left_true_bb);
-                    let true_val = self.code.push(Instr::BoolConst(true));
+                    let true_val = self.code.push(Instr::Const(Const::Bool(true)));
                     let branch_ctx = ctx.redirect(location, Some(after_bb));
                     self.handle_context(true_val, expr, Type::Bool, branch_ctx.clone(), false);
 

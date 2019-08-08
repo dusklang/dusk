@@ -241,7 +241,7 @@ impl<'src> Builder<'src> {
             decls: IdxVec::new(),
             overloads: IdxVec::new(),
             global_decl_refs: Vec::new(),
-            comp_decl_stack: vec![],
+            comp_decl_stack: Vec::new(),
             terminal_exprs: IdxVec::new(),
             interner: DefaultStringInterner::default(),
 
@@ -599,7 +599,11 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             Decl::new(SmallVec::new(), QualType { ty: Type::Error, is_mut }, level),
         );
         let name = self.interner.get_or_intern(name);
-        self.comp_decl_stack.last_mut().unwrap().decls.push(LocalDecl { name, level, decl: decl_id });
+        if let Some(comp_decl_state) = self.comp_decl_stack.last_mut() {
+            comp_decl_state.decls.push(LocalDecl { name, level, decl: decl_id });
+        } else {
+            self.global_decls.push(GlobalDecl { name, num_params: 0, decl: decl_id });
+        }
     }
 
     fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {

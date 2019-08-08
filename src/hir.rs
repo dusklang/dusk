@@ -58,6 +58,8 @@ pub enum Decl {
     Stored,
     Parameter(Type),
     Intrinsic(Intrinsic),
+    Static(ExprId),
+    Const(ExprId),
 }
 
 #[derive(Debug)]
@@ -180,10 +182,20 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             _ => self.decl_ref_no_name(smallvec![expr], range),
         }
     }
-    fn stored_decl(&mut self, _name: &'src str, _explicit_ty: Option<Type>, _is_mut: bool, root_expr: ExprId, _range: SourceRange) {
+    fn stored_decl(&mut self, _name: &'src str, _explicit_ty: Option<Type>, is_mut: bool, root_expr: ExprId, _range: SourceRange) {
         self.flush_stmt_buffer();
-        let id = self.decls.push(Decl::Stored);
-        self.item(Item::StoredDecl { id, root_expr });
+        if self.comp_decl_stack.is_empty() {
+            self.decls.push(
+                if is_mut {
+                    Decl::Static(root_expr)
+                } else {
+                    Decl::Const(root_expr)
+                }
+            );
+        } else {
+            let id = self.decls.push(Decl::Stored);
+            self.item(Item::StoredDecl { id, root_expr });
+        }
     }
     fn ret(&mut self, expr: ExprId, _range: SourceRange) -> ExprId {
         self.exprs.push(Expr::Ret { expr })
@@ -260,11 +272,10 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
     }
     fn end_computed_decl(&mut self) {
         let decl_state = self.comp_decl_stack.pop().unwrap();
-        match &mut self.decls[decl_state.id] {
-            Decl::Computed { scope, .. } => *scope = decl_state.has_scope.unwrap(),
-            Decl::Stored                 => panic!("unexpected stored decl"),
-            Decl::Parameter(_)           => panic!("unexpected parameter"),
-            Decl::Intrinsic(_)           => panic!("unexpected intrinsic"),
+        if let Decl::Computed { ref mut scope, .. } = self.decls[decl_state.id] {
+            *scope = decl_state.has_scope.unwrap();
+        } else {
+            panic!("Unexpected decl kind when ending computed decl!");
         }
     }
     fn decl_ref(&mut self, _name: &'src str, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
