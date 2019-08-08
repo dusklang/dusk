@@ -54,11 +54,12 @@ impl<T> DerefMut for Expr<T> {
 pub struct Decl {
     pub param_tys: SmallVec<[Type; 2]>,
     pub ret_ty: QualType,
+    pub level: Level,
 }
 
 impl Decl {
-    fn new(param_tys: SmallVec<[Type; 2]>, ret_ty: impl Into<QualType>) -> Self {
-        Decl { param_tys, ret_ty: ret_ty.into() }
+    fn new(param_tys: SmallVec<[Type; 2]>, ret_ty: impl Into<QualType>, level: Level) -> Self {
+        Decl { param_tys, ret_ty: ret_ty.into(), level }
     }
 }
 
@@ -448,7 +449,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
     fn add_intrinsic(&mut self, intrinsic: Intrinsic, param_tys: SmallVec<[Type; 2]>, ret_ty: Type) {
         let name = self.interner.get_or_intern(intrinsic.name());
         let num_params = param_tys.len() as u32;
-        let id = self.decls.push(Decl::new(param_tys, ret_ty));
+        let id = self.decls.push(Decl::new(param_tys, ret_ty, Level::Global(0)));
         self.global_decls.push(GlobalDecl { name, num_params, decl: id });
     }
 
@@ -526,10 +527,11 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
     }
 
     fn stored_decl(&mut self, name: &'src str, explicit_ty: Option<Type>, is_mut: bool, root_expr: ExprId, _range: SourceRange) {
-        let decl_id = self.decls.push(
-            Decl::new(SmallVec::new(), QualType { ty: Type::Error, is_mut }),
-        );
+        let decl_id = DeclId::new(self.decls.len());
         let level = self.insert_item(AssignedDecl { explicit_ty, root_expr, decl_id });
+        self.decls.push(
+            Decl::new(SmallVec::new(), QualType { ty: Type::Error, is_mut }, level),
+        );
         let name = self.interner.get_or_intern(name);
         self.comp_decl_stack.last_mut().unwrap().decls.push(LocalDecl { name, level, decl: decl_id });
     }
@@ -605,7 +607,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
 
     fn begin_computed_decl(&mut self, name: &'src str, param_names: SmallVec<[&'src str; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Type, _proto_range: SourceRange) {
         assert_eq!(param_names.len(), param_tys.len());
-        let decl_id = self.decls.push(Decl::new(param_tys.clone(), ret_ty.clone()));
+        let decl_id = self.decls.push(Decl::new(param_tys.clone(), ret_ty.clone(), Level::Global(0)));
         let name = self.interner.get_or_intern(name);
         let local_decl = LocalDecl { name, level: Level::Global(0), decl: decl_id };
         // Add decl to enclosing scope
@@ -616,7 +618,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
         // Add parameters to scope
         for (&name, ty) in param_names.iter().zip(&param_tys) {
             let name = self.interner.get_or_intern(name);
-            let id = self.decls.push(Decl::new(SmallVec::new(), ty.clone()));
+            let id = self.decls.push(Decl::new(SmallVec::new(), ty.clone(), Level::Global(0)));
             decl_state.decls.push(LocalDecl { name, level: Level::Global(0), decl: id });
         }
         self.comp_decl_stack.push(decl_state);
