@@ -167,9 +167,7 @@ pub struct Program {
     pub whiles: Vec<Expr<While>>,
     /// An expression to uniquely represent the void value
     pub void_expr: ExprId,
-
     pub tree: Tree,
-
     pub source_ranges: IdxVec<SourceRange, ExprId>,
     pub decls: IdxVec<Decl, DeclId>,
     /// Each declref's overload choices

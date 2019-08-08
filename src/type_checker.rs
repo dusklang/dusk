@@ -55,12 +55,12 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     tc.selected_overloads.resize_with(tc.prog.overloads.len(), || None);
     tc.preferred_overloads.resize_with(tc.prog.overloads.len(), || None);
     tc.cast_methods.resize_with(tc.prog.casts.len(), || CastMethod::Noop);
-/*
+
     // Extend arrays as needed so they all have the same number of levels.
     let levels = dep_vec::unify_sizes(&mut [
-        &mut tc.prog.assigned_decls, &mut tc.prog.assignments, &mut tc.prog.decl_refs, 
-        &mut tc.prog.addr_ofs, &mut tc.prog.derefs, &mut tc.prog.ifs,
-        &mut tc.prog.dos,
+        &mut tc.prog.tree.assigned_decls, &mut tc.prog.tree.assignments, &mut tc.prog.tree.decl_refs, 
+        &mut tc.prog.tree.addr_ofs, &mut tc.prog.tree.derefs, &mut tc.prog.tree.ifs,
+        &mut tc.prog.tree.dos,
     ]);
 
     // Assign the type of the void expression to be void.
@@ -91,7 +91,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     lit_pass_1(&mut tc.constraints, &tc.prog.str_lits, LiteralType::Str);
     lit_pass_1(&mut tc.constraints, &tc.prog.char_lits, LiteralType::Char);
     for level in 0..levels {
-        for item in tc.prog.assigned_decls.get_level(level) {
+        for item in tc.prog.tree.assigned_decls.get_level(level) {
             let constraints = &tc.constraints[item.root_expr];
             let ty = if let Some(explicit_ty) = &item.explicit_ty {
                 assert!(constraints.can_unify_to(&explicit_ty.into()).is_ok());
@@ -105,11 +105,11 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
             };
             tc.prog.decls[item.decl_id].ret_ty.ty = ty;
         }
-        for item in tc.prog.assignments.get_level(level) {
+        for item in tc.prog.tree.assignments.get_level(level) {
             tc.constraints[item.id].set_to(Type::Void);
             tc.types[item.id] = Type::Void;
         }
-        for item in tc.prog.decl_refs.get_level(level) {
+        for item in tc.prog.tree.decl_refs.get_level(level) {
             // Filter overloads that don't match the constraints of the parameters.
             // P.S. These borrows are only here because the borrow checker is dumb
             let decls = &tc.prog.decls;
@@ -140,7 +140,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
                 }
             }
         }
-        for item in tc.prog.addr_ofs.get_level(level) {
+        for item in tc.prog.tree.addr_ofs.get_level(level) {
             let (addr, expr) = tc.constraints.index_mut(item.id, item.expr);
             // no mutability needed
             let expr = &*expr;
@@ -158,7 +158,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
                 addr.preferred_type = type_map(pref);
             }
         }
-        for item in tc.prog.derefs.get_level(level) {
+        for item in tc.prog.tree.derefs.get_level(level) {
             let (expr, addr) = tc.constraints.index_mut(item.id, item.expr);
             // no mutability needed
             let addr = &*addr;
@@ -174,7 +174,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
                 expr.preferred_type = Some(pointee.as_ref().clone());
             }
         }
-        for item in tc.prog.ifs.get_level(level) {
+        for item in tc.prog.tree.ifs.get_level(level) {
             if tc.constraints[item.condition].can_unify_to(&Type::Bool.into()).is_err() {
                 panic!("Expected boolean condition in if expression");
             }
@@ -184,7 +184,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
             }
             tc.constraints[item.id] = constraints;
         }
-        for item in tc.prog.dos.get_level(level) {
+        for item in tc.prog.tree.dos.get_level(level) {
             tc.constraints[item.id] = tc.constraints[item.terminal_expr].clone();
         }
     }
@@ -293,15 +293,15 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
         };
     }
     for level in (0..levels).rev() {
-        for item in tc.prog.assigned_decls.get_level(level) {
+        for item in tc.prog.tree.assigned_decls.get_level(level) {
             tc.constraints[item.root_expr].set_to(tc.prog.decls[item.decl_id].ret_ty.ty.clone());
         }
-        for item in tc.prog.assignments.get_level(level) {
+        for item in tc.prog.tree.assignments.get_level(level) {
             let (lhs, rhs) = tc.constraints.index_mut(item.lhs, item.rhs);
             lhs.lopsided_intersect_with(rhs);
             assert!(lhs.one_of.is_empty() || lhs.one_of_exists(|ty| ty.is_mut), "can't assign to immutable expression");
         }
-        for item in tc.prog.decl_refs.get_level(level) {
+        for item in tc.prog.tree.decl_refs.get_level(level) {
             let constraints = &tc.constraints[item.id];
             let ty = if constraints.one_of.len() != 1 {
                 errs.push(
@@ -344,7 +344,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
             };
             tc.selected_overloads[item.decl_ref_id] = overload;
         }
-        for item in tc.prog.addr_ofs.get_level(level) {
+        for item in tc.prog.tree.addr_ofs.get_level(level) {
             let (addr, expr) = tc.constraints.index_mut(item.id, item.expr);
             assert_eq!(addr.one_of.len(), 1);
             let ty = &addr.one_of[0].ty;
@@ -355,7 +355,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
                 panic!("unexpected non-pointer for addr of expression");
             }
         }
-        for item in tc.prog.derefs.get_level(level) {
+        for item in tc.prog.tree.derefs.get_level(level) {
             let (expr, addr) = tc.constraints.index_mut(item.id, item.expr);
             assert_eq!(expr.one_of.len(), 1);
             let ty = &expr.one_of[0];
@@ -364,7 +364,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
                 QualType::from(ty.clone().ptr())
             ];
         }
-        for item in tc.prog.ifs.get_level(level) {
+        for item in tc.prog.tree.ifs.get_level(level) {
             // We already verified that the condition unifies to bool in pass 1
             tc.constraints[item.condition].set_to(Type::Bool);
             let ty = if tc.constraints[item.id].one_of.len() != 1 {
@@ -380,7 +380,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
             tc.constraints[item.then_expr].set_to(ty.clone());
             tc.constraints[item.else_expr].set_to(ty);
         }
-        for item in tc.prog.dos.get_level(level) {
+        for item in tc.prog.tree.dos.get_level(level) {
             let ty = if tc.constraints[item.id].one_of.len() != 1 {
                 errs.push(
                     Error::new("ambiguous type for do expression")
@@ -424,7 +424,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     //println!("Program: {:#?}", tc.prog);
     //println!("Decl types: {:#?}", tc.prog.local_decls);
     //println!("Constraints: {:#?}", tc.constraints);
-*/
+
     let prog = Program {
         types: tc.types,
         overloads: tc.selected_overloads,
