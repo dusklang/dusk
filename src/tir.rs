@@ -11,9 +11,10 @@ use crate::ty::{Type, QualType};
 use crate::builder::{self, *};
 
 newtype_index!(TreeId pub);
+newtype_index!(RetGroupId);
 
 #[derive(Debug)]
-pub struct Ret { pub expr: ExprId, pub ty: Type }
+pub struct RetGroup { pub ty: Type, pub exprs: SmallVec<[ExprId; 1]> }
 #[derive(Debug)]
 pub struct Cast { pub expr: ExprId, pub ty: Type, pub cast_id: CastId }
 #[derive(Debug)]
@@ -34,6 +35,12 @@ pub struct DeclRef { pub args: SmallVec<[ExprId; 2]>, pub decl_ref_id: DeclRefId
 pub struct If { pub condition: ExprId, pub then_expr: ExprId, pub else_expr: ExprId }
 #[derive(Debug)]
 pub struct While { pub condition: ExprId }
+
+impl RetGroup {
+    pub fn new(ty: Type) -> RetGroup {
+        RetGroup { ty, exprs: SmallVec::new() }
+    }
+}
 
 #[derive(Debug)]
 pub struct Expr<T> {
@@ -84,15 +91,15 @@ struct ScopeState {
 }
 
 struct CompDeclState {
-    ret_ty: Type,
+    ret_group: RetGroupId,
     decls: Vec<LocalDecl>,
     scope_stack: Vec<ScopeState>,
 }
 
 impl CompDeclState {
-    fn new(ret_ty: Type) -> Self {
+    fn new(ret_group: RetGroupId) -> Self {
         Self {
-            ret_ty,
+            ret_group,
             decls: Vec::new(),
             scope_stack: Vec::new(),
         }
@@ -156,13 +163,13 @@ pub enum Level {
 
 #[derive(Debug)]
 pub struct Program {
-    pub int_lits: Vec<Expr<()>>,
-    pub dec_lits: Vec<Expr<()>>,
-    pub str_lits: Vec<Expr<()>>,
-    pub char_lits: Vec<Expr<()>>,
+    pub int_lits: Vec<ExprId>,
+    pub dec_lits: Vec<ExprId>,
+    pub str_lits: Vec<ExprId>,
+    pub char_lits: Vec<ExprId>,
     pub stmts: Vec<Stmt>,
-    pub rets: Vec<Expr<Ret>>,
-    pub implicit_rets: Vec<Ret>,
+    pub explicit_rets: Vec<ExprId>,
+    pub ret_groups: Vec<RetGroup>,
     pub casts: Vec<Expr<Cast>>,
     pub whiles: Vec<Expr<While>>,
     /// An expression to uniquely represent the void value
@@ -177,13 +184,13 @@ pub struct Program {
 }
 
 pub struct Builder<'src> {
-    int_lits: Vec<Expr<()>>,
-    dec_lits: Vec<Expr<()>>,
-    str_lits: Vec<Expr<()>>,
-    char_lits: Vec<Expr<()>>,
+    int_lits: Vec<ExprId>,
+    dec_lits: Vec<ExprId>,
+    str_lits: Vec<ExprId>,
+    char_lits: Vec<ExprId>,
     stmts: Vec<Stmt>,
-    rets: Vec<Expr<Ret>>,
-    implicit_rets: Vec<Ret>,
+    explicit_rets: Vec<ExprId>,
+    ret_groups: IdxVec<RetGroup, RetGroupId>,
     casts: Vec<Expr<Cast>>,
     whiles: Vec<Expr<While>>,
     // An expression to uniquely represent the void value
@@ -227,8 +234,8 @@ impl<'src> Builder<'src> {
             str_lits: Vec::new(),
             char_lits: Vec::new(),
             stmts: Vec::new(),
-            rets: Vec::new(),
-            implicit_rets: Vec::new(),
+            explicit_rets: Vec::new(),
+            ret_groups: IdxVec::new(),
             casts: Vec::new(),
             whiles: Vec::new(),
             void_expr,
@@ -498,8 +505,8 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             str_lits: self.str_lits,
             char_lits: self.char_lits,
             stmts: self.stmts,
-            rets: self.rets,
-            implicit_rets: self.implicit_rets,
+            explicit_rets: self.explicit_rets,
+            ret_groups: self.ret_groups.raw,
             casts: self.casts,
             whiles: self.whiles,
             void_expr: self.void_expr,
@@ -522,7 +529,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
 
     fn int_lit(&mut self, _lit: u64, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
-        self.int_lits.push(Expr { id, data: () });
+        self.int_lits.push(id);
         self.levels.push(Level::Global(0));
         self.source_ranges.push(range);
         id
@@ -530,7 +537,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
 
     fn dec_lit(&mut self, _lit: f64, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
-        self.dec_lits.push(Expr { id, data: () });
+        self.dec_lits.push(id);
         self.levels.push(Level::Global(0));
         self.source_ranges.push(range);
 
@@ -539,7 +546,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
 
     fn str_lit(&mut self, _lit: String, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
-        self.str_lits.push(Expr { id, data: () });
+        self.str_lits.push(id);
         self.levels.push(Level::Global(0));
         self.source_ranges.push(range);
 
@@ -548,7 +555,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
 
     fn char_lit(&mut self, _lit: i8, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
-        self.char_lits.push(Expr { id, data: () });
+        self.char_lits.push(id);
         self.levels.push(Level::Global(0));
         self.source_ranges.push(range);
 
@@ -606,18 +613,17 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
     }
 
     fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
-        let id = ExprId::new(self.levels.len());
-        let ty = self.comp_decl_stack.last().unwrap().ret_ty.clone();
-        self.rets.push(Expr { id, data: Ret { expr, ty }});
-        self.levels.push(Level::Global(0));
+        let id = self.levels.push(Level::Global(0));
         self.source_ranges.push(range);
+        self.explicit_rets.push(id);
+        self.implicit_ret(expr);
 
         id
     }
 
     fn implicit_ret(&mut self, expr: ExprId) {
-        let ty = self.comp_decl_stack.last().unwrap().ret_ty.clone();
-        self.implicit_rets.push(Ret { expr, ty });
+        let group = self.comp_decl_stack.last().unwrap().ret_group;
+        self.ret_groups[group].exprs.push(expr);
     }
 
     fn if_expr(&mut self, condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId>, range: SourceRange) -> ExprId {
@@ -679,7 +685,8 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
         let decl_id = self.decls.push(Decl::new(param_tys.clone(), ret_ty.clone(), Level::Global(0)));
         let name = self.interner.get_or_intern(name);
         let local_decl = LocalDecl { name, level: Level::Global(0), decl: decl_id };
-        let mut decl_state = CompDeclState::new(ret_ty);
+        let ret_group = self.ret_groups.push(RetGroup::new(ret_ty));
+        let mut decl_state = CompDeclState::new(ret_group);
         // Add decl to its own scope to enable recursion
         decl_state.decls.push(local_decl.clone());
         if let Some(comp_decl_state) = self.comp_decl_stack.last_mut() {

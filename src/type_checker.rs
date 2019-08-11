@@ -1,7 +1,7 @@
 use smallvec::smallvec;
 
 use crate::error::Error;
-use crate::tir::{self, Expr};
+use crate::tir;
 use crate::builder::{ExprId, DeclId, DeclRefId, CastId};
 use crate::ty::{Type, QualType, IntWidth};
 use crate::index_vec::IdxVec;
@@ -68,20 +68,21 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     tc.types[tc.prog.void_expr] = Type::Void;
 
     // Pass 1: propagate info down from leaves to roots
-    fn independent_pass_1<T>(constraints: &mut IdxVec<ConstraintList, ExprId>, tys: &mut IdxVec<Type, ExprId>, exprs: &Vec<Expr<T>>, ty: impl Fn(&Expr<T>) -> Type) {
+    fn independent_pass_1<T>(constraints: &mut IdxVec<ConstraintList, ExprId>, tys: &mut IdxVec<Type, ExprId>, exprs: &Vec<T>, data: impl Fn(&T) -> (ExprId, Type)) {
         for item in exprs {
-            let constraints = &mut constraints[item.id];
-            constraints.one_of = smallvec![ty(item).into()];
-            tys[item.id] = ty(item);
+            let (id, ty) = data(item);
+            let constraints = &mut constraints[id];
+            constraints.one_of = smallvec![ty.clone().into()];
+            tys[id] = ty;
         }
     }
-    independent_pass_1(&mut tc.constraints, &mut tc.types, &tc.prog.rets, |_| Type::Never);
-    independent_pass_1(&mut tc.constraints, &mut tc.types, &tc.prog.whiles, |_| Type::Void);
-    independent_pass_1(&mut tc.constraints, &mut tc.types, &tc.prog.casts, |cast| cast.ty.clone());
+    independent_pass_1(&mut tc.constraints, &mut tc.types, &tc.prog.explicit_rets, |&id| (id, Type::Never));
+    independent_pass_1(&mut tc.constraints, &mut tc.types, &tc.prog.whiles, |item| (item.id, Type::Void));
+    independent_pass_1(&mut tc.constraints, &mut tc.types, &tc.prog.casts, |item| (item.id, item.ty.clone()));
 
-    fn lit_pass_1<T>(constraints: &mut IdxVec<ConstraintList, ExprId>, lits: &Vec<Expr<T>>, lit_ty: LiteralType) {
-        for item in lits {
-            let constraints = &mut constraints[item.id];
+    fn lit_pass_1(constraints: &mut IdxVec<ConstraintList, ExprId>, lits: &Vec<ExprId>, lit_ty: LiteralType) {
+        for &item in lits {
+            let constraints = &mut constraints[item];
             constraints.preferred_type = Some(lit_ty.preferred_type().into());
             constraints.literal = Some(lit_ty);
         }
@@ -197,24 +198,25 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
         }
         constraints.set_to(Type::Void);
     }
-    // Chain explicit and implicit rets together.
-    let rets = tc.prog.rets.iter().map(|item| &item.data).chain(&tc.prog.implicit_rets);
-    for item in rets {
-        use UnificationError::*;
-        use LiteralType::*;
 
-        match tc.constraints[item.expr].can_unify_to(&QualType::from(&item.ty)) {
-            Ok(()) => {}
-            Err(Literal(Dec)) => panic!("expected return value of {:?}, found decimal literal", item.ty),
-            Err(Literal(Int)) => panic!("expected return value of {:?}, found integer literal", item.ty),
-            Err(Literal(Str)) => panic!("expected return value of {:?}, found string literal", item.ty),
-            Err(Literal(Char)) => panic!("expected return value of {:?}, found character literal", item.ty),
-            Err(InvalidChoice(choices)) => panic!("expected return value of {:?}, found {:?}", item.ty, choices),
-            Err(Immutable) => panic!("COMPILER BUG: unexpected mutable return type"),
+    for group in tc.prog.ret_groups {
+        for expr in group.exprs {
+            use UnificationError::*;
+            use LiteralType::*;
+
+            match tc.constraints[expr].can_unify_to(&QualType::from(&group.ty)) {
+                Ok(()) => {}
+                Err(Literal(Dec)) => panic!("expected return value of {:?}, found decimal literal", group.ty),
+                Err(Literal(Int)) => panic!("expected return value of {:?}, found integer literal", group.ty),
+                Err(Literal(Str)) => panic!("expected return value of {:?}, found string literal", group.ty),
+                Err(Literal(Char)) => panic!("expected return value of {:?}, found character literal", group.ty),
+                Err(InvalidChoice(choices)) => panic!("expected return value of {:?}, found {:?}", group.ty, choices),
+                Err(Immutable) => panic!("COMPILER BUG: unexpected mutable return type"),
+            }
+
+            // Assume we panic above unless the returned expr can unify to the return type
+            tc.constraints[expr].set_to(group.ty.clone());
         }
-
-        // Assume we panic above unless the returned expr can unify to the return type
-        tc.constraints[item.expr].set_to(item.ty.clone());
     }
     for item in &tc.prog.whiles {
         if tc.constraints[item.condition].can_unify_to(&Type::Bool.into()).is_ok() {
@@ -394,20 +396,20 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
             tc.constraints[item.terminal_expr].set_to(ty);
         }
     }
-    fn lit_pass_2<T>(
+    fn lit_pass_2(
         constraints: &IdxVec<ConstraintList, ExprId>,
         types: &mut IdxVec<Type, ExprId>,
         errs: &mut Vec<Error>,
         source_ranges: &IdxVec<SourceRange, ExprId>,
-        lits: &Vec<Expr<T>>,
+        lits: &Vec<ExprId>,
         lit_ty: &str
     ) {
-        for item in lits {
-            let constraints = &constraints[item.id];
-            types[item.id] = if constraints.one_of.len() != 1 {
+        for &item in lits {
+            let constraints = &constraints[item];
+            types[item] = if constraints.one_of.len() != 1 {
                 errs.push(
                     Error::new("ambiguous type for expression")
-                        .adding_primary_range(source_ranges[item.id].clone(), format!("{} literal here", lit_ty))
+                        .adding_primary_range(source_ranges[item].clone(), format!("{} literal here", lit_ty))
                 );
                 Type::Error
             } else {
