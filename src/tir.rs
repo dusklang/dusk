@@ -262,13 +262,13 @@ impl<'src> Builder<'src> {
     fn _insert_item<T: Item>(&mut self, item: T, extra_dep: Option<Level>, decl_ref: Option<DeclRefId>) -> Level {
         macro_rules! insert_local {
             ($tree:expr, $level:expr) => {{
-                Item::storage_mut(&mut self.local_trees[$tree]).insert($level, item);
+                Item::storage(&mut self.local_trees[$tree]).insert($level, item);
                 Level::Local($tree, $level)
             }};
         }
         macro_rules! insert_global {
             ($level:expr) => {{
-                Item::storage_mut(&mut self.global_tree).insert($level, item);
+                Item::storage(&mut self.global_tree).insert($level, item);
                 Level::Global($level)
             }};
         }
@@ -384,62 +384,54 @@ impl Item for Expr<Do> {
     fn dependencies<'src>(&'src self, b: &'src Builder<'src>) -> SmallVec<[Level; 3]> {
         smallvec![b.levels[self.terminal_expr]]
     }
-    fn storage(tree: &Tree) -> &DepVec<Self> { &tree.dos }
-    fn storage_mut(tree: &mut Tree) -> &mut DepVec<Self> { &mut tree.dos }
+    fn storage(tree: &mut Tree) -> &mut DepVec<Self> { &mut tree.dos }
 }
 
 impl Item for Expr<Assignment> {
     fn dependencies<'src>(&'src self, b: &'src Builder<'src>) -> SmallVec<[Level; 3]> {
         smallvec![b.levels[self.lhs], b.levels[self.rhs]]
     }
-    fn storage(tree: &Tree) -> &DepVec<Self> { &tree.assignments }
-    fn storage_mut(tree: &mut Tree) -> &mut DepVec<Self> { &mut tree.assignments }
+    fn storage(tree: &mut Tree) -> &mut DepVec<Self> { &mut tree.assignments }
 }
 
 impl Item for Expr<DeclRef> {
     fn dependencies<'src>(&'src self, b: &'src Builder<'src>) -> SmallVec<[Level; 3]> {
         self.args.iter().map(|&id| b.levels[id]).collect()
     }
-    fn storage(tree: &Tree) -> &DepVec<Self> { &tree.decl_refs }
-    fn storage_mut(tree: &mut Tree) -> &mut DepVec<Self> { &mut tree.decl_refs }
+    fn storage(tree: &mut Tree) -> &mut DepVec<Self> { &mut tree.decl_refs }
 }
 
 impl Item for Expr<AddrOf> {
     fn dependencies<'src>(&'src self, b: &'src Builder<'src>) -> SmallVec<[Level; 3]> {
         smallvec![b.levels[self.expr]]
     }
-    fn storage(tree: &Tree) -> &DepVec<Self> { &tree.addr_ofs }
-    fn storage_mut(tree: &mut Tree) -> &mut DepVec<Self> { &mut tree.addr_ofs }
+    fn storage(tree: &mut Tree) -> &mut DepVec<Self> { &mut tree.addr_ofs }
 }
 
 impl Item for Expr<Dereference> {
     fn dependencies<'src>(&'src self, b: &'src Builder<'src>) -> SmallVec<[Level; 3]> {
         smallvec![b.levels[self.expr]]
     }
-    fn storage(tree: &Tree) -> &DepVec<Self> { &tree.derefs }
-    fn storage_mut(tree: &mut Tree) -> &mut DepVec<Self> { &mut tree.derefs }
+    fn storage(tree: &mut Tree) -> &mut DepVec<Self> { &mut tree.derefs }
 }
 
 impl Item for Expr<If> {
     fn dependencies<'src>(&'src self, b: &'src Builder<'src>) -> SmallVec<[Level; 3]> {
         smallvec![b.levels[self.condition], b.levels[self.then_expr], b.levels[self.else_expr]]
     }
-    fn storage(tree: &Tree) -> &DepVec<Self> { &tree.ifs }
-    fn storage_mut(tree: &mut Tree) -> &mut DepVec<Self> { &mut tree.ifs }
+    fn storage(tree: &mut Tree) -> &mut DepVec<Self> { &mut tree.ifs }
 }
 
 impl Item for AssignedDecl {
     fn dependencies<'src>(&'src self, b: &'src Builder<'src>) -> SmallVec<[Level; 3]> {
         smallvec![b.levels[self.root_expr]]
     }
-    fn storage(tree: &Tree) -> &DepVec<Self> { &tree.assigned_decls }
-    fn storage_mut(tree: &mut Tree) -> &mut DepVec<Self> { &mut tree.assigned_decls }
+    fn storage(tree: &mut Tree) -> &mut DepVec<Self> { &mut tree.assigned_decls }
 }
 
 pub trait Item: Sized {
     fn dependencies<'src>(&'src self, builder: &'src Builder<'src>) -> SmallVec<[Level; 3]>;
-    fn storage(tree: &Tree) -> &DepVec<Self>;
-    fn storage_mut(tree: &mut Tree) -> &mut DepVec<Self>;
+    fn storage(tree: &mut Tree) -> &mut DepVec<Self>;
 }
 
 impl<'src> Builder<'src> {
