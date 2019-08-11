@@ -57,7 +57,7 @@ pub enum Decl {
     Computed { name: String, params: SmallVec<[DeclId; 2]>, ret_ty: Type, scope: ScopeId },
     Stored,
     Parameter(Type),
-    Intrinsic(Intrinsic),
+    Intrinsic(Intrinsic, Type),
     Static(ExprId),
     Const(ExprId),
 }
@@ -140,8 +140,8 @@ impl<'src> Builder<'src> {
 
 impl<'src> builder::Builder<'src> for Builder<'src> {
     type Output = Program;
-    fn add_intrinsic(&mut self, intrinsic: Intrinsic, _param_tys: SmallVec<[Type; 2]>, _ret_ty: Type) {
-        self.decls.push(Decl::Intrinsic(intrinsic));
+    fn add_intrinsic(&mut self, intrinsic: Intrinsic, _param_tys: SmallVec<[Type; 2]>, ret_ty: Type) {
+        self.decls.push(Decl::Intrinsic(intrinsic, ret_ty));
     }
     fn void_expr(&self) -> ExprId { self.void_expr }
     fn int_lit(&mut self, lit: u64, _range: SourceRange) -> ExprId {

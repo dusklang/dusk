@@ -25,6 +25,17 @@ pub enum Const {
     Bool(bool),
 }
 
+impl Const {
+    pub fn ty(&self) -> Type {
+        match self {
+            Const::Int { ty, .. } => ty.clone(),
+            Const::Float { ty, .. } => ty.clone(),
+            Const::Str { ty, .. } => ty.clone(),
+            Const::Bool(_) => Type::Bool,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub enum Instr {
     Void,
@@ -32,7 +43,7 @@ pub enum Instr {
     Alloca(Type),
     LogicalNot(InstrId),
     Call { arguments: SmallVec<[InstrId; 2]>, func: FuncId },
-    Intrinsic { arguments: SmallVec<[InstrId; 2]>, intr: Intrinsic },
+    Intrinsic { arguments: SmallVec<[InstrId; 2]>, ty: Type, intr: Intrinsic },
     Reinterpret(InstrId, Type),
     Truncate(InstrId, Type),
     SignExtend(InstrId, Type),
@@ -55,7 +66,7 @@ enum Decl {
     Stored { location: InstrId },
     Computed { get: FuncId },
     LocalConst { value: InstrId },
-    Intrinsic(Intrinsic),
+    Intrinsic(Intrinsic, Type),
     Static(StaticId),
     Const(Const),
 }
@@ -132,6 +143,31 @@ pub struct Program {
     statics: IdxVec<Const, StaticId>,
 }
 
+impl Program {
+    pub fn type_of(&self, instr_id: InstrId, func_id: FuncId) -> Type {
+        let func = &self.comp_decls[func_id];
+        match &func.code[instr_id] {
+            Instr::Void | Instr::Store { .. } => Type::Void,
+            Instr::Const(konst) => konst.ty(),
+            Instr::Alloca(ty) => ty.clone().mut_ptr(),
+            Instr::LogicalNot(_) => Type::Bool,
+            &Instr::Call { func, .. } => self.comp_decls[func].ret_ty.clone(),
+            Instr::Intrinsic { ty, .. } => ty.clone(),
+            Instr::Reinterpret(_, ty) | Instr::Truncate(_, ty) | Instr::SignExtend(_, ty)
+                | Instr::ZeroExtend(_, ty) | Instr::FloatCast(_, ty) | Instr::FloatToInt(_, ty)
+                | Instr::IntToFloat(_, ty)
+                  => ty.clone(),
+            &Instr::Load(instr) => match self.type_of(instr, func_id) {
+                Type::Pointer(pointee) => pointee.ty,
+                _ => Type::Error,
+            },
+            &Instr::AddressOfStatic(statik) => self.statics[statik].ty().mut_ptr(),
+            Instr::Ret(_) | Instr::Br(_) | Instr::CondBr { .. } => Type::Never,
+            Instr::Parameter(ty) => ty.clone(),
+        }
+    }
+}
+
 fn expr_to_const(expr: &Expr, ty: Type, strings: &mut IdxVec<String, StrId>) -> Const {
     match *expr {
         Expr::IntLit { lit } => Const::Int { lit, ty },
@@ -170,7 +206,7 @@ impl Program {
                     },
                     hir::Decl::Stored => Decl::Stored { location: InstrId::new(std::usize::MAX) },
                     hir::Decl::Parameter(_) => Decl::LocalConst { value: InstrId::new(std::usize::MAX) },
-                    &hir::Decl::Intrinsic(intr) => Decl::Intrinsic(intr),
+                    &hir::Decl::Intrinsic(intr, ref ty) => Decl::Intrinsic(intr, ty.clone()),
                     &hir::Decl::Static(root_expr) => {
                         let konst = expr_to_const(&prog.exprs[root_expr], tc.types[root_expr].clone(), &mut strings);
                         let statik = statics.push(konst);
@@ -298,7 +334,7 @@ impl fmt::Display for Program {
                             write!(f, "%{} = ", i)?;
                             fmt_const(f, konst, self)?;
                         },
-                        Instr::Intrinsic { arguments, intr } => {
+                        Instr::Intrinsic { arguments, intr, .. } => {
                             write!(f, "%{} = intrinsic `{}`", i, intr.name())?;
                             write_args!(arguments)?
                         },
@@ -430,16 +466,18 @@ impl<'a> FunctionBuilder<'a> {
 
     fn get(&mut self, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId) -> InstrId {
         let id = self.tc.overloads[id].expect("No overload found!");
-        match &self.decls[id] {
-            &Decl::Computed { get } => self.code.push(Instr::Call { arguments, func: get }),
-            &Decl::Stored { location } => {
+        match self.decls[id] {
+            Decl::Computed { get } => self.code.push(Instr::Call { arguments, func: get }),
+            Decl::Stored { location } => {
                 assert!(arguments.is_empty());
                 self.code.push(Instr::Load(location))
             },
-            &Decl::LocalConst { value } => value,
-            &Decl::Intrinsic(intr) => self.code.push(Instr::Intrinsic { arguments, intr }),
-            Decl::Const(konst) => self.code.push(Instr::Const(konst.clone())),
-            &Decl::Static(statik) => {
+            Decl::LocalConst { value } => value,
+            Decl::Intrinsic(intr, ref ty) => {
+                self.code.push(Instr::Intrinsic { arguments, ty: ty.clone(), intr })
+            },
+            Decl::Const(ref konst) => self.code.push(Instr::Const(konst.clone())),
+            Decl::Static(statik) => {
                 let location = self.code.push(Instr::AddressOfStatic(statik));
                 self.code.push(Instr::Load(location))
             },
@@ -455,7 +493,7 @@ impl<'a> FunctionBuilder<'a> {
                 self.code.push(Instr::Store { location, value })
             },
             Decl::LocalConst { .. } | Decl::Const(_) => panic!("can't set a constant!"),
-            Decl::Intrinsic(_) => panic!("can't set an intrinsic! (yet?)"),
+            Decl::Intrinsic(_, _) => panic!("can't set an intrinsic! (yet?)"),
             &Decl::Static(statik) => {
                 let location = self.code.push(Instr::AddressOfStatic(statik));
                 self.code.push(Instr::Store { location, value })
@@ -473,7 +511,7 @@ impl<'a> FunctionBuilder<'a> {
                 location
             },
             Decl::LocalConst { .. } | Decl::Const(_) => panic!("can't modify a constant!"),
-            Decl::Intrinsic(_) => panic!("can't modify an intrinsic! (yet?)"),
+            Decl::Intrinsic(_, _) => panic!("can't modify an intrinsic! (yet?)"),
             &Decl::Static(statik) => self.code.push(Instr::AddressOfStatic(statik)),
         }
     }
