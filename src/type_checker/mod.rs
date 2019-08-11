@@ -1,3 +1,6 @@
+mod constraints;
+use constraints::{ConstraintList, LiteralType, UnificationError};
+
 use smallvec::smallvec;
 
 use crate::error::Error;
@@ -7,7 +10,6 @@ use crate::ty::{Type, QualType, IntWidth};
 use crate::index_vec::IdxVec;
 use crate::source_info::SourceRange;
 use crate::dep_vec;
-use crate::constraints::{ConstraintList, LiteralType, UnificationError};
 
 pub enum CastMethod {
     Noop,

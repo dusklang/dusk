@@ -12,7 +12,6 @@ mod hir;
 mod mir;
 mod ty;
 mod arch;
-mod constraints;
 mod type_checker;
 
 use std::fs;
