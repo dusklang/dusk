@@ -269,7 +269,7 @@ impl<'src> Builder<'src> {
         if let Some(extra_dep) = extra_dep {
             dependencies.push(extra_dep);
         }
-        if dependencies.is_empty() {
+        if dependencies.is_empty() && decl_ref.is_none() {
             insert_global!(0)
         } else {
             // Unique the dependencies by tree, choosing the max level from each
@@ -315,8 +315,7 @@ impl<'src> Builder<'src> {
                 // If the tree depends on the deepest overload of a declref, it can't yet be related to any other item and must go
                 // in a fresh tree of its own
                 fresh_tree!()
-            }
-            else if depended_trees.len() == 1 {
+            } else if depended_trees.len() == 1 {
                 // If the item depends only on items from one tree, put it in that tree
                 match depended_trees[0] {
                     Level::Global(level) => {
