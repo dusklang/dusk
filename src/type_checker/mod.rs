@@ -70,7 +70,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     tc.types[tc.prog.void_expr] = Type::Void;
 
     // Pass 1: propagate info down from leaves to roots
-    fn independent_pass_1<T>(constraints: &mut IdxVec<ConstraintList, ExprId>, tys: &mut IdxVec<Type, ExprId>, exprs: &Vec<T>, data: impl Fn(&T) -> (ExprId, Type)) {
+    fn independent_pass_1<T>(constraints: &mut IdxVec<ConstraintList, ExprId>, tys: &mut IdxVec<Type, ExprId>, exprs: &[T], data: impl Fn(&T) -> (ExprId, Type)) {
         for item in exprs {
             let (id, ty) = data(item);
             let constraints = &mut constraints[id];
@@ -82,7 +82,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     independent_pass_1(&mut tc.constraints, &mut tc.types, &tc.prog.whiles, |item| (item.id, Type::Void));
     independent_pass_1(&mut tc.constraints, &mut tc.types, &tc.prog.casts, |item| (item.id, item.ty.clone()));
 
-    fn lit_pass_1(constraints: &mut IdxVec<ConstraintList, ExprId>, lits: &Vec<ExprId>, lit_ty: LiteralType) {
+    fn lit_pass_1(constraints: &mut IdxVec<ConstraintList, ExprId>, lits: &[ExprId], lit_ty: LiteralType) {
         for &item in lits {
             let constraints = &mut constraints[item];
             constraints.preferred_type = Some(lit_ty.preferred_type().into());
@@ -242,7 +242,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
                     if pointee.is_mut || !dest_pointee_ty.is_mut {
                         src_ty = Some(ty.ty.clone());
                     }
-                } else if let Type::Int { width, is_signed: _ } = &ty.ty {
+                } else if let Type::Int { width, .. } = &ty.ty {
                     assert!(src_ty.is_none(), "Ambiguous type in cast");
                     if let IntWidth::Pointer = width {
                         src_ty = Some(ty.ty.clone());
@@ -252,7 +252,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
             let src_ty = src_ty.expect("Invalid cast!");
             constraints.set_to(src_ty);
             CastMethod::Reinterpret
-        } else if let Type::Int { ref width, is_signed: _ } = item.ty {
+        } else if let Type::Int { ref width, .. } = item.ty {
             let mut src_ty = None;
             let mut method = CastMethod::Noop;
             // TODO: Don't just pick the first valid overload; rank them
@@ -403,7 +403,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
         types: &mut IdxVec<Type, ExprId>,
         errs: &mut Vec<Error>,
         source_ranges: &IdxVec<SourceRange, ExprId>,
-        lits: &Vec<ExprId>,
+        lits: &[ExprId],
         lit_ty: &str
     ) {
         for &item in lits {

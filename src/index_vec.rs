@@ -55,13 +55,13 @@ impl<T, I: Idx> IdxVec<T, I> {
         }
         indices
     }
-    pub fn iter<'a>(&'a self) -> std::slice::Iter<'a, T> { self.raw.iter() }
-    pub fn iter_mut<'a>(&'a mut self) -> std::slice::IterMut<'a, T> { self.raw.iter_mut() }
+    pub fn iter(&self) -> std::slice::Iter<T> { self.raw.iter() }
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<T> { self.raw.iter_mut() }
     pub fn indices(&self) -> impl Iterator<Item=I> {
         // HACK: Unfortunately empty ranges in Rust (for example 0..0) appear to actually yield one element.
         // Filtering is a silly way to get around this.
         let empty = self.raw.is_empty();
-        (0..self.raw.len()).filter(move |_| !empty).map(|i| I::new(i))
+        (0..self.raw.len()).filter(move |_| !empty).map(I::new)
     }
     pub fn reserve(&mut self, additional: usize) {
         self.raw.reserve(additional);

@@ -184,7 +184,7 @@ impl Program {
         }
         let mut comp_decls = IdxVec::<Function, FuncId>::new();
         for decl in &prog.decls {
-            if let &hir::Decl::Computed { ref name, ref params, ref ret_ty, scope } = decl {
+            if let hir::Decl::Computed { ref name, ref params, ref ret_ty, scope } = *decl {
                 comp_decls.push(
                     FunctionBuilder::new(
                         prog,
@@ -424,7 +424,7 @@ impl<'a> FunctionBuilder<'a> {
                 assert!(arguments.is_empty());
                 self.code.push(Instr::Load(location))
             },
-            &Decl::LocalConst { value } => return value,
+            &Decl::LocalConst { value } => value,
             &Decl::Intrinsic(intr) => self.code.push(Instr::Intrinsic { arguments, intr }),
             Decl::Const(konst) => self.code.push(Instr::Const(konst.clone())),
             &Decl::Static(statik) => {
@@ -635,13 +635,8 @@ impl<'a> FunctionBuilder<'a> {
                             self.code.push(Instr::ZeroExtend(value, dest_ty.clone()))
                         }
                     } else if src_bit_width > dest_bit_width {
-                        if dest_is_signed {
-                            // TODO: Bounds checking
-                            self.code.push(Instr::Truncate(value, dest_ty.clone()))
-                        } else {
-                            // TODO: Bounds checking
-                            self.code.push(Instr::Truncate(value, dest_ty.clone()))
-                        }
+                        // TODO: Bounds checking
+                        self.code.push(Instr::Truncate(value, dest_ty.clone()))
                     } else {
                         unreachable!()
                     }

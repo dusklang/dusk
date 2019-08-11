@@ -404,7 +404,7 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
     fn parse_comp_decl(&mut self) {
         assert_eq!(self.cur().kind, &TokenKind::Fn);
         let mut proto_range = self.cur().range.clone();
-        let name = if let &TokenKind::Ident(name) = self.next().kind {
+        let name = if let TokenKind::Ident(name) = *self.next().kind {
             name
         } else {
             panic!("expected identifier after 'fn'")
@@ -414,7 +414,7 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
         let mut param_tys = SmallVec::new();
         if let TokenKind::LeftParen = self.next().kind {
             self.next();
-            while let &TokenKind::Ident(name) = self.cur().kind {
+            while let TokenKind::Ident(name) = *self.cur().kind {
                 param_names.push(name);
                 assert_eq!(self.next().kind, &TokenKind::Colon);
                 self.next();
@@ -453,8 +453,8 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
 
     fn parse_type(&mut self) -> (Type, SourceRange) {
         let (mut ty, mut range) = (
-            match self.cur().kind {
-                &TokenKind::Ident(ident) => match ident {
+            match *self.cur().kind {
+                TokenKind::Ident(ident) => match ident {
                     "i8" => Type::i8(),
                     "i16" => Type::i16(),
                     "i32" => Type::i32(),

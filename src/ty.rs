@@ -53,7 +53,7 @@ impl Type {
 
     pub fn expressible_by_str_lit(&self) -> bool {
         if let Type::Pointer(pointee) = self {
-            if let Type::Int { width: IntWidth::W8, is_signed: _ } = &pointee.ty {
+            if let Type::Int { width: IntWidth::W8, .. } = &pointee.ty {
                 !pointee.is_mut
             } else {
                 false
@@ -64,7 +64,7 @@ impl Type {
     }
 
     pub fn expressible_by_char_lit(&self) -> bool {
-        if let Type::Int { width: IntWidth::W8, is_signed: _ } = self {
+        if let Type::Int { width: IntWidth::W8, .. } = self {
             true
         } else {
             self.expressible_by_str_lit()

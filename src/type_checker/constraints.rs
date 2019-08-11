@@ -6,7 +6,7 @@ use crate::ty::{Type, QualType};
 pub enum LiteralType { Int, Dec, Str, Char }
 
 impl LiteralType {
-    pub fn preferred_type(&self) -> Type {
+    pub fn preferred_type(self) -> Type {
         match self {
             LiteralType::Int => Type::i32(),
             LiteralType::Dec => Type::f64(),
@@ -44,12 +44,12 @@ impl ConstraintList {
 
     fn is_never(&self) -> bool {
         self.one_of.len() == 1 
-            && &self.one_of.first().unwrap().ty == &Type::Never
+            && self.one_of.first().unwrap().ty == Type::Never
     }
 
     pub fn can_unify_to(&self, ty: &QualType) -> Result<(), UnificationError> {
         // Never is the "bottom type", so it unifies to anything.
-        if self.one_of_exists(|ty| &ty.ty == &Type::Never) { return Ok(()); }
+        if self.one_of_exists(|ty| ty.ty == Type::Never) { return Ok(()); }
 
         use UnificationError::*;
         match self.literal {

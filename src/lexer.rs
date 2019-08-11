@@ -119,7 +119,7 @@ impl<'src> Lexer<'src> {
         for (a, b) in self.src.as_bytes()[self.start..].iter().zip(slice.iter()) {
             if a != b { return false; }
         }
-        return true;
+        true
     }
 
     /// Skip over `n` bytes of known-ASCII text
@@ -136,7 +136,7 @@ impl<'src> Lexer<'src> {
             false
         }
     }
-    fn is_newline(&mut self) -> bool { self.is(b'\n') || self.is(b'\r') || self.is_str(b"\r\n") }
+    fn is_newline(&self) -> bool { self.is(b'\n') || self.is(b'\r') || self.is_str(b"\r\n") }
     fn is_whitespace(&self) -> bool { self.is(b' ') || self.is(b'\t') }
     fn is_num(&self) -> bool {
         let mut chars = self.cur().chars();
@@ -233,7 +233,7 @@ impl<'src> Lexer<'src> {
                     "no previous '/*' to match"
                 )
             );
-            return self.next();
+            self.next()
         } else if self.is(b'"') {
             self.advance();
             let mut in_escape_mode = false;

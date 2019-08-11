@@ -258,7 +258,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
         // `end_computed_decl` will attach the real scope to this decl; we don't have it yet
         self.decls[id] = Decl::Computed {
             name: name.to_owned(),
-            params: params,
+            params,
             ret_ty,
             scope: ScopeId::new(std::usize::MAX)
         };

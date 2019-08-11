@@ -339,10 +339,10 @@ impl<'src> Builder<'src> {
                     let mut max_level = 0;
                     let mut local_tree = None;
                     for t in &depended_trees {
-                        match t {
-                            &Level::Global(level) => max_level = max(max_level, level),
-                            &Level::Local(tree, level) => {
-                                if let Some(_) = local_tree {
+                        match *t {
+                            Level::Global(level) => max_level = max(max_level, level),
+                            Level::Local(tree, level) => {
+                                if local_tree.is_some() {
                                     local_tree = None;
                                     break;
                                 }
