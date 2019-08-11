@@ -18,6 +18,12 @@ macro_rules! newtype_index {
             fn new(raw: usize) -> Self { $name(raw) }
             fn idx(self) -> usize { self.0 }
         }
+
+        impl $name {
+            pub fn advance(&mut self) {
+                self.0 += 1;
+            }
+        }
     }
 }
 

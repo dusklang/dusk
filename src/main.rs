@@ -13,10 +13,14 @@ mod mir;
 mod ty;
 mod arch;
 mod type_checker;
+mod interpreter;
 
 use std::fs;
 use crossbeam_utils::thread;
 
+use interpreter::Interpreter;
+use index_vec::Idx;
+use ty::Type;
 
 fn main() {
     let contents = fs::read_to_string("HelloWorld.meda")
@@ -46,11 +50,15 @@ fn main() {
     errs.extend(mid_errs);
 
     let mir = mir::Program::build(&hir, &tc, arch::Arch::X86_64);
-    println!("{}", mir);
-    //println!("Succeeded!");
 
     for err in &errs { err.report(&file); }
     if !errs.is_empty() {
         println!("\n\u{001B}[31mcompilation failed due to previous {} errors\u{001B}[0m", errs.len());
+    } else {
+        let mut interpreter = Interpreter::new(&mir);
+        let main = mir.comp_decls.iter()
+            .position(|func| &*func.name == "main" && func.ret_ty == Type::Void && func.num_parameters() == 0)
+            .expect("Couldn't find main function with no parameters and a return type of void!");
+        println!("{:?}", interpreter.call(Idx::new(main), Vec::new()));
     }
 }

@@ -72,11 +72,26 @@ enum Decl {
 }
 
 #[derive(Debug)]
-struct Function {
-    name: String,
-    ret_ty: Type,
-    code: IdxVec<Instr, InstrId>,
-    basic_blocks: IdxVec<InstrId, BasicBlockId>,
+pub struct Function {
+    pub name: String,
+    pub ret_ty: Type,
+    pub code: IdxVec<Instr, InstrId>,
+    pub basic_blocks: IdxVec<InstrId, BasicBlockId>,
+}
+
+impl Function {
+    pub fn num_parameters(&self) -> usize {
+        let raw_code = &self.code.raw;
+        assert_eq!(raw_code[0], Instr::Void);
+        let mut num_parameters = 0;
+        for i in 1..raw_code.len() {
+            match &raw_code[i] {
+                Instr::Parameter(_) => num_parameters += 1,
+                _ => break,
+            }
+        }
+        num_parameters
+    }
 }
 
 /// What to do with a value
@@ -138,9 +153,9 @@ impl Context {
 
 #[derive(Debug)]
 pub struct Program {
-    comp_decls: IdxVec<Function, FuncId>,
-    strings: IdxVec<String, StrId>,
-    statics: IdxVec<Const, StaticId>,
+    pub comp_decls: IdxVec<Function, FuncId>,
+    pub strings: IdxVec<String, StrId>,
+    pub statics: IdxVec<Const, StaticId>,
 }
 
 impl Program {
