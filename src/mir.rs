@@ -129,6 +129,7 @@ impl Context {
 pub struct Program {
     comp_decls: IdxVec<Function, FuncId>,
     strings: IdxVec<String, StrId>,
+    statics: IdxVec<Const, StaticId>,
 }
 
 fn expr_to_const(expr: &Expr, ty: Type, strings: &mut IdxVec<String, StrId>) -> Const {
@@ -191,7 +192,6 @@ impl Program {
                         tc,
                         &mut decls,
                         &mut strings,
-                        &statics,
                         name.clone(),
                         ret_ty.clone(),
                         scope,
@@ -202,12 +202,29 @@ impl Program {
             }
         }
         assert_eq!(num_functions, comp_decls.len());
-        Program { comp_decls, strings }
+        Program { comp_decls, strings, statics }
+    }
+}
+
+fn fmt_const(f: &mut fmt::Formatter, konst: &Const, prog: &Program) -> fmt::Result {
+    match *konst {
+        Const::Bool(val) => writeln!(f, "{}", val),
+        Const::Float { lit, ref ty } => writeln!(f, "{} as {:?}", lit, ty),
+        Const::Int { lit, ref ty } => writeln!(f, "{} as {:?}", lit, ty),
+        Const::Str { id, ref ty } => writeln!(f, "%str{} ({:?}) as {:?}", id.idx(), prog.strings[id], ty),
     }
 }
 
 impl fmt::Display for Program {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if !self.statics.raw.is_empty() {
+            for (i, statik) in self.statics.iter().enumerate() {
+                write!(f, "%static{} = ", i)?;
+                fmt_const(f, statik, self)?;
+            }
+            writeln!(f)?;
+        }
+
         for (i, func) in self.comp_decls.iter().enumerate() {
             write!(f, "fn {}", &func.name)?;
             assert_eq!(&func.code.raw[0], &Instr::Void);
@@ -277,16 +294,14 @@ impl fmt::Display for Program {
                             write!(f, "%{} = call `{}`", i, self.comp_decls[callee].name)?;
                             write_args!(arguments)?
                         },
-                        Instr::Const(konst) => match *konst {
-                            Const::Bool(val) => writeln!(f, "%{} = {}", i, val)?,
-                            Const::Float { lit, ref ty } => writeln!(f, "%{} = {} as {:?}", i, lit, ty)?,
-                            Const::Int { lit, ref ty } => writeln!(f, "%{} = {} as {:?}", i, lit, ty)?,
-                            Const::Str { id, ref ty } => writeln!(f, "%{} = %str{} ({:?}) as {:?}", i, id.idx(), self.strings[id], ty)?,
+                        Instr::Const(konst) => {
+                            write!(f, "%{} = ", i)?;
+                            fmt_const(f, konst, self)?;
                         },
                         Instr::Intrinsic { arguments, intr } => {
                             write!(f, "%{} = intrinsic `{}`", i, intr.name())?;
                             write_args!(arguments)?
-                        }
+                        },
                         Instr::Load(location) => writeln!(f, "%{} = load %{}", i, location.idx())?,
                         Instr::LogicalNot(op) => writeln!(f, "%{} = not %{}", i, op.idx())?,
                         Instr::Ret(val) => writeln!(f,  "return %{}", val.idx())?,
@@ -318,7 +333,6 @@ struct FunctionBuilder<'a> {
     tc: &'a tc::Program,
     decls: &'a mut IdxVec<Decl, DeclId>,
     strings: &'a mut IdxVec<String, StrId>,
-    statics: &'a IdxVec<Const, StaticId>,
     name: String,
     ret_ty: Type,
     scope: ScopeId,
@@ -334,7 +348,6 @@ impl<'a> FunctionBuilder<'a> {
         tc: &'a tc::Program,
         decls: &'a mut IdxVec<Decl, DeclId>,
         strings: &'a mut IdxVec<String, StrId>,
-        statics: &'a IdxVec<Const, StaticId>,
         name: String,
         ret_ty: Type,
         scope: ScopeId,
@@ -358,7 +371,6 @@ impl<'a> FunctionBuilder<'a> {
             tc,
             decls,
             strings,
-            statics,
             name,
             ret_ty,
             scope,

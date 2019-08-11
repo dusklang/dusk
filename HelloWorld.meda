@@ -18,7 +18,7 @@ fn print_num(num: i32) {
     print((num % 10) as i8 + "0")
 }
 
-FIZZ_BUZZ_NUM_ITERATIONS :: 100
+FIZZ_BUZZ_NUM_ITERATIONS := 100
 
 fn fizz_buzz {
     i := 1
