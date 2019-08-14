@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum Arch {
     X86_64,
     /// Gameboy

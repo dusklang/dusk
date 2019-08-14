@@ -63,6 +63,15 @@ fn main {
     }
 }*/
 
+
+fn foo: i32 {
+    12
+}
+
 fn main() {
-    var := 5
+    if true {
+        foo := 27
+    } else {
+        foo := 22
+    }
 }

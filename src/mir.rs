@@ -156,6 +156,7 @@ pub struct Program {
     pub comp_decls: IdxVec<Function, FuncId>,
     pub strings: IdxVec<String, StrId>,
     pub statics: IdxVec<Const, StaticId>,
+    pub arch: Arch,
 }
 
 impl Program {
@@ -185,7 +186,13 @@ impl Program {
 
 fn expr_to_const(expr: &Expr, ty: Type, strings: &mut IdxVec<String, StrId>) -> Const {
     match *expr {
-        Expr::IntLit { lit } => Const::Int { lit, ty },
+        Expr::IntLit { lit } => {
+            match ty {
+                Type::Int { .. } => Const::Int { lit, ty },
+                Type::Float(_)   => Const::Float { lit: lit as f64, ty },
+                _ => panic!("Unrecognized integer literal type"),
+            }
+        },
         Expr::DecLit { lit } => Const::Float { lit, ty },
         Expr::StrLit { ref lit } => {
             let id = strings.push(lit.clone());
@@ -253,7 +260,7 @@ impl Program {
             }
         }
         assert_eq!(num_functions, comp_decls.len());
-        Program { comp_decls, strings, statics }
+        Program { comp_decls, strings, statics, arch }
     }
 }
 
