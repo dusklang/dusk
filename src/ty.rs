@@ -162,13 +162,6 @@ impl Type {
             (a, b) => a == b,
         }
     }
-
-    pub fn pointee(&self) -> Option<&QualType> {
-        match self {
-            Type::Pointer(pointee) => Some(pointee.as_ref()),
-            _ => None,
-        }
-    }
 }
 
 impl Default for Type {

@@ -20,6 +20,7 @@ macro_rules! newtype_index {
         }
 
         impl $name {
+            #[allow(unused)]
             pub fn advance(&mut self) {
                 self.0 += 1;
             }

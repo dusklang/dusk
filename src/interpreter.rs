@@ -135,10 +135,6 @@ impl Value {
         Value::from_bytes(val.to_le_bytes().as_ref())
     }
 
-    fn from_isize(val: isize) -> Value {
-        Value::from_bytes(val.to_le_bytes().as_ref())
-    }
-
     fn from_f32(val: f32) -> Value {
         Value::from_u32(val.to_bits())
     }
