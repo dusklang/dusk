@@ -257,12 +257,8 @@ impl<'mir> Interpreter<'mir> {
             },
             &Instr::Intrinsic { ref arguments, intr, .. } => {
                 match intr {
-                    // Intrinsic::Mult,
-                    // Intrinsic::Div,
-                    // Intrinsic::Mod,
-                    // Intrinsic::Add,
-                    // Intrinsic::Sub,
-                    Intrinsic::Less => {
+                    // TODO: Reduce code duplication
+                    Intrinsic::Mult => {
                         assert_eq!(arguments.len(), 2);
                         let (lhs, rhs) = (arguments[0], arguments[1]);
                         let ty = self.prog.type_of(lhs, func_id);
@@ -273,7 +269,157 @@ impl<'mir> Interpreter<'mir> {
                                 // We assume in the match below that pointer-sized ints are 64 bits
                                 assert_eq!(self.prog.arch.pointer_size(), 64);
                                 use IntWidth::*;
-                                let val = match (width, is_signed) {
+                                match (width, is_signed) {
+                                    (W8, true) => Value::from_i8(lhs.as_i8() * rhs.as_i8()),
+                                    (W16, true) => Value::from_i16(lhs.as_i16() * rhs.as_i16()),
+                                    (W32, true) => Value::from_i32(lhs.as_i32() * rhs.as_i32()),
+                                    (W64, true) | (Pointer, true) => Value::from_i64(lhs.as_i64() * rhs.as_i64()),
+
+                                    (W8, false) => Value::from_u8(lhs.as_u8() * rhs.as_u8()),
+                                    (W16, false) => Value::from_u16(lhs.as_u16() * rhs.as_u16()),
+                                    (W32, false) => Value::from_u32(lhs.as_u32() * rhs.as_u32()),
+                                    (W64, false) | (Pointer, false) => Value::from_u64(lhs.as_u64() * rhs.as_u64()),
+                                }
+                            },
+                            Type::Float(width) => match width {
+                                FloatWidth::W32 => Value::from_f32(lhs.as_f32() * rhs.as_f32()),
+                                FloatWidth::W64 => Value::from_f64(lhs.as_f64() * rhs.as_f64()),
+                            },
+                            _ => panic!("Unexpected type for intrinsic arguments"),
+                        }
+                    },
+                    Intrinsic::Div => {
+                        assert_eq!(arguments.len(), 2);
+                        let (lhs, rhs) = (arguments[0], arguments[1]);
+                        let ty = self.prog.type_of(lhs, func_id);
+                        assert_eq!(ty, self.prog.type_of(rhs, func_id));
+                        let (lhs, rhs) = (&frame.results[lhs], &frame.results[rhs]);
+                        match ty {
+                            Type::Int { width, is_signed } => {
+                                // We assume in the match below that pointer-sized ints are 64 bits
+                                assert_eq!(self.prog.arch.pointer_size(), 64);
+                                use IntWidth::*;
+                                match (width, is_signed) {
+                                    (W8, true) => Value::from_i8(lhs.as_i8() / rhs.as_i8()),
+                                    (W16, true) => Value::from_i16(lhs.as_i16() / rhs.as_i16()),
+                                    (W32, true) => Value::from_i32(lhs.as_i32() / rhs.as_i32()),
+                                    (W64, true) | (Pointer, true) => Value::from_i64(lhs.as_i64() / rhs.as_i64()),
+
+                                    (W8, false) => Value::from_u8(lhs.as_u8() / rhs.as_u8()),
+                                    (W16, false) => Value::from_u16(lhs.as_u16() / rhs.as_u16()),
+                                    (W32, false) => Value::from_u32(lhs.as_u32() / rhs.as_u32()),
+                                    (W64, false) | (Pointer, false) => Value::from_u64(lhs.as_u64() / rhs.as_u64()),
+                                }
+                            },
+                            Type::Float(width) => match width {
+                                FloatWidth::W32 => Value::from_f32(lhs.as_f32() / rhs.as_f32()),
+                                FloatWidth::W64 => Value::from_f64(lhs.as_f64() / rhs.as_f64()),
+                            },
+                            _ => panic!("Unexpected type for intrinsic arguments"),
+                        }
+                    },
+                    Intrinsic::Mod => {
+                        assert_eq!(arguments.len(), 2);
+                        let (lhs, rhs) = (arguments[0], arguments[1]);
+                        let ty = self.prog.type_of(lhs, func_id);
+                        assert_eq!(ty, self.prog.type_of(rhs, func_id));
+                        let (lhs, rhs) = (&frame.results[lhs], &frame.results[rhs]);
+                        match ty {
+                            Type::Int { width, is_signed } => {
+                                // We assume in the match below that pointer-sized ints are 64 bits
+                                assert_eq!(self.prog.arch.pointer_size(), 64);
+                                use IntWidth::*;
+                                match (width, is_signed) {
+                                    (W8, true) => Value::from_i8(lhs.as_i8() % rhs.as_i8()),
+                                    (W16, true) => Value::from_i16(lhs.as_i16() % rhs.as_i16()),
+                                    (W32, true) => Value::from_i32(lhs.as_i32() % rhs.as_i32()),
+                                    (W64, true) | (Pointer, true) => Value::from_i64(lhs.as_i64() % rhs.as_i64()),
+
+                                    (W8, false) => Value::from_u8(lhs.as_u8() % rhs.as_u8()),
+                                    (W16, false) => Value::from_u16(lhs.as_u16() % rhs.as_u16()),
+                                    (W32, false) => Value::from_u32(lhs.as_u32() % rhs.as_u32()),
+                                    (W64, false) | (Pointer, false) => Value::from_u64(lhs.as_u64() % rhs.as_u64()),
+                                }
+                            },
+                            Type::Float(width) => match width {
+                                FloatWidth::W32 => Value::from_f32(lhs.as_f32() % rhs.as_f32()),
+                                FloatWidth::W64 => Value::from_f64(lhs.as_f64() % rhs.as_f64()),
+                            },
+                            _ => panic!("Unexpected type for intrinsic arguments"),
+                        }
+                    },
+                    Intrinsic::Add => {
+                        assert_eq!(arguments.len(), 2);
+                        let (lhs, rhs) = (arguments[0], arguments[1]);
+                        let ty = self.prog.type_of(lhs, func_id);
+                        assert_eq!(ty, self.prog.type_of(rhs, func_id));
+                        let (lhs, rhs) = (&frame.results[lhs], &frame.results[rhs]);
+                        match ty {
+                            Type::Int { width, is_signed } => {
+                                // We assume in the match below that pointer-sized ints are 64 bits
+                                assert_eq!(self.prog.arch.pointer_size(), 64);
+                                use IntWidth::*;
+                                match (width, is_signed) {
+                                    (W8, true) => Value::from_i8(lhs.as_i8() + rhs.as_i8()),
+                                    (W16, true) => Value::from_i16(lhs.as_i16() + rhs.as_i16()),
+                                    (W32, true) => Value::from_i32(lhs.as_i32() + rhs.as_i32()),
+                                    (W64, true) | (Pointer, true) => Value::from_i64(lhs.as_i64() + rhs.as_i64()),
+
+                                    (W8, false) => Value::from_u8(lhs.as_u8() + rhs.as_u8()),
+                                    (W16, false) => Value::from_u16(lhs.as_u16() + rhs.as_u16()),
+                                    (W32, false) => Value::from_u32(lhs.as_u32() + rhs.as_u32()),
+                                    (W64, false) | (Pointer, false) => Value::from_u64(lhs.as_u64() + rhs.as_u64()),
+                                }
+                            },
+                            Type::Float(width) => match width {
+                                FloatWidth::W32 => Value::from_f32(lhs.as_f32() + rhs.as_f32()),
+                                FloatWidth::W64 => Value::from_f64(lhs.as_f64() + rhs.as_f64()),
+                            },
+                            _ => panic!("Unexpected type for intrinsic arguments"),
+                        }
+                    },
+                    Intrinsic::Sub => {
+                        assert_eq!(arguments.len(), 2);
+                        let (lhs, rhs) = (arguments[0], arguments[1]);
+                        let ty = self.prog.type_of(lhs, func_id);
+                        assert_eq!(ty, self.prog.type_of(rhs, func_id));
+                        let (lhs, rhs) = (&frame.results[lhs], &frame.results[rhs]);
+                        match ty {
+                            Type::Int { width, is_signed } => {
+                                // We assume in the match below that pointer-sized ints are 64 bits
+                                assert_eq!(self.prog.arch.pointer_size(), 64);
+                                use IntWidth::*;
+                                match (width, is_signed) {
+                                    (W8, true) => Value::from_i8(lhs.as_i8() - rhs.as_i8()),
+                                    (W16, true) => Value::from_i16(lhs.as_i16() - rhs.as_i16()),
+                                    (W32, true) => Value::from_i32(lhs.as_i32() - rhs.as_i32()),
+                                    (W64, true) | (Pointer, true) => Value::from_i64(lhs.as_i64() - rhs.as_i64()),
+
+                                    (W8, false) => Value::from_u8(lhs.as_u8() - rhs.as_u8()),
+                                    (W16, false) => Value::from_u16(lhs.as_u16() - rhs.as_u16()),
+                                    (W32, false) => Value::from_u32(lhs.as_u32() - rhs.as_u32()),
+                                    (W64, false) | (Pointer, false) => Value::from_u64(lhs.as_u64() - rhs.as_u64()),
+                                }
+                            },
+                            Type::Float(width) => match width {
+                                FloatWidth::W32 => Value::from_f32(lhs.as_f32() - rhs.as_f32()),
+                                FloatWidth::W64 => Value::from_f64(lhs.as_f64() - rhs.as_f64()),
+                            },
+                            _ => panic!("Unexpected type for intrinsic arguments"),
+                        }
+                    },
+                    Intrinsic::Less => {
+                        assert_eq!(arguments.len(), 2);
+                        let (lhs, rhs) = (arguments[0], arguments[1]);
+                        let ty = self.prog.type_of(lhs, func_id);
+                        assert_eq!(ty, self.prog.type_of(rhs, func_id));
+                        let (lhs, rhs) = (&frame.results[lhs], &frame.results[rhs]);
+                        let val = match ty {
+                            Type::Int { width, is_signed } => {
+                                // We assume in the match below that pointer-sized ints are 64 bits
+                                assert_eq!(self.prog.arch.pointer_size(), 64);
+                                use IntWidth::*;
+                                match (width, is_signed) {
                                     (W8, true) => lhs.as_i8() < rhs.as_i8(),
                                     (W16, true) => lhs.as_i16() < rhs.as_i16(),
                                     (W32, true) => lhs.as_i32() < rhs.as_i32(),
@@ -283,32 +429,271 @@ impl<'mir> Interpreter<'mir> {
                                     (W16, false) => lhs.as_u16() < rhs.as_u16(),
                                     (W32, false) => lhs.as_u32() < rhs.as_u32(),
                                     (W64, false) | (Pointer, false) => lhs.as_u64() < rhs.as_u64(),
-                                };
-                                Value::from_bool(val)
+                                }
                             },
-                            Type::Float(width) => {
-                                let val = match width {
-                                    FloatWidth::W32 => lhs.as_f32() < rhs.as_f32(),
-                                    FloatWidth::W64 => lhs.as_f64() < rhs.as_f64(),
-                                };
-                                Value::from_bool(val)
+                            Type::Float(width) => match width {
+                                FloatWidth::W32 => lhs.as_f32() < rhs.as_f32(),
+                                FloatWidth::W64 => lhs.as_f64() < rhs.as_f64(),
+                            },
+                            _ => panic!("Unexpected type for intrinsic arguments"),
+                        };
+                        Value::from_bool(val)
+                    },
+                    Intrinsic::LessOrEq => {
+                        assert_eq!(arguments.len(), 2);
+                        let (lhs, rhs) = (arguments[0], arguments[1]);
+                        let ty = self.prog.type_of(lhs, func_id);
+                        assert_eq!(ty, self.prog.type_of(rhs, func_id));
+                        let (lhs, rhs) = (&frame.results[lhs], &frame.results[rhs]);
+                        let val = match ty {
+                            Type::Int { width, is_signed } => {
+                                // We assume in the match below that pointer-sized ints are 64 bits
+                                assert_eq!(self.prog.arch.pointer_size(), 64);
+                                use IntWidth::*;
+                                match (width, is_signed) {
+                                    (W8, true) => lhs.as_i8() <= rhs.as_i8(),
+                                    (W16, true) => lhs.as_i16() <= rhs.as_i16(),
+                                    (W32, true) => lhs.as_i32() <= rhs.as_i32(),
+                                    (W64, true) | (Pointer, true) => lhs.as_i64() <= rhs.as_i64(),
+
+                                    (W8, false) => lhs.as_u8() <= rhs.as_u8(),
+                                    (W16, false) => lhs.as_u16() <= rhs.as_u16(),
+                                    (W32, false) => lhs.as_u32() <= rhs.as_u32(),
+                                    (W64, false) | (Pointer, false) => lhs.as_u64() <= rhs.as_u64(),
+                                }
+                            },
+                            Type::Float(width) => match width {
+                                FloatWidth::W32 => lhs.as_f32() <= rhs.as_f32(),
+                                FloatWidth::W64 => lhs.as_f64() <= rhs.as_f64(),
+                            },
+                            _ => panic!("Unexpected type for intrinsic arguments"),
+                        };
+                        Value::from_bool(val)
+                    },
+                    Intrinsic::Greater => {
+                        assert_eq!(arguments.len(), 2);
+                        let (lhs, rhs) = (arguments[0], arguments[1]);
+                        let ty = self.prog.type_of(lhs, func_id);
+                        assert_eq!(ty, self.prog.type_of(rhs, func_id));
+                        let (lhs, rhs) = (&frame.results[lhs], &frame.results[rhs]);
+                        let val = match ty {
+                            Type::Int { width, is_signed } => {
+                                // We assume in the match below that pointer-sized ints are 64 bits
+                                assert_eq!(self.prog.arch.pointer_size(), 64);
+                                use IntWidth::*;
+                                match (width, is_signed) {
+                                    (W8, true) => lhs.as_i8() > rhs.as_i8(),
+                                    (W16, true) => lhs.as_i16() > rhs.as_i16(),
+                                    (W32, true) => lhs.as_i32() > rhs.as_i32(),
+                                    (W64, true) | (Pointer, true) => lhs.as_i64() > rhs.as_i64(),
+
+                                    (W8, false) => lhs.as_u8() > rhs.as_u8(),
+                                    (W16, false) => lhs.as_u16() > rhs.as_u16(),
+                                    (W32, false) => lhs.as_u32() > rhs.as_u32(),
+                                    (W64, false) | (Pointer, false) => lhs.as_u64() > rhs.as_u64(),
+                                }
+                            },
+                            Type::Float(width) => match width {
+                                FloatWidth::W32 => lhs.as_f32() > rhs.as_f32(),
+                                FloatWidth::W64 => lhs.as_f64() > rhs.as_f64(),
+                            },
+                            _ => panic!("Unexpected type for intrinsic arguments"),
+                        };
+                        Value::from_bool(val)
+                    },
+                    Intrinsic::GreaterOrEq => {
+                        assert_eq!(arguments.len(), 2);
+                        let (lhs, rhs) = (arguments[0], arguments[1]);
+                        let ty = self.prog.type_of(lhs, func_id);
+                        assert_eq!(ty, self.prog.type_of(rhs, func_id));
+                        let (lhs, rhs) = (&frame.results[lhs], &frame.results[rhs]);
+                        let val = match ty {
+                            Type::Int { width, is_signed } => {
+                                // We assume in the match below that pointer-sized ints are 64 bits
+                                assert_eq!(self.prog.arch.pointer_size(), 64);
+                                use IntWidth::*;
+                                match (width, is_signed) {
+                                    (W8, true) => lhs.as_i8() >= rhs.as_i8(),
+                                    (W16, true) => lhs.as_i16() >= rhs.as_i16(),
+                                    (W32, true) => lhs.as_i32() >= rhs.as_i32(),
+                                    (W64, true) | (Pointer, true) => lhs.as_i64() >= rhs.as_i64(),
+
+                                    (W8, false) => lhs.as_u8() >= rhs.as_u8(),
+                                    (W16, false) => lhs.as_u16() >= rhs.as_u16(),
+                                    (W32, false) => lhs.as_u32() >= rhs.as_u32(),
+                                    (W64, false) | (Pointer, false) => lhs.as_u64() >= rhs.as_u64(),
+                                }
+                            },
+                            Type::Float(width) => match width {
+                                FloatWidth::W32 => lhs.as_f32() >= rhs.as_f32(),
+                                FloatWidth::W64 => lhs.as_f64() >= rhs.as_f64(),
+                            },
+                            _ => panic!("Unexpected type for intrinsic arguments"),
+                        };
+                        Value::from_bool(val)
+                    },
+                    Intrinsic::Eq => {
+                        assert_eq!(arguments.len(), 2);
+                        let (lhs, rhs) = (arguments[0], arguments[1]);
+                        let ty = self.prog.type_of(lhs, func_id);
+                        assert_eq!(ty, self.prog.type_of(rhs, func_id));
+                        let (lhs, rhs) = (&frame.results[lhs], &frame.results[rhs]);
+                        let val = match ty {
+                            Type::Int { width, is_signed } => {
+                                // We assume in the match below that pointer-sized ints are 64 bits
+                                assert_eq!(self.prog.arch.pointer_size(), 64);
+                                use IntWidth::*;
+                                match (width, is_signed) {
+                                    (W8, true) => lhs.as_i8() == rhs.as_i8(),
+                                    (W16, true) => lhs.as_i16() == rhs.as_i16(),
+                                    (W32, true) => lhs.as_i32() == rhs.as_i32(),
+                                    (W64, true) | (Pointer, true) => lhs.as_i64() == rhs.as_i64(),
+
+                                    (W8, false) => lhs.as_u8() == rhs.as_u8(),
+                                    (W16, false) => lhs.as_u16() == rhs.as_u16(),
+                                    (W32, false) => lhs.as_u32() == rhs.as_u32(),
+                                    (W64, false) | (Pointer, false) => lhs.as_u64() == rhs.as_u64(),
+                                }
+                            },
+                            Type::Float(width) => match width {
+                                FloatWidth::W32 => lhs.as_f32() == rhs.as_f32(),
+                                FloatWidth::W64 => lhs.as_f64() == rhs.as_f64(),
+                            },
+                            Type::Bool => lhs.as_bool() == rhs.as_bool(),
+                            _ => panic!("Unexpected type for intrinsic arguments"),
+                        };
+                        Value::from_bool(val)
+                    },
+                    Intrinsic::NotEq => {
+                        assert_eq!(arguments.len(), 2);
+                        let (lhs, rhs) = (arguments[0], arguments[1]);
+                        let ty = self.prog.type_of(lhs, func_id);
+                        assert_eq!(ty, self.prog.type_of(rhs, func_id));
+                        let (lhs, rhs) = (&frame.results[lhs], &frame.results[rhs]);
+                        let val = match ty {
+                            Type::Int { width, is_signed } => {
+                                // We assume in the match below that pointer-sized ints are 64 bits
+                                assert_eq!(self.prog.arch.pointer_size(), 64);
+                                use IntWidth::*;
+                                match (width, is_signed) {
+                                    (W8, true) => lhs.as_i8() != rhs.as_i8(),
+                                    (W16, true) => lhs.as_i16() != rhs.as_i16(),
+                                    (W32, true) => lhs.as_i32() != rhs.as_i32(),
+                                    (W64, true) | (Pointer, true) => lhs.as_i64() != rhs.as_i64(),
+
+                                    (W8, false) => lhs.as_u8() != rhs.as_u8(),
+                                    (W16, false) => lhs.as_u16() != rhs.as_u16(),
+                                    (W32, false) => lhs.as_u32() != rhs.as_u32(),
+                                    (W64, false) | (Pointer, false) => lhs.as_u64() != rhs.as_u64(),
+                                }
+                            },
+                            Type::Float(width) => match width {
+                                FloatWidth::W32 => lhs.as_f32() != rhs.as_f32(),
+                                FloatWidth::W64 => lhs.as_f64() != rhs.as_f64(),
+                            },
+                            Type::Bool => lhs.as_bool() != rhs.as_bool(),
+                            _ => panic!("Unexpected type for intrinsic arguments"),
+                        };
+                        Value::from_bool(val)
+                    },
+                    Intrinsic::BitwiseAnd => {
+                        assert_eq!(arguments.len(), 2);
+                        let (lhs, rhs) = (arguments[0], arguments[1]);
+                        let ty = self.prog.type_of(lhs, func_id);
+                        assert_eq!(ty, self.prog.type_of(rhs, func_id));
+                        let (lhs, rhs) = (&frame.results[lhs], &frame.results[rhs]);
+                        match ty {
+                            Type::Int { width, is_signed } => {
+                                // We assume in the match below that pointer-sized ints are 64 bits
+                                assert_eq!(self.prog.arch.pointer_size(), 64);
+                                use IntWidth::*;
+                                match (width, is_signed) {
+                                    (W8, true) => Value::from_i8(lhs.as_i8() & rhs.as_i8()),
+                                    (W16, true) => Value::from_i16(lhs.as_i16() & rhs.as_i16()),
+                                    (W32, true) => Value::from_i32(lhs.as_i32() & rhs.as_i32()),
+                                    (W64, true) | (Pointer, true) => Value::from_i64(lhs.as_i64() & rhs.as_i64()),
+
+                                    (W8, false) => Value::from_u8(lhs.as_u8() & rhs.as_u8()),
+                                    (W16, false) => Value::from_u16(lhs.as_u16() & rhs.as_u16()),
+                                    (W32, false) => Value::from_u32(lhs.as_u32() & rhs.as_u32()),
+                                    (W64, false) | (Pointer, false) => Value::from_u64(lhs.as_u64() & rhs.as_u64()),
+                                }
                             },
                             _ => panic!("Unexpected type for intrinsic arguments"),
                         }
                     },
-                    // Intrinsic::LessOrEq,
-                    // Intrinsic::Greater,
-                    // Intrinsic::GreaterOrEq,
-                    // Intrinsic::Eq,
-                    // Intrinsic::NotEq,
-                    // Intrinsic::BitwiseAnd,
-                    // Intrinsic::BitwiseOr,
-                    // Intrinsic::LogicalAnd,
-                    // Intrinsic::LogicalOr,
-                    // Intrinsic::LogicalNot,
-                    // Intrinsic::Neg,
-                    // Intrinsic::Pos,
-                    // Intrinsic::Panic,
+                    Intrinsic::BitwiseOr => {
+                        assert_eq!(arguments.len(), 2);
+                        let (lhs, rhs) = (arguments[0], arguments[1]);
+                        let ty = self.prog.type_of(lhs, func_id);
+                        assert_eq!(ty, self.prog.type_of(rhs, func_id));
+                        let (lhs, rhs) = (&frame.results[lhs], &frame.results[rhs]);
+                        match ty {
+                            Type::Int { width, is_signed } => {
+                                // We assume in the match below that pointer-sized ints are 64 bits
+                                assert_eq!(self.prog.arch.pointer_size(), 64);
+                                use IntWidth::*;
+                                match (width, is_signed) {
+                                    (W8, true) => Value::from_i8(lhs.as_i8() | rhs.as_i8()),
+                                    (W16, true) => Value::from_i16(lhs.as_i16() | rhs.as_i16()),
+                                    (W32, true) => Value::from_i32(lhs.as_i32() | rhs.as_i32()),
+                                    (W64, true) | (Pointer, true) => Value::from_i64(lhs.as_i64() | rhs.as_i64()),
+
+                                    (W8, false) => Value::from_u8(lhs.as_u8() | rhs.as_u8()),
+                                    (W16, false) => Value::from_u16(lhs.as_u16() | rhs.as_u16()),
+                                    (W32, false) => Value::from_u32(lhs.as_u32() | rhs.as_u32()),
+                                    (W64, false) | (Pointer, false) => Value::from_u64(lhs.as_u64() | rhs.as_u64()),
+                                }
+                            },
+                            _ => panic!("Unexpected type for intrinsic arguments"),
+                        }
+                    },
+                    Intrinsic::LogicalNot => panic!("Unexpected logical not intrinsic, should've been replaced by instruction"),
+                    Intrinsic::Neg => {
+                        assert_eq!(arguments.len(), 1);
+                        let arg = arguments[0];
+                        let ty = self.prog.type_of(arg, func_id);
+                        let arg = &frame.results[arg];
+                        match ty {
+                            Type::Int { width, is_signed } => {
+                                // We assume in the match below that pointer-sized ints are 64 bits
+                                assert_eq!(self.prog.arch.pointer_size(), 64);
+                                assert!(is_signed);
+                                match width {
+                                    IntWidth::W8 => Value::from_i8(-arg.as_i8()),
+                                    IntWidth::W16 => Value::from_i16(-arg.as_i16()),
+                                    IntWidth::W32 => Value::from_i32(-arg.as_i32()),
+                                    IntWidth::W64 | IntWidth::Pointer => Value::from_i64(-arg.as_i64()),
+                                }
+                            },
+                            Type::Float(width) => match width {
+                                FloatWidth::W32 => Value::from_f32(-arg.as_f32()),
+                                FloatWidth::W64 => Value::from_f64(-arg.as_f64()),
+                            },
+                            _ => panic!("Unexpected type for intrinsic arguments"),
+                        }
+                    },
+                    Intrinsic::Pos => {
+                        assert_eq!(arguments.len(), 1);
+                        frame.results[arguments[0]].clone()
+                    },
+                    Intrinsic::Panic => {
+                        assert!(arguments.len() <= 1);
+                        let panic_msg = "Userspace panic";
+                        if let Some(&msg) = arguments.first() {
+                            let mut ptr = frame.results[msg].as_raw_ptr();
+                            let mut msg = format!("{}: ", panic_msg);
+                            unsafe {
+                                while *ptr != 0 {
+                                    msg.push(*ptr as char);
+                                    ptr = ptr.offset(1);
+                                }
+                            }
+                            panic!(msg)
+                        } else {
+                            panic!(panic_msg)
+                        }
+                    },
                     Intrinsic::Print => {
                         assert_eq!(arguments.len(), 1);
                         let id = arguments[0];

@@ -1,11 +1,4 @@
-/*fn assert(condition: bool) {
-    if !condition { panic("assertion failed") }
-}
-
-fn remainder_three_numbers(a: i32, b: i32, c: i32): i32 {
-    a % b % c
-}
-
+/*
 fn print_num(num: i32) {
     num := num
     if num < 0 {
@@ -63,12 +56,20 @@ fn main {
     }
 }*/
 
+fn assert(condition: bool) {
+    if !condition { panic("assertion failed") }
+}
+
+fn remainder_three_numbers(a: i32, b: i32, c: i32): i32 {
+    a % b % c
+}
 
 fn foo: i32 {
     12
 }
 
 fn main() {
+    assert(5 > foo)
     if !(5 < foo) {
         print("Hello, world!\n")
     } else {
