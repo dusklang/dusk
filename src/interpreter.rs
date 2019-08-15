@@ -5,6 +5,7 @@ use std::convert::TryInto;
 use arrayvec::ArrayVec;
 
 use crate::index_vec::{IdxVec, Idx};
+use crate::builder::Intrinsic;
 use crate::mir::{Const, Function, FuncId, Instr, InstrId, Program};
 use crate::ty::{Type, IntWidth};
 
@@ -114,6 +115,10 @@ impl Value {
         Value::from_bytes(val.to_le_bytes().as_ref())
     }
 
+    fn from_usize(val: usize) -> Value {
+        Value::from_bytes(val.to_le_bytes().as_ref())
+    }
+
     fn from_i8(val: i8) -> Value {
         Value::from_bytes(val.to_le_bytes().as_ref())
     }
@@ -127,6 +132,10 @@ impl Value {
     }
 
     fn from_i64(val: i64) -> Value {
+        Value::from_bytes(val.to_le_bytes().as_ref())
+    }
+
+    fn from_isize(val: isize) -> Value {
         Value::from_bytes(val.to_le_bytes().as_ref())
     }
 
@@ -222,7 +231,10 @@ impl<'mir> Interpreter<'mir> {
                         _ => panic!("Unrecognized float constant size"),
                     },
                     Const::Bool(val) => Value::from_bool(val),
-                    Const::Str { .. } => panic!("string constants are not yet supported"),
+                    Const::Str { id, .. } => {
+                        let ptr = self.prog.strings[id].as_ptr();
+                        Value::from_usize(unsafe { mem::transmute(ptr) })
+                    },
                 }
             },
             Instr::Alloca(ty) => {
@@ -242,7 +254,52 @@ impl<'mir> Interpreter<'mir> {
                 }
                 self.call(func, copied_args)
             },
-            // Intrinsic { arguments: SmallVec<[InstrId; 2]>, ty: Type, intr: Intrinsic },
+            &Instr::Intrinsic { ref arguments, intr, .. } => {
+                match intr {
+                    // Intrinsic::Mult,
+                    // Intrinsic::Div,
+                    // Intrinsic::Mod,
+                    // Intrinsic::Add,
+                    // Intrinsic::Sub,
+                    // Intrinsic::Less,
+                    // Intrinsic::LessOrEq,
+                    // Intrinsic::Greater,
+                    // Intrinsic::GreaterOrEq,
+                    // Intrinsic::Eq,
+                    // Intrinsic::NotEq,
+                    // Intrinsic::BitwiseAnd,
+                    // Intrinsic::BitwiseOr,
+                    // Intrinsic::LogicalAnd,
+                    // Intrinsic::LogicalOr,
+                    // Intrinsic::LogicalNot,
+                    // Intrinsic::Neg,
+                    // Intrinsic::Pos,
+                    // Intrinsic::Panic,
+                    Intrinsic::Print => {
+                        assert_eq!(arguments.len(), 1);
+                        let id = arguments[0];
+                        let val = &frame.results[id];
+                        let ty = self.prog.type_of(id, *func_id);
+                        match ty {
+                            Type::Pointer(_) => unsafe {
+                                let mut ptr = val.as_raw_ptr();
+                                while *ptr != 0 {
+                                    print!("{}", *ptr as char);
+                                    ptr = ptr.offset(1);
+                                }
+                            },
+                            Type::Int { .. } => print!("{}", val.as_u8() as char),
+                            _ => panic!("Unexpected type passed to `print`: {:?}", ty),
+                        }
+                        Value::Nothing 
+                    },
+                    // Intrinsic::Malloc,
+                    // Intrinsic::Calloc,
+                    // Intrinsic::Realloc,
+                    // Intrinsic::Free,
+                    _ => panic!("Call to unexpected intrinsic {:?}", intr),
+                }
+            },
             &Instr::Reinterpret(instr, _) => frame.results[instr].clone(),
             &Instr::Truncate(instr, ref ty) => {
                 let bytes = frame.results[instr].as_bytes();
@@ -269,7 +326,7 @@ impl<'mir> Interpreter<'mir> {
                 let val = frame.results[value].as_bytes();
                 for (i, &byte) in val.iter().enumerate() {
                     println!("{}", byte);
-                    unsafe { *(ptr.offset(i as isize)) = byte; }
+                    unsafe { *ptr.add(i) = byte; }
                 }
                 Value::Nothing
             },
@@ -288,8 +345,7 @@ impl<'mir> Interpreter<'mir> {
                 frame.pc = func.basic_blocks[branch];
                 return None
             }
-            // /// Only valid at the beginning of a function, right after the void instruction
-            // Parameter(Type),
+            Instr::Parameter(_) => panic!("Invalid parameter instruction in the middle of a function!"),
             instr => panic!("Unrecognized instruction: {:?}", instr),
         };
 

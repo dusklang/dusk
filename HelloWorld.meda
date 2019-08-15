@@ -15,7 +15,7 @@ fn print_num(num: i32) {
     if num > 10 {
         print_num(num / 10)
     }
-    print((num % 10) as i8 + "0")
+    print((num % 10) as u8 + "0")
 }
 
 FIZZ_BUZZ_NUM_ITERATIONS :: 100
@@ -69,9 +69,5 @@ fn foo: i32 {
 }
 
 fn main() {
-    if true {
-        foo := 27
-    } else {
-        foo := 22
-    }
+    print("Hello, world!\n")
 }

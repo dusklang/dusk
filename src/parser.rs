@@ -73,15 +73,15 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
             p.builder.add_intrinsic(LogicalNot, smallvec![Type::Bool], Type::Bool);
 
             p.builder.add_intrinsic(Panic, SmallVec::new(), Type::Never);
-            p.builder.add_intrinsic(Panic, smallvec![Type::i8().ptr()], Type::Never);
+            p.builder.add_intrinsic(Panic, smallvec![Type::u8().ptr()], Type::Never);
 
             p.builder.add_intrinsic(Malloc, smallvec![Type::usize()], Type::Void.mut_ptr());
             p.builder.add_intrinsic(Calloc, smallvec![Type::usize()], Type::Void.mut_ptr());
             p.builder.add_intrinsic(Realloc, smallvec![Type::Void.mut_ptr(), Type::usize()], Type::Void.mut_ptr());
             p.builder.add_intrinsic(Free, smallvec![Type::Void.mut_ptr()], Type::Void);
 
-            p.builder.add_intrinsic(Print, smallvec![Type::i8().ptr()], Type::Void);
-            p.builder.add_intrinsic(Print, smallvec![Type::i8()], Type::Void);
+            p.builder.add_intrinsic(Print, smallvec![Type::u8().ptr()], Type::Void);
+            p.builder.add_intrinsic(Print, smallvec![Type::u8()], Type::Void);
         }
 
         p.skip_insignificant();
@@ -203,7 +203,7 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
                 let lit = self.builder.char_lit(val, self.cur().range.clone());
                 self.next();
                 Ok(lit)
-            }
+            },
             &TokenKind::Ident(name) => {
                 let name_range = self.cur().range.clone();
                 let mut args = SmallVec::new();

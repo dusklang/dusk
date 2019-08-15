@@ -1,3 +1,4 @@
+use std::ffi::CString;
 use std::fmt;
 
 use smallvec::SmallVec;
@@ -154,7 +155,7 @@ impl Context {
 #[derive(Debug)]
 pub struct Program {
     pub comp_decls: IdxVec<Function, FuncId>,
-    pub strings: IdxVec<String, StrId>,
+    pub strings: IdxVec<CString, StrId>,
     pub statics: IdxVec<Const, StaticId>,
     pub arch: Arch,
 }
@@ -184,7 +185,7 @@ impl Program {
     }
 }
 
-fn expr_to_const(expr: &Expr, ty: Type, strings: &mut IdxVec<String, StrId>) -> Const {
+fn expr_to_const(expr: &Expr, ty: Type, strings: &mut IdxVec<CString, StrId>) -> Const {
     match *expr {
         Expr::IntLit { lit } => {
             match ty {
@@ -202,7 +203,7 @@ fn expr_to_const(expr: &Expr, ty: Type, strings: &mut IdxVec<String, StrId>) -> 
             match ty {
                 Type::Int { .. } => Const::Int { lit: lit as u64, ty },
                 Type::Pointer(_) => {
-                    let id = strings.push(String::from_utf8(vec![lit as u8]).unwrap());
+                    let id = strings.push(CString::new([lit as u8].as_ref()).unwrap());
                     Const::Str { id, ty }
                 },
                 _ => panic!("unexpected type for character")
@@ -216,7 +217,7 @@ impl Program {
     pub fn build(prog: &hir::Program, tc: &tc::Program, arch: Arch) -> Self {
         let mut decls = IdxVec::<Decl, DeclId>::new();
         let mut statics = IdxVec::<Const, StaticId>::new();
-        let mut strings = IdxVec::<String, StrId>::new();
+        let mut strings = IdxVec::<CString, StrId>::new();
         let mut num_functions = 0usize;
 
         for decl in &prog.decls {
@@ -390,7 +391,7 @@ struct FunctionBuilder<'a> {
     prog: &'a hir::Program,
     tc: &'a tc::Program,
     decls: &'a mut IdxVec<Decl, DeclId>,
-    strings: &'a mut IdxVec<String, StrId>,
+    strings: &'a mut IdxVec<CString, StrId>,
     name: String,
     ret_ty: Type,
     scope: ScopeId,
@@ -405,7 +406,7 @@ impl<'a> FunctionBuilder<'a> {
         prog: &'a hir::Program,
         tc: &'a tc::Program,
         decls: &'a mut IdxVec<Decl, DeclId>,
-        strings: &'a mut IdxVec<String, StrId>,
+        strings: &'a mut IdxVec<CString, StrId>,
         name: String,
         ret_ty: Type,
         scope: ScopeId,

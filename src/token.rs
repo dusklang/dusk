@@ -1,3 +1,5 @@
+use std::ffi::CString;
+
 use crate::source_info::SourceRange;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -6,7 +8,7 @@ pub enum TokenKind<'src> {
 
     IntLit(u64),
     DecLit(f64),
-    StrLit(String),
+    StrLit(CString),
     CharLit(i8),
 
     // Special

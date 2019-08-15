@@ -1,3 +1,5 @@
+use std::ffi::CString;
+
 use smallvec::SmallVec;
 
 use crate::index_vec::Idx;
@@ -154,7 +156,7 @@ pub trait Builder<'src> {
     fn void_expr(&self) -> ExprId;
     fn int_lit(&mut self, lit: u64, range: SourceRange) -> ExprId;
     fn dec_lit(&mut self, lit: f64, range: SourceRange) -> ExprId;
-    fn str_lit(&mut self, lit: String, range: SourceRange) -> ExprId;
+    fn str_lit(&mut self, lit: CString, range: SourceRange) -> ExprId;
     fn char_lit(&mut self, lit: i8, range: SourceRange) -> ExprId;
     fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId;
     fn cast(&mut self, expr: ExprId, ty: Type, range: SourceRange) -> ExprId;

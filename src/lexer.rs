@@ -1,4 +1,7 @@
+
 use std::collections::HashMap;
+use std::ffi::CString;
+
 use unicode_segmentation::GraphemeCursor;
 
 use crate::token::{TokenVec, TokenKind};
@@ -295,7 +298,7 @@ impl<'src> Lexer<'src> {
             if lit.len() == 1 {
                 self.pack_tok(TokenKind::CharLit(lit.as_bytes()[0] as i8))
             } else {
-                self.pack_tok(TokenKind::StrLit(lit))
+                self.pack_tok(TokenKind::StrLit(CString::new(lit).unwrap()))
             }
         } else if self.has_chars() && (self.is_letter() || self.is(b'_')) {
             let ident_start = self.cur_loc();

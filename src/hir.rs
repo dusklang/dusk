@@ -1,5 +1,7 @@
-use smallvec::{SmallVec, smallvec};
+use std::ffi::CString;
 use std::marker::PhantomData;
+
+use smallvec::{SmallVec, smallvec};
 
 use crate::index_vec::{Idx, IdxVec};
 use crate::builder::{self, BinOp, UnOp, ExprId, DeclId, ScopeId, DeclRefId, CastId, Intrinsic};
@@ -11,7 +13,7 @@ pub enum Expr {
     Void,
     IntLit { lit: u64 },
     DecLit { lit: f64 },
-    StrLit { lit: String },
+    StrLit { lit: CString },
     CharLit { lit: i8 },
     DeclRef { arguments: SmallVec<[ExprId; 2]>, id: DeclRefId },
     LogicalOr { lhs: ExprId, rhs: ExprId },
@@ -150,7 +152,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
     fn dec_lit(&mut self, lit: f64, _range: SourceRange) -> ExprId { 
         self.exprs.push(Expr::DecLit { lit })
     }
-    fn str_lit(&mut self, lit: String, _range: SourceRange) -> ExprId { 
+    fn str_lit(&mut self, lit: CString, _range: SourceRange) -> ExprId { 
         self.exprs.push(Expr::StrLit { lit })
     }
     fn char_lit(&mut self, lit: i8, _range: SourceRange) -> ExprId { 

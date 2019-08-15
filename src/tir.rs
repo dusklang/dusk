@@ -1,6 +1,8 @@
 use std::ops::{Deref, DerefMut};
 use std::cmp::max;
+use std::ffi::CString;
 use std::marker::PhantomData;
+
 use string_interner::{Sym, DefaultStringInterner};
 use smallvec::{SmallVec, smallvec};
 
@@ -536,7 +538,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
         id
     }
 
-    fn str_lit(&mut self, _lit: String, range: SourceRange) -> ExprId {
+    fn str_lit(&mut self, _lit: CString, range: SourceRange) -> ExprId {
         let id = ExprId::new(self.levels.len());
         self.str_lits.push(id);
         self.levels.push(Level::Global(0));
