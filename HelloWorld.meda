@@ -1,11 +1,3 @@
-/*
-fn main {
-    // Allocate a single 8-bit integer on the heap
-    num :: malloc(1) as u8 *mut
-    (*num) = 12
-    free(num as void *mut)
-}*/
-
 fn assert(condition: bool) {
     if !condition { panic("assertion failed") }
 }
@@ -62,6 +54,11 @@ fn main() {
     m := l as i32
     n := m as u64
     o := n as i16
+
+    // Allocate a single 8-bit integer on the heap
+    num :: malloc(1) as u8 *mut
+    (*num) = 12
+    free(num as void *mut)
 
     fn float_const {
         blah: f32 = 5.2

@@ -54,8 +54,6 @@ pub enum Intrinsic {
     Panic,
     Print,
     Malloc,
-    Calloc,
-    Realloc,
     Free,
 }
 
@@ -84,8 +82,6 @@ impl Intrinsic {
             Panic => "panic",
             Print => "print",
             Malloc => "malloc",
-            Calloc => "calloc",
-            Realloc => "realloc",
             Free => "free",
         }
     }

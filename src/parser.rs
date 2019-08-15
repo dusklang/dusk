@@ -76,8 +76,6 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
             p.builder.add_intrinsic(Panic, smallvec![Type::u8().ptr()], Type::Never);
 
             p.builder.add_intrinsic(Malloc, smallvec![Type::usize()], Type::Void.mut_ptr());
-            p.builder.add_intrinsic(Calloc, smallvec![Type::usize()], Type::Void.mut_ptr());
-            p.builder.add_intrinsic(Realloc, smallvec![Type::Void.mut_ptr(), Type::usize()], Type::Void.mut_ptr());
             p.builder.add_intrinsic(Free, smallvec![Type::Void.mut_ptr()], Type::Void);
 
             p.builder.add_intrinsic(Print, smallvec![Type::u8().ptr()], Type::Void);

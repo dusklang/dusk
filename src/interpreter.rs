@@ -1,3 +1,5 @@
+use std::alloc;
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::ffi::CString;
 use std::mem;
@@ -209,6 +211,7 @@ impl StackFrame {
 pub struct Interpreter<'mir> {
     stack: Vec<(FuncId, StackFrame)>,
     statics: IdxVec<Value, StaticId>,
+    allocations: HashMap<usize, alloc::Layout>,
     prog: &'mir Program,
 }
 
@@ -221,6 +224,7 @@ impl<'mir> Interpreter<'mir> {
         Self {
             stack: Vec::new(),
             statics,
+            allocations: HashMap::new(),
             prog,
         }
     }
@@ -718,10 +722,25 @@ impl<'mir> Interpreter<'mir> {
                         }
                         Value::Nothing 
                     },
-                    // Intrinsic::Malloc,
-                    // Intrinsic::Calloc,
-                    // Intrinsic::Realloc,
-                    // Intrinsic::Free,
+                    Intrinsic::Malloc => {
+                        assert_eq!(arguments.len(), 1);
+                        assert_eq!(self.prog.arch.pointer_size(), 64);
+                        let size = frame.results[arguments[0]].as_u64() as usize;
+                        let layout = alloc::Layout::from_size_align(size, 8).unwrap();
+                        let buf = unsafe { alloc::alloc(layout) };
+                        let address: usize = unsafe { mem::transmute(buf) };
+                        self.allocations.insert(address, layout);
+                        Value::from_usize(address)
+                    }
+                    Intrinsic::Free => {
+                        assert_eq!(arguments.len(), 1);
+                        assert_eq!(self.prog.arch.pointer_size(), 64);
+                        let ptr = frame.results[arguments[0]].as_raw_ptr();
+                        let address: usize = unsafe { mem::transmute(ptr) };
+                        let layout = self.allocations.remove(&address).unwrap();
+                        unsafe { alloc::dealloc(ptr, layout) };
+                        Value::Nothing
+                    },
                     _ => panic!("Call to unimplemented intrinsic {:?}", intr),
                 }
             },
