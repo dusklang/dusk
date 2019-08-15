@@ -1,12 +1,14 @@
+use std::convert::TryInto;
+use std::ffi::CString;
 use std::mem;
 use std::slice;
-use std::convert::TryInto;
 
 use arrayvec::ArrayVec;
 
-use crate::index_vec::{IdxVec, Idx};
+use crate::arch::Arch;
 use crate::builder::Intrinsic;
-use crate::mir::{Const, Function, FuncId, Instr, InstrId, Program};
+use crate::index_vec::{IdxVec, Idx};
+use crate::mir::{Const, Function, FuncId, Instr, InstrId, Program, StaticId, StrId};
 use crate::ty::{Type, IntWidth, FloatWidth};
 
 
@@ -99,6 +101,40 @@ impl Value {
         Value::Inline(storage)
     }
 
+    fn from_const(konst: &Const, arch: Arch, strings: &IdxVec<CString, StrId>) -> Value {
+        match *konst {
+            Const::Int { lit, ref ty } => match ty {
+                Type::Int { width, is_signed } => {
+                    // We assume in the match below that pointer-sized ints are 64 bits
+                    assert_eq!(arch.pointer_size(), 64);
+                    use IntWidth::*;
+                    match (width, is_signed) {
+                        (W8, false) => Value::from_u8(lit.try_into().unwrap()),
+                        (W16, false) => Value::from_u16(lit.try_into().unwrap()),
+                        (W32, false) => Value::from_u32(lit.try_into().unwrap()),
+                        (W64, false) | (Pointer, false) => Value::from_u64(lit.try_into().unwrap()),
+
+                        (W8, true) => Value::from_i8(lit.try_into().unwrap()),
+                        (W16, true) => Value::from_i16(lit.try_into().unwrap()),
+                        (W32, true) => Value::from_i32(lit.try_into().unwrap()),
+                        (W64, true) | (Pointer, true) => Value::from_i64(lit.try_into().unwrap()),
+                    }
+                },
+                _ => panic!("unexpected int constant type {:?}", ty),
+            },
+            Const::Float { lit, ref ty } => match ty.size(arch) {
+                4 => Value::from_f32(lit as f32),
+                8 => Value::from_f64(lit.try_into().unwrap()),
+                _ => panic!("Unrecognized float constant size"),
+            },
+            Const::Bool(val) => Value::from_bool(val),
+            Const::Str { id, .. } => {
+                let ptr = strings[id].as_ptr();
+                Value::from_usize(unsafe { mem::transmute(ptr) })
+            },
+        }
+    }
+
     fn from_u8(val: u8) -> Value {
         Value::from_bytes(val.to_le_bytes().as_ref())
     }
@@ -172,13 +208,19 @@ impl StackFrame {
 
 pub struct Interpreter<'mir> {
     stack: Vec<(FuncId, StackFrame)>,
+    statics: IdxVec<Value, StaticId>,
     prog: &'mir Program,
 }
 
 impl<'mir> Interpreter<'mir> {
     pub fn new(prog: &'mir Program) -> Self {
+        let mut statics = IdxVec::new();
+        for statik in &prog.statics {
+            statics.push(Value::from_const(statik, prog.arch, &prog.strings));
+        }
         Self {
             stack: Vec::new(),
+            statics,
             prog,
         }
     }
@@ -201,39 +243,7 @@ impl<'mir> Interpreter<'mir> {
         let func = &self.prog.comp_decls[func_id];
         let val = match &func.code[frame.pc] {
             Instr::Void => Value::Nothing,
-            Instr::Const(konst) => {
-                match *konst {
-                    Const::Int { lit, ref ty } => match ty {
-                        Type::Int { width, is_signed } => {
-                            // We assume in the match below that pointer-sized ints are 64 bits
-                            assert_eq!(self.prog.arch.pointer_size(), 64);
-                            use IntWidth::*;
-                            match (width, is_signed) {
-                                (W8, false) => Value::from_u8(lit.try_into().unwrap()),
-                                (W16, false) => Value::from_u16(lit.try_into().unwrap()),
-                                (W32, false) => Value::from_u32(lit.try_into().unwrap()),
-                                (W64, false) | (Pointer, false) => Value::from_u64(lit.try_into().unwrap()),
-
-                                (W8, true) => Value::from_i8(lit.try_into().unwrap()),
-                                (W16, true) => Value::from_i16(lit.try_into().unwrap()),
-                                (W32, true) => Value::from_i32(lit.try_into().unwrap()),
-                                (W64, true) | (Pointer, true) => Value::from_i64(lit.try_into().unwrap()),
-                            }
-                        },
-                        _ => panic!("unexpected int constant type {:?}", ty),
-                    },
-                    Const::Float { lit, ref ty } => match ty.size(self.prog.arch) {
-                        4 => Value::from_f32(lit as f32),
-                        8 => Value::from_f64(lit.try_into().unwrap()),
-                        _ => panic!("Unrecognized float constant size"),
-                    },
-                    Const::Bool(val) => Value::from_bool(val),
-                    Const::Str { id, .. } => {
-                        let ptr = self.prog.strings[id].as_ptr();
-                        Value::from_usize(unsafe { mem::transmute(ptr) })
-                    },
-                }
-            },
+            Instr::Const(konst) => Value::from_const(konst, self.prog.arch, &self.prog.strings),
             Instr::Alloca(ty) => {
                 let mut storage = Vec::new();
                 storage.resize(ty.size(self.prog.arch), 0);
@@ -875,7 +885,7 @@ impl<'mir> Interpreter<'mir> {
                 }
                 Value::Nothing
             },
-            // AddressOfStatic(StaticId),
+            &Instr::AddressOfStatic(statik) => Value::from_usize(unsafe { mem::transmute(self.statics[statik].as_bytes().as_ptr()) }),
             &Instr::Ret(instr) => {
                 let val = mem::replace(&mut frame.results[instr], Value::Nothing);
                 return Some(val)
@@ -891,7 +901,6 @@ impl<'mir> Interpreter<'mir> {
                 return None
             }
             Instr::Parameter(_) => panic!("Invalid parameter instruction in the middle of a function!"),
-            instr => panic!("Unrecognized instruction: {:?}", instr),
         };
 
         let (_, frame) = self.stack.last_mut().unwrap();
