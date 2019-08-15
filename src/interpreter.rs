@@ -720,7 +720,37 @@ impl<'mir> Interpreter<'mir> {
                 let bytes = frame.results[instr].as_bytes();
                 Value::from_bytes(&bytes[0..ty.size(self.prog.arch)])
             },
-            // SignExtend(InstrId, Type),
+            &Instr::SignExtend(val, ref dest_ty) => {
+                let src_ty = &self.prog.type_of(val, func_id);
+                let val = &frame.results[val];
+                match (src_ty, dest_ty) {
+                    (
+                        Type::Int { width: src_width, is_signed: src_is_signed },
+                        Type::Int { width: dest_width, is_signed: dest_is_signed }
+                    ) => {
+                        assert!(dest_is_signed);
+                        match (src_width.bit_width(self.prog.arch), src_is_signed, dest_width.bit_width(self.prog.arch)) {
+                            (s, _, d) if s == d => panic!("Can't sign-extend to the same size"),
+                            (8, true, 16) => Value::from_i16(val.as_i8().try_into().unwrap()),
+                            (8, true, 32) => Value::from_i32(val.as_i8().try_into().unwrap()),
+                            (8, true, 64) => Value::from_i64(val.as_i8().try_into().unwrap()),
+                            (16, true, 32) => Value::from_i32(val.as_i16().try_into().unwrap()),
+                            (16, true, 64) => Value::from_i64(val.as_i16().try_into().unwrap()),
+                            (32, true, 64) => Value::from_i64(val.as_i32().try_into().unwrap()),
+
+                            (8, false, 16) => Value::from_i16(val.as_u8().try_into().unwrap()),
+                            (8, false, 32) => Value::from_i32(val.as_u8().try_into().unwrap()),
+                            (8, false, 64) => Value::from_i64(val.as_u8().try_into().unwrap()),
+                            (16, false, 32) => Value::from_i32(val.as_u16().try_into().unwrap()),
+                            (16, false, 64) => Value::from_i64(val.as_u16().try_into().unwrap()),
+                            (32, false, 64) => Value::from_i64(val.as_u32().try_into().unwrap()),
+
+                            (_, _, _) => panic!("Invalid int types in sign extend"),
+                        }
+                    },
+                    (_, _) => panic!("Invalid operand types to sign extension")
+                }
+            },
             // ZeroExtend(InstrId, Type),
             &Instr::FloatCast(instr, ref ty) => {
                 let val = frame.results[instr].clone();
