@@ -783,9 +783,9 @@ impl<'mir> Interpreter<'mir> {
                 }
             },
             &Instr::FloatCast(instr, ref ty) => {
-                let val = frame.results[instr].clone();
+                let val = &frame.results[instr];
                 match (val.as_bytes().len(), ty.size(self.prog.arch)) {
-                    (x, y) if x == y => val,
+                    (x, y) if x == y => val.clone(),
                     (4, 8) => Value::from_f64(val.as_f32() as f64),
                     (8, 4) => Value::from_f32(val.as_f64() as f32),
                     (4, _) | (8, _) => panic!("Unexpected destination float cast type size"),
@@ -793,7 +793,38 @@ impl<'mir> Interpreter<'mir> {
                     (_, _) => panic!("Unexpected float cast type sizes"),
                 }
             },
-            // FloatToInt(InstrId, Type),
+            &Instr::FloatToInt(instr, ref dest_ty) => {
+                let val = &frame.results[instr];
+                let src_size = self.prog.type_of(instr, func_id).size(self.prog.arch);
+                match dest_ty {
+                    Type::Int { width, is_signed } => {
+                        match (src_size * 8, width.bit_width(self.prog.arch), is_signed) {
+                            (32, 8, true) => Value::from_i8(val.as_f32() as _),
+                            (32, 16, true) => Value::from_i16(val.as_f32() as _),
+                            (32, 32, true) => Value::from_i32(val.as_f32() as _),
+                            (32, 64, true) => Value::from_i64(val.as_f32() as _),
+
+                            (32, 8, false) => Value::from_u8(val.as_f32() as _),
+                            (32, 16, false) => Value::from_u16(val.as_f32() as _),
+                            (32, 32, false) => Value::from_u32(val.as_f32() as _),
+                            (32, 64, false) => Value::from_u64(val.as_f32() as _),
+
+                            (64, 8, true) => Value::from_i8(val.as_f64() as _),
+                            (64, 16, true) => Value::from_i16(val.as_f64() as _),
+                            (64, 32, true) => Value::from_i32(val.as_f64() as _),
+                            (64, 64, true) => Value::from_i64(val.as_f64() as _),
+
+                            (64, 8, false) => Value::from_u8(val.as_f64() as _),
+                            (64, 16, false) => Value::from_u16(val.as_f64() as _),
+                            (64, 32, false) => Value::from_u32(val.as_f64() as _),
+                            (64, 64, false) => Value::from_u64(val.as_f64() as _),
+
+                            (_, _, _) => panic!("Invalid float to int operand sizes"),
+                        }
+                    },
+                    _ => panic!("Invalid destination type in float to int cast: {:?}", dest_ty),
+                }
+            }
             // IntToFloat(InstrId, Type),
             &Instr::Load(location) => {
                 let size = self.prog.type_of(frame.pc, func_id).size(self.prog.arch);
