@@ -191,7 +191,7 @@ fn expr_to_const(expr: &Expr, ty: Type, strings: &mut IdxVec<CString, StrId>) ->
             match ty {
                 Type::Int { .. } => Const::Int { lit, ty },
                 Type::Float(_)   => Const::Float { lit: lit as f64, ty },
-                _ => panic!("Unrecognized integer literal type"),
+                _ => panic!("Unrecognized integer literal type {:?}", ty),
             }
         },
         Expr::DecLit { lit } => Const::Float { lit, ty },

@@ -69,5 +69,9 @@ fn foo: i32 {
 }
 
 fn main() {
-    print("Hello, world!\n")
+    if !(5 < foo) {
+        print("Hello, world!\n")
+    } else {
+        print("Go away, world! :(\n")
+    }
 }

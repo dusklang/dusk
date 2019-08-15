@@ -7,7 +7,7 @@ use arrayvec::ArrayVec;
 use crate::index_vec::{IdxVec, Idx};
 use crate::builder::Intrinsic;
 use crate::mir::{Const, Function, FuncId, Instr, InstrId, Program};
-use crate::ty::{Type, IntWidth};
+use crate::ty::{Type, IntWidth, FloatWidth};
 
 
 #[derive(Debug)]
@@ -201,7 +201,8 @@ impl<'mir> Interpreter<'mir> {
     /// Execute the next instruction. Iff the instruction is a return, this function returns its `Value`
     fn execute_next(&mut self) -> Option<Value> {
         let (func_id, frame) = self.stack.last_mut().unwrap();
-        let func = &self.prog.comp_decls[*func_id];
+        let func_id = *func_id;
+        let func = &self.prog.comp_decls[func_id];
         let val = match &func.code[frame.pc] {
             Instr::Void => Value::Nothing,
             Instr::Const(konst) => {
@@ -223,7 +224,7 @@ impl<'mir> Interpreter<'mir> {
                                 (W64, true) | (Pointer, true) => Value::from_i64(lit.try_into().unwrap()),
                             }
                         },
-                        _ => panic!("unexpected int constant type"),
+                        _ => panic!("unexpected int constant type {:?}", ty),
                     },
                     Const::Float { lit, ref ty } => match ty.size(self.prog.arch) {
                         4 => Value::from_f32(lit as f32),
@@ -261,7 +262,40 @@ impl<'mir> Interpreter<'mir> {
                     // Intrinsic::Mod,
                     // Intrinsic::Add,
                     // Intrinsic::Sub,
-                    // Intrinsic::Less,
+                    Intrinsic::Less => {
+                        assert_eq!(arguments.len(), 2);
+                        let (lhs, rhs) = (arguments[0], arguments[1]);
+                        let ty = self.prog.type_of(lhs, func_id);
+                        assert_eq!(ty, self.prog.type_of(rhs, func_id));
+                        let (lhs, rhs) = (&frame.results[lhs], &frame.results[rhs]);
+                        match ty {
+                            Type::Int { width, is_signed } => {
+                                // We assume in the match below that pointer-sized ints are 64 bits
+                                assert_eq!(self.prog.arch.pointer_size(), 64);
+                                use IntWidth::*;
+                                let val = match (width, is_signed) {
+                                    (W8, true) => lhs.as_i8() < rhs.as_i8(),
+                                    (W16, true) => lhs.as_i16() < rhs.as_i16(),
+                                    (W32, true) => lhs.as_i32() < rhs.as_i32(),
+                                    (W64, true) | (Pointer, true) => lhs.as_i64() < rhs.as_i64(),
+
+                                    (W8, false) => lhs.as_u8() < rhs.as_u8(),
+                                    (W16, false) => lhs.as_u16() < rhs.as_u16(),
+                                    (W32, false) => lhs.as_u32() < rhs.as_u32(),
+                                    (W64, false) | (Pointer, false) => lhs.as_u64() < rhs.as_u64(),
+                                };
+                                Value::from_bool(val)
+                            },
+                            Type::Float(width) => {
+                                let val = match width {
+                                    FloatWidth::W32 => lhs.as_f32() < rhs.as_f32(),
+                                    FloatWidth::W64 => lhs.as_f64() < rhs.as_f64(),
+                                };
+                                Value::from_bool(val)
+                            },
+                            _ => panic!("Unexpected type for intrinsic arguments"),
+                        }
+                    },
                     // Intrinsic::LessOrEq,
                     // Intrinsic::Greater,
                     // Intrinsic::GreaterOrEq,
@@ -279,7 +313,7 @@ impl<'mir> Interpreter<'mir> {
                         assert_eq!(arguments.len(), 1);
                         let id = arguments[0];
                         let val = &frame.results[id];
-                        let ty = self.prog.type_of(id, *func_id);
+                        let ty = self.prog.type_of(id, func_id);
                         match ty {
                             Type::Pointer(_) => unsafe {
                                 let mut ptr = val.as_raw_ptr();
@@ -325,7 +359,6 @@ impl<'mir> Interpreter<'mir> {
                 let ptr = frame.results[location].as_raw_ptr();
                 let val = frame.results[value].as_bytes();
                 for (i, &byte) in val.iter().enumerate() {
-                    println!("{}", byte);
                     unsafe { *ptr.add(i) = byte; }
                 }
                 Value::Nothing
