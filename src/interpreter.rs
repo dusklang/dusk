@@ -716,7 +716,7 @@ impl<'mir> Interpreter<'mir> {
                     // Intrinsic::Calloc,
                     // Intrinsic::Realloc,
                     // Intrinsic::Free,
-                    _ => panic!("Call to unexpected intrinsic {:?}", intr),
+                    _ => panic!("Call to unimplemented intrinsic {:?}", intr),
                 }
             },
             &Instr::Reinterpret(instr, _) => frame.results[instr].clone(),
