@@ -739,7 +739,15 @@ impl<'mir> Interpreter<'mir> {
             },
             // FloatToInt(InstrId, Type),
             // IntToFloat(InstrId, Type),
-            // Load(InstrId),
+            &Instr::Load(location) => {
+                let size = self.prog.type_of(frame.pc, func_id).size(self.prog.arch);
+                let ptr = frame.results[location].as_raw_ptr();
+                let mut buf = ArrayVec::new();
+                for i in 0..size {
+                    buf.push(unsafe { *ptr.add(i) });
+                }
+                Value::Inline(buf)
+            },
             &Instr::Store { location, value } => {
                 let ptr = frame.results[location].as_raw_ptr();
                 let val = frame.results[value].as_bytes();

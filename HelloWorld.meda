@@ -1,36 +1,4 @@
 /*
-fn print_num(num: i32) {
-    num := num
-    if num < 0 {
-        print("-")
-        num = -num
-    }
-    if num > 10 {
-        print_num(num / 10)
-    }
-    print((num % 10) as u8 + "0")
-}
-
-FIZZ_BUZZ_NUM_ITERATIONS :: 100
-
-fn fizz_buzz {
-    i := 1
-    while i <= FIZZ_BUZZ_NUM_ITERATIONS {
-        if i % 3 == 0 || i % 5 == 0 {
-            if i % 3 == 0 {
-                print("Fizz")
-            }
-            if i % 5 == 0 {
-                print("Buzz")
-            }
-        } else {
-            print_num(i)
-        }
-        print("\n")
-        i = i + 1
-    }
-}
-
 fn main {
     foo := remainder_three_numbers(1, 2, 3)
     foo = foo + 2
@@ -64,15 +32,36 @@ fn remainder_three_numbers(a: i32, b: i32, c: i32): i32 {
     a % b % c
 }
 
-fn foo: i32 {
-    12
+fn print_num(num: i32) {
+    num := num
+    if num < 0 {
+        print("-")
+        num = -num
+    }
+    if num > 10 {
+        print_num(num / 10)
+    }
+    print((num % 10) as u8 + "0")
+}
+
+fn fizz_buzz(num_iterations: i32) {
+    i := 1
+    while i <= num_iterations {
+        if i % 3 == 0 || i % 5 == 0 {
+            if i % 3 == 0 {
+                print("Fizz")
+            }
+            if i % 5 == 0 {
+                print("Buzz")
+            }
+        } else {
+            print_num(i)
+        }
+        print("\n")
+        i = i + 1
+    }
 }
 
 fn main() {
-    assert(5 > foo)
-    if !(5 < foo) {
-        print("Hello, world!\n")
-    } else {
-        print("Go away, world! :(\n")
-    }
+    fizz_buzz(1000)
 }
