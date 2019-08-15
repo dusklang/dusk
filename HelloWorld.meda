@@ -1,27 +1,9 @@
 /*
 fn main {
-    foo := remainder_three_numbers(1, 2, 3)
-    foo = foo + 2
-
-    fizz_buzz
-
-    h := "h" as u8 as u8 as i8 as i8 as u8 as i8 as isize as u64
-    i: u64 = 24
-    j := h as usize as u8*
-    k := 5 as u8
-    l := k as u16
-    m := l as i32
-    n := m as u64
-    o := n as i16
-
     // Allocate a single 8-bit integer on the heap
     num :: malloc(1) as u8 *mut
     (*num) = 12
     free(num as void *mut)
-
-    fn float_const {
-        blah: f32 = 5.2
-    }
 }*/
 
 fn assert(condition: bool) {
@@ -63,5 +45,21 @@ fn fizz_buzz(num_iterations: i32) {
 }
 
 fn main() {
-    fizz_buzz(1000)
+    foo := remainder_three_numbers(1, 2, 3)
+    foo = foo + 2
+
+    fizz_buzz(500)
+
+    h := "h" as u8 as u8 as i8 as i8 as u8 as i8 as isize as u64
+    i: u64 = 24
+    j := h as usize as u8*
+    k := 5 as u8
+    l := k as u16
+    m := l as i32
+    n := m as u64
+    o := n as i16
+
+    fn float_const {
+        blah: f32 = 5.2
+    }
 }

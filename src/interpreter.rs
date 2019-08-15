@@ -825,7 +825,39 @@ impl<'mir> Interpreter<'mir> {
                     _ => panic!("Invalid destination type in float to int cast: {:?}", dest_ty),
                 }
             }
-            // IntToFloat(InstrId, Type),
+            &Instr::IntToFloat(instr, ref dest_ty) => {
+                let val = &frame.results[instr];
+                let src_ty = &self.prog.type_of(instr, func_id);
+                let dest_size = dest_ty.size(self.prog.arch);
+                match src_ty {
+                    Type::Int { width, is_signed } => {
+                        match (width.bit_width(self.prog.arch), is_signed, dest_size * 8) {
+                            (8, true, 32) => Value::from_f32(val.as_i8() as _),
+                            (16, true, 32) => Value::from_f32(val.as_i16() as _),
+                            (32, true, 32) => Value::from_f32(val.as_i32() as _),
+                            (64, true, 32) => Value::from_f32(val.as_i64() as _),
+
+                            (8, false, 32) => Value::from_f32(val.as_u8() as _),
+                            (16, false, 32) => Value::from_f32(val.as_u16() as _),
+                            (32, false, 32) => Value::from_f32(val.as_u32() as _),
+                            (64, false, 32) => Value::from_f32(val.as_u64() as _),
+
+                            (8, true, 64) => Value::from_f64(val.as_i8() as _),
+                            (16, true, 64) => Value::from_f64(val.as_i16() as _),
+                            (32, true, 64) => Value::from_f64(val.as_i32() as _),
+                            (64, true, 64) => Value::from_f64(val.as_i64() as _),
+
+                            (8, false, 64) => Value::from_f64(val.as_u8() as _),
+                            (16, false, 64) => Value::from_f64(val.as_u16() as _),
+                            (32, false, 64) => Value::from_f64(val.as_u32() as _),
+                            (64, false, 64) => Value::from_f64(val.as_u64() as _),
+
+                            (_, _, _) => panic!("Invalid int to float operand sizes"),
+                        }
+                    },
+                    _ => panic!("Invalid source type in int to float cast: {:?}", src_ty),
+                }
+            }
             &Instr::Load(location) => {
                 let size = self.prog.type_of(frame.pc, func_id).size(self.prog.arch);
                 let ptr = frame.results[location].as_raw_ptr();
