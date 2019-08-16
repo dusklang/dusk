@@ -166,7 +166,7 @@ pub trait Builder<'src> {
     fn do_expr(&mut self, scope: ScopeId) -> ExprId;
     fn begin_scope(&mut self) -> ScopeId;
     fn end_scope(&mut self, has_terminal_expr: bool);
-    fn begin_computed_decl(&mut self, name: &'src str, param_names: SmallVec<[&'src str; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Type, proto_range: SourceRange);
+    fn begin_computed_decl(&mut self, name: &'src str, param_names: SmallVec<[&'src str; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Option<Type>, proto_range: SourceRange);
     fn end_computed_decl(&mut self);
     fn add_intrinsic(&mut self, intrinsic: Intrinsic, param_tys: SmallVec<[Type; 2]>, ret_ty: Type);
     fn decl_ref(&mut self, name: &'src str, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId;

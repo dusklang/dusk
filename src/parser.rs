@@ -405,7 +405,7 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
         let name = if let TokenKind::Ident(name) = *self.next().kind {
             name
         } else {
-            panic!("expected identifier after 'fn'")
+            panic!("expected function name after 'fn'")
         };
         proto_range = source_info::concat(proto_range, self.cur().range.clone());
         let mut param_names = SmallVec::new();
@@ -426,26 +426,39 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
             proto_range = source_info::concat(proto_range, self.cur().range.clone());
             self.next();
         }
-        let ty = if let TokenKind::Colon = self.cur().kind {
-            self.next();
-            let (ty, range) = self.parse_type();
-            proto_range = source_info::concat(proto_range, range);
-            ty
-        } else {
-            Type::Void
+        let ty = match self.cur().kind {
+            TokenKind::Colon => {
+                self.next();
+                let (ty, range) = self.parse_type();
+                proto_range = source_info::concat(proto_range, range);
+                Some(ty)
+            },
+            TokenKind::OpenCurly => Some(Type::Void),
+            TokenKind::Assign => None,
+            tok => panic!("Invalid token {:?}", tok),
         };
-        assert_eq!(self.cur().kind, &TokenKind::OpenCurly);
         self.builder.begin_computed_decl(name, param_names, param_tys, ty.clone(), proto_range);
-
-        let scope = self.parse_scope();
-        let terminal_expr = self.builder.get_terminal_expr(scope);
-        // TODO: Do this check in TIR builder?
-        if terminal_expr == self.builder.void_expr() {
-            assert_eq!(ty, Type::Void, "expected expression to return in non-void computed decl");
+        match self.cur().kind {
+            TokenKind::OpenCurly => {
+                let scope = self.parse_scope();
+                let terminal_expr = self.builder.get_terminal_expr(scope);
+                // TODO: Do this check in TIR builder?
+                if terminal_expr == self.builder.void_expr() {
+                    assert_eq!(ty, Some(Type::Void), "expected expression to return in non-void computed decl");
+                }
+                // TODO: Handle implicit rets transparently in TIR builder and get rid of this builder method
+                self.builder.implicit_ret(terminal_expr);
+            },
+            TokenKind::Assign => {
+                self.next();
+                self.builder.begin_scope();
+                let assigned_expr = self.parse_expr();
+                self.builder.stmt(assigned_expr);
+                self.builder.implicit_ret(assigned_expr);
+                self.builder.end_scope(true);
+            },
+            tok => panic!("Invalid token {:?}", tok),
         }
-        // TODO: Handle implicit rets transparently in TIR builder and get rid of this builder method
-        self.builder.implicit_ret(terminal_expr);
-
         self.builder.end_computed_decl();
     }
 

@@ -220,7 +220,8 @@ impl Program {
         let mut strings = IdxVec::<CString, StrId>::new();
         let mut num_functions = 0usize;
 
-        for decl in &prog.decls {
+        for (i, decl) in prog.decls.iter().enumerate() {
+            let id = DeclId::new(i);
             decls.push(
                 match decl {
                     hir::Decl::Computed { .. } => {
@@ -228,8 +229,8 @@ impl Program {
                         Decl::Computed { get: FuncId::new(num_functions - 1) }
                     },
                     hir::Decl::Stored => Decl::Stored { location: InstrId::new(std::usize::MAX) },
-                    hir::Decl::Parameter(_) => Decl::LocalConst { value: InstrId::new(std::usize::MAX) },
-                    &hir::Decl::Intrinsic(intr, ref ty) => Decl::Intrinsic(intr, ty.clone()),
+                    hir::Decl::Parameter => Decl::LocalConst { value: InstrId::new(std::usize::MAX) },
+                    &hir::Decl::Intrinsic(intr) => Decl::Intrinsic(intr, tc.decl_types[id].clone()),
                     &hir::Decl::Static(root_expr) => {
                         let konst = expr_to_const(&prog.exprs[root_expr], tc.types[root_expr].clone(), &mut strings);
                         let statik = statics.push(konst);
@@ -243,8 +244,9 @@ impl Program {
             );
         }
         let mut comp_decls = IdxVec::<Function, FuncId>::new();
-        for decl in &prog.decls {
-            if let hir::Decl::Computed { ref name, ref params, ref ret_ty, scope } = *decl {
+        for (i, decl) in prog.decls.iter().enumerate() {
+            let id = DeclId::new(i);
+            if let hir::Decl::Computed { ref name, ref params, scope, .. } = *decl {
                 comp_decls.push(
                     FunctionBuilder::new(
                         prog,
@@ -252,7 +254,7 @@ impl Program {
                         &mut decls,
                         &mut strings,
                         name.clone(),
-                        ret_ty.clone(),
+                        tc.decl_types[id].clone(),
                         scope,
                         &params[..],
                         arch,
@@ -416,8 +418,8 @@ impl<'a> FunctionBuilder<'a> {
         let mut code = IdxVec::new();
         let void_instr = code.push(Instr::Void);
         for &param in params {
-            if let hir::Decl::Parameter(ty) = &prog.decls[param] {
-                let value = code.push(Instr::Parameter(ty.clone()));
+            if let hir::Decl::Parameter = &prog.decls[param] {
+                let value = code.push(Instr::Parameter(tc.decl_types[param].clone()));
                 decls[param] = Decl::LocalConst { value };
             } else {
                 panic!("unexpected non-parameter as parameter decl");

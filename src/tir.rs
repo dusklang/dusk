@@ -75,7 +75,6 @@ impl Decl {
 #[derive(Clone)]
 struct LocalDecl {
     name: Sym,
-    level: Level,
     decl: DeclId,
 }
 
@@ -92,16 +91,24 @@ struct ScopeState {
     stmt_buffer: Option<ExprId>,
 }
 
+#[derive(Clone, Copy)]
+enum RetKind {
+    RetGroup(RetGroupId),
+    AssignedDecl,
+}
+
 struct CompDeclState {
-    ret_group: RetGroupId,
+    id: DeclId,
+    ret_kind: RetKind,
     decls: Vec<LocalDecl>,
     scope_stack: Vec<ScopeState>,
 }
 
 impl CompDeclState {
-    fn new(ret_group: RetGroupId) -> Self {
+    fn new(id: DeclId, ret_kind: RetKind) -> Self {
         Self {
-            ret_group,
+            id,
+            ret_kind,
             decls: Vec::new(),
             scope_stack: Vec::new(),
         }
@@ -600,13 +607,16 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
         );
         let name = self.interner.get_or_intern(name);
         if let Some(comp_decl_state) = self.comp_decl_stack.last_mut() {
-            comp_decl_state.decls.push(LocalDecl { name, level, decl: decl_id });
+            comp_decl_state.decls.push(LocalDecl { name, decl: decl_id });
         } else {
             self.global_decls.push(GlobalDecl { name, num_params: 0, decl: decl_id });
         }
     }
 
     fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
+        if let RetKind::AssignedDecl = self.comp_decl_stack.last().unwrap().ret_kind {
+            panic!("Can't return from assigned decl!");
+        }
         let id = self.levels.push(Level::Global(0));
         self.source_ranges.push(range);
         self.explicit_rets.push(id);
@@ -616,8 +626,15 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
     }
 
     fn implicit_ret(&mut self, expr: ExprId) {
-        let group = self.comp_decl_stack.last().unwrap().ret_group;
-        self.ret_groups[group].exprs.push(expr);
+        let comp_decl = self.comp_decl_stack.last().unwrap();
+        match comp_decl.ret_kind {
+            RetKind::RetGroup(id) => self.ret_groups[id].exprs.push(expr),
+            RetKind::AssignedDecl => {
+                let decl_id = comp_decl.id;
+                let level = self.insert_item(AssignedDecl { explicit_ty: None, root_expr: expr, decl_id });
+                self.decls[decl_id].level = level;
+            },
+        }
     }
 
     fn if_expr(&mut self, condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId>, range: SourceRange) -> ExprId {
@@ -674,13 +691,16 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
         stack.decls.truncate(scope.previous_decls);
     }
 
-    fn begin_computed_decl(&mut self, name: &'src str, param_names: SmallVec<[&'src str; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Type, _proto_range: SourceRange) {
+    fn begin_computed_decl(&mut self, name: &'src str, param_names: SmallVec<[&'src str; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Option<Type>, _proto_range: SourceRange) {
         assert_eq!(param_names.len(), param_tys.len());
-        let decl_id = self.decls.push(Decl::new(param_tys.clone(), ret_ty.clone(), Level::Global(0)));
+        let decl_id = self.decls.push(Decl::new(param_tys.clone(), ret_ty.clone().unwrap_or_else(|| Type::Error), Level::Global(0)));
         let name = self.interner.get_or_intern(name);
-        let local_decl = LocalDecl { name, level: Level::Global(0), decl: decl_id };
-        let ret_group = self.ret_groups.push(RetGroup::new(ret_ty));
-        let mut decl_state = CompDeclState::new(ret_group);
+        let local_decl = LocalDecl { name, decl: decl_id };
+        let ret_kind = match ret_ty {
+            Some(ty) => RetKind::RetGroup(self.ret_groups.push(RetGroup::new(ty))),
+            None => RetKind::AssignedDecl,
+        };
+        let mut decl_state = CompDeclState::new(decl_id, ret_kind);
         // Add decl to its own scope to enable recursion
         decl_state.decls.push(local_decl.clone());
         if let Some(comp_decl_state) = self.comp_decl_stack.last_mut() {
@@ -694,7 +714,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
         for (&name, ty) in param_names.iter().zip(&param_tys) {
             let name = self.interner.get_or_intern(name);
             let id = self.decls.push(Decl::new(SmallVec::new(), ty.clone(), Level::Global(0)));
-            decl_state.decls.push(LocalDecl { name, level: Level::Global(0), decl: id });
+            decl_state.decls.push(LocalDecl { name, decl: id });
         }
         self.comp_decl_stack.push(decl_state);
     }
@@ -706,7 +726,8 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
     fn decl_ref(&mut self, name: &'src str, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
         let mut decl: Option<(Level, DeclId)> = None;
         let name = self.interner.get_or_intern(name);
-        for &LocalDecl { name: other_name, level: other_level, decl: other_decl } in self.comp_decl_stack.last().unwrap().decls.iter().rev() {
+        for &LocalDecl { name: other_name, decl: other_decl } in self.comp_decl_stack.last().unwrap().decls.iter().rev() {
+            let other_level = self.decls[other_decl].level;
             if name == other_name {
                 decl = Some((other_level, other_decl));
                 break;

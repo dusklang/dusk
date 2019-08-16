@@ -56,10 +56,10 @@ pub struct Scope {
 
 #[derive(Debug)]
 pub enum Decl {
-    Computed { name: String, params: SmallVec<[DeclId; 2]>, ret_ty: Type, scope: ScopeId },
+    Computed { name: String, params: SmallVec<[DeclId; 2]>, scope: ScopeId },
     Stored,
-    Parameter(Type),
-    Intrinsic(Intrinsic, Type),
+    Parameter,
+    Intrinsic(Intrinsic),
     Static(ExprId),
     Const(ExprId),
 }
@@ -142,8 +142,8 @@ impl<'src> Builder<'src> {
 
 impl<'src> builder::Builder<'src> for Builder<'src> {
     type Output = Program;
-    fn add_intrinsic(&mut self, intrinsic: Intrinsic, _param_tys: SmallVec<[Type; 2]>, ret_ty: Type) {
-        self.decls.push(Decl::Intrinsic(intrinsic, ret_ty));
+    fn add_intrinsic(&mut self, intrinsic: Intrinsic, _param_tys: SmallVec<[Type; 2]>, _ret_ty: Type) {
+        self.decls.push(Decl::Intrinsic(intrinsic));
     }
     fn void_expr(&self) -> ExprId { self.void_expr }
     fn int_lit(&mut self, lit: u64, _range: SourceRange) -> ExprId {
@@ -248,20 +248,19 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             self.scopes[scope.id].terminal_expr = terminal_expr;
         }
     }
-    fn begin_computed_decl(&mut self, name: &'src str, param_names: SmallVec<[&'src str; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Type, _proto_range: SourceRange) {
+    fn begin_computed_decl(&mut self, name: &'src str, param_names: SmallVec<[&'src str; 2]>, param_tys: SmallVec<[Type; 2]>, _ret_ty: Option<Type>, _proto_range: SourceRange) {
         self.flush_stmt_buffer();
         // This is a placeholder value that gets replaced once the parameter declarations are allocated.
         let id = self.decls.push(Decl::Stored);
         assert_eq!(param_names.len(), param_tys.len());
         self.decls.reserve(param_tys.len());
-        let params = param_tys.into_iter()
-            .map(|ty| self.decls.push(Decl::Parameter(ty)))
+        let params = param_tys.iter()
+            .map(|_| self.decls.push(Decl::Parameter))
             .collect();
         // `end_computed_decl` will attach the real scope to this decl; we don't have it yet
         self.decls[id] = Decl::Computed {
             name: name.to_owned(),
             params,
-            ret_ty,
             scope: ScopeId::new(std::usize::MAX)
         };
         self.comp_decl_stack.push(

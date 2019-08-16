@@ -37,6 +37,7 @@ struct TypeChecker {
 
 pub struct Program {
     pub types: IdxVec<Type, ExprId>,
+    pub decl_types: IdxVec<Type, DeclId>,
     pub overloads: IdxVec<Option<DeclId>, DeclRefId>,
     pub cast_methods: IdxVec<CastMethod, CastId>,
 }
@@ -429,8 +430,15 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     //println!("Decl types: {:#?}", tc.prog.local_decls);
     //println!("Constraints: {:#?}", tc.constraints);
 
+    let mut decl_types = IdxVec::new();
+    decl_types.reserve(tc.prog.decls.len());
+    for decl in &tc.prog.decls {
+        decl_types.push(decl.ret_ty.ty.clone());
+    }
+
     let prog = Program {
         types: tc.types,
+        decl_types,
         overloads: tc.selected_overloads,
         cast_methods: tc.cast_methods,
     };
