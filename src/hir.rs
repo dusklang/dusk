@@ -8,6 +8,8 @@ use crate::builder::{self, BinOp, UnOp, ExprId, DeclId, ScopeId, DeclRefId, Cast
 use crate::source_info::SourceRange;
 use crate::ty::Type;
 
+newtype_index!(StoredDeclId pub);
+
 #[derive(Debug)]
 pub enum Expr {
     Void,
@@ -40,12 +42,13 @@ struct CompDeclState {
     has_scope: Option<ScopeId>,
     id: DeclId,
     scope_stack: Vec<ScopeState>,
+    num_stored_decls: usize,
 }
 
 #[derive(Copy, Clone, Debug)]
 pub enum Item {
     Stmt(ExprId),
-    StoredDecl { id: DeclId, root_expr: ExprId },
+    StoredDecl { id: StoredDeclId, root_expr: ExprId },
 }
 
 #[derive(Debug)]
@@ -57,8 +60,11 @@ pub struct Scope {
 #[derive(Debug)]
 pub enum Decl {
     Computed { name: String, params: SmallVec<[DeclId; 2]>, scope: ScopeId },
-    Stored,
-    Parameter,
+    Stored(StoredDeclId),
+    Parameter {
+        /// Parameter index within the function
+        index: usize,
+    },
     Intrinsic(Intrinsic),
     Static(ExprId),
     Const(ExprId),
@@ -195,7 +201,11 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
                 }
             );
         } else {
-            let id = self.decls.push(Decl::Stored);
+            let decl = self.comp_decl_stack.last_mut().unwrap();
+            let id = StoredDeclId::new(decl.num_stored_decls);
+            decl.num_stored_decls += 1;
+
+            self.decls.push(Decl::Stored(id));
             self.item(Item::StoredDecl { id, root_expr });
         }
     }
@@ -251,11 +261,12 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
     fn begin_computed_decl(&mut self, name: &'src str, param_names: SmallVec<[&'src str; 2]>, param_tys: SmallVec<[Type; 2]>, _ret_ty: Option<Type>, _proto_range: SourceRange) {
         self.flush_stmt_buffer();
         // This is a placeholder value that gets replaced once the parameter declarations are allocated.
-        let id = self.decls.push(Decl::Stored);
+        let id = self.decls.push(Decl::Stored(StoredDeclId::new(std::usize::MAX)));
         assert_eq!(param_names.len(), param_tys.len());
         self.decls.reserve(param_tys.len());
         let params = param_tys.iter()
-            .map(|_| self.decls.push(Decl::Parameter))
+            .enumerate()
+            .map(|(index, _)| self.decls.push(Decl::Parameter { index }))
             .collect();
         // `end_computed_decl` will attach the real scope to this decl; we don't have it yet
         self.decls[id] = Decl::Computed {
@@ -268,6 +279,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
                 has_scope: None,
                 id,
                 scope_stack: Vec::new(),
+                num_stored_decls: 0,
             }
         );
     }

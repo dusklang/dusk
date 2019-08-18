@@ -9,7 +9,7 @@ use crate::type_checker as tc;
 use tc::CastMethod;
 use crate::index_vec::{Idx, IdxVec};
 use crate::builder::{DeclId, ExprId, DeclRefId, ScopeId, Intrinsic};
-use crate::hir::{self, Expr, Item};
+use crate::hir::{self, Expr, Item, StoredDeclId};
 
 newtype_index!(InstrId pub);
 newtype_index!(BasicBlockId pub);
@@ -64,7 +64,7 @@ pub enum Instr {
 
 #[derive(Debug)]
 enum Decl {
-    Stored { location: InstrId },
+    Stored(StoredDeclId),
     Computed { get: FuncId },
     LocalConst { value: InstrId },
     Intrinsic(Intrinsic, Type),
@@ -223,20 +223,20 @@ impl Program {
         for (i, decl) in prog.decls.iter().enumerate() {
             let id = DeclId::new(i);
             decls.push(
-                match decl {
+                match *decl {
                     hir::Decl::Computed { .. } => {
                         num_functions += 1;
                         Decl::Computed { get: FuncId::new(num_functions - 1) }
                     },
-                    hir::Decl::Stored => Decl::Stored { location: InstrId::new(std::usize::MAX) },
-                    hir::Decl::Parameter => Decl::LocalConst { value: InstrId::new(std::usize::MAX) },
-                    &hir::Decl::Intrinsic(intr) => Decl::Intrinsic(intr, tc.decl_types[id].clone()),
-                    &hir::Decl::Static(root_expr) => {
+                    hir::Decl::Stored(index) => Decl::Stored(index),
+                    hir::Decl::Parameter { index } => Decl::LocalConst { value: InstrId::new(index + 1) },
+                    hir::Decl::Intrinsic(intr) => Decl::Intrinsic(intr, tc.decl_types[id].clone()),
+                    hir::Decl::Static(root_expr) => {
                         let konst = expr_to_const(&prog.exprs[root_expr], tc.types[root_expr].clone(), &mut strings);
                         let statik = statics.push(konst);
                         Decl::Static(statik)
                     },
-                    &hir::Decl::Const(root_expr) => {
+                    hir::Decl::Const(root_expr) => {
                         let konst = expr_to_const(&prog.exprs[root_expr], tc.types[root_expr].clone(), &mut strings);
                         Decl::Const(konst)
                     },
@@ -251,7 +251,7 @@ impl Program {
                     FunctionBuilder::new(
                         prog,
                         tc,
-                        &mut decls,
+                        &decls,
                         &mut strings,
                         name.clone(),
                         tc.decl_types[id].clone(),
@@ -392,22 +392,23 @@ impl fmt::Display for Program {
 struct FunctionBuilder<'a> {
     prog: &'a hir::Program,
     tc: &'a tc::Program,
-    decls: &'a mut IdxVec<Decl, DeclId>,
+    decls: &'a IdxVec<Decl, DeclId>,
     strings: &'a mut IdxVec<CString, StrId>,
     name: String,
     ret_ty: Type,
     scope: ScopeId,
+    arch: Arch,
     void_instr: InstrId,
     code: IdxVec<Instr, InstrId>,
     basic_blocks: IdxVec<InstrId, BasicBlockId>,
-    arch: Arch,
+    stored_decl_locs: IdxVec<InstrId, StoredDeclId>,
 }
 
 impl<'a> FunctionBuilder<'a> {
     fn new(
         prog: &'a hir::Program,
         tc: &'a tc::Program,
-        decls: &'a mut IdxVec<Decl, DeclId>,
+        decls: &'a IdxVec<Decl, DeclId>,
         strings: &'a mut IdxVec<CString, StrId>,
         name: String,
         ret_ty: Type,
@@ -418,9 +419,8 @@ impl<'a> FunctionBuilder<'a> {
         let mut code = IdxVec::new();
         let void_instr = code.push(Instr::Void);
         for &param in params {
-            if let hir::Decl::Parameter = &prog.decls[param] {
-                let value = code.push(Instr::Parameter(tc.decl_types[param].clone()));
-                decls[param] = Decl::LocalConst { value };
+            if let hir::Decl::Parameter { .. } = prog.decls[param] {
+                code.push(Instr::Parameter(tc.decl_types[param].clone()));
             } else {
                 panic!("unexpected non-parameter as parameter decl");
             }
@@ -439,6 +439,8 @@ impl<'a> FunctionBuilder<'a> {
             code,
             basic_blocks,
             arch,
+
+            stored_decl_locs: IdxVec::new(),
         }
     }
 
@@ -454,7 +456,8 @@ impl<'a> FunctionBuilder<'a> {
             Item::StoredDecl { id, root_expr } => {
                 let ty = self.type_of(root_expr);
                 let location = self.code.push(Instr::Alloca(ty));
-                self.decls[id] = Decl::Stored { location };
+                assert_eq!(self.stored_decl_locs.len(), id.idx());
+                self.stored_decl_locs.push(location);
                 self.expr(root_expr, Context::new(0, DataDest::Store { location }, ControlDest::Continue));
             },
         }
@@ -493,8 +496,9 @@ impl<'a> FunctionBuilder<'a> {
         let id = self.tc.overloads[id].expect("No overload found!");
         match self.decls[id] {
             Decl::Computed { get } => self.code.push(Instr::Call { arguments, func: get }),
-            Decl::Stored { location } => {
+            Decl::Stored(id) => {
                 assert!(arguments.is_empty());
+                let location = self.stored_decl_locs[id];
                 self.code.push(Instr::Load(location))
             },
             Decl::LocalConst { value } => value,
@@ -513,8 +517,9 @@ impl<'a> FunctionBuilder<'a> {
         let id = self.tc.overloads[id].expect("No overload found!");
         match &self.decls[id] {
             Decl::Computed { .. } => panic!("setters not yet implemented!"),
-            &Decl::Stored { location } => {
+            &Decl::Stored(id) => {
                 assert!(arguments.is_empty());
+                let location = self.stored_decl_locs[id];
                 self.code.push(Instr::Store { location, value })
             },
             Decl::LocalConst { .. } | Decl::Const(_) => panic!("can't set a constant!"),
@@ -531,9 +536,9 @@ impl<'a> FunctionBuilder<'a> {
         let decl = &self.decls[id];
         match decl {
             Decl::Computed { .. } => panic!("modify accessors not yet implemented!"),
-            &Decl::Stored { location } => {
+            &Decl::Stored(id) => {
                 assert!(arguments.is_empty());
-                location
+                self.stored_decl_locs[id]
             },
             Decl::LocalConst { .. } | Decl::Const(_) => panic!("can't modify a constant!"),
             Decl::Intrinsic(_, _) => panic!("can't modify an intrinsic! (yet?)"),
