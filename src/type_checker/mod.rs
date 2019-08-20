@@ -11,6 +11,7 @@ use crate::index_vec::IdxVec;
 use crate::source_info::SourceRange;
 use crate::dep_vec;
 
+#[derive(Clone, Debug)]
 pub enum CastMethod {
     Noop,
     Reinterpret,
@@ -222,63 +223,37 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
             CastMethod::Noop
         } else if let Type::Pointer(dest_pointee_ty) = &item.ty {
             let dest_pointee_ty = dest_pointee_ty.as_ref();
-            let mut src_ty = None;
-            // TODO: Don't just pick the first valid overload; rank them
-            for ty in &constraints.one_of {
-                if let Type::Pointer(pointee) = &ty.ty {
-                    assert!(src_ty.is_none(), "Ambiguous type in cast");
-                    if pointee.is_mut || !dest_pointee_ty.is_mut {
-                        src_ty = Some(ty.ty.clone());
-                    }
-                } else if let Type::Int { width, .. } = &ty.ty {
-                    assert!(src_ty.is_none(), "Ambiguous type in cast");
-                    if let IntWidth::Pointer = width {
-                        src_ty = Some(ty.ty.clone());
-                    }
+            let src_ty = constraints.max_ranked_type(|ty|
+                match ty.ty {
+                    Type::Pointer(ref pointee) if pointee.is_mut || dest_pointee_ty.is_mut => 2,
+                    Type::Int { width, .. } if width == IntWidth::Pointer => 1,
+                    _ => 0,
                 }
-            }
-            let src_ty = src_ty.expect("Invalid cast!");
+            ).expect("Invalid cast!").clone();
             constraints.set_to(src_ty);
             CastMethod::Reinterpret
-        } else if let Type::Int { ref width, .. } = item.ty {
-            let mut src_ty = None;
-            let mut method = CastMethod::Noop;
-            // TODO: Don't just pick the first valid overload; rank them
-            for ty in &constraints.one_of {
-                if let Type::Int { .. } = ty.ty {
-                    assert!(src_ty.is_none(), "Ambiguous type in cast");
-                    src_ty = Some(ty.ty.clone());
-                    method = CastMethod::Int;
-                } else if let Type::Float { .. } = ty.ty {
-                    assert!(src_ty.is_none(), "Ambiguous type in cast");
-                    src_ty = Some(ty.ty.clone());
-                    method = CastMethod::FloatToInt;
-                } else if let Type::Pointer(_) = ty.ty {
-                    assert!(src_ty.is_none(), "Ambiguous type in cast");
-                    if let IntWidth::Pointer = width {
-                        src_ty = Some(ty.ty.clone());
-                        method = CastMethod::Reinterpret;
-                    }
+        } else if let Type::Int { width, .. } = item.ty {
+            let (src_ty, method) = constraints.max_ranked_type_with_assoc_data(|ty|
+                match ty.ty {
+                    Type::Int { .. } => (3, CastMethod::Int),
+                    Type::Float { .. } => (2, CastMethod::FloatToInt),
+                    Type::Pointer(_) if width == IntWidth::Pointer => (1, CastMethod::Reinterpret),
+                    _ => (0, CastMethod::Noop),
                 }
-            }
-            constraints.set_to(src_ty.expect("Invalid cast!"));
+            ).expect("Invalid cast!");
+            let src_ty = src_ty.clone();
+            constraints.set_to(src_ty);
             method
         } else if let Type::Float { .. } = item.ty {
-            let mut src_ty = None;
-            let mut method = CastMethod::Noop;
-            // TODO: Don't just pick the first valid overload; rank them
-            for ty in &constraints.one_of {
-                if let Type::Float { .. } = ty.ty {
-                    assert!(src_ty.is_none(), "Ambiguous type in cast");
-                    src_ty = Some(ty.ty.clone());
-                    method = CastMethod::Float;
-                } else if let Type::Int { .. } = ty.ty {
-                    assert!(src_ty.is_none(), "Ambiguous type in cast");
-                    src_ty = Some(ty.ty.clone());
-                    method = CastMethod::IntToFloat;
+            let (src_ty, method) = constraints.max_ranked_type_with_assoc_data(|ty|
+                match ty.ty {
+                    Type::Float { .. } => (2, CastMethod::Float),
+                    Type::Int { .. } => (1, CastMethod::IntToFloat),
+                    _ => (0, CastMethod::Noop),
                 }
-            }
-            constraints.set_to(src_ty.expect("Invalid cast!"));
+            ).expect("Invalid cast!");
+            let src_ty = src_ty.clone();
+            constraints.set_to(src_ty);
             method
         } else {
             panic!("Invalid cast!")

@@ -72,6 +72,30 @@ impl ConstraintList {
         false
     }
 
+    pub fn max_ranked_type_with_assoc_data<T: Clone>(&self, mut rank: impl FnMut(&QualType) -> (usize, T)) -> Result<(&QualType, T), Vec<(&QualType, T)>> {
+        let mut ranks = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+        for ty in &self.one_of {
+            let (rank, assoc_data) = rank(ty);
+            if rank > 0 {
+                ranks[rank - 1].push((ty, assoc_data));
+            }
+        }
+        for (i, rank) in ranks.iter().enumerate().rev() {
+            if rank.len() == 1 {
+                return Ok(rank[0].clone())
+            } else if rank.len() > 1 {
+                return Err(ranks[i].clone());
+            }
+        }
+        Err(Vec::new())
+    }
+
+    pub fn max_ranked_type(&self, mut rank: impl FnMut(&QualType) -> usize) -> Result<&QualType, Vec<&QualType>> {
+        self.max_ranked_type_with_assoc_data(|ty| (rank(ty), ()))
+            .map(|(ty, _)| ty)
+            .map_err(|tys| tys.iter().map(|(ty, _)| *ty).collect())
+    }
+
     fn is_never(&self) -> bool {
         self.one_of.len() == 1 
             && self.one_of.first().unwrap().ty == Type::Never

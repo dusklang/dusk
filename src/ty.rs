@@ -2,7 +2,7 @@ use std::fmt;
 
 use crate::arch::Arch;
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum IntWidth {
     W8, W16, W32, W64, Pointer,
 }
@@ -19,7 +19,7 @@ impl IntWidth {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FloatWidth {
     W32, W64,
 }
