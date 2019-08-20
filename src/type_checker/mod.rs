@@ -1,7 +1,7 @@
+use smallvec::{SmallVec, smallvec};
+
 mod constraints;
 use constraints::{ConstraintList, LiteralType, UnificationError};
-
-use smallvec::smallvec;
 
 use crate::error::Error;
 use crate::tir;
@@ -67,15 +67,14 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     ]);
 
     // Assign the type of the void expression to be void.
-    tc.constraints[tc.prog.void_expr].one_of = smallvec![Type::Void.into()];
+    tc.constraints[tc.prog.void_expr] = ConstraintList::new(None, smallvec![Type::Void.into()], None);
     tc.types[tc.prog.void_expr] = Type::Void;
 
     // Pass 1: propagate info down from leaves to roots
     fn independent_pass_1<T>(constraints: &mut IdxVec<ConstraintList, ExprId>, tys: &mut IdxVec<Type, ExprId>, exprs: &[T], data: impl Fn(&T) -> (ExprId, Type)) {
         for item in exprs {
             let (id, ty) = data(item);
-            let constraints = &mut constraints[id];
-            constraints.one_of = smallvec![ty.clone().into()];
+            constraints[id] = ConstraintList::new(None, smallvec![ty.clone().into()], None);
             tys[id] = ty;
         }
     }
@@ -85,9 +84,11 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
 
     fn lit_pass_1(constraints: &mut IdxVec<ConstraintList, ExprId>, lits: &[ExprId], lit_ty: LiteralType) {
         for &item in lits {
-            let constraints = &mut constraints[item];
-            constraints.preferred_type = Some(lit_ty.preferred_type().into());
-            constraints.literal = Some(lit_ty);
+            constraints[item] = ConstraintList::new(
+                Some(lit_ty), 
+                SmallVec::new(),
+                Some(lit_ty.preferred_type().into())
+            );
         }
     }
     lit_pass_1(&mut tc.constraints, &tc.prog.int_lits, LiteralType::Int);
@@ -100,7 +101,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
             let ty = if let Some(explicit_ty) = &item.explicit_ty {
                 assert!(constraints.can_unify_to(&explicit_ty.into()).is_ok());
                 explicit_ty.clone()
-            } else if let Some(pref) = &constraints.preferred_type {
+            } else if let Some(pref) = constraints.preferred_type() {
                 // I don't actually know if it's possible for an expression to not be able to unify to its preferred type?
                 //assert!(dbg!(constraints).can_unify_to(dbg!(pref)).is_ok());
                 pref.ty.clone()
@@ -127,65 +128,51 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
                 true
             });
 
-            tc.constraints[item.id].one_of = tc.prog.overloads[item.decl_ref_id].iter()
+            let one_of = tc.prog.overloads[item.decl_ref_id].iter()
                 .map(|&overload| decls[overload].ret_ty.clone())
                 .collect();
-
+            let mut pref = None;
             'find_preference: for (i, &arg) in item.args.iter().enumerate() {
-                if let Some(ty) = &tc.constraints[arg].preferred_type {
+                if let Some(ty) = tc.constraints[arg].preferred_type() {
                     for &overload in &tc.prog.overloads[item.decl_ref_id] {
                         let decl = &decls[overload];
                         if ty.ty.trivially_convertible_to(&decl.param_tys[i]) {
-                            tc.constraints[item.id].preferred_type = Some(decl.ret_ty.clone());
+                            pref = Some(decl.ret_ty.clone());
                             tc.preferred_overloads[item.decl_ref_id] = Some(overload);
                             break 'find_preference;
                         }
                     }
                 }
             }
+            tc.constraints[item.id] = ConstraintList::new(None, one_of, pref);
         }
         for item in tc.prog.tree.addr_ofs.get_level(level) {
-            let (addr, expr) = tc.constraints.index_mut(item.id, item.expr);
-            // no mutability needed
-            let expr = &*expr;
-
-            let type_map = |ty: &QualType| {
+            let constraints = tc.constraints[item.expr].filter_map(|ty| {
                 if item.is_mut && !ty.is_mut { return None; }
                 Some(
                     QualType::from(
                         ty.ty.clone().ptr_with_mut(item.is_mut)
                     )
                 )
-            };
-            addr.one_of = expr.one_of.iter().filter_map(type_map).collect();
-            if let Some(pref) = &expr.preferred_type {
-                addr.preferred_type = type_map(pref);
-            }
+            });
+            tc.constraints[item.id] = constraints;
         }
         for item in tc.prog.tree.derefs.get_level(level) {
-            let (expr, addr) = tc.constraints.index_mut(item.id, item.expr);
-            // no mutability needed
-            let addr = &*addr;
-
-            expr.one_of = addr.one_of.iter().filter_map(|ty| {
+            let constraints = tc.constraints[item.expr].filter_map(|ty| {
                 if let Type::Pointer(pointee) = &ty.ty {
                     Some(pointee.as_ref().clone())
                 } else {
                     None
                 }
-            }).collect();
-            if let Some(QualType { ty: Type::Pointer(pointee), .. }) = &addr.preferred_type {
-                expr.preferred_type = Some(pointee.as_ref().clone());
-            }
+            });
+            tc.constraints[item.id] = constraints;
         }
         for item in tc.prog.tree.ifs.get_level(level) {
             if tc.constraints[item.condition].can_unify_to(&Type::Bool.into()).is_err() {
                 panic!("Expected boolean condition in if expression");
             }
             let constraints = tc.constraints[item.then_expr].intersect_with(&tc.constraints[item.else_expr]);
-            if constraints.one_of.is_empty() && constraints.literal.is_none() {
-                panic!("Failed to unify branches of if expression");
-            }
+            assert!(constraints.solve().is_ok(), "Failed to unify branches of if expression");
             tc.constraints[item.id] = constraints;
         }
         for item in tc.prog.tree.dos.get_level(level) {

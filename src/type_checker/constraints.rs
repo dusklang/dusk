@@ -20,9 +20,9 @@ impl LiteralType {
 
 #[derive(Debug, Default, Clone)]
 pub struct ConstraintList {
-    pub literal: Option<LiteralType>,
+    literal: Option<LiteralType>,
     pub one_of: SmallVec<[QualType; 1]>,
-    pub preferred_type: Option<QualType>,
+    preferred_type: Option<QualType>,
 }
 
 pub enum UnificationError<'a> {
@@ -35,6 +35,36 @@ pub enum UnificationError<'a> {
 }
 
 impl ConstraintList {
+    pub const fn new(literal: Option<LiteralType>, one_of: SmallVec<[QualType; 1]>, preferred_type: Option<QualType>) -> Self {
+        Self { literal, one_of, preferred_type }
+    }
+
+    pub fn solve(&self) -> Result<Type, ()> {
+        if self.one_of.len() == 1 {
+            Ok(self.one_of[0].ty.clone())
+        } else if self.one_of.len() > 1 {
+            match self.preferred_type {
+                None => Err(()),
+                Some(ref pref) if self.can_unify_to(pref).is_ok() => Ok(pref.ty.clone()),
+                _ => Err(()),
+            }
+        } else {
+            Err(())
+        }
+    }
+
+    pub fn preferred_type(&self) -> Option<&QualType> {
+        self.preferred_type.as_ref()
+    }
+
+    pub fn filter_map(&self, type_map: impl FnMut(&QualType) -> Option<QualType> + Copy) -> Self {
+        Self::new(
+            None,
+            self.one_of.iter().filter_map(type_map).collect(),
+            self.preferred_type().and_then(type_map),
+        )
+    }
+
     pub fn one_of_exists(&self, mut condition: impl FnMut(&QualType) -> bool) -> bool {
         for ty in &self.one_of {
             if condition(ty) { return true; }
