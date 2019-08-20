@@ -21,7 +21,7 @@ impl LiteralType {
 #[derive(Debug, Default, Clone)]
 pub struct ConstraintList {
     literal: Option<LiteralType>,
-    pub one_of: SmallVec<[QualType; 1]>,
+    one_of: SmallVec<[QualType; 1]>,
     preferred_type: Option<QualType>,
 }
 
@@ -39,17 +39,20 @@ impl ConstraintList {
         Self { literal, one_of, preferred_type }
     }
 
-    pub fn solve(&self) -> Result<Type, ()> {
+    pub fn solve(&self) -> Result<QualType, ()> {
         if self.one_of.len() == 1 {
-            Ok(self.one_of[0].ty.clone())
+            Ok(self.one_of[0].clone())
         } else if self.one_of.len() > 1 {
             match self.preferred_type {
                 None => Err(()),
-                Some(ref pref) if self.can_unify_to(pref).is_ok() => Ok(pref.ty.clone()),
+                Some(ref pref) if self.can_unify_to(pref).is_ok() => Ok(pref.clone()),
                 _ => Err(()),
             }
         } else {
-            Err(())
+            match self.preferred_type {
+                None => Err(()),
+                Some(ref pref) => Ok(pref.clone())
+            }
         }
     }
 
@@ -317,5 +320,6 @@ impl ConstraintList {
                 }
             }
         }
+        assert!(self.one_of.is_empty() || self.one_of_exists(|ty| ty.is_mut), "can't assign to immutable expression");
     }
 }

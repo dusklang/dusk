@@ -8,7 +8,6 @@ use crate::tir;
 use crate::builder::{ExprId, DeclId, DeclRefId, CastId};
 use crate::ty::{Type, QualType, IntWidth};
 use crate::index_vec::IdxVec;
-use crate::source_info::SourceRange;
 use crate::dep_vec;
 
 #[derive(Clone, Debug)]
@@ -102,12 +101,8 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
             let ty = if let Some(explicit_ty) = &item.explicit_ty {
                 assert!(constraints.can_unify_to(&explicit_ty.into()).is_ok());
                 explicit_ty.clone()
-            } else if let Some(pref) = constraints.preferred_type() {
-                // I don't actually know if it's possible for an expression to not be able to unify to its preferred type?
-                //assert!(dbg!(constraints).can_unify_to(dbg!(pref)).is_ok());
-                pref.ty.clone()
             } else {
-                constraints.one_of[0].ty.clone()
+                constraints.solve().expect("Ambiguous type for assigned declaration").ty
             };
             tc.prog.decls[item.decl_id].ret_ty.ty = ty;
         }
@@ -266,19 +261,9 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
         for item in tc.prog.tree.assignments.get_level(level) {
             let (lhs, rhs) = tc.constraints.index_mut(item.lhs, item.rhs);
             lhs.lopsided_intersect_with(rhs);
-            assert!(lhs.one_of.is_empty() || lhs.one_of_exists(|ty| ty.is_mut), "can't assign to immutable expression");
         }
         for item in tc.prog.tree.decl_refs.get_level(level) {
-            let constraints = &tc.constraints[item.id];
-            let ty = if constraints.one_of.len() != 1 {
-                errs.push(
-                    Error::new("ambiguous type for expression")
-                        .adding_primary_range(tc.prog.source_ranges[item.id].clone(), "expression here")
-                );
-                QualType::from(Type::Error)
-            } else {
-                constraints.one_of[0].clone()
-            };
+            let ty = tc.constraints[item.id].solve().expect("Ambiguous type for expression");
             tc.types[item.id] = ty.ty.clone();
 
             // P.S. These borrows are only here because the borrow checker is dumb
@@ -312,51 +297,28 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
             tc.selected_overloads[item.decl_ref_id] = overload;
         }
         for item in tc.prog.tree.addr_ofs.get_level(level) {
-            let (addr, expr) = tc.constraints.index_mut(item.id, item.expr);
-            assert_eq!(addr.one_of.len(), 1);
-            let ty = &addr.one_of[0].ty;
-            tc.types[item.id] = ty.clone();
-            if let Type::Pointer(pointee) = ty {
-                expr.one_of = smallvec![pointee.as_ref().clone()];
-            } else {
-                panic!("unexpected non-pointer for addr of expression");
+            let ty = tc.constraints[item.id].solve().unwrap().ty;
+            match ty {
+                Type::Pointer(ref pointee) => tc.constraints[item.expr].set_to(pointee.as_ref().clone()),
+                _ => panic!("unexpected non-pointer for addr of expression"),
             }
+            tc.types[item.id] = ty;
         }
         for item in tc.prog.tree.derefs.get_level(level) {
-            let (expr, addr) = tc.constraints.index_mut(item.id, item.expr);
-            assert_eq!(expr.one_of.len(), 1);
-            let ty = &expr.one_of[0];
-            tc.types[item.id] = ty.ty.clone();
-            addr.one_of = smallvec![
-                QualType::from(ty.clone().ptr())
-            ];
+            let ty = tc.constraints[item.id].solve().unwrap();
+            tc.constraints[item.expr].set_to(ty.clone().ptr());
+            tc.types[item.id] = ty.ty;
         }
         for item in tc.prog.tree.ifs.get_level(level) {
             // We already verified that the condition unifies to bool in pass 1
             tc.constraints[item.condition].set_to(Type::Bool);
-            let ty = if tc.constraints[item.id].one_of.len() != 1 {
-                errs.push(
-                    Error::new("ambiguous type for if expression")
-                        .adding_primary_range(tc.prog.source_ranges[item.id].clone(), "expression here")
-                );
-                QualType::from(Type::Error)
-            } else {
-                tc.constraints[item.id].one_of[0].clone()
-            };
+            let ty = tc.constraints[item.id].solve().expect("ambiguous type for if expression");
             tc.types[item.id] = ty.ty.clone();
             tc.constraints[item.then_expr].set_to(ty.clone());
             tc.constraints[item.else_expr].set_to(ty);
         }
         for item in tc.prog.tree.dos.get_level(level) {
-            let ty = if tc.constraints[item.id].one_of.len() != 1 {
-                errs.push(
-                    Error::new("ambiguous type for do expression")
-                        .adding_primary_range(tc.prog.source_ranges[item.id].clone(), "expression here")
-                );
-                QualType::from(Type::Error)
-            } else {
-                tc.constraints[item.id].one_of[0].clone()
-            };
+            let ty = tc.constraints[item.id].solve().expect("Ambiguous type for do expression");
             tc.types[item.id] = ty.ty.clone();
             tc.constraints[item.terminal_expr].set_to(ty);
         }
@@ -364,28 +326,17 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     fn lit_pass_2(
         constraints: &IdxVec<ConstraintList, ExprId>,
         types: &mut IdxVec<Type, ExprId>,
-        errs: &mut Vec<Error>,
-        source_ranges: &IdxVec<SourceRange, ExprId>,
         lits: &[ExprId],
         lit_ty: &str
     ) {
         for &item in lits {
-            let constraints = &constraints[item];
-            types[item] = if constraints.one_of.len() != 1 {
-                errs.push(
-                    Error::new("ambiguous type for expression")
-                        .adding_primary_range(source_ranges[item].clone(), format!("{} literal here", lit_ty))
-                );
-                Type::Error
-            } else {
-                constraints.one_of[0].ty.clone()
-            };
+            types[item] = constraints[item].solve().expect(format!("Ambiguous type for {} literal", lit_ty).as_ref()).ty;
         }
     }
-    lit_pass_2(&tc.constraints, &mut tc.types, &mut errs, &tc.prog.source_ranges, &tc.prog.int_lits, "integer");
-    lit_pass_2(&tc.constraints, &mut tc.types, &mut errs, &tc.prog.source_ranges, &tc.prog.dec_lits, "decimal");
-    lit_pass_2(&tc.constraints, &mut tc.types, &mut errs, &tc.prog.source_ranges, &tc.prog.str_lits, "string");
-    lit_pass_2(&tc.constraints, &mut tc.types, &mut errs, &tc.prog.source_ranges, &tc.prog.char_lits, "character");
+    lit_pass_2(&tc.constraints, &mut tc.types, &tc.prog.int_lits, "integer");
+    lit_pass_2(&tc.constraints, &mut tc.types, &tc.prog.dec_lits, "decimal");
+    lit_pass_2(&tc.constraints, &mut tc.types, &tc.prog.str_lits, "string");
+    lit_pass_2(&tc.constraints, &mut tc.types, &tc.prog.char_lits, "character");
 
     //println!("Types: {:#?}", tc.types);
     //println!("Program: {:#?}", tc.prog);
