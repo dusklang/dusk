@@ -1,4 +1,4 @@
-use smallvec::{SmallVec, smallvec};
+use smallvec::smallvec;
 
 mod constraints;
 use constraints::{ConstraintList, LiteralType, UnificationError};
@@ -67,14 +67,14 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     ]);
 
     // Assign the type of the void expression to be void.
-    tc.constraints[tc.prog.void_expr] = ConstraintList::new(None, smallvec![Type::Void.into()], None);
+    tc.constraints[tc.prog.void_expr] = ConstraintList::new(None, Some(smallvec![Type::Void.into()]), None);
     tc.types[tc.prog.void_expr] = Type::Void;
 
     // Pass 1: propagate info down from leaves to roots
     fn independent_pass_1<T>(constraints: &mut IdxVec<ConstraintList, ExprId>, tys: &mut IdxVec<Type, ExprId>, exprs: &[T], data: impl Fn(&T) -> (ExprId, Type)) {
         for item in exprs {
             let (id, ty) = data(item);
-            constraints[id] = ConstraintList::new(None, smallvec![ty.clone().into()], None);
+            constraints[id] = ConstraintList::new(None, Some(smallvec![ty.clone().into()]), None);
             tys[id] = ty;
         }
     }
@@ -86,7 +86,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
         for &item in lits {
             constraints[item] = ConstraintList::new(
                 Some(lit_ty), 
-                SmallVec::new(),
+                None,
                 Some(lit_ty.preferred_type().into())
             );
         }
@@ -140,7 +140,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
                     }
                 }
             }
-            tc.constraints[item.id] = ConstraintList::new(None, one_of, pref);
+            tc.constraints[item.id] = ConstraintList::new(None, Some(one_of), pref);
         }
         for item in tc.prog.tree.addr_ofs.get_level(level) {
             let constraints = tc.constraints[item.expr].filter_map(|ty| {
