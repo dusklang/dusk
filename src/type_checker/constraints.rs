@@ -1,43 +1,24 @@
-use arrayvec::ArrayVec;
 use smallvec::{SmallVec, smallvec};
 
-use crate::ty::{Type, QualType};
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum LiteralType { Int, Dec, Str, Char }
-
-impl LiteralType {
-    pub fn preferred_type(self) -> Type {
-        match self {
-            LiteralType::Int => Type::i32(),
-            LiteralType::Dec => Type::f64(),
-            LiteralType::Str => Type::i8().ptr(),
-            // Because a char literal has the same syntax as a string literal, it would feel
-            // inconsistent if one-byte string literals defaulted to `i8`
-            LiteralType::Char => Type::i8().ptr(),
-        }
-    }
-}
+use crate::ty::{Type, QualType, BuiltinTraits};
 
 #[derive(Debug, Default, Clone)]
 pub struct ConstraintList {
-    literal: Option<LiteralType>,
+    trait_impls: BuiltinTraits,
     one_of: Option<SmallVec<[QualType; 1]>>,
     preferred_type: Option<QualType>,
 }
 
 pub enum UnificationError<'a> {
-    /// The expression was constrained to be a literal that can't be unified to the requested type
-    Literal(LiteralType),
+    /// The expression was constrained to implement a trait that the requested type doesn't implement
+    Trait(BuiltinTraits),
     /// The expression didn't have the requested type in its list of type choices
     InvalidChoice(&'a [QualType]),
-    /// The requested type was mutable but the expression was immutable
-    Immutable,
 }
 
 impl ConstraintList {
-    pub const fn new(literal: Option<LiteralType>, one_of: Option<SmallVec<[QualType; 1]>>, preferred_type: Option<QualType>) -> Self {
-        Self { literal, one_of, preferred_type }
+    pub const fn new(trait_impls: BuiltinTraits, one_of: Option<SmallVec<[QualType; 1]>>, preferred_type: Option<QualType>) -> Self {
+        Self { trait_impls, one_of, preferred_type }
     }
 
     pub fn solve(&self) -> Result<QualType, ()> {
@@ -62,7 +43,7 @@ impl ConstraintList {
 
     pub fn filter_map(&self, type_map: impl FnMut(&QualType) -> Option<QualType> + Copy) -> Self {
         Self::new(
-            None,
+            BuiltinTraits::empty(),
             self.one_of.as_ref().map(|tys| tys.iter().filter_map(type_map).collect()),
             self.preferred_type().and_then(type_map),
         )
@@ -113,25 +94,13 @@ impl ConstraintList {
         }
     }
 
-    fn type_expressible_by_literal(ty: &Type, lit: LiteralType) -> bool {
-        match lit {
-            LiteralType::Dec => ty.expressible_by_dec_lit(),
-            LiteralType::Int => ty.expressible_by_int_lit(),
-            LiteralType::Str => ty.expressible_by_str_lit(),
-            LiteralType::Char => ty.expressible_by_char_lit(),
-        }
-    }
-
     pub fn can_unify_to(&self, ty: &QualType) -> Result<(), UnificationError> {
         // Never is the "bottom type", so it unifies to anything.
         if self.one_of_exists(|ty| ty.ty == Type::Never) { return Ok(()); }
 
         use UnificationError::*;
-        if let Some(lit) = self.literal {
-            if ty.is_mut { return Err(Immutable); }
-            if !Self::type_expressible_by_literal(&ty.ty, lit) {
-                return Err(Literal(lit));
-            }
+        if let Some(not_implemented) = ty.ty.implements_traits(self.trait_impls).err() {
+            return Err(Trait(not_implemented));
         }
         if let Some(one_of) = &self.one_of {
             for oty in one_of {
@@ -159,27 +128,7 @@ impl ConstraintList {
             return self.clone();
         }
 
-        let requirements: ArrayVec<[LiteralType; 2]> = self.literal.into_iter().chain(other.literal.into_iter()).collect();
-        let literal = match (self.literal, other.literal) {
-            (Some(LiteralType::Dec), Some(rhs)) => match rhs {
-                LiteralType::Int | LiteralType::Dec => Some(LiteralType::Dec),
-                LiteralType::Str | LiteralType::Char => None,
-            },
-            (Some(LiteralType::Int), Some(rhs)) => match rhs {
-                LiteralType::Int | LiteralType::Dec => Some(rhs),
-                LiteralType::Str | LiteralType::Char => None,
-            },
-            (Some(LiteralType::Str), Some(rhs)) => match rhs {
-                LiteralType::Str | LiteralType::Char => Some(LiteralType::Str),
-                LiteralType::Int | LiteralType::Dec => None,
-            }
-            (Some(LiteralType::Char), Some(rhs)) => match rhs {
-                LiteralType::Str | LiteralType::Char => Some(rhs),
-                LiteralType::Int | LiteralType::Dec => None,
-            }
-            (Some(lit), None) | (None, Some(lit)) => Some(lit),
-            (None, None) => None,
-        };
+        let trait_impls = self.trait_impls | other.trait_impls;
 
         let one_of = match (&self.one_of, &other.one_of) {
             (None, None) => None,
@@ -187,14 +136,10 @@ impl ConstraintList {
             (Some(lhs), Some(rhs)) => {
                 let mut one_of = SmallVec::new();
                 for lty in lhs {
-                    for &req in &requirements {
-                        if !Self::type_expressible_by_literal(&lty.ty, req) { continue }
-                    }
+                    if lty.ty.implements_traits(trait_impls).is_err() { continue; }
 
                     for rty in rhs {
-                        for &req in &requirements {
-                            if !Self::type_expressible_by_literal(&rty.ty, req) { continue }
-                        }
+                        if rty.ty.implements_traits(trait_impls).is_err() { continue; }
 
                         // TODO: would it be ok to break from this loop after finding a match here?
                         if lty.trivially_convertible_to(rty) {
@@ -224,7 +169,7 @@ impl ConstraintList {
             pref
         };
 
-        Self::new(literal, one_of, preferred_type)
+        Self::new(trait_impls, one_of, preferred_type)
     }
 
     // Same as intersect_with, but: 
@@ -233,45 +178,19 @@ impl ConstraintList {
     //  - is literally just used for assignment expressions
     //  - terrible abstraction :(
     pub fn lopsided_intersect_with(&mut self, other: &mut ConstraintList) {
-        let literal = match (self.literal, other.literal) {
-            (Some(LiteralType::Dec), Some(rhs)) => match rhs {
-                LiteralType::Int | LiteralType::Dec => Some(LiteralType::Dec),
-                LiteralType::Str | LiteralType::Char => None,
-            },
-            (Some(LiteralType::Int), Some(rhs)) => match rhs {
-                LiteralType::Int | LiteralType::Dec => Some(rhs),
-                LiteralType::Str | LiteralType::Char => None,
-            },
-            (Some(LiteralType::Str), Some(rhs)) => match rhs {
-                LiteralType::Str | LiteralType::Char => Some(LiteralType::Str),
-                LiteralType::Int | LiteralType::Dec => None,
-            }
-            (Some(LiteralType::Char), Some(rhs)) => match rhs {
-                LiteralType::Str | LiteralType::Char => Some(rhs),
-                LiteralType::Int | LiteralType::Dec => None,
-            }
-            (Some(lit), None) | (None, Some(lit)) => Some(lit),
-            (None, None) => None,
-        };
-        self.literal = literal;
-        other.literal = literal;
+        let trait_impls = self.trait_impls | other.trait_impls;
+        self.trait_impls = trait_impls;
+        other.trait_impls = trait_impls;
 
         if !self.is_never() && !other.is_never() {
             let lhs = self.one_of.as_mut().expect("can't assign to expression without a one-of constraint");
-            fn type_expressible_by_literal(ty: &Type, lit: Option<LiteralType>) -> bool {
-                match lit {
-                    None => true,
-                    Some(lit) => ConstraintList::type_expressible_by_literal(ty, lit),
-                }
-            }
-
             if other.one_of.is_some() {
                 lhs.retain(|lty|
-                    type_expressible_by_literal(&lty.ty, literal) && other.one_of_exists(|rty| rty.ty.trivially_convertible_to(&lty.ty))
+                    lty.ty.implements_traits(trait_impls).is_ok() && other.one_of_exists(|rty| rty.ty.trivially_convertible_to(&lty.ty))
                 );
                 let rhs = other.one_of.as_mut().unwrap();
                 rhs.retain(|rty|
-                    type_expressible_by_literal(&rty.ty, literal) && self.one_of_exists(|lty| rty.ty.trivially_convertible_to(&lty.ty))
+                    rty.ty.implements_traits(trait_impls).is_ok() && self.one_of_exists(|lty| rty.ty.trivially_convertible_to(&lty.ty))
                 );
             }
         }

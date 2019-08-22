@@ -1,12 +1,12 @@
 use smallvec::smallvec;
 
 mod constraints;
-use constraints::{ConstraintList, LiteralType, UnificationError};
+use constraints::{ConstraintList, UnificationError};
 
 use crate::error::Error;
 use crate::tir;
 use crate::builder::{ExprId, DeclId, DeclRefId, CastId};
-use crate::ty::{Type, QualType, IntWidth};
+use crate::ty::{BuiltinTraits, Type, QualType, IntWidth};
 use crate::index_vec::IdxVec;
 use crate::dep_vec;
 
@@ -67,14 +67,14 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     ]);
 
     // Assign the type of the void expression to be void.
-    tc.constraints[tc.prog.void_expr] = ConstraintList::new(None, Some(smallvec![Type::Void.into()]), None);
+    tc.constraints[tc.prog.void_expr] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
     tc.types[tc.prog.void_expr] = Type::Void;
 
     // Pass 1: propagate info down from leaves to roots
     fn independent_pass_1<T>(constraints: &mut IdxVec<ConstraintList, ExprId>, tys: &mut IdxVec<Type, ExprId>, exprs: &[T], data: impl Fn(&T) -> (ExprId, Type)) {
         for item in exprs {
             let (id, ty) = data(item);
-            constraints[id] = ConstraintList::new(None, Some(smallvec![ty.clone().into()]), None);
+            constraints[id] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![ty.clone().into()]), None);
             tys[id] = ty;
         }
     }
@@ -82,19 +82,19 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     independent_pass_1(&mut tc.constraints, &mut tc.types, &tc.prog.whiles, |item| (item.id, Type::Void));
     independent_pass_1(&mut tc.constraints, &mut tc.types, &tc.prog.casts, |item| (item.id, item.ty.clone()));
 
-    fn lit_pass_1(constraints: &mut IdxVec<ConstraintList, ExprId>, lits: &[ExprId], lit_ty: LiteralType) {
+    fn lit_pass_1(constraints: &mut IdxVec<ConstraintList, ExprId>, lits: &[ExprId], trait_impls: BuiltinTraits, pref: Type) {
         for &item in lits {
             constraints[item] = ConstraintList::new(
-                Some(lit_ty), 
+                trait_impls, 
                 None,
-                Some(lit_ty.preferred_type().into())
+                Some(pref.clone().into())
             );
         }
     }
-    lit_pass_1(&mut tc.constraints, &tc.prog.int_lits, LiteralType::Int);
-    lit_pass_1(&mut tc.constraints, &tc.prog.dec_lits, LiteralType::Dec);
-    lit_pass_1(&mut tc.constraints, &tc.prog.str_lits, LiteralType::Str);
-    lit_pass_1(&mut tc.constraints, &tc.prog.char_lits, LiteralType::Char);
+    lit_pass_1(&mut tc.constraints, &tc.prog.int_lits, BuiltinTraits::INT, Type::i32());
+    lit_pass_1(&mut tc.constraints, &tc.prog.dec_lits, BuiltinTraits::DEC, Type::i32());
+    lit_pass_1(&mut tc.constraints, &tc.prog.str_lits, BuiltinTraits::CHAR, Type::u8().ptr());
+    lit_pass_1(&mut tc.constraints, &tc.prog.char_lits, BuiltinTraits::STR, Type::u8().ptr());
     for level in 0..levels {
         for item in tc.prog.tree.assigned_decls.get_level(level) {
             let constraints = &tc.constraints[item.root_expr];
@@ -140,7 +140,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
                     }
                 }
             }
-            tc.constraints[item.id] = ConstraintList::new(None, Some(one_of), pref);
+            tc.constraints[item.id] = ConstraintList::new(BuiltinTraits::empty(), Some(one_of), pref);
         }
         for item in tc.prog.tree.addr_ofs.get_level(level) {
             let constraints = tc.constraints[item.expr].filter_map(|ty| {
@@ -188,16 +188,11 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     for group in tc.prog.ret_groups {
         for expr in group.exprs {
             use UnificationError::*;
-            use LiteralType::*;
 
             match tc.constraints[expr].can_unify_to(&QualType::from(&group.ty)) {
                 Ok(()) => {}
-                Err(Literal(Dec)) => panic!("expected return value of {:?}, found decimal literal", group.ty),
-                Err(Literal(Int)) => panic!("expected return value of {:?}, found integer literal", group.ty),
-                Err(Literal(Str)) => panic!("expected return value of {:?}, found string literal", group.ty),
-                Err(Literal(Char)) => panic!("expected return value of {:?}, found character literal", group.ty),
-                Err(InvalidChoice(choices)) => panic!("expected return value of {:?}, found {:?}", group.ty, choices),
-                Err(Immutable) => panic!("COMPILER BUG: unexpected mutable return type"),
+                Err(Trait(not_implemented)) => panic!("expected return value of type {:?} which doesn't implement required traits {:?}.", group.ty, not_implemented.names()),
+                Err(InvalidChoice(choices)) => panic!("expected return value of type {:?}, found {:?}", group.ty, choices),
             }
 
             // Assume we panic above unless the returned expr can unify to the return type
