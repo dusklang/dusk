@@ -1,19 +1,7 @@
 use arrayvec::ArrayVec;
-use bitflags::bitflags;
 use smallvec::{SmallVec, smallvec};
 
 use crate::ty::{Type, QualType};
-
-bitflags! {
-    pub struct BuiltinTraits: u32 {
-        const INT  = 0b0000_0001;
-        // ExpressibleByDecimalLiteral inherits from ExpressibleByIntLiteral
-        const DEC  = 0b0000_0011;
-        const CHAR = 0b0000_0100;
-        // ExpressibleByStringLiteral inherits from ExpressibleByCharLiteral
-        const STR  = 0b0000_1100;
-    }
-}
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum LiteralType { Int, Dec, Str, Char }

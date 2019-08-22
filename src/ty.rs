@@ -1,5 +1,7 @@
 use std::fmt;
 
+use bitflags::bitflags;
+
 use crate::arch::Arch;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -24,6 +26,17 @@ pub enum FloatWidth {
     W32, W64,
 }
 
+bitflags! {
+    pub struct BuiltinTraits: u8 {
+        const INT  = 0b0000_0001;
+        // ExpressibleByDecimalLiteral inherits from ExpressibleByIntLiteral
+        const DEC  = 0b0000_0011;
+        const CHAR = 0b0000_0100;
+        // ExpressibleByStringLiteral inherits from ExpressibleByCharLiteral
+        const STR  = 0b0000_1100;
+    }
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub enum Type {
     Error,
@@ -40,6 +53,29 @@ pub enum Type {
 }
 
 impl Type {
+    // TODO: Get rid of expressible_by_XXX methods and put the logic in here?
+    pub fn implements_traits(&self, traits: BuiltinTraits) -> Result<(), BuiltinTraits> {
+        let mut not_implemented = BuiltinTraits::empty();
+        if traits.contains(BuiltinTraits::INT) && !self.expressible_by_int_lit() {
+            not_implemented |= BuiltinTraits::INT;
+        }
+        if traits.contains(BuiltinTraits::DEC) && !self.expressible_by_dec_lit() {
+            not_implemented |= BuiltinTraits::DEC;
+        }
+        if traits.contains(BuiltinTraits::CHAR) && !self.expressible_by_char_lit() {
+            not_implemented |= BuiltinTraits::CHAR;
+        }
+        if traits.contains(BuiltinTraits::STR) && !self.expressible_by_str_lit() {
+            not_implemented |= BuiltinTraits::STR;
+        }
+
+        if not_implemented.is_empty() {
+            Ok(())
+        } else {
+            Err(not_implemented)
+        }
+    }
+
     /// Size of an instance of the type in bytes
     pub fn size(&self, arch: Arch) -> usize {
         match self {
