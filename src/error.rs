@@ -36,19 +36,19 @@ impl Error {
         self
     }
 
-    // pub fn add_secondary_range(&mut self, range: SourceRange, message: impl Into<Cow<'static, str>>) {
-    //     self.secondary_ranges.push(
-    //         ErrorRange {
-    //             range,
-    //             message: message.into(),
-    //         }
-    //     );
-    // }
+    pub fn add_secondary_range(&mut self, _range: SourceRange, _message: impl Into<Cow<'static, str>>) {
+        // self.secondary_ranges.push(
+        //     ErrorRange {
+        //         range,
+        //         message: message.into(),
+        //     }
+        // );
+    }
 
-    // pub fn adding_secondary_range(mut self, range: SourceRange, message: impl Into<Cow<'static, str>>) -> Error {
-    //     self.add_secondary_range(range, message);
-    //     self
-    // }
+    pub fn adding_secondary_range(mut self, range: SourceRange, message: impl Into<Cow<'static, str>>) -> Error {
+        self.add_secondary_range(range, message);
+        self
+    }
 
     pub fn report(&self, _file: &SourceFile) {
         println!("\u{001B}[31merror: {}\u{001B}[0m", &self.message);

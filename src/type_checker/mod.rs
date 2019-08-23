@@ -99,7 +99,24 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
         for item in tc.prog.tree.assigned_decls.get_level(level) {
             let constraints = &tc.constraints[item.root_expr];
             let ty = if let Some(explicit_ty) = &item.explicit_ty {
-                assert!(constraints.can_unify_to(&explicit_ty.into()).is_ok());
+                if let Some(err) = constraints.can_unify_to(&explicit_ty.into()).err() {
+                    let range = tc.prog.source_ranges[item.root_expr].clone();
+                    let mut error = Error::new(format!("Couldn't unify expression to assigned decl type `{:?}`", explicit_ty))
+                        .adding_primary_range(range.clone(), "expression here");
+                    match err {
+                        UnificationError::InvalidChoice(choices)
+                            => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                        UnificationError::Trait(not_implemented)
+                            => error.add_secondary_range(
+                                range,
+                                format!(
+                                    "note: couldn't unify because expression requires implementations of {:?}",
+                                    not_implemented.names(),
+                                ),
+                            ),
+                    }
+                    errs.push(error);
+                }
                 explicit_ty.clone()
             } else {
                 constraints.solve().expect("Ambiguous type for assigned declaration").ty
@@ -168,7 +185,15 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
                 panic!("Expected boolean condition in if expression");
             }
             let constraints = tc.constraints[item.then_expr].intersect_with(&tc.constraints[item.else_expr]);
-            assert!(constraints.solve().is_ok(), "Failed to unify branches of if expression");
+            
+            if constraints.solve().is_err() {
+                // TODO: handle void expressions, which don't have appropriate source location info.
+                errs.push(
+                    Error::new("Failed to unify branches of if expression")
+                        .adding_primary_range(tc.prog.source_ranges[item.then_expr].clone(), "first terminal expression here")
+                        .adding_primary_range(tc.prog.source_ranges[item.else_expr].clone(), "second terminal expression here")
+                );
+            }
             tc.constraints[item.id] = constraints;
         }
         for item in tc.prog.tree.dos.get_level(level) {
@@ -187,12 +212,23 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
 
     for group in tc.prog.ret_groups {
         for expr in group.exprs {
-            use UnificationError::*;
-
-            match tc.constraints[expr].can_unify_to(&QualType::from(&group.ty)) {
-                Ok(()) => {}
-                Err(Trait(not_implemented)) => panic!("expected return value of type {:?} which doesn't implement required traits {:?}.", group.ty, not_implemented.names()),
-                Err(InvalidChoice(choices)) => panic!("expected return value of type {:?}, found {:?}", group.ty, choices),
+            if let Some(err) = tc.constraints[expr].can_unify_to(&QualType::from(&group.ty)).err() {
+                let range = tc.prog.source_ranges[expr].clone();
+                let mut error = Error::new(format!("can't unify expression to return type {:?}", group.ty))
+                    .adding_primary_range(range.clone(), "expression here");
+                match err {
+                    UnificationError::InvalidChoice(choices)
+                        => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                    UnificationError::Trait(not_implemented)
+                        => error.add_secondary_range(
+                            range,
+                            format!(
+                                "note: couldn't unify because expression requires implementations of {:?}",
+                                not_implemented.names(),
+                            ),
+                        ),
+                }
+                errs.push(error);
             }
 
             // Assume we panic above unless the returned expr can unify to the return type
@@ -208,9 +244,8 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     }
     for item in &tc.prog.casts {
         let constraints = &mut tc.constraints[item.expr];
-        tc.cast_methods[item.cast_id] = if constraints.can_unify_to(&item.ty.clone().into()).is_ok() {
-            constraints.set_to(item.ty.clone());
-            CastMethod::Noop
+        let ty_and_method: Result<(Type, CastMethod), Vec<&QualType>> = if constraints.can_unify_to(&item.ty.clone().into()).is_ok() {
+            Ok((item.ty.clone(), CastMethod::Noop))
         } else if let Type::Pointer(dest_pointee_ty) = &item.ty {
             let dest_pointee_ty = dest_pointee_ty.as_ref();
             let src_ty = constraints.max_ranked_type(|ty|
@@ -219,35 +254,41 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
                     Type::Int { width, .. } if width == IntWidth::Pointer => 1,
                     _ => 0,
                 }
-            ).expect("Invalid cast!").clone();
-            constraints.set_to(src_ty);
-            CastMethod::Reinterpret
+            ).expect("Invalid cast 1!").clone();
+            Ok((src_ty.ty.clone(), CastMethod::Reinterpret))
         } else if let Type::Int { width, .. } = item.ty {
-            let (src_ty, method) = constraints.max_ranked_type_with_assoc_data(|ty|
+            constraints.max_ranked_type_with_assoc_data(|ty|
                 match ty.ty {
                     Type::Int { .. } => (3, CastMethod::Int),
                     Type::Float { .. } => (2, CastMethod::FloatToInt),
                     Type::Pointer(_) if width == IntWidth::Pointer => (1, CastMethod::Reinterpret),
                     _ => (0, CastMethod::Noop),
                 }
-            ).expect("Invalid cast!");
-            let src_ty = src_ty.clone();
-            constraints.set_to(src_ty);
-            method
+            ).map(|(ty, method)| (ty.ty.clone(), method))
+             .map_err(|options| options.iter().map(|(ty, _)| ty.clone()).collect())
         } else if let Type::Float { .. } = item.ty {
-            let (src_ty, method) = constraints.max_ranked_type_with_assoc_data(|ty|
+            constraints.max_ranked_type_with_assoc_data(|ty|
                 match ty.ty {
                     Type::Float { .. } => (2, CastMethod::Float),
                     Type::Int { .. } => (1, CastMethod::IntToFloat),
                     _ => (0, CastMethod::Noop),
                 }
-            ).expect("Invalid cast!");
-            let src_ty = src_ty.clone();
-            constraints.set_to(src_ty);
-            method
+            ).map(|(ty, method)| (ty.ty.clone(), method))
+             .map_err(|options| options.iter().map(|(ty, _)| ty.clone()).collect())
         } else {
             panic!("Invalid cast!")
         };
+        match ty_and_method {
+            Ok((ty, method)) => {
+                constraints.set_to(ty);
+                tc.cast_methods[item.cast_id] = method;
+            },
+            Err(_) => {
+                errs.push(Error::new("Invalid cast!").adding_primary_range(tc.prog.source_ranges[item.id].clone(), "cast here"));
+                constraints.set_to(Type::Error);
+                tc.cast_methods[item.cast_id] = CastMethod::Noop;
+            }
+        }
     }
     for level in (0..levels).rev() {
         for item in tc.prog.tree.assigned_decls.get_level(level) {
