@@ -49,7 +49,7 @@ fn main() {
     }).unwrap();
     errs.extend(mid_errs);
 
-    for err in &errs { err.report(&file); }
+    for err in &mut errs { err.report(&file); }
     if !errs.is_empty() {
         print!("\n\u{001B}[31mcompilation failed due to previous ");
         if errs.len() == 1 {
