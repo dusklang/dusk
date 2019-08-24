@@ -181,8 +181,22 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
             tc.constraints[item.id] = constraints;
         }
         for item in tc.prog.tree.ifs.get_level(level) {
-            if tc.constraints[item.condition].can_unify_to(&Type::Bool.into()).is_err() {
-                panic!("Expected boolean condition in if expression");
+            if let Some(err) = tc.constraints[item.condition].can_unify_to(&Type::Bool.into()).err() {
+                let mut error = Error::new("Expected boolean condition in if expression");
+                let range = tc.prog.source_ranges[item.condition].clone();
+                match err {
+                    UnificationError::InvalidChoice(choices)
+                        => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                    UnificationError::Trait(not_implemented)
+                        => error.add_secondary_range(
+                            range,
+                            format!(
+                                "note: couldn't unify because expression requires implementations of {:?}",
+                                not_implemented.names(),
+                            ),
+                        ),
+                }
+                errs.push(error);
             }
             let constraints = tc.constraints[item.then_expr].intersect_with(&tc.constraints[item.else_expr]);
             
@@ -204,8 +218,22 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     // Pass 2: propagate info up from roots to leaves
     for item in &tc.prog.stmts {
         let constraints = &mut tc.constraints[item.root_expr];
-        if constraints.can_unify_to(&Type::Void.into()).is_err() {
-            panic!("standalone expressions must return void");
+        if let Some(err) = constraints.can_unify_to(&Type::Void.into()).err() {
+            let mut error = Error::new("statements must return void");
+            let range = tc.prog.source_ranges[item.root_expr].clone();
+            match err {
+                UnificationError::InvalidChoice(choices)
+                    => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                UnificationError::Trait(not_implemented)
+                    => error.add_secondary_range(
+                        range,
+                        format!(
+                            "note: couldn't unify because expression requires implementations of {:?}",
+                            not_implemented.names(),
+                        ),
+                    ),
+            }
+            errs.push(error);
         }
         constraints.set_to(Type::Void);
     }
@@ -333,21 +361,31 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
             tc.selected_overloads[item.decl_ref_id] = overload;
         }
         for item in tc.prog.tree.addr_ofs.get_level(level) {
-            let ty = tc.constraints[item.id].solve().unwrap().ty;
-            match ty {
-                Type::Pointer(ref pointee) => tc.constraints[item.expr].set_to(pointee.as_ref().clone()),
-                _ => panic!("unexpected non-pointer for addr of expression"),
-            }
-            tc.types[item.id] = ty;
+            let pointer_ty = tc.constraints[item.id].solve()
+                .map(|ty| ty.ty)
+                .unwrap_or(Type::Error);
+            let pointee_ty = match pointer_ty {
+                Type::Pointer(ref pointee) => pointee.as_ref().clone(),
+                Type::Error => Type::Error.into(),
+                _ => panic!("unexpected non-pointer, non-error type for addr of expression"),
+            };
+            tc.constraints[item.expr].set_to(pointee_ty);
+            tc.types[item.id] = pointer_ty;
         }
         for item in tc.prog.tree.derefs.get_level(level) {
-            let ty = tc.constraints[item.id].solve().unwrap();
-            tc.constraints[item.expr].set_to(ty.clone().ptr());
-            tc.types[item.id] = ty.ty;
+            let mut ty = tc.constraints[item.id].solve().unwrap_or(Type::Error.into());
+            tc.types[item.id] = ty.ty.clone();
+
+            if ty.ty != Type::Error {
+                ty = ty.ptr().into();
+            }
+            tc.constraints[item.expr].set_to(ty);
         }
         for item in tc.prog.tree.ifs.get_level(level) {
-            // We already verified that the condition unifies to bool in pass 1
-            tc.constraints[item.condition].set_to(Type::Bool);
+            let condition = &mut tc.constraints[item.condition];
+            let condition_ty = condition.solve().map(|ty| ty.ty).unwrap_or(Type::Error);
+            // Don't bother checking if bool, because we already did that in pass 1
+            tc.constraints[item.condition].set_to(condition_ty);
             let ty = tc.constraints[item.id].solve().expect("ambiguous type for if expression");
             tc.types[item.id] = ty.ty.clone();
             tc.constraints[item.then_expr].set_to(ty.clone());
