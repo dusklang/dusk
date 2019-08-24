@@ -299,7 +299,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
             lhs.lopsided_intersect_with(rhs);
         }
         for item in tc.prog.tree.decl_refs.get_level(level) {
-            let ty = tc.constraints[item.id].solve().expect("Ambiguous type for expression");
+            let ty = tc.constraints[item.id].solve().unwrap_or(Type::Error.into());
             tc.types[item.id] = ty.ty.clone();
 
             // P.S. These borrows are only here because the borrow checker is dumb
