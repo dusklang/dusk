@@ -1,6 +1,7 @@
-use std::str;
+use std::borrow::Cow;
 use std::cmp::{min, max};
 use std::ops::Range;
+use std::str;
 
 pub type SourceRange = Range<usize>;
 
@@ -20,6 +21,12 @@ pub struct SourceFile {
     pub src: String,
     /// The starting position of each line.
     pub lines: Vec<usize>,
+}
+
+pub struct CommentatedSourceRange {
+    pub range: SourceRange,
+    pub message: Cow<'static, str>,
+    pub highlight: char,
 }
 
 impl SourceFile {
@@ -78,5 +85,77 @@ impl SourceFile {
             });
         }
         result
+    }
+
+    pub fn print_commentated_source_ranges(&self, ranges: &mut [CommentatedSourceRange]) {
+        ranges.sort_by_key(|range| range.range.start);
+        let mut line_range_lists: Vec<Vec<LineRange>> = Vec::new();
+        fn num_digits(num: usize) -> usize {
+            let mut digits = 0;
+            let mut num = num;
+            while num > 0 {
+                num /= 10;
+                digits += 1;
+            }
+
+            digits
+        }
+        fn print_times(chr: char, n: usize) {
+            for _ in 0..n { print!("{}", chr); }
+        }
+        fn print_whitespace(n: usize) {
+            print_times(' ', n);
+        }
+        let mut max_line_number_digits = 0;
+        for range in &*ranges {
+            let line_ranges = self.lines_in_range(range.range.clone());
+            for range in &line_ranges {
+                max_line_number_digits = max(max_line_number_digits, num_digits(range.line))
+            }
+            line_range_lists.push(line_ranges);
+        }
+        let print_source_line = |line: usize| {
+            let line_no_as_string = format!("{}", line);
+            print!("{}", line_no_as_string);
+            print_whitespace(max_line_number_digits - line_no_as_string.len());
+            print!(" | {}", self.substring_from_line(line));
+        };
+        for (i, range) in ranges.iter().enumerate() {
+            let lines = &line_range_lists[i];
+            let next_lines = if i + 1 < ranges.len() {
+                Some(&line_range_lists[i + 1])
+            } else {
+                None
+            };
+            let mut first = true;
+            for line in lines {
+                if !first {
+                    println!();
+                } else {
+                    first = false;
+                }
+
+                print_source_line(line.line);
+                print_whitespace(max_line_number_digits);
+                print!(" | ");
+                print_whitespace(line.start_column);
+                let number_of_highlights = line.end_column - line.start_column;
+                print_times(range.highlight, number_of_highlights);
+            }
+            if !range.message.is_empty() {
+                // TODO: Wrap the range message on to multiple lines if necessary.
+                print!(" {}", range.message);
+            }
+            println!();
+            match next_lines {
+                Some(next_lines) if next_lines.first().unwrap().line <= lines.last().unwrap().line + 2 => {
+                    for i in (lines.last().unwrap().line + 1)..next_lines.first().unwrap().line {
+                        print_source_line(i);
+                    }
+                },
+                None => println!(),
+                Some(_) => println!("..."),
+            }
+        }
     }
 }
