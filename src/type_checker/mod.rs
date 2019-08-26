@@ -45,13 +45,19 @@ struct TypeChecker<'src> {
 impl<'src> TypeChecker<'src> {
     fn debug_output(&mut self, level: usize) {
         if !self.debug { return; }
-
+        println!("LEVEL {}", level);
         assert_eq!(self.constraints.len(), self.constraints_copy.len());
         for i in 0..self.constraints.len() {
             let i = ExprId::new(i);
-            self.source_file.print_commentated_source_ranges(&mut [
-                CommentatedSourceRange::new(self.prog.source_ranges[i].clone(), "typechecking", '-'),
-            ]);
+            let new_constraints = &self.constraints[i];
+            let old_constraints = &mut self.constraints_copy[i];
+            if new_constraints != old_constraints {
+                self.source_file.print_commentated_source_ranges(&mut [
+                    CommentatedSourceRange::new(self.prog.source_ranges[i].clone(), "", '-')
+                ]);
+                old_constraints.print_diff(new_constraints);
+                *old_constraints = new_constraints.clone();
+            }
         }
     }
 }
@@ -120,8 +126,8 @@ pub fn type_check(prog: tir::Program, source_file: &SourceFile, debug: bool) -> 
     }
     lit_pass_1(&mut tc.constraints, &tc.prog.int_lits, BuiltinTraits::INT, Type::i32());
     lit_pass_1(&mut tc.constraints, &tc.prog.dec_lits, BuiltinTraits::DEC, Type::i32());
-    lit_pass_1(&mut tc.constraints, &tc.prog.str_lits, BuiltinTraits::CHAR, Type::u8().ptr());
-    lit_pass_1(&mut tc.constraints, &tc.prog.char_lits, BuiltinTraits::STR, Type::u8().ptr());
+    lit_pass_1(&mut tc.constraints, &tc.prog.str_lits, BuiltinTraits::STR, Type::u8().ptr());
+    lit_pass_1(&mut tc.constraints, &tc.prog.char_lits, BuiltinTraits::CHAR, Type::u8().ptr());
     tc.debug_output(0);
     for level in 0..levels {
         for item in tc.prog.tree.assigned_decls.get_level(level) {

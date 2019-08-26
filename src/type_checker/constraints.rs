@@ -2,7 +2,7 @@ use smallvec::{SmallVec, smallvec};
 
 use crate::ty::{Type, QualType, BuiltinTraits};
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ConstraintList {
     trait_impls: BuiltinTraits,
     one_of: Option<SmallVec<[QualType; 1]>>,
@@ -217,5 +217,22 @@ impl ConstraintList {
             }
         }
         assert!(self.one_of.as_ref().unwrap().is_empty() || self.one_of_exists(|ty| ty.is_mut), "can't assign to immutable expression");
+    }
+
+    pub fn print_diff(&self, other: &ConstraintList) {
+        if self.trait_impls != other.trait_impls {
+            let old = self.trait_impls.names();
+            let new = other.trait_impls.names();
+            for name in &old {
+                if !new.contains(name) {
+                    println!("no longer requires {}", name);
+                }
+            }
+            for name in &new {
+                if !old.contains(name) {
+                    println!("now requires {}", name);
+                }
+            }
+        }
     }
 }
