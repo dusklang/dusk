@@ -661,8 +661,8 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
         scope_state.stmt_buffer = Some(expr);
     }
 
-    fn do_expr(&mut self, scope: ScopeId) -> ExprId {
-        self.source_ranges.push(0..0);
+    fn do_expr(&mut self, scope: ScopeId, range: SourceRange) -> ExprId {
+        self.source_ranges.push(range);
         self.insert_expr(Do { terminal_expr: self.terminal_exprs[scope] })
     }
 
@@ -749,6 +749,10 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
 
     fn get_range(&self, id: ExprId) -> SourceRange {
         self.source_ranges[id].clone()
+    }
+
+    fn set_range(&mut self, id: ExprId, range: SourceRange) {
+        self.source_ranges[id] = range;
     }
 
     fn get_terminal_expr(&self, scope: ScopeId) -> ExprId {

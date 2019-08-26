@@ -1,7 +1,6 @@
 use std::borrow::Cow;
-use std::cmp::max;
 
-use crate::source_info::{SourceFile, SourceRange, LineRange, CommentatedSourceRange};
+use crate::source_info::{SourceFile, SourceRange, CommentatedSourceRange};
 
 pub struct Error {
     message: Cow<'static, str>,
@@ -17,13 +16,7 @@ impl Error {
     }
 
     pub fn add_primary_range(&mut self, range: SourceRange, message: impl Into<Cow<'static, str>>) {
-        self.ranges.push(
-            CommentatedSourceRange {
-                range,
-                message: message.into(),
-                highlight: '^',
-            }
-        );
+        self.ranges.push(CommentatedSourceRange::new(range, message, '^'));
     }
 
     pub fn adding_primary_range(mut self, range: SourceRange, message: impl Into<Cow<'static, str>>) -> Error {
@@ -32,13 +25,7 @@ impl Error {
     }
 
     pub fn add_secondary_range(&mut self, range: SourceRange, message: impl Into<Cow<'static, str>>) {
-        self.ranges.push(
-            CommentatedSourceRange {
-                range,
-                message: message.into(),
-                highlight: '-',
-            }
-        );
+        self.ranges.push(CommentatedSourceRange::new(range, message, '-'));
     }
 
     #[allow(dead_code)]

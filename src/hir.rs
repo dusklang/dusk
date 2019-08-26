@@ -226,7 +226,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
         let scope = self.comp_decl_stack.last_mut().unwrap().scope_stack.last_mut().unwrap();
         scope.stmt_buffer = Some(expr);
     }
-    fn do_expr(&mut self, scope: ScopeId) -> ExprId {
+    fn do_expr(&mut self, scope: ScopeId, _range: SourceRange) -> ExprId {
         self.exprs.push(Expr::Do { scope })
     }
     fn begin_scope(&mut self) -> ScopeId { 
@@ -296,6 +296,8 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
     }
     // TODO: Refactor so this method doesn't need to be exposed by HIR
     fn get_range(&self, _id: ExprId) -> SourceRange { 0..0 }
+    // TODO: Refactor so this method doesn't need to be exposed by HIR
+    fn set_range(&mut self, _id: ExprId, _range: SourceRange) { }
     fn get_terminal_expr(&self, scope: ScopeId) -> ExprId { 
         self.scopes[scope].terminal_expr
     }

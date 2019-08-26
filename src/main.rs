@@ -16,7 +16,6 @@ mod type_checker;
 mod interpreter;
 
 use std::fs;
-use crossbeam_utils::thread;
 
 use interpreter::Interpreter;
 use index_vec::Idx;
@@ -30,24 +29,13 @@ fn main() {
         contents
     );
     let (toks, mut errs) = lexer::lex(&file.src, &mut file.lines);
+    let (tir, tir_errs) = parser::parse(&toks, tir::Builder::new());
+    let (hir, hir_errs) = parser::parse(&toks, hir::Builder::new());
+    let (tc, tc_errs) = type_checker::type_check(tir, &file, true);
 
-    let (tc, hir, mid_errs) = thread::scope(|s| {
-        let tc = s.spawn(|_| {
-            let (tir, mut errs) = parser::parse(&toks, tir::Builder::new());
-            let (tc, tc_errs) = type_checker::type_check(tir);
-            errs.extend(tc_errs);
-
-            (tc, errs)
-        });
-        let hir = s.spawn(|_| parser::parse(&toks, hir::Builder::new()));
-
-        let (tc, mut errs) = tc.join().unwrap();
-        let (hir, hir_errs) = hir.join().unwrap();
-        errs.extend(hir_errs);
-
-        (tc, hir, errs)
-    }).unwrap();
-    errs.extend(mid_errs);
+    errs.extend(tir_errs);
+    errs.extend(hir_errs);
+    errs.extend(tc_errs);
 
     for err in &mut errs { err.report(&file); }
     if !errs.is_empty() {

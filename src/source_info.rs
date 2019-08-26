@@ -10,10 +10,10 @@ pub fn concat(a: SourceRange, b: SourceRange) -> SourceRange {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct LineRange {
-    pub start_column: usize,
-    pub end_column: usize,
-    pub line: usize,
+struct LineRange {
+    start_column: usize,
+    end_column: usize,
+    line: usize,
 }
 
 pub struct SourceFile {
@@ -29,12 +29,22 @@ pub struct CommentatedSourceRange {
     pub highlight: char,
 }
 
+impl CommentatedSourceRange {
+    pub fn new(range: SourceRange, message: impl Into<Cow<'static, str>>, highlight: char) -> Self {
+        Self {
+            range,
+            message: message.into(),
+            highlight,
+        }
+    }
+}
+
 impl SourceFile {
     pub fn new(name: String, source: String) -> SourceFile {
         SourceFile {
             name,
             src: source,
-            lines: Vec::new(),
+            lines: vec![0],
         }
     }
 
@@ -53,7 +63,7 @@ impl SourceFile {
         self.substring_from_range(start..end)
     }
 
-    pub fn lines_in_range(&self, range: SourceRange) -> Vec<LineRange> {
+    fn lines_in_range(&self, range: SourceRange) -> Vec<LineRange> {
         let mut result = Vec::new();
         for (i, &line_start) in self.lines.iter().enumerate() {
             let line_end = if i == self.lines.len() - 1 {
@@ -89,6 +99,7 @@ impl SourceFile {
 
     pub fn print_commentated_source_ranges(&self, ranges: &mut [CommentatedSourceRange]) {
         ranges.sort_by_key(|range| range.range.start);
+        let ranges = &*ranges;
         let mut line_range_lists: Vec<Vec<LineRange>> = Vec::new();
         fn num_digits(num: usize) -> usize {
             let mut digits = 0;
@@ -107,15 +118,15 @@ impl SourceFile {
             print_times(' ', n);
         }
         let mut max_line_number_digits = 0;
-        for range in &*ranges {
+        for range in ranges {
             let line_ranges = self.lines_in_range(range.range.clone());
             for range in &line_ranges {
-                max_line_number_digits = max(max_line_number_digits, num_digits(range.line))
+                max_line_number_digits = max(max_line_number_digits, num_digits(range.line + 1));
             }
             line_range_lists.push(line_ranges);
         }
         let print_source_line = |line: usize| {
-            let line_no_as_string = format!("{}", line);
+            let line_no_as_string = format!("{}", line + 1);
             print!("{}", line_no_as_string);
             print_whitespace(max_line_number_digits - line_no_as_string.len());
             print!(" | {}", self.substring_from_line(line));

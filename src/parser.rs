@@ -130,8 +130,9 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
         Some(op)
     }
 
-    fn parse_unary_operator(&mut self) -> Option<UnOp> {
-        let op = match self.cur().kind {
+    fn parse_unary_operator(&mut self) -> Option<(UnOp, SourceRange)> {
+        let tok = self.cur();
+        let op = match tok.kind {
             TokenKind::Sub        => UnOp::Neg,
             TokenKind::Add        => UnOp::Plus,
             TokenKind::LogicalNot => UnOp::Not,
@@ -145,7 +146,7 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
             _ => return None,
         };
         self.next();
-        Some(op)
+        Some((op, tok.range.clone()))
     }
 
     fn try_parse_term(&mut self) -> Result<ExprId, TokenKind<'src>> {
@@ -161,14 +162,16 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
     }
 
     fn try_parse_non_cast_term(&mut self) -> Result<ExprId, TokenKind<'src>> {
-        if let Some(op) = self.parse_unary_operator() {
+        if let Some((op, op_range)) = self.parse_unary_operator() {
             let term = self.try_parse_non_cast_term()
                 .unwrap_or_else(|tok| panic!("Expected expression after unary operator, found {:?}", tok));
-            return Ok(self.builder.un_op(op, term, 0..0));
+            let term_range = self.builder.get_range(term);
+            return Ok(self.builder.un_op(op, term, source_info::concat(op_range, term_range)));
         }
 
         match self.cur().kind {
             TokenKind::LeftParen => {
+                let open_paren_range = self.cur().range.clone();
                 self.next();
                 let expr = self.parse_expr();
                 if let TokenKind::RightParen = self.cur().kind {}
@@ -178,6 +181,8 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
                             .adding_primary_range(self.cur().range.clone(), "paren here")
                     );
                 }
+                let close_paren_range = self.cur().range.clone();
+                self.builder.set_range(expr, source_info::concat(open_paren_range, close_paren_range));
                 self.next();
                 Ok(expr)
             },
@@ -210,9 +215,11 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
                     self.next();
                     loop {
                         // TODO: actually implement proper comma and newline handling like I've thought about
-                        match self.cur().kind {
+                        let Token { kind, range } = self.cur();
+                        match kind {
                             TokenKind::RightParen => {
-                                end_range = self.next().range.clone();
+                                end_range = range.clone();
+                                self.next();
                                 break;
                             }
                             TokenKind::Comma => { self.next(); }
@@ -234,23 +241,27 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
                 Ok(decl_ref)
             },
             TokenKind::Do => {
+                let do_range = self.cur().range.clone();
                 self.next();
-                let scope = self.parse_scope();
-                Ok(self.builder.do_expr(scope))
+                let (scope, scope_range) = self.parse_scope();
+                Ok(self.builder.do_expr(scope, source_info::concat(do_range, scope_range)))
             },
             TokenKind::If => Ok(self.parse_if()),
             TokenKind::While => {
+                let while_range = self.cur().range.clone();
                 self.next();
                 let condition = self.parse_expr();
-                let scope = self.parse_scope();
-                Ok(self.builder.while_expr(condition, scope, 0..0))
+                let (scope, scope_range) = self.parse_scope();
+                Ok(self.builder.while_expr(condition, scope, source_info::concat(while_range, scope_range)))
             },
             TokenKind::Return => {
+                let ret_range = self.cur().range.clone();
                 self.next();
                 let ret_expr = self.try_parse_expr().unwrap_or_else(|_| self.builder.void_expr());
-                Ok(self.builder.ret(ret_expr, 0..0))
+                let expr_range = self.builder.get_range(ret_expr);
+                Ok(self.builder.ret(ret_expr, source_info::concat(ret_range, expr_range)))
             },
-            x => Err(x.clone())
+            x => Err(x.clone()),
         }
     }
 
@@ -296,26 +307,35 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
     }
 
     fn parse_if(&mut self) -> ExprId {
-        assert_eq!(self.cur().kind, &TokenKind::If);
+        let Token { kind, range: if_range } = self.cur();
+        let if_range = if_range.clone();
+        assert_eq!(kind, &TokenKind::If);
         self.next();
         let condition = self.parse_expr();
-        let then_scope = self.parse_scope();
+        let (then_scope, then_range) = self.parse_scope();
+        let mut range = source_info::concat(if_range, then_range);
         let else_scope = if let TokenKind::Else = self.cur().kind {
             match self.next().kind {
                 TokenKind::If => {
                     let scope = self.builder.begin_scope();
                     let if_expr = self.parse_if();
+                    let if_range = self.builder.get_range(if_expr);
+                    range = source_info::concat(range, if_range);
                     self.builder.stmt(if_expr);
                     self.builder.end_scope(true);
                     Some(scope)
                 },
-                TokenKind::OpenCurly => Some(self.parse_scope()),
+                TokenKind::OpenCurly => {
+                    let (else_scope, else_range) = self.parse_scope();
+                    range = source_info::concat(range, else_range);
+                    Some(else_scope)
+                },
                 _ => panic!("Expected '{' or 'if' after 'else'"),
             }
         } else {
             None
         };
-        self.builder.if_expr(condition, then_scope, else_scope, 0..0)
+        self.builder.if_expr(condition, then_scope, else_scope, range)
     }
 
     /// Parses any node. Iff the node is an expression, returns its ExprId.
@@ -370,17 +390,20 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
     }
 
     // Parses an open curly brace, then a list of nodes, then a closing curly brace.
-    fn parse_scope(&mut self) -> ScopeId {
+    fn parse_scope(&mut self) -> (ScopeId, SourceRange) {
         let scope = self.builder.begin_scope();
         let mut last_was_expr = false;
-        assert_eq!(self.cur().kind, &TokenKind::OpenCurly);
+        let Token { kind, range: open_curly_range } = self.cur();
+        let open_curly_range = open_curly_range.clone();
+        assert_eq!(kind, &TokenKind::OpenCurly);
         self.next();
-        loop {
+        let close_curly_range = loop {
             match self.cur().kind {
                 TokenKind::Eof => panic!("Unexpected eof while parsing scope"),
                 TokenKind::CloseCurly => {
+                    let close_curly_range = self.cur().range.clone();
                     self.next();
-                    break;
+                    break close_curly_range;
                 },
                 _ => {
                     let node = self.parse_node();
@@ -394,9 +417,9 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
                     }
                 }
             }
-        }
+        };
         self.builder.end_scope(last_was_expr);
-        scope
+        (scope, source_info::concat(open_curly_range, close_curly_range))
     }
 
     fn parse_comp_decl(&mut self) {
@@ -440,7 +463,7 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
         self.builder.begin_computed_decl(name, param_names, param_tys, ty.clone(), proto_range);
         match self.cur().kind {
             TokenKind::OpenCurly => {
-                let scope = self.parse_scope();
+                let (scope, _) = self.parse_scope();
                 let terminal_expr = self.builder.get_terminal_expr(scope);
                 // TODO: Do this check in TIR builder?
                 if terminal_expr == self.builder.void_expr() {

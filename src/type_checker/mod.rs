@@ -6,9 +6,11 @@ use constraints::{ConstraintList, UnificationError};
 use crate::error::Error;
 use crate::tir;
 use crate::builder::{ExprId, DeclId, DeclRefId, CastId};
+use crate::index_vec::Idx;
 use crate::ty::{BuiltinTraits, Type, QualType, IntWidth};
 use crate::index_vec::IdxVec;
 use crate::dep_vec;
+use crate::source_info::{SourceFile, CommentatedSourceRange};
 
 #[derive(Clone, Debug)]
 pub enum CastMethod {
@@ -20,19 +22,38 @@ pub enum CastMethod {
     IntToFloat,
 }
 
-struct TypeChecker {
+struct TypeChecker<'src> {
     /// The input TIR program
     prog: tir::Program,
     /// The type of each expression
     types: IdxVec<Type, ExprId>,
     /// The constraints on each expression's type
     constraints: IdxVec<ConstraintList, ExprId>,
+    /// A copy of the constraints, used for debugging the typechecker
+    constraints_copy: IdxVec<ConstraintList, ExprId>,
     /// The preferred overload for each decl ref (currently only ever originates from literals)
     preferred_overloads: IdxVec<Option<DeclId>, DeclRefId>,
     /// The selected overload for each decl ref
     selected_overloads: IdxVec<Option<DeclId>, DeclRefId>,
     /// The cast method for each cast expression
     cast_methods: IdxVec<CastMethod, CastId>,
+
+    source_file: &'src SourceFile,
+    debug: bool,
+}
+
+impl<'src> TypeChecker<'src> {
+    fn debug_output(&mut self, level: usize) {
+        if !self.debug { return; }
+
+        assert_eq!(self.constraints.len(), self.constraints_copy.len());
+        for i in 0..self.constraints.len() {
+            let i = ExprId::new(i);
+            self.source_file.print_commentated_source_ranges(&mut [
+                CommentatedSourceRange::new(self.prog.source_ranges[i].clone(), "typechecking", '-'),
+            ]);
+        }
+    }
 }
 
 pub struct Program {
@@ -43,18 +64,24 @@ pub struct Program {
 }
 
 #[inline(never)]
-pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
+pub fn type_check(prog: tir::Program, source_file: &SourceFile, debug: bool) -> (Program, Vec<Error>) {
     let mut tc = TypeChecker {
         prog,
         types: IdxVec::new(),
         constraints: IdxVec::new(),
+        constraints_copy: IdxVec::new(),
         preferred_overloads: IdxVec::new(),
         selected_overloads: IdxVec::new(),
         cast_methods: IdxVec::new(),
+        source_file,
+        debug,
     };
     let mut errs = Vec::new();
     tc.types.resize_with(tc.prog.num_exprs, Default::default);
     tc.constraints.resize_with(tc.prog.num_exprs, Default::default);
+    if debug {
+        tc.constraints_copy.resize_with(tc.prog.num_exprs, Default::default);
+    }
     tc.selected_overloads.resize_with(tc.prog.overloads.len(), || None);
     tc.preferred_overloads.resize_with(tc.prog.overloads.len(), || None);
     tc.cast_methods.resize_with(tc.prog.casts.len(), || CastMethod::Noop);
@@ -95,6 +122,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
     lit_pass_1(&mut tc.constraints, &tc.prog.dec_lits, BuiltinTraits::DEC, Type::i32());
     lit_pass_1(&mut tc.constraints, &tc.prog.str_lits, BuiltinTraits::CHAR, Type::u8().ptr());
     lit_pass_1(&mut tc.constraints, &tc.prog.char_lits, BuiltinTraits::STR, Type::u8().ptr());
+    tc.debug_output(0);
     for level in 0..levels {
         for item in tc.prog.tree.assigned_decls.get_level(level) {
             let constraints = &tc.constraints[item.root_expr];
@@ -213,6 +241,7 @@ pub fn type_check(prog: tir::Program) -> (Program, Vec<Error>) {
         for item in tc.prog.tree.dos.get_level(level) {
             tc.constraints[item.id] = tc.constraints[item.terminal_expr].clone();
         }
+        tc.debug_output(level as usize);
     }
 
     // Pass 2: propagate info up from roots to leaves

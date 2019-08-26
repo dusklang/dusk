@@ -163,7 +163,7 @@ pub trait Builder<'src> {
     fn if_expr(&mut self, condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId>, range: SourceRange) -> ExprId;
     fn while_expr(&mut self, condition: ExprId, scope: ScopeId, range: SourceRange) -> ExprId;
     fn stmt(&mut self, expr: ExprId);
-    fn do_expr(&mut self, scope: ScopeId) -> ExprId;
+    fn do_expr(&mut self, scope: ScopeId, range: SourceRange) -> ExprId;
     fn begin_scope(&mut self) -> ScopeId;
     fn end_scope(&mut self, has_terminal_expr: bool);
     fn begin_computed_decl(&mut self, name: &'src str, param_names: SmallVec<[&'src str; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Option<Type>, proto_range: SourceRange);
@@ -171,6 +171,7 @@ pub trait Builder<'src> {
     fn add_intrinsic(&mut self, intrinsic: Intrinsic, param_tys: SmallVec<[Type; 2]>, ret_ty: Type);
     fn decl_ref(&mut self, name: &'src str, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId;
     fn get_range(&self, id: ExprId) -> SourceRange;
+    fn set_range(&mut self, id: ExprId, range: SourceRange);
     fn get_terminal_expr(&self, scope: ScopeId) -> ExprId;
     fn output(self) -> Self::Output;
 }
