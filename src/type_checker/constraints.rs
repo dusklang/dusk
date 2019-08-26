@@ -234,5 +234,21 @@ impl ConstraintList {
                 }
             }
         }
+
+        if self.one_of != other.one_of {
+            if let Some(new) = &other.one_of {
+                println!("now one of {:?}", new);
+            }
+        }
+
+        if self.preferred_type != other.preferred_type {
+            if let Some(new) = &other.preferred_type {
+                println!("set preferred type to {:?}", new);
+            } else {
+                println!("removed preferred type {:?}", self.preferred_type.as_ref().unwrap())
+            }
+        }
+
+        println!();
     }
 }

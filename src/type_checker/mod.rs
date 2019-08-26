@@ -104,6 +104,7 @@ pub fn type_check(prog: tir::Program, source_file: &SourceFile, debug: bool) -> 
     tc.types[tc.prog.void_expr] = Type::Void;
 
     // Pass 1: propagate info down from leaves to roots
+    if debug { println!("===============TYPECHECKING: PASS 1==============="); }
     fn independent_pass_1<T>(constraints: &mut IdxVec<ConstraintList, ExprId>, tys: &mut IdxVec<Type, ExprId>, exprs: &[T], data: impl Fn(&T) -> (ExprId, Type)) {
         for item in exprs {
             let (id, ty) = data(item);
@@ -128,7 +129,6 @@ pub fn type_check(prog: tir::Program, source_file: &SourceFile, debug: bool) -> 
     lit_pass_1(&mut tc.constraints, &tc.prog.dec_lits, BuiltinTraits::DEC, Type::i32());
     lit_pass_1(&mut tc.constraints, &tc.prog.str_lits, BuiltinTraits::STR, Type::u8().ptr());
     lit_pass_1(&mut tc.constraints, &tc.prog.char_lits, BuiltinTraits::CHAR, Type::u8().ptr());
-    tc.debug_output(0);
     for level in 0..levels {
         for item in tc.prog.tree.assigned_decls.get_level(level) {
             let constraints = &tc.constraints[item.root_expr];
@@ -251,6 +251,7 @@ pub fn type_check(prog: tir::Program, source_file: &SourceFile, debug: bool) -> 
     }
 
     // Pass 2: propagate info up from roots to leaves
+    if debug { println!("===============TYPECHECKING: PASS 2==============="); }
     for item in &tc.prog.stmts {
         let constraints = &mut tc.constraints[item.root_expr];
         if let Some(err) = constraints.can_unify_to(&Type::Void.into()).err() {
@@ -273,8 +274,8 @@ pub fn type_check(prog: tir::Program, source_file: &SourceFile, debug: bool) -> 
         constraints.set_to(Type::Void);
     }
 
-    for group in tc.prog.ret_groups {
-        for expr in group.exprs {
+    for group in &tc.prog.ret_groups {
+        for &expr in &group.exprs {
             if let Some(err) = tc.constraints[expr].can_unify_to(&QualType::from(&group.ty)).err() {
                 let range = tc.prog.source_ranges[expr].clone();
                 let mut error = Error::new(format!("can't unify expression to return type {:?}", group.ty))
@@ -431,6 +432,9 @@ pub fn type_check(prog: tir::Program, source_file: &SourceFile, debug: bool) -> 
             tc.types[item.id] = ty.ty.clone();
             tc.constraints[item.terminal_expr].set_to(ty);
         }
+        if level > 0 {
+            tc.debug_output(level as usize);
+        }
     }
     fn lit_pass_2(
         constraints: &IdxVec<ConstraintList, ExprId>,
@@ -446,6 +450,7 @@ pub fn type_check(prog: tir::Program, source_file: &SourceFile, debug: bool) -> 
     lit_pass_2(&tc.constraints, &mut tc.types, &tc.prog.dec_lits, "decimal");
     lit_pass_2(&tc.constraints, &mut tc.types, &tc.prog.str_lits, "string");
     lit_pass_2(&tc.constraints, &mut tc.types, &tc.prog.char_lits, "character");
+    tc.debug_output(0);
 
     //println!("Types: {:#?}", tc.types);
     //println!("Program: {:#?}", tc.prog);

@@ -31,7 +31,7 @@ fn main() {
     let (toks, mut errs) = lexer::lex(&file.src, &mut file.lines);
     let (tir, tir_errs) = parser::parse(&toks, tir::Builder::new());
     let (hir, hir_errs) = parser::parse(&toks, hir::Builder::new());
-    let (tc, tc_errs) = type_checker::type_check(tir, &file, true);
+    let (tc, tc_errs) = type_checker::type_check(tir, &file, false);
 
     errs.extend(tir_errs);
     errs.extend(hir_errs);
