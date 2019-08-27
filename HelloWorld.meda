@@ -38,18 +38,77 @@ fn fizz_buzz {
     }
 }
 
+fn fib(n: i32): i32 {
+    if n == 0 {
+        0
+    } else if n == 1 {
+        1
+    } else {
+        fib(n - 1) + fib(n - 2)
+    }
+}
+
+fn strlen(str: u8*): usize {
+    str := str
+    len: usize = 0
+    while *((str as usize + len) as u8*) != 0 as u8 {
+        len = len + 1
+    }
+    len
+}
+
+fn concat(a: u8*, b: u8*): u8* {
+    len :: strlen(a) + strlen(b)
+    buf := malloc(len + 1) as u8 *mut
+    ret_val :: buf
+    a := a
+    while *(a as u8*) != 0 as u8 {
+        (*buf) = *a
+        a = (a as usize + 1) as u8 *
+        buf = (buf as usize + 1) as u8 *mut
+    }
+    b := b
+    while *(b as u8*) != 0 as u8 {
+        (*buf) = *b
+        b = (b as usize + 1) as u8 *
+        buf = (buf as usize + 1) as u8 *mut
+    }
+    (*buf) = 0
+    ret_val
+}
+
+fn print_and_return_fib(str: u8*, n: i32): i32 {
+    print(str)
+    fib(n)
+}
+
+fn print_and_return_concatenated_string(a: u8*, b: u8*): u8* {
+    val :: concat(a, b)
+    print(val)
+    val
+}
+
+FIB_N :: 20
+FIB := print_and_return_fib("printing at compile time!\n", FIB_N)
+generated_string := concat("Hello, ", "world!\n")
+
 fn too_hype_for_types(a: i32, b: i32, c: i32) = a * b + c
 
 fn main {
     foo := remainder_three_numbers(1, 2, 3)
     foo = foo + 2
 
+    //fizz_buzz
+    //FIZZ_BUZZ_ITERATIONS = 200
+    //fizz_buzz
 
-    fizz_buzz
-    FIZZ_BUZZ_ITERATIONS = 200
-    fizz_buzz
+    print("fib(")
+    print_num(FIB_N)
+    print(") = ")
+    print_num(FIB)
+    print("\n")
 
-    print_num(too_hype_for_types(200, 2, 4))
+    print(generated_string)
 
     h := "h" as u8 as u8 as i8 as i8 as u8 as i8 as isize as u64
     i: u64 = 24

@@ -20,6 +20,7 @@ use std::fs;
 use interpreter::Interpreter;
 use index_vec::Idx;
 use ty::Type;
+use mir::FunctionRef;
 
 fn main() {
     let contents = fs::read_to_string("HelloWorld.meda")
@@ -54,5 +55,7 @@ fn main() {
     let main = mir.functions.iter()
         .position(|func| &*func.name == "main" && func.ret_ty == Type::Void && func.num_parameters() == 0)
         .expect("Couldn't find main function with no parameters and a return type of void!");
-    interpreter.call(Idx::new(main), Vec::new());
+    
+    println!("Running the user's program in the interpreter:\n");
+    interpreter.call(FunctionRef::Id(Idx::new(main)), Vec::new());
 }

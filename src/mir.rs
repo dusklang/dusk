@@ -10,6 +10,7 @@ use tc::CastMethod;
 use crate::index_vec::{Idx, IdxVec};
 use crate::builder::{DeclId, ExprId, DeclRefId, ScopeId, Intrinsic};
 use crate::hir::{self, Expr, Item, StoredDeclId};
+use crate::interpreter::Interpreter;
 
 newtype_index!(InstrId pub);
 newtype_index!(BasicBlockId pub);
@@ -161,8 +162,11 @@ pub struct Program {
 }
 
 impl Program {
-    pub fn type_of(&self, instr_id: InstrId, func_id: FuncId) -> Type {
-        let func = &self.functions[func_id];
+    pub fn type_of(&self, instr_id: InstrId, func_ref: &FunctionRef) -> Type {
+        let func = match func_ref {
+            FunctionRef::Ref(func) => func,
+            &FunctionRef::Id(id) => &self.functions[id],
+        };
         match &func.code[instr_id] {
             Instr::Void | Instr::Store { .. } => Type::Void,
             Instr::Const(konst) => konst.ty(),
@@ -174,7 +178,7 @@ impl Program {
                 | Instr::ZeroExtend(_, ty) | Instr::FloatCast(_, ty) | Instr::FloatToInt(_, ty)
                 | Instr::IntToFloat(_, ty)
                   => ty.clone(),
-            &Instr::Load(instr) => match self.type_of(instr, func_id) {
+            &Instr::Load(instr) => match self.type_of(instr, func_ref) {
                 Type::Pointer(pointee) => pointee.ty,
                 _ => Type::Error,
             },
@@ -213,12 +217,17 @@ fn expr_to_const(expr: &Expr, ty: Type, strings: &mut IdxVec<CString, StrId>) ->
     }
 }
 
+pub enum FunctionRef {
+    Id(FuncId),
+    Ref(Function),
+}
+
 impl Program {
     pub fn build(prog: &hir::Program, tc: &tc::Program, arch: Arch) -> Self {
         let mut decls = IdxVec::<Decl, DeclId>::new();
-        let mut statics = IdxVec::<Const, StaticId>::new();
         let mut strings = IdxVec::<CString, StrId>::new();
         let mut num_functions = 0usize;
+        let mut num_statics = 0usize;
 
         for (i, decl) in prog.decls.iter().enumerate() {
             let id = DeclId::new(i);
@@ -232,9 +241,8 @@ impl Program {
                     hir::Decl::Parameter { index } => Decl::LocalConst { value: InstrId::new(index + 1) },
                     hir::Decl::Intrinsic(intr) => Decl::Intrinsic(intr, tc.decl_types[id].clone()),
                     hir::Decl::Static(root_expr) => {
-                        let konst = expr_to_const(&prog.exprs[root_expr], tc.types[root_expr].clone(), &mut strings);
-                        let statik = statics.push(konst);
-                        Decl::Static(statik)
+                        num_statics += 1;
+                        Decl::Static(StaticId::new(num_statics - 1))
                     },
                     hir::Decl::Const(root_expr) => {
                         let konst = expr_to_const(&prog.exprs[root_expr], tc.types[root_expr].clone(), &mut strings);
@@ -243,27 +251,60 @@ impl Program {
                 }
             );
         }
+        let mut static_inits = IdxVec::<Function, StaticId>::new();
         let mut functions = IdxVec::<Function, FuncId>::new();
         for (i, decl) in prog.decls.iter().enumerate() {
             let id = DeclId::new(i);
-            if let hir::Decl::Computed { ref name, ref params, scope, .. } = *decl {
-                functions.push(
-                    FunctionBuilder::new(
-                        prog,
-                        tc,
-                        &decls,
-                        &mut strings,
-                        name.clone(),
-                        tc.decl_types[id].clone(),
-                        scope,
-                        &params[..],
-                        arch,
-                    ).build()
-                );
+            match *decl {
+                hir::Decl::Computed { ref name, ref params, scope } => {
+                    functions.push(
+                        FunctionBuilder::new(
+                            prog,
+                            tc,
+                            &decls,
+                            &mut strings,
+                            name.clone(),
+                            tc.decl_types[id].clone(),
+                            FunctionBody::Scope(scope),
+                            &params[..],
+                            arch,
+                        ).build()
+                    );
+                },
+                hir::Decl::Static(expr) => {
+                    static_inits.push(
+                        FunctionBuilder::new(
+                            prog,
+                            tc,
+                            &decls,
+                            &mut strings,
+                            String::from("static_init"),
+                            tc.decl_types[id].clone(),
+                            FunctionBody::Expr(expr),
+                            &[],
+                            arch,
+                        ).build()
+                    );
+                },
+                _ => {},
             }
         }
         assert_eq!(num_functions, functions.len());
-        Program { functions, strings, statics, arch }
+
+        let mut prog = Program { functions, strings, statics: IdxVec::new(), arch };
+        let mut statics = IdxVec::new();
+
+        for statik in static_inits.raw {
+            let ty = statik.ret_ty.clone();
+            let konst = Interpreter::new(&prog)
+                .call(FunctionRef::Ref(statik), Vec::new())
+                .to_const(arch, ty, &mut prog.strings);
+            statics.push(konst);
+        }
+
+        prog.statics = statics;
+        
+        prog
     }
 }
 
@@ -389,6 +430,12 @@ impl fmt::Display for Program {
     }
 }
 
+#[derive(Copy, Clone)]
+enum FunctionBody {
+    Scope(ScopeId),
+    Expr(ExprId),
+}
+
 struct FunctionBuilder<'a> {
     prog: &'a hir::Program,
     tc: &'a tc::Program,
@@ -396,7 +443,7 @@ struct FunctionBuilder<'a> {
     strings: &'a mut IdxVec<CString, StrId>,
     name: String,
     ret_ty: Type,
-    scope: ScopeId,
+    body: FunctionBody,
     arch: Arch,
     void_instr: InstrId,
     code: IdxVec<Instr, InstrId>,
@@ -412,7 +459,7 @@ impl<'a> FunctionBuilder<'a> {
         strings: &'a mut IdxVec<CString, StrId>,
         name: String,
         ret_ty: Type,
-        scope: ScopeId,
+        body: FunctionBody,
         params: &[DeclId],
         arch: Arch,
     ) -> Self {
@@ -434,7 +481,7 @@ impl<'a> FunctionBuilder<'a> {
             strings,
             name,
             ret_ty,
-            scope,
+            body,
             void_instr,
             code,
             basic_blocks,
@@ -861,7 +908,11 @@ impl<'a> FunctionBuilder<'a> {
     }
 
     fn build(mut self) -> Function {
-        self.scope(self.scope, Context::new(0, DataDest::Ret, ControlDest::Unreachable));
+        let ctx = Context::new(0, DataDest::Ret, ControlDest::Unreachable);
+        match self.body {
+            FunctionBody::Expr(expr) => self.expr(expr, ctx),
+            FunctionBody::Scope(scope) => self.scope(scope, ctx),
+        };
         Function {
             name: self.name,
             ret_ty: self.ret_ty,

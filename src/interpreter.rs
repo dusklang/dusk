@@ -1,7 +1,7 @@
 use std::alloc;
 use std::collections::HashMap;
 use std::convert::TryInto;
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::mem;
 use std::slice;
 
@@ -10,7 +10,7 @@ use arrayvec::ArrayVec;
 use crate::arch::Arch;
 use crate::builder::Intrinsic;
 use crate::index_vec::{IdxVec, Idx};
-use crate::mir::{Const, Function, FuncId, Instr, InstrId, Program, StaticId, StrId};
+use crate::mir::{Const, Function, FuncId, FunctionRef, Instr, InstrId, Program, StaticId, StrId};
 use crate::ty::{Type, IntWidth, FloatWidth};
 
 
@@ -137,6 +137,44 @@ impl Value {
         }
     }
 
+    pub fn to_const(&self, arch: Arch, ty: Type, strings: &mut IdxVec<CString, StrId>) -> Const {
+        match ty {
+            Type::Int { width, is_signed } => {
+                use IntWidth::*;
+                assert_eq!(arch.pointer_size(), 64);
+                let lit = match (width, is_signed) {
+                    (W8, true) => self.as_i8() as i64 as u64,
+                    (W16, true) => self.as_i16() as i64 as u64,
+                    (W32, true) => self.as_i32() as i64 as u64,
+                    (W64, true) | (Pointer, true) => self.as_i64() as u64,
+
+                    (W8, false) => self.as_u8() as u64,
+                    (W16, false) => self.as_u16() as u64,
+                    (W32, false) => self.as_u32() as u64,
+                    (W64, false) | (Pointer, false) => self.as_u64(),
+                };
+                Const::Int { lit, ty }
+            },
+            Type::Float(width) => {
+                let lit = match width {
+                    FloatWidth::W32 => self.as_f32() as f64,
+                    FloatWidth::W64 => self.as_f64(),
+                };
+                Const::Float { lit, ty }
+            },
+            Type::Bool => Const::Bool(self.as_bool()),
+            Type::Pointer(ref pointee) => {
+                assert!(!pointee.is_mut);
+                assert!(pointee.ty == Type::i8() || pointee.ty == Type::u8());
+                println!("Warning: about to blindly copy a pointer into the global strings!");
+                let string = unsafe { CString::from(CStr::from_ptr(self.as_raw_ptr() as *const _)) };
+                let id = strings.push(string);
+                Const::Str { id, ty }
+            },
+            _ => panic!("Can't output value of type {:?} as constant", ty),
+        }
+    }
+
     fn from_u8(val: u8) -> Value {
         Value::from_bytes(val.to_le_bytes().as_ref())
     }
@@ -209,7 +247,7 @@ impl StackFrame {
 }
 
 pub struct Interpreter<'mir> {
-    stack: Vec<(FuncId, StackFrame)>,
+    stack: Vec<(FunctionRef, StackFrame)>,
     statics: IdxVec<Value, StaticId>,
     allocations: HashMap<usize, alloc::Layout>,
     prog: &'mir Program,
@@ -229,9 +267,13 @@ impl<'mir> Interpreter<'mir> {
         }
     }
 
-    pub fn call(&mut self, func_id: FuncId, arguments: Vec<Value>) -> Value {
-        let frame = StackFrame::new(&self.prog.functions[func_id], arguments);
-        self.stack.push((func_id, frame));
+    pub fn call(&mut self, func_ref: FunctionRef, arguments: Vec<Value>) -> Value {
+        let func = match func_ref {
+            FunctionRef::Id(id) => &self.prog.functions[id],
+            FunctionRef::Ref(ref func) => func,
+        };
+        let frame = StackFrame::new(func, arguments);
+        self.stack.push((func_ref, frame));
         loop {
             if let Some(val) = self.execute_next() {
                 self.stack.pop().unwrap();
@@ -242,9 +284,11 @@ impl<'mir> Interpreter<'mir> {
 
     /// Execute the next instruction. Iff the instruction is a return, this function returns its `Value`
     fn execute_next(&mut self) -> Option<Value> {
-        let (func_id, frame) = self.stack.last_mut().unwrap();
-        let func_id = *func_id;
-        let func = &self.prog.functions[func_id];
+        let (func_ref, frame) = self.stack.last_mut().unwrap();
+        let func = match &*func_ref {
+            FunctionRef::Ref(func) => func,
+            &FunctionRef::Id(id) => &self.prog.functions[id],
+        };
         let val = match &func.code[frame.pc] {
             Instr::Void => Value::Nothing,
             Instr::Const(konst) => Value::from_const(konst, self.prog.arch, &self.prog.strings),
@@ -263,7 +307,7 @@ impl<'mir> Interpreter<'mir> {
                 for &arg in arguments {
                     copied_args.push(frame.results[arg].clone());
                 }
-                self.call(func, copied_args)
+                self.call(FunctionRef::Id(func), copied_args)
             },
             &Instr::Intrinsic { ref arguments, intr, .. } => {
                 match intr {
@@ -271,8 +315,8 @@ impl<'mir> Interpreter<'mir> {
                     Intrinsic::Mult => {
                         assert_eq!(arguments.len(), 2);
                         let (lhs, rhs) = (arguments[0], arguments[1]);
-                        let ty = self.prog.type_of(lhs, func_id);
-                        assert_eq!(ty, self.prog.type_of(rhs, func_id));
+                        let ty = self.prog.type_of(lhs, &func_ref);
+                        assert_eq!(ty, self.prog.type_of(rhs, &func_ref));
                         let (lhs, rhs) = (&frame.results[lhs], &frame.results[rhs]);
                         match ty {
                             Type::Int { width, is_signed } => {
@@ -301,8 +345,8 @@ impl<'mir> Interpreter<'mir> {
                     Intrinsic::Div => {
                         assert_eq!(arguments.len(), 2);
                         let (lhs, rhs) = (arguments[0], arguments[1]);
-                        let ty = self.prog.type_of(lhs, func_id);
-                        assert_eq!(ty, self.prog.type_of(rhs, func_id));
+                        let ty = self.prog.type_of(lhs, &func_ref);
+                        assert_eq!(ty, self.prog.type_of(rhs, &func_ref));
                         let (lhs, rhs) = (&frame.results[lhs], &frame.results[rhs]);
                         match ty {
                             Type::Int { width, is_signed } => {
@@ -331,8 +375,8 @@ impl<'mir> Interpreter<'mir> {
                     Intrinsic::Mod => {
                         assert_eq!(arguments.len(), 2);
                         let (lhs, rhs) = (arguments[0], arguments[1]);
-                        let ty = self.prog.type_of(lhs, func_id);
-                        assert_eq!(ty, self.prog.type_of(rhs, func_id));
+                        let ty = self.prog.type_of(lhs, &func_ref);
+                        assert_eq!(ty, self.prog.type_of(rhs, &func_ref));
                         let (lhs, rhs) = (&frame.results[lhs], &frame.results[rhs]);
                         match ty {
                             Type::Int { width, is_signed } => {
@@ -361,8 +405,8 @@ impl<'mir> Interpreter<'mir> {
                     Intrinsic::Add => {
                         assert_eq!(arguments.len(), 2);
                         let (lhs, rhs) = (arguments[0], arguments[1]);
-                        let ty = self.prog.type_of(lhs, func_id);
-                        assert_eq!(ty, self.prog.type_of(rhs, func_id));
+                        let ty = self.prog.type_of(lhs, &func_ref);
+                        assert_eq!(ty, self.prog.type_of(rhs, &func_ref));
                         let (lhs, rhs) = (&frame.results[lhs], &frame.results[rhs]);
                         match ty {
                             Type::Int { width, is_signed } => {
@@ -391,8 +435,8 @@ impl<'mir> Interpreter<'mir> {
                     Intrinsic::Sub => {
                         assert_eq!(arguments.len(), 2);
                         let (lhs, rhs) = (arguments[0], arguments[1]);
-                        let ty = self.prog.type_of(lhs, func_id);
-                        assert_eq!(ty, self.prog.type_of(rhs, func_id));
+                        let ty = self.prog.type_of(lhs, &func_ref);
+                        assert_eq!(ty, self.prog.type_of(rhs, &func_ref));
                         let (lhs, rhs) = (&frame.results[lhs], &frame.results[rhs]);
                         match ty {
                             Type::Int { width, is_signed } => {
@@ -421,8 +465,8 @@ impl<'mir> Interpreter<'mir> {
                     Intrinsic::Less => {
                         assert_eq!(arguments.len(), 2);
                         let (lhs, rhs) = (arguments[0], arguments[1]);
-                        let ty = self.prog.type_of(lhs, func_id);
-                        assert_eq!(ty, self.prog.type_of(rhs, func_id));
+                        let ty = self.prog.type_of(lhs, &func_ref);
+                        assert_eq!(ty, self.prog.type_of(rhs, &func_ref));
                         let (lhs, rhs) = (&frame.results[lhs], &frame.results[rhs]);
                         let val = match ty {
                             Type::Int { width, is_signed } => {
@@ -452,8 +496,8 @@ impl<'mir> Interpreter<'mir> {
                     Intrinsic::LessOrEq => {
                         assert_eq!(arguments.len(), 2);
                         let (lhs, rhs) = (arguments[0], arguments[1]);
-                        let ty = self.prog.type_of(lhs, func_id);
-                        assert_eq!(ty, self.prog.type_of(rhs, func_id));
+                        let ty = self.prog.type_of(lhs, &func_ref);
+                        assert_eq!(ty, self.prog.type_of(rhs, &func_ref));
                         let (lhs, rhs) = (&frame.results[lhs], &frame.results[rhs]);
                         let val = match ty {
                             Type::Int { width, is_signed } => {
@@ -483,8 +527,8 @@ impl<'mir> Interpreter<'mir> {
                     Intrinsic::Greater => {
                         assert_eq!(arguments.len(), 2);
                         let (lhs, rhs) = (arguments[0], arguments[1]);
-                        let ty = self.prog.type_of(lhs, func_id);
-                        assert_eq!(ty, self.prog.type_of(rhs, func_id));
+                        let ty = self.prog.type_of(lhs, &func_ref);
+                        assert_eq!(ty, self.prog.type_of(rhs, &func_ref));
                         let (lhs, rhs) = (&frame.results[lhs], &frame.results[rhs]);
                         let val = match ty {
                             Type::Int { width, is_signed } => {
@@ -514,8 +558,8 @@ impl<'mir> Interpreter<'mir> {
                     Intrinsic::GreaterOrEq => {
                         assert_eq!(arguments.len(), 2);
                         let (lhs, rhs) = (arguments[0], arguments[1]);
-                        let ty = self.prog.type_of(lhs, func_id);
-                        assert_eq!(ty, self.prog.type_of(rhs, func_id));
+                        let ty = self.prog.type_of(lhs, &func_ref);
+                        assert_eq!(ty, self.prog.type_of(rhs, &func_ref));
                         let (lhs, rhs) = (&frame.results[lhs], &frame.results[rhs]);
                         let val = match ty {
                             Type::Int { width, is_signed } => {
@@ -545,8 +589,8 @@ impl<'mir> Interpreter<'mir> {
                     Intrinsic::Eq => {
                         assert_eq!(arguments.len(), 2);
                         let (lhs, rhs) = (arguments[0], arguments[1]);
-                        let ty = self.prog.type_of(lhs, func_id);
-                        assert_eq!(ty, self.prog.type_of(rhs, func_id));
+                        let ty = self.prog.type_of(lhs, &func_ref);
+                        assert_eq!(ty, self.prog.type_of(rhs, &func_ref));
                         let (lhs, rhs) = (&frame.results[lhs], &frame.results[rhs]);
                         let val = match ty {
                             Type::Int { width, is_signed } => {
@@ -577,8 +621,8 @@ impl<'mir> Interpreter<'mir> {
                     Intrinsic::NotEq => {
                         assert_eq!(arguments.len(), 2);
                         let (lhs, rhs) = (arguments[0], arguments[1]);
-                        let ty = self.prog.type_of(lhs, func_id);
-                        assert_eq!(ty, self.prog.type_of(rhs, func_id));
+                        let ty = self.prog.type_of(lhs, &func_ref);
+                        assert_eq!(ty, self.prog.type_of(rhs, &func_ref));
                         let (lhs, rhs) = (&frame.results[lhs], &frame.results[rhs]);
                         let val = match ty {
                             Type::Int { width, is_signed } => {
@@ -609,8 +653,8 @@ impl<'mir> Interpreter<'mir> {
                     Intrinsic::BitwiseAnd => {
                         assert_eq!(arguments.len(), 2);
                         let (lhs, rhs) = (arguments[0], arguments[1]);
-                        let ty = self.prog.type_of(lhs, func_id);
-                        assert_eq!(ty, self.prog.type_of(rhs, func_id));
+                        let ty = self.prog.type_of(lhs, &func_ref);
+                        assert_eq!(ty, self.prog.type_of(rhs, &func_ref));
                         let (lhs, rhs) = (&frame.results[lhs], &frame.results[rhs]);
                         match ty {
                             Type::Int { width, is_signed } => {
@@ -635,8 +679,8 @@ impl<'mir> Interpreter<'mir> {
                     Intrinsic::BitwiseOr => {
                         assert_eq!(arguments.len(), 2);
                         let (lhs, rhs) = (arguments[0], arguments[1]);
-                        let ty = self.prog.type_of(lhs, func_id);
-                        assert_eq!(ty, self.prog.type_of(rhs, func_id));
+                        let ty = self.prog.type_of(lhs, &func_ref);
+                        assert_eq!(ty, self.prog.type_of(rhs, &func_ref));
                         let (lhs, rhs) = (&frame.results[lhs], &frame.results[rhs]);
                         match ty {
                             Type::Int { width, is_signed } => {
@@ -662,7 +706,7 @@ impl<'mir> Interpreter<'mir> {
                     Intrinsic::Neg => {
                         assert_eq!(arguments.len(), 1);
                         let arg = arguments[0];
-                        let ty = self.prog.type_of(arg, func_id);
+                        let ty = self.prog.type_of(arg, &func_ref);
                         let arg = &frame.results[arg];
                         match ty {
                             Type::Int { width, is_signed } => {
@@ -708,7 +752,7 @@ impl<'mir> Interpreter<'mir> {
                         assert_eq!(arguments.len(), 1);
                         let id = arguments[0];
                         let val = &frame.results[id];
-                        let ty = self.prog.type_of(id, func_id);
+                        let ty = self.prog.type_of(id, &func_ref);
                         match ty {
                             Type::Pointer(_) => unsafe {
                                 let mut ptr = val.as_raw_ptr();
@@ -750,7 +794,7 @@ impl<'mir> Interpreter<'mir> {
                 Value::from_bytes(&bytes[0..ty.size(self.prog.arch)])
             },
             &Instr::SignExtend(val, ref dest_ty) => {
-                let src_ty = &self.prog.type_of(val, func_id);
+                let src_ty = &self.prog.type_of(val, &func_ref);
                 let val = &frame.results[val];
                 match (src_ty, dest_ty) {
                     (
@@ -781,7 +825,7 @@ impl<'mir> Interpreter<'mir> {
                 }
             },
             &Instr::ZeroExtend(val, ref dest_ty) => {
-                let src_ty = &self.prog.type_of(val, func_id);
+                let src_ty = &self.prog.type_of(val, &func_ref);
                 let val = &frame.results[val];
                 match (src_ty, dest_ty) {
                     (
@@ -824,7 +868,7 @@ impl<'mir> Interpreter<'mir> {
             },
             &Instr::FloatToInt(instr, ref dest_ty) => {
                 let val = &frame.results[instr];
-                let src_size = self.prog.type_of(instr, func_id).size(self.prog.arch);
+                let src_size = self.prog.type_of(instr, &func_ref).size(self.prog.arch);
                 match dest_ty {
                     Type::Int { width, is_signed } => {
                         match (src_size * 8, width.bit_width(self.prog.arch), is_signed) {
@@ -856,7 +900,7 @@ impl<'mir> Interpreter<'mir> {
             }
             &Instr::IntToFloat(instr, ref dest_ty) => {
                 let val = &frame.results[instr];
-                let src_ty = &self.prog.type_of(instr, func_id);
+                let src_ty = &self.prog.type_of(instr, &func_ref);
                 let dest_size = dest_ty.size(self.prog.arch);
                 match src_ty {
                     Type::Int { width, is_signed } => {
@@ -888,7 +932,7 @@ impl<'mir> Interpreter<'mir> {
                 }
             }
             &Instr::Load(location) => {
-                let size = self.prog.type_of(frame.pc, func_id).size(self.prog.arch);
+                let size = self.prog.type_of(frame.pc, &func_ref).size(self.prog.arch);
                 let ptr = frame.results[location].as_raw_ptr();
                 let mut buf = ArrayVec::new();
                 for i in 0..size {

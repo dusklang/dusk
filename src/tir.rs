@@ -726,11 +726,13 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
     fn decl_ref(&mut self, name: &'src str, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
         let mut decl: Option<(Level, DeclId)> = None;
         let name = self.interner.get_or_intern(name);
-        for &LocalDecl { name: other_name, decl: other_decl } in self.comp_decl_stack.last().unwrap().decls.iter().rev() {
-            let other_level = self.decls[other_decl].level;
-            if name == other_name {
-                decl = Some((other_level, other_decl));
-                break;
+        if let Some(comp_decl) = self.comp_decl_stack.last() {
+            for &LocalDecl { name: other_name, decl: other_decl } in comp_decl.decls.iter().rev() {
+                let other_level = self.decls[other_decl].level;
+                if name == other_name {
+                    decl = Some((other_level, other_decl));
+                    break;
+                }
             }
         }
 
