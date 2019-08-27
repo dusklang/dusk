@@ -154,7 +154,7 @@ impl Context {
 
 #[derive(Debug)]
 pub struct Program {
-    pub comp_decls: IdxVec<Function, FuncId>,
+    pub functions: IdxVec<Function, FuncId>,
     pub strings: IdxVec<CString, StrId>,
     pub statics: IdxVec<Const, StaticId>,
     pub arch: Arch,
@@ -162,13 +162,13 @@ pub struct Program {
 
 impl Program {
     pub fn type_of(&self, instr_id: InstrId, func_id: FuncId) -> Type {
-        let func = &self.comp_decls[func_id];
+        let func = &self.functions[func_id];
         match &func.code[instr_id] {
             Instr::Void | Instr::Store { .. } => Type::Void,
             Instr::Const(konst) => konst.ty(),
             Instr::Alloca(ty) => ty.clone().mut_ptr(),
             Instr::LogicalNot(_) => Type::Bool,
-            &Instr::Call { func, .. } => self.comp_decls[func].ret_ty.clone(),
+            &Instr::Call { func, .. } => self.functions[func].ret_ty.clone(),
             Instr::Intrinsic { ty, .. } => ty.clone(),
             Instr::Reinterpret(_, ty) | Instr::Truncate(_, ty) | Instr::SignExtend(_, ty)
                 | Instr::ZeroExtend(_, ty) | Instr::FloatCast(_, ty) | Instr::FloatToInt(_, ty)
@@ -243,11 +243,11 @@ impl Program {
                 }
             );
         }
-        let mut comp_decls = IdxVec::<Function, FuncId>::new();
+        let mut functions = IdxVec::<Function, FuncId>::new();
         for (i, decl) in prog.decls.iter().enumerate() {
             let id = DeclId::new(i);
             if let hir::Decl::Computed { ref name, ref params, scope, .. } = *decl {
-                comp_decls.push(
+                functions.push(
                     FunctionBuilder::new(
                         prog,
                         tc,
@@ -262,8 +262,8 @@ impl Program {
                 );
             }
         }
-        assert_eq!(num_functions, comp_decls.len());
-        Program { comp_decls, strings, statics, arch }
+        assert_eq!(num_functions, functions.len());
+        Program { functions, strings, statics, arch }
     }
 }
 
@@ -286,7 +286,7 @@ impl fmt::Display for Program {
             writeln!(f)?;
         }
 
-        for (i, func) in self.comp_decls.iter().enumerate() {
+        for (i, func) in self.functions.iter().enumerate() {
             write!(f, "fn {}", &func.name)?;
             assert_eq!(&func.code.raw[0], &Instr::Void);
             let mut first = true;
@@ -352,7 +352,7 @@ impl fmt::Display for Program {
                         &Instr::CondBr { condition, true_bb, false_bb }
                             => writeln!(f, "condbr %{}, %bb{}, %bb{}", condition.idx(), true_bb.idx(), false_bb.idx())?,
                         &Instr::Call { ref arguments, func: callee } => {
-                            write!(f, "%{} = call `{}`", i, self.comp_decls[callee].name)?;
+                            write!(f, "%{} = call `{}`", i, self.functions[callee].name)?;
                             write_args!(arguments)?
                         },
                         Instr::Const(konst) => {
@@ -381,7 +381,7 @@ impl fmt::Display for Program {
                 }
             }
             write!(f, "}}")?;
-            if i + 1 < self.comp_decls.len() {
+            if i + 1 < self.functions.len() {
                 writeln!(f, "\n")?;
             }
         }

@@ -51,7 +51,7 @@ fn main() {
 
     let mir = mir::Program::build(&hir, &tc, arch::Arch::X86_64);
     let mut interpreter = Interpreter::new(&mir);
-    let main = mir.comp_decls.iter()
+    let main = mir.functions.iter()
         .position(|func| &*func.name == "main" && func.ret_ty == Type::Void && func.num_parameters() == 0)
         .expect("Couldn't find main function with no parameters and a return type of void!");
     interpreter.call(Idx::new(main), Vec::new());

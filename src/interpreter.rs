@@ -230,7 +230,7 @@ impl<'mir> Interpreter<'mir> {
     }
 
     pub fn call(&mut self, func_id: FuncId, arguments: Vec<Value>) -> Value {
-        let frame = StackFrame::new(&self.prog.comp_decls[func_id], arguments);
+        let frame = StackFrame::new(&self.prog.functions[func_id], arguments);
         self.stack.push((func_id, frame));
         loop {
             if let Some(val) = self.execute_next() {
@@ -244,7 +244,7 @@ impl<'mir> Interpreter<'mir> {
     fn execute_next(&mut self) -> Option<Value> {
         let (func_id, frame) = self.stack.last_mut().unwrap();
         let func_id = *func_id;
-        let func = &self.prog.comp_decls[func_id];
+        let func = &self.prog.functions[func_id];
         let val = match &func.code[frame.pc] {
             Instr::Void => Value::Nothing,
             Instr::Const(konst) => Value::from_const(konst, self.prog.arch, &self.prog.strings),
