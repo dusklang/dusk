@@ -222,14 +222,24 @@ pub enum FunctionRef {
     Ref(Function),
 }
 
-impl Program {
-    pub fn build(prog: &hir::Program, tc: &tc::Program, arch: Arch) -> Self {
+pub struct Builder<'a> {
+    hir: &'a hir::Program,
+    tc: &'a tc::Program,
+    arch: Arch,
+    decls: IdxVec<Decl, DeclId>,
+    strings: IdxVec<CString, StrId>,
+    static_inits: IdxVec<Function, StaticId>,
+    functions: IdxVec<Function, FuncId>,
+}
+
+impl<'a> Builder<'a> {
+    pub fn new(hir: &'a hir::Program, tc: &'a tc::Program, arch: Arch) -> Self {
         let mut decls = IdxVec::<Decl, DeclId>::new();
         let mut strings = IdxVec::<CString, StrId>::new();
         let mut num_functions = 0usize;
         let mut num_statics = 0usize;
 
-        for (i, decl) in prog.decls.iter().enumerate() {
+        for (i, decl) in hir.decls.iter().enumerate() {
             let id = DeclId::new(i);
             decls.push(
                 match *decl {
@@ -240,70 +250,89 @@ impl Program {
                     hir::Decl::Stored(index) => Decl::Stored(index),
                     hir::Decl::Parameter { index } => Decl::LocalConst { value: InstrId::new(index + 1) },
                     hir::Decl::Intrinsic(intr) => Decl::Intrinsic(intr, tc.decl_types[id].clone()),
-                    hir::Decl::Static(root_expr) => {
+                    hir::Decl::Static(_) => {
                         num_statics += 1;
                         Decl::Static(StaticId::new(num_statics - 1))
                     },
                     hir::Decl::Const(root_expr) => {
-                        let konst = expr_to_const(&prog.exprs[root_expr], tc.types[root_expr].clone(), &mut strings);
+                        let konst = expr_to_const(&hir.exprs[root_expr], tc.types[root_expr].clone(), &mut strings);
                         Decl::Const(konst)
                     },
                 }
             );
         }
-        let mut static_inits = IdxVec::<Function, StaticId>::new();
-        let mut functions = IdxVec::<Function, FuncId>::new();
-        for (i, decl) in prog.decls.iter().enumerate() {
-            let id = DeclId::new(i);
-            match *decl {
-                hir::Decl::Computed { ref name, ref params, scope } => {
-                    functions.push(
-                        FunctionBuilder::new(
-                            prog,
-                            tc,
-                            &decls,
-                            &mut strings,
-                            name.clone(),
-                            tc.decl_types[id].clone(),
-                            FunctionBody::Scope(scope),
-                            &params[..],
-                            arch,
-                        ).build()
-                    );
-                },
-                hir::Decl::Static(expr) => {
-                    static_inits.push(
-                        FunctionBuilder::new(
-                            prog,
-                            tc,
-                            &decls,
-                            &mut strings,
-                            String::from("static_init"),
-                            tc.decl_types[id].clone(),
-                            FunctionBody::Expr(expr),
-                            &[],
-                            arch,
-                        ).build()
-                    );
-                },
-                _ => {},
-            }
-        }
-        assert_eq!(num_functions, functions.len());
 
-        let mut prog = Program { functions, strings, statics: IdxVec::new(), arch };
+        Self { 
+            hir,
+            tc,
+            arch,
+            decls,
+            strings,
+            static_inits: IdxVec::new(),
+            functions: IdxVec::new(),
+        }
+    }
+
+    pub fn build_decl(&mut self, id: DeclId) {
+        match self.hir.decls[id] {
+            hir::Decl::Computed { ref name, ref params, scope } => {
+                self.functions.push(
+                    FunctionBuilder::new(
+                        &self.hir,
+                        &self.tc,
+                        &self.decls,
+                        &mut self.strings,
+                        name.clone(),
+                        self.tc.decl_types[id].clone(),
+                        FunctionBody::Scope(scope),
+                        &params[..],
+                        self.arch,
+                    ).build()
+                );
+            },
+            hir::Decl::Static(expr) => {
+                self.static_inits.push(
+                    FunctionBuilder::new(
+                        self.hir,
+                        self.tc,
+                        &self.decls,
+                        &mut self.strings,
+                        String::from("static_init"),
+                        self.tc.decl_types[id].clone(),
+                        FunctionBody::Expr(expr),
+                        &[],
+                        self.arch,
+                    ).build()
+                );
+            },
+            _ => {},
+        }
+    }
+
+    pub fn build(mut self) -> Program {
+        for i in 0..self.hir.decls.len() {
+            self.build_decl(DeclId::new(i));
+        }
+
+        let mut prog = Program {
+            functions: self.functions,
+            strings: self.strings,
+            statics: IdxVec::new(),
+            arch: self.arch,
+        };
+        // TODO: creating a new variable for statics here is a hack to prevent userspace code from being able to access static variables
+        // There should be a flag passed to the interpreter to solve this problem (with a nice error message) instead.
         let mut statics = IdxVec::new();
 
-        for statik in static_inits.raw {
+        for statik in self.static_inits.raw {
             let ty = statik.ret_ty.clone();
             let konst = Interpreter::new(&prog)
                 .call(FunctionRef::Ref(statik), Vec::new())
-                .to_const(arch, ty, &mut prog.strings);
+                .to_const(self.arch, ty, &mut prog.strings);
             statics.push(konst);
         }
-
         prog.statics = statics;
-        
+
         prog
     }
 }
