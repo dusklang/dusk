@@ -199,14 +199,14 @@ pub trait MirProvider {
     fn string(&self, id: StrId) -> &CString;
     fn new_string(&mut self, val: CString) -> StrId;
     fn statics(&self) -> &[Const];
-    fn function(&self, id: FuncId) -> &Function;
-    fn function_by_ref<'a>(&'a self, func_ref: &'a FunctionRef) -> &'a Function {
+    fn function(&mut self, id: FuncId) -> &Function;
+    fn function_by_ref<'a>(&'a mut self, func_ref: &'a FunctionRef) -> &'a Function {
         match func_ref {
             &FunctionRef::Id(id) => self.function(id),
             FunctionRef::Ref(func) => func,
         }
     }
-    fn type_of(&self, instr: InstrId, func_ref: &FunctionRef) -> Type {
+    fn type_of(&mut self, instr: InstrId, func_ref: &FunctionRef) -> Type {
         let func = self.function_by_ref(func_ref);
         match &func.code[instr] {
             Instr::Void | Instr::Store { .. } => Type::Void,
@@ -235,7 +235,7 @@ impl<'a> MirProvider for Builder<'a> {
     fn string(&self, id: StrId) -> &CString { &self.strings[id] }
     fn new_string(&mut self, val: CString) -> StrId { self.strings.push(val) }
     fn statics(&self) -> &[Const] { &[] }
-    fn function(&self, id: FuncId) -> &Function { &self.functions[id] }
+    fn function(&mut self, id: FuncId) -> &Function { &self.functions[id] }
 }
 
 impl MirProvider for Program {
@@ -243,7 +243,7 @@ impl MirProvider for Program {
     fn string(&self, id: StrId) -> &CString { &self.strings[id] }
     fn new_string(&mut self, val: CString) -> StrId { self.strings.push(val) }
     fn statics(&self) -> &[Const] { &self.statics.raw }
-    fn function(&self, id: FuncId) -> &Function { &self.functions[id] }
+    fn function(&mut self, id: FuncId) -> &Function { &self.functions[id] }
 }
 
 pub struct Builder<'a> {
@@ -350,7 +350,7 @@ impl<'a> Builder<'a> {
 
         for statik in self.static_inits.raw {
             let ty = statik.ret_ty.clone();
-            let konst = Interpreter::new(&prog)
+            let konst = Interpreter::new(&mut prog)
                 .call(FunctionRef::Ref(statik), Vec::new())
                 .to_const(self.arch, ty, &mut prog.strings);
             statics.push(konst);
