@@ -161,34 +161,6 @@ pub struct Program {
     pub arch: Arch,
 }
 
-impl Program {
-    pub fn type_of(&self, instr_id: InstrId, func_ref: &FunctionRef) -> Type {
-        let func = match func_ref {
-            FunctionRef::Ref(func) => func,
-            &FunctionRef::Id(id) => &self.functions[id],
-        };
-        match &func.code[instr_id] {
-            Instr::Void | Instr::Store { .. } => Type::Void,
-            Instr::Const(konst) => konst.ty(),
-            Instr::Alloca(ty) => ty.clone().mut_ptr(),
-            Instr::LogicalNot(_) => Type::Bool,
-            &Instr::Call { func, .. } => self.functions[func].ret_ty.clone(),
-            Instr::Intrinsic { ty, .. } => ty.clone(),
-            Instr::Reinterpret(_, ty) | Instr::Truncate(_, ty) | Instr::SignExtend(_, ty)
-                | Instr::ZeroExtend(_, ty) | Instr::FloatCast(_, ty) | Instr::FloatToInt(_, ty)
-                | Instr::IntToFloat(_, ty)
-                  => ty.clone(),
-            &Instr::Load(instr) => match self.type_of(instr, func_ref) {
-                Type::Pointer(pointee) => pointee.ty,
-                _ => Type::Error,
-            },
-            &Instr::AddressOfStatic(statik) => self.statics[statik].ty().mut_ptr(),
-            Instr::Ret(_) | Instr::Br(_) | Instr::CondBr { .. } => Type::Never,
-            Instr::Parameter(ty) => ty.clone(),
-        }
-    }
-}
-
 fn expr_to_const(expr: &Expr, ty: Type, strings: &mut IdxVec<CString, StrId>) -> Const {
     match *expr {
         Expr::IntLit { lit } => {
@@ -220,6 +192,61 @@ fn expr_to_const(expr: &Expr, ty: Type, strings: &mut IdxVec<CString, StrId>) ->
 pub enum FunctionRef {
     Id(FuncId),
     Ref(Function),
+}
+
+pub trait MirProvider {
+    fn arch(&self) -> Arch;
+    fn string(&self, id: StrId) -> &CString;
+    fn new_string(&mut self, val: CString) -> StrId;
+    fn num_statics(&self) -> usize;
+    fn statik(&self, id: usize) -> Const;
+    fn function(&self, id: FuncId) -> &Function;
+    fn function_by_ref<'a>(&'a self, func_ref: &'a FunctionRef) -> &'a Function {
+        match func_ref {
+            &FunctionRef::Id(id) => self.function(id),
+            FunctionRef::Ref(func) => func,
+        }
+    }
+    fn type_of(&self, instr: InstrId, func_ref: &FunctionRef) -> Type {
+        let func = self.function_by_ref(func_ref);
+        match &func.code[instr] {
+            Instr::Void | Instr::Store { .. } => Type::Void,
+            Instr::Const(konst) => konst.ty(),
+            Instr::Alloca(ty) => ty.clone().mut_ptr(),
+            Instr::LogicalNot(_) => Type::Bool,
+            &Instr::Call { func, .. } => self.function(func).ret_ty.clone(),
+            Instr::Intrinsic { ty, .. } => ty.clone(),
+            Instr::Reinterpret(_, ty) | Instr::Truncate(_, ty) | Instr::SignExtend(_, ty)
+                | Instr::ZeroExtend(_, ty) | Instr::FloatCast(_, ty) | Instr::FloatToInt(_, ty)
+                | Instr::IntToFloat(_, ty)
+                  => ty.clone(),
+            &Instr::Load(instr) => match self.type_of(instr, func_ref) {
+                Type::Pointer(pointee) => pointee.ty,
+                _ => Type::Error,
+            },
+            &Instr::AddressOfStatic(statik) => self.statik(statik.idx()).ty().mut_ptr(),
+            Instr::Ret(_) | Instr::Br(_) | Instr::CondBr { .. } => Type::Never,
+            Instr::Parameter(ty) => ty.clone(),
+        }
+    }
+}
+
+impl<'a> MirProvider for Builder<'a> {
+    fn arch(&self) -> Arch { self.arch }
+    fn string(&self, id: StrId) -> &CString { &self.strings[id] }
+    fn new_string(&mut self, val: CString) -> StrId { self.strings.push(val) }
+    fn num_statics(&self) -> usize { self.static_inits.len() }
+    fn statik(&self, _id: usize) -> Const { panic!("can't get static from mir builder"); }
+    fn function(&self, id: FuncId) -> &Function { &self.functions[id] }
+}
+
+impl MirProvider for Program {
+    fn arch(&self) -> Arch { self.arch }
+    fn string(&self, id: StrId) -> &CString { &self.strings[id] }
+    fn new_string(&mut self, val: CString) -> StrId { self.strings.push(val) }
+    fn num_statics(&self) -> usize { self.statics.len() }
+    fn statik(&self, id: usize) -> Const { self.statics[StaticId::new(id)].clone() }
+    fn function(&self, id: FuncId) -> &Function { &self.functions[id] }
 }
 
 pub struct Builder<'a> {

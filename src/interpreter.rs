@@ -10,9 +10,8 @@ use arrayvec::ArrayVec;
 use crate::arch::Arch;
 use crate::builder::Intrinsic;
 use crate::index_vec::{IdxVec, Idx};
-use crate::mir::{Const, Function, FunctionRef, Instr, InstrId, Program, StaticId, StrId};
+use crate::mir::{Const, Function, FunctionRef, Instr, InstrId, Program, StaticId, StrId, MirProvider};
 use crate::ty::{Type, IntWidth, FloatWidth};
-
 
 #[derive(Debug)]
 pub enum Value {
