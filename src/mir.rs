@@ -198,8 +198,7 @@ pub trait MirProvider {
     fn arch(&self) -> Arch;
     fn string(&self, id: StrId) -> &CString;
     fn new_string(&mut self, val: CString) -> StrId;
-    fn num_statics(&self) -> usize;
-    fn statik(&self, id: usize) -> Const;
+    fn statics(&self) -> &[Const];
     fn function(&self, id: FuncId) -> &Function;
     fn function_by_ref<'a>(&'a self, func_ref: &'a FunctionRef) -> &'a Function {
         match func_ref {
@@ -224,7 +223,7 @@ pub trait MirProvider {
                 Type::Pointer(pointee) => pointee.ty,
                 _ => Type::Error,
             },
-            &Instr::AddressOfStatic(statik) => self.statik(statik.idx()).ty().mut_ptr(),
+            &Instr::AddressOfStatic(statik) => self.statics()[statik.idx()].ty().mut_ptr(),
             Instr::Ret(_) | Instr::Br(_) | Instr::CondBr { .. } => Type::Never,
             Instr::Parameter(ty) => ty.clone(),
         }
@@ -235,8 +234,7 @@ impl<'a> MirProvider for Builder<'a> {
     fn arch(&self) -> Arch { self.arch }
     fn string(&self, id: StrId) -> &CString { &self.strings[id] }
     fn new_string(&mut self, val: CString) -> StrId { self.strings.push(val) }
-    fn num_statics(&self) -> usize { self.static_inits.len() }
-    fn statik(&self, _id: usize) -> Const { panic!("can't get static from mir builder"); }
+    fn statics(&self) -> &[Const] { &[] }
     fn function(&self, id: FuncId) -> &Function { &self.functions[id] }
 }
 
@@ -244,8 +242,7 @@ impl MirProvider for Program {
     fn arch(&self) -> Arch { self.arch }
     fn string(&self, id: StrId) -> &CString { &self.strings[id] }
     fn new_string(&mut self, val: CString) -> StrId { self.strings.push(val) }
-    fn num_statics(&self) -> usize { self.statics.len() }
-    fn statik(&self, id: usize) -> Const { self.statics[StaticId::new(id)].clone() }
+    fn statics(&self) -> &[Const] { &self.statics.raw }
     fn function(&self, id: FuncId) -> &Function { &self.functions[id] }
 }
 
