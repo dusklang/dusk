@@ -318,7 +318,20 @@ impl<'a> Builder<'a> {
                 decl
             },
             hir::Decl::Const(root_expr) => {
-                let konst = expr_to_const(&self.hir.exprs[root_expr], self.tc.types[root_expr].clone(), &mut self.strings);
+                let ty = self.tc.decl_types[id].clone();
+                let function = FunctionBuilder::new(
+                    self,
+                    String::from("const_init"),
+                    ty.clone(),
+                    FunctionBody::Expr(root_expr),
+                    &[],
+                    self.arch,
+                ).build();
+                let konst = Interpreter::new(&*self)
+                    .call(FunctionRef::Ref(function), Vec::new())
+                    .to_const(self.arch, ty, &mut self.strings);
+                
+                // TODO: Deal with cycles!
                 let decl = Decl::Const(konst);
                 self.decls.insert(id, decl.clone());
                 decl
@@ -337,7 +350,7 @@ impl<'a> Builder<'a> {
             statics: IdxVec::new(),
             arch: self.arch,
         };
-        // TODO: creating a new variable for statics here is a hack to prevent userspace code from being able to access static variables
+        // TODO: creating a new variable for statics here is a hack to prevent userspace code from being able to access static variables.
         // There should be a flag passed to the interpreter to solve this problem (with a nice error message) instead.
         let mut statics = IdxVec::new();
 
