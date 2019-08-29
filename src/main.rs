@@ -50,11 +50,11 @@ fn main() {
         return;
     }
 
-    let mut mir = mir::Builder::new(&hir, &tc, arch::Arch::X86_64).build();
+    let mir = mir::Builder::new(&hir, &tc, arch::Arch::X86_64).build();
+    let mut interpreter = Interpreter::new(&mir);
     let main = mir.functions.iter()
         .position(|func| &*func.name == "main" && func.ret_ty == Type::Void && func.num_parameters() == 0)
         .expect("Couldn't find main function with no parameters and a return type of void!");
-    let mut interpreter = Interpreter::new(&mut mir);
     
     println!("Running the user's program in the interpreter:\n");
     interpreter.call(FunctionRef::Id(Idx::new(main)), Vec::new());
