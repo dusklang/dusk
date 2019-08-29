@@ -469,7 +469,7 @@ impl<'src> Builder<'src> {
                 }
             }
         }
-        tree_offsets[tree] = result;
+        tree_offsets[tree] = result + 1;
     }
 }
 

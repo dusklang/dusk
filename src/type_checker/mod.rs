@@ -57,6 +57,7 @@ impl<'src> TypeChecker<'src> {
                 ]);
                 old_constraints.print_diff(new_constraints);
                 *old_constraints = new_constraints.clone();
+                println!("============================================================================================\n")
             }
         }
     }

@@ -51,7 +51,6 @@ fn main() {
     }
 
     let mir = mir::Builder::new(&hir, &tc, arch::Arch::X86_64).build();
-    println!("{}", mir);
     let mut interpreter = Interpreter::new(&mir);
     let main = mir.functions.iter()
         .position(|func| &*func.name == "main" && func.ret_ty == Type::Void && func.num_parameters() == 0)
