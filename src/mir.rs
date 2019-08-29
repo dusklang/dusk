@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::ffi::CString;
 use std::fmt;
 
@@ -63,7 +64,7 @@ pub enum Instr {
     Parameter(Type),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum Decl {
     Stored(StoredDeclId),
     Computed { get: FuncId },
@@ -250,7 +251,7 @@ pub struct Builder<'a> {
     hir: &'a hir::Program,
     tc: &'a tc::Program,
     arch: Arch,
-    decls: IdxVec<Decl, DeclId>,
+    decls: HashMap<DeclId, Decl>,
     strings: IdxVec<CString, StrId>,
     static_inits: IdxVec<Function, StaticId>,
     functions: IdxVec<Function, FuncId>,
@@ -258,48 +259,24 @@ pub struct Builder<'a> {
 
 impl<'a> Builder<'a> {
     pub fn new(hir: &'a hir::Program, tc: &'a tc::Program, arch: Arch) -> Self {
-        let mut decls = IdxVec::<Decl, DeclId>::new();
-        let mut strings = IdxVec::<CString, StrId>::new();
-        let mut num_functions = 0usize;
-        let mut num_statics = 0usize;
-
-        for (i, decl) in hir.decls.iter().enumerate() {
-            let id = DeclId::new(i);
-            decls.push(
-                match *decl {
-                    hir::Decl::Computed { .. } => {
-                        num_functions += 1;
-                        Decl::Computed { get: FuncId::new(num_functions - 1) }
-                    },
-                    hir::Decl::Stored(index) => Decl::Stored(index),
-                    hir::Decl::Parameter { index } => Decl::LocalConst { value: InstrId::new(index + 1) },
-                    hir::Decl::Intrinsic(intr) => Decl::Intrinsic(intr, tc.decl_types[id].clone()),
-                    hir::Decl::Static(_) => {
-                        num_statics += 1;
-                        Decl::Static(StaticId::new(num_statics - 1))
-                    },
-                    hir::Decl::Const(root_expr) => {
-                        let konst = expr_to_const(&hir.exprs[root_expr], tc.types[root_expr].clone(), &mut strings);
-                        Decl::Const(konst)
-                    },
-                }
-            );
-        }
-
         Self { 
             hir,
             tc,
             arch,
-            decls,
-            strings,
+            decls: HashMap::new(),
+            strings: IdxVec::new(),
             static_inits: IdxVec::new(),
             functions: IdxVec::new(),
         }
     }
 
-    pub fn build_decl(&mut self, id: DeclId) {
+    fn get_decl(&mut self, id: DeclId) -> Decl {
+        if let Some(decl) = self.decls.get(&id) { return decl.clone(); }
         match self.hir.decls[id] {
             hir::Decl::Computed { ref name, ref params, scope } => {
+                let get = FuncId::new(self.functions.len());
+                let decl = Decl::Computed { get };
+                self.decls.insert(id, decl.clone());
                 let func = FunctionBuilder::new(
                     self,
                     name.clone(),
@@ -309,8 +286,26 @@ impl<'a> Builder<'a> {
                     self.arch,
                 ).build();
                 self.functions.push(func);
+                decl
+            },
+            hir::Decl::Stored(index) => {
+                let decl = Decl::Stored(index);
+                self.decls.insert(id, decl.clone());
+                decl
+            },
+            hir::Decl::Parameter { index } => {
+                let decl = Decl::LocalConst { value: InstrId::new(index + 1) };
+                self.decls.insert(id, decl.clone());
+                decl
+            },
+            hir::Decl::Intrinsic(intr) => {
+                let decl = Decl::Intrinsic(intr, self.tc.decl_types[id].clone());
+                self.decls.insert(id, decl.clone());
+                decl
             },
             hir::Decl::Static(expr) => {
+                let decl = Decl::Static(StaticId::new(self.static_inits.len()));
+                self.decls.insert(id, decl.clone());
                 let func = FunctionBuilder::new(
                     self,
                     String::from("static_init"),
@@ -320,14 +315,20 @@ impl<'a> Builder<'a> {
                     self.arch,
                 ).build();
                 self.static_inits.push(func);
+                decl
             },
-            _ => {},
+            hir::Decl::Const(root_expr) => {
+                let konst = expr_to_const(&self.hir.exprs[root_expr], self.tc.types[root_expr].clone(), &mut self.strings);
+                let decl = Decl::Const(konst);
+                self.decls.insert(id, decl.clone());
+                decl
+            },
         }
     }
 
     pub fn build(mut self) -> Program {
         for i in 0..self.hir.decls.len() {
-            self.build_decl(DeclId::new(i));
+            self.get_decl(DeclId::new(i));
         }
 
         let mut prog = Program {
@@ -577,7 +578,7 @@ impl<'a, 'mir: 'a> FunctionBuilder<'a, 'mir> {
 
     fn get(&mut self, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId) -> InstrId {
         let id = self.b.tc.overloads[id].expect("No overload found!");
-        match self.b.decls[id] {
+        match self.b.get_decl(id) {
             Decl::Computed { get } => self.code.push(Instr::Call { arguments, func: get }),
             Decl::Stored(id) => {
                 assert!(arguments.is_empty());
@@ -598,16 +599,16 @@ impl<'a, 'mir: 'a> FunctionBuilder<'a, 'mir> {
 
     fn set(&mut self, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId, value: InstrId) -> InstrId {
         let id = self.b.tc.overloads[id].expect("No overload found!");
-        match &self.b.decls[id] {
+        match self.b.get_decl(id) {
             Decl::Computed { .. } => panic!("setters not yet implemented!"),
-            &Decl::Stored(id) => {
+            Decl::Stored(id) => {
                 assert!(arguments.is_empty());
                 let location = self.stored_decl_locs[id];
                 self.code.push(Instr::Store { location, value })
             },
             Decl::LocalConst { .. } | Decl::Const(_) => panic!("can't set a constant!"),
             Decl::Intrinsic(_, _) => panic!("can't set an intrinsic! (yet?)"),
-            &Decl::Static(statik) => {
+            Decl::Static(statik) => {
                 let location = self.code.push(Instr::AddressOfStatic(statik));
                 self.code.push(Instr::Store { location, value })
             }
@@ -616,16 +617,15 @@ impl<'a, 'mir: 'a> FunctionBuilder<'a, 'mir> {
 
     fn modify(&mut self, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId) -> InstrId {
         let id = self.b.tc.overloads[id].expect("No overload found!");
-        let decl = &self.b.decls[id];
-        match decl {
+        match self.b.get_decl(id) {
             Decl::Computed { .. } => panic!("modify accessors not yet implemented!"),
-            &Decl::Stored(id) => {
+            Decl::Stored(id) => {
                 assert!(arguments.is_empty());
                 self.stored_decl_locs[id]
             },
             Decl::LocalConst { .. } | Decl::Const(_) => panic!("can't modify a constant!"),
             Decl::Intrinsic(_, _) => panic!("can't modify an intrinsic! (yet?)"),
-            &Decl::Static(statik) => self.code.push(Instr::AddressOfStatic(statik)),
+            Decl::Static(statik) => self.code.push(Instr::AddressOfStatic(statik)),
         }
     }
 
