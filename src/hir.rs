@@ -59,13 +59,19 @@ pub struct Scope {
 
 #[derive(Debug)]
 pub enum Decl {
-    Computed { name: String, params: SmallVec<[DeclId; 2]>, scope: ScopeId },
+    Computed {
+        name: String,
+        param_tys: SmallVec<[Type; 2]>,
+        params: SmallVec<[DeclId; 2]>,
+        ret_ty: Option<Type>,
+        scope: ScopeId,
+    },
     Stored(StoredDeclId),
     Parameter {
         /// Parameter index within the function
         index: usize,
     },
-    Intrinsic(Intrinsic),
+    Intrinsic { intr: Intrinsic, param_tys: SmallVec<[Type; 2]>, ret_ty: Type },
     Static(ExprId),
     Const(ExprId),
 }
@@ -88,6 +94,7 @@ pub struct Builder<'src> {
     decls: IdxVec<Decl, DeclId>,
     scopes: IdxVec<Scope, ScopeId>,
     comp_decl_stack: Vec<CompDeclState>,
+    source_ranges: IdxVec<SourceRange, ExprId>,
     void_expr: ExprId,
     
     _phantom_src_lifetime: PhantomData<&'src str>,
@@ -95,18 +102,19 @@ pub struct Builder<'src> {
 
 impl<'src> Builder<'src> {
     pub fn new() -> Self {
-        let mut exprs = IdxVec::new();
-        let void_expr = exprs.push(Expr::Void);
-        Self {
-            exprs,
+        let mut b = Self {
+            exprs: IdxVec::new(),
             num_decl_refs: 0,
             num_casts: 0,
             decls: IdxVec::new(),
             scopes: IdxVec::new(),
             comp_decl_stack: Vec::new(),
-            void_expr,
+            source_ranges: IdxVec::new(),
+            void_expr: ExprId::new(0),
             _phantom_src_lifetime: PhantomData,
-        }
+        };
+        b.push(Expr::Void, 0..0);
+        b
     }
 
     fn flush_stmt_buffer(&mut self) {
@@ -132,50 +140,55 @@ impl<'src> Builder<'src> {
         decl_ref_id
     }
 
-    fn decl_ref_no_name(&mut self, arguments: SmallVec<[ExprId; 2]>, _range: SourceRange) -> ExprId {
+    fn decl_ref_no_name(&mut self, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
         let decl_ref_id = self.allocate_decl_ref_id();
-        self.exprs.push(Expr::DeclRef { arguments, id: decl_ref_id })
+        self.push(Expr::DeclRef { arguments, id: decl_ref_id }, range)
     }
 
     /// Allocates a new DeclRefId, then pushes `expr`.
     /// Some operators are represented as decl refs in TIR but are built-in in HIR. So this is a
     /// hack to preserve synchronization between the two representations.
-    fn push_op_expr(&mut self, expr: Expr) -> ExprId {
+    fn push_op_expr(&mut self, expr: Expr, range: SourceRange) -> ExprId {
         self.allocate_decl_ref_id();
-        self.exprs.push(expr)
+        self.push(expr, range)
+    }
+
+    fn push(&mut self, expr: Expr, range: SourceRange) -> ExprId {
+        self.exprs.push(expr);
+        self.source_ranges.push(range)
     }
 }
 
 impl<'src> builder::Builder<'src> for Builder<'src> {
     type Output = Program;
-    fn add_intrinsic(&mut self, intrinsic: Intrinsic, _param_tys: SmallVec<[Type; 2]>, _ret_ty: Type) {
-        self.decls.push(Decl::Intrinsic(intrinsic));
+    fn add_intrinsic(&mut self, intrinsic: Intrinsic, param_tys: SmallVec<[Type; 2]>, ret_ty: Type) {
+        self.decls.push(Decl::Intrinsic { intr: intrinsic, param_tys, ret_ty });
     }
     fn void_expr(&self) -> ExprId { self.void_expr }
-    fn int_lit(&mut self, lit: u64, _range: SourceRange) -> ExprId {
-        self.exprs.push(Expr::IntLit { lit })
+    fn int_lit(&mut self, lit: u64, range: SourceRange) -> ExprId {
+        self.push(Expr::IntLit { lit }, range)
     }
-    fn dec_lit(&mut self, lit: f64, _range: SourceRange) -> ExprId { 
-        self.exprs.push(Expr::DecLit { lit })
+    fn dec_lit(&mut self, lit: f64, range: SourceRange) -> ExprId { 
+        self.push(Expr::DecLit { lit }, range)
     }
-    fn str_lit(&mut self, lit: CString, _range: SourceRange) -> ExprId { 
-        self.exprs.push(Expr::StrLit { lit })
+    fn str_lit(&mut self, lit: CString, range: SourceRange) -> ExprId { 
+        self.push(Expr::StrLit { lit }, range)
     }
-    fn char_lit(&mut self, lit: i8, _range: SourceRange) -> ExprId { 
-        self.exprs.push(Expr::CharLit { lit })
+    fn char_lit(&mut self, lit: i8, range: SourceRange) -> ExprId { 
+        self.push(Expr::CharLit { lit }, range)
     }
     fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId {
         match op {
-            BinOp::Assign => self.exprs.push(Expr::Set { lhs, rhs }),
-            BinOp::LogicalAnd => self.push_op_expr(Expr::LogicalAnd { lhs, rhs }),
-            BinOp::LogicalOr => self.push_op_expr(Expr::LogicalOr { lhs, rhs }),
+            BinOp::Assign => self.push(Expr::Set { lhs, rhs }, range),
+            BinOp::LogicalAnd => self.push_op_expr(Expr::LogicalAnd { lhs, rhs }, range),
+            BinOp::LogicalOr => self.push_op_expr(Expr::LogicalOr { lhs, rhs }, range),
             _ => self.decl_ref_no_name(smallvec![lhs, rhs], range),
         }
     }
-    fn cast(&mut self, expr: ExprId, ty: Type, _range: SourceRange) -> ExprId {
+    fn cast(&mut self, expr: ExprId, ty: Type, range: SourceRange) -> ExprId {
         let cast_id = CastId::new(self.num_casts);
         self.num_casts += 1;
-        self.exprs.push(Expr::Cast { expr, ty, cast_id })
+        self.push(Expr::Cast { expr, ty, cast_id }, range)
     }
     fn un_op(&mut self, op: UnOp, expr: ExprId, range: SourceRange) -> ExprId {
         match op {
@@ -184,9 +197,9 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
                 // Unary plus is a no-op
                 expr
             },
-            UnOp::Deref => self.exprs.push(Expr::Deref(expr)),
-            UnOp::AddrOf | UnOp::AddrOfMut => self.exprs.push(Expr::AddrOf(expr)),
-            UnOp::Not => self.push_op_expr(Expr::LogicalNot(expr)),
+            UnOp::Deref => self.push(Expr::Deref(expr), range),
+            UnOp::AddrOf | UnOp::AddrOfMut => self.push(Expr::AddrOf(expr), range),
+            UnOp::Not => self.push_op_expr(Expr::LogicalNot(expr), range),
             _ => self.decl_ref_no_name(smallvec![expr], range),
         }
     }
@@ -196,7 +209,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             self.decls.push(
                 if is_mut {
                     Decl::Static(root_expr)
-                } else {
+            } else {
                     Decl::Const(root_expr)
                 }
             );
@@ -209,25 +222,26 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             self.item(Item::StoredDecl { id, root_expr });
         }
     }
-    fn ret(&mut self, expr: ExprId, _range: SourceRange) -> ExprId {
-        self.exprs.push(Expr::Ret { expr })
+    fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
+        self.push(Expr::Ret { expr }, range)
     }
     fn implicit_ret(&mut self, _expr: ExprId) {}
-    fn if_expr(&mut self, condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId>, _range: SourceRange) -> ExprId {
-        self.exprs.push(
-            Expr::If { condition, then_scope, else_scope }
+    fn if_expr(&mut self, condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId>, range: SourceRange) -> ExprId {
+        self.push(
+            Expr::If { condition, then_scope, else_scope },
+            range,
         )
     }
-    fn while_expr(&mut self, condition: ExprId, scope: ScopeId, _range: SourceRange) -> ExprId {
-        self.exprs.push(Expr::While { condition, scope })
+    fn while_expr(&mut self, condition: ExprId, scope: ScopeId, range: SourceRange) -> ExprId {
+        self.push(Expr::While { condition, scope }, range)
     }
     fn stmt(&mut self, expr: ExprId) {
         self.flush_stmt_buffer();
         let scope = self.comp_decl_stack.last_mut().unwrap().scope_stack.last_mut().unwrap();
         scope.stmt_buffer = Some(expr);
     }
-    fn do_expr(&mut self, scope: ScopeId, _range: SourceRange) -> ExprId {
-        self.exprs.push(Expr::Do { scope })
+    fn do_expr(&mut self, scope: ScopeId, range: SourceRange) -> ExprId {
+        self.push(Expr::Do { scope }, range)
     }
     fn begin_scope(&mut self) -> ScopeId { 
         let id = self.scopes.push(
@@ -258,7 +272,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             self.scopes[scope.id].terminal_expr = terminal_expr;
         }
     }
-    fn begin_computed_decl(&mut self, name: &'src str, param_names: SmallVec<[&'src str; 2]>, param_tys: SmallVec<[Type; 2]>, _ret_ty: Option<Type>, _proto_range: SourceRange) {
+    fn begin_computed_decl(&mut self, name: &'src str, param_names: SmallVec<[&'src str; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Option<Type>, _proto_range: SourceRange) {
         self.flush_stmt_buffer();
         // This is a placeholder value that gets replaced once the parameter declarations are allocated.
         let id = self.decls.push(Decl::Stored(StoredDeclId::new(std::usize::MAX)));
@@ -271,7 +285,9 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
         // `end_computed_decl` will attach the real scope to this decl; we don't have it yet
         self.decls[id] = Decl::Computed {
             name: name.to_owned(),
+            param_tys,
             params,
+            ret_ty,
             scope: ScopeId::new(std::usize::MAX)
         };
         self.comp_decl_stack.push(
@@ -294,10 +310,8 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
     fn decl_ref(&mut self, _name: &'src str, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
         self.decl_ref_no_name(arguments, range)
     }
-    // TODO: Refactor so this method doesn't need to be exposed by HIR
-    fn get_range(&self, _id: ExprId) -> SourceRange { 0..0 }
-    // TODO: Refactor so this method doesn't need to be exposed by HIR
-    fn set_range(&mut self, _id: ExprId, _range: SourceRange) { }
+    fn get_range(&self, id: ExprId) -> SourceRange { self.source_ranges[id].clone() }
+    fn set_range(&mut self, id: ExprId, range: SourceRange) { self.source_ranges[id] = range; }
     fn get_terminal_expr(&self, scope: ScopeId) -> ExprId { 
         self.scopes[scope].terminal_expr
     }

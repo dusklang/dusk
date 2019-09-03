@@ -273,7 +273,7 @@ impl<'a> Builder<'a> {
     fn get_decl(&mut self, id: DeclId) -> Decl {
         if let Some(decl) = self.decls.get(&id) { return decl.clone(); }
         match self.hir.decls[id] {
-            hir::Decl::Computed { ref name, ref params, scope } => {
+            hir::Decl::Computed { ref name, ref params, scope, .. } => {
                 let get = FuncId::new(self.functions.len());
                 let decl = Decl::Computed { get };
                 self.decls.insert(id, decl.clone());
@@ -298,7 +298,7 @@ impl<'a> Builder<'a> {
                 self.decls.insert(id, decl.clone());
                 decl
             },
-            hir::Decl::Intrinsic(intr) => {
+            hir::Decl::Intrinsic { intr, .. } => {
                 let decl = Decl::Intrinsic(intr, self.tc.decl_types[id].clone());
                 self.decls.insert(id, decl.clone());
                 decl
