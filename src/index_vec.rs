@@ -30,10 +30,22 @@ macro_rules! newtype_index {
 
 pub struct IdxVec<T, I: Idx> {
     pub raw: Vec<T>,
-    _marker: PhantomData<fn(&I)>
+    _marker: PhantomData<fn(&I)>,
+}
+
+#[derive(Copy, Clone)]
+pub struct IdxSlice<'a, T, I: Idx> {
+    raw: &'a [T],
+    _marker: PhantomData<fn(&I)>,
 }
 
 impl<T: Debug, I: Idx> Debug for IdxVec<T, I> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        self.raw.fmt(f)
+    }
+}
+
+impl<'a, T: Debug, I: Idx> Debug for IdxSlice<'a, T, I> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         self.raw.fmt(f)
     }
@@ -83,6 +95,9 @@ impl<T, I: Idx> IdxVec<T, I> {
             (&mut section_a[0], &mut section_b[b.idx()])
         }
     }
+    pub fn as_idx_slice(&self) -> IdxSlice<'_, T, I> {
+        IdxSlice { raw: self.raw.as_ref(), _marker: PhantomData }
+    }
 }
 
 impl<T, I: Idx> IntoIterator for IdxVec<T, I> {
@@ -124,5 +139,12 @@ impl<T, I: Idx> Index<I> for IdxVec<T, I> {
 impl<T, I: Idx> IndexMut<I> for IdxVec<T, I> {
     fn index_mut(&mut self, idx: I) -> &mut T {
         &mut self.raw[idx.idx()]
+    }
+}
+
+impl<'a, T, I: Idx> Index<I> for IdxSlice<'a, T, I> {
+    type Output = T;
+    fn index(&self, idx: I) -> &T {
+        &self.raw[idx.idx()]
     }
 }
