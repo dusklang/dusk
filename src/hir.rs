@@ -2,6 +2,7 @@ use std::ffi::CString;
 use std::marker::PhantomData;
 
 use smallvec::{SmallVec, smallvec};
+use string_interner::{DefaultStringInterner as Interner, Sym};
 
 use crate::index_vec::{Idx, IdxVec};
 use crate::builder::{self, BinOp, UnOp, ExprId, DeclId, ScopeId, DeclRefId, CastId, Intrinsic};
@@ -17,7 +18,7 @@ pub enum Expr {
     DecLit { lit: f64 },
     StrLit { lit: CString },
     CharLit { lit: i8 },
-    DeclRef { arguments: SmallVec<[ExprId; 2]>, id: DeclRefId },
+    DeclRef { name: Sym, arguments: SmallVec<[ExprId; 2]>, id: DeclRefId },
     LogicalOr { lhs: ExprId, rhs: ExprId },
     LogicalAnd { lhs: ExprId, rhs: ExprId },
     LogicalNot(ExprId),
@@ -63,7 +64,7 @@ pub enum Decl {
         name: String,
         param_tys: SmallVec<[Type; 2]>,
         params: SmallVec<[DeclId; 2]>,
-        ret_ty: Option<Type>,
+        explicit_ty: Option<Type>,
         scope: ScopeId,
     },
     Stored(StoredDeclId),
@@ -83,6 +84,7 @@ pub struct Program {
     pub decls: IdxVec<Decl, DeclId>,
     pub scopes: IdxVec<Scope, ScopeId>,
     pub void_expr: ExprId,
+    pub interner: Interner,
 }
 
 #[derive(Debug)]
@@ -96,6 +98,7 @@ pub struct Builder<'src> {
     comp_decl_stack: Vec<CompDeclState>,
     source_ranges: IdxVec<SourceRange, ExprId>,
     void_expr: ExprId,
+    interner: Interner,
     
     _phantom_src_lifetime: PhantomData<&'src str>,
 }
@@ -111,6 +114,7 @@ impl<'src> Builder<'src> {
             comp_decl_stack: Vec::new(),
             source_ranges: IdxVec::new(),
             void_expr: ExprId::new(0),
+            interner: Interner::new(),
             _phantom_src_lifetime: PhantomData,
         };
         b.push(Expr::Void, 0..0);
@@ -138,11 +142,6 @@ impl<'src> Builder<'src> {
         let decl_ref_id = DeclRefId::new(self.num_decl_refs);
         self.num_decl_refs += 1;
         decl_ref_id
-    }
-
-    fn decl_ref_no_name(&mut self, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
-        let decl_ref_id = self.allocate_decl_ref_id();
-        self.push(Expr::DeclRef { arguments, id: decl_ref_id }, range)
     }
 
     /// Allocates a new DeclRefId, then pushes `expr`.
@@ -180,9 +179,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
     fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId {
         match op {
             BinOp::Assign => self.push(Expr::Set { lhs, rhs }, range),
-            BinOp::LogicalAnd => self.push_op_expr(Expr::LogicalAnd { lhs, rhs }, range),
-            BinOp::LogicalOr => self.push_op_expr(Expr::LogicalOr { lhs, rhs }, range),
-            _ => self.decl_ref_no_name(smallvec![lhs, rhs], range),
+            _ => self.decl_ref(op.symbol(), smallvec![lhs, rhs], range),
         }
     }
     fn cast(&mut self, expr: ExprId, ty: Type, range: SourceRange) -> ExprId {
@@ -199,8 +196,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             },
             UnOp::Deref => self.push(Expr::Deref(expr), range),
             UnOp::AddrOf | UnOp::AddrOfMut => self.push(Expr::AddrOf(expr), range),
-            UnOp::Not => self.push_op_expr(Expr::LogicalNot(expr), range),
-            _ => self.decl_ref_no_name(smallvec![expr], range),
+            _ => self.decl_ref(op.symbol(), smallvec![expr], range),
         }
     }
     fn stored_decl(&mut self, _name: &'src str, _explicit_ty: Option<Type>, is_mut: bool, root_expr: ExprId, _range: SourceRange) {
@@ -272,7 +268,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             self.scopes[scope.id].terminal_expr = terminal_expr;
         }
     }
-    fn begin_computed_decl(&mut self, name: &'src str, param_names: SmallVec<[&'src str; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Option<Type>, _proto_range: SourceRange) {
+    fn begin_computed_decl(&mut self, name: &'src str, param_names: SmallVec<[&'src str; 2]>, param_tys: SmallVec<[Type; 2]>, explicit_ty: Option<Type>, _proto_range: SourceRange) {
         self.flush_stmt_buffer();
         // This is a placeholder value that gets replaced once the parameter declarations are allocated.
         let id = self.decls.push(Decl::Stored(StoredDeclId::new(std::usize::MAX)));
@@ -287,7 +283,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             name: name.to_owned(),
             param_tys,
             params,
-            ret_ty,
+            explicit_ty,
             scope: ScopeId::new(std::usize::MAX)
         };
         self.comp_decl_stack.push(
@@ -307,8 +303,10 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             panic!("Unexpected decl kind when ending computed decl!");
         }
     }
-    fn decl_ref(&mut self, _name: &'src str, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
-        self.decl_ref_no_name(arguments, range)
+    fn decl_ref(&mut self, name: &'src str, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
+        let decl_ref_id = self.allocate_decl_ref_id();
+        let name = self.interner.get_or_intern(name);
+        self.push(Expr::DeclRef { name, arguments, id: decl_ref_id }, range)
     }
     fn get_range(&self, id: ExprId) -> SourceRange { self.source_ranges[id].clone() }
     fn set_range(&mut self, id: ExprId, range: SourceRange) { self.source_ranges[id] = range; }
@@ -322,6 +320,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             decls: self.decls,
             scopes: self.scopes,
             void_expr: self.void_expr,
+            interner: self.interner,
         }
     }
 }

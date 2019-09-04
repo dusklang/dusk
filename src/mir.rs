@@ -665,7 +665,7 @@ impl<'a, 'mir: 'a> FunctionBuilder<'a, 'mir> {
                     _ => self.void_instr(),
                 };
             },
-            Expr::DeclRef { ref arguments, id } => {
+            Expr::DeclRef { ref arguments, id, .. } => {
                 should_allow_set = true;
                 let arguments = arguments.iter().map(|&argument|
                     self.expr(argument, Context::new(0, DataDest::Read, ControlDest::Continue))
