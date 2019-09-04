@@ -665,13 +665,126 @@ impl<'a, 'mir: 'a> FunctionBuilder<'a, 'mir> {
                     _ => self.void_instr(),
                 };
             },
-            Expr::DeclRef { ref arguments, id, .. } => {
+            // This isn't really a loop! It's just a control flow hack to get around the fact
+            // that you can't chain `if let`s in Rust.
+            Expr::DeclRef { ref arguments, id, .. } => loop {
+                // Check if the declaration is an intrinsic
+                let decl_id = self.b.tc.overloads[id].unwrap();
+                if let hir::Decl::Intrinsic { intr, .. } = self.b.hir.decls[decl_id] {
+                    // Check if we need to special case the intrinsic
+                    match intr {
+                        Intrinsic::LogicalAnd => break {
+                            assert_eq!(ctx.indirection, 0);
+                            assert_eq!(arguments.len(), 2);
+                            let (lhs, rhs) = (arguments[0], arguments[1]);
+                            let left_true_bb = self.new_bb();
+                            let location = if let DataDest::Read = ctx.data {
+                                Some(self.code.push(Instr::Alloca(ty.clone())))
+                            } else {
+                                None
+                            };
+                            if let DataDest::Branch(true_bb, false_bb) = ctx.data {
+                                self.expr(
+                                    lhs,
+                                    Context::new(0, DataDest::Branch(left_true_bb, false_bb), ControlDest::Continue),
+                                );
+
+                                self.begin_bb(left_true_bb);
+                                return self.expr(
+                                    rhs,
+                                    Context::new(0, DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
+                                );
+                            } else {
+                                let left_false_bb = self.new_bb();
+                                let after_bb = self.new_bb();
+                                self.expr(
+                                    lhs,
+                                    Context::new(0, DataDest::Branch(left_true_bb, left_false_bb), ControlDest::Continue),
+                                );
+
+                                self.begin_bb(left_true_bb);
+                                // No further branching required, because (true && foo) <=> foo
+                                let branch_ctx = ctx.redirect(location, Some(after_bb));
+                                self.expr(rhs, branch_ctx.clone());
+
+                                self.begin_bb(left_false_bb);
+                                let false_val = self.code.push(Instr::Const(Const::Bool(false)));
+                                self.handle_context(false_val, expr, Type::Bool, branch_ctx, false);
+
+                                self.begin_bb(after_bb);
+                                if let Some(location) = location {
+                                    self.code.push(Instr::Load(location))
+                                } else {
+                                    return self.void_instr()
+                                }
+                            }
+                        },
+                        Intrinsic::LogicalOr => break {
+                            assert_eq!(ctx.indirection, 0);
+                            assert_eq!(arguments.len(), 2);
+                            let (lhs, rhs) = (arguments[0], arguments[1]);
+                            let left_false_bb = self.new_bb();
+                            if let DataDest::Branch(true_bb, false_bb) = ctx.data {
+                                self.expr(
+                                    lhs,
+                                    Context::new(0, DataDest::Branch(true_bb, left_false_bb), ControlDest::Continue),
+                                );
+
+                                self.begin_bb(left_false_bb);
+                                return self.expr(
+                                    rhs,
+                                    Context::new(0, DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
+                                );
+                            } else {
+                                let left_true_bb = self.new_bb();
+                                let after_bb = self.new_bb();
+                                let location = if let DataDest::Read = ctx.data {
+                                    Some(self.code.push(Instr::Alloca(ty.clone())))
+                                } else {
+                                    None
+                                };
+                                self.expr(
+                                    lhs,
+                                    Context::new(0, DataDest::Branch(left_true_bb, left_false_bb), ControlDest::Continue),
+                                );
+
+                                self.begin_bb(left_true_bb);
+                                let true_val = self.code.push(Instr::Const(Const::Bool(true)));
+                                let branch_ctx = ctx.redirect(location, Some(after_bb));
+                                self.handle_context(true_val, expr, Type::Bool, branch_ctx.clone(), false);
+
+                                self.begin_bb(left_false_bb);
+                                self.expr(rhs, branch_ctx);
+
+                                self.begin_bb(after_bb);
+                                if let Some(location) = location {
+                                    self.code.push(Instr::Load(location))
+                                } else {
+                                    return self.void_instr()
+                                }
+                            }
+                        },
+                        Intrinsic::LogicalNot => break {
+                            assert_eq!(arguments.len(), 1);
+                            let operand = arguments[0];
+                            if let DataDest::Branch(true_bb, false_bb) = ctx.data {
+                                return self.expr(operand, Context::new(0, DataDest::Branch(false_bb, true_bb), ctx.control))
+                            } else {
+                                let operand = self.expr(operand, Context::new(0, DataDest::Read, ControlDest::Continue));
+                                self.code.push(Instr::LogicalNot(operand))
+                            }
+                        },
+                        _ => {},
+                    }
+                }
+
+                // Otherwise, just handle the general case
                 should_allow_set = true;
                 let arguments = arguments.iter().map(|&argument|
                     self.expr(argument, Context::new(0, DataDest::Read, ControlDest::Continue))
                 ).collect();
 
-                if ctx.indirection < 0 {
+                break if ctx.indirection < 0 {
                     ctx.indirection += 1;
                     self.modify(arguments, id)
                 } else {
@@ -686,102 +799,6 @@ impl<'a, 'mir: 'a> FunctionBuilder<'a, 'mir> {
                         },
                         _ => self.get(arguments, id),
                     }
-                }
-            },
-            Expr::LogicalAnd { lhs, rhs } => {
-                assert_eq!(ctx.indirection, 0);
-                let left_true_bb = self.new_bb();
-                let location = if let DataDest::Read = ctx.data {
-                    Some(self.code.push(Instr::Alloca(ty.clone())))
-                } else {
-                    None
-                };
-                if let DataDest::Branch(true_bb, false_bb) = ctx.data {
-                    self.expr(
-                        lhs,
-                        Context::new(0, DataDest::Branch(left_true_bb, false_bb), ControlDest::Continue),
-                    );
-
-                    self.begin_bb(left_true_bb);
-                    return self.expr(
-                        rhs,
-                        Context::new(0, DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
-                    );
-                } else {
-                    let left_false_bb = self.new_bb();
-                    let after_bb = self.new_bb();
-                    self.expr(
-                        lhs,
-                        Context::new(0, DataDest::Branch(left_true_bb, left_false_bb), ControlDest::Continue),
-                    );
-
-                    self.begin_bb(left_true_bb);
-                    // No further branching required, because (true && foo) <=> foo
-                    let branch_ctx = ctx.redirect(location, Some(after_bb));
-                    self.expr(rhs, branch_ctx.clone());
-
-                    self.begin_bb(left_false_bb);
-                    let false_val = self.code.push(Instr::Const(Const::Bool(false)));
-                    self.handle_context(false_val, expr, Type::Bool, branch_ctx, false);
-
-                    self.begin_bb(after_bb);
-                    if let Some(location) = location {
-                        self.code.push(Instr::Load(location))
-                    } else {
-                        return self.void_instr()
-                    }
-                }
-            },
-            Expr::LogicalOr { lhs, rhs } => {
-                assert_eq!(ctx.indirection, 0);
-                let left_false_bb = self.new_bb();
-                if let DataDest::Branch(true_bb, false_bb) = ctx.data {
-                    self.expr(
-                        lhs,
-                        Context::new(0, DataDest::Branch(true_bb, left_false_bb), ControlDest::Continue),
-                    );
-
-                    self.begin_bb(left_false_bb);
-                    return self.expr(
-                        rhs,
-                        Context::new(0, DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
-                    );
-                } else {
-                    let left_true_bb = self.new_bb();
-                    let after_bb = self.new_bb();
-                    let location = if let DataDest::Read = ctx.data {
-                        Some(self.code.push(Instr::Alloca(ty.clone())))
-                    } else {
-                        None
-                    };
-                    self.expr(
-                        lhs,
-                        Context::new(0, DataDest::Branch(left_true_bb, left_false_bb), ControlDest::Continue),
-                    );
-
-                    self.begin_bb(left_true_bb);
-                    let true_val = self.code.push(Instr::Const(Const::Bool(true)));
-                    let branch_ctx = ctx.redirect(location, Some(after_bb));
-                    self.handle_context(true_val, expr, Type::Bool, branch_ctx.clone(), false);
-
-                    self.begin_bb(left_false_bb);
-                    self.expr(rhs, branch_ctx);
-
-                    self.begin_bb(after_bb);
-                    if let Some(location) = location {
-                        self.code.push(Instr::Load(location))
-                    } else {
-                        return self.void_instr()
-                    }
-                }
-            },
-            Expr::LogicalNot(operand) => {
-                assert_eq!(ctx.indirection, 0);
-                if let DataDest::Branch(true_bb, false_bb) = ctx.data {
-                    return self.expr(operand, Context::new(0, DataDest::Branch(false_bb, true_bb), ctx.control))
-                } else {
-                    let operand = self.expr(operand, Context::new(0, DataDest::Read, ControlDest::Continue));
-                    self.code.push(Instr::LogicalNot(operand))
                 }
             },
             Expr::Cast { expr, ty: ref dest_ty, cast_id } => match &self.b.tc.cast_methods[cast_id] {

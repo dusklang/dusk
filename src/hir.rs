@@ -19,9 +19,6 @@ pub enum Expr {
     StrLit { lit: CString },
     CharLit { lit: i8 },
     DeclRef { name: Sym, arguments: SmallVec<[ExprId; 2]>, id: DeclRefId },
-    LogicalOr { lhs: ExprId, rhs: ExprId },
-    LogicalAnd { lhs: ExprId, rhs: ExprId },
-    LogicalNot(ExprId),
     AddrOf(ExprId),
     Deref(ExprId),
     Set { lhs: ExprId, rhs: ExprId },
@@ -29,7 +26,7 @@ pub enum Expr {
     If { condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId> },
     While { condition: ExprId, scope: ScopeId },
     Cast { expr: ExprId, ty: Type, cast_id: CastId },
-    Ret { expr: ExprId }
+    Ret { expr: ExprId },
 }
 
 #[derive(Debug)]
