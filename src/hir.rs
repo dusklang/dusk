@@ -79,6 +79,8 @@ pub struct Program {
     pub exprs: IdxVec<Expr, ExprId>,
     pub num_decl_refs: usize,
     pub decls: IdxVec<Decl, DeclId>,
+    /// The subset of decls that are in the global scope
+    pub global_decls: Vec<DeclId>,
     pub scopes: IdxVec<Scope, ScopeId>,
     pub void_expr: ExprId,
     pub interner: Interner,
@@ -91,6 +93,8 @@ pub struct Builder<'src> {
     num_casts: usize,
 
     decls: IdxVec<Decl, DeclId>,
+    /// The subset of decls that are in the global scope
+    global_decls: Vec<DeclId>,
     scopes: IdxVec<Scope, ScopeId>,
     comp_decl_stack: Vec<CompDeclState>,
     source_ranges: IdxVec<SourceRange, ExprId>,
@@ -107,6 +111,7 @@ impl<'src> Builder<'src> {
             num_decl_refs: 0,
             num_casts: 0,
             decls: IdxVec::new(),
+            global_decls: Vec::new(),
             scopes: IdxVec::new(),
             comp_decl_stack: Vec::new(),
             source_ranges: IdxVec::new(),
@@ -141,24 +146,21 @@ impl<'src> Builder<'src> {
         decl_ref_id
     }
 
-    /// Allocates a new DeclRefId, then pushes `expr`.
-    /// Some operators are represented as decl refs in TIR but are built-in in HIR. So this is a
-    /// hack to preserve synchronization between the two representations.
-    fn push_op_expr(&mut self, expr: Expr, range: SourceRange) -> ExprId {
-        self.allocate_decl_ref_id();
-        self.push(expr, range)
-    }
-
     fn push(&mut self, expr: Expr, range: SourceRange) -> ExprId {
         self.exprs.push(expr);
         self.source_ranges.push(range)
+    }
+
+    fn global_decl(&mut self, decl: Decl) {
+        let id = self.decls.push(decl);
+        self.global_decls.push(id);
     }
 }
 
 impl<'src> builder::Builder<'src> for Builder<'src> {
     type Output = Program;
     fn add_intrinsic(&mut self, intrinsic: Intrinsic, param_tys: SmallVec<[Type; 2]>, ret_ty: Type) {
-        self.decls.push(Decl::Intrinsic { intr: intrinsic, param_tys, ret_ty });
+        self.global_decl(Decl::Intrinsic { intr: intrinsic, param_tys, ret_ty });
     }
     fn void_expr(&self) -> ExprId { self.void_expr }
     fn int_lit(&mut self, lit: u64, range: SourceRange) -> ExprId {
@@ -186,11 +188,6 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
     }
     fn un_op(&mut self, op: UnOp, expr: ExprId, range: SourceRange) -> ExprId {
         match op {
-            UnOp::Plus => {
-                self.allocate_decl_ref_id();
-                // Unary plus is a no-op
-                expr
-            },
             UnOp::Deref => self.push(Expr::Deref(expr), range),
             UnOp::AddrOf | UnOp::AddrOfMut => self.push(Expr::AddrOf(expr), range),
             _ => self.decl_ref(op.symbol(), smallvec![expr], range),
@@ -199,10 +196,10 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
     fn stored_decl(&mut self, _name: &'src str, _explicit_ty: Option<Type>, is_mut: bool, root_expr: ExprId, _range: SourceRange) {
         self.flush_stmt_buffer();
         if self.comp_decl_stack.is_empty() {
-            self.decls.push(
+            self.global_decl(
                 if is_mut {
                     Decl::Static(root_expr)
-            } else {
+                } else {
                     Decl::Const(root_expr)
                 }
             );
@@ -283,6 +280,9 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             explicit_ty,
             scope: ScopeId::new(std::usize::MAX)
         };
+        if self.comp_decl_stack.is_empty() {
+            self.global_decls.push(id);
+        }
         self.comp_decl_stack.push(
             CompDeclState {
                 has_scope: None,
@@ -315,6 +315,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             exprs: self.exprs,
             num_decl_refs: self.num_decl_refs,
             decls: self.decls,
+            global_decls: self.global_decls,
             scopes: self.scopes,
             void_expr: self.void_expr,
             interner: self.interner,
