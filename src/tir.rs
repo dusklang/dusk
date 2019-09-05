@@ -153,6 +153,47 @@ impl<'hir> Builder<'hir> {
             terminal_exprs: IdxVec::new(),
         }
     }
+
+    pub fn build(mut self) -> Program<'hir> {
+        for &decl in &self.hir.global_decls {
+            match self.hir.decls[decl] {
+                hir::Decl::Computed { ref name, ref param_tys, ref explicit_ty, scope, .. } => {
+                    let ret_ty = explicit_ty.as_ref()
+                        .map(|ty| ty.clone())
+                        .unwrap_or(Type::Error)
+                        .into();
+                    self.decls.push(
+                        Decl { param_tys: param_tys.clone(), ret_ty }
+                    );
+                },
+                _ => panic!("Unhandled declaration kind"),
+            }
+        }
+
+        Program {
+            int_lits: self.int_lits,
+            dec_lits: self.dec_lits,
+            str_lits: self.str_lits,
+            char_lits: self.char_lits,
+            stmts: self.stmts,
+            explicit_rets: self.explicit_rets,
+            ret_groups: self.ret_groups.raw,
+            casts: self.casts,
+            whiles: self.whiles,
+            dos: self.dos,
+            assigned_decls: self.assigned_decls,
+            assignments: self.assignments,
+            decl_refs: self.decl_refs,
+            addr_ofs: self.addr_ofs,
+            derefs: self.derefs,
+            ifs: self.ifs,
+            void_expr: self.void_expr,
+            source_ranges: self.hir.source_ranges.as_idx_slice(),
+            decls: self.decls,
+            overloads: self.overloads,
+            num_exprs: self.expr_levels.len(),
+        }
+    }
 }
 
 // pub trait Item: Sized {

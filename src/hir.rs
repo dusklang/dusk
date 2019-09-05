@@ -83,6 +83,7 @@ pub struct Program {
     pub global_decls: Vec<DeclId>,
     pub scopes: IdxVec<Scope, ScopeId>,
     pub void_expr: ExprId,
+    pub source_ranges: IdxVec<SourceRange, ExprId>,
     pub interner: Interner,
 }
 
@@ -316,6 +317,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             num_decl_refs: self.num_decl_refs,
             decls: self.decls,
             global_decls: self.global_decls,
+            source_ranges: self.source_ranges,
             scopes: self.scopes,
             void_expr: self.void_expr,
             interner: self.interner,
