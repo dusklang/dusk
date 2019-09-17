@@ -171,7 +171,7 @@ impl<'hir> Builder<'hir> {
                 .map(|ty| ty.clone())
                 .unwrap_or(Type::Error);
             let (ret_ty, param_tys) = match *decl {
-                hir::Decl::Computed { ref name, ref param_tys, scope, .. } => (
+                hir::Decl::Computed { ref param_tys, .. } => (
                     ty.into(),
                     param_tys.clone(),
                 ),

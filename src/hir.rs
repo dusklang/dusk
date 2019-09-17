@@ -1,5 +1,6 @@
 use std::ffi::CString;
 use std::marker::PhantomData;
+use std::rc::Rc;
 
 use smallvec::{SmallVec, smallvec};
 use string_interner::{DefaultStringInterner as Interner, Sym};
@@ -58,7 +59,6 @@ pub struct Scope {
 #[derive(Debug)]
 pub enum Decl {
     Computed {
-        name: String,
         param_tys: SmallVec<[Type; 2]>,
         params: SmallVec<[DeclId; 2]>,
         scope: ScopeId,
@@ -78,13 +78,14 @@ pub struct Program {
     pub exprs: IdxVec<Expr, ExprId>,
     pub num_decl_refs: usize,
     pub decls: IdxVec<Decl, DeclId>,
+    pub names: IdxVec<Sym, DeclId>,
     pub explicit_tys: IdxVec<Option<Type>, DeclId>,
     /// The subset of decls that are in the global scope
     pub global_decls: Vec<DeclId>,
     pub scopes: IdxVec<Scope, ScopeId>,
     pub void_expr: ExprId,
     pub source_ranges: IdxVec<SourceRange, ExprId>,
-    pub interner: Interner,
+    pub interner: Rc<Interner>,
 }
 
 #[derive(Debug)]
@@ -94,6 +95,7 @@ pub struct Builder<'src> {
     num_casts: usize,
 
     decls: IdxVec<Decl, DeclId>,
+    names: IdxVec<Sym, DeclId>,
     explicit_tys: IdxVec<Option<Type>, DeclId>,
     /// The subset of decls that are in the global scope
     global_decls: Vec<DeclId>,
@@ -113,6 +115,7 @@ impl<'src> Builder<'src> {
             num_decl_refs: 0,
             num_casts: 0,
             decls: IdxVec::new(),
+            names: IdxVec::new(),
             explicit_tys: IdxVec::new(),
             global_decls: Vec::new(),
             scopes: IdxVec::new(),
@@ -154,16 +157,18 @@ impl<'src> Builder<'src> {
         self.source_ranges.push(range)
     }
 
-    fn decl(&mut self, decl: Decl, explicit_ty: Option<Type>) -> DeclId {
+    fn decl(&mut self, decl: Decl, name: Sym, explicit_ty: Option<Type>) -> DeclId {
         let id1 = self.decls.push(decl);
         let id2 = self.explicit_tys.push(explicit_ty);
+        let id3 = self.names.push(name);
         debug_assert_eq!(id1, id2);
+        debug_assert_eq!(id2, id3);
 
         id1
     }
 
-    fn global_decl(&mut self, decl: Decl, explicit_ty: Option<Type>) {
-        let id = self.decl(decl, explicit_ty);
+    fn global_decl(&mut self, decl: Decl, name: Sym, explicit_ty: Option<Type>) {
+        let id = self.decl(decl, name, explicit_ty);
         self.global_decls.push(id);
     }
 }
@@ -171,7 +176,8 @@ impl<'src> Builder<'src> {
 impl<'src> builder::Builder<'src> for Builder<'src> {
     type Output = Program;
     fn add_intrinsic(&mut self, intrinsic: Intrinsic, param_tys: SmallVec<[Type; 2]>, ret_ty: Type) {
-        self.global_decl(Decl::Intrinsic { intr: intrinsic, param_tys }, Some(ret_ty));
+        let name = self.interner.get_or_intern(intrinsic.name());
+        self.global_decl(Decl::Intrinsic { intr: intrinsic, param_tys }, name, Some(ret_ty));
     }
     fn void_expr(&self) -> ExprId { self.void_expr }
     fn int_lit(&mut self, lit: u64, range: SourceRange) -> ExprId {
@@ -204,8 +210,9 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             _ => self.decl_ref(op.symbol(), smallvec![expr], range),
         }
     }
-    fn stored_decl(&mut self, _name: &'src str, explicit_ty: Option<Type>, is_mut: bool, root_expr: ExprId, _range: SourceRange) {
+    fn stored_decl(&mut self, name: &'src str, explicit_ty: Option<Type>, is_mut: bool, root_expr: ExprId, _range: SourceRange) {
         self.flush_stmt_buffer();
+        let name = self.interner.get_or_intern(name);
         if self.comp_decl_stack.is_empty() {
             self.global_decl(
                 if is_mut {
@@ -213,6 +220,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
                 } else {
                     Decl::Const(root_expr)
                 },
+                name,
                 explicit_ty,
             );
         } else {
@@ -220,7 +228,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             let id = StoredDeclId::new(decl.num_stored_decls);
             decl.num_stored_decls += 1;
 
-            self.decl(Decl::Stored { id, is_mut }, explicit_ty);
+            self.decl(Decl::Stored { id, is_mut }, name, explicit_ty);
             self.item(Item::StoredDecl { id, root_expr });
         }
     }
@@ -276,17 +284,21 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
     }
     fn begin_computed_decl(&mut self, name: &'src str, param_names: SmallVec<[&'src str; 2]>, param_tys: SmallVec<[Type; 2]>, explicit_ty: Option<Type>, _proto_range: SourceRange) {
         self.flush_stmt_buffer();
+        let name = self.interner.get_or_intern(name);
         // This is a placeholder value that gets replaced once the parameter declarations get allocated.
-        let id = self.decl(Decl::Const(ExprId::new(std::usize::MAX)), explicit_ty);
+        let id = self.decl(Decl::Const(ExprId::new(std::usize::MAX)), name, explicit_ty);
         assert_eq!(param_names.len(), param_tys.len());
         self.decls.reserve(param_tys.len());
         let params = param_tys.iter()
             .enumerate()
-            .map(|(index, ty)| self.decl(Decl::Parameter { index }, Some(ty.clone())))
+            .zip(&param_names)
+            .map(|((index, ty), &name)| {
+                let name = self.interner.get_or_intern(name);
+                self.decl(Decl::Parameter { index }, name, Some(ty.clone()))
+            })
             .collect();
         // `end_computed_decl` will attach the real scope to this decl; we don't have it yet
         self.decls[id] = Decl::Computed {
-            name: name.to_owned(),
             param_tys,
             params,
             scope: ScopeId::new(std::usize::MAX)
@@ -326,12 +338,13 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             exprs: self.exprs,
             num_decl_refs: self.num_decl_refs,
             decls: self.decls,
+            names: self.names,
             explicit_tys: self.explicit_tys,
             global_decls: self.global_decls,
             source_ranges: self.source_ranges,
             scopes: self.scopes,
             void_expr: self.void_expr,
-            interner: self.interner,
+            interner: Rc::new(self.interner),
         }
     }
 }

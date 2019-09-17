@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::fmt;
+use std::rc::Rc;
 
 use smallvec::SmallVec;
+use string_interner::{Sym, DefaultStringInterner as Interner};
 
 use crate::arch::Arch;
 use crate::ty::Type;
@@ -76,7 +78,7 @@ enum Decl {
 
 #[derive(Debug)]
 pub struct Function {
-    pub name: String,
+    pub name: Option<Sym>,
     pub ret_ty: Type,
     pub code: IdxVec<Instr, InstrId>,
     pub basic_blocks: IdxVec<InstrId, BasicBlockId>,
@@ -160,6 +162,7 @@ pub struct Program {
     pub strings: IdxVec<CString, StrId>,
     pub statics: IdxVec<Const, StaticId>,
     pub arch: Arch,
+    interner: Rc<Interner>,
 }
 
 fn expr_to_const(expr: &Expr, ty: Type, strings: &mut IdxVec<CString, StrId>) -> Const {
@@ -273,13 +276,13 @@ impl<'a> Builder<'a> {
     fn get_decl(&mut self, id: DeclId) -> Decl {
         if let Some(decl) = self.decls.get(&id) { return decl.clone(); }
         match self.hir.decls[id] {
-            hir::Decl::Computed { ref name, ref params, scope, .. } => {
+            hir::Decl::Computed { ref params, scope, .. } => {
                 let get = FuncId::new(self.functions.len());
                 let decl = Decl::Computed { get };
                 self.decls.insert(id, decl.clone());
                 let func = FunctionBuilder::new(
                     self,
-                    name.clone(),
+                    Some(self.hir.names[id]),
                     self.tc.decl_types[id].clone(),
                     FunctionBody::Scope(scope),
                     &params[..],
@@ -308,7 +311,7 @@ impl<'a> Builder<'a> {
                 self.decls.insert(id, decl.clone());
                 let func = FunctionBuilder::new(
                     self,
-                    String::from("static_init"),
+                    None,
                     self.tc.decl_types[id].clone(),
                     FunctionBody::Expr(expr),
                     &[],
@@ -321,7 +324,7 @@ impl<'a> Builder<'a> {
                 let ty = self.tc.decl_types[id].clone();
                 let function = FunctionBuilder::new(
                     self,
-                    String::from("const_init"),
+                    None,
                     ty.clone(),
                     FunctionBody::Expr(root_expr),
                     &[],
@@ -349,6 +352,7 @@ impl<'a> Builder<'a> {
             strings: self.strings,
             statics: IdxVec::new(),
             arch: self.arch,
+            interner: self.hir.interner.clone(),
         };
         // TODO: creating a new variable for statics here is a hack to prevent userspace code from being able to access static variables.
         // There should be a flag passed to the interpreter to solve this problem (with a nice error message) instead.
@@ -376,6 +380,15 @@ fn fmt_const(f: &mut fmt::Formatter, konst: &Const, prog: &Program) -> fmt::Resu
     }
 }
 
+impl Program {
+    fn fn_name(&self, name: Option<Sym>) -> &str {
+        match name {
+            Some(name) => self.interner.as_ref().resolve(name).unwrap(),
+            None => "{anonymous}",
+        }
+    }
+}
+
 impl fmt::Display for Program {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if !self.statics.raw.is_empty() {
@@ -387,7 +400,7 @@ impl fmt::Display for Program {
         }
 
         for (i, func) in self.functions.iter().enumerate() {
-            write!(f, "fn {}", &func.name)?;
+            write!(f, "fn {}", self.fn_name(func.name))?;
             assert_eq!(&func.code.raw[0], &Instr::Void);
             let mut first = true;
             for i in 1..func.code.len() {
@@ -452,7 +465,7 @@ impl fmt::Display for Program {
                         &Instr::CondBr { condition, true_bb, false_bb }
                             => writeln!(f, "condbr %{}, %bb{}, %bb{}", condition.idx(), true_bb.idx(), false_bb.idx())?,
                         &Instr::Call { ref arguments, func: callee } => {
-                            write!(f, "%{} = call `{}`", i, self.functions[callee].name)?;
+                            write!(f, "%{} = call `{}`", i, self.fn_name(self.functions[callee].name))?;
                             write_args!(arguments)?
                         },
                         Instr::Const(konst) => {
@@ -497,7 +510,7 @@ enum FunctionBody {
 
 struct FunctionBuilder<'a, 'mir: 'a> {
     b: &'a mut Builder<'mir>,
-    name: String,
+    name: Option<Sym>,
     ret_ty: Type,
     body: FunctionBody,
     arch: Arch,
@@ -510,7 +523,7 @@ struct FunctionBuilder<'a, 'mir: 'a> {
 impl<'a, 'mir: 'a> FunctionBuilder<'a, 'mir> {
     fn new(
         b: &'a mut Builder<'mir>,
-        name: String,
+        name: Option<Sym>,
         ret_ty: Type,
         body: FunctionBody,
         params: &[DeclId],
