@@ -164,19 +164,39 @@ impl<'hir> Builder<'hir> {
     }
 
     pub fn build(mut self) -> Program<'hir> {
-        for &decl in &self.hir.global_decls {
-            match self.hir.decls[decl] {
-                hir::Decl::Computed { ref name, ref param_tys, ref explicit_ty, scope, .. } => {
-                    let ret_ty = explicit_ty.as_ref()
-                        .map(|ty| ty.clone())
-                        .unwrap_or(Type::Error)
-                        .into();
-                    self.decls.push(
-                        Decl { param_tys: param_tys.clone(), ret_ty }
-                    );
-                },
-                _ => panic!("Unhandled declaration kind"),
-            }
+        // Populate `self.decls`
+        for (i, decl) in self.hir.decls.iter().enumerate() {
+            let id = DeclId::new(i);
+            let ty = self.hir.explicit_tys[id].as_ref()
+                .map(|ty| ty.clone())
+                .unwrap_or(Type::Error);
+            let (ret_ty, param_tys) = match *decl {
+                hir::Decl::Computed { ref name, ref param_tys, scope, .. } => (
+                    ty.into(),
+                    param_tys.clone(),
+                ),
+                hir::Decl::Const(expr) => (
+                    ty.into(),
+                    SmallVec::new(),
+                ),
+                hir::Decl::Intrinsic { intr, ref param_tys, } => (
+                    ty.into(),
+                    param_tys.clone(),
+                ),
+                hir::Decl::Parameter { .. } => (
+                    ty.into(),
+                    SmallVec::new(),
+                ),
+                hir::Decl::Static(expr) => (
+                    QualType { ty, is_mut: true },
+                    SmallVec::new(),
+                ),
+                hir::Decl::Stored { id, is_mut } => (
+                    QualType { ty, is_mut },
+                    SmallVec::new(),
+                ),
+            };
+            self.decls.push(Decl { param_tys, ret_ty });
         }
 
         Program {

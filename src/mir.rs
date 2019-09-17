@@ -288,7 +288,7 @@ impl<'a> Builder<'a> {
                 self.functions.push(func);
                 decl
             },
-            hir::Decl::Stored(index) => {
+            hir::Decl::Stored { id: index, .. } => {
                 let decl = Decl::Stored(index);
                 self.decls.insert(id, decl.clone());
                 decl
