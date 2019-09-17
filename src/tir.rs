@@ -1,5 +1,6 @@
 use std::ops::{Deref, DerefMut};
 use smallvec::SmallVec;
+use string_interner::Sym;
 
 use crate::builder::*;
 use crate::dep_vec::DepVec;
@@ -98,6 +99,16 @@ pub struct Program<'hir> {
     pub num_exprs: usize,
 }
 
+struct GlobalDecl {
+    id: DeclId,
+    num_params: usize,
+}
+
+struct GlobalDeclGroup {
+    name: Sym,
+    decls: Vec<GlobalDecl>,
+}
+
 pub struct Builder<'hir> {
     int_lits: Vec<ExprId>,
     dec_lits: Vec<ExprId>,
@@ -122,6 +133,7 @@ pub struct Builder<'hir> {
     expr_levels: IdxVec<u32, ExprId>,
     decl_levels: IdxVec<u32, DeclId>,
     decls: IdxVec<Decl, DeclId>,
+    global_decls: Vec<GlobalDeclGroup>,
     /// Each declref's overload choices
     overloads: IdxVec<Vec<DeclId>, DeclRefId>,
 
@@ -158,6 +170,7 @@ impl<'hir> Builder<'hir> {
             expr_levels,
             decl_levels: IdxVec::new(),
             decls: IdxVec::new(),
+            global_decls: Vec::new(),
             overloads: IdxVec::new(),
             terminal_exprs: IdxVec::new(),
         }
@@ -197,6 +210,18 @@ impl<'hir> Builder<'hir> {
                 ),
             };
             self.decls.push(Decl { param_tys, ret_ty });
+        }
+
+        // Populate `self.global_decls`
+        for &id in &self.hir.global_decls {
+            let name = self.hir.names[id];
+            match self.global_decls.iter_mut().find(|group| group.name == name) {
+                Some(group) => group,
+                None => {
+                    self.global_decls.push(GlobalDeclGroup { name, decls: Vec::new() });
+                    self.global_decls.last_mut().unwrap()
+                },
+            }.decls.push(GlobalDecl { id, num_params: self.decls[id].param_tys.len() });
         }
 
         Program {
