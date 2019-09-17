@@ -40,6 +40,15 @@ impl RetGroup {
     }
 }
 
+/// State machine to prevent cycles at the global scope. For example:
+///     fn foo = bar
+///     fn bar = foo
+enum Level {
+    Unresolved,
+    Resolving,
+    Resolved(u32),
+}
+
 #[derive(Debug)]
 pub struct Expr<T> {
     pub id: ExprId,
