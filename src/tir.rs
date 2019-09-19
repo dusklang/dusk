@@ -109,6 +109,36 @@ struct GlobalDeclGroup {
     decls: Vec<GlobalDecl>,
 }
 
+struct LocalDecl {
+    name: Sym,
+    id: DeclId,
+}
+
+struct CompDeclState {
+    local_decls: Vec<LocalDecl>,
+    /// The size of `local_decls` before the current scope was started
+    scope_stack: Vec<usize>,
+}
+
+impl CompDeclState {
+    fn new() -> Self {
+        Self {
+            local_decls: Vec::new(),
+            scope_stack: Vec::new(),
+        }
+    }
+
+    fn open_scope(&mut self) {
+        self.scope_stack.push(self.local_decls.len());
+    }
+
+    fn close_scope(&mut self) {
+        let new_len = self.scope_stack.pop().unwrap();
+        debug_assert!(new_len <= self.local_decls.len());
+        self.local_decls.truncate(new_len);
+    }
+}
+
 pub struct Builder<'hir> {
     int_lits: Vec<ExprId>,
     dec_lits: Vec<ExprId>,
@@ -134,6 +164,7 @@ pub struct Builder<'hir> {
     decl_levels: IdxVec<u32, DeclId>,
     decls: IdxVec<Decl, DeclId>,
     global_decls: Vec<GlobalDeclGroup>,
+    comp_decl_stack: Vec<CompDeclState>,
     /// Each declref's overload choices
     overloads: IdxVec<Vec<DeclId>, DeclRefId>,
 
@@ -171,6 +202,7 @@ impl<'hir> Builder<'hir> {
             decl_levels: IdxVec::new(),
             decls: IdxVec::new(),
             global_decls: Vec::new(),
+            comp_decl_stack: Vec::new(),
             overloads: IdxVec::new(),
             terminal_exprs: IdxVec::new(),
         }
