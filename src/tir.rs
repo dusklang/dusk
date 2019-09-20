@@ -44,10 +44,20 @@ impl RetGroup {
 /// State machine to prevent cycles at the global scope. For example:
 ///     fn foo = bar
 ///     fn bar = foo
+#[derive(Copy, Clone)]
 enum Level {
     Unresolved,
     Resolving,
     Resolved(u32),
+}
+
+impl Level {
+    fn unwrap(self) -> u32 {
+        match self {
+            Level::Resolved(level) => level,
+            _ => panic!("attempt to unwrap unresolved level"),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -118,13 +128,17 @@ struct CompDeclState {
     local_decls: Vec<LocalDecl>,
     /// The size of `local_decls` before the current scope was started
     scope_stack: Vec<usize>,
+
+    /// All the expressions to be put into this comp decl's RetGroup
+    returned_expressions: SmallVec<[ExprId; 1]>,
 }
 
 impl CompDeclState {
     fn new() -> Self {
         Self {
             local_decls: Vec::new(),
-            scope_stack: Vec::new(),
+            scope_stack: vec![0],
+            returned_expressions: SmallVec::new(),
         }
     }
 
@@ -161,7 +175,7 @@ pub struct Builder<'hir> {
 
     hir: &'hir hir::Program,
     expr_levels: IdxVec<u32, ExprId>,
-    decl_levels: IdxVec<u32, DeclId>,
+    decl_levels: IdxVec<Level, DeclId>,
     decls: IdxVec<Decl, DeclId>,
     global_decls: Vec<GlobalDeclGroup>,
     comp_decl_stack: Vec<CompDeclState>,
@@ -206,6 +220,68 @@ impl<'hir> Builder<'hir> {
             overloads: IdxVec::new(),
             terminal_exprs: IdxVec::new(),
         }
+    }
+
+    fn open_comp_decl(&mut self) {
+        self.comp_decl_stack.push(CompDeclState::new());
+    }
+
+    fn build_expr(&mut self, id: ExprId) -> u32 {
+        let mut level = 0u32;
+
+        level
+    }
+
+    fn insert<T: Item>(&mut self, value: T) {
+        let level = value.compute_level(self);
+        T::storage(self).insert(level, value);
+    }
+
+    fn build_decl(&mut self, id: DeclId) -> u32 {
+        match self.decl_levels[id] {
+            Level::Unresolved => self.decl_levels[id] = Level::Resolving,
+            Level::Resolving => panic!("Cycle detected!"),
+            Level::Resolved(level) => return level,
+        }
+        let mut level = 0u32;
+        match self.hir.decls[id] {
+            hir::Decl::Computed { ref param_tys, ref params, scope } => {
+                self.comp_decl_stack.push(CompDeclState::new());
+
+                let scope = &self.hir.scopes[scope];
+                for &item in &scope.items {
+                    match item {
+                        hir::Item::Stmt(expr) => { self.build_expr(expr); },
+                        hir::Item::StoredDecl { id, root_expr } => {
+                            // TODO: add decl id to hir so we can actually do something here
+                        },
+                        // TODO: add computed decls as items to hir so we can actually do something here
+                    }
+                }
+                level = self.build_expr(scope.terminal_expr);
+                let ret_exprs = &mut self.comp_decl_stack.last_mut().unwrap().returned_expressions;
+                ret_exprs.push(scope.terminal_expr);
+                match &self.hir.explicit_tys[id] {
+                    Some(ty) => {
+                        self.ret_groups.push(RetGroup { ty: ty.clone(), exprs: ret_exprs.clone() });
+                    },
+                    None => {
+                        assert_eq!(ret_exprs.len(), 1, "multiple returns from assigned functions not allowed");
+                        let root_expr = ret_exprs[0];
+                        self.insert(AssignedDecl { explicit_ty: None, root_expr, decl_id: id });
+                    },
+                }
+
+                self.comp_decl_stack.pop().unwrap();
+            },
+            hir::Decl::Const(expr) => {},
+            hir::Decl::Intrinsic { intr, ref param_tys } => {},
+            hir::Decl::Parameter { index } => {},
+            hir::Decl::Static(expr) => {},
+            hir::Decl::Stored { id, is_mut } => {},
+        }
+
+        level
     }
 
     pub fn build(mut self) -> Program<'hir> {
@@ -256,6 +332,11 @@ impl<'hir> Builder<'hir> {
             }.decls.push(GlobalDecl { id, num_params: self.decls[id].param_tys.len() });
         }
 
+        // Build global decls, which will recursively build all expressions and local declarations
+        for &id in &self.hir.global_decls {
+            self.build_decl(id);
+        }
+
         Program {
             int_lits: self.int_lits,
             dec_lits: self.dec_lits,
@@ -282,56 +363,62 @@ impl<'hir> Builder<'hir> {
     }
 }
 
-// pub trait Item: Sized {
-//     fn dependencies<'hir>(&'hir self, builder: &'hir Builder<'hir>) -> SmallVec<[Level; 3]>;
-//     fn storage(tree: &mut Tree) -> &mut DepVec<Self>;
-// }
+macro_rules! level {
+    ($b:expr, $($level:expr),+) => {{
+        [$($b.expr_levels[$level]),+].iter().max().unwrap() + 1
+    }}
+}
 
-// impl Item for Expr<Do> {
-//     fn dependencies<'hir>(&'hir self, b: &'hir Builder<'hir>) -> SmallVec<[Level; 3]> {
-//         smallvec![b.levels[self.terminal_expr]]
-//     }
-//     fn storage(tree: &mut Tree) -> &mut DepVec<Self> { &mut tree.dos }
-// }
+pub trait Item: Sized {
+    fn compute_level<'hir>(&'hir self, builder: &'hir Builder<'hir>) -> u32;
+    fn storage<'a, 'hir>(builder: &'a mut Builder<'hir>) -> &'a mut DepVec<Self>;
+}
 
-// impl Item for Expr<Assignment> {
-//     fn dependencies<'hir>(&'hir self, b: &'hir Builder<'hir>) -> SmallVec<[Level; 3]> {
-//         smallvec![b.levels[self.lhs], b.levels[self.rhs]]
-//     }
-//     fn storage(tree: &mut Tree) -> &mut DepVec<Self> { &mut tree.assignments }
-// }
+impl Item for Expr<Do> {
+    fn compute_level<'hir>(&'hir self, b: &'hir Builder<'hir>) -> u32 {
+        level!(b, self.terminal_expr)
+    }
+    fn storage<'a, 'hir>(builder: &'a mut Builder<'hir>) -> &'a mut DepVec<Self> { &mut builder.dos }
+}
 
-// impl Item for Expr<DeclRef> {
-//     fn dependencies<'hir>(&'hir self, b: &'hir Builder<'hir>) -> SmallVec<[Level; 3]> {
-//         self.args.iter().map(|&id| b.levels[id]).collect()
-//     }
-//     fn storage(tree: &mut Tree) -> &mut DepVec<Self> { &mut tree.decl_refs }
-// }
+impl Item for Expr<Assignment> {
+    fn compute_level<'hir>(&'hir self, b: &'hir Builder<'hir>) -> u32 {
+        level!(b, self.lhs, self.rhs)
+    }
+    fn storage<'a, 'hir>(builder: &'a mut Builder<'hir>) -> &'a mut DepVec<Self> { &mut builder.assignments }
+}
 
-// impl Item for Expr<AddrOf> {
-//     fn dependencies<'hir>(&'hir self, b: &'hir Builder<'hir>) -> SmallVec<[Level; 3]> {
-//         smallvec![b.levels[self.expr]]
-//     }
-//     fn storage(tree: &mut Tree) -> &mut DepVec<Self> { &mut tree.addr_ofs }
-// }
+impl Item for Expr<DeclRef> {
+    fn compute_level<'hir>(&'hir self, b: &'hir Builder<'hir>) -> u32 {
+        self.args.iter().map(|&id| b.expr_levels[id]).max().unwrap() + 1
+    }
+    fn storage<'a, 'hir>(builder: &'a mut Builder<'hir>) -> &'a mut DepVec<Self> { &mut builder.decl_refs }
+}
 
-// impl Item for Expr<Dereference> {
-//     fn dependencies<'hir>(&'hir self, b: &'hir Builder<'hir>) -> SmallVec<[Level; 3]> {
-//         smallvec![b.levels[self.expr]]
-//     }
-//     fn storage(tree: &mut Tree) -> &mut DepVec<Self> { &mut tree.derefs }
-// }
+impl Item for Expr<AddrOf> {
+    fn compute_level<'hir>(&'hir self, b: &'hir Builder<'hir>) -> u32 {
+        level!(b, self.expr)
+    }
+    fn storage<'a, 'hir>(builder: &'a mut Builder<'hir>) -> &'a mut DepVec<Self> { &mut builder.addr_ofs }
+}
 
-// impl Item for Expr<If> {
-//     fn dependencies<'hir>(&'hir self, b: &'hir Builder<'hir>) -> SmallVec<[Level; 3]> {
-//         smallvec![b.levels[self.condition], b.levels[self.then_expr], b.levels[self.else_expr]]
-//     }
-//     fn storage(tree: &mut Tree) -> &mut DepVec<Self> { &mut tree.ifs }
-// }
+impl Item for Expr<Dereference> {
+    fn compute_level<'hir>(&'hir self, b: &'hir Builder<'hir>) -> u32 {
+        level!(b, self.expr)
+    }
+    fn storage<'a, 'hir>(builder: &'a mut Builder<'hir>) -> &'a mut DepVec<Self> { &mut builder.derefs }
+}
 
-// impl Item for AssignedDecl {
-//     fn dependencies<'hir>(&'hir self, b: &'hir Builder<'hir>) -> SmallVec<[Level; 3]> {
-//         smallvec![b.levels[self.root_expr]]
-//     }
-//     fn storage(tree: &mut Tree) -> &mut DepVec<Self> { &mut tree.assigned_decls }
-// }
+impl Item for Expr<If> {
+    fn compute_level<'hir>(&'hir self, b: &'hir Builder<'hir>) -> u32 {
+        level!(b, self.condition, self.then_expr, self.else_expr)
+    }
+    fn storage<'a, 'hir>(builder: &'a mut Builder<'hir>) -> &'a mut DepVec<Self> { &mut builder.ifs }
+}
+
+impl Item for AssignedDecl {
+    fn compute_level<'hir>(&'hir self, b: &'hir Builder<'hir>) -> u32 {
+        level!(b, self.root_expr)
+    }
+    fn storage<'a, 'hir>(builder: &'a mut Builder<'hir>) -> &'a mut DepVec<Self> { &mut builder.assigned_decls }
+}
