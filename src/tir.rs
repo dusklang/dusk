@@ -320,6 +320,7 @@ impl<'hir> Builder<'hir> {
                 ),
             };
             self.decls.push(Decl { param_tys, ret_ty });
+            self.decl_levels.push(Level::Unresolved);
         }
 
         // Populate `self.global_decls`
