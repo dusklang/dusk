@@ -252,7 +252,7 @@ impl<'hir> Builder<'hir> {
                 for &item in &scope.items {
                     match item {
                         hir::Item::Stmt(expr) => { self.build_expr(expr); },
-                        hir::Item::StoredDecl { id, root_expr } => {
+                        hir::Item::StoredDecl { decl_id, root_expr, .. } => {
                             // TODO: add decl id to hir so we can actually do something here
                         },
                         // TODO: add computed decls as items to hir so we can actually do something here

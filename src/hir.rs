@@ -47,7 +47,7 @@ struct CompDeclState {
 #[derive(Copy, Clone, Debug)]
 pub enum Item {
     Stmt(ExprId),
-    StoredDecl { id: StoredDeclId, root_expr: ExprId },
+    StoredDecl { decl_id: DeclId, id: StoredDeclId, root_expr: ExprId },
 }
 
 #[derive(Debug)]
@@ -228,8 +228,8 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             let id = StoredDeclId::new(decl.num_stored_decls);
             decl.num_stored_decls += 1;
 
-            self.decl(Decl::Stored { id, is_mut }, name, explicit_ty);
-            self.item(Item::StoredDecl { id, root_expr });
+            let decl_id = self.decl(Decl::Stored { id, is_mut }, name, explicit_ty);
+            self.item(Item::StoredDecl { decl_id, id, root_expr });
         }
     }
     fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {

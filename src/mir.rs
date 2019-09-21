@@ -563,7 +563,7 @@ impl<'a, 'mir: 'a> FunctionBuilder<'a, 'mir> {
             Item::Stmt(expr) => {
                 self.expr(expr, Context::new(0, DataDest::Void, ControlDest::Continue));
             },
-            Item::StoredDecl { id, root_expr } => {
+            Item::StoredDecl { id, root_expr, .. } => {
                 let ty = self.type_of(root_expr);
                 let location = self.code.push(Instr::Alloca(ty));
                 assert_eq!(self.stored_decl_locs.len(), id.idx());
