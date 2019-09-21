@@ -570,6 +570,8 @@ impl<'a, 'mir: 'a> FunctionBuilder<'a, 'mir> {
                 self.stored_decl_locs.push(location);
                 self.expr(root_expr, Context::new(0, DataDest::Store { location }, ControlDest::Continue));
             },
+            // No need to give local computed decls special treatment at the MIR level
+            Item::ComputedDecl(_) => {},
         }
     }
 

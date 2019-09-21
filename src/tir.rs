@@ -253,9 +253,11 @@ impl<'hir> Builder<'hir> {
                     match item {
                         hir::Item::Stmt(expr) => { self.build_expr(expr); },
                         hir::Item::StoredDecl { decl_id, root_expr, .. } => {
-                            // TODO: add decl id to hir so we can actually do something here
+                            // TODO: actually do something here
                         },
-                        // TODO: add computed decls as items to hir so we can actually do something here
+                        hir::Item::ComputedDecl(decl_id) => {
+                            // TODO: actually do something here
+                        },
                     }
                 }
                 level = self.build_expr(scope.terminal_expr);

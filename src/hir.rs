@@ -48,6 +48,7 @@ struct CompDeclState {
 pub enum Item {
     Stmt(ExprId),
     StoredDecl { decl_id: DeclId, id: StoredDeclId, root_expr: ExprId },
+    ComputedDecl(DeclId),
 }
 
 #[derive(Debug)]
@@ -283,7 +284,6 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
         }
     }
     fn begin_computed_decl(&mut self, name: &'src str, param_names: SmallVec<[&'src str; 2]>, param_tys: SmallVec<[Type; 2]>, explicit_ty: Option<Type>, _proto_range: SourceRange) {
-        self.flush_stmt_buffer();
         let name = self.interner.get_or_intern(name);
         // This is a placeholder value that gets replaced once the parameter declarations get allocated.
         let id = self.decl(Decl::Const(ExprId::new(std::usize::MAX)), name, explicit_ty);
@@ -305,6 +305,9 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
         };
         if self.comp_decl_stack.is_empty() {
             self.global_decls.push(id);
+        } else {
+            self.flush_stmt_buffer();
+            self.item(Item::ComputedDecl(id));
         }
         self.comp_decl_stack.push(
             CompDeclState {
