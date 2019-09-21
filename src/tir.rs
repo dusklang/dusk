@@ -137,7 +137,7 @@ impl CompDeclState {
     fn new() -> Self {
         Self {
             local_decls: Vec::new(),
-            scope_stack: vec![0],
+            scope_stack: Vec::new(),
             returned_expressions: SmallVec::new(),
         }
     }
@@ -237,6 +237,41 @@ impl<'hir> Builder<'hir> {
         T::storage(self).insert(level, value);
     }
 
+    /// Returns terminal expression
+    fn build_scope(&mut self, id: ScopeId) -> ExprId {
+        self.comp_decl_stack.last_mut().unwrap().open_scope();
+
+        let scope = &self.hir.scopes[id];
+        for &item in &scope.items {
+            match item {
+                hir::Item::Stmt(expr) => { self.build_expr(expr); },
+                hir::Item::StoredDecl { decl_id, root_expr, .. } => {
+                    let name = self.hir.names[decl_id];
+                    let explicit_ty = self.hir.explicit_tys[decl_id].clone();
+
+                    self.comp_decl_stack.last_mut().unwrap().local_decls.push(LocalDecl { name, id: decl_id });
+                    self.build_expr(root_expr);
+                    self.insert(AssignedDecl { explicit_ty, root_expr, decl_id });
+                },
+                hir::Item::ComputedDecl(decl_id) => {
+                    let name = self.hir.names[decl_id];
+
+                    self.comp_decl_stack.last_mut().unwrap().local_decls.push(LocalDecl { name, id: decl_id });
+                    let scope = match self.hir.decls[decl_id] {
+                        hir::Decl::Computed { scope, .. } => scope,
+                        _ => panic!("unexpected non-computed decl"),
+                    };
+                    self.build_scope(scope);
+                },
+            }
+        }
+        self.build_expr(scope.terminal_expr);
+
+        self.comp_decl_stack.last_mut().unwrap().close_scope();
+
+        scope.terminal_expr
+    }
+
     fn build_decl(&mut self, id: DeclId) -> u32 {
         match self.decl_levels[id] {
             Level::Unresolved => self.decl_levels[id] = Level::Resolving,
@@ -248,21 +283,9 @@ impl<'hir> Builder<'hir> {
             hir::Decl::Computed { ref param_tys, ref params, scope } => {
                 self.comp_decl_stack.push(CompDeclState::new());
 
-                let scope = &self.hir.scopes[scope];
-                for &item in &scope.items {
-                    match item {
-                        hir::Item::Stmt(expr) => { self.build_expr(expr); },
-                        hir::Item::StoredDecl { decl_id, root_expr, .. } => {
-                            // TODO: actually do something here
-                        },
-                        hir::Item::ComputedDecl(decl_id) => {
-                            // TODO: actually do something here
-                        },
-                    }
-                }
-                level = self.build_expr(scope.terminal_expr);
+                let terminal_expr = self.build_scope(scope);
                 let ret_exprs = &mut self.comp_decl_stack.last_mut().unwrap().returned_expressions;
-                ret_exprs.push(scope.terminal_expr);
+                ret_exprs.push(terminal_expr);
                 match &self.hir.explicit_tys[id] {
                     Some(ty) => {
                         self.ret_groups.push(RetGroup { ty: ty.clone(), exprs: ret_exprs.clone() });
