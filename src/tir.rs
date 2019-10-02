@@ -222,20 +222,83 @@ impl<'hir> Builder<'hir> {
         }
     }
 
-    fn open_comp_decl(&mut self) {
-        self.comp_decl_stack.push(CompDeclState::new());
-    }
-
     fn build_expr(&mut self, id: ExprId) -> u32 {
-        let mut level = 0u32;
-
-        level
+        match self.hir.exprs[id] {
+            hir::Expr::AddrOf { expr, is_mut } => self.insert_expr(id, AddrOf { expr, is_mut }),
+            hir::Expr::Cast { expr, ref ty, cast_id } => {
+                self.casts.push(Expr { id, data: Cast { expr, ty: ty.clone(), cast_id } });
+                0
+            },
+            hir::Expr::CharLit { .. } => {
+                self.char_lits.push(id);
+                0
+            },
+            hir::Expr::DecLit { .. } => {
+                self.dec_lits.push(id);
+                0
+            },
+            hir::Expr::IntLit { .. } => {
+                self.int_lits.push(id);
+                0
+            },
+            hir::Expr::StrLit { .. } => {
+                self.str_lits.push(id);
+                0
+            }
+            hir::Expr::DeclRef { name, ref arguments, id: decl_ref_id } => {
+                let mut overloads = Vec::new();
+                if let Some(state) = self.comp_decl_stack.last() {
+                    if let Some(decl) = state.local_decls.iter().rev().find(|decl| decl.name == name) {
+                        overloads = vec![decl.id];
+                    }
+                }
+                if overloads.is_empty() {
+                    if let Some(group) = self.global_decls.iter().find(|group| group.name == name) {
+                        overloads = group.decls.iter()
+                            .filter_map(|decl| if decl.num_params == arguments.len() {
+                                Some(decl.id)
+                            } else {
+                                None
+                            }).collect();
+                    }
+                }
+                self.overloads[decl_ref_id] = overloads;
+                self.insert_expr(id, DeclRef { args: arguments.clone(), decl_ref_id })
+            },
+            hir::Expr::Deref(expr) => self.insert_expr(id, Dereference { expr }),
+            hir::Expr::Do { scope } => {
+                let terminal_expr = self.build_scope(scope);
+                self.insert_expr(id, Do { terminal_expr })
+            },
+            hir::Expr::If { condition, then_scope, else_scope } => {
+                let then_expr = self.build_scope(then_scope);
+                let else_expr = else_scope.map_or(self.void_expr, |scope| self.build_scope(scope));
+                self.insert_expr(id, If { condition, then_expr, else_expr })
+            },
+            hir::Expr::Ret { expr } => {
+                self.comp_decl_stack.last_mut()
+                    .expect("Found return expression outside of comp decl")
+                    .returned_expressions.push(expr);
+                0
+            },
+            hir::Expr::Set { lhs, rhs } => self.insert_expr(id, Assignment { lhs, rhs }),
+            hir::Expr::Void => 0,
+            hir::Expr::While { condition, scope } => {
+                self.build_scope(scope);
+                self.whiles.push(Expr { id, data: While { condition } });
+                0
+            },
+        }
     }
 
     fn insert<T: Item>(&mut self, value: T) -> u32 {
         let level = value.compute_level(self);
         T::storage(self).insert(level, value);
         level
+    }
+
+    fn insert_expr<T>(&mut self, id: ExprId, data: T) -> u32 where Expr<T>: Item {
+        self.insert(Expr { id, data })
     }
 
     /// Returns terminal expression

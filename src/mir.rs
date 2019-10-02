@@ -862,7 +862,7 @@ impl<'a, 'mir: 'a> FunctionBuilder<'a, 'mir> {
                     self.code.push(Instr::IntToFloat(value, dest_ty.clone()))
                 },
             },
-            Expr::AddrOf(operand) => return self.expr(operand, Context::new(ctx.indirection - 1, ctx.data, ctx.control)),
+            Expr::AddrOf { expr: operand, .. } => return self.expr(operand, Context::new(ctx.indirection - 1, ctx.data, ctx.control)),
             Expr::Deref(operand) => return self.expr(operand, Context::new(ctx.indirection + 1, ctx.data, ctx.control)),
             Expr::Do { scope } => return self.scope(scope, ctx),
             Expr::If { condition, then_scope, else_scope } => {

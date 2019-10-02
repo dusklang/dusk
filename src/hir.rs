@@ -20,7 +20,7 @@ pub enum Expr {
     StrLit { lit: CString },
     CharLit { lit: i8 },
     DeclRef { name: Sym, arguments: SmallVec<[ExprId; 2]>, id: DeclRefId },
-    AddrOf(ExprId),
+    AddrOf { expr: ExprId, is_mut: bool },
     Deref(ExprId),
     Set { lhs: ExprId, rhs: ExprId },
     Do { scope: ScopeId },
@@ -207,7 +207,8 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
     fn un_op(&mut self, op: UnOp, expr: ExprId, range: SourceRange) -> ExprId {
         match op {
             UnOp::Deref => self.push(Expr::Deref(expr), range),
-            UnOp::AddrOf | UnOp::AddrOfMut => self.push(Expr::AddrOf(expr), range),
+            UnOp::AddrOf => self.push(Expr::AddrOf { expr, is_mut: false }, range),
+            UnOp::AddrOfMut => self.push(Expr::AddrOf { expr, is_mut: true }, range),
             _ => self.decl_ref(op.symbol(), smallvec![expr], range),
         }
     }
