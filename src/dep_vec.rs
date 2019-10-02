@@ -11,7 +11,7 @@ impl<T> DepVec<T> {
         DepVec { storage: Vec::new() }
     }
 
-    /// Insert an element into the vector at the level above the maximum level in `dependencies`. Returns the level the element was inserted at.
+    /// Insert an element into the vector at `level`
     pub fn insert(&mut self, level: u32, element: T) {
         let level = level as usize;
         self.storage.resize_with(max(level + 1, self.storage.len()), Vec::new);

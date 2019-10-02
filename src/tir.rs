@@ -232,9 +232,10 @@ impl<'hir> Builder<'hir> {
         level
     }
 
-    fn insert<T: Item>(&mut self, value: T) {
+    fn insert<T: Item>(&mut self, value: T) -> u32 {
         let level = value.compute_level(self);
         T::storage(self).insert(level, value);
+        level
     }
 
     /// Returns terminal expression
@@ -278,7 +279,6 @@ impl<'hir> Builder<'hir> {
             Level::Resolving => panic!("Cycle detected!"),
             Level::Resolved(level) => return level,
         }
-        let mut level = 0u32;
         match self.hir.decls[id] {
             hir::Decl::Computed { ref param_tys, ref params, scope } => {
                 self.comp_decl_stack.push(CompDeclState::new());
@@ -286,27 +286,39 @@ impl<'hir> Builder<'hir> {
                 let terminal_expr = self.build_scope(scope);
                 let ret_exprs = &mut self.comp_decl_stack.last_mut().unwrap().returned_expressions;
                 ret_exprs.push(terminal_expr);
-                match &self.hir.explicit_tys[id] {
+                let level = match &self.hir.explicit_tys[id] {
                     Some(ty) => {
                         self.ret_groups.push(RetGroup { ty: ty.clone(), exprs: ret_exprs.clone() });
+                        0
                     },
                     None => {
                         assert_eq!(ret_exprs.len(), 1, "multiple returns from assigned functions not allowed");
                         let root_expr = ret_exprs[0];
-                        self.insert(AssignedDecl { explicit_ty: None, root_expr, decl_id: id });
+                        self.insert(AssignedDecl { explicit_ty: None, root_expr, decl_id: id })
                     },
-                }
+                };
 
                 self.comp_decl_stack.pop().unwrap();
-            },
-            hir::Decl::Const(expr) => {},
-            hir::Decl::Intrinsic { intr, ref param_tys } => {},
-            hir::Decl::Parameter { index } => {},
-            hir::Decl::Static(expr) => {},
-            hir::Decl::Stored { id, is_mut } => {},
-        }
 
-        level
+                level
+            },
+            hir::Decl::Const(expr) | hir::Decl::Static(expr) => {
+                self.build_expr(expr);
+                self.insert(AssignedDecl { explicit_ty: self.hir.explicit_tys[id].clone(), root_expr: expr, decl_id: id })
+            },
+            hir::Decl::Intrinsic { .. } | hir::Decl::Parameter { .. } => 0,
+            hir::Decl::Stored { root_expr, .. } => {
+                self.build_expr(root_expr);
+                let explicit_ty = self.hir.explicit_tys[id].clone();
+                let has_explicit_ty = explicit_ty.is_some();
+                let level = self.insert(AssignedDecl { explicit_ty, root_expr, decl_id: id });
+                if has_explicit_ty {
+                    0
+                } else {
+                    level
+                }
+            }
+        }
     }
 
     pub fn build(mut self) -> Program<'hir> {
@@ -321,11 +333,11 @@ impl<'hir> Builder<'hir> {
                     ty.into(),
                     param_tys.clone(),
                 ),
-                hir::Decl::Const(expr) => (
+                hir::Decl::Const(_) => (
                     ty.into(),
                     SmallVec::new(),
                 ),
-                hir::Decl::Intrinsic { intr, ref param_tys, } => (
+                hir::Decl::Intrinsic { ref param_tys, .. } => (
                     ty.into(),
                     param_tys.clone(),
                 ),
@@ -333,11 +345,11 @@ impl<'hir> Builder<'hir> {
                     ty.into(),
                     SmallVec::new(),
                 ),
-                hir::Decl::Static(expr) => (
+                hir::Decl::Static(_) => (
                     QualType { ty, is_mut: true },
                     SmallVec::new(),
                 ),
-                hir::Decl::Stored { id, is_mut } => (
+                hir::Decl::Stored { is_mut, .. } => (
                     QualType { ty, is_mut },
                     SmallVec::new(),
                 ),
