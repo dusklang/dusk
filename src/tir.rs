@@ -389,10 +389,15 @@ impl<'hir> Builder<'hir> {
     }
 }
 
-macro_rules! level {
-    ($b:expr, $($level:expr),+) => {{
-        [$($b.expr_levels[$level]),+].iter().max().unwrap() + 1
-    }}
+macro_rules! item_impl {
+    ($ty:ty, $storage:ident; $($level:ident),+) => {
+        impl Item for $ty {
+            fn compute_level<'hir>(&'hir self, b: &'hir Builder<'hir>) -> u32 {
+                [$(b.expr_levels[self.$level]),+].iter().max().unwrap() + 1
+            }
+            fn storage<'a, 'hir>(builder: &'a mut Builder<'hir>) -> &'a mut DepVec<Self> { &mut builder.$storage }
+        }
+    }
 }
 
 pub trait Item: Sized {
@@ -400,51 +405,16 @@ pub trait Item: Sized {
     fn storage<'a, 'hir>(builder: &'a mut Builder<'hir>) -> &'a mut DepVec<Self>;
 }
 
-impl Item for Expr<Do> {
-    fn compute_level<'hir>(&'hir self, b: &'hir Builder<'hir>) -> u32 {
-        level!(b, self.terminal_expr)
-    }
-    fn storage<'a, 'hir>(builder: &'a mut Builder<'hir>) -> &'a mut DepVec<Self> { &mut builder.dos }
-}
-
-impl Item for Expr<Assignment> {
-    fn compute_level<'hir>(&'hir self, b: &'hir Builder<'hir>) -> u32 {
-        level!(b, self.lhs, self.rhs)
-    }
-    fn storage<'a, 'hir>(builder: &'a mut Builder<'hir>) -> &'a mut DepVec<Self> { &mut builder.assignments }
-}
+item_impl!(Expr<Do>, dos; terminal_expr);
+item_impl!(Expr<Assignment>, assignments; lhs, rhs);
+item_impl!(Expr<AddrOf>, addr_ofs; expr);
+item_impl!(Expr<Dereference>, derefs; expr);
+item_impl!(Expr<If>, ifs; condition, then_expr, else_expr);
+item_impl!(AssignedDecl, assigned_decls; root_expr);
 
 impl Item for Expr<DeclRef> {
     fn compute_level<'hir>(&'hir self, b: &'hir Builder<'hir>) -> u32 {
         self.args.iter().map(|&id| b.expr_levels[id]).max().unwrap() + 1
     }
     fn storage<'a, 'hir>(builder: &'a mut Builder<'hir>) -> &'a mut DepVec<Self> { &mut builder.decl_refs }
-}
-
-impl Item for Expr<AddrOf> {
-    fn compute_level<'hir>(&'hir self, b: &'hir Builder<'hir>) -> u32 {
-        level!(b, self.expr)
-    }
-    fn storage<'a, 'hir>(builder: &'a mut Builder<'hir>) -> &'a mut DepVec<Self> { &mut builder.addr_ofs }
-}
-
-impl Item for Expr<Dereference> {
-    fn compute_level<'hir>(&'hir self, b: &'hir Builder<'hir>) -> u32 {
-        level!(b, self.expr)
-    }
-    fn storage<'a, 'hir>(builder: &'a mut Builder<'hir>) -> &'a mut DepVec<Self> { &mut builder.derefs }
-}
-
-impl Item for Expr<If> {
-    fn compute_level<'hir>(&'hir self, b: &'hir Builder<'hir>) -> u32 {
-        level!(b, self.condition, self.then_expr, self.else_expr)
-    }
-    fn storage<'a, 'hir>(builder: &'a mut Builder<'hir>) -> &'a mut DepVec<Self> { &mut builder.ifs }
-}
-
-impl Item for AssignedDecl {
-    fn compute_level<'hir>(&'hir self, b: &'hir Builder<'hir>) -> u32 {
-        level!(b, self.root_expr)
-    }
-    fn storage<'a, 'hir>(builder: &'a mut Builder<'hir>) -> &'a mut DepVec<Self> { &mut builder.assigned_decls }
 }
