@@ -64,7 +64,7 @@ pub enum Decl {
         params: SmallVec<[DeclId; 2]>,
         scope: ScopeId,
     },
-    Stored { id: StoredDeclId, is_mut: bool },
+    Stored { id: StoredDeclId, is_mut: bool, root_expr: ExprId, },
     Parameter {
         /// Parameter index within the function
         index: usize,
@@ -229,7 +229,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             let id = StoredDeclId::new(decl.num_stored_decls);
             decl.num_stored_decls += 1;
 
-            let decl_id = self.decl(Decl::Stored { id, is_mut }, name, explicit_ty);
+            let decl_id = self.decl(Decl::Stored { id, is_mut, root_expr }, name, explicit_ty);
             self.item(Item::StoredDecl { decl_id, id, root_expr });
         }
     }
