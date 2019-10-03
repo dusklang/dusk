@@ -375,6 +375,11 @@ impl<'hir> Builder<'hir> {
         }
         let level = match self.hir.decls[id] {
             hir::Decl::Computed { ref params, scope, .. } => {
+                // Enable recursion by resolving computed decls with explicit tys before building their scope
+                if self.hir.explicit_tys[id].is_some() {
+                    self.decl_levels[id] = Level::Resolved(0);
+                }
+
                 let mut comp_decl_state = CompDeclState::new();
                 comp_decl_state.open_scope();
                 comp_decl_state.local_decls.reserve(params.len());
