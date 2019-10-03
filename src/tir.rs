@@ -252,7 +252,6 @@ impl<'hir> Builder<'hir> {
                 0
             }
             hir::Expr::DeclRef { name, ref arguments, id: decl_ref_id } => {
-                println!("Building declref {} at range {:?}", self.hir.interner.resolve(name).unwrap(), self.hir.source_ranges[id]);
                 for &arg in arguments {
                     self.build_expr(arg);
                 }
@@ -370,7 +369,7 @@ impl<'hir> Builder<'hir> {
     fn build_decl(&mut self, id: DeclId) -> u32 {
         match self.decl_levels[id] {
             Level::Unresolved => self.decl_levels[id] = Level::Resolving,
-            Level::Resolving => panic!("Cycle detected on decl {}! CompDeclState: {:#?}", self.hir.interner.resolve(self.hir.names[id]).unwrap(), self.comp_decl_stack.last().unwrap()),
+            Level::Resolving => panic!("Cycle detected on decl {}!", self.hir.interner.resolve(self.hir.names[id]).unwrap()),
             Level::Resolved(level) => return level,
         }
         let level = match self.hir.decls[id] {
