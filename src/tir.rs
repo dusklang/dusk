@@ -35,12 +35,6 @@ pub struct If { pub condition: ExprId, pub then_expr: ExprId, pub else_expr: Exp
 #[derive(Debug)]
 pub struct While { pub condition: ExprId }
 
-impl RetGroup {
-    pub fn new(ty: Type) -> RetGroup {
-        RetGroup { ty, exprs: SmallVec::new() }
-    }
-}
-
 /// State machine to prevent cycles at the global scope. For example:
 ///     fn foo = bar
 ///     fn bar = foo
@@ -49,15 +43,6 @@ enum Level {
     Unresolved,
     Resolving,
     Resolved(u32),
-}
-
-impl Level {
-    fn unwrap(self) -> u32 {
-        match self {
-            Level::Resolved(level) => level,
-            _ => panic!("attempt to unwrap unresolved level"),
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -183,10 +168,6 @@ pub struct Builder<'hir> {
     comp_decl_stack: Vec<CompDeclState>,
     /// Each declref's overload choices
     overloads: IdxVec<Vec<DeclId>, DeclRefId>,
-
-    /// The terminal expression for each scope so far 
-    /// (or the void expression if there is no terminal expression)
-    terminal_exprs: IdxVec<ExprId, ScopeId>,
 }
 
 impl<'hir> Builder<'hir> {
@@ -220,7 +201,6 @@ impl<'hir> Builder<'hir> {
             global_decls: Vec::new(),
             comp_decl_stack: Vec::new(),
             overloads: IdxVec::new(),
-            terminal_exprs: IdxVec::new(),
         }
     }
 
@@ -348,14 +328,10 @@ impl<'hir> Builder<'hir> {
                     self.decl_levels[decl_id] = Level::Resolved(level);
                 },
                 hir::Item::ComputedDecl(decl_id) => {
-                    let name = self.hir.names[decl_id];
+                    self.build_decl(decl_id);
 
+                    let name = self.hir.names[decl_id];
                     self.comp_decl_stack.last_mut().unwrap().local_decls.push(LocalDecl { name, id: decl_id });
-                    let scope = match self.hir.decls[decl_id] {
-                        hir::Decl::Computed { scope, .. } => scope,
-                        _ => panic!("unexpected non-computed decl"),
-                    };
-                    self.build_scope(scope);
                 },
             }
         }
@@ -374,19 +350,21 @@ impl<'hir> Builder<'hir> {
         }
         let level = match self.hir.decls[id] {
             hir::Decl::Computed { ref params, scope, .. } => {
-                // Enable recursion by resolving computed decls with explicit tys before building their scope
+                // Resolve computed decls with explicit tys before building their scope
                 if self.hir.explicit_tys[id].is_some() {
                     self.decl_levels[id] = Level::Resolved(0);
                 }
 
                 let mut comp_decl_state = CompDeclState::new();
-                comp_decl_state.open_scope();
+                // Add function name to local scope to enable recursion
+                let name = self.hir.names[id];
+                comp_decl_state.local_decls.push(LocalDecl { name, id });
                 comp_decl_state.local_decls.reserve(params.len());
                 for &id in params {
                     let name = self.hir.names[id];
                     comp_decl_state.local_decls.push(LocalDecl { name, id });
                 }
-                self.comp_decl_stack.push(CompDeclState::new());
+                self.comp_decl_stack.push(comp_decl_state);
 
                 let terminal_expr = self.build_scope(scope);
                 let ret_exprs = &mut self.comp_decl_stack.last_mut().unwrap().returned_expressions;

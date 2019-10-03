@@ -192,6 +192,9 @@ pub fn type_check(prog: tir::Program, source_file: &SourceFile, debug: bool) -> 
                     }
                 }
             }
+            // if one_of.is_empty() {
+            //     println!("")
+            // }
             tc.constraints[item.id] = ConstraintList::new(BuiltinTraits::empty(), Some(one_of), pref);
         }
         for item in tc.prog.addr_ofs.get_level(level) {
