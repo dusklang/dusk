@@ -30,11 +30,10 @@ fn main() {
         contents
     );
     let (toks, mut errs) = lexer::lex(&file.src, &mut file.lines);
-    let (tir, tir_errs) = parser::parse(&toks, tir::Builder::new());
     let (hir, hir_errs) = parser::parse(&toks, hir::Builder::new());
+    let tir = tir::Builder::new(&hir).build();
     let (tc, tc_errs) = type_checker::type_check(tir, &file, false);
 
-    errs.extend(tir_errs);
     errs.extend(hir_errs);
     errs.extend(tc_errs);
 
@@ -53,7 +52,15 @@ fn main() {
     let mir = mir::Builder::new(&hir, &tc, arch::Arch::X86_64).build();
     let mut interpreter = Interpreter::new(&mir);
     let main = mir.functions.iter()
-        .position(|func| &*func.name == "main" && func.ret_ty == Type::Void && func.num_parameters() == 0)
+        .position(|func| {
+            match func.name {
+                // TODO: intern "main" and then repeatedly compare its handle to the function's handle rather than doing string comp
+                // The problem right now is the interner is stuck behind an Rc, so we can't write to it. Simplest thing would be to
+                // intern "main" in HIR, and then store the handle, before it gets frozen.
+                Some(name) => hir.interner.resolve(name).unwrap() == "main" && func.ret_ty == Type::Void && func.num_parameters() == 0,
+                None => false,
+            }
+        })
         .expect("Couldn't find main function with no parameters and a return type of void!");
     
     println!("Running the user's program in the interpreter:\n");

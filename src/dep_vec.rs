@@ -11,7 +11,7 @@ impl<T> DepVec<T> {
         DepVec { storage: Vec::new() }
     }
 
-    /// Insert an element into the vector at the level above the maximum level in `dependencies`. Returns the level the element was inserted at.
+    /// Insert an element into the vector at `level`
     pub fn insert(&mut self, level: u32, element: T) {
         let level = level as usize;
         self.storage.resize_with(max(level + 1, self.storage.len()), Vec::new);
@@ -21,14 +21,6 @@ impl<T> DepVec<T> {
     /// Get slice containing the specified level of elements
     pub fn get_level(&self, level: u32) -> &[T] {
         &self.storage[level as usize]
-    }
-
-    pub fn extend(&mut self, offset: u32, other: DepVec<T>) {
-        let offset = offset as usize;
-        self.storage.resize_with(max(other.storage.len() + offset, self.storage.len()), Vec::new);
-        for (i, level) in other.storage.into_iter().enumerate() {
-            self.storage[offset + i].extend(level);
-        }
     }
 }
 

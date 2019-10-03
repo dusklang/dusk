@@ -1,16 +1,13 @@
 use std::ops::{Deref, DerefMut};
-use std::cmp::max;
-use std::ffi::CString;
-use std::marker::PhantomData;
+use smallvec::SmallVec;
+use string_interner::Sym;
 
-use string_interner::{Sym, DefaultStringInterner};
-use smallvec::{SmallVec, smallvec};
-
+use crate::builder::*;
 use crate::dep_vec::DepVec;
+use crate::hir;
+use crate::index_vec::{Idx, IdxVec, IdxSlice};
 use crate::source_info::SourceRange;
-use crate::index_vec::{Idx, IdxVec};
 use crate::ty::{Type, QualType};
-use crate::builder::{self, *};
 
 newtype_index!(TreeId pub);
 newtype_index!(RetGroupId);
@@ -38,10 +35,14 @@ pub struct If { pub condition: ExprId, pub then_expr: ExprId, pub else_expr: Exp
 #[derive(Debug)]
 pub struct While { pub condition: ExprId }
 
-impl RetGroup {
-    pub fn new(ty: Type) -> RetGroup {
-        RetGroup { ty, exprs: SmallVec::new() }
-    }
+/// State machine to prevent cycles at the global scope. For example:
+///     fn foo = bar
+///     fn bar = foo
+#[derive(Copy, Clone)]
+enum Level {
+    Unresolved,
+    Resolving,
+    Resolved(u32),
 }
 
 #[derive(Debug)]
@@ -63,115 +64,10 @@ impl<T> DerefMut for Expr<T> {
 pub struct Decl {
     pub param_tys: SmallVec<[Type; 2]>,
     pub ret_ty: QualType,
-    pub level: Level,
-}
-
-impl Decl {
-    fn new(param_tys: SmallVec<[Type; 2]>, ret_ty: impl Into<QualType>, level: Level) -> Self {
-        Decl { param_tys, ret_ty: ret_ty.into(), level }
-    }
-}
-
-#[derive(Clone)]
-struct LocalDecl {
-    name: Sym,
-    decl: DeclId,
 }
 
 #[derive(Debug)]
-struct GlobalDecl {
-    name: Sym, 
-    num_params: u32,
-    decl: DeclId,
-}
-
-struct ScopeState {
-    id: ScopeId,
-    previous_decls: usize,
-    stmt_buffer: Option<ExprId>,
-}
-
-#[derive(Clone, Copy)]
-enum RetKind {
-    RetGroup(RetGroupId),
-    AssignedDecl,
-}
-
-struct CompDeclState {
-    id: DeclId,
-    ret_kind: RetKind,
-    decls: Vec<LocalDecl>,
-    scope_stack: Vec<ScopeState>,
-}
-
-impl CompDeclState {
-    fn new(id: DeclId, ret_kind: RetKind) -> Self {
-        Self {
-            id,
-            ret_kind,
-            decls: Vec::new(),
-            scope_stack: Vec::new(),
-        }
-    }
-}
-
-struct GlobalDeclRef {
-    id: DeclRefId,
-    name: Sym,
-    num_arguments: u32,
-}
-
-#[derive(Debug)]
-pub struct Tree {
-    pub dos: DepVec<Expr<Do>>,
-    pub assigned_decls: DepVec<AssignedDecl>,
-    pub assignments: DepVec<Expr<Assignment>>,
-    pub decl_refs: DepVec<Expr<DeclRef>>,
-    pub addr_ofs: DepVec<Expr<AddrOf>>,
-    pub derefs: DepVec<Expr<Dereference>>,
-    pub ifs: DepVec<Expr<If>>,
-}
-
-impl Tree {
-    fn new() -> Self {
-        Self {
-            dos: DepVec::new(),
-            assigned_decls: DepVec::new(),
-            assignments: DepVec::new(),
-            decl_refs: DepVec::new(),
-            addr_ofs: DepVec::new(),
-            derefs: DepVec::new(),
-            ifs: DepVec::new(),
-        }
-    }
-
-    fn extend(&mut self, offset: u32, other: Tree) {
-        self.dos.extend(offset, other.dos);
-        self.assigned_decls.extend(offset, other.assigned_decls);
-        self.assignments.extend(offset, other.assignments);
-        self.decl_refs.extend(offset, other.decl_refs);
-        self.addr_ofs.extend(offset, other.addr_ofs);
-        self.derefs.extend(offset, other.derefs);
-        self.ifs.extend(offset, other.ifs);
-    }
-}
-
-#[derive(Debug)]
-pub struct TreeDependencies {
-    pub global: u32,
-    pub local: Vec<(TreeId, u32)>,
-    /// Depend on the deepest overload of a decl ref
-    pub decl_ref: Option<DeclRefId>,
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum Level {
-    Global(u32),
-    Local(TreeId, u32),
-}
-
-#[derive(Debug)]
-pub struct Program {
+pub struct Program<'hir> {
     pub int_lits: Vec<ExprId>,
     pub dec_lits: Vec<ExprId>,
     pub str_lits: Vec<ExprId>,
@@ -181,10 +77,16 @@ pub struct Program {
     pub ret_groups: Vec<RetGroup>,
     pub casts: Vec<Expr<Cast>>,
     pub whiles: Vec<Expr<While>>,
+    pub dos: DepVec<Expr<Do>>,
+    pub assigned_decls: DepVec<AssignedDecl>,
+    pub assignments: DepVec<Expr<Assignment>>,
+    pub decl_refs: DepVec<Expr<DeclRef>>,
+    pub addr_ofs: DepVec<Expr<AddrOf>>,
+    pub derefs: DepVec<Expr<Dereference>>,
+    pub ifs: DepVec<Expr<If>>,
     /// An expression to uniquely represent the void value
     pub void_expr: ExprId,
-    pub tree: Tree,
-    pub source_ranges: IdxVec<SourceRange, ExprId>,
+    pub source_ranges: IdxSlice<'hir, SourceRange, ExprId>,
     pub decls: IdxVec<Decl, DeclId>,
     /// Each declref's overload choices
     pub overloads: IdxVec<Vec<DeclId>, DeclRefId>,
@@ -192,7 +94,53 @@ pub struct Program {
     pub num_exprs: usize,
 }
 
-pub struct Builder<'src> {
+struct GlobalDecl {
+    id: DeclId,
+    num_params: usize,
+}
+
+struct GlobalDeclGroup {
+    name: Sym,
+    decls: Vec<GlobalDecl>,
+}
+
+#[derive(Debug)]
+struct LocalDecl {
+    name: Sym,
+    id: DeclId,
+}
+
+#[derive(Debug)]
+struct CompDeclState {
+    local_decls: Vec<LocalDecl>,
+    /// The size of `local_decls` before the current scope was started
+    scope_stack: Vec<usize>,
+
+    /// All the expressions to be put into this comp decl's RetGroup
+    returned_expressions: SmallVec<[ExprId; 1]>,
+}
+
+impl CompDeclState {
+    fn new() -> Self {
+        Self {
+            local_decls: Vec::new(),
+            scope_stack: Vec::new(),
+            returned_expressions: SmallVec::new(),
+        }
+    }
+
+    fn open_scope(&mut self) {
+        self.scope_stack.push(self.local_decls.len());
+    }
+
+    fn close_scope(&mut self) {
+        let new_len = self.scope_stack.pop().unwrap();
+        debug_assert!(new_len <= self.local_decls.len());
+        self.local_decls.truncate(new_len);
+    }
+}
+
+pub struct Builder<'hir> {
     int_lits: Vec<ExprId>,
     dec_lits: Vec<ExprId>,
     str_lits: Vec<ExprId>,
@@ -202,40 +150,31 @@ pub struct Builder<'src> {
     ret_groups: IdxVec<RetGroup, RetGroupId>,
     casts: Vec<Expr<Cast>>,
     whiles: Vec<Expr<While>>,
+    dos: DepVec<Expr<Do>>,
+    assigned_decls: DepVec<AssignedDecl>,
+    assignments: DepVec<Expr<Assignment>>,
+    decl_refs: DepVec<Expr<DeclRef>>,
+    addr_ofs: DepVec<Expr<AddrOf>>,
+    derefs: DepVec<Expr<Dereference>>,
+    ifs: DepVec<Expr<If>>,
     // An expression to uniquely represent the void value
     void_expr: ExprId,
 
-    global_tree: Tree,
-    local_trees: IdxVec<Tree, TreeId>,
-    tree_dependencies: IdxVec<TreeDependencies, TreeId>,
-
-    source_ranges: IdxVec<SourceRange, ExprId>,
-    levels: IdxVec<Level, ExprId>,
-    global_decls: Vec<GlobalDecl>,
+    hir: &'hir hir::Program,
+    expr_levels: IdxVec<u32, ExprId>,
+    decl_levels: IdxVec<Level, DeclId>,
     decls: IdxVec<Decl, DeclId>,
+    global_decls: Vec<GlobalDeclGroup>,
+    comp_decl_stack: Vec<CompDeclState>,
     /// Each declref's overload choices
     overloads: IdxVec<Vec<DeclId>, DeclRefId>,
-
-    global_decl_refs: Vec<GlobalDeclRef>,
-    /// State related to each nested computed decl
-    comp_decl_stack: Vec<CompDeclState>,
-
-    /// The terminal expression for each scope so far 
-    /// (or the void expression if there is no terminal expression)
-    terminal_exprs: IdxVec<ExprId, ScopeId>,
-
-    interner: DefaultStringInterner,
-
-    _phantom_src_lifetime: PhantomData<&'src str>,
 }
 
-impl<'src> Builder<'src> {
-    pub fn new() -> Self {
+impl<'hir> Builder<'hir> {
+    pub fn new(hir: &'hir hir::Program) -> Self {
         // Create the void expression
-        let mut levels = IdxVec::new();
-        let mut source_ranges = IdxVec::new();
-        let void_expr = levels.push(Level::Global(0));
-        source_ranges.push(0..0);
+        let mut expr_levels = IdxVec::new();
+        let void_expr = expr_levels.push(0);
 
         Self {
             int_lits: Vec::new(),
@@ -247,257 +186,273 @@ impl<'src> Builder<'src> {
             ret_groups: IdxVec::new(),
             casts: Vec::new(),
             whiles: Vec::new(),
+            dos: DepVec::new(),
+            assigned_decls: DepVec::new(),
+            assignments: DepVec::new(),
+            decl_refs: DepVec::new(),
+            addr_ofs: DepVec::new(),
+            derefs: DepVec::new(),
+            ifs: DepVec::new(),
             void_expr,
-            global_tree: Tree::new(),
-            local_trees: IdxVec::new(),
-            tree_dependencies: IdxVec::new(),
-            source_ranges,
-            levels,
-            global_decls: Vec::new(),
+            hir,
+            expr_levels,
+            decl_levels: IdxVec::new(),
             decls: IdxVec::new(),
-            overloads: IdxVec::new(),
-            global_decl_refs: Vec::new(),
+            global_decls: Vec::new(),
             comp_decl_stack: Vec::new(),
-            terminal_exprs: IdxVec::new(),
-            interner: DefaultStringInterner::default(),
-
-            _phantom_src_lifetime: PhantomData,
+            overloads: IdxVec::new(),
         }
     }
 
-    fn insert_item<T: Item>(&mut self, item: T) -> Level {
-        self._insert_item(item, None, None)
+    fn build_expr(&mut self, id: ExprId) -> u32 {
+        let level = match self.hir.exprs[id] {
+            hir::Expr::AddrOf { expr, is_mut } => {
+                self.build_expr(expr);
+                self.insert_expr(id, AddrOf { expr, is_mut }, 0)
+            },
+            hir::Expr::Cast { expr, ref ty, cast_id } => {
+                self.build_expr(expr);
+                self.casts.push(Expr { id, data: Cast { expr, ty: ty.clone(), cast_id } });
+                0
+            },
+            hir::Expr::CharLit { .. } => {
+                self.char_lits.push(id);
+                0
+            },
+            hir::Expr::DecLit { .. } => {
+                self.dec_lits.push(id);
+                0
+            },
+            hir::Expr::IntLit { .. } => {
+                self.int_lits.push(id);
+                0
+            },
+            hir::Expr::StrLit { .. } => {
+                self.str_lits.push(id);
+                0
+            }
+            hir::Expr::DeclRef { name, ref arguments, id: decl_ref_id } => {
+                for &arg in arguments {
+                    self.build_expr(arg);
+                }
+        
+                let mut overloads = Vec::new();
+                if let Some(state) = self.comp_decl_stack.last() {
+                    if let Some(decl) = state.local_decls.iter().rev().find(|decl| decl.name == name) {
+                        overloads = vec![decl.id];
+                    }
+                }
+                if overloads.is_empty() {
+                    if let Some(group) = self.global_decls.iter().find(|group| group.name == name) {
+                        overloads = group.decls.iter()
+                            .filter_map(|decl| if decl.num_params == arguments.len() {
+                                Some(decl.id)
+                            } else {
+                                None
+                            }).collect();
+                    }
+                }
+                let mut deepest_overload = 0;
+                for &overload in &overloads {
+                    deepest_overload = std::cmp::max(deepest_overload, self.build_decl(overload));
+                }
+                self.overloads[decl_ref_id] = overloads;
+                self.insert_expr(id, DeclRef { args: arguments.clone(), decl_ref_id }, deepest_overload)
+            },
+            hir::Expr::Deref(expr) => {
+                self.build_expr(expr);
+                self.insert_expr(id, Dereference { expr }, 0)
+            },
+            hir::Expr::Do { scope } => {
+                let terminal_expr = self.build_scope(scope);
+                self.insert_expr(id, Do { terminal_expr }, 0)
+            },
+            hir::Expr::If { condition, then_scope, else_scope } => {
+                self.build_expr(condition);
+                let then_expr = self.build_scope(then_scope);
+                let else_expr = else_scope.map_or(self.void_expr, |scope| self.build_scope(scope));
+                self.insert_expr(id, If { condition, then_expr, else_expr }, 0)
+            },
+            hir::Expr::Ret { expr } => {
+                self.build_expr(expr);
+                self.comp_decl_stack.last_mut()
+                    .expect("Found return expression outside of comp decl")
+                    .returned_expressions.push(expr);
+                0
+            },
+            hir::Expr::Set { lhs, rhs } => {
+                self.build_expr(lhs);
+                self.build_expr(rhs);
+                self.insert_expr(id, Assignment { lhs, rhs }, 0)
+            },
+            hir::Expr::Void => 0,
+            hir::Expr::While { condition, scope } => {
+                self.build_expr(condition);
+                self.build_scope(scope);
+                self.whiles.push(Expr { id, data: While { condition } });
+                0
+            },
+        };
+        self.expr_levels[id] = level;
+        level
     }
-    fn _insert_item<T: Item>(&mut self, item: T, extra_dep: Option<Level>, decl_ref: Option<DeclRefId>) -> Level {
-        macro_rules! insert_local {
-            ($tree:expr, $level:expr) => {{
-                Item::storage(&mut self.local_trees[$tree]).insert($level, item);
-                Level::Local($tree, $level)
-            }};
-        }
-        macro_rules! insert_global {
-            ($level:expr) => {{
-                Item::storage(&mut self.global_tree).insert($level, item);
-                Level::Global($level)
-            }};
-        }
-        let mut dependencies = item.dependencies(&self);
-        if let Some(extra_dep) = extra_dep {
-            dependencies.push(extra_dep);
-        }
-        if dependencies.is_empty() && decl_ref.is_none() {
-            insert_global!(0)
-        } else {
-            // Unique the dependencies by tree, choosing the max level from each
-            let mut depended_trees = Vec::<Level>::new();
-            for cur in dependencies {
-                let mut found = false;
-                for &mut prev in &mut depended_trees {
-                    match (prev, cur) {
-                        (Level::Global(ref mut prev), Level::Global(cur)) => {
-                            *prev = max(*prev, cur);
-                            found = true;
-                        },
-                        (Level::Local(prev_tree, ref mut prev), Level::Local(cur_tree, cur)) if prev_tree == cur_tree => {
-                            *prev = max(*prev, cur);
-                            found = true;
-                        }
-                        _ => {}
-                    }
-                }
-                if !found {
-                    depended_trees.push(cur);
-                }
-            }
 
-            macro_rules! fresh_tree {
-                () => {{
-                    let mut global = 0;
-                    let mut local = Vec::new();
-                    for dep in depended_trees {
-                        match dep {
-                            Level::Global(level) => global = level,
-                            Level::Local(tree, level) => local.push((tree, level)),
-                        }
-                    }
-                    let new_tree = self.local_trees.push(Tree::new());
-                    let dependencies = self.tree_dependencies.push(TreeDependencies { global, local, decl_ref });
-                    assert_eq!(new_tree, dependencies);
-                    insert_local!(new_tree, 0)
-                }};
-            }
+    fn insert<T: Item>(&mut self, value: T, additional_level: u32) -> u32 {
+        let level = std::cmp::max(additional_level, value.compute_level(self));
+        T::storage(self).insert(level, value);
+        level
+    }
 
-            if decl_ref.is_some() {
-                // If the tree depends on the deepest overload of a declref, it can't yet be related to any other item and must go
-                // in a fresh tree of its own
-                fresh_tree!()
-            } else if depended_trees.len() == 1 {
-                // If the item depends only on items from one tree, put it in that tree
-                match depended_trees[0] {
-                    Level::Global(level) => {
-                        insert_global!(level + 1)
+    fn insert_expr<T>(&mut self, id: ExprId, data: T, additional_level: u32) -> u32 where Expr<T>: Item {
+        self.insert(Expr { id, data }, additional_level)
+    }
+
+    /// Returns terminal expression
+    fn build_scope(&mut self, id: ScopeId) -> ExprId {
+        self.comp_decl_stack.last_mut().unwrap().open_scope();
+
+        let scope = &self.hir.scopes[id];
+        for &item in &scope.items {
+            match item {
+                hir::Item::Stmt(expr) => { self.build_expr(expr); },
+                hir::Item::StoredDecl { decl_id, root_expr, .. } => {
+                    let name = self.hir.names[decl_id];
+                    let explicit_ty = self.hir.explicit_tys[decl_id].clone();
+                    let has_explicit_ty = explicit_ty.is_some();
+
+                    self.build_expr(root_expr);
+                    self.comp_decl_stack.last_mut().unwrap().local_decls.push(LocalDecl { name, id: decl_id });
+                    let mut level = self.insert(AssignedDecl { explicit_ty, root_expr, decl_id }, 0);
+                    if has_explicit_ty { level = 0; }
+
+                    self.decl_levels[decl_id] = Level::Resolved(level);
+                },
+                hir::Item::ComputedDecl(decl_id) => {
+                    self.build_decl(decl_id);
+
+                    let name = self.hir.names[decl_id];
+                    self.comp_decl_stack.last_mut().unwrap().local_decls.push(LocalDecl { name, id: decl_id });
+                },
+            }
+        }
+        self.build_expr(scope.terminal_expr);
+
+        self.comp_decl_stack.last_mut().unwrap().close_scope();
+
+        scope.terminal_expr
+    }
+
+    fn build_decl(&mut self, id: DeclId) -> u32 {
+        match self.decl_levels[id] {
+            Level::Unresolved => self.decl_levels[id] = Level::Resolving,
+            Level::Resolving => panic!("Cycle detected on decl {}!", self.hir.interner.resolve(self.hir.names[id]).unwrap()),
+            Level::Resolved(level) => return level,
+        }
+        let level = match self.hir.decls[id] {
+            hir::Decl::Computed { ref params, scope, .. } => {
+                // Resolve computed decls with explicit tys before building their scope
+                if self.hir.explicit_tys[id].is_some() {
+                    self.decl_levels[id] = Level::Resolved(0);
+                }
+
+                let mut comp_decl_state = CompDeclState::new();
+                // Add function name to local scope to enable recursion
+                let name = self.hir.names[id];
+                comp_decl_state.local_decls.push(LocalDecl { name, id });
+                comp_decl_state.local_decls.reserve(params.len());
+                for &id in params {
+                    let name = self.hir.names[id];
+                    comp_decl_state.local_decls.push(LocalDecl { name, id });
+                }
+                self.comp_decl_stack.push(comp_decl_state);
+
+                let terminal_expr = self.build_scope(scope);
+                let ret_exprs = &mut self.comp_decl_stack.last_mut().unwrap().returned_expressions;
+                ret_exprs.push(terminal_expr);
+                let level = match &self.hir.explicit_tys[id] {
+                    Some(ty) => {
+                        self.ret_groups.push(RetGroup { ty: ty.clone(), exprs: ret_exprs.clone() });
+                        0
                     },
-                    Level::Local(id, level) => {
-                        insert_local!(id, level + 1)
-                    }
-                }
-            } else {
-                // If the item depends on items from the global tree and exactly one local tree, put it in 
-                // the local tree at the max level of all the items it depends on
-                if depended_trees.len() == 2 {
-                    let mut max_level = 0;
-                    let mut local_tree = None;
-                    for t in &depended_trees {
-                        match *t {
-                            Level::Global(level) => max_level = max(max_level, level),
-                            Level::Local(tree, level) => {
-                                if local_tree.is_some() {
-                                    local_tree = None;
-                                    break;
-                                }
-                                max_level = max(max_level, level);
-                                local_tree = Some(tree);
-                            }
-                        }
-                    }
-                    if let Some(local_tree) = local_tree {
-                        return insert_local!(local_tree, max_level + 1);
-                    }
-                }
-
-                // If the item depends on items from multiple local trees, create a fresh tree to put it in
-                fresh_tree!()
-            }
-        }
-    }
-
-    fn insert_expr<T>(&mut self, data: T) -> ExprId where Expr<T>: Item {
-        self._insert_expr(data, None, None)
-    }
-    fn insert_global_decl_ref(&mut self, data: DeclRef) -> ExprId {
-        let decl_ref = data.decl_ref_id;
-        self._insert_expr(data, None, Some(decl_ref))
-    }
-    fn insert_local_decl_ref(&mut self, data: DeclRef, extra_dep: Level) -> ExprId {
-        self._insert_expr(data, Some(extra_dep), None)
-    }
-    fn _insert_expr<T>(&mut self, data: T, extra_dep: Option<Level>, decl_ref: Option<DeclRefId>) -> ExprId where Expr<T>: Item {
-        let id = ExprId::new(self.levels.len());
-        let level = self._insert_item(Expr { id, data }, extra_dep, decl_ref);
-        self.levels.push(level);
-        id
-    }
-}
-
-impl Item for Expr<Do> {
-    fn dependencies<'src>(&'src self, b: &'src Builder<'src>) -> SmallVec<[Level; 3]> {
-        smallvec![b.levels[self.terminal_expr]]
-    }
-    fn storage(tree: &mut Tree) -> &mut DepVec<Self> { &mut tree.dos }
-}
-
-impl Item for Expr<Assignment> {
-    fn dependencies<'src>(&'src self, b: &'src Builder<'src>) -> SmallVec<[Level; 3]> {
-        smallvec![b.levels[self.lhs], b.levels[self.rhs]]
-    }
-    fn storage(tree: &mut Tree) -> &mut DepVec<Self> { &mut tree.assignments }
-}
-
-impl Item for Expr<DeclRef> {
-    fn dependencies<'src>(&'src self, b: &'src Builder<'src>) -> SmallVec<[Level; 3]> {
-        self.args.iter().map(|&id| b.levels[id]).collect()
-    }
-    fn storage(tree: &mut Tree) -> &mut DepVec<Self> { &mut tree.decl_refs }
-}
-
-impl Item for Expr<AddrOf> {
-    fn dependencies<'src>(&'src self, b: &'src Builder<'src>) -> SmallVec<[Level; 3]> {
-        smallvec![b.levels[self.expr]]
-    }
-    fn storage(tree: &mut Tree) -> &mut DepVec<Self> { &mut tree.addr_ofs }
-}
-
-impl Item for Expr<Dereference> {
-    fn dependencies<'src>(&'src self, b: &'src Builder<'src>) -> SmallVec<[Level; 3]> {
-        smallvec![b.levels[self.expr]]
-    }
-    fn storage(tree: &mut Tree) -> &mut DepVec<Self> { &mut tree.derefs }
-}
-
-impl Item for Expr<If> {
-    fn dependencies<'src>(&'src self, b: &'src Builder<'src>) -> SmallVec<[Level; 3]> {
-        smallvec![b.levels[self.condition], b.levels[self.then_expr], b.levels[self.else_expr]]
-    }
-    fn storage(tree: &mut Tree) -> &mut DepVec<Self> { &mut tree.ifs }
-}
-
-impl Item for AssignedDecl {
-    fn dependencies<'src>(&'src self, b: &'src Builder<'src>) -> SmallVec<[Level; 3]> {
-        smallvec![b.levels[self.root_expr]]
-    }
-    fn storage(tree: &mut Tree) -> &mut DepVec<Self> { &mut tree.assigned_decls }
-}
-
-pub trait Item: Sized {
-    fn dependencies<'src>(&'src self, builder: &'src Builder<'src>) -> SmallVec<[Level; 3]>;
-    fn storage(tree: &mut Tree) -> &mut DepVec<Self>;
-}
-
-impl<'src> Builder<'src> {
-    fn compute_tree_offset(&self, tree: TreeId, tree_offsets: &mut IdxVec<u32, TreeId>) {
-        if tree_offsets[tree] != std::u32::MAX {
-            return;
-        }
-
-        let deps = &self.tree_dependencies[tree];
-        let mut result = deps.global;
-        for &(tree, offset) in &deps.local {
-            self.compute_tree_offset(tree, tree_offsets);
-            let local_offset = tree_offsets[tree] + offset;
-            result = max(result, local_offset);
-        }
-        if let Some(decl_ref) = deps.decl_ref {
-            for &overload in &self.overloads[decl_ref] {
-                let level = self.decls[overload].level;
-                match level {
-                    Level::Global(offset) => result = max(result, offset),
-                    Level::Local(tree, offset) => {
-                        self.compute_tree_offset(tree, tree_offsets);
-                        let local_offset = tree_offsets[tree] + offset;
-                        result = max(result, local_offset);
+                    None => {
+                        assert_eq!(ret_exprs.len(), 1, "multiple returns from assigned functions not allowed");
+                        let root_expr = ret_exprs[0];
+                        self.insert(AssignedDecl { explicit_ty: None, root_expr, decl_id: id }, 0)
                     },
-                }
-            }
-        }
-        tree_offsets[tree] = result + 1;
+                };
+
+                self.comp_decl_stack.pop().unwrap();
+
+                level
+            },
+            hir::Decl::Const(expr) | hir::Decl::Static(expr) => {
+                self.build_expr(expr);
+                self.insert(AssignedDecl { explicit_ty: self.hir.explicit_tys[id].clone(), root_expr: expr, decl_id: id }, 0)
+            },
+            hir::Decl::Intrinsic { .. } | hir::Decl::Parameter { .. } => 0,
+            hir::Decl::Stored { .. } => panic!("Should've already been handled in build_scope"),
+        };
+        self.decl_levels[id] = Level::Resolved(level);
+        level
     }
-}
 
-impl<'src> builder::Builder<'src> for Builder<'src> {
-    type Output = Program;
-
-    fn output(mut self) -> Program {
-        // Enumerate overloads for all the decl refs
-        for decl_ref in &self.global_decl_refs {
-            self.overloads[decl_ref.id] = self.global_decls.iter().filter_map(|decl| {
-                if decl.name == decl_ref.name && decl.num_params == decl_ref.num_arguments {
-                    Some(decl.decl)
-                } else {
-                    None
-                }
-            }).collect();
+    pub fn build(mut self) -> Program<'hir> {
+        // Populate `self.decls`
+        for (i, decl) in self.hir.decls.iter().enumerate() {
+            let id = DeclId::new(i);
+            let ty = self.hir.explicit_tys[id].as_ref()
+                .map(|ty| ty.clone())
+                .unwrap_or(Type::Error);
+            let (ret_ty, param_tys) = match *decl {
+                hir::Decl::Computed { ref param_tys, .. } => (
+                    ty.into(),
+                    param_tys.clone(),
+                ),
+                hir::Decl::Const(_) => (
+                    ty.into(),
+                    SmallVec::new(),
+                ),
+                hir::Decl::Intrinsic { ref param_tys, .. } => (
+                    ty.into(),
+                    param_tys.clone(),
+                ),
+                hir::Decl::Parameter { .. } => (
+                    ty.into(),
+                    SmallVec::new(),
+                ),
+                hir::Decl::Static(_) => (
+                    QualType { ty, is_mut: true },
+                    SmallVec::new(),
+                ),
+                hir::Decl::Stored { is_mut, .. } => (
+                    QualType { ty, is_mut },
+                    SmallVec::new(),
+                ),
+            };
+            self.decls.push(Decl { param_tys, ret_ty });
+            self.decl_levels.push(Level::Unresolved);
         }
 
-        // Compute base tree offsets using dynamic programming
-        let mut tree_offsets = IdxVec::<u32, TreeId>::new();
-        tree_offsets.raw.resize(self.local_trees.len(), std::u32::MAX);
-        for i in 0..tree_offsets.len() {
-            self.compute_tree_offset(TreeId::new(i), &mut tree_offsets);
+        // Populate `self.global_decls`
+        for &id in &self.hir.global_decls {
+            let name = self.hir.names[id];
+            match self.global_decls.iter_mut().find(|group| group.name == name) {
+                Some(group) => group,
+                None => {
+                    self.global_decls.push(GlobalDeclGroup { name, decls: Vec::new() });
+                    self.global_decls.last_mut().unwrap()
+                },
+            }.decls.push(GlobalDecl { id, num_params: self.decls[id].param_tys.len() });
         }
 
-        let mut global_tree = self.global_tree;
-        for (tree, offset) in self.local_trees.into_iter().zip(tree_offsets) {
-            global_tree.extend(offset, tree);
+        debug_assert!(self.overloads.is_empty());
+        debug_assert!(self.expr_levels.len() == 1);
+        self.overloads.resize_with(self.hir.num_decl_refs, || Vec::new());
+        self.expr_levels.resize_with(self.hir.exprs.len(), || std::u32::MAX);
+
+        // Build global decls, which will recursively build all expressions and local declarations
+        for &id in &self.hir.global_decls {
+            self.build_decl(id);
         }
 
         Program {
@@ -510,254 +465,48 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             ret_groups: self.ret_groups.raw,
             casts: self.casts,
             whiles: self.whiles,
+            dos: self.dos,
+            assigned_decls: self.assigned_decls,
+            assignments: self.assignments,
+            decl_refs: self.decl_refs,
+            addr_ofs: self.addr_ofs,
+            derefs: self.derefs,
+            ifs: self.ifs,
             void_expr: self.void_expr,
-            tree: global_tree,
-            source_ranges: self.source_ranges,
+            source_ranges: self.hir.source_ranges.as_idx_slice(),
             decls: self.decls,
             overloads: self.overloads,
-            num_exprs: self.levels.len(),
+            num_exprs: self.expr_levels.len(),
         }
     }
+}
 
-    fn add_intrinsic(&mut self, intrinsic: Intrinsic, param_tys: SmallVec<[Type; 2]>, ret_ty: Type) {
-        let name = self.interner.get_or_intern(intrinsic.name());
-        let num_params = param_tys.len() as u32;
-        let id = self.decls.push(Decl::new(param_tys, ret_ty, Level::Global(0)));
-        self.global_decls.push(GlobalDecl { name, num_params, decl: id });
-    }
-
-    fn void_expr(&self) -> ExprId { self.void_expr }
-
-    fn int_lit(&mut self, _lit: u64, range: SourceRange) -> ExprId {
-        let id = ExprId::new(self.levels.len());
-        self.int_lits.push(id);
-        self.levels.push(Level::Global(0));
-        self.source_ranges.push(range);
-        id
-    }
-
-    fn dec_lit(&mut self, _lit: f64, range: SourceRange) -> ExprId {
-        let id = ExprId::new(self.levels.len());
-        self.dec_lits.push(id);
-        self.levels.push(Level::Global(0));
-        self.source_ranges.push(range);
-
-        id
-    }
-
-    fn str_lit(&mut self, _lit: CString, range: SourceRange) -> ExprId {
-        let id = ExprId::new(self.levels.len());
-        self.str_lits.push(id);
-        self.levels.push(Level::Global(0));
-        self.source_ranges.push(range);
-
-        id
-    }
-
-    fn char_lit(&mut self, _lit: i8, range: SourceRange) -> ExprId {
-        let id = ExprId::new(self.levels.len());
-        self.char_lits.push(id);
-        self.levels.push(Level::Global(0));
-        self.source_ranges.push(range);
-
-        id
-    }
-
-    fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId {
-        self.source_ranges.push(range);
-        match op {
-            BinOp::Assign => self.insert_expr(Assignment { lhs, rhs }), 
-            _ => {
-                let decl_ref_id = self.overloads.push(Vec::new());
-                self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name: self.interner.get_or_intern(op.symbol()), num_arguments: 2 });
-                self.insert_global_decl_ref(DeclRef { args: smallvec![lhs, rhs], decl_ref_id })
+macro_rules! item_impl {
+    ($ty:ty, $storage:ident; $($level:ident),+) => {
+        impl Item for $ty {
+            fn compute_level<'hir>(&'hir self, b: &'hir Builder<'hir>) -> u32 {
+                [$(b.expr_levels[self.$level]),+].iter().max().unwrap() + 1
             }
+            fn storage<'a, 'hir>(builder: &'a mut Builder<'hir>) -> &'a mut DepVec<Self> { &mut builder.$storage }
         }
     }
+}
 
-    fn cast(&mut self, expr: ExprId, ty: Type, range: SourceRange) -> ExprId {
-        let id = ExprId::new(self.levels.len());
-        let cast_id = CastId::new(self.casts.len());
-        self.casts.push(Expr { id, data: Cast { expr, ty, cast_id }});
-        self.levels.push(Level::Global(0));
-        self.source_ranges.push(range);
+pub trait Item: Sized {
+    fn compute_level<'hir>(&'hir self, builder: &'hir Builder<'hir>) -> u32;
+    fn storage<'a, 'hir>(builder: &'a mut Builder<'hir>) -> &'a mut DepVec<Self>;
+}
 
-        id
+item_impl!(Expr<Do>, dos; terminal_expr);
+item_impl!(Expr<Assignment>, assignments; lhs, rhs);
+item_impl!(Expr<AddrOf>, addr_ofs; expr);
+item_impl!(Expr<Dereference>, derefs; expr);
+item_impl!(Expr<If>, ifs; condition, then_expr, else_expr);
+item_impl!(AssignedDecl, assigned_decls; root_expr);
+
+impl Item for Expr<DeclRef> {
+    fn compute_level<'hir>(&'hir self, b: &'hir Builder<'hir>) -> u32 {
+        self.args.iter().map(|&id| b.expr_levels[id]).max().unwrap_or(0) + 1
     }
-
-    fn un_op(&mut self, op: UnOp, expr: ExprId, range: SourceRange) -> ExprId {
-        self.source_ranges.push(range);
-        match op {
-            UnOp::AddrOf => self.insert_expr(AddrOf { expr, is_mut: false }),
-            UnOp::AddrOfMut => self.insert_expr(AddrOf { expr, is_mut: true }),
-            UnOp::Deref => self.insert_expr(Dereference { expr }),
-            _ => {
-                let decl_ref_id = self.overloads.push(Vec::new());
-                self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name: self.interner.get_or_intern(op.symbol()), num_arguments: 1 });
-                self.insert_global_decl_ref(DeclRef { args: smallvec![expr], decl_ref_id })
-            }
-        }
-    }
-
-    fn stored_decl(&mut self, name: &'src str, explicit_ty: Option<Type>, is_mut: bool, root_expr: ExprId, _range: SourceRange) {
-        let decl_id = DeclId::new(self.decls.len());
-        let level = self.insert_item(AssignedDecl { explicit_ty, root_expr, decl_id });
-        self.decls.push(
-            Decl::new(SmallVec::new(), QualType { ty: Type::Error, is_mut }, level),
-        );
-        let name = self.interner.get_or_intern(name);
-        if let Some(comp_decl_state) = self.comp_decl_stack.last_mut() {
-            comp_decl_state.decls.push(LocalDecl { name, decl: decl_id });
-        } else {
-            self.global_decls.push(GlobalDecl { name, num_params: 0, decl: decl_id });
-        }
-    }
-
-    fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
-        if let RetKind::AssignedDecl = self.comp_decl_stack.last().unwrap().ret_kind {
-            panic!("Can't return from assigned decl!");
-        }
-        let id = self.levels.push(Level::Global(0));
-        self.source_ranges.push(range);
-        self.explicit_rets.push(id);
-        self.implicit_ret(expr);
-
-        id
-    }
-
-    fn implicit_ret(&mut self, expr: ExprId) {
-        let comp_decl = self.comp_decl_stack.last().unwrap();
-        match comp_decl.ret_kind {
-            RetKind::RetGroup(id) => self.ret_groups[id].exprs.push(expr),
-            RetKind::AssignedDecl => {
-                let decl_id = comp_decl.id;
-                let level = self.insert_item(AssignedDecl { explicit_ty: None, root_expr: expr, decl_id });
-                self.decls[decl_id].level = level;
-            },
-        }
-    }
-
-    fn if_expr(&mut self, condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId>, range: SourceRange) -> ExprId {
-        let then_expr = self.terminal_exprs[then_scope];
-        let else_expr = else_scope.map_or_else(|| self.void_expr(), |scope| self.terminal_exprs[scope]);
-        self.source_ranges.push(range);
-        self.insert_expr(If { condition, then_expr, else_expr })
-    }
-
-    fn while_expr(&mut self, condition: ExprId, _scope: ScopeId, range: SourceRange) -> ExprId {
-        let id = ExprId::new(self.levels.len());
-        self.whiles.push(Expr { id, data: While { condition }});
-        self.levels.push(Level::Global(0));
-        self.source_ranges.push(range);
-
-        id
-    }
-
-    fn stmt(&mut self, expr: ExprId) {
-        let scope_state = self.comp_decl_stack.last_mut().unwrap().scope_stack.last_mut().unwrap();
-        if let Some(stmt) = scope_state.stmt_buffer {
-            self.stmts.push(Stmt { root_expr: stmt });
-        }
-        scope_state.stmt_buffer = Some(expr);
-    }
-
-    fn do_expr(&mut self, scope: ScopeId, range: SourceRange) -> ExprId {
-        self.source_ranges.push(range);
-        self.insert_expr(Do { terminal_expr: self.terminal_exprs[scope] })
-    }
-
-    fn begin_scope(&mut self) -> ScopeId {
-        let scope = self.terminal_exprs.push(self.void_expr());
-        let stack = self.comp_decl_stack.last_mut().unwrap();
-        stack.scope_stack.push(
-            ScopeState {
-                id: scope,
-                previous_decls: stack.decls.len(),
-                stmt_buffer: None,
-            }
-        );
-        scope
-    }
-
-    fn end_scope(&mut self, has_terminal_expr: bool) {
-        let stack = self.comp_decl_stack.last_mut().unwrap();
-        let scope = stack.scope_stack.pop().unwrap();
-        if has_terminal_expr {
-            let terminal_expr = scope.stmt_buffer.expect("must pass terminal expression via Builder::stmt()");
-            self.terminal_exprs[scope.id] = terminal_expr;
-        } else if let Some(stmt) = scope.stmt_buffer {
-            self.stmts.push(Stmt { root_expr: stmt });
-        }
-        stack.decls.truncate(scope.previous_decls);
-    }
-
-    fn begin_computed_decl(&mut self, name: &'src str, param_names: SmallVec<[&'src str; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Option<Type>, _proto_range: SourceRange) {
-        assert_eq!(param_names.len(), param_tys.len());
-        let decl_id = self.decls.push(Decl::new(param_tys.clone(), ret_ty.clone().unwrap_or_else(|| Type::Error), Level::Global(0)));
-        let name = self.interner.get_or_intern(name);
-        let local_decl = LocalDecl { name, decl: decl_id };
-        let ret_kind = match ret_ty {
-            Some(ty) => RetKind::RetGroup(self.ret_groups.push(RetGroup::new(ty))),
-            None => RetKind::AssignedDecl,
-        };
-        let mut decl_state = CompDeclState::new(decl_id, ret_kind);
-        // Add decl to its own scope to enable recursion
-        decl_state.decls.push(local_decl.clone());
-        if let Some(comp_decl_state) = self.comp_decl_stack.last_mut() {
-            // Add decl to enclosing scope
-            comp_decl_state.decls.push(local_decl);
-        } else {
-            // Add decl to global scope
-            self.global_decls.push(GlobalDecl { name, num_params: param_tys.len() as u32, decl: decl_id });
-        }
-        // Add parameters to scope
-        for (&name, ty) in param_names.iter().zip(&param_tys) {
-            let name = self.interner.get_or_intern(name);
-            let id = self.decls.push(Decl::new(SmallVec::new(), ty.clone(), Level::Global(0)));
-            decl_state.decls.push(LocalDecl { name, decl: id });
-        }
-        self.comp_decl_stack.push(decl_state);
-    }
-
-    fn end_computed_decl(&mut self) {
-        self.comp_decl_stack.pop().unwrap();
-    }
-
-    fn decl_ref(&mut self, name: &'src str, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
-        let mut decl: Option<(Level, DeclId)> = None;
-        let name = self.interner.get_or_intern(name);
-        if let Some(comp_decl) = self.comp_decl_stack.last() {
-            for &LocalDecl { name: other_name, decl: other_decl } in comp_decl.decls.iter().rev() {
-                let other_level = self.decls[other_decl].level;
-                if name == other_name {
-                    decl = Some((other_level, other_decl));
-                    break;
-                }
-            }
-        }
-
-        self.source_ranges.push(range);
-        if let Some((level, decl)) = decl {
-            // Local decl
-            let decl_ref_id = self.overloads.push(vec![decl]);
-            self.insert_local_decl_ref(DeclRef { args: arguments, decl_ref_id }, level)
-        } else {
-            // Global decl
-            let decl_ref_id = self.overloads.push(Vec::new());
-            self.global_decl_refs.push(GlobalDeclRef { id: decl_ref_id, name, num_arguments: arguments.len() as u32 });
-            self.insert_global_decl_ref(DeclRef { args: arguments, decl_ref_id })
-        }
-    }
-
-    fn get_range(&self, id: ExprId) -> SourceRange {
-        self.source_ranges[id].clone()
-    }
-
-    fn set_range(&mut self, id: ExprId, range: SourceRange) {
-        self.source_ranges[id] = range;
-    }
-
-    fn get_terminal_expr(&self, scope: ScopeId) -> ExprId {
-        self.terminal_exprs[scope]
-    }
+    fn storage<'a, 'hir>(builder: &'a mut Builder<'hir>) -> &'a mut DepVec<Self> { &mut builder.decl_refs }
 }

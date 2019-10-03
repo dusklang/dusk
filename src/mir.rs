@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::fmt;
+use std::rc::Rc;
 
 use smallvec::SmallVec;
+use string_interner::{Sym, DefaultStringInterner as Interner};
 
 use crate::arch::Arch;
 use crate::ty::Type;
@@ -76,7 +78,7 @@ enum Decl {
 
 #[derive(Debug)]
 pub struct Function {
-    pub name: String,
+    pub name: Option<Sym>,
     pub ret_ty: Type,
     pub code: IdxVec<Instr, InstrId>,
     pub basic_blocks: IdxVec<InstrId, BasicBlockId>,
@@ -160,6 +162,7 @@ pub struct Program {
     pub strings: IdxVec<CString, StrId>,
     pub statics: IdxVec<Const, StaticId>,
     pub arch: Arch,
+    interner: Rc<Interner>,
 }
 
 fn expr_to_const(expr: &Expr, ty: Type, strings: &mut IdxVec<CString, StrId>) -> Const {
@@ -273,13 +276,13 @@ impl<'a> Builder<'a> {
     fn get_decl(&mut self, id: DeclId) -> Decl {
         if let Some(decl) = self.decls.get(&id) { return decl.clone(); }
         match self.hir.decls[id] {
-            hir::Decl::Computed { ref name, ref params, scope } => {
+            hir::Decl::Computed { ref params, scope, .. } => {
                 let get = FuncId::new(self.functions.len());
                 let decl = Decl::Computed { get };
                 self.decls.insert(id, decl.clone());
                 let func = FunctionBuilder::new(
                     self,
-                    name.clone(),
+                    Some(self.hir.names[id]),
                     self.tc.decl_types[id].clone(),
                     FunctionBody::Scope(scope),
                     &params[..],
@@ -288,7 +291,7 @@ impl<'a> Builder<'a> {
                 self.functions.push(func);
                 decl
             },
-            hir::Decl::Stored(index) => {
+            hir::Decl::Stored { id: index, .. } => {
                 let decl = Decl::Stored(index);
                 self.decls.insert(id, decl.clone());
                 decl
@@ -298,7 +301,7 @@ impl<'a> Builder<'a> {
                 self.decls.insert(id, decl.clone());
                 decl
             },
-            hir::Decl::Intrinsic(intr) => {
+            hir::Decl::Intrinsic { intr, .. } => {
                 let decl = Decl::Intrinsic(intr, self.tc.decl_types[id].clone());
                 self.decls.insert(id, decl.clone());
                 decl
@@ -308,7 +311,7 @@ impl<'a> Builder<'a> {
                 self.decls.insert(id, decl.clone());
                 let func = FunctionBuilder::new(
                     self,
-                    String::from("static_init"),
+                    None,
                     self.tc.decl_types[id].clone(),
                     FunctionBody::Expr(expr),
                     &[],
@@ -321,7 +324,7 @@ impl<'a> Builder<'a> {
                 let ty = self.tc.decl_types[id].clone();
                 let function = FunctionBuilder::new(
                     self,
-                    String::from("const_init"),
+                    None,
                     ty.clone(),
                     FunctionBody::Expr(root_expr),
                     &[],
@@ -349,6 +352,7 @@ impl<'a> Builder<'a> {
             strings: self.strings,
             statics: IdxVec::new(),
             arch: self.arch,
+            interner: self.hir.interner.clone(),
         };
         // TODO: creating a new variable for statics here is a hack to prevent userspace code from being able to access static variables.
         // There should be a flag passed to the interpreter to solve this problem (with a nice error message) instead.
@@ -376,6 +380,15 @@ fn fmt_const(f: &mut fmt::Formatter, konst: &Const, prog: &Program) -> fmt::Resu
     }
 }
 
+impl Program {
+    fn fn_name(&self, name: Option<Sym>) -> &str {
+        match name {
+            Some(name) => self.interner.as_ref().resolve(name).unwrap(),
+            None => "{anonymous}",
+        }
+    }
+}
+
 impl fmt::Display for Program {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if !self.statics.raw.is_empty() {
@@ -387,7 +400,7 @@ impl fmt::Display for Program {
         }
 
         for (i, func) in self.functions.iter().enumerate() {
-            write!(f, "fn {}", &func.name)?;
+            write!(f, "fn {}", self.fn_name(func.name))?;
             assert_eq!(&func.code.raw[0], &Instr::Void);
             let mut first = true;
             for i in 1..func.code.len() {
@@ -452,7 +465,7 @@ impl fmt::Display for Program {
                         &Instr::CondBr { condition, true_bb, false_bb }
                             => writeln!(f, "condbr %{}, %bb{}, %bb{}", condition.idx(), true_bb.idx(), false_bb.idx())?,
                         &Instr::Call { ref arguments, func: callee } => {
-                            write!(f, "%{} = call `{}`", i, self.functions[callee].name)?;
+                            write!(f, "%{} = call `{}`", i, self.fn_name(self.functions[callee].name))?;
                             write_args!(arguments)?
                         },
                         Instr::Const(konst) => {
@@ -497,7 +510,7 @@ enum FunctionBody {
 
 struct FunctionBuilder<'a, 'mir: 'a> {
     b: &'a mut Builder<'mir>,
-    name: String,
+    name: Option<Sym>,
     ret_ty: Type,
     body: FunctionBody,
     arch: Arch,
@@ -510,7 +523,7 @@ struct FunctionBuilder<'a, 'mir: 'a> {
 impl<'a, 'mir: 'a> FunctionBuilder<'a, 'mir> {
     fn new(
         b: &'a mut Builder<'mir>,
-        name: String,
+        name: Option<Sym>,
         ret_ty: Type,
         body: FunctionBody,
         params: &[DeclId],
@@ -550,13 +563,15 @@ impl<'a, 'mir: 'a> FunctionBuilder<'a, 'mir> {
             Item::Stmt(expr) => {
                 self.expr(expr, Context::new(0, DataDest::Void, ControlDest::Continue));
             },
-            Item::StoredDecl { id, root_expr } => {
+            Item::StoredDecl { id, root_expr, .. } => {
                 let ty = self.type_of(root_expr);
                 let location = self.code.push(Instr::Alloca(ty));
                 assert_eq!(self.stored_decl_locs.len(), id.idx());
                 self.stored_decl_locs.push(location);
                 self.expr(root_expr, Context::new(0, DataDest::Store { location }, ControlDest::Continue));
             },
+            // No need to give local computed decls special treatment at the MIR level
+            Item::ComputedDecl(_) => {},
         }
     }
 
@@ -665,13 +680,126 @@ impl<'a, 'mir: 'a> FunctionBuilder<'a, 'mir> {
                     _ => self.void_instr(),
                 };
             },
-            Expr::DeclRef { ref arguments, id } => {
+            // This isn't really a loop! It's just a control flow hack to get around the fact
+            // that you can't chain `if let`s in Rust.
+            Expr::DeclRef { ref arguments, id, .. } => loop {
+                // Check if the declaration is an intrinsic
+                let decl_id = self.b.tc.overloads[id].unwrap();
+                if let hir::Decl::Intrinsic { intr, .. } = self.b.hir.decls[decl_id] {
+                    // Check if we need to special case the intrinsic
+                    match intr {
+                        Intrinsic::LogicalAnd => break {
+                            assert_eq!(ctx.indirection, 0);
+                            assert_eq!(arguments.len(), 2);
+                            let (lhs, rhs) = (arguments[0], arguments[1]);
+                            let left_true_bb = self.new_bb();
+                            let location = if let DataDest::Read = ctx.data {
+                                Some(self.code.push(Instr::Alloca(ty.clone())))
+                            } else {
+                                None
+                            };
+                            if let DataDest::Branch(true_bb, false_bb) = ctx.data {
+                                self.expr(
+                                    lhs,
+                                    Context::new(0, DataDest::Branch(left_true_bb, false_bb), ControlDest::Continue),
+                                );
+
+                                self.begin_bb(left_true_bb);
+                                return self.expr(
+                                    rhs,
+                                    Context::new(0, DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
+                                );
+                            } else {
+                                let left_false_bb = self.new_bb();
+                                let after_bb = self.new_bb();
+                                self.expr(
+                                    lhs,
+                                    Context::new(0, DataDest::Branch(left_true_bb, left_false_bb), ControlDest::Continue),
+                                );
+
+                                self.begin_bb(left_true_bb);
+                                // No further branching required, because (true && foo) <=> foo
+                                let branch_ctx = ctx.redirect(location, Some(after_bb));
+                                self.expr(rhs, branch_ctx.clone());
+
+                                self.begin_bb(left_false_bb);
+                                let false_val = self.code.push(Instr::Const(Const::Bool(false)));
+                                self.handle_context(false_val, expr, Type::Bool, branch_ctx, false);
+
+                                self.begin_bb(after_bb);
+                                if let Some(location) = location {
+                                    self.code.push(Instr::Load(location))
+                                } else {
+                                    return self.void_instr()
+                                }
+                            }
+                        },
+                        Intrinsic::LogicalOr => break {
+                            assert_eq!(ctx.indirection, 0);
+                            assert_eq!(arguments.len(), 2);
+                            let (lhs, rhs) = (arguments[0], arguments[1]);
+                            let left_false_bb = self.new_bb();
+                            if let DataDest::Branch(true_bb, false_bb) = ctx.data {
+                                self.expr(
+                                    lhs,
+                                    Context::new(0, DataDest::Branch(true_bb, left_false_bb), ControlDest::Continue),
+                                );
+
+                                self.begin_bb(left_false_bb);
+                                return self.expr(
+                                    rhs,
+                                    Context::new(0, DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
+                                );
+                            } else {
+                                let left_true_bb = self.new_bb();
+                                let after_bb = self.new_bb();
+                                let location = if let DataDest::Read = ctx.data {
+                                    Some(self.code.push(Instr::Alloca(ty.clone())))
+                                } else {
+                                    None
+                                };
+                                self.expr(
+                                    lhs,
+                                    Context::new(0, DataDest::Branch(left_true_bb, left_false_bb), ControlDest::Continue),
+                                );
+
+                                self.begin_bb(left_true_bb);
+                                let true_val = self.code.push(Instr::Const(Const::Bool(true)));
+                                let branch_ctx = ctx.redirect(location, Some(after_bb));
+                                self.handle_context(true_val, expr, Type::Bool, branch_ctx.clone(), false);
+
+                                self.begin_bb(left_false_bb);
+                                self.expr(rhs, branch_ctx);
+
+                                self.begin_bb(after_bb);
+                                if let Some(location) = location {
+                                    self.code.push(Instr::Load(location))
+                                } else {
+                                    return self.void_instr()
+                                }
+                            }
+                        },
+                        Intrinsic::LogicalNot => break {
+                            assert_eq!(arguments.len(), 1);
+                            let operand = arguments[0];
+                            if let DataDest::Branch(true_bb, false_bb) = ctx.data {
+                                return self.expr(operand, Context::new(0, DataDest::Branch(false_bb, true_bb), ctx.control))
+                            } else {
+                                let operand = self.expr(operand, Context::new(0, DataDest::Read, ControlDest::Continue));
+                                self.code.push(Instr::LogicalNot(operand))
+                            }
+                        },
+                        _ => {},
+                    }
+                }
+
+                // Otherwise, just handle the general case
                 should_allow_set = true;
                 let arguments = arguments.iter().map(|&argument|
                     self.expr(argument, Context::new(0, DataDest::Read, ControlDest::Continue))
                 ).collect();
 
-                if ctx.indirection < 0 {
+                break if ctx.indirection < 0 {
                     ctx.indirection += 1;
                     self.modify(arguments, id)
                 } else {
@@ -686,102 +814,6 @@ impl<'a, 'mir: 'a> FunctionBuilder<'a, 'mir> {
                         },
                         _ => self.get(arguments, id),
                     }
-                }
-            },
-            Expr::LogicalAnd { lhs, rhs } => {
-                assert_eq!(ctx.indirection, 0);
-                let left_true_bb = self.new_bb();
-                let location = if let DataDest::Read = ctx.data {
-                    Some(self.code.push(Instr::Alloca(ty.clone())))
-                } else {
-                    None
-                };
-                if let DataDest::Branch(true_bb, false_bb) = ctx.data {
-                    self.expr(
-                        lhs,
-                        Context::new(0, DataDest::Branch(left_true_bb, false_bb), ControlDest::Continue),
-                    );
-
-                    self.begin_bb(left_true_bb);
-                    return self.expr(
-                        rhs,
-                        Context::new(0, DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
-                    );
-                } else {
-                    let left_false_bb = self.new_bb();
-                    let after_bb = self.new_bb();
-                    self.expr(
-                        lhs,
-                        Context::new(0, DataDest::Branch(left_true_bb, left_false_bb), ControlDest::Continue),
-                    );
-
-                    self.begin_bb(left_true_bb);
-                    // No further branching required, because (true && foo) <=> foo
-                    let branch_ctx = ctx.redirect(location, Some(after_bb));
-                    self.expr(rhs, branch_ctx.clone());
-
-                    self.begin_bb(left_false_bb);
-                    let false_val = self.code.push(Instr::Const(Const::Bool(false)));
-                    self.handle_context(false_val, expr, Type::Bool, branch_ctx, false);
-
-                    self.begin_bb(after_bb);
-                    if let Some(location) = location {
-                        self.code.push(Instr::Load(location))
-                    } else {
-                        return self.void_instr()
-                    }
-                }
-            },
-            Expr::LogicalOr { lhs, rhs } => {
-                assert_eq!(ctx.indirection, 0);
-                let left_false_bb = self.new_bb();
-                if let DataDest::Branch(true_bb, false_bb) = ctx.data {
-                    self.expr(
-                        lhs,
-                        Context::new(0, DataDest::Branch(true_bb, left_false_bb), ControlDest::Continue),
-                    );
-
-                    self.begin_bb(left_false_bb);
-                    return self.expr(
-                        rhs,
-                        Context::new(0, DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
-                    );
-                } else {
-                    let left_true_bb = self.new_bb();
-                    let after_bb = self.new_bb();
-                    let location = if let DataDest::Read = ctx.data {
-                        Some(self.code.push(Instr::Alloca(ty.clone())))
-                    } else {
-                        None
-                    };
-                    self.expr(
-                        lhs,
-                        Context::new(0, DataDest::Branch(left_true_bb, left_false_bb), ControlDest::Continue),
-                    );
-
-                    self.begin_bb(left_true_bb);
-                    let true_val = self.code.push(Instr::Const(Const::Bool(true)));
-                    let branch_ctx = ctx.redirect(location, Some(after_bb));
-                    self.handle_context(true_val, expr, Type::Bool, branch_ctx.clone(), false);
-
-                    self.begin_bb(left_false_bb);
-                    self.expr(rhs, branch_ctx);
-
-                    self.begin_bb(after_bb);
-                    if let Some(location) = location {
-                        self.code.push(Instr::Load(location))
-                    } else {
-                        return self.void_instr()
-                    }
-                }
-            },
-            Expr::LogicalNot(operand) => {
-                assert_eq!(ctx.indirection, 0);
-                if let DataDest::Branch(true_bb, false_bb) = ctx.data {
-                    return self.expr(operand, Context::new(0, DataDest::Branch(false_bb, true_bb), ctx.control))
-                } else {
-                    let operand = self.expr(operand, Context::new(0, DataDest::Read, ControlDest::Continue));
-                    self.code.push(Instr::LogicalNot(operand))
                 }
             },
             Expr::Cast { expr, ty: ref dest_ty, cast_id } => match &self.b.tc.cast_methods[cast_id] {
@@ -830,7 +862,7 @@ impl<'a, 'mir: 'a> FunctionBuilder<'a, 'mir> {
                     self.code.push(Instr::IntToFloat(value, dest_ty.clone()))
                 },
             },
-            Expr::AddrOf(operand) => return self.expr(operand, Context::new(ctx.indirection - 1, ctx.data, ctx.control)),
+            Expr::AddrOf { expr: operand, .. } => return self.expr(operand, Context::new(ctx.indirection - 1, ctx.data, ctx.control)),
             Expr::Deref(operand) => return self.expr(operand, Context::new(ctx.indirection + 1, ctx.data, ctx.control)),
             Expr::Do { scope } => return self.scope(scope, ctx),
             Expr::If { condition, then_scope, else_scope } => {
