@@ -57,6 +57,8 @@ impl<T, I: Idx> IdxVec<T, I> {
     }
 
     pub fn len(&self) -> usize { self.raw.len() }
+    pub fn is_empty(&self) -> bool { self.raw.is_empty() }
+
     pub fn push(&mut self, value: T) -> I { 
         let i = self.raw.len();
         self.raw.push(value);

@@ -119,11 +119,13 @@ struct GlobalDeclGroup {
     decls: Vec<GlobalDecl>,
 }
 
+#[derive(Debug)]
 struct LocalDecl {
     name: Sym,
     id: DeclId,
 }
 
+#[derive(Debug)]
 struct CompDeclState {
     local_decls: Vec<LocalDecl>,
     /// The size of `local_decls` before the current scope was started
@@ -223,9 +225,13 @@ impl<'hir> Builder<'hir> {
     }
 
     fn build_expr(&mut self, id: ExprId) -> u32 {
-        match self.hir.exprs[id] {
-            hir::Expr::AddrOf { expr, is_mut } => self.insert_expr(id, AddrOf { expr, is_mut }),
+        let level = match self.hir.exprs[id] {
+            hir::Expr::AddrOf { expr, is_mut } => {
+                self.build_expr(expr);
+                self.insert_expr(id, AddrOf { expr, is_mut }, 0)
+            },
             hir::Expr::Cast { expr, ref ty, cast_id } => {
+                self.build_expr(expr);
                 self.casts.push(Expr { id, data: Cast { expr, ty: ty.clone(), cast_id } });
                 0
             },
@@ -246,6 +252,11 @@ impl<'hir> Builder<'hir> {
                 0
             }
             hir::Expr::DeclRef { name, ref arguments, id: decl_ref_id } => {
+                println!("Building declref {} at range {:?}", self.hir.interner.resolve(name).unwrap(), self.hir.source_ranges[id]);
+                for &arg in arguments {
+                    self.build_expr(arg);
+                }
+        
                 let mut overloads = Vec::new();
                 if let Some(state) = self.comp_decl_stack.last() {
                     if let Some(decl) = state.local_decls.iter().rev().find(|decl| decl.name == name) {
@@ -262,43 +273,59 @@ impl<'hir> Builder<'hir> {
                             }).collect();
                     }
                 }
+                let mut deepest_overload = 0;
+                for &overload in &overloads {
+                    deepest_overload = std::cmp::max(deepest_overload, self.build_decl(overload));
+                }
                 self.overloads[decl_ref_id] = overloads;
-                self.insert_expr(id, DeclRef { args: arguments.clone(), decl_ref_id })
+                self.insert_expr(id, DeclRef { args: arguments.clone(), decl_ref_id }, deepest_overload)
             },
-            hir::Expr::Deref(expr) => self.insert_expr(id, Dereference { expr }),
+            hir::Expr::Deref(expr) => {
+                self.build_expr(expr);
+                self.insert_expr(id, Dereference { expr }, 0)
+            },
             hir::Expr::Do { scope } => {
                 let terminal_expr = self.build_scope(scope);
-                self.insert_expr(id, Do { terminal_expr })
+                self.insert_expr(id, Do { terminal_expr }, 0)
             },
             hir::Expr::If { condition, then_scope, else_scope } => {
+                self.build_expr(condition);
                 let then_expr = self.build_scope(then_scope);
                 let else_expr = else_scope.map_or(self.void_expr, |scope| self.build_scope(scope));
-                self.insert_expr(id, If { condition, then_expr, else_expr })
+                self.insert_expr(id, If { condition, then_expr, else_expr }, 0)
             },
             hir::Expr::Ret { expr } => {
+                self.build_expr(expr);
                 self.comp_decl_stack.last_mut()
                     .expect("Found return expression outside of comp decl")
                     .returned_expressions.push(expr);
                 0
             },
-            hir::Expr::Set { lhs, rhs } => self.insert_expr(id, Assignment { lhs, rhs }),
+            hir::Expr::Set { lhs, rhs } => {
+                self.build_expr(lhs);
+                self.build_expr(rhs);
+                self.insert_expr(id, Assignment { lhs, rhs }, 0)
+            },
             hir::Expr::Void => 0,
             hir::Expr::While { condition, scope } => {
+                self.build_expr(condition);
                 self.build_scope(scope);
                 self.whiles.push(Expr { id, data: While { condition } });
                 0
             },
-        }
+        };
+        self.expr_levels[id] = level;
+        level
     }
 
-    fn insert<T: Item>(&mut self, value: T) -> u32 {
-        let level = value.compute_level(self);
+    fn insert<T: Item>(&mut self, value: T, additional_level: u32) -> u32 {
+        let level = std::cmp::max(additional_level, value.compute_level(self));
         T::storage(self).insert(level, value);
         level
     }
 
-    fn insert_expr<T>(&mut self, id: ExprId, data: T) -> u32 where Expr<T>: Item {
-        self.insert(Expr { id, data })
+    fn insert_expr<T>(&mut self, id: ExprId, data: T, additional_level: u32) -> u32 where Expr<T>: Item {
+        self.insert(Expr { id, data }, additional_level)
     }
 
     /// Returns terminal expression
@@ -312,10 +339,14 @@ impl<'hir> Builder<'hir> {
                 hir::Item::StoredDecl { decl_id, root_expr, .. } => {
                     let name = self.hir.names[decl_id];
                     let explicit_ty = self.hir.explicit_tys[decl_id].clone();
+                    let has_explicit_ty = explicit_ty.is_some();
 
-                    self.comp_decl_stack.last_mut().unwrap().local_decls.push(LocalDecl { name, id: decl_id });
                     self.build_expr(root_expr);
-                    self.insert(AssignedDecl { explicit_ty, root_expr, decl_id });
+                    self.comp_decl_stack.last_mut().unwrap().local_decls.push(LocalDecl { name, id: decl_id });
+                    let mut level = self.insert(AssignedDecl { explicit_ty, root_expr, decl_id }, 0);
+                    if has_explicit_ty { level = 0; }
+
+                    self.decl_levels[decl_id] = Level::Resolved(level);
                 },
                 hir::Item::ComputedDecl(decl_id) => {
                     let name = self.hir.names[decl_id];
@@ -339,11 +370,18 @@ impl<'hir> Builder<'hir> {
     fn build_decl(&mut self, id: DeclId) -> u32 {
         match self.decl_levels[id] {
             Level::Unresolved => self.decl_levels[id] = Level::Resolving,
-            Level::Resolving => panic!("Cycle detected!"),
+            Level::Resolving => panic!("Cycle detected on decl {}! CompDeclState: {:#?}", self.hir.interner.resolve(self.hir.names[id]).unwrap(), self.comp_decl_stack.last().unwrap()),
             Level::Resolved(level) => return level,
         }
-        match self.hir.decls[id] {
-            hir::Decl::Computed { ref param_tys, ref params, scope } => {
+        let level = match self.hir.decls[id] {
+            hir::Decl::Computed { ref params, scope, .. } => {
+                let mut comp_decl_state = CompDeclState::new();
+                comp_decl_state.open_scope();
+                comp_decl_state.local_decls.reserve(params.len());
+                for &id in params {
+                    let name = self.hir.names[id];
+                    comp_decl_state.local_decls.push(LocalDecl { name, id });
+                }
                 self.comp_decl_stack.push(CompDeclState::new());
 
                 let terminal_expr = self.build_scope(scope);
@@ -357,7 +395,7 @@ impl<'hir> Builder<'hir> {
                     None => {
                         assert_eq!(ret_exprs.len(), 1, "multiple returns from assigned functions not allowed");
                         let root_expr = ret_exprs[0];
-                        self.insert(AssignedDecl { explicit_ty: None, root_expr, decl_id: id })
+                        self.insert(AssignedDecl { explicit_ty: None, root_expr, decl_id: id }, 0)
                     },
                 };
 
@@ -367,21 +405,13 @@ impl<'hir> Builder<'hir> {
             },
             hir::Decl::Const(expr) | hir::Decl::Static(expr) => {
                 self.build_expr(expr);
-                self.insert(AssignedDecl { explicit_ty: self.hir.explicit_tys[id].clone(), root_expr: expr, decl_id: id })
+                self.insert(AssignedDecl { explicit_ty: self.hir.explicit_tys[id].clone(), root_expr: expr, decl_id: id }, 0)
             },
             hir::Decl::Intrinsic { .. } | hir::Decl::Parameter { .. } => 0,
-            hir::Decl::Stored { root_expr, .. } => {
-                self.build_expr(root_expr);
-                let explicit_ty = self.hir.explicit_tys[id].clone();
-                let has_explicit_ty = explicit_ty.is_some();
-                let level = self.insert(AssignedDecl { explicit_ty, root_expr, decl_id: id });
-                if has_explicit_ty {
-                    0
-                } else {
-                    level
-                }
-            }
-        }
+            hir::Decl::Stored { .. } => panic!("Should've already been handled in build_scope"),
+        };
+        self.decl_levels[id] = Level::Resolved(level);
+        level
     }
 
     pub fn build(mut self) -> Program<'hir> {
@@ -432,6 +462,11 @@ impl<'hir> Builder<'hir> {
                 },
             }.decls.push(GlobalDecl { id, num_params: self.decls[id].param_tys.len() });
         }
+
+        debug_assert!(self.overloads.is_empty());
+        debug_assert!(self.expr_levels.len() == 1);
+        self.overloads.resize_with(self.hir.num_decl_refs, || Vec::new());
+        self.expr_levels.resize_with(self.hir.exprs.len(), || std::u32::MAX);
 
         // Build global decls, which will recursively build all expressions and local declarations
         for &id in &self.hir.global_decls {
@@ -489,7 +524,7 @@ item_impl!(AssignedDecl, assigned_decls; root_expr);
 
 impl Item for Expr<DeclRef> {
     fn compute_level<'hir>(&'hir self, b: &'hir Builder<'hir>) -> u32 {
-        self.args.iter().map(|&id| b.expr_levels[id]).max().unwrap() + 1
+        self.args.iter().map(|&id| b.expr_levels[id]).max().unwrap_or(0) + 1
     }
     fn storage<'a, 'hir>(builder: &'a mut Builder<'hir>) -> &'a mut DepVec<Self> { &mut builder.decl_refs }
 }
