@@ -22,14 +22,6 @@ impl<T> DepVec<T> {
     pub fn get_level(&self, level: u32) -> &[T] {
         &self.storage[level as usize]
     }
-
-    pub fn extend(&mut self, offset: u32, other: DepVec<T>) {
-        let offset = offset as usize;
-        self.storage.resize_with(max(other.storage.len() + offset, self.storage.len()), Vec::new);
-        for (i, level) in other.storage.into_iter().enumerate() {
-            self.storage[offset + i].extend(level);
-        }
-    }
 }
 
 // Type eraser for DepVecs with different Ts.
