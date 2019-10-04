@@ -300,6 +300,11 @@ impl<'hir> Builder<'hir> {
         self.get_level(Expr { id, data }, additional_level)
     }
 
+    fn insert_expr<T>(&mut self, id: ExprId, data: T) where Expr<T>: Item {
+        let level = self.expr_levels[id];
+        Expr::<T>::storage(self).insert(level, Expr { id, data });
+    }
+
     /// Returns terminal expression
     fn prebuild_scope(&mut self, id: ScopeId) -> ExprId {
         self.comp_decl_stack.last_mut().unwrap().open_scope();
@@ -342,7 +347,7 @@ impl<'hir> Builder<'hir> {
         }
         let level = match self.hir.decls[id] {
             hir::Decl::Computed { ref params, scope, .. } => {
-                // Resolve computed decls with explicit tys before building their scope
+                // Resolve computed decls with explicit tys before prebuilding their scope
                 if self.hir.explicit_tys[id].is_some() {
                     self.decl_levels[id] = Level::Resolved(0);
                 }
@@ -448,6 +453,52 @@ impl<'hir> Builder<'hir> {
         for &id in &self.hir.global_decls {
             self.prebuild_decl(id);
         }
+
+        // Build expressions
+        for (i, expr) in self.hir.exprs.iter().enumerate() {
+            let id = ExprId::new(i);
+            match *expr {
+                hir::Expr::AddrOf { expr, is_mut } => self.insert_expr(id, AddrOf { expr, is_mut }),
+                hir::Expr::Cast { expr, ref ty, cast_id } => self.casts.push(Expr { id, data: Cast { expr, ty: ty.clone(), cast_id } }),
+                hir::Expr::CharLit { .. } => self.char_lits.push(id),
+                hir::Expr::DecLit { .. } => self.dec_lits.push(id),
+                hir::Expr::IntLit { .. } => self.int_lits.push(id),
+                hir::Expr::StrLit { .. } => self.str_lits.push(id),
+                hir::Expr::DeclRef { ref arguments, id: decl_ref_id, .. } => self.insert_expr(id, DeclRef { args: arguments.clone(), decl_ref_id }),
+                hir::Expr::Deref(expr) => self.insert_expr(id, Dereference { expr }),
+                hir::Expr::Do { scope } => self.insert_expr(id, Do { terminal_expr: self.hir.scopes[scope].terminal_expr }),
+                hir::Expr::If { condition, then_scope, else_scope } => {
+                    let then_expr = self.hir.scopes[then_scope].terminal_expr;
+                    let else_expr = else_scope.map_or(self.void_expr, |scope| self.hir.scopes[scope].terminal_expr);
+                    self.insert_expr(id, If { condition, then_expr, else_expr});
+                },
+                // Handled with ret groups
+                hir::Expr::Ret { .. } => {},
+                hir::Expr::Set { lhs, rhs } => self.insert_expr(id, Assignment { lhs, rhs }),
+                hir::Expr::Void => {},
+                hir::Expr::While { condition, .. } => self.whiles.push(Expr { id, data: While { condition } }),
+            }
+        }
+
+        // Build declarations
+        for i in 0..self.hir.decls.len() {
+            let id = DeclId::new(i);
+            if let Some(decl) = self.staged_decls.remove(&id) {
+                match decl {
+                    StagedDecl::AssignedDecl(assigned_decl) => {
+                        let level = match self.decl_levels[id] {
+                            Level::Resolved(level) => level,
+                            _ => panic!("failed to get level"),
+                        };
+                        self.assigned_decls.insert(level, assigned_decl);
+                    },
+                    StagedDecl::RetGroup(ret_group) => {
+                        self.ret_groups.push(ret_group);
+                    }
+                }
+            }
+        }
+
 
         Program {
             int_lits: self.int_lits,
