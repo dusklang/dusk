@@ -486,52 +486,18 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
     }
 
     fn parse_type(&mut self) -> (Type, SourceRange) {
-        let (mut ty, mut range) = (
-            match *self.cur().kind {
-                TokenKind::Ident(ident) => match ident {
-                    "i8" => Type::i8(),
-                    "i16" => Type::i16(),
-                    "i32" => Type::i32(),
-                    "i64" => Type::i64(),
-                    "isize" => Type::isize(),
-                    "u8" => Type::u8(),
-                    "u16" => Type::u16(),
-                    "u32" => Type::u32(),
-                    "u64" => Type::u64(),
-                    "usize" => Type::usize(),
-                    "f32" => Type::f32(),
-                    "f64" => Type::f64(),
-                    "never" => Type::Never,
-                    "bool" => Type::Bool,
-                    "void" => Type::Void,
-                    _ => {
-                        self.errs.push(
-                            Error::new("Unrecognized type")
-                                .adding_primary_range(self.cur().range.clone(), "")
-                        );
-                        Type::Error
-                    }
-                },
-                _ => {
-                    self.errs.push(
-                        Error::new("Unrecognized type")
-                            .adding_primary_range(self.cur().range.clone(), "")
-                    );
-                    Type::Error
-                }
-            }, 
-            self.cur().range.clone()
-        );
-        while let TokenKind::Asterisk = self.next().kind {
-            let is_mut = if let TokenKind::Mut = self.peek_next().kind {
-                self.next();
-                true
-            } else {
-                false
-            };
-            ty = ty.ptr_with_mut(is_mut);
-            range = source_info::concat(range, self.cur().range.clone());
-        }
+        self.builder.enter_type_ctx();
+        let begin_range = self.cur().range.clone();
+        // This is a term and not an expression because assignments are valid expressions.
+        //     For example: `foo: SomeType = ...` <- the parser would think you were assigning `...` to `SomeType` and
+        //     taking the `void` result of that assignment as the type of variable declaration `foo`
+        // TODO: add statements as a slight superset of expressions which includes assignments.
+        let expr = self.try_parse_term().unwrap();
+        let ty = self.builder.HACK_convert_expr_to_type(expr);
+        let end_range = self.cur().range.clone();
+        let range = begin_range.start..end_range.start;
+
+        self.builder.exit_type_ctx();
         (ty, range)
     }
 

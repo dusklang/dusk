@@ -114,7 +114,7 @@ pub struct Builder<'src> {
     /// TEMPORARY HACK: we can't yet typecheck type expressions, so the TIR generator needs to
     /// be able to ignore them
     exprs_in_type_ctx: HashSet<ExprId>,
-    in_type_ctx: bool,
+    type_ctx_count: u8,
 
     interner: Interner,
     
@@ -136,7 +136,7 @@ impl<'src> Builder<'src> {
             source_ranges: IdxVec::new(),
             void_expr: ExprId::new(0),
             exprs_in_type_ctx: HashSet::new(),
-            in_type_ctx: false,
+            type_ctx_count: 0,
             interner: Interner::new(),
             _phantom_src_lifetime: PhantomData,
         };
@@ -168,8 +168,14 @@ impl<'src> Builder<'src> {
     }
 
     fn push(&mut self, expr: Expr, range: SourceRange) -> ExprId {
-        self.exprs.push(expr);
-        self.source_ranges.push(range)
+        let id1 = self.exprs.push(expr);
+        let id2 = self.source_ranges.push(range);
+        debug_assert_eq!(id1, id2);
+        if self.type_ctx_count > 0 {
+            self.exprs_in_type_ctx.insert(id1);
+        }
+
+        id1
     }
 
     fn decl(&mut self, decl: Decl, name: Sym, explicit_ty: Option<Type>) -> DeclId {
@@ -196,12 +202,37 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
     }
     fn void_expr(&self) -> ExprId { self.void_expr }
     fn enter_type_ctx(&mut self) {
-        debug_assert!(!self.in_type_ctx);
-        self.in_type_ctx = true;
+        self.type_ctx_count += 1;
     }
     fn exit_type_ctx(&mut self) {
-        debug_assert!(self.in_type_ctx);
-        self.in_type_ctx = false;
+        self.type_ctx_count -= 1;
+    }
+    fn HACK_convert_expr_to_type(&self, expr: ExprId) -> Type {
+        match self.exprs[expr] {
+            Expr::DeclRef { name, ref arguments, .. } => {
+                assert!(arguments.is_empty(), "Invalid type!");
+                let name = self.interner.resolve(name).unwrap();
+                match name {
+                    "i8" => Type::i8(),
+                    "i16" => Type::i16(),
+                    "i32" => Type::i32(),
+                    "i64" => Type::i64(),
+                    "isize" => Type::isize(),
+                    "u8" => Type::u8(),
+                    "u16" => Type::u16(),
+                    "u32" => Type::u32(),
+                    "u64" => Type::u64(),
+                    "usize" => Type::usize(),
+                    "f32" => Type::f32(),
+                    "f64" => Type::f64(),
+                    "never" => Type::Never,
+                    "bool" => Type::Bool,
+                    "void" => Type::Void,
+                    _ => panic!("Invalid type!"),
+                }
+            },
+            _ => panic!("Invalid type! {:?}", self.exprs[expr]),
+        }
     }
     fn int_lit(&mut self, lit: u64, range: SourceRange) -> ExprId {
         self.push(Expr::IntLit { lit }, range)

@@ -40,7 +40,7 @@ pub struct While { pub condition: ExprId }
 /// State machine to prevent cycles at the global scope. For example:
 ///     fn foo = bar
 ///     fn bar = foo
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 enum Level {
     Unresolved,
     Resolving,
@@ -96,11 +96,13 @@ pub struct Program<'hir> {
     pub num_exprs: usize,
 }
 
+#[derive(Debug)]
 struct GlobalDecl {
     id: DeclId,
     num_params: usize,
 }
 
+#[derive(Debug)]
 struct GlobalDeclGroup {
     name: Sym,
     decls: Vec<GlobalDecl>,

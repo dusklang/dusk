@@ -175,5 +175,6 @@ pub trait Builder<'src> {
     fn get_terminal_expr(&self, scope: ScopeId) -> ExprId;
     fn enter_type_ctx(&mut self);
     fn exit_type_ctx(&mut self);
+    fn HACK_convert_expr_to_type(&self, expr: ExprId) -> Type;
     fn output(self) -> Self::Output;
 }
