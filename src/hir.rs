@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::ffi::CString;
 use std::marker::PhantomData;
 use std::rc::Rc;
@@ -86,6 +87,11 @@ pub struct Program {
     pub scopes: IdxVec<Scope, ScopeId>,
     pub void_expr: ExprId,
     pub source_ranges: IdxVec<SourceRange, ExprId>,
+
+    /// TEMPORARY HACK: we can't yet typecheck type expressions, so the TIR generator needs to
+    /// be able to ignore them
+    pub exprs_in_type_ctx: HashSet<ExprId>,
+
     pub interner: Rc<Interner>,
 }
 
@@ -104,6 +110,12 @@ pub struct Builder<'src> {
     comp_decl_stack: Vec<CompDeclState>,
     source_ranges: IdxVec<SourceRange, ExprId>,
     void_expr: ExprId,
+
+    /// TEMPORARY HACK: we can't yet typecheck type expressions, so the TIR generator needs to
+    /// be able to ignore them
+    exprs_in_type_ctx: HashSet<ExprId>,
+    in_type_ctx: bool,
+
     interner: Interner,
     
     _phantom_src_lifetime: PhantomData<&'src str>,
@@ -123,6 +135,8 @@ impl<'src> Builder<'src> {
             comp_decl_stack: Vec::new(),
             source_ranges: IdxVec::new(),
             void_expr: ExprId::new(0),
+            exprs_in_type_ctx: HashSet::new(),
+            in_type_ctx: false,
             interner: Interner::new(),
             _phantom_src_lifetime: PhantomData,
         };
@@ -181,6 +195,14 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
         self.global_decl(Decl::Intrinsic { intr: intrinsic, param_tys }, name, Some(ret_ty));
     }
     fn void_expr(&self) -> ExprId { self.void_expr }
+    fn enter_type_ctx(&mut self) {
+        debug_assert!(!self.in_type_ctx);
+        self.in_type_ctx = true;
+    }
+    fn exit_type_ctx(&mut self) {
+        debug_assert!(self.in_type_ctx);
+        self.in_type_ctx = false;
+    }
     fn int_lit(&mut self, lit: u64, range: SourceRange) -> ExprId {
         self.push(Expr::IntLit { lit }, range)
     }
@@ -348,6 +370,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             source_ranges: self.source_ranges,
             scopes: self.scopes,
             void_expr: self.void_expr,
+            exprs_in_type_ctx: self.exprs_in_type_ctx,
             interner: Rc::new(self.interner),
         }
     }

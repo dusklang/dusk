@@ -173,5 +173,7 @@ pub trait Builder<'src> {
     fn get_range(&self, id: ExprId) -> SourceRange;
     fn set_range(&mut self, id: ExprId, range: SourceRange);
     fn get_terminal_expr(&self, scope: ScopeId) -> ExprId;
+    fn enter_type_ctx(&mut self);
+    fn exit_type_ctx(&mut self);
     fn output(self) -> Self::Output;
 }

@@ -457,6 +457,8 @@ impl<'hir> Builder<'hir> {
         // Build expressions
         for (i, expr) in self.hir.exprs.iter().enumerate() {
             let id = ExprId::new(i);
+            if self.hir.exprs_in_type_ctx.contains(&id) { continue; }
+
             match *expr {
                 hir::Expr::AddrOf { expr, is_mut } => self.insert_expr(id, AddrOf { expr, is_mut }),
                 hir::Expr::Cast { expr, ref ty, cast_id } => self.casts.push(Expr { id, data: Cast { expr, ty: ty.clone(), cast_id } }),
