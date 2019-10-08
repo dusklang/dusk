@@ -1,5 +1,6 @@
 use std::ffi::CString;
 
+use bitflags::bitflags;
 use smallvec::SmallVec;
 
 use crate::index_vec::Idx;
@@ -29,6 +30,32 @@ pub enum BinOp {
 #[derive(Clone, Copy, Debug)]
 pub enum UnOp {
     Not, Deref, AddrOf, Neg, Plus, AddrOfMut
+}
+
+bitflags! {
+    pub struct OpPlacement: u8 {
+        const PREFIX  = 1 << 0;
+        const POSTFIX = 1 << 1;
+        const INFIX   = 1 << 2;
+    }
+}
+
+impl BinOp {
+    pub fn placement(self) -> OpPlacement {
+        match self {
+            BinOp::Mult | BinOp::Add | BinOp::Sub | BinOp::BitwiseAnd => OpPlacement::INFIX | OpPlacement::PREFIX,
+            _ => OpPlacement::INFIX,
+        }
+    }
+}
+
+impl UnOp {
+    pub fn placement(self) -> OpPlacement {
+        match self {
+            UnOp::Deref | UnOp::AddrOf | UnOp::Neg | UnOp::Plus => OpPlacement::PREFIX | OpPlacement::INFIX,
+            UnOp::Not | UnOp::AddrOfMut => OpPlacement::PREFIX,
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

@@ -1,7 +1,7 @@
 use smallvec::{SmallVec, smallvec};
 
 use crate::token::{TokenVec, TokenKind, Token};
-use crate::builder::{ExprId, ScopeId, BinOp, UnOp, Builder, Intrinsic};
+use crate::builder::{ExprId, ScopeId, BinOp, UnOp, Builder, OpPlacement, Intrinsic};
 use crate::ty::Type;
 use crate::error::Error;
 use crate::source_info::{self, SourceRange};
@@ -123,14 +123,22 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
             TokenKind::LogicalOr => BinOp::LogicalOr,
             TokenKind::LogicalAnd => BinOp::LogicalAnd,
             TokenKind::Pipe => BinOp::BitwiseOr,
-            TokenKind::Ampersand => BinOp::BitwiseAnd,
+            TokenKind::Ampersand if self.peek_next().kind != &TokenKind::Mut => BinOp::BitwiseAnd,
             _ => return None,
         };
+        let placement = op.placement();
+        // Don't bother checking for postfix placement; it's assumed if this were a postfix operator,
+        // this method (`parse_binary_operator`) would never be called.
+        if placement.contains(OpPlacement::PREFIX) {
+            let lhs_whitespace = self.peek_prev_including_insignificant().kind.is_insignificant();
+            let rhs_whitespace = self.peek_next_including_insignificant().kind.is_insignificant();
+            if lhs_whitespace && !rhs_whitespace { return None; }
+        }
         self.next();
         Some(op)
     }
 
-    fn parse_unary_operator(&mut self) -> Option<(UnOp, SourceRange)> {
+    fn parse_prefix_operator(&mut self) -> Option<(UnOp, SourceRange)> {
         let tok = self.cur();
         let op = match tok.kind {
             TokenKind::Sub        => UnOp::Neg,
@@ -162,7 +170,7 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
     }
 
     fn try_parse_non_cast_term(&mut self) -> Result<ExprId, TokenKind<'src>> {
-        if let Some((op, op_range)) = self.parse_unary_operator() {
+        if let Some((op, op_range)) = self.parse_prefix_operator() {
             let term = self.try_parse_non_cast_term()
                 .unwrap_or_else(|tok| panic!("Expected expression after unary operator, found {:?}", tok));
             let term_range = self.builder.get_range(term);
@@ -505,6 +513,8 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
         self.toks.at(self.cur)
     }
 
+    // TODO: come up with a better term for whitespace and comments than "insignificant".
+    // If they really were insignificant, we wouldn't be lexing them. :)
     fn skip_insignificant(&mut self) {
         while self.cur().kind.is_insignificant() {
             self.next_including_insignificant();
@@ -520,6 +530,14 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
         self.next_including_insignificant();
         self.skip_insignificant();
         self.cur()
+    }
+
+    fn peek_next_including_insignificant(&self) -> Token<'src> {
+        self.toks.at(self.cur+1)
+    }
+
+    fn peek_prev_including_insignificant(&self) -> Token<'src> {
+        self.toks.at(self.cur - 1)
     }
 
     fn peek_next(&self) -> Token<'src> {
