@@ -22,6 +22,8 @@ pub enum Expr {
     CharLit { lit: i8 },
     DeclRef { name: Sym, arguments: SmallVec<[ExprId; 2]>, id: DeclRefId },
     AddrOf { expr: ExprId, is_mut: bool },
+    /// Transforms type into pointer type
+    Pointer { expr: ExprId, is_mut: bool },
     Deref(ExprId),
     Set { lhs: ExprId, rhs: ExprId },
     Do { scope: ScopeId },
@@ -231,6 +233,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
                     _ => panic!("Invalid type!"),
                 }
             },
+            Expr::Pointer { expr, is_mut } => self.HACK_convert_expr_to_type(expr).ptr_with_mut(is_mut),
             _ => panic!("Invalid type! {:?}", self.exprs[expr]),
         }
     }
@@ -262,6 +265,8 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             UnOp::Deref => self.push(Expr::Deref(expr), range),
             UnOp::AddrOf => self.push(Expr::AddrOf { expr, is_mut: false }, range),
             UnOp::AddrOfMut => self.push(Expr::AddrOf { expr, is_mut: true }, range),
+            UnOp::Pointer => self.push(Expr::Pointer { expr, is_mut: false }, range),
+            UnOp::PointerMut => self.push(Expr::Pointer { expr, is_mut: true }, range),
             _ => self.decl_ref(op.symbol(), smallvec![expr], range),
         }
     }

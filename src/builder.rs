@@ -29,7 +29,11 @@ pub enum BinOp {
 
 #[derive(Clone, Copy, Debug)]
 pub enum UnOp {
-    Not, Deref, AddrOf, Neg, Plus, AddrOfMut
+    /// Prefix
+    Not, Deref, AddrOf, Neg, Plus, AddrOfMut,
+    
+    /// Postfix
+    Pointer, PointerMut,
 }
 
 bitflags! {
@@ -54,6 +58,8 @@ impl UnOp {
         match self {
             UnOp::Deref | UnOp::AddrOf | UnOp::Neg | UnOp::Plus => OpPlacement::PREFIX | OpPlacement::INFIX,
             UnOp::Not | UnOp::AddrOfMut => OpPlacement::PREFIX,
+            UnOp::Pointer => OpPlacement::PREFIX | OpPlacement::INFIX | OpPlacement::POSTFIX,
+            UnOp::PointerMut => OpPlacement::POSTFIX,
         }
     }
 }
@@ -133,7 +139,6 @@ impl BinOp {
             BitwiseOr => "|",
             LogicalAnd => "&&",
             LogicalOr => "||",
-            Assign => "=",
             MultAssign => "*=",
             DivAssign => "/=",
             ModAssign => "%=",
@@ -141,6 +146,7 @@ impl BinOp {
             SubAssign => "-=",
             BitwiseAndAssign => "&=",
             BitwiseOrAssign => "|=",
+            Assign => panic!("operator has no symbol"),
         }
     }
 
@@ -165,11 +171,9 @@ impl UnOp {
         use UnOp::*;
         match self {
             Not => "!",
-            Deref => "*",
             Neg => "-",
             Plus => "+",
-            AddrOf => "&",
-            AddrOfMut => "&mut",
+            Deref | AddrOf | AddrOfMut | Pointer | PointerMut => panic!("operator has no symbol")
         }
     }
 }

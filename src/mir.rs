@@ -863,6 +863,7 @@ impl<'a, 'mir: 'a> FunctionBuilder<'a, 'mir> {
                 },
             },
             Expr::AddrOf { expr: operand, .. } => return self.expr(operand, Context::new(ctx.indirection - 1, ctx.data, ctx.control)),
+            Expr::Pointer { .. } => panic!("type expressions are currently a hack"),
             Expr::Deref(operand) => return self.expr(operand, Context::new(ctx.indirection + 1, ctx.data, ctx.control)),
             Expr::Do { scope } => return self.scope(scope, ctx),
             Expr::If { condition, then_scope, else_scope } => {

@@ -251,7 +251,7 @@ impl<'hir> Builder<'hir> {
                 }
                 let deepest_overload = overloads.iter()
                     .map(|&overload| self.prebuild_decl(overload))
-                    .max().unwrap();
+                    .max().unwrap_or(0);
                 self.overloads[decl_ref_id] = overloads;
                 // TODO: would be nice if we didn't clone and then immediately throw away the arguments
                 self.get_expr_level(id, DeclRef { args: arguments.clone(), decl_ref_id }, deepest_overload)
@@ -260,6 +260,7 @@ impl<'hir> Builder<'hir> {
                 self.prebuild_expr(expr);
                 self.get_expr_level(id, Dereference { expr }, 0)
             },
+            hir::Expr::Pointer { .. } => panic!("type expressions are currently a hack"),
             hir::Expr::Do { scope } => {
                 let terminal_expr = self.prebuild_scope(scope);
                 self.get_expr_level(id, Do { terminal_expr }, 0)
@@ -463,6 +464,7 @@ impl<'hir> Builder<'hir> {
 
             match *expr {
                 hir::Expr::AddrOf { expr, is_mut } => self.insert_expr(id, AddrOf { expr, is_mut }),
+                hir::Expr::Pointer { .. } => panic!("type expressions are currently a hack"),
                 hir::Expr::Cast { expr, ref ty, cast_id } => self.casts.push(Expr { id, data: Cast { expr, ty: ty.clone(), cast_id } }),
                 hir::Expr::CharLit { .. } => self.char_lits.push(id),
                 hir::Expr::DecLit { .. } => self.dec_lits.push(id),

@@ -126,12 +126,13 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
             TokenKind::Ampersand if self.peek_next().kind != &TokenKind::Mut => BinOp::BitwiseAnd,
             _ => return None,
         };
-        let placement = op.placement();
         // Don't bother checking for postfix placement; it's assumed if this were a postfix operator,
         // this method (`parse_binary_operator`) would never be called.
+        let placement = op.placement();
+        debug_assert!(placement.contains(OpPlacement::INFIX));
         if placement.contains(OpPlacement::PREFIX) {
             let lhs_whitespace = self.peek_prev_including_insignificant().kind.is_insignificant();
-            let rhs_whitespace = self.peek_next_including_insignificant().kind.is_insignificant();
+            let rhs_whitespace = !self.peek_next_including_insignificant().kind.could_begin_expression();
             if lhs_whitespace && !rhs_whitespace { return None; }
         }
         self.next();
@@ -140,21 +141,53 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
 
     fn parse_prefix_operator(&mut self) -> Option<(UnOp, SourceRange)> {
         let tok = self.cur();
+        let mut range = tok.range.clone();
         let op = match tok.kind {
             TokenKind::Sub        => UnOp::Neg,
             TokenKind::Add        => UnOp::Plus,
             TokenKind::LogicalNot => UnOp::Not,
             TokenKind::Asterisk   => UnOp::Deref,
             TokenKind::Ampersand  => if let TokenKind::Mut = self.peek_next().kind {
-                self.next();
+                let mut_range = self.next().range.clone();
+                range = source_info::concat(range, mut_range);
                 UnOp::AddrOfMut
             } else {
                 UnOp::AddrOf
             },
             _ => return None,
         };
+        debug_assert!(op.placement().contains(OpPlacement::PREFIX));
         self.next();
-        Some((op, tok.range.clone()))
+        Some((op, range))
+    }
+
+    fn parse_postfix_operator(&mut self) -> Option<(UnOp, SourceRange)> {
+        let lhs_whitespace = self.peek_prev_including_insignificant().kind.is_insignificant();
+        let tok = self.cur();
+        let mut range = tok.range.clone();
+        let op = match tok.kind {
+            TokenKind::Asterisk => if let TokenKind::Mut = self.peek_next().kind {
+                let mut_range = self.next().range.clone();
+                range = source_info::concat(range, mut_range);
+                UnOp::PointerMut
+            } else {
+                UnOp::Pointer
+            },
+            _ => return None,
+        };
+        let placement = op.placement();
+        debug_assert!(placement.contains(OpPlacement::POSTFIX));
+        if placement.contains(OpPlacement::PREFIX) {
+            debug_assert!(
+                placement.contains(OpPlacement::INFIX),
+                "Operators that can be prefix and postfix but not infix are not supported! See https://github.com/zachrwolfe/meda/issues/14"
+            );
+            let rhs_whitespace = !self.peek_next_including_insignificant().kind.could_begin_expression();
+            if lhs_whitespace || !rhs_whitespace { return None; }
+        }
+        self.next();
+
+        Some((op, range))
     }
 
     fn try_parse_term(&mut self) -> Result<ExprId, TokenKind<'src>> {
@@ -270,7 +303,13 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
                 Ok(self.builder.ret(ret_expr, source_info::concat(ret_range, expr_range)))
             },
             x => Err(x.clone()),
-        }
+        }.map(|expr| match self.parse_postfix_operator() {
+            None => expr,
+            Some((op, mut range)) => {
+                range = source_info::concat(range, self.builder.get_range(expr));
+                self.builder.un_op(op, expr, range)
+            }
+        })
     }
 
     fn try_parse_expr(&mut self) -> Result<ExprId, TokenKind<'src>> {

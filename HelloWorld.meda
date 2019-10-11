@@ -43,7 +43,7 @@ fn fib(n: i32): i32 {
         fib(n - 1) + fib(n - 2)
     }
 }
-/*
+
 fn strlen(str: u8*): usize {
     str := str
     len: usize = 0
@@ -60,13 +60,13 @@ fn concat(a: u8*, b: u8*): u8* {
     a := a
     while *a != 0 {
         (*buf) = *a
-        a = (a as usize + 1) as u8 *
+        a = (a as usize + 1) as u8*
         buf = (buf as usize + 1) as u8 *mut
     }
     b := b
     while *b != 0 {
         (*buf) = *b
-        b = (b as usize + 1) as u8 *
+        b = (b as usize + 1) as u8*
         buf = (buf as usize + 1) as u8 *mut
     }
     (*buf) = 0
@@ -86,35 +86,22 @@ fn print_and_return_concatenated_string(a: u8*, b: u8*): u8* {
 
 FIB_N :: print_and_return_fib("printing at compile time while compiling constant!\n", 7)
 FIB :: print_and_return_fib("printing at compile time!\n", FIB_N)
-generated_string :: concat("Hello, ", "world!\n")
-*/
-fn too_hype_for_types(a: i32, b: i32, c: i32) = a * b + c
+generated_string :: concat(concat("Hello, ", "world!"), " (from compile-time)\n")
 
-fn foo = do {
-    a := 32
-    b :: & mut a
-    *b = 43
-    print("a: ")
-    print_num(a)
-    print("\n*b: ")
-    print_num(*b)
-    print("\n")
-}
+fn too_hype_for_types(a: i32, b: i32, c: i32) = a * b + c
 
 fn main {
     //fizz_buzz
     //FIZZ_BUZZ_ITERATIONS = 200
     //fizz_buzz
 
-    //print("fib(")
-    //print_num(FIB_N)
-    //print(") = ")
-    //print_num(FIB)
-    //print("\n")
+    print("fib(")
+    print_num(FIB_N)
+    print(") = ")
+    print_num(FIB)
+    print("\n")
 
-    //fizz_buzz
-
-    //print(generated_string)
+    print(generated_string)
 
     h := (((((((("h" as u8) as u8) as i8) as i8) as u8) as i8) as isize) as u64)
     i: u64 = 24
@@ -124,8 +111,6 @@ fn main {
     m := l as i32
     n := m as u64
     o := n as i16
-
-    foo
 
     // Allocate a single 8-bit integer on the heap
     //num :: malloc(1) as u8 *mut
