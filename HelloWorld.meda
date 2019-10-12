@@ -114,6 +114,9 @@ fn main {
     n := m as u64
     o := n as i16
 
+    // "Unimplemented intrinsic I32"
+    take_a_type(i32)
+
     // Allocate a single 8-bit integer on the heap
     //num :: malloc(1) as u8 *mut
     //(*num) = 12

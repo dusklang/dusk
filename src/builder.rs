@@ -88,6 +88,24 @@ pub enum Intrinsic {
     Print,
     Malloc,
     Free,
+
+    // Named types
+    I8,
+    I16,
+    I32,
+    I64,
+    Isize,
+    U8,
+    U16,
+    U32,
+    U64,
+    Usize,
+    F32,
+    F64,
+    Never,
+    Bool,
+    Void,
+    Ty,
 }
 
 impl Intrinsic {
@@ -116,6 +134,22 @@ impl Intrinsic {
             Print => "print",
             Malloc => "malloc",
             Free => "free",
+            I8 => "i8",
+            I16 => "i16",
+            I32 => "i32",
+            I64 => "i64",
+            Isize => "isize",
+            U8 => "u8",
+            U16 => "u16",
+            U32 => "u32",
+            U64 => "u64",
+            Usize => "usize",
+            F32 => "f32",
+            F64 => "f64",
+            Never => "never",
+            Bool => "bool",
+            Void => "void",
+            Ty => "type",
         }
     }
 }

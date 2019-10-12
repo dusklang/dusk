@@ -230,7 +230,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
                     "never" => Type::Never,
                     "bool" => Type::Bool,
                     "void" => Type::Void,
-                    "type" => Type::Type,
+                    "type" => Type::Ty,
                     _ => panic!("Invalid type!"),
                 }
             },
