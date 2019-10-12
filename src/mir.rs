@@ -59,6 +59,7 @@ pub enum Instr {
     Load(InstrId),
     Store { location: InstrId, value: InstrId },
     AddressOfStatic(StaticId),
+    Pointer { op: InstrId, is_mut: bool },
     Ret(InstrId),
     Br(BasicBlockId),
     CondBr { condition: InstrId, true_bb: BasicBlockId, false_bb: BasicBlockId },
@@ -214,6 +215,7 @@ pub trait MirProvider {
         let func = self.function_by_ref(func_ref);
         match &func.code[instr] {
             Instr::Void | Instr::Store { .. } => Type::Void,
+            Instr::Pointer { .. } => Type::Ty,
             Instr::Const(konst) => konst.ty(),
             Instr::Alloca(ty) => ty.clone().mut_ptr(),
             Instr::LogicalNot(_) => Type::Bool,
@@ -476,6 +478,14 @@ impl fmt::Display for Program {
                             write!(f, "%{} = intrinsic `{}`", i, intr.name())?;
                             write_args!(arguments)?
                         },
+                        &Instr::Pointer { op, is_mut } => {
+                            write!(f, "%{} = %{} *", i, op.idx())?;
+                            if is_mut {
+                                writeln!(f, "mut")?
+                            } else {
+                                writeln!(f)?
+                            }
+                        }
                         Instr::Load(location) => writeln!(f, "%{} = load %{}", i, location.idx())?,
                         Instr::LogicalNot(op) => writeln!(f, "%{} = not %{}", i, op.idx())?,
                         Instr::Ret(val) => writeln!(f,  "return %{}", val.idx())?,
@@ -863,7 +873,11 @@ impl<'a, 'mir: 'a> FunctionBuilder<'a, 'mir> {
                 },
             },
             Expr::AddrOf { expr: operand, .. } => return self.expr(operand, Context::new(ctx.indirection - 1, ctx.data, ctx.control)),
-            Expr::Pointer { .. } => panic!("type expressions are currently a hack"),
+            Expr::Pointer { expr, is_mut } => {
+                assert_eq!(ctx.indirection, 0);
+                let op = self.expr(expr, Context::new(0, DataDest::Read, ControlDest::Continue));
+                self.code.push(Instr::Pointer { op, is_mut })
+            },
             Expr::Deref(operand) => return self.expr(operand, Context::new(ctx.indirection + 1, ctx.data, ctx.control)),
             Expr::Do { scope } => return self.scope(scope, ctx),
             Expr::If { condition, then_scope, else_scope } => {

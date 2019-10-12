@@ -23,6 +23,8 @@ pub struct AddrOf { pub expr: ExprId, pub is_mut: bool }
 #[derive(Debug)]
 pub struct Dereference { pub expr: ExprId }
 #[derive(Debug)]
+pub struct Pointer { pub expr: ExprId }
+#[derive(Debug)]
 pub struct Stmt { pub root_expr: ExprId }
 #[derive(Debug)]
 pub struct Do { pub terminal_expr: ExprId }
@@ -85,6 +87,7 @@ pub struct Program<'hir> {
     pub decl_refs: DepVec<Expr<DeclRef>>,
     pub addr_ofs: DepVec<Expr<AddrOf>>,
     pub derefs: DepVec<Expr<Dereference>>,
+    pub pointers: DepVec<Expr<Pointer>>,
     pub ifs: DepVec<Expr<If>>,
     /// An expression to uniquely represent the void value
     pub void_expr: ExprId,
@@ -160,6 +163,7 @@ pub struct Builder<'hir> {
     decl_refs: DepVec<Expr<DeclRef>>,
     addr_ofs: DepVec<Expr<AddrOf>>,
     derefs: DepVec<Expr<Dereference>>,
+    pointers: DepVec<Expr<Pointer>>,
     ifs: DepVec<Expr<If>>,
     // An expression to uniquely represent the void value
     void_expr: ExprId,
@@ -203,6 +207,7 @@ impl<'hir> Builder<'hir> {
             decl_refs: DepVec::new(),
             addr_ofs: DepVec::new(),
             derefs: DepVec::new(),
+            pointers: DepVec::new(),
             ifs: DepVec::new(),
             void_expr,
             hir,
@@ -260,7 +265,10 @@ impl<'hir> Builder<'hir> {
                 self.prebuild_expr(expr);
                 self.get_expr_level(id, Dereference { expr }, 0)
             },
-            hir::Expr::Pointer { .. } => panic!("type expressions are currently a hack"),
+            hir::Expr::Pointer { expr, .. } => {
+                self.prebuild_expr(expr);
+                self.get_expr_level(id, Pointer { expr }, 0)
+            },
             hir::Expr::Do { scope } => {
                 let terminal_expr = self.prebuild_scope(scope);
                 self.get_expr_level(id, Do { terminal_expr }, 0)
@@ -464,7 +472,7 @@ impl<'hir> Builder<'hir> {
 
             match *expr {
                 hir::Expr::AddrOf { expr, is_mut } => self.insert_expr(id, AddrOf { expr, is_mut }),
-                hir::Expr::Pointer { .. } => panic!("type expressions are currently a hack"),
+                hir::Expr::Pointer { expr, .. } => self.insert_expr(id, Pointer { expr }),
                 hir::Expr::Cast { expr, ref ty, cast_id } => self.casts.push(Expr { id, data: Cast { expr, ty: ty.clone(), cast_id } }),
                 hir::Expr::CharLit { .. } => self.char_lits.push(id),
                 hir::Expr::DecLit { .. } => self.dec_lits.push(id),
@@ -505,7 +513,6 @@ impl<'hir> Builder<'hir> {
             }
         }
 
-
         Program {
             int_lits: self.int_lits,
             dec_lits: self.dec_lits,
@@ -522,6 +529,7 @@ impl<'hir> Builder<'hir> {
             decl_refs: self.decl_refs,
             addr_ofs: self.addr_ofs,
             derefs: self.derefs,
+            pointers: self.pointers,
             ifs: self.ifs,
             void_expr: self.void_expr,
             source_ranges: self.hir.source_ranges.as_idx_slice(),
@@ -552,6 +560,7 @@ item_impl!(Expr<Do>, dos; terminal_expr);
 item_impl!(Expr<Assignment>, assignments; lhs, rhs);
 item_impl!(Expr<AddrOf>, addr_ofs; expr);
 item_impl!(Expr<Dereference>, derefs; expr);
+item_impl!(Expr<Pointer>, pointers; expr);
 item_impl!(Expr<If>, ifs; condition, then_expr, else_expr);
 item_impl!(AssignedDecl, assigned_decls; root_expr);
 

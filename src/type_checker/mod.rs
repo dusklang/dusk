@@ -96,7 +96,7 @@ pub fn type_check(prog: tir::Program, source_file: &SourceFile, debug: bool) -> 
     // Extend arrays as needed so they all have the same number of levels.
     let levels = dep_vec::unify_sizes(&mut [
         &mut tc.prog.assigned_decls, &mut tc.prog.assignments, &mut tc.prog.decl_refs, 
-        &mut tc.prog.addr_ofs, &mut tc.prog.derefs, &mut tc.prog.ifs,
+        &mut tc.prog.addr_ofs, &mut tc.prog.derefs, &mut tc.prog.pointers, &mut tc.prog.ifs,
         &mut tc.prog.dos,
     ]);
 
@@ -192,9 +192,6 @@ pub fn type_check(prog: tir::Program, source_file: &SourceFile, debug: bool) -> 
                     }
                 }
             }
-            // if one_of.is_empty() {
-            //     println!("")
-            // }
             tc.constraints[item.id] = ConstraintList::new(BuiltinTraits::empty(), Some(one_of), pref);
         }
         for item in tc.prog.addr_ofs.get_level(level) {
@@ -217,6 +214,26 @@ pub fn type_check(prog: tir::Program, source_file: &SourceFile, debug: bool) -> 
                 }
             });
             tc.constraints[item.id] = constraints;
+        }
+        for item in tc.prog.pointers.get_level(level) {
+            if let Some(err) = tc.constraints[item.expr].can_unify_to(&Type::Ty.into()).err() {
+                let mut error = Error::new("Expected type operand to pointer operator");
+                let range = tc.prog.source_ranges[item.expr].clone();
+                match err {
+                    UnificationError::InvalidChoice(choices)
+                        => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                    UnificationError::Trait(not_implemented)
+                        => error.add_secondary_range(
+                            range,
+                            format!(
+                                "note: couldn't unify because expression requires implementations of {:?}",
+                                not_implemented.names(),
+                            ),
+                        ),
+                }
+                errs.push(error);
+            }
+            tc.constraints[item.id].set_to(Type::Ty);
         }
         for item in tc.prog.ifs.get_level(level) {
             if let Some(err) = tc.constraints[item.condition].can_unify_to(&Type::Bool.into()).err() {
@@ -420,6 +437,15 @@ pub fn type_check(prog: tir::Program, source_file: &SourceFile, debug: bool) -> 
                 ty = ty.ptr().into();
             }
             tc.constraints[item.expr].set_to(ty);
+        }
+        for item in tc.prog.pointers.get_level(level) {
+            let expr = &mut tc.constraints[item.expr];
+            let expr_ty = expr.solve().map(|ty| ty.ty).unwrap_or(Type::Error);
+            // Don't bother checking if it's a type, because we already did that in pass 1
+            tc.constraints[item.expr].set_to(expr_ty);
+            let ty = tc.constraints[item.id].solve().expect("Ambiguous type for pointer expression");
+            debug_assert_eq!(ty.ty, Type::Ty);
+            tc.types[item.id] = Type::Ty;
         }
         for item in tc.prog.ifs.get_level(level) {
             let condition = &mut tc.constraints[item.condition];

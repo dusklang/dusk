@@ -942,6 +942,7 @@ impl<'mir, T: MirProvider> Interpreter<'mir, T> {
                 Value::Nothing
             },
             &Instr::AddressOfStatic(statik) => Value::from_usize(unsafe { mem::transmute(self.statics[statik].as_bytes().as_ptr()) }),
+            &Instr::Pointer { op, is_mut } => panic!("Pointer expressions are unimplemented!"),
             &Instr::Ret(instr) => {
                 let val = mem::replace(&mut frame.results[instr], Value::Nothing);
                 return Some(val)
