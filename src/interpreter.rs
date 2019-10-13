@@ -10,7 +10,7 @@ use arrayvec::ArrayVec;
 use crate::arch::Arch;
 use crate::builder::Intrinsic;
 use crate::index_vec::{IdxVec, Idx};
-use crate::mir::{Const, Function, FunctionRef, Instr, InstrId, StaticId, StrId, MirProvider};
+use crate::mir::{self, Const, Function, FunctionRef, Instr, InstrId, StaticId, StrId, MirProvider};
 use crate::ty::{Type, IntWidth, FloatWidth};
 
 #[derive(Debug)]
@@ -306,16 +306,16 @@ pub enum InterpMode {
     RunTime,
 }
 
-pub struct Interpreter<'mir, T: MirProvider> {
+pub struct Interpreter<'mir> {
     stack: Vec<(FunctionRef, StackFrame)>,
     statics: HashMap<StaticId, Value>,
     allocations: HashMap<usize, alloc::Layout>,
     mode: InterpMode,
-    mir: &'mir T,
+    mir: &'mir mir::Builder<'mir>,
 }
 
-impl<'mir, T: MirProvider> Interpreter<'mir, T> {
-    pub fn new(mir: &'mir T, mode: InterpMode) -> Self {
+impl<'mir> Interpreter<'mir> {
+    pub fn new(mir: &'mir mir::Builder<'mir>, mode: InterpMode) -> Self {
         Self {
             stack: Vec::new(),
             statics: HashMap::new(),

@@ -50,7 +50,8 @@ fn main() {
         return;
     }
 
-    let mir = mir::Builder::new(&hir, &tc, arch::Arch::X86_64).build();
+    let mut mir = mir::Builder::new(&hir, &tc, arch::Arch::X86_64);
+    mir.build();
     let mut interpreter = Interpreter::new(&mir, InterpMode::RunTime);
     let main = mir.functions.iter()
         .position(|func| {

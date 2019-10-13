@@ -157,15 +157,6 @@ impl Context {
     }
 }
 
-#[derive(Debug)]
-pub struct Program {
-    pub functions: IdxVec<Function, FuncId>,
-    pub strings: IdxVec<CString, StrId>,
-    pub statics: IdxVec<Const, StaticId>,
-    pub arch: Arch,
-    interner: Rc<Interner>,
-}
-
 fn expr_to_const(expr: &Expr, ty: Type, strings: &mut IdxVec<CString, StrId>) -> Const {
     match *expr {
         Expr::IntLit { lit } => {
@@ -240,14 +231,6 @@ impl<'a> MirProvider for Builder<'a> {
     fn arch(&self) -> Arch { self.arch }
     fn string(&self, id: StrId) -> &CString { &self.strings[id] }
     fn new_string(&mut self, val: CString) -> StrId { self.strings.push(val) }
-    fn statics(&self) -> &[Const] { &[] }
-    fn function(&self, id: FuncId) -> &Function { &self.functions[id] }
-}
-
-impl MirProvider for Program {
-    fn arch(&self) -> Arch { self.arch }
-    fn string(&self, id: StrId) -> &CString { &self.strings[id] }
-    fn new_string(&mut self, val: CString) -> StrId { self.strings.push(val) }
     fn statics(&self) -> &[Const] { &self.statics.raw }
     fn function(&self, id: FuncId) -> &Function { &self.functions[id] }
 }
@@ -255,11 +238,12 @@ impl MirProvider for Program {
 pub struct Builder<'a> {
     hir: &'a hir::Program,
     tc: &'a tc::Program,
-    arch: Arch,
     decls: HashMap<DeclId, Decl>,
-    strings: IdxVec<CString, StrId>,
     static_inits: IdxVec<Function, StaticId>,
-    functions: IdxVec<Function, FuncId>,
+    pub arch: Arch,
+    pub strings: IdxVec<CString, StrId>,
+    pub functions: IdxVec<Function, FuncId>,
+    pub statics: IdxVec<Const, StaticId>,
 }
 
 impl<'a> Builder<'a> {
@@ -267,11 +251,12 @@ impl<'a> Builder<'a> {
         Self { 
             hir,
             tc,
-            arch,
             decls: HashMap::new(),
-            strings: IdxVec::new(),
             static_inits: IdxVec::new(),
+            arch,
+            strings: IdxVec::new(),
             functions: IdxVec::new(),
+            statics: IdxVec::new(),
         }
     }
 
@@ -344,59 +329,46 @@ impl<'a> Builder<'a> {
         }
     }
 
-    pub fn build(mut self) -> Program {
+    pub fn build(&mut self) {
         for i in 0..self.hir.decls.len() {
             self.get_decl(DeclId::new(i));
         }
 
-        let mut prog = Program {
-            functions: self.functions,
-            strings: self.strings,
-            statics: IdxVec::new(),
-            arch: self.arch,
-            interner: self.hir.interner.clone(),
-        };
-        // TODO: creating a new variable for statics here is a hack to prevent userspace code from being able to access static variables.
-        // There should be a flag passed to the interpreter to solve this problem (with a nice error message) instead.
-        let mut statics = IdxVec::new();
-
-        for statik in self.static_inits.raw {
+        let static_inits = std::mem::replace(&mut self.static_inits, IdxVec::new());
+        for statik in static_inits.raw {
             let ty = statik.ret_ty.clone();
-            let konst = Interpreter::new(&prog, InterpMode::CompileTime)
+            let konst = Interpreter::new(self, InterpMode::CompileTime)
                 .call(FunctionRef::Ref(statik), Vec::new())
-                .to_const(self.arch, ty, &mut prog.strings);
-            statics.push(konst);
+                .to_const(self.arch, ty, &mut self.strings);
+            self.statics.push(konst);
         }
-        prog.statics = statics;
-
-        prog
     }
 }
 
-fn fmt_const(f: &mut fmt::Formatter, konst: &Const, prog: &Program) -> fmt::Result {
-    match *konst {
-        Const::Bool(val) => writeln!(f, "{}", val),
-        Const::Float { lit, ref ty } => writeln!(f, "{} as {:?}", lit, ty),
-        Const::Int { lit, ref ty } => writeln!(f, "{} as {:?}", lit, ty),
-        Const::Str { id, ref ty } => writeln!(f, "%str{} ({:?}) as {:?}", id.idx(), prog.strings[id], ty),
+impl<'a> Builder<'a> {
+    fn fmt_const(&self, f: &mut fmt::Formatter, konst: &Const) -> fmt::Result {
+        match *konst {
+            Const::Bool(val) => writeln!(f, "{}", val),
+            Const::Float { lit, ref ty } => writeln!(f, "{} as {:?}", lit, ty),
+            Const::Int { lit, ref ty } => writeln!(f, "{} as {:?}", lit, ty),
+            Const::Str { id, ref ty } => writeln!(f, "%str{} ({:?}) as {:?}", id.idx(), self.strings[id], ty),
+        }
     }
-}
 
-impl Program {
     fn fn_name(&self, name: Option<Sym>) -> &str {
         match name {
-            Some(name) => self.interner.as_ref().resolve(name).unwrap(),
+            Some(name) => self.hir.interner.as_ref().resolve(name).unwrap(),
             None => "{anonymous}",
         }
     }
 }
 
-impl fmt::Display for Program {
+impl<'a> fmt::Display for Builder<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if !self.statics.raw.is_empty() {
             for (i, statik) in self.statics.iter().enumerate() {
                 write!(f, "%static{} = ", i)?;
-                fmt_const(f, statik, self)?;
+                self.fmt_const(f, statik)?;
             }
             writeln!(f)?;
         }
@@ -472,7 +444,7 @@ impl fmt::Display for Program {
                         },
                         Instr::Const(konst) => {
                             write!(f, "%{} = ", i)?;
-                            fmt_const(f, konst, self)?;
+                            self.fmt_const(f, konst)?;
                         },
                         Instr::Intrinsic { arguments, intr, .. } => {
                             write!(f, "%{} = intrinsic `{}`", i, intr.name())?;
