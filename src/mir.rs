@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::fmt;
-use std::rc::Rc;
 
 use smallvec::SmallVec;
-use string_interner::{Sym, DefaultStringInterner as Interner};
+use string_interner::Sym;
 
 use crate::arch::Arch;
 use crate::driver::Driver;
@@ -14,7 +13,6 @@ use tc::CastMethod;
 use crate::index_vec::{Idx, IdxVec};
 use crate::builder::{DeclId, ExprId, DeclRefId, ScopeId, Intrinsic};
 use crate::hir::{self, Expr, Item, StoredDeclId};
-use crate::interpreter::{Interpreter, InterpMode};
 
 newtype_index!(InstrId pub);
 newtype_index!(BasicBlockId pub);
@@ -329,6 +327,7 @@ impl<'src> Driver<'src> {
         }
     }
 
+    #[allow(dead_code)]
     fn fmt_const(&self, f: &mut fmt::Formatter, konst: &Const) -> fmt::Result {
         match *konst {
             Const::Bool(val) => writeln!(f, "{}", val),
@@ -338,6 +337,7 @@ impl<'src> Driver<'src> {
         }
     }
 
+    #[allow(dead_code)]
     fn fn_name(&self, name: Option<Sym>) -> &str {
         match name {
             Some(name) => self.hir.interner.as_ref().resolve(name).unwrap(),
@@ -345,6 +345,7 @@ impl<'src> Driver<'src> {
         }
     }
 
+    #[allow(dead_code)]
     fn fmt_mir(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if !self.mir.statics.raw.is_empty() {
             for (i, statik) in self.mir.statics.iter().enumerate() {

@@ -18,7 +18,7 @@ mod interpreter;
 
 use std::fs;
 
-use interpreter::{Interpreter, InterpMode};
+use interpreter::InterpMode;
 use index_vec::Idx;
 use ty::Type;
 use mir::FunctionRef;
