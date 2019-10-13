@@ -190,51 +190,6 @@ pub enum FunctionRef {
     Ref(Function),
 }
 
-pub trait MirProvider {
-    fn arch(&self) -> Arch;
-    fn string(&self, id: StrId) -> &CString;
-    fn new_string(&mut self, val: CString) -> StrId;
-    fn statics(&self) -> &[Const];
-    fn function(&self, id: FuncId) -> &Function;
-    fn function_by_ref<'a>(&'a self, func_ref: &'a FunctionRef) -> &'a Function {
-        match func_ref {
-            &FunctionRef::Id(id) => self.function(id),
-            FunctionRef::Ref(func) => func,
-        }
-    }
-    fn type_of(&self, instr: InstrId, func_ref: &FunctionRef) -> Type {
-        let func = self.function_by_ref(func_ref);
-        match &func.code[instr] {
-            Instr::Void | Instr::Store { .. } => Type::Void,
-            Instr::Pointer { .. } => Type::Ty,
-            Instr::Const(konst) => konst.ty(),
-            Instr::Alloca(ty) => ty.clone().mut_ptr(),
-            Instr::LogicalNot(_) => Type::Bool,
-            &Instr::Call { func, .. } => self.function(func).ret_ty.clone(),
-            Instr::Intrinsic { ty, .. } => ty.clone(),
-            Instr::Reinterpret(_, ty) | Instr::Truncate(_, ty) | Instr::SignExtend(_, ty)
-                | Instr::ZeroExtend(_, ty) | Instr::FloatCast(_, ty) | Instr::FloatToInt(_, ty)
-                | Instr::IntToFloat(_, ty)
-                  => ty.clone(),
-            &Instr::Load(instr) => match self.type_of(instr, func_ref) {
-                Type::Pointer(pointee) => pointee.ty,
-                _ => Type::Error,
-            },
-            &Instr::AddressOfStatic(statik) => self.statics()[statik.idx()].ty().mut_ptr(),
-            Instr::Ret(_) | Instr::Br(_) | Instr::CondBr { .. } => Type::Never,
-            Instr::Parameter(ty) => ty.clone(),
-        }
-    }
-}
-
-impl<'a> MirProvider for Builder<'a> {
-    fn arch(&self) -> Arch { self.arch }
-    fn string(&self, id: StrId) -> &CString { &self.strings[id] }
-    fn new_string(&mut self, val: CString) -> StrId { self.strings.push(val) }
-    fn statics(&self) -> &[Const] { &self.statics.raw }
-    fn function(&self, id: FuncId) -> &Function { &self.functions[id] }
-}
-
 pub struct Builder<'a> {
     hir: &'a hir::Program,
     tc: &'a tc::Program,
@@ -257,6 +212,37 @@ impl<'a> Builder<'a> {
             strings: IdxVec::new(),
             functions: IdxVec::new(),
             statics: IdxVec::new(),
+        }
+    }
+
+    pub fn function_by_ref<'b>(&'b self, func_ref: &'b FunctionRef) -> &'b Function {
+        match func_ref {
+            &FunctionRef::Id(id) => &self.functions[id],
+            FunctionRef::Ref(func) => func,
+        }
+    }
+
+    pub fn type_of(&self, instr: InstrId, func_ref: &FunctionRef) -> Type {
+        let func = self.function_by_ref(func_ref);
+        match &func.code[instr] {
+            Instr::Void | Instr::Store { .. } => Type::Void,
+            Instr::Pointer { .. } => Type::Ty,
+            Instr::Const(konst) => konst.ty(),
+            Instr::Alloca(ty) => ty.clone().mut_ptr(),
+            Instr::LogicalNot(_) => Type::Bool,
+            &Instr::Call { func, .. } => self.functions[func].ret_ty.clone(),
+            Instr::Intrinsic { ty, .. } => ty.clone(),
+            Instr::Reinterpret(_, ty) | Instr::Truncate(_, ty) | Instr::SignExtend(_, ty)
+                | Instr::ZeroExtend(_, ty) | Instr::FloatCast(_, ty) | Instr::FloatToInt(_, ty)
+                | Instr::IntToFloat(_, ty)
+                  => ty.clone(),
+            &Instr::Load(instr) => match self.type_of(instr, func_ref) {
+                Type::Pointer(pointee) => pointee.ty,
+                _ => Type::Error,
+            },
+            &Instr::AddressOfStatic(statik) => self.statics[statik].ty().mut_ptr(),
+            Instr::Ret(_) | Instr::Br(_) | Instr::CondBr { .. } => Type::Never,
+            Instr::Parameter(ty) => ty.clone(),
         }
     }
 

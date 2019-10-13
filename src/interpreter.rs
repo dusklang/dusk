@@ -10,7 +10,7 @@ use arrayvec::ArrayVec;
 use crate::arch::Arch;
 use crate::builder::Intrinsic;
 use crate::index_vec::{IdxVec, Idx};
-use crate::mir::{self, Const, Function, FunctionRef, Instr, InstrId, StaticId, StrId, MirProvider};
+use crate::mir::{self, Const, Function, FunctionRef, Instr, InstrId, StaticId, StrId};
 use crate::ty::{Type, IntWidth, FloatWidth};
 
 #[derive(Debug)]
@@ -153,12 +153,12 @@ impl Value {
         Value::Inline(storage)
     }
 
-    fn from_const<T: MirProvider>(konst: &Const, mir: &T) -> Value {
+    fn from_const(konst: &Const, mir: &mir::Builder) -> Value {
         match *konst {
             Const::Int { lit, ref ty } => match ty {
                 Type::Int { width, is_signed } => {
                     // We assume in the match below that pointer-sized ints are 64 bits
-                    assert_eq!(mir.arch().pointer_size(), 64);
+                    assert_eq!(mir.arch.pointer_size(), 64);
                     use IntWidth::*;
                     match (width, is_signed) {
                         (W8, false) => Value::from_u8(lit.try_into().unwrap()),
@@ -174,14 +174,14 @@ impl Value {
                 },
                 _ => panic!("unexpected int constant type {:?}", ty),
             },
-            Const::Float { lit, ref ty } => match ty.size(mir.arch()) {
+            Const::Float { lit, ref ty } => match ty.size(mir.arch) {
                 4 => Value::from_f32(lit as f32),
                 8 => Value::from_f64(lit.try_into().unwrap()),
                 _ => panic!("Unrecognized float constant size"),
             },
             Const::Bool(val) => Value::from_bool(val),
             Const::Str { id, .. } => {
-                let ptr = mir.string(id).as_ptr();
+                let ptr = mir.strings[id].as_ptr();
                 Value::from_usize(unsafe { mem::transmute(ptr) })
             },
         }
@@ -346,7 +346,7 @@ impl<'mir> Interpreter<'mir> {
             Instr::Const(konst) => Value::from_const(konst, self.mir),
             Instr::Alloca(ty) => {
                 let mut storage = Vec::new();
-                storage.resize(ty.size(self.mir.arch()), 0);
+                storage.resize(ty.size(self.mir.arch), 0);
                 Value::Dynamic(storage.into_boxed_slice())
             },
             &Instr::LogicalNot(val) => {
@@ -373,7 +373,7 @@ impl<'mir> Interpreter<'mir> {
                         match ty {
                             Type::Int { width, is_signed } => {
                                 // We assume in the match below that pointer-sized ints are 64 bits
-                                assert_eq!(self.mir.arch().pointer_size(), 64);
+                                assert_eq!(self.mir.arch.pointer_size(), 64);
                                 use IntWidth::*;
                                 match (width, is_signed) {
                                     (W8, true) => Value::from_i8(lhs.as_i8() * rhs.as_i8()),
@@ -403,7 +403,7 @@ impl<'mir> Interpreter<'mir> {
                         match ty {
                             Type::Int { width, is_signed } => {
                                 // We assume in the match below that pointer-sized ints are 64 bits
-                                assert_eq!(self.mir.arch().pointer_size(), 64);
+                                assert_eq!(self.mir.arch.pointer_size(), 64);
                                 use IntWidth::*;
                                 match (width, is_signed) {
                                     (W8, true) => Value::from_i8(lhs.as_i8() / rhs.as_i8()),
@@ -433,7 +433,7 @@ impl<'mir> Interpreter<'mir> {
                         match ty {
                             Type::Int { width, is_signed } => {
                                 // We assume in the match below that pointer-sized ints are 64 bits
-                                assert_eq!(self.mir.arch().pointer_size(), 64);
+                                assert_eq!(self.mir.arch.pointer_size(), 64);
                                 use IntWidth::*;
                                 match (width, is_signed) {
                                     (W8, true) => Value::from_i8(lhs.as_i8() % rhs.as_i8()),
@@ -463,7 +463,7 @@ impl<'mir> Interpreter<'mir> {
                         match ty {
                             Type::Int { width, is_signed } => {
                                 // We assume in the match below that pointer-sized ints are 64 bits
-                                assert_eq!(self.mir.arch().pointer_size(), 64);
+                                assert_eq!(self.mir.arch.pointer_size(), 64);
                                 use IntWidth::*;
                                 match (width, is_signed) {
                                     (W8, true) => Value::from_i8(lhs.as_i8() + rhs.as_i8()),
@@ -493,7 +493,7 @@ impl<'mir> Interpreter<'mir> {
                         match ty {
                             Type::Int { width, is_signed } => {
                                 // We assume in the match below that pointer-sized ints are 64 bits
-                                assert_eq!(self.mir.arch().pointer_size(), 64);
+                                assert_eq!(self.mir.arch.pointer_size(), 64);
                                 use IntWidth::*;
                                 match (width, is_signed) {
                                     (W8, true) => Value::from_i8(lhs.as_i8() - rhs.as_i8()),
@@ -523,7 +523,7 @@ impl<'mir> Interpreter<'mir> {
                         let val = match ty {
                             Type::Int { width, is_signed } => {
                                 // We assume in the match below that pointer-sized ints are 64 bits
-                                assert_eq!(self.mir.arch().pointer_size(), 64);
+                                assert_eq!(self.mir.arch.pointer_size(), 64);
                                 use IntWidth::*;
                                 match (width, is_signed) {
                                     (W8, true) => lhs.as_i8() < rhs.as_i8(),
@@ -554,7 +554,7 @@ impl<'mir> Interpreter<'mir> {
                         let val = match ty {
                             Type::Int { width, is_signed } => {
                                 // We assume in the match below that pointer-sized ints are 64 bits
-                                assert_eq!(self.mir.arch().pointer_size(), 64);
+                                assert_eq!(self.mir.arch.pointer_size(), 64);
                                 use IntWidth::*;
                                 match (width, is_signed) {
                                     (W8, true) => lhs.as_i8() <= rhs.as_i8(),
@@ -585,7 +585,7 @@ impl<'mir> Interpreter<'mir> {
                         let val = match ty {
                             Type::Int { width, is_signed } => {
                                 // We assume in the match below that pointer-sized ints are 64 bits
-                                assert_eq!(self.mir.arch().pointer_size(), 64);
+                                assert_eq!(self.mir.arch.pointer_size(), 64);
                                 use IntWidth::*;
                                 match (width, is_signed) {
                                     (W8, true) => lhs.as_i8() > rhs.as_i8(),
@@ -616,7 +616,7 @@ impl<'mir> Interpreter<'mir> {
                         let val = match ty {
                             Type::Int { width, is_signed } => {
                                 // We assume in the match below that pointer-sized ints are 64 bits
-                                assert_eq!(self.mir.arch().pointer_size(), 64);
+                                assert_eq!(self.mir.arch.pointer_size(), 64);
                                 use IntWidth::*;
                                 match (width, is_signed) {
                                     (W8, true) => lhs.as_i8() >= rhs.as_i8(),
@@ -647,7 +647,7 @@ impl<'mir> Interpreter<'mir> {
                         let val = match ty {
                             Type::Int { width, is_signed } => {
                                 // We assume in the match below that pointer-sized ints are 64 bits
-                                assert_eq!(self.mir.arch().pointer_size(), 64);
+                                assert_eq!(self.mir.arch.pointer_size(), 64);
                                 use IntWidth::*;
                                 match (width, is_signed) {
                                     (W8, true) => lhs.as_i8() == rhs.as_i8(),
@@ -679,7 +679,7 @@ impl<'mir> Interpreter<'mir> {
                         let val = match ty {
                             Type::Int { width, is_signed } => {
                                 // We assume in the match below that pointer-sized ints are 64 bits
-                                assert_eq!(self.mir.arch().pointer_size(), 64);
+                                assert_eq!(self.mir.arch.pointer_size(), 64);
                                 use IntWidth::*;
                                 match (width, is_signed) {
                                     (W8, true) => lhs.as_i8() != rhs.as_i8(),
@@ -711,7 +711,7 @@ impl<'mir> Interpreter<'mir> {
                         match ty {
                             Type::Int { width, is_signed } => {
                                 // We assume in the match below that pointer-sized ints are 64 bits
-                                assert_eq!(self.mir.arch().pointer_size(), 64);
+                                assert_eq!(self.mir.arch.pointer_size(), 64);
                                 use IntWidth::*;
                                 match (width, is_signed) {
                                     (W8, true) => Value::from_i8(lhs.as_i8() & rhs.as_i8()),
@@ -737,7 +737,7 @@ impl<'mir> Interpreter<'mir> {
                         match ty {
                             Type::Int { width, is_signed } => {
                                 // We assume in the match below that pointer-sized ints are 64 bits
-                                assert_eq!(self.mir.arch().pointer_size(), 64);
+                                assert_eq!(self.mir.arch.pointer_size(), 64);
                                 use IntWidth::*;
                                 match (width, is_signed) {
                                     (W8, true) => Value::from_i8(lhs.as_i8() | rhs.as_i8()),
@@ -763,7 +763,7 @@ impl<'mir> Interpreter<'mir> {
                         match ty {
                             Type::Int { width, is_signed } => {
                                 // We assume in the match below that pointer-sized ints are 64 bits
-                                assert_eq!(self.mir.arch().pointer_size(), 64);
+                                assert_eq!(self.mir.arch.pointer_size(), 64);
                                 assert!(is_signed);
                                 match width {
                                     IntWidth::W8 => Value::from_i8(-arg.as_i8()),
@@ -820,7 +820,7 @@ impl<'mir> Interpreter<'mir> {
                     },
                     Intrinsic::Malloc => {
                         assert_eq!(arguments.len(), 1);
-                        assert_eq!(self.mir.arch().pointer_size(), 64);
+                        assert_eq!(self.mir.arch.pointer_size(), 64);
                         let size = frame.results[arguments[0]].as_u64() as usize;
                         let layout = alloc::Layout::from_size_align(size, 8).unwrap();
                         let buf = unsafe { alloc::alloc(layout) };
@@ -830,7 +830,7 @@ impl<'mir> Interpreter<'mir> {
                     }
                     Intrinsic::Free => {
                         assert_eq!(arguments.len(), 1);
-                        assert_eq!(self.mir.arch().pointer_size(), 64);
+                        assert_eq!(self.mir.arch.pointer_size(), 64);
                         let ptr = frame.results[arguments[0]].as_raw_ptr();
                         let address: usize = unsafe { mem::transmute(ptr) };
                         let layout = self.allocations.remove(&address).unwrap();
@@ -864,7 +864,7 @@ impl<'mir> Interpreter<'mir> {
             &Instr::Reinterpret(instr, _) => frame.results[instr].clone(),
             &Instr::Truncate(instr, ref ty) => {
                 let bytes = frame.results[instr].as_bytes();
-                Value::from_bytes(&bytes[0..ty.size(self.mir.arch())])
+                Value::from_bytes(&bytes[0..ty.size(self.mir.arch)])
             },
             &Instr::SignExtend(val, ref dest_ty) => {
                 let src_ty = &self.mir.type_of(val, &func_ref);
@@ -875,7 +875,7 @@ impl<'mir> Interpreter<'mir> {
                         Type::Int { width: dest_width, is_signed: dest_is_signed }
                     ) => {
                         assert!(dest_is_signed);
-                        match (src_width.bit_width(self.mir.arch()), src_is_signed, dest_width.bit_width(self.mir.arch())) {
+                        match (src_width.bit_width(self.mir.arch), src_is_signed, dest_width.bit_width(self.mir.arch)) {
                             (s, _, d) if s == d => panic!("Can't sign-extend to the same size"),
                             (8, true, 16) => Value::from_i16(val.as_i8().try_into().unwrap()),
                             (8, true, 32) => Value::from_i32(val.as_i8().try_into().unwrap()),
@@ -906,7 +906,7 @@ impl<'mir> Interpreter<'mir> {
                         Type::Int { width: dest_width, is_signed: dest_is_signed }
                     ) => {
                         assert!(!dest_is_signed);
-                        match (src_width.bit_width(self.mir.arch()), src_is_signed, dest_width.bit_width(self.mir.arch())) {
+                        match (src_width.bit_width(self.mir.arch), src_is_signed, dest_width.bit_width(self.mir.arch)) {
                             (s, _, d) if s == d => panic!("Can't zero-extend to the same size"),
                             (8, true, 16) => Value::from_u16(val.as_i8().try_into().unwrap()),
                             (8, true, 32) => Value::from_u32(val.as_i8().try_into().unwrap()),
@@ -930,7 +930,7 @@ impl<'mir> Interpreter<'mir> {
             },
             &Instr::FloatCast(instr, ref ty) => {
                 let val = &frame.results[instr];
-                match (val.as_bytes().len(), ty.size(self.mir.arch())) {
+                match (val.as_bytes().len(), ty.size(self.mir.arch)) {
                     (x, y) if x == y => val.clone(),
                     (4, 8) => Value::from_f64(val.as_f32() as f64),
                     (8, 4) => Value::from_f32(val.as_f64() as f32),
@@ -941,10 +941,10 @@ impl<'mir> Interpreter<'mir> {
             },
             &Instr::FloatToInt(instr, ref dest_ty) => {
                 let val = &frame.results[instr];
-                let src_size = self.mir.type_of(instr, &func_ref).size(self.mir.arch());
+                let src_size = self.mir.type_of(instr, &func_ref).size(self.mir.arch);
                 match dest_ty {
                     Type::Int { width, is_signed } => {
-                        match (src_size * 8, width.bit_width(self.mir.arch()), is_signed) {
+                        match (src_size * 8, width.bit_width(self.mir.arch), is_signed) {
                             (32, 8, true) => Value::from_i8(val.as_f32() as _),
                             (32, 16, true) => Value::from_i16(val.as_f32() as _),
                             (32, 32, true) => Value::from_i32(val.as_f32() as _),
@@ -974,10 +974,10 @@ impl<'mir> Interpreter<'mir> {
             &Instr::IntToFloat(instr, ref dest_ty) => {
                 let val = &frame.results[instr];
                 let src_ty = &self.mir.type_of(instr, &func_ref);
-                let dest_size = dest_ty.size(self.mir.arch());
+                let dest_size = dest_ty.size(self.mir.arch);
                 match src_ty {
                     Type::Int { width, is_signed } => {
-                        match (width.bit_width(self.mir.arch()), is_signed, dest_size * 8) {
+                        match (width.bit_width(self.mir.arch), is_signed, dest_size * 8) {
                             (8, true, 32) => Value::from_f32(val.as_i8() as _),
                             (16, true, 32) => Value::from_f32(val.as_i16() as _),
                             (32, true, 32) => Value::from_f32(val.as_i32() as _),
@@ -1005,7 +1005,7 @@ impl<'mir> Interpreter<'mir> {
                 }
             }
             &Instr::Load(location) => {
-                let size = self.mir.type_of(frame.pc, &func_ref).size(self.mir.arch());
+                let size = self.mir.type_of(frame.pc, &func_ref).size(self.mir.arch);
                 frame.results[location].load(size)
             },
             &Instr::Store { location, value } => {
@@ -1019,7 +1019,7 @@ impl<'mir> Interpreter<'mir> {
                 }
                 let mir = &self.mir;
                 let statik = self.statics.entry(statik)
-                    .or_insert_with(|| Value::from_const(&mir.statics()[statik.idx()], *mir));
+                    .or_insert_with(|| Value::from_const(&mir.statics[statik], *mir));
                 Value::from_usize(unsafe { mem::transmute(statik.as_bytes().as_ptr()) })
             },
             &Instr::Pointer { op, is_mut } => {
