@@ -39,19 +39,8 @@ fn main() {
     errs.extend(hir_errs);
     errs.extend(tc_errs);
 
-    for err in &mut errs { err.report(&file); }
-    if !errs.is_empty() {
-        print!("\n\u{001B}[31mcompilation failed due to previous ");
-        if errs.len() == 1 {
-            print!("error");
-        } else {
-            print!("{} errors", errs.len());
-        }
-        println!("\u{001B}[0m");
-        return;
-    }
-
-    let mut driver = Driver::new(&hir, &tc, arch::Arch::X86_64);
+    let mut driver = Driver::new(file, &hir, &tc, errs, arch::Arch::X86_64);
+    if driver.report_errors() { return; }
     driver.build_mir();
     let main = driver.mir.functions.iter()
         .position(|func| {
