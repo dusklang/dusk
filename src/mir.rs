@@ -7,6 +7,7 @@ use smallvec::SmallVec;
 use string_interner::{Sym, DefaultStringInterner as Interner};
 
 use crate::arch::Arch;
+use crate::driver::Driver;
 use crate::ty::Type;
 use crate::type_checker as tc;
 use tc::CastMethod;
@@ -190,9 +191,7 @@ pub enum FunctionRef {
     Ref(Function),
 }
 
-pub struct Builder<'a> {
-    hir: &'a hir::Program,
-    tc: &'a tc::Program,
+pub struct Builder {
     decls: HashMap<DeclId, Decl>,
     static_inits: IdxVec<Function, StaticId>,
     pub arch: Arch,
@@ -201,11 +200,9 @@ pub struct Builder<'a> {
     pub statics: IdxVec<Const, StaticId>,
 }
 
-impl<'a> Builder<'a> {
-    pub fn new(hir: &'a hir::Program, tc: &'a tc::Program, arch: Arch) -> Self {
-        Self { 
-            hir,
-            tc,
+impl Builder {
+    pub fn new(arch: Arch) -> Self {
+        Self {
             decls: HashMap::new(),
             static_inits: IdxVec::new(),
             arch,
@@ -214,7 +211,9 @@ impl<'a> Builder<'a> {
             statics: IdxVec::new(),
         }
     }
+}
 
+impl Builder {
     pub fn function_by_ref<'b>(&'b self, func_ref: &'b FunctionRef) -> &'b Function {
         match func_ref {
             &FunctionRef::Id(id) => &self.functions[id],
@@ -245,52 +244,54 @@ impl<'a> Builder<'a> {
             Instr::Parameter(ty) => ty.clone(),
         }
     }
+}
 
+impl<'src> Driver<'src> {
     fn get_decl(&mut self, id: DeclId) -> Decl {
-        if let Some(decl) = self.decls.get(&id) { return decl.clone(); }
+        if let Some(decl) = self.mir.decls.get(&id) { return decl.clone(); }
         match self.hir.decls[id] {
             hir::Decl::Computed { ref params, scope, .. } => {
-                let get = FuncId::new(self.functions.len());
+                let get = FuncId::new(self.mir.functions.len());
                 let decl = Decl::Computed { get };
-                self.decls.insert(id, decl.clone());
+                self.mir.decls.insert(id, decl.clone());
                 let func = FunctionBuilder::new(
                     self,
                     Some(self.hir.names[id]),
                     self.tc.decl_types[id].clone(),
                     FunctionBody::Scope(scope),
                     &params[..],
-                    self.arch,
+                    self.mir.arch,
                 ).build();
-                self.functions.push(func);
+                self.mir.functions.push(func);
                 decl
             },
             hir::Decl::Stored { id: index, .. } => {
                 let decl = Decl::Stored(index);
-                self.decls.insert(id, decl.clone());
+                self.mir.decls.insert(id, decl.clone());
                 decl
             },
             hir::Decl::Parameter { index } => {
                 let decl = Decl::LocalConst { value: InstrId::new(index + 1) };
-                self.decls.insert(id, decl.clone());
+                self.mir.decls.insert(id, decl.clone());
                 decl
             },
             hir::Decl::Intrinsic { intr, .. } => {
                 let decl = Decl::Intrinsic(intr, self.tc.decl_types[id].clone());
-                self.decls.insert(id, decl.clone());
+                self.mir.decls.insert(id, decl.clone());
                 decl
             },
             hir::Decl::Static(expr) => {
-                let decl = Decl::Static(StaticId::new(self.static_inits.len()));
-                self.decls.insert(id, decl.clone());
+                let decl = Decl::Static(StaticId::new(self.mir.static_inits.len()));
+                self.mir.decls.insert(id, decl.clone());
                 let func = FunctionBuilder::new(
                     self,
                     None,
                     self.tc.decl_types[id].clone(),
                     FunctionBody::Expr(expr),
                     &[],
-                    self.arch,
+                    self.mir.arch,
                 ).build();
-                self.static_inits.push(func);
+                self.mir.static_inits.push(func);
                 decl
             },
             hir::Decl::Const(root_expr) => {
@@ -301,43 +302,39 @@ impl<'a> Builder<'a> {
                     ty.clone(),
                     FunctionBody::Expr(root_expr),
                     &[],
-                    self.arch,
+                    self.mir.arch,
                 ).build();
-                let konst = Interpreter::new(&*self, InterpMode::CompileTime)
-                    .call(FunctionRef::Ref(function), Vec::new())
-                    .to_const(self.arch, ty, &mut self.strings);
+                let konst = self.call(FunctionRef::Ref(function), Vec::new())
+                    .to_const(self.mir.arch, ty, &mut self.mir.strings);
                 
                 // TODO: Deal with cycles!
                 let decl = Decl::Const(konst);
-                self.decls.insert(id, decl.clone());
+                self.mir.decls.insert(id, decl.clone());
                 decl
             },
         }
     }
 
-    pub fn build(&mut self) {
+    pub fn build_mir(&mut self) {
         for i in 0..self.hir.decls.len() {
             self.get_decl(DeclId::new(i));
         }
 
-        let static_inits = std::mem::replace(&mut self.static_inits, IdxVec::new());
+        let static_inits = std::mem::replace(&mut self.mir.static_inits, IdxVec::new());
         for statik in static_inits.raw {
             let ty = statik.ret_ty.clone();
-            let konst = Interpreter::new(self, InterpMode::CompileTime)
-                .call(FunctionRef::Ref(statik), Vec::new())
-                .to_const(self.arch, ty, &mut self.strings);
-            self.statics.push(konst);
+            let konst = self.call(FunctionRef::Ref(statik), Vec::new())
+                .to_const(self.mir.arch, ty, &mut self.mir.strings);
+            self.mir.statics.push(konst);
         }
     }
-}
 
-impl<'a> Builder<'a> {
     fn fmt_const(&self, f: &mut fmt::Formatter, konst: &Const) -> fmt::Result {
         match *konst {
             Const::Bool(val) => writeln!(f, "{}", val),
             Const::Float { lit, ref ty } => writeln!(f, "{} as {:?}", lit, ty),
             Const::Int { lit, ref ty } => writeln!(f, "{} as {:?}", lit, ty),
-            Const::Str { id, ref ty } => writeln!(f, "%str{} ({:?}) as {:?}", id.idx(), self.strings[id], ty),
+            Const::Str { id, ref ty } => writeln!(f, "%str{} ({:?}) as {:?}", id.idx(), self.mir.strings[id], ty),
         }
     }
 
@@ -347,19 +344,17 @@ impl<'a> Builder<'a> {
             None => "{anonymous}",
         }
     }
-}
 
-impl<'a> fmt::Display for Builder<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if !self.statics.raw.is_empty() {
-            for (i, statik) in self.statics.iter().enumerate() {
+    fn fmt_mir(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if !self.mir.statics.raw.is_empty() {
+            for (i, statik) in self.mir.statics.iter().enumerate() {
                 write!(f, "%static{} = ", i)?;
                 self.fmt_const(f, statik)?;
             }
             writeln!(f)?;
         }
 
-        for (i, func) in self.functions.iter().enumerate() {
+        for (i, func) in self.mir.functions.iter().enumerate() {
             write!(f, "fn {}", self.fn_name(func.name))?;
             assert_eq!(&func.code.raw[0], &Instr::Void);
             let mut first = true;
@@ -425,7 +420,7 @@ impl<'a> fmt::Display for Builder<'a> {
                         &Instr::CondBr { condition, true_bb, false_bb }
                             => writeln!(f, "condbr %{}, %bb{}, %bb{}", condition.idx(), true_bb.idx(), false_bb.idx())?,
                         &Instr::Call { ref arguments, func: callee } => {
-                            write!(f, "%{} = call `{}`", i, self.fn_name(self.functions[callee].name))?;
+                            write!(f, "%{} = call `{}`", i, self.fn_name(self.mir.functions[callee].name))?;
                             write_args!(arguments)?
                         },
                         Instr::Const(konst) => {
@@ -462,7 +457,7 @@ impl<'a> fmt::Display for Builder<'a> {
                 }
             }
             write!(f, "}}")?;
-            if i + 1 < self.functions.len() {
+            if i + 1 < self.mir.functions.len() {
                 writeln!(f, "\n")?;
             }
         }
@@ -476,8 +471,8 @@ enum FunctionBody {
     Expr(ExprId),
 }
 
-struct FunctionBuilder<'a, 'mir: 'a> {
-    b: &'a mut Builder<'mir>,
+struct FunctionBuilder<'a, 'b: 'a> {
+    d: &'a mut Driver<'b>,
     name: Option<Sym>,
     ret_ty: Type,
     body: FunctionBody,
@@ -488,9 +483,9 @@ struct FunctionBuilder<'a, 'mir: 'a> {
     stored_decl_locs: IdxVec<InstrId, StoredDeclId>,
 }
 
-impl<'a, 'mir: 'a> FunctionBuilder<'a, 'mir> {
+impl<'a, 'b> FunctionBuilder<'a, 'b> {
     fn new(
-        b: &'a mut Builder<'mir>,
+        d: &'a mut Driver<'b>,
         name: Option<Sym>,
         ret_ty: Type,
         body: FunctionBody,
@@ -500,16 +495,16 @@ impl<'a, 'mir: 'a> FunctionBuilder<'a, 'mir> {
         let mut code = IdxVec::new();
         let void_instr = code.push(Instr::Void);
         for &param in params {
-            if let hir::Decl::Parameter { .. } = b.hir.decls[param] {
-                code.push(Instr::Parameter(b.tc.decl_types[param].clone()));
+            if let hir::Decl::Parameter { .. } = d.hir.decls[param] {
+                code.push(Instr::Parameter(d.tc.decl_types[param].clone()));
             } else {
                 panic!("unexpected non-parameter as parameter decl");
             }
         }
         let mut basic_blocks = IdxVec::new();
         basic_blocks.push(InstrId::new(code.len()));
-        FunctionBuilder::<'a, 'mir> {
-            b,
+        FunctionBuilder::<'a, 'b> {
+            d,
             name,
             ret_ty,
             body,
@@ -523,7 +518,7 @@ impl<'a, 'mir: 'a> FunctionBuilder<'a, 'mir> {
     }
 
     fn type_of(&self, expr: ExprId) -> Type {
-        self.b.tc.types[expr].clone()
+        self.d.tc.types[expr].clone()
     }
 
     fn item(&mut self, item: Item) {
@@ -546,7 +541,7 @@ impl<'a, 'mir: 'a> FunctionBuilder<'a, 'mir> {
     fn void_instr(&self) -> InstrId { self.void_instr }
 
     fn scope(&mut self, scope: ScopeId, ctx: Context) -> InstrId {
-        let scope = &self.b.hir.scopes[scope];
+        let scope = &self.d.hir.scopes[scope];
         for &item in &scope.items {
             self.item(item);
         }
@@ -573,8 +568,8 @@ impl<'a, 'mir: 'a> FunctionBuilder<'a, 'mir> {
     }
 
     fn get(&mut self, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId) -> InstrId {
-        let id = self.b.tc.overloads[id].expect("No overload found!");
-        match self.b.get_decl(id) {
+        let id = self.d.tc.overloads[id].expect("No overload found!");
+        match self.d.get_decl(id) {
             Decl::Computed { get } => self.code.push(Instr::Call { arguments, func: get }),
             Decl::Stored(id) => {
                 assert!(arguments.is_empty());
@@ -594,8 +589,8 @@ impl<'a, 'mir: 'a> FunctionBuilder<'a, 'mir> {
     }
 
     fn set(&mut self, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId, value: InstrId) -> InstrId {
-        let id = self.b.tc.overloads[id].expect("No overload found!");
-        match self.b.get_decl(id) {
+        let id = self.d.tc.overloads[id].expect("No overload found!");
+        match self.d.get_decl(id) {
             Decl::Computed { .. } => panic!("setters not yet implemented!"),
             Decl::Stored(id) => {
                 assert!(arguments.is_empty());
@@ -612,8 +607,8 @@ impl<'a, 'mir: 'a> FunctionBuilder<'a, 'mir> {
     }
 
     fn modify(&mut self, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId) -> InstrId {
-        let id = self.b.tc.overloads[id].expect("No overload found!");
-        match self.b.get_decl(id) {
+        let id = self.d.tc.overloads[id].expect("No overload found!");
+        match self.d.get_decl(id) {
             Decl::Computed { .. } => panic!("modify accessors not yet implemented!"),
             Decl::Stored(id) => {
                 assert!(arguments.is_empty());
@@ -631,10 +626,10 @@ impl<'a, 'mir: 'a> FunctionBuilder<'a, 'mir> {
 
         let ty = self.type_of(expr);
 
-        let instr = match self.b.hir.exprs[expr] {
+        let instr = match self.d.hir.exprs[expr] {
             Expr::Void => self.void_instr(),
             Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::StrLit { .. } | Expr::CharLit { .. } => {
-                let konst = expr_to_const(&self.b.hir.exprs[expr], ty.clone(), &mut self.b.strings);
+                let konst = expr_to_const(&self.d.hir.exprs[expr], ty.clone(), &mut self.d.mir.strings);
                 self.code.push(Instr::Const(konst))
             },
             Expr::Set { lhs, rhs } => {
@@ -652,8 +647,8 @@ impl<'a, 'mir: 'a> FunctionBuilder<'a, 'mir> {
             // that you can't chain `if let`s in Rust.
             Expr::DeclRef { ref arguments, id, .. } => loop {
                 // Check if the declaration is an intrinsic
-                let decl_id = self.b.tc.overloads[id].unwrap();
-                if let hir::Decl::Intrinsic { intr, .. } = self.b.hir.decls[decl_id] {
+                let decl_id = self.d.tc.overloads[id].unwrap();
+                if let hir::Decl::Intrinsic { intr, .. } = self.d.hir.decls[decl_id] {
                     // Check if we need to special case the intrinsic
                     match intr {
                         Intrinsic::LogicalAnd => break {
@@ -784,14 +779,14 @@ impl<'a, 'mir: 'a> FunctionBuilder<'a, 'mir> {
                     }
                 }
             },
-            Expr::Cast { expr, ty: ref dest_ty, cast_id } => match &self.b.tc.cast_methods[cast_id] {
+            Expr::Cast { expr, ty: ref dest_ty, cast_id } => match &self.d.tc.cast_methods[cast_id] {
                 CastMethod::Noop => return self.expr(expr, ctx),
                 CastMethod::Reinterpret => {
                     let value = self.expr(expr, Context::new(0, DataDest::Read, ControlDest::Continue));
                     self.code.push(Instr::Reinterpret(value, dest_ty.clone()))
                 },
                 CastMethod::Int => {
-                    let (src_width, _src_is_signed, dest_width, dest_is_signed) = match (&self.b.tc.types[expr], dest_ty) {
+                    let (src_width, _src_is_signed, dest_width, dest_is_signed) = match (&self.d.tc.types[expr], dest_ty) {
                         (&Type::Int { width: ref src_width, is_signed: src_is_signed }, &Type::Int { width: ref dest_width, is_signed: dest_is_signed })
                             => (src_width.clone(), src_is_signed, dest_width.clone(), dest_is_signed),
                         _ => panic!("Internal compiler error: found invalid cast types while generating MIR")

@@ -22,6 +22,7 @@ use interpreter::{Interpreter, InterpMode};
 use index_vec::Idx;
 use ty::Type;
 use mir::FunctionRef;
+use driver::Driver;
 
 fn main() {
     let contents = fs::read_to_string("HelloWorld.meda")
@@ -50,10 +51,9 @@ fn main() {
         return;
     }
 
-    let mut mir = mir::Builder::new(&hir, &tc, arch::Arch::X86_64);
-    mir.build();
-    let mut interpreter = Interpreter::new(&mir, InterpMode::RunTime);
-    let main = mir.functions.iter()
+    let mut driver = Driver::new(&hir, &tc, arch::Arch::X86_64);
+    driver.build_mir();
+    let main = driver.mir.functions.iter()
         .position(|func| {
             match func.name {
                 // TODO: intern "main" and then repeatedly compare its handle to the function's handle rather than doing string comp
@@ -64,7 +64,8 @@ fn main() {
             }
         })
         .expect("Couldn't find main function with no parameters and a return type of void!");
-    
+
     println!("Running the user's program in the interpreter:\n");
-    interpreter.call(FunctionRef::Id(Idx::new(main)), Vec::new());
+    driver.interp.mode = InterpMode::RunTime;
+    driver.call(FunctionRef::Id(Idx::new(main)), Vec::new());
 }

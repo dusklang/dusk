@@ -9,6 +9,7 @@ use arrayvec::ArrayVec;
 
 use crate::arch::Arch;
 use crate::builder::Intrinsic;
+use crate::driver::Driver;
 use crate::index_vec::{IdxVec, Idx};
 use crate::mir::{self, Const, Function, FunctionRef, Instr, InstrId, StaticId, StrId};
 use crate::ty::{Type, IntWidth, FloatWidth};
@@ -306,32 +307,32 @@ pub enum InterpMode {
     RunTime,
 }
 
-pub struct Interpreter<'mir> {
+pub struct Interpreter {
     stack: Vec<(FunctionRef, StackFrame)>,
     statics: HashMap<StaticId, Value>,
     allocations: HashMap<usize, alloc::Layout>,
-    mode: InterpMode,
-    mir: &'mir mir::Builder<'mir>,
+    pub mode: InterpMode,
 }
 
-impl<'mir> Interpreter<'mir> {
-    pub fn new(mir: &'mir mir::Builder<'mir>, mode: InterpMode) -> Self {
+impl Interpreter {
+    pub fn new() -> Self {
         Self {
             stack: Vec::new(),
             statics: HashMap::new(),
             allocations: HashMap::new(),
-            mode,
-            mir,
+            mode: InterpMode::CompileTime,
         }
     }
+}
 
+impl<'src> Driver<'src> {
     pub fn call(&mut self, func_ref: FunctionRef, arguments: Vec<Value>) -> Value {
         let func = self.mir.function_by_ref(&func_ref);
         let frame = StackFrame::new(func, arguments);
-        self.stack.push((func_ref, frame));
+        self.interp.stack.push((func_ref, frame));
         loop {
             if let Some(val) = self.execute_next() {
-                self.stack.pop().unwrap();
+                self.interp.stack.pop().unwrap();
                 return val;
             }
         }
@@ -339,11 +340,11 @@ impl<'mir> Interpreter<'mir> {
 
     /// Execute the next instruction. Iff the instruction is a return, this function returns its `Value`
     fn execute_next(&mut self) -> Option<Value> {
-        let (func_ref, frame) = self.stack.last_mut().unwrap();
+        let (func_ref, frame) = self.interp.stack.last_mut().unwrap();
         let func = self.mir.function_by_ref(func_ref);
         let val = match &func.code[frame.pc] {
             Instr::Void => Value::Nothing,
-            Instr::Const(konst) => Value::from_const(konst, self.mir),
+            Instr::Const(konst) => Value::from_const(konst, &self.mir),
             Instr::Alloca(ty) => {
                 let mut storage = Vec::new();
                 storage.resize(ty.size(self.mir.arch), 0);
@@ -825,7 +826,7 @@ impl<'mir> Interpreter<'mir> {
                         let layout = alloc::Layout::from_size_align(size, 8).unwrap();
                         let buf = unsafe { alloc::alloc(layout) };
                         let address: usize = unsafe { mem::transmute(buf) };
-                        self.allocations.insert(address, layout);
+                        self.interp.allocations.insert(address, layout);
                         Value::from_usize(address)
                     }
                     Intrinsic::Free => {
@@ -833,7 +834,7 @@ impl<'mir> Interpreter<'mir> {
                         assert_eq!(self.mir.arch.pointer_size(), 64);
                         let ptr = frame.results[arguments[0]].as_raw_ptr();
                         let address: usize = unsafe { mem::transmute(ptr) };
-                        let layout = self.allocations.remove(&address).unwrap();
+                        let layout = self.interp.allocations.remove(&address).unwrap();
                         unsafe { alloc::dealloc(ptr, layout) };
                         Value::Nothing
                     },
@@ -1014,12 +1015,12 @@ impl<'mir> Interpreter<'mir> {
                 Value::Nothing
             },
             &Instr::AddressOfStatic(statik) => {
-                if let InterpMode::CompileTime = self.mode {
+                if let InterpMode::CompileTime = self.interp.mode {
                     panic!("Can't access static at compile time!");
                 }
                 let mir = &self.mir;
-                let statik = self.statics.entry(statik)
-                    .or_insert_with(|| Value::from_const(&mir.statics[statik], *mir));
+                let statik = self.interp.statics.entry(statik)
+                    .or_insert_with(|| Value::from_const(&mir.statics[statik], mir));
                 Value::from_usize(unsafe { mem::transmute(statik.as_bytes().as_ptr()) })
             },
             &Instr::Pointer { op, is_mut } => {
@@ -1042,7 +1043,7 @@ impl<'mir> Interpreter<'mir> {
             Instr::Parameter(_) => panic!("Invalid parameter instruction in the middle of a function!"),
         };
 
-        let (_, frame) = self.stack.last_mut().unwrap();
+        let (_, frame) = self.interp.stack.last_mut().unwrap();
         frame.results[frame.pc] = val;
         frame.pc.advance();
         None
