@@ -106,6 +106,7 @@ pub enum Intrinsic {
     Bool,
     Void,
     Ty,
+    PrintType,
 }
 
 impl Intrinsic {
@@ -150,6 +151,7 @@ impl Intrinsic {
             Bool => "bool",
             Void => "void",
             Ty => "type",
+            PrintType => "print_type",
         }
     }
 }

@@ -90,7 +90,17 @@ generated_string :: concat(concat("Hello, ", "world!"), " (from compile-time)\n"
 
 fn too_hype_for_types(a: i32, b: i32, c: i32) = a * b + c
 
-fn take_a_type(T: type) {}
+fn take_a_type(T: type) {
+    print_type(T)
+    print("\n")
+    U := T
+    U = bool
+    print_type(U)
+    print("\n")
+    U = type
+    print_type(U)
+    print("\n")
+}
 
 fn main {
     //fizz_buzz
@@ -114,8 +124,7 @@ fn main {
     n := m as u64
     o := n as i16
 
-    // "Unimplemented intrinsic I32"
-    take_a_type(i32*)
+    take_a_type(i8 *mut)
 
     // Allocate a single 8-bit integer on the heap
     //num :: malloc(1) as u8 *mut

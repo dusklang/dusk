@@ -15,8 +15,11 @@ use crate::ty::{Type, IntWidth, FloatWidth};
 
 #[derive(Debug)]
 pub enum Value {
+    /// An inline value
     Inline(ArrayVec<[u8; 64 / 8]>),
+    /// A *pointer* to a piece of memory
     Dynamic(Box<[u8]>),
+    Ty { ty: Type, indirection: u8 },
     Nothing,
 }
 
@@ -25,6 +28,7 @@ impl Clone for Value {
         match self {
             Value::Inline(storage) => Value::Inline(storage.clone()),
             Value::Dynamic(_) => Value::from_bytes(self.as_bytes()),
+            &Value::Ty { ref ty, indirection } => Value::Ty { ty: ty.clone(), indirection },
             Value::Nothing => Value::Nothing,
         }
     }
@@ -38,7 +42,44 @@ impl Value {
                 let address_bits = mem::transmute::<&Box<_>, *const u8>(ptr);
                 slice::from_raw_parts(address_bits, mem::size_of::<usize>())
             },
+            Value::Ty { .. } => panic!("Can't get bytes of a type!"),
             Value::Nothing => &[],
+        }
+    }
+
+    /// Interprets the value as a pointer and loads from it
+    fn load(&self, size: usize) -> Value {
+        match self {
+            Value::Inline(_) => {
+                let ptr = self.as_raw_ptr();
+                let mut buf = ArrayVec::new();
+                for i in 0..size {
+                    buf.push(unsafe { *ptr.add(i) });
+                }
+                Value::Inline(buf)
+            },
+            Value::Dynamic(val) => {
+                let mut buf = ArrayVec::new();
+                for &byte in &**val {
+                    buf.push(byte);
+                }
+                Value::Inline(buf)
+            },
+            Value::Ty { ty, indirection } => Value::Ty { ty: ty.clone(), indirection: indirection - 1 },
+            Value::Nothing => panic!("can't load from nothing"),
+        }
+    }
+
+    fn store(&mut self, val: Value) {
+        match val {
+            Value::Ty { ty, indirection } => *self = Value::Ty { ty, indirection: indirection + 1 },
+            _ => {
+                let ptr = self.as_raw_ptr();
+                let val = val.as_bytes();
+                for (i, &byte) in val.iter().enumerate() {
+                    unsafe { *ptr.add(i) = byte; }
+                }
+            }
         }
     }
 
@@ -90,6 +131,16 @@ impl Value {
         let bytes = self.as_bytes();
         assert!(bytes.len() == 1);
         unsafe { mem::transmute(bytes[0]) }
+    }
+
+    fn as_ty(&self) -> &Type {
+        match self {
+            &Value::Ty { ref ty, indirection } => {
+                assert_eq!(indirection, 0, "can't get pointer to type as type");
+                ty
+            },
+            _ => panic!("Can't get non-type as type"),
+        }
     }
 
     fn from_bytes(bytes: &[u8]) -> Value {
@@ -220,6 +271,10 @@ impl Value {
 
     fn from_bool(val: bool) -> Value {
         Value::from_u8(unsafe { mem::transmute(val) })
+    }
+
+    fn from_ty(ty: Type) -> Value {
+        Value::Ty { ty, indirection: 0 }
     }
 }
 
@@ -778,6 +833,27 @@ impl<'mir, T: MirProvider> Interpreter<'mir, T> {
                         unsafe { alloc::dealloc(ptr, layout) };
                         Value::Nothing
                     },
+                    Intrinsic::I8 => Value::from_ty(Type::i8()),
+                    Intrinsic::I16 => Value::from_ty(Type::i16()),
+                    Intrinsic::I32 => Value::from_ty(Type::i32()),
+                    Intrinsic::I64 => Value::from_ty(Type::i64()),
+                    Intrinsic::Isize => Value::from_ty(Type::isize()),
+                    Intrinsic::U8 => Value::from_ty(Type::u8()),
+                    Intrinsic::U16 => Value::from_ty(Type::u16()),
+                    Intrinsic::U32 => Value::from_ty(Type::u32()),
+                    Intrinsic::U64 => Value::from_ty(Type::u64()),
+                    Intrinsic::Usize => Value::from_ty(Type::usize()),
+                    Intrinsic::F32 => Value::from_ty(Type::f32()),
+                    Intrinsic::F64 => Value::from_ty(Type::f64()),
+                    Intrinsic::Never => Value::from_ty(Type::Never),
+                    Intrinsic::Bool => Value::from_ty(Type::Bool),
+                    Intrinsic::Void => Value::from_ty(Type::Void),
+                    Intrinsic::Ty => Value::from_ty(Type::Ty),
+                    Intrinsic::PrintType => {
+                        assert_eq!(arguments.len(), 1);
+                        print!("{:?}", frame.results[arguments[0]].as_ty());
+                        Value::Nothing
+                    }
                     _ => panic!("Call to unimplemented intrinsic {:?}", intr),
                 }
             },
@@ -926,23 +1002,17 @@ impl<'mir, T: MirProvider> Interpreter<'mir, T> {
             }
             &Instr::Load(location) => {
                 let size = self.mir.type_of(frame.pc, &func_ref).size(self.mir.arch());
-                let ptr = frame.results[location].as_raw_ptr();
-                let mut buf = ArrayVec::new();
-                for i in 0..size {
-                    buf.push(unsafe { *ptr.add(i) });
-                }
-                Value::Inline(buf)
+                frame.results[location].load(size)
             },
             &Instr::Store { location, value } => {
-                let ptr = frame.results[location].as_raw_ptr();
-                let val = frame.results[value].as_bytes();
-                for (i, &byte) in val.iter().enumerate() {
-                    unsafe { *ptr.add(i) = byte; }
-                }
+                let val = frame.results[value].clone();
+                frame.results[location].store(val);
                 Value::Nothing
             },
             &Instr::AddressOfStatic(statik) => Value::from_usize(unsafe { mem::transmute(self.statics[statik].as_bytes().as_ptr()) }),
-            &Instr::Pointer { op, is_mut } => panic!("Pointer expressions are unimplemented!"),
+            &Instr::Pointer { op, is_mut } => {
+                Value::from_ty(frame.results[op].as_ty().clone().ptr_with_mut(is_mut))
+            },
             &Instr::Ret(instr) => {
                 let val = mem::replace(&mut frame.results[instr], Value::Nothing);
                 return Some(val)

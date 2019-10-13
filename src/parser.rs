@@ -80,6 +80,8 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
 
             p.builder.add_intrinsic(Print, smallvec![Type::u8().ptr()], Type::Void);
             p.builder.add_intrinsic(Print, smallvec![Type::u8()], Type::Void);
+            p.builder.add_intrinsic(PrintType, smallvec![Type::Ty], Type::Void);
+
             macro_rules! types {
                 ($($ty:ident),+) => {
                     $(p.builder.add_intrinsic($ty, SmallVec::new(), Type::Ty);)+
