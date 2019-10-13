@@ -13,7 +13,7 @@ use tc::CastMethod;
 use crate::index_vec::{Idx, IdxVec};
 use crate::builder::{DeclId, ExprId, DeclRefId, ScopeId, Intrinsic};
 use crate::hir::{self, Expr, Item, StoredDeclId};
-use crate::interpreter::Interpreter;
+use crate::interpreter::{Interpreter, InterpMode};
 
 newtype_index!(InstrId pub);
 newtype_index!(BasicBlockId pub);
@@ -332,7 +332,7 @@ impl<'a> Builder<'a> {
                     &[],
                     self.arch,
                 ).build();
-                let konst = Interpreter::new(&*self)
+                let konst = Interpreter::new(&*self, InterpMode::CompileTime)
                     .call(FunctionRef::Ref(function), Vec::new())
                     .to_const(self.arch, ty, &mut self.strings);
                 
@@ -362,7 +362,7 @@ impl<'a> Builder<'a> {
 
         for statik in self.static_inits.raw {
             let ty = statik.ret_ty.clone();
-            let konst = Interpreter::new(&prog)
+            let konst = Interpreter::new(&prog, InterpMode::CompileTime)
                 .call(FunctionRef::Ref(statik), Vec::new())
                 .to_const(self.arch, ty, &mut prog.strings);
             statics.push(konst);

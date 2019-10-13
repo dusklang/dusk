@@ -12,12 +12,13 @@ mod hir;
 mod mir;
 mod ty;
 mod arch;
+mod driver;
 mod type_checker;
 mod interpreter;
 
 use std::fs;
 
-use interpreter::Interpreter;
+use interpreter::{Interpreter, InterpMode};
 use index_vec::Idx;
 use ty::Type;
 use mir::FunctionRef;
@@ -50,7 +51,7 @@ fn main() {
     }
 
     let mir = mir::Builder::new(&hir, &tc, arch::Arch::X86_64).build();
-    let mut interpreter = Interpreter::new(&mir);
+    let mut interpreter = Interpreter::new(&mir, InterpMode::RunTime);
     let main = mir.functions.iter()
         .position(|func| {
             match func.name {

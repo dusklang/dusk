@@ -300,23 +300,27 @@ impl StackFrame {
     }
 }
 
+#[derive(Copy, Clone)]
+pub enum InterpMode {
+    CompileTime,
+    RunTime,
+}
+
 pub struct Interpreter<'mir, T: MirProvider> {
     stack: Vec<(FunctionRef, StackFrame)>,
-    statics: IdxVec<Value, StaticId>,
+    statics: HashMap<StaticId, Value>,
     allocations: HashMap<usize, alloc::Layout>,
+    mode: InterpMode,
     mir: &'mir T,
 }
 
 impl<'mir, T: MirProvider> Interpreter<'mir, T> {
-    pub fn new(mir: &'mir T) -> Self {
-        let mut statics = IdxVec::new();
-        for statik in mir.statics() {
-            statics.push(Value::from_const(statik, mir));
-        }
+    pub fn new(mir: &'mir T, mode: InterpMode) -> Self {
         Self {
             stack: Vec::new(),
-            statics,
+            statics: HashMap::new(),
             allocations: HashMap::new(),
+            mode,
             mir,
         }
     }
@@ -1009,7 +1013,15 @@ impl<'mir, T: MirProvider> Interpreter<'mir, T> {
                 frame.results[location].store(val);
                 Value::Nothing
             },
-            &Instr::AddressOfStatic(statik) => Value::from_usize(unsafe { mem::transmute(self.statics[statik].as_bytes().as_ptr()) }),
+            &Instr::AddressOfStatic(statik) => {
+                if let InterpMode::CompileTime = self.mode {
+                    panic!("Can't access static at compile time!");
+                }
+                let mir = &self.mir;
+                let statik = self.statics.entry(statik)
+                    .or_insert_with(|| Value::from_const(&mir.statics()[statik.idx()], *mir));
+                Value::from_usize(unsafe { mem::transmute(statik.as_bytes().as_ptr()) })
+            },
             &Instr::Pointer { op, is_mut } => {
                 Value::from_ty(frame.results[op].as_ty().clone().ptr_with_mut(is_mut))
             },
