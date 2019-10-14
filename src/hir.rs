@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::ffi::CString;
 use std::marker::PhantomData;
+use std::ops::Range;
 use std::rc::Rc;
 
 use smallvec::{SmallVec, smallvec};
@@ -64,7 +65,7 @@ pub struct Scope {
 pub enum Decl {
     Computed {
         param_tys: SmallVec<[Type; 2]>,
-        params: SmallVec<[DeclId; 2]>,
+        params: Range<DeclId>,
         scope: ScopeId,
     },
     Stored { id: StoredDeclId, is_mut: bool, root_expr: ExprId, },
@@ -349,14 +350,16 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
         let id = self.decl(Decl::Const(ExprId::new(std::usize::MAX)), name, explicit_ty);
         assert_eq!(param_names.len(), param_tys.len());
         self.decls.reserve(param_tys.len());
-        let params = param_tys.iter()
+        let first_param = DeclId::new(self.decls.len());
+        param_tys.iter()
             .enumerate()
             .zip(&param_names)
-            .map(|((index, ty), &name)| {
+            .for_each(|((index, ty), &name)| {
                 let name = self.interner.get_or_intern(name);
-                self.decl(Decl::Parameter { index }, name, Some(ty.clone()))
-            })
-            .collect();
+                self.decl(Decl::Parameter { index }, name, Some(ty.clone()));
+            });
+        let last_param = DeclId::new(self.decls.len());
+        let params = first_param..last_param;
         // `end_computed_decl` will attach the real scope to this decl; we don't have it yet
         self.decls[id] = Decl::Computed {
             param_tys,

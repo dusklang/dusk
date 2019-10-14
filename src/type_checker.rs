@@ -53,7 +53,7 @@ impl TypeChecker {
     }
 }
 
-impl<'src> Driver<'src> {
+impl Driver {
     fn debug_output(&mut self, level: usize) {
         if !self.tc.debug { return; }
         println!("LEVEL {}", level);

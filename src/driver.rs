@@ -7,9 +7,9 @@ use crate::error::Error;
 use crate::mir;
 use crate::interpreter::Interpreter;
 
-pub struct Driver<'src> {
+pub struct Driver {
     pub file: SourceFile,
-    pub hir: &'src hir::Program,
+    pub hir: hir::Program,
     pub tir: tir::Program,
     pub tc: TypeChecker,
     pub errors: Vec<Error>,
@@ -17,8 +17,8 @@ pub struct Driver<'src> {
     pub interp: Interpreter,
 }
 
-impl<'src> Driver<'src> {
-    pub fn new(file: SourceFile, hir: &'src hir::Program, tir: tir::Program, debug_tc: bool, arch: Arch) -> Self {
+impl Driver {
+    pub fn new(file: SourceFile, hir: hir::Program, tir: tir::Program, debug_tc: bool, arch: Arch) -> Self {
         Self {
             file,
             hir,

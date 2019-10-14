@@ -41,7 +41,7 @@ impl Error {
     }
 }
 
-impl<'src> Driver<'src> {
+impl Driver {
     pub fn report_errors(&mut self) -> bool {
         for err in &mut self.errors { err.report(&mut self.file); }
         if !self.errors.is_empty() {

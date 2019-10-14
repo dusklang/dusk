@@ -325,7 +325,7 @@ impl Interpreter {
     }
 }
 
-impl<'src> Driver<'src> {
+impl Driver {
     pub fn call(&mut self, func_ref: FunctionRef, arguments: Vec<Value>) -> Value {
         let func = self.mir.function_by_ref(&func_ref);
         let frame = StackFrame::new(func, arguments);

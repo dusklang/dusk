@@ -146,7 +146,7 @@ impl CompDeclState {
     }
 }
 
-impl<'src> Driver<'src> {
+impl Driver {
     pub fn decl_type(&self, id: DeclId) -> &Type {
         &self.tir.decls[id].ret_ty.ty
     }
@@ -372,8 +372,9 @@ impl<'hir> Builder<'hir> {
                 // Add function name to local scope to enable recursion
                 let name = self.hir.names[id];
                 comp_decl_state.local_decls.push(LocalDecl { name, id });
-                comp_decl_state.local_decls.reserve(params.len());
-                for &id in params {
+                comp_decl_state.local_decls.reserve(params.end.idx() - params.start.idx());
+                for id in params.start.idx()..params.end.idx() {
+                    let id = DeclId::new(id);
                     let name = self.hir.names[id];
                     comp_decl_state.local_decls.push(LocalDecl { name, id });
                 }

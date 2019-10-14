@@ -34,7 +34,7 @@ fn main() {
     let (toks, lex_errs) = lexer::lex(&file.src, &mut file.lines);
     let (hir, hir_errs) = parser::parse(&toks, hir::Builder::new());
     let tir = tir::Builder::new(&hir).build();
-    let mut driver = Driver::new(file, &hir, tir, false, arch::Arch::X86_64);
+    let mut driver = Driver::new(file, hir, tir, false, arch::Arch::X86_64);
     driver.errors.extend(lex_errs);
     driver.errors.extend(hir_errs);
     driver.type_check();
@@ -47,7 +47,7 @@ fn main() {
                 // TODO: intern "main" and then repeatedly compare its handle to the function's handle rather than doing string comp
                 // The problem right now is the interner is stuck behind an Rc, so we can't write to it. Simplest thing would be to
                 // intern "main" in HIR, and then store the handle, before it gets frozen.
-                Some(name) => hir.interner.resolve(name).unwrap() == "main" && func.ret_ty == Type::Void && func.num_parameters() == 0,
+                Some(name) => driver.hir.interner.resolve(name).unwrap() == "main" && func.ret_ty == Type::Void && func.num_parameters() == 0,
                 None => false,
             }
         })
