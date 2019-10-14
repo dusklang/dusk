@@ -4,11 +4,11 @@ use std::collections::HashMap;
 use smallvec::SmallVec;
 use string_interner::Sym;
 
+use crate::driver::Driver;
 use crate::builder::*;
 use crate::dep_vec::DepVec;
 use crate::hir;
-use crate::index_vec::{Idx, IdxVec, IdxSlice};
-use crate::source_info::SourceRange;
+use crate::index_vec::{Idx, IdxVec};
 use crate::ty::{Type, QualType};
 
 newtype_index!(TreeId pub);
@@ -71,7 +71,7 @@ pub struct Decl {
 }
 
 #[derive(Debug)]
-pub struct Program<'hir> {
+pub struct Program {
     pub int_lits: Vec<ExprId>,
     pub dec_lits: Vec<ExprId>,
     pub str_lits: Vec<ExprId>,
@@ -91,7 +91,6 @@ pub struct Program<'hir> {
     pub ifs: DepVec<Expr<If>>,
     /// An expression to uniquely represent the void value
     pub void_expr: ExprId,
-    pub source_ranges: IdxSlice<'hir, SourceRange, ExprId>,
     pub decls: IdxVec<Decl, DeclId>,
     /// Each declref's overload choices
     pub overloads: IdxVec<Vec<DeclId>, DeclRefId>,
@@ -144,6 +143,12 @@ impl CompDeclState {
         let new_len = self.scope_stack.pop().unwrap();
         debug_assert!(new_len <= self.local_decls.len());
         self.local_decls.truncate(new_len);
+    }
+}
+
+impl<'src> Driver<'src> {
+    pub fn decl_type(&self, id: DeclId) -> &Type {
+        &self.tir.decls[id].ret_ty.ty
     }
 }
 
@@ -406,7 +411,7 @@ impl<'hir> Builder<'hir> {
         level
     }
 
-    pub fn build(mut self) -> Program<'hir> {
+    pub fn build(mut self) -> Program {
         // Populate `self.decls`
         for (i, decl) in self.hir.decls.iter().enumerate() {
             let id = DeclId::new(i);
@@ -532,7 +537,6 @@ impl<'hir> Builder<'hir> {
             pointers: self.pointers,
             ifs: self.ifs,
             void_expr: self.void_expr,
-            source_ranges: self.hir.source_ranges.as_idx_slice(),
             decls: self.decls,
             overloads: self.overloads,
             num_exprs: self.expr_levels.len(),

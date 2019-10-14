@@ -31,15 +31,14 @@ fn main() {
         String::from("HelloWorld.meda"), 
         contents
     );
-    let (toks, mut errs) = lexer::lex(&file.src, &mut file.lines);
+    let (toks, lex_errs) = lexer::lex(&file.src, &mut file.lines);
     let (hir, hir_errs) = parser::parse(&toks, hir::Builder::new());
     let tir = tir::Builder::new(&hir).build();
-    let (tc, tc_errs) = type_checker::type_check(tir, &file, false);
+    let mut driver = Driver::new(file, &hir, tir, false, arch::Arch::X86_64);
+    driver.errors.extend(lex_errs);
+    driver.errors.extend(hir_errs);
+    driver.type_check();
 
-    errs.extend(hir_errs);
-    errs.extend(tc_errs);
-
-    let mut driver = Driver::new(file, &hir, &tc, errs, arch::Arch::X86_64);
     if driver.report_errors() { return; }
     driver.build_mir();
     let main = driver.mir.functions.iter()

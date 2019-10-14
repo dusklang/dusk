@@ -255,7 +255,7 @@ impl<'src> Driver<'src> {
                 let func = FunctionBuilder::new(
                     self,
                     Some(self.hir.names[id]),
-                    self.tc.decl_types[id].clone(),
+                    self.decl_type(id).clone(),
                     FunctionBody::Scope(scope),
                     &params[..],
                     self.mir.arch,
@@ -274,7 +274,7 @@ impl<'src> Driver<'src> {
                 decl
             },
             hir::Decl::Intrinsic { intr, .. } => {
-                let decl = Decl::Intrinsic(intr, self.tc.decl_types[id].clone());
+                let decl = Decl::Intrinsic(intr, self.decl_type(id).clone());
                 self.mir.decls.insert(id, decl.clone());
                 decl
             },
@@ -284,7 +284,7 @@ impl<'src> Driver<'src> {
                 let func = FunctionBuilder::new(
                     self,
                     None,
-                    self.tc.decl_types[id].clone(),
+                    self.decl_type(id).clone(),
                     FunctionBody::Expr(expr),
                     &[],
                     self.mir.arch,
@@ -293,7 +293,7 @@ impl<'src> Driver<'src> {
                 decl
             },
             hir::Decl::Const(root_expr) => {
-                let ty = self.tc.decl_types[id].clone();
+                let ty = self.decl_type(id).clone();
                 let function = FunctionBuilder::new(
                     self,
                     None,
@@ -497,7 +497,7 @@ impl<'a, 'b> FunctionBuilder<'a, 'b> {
         let void_instr = code.push(Instr::Void);
         for &param in params {
             if let hir::Decl::Parameter { .. } = d.hir.decls[param] {
-                code.push(Instr::Parameter(d.tc.decl_types[param].clone()));
+                code.push(Instr::Parameter(d.decl_type(param).clone()));
             } else {
                 panic!("unexpected non-parameter as parameter decl");
             }
