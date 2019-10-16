@@ -33,10 +33,10 @@ fn main() {
     );
     let (toks, lex_errs) = lexer::lex(&file.src, &mut file.lines);
     let (hir, hir_errs) = parser::parse(&toks, hir::Builder::new());
-    let tir = tir::Builder::new(&hir).build();
-    let mut driver = Driver::new(file, hir, tir, false, arch::Arch::X86_64);
+    let mut driver = Driver::new(file, hir, false, arch::Arch::X86_64);
     driver.errors.extend(lex_errs);
     driver.errors.extend(hir_errs);
+    driver.build_tir();
     driver.type_check();
 
     if driver.report_errors() { return; }

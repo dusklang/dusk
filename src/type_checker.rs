@@ -74,10 +74,10 @@ impl Driver {
     }
 
     pub fn type_check(&mut self) {
-        self.tc.types.resize_with(self.tir.num_exprs, Default::default);
-        self.tc.constraints.resize_with(self.tir.num_exprs, Default::default);
+        self.tc.types.resize_with(self.tir.num_exprs(), Default::default);
+        self.tc.constraints.resize_with(self.tir.num_exprs(), Default::default);
         if self.tc.debug {
-            self.tc.constraints_copy.resize_with(self.tir.num_exprs, Default::default);
+            self.tc.constraints_copy.resize_with(self.tir.num_exprs(), Default::default);
         }
         self.tc.overloads.resize_with(self.tir.overloads.len(), || None);
         self.tc.preferred_overloads.resize_with(self.tir.overloads.len(), || None);
@@ -285,7 +285,7 @@ impl Driver {
             constraints.set_to(Type::Void);
         }
 
-        for group in &self.tir.ret_groups {
+        for group in self.tir.ret_groups() {
             for &expr in &group.exprs {
                 if let Some(err) = self.tc.constraints[expr].can_unify_to(&QualType::from(&group.ty)).err() {
                     let range = self.hir.source_ranges[expr].clone();
