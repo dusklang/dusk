@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::ffi::CString;
-use std::marker::PhantomData;
 use std::ops::Range;
 use std::rc::Rc;
 
@@ -8,7 +7,7 @@ use smallvec::{SmallVec, smallvec};
 use string_interner::{DefaultStringInterner as Interner, Sym};
 
 use crate::index_vec::{Idx, IdxVec};
-use crate::builder::{self, BinOp, UnOp, ExprId, DeclId, ScopeId, DeclRefId, CastId, Intrinsic};
+use crate::builder::{BinOp, UnOp, ExprId, DeclId, ScopeId, DeclRefId, CastId, Intrinsic};
 use crate::source_info::SourceRange;
 use crate::ty::Type;
 
@@ -99,7 +98,7 @@ pub struct Program {
 }
 
 #[derive(Debug)]
-pub struct Builder<'src> {
+pub struct Builder {
     exprs: IdxVec<Expr, ExprId>,
     num_decl_refs: usize,
     num_casts: usize,
@@ -119,13 +118,11 @@ pub struct Builder<'src> {
     exprs_in_type_ctx: HashSet<ExprId>,
     type_ctx_count: u8,
 
-    interner: Interner,
-    
-    _phantom_src_lifetime: PhantomData<&'src str>,
+    pub interner: Interner,
 }
 
-impl<'src> Builder<'src> {
-    pub fn new() -> Self {
+impl<'src> Builder {
+    pub fn new(interner: Interner) -> Self {
         let mut b = Self {
             exprs: IdxVec::new(),
             num_decl_refs: 0,
@@ -140,8 +137,7 @@ impl<'src> Builder<'src> {
             void_expr: ExprId::new(0),
             exprs_in_type_ctx: HashSet::new(),
             type_ctx_count: 0,
-            interner: Interner::new(),
-            _phantom_src_lifetime: PhantomData,
+            interner,
         };
         b.push(Expr::Void, 0..0);
         b
@@ -197,20 +193,19 @@ impl<'src> Builder<'src> {
     }
 }
 
-impl<'src> builder::Builder<'src> for Builder<'src> {
-    type Output = Program;
-    fn add_intrinsic(&mut self, intrinsic: Intrinsic, param_tys: SmallVec<[Type; 2]>, ret_ty: Type) {
+impl Builder {
+    pub fn add_intrinsic(&mut self, intrinsic: Intrinsic, param_tys: SmallVec<[Type; 2]>, ret_ty: Type) {
         let name = self.interner.get_or_intern(intrinsic.name());
         self.global_decl(Decl::Intrinsic { intr: intrinsic, param_tys }, name, Some(ret_ty));
     }
-    fn void_expr(&self) -> ExprId { self.void_expr }
-    fn enter_type_ctx(&mut self) {
+    pub fn void_expr(&self) -> ExprId { self.void_expr }
+    pub fn enter_type_ctx(&mut self) {
         self.type_ctx_count += 1;
     }
-    fn exit_type_ctx(&mut self) {
+    pub fn exit_type_ctx(&mut self) {
         self.type_ctx_count -= 1;
     }
-    fn HACK_convert_expr_to_type(&self, expr: ExprId) -> Type {
+    pub fn HACK_convert_expr_to_type(&self, expr: ExprId) -> Type {
         match self.exprs[expr] {
             Expr::DeclRef { name, ref arguments, .. } => {
                 assert!(arguments.is_empty(), "Invalid type!");
@@ -239,42 +234,47 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             _ => panic!("Invalid type! {:?}", self.exprs[expr]),
         }
     }
-    fn int_lit(&mut self, lit: u64, range: SourceRange) -> ExprId {
+    pub fn int_lit(&mut self, lit: u64, range: SourceRange) -> ExprId {
         self.push(Expr::IntLit { lit }, range)
     }
-    fn dec_lit(&mut self, lit: f64, range: SourceRange) -> ExprId { 
+    pub fn dec_lit(&mut self, lit: f64, range: SourceRange) -> ExprId { 
         self.push(Expr::DecLit { lit }, range)
     }
-    fn str_lit(&mut self, lit: CString, range: SourceRange) -> ExprId { 
+    pub fn str_lit(&mut self, lit: CString, range: SourceRange) -> ExprId { 
         self.push(Expr::StrLit { lit }, range)
     }
-    fn char_lit(&mut self, lit: i8, range: SourceRange) -> ExprId { 
+    pub fn char_lit(&mut self, lit: i8, range: SourceRange) -> ExprId { 
         self.push(Expr::CharLit { lit }, range)
     }
-    fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId {
+    pub fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId {
         match op {
             BinOp::Assign => self.push(Expr::Set { lhs, rhs }, range),
-            _ => self.decl_ref(op.symbol(), smallvec![lhs, rhs], range),
+            _ => {
+                let name = self.interner.get_or_intern(op.symbol());
+                self.decl_ref(name, smallvec![lhs, rhs], range)
+            }
         }
     }
-    fn cast(&mut self, expr: ExprId, ty: Type, range: SourceRange) -> ExprId {
+    pub fn cast(&mut self, expr: ExprId, ty: Type, range: SourceRange) -> ExprId {
         let cast_id = CastId::new(self.num_casts);
         self.num_casts += 1;
         self.push(Expr::Cast { expr, ty, cast_id }, range)
     }
-    fn un_op(&mut self, op: UnOp, expr: ExprId, range: SourceRange) -> ExprId {
+    pub fn un_op(&mut self, op: UnOp, expr: ExprId, range: SourceRange) -> ExprId {
         match op {
             UnOp::Deref => self.push(Expr::Deref(expr), range),
             UnOp::AddrOf => self.push(Expr::AddrOf { expr, is_mut: false }, range),
             UnOp::AddrOfMut => self.push(Expr::AddrOf { expr, is_mut: true }, range),
             UnOp::Pointer => self.push(Expr::Pointer { expr, is_mut: false }, range),
             UnOp::PointerMut => self.push(Expr::Pointer { expr, is_mut: true }, range),
-            _ => self.decl_ref(op.symbol(), smallvec![expr], range),
+            _ => {
+                let name = self.interner.get_or_intern(op.symbol());
+                self.decl_ref(name, smallvec![expr], range)
+            },
         }
     }
-    fn stored_decl(&mut self, name: &'src str, explicit_ty: Option<Type>, is_mut: bool, root_expr: ExprId, _range: SourceRange) {
+    pub fn stored_decl(&mut self, name: Sym, explicit_ty: Option<Type>, is_mut: bool, root_expr: ExprId, _range: SourceRange) {
         self.flush_stmt_buffer();
-        let name = self.interner.get_or_intern(name);
         if self.comp_decl_stack.is_empty() {
             self.global_decl(
                 if is_mut {
@@ -294,28 +294,28 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             self.item(Item::StoredDecl { decl_id, id, root_expr });
         }
     }
-    fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
+    pub fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
         self.push(Expr::Ret { expr }, range)
     }
-    fn implicit_ret(&mut self, _expr: ExprId) {}
-    fn if_expr(&mut self, condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId>, range: SourceRange) -> ExprId {
+    pub fn implicit_ret(&mut self, _expr: ExprId) {}
+    pub fn if_expr(&mut self, condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId>, range: SourceRange) -> ExprId {
         self.push(
             Expr::If { condition, then_scope, else_scope },
             range,
         )
     }
-    fn while_expr(&mut self, condition: ExprId, scope: ScopeId, range: SourceRange) -> ExprId {
+    pub fn while_expr(&mut self, condition: ExprId, scope: ScopeId, range: SourceRange) -> ExprId {
         self.push(Expr::While { condition, scope }, range)
     }
-    fn stmt(&mut self, expr: ExprId) {
+    pub fn stmt(&mut self, expr: ExprId) {
         self.flush_stmt_buffer();
         let scope = self.comp_decl_stack.last_mut().unwrap().scope_stack.last_mut().unwrap();
         scope.stmt_buffer = Some(expr);
     }
-    fn do_expr(&mut self, scope: ScopeId, range: SourceRange) -> ExprId {
+    pub fn do_expr(&mut self, scope: ScopeId, range: SourceRange) -> ExprId {
         self.push(Expr::Do { scope }, range)
     }
-    fn begin_scope(&mut self) -> ScopeId { 
+    pub fn begin_scope(&mut self) -> ScopeId { 
         let id = self.scopes.push(
             Scope {
                 items: Vec::new(),
@@ -337,15 +337,14 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
 
         id
     }
-    fn end_scope(&mut self, has_terminal_expr: bool) {
+    pub fn end_scope(&mut self, has_terminal_expr: bool) {
         let scope = self.comp_decl_stack.last_mut().unwrap().scope_stack.pop().unwrap();
         if has_terminal_expr {
             let terminal_expr = scope.stmt_buffer.expect("must pass terminal expression via Builder::stmt()");
             self.scopes[scope.id].terminal_expr = terminal_expr;
         }
     }
-    fn begin_computed_decl(&mut self, name: &'src str, param_names: SmallVec<[&'src str; 2]>, param_tys: SmallVec<[Type; 2]>, explicit_ty: Option<Type>, _proto_range: SourceRange) {
-        let name = self.interner.get_or_intern(name);
+    pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[Type; 2]>, explicit_ty: Option<Type>, _proto_range: SourceRange) {
         // This is a placeholder value that gets replaced once the parameter declarations get allocated.
         let id = self.decl(Decl::Const(ExprId::new(std::usize::MAX)), name, explicit_ty);
         assert_eq!(param_names.len(), param_tys.len());
@@ -355,7 +354,6 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             .enumerate()
             .zip(&param_names)
             .for_each(|((index, ty), &name)| {
-                let name = self.interner.get_or_intern(name);
                 self.decl(Decl::Parameter { index }, name, Some(ty.clone()));
             });
         let last_param = DeclId::new(self.decls.len());
@@ -381,7 +379,7 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             }
         );
     }
-    fn end_computed_decl(&mut self) {
+    pub fn end_computed_decl(&mut self) {
         let decl_state = self.comp_decl_stack.pop().unwrap();
         if let Decl::Computed { ref mut scope, .. } = self.decls[decl_state.id] {
             *scope = decl_state.has_scope.unwrap();
@@ -389,17 +387,16 @@ impl<'src> builder::Builder<'src> for Builder<'src> {
             panic!("Unexpected decl kind when ending computed decl!");
         }
     }
-    fn decl_ref(&mut self, name: &'src str, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
+    pub fn decl_ref(&mut self, name: Sym, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
         let decl_ref_id = self.allocate_decl_ref_id();
-        let name = self.interner.get_or_intern(name);
         self.push(Expr::DeclRef { name, arguments, id: decl_ref_id }, range)
     }
-    fn get_range(&self, id: ExprId) -> SourceRange { self.source_ranges[id].clone() }
-    fn set_range(&mut self, id: ExprId, range: SourceRange) { self.source_ranges[id] = range; }
-    fn get_terminal_expr(&self, scope: ScopeId) -> ExprId { 
+    pub fn get_range(&self, id: ExprId) -> SourceRange { self.source_ranges[id].clone() }
+    pub fn set_range(&mut self, id: ExprId, range: SourceRange) { self.source_ranges[id] = range; }
+    pub fn get_terminal_expr(&self, scope: ScopeId) -> ExprId { 
         self.scopes[scope].terminal_expr
     }
-    fn output(self) -> Program {
+    pub fn output(self) -> Program {
         Program {
             exprs: self.exprs,
             num_decl_refs: self.num_decl_refs,

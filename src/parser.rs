@@ -1,26 +1,29 @@
 use smallvec::{SmallVec, smallvec};
 
+use string_interner::Sym;
+
+use crate::hir;
 use crate::token::{TokenVec, TokenKind, Token};
-use crate::builder::{ExprId, ScopeId, BinOp, UnOp, Builder, OpPlacement, Intrinsic};
+use crate::builder::{ExprId, ScopeId, BinOp, UnOp, OpPlacement, Intrinsic};
 use crate::ty::Type;
 use crate::error::Error;
 use crate::source_info::{self, SourceRange};
 
 #[inline]
-pub fn parse<'src, B: Builder<'src>>(toks: &'src TokenVec, builder: B) -> (B::Output, Vec<Error>) {
-    Parser::<'src, B>::parse(toks, builder)
+pub fn parse<'src>(toks: &'src TokenVec, builder: hir::Builder) -> (hir::Program, Vec<Error>) {
+    Parser::<'src>::parse(toks, builder)
 }
 
-struct Parser<'src, B: Builder<'src>> {
-    toks: &'src TokenVec<'src>,
-    builder: B,
+struct Parser<'src> {
+    toks: &'src TokenVec,
+    builder: hir::Builder,
     cur: usize,
     errs: Vec<Error>,
 }
 
-impl<'src, B: Builder<'src>> Parser<'src, B> {
+impl<'src> Parser<'src> {
     #[inline(never)]
-    fn parse(toks: &'src TokenVec, builder: B) -> (B::Output, Vec<Error>) {
+    fn parse(toks: &'src TokenVec, builder: hir::Builder) -> (hir::Program, Vec<Error>) {
         let mut p = Parser {
             toks,
             builder,
@@ -203,7 +206,7 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
         Some((op, range))
     }
 
-    fn try_parse_term(&mut self) -> Result<ExprId, TokenKind<'src>> {
+    fn try_parse_term(&mut self) -> Result<ExprId, TokenKind> {
         let mut term = self.try_parse_non_cast_term()?;
         let mut range = self.builder.get_range(term);
         while let TokenKind::As = self.cur().kind {
@@ -215,7 +218,7 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
         Ok(term)
     }
 
-    fn try_parse_non_cast_term(&mut self) -> Result<ExprId, TokenKind<'src>> {
+    fn try_parse_non_cast_term(&mut self) -> Result<ExprId, TokenKind> {
         if let Some((op, op_range)) = self.parse_prefix_operator() {
             let term = self.try_parse_non_cast_term()
                 .unwrap_or_else(|tok| panic!("Expected expression after unary operator, found {:?}", tok));
@@ -325,7 +328,7 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
         })
     }
 
-    fn try_parse_expr(&mut self) -> Result<ExprId, TokenKind<'src>> {
+    fn try_parse_expr(&mut self) -> Result<ExprId, TokenKind> {
         const INLINE: usize = 5;
         let mut expr_stack = SmallVec::<[ExprId; INLINE]>::new();
         let mut op_stack = SmallVec::<[BinOp; INLINE]>::new();
@@ -417,7 +420,7 @@ impl<'src, B: Builder<'src>> Parser<'src, B> {
         }
     }
 
-    fn parse_decl(&mut self, name: &'src str) {
+    fn parse_decl(&mut self, name: Sym) {
         let name_range = self.cur().range.clone();
         // Skip to colon, get range.
         let colon_range = self.next().range.clone();

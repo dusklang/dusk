@@ -1,10 +1,12 @@
 use std::ffi::CString;
 
+use string_interner::Sym;
+
 use crate::source_info::SourceRange;
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum TokenKind<'src> {
-    Ident(&'src str),
+pub enum TokenKind {
+    Ident(Sym),
 
     IntLit(u64),
     DecLit(f64),
@@ -68,18 +70,18 @@ pub enum TokenKind<'src> {
 }
 
 #[derive(Debug)]
-pub struct TokenVec<'src> {
-    pub kinds: Vec<TokenKind<'src>>,
+pub struct TokenVec {
+    pub kinds: Vec<TokenKind>,
     pub ranges: Vec<SourceRange>,
 }
 
 #[derive(Debug)]
 pub struct Token<'src> {
-    pub kind: &'src TokenKind<'src>,
+    pub kind: &'src TokenKind,
     pub range: &'src SourceRange,
 }
 
-impl<'src> TokenVec<'src> {
+impl TokenVec {
     pub fn new() -> Self {
         Self {
             kinds: Vec::new(),
@@ -87,13 +89,13 @@ impl<'src> TokenVec<'src> {
         }
     }
 
-    pub fn push(&mut self, kind: TokenKind<'src>, range: SourceRange) {
+    pub fn push(&mut self, kind: TokenKind, range: SourceRange) {
         self.kinds.push(kind);
         self.ranges.push(range);
     }
 
-    pub fn at(&'src self, i: usize) -> Token<'src> {
-        Token::<'src> {
+    pub fn at<'src>(&'src self, i: usize) -> Token<'src> {
+        Token {
             kind: &self.kinds[i],
             range: &self.ranges[i],
         }
@@ -102,7 +104,7 @@ impl<'src> TokenVec<'src> {
     pub fn len(&self) -> usize { self.kinds.len() }
 }
 
-impl<'src> TokenKind<'src> {
+impl TokenKind {
     pub fn is_insignificant(&self) -> bool {
         use TokenKind::*;
         match self {

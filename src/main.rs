@@ -18,6 +18,8 @@ mod interpreter;
 
 use std::fs;
 
+use string_interner::DefaultStringInterner;
+
 use interpreter::InterpMode;
 use index_vec::Idx;
 use ty::Type;
@@ -31,8 +33,10 @@ fn main() {
         String::from("HelloWorld.meda"), 
         contents
     );
-    let (toks, lex_errs) = lexer::lex(&file.src, &mut file.lines);
-    let (hir, hir_errs) = parser::parse(&toks, hir::Builder::new());
+    let mut interner = DefaultStringInterner::new();
+    let main_sym = interner.get_or_intern("main");
+    let (toks, lex_errs) = lexer::lex(&file.src, &mut file.lines, &mut interner);
+    let (hir, hir_errs) = parser::parse(&toks, hir::Builder::new(interner));
     let mut driver = Driver::new(file, hir, false, arch::Arch::X86_64);
     driver.errors.extend(lex_errs);
     driver.errors.extend(hir_errs);
@@ -44,10 +48,7 @@ fn main() {
     let main = driver.mir.functions.iter()
         .position(|func| {
             match func.name {
-                // TODO: intern "main" and then repeatedly compare its handle to the function's handle rather than doing string comp
-                // The problem right now is the interner is stuck behind an Rc, so we can't write to it. Simplest thing would be to
-                // intern "main" in HIR, and then store the handle, before it gets frozen.
-                Some(name) => driver.hir.interner.resolve(name).unwrap() == "main" && func.ret_ty == Type::Void && func.num_parameters() == 0,
+                Some(name) => name == main_sym && func.ret_ty == Type::Void && func.num_parameters() == 0,
                 None => false,
             }
         })
