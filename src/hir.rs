@@ -1,11 +1,11 @@
 use std::collections::HashSet;
 use std::ffi::CString;
 use std::ops::Range;
-use std::rc::Rc;
 
 use smallvec::{SmallVec, smallvec};
-use string_interner::{DefaultStringInterner as Interner, Sym};
+use string_interner::Sym;
 
+use crate::driver::Driver;
 use crate::index_vec::{Idx, IdxVec};
 use crate::builder::{BinOp, UnOp, ExprId, DeclId, ScopeId, DeclRefId, CastId, Intrinsic};
 use crate::source_info::SourceRange;
@@ -78,7 +78,7 @@ pub enum Decl {
 }
 
 #[derive(Debug)]
-pub struct Program {
+pub struct Builder {
     pub exprs: IdxVec<Expr, ExprId>,
     pub num_decl_refs: usize,
     pub decls: IdxVec<Decl, DeclId>,
@@ -93,54 +93,42 @@ pub struct Program {
     /// TEMPORARY HACK: we can't yet typecheck type expressions, so the TIR generator needs to
     /// be able to ignore them
     pub exprs_in_type_ctx: HashSet<ExprId>,
-
-    pub interner: Rc<Interner>,
-}
-
-#[derive(Debug)]
-pub struct Builder {
-    exprs: IdxVec<Expr, ExprId>,
-    num_decl_refs: usize,
-    num_casts: usize,
-
-    decls: IdxVec<Decl, DeclId>,
-    names: IdxVec<Sym, DeclId>,
-    explicit_tys: IdxVec<Option<Type>, DeclId>,
-    /// The subset of decls that are in the global scope
-    global_decls: Vec<DeclId>,
-    scopes: IdxVec<Scope, ScopeId>,
-    comp_decl_stack: Vec<CompDeclState>,
-    source_ranges: IdxVec<SourceRange, ExprId>,
-    void_expr: ExprId,
-
-    /// TEMPORARY HACK: we can't yet typecheck type expressions, so the TIR generator needs to
-    /// be able to ignore them
-    exprs_in_type_ctx: HashSet<ExprId>,
     type_ctx_count: u8,
 
-    pub interner: Interner,
+    num_casts: usize,
+    comp_decl_stack: Vec<CompDeclState>,
 }
 
-impl<'src> Builder {
-    pub fn new(interner: Interner) -> Self {
+impl Builder {
+    pub fn new() -> Self {
         let mut b = Self {
             exprs: IdxVec::new(),
             num_decl_refs: 0,
-            num_casts: 0,
             decls: IdxVec::new(),
             names: IdxVec::new(),
             explicit_tys: IdxVec::new(),
             global_decls: Vec::new(),
             scopes: IdxVec::new(),
-            comp_decl_stack: Vec::new(),
-            source_ranges: IdxVec::new(),
             void_expr: ExprId::new(0),
+            source_ranges: IdxVec::new(),
             exprs_in_type_ctx: HashSet::new(),
             type_ctx_count: 0,
-            interner,
+            num_casts: 0,
+            comp_decl_stack: Vec::new(),
         };
         b.push(Expr::Void, 0..0);
         b
+    }
+
+    fn push(&mut self, expr: Expr, range: SourceRange) -> ExprId {
+        let id1 = self.exprs.push(expr);
+        let id2 = self.source_ranges.push(range);
+        debug_assert_eq!(id1, id2);
+        if self.type_ctx_count > 0 {
+            self.exprs_in_type_ctx.insert(id1);
+        }
+
+        id1
     }
 
     fn flush_stmt_buffer(&mut self) {
@@ -166,17 +154,6 @@ impl<'src> Builder {
         decl_ref_id
     }
 
-    fn push(&mut self, expr: Expr, range: SourceRange) -> ExprId {
-        let id1 = self.exprs.push(expr);
-        let id2 = self.source_ranges.push(range);
-        debug_assert_eq!(id1, id2);
-        if self.type_ctx_count > 0 {
-            self.exprs_in_type_ctx.insert(id1);
-        }
-
-        id1
-    }
-
     fn decl(&mut self, decl: Decl, name: Sym, explicit_ty: Option<Type>) -> DeclId {
         let id1 = self.decls.push(decl);
         let id2 = self.explicit_tys.push(explicit_ty);
@@ -191,49 +168,17 @@ impl<'src> Builder {
         let id = self.decl(decl, name, explicit_ty);
         self.global_decls.push(id);
     }
-}
 
-impl Builder {
-    pub fn add_intrinsic(&mut self, intrinsic: Intrinsic, param_tys: SmallVec<[Type; 2]>, ret_ty: Type) {
-        let name = self.interner.get_or_intern(intrinsic.name());
-        self.global_decl(Decl::Intrinsic { intr: intrinsic, param_tys }, name, Some(ret_ty));
-    }
-    pub fn void_expr(&self) -> ExprId { self.void_expr }
     pub fn enter_type_ctx(&mut self) {
         self.type_ctx_count += 1;
     }
+
     pub fn exit_type_ctx(&mut self) {
         self.type_ctx_count -= 1;
     }
-    pub fn HACK_convert_expr_to_type(&self, expr: ExprId) -> Type {
-        match self.exprs[expr] {
-            Expr::DeclRef { name, ref arguments, .. } => {
-                assert!(arguments.is_empty(), "Invalid type!");
-                let name = self.interner.resolve(name).unwrap();
-                match name {
-                    "i8" => Type::i8(),
-                    "i16" => Type::i16(),
-                    "i32" => Type::i32(),
-                    "i64" => Type::i64(),
-                    "isize" => Type::isize(),
-                    "u8" => Type::u8(),
-                    "u16" => Type::u16(),
-                    "u32" => Type::u32(),
-                    "u64" => Type::u64(),
-                    "usize" => Type::usize(),
-                    "f32" => Type::f32(),
-                    "f64" => Type::f64(),
-                    "never" => Type::Never,
-                    "bool" => Type::Bool,
-                    "void" => Type::Void,
-                    "type" => Type::Ty,
-                    _ => panic!("Invalid type!"),
-                }
-            },
-            Expr::Pointer { expr, is_mut } => self.HACK_convert_expr_to_type(expr).ptr_with_mut(is_mut),
-            _ => panic!("Invalid type! {:?}", self.exprs[expr]),
-        }
-    }
+
+    pub fn void_expr(&self) -> ExprId { self.void_expr }
+
     pub fn int_lit(&mut self, lit: u64, range: SourceRange) -> ExprId {
         self.push(Expr::IntLit { lit }, range)
     }
@@ -246,33 +191,12 @@ impl Builder {
     pub fn char_lit(&mut self, lit: i8, range: SourceRange) -> ExprId { 
         self.push(Expr::CharLit { lit }, range)
     }
-    pub fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId {
-        match op {
-            BinOp::Assign => self.push(Expr::Set { lhs, rhs }, range),
-            _ => {
-                let name = self.interner.get_or_intern(op.symbol());
-                self.decl_ref(name, smallvec![lhs, rhs], range)
-            }
-        }
-    }
     pub fn cast(&mut self, expr: ExprId, ty: Type, range: SourceRange) -> ExprId {
         let cast_id = CastId::new(self.num_casts);
         self.num_casts += 1;
         self.push(Expr::Cast { expr, ty, cast_id }, range)
     }
-    pub fn un_op(&mut self, op: UnOp, expr: ExprId, range: SourceRange) -> ExprId {
-        match op {
-            UnOp::Deref => self.push(Expr::Deref(expr), range),
-            UnOp::AddrOf => self.push(Expr::AddrOf { expr, is_mut: false }, range),
-            UnOp::AddrOfMut => self.push(Expr::AddrOf { expr, is_mut: true }, range),
-            UnOp::Pointer => self.push(Expr::Pointer { expr, is_mut: false }, range),
-            UnOp::PointerMut => self.push(Expr::Pointer { expr, is_mut: true }, range),
-            _ => {
-                let name = self.interner.get_or_intern(op.symbol());
-                self.decl_ref(name, smallvec![expr], range)
-            },
-        }
-    }
+
     pub fn stored_decl(&mut self, name: Sym, explicit_ty: Option<Type>, is_mut: bool, root_expr: ExprId, _range: SourceRange) {
         self.flush_stmt_buffer();
         if self.comp_decl_stack.is_empty() {
@@ -297,7 +221,6 @@ impl Builder {
     pub fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
         self.push(Expr::Ret { expr }, range)
     }
-    pub fn implicit_ret(&mut self, _expr: ExprId) {}
     pub fn if_expr(&mut self, condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId>, range: SourceRange) -> ExprId {
         self.push(
             Expr::If { condition, then_scope, else_scope },
@@ -396,19 +319,62 @@ impl Builder {
     pub fn get_terminal_expr(&self, scope: ScopeId) -> ExprId { 
         self.scopes[scope].terminal_expr
     }
-    pub fn output(self) -> Program {
-        Program {
-            exprs: self.exprs,
-            num_decl_refs: self.num_decl_refs,
-            decls: self.decls,
-            names: self.names,
-            explicit_tys: self.explicit_tys,
-            global_decls: self.global_decls,
-            source_ranges: self.source_ranges,
-            scopes: self.scopes,
-            void_expr: self.void_expr,
-            exprs_in_type_ctx: self.exprs_in_type_ctx,
-            interner: Rc::new(self.interner),
+}
+
+impl Driver {
+    pub fn add_intrinsic(&mut self, intrinsic: Intrinsic, param_tys: SmallVec<[Type; 2]>, ret_ty: Type) {
+        let name = self.interner.get_or_intern(intrinsic.name());
+        self.hir.global_decl(Decl::Intrinsic { intr: intrinsic, param_tys }, name, Some(ret_ty));
+    }
+    pub fn HACK_convert_expr_to_type(&self, expr: ExprId) -> Type {
+        match self.hir.exprs[expr] {
+            Expr::DeclRef { name, ref arguments, .. } => {
+                assert!(arguments.is_empty(), "Invalid type!");
+                let name = self.interner.resolve(name).unwrap();
+                match name {
+                    "i8" => Type::i8(),
+                    "i16" => Type::i16(),
+                    "i32" => Type::i32(),
+                    "i64" => Type::i64(),
+                    "isize" => Type::isize(),
+                    "u8" => Type::u8(),
+                    "u16" => Type::u16(),
+                    "u32" => Type::u32(),
+                    "u64" => Type::u64(),
+                    "usize" => Type::usize(),
+                    "f32" => Type::f32(),
+                    "f64" => Type::f64(),
+                    "never" => Type::Never,
+                    "bool" => Type::Bool,
+                    "void" => Type::Void,
+                    "type" => Type::Ty,
+                    _ => panic!("Invalid type!"),
+                }
+            },
+            Expr::Pointer { expr, is_mut } => self.HACK_convert_expr_to_type(expr).ptr_with_mut(is_mut),
+            _ => panic!("Invalid type! {:?}", self.hir.exprs[expr]),
+        }
+    }
+    pub fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId {
+        match op {
+            BinOp::Assign => self.hir.push(Expr::Set { lhs, rhs }, range),
+            _ => {
+                let name = self.interner.get_or_intern(op.symbol());
+                self.hir.decl_ref(name, smallvec![lhs, rhs], range)
+            }
+        }
+    }
+    pub fn un_op(&mut self, op: UnOp, expr: ExprId, range: SourceRange) -> ExprId {
+        match op {
+            UnOp::Deref => self.hir.push(Expr::Deref(expr), range),
+            UnOp::AddrOf => self.hir.push(Expr::AddrOf { expr, is_mut: false }, range),
+            UnOp::AddrOfMut => self.hir.push(Expr::AddrOf { expr, is_mut: true }, range),
+            UnOp::Pointer => self.hir.push(Expr::Pointer { expr, is_mut: false }, range),
+            UnOp::PointerMut => self.hir.push(Expr::Pointer { expr, is_mut: true }, range),
+            _ => {
+                let name = self.interner.get_or_intern(op.symbol());
+                self.hir.decl_ref(name, smallvec![expr], range)
+            },
         }
     }
 }

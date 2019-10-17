@@ -36,10 +36,9 @@ fn main() {
     let mut interner = DefaultStringInterner::new();
     let main_sym = interner.get_or_intern("main");
     let (toks, lex_errs) = lexer::lex(&file.src, &mut file.lines, &mut interner);
-    let (hir, hir_errs) = parser::parse(&toks, hir::Builder::new(interner));
-    let mut driver = Driver::new(file, hir, false, arch::Arch::X86_64);
+    let mut driver = Driver::new(file, toks, interner, false, arch::Arch::X86_64);
     driver.errors.extend(lex_errs);
-    driver.errors.extend(hir_errs);
+    driver.parse();
     driver.build_tir();
     driver.type_check();
 

@@ -1,4 +1,7 @@
+use string_interner::DefaultStringInterner;
+
 use crate::source_info::SourceFile;
+use crate::token::TokenVec;
 use crate::arch::Arch;
 use crate::hir;
 use crate::tir;
@@ -9,7 +12,9 @@ use crate::interpreter::Interpreter;
 
 pub struct Driver {
     pub file: SourceFile,
-    pub hir: hir::Program,
+    pub toks: TokenVec,
+    pub interner: DefaultStringInterner,
+    pub hir: hir::Builder,
     pub tir: tir::Builder,
     pub tc: TypeChecker,
     pub errors: Vec<Error>,
@@ -18,10 +23,12 @@ pub struct Driver {
 }
 
 impl Driver {
-    pub fn new(file: SourceFile, hir: hir::Program, debug_tc: bool, arch: Arch) -> Self {
+    pub fn new(file: SourceFile, toks: TokenVec, interner: DefaultStringInterner, debug_tc: bool, arch: Arch) -> Self {
         Self {
             file,
-            hir,
+            toks,
+            interner,
+            hir: hir::Builder::new(),
             tir: tir::Builder::new(),
             tc: TypeChecker::new(debug_tc),
             errors: Vec::new(),

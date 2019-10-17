@@ -454,7 +454,7 @@ impl Driver {
     fn prebuild_decl(&mut self, id: DeclId) -> u32 {
         match self.tir.decl_levels[id] {
             Level::Unresolved => self.tir.decl_levels[id] = Level::Resolving,
-            Level::Resolving => panic!("Cycle detected on decl {}!", self.hir.interner.resolve(self.hir.names[id]).unwrap()),
+            Level::Resolving => panic!("Cycle detected on decl {}!", self.interner.resolve(self.hir.names[id]).unwrap()),
             Level::Resolved(level) => return level,
         }
         let level = match self.hir.decls[id] {

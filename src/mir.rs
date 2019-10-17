@@ -321,7 +321,7 @@ impl Driver {
     #[allow(dead_code)]
     fn fn_name(&self, name: Option<Sym>) -> &str {
         match name {
-            Some(name) => self.hir.interner.as_ref().resolve(name).unwrap(),
+            Some(name) => self.interner.resolve(name).unwrap(),
             None => "{anonymous}",
         }
     }
