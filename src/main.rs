@@ -29,15 +29,14 @@ use driver::Driver;
 fn main() {
     let contents = fs::read_to_string("HelloWorld.meda")
         .expect("unable to read input file");
-    let mut file = source_info::SourceFile::new(
+    let file = source_info::SourceFile::new(
         String::from("HelloWorld.meda"), 
         contents
     );
     let mut interner = DefaultStringInterner::new();
     let main_sym = interner.get_or_intern("main");
-    let (toks, lex_errs) = lexer::lex(&file.src, &mut file.lines, &mut interner);
-    let mut driver = Driver::new(file, toks, interner, false, arch::Arch::X86_64);
-    driver.errors.extend(lex_errs);
+    let mut driver = Driver::new(file, interner, false, arch::Arch::X86_64);
+    driver.lex();
     driver.parse();
     driver.build_tir();
     driver.type_check();

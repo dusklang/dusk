@@ -23,10 +23,10 @@ pub struct Driver {
 }
 
 impl Driver {
-    pub fn new(file: SourceFile, toks: TokenVec, interner: DefaultStringInterner, debug_tc: bool, arch: Arch) -> Self {
+    pub fn new(file: SourceFile, interner: DefaultStringInterner, debug_tc: bool, arch: Arch) -> Self {
         Self {
             file,
-            toks,
+            toks: TokenVec::new(),
             interner,
             hir: hir::Builder::new(),
             tir: tir::Builder::new(),
