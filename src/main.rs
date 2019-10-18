@@ -12,57 +12,47 @@ mod hir;
 mod mir;
 mod ty;
 mod arch;
+mod driver;
 mod type_checker;
 mod interpreter;
 
 use std::fs;
 
-use interpreter::Interpreter;
+use string_interner::DefaultStringInterner;
+
+use interpreter::InterpMode;
 use index_vec::Idx;
 use ty::Type;
 use mir::FunctionRef;
+use driver::Driver;
 
 fn main() {
     let contents = fs::read_to_string("HelloWorld.meda")
         .expect("unable to read input file");
-    let mut file = source_info::SourceFile::new(
+    let file = source_info::SourceFile::new(
         String::from("HelloWorld.meda"), 
         contents
     );
-    let (toks, mut errs) = lexer::lex(&file.src, &mut file.lines);
-    let (hir, hir_errs) = parser::parse(&toks, hir::Builder::new());
-    let tir = tir::Builder::new(&hir).build();
-    let (tc, tc_errs) = type_checker::type_check(tir, &file, false);
+    let mut interner = DefaultStringInterner::new();
+    let main_sym = interner.get_or_intern("main");
+    let mut driver = Driver::new(file, interner, false, arch::Arch::X86_64);
+    driver.lex();
+    driver.parse();
+    driver.build_tir();
+    driver.type_check();
 
-    errs.extend(hir_errs);
-    errs.extend(tc_errs);
-
-    for err in &mut errs { err.report(&file); }
-    if !errs.is_empty() {
-        print!("\n\u{001B}[31mcompilation failed due to previous ");
-        if errs.len() == 1 {
-            print!("error");
-        } else {
-            print!("{} errors", errs.len());
-        }
-        println!("\u{001B}[0m");
-        return;
-    }
-
-    let mir = mir::Builder::new(&hir, &tc, arch::Arch::X86_64).build();
-    let mut interpreter = Interpreter::new(&mir);
-    let main = mir.functions.iter()
+    if driver.report_errors() { return; }
+    driver.build_mir();
+    let main = driver.mir.functions.iter()
         .position(|func| {
             match func.name {
-                // TODO: intern "main" and then repeatedly compare its handle to the function's handle rather than doing string comp
-                // The problem right now is the interner is stuck behind an Rc, so we can't write to it. Simplest thing would be to
-                // intern "main" in HIR, and then store the handle, before it gets frozen.
-                Some(name) => hir.interner.resolve(name).unwrap() == "main" && func.ret_ty == Type::Void && func.num_parameters() == 0,
+                Some(name) => name == main_sym && func.ret_ty == Type::Void && func.num_parameters() == 0,
                 None => false,
             }
         })
         .expect("Couldn't find main function with no parameters and a return type of void!");
-    
+
     println!("Running the user's program in the interpreter:\n");
-    interpreter.call(FunctionRef::Id(Idx::new(main)), Vec::new());
+    driver.interp.mode = InterpMode::RunTime;
+    driver.call(FunctionRef::Id(Idx::new(main)), Vec::new());
 }

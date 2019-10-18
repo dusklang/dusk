@@ -103,9 +103,9 @@ fn take_a_type(T: type) {
 }
 
 fn main {
-    //fizz_buzz
-    //FIZZ_BUZZ_ITERATIONS = 200
-    //fizz_buzz
+    fizz_buzz
+    FIZZ_BUZZ_ITERATIONS = 200
+    fizz_buzz
 
     print("fib(")
     print_num(FIB_N)

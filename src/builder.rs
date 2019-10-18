@@ -1,11 +1,8 @@
-use std::ffi::CString;
+// TODO: Rename this file, or move its contents elsewhere. Used to contain the builder trait, which no longer exists.
 
 use bitflags::bitflags;
-use smallvec::SmallVec;
 
 use crate::index_vec::Idx;
-use crate::source_info::SourceRange;
-use crate::ty::Type;
 
 newtype_index!(ExprId pub);
 newtype_index!(DeclRefId pub);
@@ -212,36 +209,4 @@ impl UnOp {
             Deref | AddrOf | AddrOfMut | Pointer | PointerMut => panic!("operator has no symbol")
         }
     }
-}
-
-pub trait Builder<'src> {
-    type Output;
-    fn void_expr(&self) -> ExprId;
-    fn int_lit(&mut self, lit: u64, range: SourceRange) -> ExprId;
-    fn dec_lit(&mut self, lit: f64, range: SourceRange) -> ExprId;
-    fn str_lit(&mut self, lit: CString, range: SourceRange) -> ExprId;
-    fn char_lit(&mut self, lit: i8, range: SourceRange) -> ExprId;
-    fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId;
-    fn cast(&mut self, expr: ExprId, ty: Type, range: SourceRange) -> ExprId;
-    fn un_op(&mut self, op: UnOp, expr: ExprId, range: SourceRange) -> ExprId;
-    fn stored_decl(&mut self, name: &'src str, explicit_ty: Option<Type>, is_mut: bool, root_expr: ExprId, range: SourceRange);
-    fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId;
-    fn implicit_ret(&mut self, expr: ExprId);
-    fn if_expr(&mut self, condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId>, range: SourceRange) -> ExprId;
-    fn while_expr(&mut self, condition: ExprId, scope: ScopeId, range: SourceRange) -> ExprId;
-    fn stmt(&mut self, expr: ExprId);
-    fn do_expr(&mut self, scope: ScopeId, range: SourceRange) -> ExprId;
-    fn begin_scope(&mut self) -> ScopeId;
-    fn end_scope(&mut self, has_terminal_expr: bool);
-    fn begin_computed_decl(&mut self, name: &'src str, param_names: SmallVec<[&'src str; 2]>, param_tys: SmallVec<[Type; 2]>, ret_ty: Option<Type>, proto_range: SourceRange);
-    fn end_computed_decl(&mut self);
-    fn add_intrinsic(&mut self, intrinsic: Intrinsic, param_tys: SmallVec<[Type; 2]>, ret_ty: Type);
-    fn decl_ref(&mut self, name: &'src str, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId;
-    fn get_range(&self, id: ExprId) -> SourceRange;
-    fn set_range(&mut self, id: ExprId, range: SourceRange);
-    fn get_terminal_expr(&self, scope: ScopeId) -> ExprId;
-    fn enter_type_ctx(&mut self);
-    fn exit_type_ctx(&mut self);
-    fn HACK_convert_expr_to_type(&self, expr: ExprId) -> Type;
-    fn output(self) -> Self::Output;
 }

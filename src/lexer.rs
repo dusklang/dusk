@@ -4,17 +4,12 @@ use std::ffi::CString;
 
 use unicode_segmentation::GraphemeCursor;
 
-use crate::token::{TokenVec, TokenKind};
+use crate::driver::Driver;
+use crate::token::TokenKind;
 use crate::error::Error;
 use crate::source_info::SourceRange;
 
-#[inline(always)]
-pub fn lex<'src>(src: &'src str, lines: &'src mut Vec<usize>) -> (TokenVec<'src>, Vec<Error>) {
-    Lexer::lex(src, lines)
-}
-
-struct Lexer<'src> {
-    src: &'src str,
+struct Lexer {
     /// Start of current grapheme
     start: usize,
     /// End of current grapheme
@@ -26,8 +21,8 @@ struct Lexer<'src> {
     special_escape_characters: HashMap<&'static str, &'static str>,
 }
 
-impl<'src> Lexer<'src> {
-    fn new(src: &'src str, lines: &'src mut Vec<usize>) -> Lexer<'src> {
+impl Driver {
+    pub fn lex(&mut self) {
         let special_escape_characters = {
             let mut map = HashMap::new();
             map.insert("n", "\n");
@@ -38,39 +33,41 @@ impl<'src> Lexer<'src> {
         };
 
         let mut l = Lexer {
-            src,
             start: 0,
-            end:   GraphemeCursor::new(0, src.len(), true),
+            end:   GraphemeCursor::new(0, self.file.src.len(), true),
             tok_start_loc: 0,
             special_escape_characters,
             errs: Vec::new(),
         };
-        l.next_boundary();
+        self.next_boundary(&mut l);
 
         // Find line breaks.
         while l.has_chars() {
-            if l.is(b'\n') {
-                l.advance();
-                lines.push(l.cur_loc());
-            } else if l.is_str(b"\r\n") {
-                unsafe { l.advance_by_ascii(2); }
-                lines.push(l.cur_loc());
-            } else if l.is(b'\r') {
-                l.advance();
-                lines.push(l.cur_loc());
+            if self.is(&l, b'\n') {
+                self.advance(&mut l);
+                self.file.lines.push(l.cur_loc());
+            } else if self.is_str(&l, b"\r\n") {
+                unsafe { self.advance_by_ascii(&mut l, 2); }
+                self.file.lines.push(l.cur_loc());
+            } else if self.is(&l, b'\r') {
+                self.advance(&mut l);
+                self.file.lines.push(l.cur_loc());
             } else {
-                l.advance();
+                self.advance(&mut l);
             }
         }
-        l.set_pos(0);
+        self.set_pos(&mut l, 0);
 
-        l
+        loop {
+            let (tok, range) = self.l_next(&mut l);
+            let should_break = tok == TokenKind::Eof;
+            self.toks.push(tok, range);
+            if should_break { break; }
+        }
     }
+}
 
-    fn cur(&self) -> &str {
-        &self.src[self.start..self.end.cur_cursor()]
-    }
-
+impl Lexer {
     fn cur_loc(&self) -> usize {
         self.start
     }
@@ -78,71 +75,77 @@ impl<'src> Lexer<'src> {
     fn has_chars(&self) -> bool {
         self.start < self.end.cur_cursor()
     }
+}
 
-    /// Calls `self.end.next_boundary()`, with a fast-path for ASCII
-    fn next_boundary(&mut self) {
-        self.next_boundary_from(self.end.cur_cursor());
+impl Driver {
+    fn cur_tok(&self, l: &Lexer) -> &str {
+        &self.file.src[l.start..l.end.cur_cursor()]
     }
 
-    fn next_boundary_from(&mut self, start: usize) {
-        if start == self.src.len() { return; }
+    /// Calls `self.end.next_boundary()`, with a fast-path for ASCII
+    fn next_boundary(&mut self, l: &mut Lexer) {
+        self.next_boundary_from(l, l.end.cur_cursor());
+    }
 
-        let cur_byte = self.src.as_bytes()[start];
+    fn next_boundary_from(&mut self, l: &mut Lexer, start: usize) {
+        if start == self.file.src.len() { return; }
+
+        let cur_byte = self.file.src.as_bytes()[start];
         if cur_byte & 0x80 == 0 {
-            let next_cursor = std::cmp::min(start + 1, self.src.len());
-            self.end.set_cursor(next_cursor);
+            let next_cursor = std::cmp::min(start + 1, self.file.src.len());
+            l.end.set_cursor(next_cursor);
         } else {
-            self.end.next_boundary(self.src, 0).unwrap();
+            l.end.next_boundary(&self.file.src, 0).unwrap();
         }
     }
 
-    fn set_pos(&mut self, pos: usize) {
-        self.start = pos;
-        self.next_boundary_from(pos);
+    fn set_pos(&mut self, l: &mut Lexer, pos: usize) {
+        l.start = pos;
+        self.next_boundary_from(l, pos);
     }
 
     /// Skip to next grapheme.
-    fn advance(&mut self) {
-        self.start = self.end.cur_cursor();
-        self.next_boundary();
+    fn advance(&mut self, l: &mut Lexer) {
+        l.start = l.end.cur_cursor();
+        self.next_boundary(l);
     }
 
-    fn is(&self, character: u8) -> bool {
-        if self.has_chars() {
-            self.src.as_bytes()[self.start] == character
+    fn is(&self, l: &Lexer, character: u8) -> bool {
+        if l.has_chars() {
+            self.file.src.as_bytes()[l.start] == character
         } else {
             false
         }
     }
 
-    fn is_str(&self, slice: &[u8]) -> bool {
-        if slice.len() > self.src.len() - self.start {
+    fn is_str(&self, l: &Lexer, slice: &[u8]) -> bool {
+        if slice.len() > self.file.src.len() - l.start {
             return false;
         }
-        for (a, b) in self.src.as_bytes()[self.start..].iter().zip(slice.iter()) {
+        for (a, b) in self.file.src.as_bytes()[l.start..].iter().zip(slice.iter()) {
             if a != b { return false; }
         }
         true
     }
 
     /// Skip over `n` bytes of known-ASCII text
-    unsafe fn advance_by_ascii(&mut self, n: usize) {
-        self.start = std::cmp::min(self.start + n, self.src.len());
-        self.next_boundary_from(self.end.cur_cursor() + n - 1);
+    unsafe fn advance_by_ascii(&mut self, l: &mut Lexer, n: usize) {
+        l.start = std::cmp::min(l.start + n, self.file.src.len());
+        self.next_boundary_from(l, l.end.cur_cursor() + n - 1);
     }
 
-    fn is_letter(&self) -> bool {
-        let mut chars = self.cur().chars();
+    fn is_letter(&self, l: &Lexer) -> bool {
+        let mut chars = self.cur_tok(l).chars();
         if let Some(character) = chars.next() {
             chars.next().is_none() && character.is_alphabetic()
         } else {
             false
         }
     }
-    fn is_newline(&self) -> bool { self.is(b'\n') || self.is(b'\r') || self.is_str(b"\r\n") }
-    fn is_whitespace(&self) -> bool { self.is(b' ') || self.is(b'\t') }
-    fn is_num(&self) -> bool {
-        let mut chars = self.cur().chars();
+    fn is_newline(&self, l: &Lexer) -> bool { self.is(l, b'\n') || self.is(l, b'\r') || self.is_str(l, b"\r\n") }
+    fn is_whitespace(&self, l: &Lexer) -> bool { self.is(l, b' ') || self.is(l, b'\t') }
+    fn is_num(&self, l: &Lexer) -> bool {
+        let mut chars = self.cur_tok(l).chars();
         if let Some(character) = chars.next() {
             chars.next().is_none() && character.is_numeric()
         } else {
@@ -150,133 +153,118 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    fn pack_tok(&mut self, kind: TokenKind<'src>) -> (TokenKind<'src>, SourceRange) {
-        let range = self.tok_start_loc..self.cur_loc();
-        self.tok_start_loc = self.cur_loc();
+    fn pack_tok(&self, l: &mut Lexer, kind: TokenKind) -> (TokenKind, SourceRange) {
+        let range = l.tok_start_loc..l.cur_loc();
+        l.tok_start_loc = l.cur_loc();
         (kind, range)
     }
 
-    #[inline(never)]
-    fn lex(src: &'src str, lines: &'src mut Vec<usize>) -> (TokenVec<'src>, Vec<Error>) {
-        let mut l = Lexer::new(src, lines);
-        let mut toks = TokenVec::new();
-        loop {
-            let (tok, range) = l.next();
-            let should_break = tok == TokenKind::Eof;
-            toks.push(tok, range);
-            if should_break { break; }
-        }
-        (toks, l.errs)
-    }
-
-    fn next(&mut self) -> (TokenKind<'src>, SourceRange) {
-        if !self.has_chars() {
-            self.pack_tok(TokenKind::Eof)
-        } else if self.is_newline() {
-            while self.has_chars() && self.is_newline() {
-                self.advance();
+    fn l_next(&mut self, l: &mut Lexer) -> (TokenKind, SourceRange) {
+        if !l.has_chars() {
+            self.pack_tok(l, TokenKind::Eof)
+        } else if self.is_newline(l) {
+            while l.has_chars() && self.is_newline(l) {
+                self.advance(l);
             }
-            self.pack_tok(TokenKind::Newline)
-        } else if self.is_whitespace() {
-            while self.has_chars() && self.is_whitespace() {
-                self.advance();
+            self.pack_tok(l, TokenKind::Newline)
+        } else if self.is_whitespace(l) {
+            while l.has_chars() && self.is_whitespace(l) {
+                self.advance(l);
             }
-            self.pack_tok(TokenKind::Whitespace)
-        } else if self.is_str(b"//") {
-            unsafe { self.advance_by_ascii(2); }
-            while self.has_chars() && !self.is_newline() {
-                self.advance();
+            self.pack_tok(l, TokenKind::Whitespace)
+        } else if self.is_str(l, b"//") {
+            unsafe { self.advance_by_ascii(l, 2); }
+            while l.has_chars() && !self.is_newline(l) {
+                self.advance(l);
             }
-            self.pack_tok(TokenKind::SingleLineComment)
-        } else if self.is_str(b"/*") {
-            let mut comment_begin = self.cur_loc();
+            self.pack_tok(l, TokenKind::SingleLineComment)
+        } else if self.is_str(l, b"/*") {
+            let mut comment_begin = l.cur_loc();
             let mut levels = 1;
-            unsafe { self.advance_by_ascii(2); }
+            unsafe { self.advance_by_ascii(l, 2); }
             let mut prev_ending_delimiter = None;
-            while self.has_chars() {
-                if self.is_str(b"/*") {
+            while l.has_chars() {
+                if self.is_str(l, b"/*") {
                     levels += 1;
-                    comment_begin = self.cur_loc();
-                    self.advance();
-                } else if self.is_str(b"*/") {
-                    prev_ending_delimiter = Some(self.cur_loc());
+                    comment_begin = l.cur_loc();
+                    self.advance(l);
+                } else if self.is_str(l, b"*/") {
+                    prev_ending_delimiter = Some(l.cur_loc());
                     levels -= 1;
-                    self.advance();
+                    self.advance(l);
                     assert!(levels >= 0);
                     if levels == 0 {
-                        self.advance();
+                        self.advance(l);
                         break;
                     }
                 }
-                self.advance();
+                self.advance(l);
             }
             if levels > 0 {
                 let mut err = Error::new(
                     "unterminated '/*' comment"
                 ).adding_primary_range(
-                    comment_begin..self.cur_loc(),
+                    comment_begin..l.cur_loc(),
                     "previous '/*' delimiter here"
                 );
                 if let Some(prev_ending_delimiter) = prev_ending_delimiter {
                     err.add_primary_range(prev_ending_delimiter..(prev_ending_delimiter + 2), "previous '*/' delimiter here");
                     // Reset the position to the position right after the previous ending delimiter so we can keep lexing.
                     // This might be a terrible idea, we'll just have to wait and see.
-                    self.set_pos(prev_ending_delimiter + 2);
+                    self.set_pos(l, prev_ending_delimiter + 2);
                 }
-                self.errs.push(err);
+                self.errors.push(err);
             }
-            self.pack_tok(TokenKind::MultiLineComment)
-        } else if self.is_str(b"*/") {
-            unsafe { self.advance_by_ascii(2); }
-            self.errs.push(
+            self.pack_tok(l, TokenKind::MultiLineComment)
+        } else if self.is_str(l, b"*/") {
+            unsafe { self.advance_by_ascii(l, 2); }
+            self.errors.push(
                 Error::new(
                     "unexpected '*/' delimiter"
                 ).adding_primary_range(
-                    self.tok_start_loc..self.cur_loc(),
+                    l.tok_start_loc..l.cur_loc(),
                     "no previous '/*' to match"
                 )
             );
-            self.next()
-        } else if self.is(b'"') {
-            self.advance();
+            self.l_next(l)
+        } else if self.is(l, b'"') {
+            self.advance(l);
             let mut in_escape_mode = false;
             let mut lit = String::new();
             let mut terminated = false;
-            while self.has_chars() && !self.is_newline() {
+            while l.has_chars() && !self.is_newline(l) {
                 let char_to_insert = if in_escape_mode {
                     in_escape_mode = false;
-                    if let Some(character) = self.special_escape_characters.get(self.cur()) {
+                    if let Some(character) = l.special_escape_characters.get(self.cur_tok(l)) {
                         character
                     } else {
-                        self.errs.push(
+                        self.errors.push(
                             Error::new(
-                                format!("invalid escape character '{}'", self.cur())
+                                format!("invalid escape character '{}'", self.cur_tok(l))
                             ).adding_primary_range(
-                                self.cur_loc()..(self.cur_loc() + 1), 
+                                l.cur_loc()..(l.cur_loc() + 1), 
                                 "escaped here"
                             )
                         );
-                        self.cur()
+                        self.cur_tok(l)
                     }
                 } else {
-                    // This is same expression that self.cur() returns, but calling that method makes
-                    // the borrow checker complain. :(
-                    self.cur()
+                    self.cur_tok(l)
                 };
 
                 match char_to_insert {
                     "\\" => {
-                        self.advance();
+                        self.advance(l);
                         in_escape_mode = true;
                     },
                     "\"" => {
-                        self.advance();
+                        self.advance(l);
                         terminated = true;
                         break;
                     },
                     char_to_insert => {
                         lit += char_to_insert;
-                        self.advance();
+                        self.advance(l);
                     }
                 }
             }
@@ -286,37 +274,37 @@ impl<'src> Lexer<'src> {
                 } else {
                     "unterminated string literal"
                 };
-                self.errs.push(
+                self.errors.push(
                     Error::new(
                         msg
                     ).adding_primary_range(
-                        self.tok_start_loc..self.tok_start_loc + 1,
+                        l.tok_start_loc..l.tok_start_loc + 1,
                         "literal begins here"
                     )
                 );
             }
             if lit.len() == 1 {
-                self.pack_tok(TokenKind::CharLit(lit.as_bytes()[0] as i8))
+                self.pack_tok(l, TokenKind::CharLit(lit.as_bytes()[0] as i8))
             } else {
-                self.pack_tok(TokenKind::StrLit(CString::new(lit).unwrap()))
+                self.pack_tok(l, TokenKind::StrLit(CString::new(lit).unwrap()))
             }
-        } else if self.has_chars() && (self.is_letter() || self.is(b'_')) {
-            let ident_start = self.cur_loc();
+        } else if l.has_chars() && (self.is_letter(l) || self.is(l, b'_')) {
+            let ident_start = l.cur_loc();
             let ident_end;
             loop {
-                self.advance();
+                self.advance(l);
 
-                if !self.has_chars() || (!self.is_letter() && !self.is(b'_') && !self.is_num()) {
-                    ident_end = self.cur_loc();
+                if !l.has_chars() || (!self.is_letter(l) && !self.is(l, b'_') && !self.is_num(l)) {
+                    ident_end = l.cur_loc();
                     break;
                 }
             }
 
-            let ident_bytes: &'src [u8] = &self.src.as_bytes()[ident_start..ident_end];
-            let ident: &'src str = unsafe { std::str::from_utf8_unchecked(ident_bytes) };
+            let ident_bytes = &self.file.src.as_bytes()[ident_start..ident_end];
+            let ident = unsafe { std::str::from_utf8_unchecked(ident_bytes) };
 
             use TokenKind::*;
-            let kind: TokenKind<'src> = match ident {
+            let kind: TokenKind = match ident {
                 "fn" => Fn,
                 "return" => Return,
                 "true" => True,
@@ -328,44 +316,47 @@ impl<'src> Lexer<'src> {
                 "struct" => Struct,
                 "do" => Do,
                 "mut" => Mut,
-                _ => Ident(ident),
+                _ => {
+                    let ident = self.interner.get_or_intern(ident);
+                    Ident(ident)
+                },
             };
-            self.pack_tok(kind)
-        } else if self.has_chars() && self.is_num() {
+            self.pack_tok(l, kind)
+        } else if l.has_chars() && self.is_num(l) {
             let mut has_dot = false;
             loop {
                 // TODO: When the char after the '.' is not a number,
                 // we should output the '.' as its own token so something
                 // like 5.member would work. Not a priority right now though,
                 // obviously.
-                if self.is(b'.') {
+                if self.is(l, b'.') {
                     if has_dot {
                         break;
                     } else {
                         has_dot = true;
                     }
                 }
-                if !self.has_chars() || (!self.is_num() && !self.is(b'.')) {
+                if !l.has_chars() || (!self.is_num(l) && !self.is(l, b'.')) {
                     break;
                 }
-                self.advance();
+                self.advance(l);
             }
 
-            let lit = &self.src[self.tok_start_loc..self.cur_loc()];
+            let lit = &self.file.src[l.tok_start_loc..l.cur_loc()];
             if has_dot {
-                self.pack_tok(TokenKind::DecLit(lit.parse().unwrap()))
+                self.pack_tok(l, TokenKind::DecLit(lit.parse().unwrap()))
             } else {
-                self.pack_tok(TokenKind::IntLit(lit.parse().unwrap()))
+                self.pack_tok(l, TokenKind::IntLit(lit.parse().unwrap()))
             }
         } else {
             macro_rules! match_tokens {
                 ($($kind: ident $symbol: expr)+) => {
                     if false { unreachable!() }
                     $(
-                        else if self.is_str($symbol) {
+                        else if self.is_str(l, $symbol) {
                             // symbols are all ASCII, so it's safe to assume that number of grapheme clusters == number of bytes
-                            unsafe { self.advance_by_ascii($symbol.len()); }
-                            self.pack_tok(TokenKind::$kind)
+                            unsafe { self.advance_by_ascii(l, $symbol.len()); }
+                            self.pack_tok(l, TokenKind::$kind)
                         }
                     )+
                     else { 
