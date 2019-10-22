@@ -1,13 +1,14 @@
 use string_interner::DefaultStringInterner;
 
 use crate::source_info::SourceFile;
+use crate::builder::ExprId;
 use crate::token::TokenVec;
 use crate::arch::Arch;
 use crate::hir;
 use crate::tir;
 use crate::type_checker::TypeChecker;
 use crate::error::Error;
-use crate::mir;
+use crate::mir::{self, FunctionRef, Const};
 use crate::interpreter::Interpreter;
 
 pub struct Driver {
@@ -35,5 +36,11 @@ impl Driver {
             mir: mir::Builder::new(arch),
             interp: Interpreter::new(),
         }
+    }
+
+    pub fn eval_expr(&mut self, expr: ExprId) -> Const {
+        let func = self.build_standalone_expr(expr);
+        self.call(FunctionRef::Ref(func), Vec::new())
+            .to_const(self.mir.arch, self.tc.types[expr].clone(), &mut self.mir.strings)
     }
 }

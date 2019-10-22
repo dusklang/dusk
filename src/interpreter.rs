@@ -185,6 +185,7 @@ impl Value {
                 let ptr = mir.strings[id].as_ptr();
                 Value::from_usize(unsafe { mem::transmute(ptr) })
             },
+            Const::Ty(ref ty) => Value::from_ty(ty.clone()),
         }
     }
 
@@ -222,6 +223,7 @@ impl Value {
                 let id = strings.push(string);
                 Const::Str { id, ty }
             },
+            Type::Ty => Const::Ty(self.as_ty().clone()),
             _ => panic!("Can't output value of type {:?} as constant", ty),
         }
     }

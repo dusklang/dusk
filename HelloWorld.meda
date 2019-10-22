@@ -124,6 +124,8 @@ fn main {
     n := m as u64
     o := n as i16
 
+    p :: 45 | 12
+
     take_a_type(i8 *mut)
 
     // Allocate a single 8-bit integer on the heap

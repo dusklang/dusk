@@ -28,6 +28,7 @@ pub enum Const {
     Float { lit: f64, ty: Type },
     Str { id: StrId, ty: Type },
     Bool(bool),
+    Ty(Type),
 }
 
 impl Const {
@@ -37,6 +38,7 @@ impl Const {
             Const::Float { ty, .. } => ty.clone(),
             Const::Str { ty, .. } => ty.clone(),
             Const::Bool(_) => Type::Bool,
+            Const::Ty(_) => Type::Ty,
         }
     }
 }
@@ -192,7 +194,7 @@ pub enum FunctionRef {
 
 pub struct Builder {
     decls: HashMap<DeclId, Decl>,
-    static_inits: IdxVec<Function, StaticId>,
+    static_inits: IdxVec<ExprId, StaticId>,
     pub arch: Arch,
     pub strings: IdxVec<CString, StrId>,
     pub functions: IdxVec<Function, FuncId>,
@@ -251,13 +253,16 @@ impl Driver {
             self.get_decl(DeclId::new(i));
         }
 
-        let static_inits = std::mem::replace(&mut self.mir.static_inits, IdxVec::new());
-        for statik in static_inits.raw {
-            let ty = statik.ret_ty.clone();
-            let konst = self.call(FunctionRef::Ref(statik), Vec::new())
-                .to_const(self.mir.arch, ty, &mut self.mir.strings);
+        for i in 0..self.mir.static_inits.len() {
+            let id = StaticId::new(i);
+            let init = self.mir.static_inits[id];
+            let konst = self.eval_expr(init);
             self.mir.statics.push(konst);
         }
+    }
+
+    pub fn build_standalone_expr(&mut self, expr: ExprId) -> Function {
+        self.build_function(None, self.tc.types[expr].clone(), FunctionBody::Expr(expr), DeclId::new(0)..DeclId::new(0))
     }
 
     fn get_decl(&mut self, id: DeclId) -> Decl {
@@ -290,16 +295,12 @@ impl Driver {
             hir::Decl::Static(expr) => {
                 let decl = Decl::Static(StaticId::new(self.mir.static_inits.len()));
                 self.mir.decls.insert(id, decl.clone());
-                let func = self.build_function(None, self.decl_type(id).clone(), FunctionBody::Expr(expr), DeclId::new(0)..DeclId::new(0));
-                self.mir.static_inits.push(func);
+                self.mir.static_inits.push(expr);
                 decl
             },
             hir::Decl::Const(root_expr) => {
-                let ty = self.decl_type(id).clone();
-                let function = self.build_function(None, ty.clone(), FunctionBody::Expr(root_expr), DeclId::new(0)..DeclId::new(0));
-                let konst = self.call(FunctionRef::Ref(function), Vec::new())
-                    .to_const(self.mir.arch, ty, &mut self.mir.strings);
-                
+                let konst = self.eval_expr(root_expr);
+
                 // TODO: Deal with cycles!
                 let decl = Decl::Const(konst);
                 self.mir.decls.insert(id, decl.clone());
@@ -315,6 +316,7 @@ impl Driver {
             Const::Float { lit, ref ty } => writeln!(f, "{} as {:?}", lit, ty),
             Const::Int { lit, ref ty } => writeln!(f, "{} as {:?}", lit, ty),
             Const::Str { id, ref ty } => writeln!(f, "%str{} ({:?}) as {:?}", id.idx(), self.mir.strings[id], ty),
+            Const::Ty(ref ty) => writeln!(f, "`{:?}`", ty),
         }
     }
 
