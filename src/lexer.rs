@@ -16,7 +16,6 @@ struct Lexer {
     end: GraphemeCursor,
 
     tok_start_loc: usize,
-    errs: Vec<Error>,
 
     special_escape_characters: HashMap<&'static str, &'static str>,
 }
@@ -37,7 +36,6 @@ impl Driver {
             end:   GraphemeCursor::new(0, self.file.src.len(), true),
             tok_start_loc: 0,
             special_escape_characters,
-            errs: Vec::new(),
         };
         self.next_boundary(&mut l);
 
