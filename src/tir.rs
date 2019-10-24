@@ -1,5 +1,4 @@
 use std::ops::{Deref, DerefMut};
-use std::collections::HashMap;
 
 use arrayvec::ArrayVec;
 use smallvec::SmallVec;
@@ -101,8 +100,6 @@ pub struct Builder {
     decl_levels: IdxVec<Level, DeclId>,
     global_decls: Vec<GlobalDeclGroup>,
     comp_decl_stack: Vec<CompDeclState>,
-
-    staged_decls: HashMap<DeclId, AssignedDecl>,
 }
 
 #[derive(Debug)]
@@ -190,8 +187,6 @@ impl Builder {
             global_decls: Vec::new(),
             comp_decl_stack: Vec::new(),
             overloads: IdxVec::new(),
-
-            staged_decls: HashMap::new(),
         }
     }
 
@@ -299,12 +294,24 @@ impl Driver {
         // Build declarations
         for i in 0..self.hir.decls.len() {
             let id = DeclId::new(i);
-            if let Some(decl) = self.tir.staged_decls.remove(&id) {
-                let level = match self.tir.decl_levels[id] {
-                    Level::Resolved(level) => level,
-                    _ => panic!("failed to get level"),
-                };
-                self.tir.assigned_decls.insert(level, decl);
+            let level = match self.tir.decl_levels[id] {
+                Level::Resolved(level) => level,
+                _ => panic!("failed to get level"),
+            };
+            match self.hir.decls[id] {
+                hir::Decl::Stored { root_expr, .. } => {
+                    let explicit_ty = self.hir.explicit_tys[id].clone();
+                    self.tir.assigned_decls.insert(level, AssignedDecl { explicit_ty, root_expr, decl_id: id });
+                },
+                hir::Decl::Computed { scope, .. } => if self.hir.explicit_tys[id].is_none() {
+                    let root_expr = self.hir.scopes[scope].terminal_expr;
+                    self.tir.assigned_decls.insert(level, AssignedDecl { explicit_ty: None, root_expr, decl_id: id });
+                },
+                hir::Decl::Const(expr) | hir::Decl::Static(expr) => {
+                    let explicit_ty = self.hir.explicit_tys[id].clone();
+                    self.tir.assigned_decls.insert(level, AssignedDecl { explicit_ty, root_expr: expr, decl_id: id });
+                },
+                hir::Decl::Parameter { .. } | hir::Decl::Intrinsic { .. } => {},
             }
         }
     }
@@ -392,12 +399,9 @@ impl Driver {
             match self.hir.scopes[id].items[i] {
                 hir::Item::Stmt(expr) => { self.prebuild_expr(expr); },
                 hir::Item::StoredDecl { decl_id, root_expr, .. } => {
+                    let level = self.pb_deps(&[root_expr], &[], &[]);
+
                     let name = self.hir.names[decl_id];
-                    let explicit_ty = self.hir.explicit_tys[decl_id].clone();
-
-                    let level = self.prebuild_expr(root_expr) + 1;
-                    self.tir.staged_decls.insert(decl_id, AssignedDecl { explicit_ty, root_expr, decl_id });
-
                     self.tir.comp_decl_stack.last_mut().unwrap().local_decls.push(LocalDecl { name, id: decl_id });
 
                     self.tir.decl_levels[decl_id] = Level::Resolved(level);
@@ -442,31 +446,21 @@ impl Driver {
                 }
                 self.tir.comp_decl_stack.push(comp_decl_state);
 
-                let terminal_expr = self.prebuild_scope(scope);
-                let ret_exprs = &mut self.tir.comp_decl_stack.last_mut().unwrap().returned_expressions;
-                ret_exprs.push(terminal_expr);
-                let level = match &self.hir.explicit_tys[id] {
+                let mut level = self.pb_deps(&[], &[], &[scope]);
+                let mut exprs = self.tir.comp_decl_stack.pop().unwrap().returned_expressions;
+                let terminal_expr = self.hir.scopes[scope].terminal_expr;
+                exprs.push(terminal_expr);
+                match &self.hir.explicit_tys[id] {
                     Some(ty) => {
-                        self.tir.ret_groups.push(RetGroup { ty: ty.clone(), exprs: ret_exprs.clone() });
-                        0
+                        self.tir.ret_groups.push(RetGroup { ty: ty.clone(), exprs });
+                        level = 0;
                     },
-                    None => {
-                        assert_eq!(ret_exprs.len(), 1, "multiple returns from assigned functions not allowed");
-                        let root_expr = ret_exprs[0];
-                        self.tir.staged_decls.insert(id, AssignedDecl { explicit_ty: None, root_expr, decl_id: id });
-                        self.tir.expr_levels[root_expr] + 1
-                    },
+                    None => assert_eq!(exprs.len(), 1, "multiple returns from assigned functions not allowed"),
                 };
-
-                self.tir.comp_decl_stack.pop().unwrap();
 
                 level
             },
-            hir::Decl::Const(expr) | hir::Decl::Static(expr) => {
-                self.prebuild_expr(expr);
-                self.tir.staged_decls.insert(id, AssignedDecl { explicit_ty: self.hir.explicit_tys[id].clone(), root_expr: expr, decl_id: id });
-                self.tir.expr_levels[expr] + 1
-            },
+            hir::Decl::Const(expr) | hir::Decl::Static(expr) => self.pb_deps(&[expr], &[], &[]),
             hir::Decl::Intrinsic { .. } | hir::Decl::Parameter { .. } => 0,
             hir::Decl::Stored { .. } => panic!("Should've already been handled in prebuild_scope"),
         };
