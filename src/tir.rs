@@ -1,6 +1,7 @@
 use std::ops::{Deref, DerefMut};
 use std::collections::HashMap;
 
+use arrayvec::ArrayVec;
 use smallvec::SmallVec;
 use string_interner::Sym;
 
@@ -322,25 +323,32 @@ impl Driver {
         }
     }
 
+    fn pb_deps(&mut self, normal: &[ExprId], weak: &[DeclId], codegen: &[ScopeId]) -> u32 {
+        // IMPORTANT NOTE: the terminal expressions of the "codegen" scopes MUST be treated as normal dependencies!
+        let normal = normal.iter()
+            .map(|&expr| self.prebuild_expr(expr))
+            .max().unwrap_or(0);
+        let weak = weak.iter()
+            .map(|&decl| self.prebuild_decl(decl))
+            .max().unwrap_or(0);
+        let codegen = codegen.iter()
+            .map(|&scope| {
+                let expr = self.prebuild_scope(scope);
+                self.tir.expr_levels[expr]
+            })
+            .max().unwrap_or(0);
+        use std::cmp::max;
+        max(normal, max(weak, codegen)) + 1
+    }
+
     fn prebuild_expr(&mut self, id: ExprId) -> u32 {
         let level = match self.hir.exprs[id] {
-            hir::Expr::AddrOf { expr, is_mut } => {
-                self.prebuild_expr(expr);
-                self.get_expr_level(id, AddrOf { expr, is_mut }, 0)
-            },
-            hir::Expr::Cast { expr, .. } => {
-                self.prebuild_expr(expr);
-                0
-            },
-            hir::Expr::CharLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::IntLit { .. } | hir::Expr::StrLit { .. } => 0,
+            hir::Expr::AddrOf { expr, .. } => self.pb_deps(&[expr], &[], &[]),
+            hir::Expr::Cast { expr, .. } => self.pb_deps(&[expr], &[], &[]),
+            hir::Expr::CharLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::IntLit { .. } | hir::Expr::StrLit { .. } => self.pb_deps(&[], &[], &[]),
             hir::Expr::DeclRef { name, ref arguments, id: decl_ref_id } => {
-                // TODO: Would be nice to not have to clone the arguments here, because they're just used to get the expr level at the bottom of this
-                // scope.
+                // TODO: Would be nice to not have to clone the arguments here. Difficult to do though because of the borrow checker.
                 let arguments = arguments.clone();
-                for &arg in &arguments {
-                    self.prebuild_expr(arg);
-                }
-
                 let mut overloads = Vec::new();
                 if let Some(state) = self.tir.comp_decl_stack.last() {
                     if let Some(decl) = state.local_decls.iter().rev().find(|decl| decl.name == name) {
@@ -357,60 +365,32 @@ impl Driver {
                             }).collect();
                     }
                 }
-                let deepest_overload = overloads.iter()
-                    .map(|&overload| self.prebuild_decl(overload))
-                    .max().unwrap_or(0);
+                let level = self.pb_deps(&arguments[..], &overloads[..], &[]);
                 self.tir.overloads[decl_ref_id] = overloads;
-                self.get_expr_level(id, DeclRef { args: arguments, decl_ref_id }, deepest_overload)
+                level
             },
-            hir::Expr::Deref(expr) => {
-                self.prebuild_expr(expr);
-                self.get_expr_level(id, Dereference { expr }, 0)
-            },
-            hir::Expr::Pointer { expr, .. } => {
-                self.prebuild_expr(expr);
-                self.get_expr_level(id, Pointer { expr }, 0)
-            },
-            hir::Expr::Do { scope } => {
-                let terminal_expr = self.prebuild_scope(scope);
-                self.get_expr_level(id, Do { terminal_expr }, 0)
-            },
+            hir::Expr::Deref(expr) => self.pb_deps(&[expr], &[], &[]),
+            hir::Expr::Pointer { expr, .. } => self.pb_deps(&[expr], &[], &[]),
+            hir::Expr::Do { scope } => self.pb_deps(&[], &[], &[scope]),
             hir::Expr::If { condition, then_scope, else_scope } => {
-                self.prebuild_expr(condition);
-                let then_expr = self.prebuild_scope(then_scope);
-                let else_expr = else_scope.map_or(self.tir.void_expr, |scope| self.prebuild_scope(scope));
-                self.get_expr_level(id, If { condition, then_expr, else_expr }, 0)
+                let mut scopes = ArrayVec::<[ScopeId; 2]>::new();
+                scopes.push(then_scope);
+                if let Some(else_scope) = else_scope { scopes.push(else_scope); }
+                self.pb_deps(&[condition], &[], &scopes[..])
             },
             hir::Expr::Ret { expr } => {
-                self.prebuild_expr(expr);
                 self.tir.comp_decl_stack.last_mut()
                     .expect("Found return expression outside of comp decl")
                     .returned_expressions
                     .push(expr);
-                0
+                self.pb_deps(&[expr], &[], &[])
             },
-            hir::Expr::Set { lhs, rhs } => {
-                self.prebuild_expr(lhs);
-                self.prebuild_expr(rhs);
-                self.get_expr_level(id, Assignment { lhs, rhs }, 0)
-            },
+            hir::Expr::Set { lhs, rhs } => self.pb_deps(&[lhs, rhs], &[], &[]),
             hir::Expr::Void => 0,
-            hir::Expr::While { condition, scope } => {
-                self.prebuild_expr(condition);
-                self.prebuild_scope(scope);
-                0
-            },
+            hir::Expr::While { condition, scope } => self.pb_deps(&[condition], &[], &[scope]),
         };
         self.tir.expr_levels[id] = level;
         level
-    }
-
-    fn get_level<T: Item>(&self, value: T, additional_level: u32) -> u32 {
-        std::cmp::max(additional_level, value.compute_level(&self.tir))
-    }
-
-    fn get_expr_level<T>(&self, id: ExprId, data: T, additional_level: u32) -> u32 where Expr<T>: Item {
-        self.get_level(Expr { id, data }, additional_level)
     }
 
     fn insert_expr<T>(&mut self, id: ExprId, data: T) where Expr<T>: Item {
@@ -510,32 +490,22 @@ impl Driver {
 }
 
 macro_rules! item_impl {
-    ($ty:ty, $storage:ident; $($level:ident),+) => {
+    ($ty:ty, $storage:ident) => {
         impl Item for $ty {
-            fn compute_level(&self, b: &Builder) -> u32 {
-                [$(b.expr_levels[self.$level]),+].iter().max().unwrap() + 1
-            }
             fn storage(builder: &mut Builder) -> &mut DepVec<Self> { &mut builder.$storage }
         }
     }
 }
 
 pub trait Item: Sized {
-    fn compute_level(&self, builder: &Builder) -> u32;
     fn storage(builder: &mut Builder) -> &mut DepVec<Self>;
 }
 
-item_impl!(Expr<Do>, dos; terminal_expr);
-item_impl!(Expr<Assignment>, assignments; lhs, rhs);
-item_impl!(Expr<AddrOf>, addr_ofs; expr);
-item_impl!(Expr<Dereference>, derefs; expr);
-item_impl!(Expr<Pointer>, pointers; expr);
-item_impl!(Expr<If>, ifs; condition, then_expr, else_expr);
-item_impl!(AssignedDecl, assigned_decls; root_expr);
-
-impl Item for Expr<DeclRef> {
-    fn compute_level(&self, b: &Builder) -> u32 {
-        self.args.iter().map(|&id| b.expr_levels[id]).max().unwrap_or(0) + 1
-    }
-    fn storage(builder: &mut Builder) -> &mut DepVec<Self> { &mut builder.decl_refs }
-}
+item_impl!(Expr<Do>, dos);
+item_impl!(Expr<Assignment>, assignments);
+item_impl!(Expr<AddrOf>, addr_ofs);
+item_impl!(Expr<Dereference>, derefs);
+item_impl!(Expr<Pointer>, pointers);
+item_impl!(Expr<If>, ifs);
+item_impl!(AssignedDecl, assigned_decls);
+item_impl!(Expr<DeclRef>, decl_refs);
