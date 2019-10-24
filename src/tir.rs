@@ -131,6 +131,10 @@ pub struct Builder {
 
     expr_levels: IdxVec<u32, ExprId>,
     decl_levels: IdxVec<Level, DeclId>,
+
+    expr_sub_progs: IdxVec<u32, ExprId>,
+    decl_sub_progs: IdxVec<u32, DeclId>,
+
     global_decls: Vec<GlobalDeclGroup>,
     comp_decl_stack: Vec<CompDeclState>,
 
@@ -196,6 +200,8 @@ impl Builder {
         // Create the void expression
         let mut expr_levels = IdxVec::new();
         let void_expr = expr_levels.push(0);
+        let mut expr_sub_progs = IdxVec::new();
+        expr_sub_progs.push(0);
 
         Self {
             sub_progs: Vec::new(),
@@ -203,6 +209,10 @@ impl Builder {
             num_casts: 0,
             expr_levels,
             decl_levels: IdxVec::new(),
+
+            expr_sub_progs,
+            decl_sub_progs: IdxVec::new(),
+
             decls: IdxVec::new(),
             global_decls: Vec::new(),
             comp_decl_stack: Vec::new(),
@@ -268,7 +278,7 @@ impl Driver {
         }
 
         debug_assert!(self.tir.overloads.is_empty());
-        debug_assert!(self.tir.expr_levels.len() == 1);
+        debug_assert_eq!(self.tir.expr_levels.len(), 1);
         self.tir.overloads.resize_with(self.hir.num_decl_refs, || Vec::new());
         self.tir.expr_levels.resize_with(self.hir.exprs.len(), || std::u32::MAX);
 
@@ -277,12 +287,16 @@ impl Driver {
             self.prebuild_decl(self.hir.global_decls[i]);
         }
 
+        debug_assert_eq!(self.tir.expr_sub_progs.len(), 1);
+        self.tir.expr_sub_progs.resize_with(self.hir.exprs.len(), || 0);
+        self.tir.decl_sub_progs.resize_with(self.hir.decls.len(), || 0);
+
         // Build expressions
         for i in 0..self.hir.exprs.len() {
             let id = ExprId::new(i);
             let expr = &self.hir.exprs[id];
             if self.hir.exprs_in_type_ctx.contains(&id) { continue; }
-            let sub_prog = 0;
+            let sub_prog = self.tir.expr_sub_progs[id] as usize;
             self.tir.sub_progs.resize_with(sub_prog + 1, || Subprogram::new());
             match *expr {
                 hir::Expr::AddrOf { expr, is_mut } => self.insert_expr(id, AddrOf { expr, is_mut }),
@@ -322,7 +336,7 @@ impl Driver {
                 Level::Resolved(level) => level,
                 _ => panic!("failed to get level"),
             };
-            let sub_prog = 0;
+            let sub_prog = self.tir.decl_sub_progs[id] as usize;
             self.tir.sub_progs.resize_with(sub_prog + 1, || Subprogram::new());
             match self.hir.decls[id] {
                 hir::Decl::Stored { root_expr, .. } => {
@@ -342,7 +356,7 @@ impl Driver {
         }
         let staged_ret_groups = std::mem::replace(&mut self.tir.staged_ret_groups, Vec::new());
         for (decl, ret_group) in staged_ret_groups {
-            let sub_prog = 0;
+            let sub_prog = self.tir.decl_sub_progs[decl] as usize;
             self.tir.sub_progs[sub_prog].ret_groups.push(ret_group);
         }
     }
