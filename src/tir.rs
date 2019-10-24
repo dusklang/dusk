@@ -71,14 +71,14 @@ pub struct Decl {
 }
 
 #[derive(Debug)]
-pub struct Builder {
+pub struct Subprogram {
     pub int_lits: Vec<ExprId>,
     pub dec_lits: Vec<ExprId>,
     pub str_lits: Vec<ExprId>,
     pub char_lits: Vec<ExprId>,
     pub stmts: Vec<Stmt>,
     pub explicit_rets: Vec<ExprId>,
-    // Not public because RetGroupIds are not exposed outside of TIR. Instead, you get a slice via the `ret_groups()` method on `Builder`.
+    // Not public because RetGroupIds are not exposed outside of TIR. Instead, you get a slice via the `ret_groups()` method on `Subprogram`.
     ret_groups: IdxVec<RetGroup, RetGroupId>,
     pub casts: Vec<Expr<Cast>>,
     pub whiles: Vec<Expr<While>>,
@@ -90,8 +90,41 @@ pub struct Builder {
     pub derefs: DepVec<Expr<Dereference>>,
     pub pointers: DepVec<Expr<Pointer>>,
     pub ifs: DepVec<Expr<If>>,
+}
+
+impl Subprogram {
+    fn new() -> Self {
+        Self {
+            int_lits: Vec::new(),
+            dec_lits: Vec::new(),
+            str_lits: Vec::new(),
+            char_lits: Vec::new(),
+            stmts: Vec::new(),
+            explicit_rets: Vec::new(),
+            ret_groups: IdxVec::new(),
+            casts: Vec::new(),
+            whiles: Vec::new(),
+            dos: DepVec::new(),
+            assigned_decls: DepVec::new(),
+            assignments: DepVec::new(),
+            decl_refs: DepVec::new(),
+            addr_ofs: DepVec::new(),
+            derefs: DepVec::new(),
+            pointers: DepVec::new(),
+            ifs: DepVec::new(),
+        }
+    }
+    pub fn ret_groups(&self) -> &[RetGroup] {
+        &self.ret_groups.raw[..]
+    }
+}
+
+#[derive(Debug)]
+pub struct Builder {
+    pub sub_progs: Vec<Subprogram>,
     /// An expression to uniquely represent the void value
     pub void_expr: ExprId,
+    pub num_casts: usize,
     pub decls: IdxVec<Decl, DeclId>,
     /// Each declref's overload choices
     pub overloads: IdxVec<Vec<DeclId>, DeclRefId>,
@@ -100,6 +133,8 @@ pub struct Builder {
     decl_levels: IdxVec<Level, DeclId>,
     global_decls: Vec<GlobalDeclGroup>,
     comp_decl_stack: Vec<CompDeclState>,
+
+    staged_ret_groups: Vec<(DeclId, RetGroup)>,
 }
 
 #[derive(Debug)]
@@ -163,39 +198,22 @@ impl Builder {
         let void_expr = expr_levels.push(0);
 
         Self {
-            int_lits: Vec::new(),
-            dec_lits: Vec::new(),
-            str_lits: Vec::new(),
-            char_lits: Vec::new(),
-            stmts: Vec::new(),
-            explicit_rets: Vec::new(),
-            ret_groups: IdxVec::new(),
-            casts: Vec::new(),
-            whiles: Vec::new(),
-            dos: DepVec::new(),
-            assigned_decls: DepVec::new(),
-            assignments: DepVec::new(),
-            decl_refs: DepVec::new(),
-            addr_ofs: DepVec::new(),
-            derefs: DepVec::new(),
-            pointers: DepVec::new(),
-            ifs: DepVec::new(),
+            sub_progs: Vec::new(),
             void_expr,
+            num_casts: 0,
             expr_levels,
             decl_levels: IdxVec::new(),
             decls: IdxVec::new(),
             global_decls: Vec::new(),
             comp_decl_stack: Vec::new(),
             overloads: IdxVec::new(),
+
+            staged_ret_groups: Vec::new(),
         }
     }
 
     pub fn num_exprs(&self) -> usize {
         self.expr_levels.len()
-    }
-
-    pub fn ret_groups(&self) -> &[RetGroup] {
-        &self.ret_groups.raw[..]
     }
 }
 
@@ -264,14 +282,20 @@ impl Driver {
             let id = ExprId::new(i);
             let expr = &self.hir.exprs[id];
             if self.hir.exprs_in_type_ctx.contains(&id) { continue; }
+            let sub_prog = 0;
+            self.tir.sub_progs.resize_with(sub_prog + 1, || Subprogram::new());
             match *expr {
                 hir::Expr::AddrOf { expr, is_mut } => self.insert_expr(id, AddrOf { expr, is_mut }),
                 hir::Expr::Pointer { expr, .. } => self.insert_expr(id, Pointer { expr }),
-                hir::Expr::Cast { expr, ref ty, cast_id } => self.tir.casts.push(Expr { id, data: Cast { expr, ty: ty.clone(), cast_id } }),
-                hir::Expr::CharLit { .. } => self.tir.char_lits.push(id),
-                hir::Expr::DecLit { .. } => self.tir.dec_lits.push(id),
-                hir::Expr::IntLit { .. } => self.tir.int_lits.push(id),
-                hir::Expr::StrLit { .. } => self.tir.str_lits.push(id),
+                hir::Expr::Cast { expr, ref ty, cast_id } => {
+                    self.tir.num_casts += 1;
+                    let ty = ty.clone();
+                    self.insert_expr(id, Cast { expr, ty, cast_id })
+                },
+                hir::Expr::CharLit { .. } => self.tir.sub_progs[sub_prog].char_lits.push(id),
+                hir::Expr::DecLit { .. } => self.tir.sub_progs[sub_prog].dec_lits.push(id),
+                hir::Expr::IntLit { .. } => self.tir.sub_progs[sub_prog].int_lits.push(id),
+                hir::Expr::StrLit { .. } => self.tir.sub_progs[sub_prog].str_lits.push(id),
                 hir::Expr::DeclRef { ref arguments, id: decl_ref_id, .. } => {
                     let args = arguments.clone();
                     self.insert_expr(id, DeclRef { args, decl_ref_id })
@@ -287,7 +311,7 @@ impl Driver {
                 hir::Expr::Ret { .. } => {},
                 hir::Expr::Set { lhs, rhs } => self.insert_expr(id, Assignment { lhs, rhs }),
                 hir::Expr::Void => {},
-                hir::Expr::While { condition, .. } => self.tir.whiles.push(Expr { id, data: While { condition } }),
+                hir::Expr::While { condition, .. } => self.insert_expr(id, While { condition }),
             }
         }
 
@@ -298,21 +322,28 @@ impl Driver {
                 Level::Resolved(level) => level,
                 _ => panic!("failed to get level"),
             };
+            let sub_prog = 0;
+            self.tir.sub_progs.resize_with(sub_prog + 1, || Subprogram::new());
             match self.hir.decls[id] {
                 hir::Decl::Stored { root_expr, .. } => {
                     let explicit_ty = self.hir.explicit_tys[id].clone();
-                    self.tir.assigned_decls.insert(level, AssignedDecl { explicit_ty, root_expr, decl_id: id });
+                    self.tir.sub_progs[sub_prog].assigned_decls.insert(level, AssignedDecl { explicit_ty, root_expr, decl_id: id });
                 },
                 hir::Decl::Computed { scope, .. } => if self.hir.explicit_tys[id].is_none() {
                     let root_expr = self.hir.scopes[scope].terminal_expr;
-                    self.tir.assigned_decls.insert(level, AssignedDecl { explicit_ty: None, root_expr, decl_id: id });
+                    self.tir.sub_progs[sub_prog].assigned_decls.insert(level, AssignedDecl { explicit_ty: None, root_expr, decl_id: id });
                 },
                 hir::Decl::Const(expr) | hir::Decl::Static(expr) => {
                     let explicit_ty = self.hir.explicit_tys[id].clone();
-                    self.tir.assigned_decls.insert(level, AssignedDecl { explicit_ty, root_expr: expr, decl_id: id });
+                    self.tir.sub_progs[sub_prog].assigned_decls.insert(level, AssignedDecl { explicit_ty, root_expr: expr, decl_id: id });
                 },
                 hir::Decl::Parameter { .. } | hir::Decl::Intrinsic { .. } => {},
             }
+        }
+        let staged_ret_groups = std::mem::replace(&mut self.tir.staged_ret_groups, Vec::new());
+        for (decl, ret_group) in staged_ret_groups {
+            let sub_prog = 0;
+            self.tir.sub_progs[sub_prog].ret_groups.push(ret_group);
         }
     }
 
@@ -388,7 +419,7 @@ impl Driver {
 
     fn insert_expr<T>(&mut self, id: ExprId, data: T) where Expr<T>: Item {
         let level = self.tir.expr_levels[id];
-        Expr::<T>::storage(&mut self.tir).insert(level, Expr { id, data });
+        Expr { id, data }.insert(&mut self.tir, (0, level));
     }
 
     /// Returns terminal expression
@@ -452,7 +483,7 @@ impl Driver {
                 exprs.push(terminal_expr);
                 match &self.hir.explicit_tys[id] {
                     Some(ty) => {
-                        self.tir.ret_groups.push(RetGroup { ty: ty.clone(), exprs });
+                        self.tir.staged_ret_groups.push((id, RetGroup { ty: ty.clone(), exprs }));
                         level = 0;
                     },
                     None => assert_eq!(exprs.len(), 1, "multiple returns from assigned functions not allowed"),
@@ -469,23 +500,34 @@ impl Driver {
     }
 }
 
+
+pub trait Item: Sized {
+    fn insert(self, builder: &mut Builder, level: (u32, u32));
+}
+
 macro_rules! item_impl {
     ($ty:ty, $storage:ident) => {
-        impl Item for $ty {
-            fn storage(builder: &mut Builder) -> &mut DepVec<Self> { &mut builder.$storage }
+        impl Item for Expr<$ty> {
+            fn insert(self, builder: &mut Builder, (sub_prog, level): (u32, u32)) { builder.sub_progs[sub_prog as usize].$storage.insert(level, self); }
         }
     }
 }
 
-pub trait Item: Sized {
-    fn storage(builder: &mut Builder) -> &mut DepVec<Self>;
+macro_rules! item_vec_impl {
+    ($ty:ty, $storage:ident) => {
+        impl Item for Expr<$ty> {
+            fn insert(self, builder: &mut Builder, (sub_prog, _): (u32, u32)) { builder.sub_progs[sub_prog as usize].$storage.push(self); }
+        }
+    }
 }
 
-item_impl!(Expr<Do>, dos);
-item_impl!(Expr<Assignment>, assignments);
-item_impl!(Expr<AddrOf>, addr_ofs);
-item_impl!(Expr<Dereference>, derefs);
-item_impl!(Expr<Pointer>, pointers);
-item_impl!(Expr<If>, ifs);
-item_impl!(Expr<DeclRef>, decl_refs);
-item_impl!(AssignedDecl, assigned_decls);
+item_vec_impl!(Cast, casts);
+item_vec_impl!(While, whiles);
+
+item_impl!(Do, dos);
+item_impl!(Assignment, assignments);
+item_impl!(AddrOf, addr_ofs);
+item_impl!(Dereference, derefs);
+item_impl!(Pointer, pointers);
+item_impl!(If, ifs);
+item_impl!(DeclRef, decl_refs);
