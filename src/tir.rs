@@ -13,6 +13,7 @@ use crate::ty::{Type, QualType};
 
 newtype_index!(TreeId pub);
 newtype_index!(RetGroupId);
+newtype_index!(SpVarId);
 
 #[derive(Debug)]
 pub struct RetGroup { pub ty: Type, pub exprs: SmallVec<[ExprId; 1]> }
@@ -46,7 +47,7 @@ pub struct While { pub condition: ExprId }
 enum Level {
     Unresolved,
     Resolving,
-    Resolved(u32),
+    Resolved(u32, SpVarId),
 }
 
 #[derive(Debug)]
@@ -120,6 +121,23 @@ impl Subprogram {
 }
 
 #[derive(Debug)]
+struct SubprogramVar {
+    weak: Vec<SpVarId>,
+    eval: Vec<SpVarId>,
+    codegen: Vec<SpVarId>,
+}
+
+impl SubprogramVar {
+    fn new() -> Self { 
+        Self {
+            weak: Vec::new(),
+            eval: Vec::new(),
+            codegen: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct Builder {
     pub sub_progs: Vec<Subprogram>,
     /// An expression to uniquely represent the void value
@@ -131,6 +149,8 @@ pub struct Builder {
 
     expr_levels: IdxVec<u32, ExprId>,
     decl_levels: IdxVec<Level, DeclId>,
+
+    sp_vars: IdxVec<SubprogramVar, SpVarId>,
 
     expr_sub_progs: IdxVec<u32, ExprId>,
     decl_sub_progs: IdxVec<u32, DeclId>,
@@ -213,6 +233,8 @@ impl Builder {
             expr_sub_progs,
             decl_sub_progs: IdxVec::new(),
 
+            sp_vars: IdxVec::new(),
+
             decls: IdxVec::new(),
             global_decls: Vec::new(),
             comp_decl_stack: Vec::new(),
@@ -284,7 +306,7 @@ impl Driver {
 
         // Prebuild global decls, which will recursively compute the typechecking dependencies of all declarations and expressions
         for i in 0..self.hir.global_decls.len() {
-            self.prebuild_decl(self.hir.global_decls[i]);
+            self.prebuild_decl(self.hir.global_decls[i], None);
         }
 
         debug_assert_eq!(self.tir.expr_sub_progs.len(), 1);
@@ -333,7 +355,7 @@ impl Driver {
         for i in 0..self.hir.decls.len() {
             let id = DeclId::new(i);
             let level = match self.tir.decl_levels[id] {
-                Level::Resolved(level) => level,
+                Level::Resolved(level, _) => level,
                 _ => panic!("failed to get level"),
             };
             let sub_prog = self.tir.decl_sub_progs[id] as usize;
@@ -361,17 +383,17 @@ impl Driver {
         }
     }
 
-    fn pb_deps(&mut self, normal: &[ExprId], weak: &[DeclId], codegen: &[ScopeId]) -> u32 {
+    fn pb_deps(&mut self, sp_var: SpVarId, normal: &[ExprId], weak: &[DeclId], codegen: &[ScopeId]) -> u32 {
         // IMPORTANT NOTE: the terminal expressions of the "codegen" scopes MUST be treated as normal dependencies!
         let normal = normal.iter()
-            .map(|&expr| self.prebuild_expr(expr))
+            .map(|&expr| self.prebuild_expr(expr, Some(sp_var)))
             .max().unwrap_or(0);
         let weak = weak.iter()
-            .map(|&decl| self.prebuild_decl(decl))
+            .map(|&decl| self.prebuild_decl(decl, Some(sp_var)))
             .max().unwrap_or(0);
         let codegen = codegen.iter()
             .map(|&scope| {
-                let expr = self.prebuild_scope(scope);
+                let expr = self.prebuild_scope(scope, sp_var);
                 self.tir.expr_levels[expr]
             })
             .max().unwrap_or(0);
@@ -379,11 +401,16 @@ impl Driver {
         max(normal, max(weak, codegen)) + 1
     }
 
-    fn prebuild_expr(&mut self, id: ExprId) -> u32 {
+    fn new_sp_var(&mut self) -> SpVarId {
+        self.tir.sp_vars.push(SubprogramVar::new())
+    }
+
+    fn prebuild_expr(&mut self, id: ExprId, sp_var: Option<SpVarId>) -> u32 {
+        let sp_var = sp_var.unwrap_or_else(|| self.new_sp_var());
         let level = match self.hir.exprs[id] {
-            hir::Expr::AddrOf { expr, .. } => self.pb_deps(&[expr], &[], &[]),
-            hir::Expr::Cast { expr, .. } => self.pb_deps(&[expr], &[], &[]),
-            hir::Expr::CharLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::IntLit { .. } | hir::Expr::StrLit { .. } => self.pb_deps(&[], &[], &[]),
+            hir::Expr::AddrOf { expr, .. } => self.pb_deps(sp_var, &[expr], &[], &[]),
+            hir::Expr::Cast { expr, .. } => self.pb_deps(sp_var, &[expr], &[], &[]),
+            hir::Expr::CharLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::IntLit { .. } | hir::Expr::StrLit { .. } => self.pb_deps(sp_var, &[], &[], &[]),
             hir::Expr::DeclRef { name, ref arguments, id: decl_ref_id } => {
                 // TODO: Would be nice to not have to clone the arguments here. Difficult to do though because of the borrow checker.
                 let arguments = arguments.clone();
@@ -403,29 +430,29 @@ impl Driver {
                             }).collect();
                     }
                 }
-                let level = self.pb_deps(&arguments[..], &overloads[..], &[]);
+                let level = self.pb_deps(sp_var, &arguments[..], &overloads[..], &[]);
                 self.tir.overloads[decl_ref_id] = overloads;
                 level
             },
-            hir::Expr::Deref(expr) => self.pb_deps(&[expr], &[], &[]),
-            hir::Expr::Pointer { expr, .. } => self.pb_deps(&[expr], &[], &[]),
-            hir::Expr::Do { scope } => self.pb_deps(&[], &[], &[scope]),
+            hir::Expr::Deref(expr) => self.pb_deps(sp_var, &[expr], &[], &[]),
+            hir::Expr::Pointer { expr, .. } => self.pb_deps(sp_var, &[expr], &[], &[]),
+            hir::Expr::Do { scope } => self.pb_deps(sp_var, &[], &[], &[scope]),
             hir::Expr::If { condition, then_scope, else_scope } => {
                 let mut scopes = ArrayVec::<[ScopeId; 2]>::new();
                 scopes.push(then_scope);
                 if let Some(else_scope) = else_scope { scopes.push(else_scope); }
-                self.pb_deps(&[condition], &[], &scopes[..])
+                self.pb_deps(sp_var, &[condition], &[], &scopes[..])
             },
             hir::Expr::Ret { expr } => {
                 self.tir.comp_decl_stack.last_mut()
                     .expect("Found return expression outside of comp decl")
                     .returned_expressions
                     .push(expr);
-                self.pb_deps(&[expr], &[], &[])
+                self.pb_deps(sp_var, &[expr], &[], &[])
             },
-            hir::Expr::Set { lhs, rhs } => self.pb_deps(&[lhs, rhs], &[], &[]),
+            hir::Expr::Set { lhs, rhs } => self.pb_deps(sp_var, &[lhs, rhs], &[], &[]),
             hir::Expr::Void => 0,
-            hir::Expr::While { condition, scope } => self.pb_deps(&[condition], &[], &[scope]),
+            hir::Expr::While { condition, scope } => self.pb_deps(sp_var, &[condition], &[], &[scope]),
         };
         self.tir.expr_levels[id] = level;
         level
@@ -436,47 +463,77 @@ impl Driver {
         Expr { id, data }.insert(&mut self.tir, (0, level));
     }
 
+    fn add_weak_dep(&mut self, dependent: SpVarId, dependee: SpVarId) {
+        self.tir.sp_vars[dependent].weak.push(dependee);
+    }
+
+    fn add_eval_dep(&mut self, dependent: SpVarId, dependee: SpVarId) {
+        self.tir.sp_vars[dependent].eval.push(dependee);
+    }
+
+    fn add_codegen_dep(&mut self, dependent: SpVarId, dependee: SpVarId) {
+        self.tir.sp_vars[dependent].codegen.push(dependee);
+    }
+
     /// Returns terminal expression
-    fn prebuild_scope(&mut self, id: ScopeId) -> ExprId {
+    ///     `dependent_sp_var`: the subprogram variable that has a codegen dependency on everything in this scope except for its terminal expression,
+    ///                         on which it has a normal dependency
+    fn prebuild_scope(&mut self, id: ScopeId, dependent_sp_var: SpVarId) -> ExprId {
         self.tir.comp_decl_stack.last_mut().unwrap().open_scope();
 
         for i in 0..self.hir.scopes[id].items.len() {
             match self.hir.scopes[id].items[i] {
-                hir::Item::Stmt(expr) => { self.prebuild_expr(expr); },
+                hir::Item::Stmt(expr) => {
+                    let sp_var = self.new_sp_var();
+                    self.prebuild_expr(expr, Some(sp_var));
+                    self.add_codegen_dep(dependent_sp_var, sp_var);
+                },
                 hir::Item::StoredDecl { decl_id, root_expr, .. } => {
-                    let level = self.pb_deps(&[root_expr], &[], &[]);
+                    let sp_var = self.new_sp_var();
+                    let level = self.prebuild_expr(root_expr, Some(sp_var)) + 1;
+                    self.add_codegen_dep(dependent_sp_var, sp_var);
 
                     let name = self.hir.names[decl_id];
                     self.tir.comp_decl_stack.last_mut().unwrap().local_decls.push(LocalDecl { name, id: decl_id });
 
-                    self.tir.decl_levels[decl_id] = Level::Resolved(level);
+                    self.tir.decl_levels[decl_id] = Level::Resolved(level, sp_var);
                 },
                 hir::Item::ComputedDecl(decl_id) => {
-                    self.prebuild_decl(decl_id);
+                    self.prebuild_decl(decl_id, None);
 
                     let name = self.hir.names[decl_id];
                     self.tir.comp_decl_stack.last_mut().unwrap().local_decls.push(LocalDecl { name, id: decl_id });
                 },
             }
         }
-        self.prebuild_expr(self.hir.scopes[id].terminal_expr);
+        self.prebuild_expr(self.hir.scopes[id].terminal_expr, Some(dependent_sp_var));
 
         self.tir.comp_decl_stack.last_mut().unwrap().close_scope();
 
         self.hir.scopes[id].terminal_expr
     }
 
-    fn prebuild_decl(&mut self, id: DeclId) -> u32 {
-        match self.tir.decl_levels[id] {
-            Level::Unresolved => self.tir.decl_levels[id] = Level::Resolving,
+    ///     `dependent_sp_var`: the subprogram variable which has a weak normal dependency on this declaration.
+    ///                         can be different each call
+    fn prebuild_decl(&mut self, id: DeclId, dependent_sp_var: Option<SpVarId>) -> u32 {
+        let sp_var = match self.tir.decl_levels[id] {
+            Level::Unresolved => {
+                self.tir.decl_levels[id] = Level::Resolving;
+                self.new_sp_var()
+            },
             Level::Resolving => panic!("Cycle detected on decl {}!", self.interner.resolve(self.hir.names[id]).unwrap()),
-            Level::Resolved(level) => return level,
-        }
+            Level::Resolved(level, sp_var) => {
+                if let Some(dependent_sp_var) = dependent_sp_var {
+                    self.add_weak_dep(dependent_sp_var, sp_var);
+                }
+                return level
+            },
+        };
         let level = match self.hir.decls[id] {
             hir::Decl::Computed { ref params, scope, .. } => {
                 // Resolve computed decls with explicit tys before prebuilding their scope
                 if self.hir.explicit_tys[id].is_some() {
-                    self.tir.decl_levels[id] = Level::Resolved(0);
+                    self.tir.decl_levels[id] = Level::Resolved(0, sp_var);
                 }
 
                 let mut comp_decl_state = CompDeclState::new();
@@ -491,7 +548,7 @@ impl Driver {
                 }
                 self.tir.comp_decl_stack.push(comp_decl_state);
 
-                let mut level = self.pb_deps(&[], &[], &[scope]);
+                let mut level = self.pb_deps(sp_var, &[], &[], &[scope]);
                 let mut exprs = self.tir.comp_decl_stack.pop().unwrap().returned_expressions;
                 let terminal_expr = self.hir.scopes[scope].terminal_expr;
                 exprs.push(terminal_expr);
@@ -505,11 +562,11 @@ impl Driver {
 
                 level
             },
-            hir::Decl::Const(expr) | hir::Decl::Static(expr) => self.pb_deps(&[expr], &[], &[]),
+            hir::Decl::Const(expr) | hir::Decl::Static(expr) => self.pb_deps(sp_var, &[expr], &[], &[]),
             hir::Decl::Intrinsic { .. } | hir::Decl::Parameter { .. } => 0,
             hir::Decl::Stored { .. } => panic!("Should've already been handled in prebuild_scope"),
         };
-        self.tir.decl_levels[id] = Level::Resolved(level);
+        self.tir.decl_levels[id] = Level::Resolved(level, sp_var);
         level
     }
 }
