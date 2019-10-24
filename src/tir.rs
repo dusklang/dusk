@@ -102,7 +102,7 @@ pub struct Builder {
     global_decls: Vec<GlobalDeclGroup>,
     comp_decl_stack: Vec<CompDeclState>,
 
-    staged_decls: HashMap<DeclId, StagedDecl>,
+    staged_decls: HashMap<DeclId, AssignedDecl>,
 }
 
 #[derive(Debug)]
@@ -157,13 +157,6 @@ impl Driver {
     pub fn decl_type(&self, id: DeclId) -> &Type {
         &self.tir.decls[id].ret_ty.ty
     }
-}
-
-
-#[derive(Debug)]
-enum StagedDecl {
-    AssignedDecl(AssignedDecl),
-    RetGroup(RetGroup),
 }
 
 impl Builder {
@@ -307,18 +300,11 @@ impl Driver {
         for i in 0..self.hir.decls.len() {
             let id = DeclId::new(i);
             if let Some(decl) = self.tir.staged_decls.remove(&id) {
-                match decl {
-                    StagedDecl::AssignedDecl(assigned_decl) => {
-                        let level = match self.tir.decl_levels[id] {
-                            Level::Resolved(level) => level,
-                            _ => panic!("failed to get level"),
-                        };
-                        self.tir.assigned_decls.insert(level, assigned_decl);
-                    },
-                    StagedDecl::RetGroup(ret_group) => {
-                        self.tir.ret_groups.push(ret_group);
-                    }
-                }
+                let level = match self.tir.decl_levels[id] {
+                    Level::Resolved(level) => level,
+                    _ => panic!("failed to get level"),
+                };
+                self.tir.assigned_decls.insert(level, decl);
             }
         }
     }
@@ -410,7 +396,7 @@ impl Driver {
                     let explicit_ty = self.hir.explicit_tys[decl_id].clone();
 
                     let level = self.prebuild_expr(root_expr) + 1;
-                    self.tir.staged_decls.insert(decl_id, StagedDecl::AssignedDecl(AssignedDecl { explicit_ty, root_expr, decl_id }));
+                    self.tir.staged_decls.insert(decl_id, AssignedDecl { explicit_ty, root_expr, decl_id });
 
                     self.tir.comp_decl_stack.last_mut().unwrap().local_decls.push(LocalDecl { name, id: decl_id });
 
@@ -461,13 +447,13 @@ impl Driver {
                 ret_exprs.push(terminal_expr);
                 let level = match &self.hir.explicit_tys[id] {
                     Some(ty) => {
-                        self.tir.staged_decls.insert(id, StagedDecl::RetGroup(RetGroup { ty: ty.clone(), exprs: ret_exprs.clone() }));
+                        self.tir.ret_groups.push(RetGroup { ty: ty.clone(), exprs: ret_exprs.clone() });
                         0
                     },
                     None => {
                         assert_eq!(ret_exprs.len(), 1, "multiple returns from assigned functions not allowed");
                         let root_expr = ret_exprs[0];
-                        self.tir.staged_decls.insert(id, StagedDecl::AssignedDecl(AssignedDecl { explicit_ty: None, root_expr, decl_id: id }));
+                        self.tir.staged_decls.insert(id, AssignedDecl { explicit_ty: None, root_expr, decl_id: id });
                         self.tir.expr_levels[root_expr] + 1
                     },
                 };
@@ -478,7 +464,7 @@ impl Driver {
             },
             hir::Decl::Const(expr) | hir::Decl::Static(expr) => {
                 self.prebuild_expr(expr);
-                self.tir.staged_decls.insert(id, StagedDecl::AssignedDecl(AssignedDecl { explicit_ty: self.hir.explicit_tys[id].clone(), root_expr: expr, decl_id: id }));
+                self.tir.staged_decls.insert(id, AssignedDecl { explicit_ty: self.hir.explicit_tys[id].clone(), root_expr: expr, decl_id: id });
                 self.tir.expr_levels[expr] + 1
             },
             hir::Decl::Intrinsic { .. } | hir::Decl::Parameter { .. } => 0,
@@ -507,5 +493,5 @@ item_impl!(Expr<AddrOf>, addr_ofs);
 item_impl!(Expr<Dereference>, derefs);
 item_impl!(Expr<Pointer>, pointers);
 item_impl!(Expr<If>, ifs);
-item_impl!(AssignedDecl, assigned_decls);
 item_impl!(Expr<DeclRef>, decl_refs);
+item_impl!(AssignedDecl, assigned_decls);
