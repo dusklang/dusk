@@ -552,19 +552,21 @@ impl Driver {
     ///     `dependent_sp_var`: the subprogram variable which has a weak normal dependency on this declaration.
     ///                         can be different each call
     fn prebuild_decl(&mut self, id: DeclId, dependent_sp_var: Option<SpVarId>) -> u32 {
-        let sp_var = match self.tir.decl_levels[id] {
+        let (sp_var, resolved_level) = match self.tir.decl_levels[id] {
             Level::Unresolved => {
                 self.tir.decl_levels[id] = Level::Resolving;
-                self.new_sp_var()
+                (self.new_sp_var(), None)
             },
             Level::Resolving => panic!("Cycle detected on decl {}!", self.interner.resolve(self.hir.names[id]).unwrap()),
-            Level::Resolved(level, sp_var) => {
-                if let Some(dependent_sp_var) = dependent_sp_var {
-                    self.add_weak_dep(dependent_sp_var, sp_var);
-                }
-                return level
-            },
+            Level::Resolved(level, sp_var) => (sp_var, Some(level)),
         };
+        if let Some(dependent_sp_var) = dependent_sp_var {
+            // TODO: check if there's an explicit type and if there is, add an eval dependency on that type expression instead of a
+            // weak dependency on the declaration
+            self.add_weak_dep(dependent_sp_var, sp_var);
+        }
+
+        if let Some(level) = resolved_level { return level; }
         let level = match self.hir.decls[id] {
             hir::Decl::Computed { ref params, scope, .. } => {
                 // Resolve computed decls with explicit tys before prebuilding their scope
