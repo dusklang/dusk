@@ -125,6 +125,8 @@ struct SubprogramVar {
     weak: Vec<SpVarId>,
     eval: Vec<SpVarId>,
     codegen: Vec<SpVarId>,
+
+    value: Option<u32>,
 }
 
 impl SubprogramVar {
@@ -133,6 +135,8 @@ impl SubprogramVar {
             weak: Vec::new(),
             eval: Vec::new(),
             codegen: Vec::new(),
+
+            value: None,
         }
     }
 }
@@ -309,6 +313,12 @@ impl Driver {
             self.prebuild_decl(self.hir.global_decls[i], None);
         }
 
+        for i in 0..self.tir.sp_vars.len() {
+            let id = SpVarId::new(i);
+            self.solve_sp_var(id);
+        }
+
+
         debug_assert_eq!(self.tir.expr_sub_progs.len(), 1);
         self.tir.expr_sub_progs.resize_with(self.hir.exprs.len(), || 0);
         self.tir.decl_sub_progs.resize_with(self.hir.decls.len(), || 0);
@@ -381,6 +391,32 @@ impl Driver {
             let sub_prog = self.tir.decl_sub_progs[decl] as usize;
             self.tir.sub_progs[sub_prog].ret_groups.push(ret_group);
         }
+    }
+
+    fn solve_sp_var(&mut self, sp_var: SpVarId) -> u32 {
+        if let Some(value) = self.tir.sp_vars[sp_var].value {
+            return value;
+        }
+
+        use std::cmp::max;
+        macro_rules! maximize {
+            ($dep_kind: ident) => {{
+                let mut result = 0;
+                for i in 0..self.tir.sp_vars[sp_var].$dep_kind.len() {
+                    let dep_var = self.tir.sp_vars[sp_var].$dep_kind[i];
+                    let val = self.solve_sp_var(dep_var);
+                    result = max(result, val);
+                }
+                result
+            }};
+        }
+        let weak = maximize!(weak);
+        let eval = maximize!(eval);
+        let codegen = maximize!(codegen);
+        let value = max(weak, max(codegen, eval + 1));
+        self.tir.sp_vars[sp_var].value = Some(value);
+
+        value
     }
 
     fn pb_deps(&mut self, sp_var: SpVarId, normal: &[ExprId], weak: &[DeclId], codegen: &[ScopeId]) -> u32 {

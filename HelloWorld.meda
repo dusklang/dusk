@@ -1,4 +1,4 @@
-fn assert(condition: bool) {
+/*fn assert(condition: bool) {
     if !condition { panic("assertion failed") }
 }
 
@@ -103,9 +103,9 @@ fn take_a_type(T: type) {
 }
 
 fn main {
-    fizz_buzz
-    FIZZ_BUZZ_ITERATIONS = 200
-    fizz_buzz
+    //fizz_buzz
+    //FIZZ_BUZZ_ITERATIONS = 200
+    //fizz_buzz
 
     print("fib(")
     print_num(FIB_N)
@@ -136,4 +136,8 @@ fn main {
     fn float_const {
         blah: f32 = 5.2
     }
+}*/
+
+fn main {
+    
 }
