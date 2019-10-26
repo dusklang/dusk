@@ -318,7 +318,6 @@ impl Driver {
             self.solve_sp_var(id);
         }
 
-
         debug_assert_eq!(self.tir.expr_sub_progs.len(), 1);
         self.tir.expr_sub_progs.resize_with(self.hir.exprs.len(), || 0);
         self.tir.decl_sub_progs.resize_with(self.hir.decls.len(), || 0);
@@ -400,20 +399,20 @@ impl Driver {
 
         use std::cmp::max;
         macro_rules! maximize {
-            ($dep_kind: ident) => {{
+            ($dep_kind:ident + $constraint:expr) => {{
                 let mut result = 0;
                 for i in 0..self.tir.sp_vars[sp_var].$dep_kind.len() {
                     let dep_var = self.tir.sp_vars[sp_var].$dep_kind[i];
                     let val = self.solve_sp_var(dep_var);
-                    result = max(result, val);
+                    result = max(result, val + $constraint);
                 }
                 result
             }};
         }
-        let weak = maximize!(weak);
-        let eval = maximize!(eval);
-        let codegen = maximize!(codegen);
-        let value = max(weak, max(codegen, eval + 1));
+        let weak = maximize!(weak + 0);
+        let eval = maximize!(eval + 1);
+        let codegen = maximize!(codegen + 0);
+        let value = max(weak, max(codegen, eval));
         self.tir.sp_vars[sp_var].value = Some(value);
 
         value
@@ -561,9 +560,11 @@ impl Driver {
             Level::Resolved(level, sp_var) => (sp_var, Some(level)),
         };
         if let Some(dependent_sp_var) = dependent_sp_var {
-            // TODO: check if there's an explicit type and if there is, add an eval dependency on that type expression instead of a
-            // weak dependency on the declaration
-            self.add_weak_dep(dependent_sp_var, sp_var);
+            if self.hir.explicit_tys[id].is_some() {
+                // add an eval dependency on the explicit type expression
+            } else {
+                self.add_weak_dep(dependent_sp_var, sp_var);
+            }
         }
 
         if let Some(level) = resolved_level { return level; }

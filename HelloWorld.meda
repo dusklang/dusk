@@ -1,4 +1,4 @@
-/*fn assert(condition: bool) {
+fn assert(condition: bool) {
     if !condition { panic("assertion failed") }
 }
 
@@ -136,8 +136,4 @@ fn main {
     fn float_const {
         blah: f32 = 5.2
     }
-}*/
-
-fn main {
-    
 }
