@@ -156,6 +156,9 @@ pub struct Builder {
 
     sp_vars: IdxVec<SubprogramVar, SpVarId>,
 
+    expr_sp_vars: IdxVec<SpVarId, ExprId>,
+    decl_sp_vars: IdxVec<SpVarId, DeclId>,
+
     expr_sub_progs: IdxVec<u32, ExprId>,
     decl_sub_progs: IdxVec<u32, DeclId>,
 
@@ -224,8 +227,11 @@ impl Builder {
         // Create the void expression
         let mut expr_levels = IdxVec::new();
         let void_expr = expr_levels.push(0);
-        let mut expr_sub_progs = IdxVec::new();
-        expr_sub_progs.push(0);
+
+        let mut sp_vars = IdxVec::new();
+        let void_sp_var = sp_vars.push(SubprogramVar::new());
+        let mut expr_sp_vars = IdxVec::new();
+        expr_sp_vars.push(void_sp_var);
 
         Self {
             sub_progs: Vec::new(),
@@ -234,10 +240,13 @@ impl Builder {
             expr_levels,
             decl_levels: IdxVec::new(),
 
-            expr_sub_progs,
+            expr_sp_vars,
+            decl_sp_vars: IdxVec::new(),
+
+            expr_sub_progs: IdxVec::new(),
             decl_sub_progs: IdxVec::new(),
 
-            sp_vars: IdxVec::new(),
+            sp_vars,
 
             decls: IdxVec::new(),
             global_decls: Vec::new(),
@@ -308,19 +317,42 @@ impl Driver {
         self.tir.overloads.resize_with(self.hir.num_decl_refs, || Vec::new());
         self.tir.expr_levels.resize_with(self.hir.exprs.len(), || std::u32::MAX);
 
+        self.tir.expr_sp_vars.resize_with(self.hir.exprs.len(), || SpVarId::new(std::usize::MAX));
+        self.tir.decl_sp_vars.resize_with(self.hir.decls.len(), || SpVarId::new(std::usize::MAX));
+
         // Prebuild global decls, which will recursively compute the typechecking dependencies of all declarations and expressions
         for i in 0..self.hir.global_decls.len() {
             self.prebuild_decl(self.hir.global_decls[i], None);
         }
 
+        // Solve system of subprogram variables
         for i in 0..self.tir.sp_vars.len() {
             let id = SpVarId::new(i);
             self.solve_sp_var(id);
         }
 
-        debug_assert_eq!(self.tir.expr_sub_progs.len(), 1);
-        self.tir.expr_sub_progs.resize_with(self.hir.exprs.len(), || 0);
-        self.tir.decl_sub_progs.resize_with(self.hir.decls.len(), || 0);
+        // Apply subprogram solution to expressions:
+        self.tir.expr_sub_progs.reserve(self.hir.exprs.len());
+        for i in 0..self.hir.exprs.len() {
+            let id = ExprId::new(i);
+
+            if self.hir.exprs_in_type_ctx.contains(&id) {
+                self.tir.expr_sub_progs.push(std::u32::MAX);
+            } else {
+                let var = self.tir.expr_sp_vars[id];
+                let val = self.tir.sp_vars[var].value.unwrap();
+                self.tir.expr_sub_progs.push(val);
+            }
+        }
+
+        // Apply subprogram solution to declarations:
+        self.tir.decl_sub_progs.reserve(self.hir.decls.len());
+        for i in 0..self.hir.decls.len() {
+            let id = DeclId::new(i);
+            let var = self.tir.decl_sp_vars[id];
+            let val = self.tir.sp_vars[var].value.unwrap();
+            self.tir.decl_sub_progs.push(val);
+        }
 
         // Build expressions
         for i in 0..self.hir.exprs.len() {
@@ -442,6 +474,7 @@ impl Driver {
 
     fn prebuild_expr(&mut self, id: ExprId, sp_var: Option<SpVarId>) -> u32 {
         let sp_var = sp_var.unwrap_or_else(|| self.new_sp_var());
+        self.tir.expr_sp_vars[id] = sp_var;
         let level = match self.hir.exprs[id] {
             hir::Expr::AddrOf { expr, .. } => self.pb_deps(sp_var, &[expr], &[], &[]),
             hir::Expr::Cast { expr, .. } => self.pb_deps(sp_var, &[expr], &[], &[]),
@@ -525,6 +558,7 @@ impl Driver {
                 },
                 hir::Item::StoredDecl { decl_id, root_expr, .. } => {
                     let sp_var = self.new_sp_var();
+                    self.tir.decl_sp_vars[decl_id] = sp_var;
                     let level = self.prebuild_expr(root_expr, Some(sp_var)) + 1;
                     self.add_codegen_dep(dependent_sp_var, sp_var);
 
@@ -566,6 +600,8 @@ impl Driver {
                 self.add_weak_dep(dependent_sp_var, sp_var);
             }
         }
+
+        self.tir.decl_sp_vars[id] = sp_var;
 
         if let Some(level) = resolved_level { return level; }
         let level = match self.hir.decls[id] {
