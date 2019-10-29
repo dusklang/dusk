@@ -769,8 +769,8 @@ impl Driver {
                     }
                 }
             },
-            Expr::Cast { expr, ty: ref dest_ty, cast_id } => {
-                let dest_ty = dest_ty.clone();
+            Expr::Cast { expr, ty: dest_ty, cast_id } => {
+                let dest_ty = self.get_evaluated_type(dest_ty).clone();
                 match &self.tc.cast_methods[cast_id] {
                     CastMethod::Noop => return self.build_expr(b, expr, ctx),
                     CastMethod::Reinterpret => {

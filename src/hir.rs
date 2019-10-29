@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::ffi::CString;
 use std::ops::Range;
 
@@ -20,6 +19,7 @@ pub enum Expr {
     DecLit { lit: f64 },
     StrLit { lit: CString },
     CharLit { lit: i8 },
+    ConstTy(Type),
     DeclRef { name: Sym, arguments: SmallVec<[ExprId; 2]>, id: DeclRefId },
     AddrOf { expr: ExprId, is_mut: bool },
     /// Transforms type into pointer type
@@ -29,7 +29,7 @@ pub enum Expr {
     Do { scope: ScopeId },
     If { condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId> },
     While { condition: ExprId, scope: ScopeId },
-    Cast { expr: ExprId, ty: Type, cast_id: CastId },
+    Cast { expr: ExprId, ty: ExprId, cast_id: CastId },
     Ret { expr: ExprId },
 }
 
@@ -63,7 +63,7 @@ pub struct Scope {
 #[derive(Debug)]
 pub enum Decl {
     Computed {
-        param_tys: SmallVec<[Type; 2]>,
+        param_tys: SmallVec<[ExprId; 2]>,
         params: Range<DeclId>,
         scope: ScopeId,
     },
@@ -72,7 +72,7 @@ pub enum Decl {
         /// Parameter index within the function
         index: usize,
     },
-    Intrinsic { intr: Intrinsic, param_tys: SmallVec<[Type; 2]>, },
+    Intrinsic { intr: Intrinsic, param_tys: SmallVec<[ExprId; 2]>, },
     Static(ExprId),
     Const(ExprId),
 }
@@ -83,17 +83,13 @@ pub struct Builder {
     pub num_decl_refs: usize,
     pub decls: IdxVec<Decl, DeclId>,
     pub names: IdxVec<Sym, DeclId>,
-    pub explicit_tys: IdxVec<Option<Type>, DeclId>,
+    pub explicit_tys: IdxVec<Option<ExprId>, DeclId>,
     /// The subset of decls that are in the global scope
     pub global_decls: Vec<DeclId>,
     pub scopes: IdxVec<Scope, ScopeId>,
     pub void_expr: ExprId,
+    pub void_ty: ExprId,
     pub source_ranges: IdxVec<SourceRange, ExprId>,
-
-    /// TEMPORARY HACK: we can't yet typecheck type expressions, so the TIR generator needs to
-    /// be able to ignore them
-    pub exprs_in_type_ctx: HashSet<ExprId>,
-    type_ctx_count: u8,
 
     num_casts: usize,
     comp_decl_stack: Vec<CompDeclState>,
@@ -110,13 +106,13 @@ impl Builder {
             global_decls: Vec::new(),
             scopes: IdxVec::new(),
             void_expr: ExprId::new(0),
+            void_ty: ExprId::new(1),
             source_ranges: IdxVec::new(),
-            exprs_in_type_ctx: HashSet::new(),
-            type_ctx_count: 0,
             num_casts: 0,
             comp_decl_stack: Vec::new(),
         };
         b.push(Expr::Void, 0..0);
+        b.push(Expr::ConstTy(Type::Void), 0..0);
         b
     }
 
@@ -124,10 +120,6 @@ impl Builder {
         let id1 = self.exprs.push(expr);
         let id2 = self.source_ranges.push(range);
         debug_assert_eq!(id1, id2);
-        if self.type_ctx_count > 0 {
-            self.exprs_in_type_ctx.insert(id1);
-        }
-
         id1
     }
 
@@ -154,7 +146,7 @@ impl Builder {
         decl_ref_id
     }
 
-    fn decl(&mut self, decl: Decl, name: Sym, explicit_ty: Option<Type>) -> DeclId {
+    fn decl(&mut self, decl: Decl, name: Sym, explicit_ty: Option<ExprId>) -> DeclId {
         let id1 = self.decls.push(decl);
         let id2 = self.explicit_tys.push(explicit_ty);
         let id3 = self.names.push(name);
@@ -164,17 +156,9 @@ impl Builder {
         id1
     }
 
-    fn global_decl(&mut self, decl: Decl, name: Sym, explicit_ty: Option<Type>) {
+    fn global_decl(&mut self, decl: Decl, name: Sym, explicit_ty: Option<ExprId>) {
         let id = self.decl(decl, name, explicit_ty);
         self.global_decls.push(id);
-    }
-
-    pub fn enter_type_ctx(&mut self) {
-        self.type_ctx_count += 1;
-    }
-
-    pub fn exit_type_ctx(&mut self) {
-        self.type_ctx_count -= 1;
     }
 
     pub fn void_expr(&self) -> ExprId { self.void_expr }
@@ -191,13 +175,13 @@ impl Builder {
     pub fn char_lit(&mut self, lit: i8, range: SourceRange) -> ExprId { 
         self.push(Expr::CharLit { lit }, range)
     }
-    pub fn cast(&mut self, expr: ExprId, ty: Type, range: SourceRange) -> ExprId {
+    pub fn cast(&mut self, expr: ExprId, ty: ExprId, range: SourceRange) -> ExprId {
         let cast_id = CastId::new(self.num_casts);
         self.num_casts += 1;
         self.push(Expr::Cast { expr, ty, cast_id }, range)
     }
 
-    pub fn stored_decl(&mut self, name: Sym, explicit_ty: Option<Type>, is_mut: bool, root_expr: ExprId, _range: SourceRange) {
+    pub fn stored_decl(&mut self, name: Sym, explicit_ty: Option<ExprId>, is_mut: bool, root_expr: ExprId, _range: SourceRange) {
         self.flush_stmt_buffer();
         if self.comp_decl_stack.is_empty() {
             self.global_decl(
@@ -267,7 +251,7 @@ impl Builder {
             self.scopes[scope.id].terminal_expr = terminal_expr;
         }
     }
-    pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[Type; 2]>, explicit_ty: Option<Type>, _proto_range: SourceRange) {
+    pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, explicit_ty: Option<ExprId>, _proto_range: SourceRange) {
         // This is a placeholder value that gets replaced once the parameter declarations get allocated.
         let id = self.decl(Decl::Const(ExprId::new(std::usize::MAX)), name, explicit_ty);
         assert_eq!(param_names.len(), param_tys.len());
@@ -322,38 +306,16 @@ impl Builder {
 }
 
 impl Driver {
+    // TODO: Efficiency. Right now, each call to add_intrinsic will add a bunch of new constant type expressions, many of which will
+    // be duplicates of those added in previous calls. This is a constant cost, but is still really dumb and should be fixed.
     pub fn add_intrinsic(&mut self, intrinsic: Intrinsic, param_tys: SmallVec<[Type; 2]>, ret_ty: Type) {
         let name = self.interner.get_or_intern(intrinsic.name());
+
+        use std::usize::MAX;
+        // We don't (yet?) read the source range of types, so MAX..MAX is ok
+        let param_tys = param_tys.into_iter().map(|ty| self.hir.push(Expr::ConstTy(ty), MAX..MAX)).collect();
+        let ret_ty = self.hir.push(Expr::ConstTy(ret_ty), MAX..MAX);
         self.hir.global_decl(Decl::Intrinsic { intr: intrinsic, param_tys }, name, Some(ret_ty));
-    }
-    pub fn HACK_convert_expr_to_type(&self, expr: ExprId) -> Type {
-        match self.hir.exprs[expr] {
-            Expr::DeclRef { name, ref arguments, .. } => {
-                assert!(arguments.is_empty(), "Invalid type!");
-                let name = self.interner.resolve(name).unwrap();
-                match name {
-                    "i8" => Type::i8(),
-                    "i16" => Type::i16(),
-                    "i32" => Type::i32(),
-                    "i64" => Type::i64(),
-                    "isize" => Type::isize(),
-                    "u8" => Type::u8(),
-                    "u16" => Type::u16(),
-                    "u32" => Type::u32(),
-                    "u64" => Type::u64(),
-                    "usize" => Type::usize(),
-                    "f32" => Type::f32(),
-                    "f64" => Type::f64(),
-                    "never" => Type::Never,
-                    "bool" => Type::Bool,
-                    "void" => Type::Void,
-                    "type" => Type::Ty,
-                    _ => panic!("Invalid type!"),
-                }
-            },
-            Expr::Pointer { expr, is_mut } => self.HACK_convert_expr_to_type(expr).ptr_with_mut(is_mut),
-            _ => panic!("Invalid type! {:?}", self.hir.exprs[expr]),
-        }
     }
     pub fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId {
         match op {

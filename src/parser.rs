@@ -527,19 +527,16 @@ impl Driver {
         self.hir.end_computed_decl();
     }
 
-    fn parse_type(&mut self, p: &mut Parser) -> (Type, SourceRange) {
-        self.hir.enter_type_ctx();
+    fn parse_type(&mut self, p: &mut Parser) -> (ExprId, SourceRange) {
         let begin_range = self.cur(p).range.clone();
         // This is a term and not an expression because assignments are valid expressions.
         //     For example: `foo: SomeType = ...` <- the parser would think you were assigning `...` to `SomeType` and
         //     taking the `void` result of that assignment as the type of variable declaration `foo`
         // TODO: add statements as a slight superset of expressions which includes assignments.
-        let expr = self.try_parse_term(p).unwrap();
-        let ty = self.HACK_convert_expr_to_type(expr);
+        let ty = self.try_parse_term(p).unwrap();
         let end_range = self.cur(p).range.clone();
         let range = begin_range.start..end_range.start;
 
-        self.hir.exit_type_ctx();
         (ty, range)
     }
 

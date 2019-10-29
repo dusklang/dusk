@@ -9,16 +9,16 @@ use crate::builder::*;
 use crate::dep_vec::DepVec;
 use crate::hir;
 use crate::index_vec::{Idx, IdxVec};
-use crate::ty::{Type, QualType};
+use crate::ty::Type;
 
 newtype_index!(TreeId pub);
 newtype_index!(RetGroupId);
 newtype_index!(SpVarId);
 
 #[derive(Debug)]
-pub struct RetGroup { pub ty: Type, pub exprs: SmallVec<[ExprId; 1]> }
+pub struct RetGroup { pub ty: ExprId, pub exprs: SmallVec<[ExprId; 1]> }
 #[derive(Debug)]
-pub struct Cast { pub expr: ExprId, pub ty: Type, pub cast_id: CastId }
+pub struct Cast { pub expr: ExprId, pub ty: ExprId, pub cast_id: CastId }
 #[derive(Debug)]
 pub struct AddrOf { pub expr: ExprId, pub is_mut: bool }
 #[derive(Debug)]
@@ -30,7 +30,7 @@ pub struct Stmt { pub root_expr: ExprId }
 #[derive(Debug)]
 pub struct Do { pub terminal_expr: ExprId }
 #[derive(Debug)]
-pub struct AssignedDecl { pub explicit_ty: Option<Type>, pub root_expr: ExprId, pub decl_id: DeclId }
+pub struct AssignedDecl { pub explicit_ty: Option<ExprId>, pub root_expr: ExprId, pub decl_id: DeclId }
 #[derive(Debug)]
 pub struct Assignment { pub lhs: ExprId, pub rhs: ExprId }
 #[derive(Debug)]
@@ -67,8 +67,10 @@ impl<T> DerefMut for Expr<T> {
 
 #[derive(Debug)]
 pub struct Decl {
-    pub param_tys: SmallVec<[Type; 2]>,
-    pub ret_ty: QualType,
+    pub param_tys: SmallVec<[ExprId; 2]>,
+    // None == Error
+    pub ret_ty: Option<ExprId>,
+    pub is_mut: bool,
 }
 
 #[derive(Debug)]
@@ -218,7 +220,11 @@ impl CompDeclState {
 
 impl Driver {
     pub fn decl_type(&self, id: DeclId) -> &Type {
-        &self.tir.decls[id].ret_ty.ty
+        // TODO: move and implement this method to tc after types are evaluated and stored by the typechecker
+    }
+
+    pub fn get_evaluated_type(&self, id: ExprId) -> &Type {
+        // TODO: move and implement this method to tc after types are evaluated and stored by the typechecker
     }
 }
 
@@ -267,36 +273,34 @@ impl Driver {
         // Populate `self.decls`
         for (i, decl) in self.hir.decls.iter().enumerate() {
             let id = DeclId::new(i);
-            let ty = self.hir.explicit_tys[id].as_ref()
-                .map(|ty| ty.clone())
-                .unwrap_or(Type::Error);
-            let (ret_ty, param_tys) = match *decl {
+            let ret_ty = self.hir.explicit_tys[id].map(|ty| ty);
+            let (is_mut, param_tys) = match *decl {
                 hir::Decl::Computed { ref param_tys, .. } => (
-                    ty.into(),
+                    false,
                     param_tys.clone(),
                 ),
                 hir::Decl::Const(_) => (
-                    ty.into(),
+                    false,
                     SmallVec::new(),
                 ),
                 hir::Decl::Intrinsic { ref param_tys, .. } => (
-                    ty.into(),
+                    false,
                     param_tys.clone(),
                 ),
                 hir::Decl::Parameter { .. } => (
-                    ty.into(),
+                    false,
                     SmallVec::new(),
                 ),
                 hir::Decl::Static(_) => (
-                    QualType { ty, is_mut: true },
+                    true,
                     SmallVec::new(),
                 ),
                 hir::Decl::Stored { is_mut, .. } => (
-                    QualType { ty, is_mut },
+                    is_mut,
                     SmallVec::new(),
                 ),
             };
-            self.tir.decls.push(Decl { param_tys, ret_ty });
+            self.tir.decls.push(Decl { param_tys, ret_ty, is_mut });
             self.tir.decl_levels.push(Level::Unresolved);
         }
 
@@ -336,13 +340,9 @@ impl Driver {
         for i in 0..self.hir.exprs.len() {
             let id = ExprId::new(i);
 
-            if self.hir.exprs_in_type_ctx.contains(&id) {
-                self.tir.expr_sub_progs.push(std::u32::MAX);
-            } else {
-                let var = self.tir.expr_sp_vars[id];
-                let val = self.tir.sp_vars[var].value.unwrap();
-                self.tir.expr_sub_progs.push(val);
-            }
+            let var = self.tir.expr_sp_vars[id];
+            let val = self.tir.sp_vars[var].value.unwrap();
+            self.tir.expr_sub_progs.push(val);
         }
 
         // Apply subprogram solution to declarations:
@@ -358,7 +358,6 @@ impl Driver {
         for i in 0..self.hir.exprs.len() {
             let id = ExprId::new(i);
             let expr = &self.hir.exprs[id];
-            if self.hir.exprs_in_type_ctx.contains(&id) { continue; }
             let sub_prog = self.tir.expr_sub_progs[id] as usize;
             self.tir.sub_progs.resize_with(sub_prog + 1, || Subprogram::new());
             match *expr {
@@ -472,6 +471,7 @@ impl Driver {
         self.tir.sp_vars.push(SubprogramVar::new())
     }
 
+    ///     `dependent_sp_var`: the subprogram variable that has an eval dependency on this expression
     fn prebuild_expr(&mut self, id: ExprId, sp_var: Option<SpVarId>) -> u32 {
         let sp_var = sp_var.unwrap_or_else(|| self.new_sp_var());
         self.tir.expr_sp_vars[id] = sp_var;
@@ -594,19 +594,24 @@ impl Driver {
             Level::Resolved(level, sp_var) => (sp_var, Some(level)),
         };
         if let Some(dependent_sp_var) = dependent_sp_var {
-            if self.hir.explicit_tys[id].is_some() {
-                // add an eval dependency on the explicit type expression
+            if let Some(explicit_ty) = self.hir.explicit_tys[id] {
+                self.add_codegen_dep(dependent_sp_var, sp_var);
             } else {
                 self.add_weak_dep(dependent_sp_var, sp_var);
             }
         }
 
         self.tir.decl_sp_vars[id] = sp_var;
+        if let Some(explicit_ty) = self.hir.explicit_tys[id] {
+            let ty_sp_var = self.new_sp_var();
+            self.prebuild_expr(explicit_ty, Some(ty_sp_var));
+            self.add_eval_dep(sp_var, ty_sp_var);
+        }
 
         if let Some(level) = resolved_level { return level; }
         let level = match self.hir.decls[id] {
             hir::Decl::Computed { ref params, scope, .. } => {
-                // Resolve computed decls with explicit tys before prebuilding their scope
+                // Resolve computed decls with explicit tys before prebuilding their scopes
                 if self.hir.explicit_tys[id].is_some() {
                     self.tir.decl_levels[id] = Level::Resolved(0, sp_var);
                 }
