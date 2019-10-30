@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use smallvec::smallvec;
 
 mod constraints;
@@ -11,6 +13,7 @@ use crate::ty::{BuiltinTraits, Type, QualType, IntWidth};
 use crate::index_vec::IdxVec;
 use crate::dep_vec;
 use crate::source_info::CommentatedSourceRange;
+use crate::mir::Const;
 
 #[derive(Clone, Debug)]
 pub enum CastMethod {
@@ -35,6 +38,10 @@ pub struct TypeChecker {
     constraints_copy: IdxVec<ConstraintList, ExprId>,
     /// The preferred overload for each decl ref (currently only ever originates from literals)
     preferred_overloads: IdxVec<Option<DeclId>, DeclRefId>,
+    decl_types: IdxVec<QualType, DeclId>,
+
+    eval_results: HashMap<ExprId, Const>,
+
     debug: bool,
 }
 
@@ -48,6 +55,10 @@ impl TypeChecker {
             constraints: IdxVec::new(),
             constraints_copy: IdxVec::new(),
             preferred_overloads: IdxVec::new(),
+            decl_types: IdxVec::new(),
+
+            eval_results: HashMap::new(),
+
             debug,
         }
     }
@@ -73,8 +84,23 @@ impl Driver {
         }
     }
 
+    pub fn decl_type(&self, id: DeclId) -> &Type {
+        &self.tc.decl_types[id].ty
+    }
+
+    /// Doesn't get the type of `id`, gets the type that `id` as an expression *represents*
+    pub fn get_evaluated_type(&self, id: ExprId) -> &Type {
+        match &self.tc.eval_results[&id] {
+            Const::Ty(ty) => ty,
+            x => panic!("Expected type! Found {:?}", x),
+        }
+    }
+
     pub fn type_check(&mut self) {
         self.tc.types.resize_with(self.tir.num_exprs(), Default::default);
+        self.tc.decl_types.raw = self.tir.decls.iter()
+            .map(|decl| QualType { ty: Type::Error, is_mut: decl.is_mut })
+            .collect();
         self.tc.constraints.resize_with(self.tir.num_exprs(), Default::default);
         if self.tc.debug {
             self.tc.constraints_copy.resize_with(self.tir.num_exprs(), Default::default);
@@ -125,7 +151,8 @@ impl Driver {
             for level in 0..levels {
                 for item in self.tir.sub_progs[sp].assigned_decls.get_level(level) {
                     let constraints = &self.tc.constraints[item.root_expr];
-                    let ty = if let Some(explicit_ty) = &item.explicit_ty {
+                    let ty = if let Some(explicit_ty) = item.explicit_ty {
+                        let explicit_ty = self.get_evaluated_type(explicit_ty).clone();
                         if let Some(err) = constraints.can_unify_to(&explicit_ty.into()).err() {
                             let range = self.hir.source_ranges[item.root_expr].clone();
                             let mut error = Error::new(format!("Couldn't unify expression to assigned decl type `{:?}`", explicit_ty))
@@ -144,11 +171,11 @@ impl Driver {
                             }
                             self.errors.push(error);
                         }
-                        explicit_ty.clone()
+                        explicit_ty
                     } else {
                         constraints.solve().expect("Ambiguous type for assigned declaration").ty
                     };
-                    self.tir.decls[item.decl_id].ret_ty.ty = ty;
+                    self.tc.decl_types[item.decl_id].ty = ty;
                 }
                 for item in self.tir.sub_progs[sp].assignments.get_level(level) {
                     self.tc.constraints[item.id].set_to(Type::Void);
@@ -473,6 +500,12 @@ impl Driver {
             lit_pass_2(&self.tc.constraints, &mut self.tc.types, &self.tir.sub_progs[sp].str_lits, "string");
             lit_pass_2(&self.tc.constraints, &mut self.tc.types, &self.tir.sub_progs[sp].char_lits, "character");
             self.debug_output(0);
+
+            for i in 0..self.tir.sub_progs[sp].eval_dependees.len() {
+                let expr = self.tir.sub_progs[sp].eval_dependees[i];
+                let val = self.eval_expr(expr);
+                self.tc.eval_results.insert(expr, val);
+            }
         }
     }
 }

@@ -1,3 +1,4 @@
+use std::cmp::max;
 use std::ops::{Deref, DerefMut};
 
 use arrayvec::ArrayVec;
@@ -93,6 +94,9 @@ pub struct Subprogram {
     pub derefs: DepVec<Expr<Dereference>>,
     pub pointers: DepVec<Expr<Pointer>>,
     pub ifs: DepVec<Expr<If>>,
+
+    /// The expressions in this subprogram that later subprograms have eval dependencies on
+    pub eval_dependees: Vec<ExprId>,
 }
 
 impl Subprogram {
@@ -115,6 +119,8 @@ impl Subprogram {
             derefs: DepVec::new(),
             pointers: DepVec::new(),
             ifs: DepVec::new(),
+
+            eval_dependees: Vec::new(),
         }
     }
     pub fn ret_groups(&self) -> &[RetGroup] {
@@ -127,6 +133,7 @@ struct SubprogramVar {
     weak: Vec<SpVarId>,
     eval: Vec<SpVarId>,
     codegen: Vec<SpVarId>,
+    has_eval_dependers: bool,
 
     value: Option<u32>,
 }
@@ -137,6 +144,7 @@ impl SubprogramVar {
             weak: Vec::new(),
             eval: Vec::new(),
             codegen: Vec::new(),
+            has_eval_dependers: false,
 
             value: None,
         }
@@ -215,16 +223,6 @@ impl CompDeclState {
         let new_len = self.scope_stack.pop().unwrap();
         debug_assert!(new_len <= self.local_decls.len());
         self.local_decls.truncate(new_len);
-    }
-}
-
-impl Driver {
-    pub fn decl_type(&self, id: DeclId) -> &Type {
-        // TODO: move and implement this method to tc after types are evaluated and stored by the typechecker
-    }
-
-    pub fn get_evaluated_type(&self, id: ExprId) -> &Type {
-        // TODO: move and implement this method to tc after types are evaluated and stored by the typechecker
     }
 }
 
@@ -359,7 +357,15 @@ impl Driver {
             let id = ExprId::new(i);
             let expr = &self.hir.exprs[id];
             let sub_prog = self.tir.expr_sub_progs[id] as usize;
-            self.tir.sub_progs.resize_with(sub_prog + 1, || Subprogram::new());
+            // TODO: store the maximum subprogram number and move this out of the loop!
+            let new_len = max(self.tir.sub_progs.len(), sub_prog + 1);
+            self.tir.sub_progs.resize_with(new_len, || Subprogram::new());
+
+            let sp_var = self.tir.expr_sp_vars[id];
+            if self.tir.sp_vars[sp_var].has_eval_dependers {
+                self.tir.sub_progs[sub_prog].eval_dependees.push(id);
+            }
+
             match *expr {
                 hir::Expr::AddrOf { expr, is_mut } => self.insert_expr(id, AddrOf { expr, is_mut }),
                 hir::Expr::Pointer { expr, .. } => self.insert_expr(id, Pointer { expr }),
@@ -399,7 +405,9 @@ impl Driver {
                 _ => panic!("failed to get level"),
             };
             let sub_prog = self.tir.decl_sub_progs[id] as usize;
-            self.tir.sub_progs.resize_with(sub_prog + 1, || Subprogram::new());
+            // TODO: store the maximum subprogram number and move this out of the loop! (out of the expression loop above as well)
+            let new_len = max(self.tir.sub_progs.len(), sub_prog + 1);
+            self.tir.sub_progs.resize_with(new_len, || Subprogram::new());
             match self.hir.decls[id] {
                 hir::Decl::Stored { root_expr, .. } => {
                     let explicit_ty = self.hir.explicit_tys[id].clone();
@@ -428,7 +436,6 @@ impl Driver {
             return value;
         }
 
-        use std::cmp::max;
         macro_rules! maximize {
             ($dep_kind:ident + $constraint:expr) => {{
                 let mut result = 0;
@@ -463,7 +470,6 @@ impl Driver {
                 self.tir.expr_levels[expr]
             })
             .max().unwrap_or(0);
-        use std::cmp::max;
         max(normal, max(weak, codegen)) + 1
     }
 
@@ -537,6 +543,7 @@ impl Driver {
 
     fn add_eval_dep(&mut self, dependent: SpVarId, dependee: SpVarId) {
         self.tir.sp_vars[dependent].eval.push(dependee);
+        self.tir.sp_vars[dependee].has_eval_dependers = true;
     }
 
     fn add_codegen_dep(&mut self, dependent: SpVarId, dependee: SpVarId) {
