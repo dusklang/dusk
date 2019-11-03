@@ -296,7 +296,7 @@ impl Driver {
             TokenKind::Return => {
                 let ret_range = self.cur(p).range.clone();
                 self.next(p);
-                let ret_expr = self.try_parse_expr(p).unwrap_or_else(|_| self.hir.void_expr());
+                let ret_expr = self.try_parse_expr(p).unwrap_or_else(|_| self.hir.void_expr);
                 let expr_range = self.hir.get_range(ret_expr);
                 Ok(self.hir.ret(ret_expr, source_info::concat(ret_range, expr_range)))
             },
@@ -501,19 +501,14 @@ impl Driver {
                 proto_range = source_info::concat(proto_range, range);
                 Some(ty)
             },
-            TokenKind::OpenCurly => Some(Type::Void),
+            TokenKind::OpenCurly => Some(self.hir.void_ty),
             TokenKind::Assign => None,
             tok => panic!("Invalid token {:?}", tok),
         };
         self.hir.begin_computed_decl(name, param_names, param_tys, ty.clone(), proto_range);
         match self.cur(p).kind {
             TokenKind::OpenCurly => {
-                let (scope, _) = self.parse_scope(p);
-                let terminal_expr = self.hir.get_terminal_expr(scope);
-                // TODO: Do this check in TIR builder?
-                if terminal_expr == self.hir.void_expr() {
-                    assert_eq!(ty, Some(Type::Void), "expected expression to return in non-void computed decl");
-                }
+                self.parse_scope(p);
             },
             TokenKind::Assign => {
                 self.next(p);

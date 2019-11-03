@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use smallvec::smallvec;
+use smallvec::{SmallVec, smallvec};
 
 mod constraints;
 use constraints::{ConstraintList, UnificationError};
@@ -66,6 +66,16 @@ impl TypeChecker {
     }
 }
 
+impl TypeChecker {
+    /// Doesn't get the type *of* `id`, gets the type that `id` as an expression *is*
+    pub fn get_evaluated_type(&self, id: ExprId) -> &Type {
+        match &self.eval_results[&id] {
+            Const::Ty(ty) => ty,
+            x => panic!("Expected type! Found {:?}", x),
+        }
+    }
+}
+
 impl Driver {
     fn debug_output(&mut self, level: usize) {
         if !self.tc.debug { return; }
@@ -87,22 +97,14 @@ impl Driver {
     }
 
     pub fn decl_type(&self, id: DeclId) -> &Type {
-        self.hir.explicit_tys[id].map(|ty| self.get_evaluated_type(ty)).unwrap_or(&Type::Error)
-    }
-
-    /// Doesn't get the type *of* `id`, gets the type that `id` as an expression *is*
-    pub fn get_evaluated_type(&self, id: ExprId) -> &Type {
-        match &self.tc.eval_results[&id] {
-            Const::Ty(ty) => ty,
-            x => panic!("Expected type! Found {:?}", x),
-        }
+        self.hir.explicit_tys[id].map(|ty| self.tc.get_evaluated_type(ty)).unwrap_or(&Type::Error)
     }
 
     pub fn fetch_decl_type(&mut self, id: DeclId) -> &Type {
         match self.tc.decl_types[id].ty {
             Type::Error => match self.hir.explicit_tys[id] {
                 Some(expr) => {
-                    let ty = self.get_evaluated_type(expr).clone();
+                    let ty = self.tc.get_evaluated_type(expr).clone();
                     self.tc.decl_types[id].ty = ty;
                     &self.tc.decl_types[id].ty
                 },
@@ -152,7 +154,16 @@ impl Driver {
             }
             independent_pass_1(&mut self.tc.constraints, &mut self.tc.types, &self.tir.sub_progs[sp].explicit_rets, |&id| (id, Type::Never));
             independent_pass_1(&mut self.tc.constraints, &mut self.tc.types, &self.tir.sub_progs[sp].whiles, |item| (item.id, Type::Void));
-            independent_pass_1(&mut self.tc.constraints, &mut self.tc.types, &self.tir.sub_progs[sp].casts, |item| (item.id, item.ty.clone()));
+
+            // This used to be a call to `independent_pass_1`, but it can't be anymore due to the borrow checker being dumb
+            for i in 0..self.tir.sub_progs[sp].casts.len() {
+                let item = self.tir.sub_progs[sp].casts[i];
+                let id = item.id;
+                let ty = item.ty;
+                let ty = self.tc.get_evaluated_type(ty).clone();
+                self.tc.constraints[id] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![ty.clone().into()]), None);
+                self.tc.types[id] = ty;
+            }
 
             fn lit_pass_1(constraints: &mut IdxVec<ConstraintList, ExprId>, lits: &[ExprId], trait_impls: BuiltinTraits, pref: Type) {
                 for &item in lits {
@@ -171,7 +182,7 @@ impl Driver {
                 for item in self.tir.sub_progs[sp].assigned_decls.get_level(level) {
                     let constraints = &self.tc.constraints[item.root_expr];
                     let ty = if let Some(explicit_ty) = item.explicit_ty {
-                        let explicit_ty = self.get_evaluated_type(explicit_ty).clone();
+                        let explicit_ty = self.tc.get_evaluated_type(explicit_ty).clone();
                         if let Some(err) = constraints.can_unify_to(&explicit_ty.into()).err() {
                             let range = self.hir.source_ranges[item.root_expr].clone();
                             let mut error = Error::new(format!("Couldn't unify expression to assigned decl type `{:?}`", explicit_ty))
@@ -194,7 +205,7 @@ impl Driver {
                     } else {
                         constraints.solve().expect("Ambiguous type for assigned declaration").ty
                     };
-                    self.tir.decls[item.decl_id].ret_ty.ty = ty;
+                    self.tc.decl_types[item.decl_id].ty = ty;
                 }
                 for item in self.tir.sub_progs[sp].assignments.get_level(level) {
                     self.tc.constraints[item.id].set_to(Type::Void);
@@ -202,28 +213,37 @@ impl Driver {
                 }
                 for item in self.tir.sub_progs[sp].decl_refs.get_level(level) {
                     // Filter overloads that don't match the constraints of the parameters.
-                    // P.S. These borrows are only here because the borrow checker is dumb
+                    // These borrows are only here because the borrow checker is dumb
                     let decls = &self.tir.decls;
-                    let constraints = &self.tc.constraints;
+                    let tc = &self.tc;
                     // Rule out overloads that don't match the arguments
                     self.tir.overloads[item.decl_ref_id].retain(|&overload| {
                         assert_eq!(decls[overload].param_tys.len(), item.args.len());
-                        for (constraints, ty) in item.args.iter().map(|&arg| &constraints[arg]).zip(&decls[overload].param_tys) {
+                        let arg_constraints = item.args.iter().map(|&arg| &tc.constraints[arg]);
+                        let param_tys = decls[overload].param_tys.iter().map(|&expr| tc.get_evaluated_type(expr));
+                        for (constraints, ty) in arg_constraints.zip(param_tys) {
                             if constraints.can_unify_to(&ty.into()).is_err() { return false; }
                         }
                         true
                     });
 
-                    let one_of = self.tir.overloads[item.decl_ref_id].iter()
-                        .map(|&overload| decls[overload].ret_ty.clone())
-                        .collect();
+                    let mut one_of = SmallVec::new();
+                    one_of.reserve(self.tir.overloads[item.decl_ref_id].len());
+                    for i in 0..self.tir.overloads[item.decl_ref_id].len() {
+                        let overload = self.tir.overloads[item.decl_ref_id][i];
+                        let ty = self.fetch_decl_type(overload).clone();
+                        let is_mut = self.tir.decls[overload].is_mut;
+                        one_of.push(QualType { ty, is_mut });
+                    }
                     let mut pref = None;
                     'find_preference: for (i, &arg) in item.args.iter().enumerate() {
                         if let Some(ty) = self.tc.constraints[arg].preferred_type() {
                             for &overload in &self.tir.overloads[item.decl_ref_id] {
                                 let decl = &decls[overload];
-                                if ty.ty.trivially_convertible_to(&decl.param_tys[i]) {
-                                    pref = Some(decl.ret_ty.clone());
+                                if ty.ty.trivially_convertible_to(tc.get_evaluated_type(decl.param_tys[i])) {
+                                    // NOTE: We assume here that fetch_decl type will have already been called on all overloads above!
+                                    let ty = tc.decl_types[overload].clone();
+                                    pref = Some(ty);
                                     self.tc.preferred_overloads[item.decl_ref_id] = Some(overload);
                                     break 'find_preference;
                                 }
@@ -335,9 +355,10 @@ impl Driver {
 
             for group in self.tir.sub_progs[sp].ret_groups() {
                 for &expr in &group.exprs {
-                    if let Some(err) = self.tc.constraints[expr].can_unify_to(&QualType::from(&group.ty)).err() {
+                    let ty = self.tc.get_evaluated_type(group.ty).clone();
+                    if let Some(err) = self.tc.constraints[expr].can_unify_to(&QualType::from(&ty)).err() {
                         let range = self.hir.source_ranges[expr].clone();
-                        let mut error = Error::new(format!("can't unify expression to return type {:?}", group.ty))
+                        let mut error = Error::new(format!("can't unify expression to return type {:?}", ty))
                             .adding_primary_range(range.clone(), "expression here");
                         match err {
                             UnificationError::InvalidChoice(choices)
@@ -355,7 +376,7 @@ impl Driver {
                     }
 
                     // Assume we panic above unless the returned expr can unify to the return type
-                    self.tc.constraints[expr].set_to(group.ty.clone());
+                    self.tc.constraints[expr].set_to(ty);
                 }
             }
             for item in &self.tir.sub_progs[sp].whiles {
@@ -367,9 +388,10 @@ impl Driver {
             }
             for item in &self.tir.sub_progs[sp].casts {
                 let constraints = &mut self.tc.constraints[item.expr];
-                let ty_and_method: Result<(Type, CastMethod), Vec<&QualType>> = if constraints.can_unify_to(&item.ty.clone().into()).is_ok() {
-                    Ok((item.ty.clone(), CastMethod::Noop))
-                } else if let Type::Pointer(dest_pointee_ty) = &item.ty {
+                let ty = self.tc.get_evaluated_type(item.ty).clone();
+                let ty_and_method: Result<(Type, CastMethod), Vec<&QualType>> = if constraints.can_unify_to(&QualType::from(&ty)).is_ok() {
+                    Ok((ty, CastMethod::Noop))
+                } else if let Type::Pointer(dest_pointee_ty) = ty {
                     let dest_pointee_ty = dest_pointee_ty.as_ref();
                     let src_ty = constraints.max_ranked_type(|ty|
                         match ty.ty {
@@ -379,7 +401,7 @@ impl Driver {
                         }
                     ).expect("Invalid cast 1!").clone();
                     Ok((src_ty.ty.clone(), CastMethod::Reinterpret))
-                } else if let Type::Int { width, .. } = item.ty {
+                } else if let Type::Int { width, .. } = ty {
                     constraints.max_ranked_type_with_assoc_data(|ty|
                         match ty.ty {
                             Type::Int { .. } => (3, CastMethod::Int),
@@ -389,7 +411,7 @@ impl Driver {
                         }
                     ).map(|(ty, method)| (ty.ty.clone(), method))
                     .map_err(|options| options.iter().map(|(ty, _)| ty.clone()).collect())
-                } else if let Type::Float { .. } = item.ty {
+                } else if let Type::Float { .. } = ty {
                     constraints.max_ranked_type_with_assoc_data(|ty|
                         match ty.ty {
                             Type::Float { .. } => (2, CastMethod::Float),
@@ -415,7 +437,9 @@ impl Driver {
             }
             for level in (0..levels).rev() {
                 for item in self.tir.sub_progs[sp].assigned_decls.get_level(level) {
-                    self.tc.constraints[item.root_expr].set_to(self.tir.decls[item.decl_id].ret_ty.ty.clone());
+                    // TODO: is it necessary to call this here or can we just directly look at `decl_types`?
+                    let ty = self.fetch_decl_type(item.decl_id).clone();
+                    self.tc.constraints[item.root_expr].set_to(ty);
                 }
                 for item in self.tir.sub_progs[sp].assignments.get_level(level) {
                     let (lhs, rhs) = self.tc.constraints.index_mut(item.lhs, item.rhs);
@@ -428,9 +452,9 @@ impl Driver {
                     // P.S. These borrows are only here because the borrow checker is dumb
                     let decls = &self.tir.decls;
                     let overloads = &mut self.tir.overloads[item.decl_ref_id];
+                    let decl_types = &self.tc.decl_types;
                     overloads.retain(|&overload| {
-                        decls[overload].ret_ty
-                            .trivially_convertible_to(&ty)
+                        decl_types[overload].trivially_convertible_to(&ty)
                     });
                     let pref = self.tc.preferred_overloads[item.decl_ref_id];
 
@@ -440,7 +464,8 @@ impl Driver {
                             .unwrap_or_else(|| overloads[0]);
                         let decl = &decls[overload];
                         for (i, &arg) in item.args.iter().enumerate() {
-                            self.tc.constraints[arg].set_to(decl.param_tys[i].clone());
+                            let ty = self.tc.get_evaluated_type(decl.param_tys[i]).clone();
+                            self.tc.constraints[arg].set_to(ty);
                         }
                         Some(overload)
                     } else {

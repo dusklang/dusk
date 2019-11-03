@@ -161,8 +161,6 @@ impl Builder {
         self.global_decls.push(id);
     }
 
-    pub fn void_expr(&self) -> ExprId { self.void_expr }
-
     pub fn int_lit(&mut self, lit: u64, range: SourceRange) -> ExprId {
         self.push(Expr::IntLit { lit }, range)
     }
@@ -226,7 +224,7 @@ impl Builder {
         let id = self.scopes.push(
             Scope {
                 items: Vec::new(),
-                terminal_expr: self.void_expr(),
+                terminal_expr: self.void_expr,
             }
         );
         let comp_decl = self.comp_decl_stack.last_mut().unwrap();
