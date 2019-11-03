@@ -90,7 +90,7 @@ impl Driver {
         self.hir.explicit_tys[id].map(|ty| self.get_evaluated_type(ty)).unwrap_or(&Type::Error)
     }
 
-    /// Doesn't get the type of `id`, gets the type that `id` as an expression *is*
+    /// Doesn't get the type *of* `id`, gets the type that `id` as an expression *is*
     pub fn get_evaluated_type(&self, id: ExprId) -> &Type {
         match &self.tc.eval_results[&id] {
             Const::Ty(ty) => ty,
@@ -101,15 +101,12 @@ impl Driver {
     pub fn fetch_decl_type(&mut self, id: DeclId) -> &Type {
         match self.tc.decl_types[id].ty {
             Type::Error => match self.hir.explicit_tys[id] {
-                Some(ref expr) => match self.tc.eval_results.get(expr).unwrap() {
-                    Const::Ty(ty) => {
-                        let ty = ty.clone();
-                        self.tc.decl_types[id].ty = ty;
-                        &self.tc.decl_types[id].ty
-                    },
-                    _ => panic!("Found non-type expression in type position!"),
+                Some(expr) => {
+                    let ty = self.get_evaluated_type(expr).clone();
+                    self.tc.decl_types[id].ty = ty;
+                    &self.tc.decl_types[id].ty
                 },
-                None => &self.tc.decl_types[id].ty
+                None => &self.tc.decl_types[id].ty,
             },
             ref ty => ty,
         }

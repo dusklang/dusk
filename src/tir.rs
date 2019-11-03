@@ -472,13 +472,17 @@ impl Driver {
         self.tir.sp_vars.push(SubprogramVar::new())
     }
 
-    ///     `dependent_sp_var`: the subprogram variable that has an eval dependency on this expression
     fn prebuild_expr(&mut self, id: ExprId, sp_var: Option<SpVarId>) -> u32 {
         let sp_var = sp_var.unwrap_or_else(|| self.new_sp_var());
         self.tir.expr_sp_vars[id] = sp_var;
         let level = match self.hir.exprs[id] {
             hir::Expr::AddrOf { expr, .. } => self.pb_deps(sp_var, &[expr], &[], &[]),
-            hir::Expr::Cast { expr, .. } => self.pb_deps(sp_var, &[expr], &[], &[]),
+            hir::Expr::Cast { expr, ty, .. } => {
+                let ty_sp_var = self.new_sp_var();
+                self.prebuild_expr(ty, Some(ty_sp_var));
+                self.add_eval_dep(sp_var, ty_sp_var);
+                self.pb_deps(sp_var, &[expr], &[], &[])
+            },
             hir::Expr::CharLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::IntLit { .. } | hir::Expr::StrLit { .. } => self.pb_deps(sp_var, &[], &[], &[]),
             hir::Expr::DeclRef { name, ref arguments, id: decl_ref_id } => {
                 // TODO: Would be nice to not have to clone the arguments here. Difficult to do though because of the borrow checker.
