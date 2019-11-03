@@ -38,6 +38,7 @@ pub struct TypeChecker {
     constraints_copy: IdxVec<ConstraintList, ExprId>,
     /// The preferred overload for each decl ref (currently only ever originates from literals)
     preferred_overloads: IdxVec<Option<DeclId>, DeclRefId>,
+
     decl_types: IdxVec<QualType, DeclId>,
 
     eval_results: HashMap<ExprId, Const>,
@@ -55,6 +56,7 @@ impl TypeChecker {
             constraints: IdxVec::new(),
             constraints_copy: IdxVec::new(),
             preferred_overloads: IdxVec::new(),
+
             decl_types: IdxVec::new(),
 
             eval_results: HashMap::new(),
@@ -85,10 +87,10 @@ impl Driver {
     }
 
     pub fn decl_type(&self, id: DeclId) -> &Type {
-        &self.tc.decl_types[id].ty
+        self.hir.explicit_tys[id].map(|ty| self.get_evaluated_type(ty)).unwrap_or(&Type::Error)
     }
 
-    /// Doesn't get the type of `id`, gets the type that `id` as an expression *represents*
+    /// Doesn't get the type of `id`, gets the type that `id` as an expression *is*
     pub fn get_evaluated_type(&self, id: ExprId) -> &Type {
         match &self.tc.eval_results[&id] {
             Const::Ty(ty) => ty,
@@ -96,11 +98,12 @@ impl Driver {
         }
     }
 
+    pub fn fetch_decl_type(&mut self, id: DeclId) -> &Type {
+        match self.
+    }
+
     pub fn type_check(&mut self) {
         self.tc.types.resize_with(self.tir.num_exprs(), Default::default);
-        self.tc.decl_types.raw = self.tir.decls.iter()
-            .map(|decl| QualType { ty: Type::Error, is_mut: decl.is_mut })
-            .collect();
         self.tc.constraints.resize_with(self.tir.num_exprs(), Default::default);
         if self.tc.debug {
             self.tc.constraints_copy.resize_with(self.tir.num_exprs(), Default::default);
@@ -108,6 +111,12 @@ impl Driver {
         self.tc.overloads.resize_with(self.tir.overloads.len(), || None);
         self.tc.preferred_overloads.resize_with(self.tir.overloads.len(), || None);
         self.tc.cast_methods.resize_with(self.tir.num_casts, || CastMethod::Noop);
+
+        for i in 0..self.tir.decls.len() {
+            let id = DeclId::new(i);
+            let is_mut = self.tir.decls[id].is_mut;
+            self.tc.decl_types.push(QualType { ty: Type::Error, is_mut });
+        }
 
         // Assign the type of the void expression to be void.
         self.tc.constraints[self.tir.void_expr] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
@@ -175,7 +184,7 @@ impl Driver {
                     } else {
                         constraints.solve().expect("Ambiguous type for assigned declaration").ty
                     };
-                    self.tc.decl_types[item.decl_id].ty = ty;
+                    self.tir.decls[item.decl_id].ret_ty.ty = ty;
                 }
                 for item in self.tir.sub_progs[sp].assignments.get_level(level) {
                     self.tc.constraints[item.id].set_to(Type::Void);

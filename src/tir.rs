@@ -10,7 +10,6 @@ use crate::builder::*;
 use crate::dep_vec::DepVec;
 use crate::hir;
 use crate::index_vec::{Idx, IdxVec};
-use crate::ty::Type;
 
 newtype_index!(TreeId pub);
 newtype_index!(RetGroupId);
@@ -69,8 +68,6 @@ impl<T> DerefMut for Expr<T> {
 #[derive(Debug)]
 pub struct Decl {
     pub param_tys: SmallVec<[ExprId; 2]>,
-    // None == Error
-    pub ret_ty: Option<ExprId>,
     pub is_mut: bool,
 }
 
@@ -271,7 +268,6 @@ impl Driver {
         // Populate `self.decls`
         for (i, decl) in self.hir.decls.iter().enumerate() {
             let id = DeclId::new(i);
-            let ret_ty = self.hir.explicit_tys[id].map(|ty| ty);
             let (is_mut, param_tys) = match *decl {
                 hir::Decl::Computed { ref param_tys, .. } => (
                     false,
@@ -298,7 +294,6 @@ impl Driver {
                     SmallVec::new(),
                 ),
             };
-            self.tir.decls.push(Decl { param_tys, ret_ty, is_mut });
             self.tir.decl_levels.push(Level::Unresolved);
         }
 
