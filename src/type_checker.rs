@@ -99,7 +99,20 @@ impl Driver {
     }
 
     pub fn fetch_decl_type(&mut self, id: DeclId) -> &Type {
-        match self.
+        match self.tc.decl_types[id].ty {
+            Type::Error => match self.hir.explicit_tys[id] {
+                Some(ref expr) => match self.tc.eval_results.get(expr).unwrap() {
+                    Const::Ty(ty) => {
+                        let ty = ty.clone();
+                        self.tc.decl_types[id].ty = ty;
+                        &self.tc.decl_types[id].ty
+                    },
+                    _ => panic!("Found non-type expression in type position!"),
+                },
+                None => &self.tc.decl_types[id].ty
+            },
+            ref ty => ty,
+        }
     }
 
     pub fn type_check(&mut self) {
