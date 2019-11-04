@@ -298,9 +298,6 @@ impl Builder {
     }
     pub fn get_range(&self, id: ExprId) -> SourceRange { self.source_ranges[id].clone() }
     pub fn set_range(&mut self, id: ExprId, range: SourceRange) { self.source_ranges[id] = range; }
-    pub fn get_terminal_expr(&self, scope: ScopeId) -> ExprId { 
-        self.scopes[scope].terminal_expr
-    }
 }
 
 impl Driver {

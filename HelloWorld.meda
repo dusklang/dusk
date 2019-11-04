@@ -1,4 +1,4 @@
-fn assert(condition: bool) {
+/*fn assert(condition: bool) {
     if !condition { panic("assertion failed") }
 }
 
@@ -137,3 +137,6 @@ fn main {
         blah: f32 = 5.2
     }
 }
+*/
+
+fn main {}

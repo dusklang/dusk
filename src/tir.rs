@@ -77,6 +77,7 @@ pub struct Subprogram {
     pub dec_lits: Vec<ExprId>,
     pub str_lits: Vec<ExprId>,
     pub char_lits: Vec<ExprId>,
+    pub const_tys: Vec<ExprId>,
     pub stmts: Vec<Stmt>,
     pub explicit_rets: Vec<ExprId>,
     // Not public because RetGroupIds are not exposed outside of TIR. Instead, you get a slice via the `ret_groups()` method on `Subprogram`.
@@ -103,6 +104,7 @@ impl Subprogram {
             dec_lits: Vec::new(),
             str_lits: Vec::new(),
             char_lits: Vec::new(),
+            const_tys: Vec::new(),
             stmts: Vec::new(),
             explicit_rets: Vec::new(),
             ret_groups: IdxVec::new(),
@@ -266,8 +268,7 @@ impl Builder {
 impl Driver {
     pub fn build_tir(&mut self) {
         // Populate `self.decls`
-        for (i, decl) in self.hir.decls.iter().enumerate() {
-            let id = DeclId::new(i);
+        for decl in &self.hir.decls {
             let (is_mut, param_tys) = match *decl {
                 hir::Decl::Computed { ref param_tys, .. } => (
                     false,
@@ -294,6 +295,7 @@ impl Driver {
                     SmallVec::new(),
                 ),
             };
+            self.tir.decls.push(Decl { param_tys, is_mut });
             self.tir.decl_levels.push(Level::Unresolved);
         }
 
@@ -373,6 +375,7 @@ impl Driver {
                 hir::Expr::DecLit { .. } => self.tir.sub_progs[sub_prog].dec_lits.push(id),
                 hir::Expr::IntLit { .. } => self.tir.sub_progs[sub_prog].int_lits.push(id),
                 hir::Expr::StrLit { .. } => self.tir.sub_progs[sub_prog].str_lits.push(id),
+                hir::Expr::ConstTy(_) => self.tir.sub_progs[sub_prog].const_tys.push(id),
                 hir::Expr::DeclRef { ref arguments, id: decl_ref_id, .. } => {
                     let args = arguments.clone();
                     self.insert_expr(id, DeclRef { args, decl_ref_id })
@@ -483,7 +486,8 @@ impl Driver {
                 self.add_eval_dep(sp_var, ty_sp_var);
                 self.pb_deps(sp_var, &[expr], &[], &[])
             },
-            hir::Expr::CharLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::IntLit { .. } | hir::Expr::StrLit { .. } => self.pb_deps(sp_var, &[], &[], &[]),
+            hir::Expr::CharLit { .. } | hir::Expr::DecLit { .. } |
+                hir::Expr::IntLit { .. } | hir::Expr::StrLit { .. } | hir::Expr::ConstTy(_) => self.pb_deps(sp_var, &[], &[], &[]),
             hir::Expr::DeclRef { name, ref arguments, id: decl_ref_id } => {
                 // TODO: Would be nice to not have to clone the arguments here. Difficult to do though because of the borrow checker.
                 let arguments = arguments.clone();
@@ -600,9 +604,11 @@ impl Driver {
             Level::Resolved(level, sp_var) => (sp_var, Some(level)),
         };
         if let Some(dependent_sp_var) = dependent_sp_var {
-            if let Some(explicit_ty) = self.hir.explicit_tys[id] {
+            if self.hir.explicit_tys[id].is_some() {
+                // If there's an explicit type, add a codegen dependency because level doesn't matter
                 self.add_codegen_dep(dependent_sp_var, sp_var);
             } else {
+                // Otherwise add a weak dependency, because level does matter
                 self.add_weak_dep(dependent_sp_var, sp_var);
             }
         }

@@ -173,16 +173,15 @@ fn expr_to_const(expr: &Expr, ty: Type, strings: &mut IdxVec<CString, StrId>) ->
             let id = strings.push(lit.clone());
             Const::Str { id, ty }
         },
-        Expr::CharLit { lit } => {
-            match ty {
-                Type::Int { .. } => Const::Int { lit: lit as u64, ty },
-                Type::Pointer(_) => {
-                    let id = strings.push(CString::new([lit as u8].as_ref()).unwrap());
-                    Const::Str { id, ty }
-                },
-                _ => panic!("unexpected type for character")
-            }
+        Expr::CharLit { lit } => match ty {
+            Type::Int { .. } => Const::Int { lit: lit as u64, ty },
+            Type::Pointer(_) => {
+                let id = strings.push(CString::new([lit as u8].as_ref()).unwrap());
+                Const::Str { id, ty }
+            },
+            _ => panic!("unexpected type for character")
         },
+        Expr::ConstTy(ref ty) => Const::Ty(ty.clone()),
         _ => panic!("Cannot convert expression to constant: {:#?}", expr),
     }
 }
@@ -610,7 +609,7 @@ impl Driver {
 
         let instr = match self.hir.exprs[expr] {
             Expr::Void => b.void_instr,
-            Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::StrLit { .. } | Expr::CharLit { .. } => {
+            Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::StrLit { .. } | Expr::CharLit { .. } | Expr::ConstTy(_) => {
                 let konst = expr_to_const(&self.hir.exprs[expr], ty.clone(), &mut self.mir.strings);
                 b.code.push(Instr::Const(konst))
             },

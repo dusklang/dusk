@@ -18,6 +18,11 @@ impl<T> DepVec<T> {
         self.storage[level].push(element);
     }
 
+    pub fn level_len(&self, level: u32) -> usize { self.storage[level as usize].len() }
+    pub fn at(&self, level: u32, index: usize) -> &T {
+        &self.storage[level as usize][index]
+    }
+
     /// Get slice containing the specified level of elements
     pub fn get_level(&self, level: u32) -> &[T] {
         &self.storage[level as usize]
