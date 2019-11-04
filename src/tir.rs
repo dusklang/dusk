@@ -349,6 +349,8 @@ impl Driver {
             self.tir.decl_sub_progs.push(val);
         }
 
+        let sp_var = self.tir.expr_sp_vars[ExprId::new(525)];
+        dbg!(&self.tir.sp_vars[sp_var]);
         // Build expressions
         for i in 0..self.hir.exprs.len() {
             let id = ExprId::new(i);
@@ -622,7 +624,7 @@ impl Driver {
 
         if let Some(level) = resolved_level { return level; }
         let level = match self.hir.decls[id] {
-            hir::Decl::Computed { ref params, scope, .. } => {
+            hir::Decl::Computed { ref param_tys, ref params, scope } => {
                 // Resolve computed decls with explicit tys before prebuilding their scopes
                 if self.hir.explicit_tys[id].is_some() {
                     self.tir.decl_levels[id] = Level::Resolved(0, sp_var);
@@ -637,6 +639,18 @@ impl Driver {
                     let id = DeclId::new(id);
                     let name = self.hir.names[id];
                     comp_decl_state.local_decls.push(LocalDecl { name, id });
+
+                    // Set the sp var for the param decl to be the same as the parent decl
+                    self.tir.decl_sp_vars[id] = sp_var;
+                }
+                let param_tys = param_tys.clone();
+                let params = params.clone();
+                for (&ty, id) in param_tys.iter().zip(params.start.idx()..params.end.idx()) {
+                    let id = DeclId::new(id);
+                    let ty_sp_var = self.new_sp_var();
+                    self.prebuild_expr(ty, Some(ty_sp_var));
+                    self.tir.decl_levels[id] = Level::Resolved(0, sp_var);
+                    self.add_eval_dep(sp_var, ty_sp_var);
                 }
                 self.tir.comp_decl_stack.push(comp_decl_state);
 
@@ -655,7 +669,16 @@ impl Driver {
                 level
             },
             hir::Decl::Const(expr) | hir::Decl::Static(expr) => self.pb_deps(sp_var, &[expr], &[], &[]),
-            hir::Decl::Intrinsic { .. } | hir::Decl::Parameter { .. } => 0,
+            hir::Decl::Intrinsic { ref param_tys, .. } => {
+                let param_tys = param_tys.clone();
+                for ty in param_tys {
+                    let ty_sp_var = self.new_sp_var();
+                    self.prebuild_expr(ty, Some(ty_sp_var));
+                    self.add_eval_dep(sp_var, ty_sp_var);
+                }
+                0
+            },
+            hir::Decl::Parameter { .. } => panic!("prebuilding parameter should've been handled elsewhere!"),
             hir::Decl::Stored { .. } => panic!("Should've already been handled in prebuild_scope"),
         };
         self.tir.decl_levels[id] = Level::Resolved(level, sp_var);

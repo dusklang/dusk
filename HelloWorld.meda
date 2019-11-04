@@ -136,7 +136,12 @@ fn main {
     fn float_const {
         blah: f32 = 5.2
     }
-}
-*/
+}*/
 
-fn main {}
+fn foo(a: i32) {
+
+}
+
+fn main {
+    foo(34)
+}
