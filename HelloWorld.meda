@@ -138,10 +138,15 @@ fn main {
     }
 }*/
 
-fn foo(a: i32) {
+fn ret_num(in: i32): i32 { var := 5 var }
 
-}
+var: i8 = 5
 
 fn main {
-    foo(34)
+    print("Hello world!\n")
+
+    while var > 0 {
+        print("|")
+        var = var - 1
+    }
 }

@@ -112,7 +112,6 @@ impl Driver {
     }
 
     pub fn type_check(&mut self) {
-        dbg!(&self.hir.exprs[ExprId::new(525)]);
         self.tc.types.resize_with(self.tir.num_exprs(), Default::default);
         self.tc.constraints.resize_with(self.tir.num_exprs(), Default::default);
         if self.tc.debug {
@@ -131,10 +130,6 @@ impl Driver {
         // Assign the type of the void expression to be void.
         self.tc.constraints[self.tir.void_expr] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
         self.tc.types[self.tir.void_expr] = Type::Void;
-
-        for i in 0..self.tir.sub_progs.len() {
-            //dbg!(&self.tir.sub_progs[i].eval_dependees);
-        }
 
         for sp in 0..self.tir.sub_progs.len() {
             // Extend arrays as needed so they all have the same number of levels.
@@ -559,8 +554,6 @@ impl Driver {
             lit_pass_2(&self.tc.constraints, &mut self.tc.types, &self.tir.sub_progs[sp].char_lits, "character");
             self.debug_output(0);
 
-            dbg!(self.tir.sub_progs.len());
-            dbg!(sp);
             for i in 0..self.tir.sub_progs[sp].eval_dependees.len() {
                 let expr = self.tir.sub_progs[sp].eval_dependees[i];
                 let val = self.eval_expr(expr);

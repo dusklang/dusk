@@ -165,6 +165,7 @@ pub struct Builder {
 
     sp_vars: IdxVec<SubprogramVar, SpVarId>,
 
+    // TODO: MAKE PRIVATE!!!!
     expr_sp_vars: IdxVec<SpVarId, ExprId>,
     decl_sp_vars: IdxVec<SpVarId, DeclId>,
 
@@ -350,50 +351,50 @@ impl Driver {
         }
 
         let sp_var = self.tir.expr_sp_vars[ExprId::new(525)];
-        dbg!(&self.tir.sp_vars[sp_var]);
         // Build expressions
         for i in 0..self.hir.exprs.len() {
             let id = ExprId::new(i);
             let expr = &self.hir.exprs[id];
-            let sub_prog = self.tir.expr_sub_progs[id] as usize;
+            let sp = self.tir.expr_sub_progs[id];
+            let sp_usize = sp as usize;
             // TODO: store the maximum subprogram number and move this out of the loop!
-            let new_len = max(self.tir.sub_progs.len(), sub_prog + 1);
+            let new_len = max(self.tir.sub_progs.len(), sp_usize + 1);
             self.tir.sub_progs.resize_with(new_len, || Subprogram::new());
 
             let sp_var = self.tir.expr_sp_vars[id];
             if self.tir.sp_vars[sp_var].has_eval_dependers {
-                self.tir.sub_progs[sub_prog].eval_dependees.push(id);
+                self.tir.sub_progs[sp_usize].eval_dependees.push(id);
             }
 
             match *expr {
-                hir::Expr::AddrOf { expr, is_mut } => self.insert_expr(id, AddrOf { expr, is_mut }),
-                hir::Expr::Pointer { expr, .. } => self.insert_expr(id, Pointer { expr }),
+                hir::Expr::AddrOf { expr, is_mut } => self.insert_expr(sp, id, AddrOf { expr, is_mut }),
+                hir::Expr::Pointer { expr, .. } => self.insert_expr(sp, id, Pointer { expr }),
                 hir::Expr::Cast { expr, ref ty, cast_id } => {
                     self.tir.num_casts += 1;
                     let ty = ty.clone();
-                    self.insert_expr(id, Cast { expr, ty, cast_id })
+                    self.insert_expr(sp, id, Cast { expr, ty, cast_id })
                 },
-                hir::Expr::CharLit { .. } => self.tir.sub_progs[sub_prog].char_lits.push(id),
-                hir::Expr::DecLit { .. } => self.tir.sub_progs[sub_prog].dec_lits.push(id),
-                hir::Expr::IntLit { .. } => self.tir.sub_progs[sub_prog].int_lits.push(id),
-                hir::Expr::StrLit { .. } => self.tir.sub_progs[sub_prog].str_lits.push(id),
-                hir::Expr::ConstTy(_) => self.tir.sub_progs[sub_prog].const_tys.push(id),
+                hir::Expr::CharLit { .. } => self.tir.sub_progs[sp_usize].char_lits.push(id),
+                hir::Expr::DecLit { .. } => self.tir.sub_progs[sp_usize].dec_lits.push(id),
+                hir::Expr::IntLit { .. } => self.tir.sub_progs[sp_usize].int_lits.push(id),
+                hir::Expr::StrLit { .. } => self.tir.sub_progs[sp_usize].str_lits.push(id),
+                hir::Expr::ConstTy(_) => self.tir.sub_progs[sp_usize].const_tys.push(id),
                 hir::Expr::DeclRef { ref arguments, id: decl_ref_id, .. } => {
                     let args = arguments.clone();
-                    self.insert_expr(id, DeclRef { args, decl_ref_id })
+                    self.insert_expr(sp, id, DeclRef { args, decl_ref_id })
                 },
-                hir::Expr::Deref(expr) => self.insert_expr(id, Dereference { expr }),
-                hir::Expr::Do { scope } => self.insert_expr(id, Do { terminal_expr: self.hir.scopes[scope].terminal_expr }),
+                hir::Expr::Deref(expr) => self.insert_expr(sp, id, Dereference { expr }),
+                hir::Expr::Do { scope } => self.insert_expr(sp, id, Do { terminal_expr: self.hir.scopes[scope].terminal_expr }),
                 hir::Expr::If { condition, then_scope, else_scope } => {
                     let then_expr = self.hir.scopes[then_scope].terminal_expr;
                     let else_expr = else_scope.map_or(self.tir.void_expr, |scope| self.hir.scopes[scope].terminal_expr);
-                    self.insert_expr(id, If { condition, then_expr, else_expr});
+                    self.insert_expr(sp, id, If { condition, then_expr, else_expr});
                 },
                 // Handled with ret groups
                 hir::Expr::Ret { .. } => {},
-                hir::Expr::Set { lhs, rhs } => self.insert_expr(id, Assignment { lhs, rhs }),
+                hir::Expr::Set { lhs, rhs } => self.insert_expr(sp, id, Assignment { lhs, rhs }),
                 hir::Expr::Void => {},
-                hir::Expr::While { condition, .. } => self.insert_expr(id, While { condition }),
+                hir::Expr::While { condition, .. } => self.insert_expr(sp, id, While { condition }),
             }
         }
 
@@ -537,9 +538,9 @@ impl Driver {
         level
     }
 
-    fn insert_expr<T>(&mut self, id: ExprId, data: T) where Expr<T>: Item {
+    fn insert_expr<T>(&mut self, sp: u32, id: ExprId, data: T) where Expr<T>: Item {
         let level = self.tir.expr_levels[id];
-        Expr { id, data }.insert(&mut self.tir, (0, level));
+        Expr { id, data }.insert(&mut self.tir, (sp, level));
     }
 
     fn add_weak_dep(&mut self, dependent: SpVarId, dependee: SpVarId) {
