@@ -165,7 +165,6 @@ pub struct Builder {
 
     sp_vars: IdxVec<SubprogramVar, SpVarId>,
 
-    // TODO: MAKE PRIVATE!!!!
     expr_sp_vars: IdxVec<SpVarId, ExprId>,
     decl_sp_vars: IdxVec<SpVarId, DeclId>,
 
@@ -553,6 +552,7 @@ impl Driver {
     }
 
     fn add_codegen_dep(&mut self, dependent: SpVarId, dependee: SpVarId) {
+        assert_ne!(dependent, dependee);
         self.tir.sp_vars[dependent].codegen.push(dependee);
     }
 
@@ -574,6 +574,12 @@ impl Driver {
                     self.tir.decl_sp_vars[decl_id] = sp_var;
                     let level = self.prebuild_expr(root_expr, Some(sp_var)) + 1;
                     self.add_codegen_dep(dependent_sp_var, sp_var);
+
+                    if let Some(explicit_ty) = self.hir.explicit_tys[decl_id] {
+                        let ty_sp_var = self.new_sp_var();
+                        self.prebuild_expr(explicit_ty, Some(ty_sp_var));
+                        self.add_eval_dep(sp_var, ty_sp_var);
+                    }
 
                     let name = self.hir.names[decl_id];
                     self.tir.comp_decl_stack.last_mut().unwrap().local_decls.push(LocalDecl { name, id: decl_id });

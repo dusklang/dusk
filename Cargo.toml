@@ -9,6 +9,7 @@ debug = true
 lto = true
 
 [dependencies]
+serde = "1.0.103"
 unicode-segmentation = { git = "https://github.com/unicode-rs/unicode-segmentation" }
 string-interner = "0.7.0"
 bitflags = "1.1.0"
