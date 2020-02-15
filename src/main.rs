@@ -1,3 +1,6 @@
+// TODO: GET RID OF THIS
+#![allow(dead_code, unused_imports, unused_variables)]
+
 mod dep_vec;
 #[macro_use]
 mod index_vec;
@@ -39,20 +42,20 @@ fn main() {
     driver.lex();
     driver.parse();
     driver.build_tir();
-    driver.type_check();
+    // driver.type_check();
 
-    if driver.report_errors() { return; }
-    driver.build_mir();
-    let main = driver.mir.functions.iter()
-        .position(|func| {
-            match func.name {
-                Some(name) => name == main_sym && func.ret_ty == Type::Void && func.num_parameters() == 0,
-                None => false,
-            }
-        })
-        .expect("Couldn't find main function with no parameters and a return type of void!");
+    // if driver.report_errors() { return; }
+    // driver.build_mir();
+    // let main = driver.mir.functions.iter()
+    //     .position(|func| {
+    //         match func.name {
+    //             Some(name) => name == main_sym && func.ret_ty == Type::Void && func.num_parameters() == 0,
+    //             None => false,
+    //         }
+    //     })
+    //     .expect("Couldn't find main function with no parameters and a return type of void!");
 
-    println!("Running the user's program in the interpreter:\n");
-    driver.interp.mode = InterpMode::RunTime;
-    driver.call(FunctionRef::Id(Idx::new(main)), Vec::new());
+    // println!("Running the user's program in the interpreter:\n");
+    // driver.interp.mode = InterpMode::RunTime;
+    // driver.call(FunctionRef::Id(Idx::new(main)), Vec::new());
 }
