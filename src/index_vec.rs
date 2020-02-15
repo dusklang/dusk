@@ -128,3 +128,21 @@ impl<T, I: Idx> IndexMut<I> for IdxVec<T, I> {
         &mut self.raw[idx.idx()]
     }
 }
+
+#[derive(Debug)]
+pub struct IdxCounter<I: Idx> {
+    next_id: u32,
+    _phantom: PhantomData<I>,
+}
+
+impl<I: Idx> IdxCounter<I> {
+    pub fn new() -> Self {
+        IdxCounter { next_id: 0, _phantom: PhantomData }
+    }
+
+    pub fn next(&mut self) -> I {
+        let next = I::new(self.next_id as usize);
+        self.next_id += 1;
+        next
+    }
+}

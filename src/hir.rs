@@ -5,7 +5,7 @@ use smallvec::{SmallVec, smallvec};
 use string_interner::Sym;
 
 use crate::driver::Driver;
-use crate::index_vec::{Idx, IdxVec};
+use crate::index_vec::{Idx, IdxVec, IdxCounter};
 use crate::builder::{BinOp, UnOp, ExprId, DeclId, ScopeId, DeclRefId, CastId, Intrinsic};
 use crate::source_info::SourceRange;
 use crate::ty::Type;
@@ -44,7 +44,7 @@ struct CompDeclState {
     has_scope: Option<ScopeId>,
     id: DeclId,
     scope_stack: Vec<ScopeState>,
-    num_stored_decls: usize,
+    stored_decl_counter: IdxCounter<StoredDeclId>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -80,7 +80,7 @@ pub enum Decl {
 #[derive(Debug)]
 pub struct Builder {
     pub exprs: IdxVec<Expr, ExprId>,
-    pub num_decl_refs: usize,
+    pub decl_ref_counter: IdxCounter<DeclRefId>,
     pub decls: IdxVec<Decl, DeclId>,
     pub names: IdxVec<Sym, DeclId>,
     pub explicit_tys: IdxVec<Option<ExprId>, DeclId>,
@@ -91,7 +91,7 @@ pub struct Builder {
     pub void_ty: ExprId,
     pub source_ranges: IdxVec<SourceRange, ExprId>,
 
-    num_casts: usize,
+    cast_counter: IdxCounter<CastId>,
     comp_decl_stack: Vec<CompDeclState>,
 }
 
@@ -99,7 +99,7 @@ impl Builder {
     pub fn new() -> Self {
         let mut b = Self {
             exprs: IdxVec::new(),
-            num_decl_refs: 0,
+            decl_ref_counter: IdxCounter::new(),
             decls: IdxVec::new(),
             names: IdxVec::new(),
             explicit_tys: IdxVec::new(),
@@ -108,7 +108,7 @@ impl Builder {
             void_expr: ExprId::new(0),
             void_ty: ExprId::new(1),
             source_ranges: IdxVec::new(),
-            num_casts: 0,
+            cast_counter: IdxCounter::new(),
             comp_decl_stack: Vec::new(),
         };
         b.push(Expr::Void, 0..0);
@@ -140,12 +140,6 @@ impl Builder {
         self.scopes[scope].items.push(item);
     }
 
-    fn allocate_decl_ref_id(&mut self) -> DeclRefId {
-        let decl_ref_id = DeclRefId::new(self.num_decl_refs);
-        self.num_decl_refs += 1;
-        decl_ref_id
-    }
-
     fn decl(&mut self, decl: Decl, name: Sym, explicit_ty: Option<ExprId>) -> DeclId {
         let id1 = self.decls.push(decl);
         let id2 = self.explicit_tys.push(explicit_ty);
@@ -174,8 +168,7 @@ impl Builder {
         self.push(Expr::CharLit { lit }, range)
     }
     pub fn cast(&mut self, expr: ExprId, ty: ExprId, range: SourceRange) -> ExprId {
-        let cast_id = CastId::new(self.num_casts);
-        self.num_casts += 1;
+        let cast_id = self.cast_counter.next();
         self.push(Expr::Cast { expr, ty, cast_id }, range)
     }
 
@@ -193,8 +186,7 @@ impl Builder {
             );
         } else {
             let decl = self.comp_decl_stack.last_mut().unwrap();
-            let id = StoredDeclId::new(decl.num_stored_decls);
-            decl.num_stored_decls += 1;
+            let id = decl.stored_decl_counter.next();
 
             let decl_id = self.decl(Decl::Stored { id, is_mut, root_expr }, name, explicit_ty);
             self.item(Item::StoredDecl { decl_id, id, root_expr });
@@ -280,7 +272,7 @@ impl Builder {
                 has_scope: None,
                 id,
                 scope_stack: Vec::new(),
-                num_stored_decls: 0,
+                stored_decl_counter: IdxCounter::new(),
             }
         );
     }
@@ -293,7 +285,7 @@ impl Builder {
         }
     }
     pub fn decl_ref(&mut self, name: Sym, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
-        let decl_ref_id = self.allocate_decl_ref_id();
+        let decl_ref_id = self.decl_ref_counter.next();
         self.push(Expr::DeclRef { name, arguments, id: decl_ref_id }, range)
     }
     pub fn get_range(&self, id: ExprId) -> SourceRange { self.source_ranges[id].clone() }
