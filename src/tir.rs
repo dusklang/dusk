@@ -215,35 +215,3 @@ impl Driver {
         
     }
 }
-
-
-pub trait Item: Sized {
-    fn insert(self, builder: &mut Builder, level: (u32, u32));
-}
-
-macro_rules! item_impl {
-    ($ty:ty, $storage:ident) => {
-        impl Item for Expr<$ty> {
-            fn insert(self, builder: &mut Builder, (sub_prog, level): (u32, u32)) { builder.sub_progs[sub_prog as usize].$storage.insert(level, self); }
-        }
-    }
-}
-
-macro_rules! item_vec_impl {
-    ($ty:ty, $storage:ident) => {
-        impl Item for Expr<$ty> {
-            fn insert(self, builder: &mut Builder, (sub_prog, _): (u32, u32)) { builder.sub_progs[sub_prog as usize].$storage.push(self); }
-        }
-    }
-}
-
-item_vec_impl!(Cast, casts);
-item_vec_impl!(While, whiles);
-
-item_impl!(Do, dos);
-item_impl!(Assignment, assignments);
-item_impl!(AddrOf, addr_ofs);
-item_impl!(Dereference, derefs);
-item_impl!(Pointer, pointers);
-item_impl!(If, ifs);
-item_impl!(DeclRef, decl_refs);
