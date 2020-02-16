@@ -37,8 +37,14 @@ impl Graph {
         }
     }
 
-    pub fn add_edge(&mut self, a: impl Into<ItemId>, b: impl Into<ItemId>) {
-        self.edges.push((a.into(), b.into()));
+    pub fn add_type1_dep(&mut self, a: impl Into<ItemId>, b: impl Into<ItemId>) {
+        let a = a.into();
+        let b = b.into();
+        // TODO: remove this HACK to prevent type 1 dependencies on the void expression
+        if let ItemId::Expr(expr) = b {
+            if expr.idx() == 0 { return; }
+        }
+        self.edges.push((a, b));
     }
 }
 
@@ -75,14 +81,14 @@ impl Driver {
             if range.start != range.end {
                 writeln!(
                     w,
-                    "    expr{} [label=\"{}\"];",
+                    "    expr{} [label=\"{}\\l\"];",
                     // TODO: do something more efficient than calling replace multiple times
                     i,
                     self.file.substring_from_range(range)
                         .replace("\\", "\\\\")
                         .replace("\"", "\\\"")
                         .replace("\n", "\\n")
-                        .replace("\r", "\\r"),
+                        .replace("\r", ""),
                 )?;
             }
         }
@@ -90,7 +96,7 @@ impl Driver {
         w.flush()?;
 
         let command = Command::new("sfdp")
-            .args(&["-Tpdf", "tmp/tc_graph.gv", "-o", "tmp/tc_graph.pdf"])
+            .args(&["-Goverlap=scale", "-Tpdf", "tmp/tc_graph.gv", "-o", "tmp/tc_graph.pdf"])
             .stdout(Stdio::inherit())
             .output()
             .expect("Failed to execute graph rendering command");
