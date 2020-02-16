@@ -215,7 +215,63 @@ impl Builder {
 impl Driver {
     pub fn build_tir(&mut self) {
         let mut graph = graph::Graph::new();
-        graph.add_edge(ExprId::new(0), ExprId::new(1));
+        
+        // Add type 1 dependencies to the graph
+        for i in 0..self.hir.decls.len() {
+            let id = DeclId::new(i);
+            match self.hir.decls[id] {
+                hir::Decl::Parameter { .. } | hir::Decl::Intrinsic { .. } => {},
+                hir::Decl::Static(assigned_expr) | hir::Decl::Const(assigned_expr) => graph.add_edge(id, assigned_expr),
+                hir::Decl::Computed { scope, .. } => {
+                    let terminal_expr = self.hir.scopes[scope].terminal_expr;
+                    graph.add_edge(id, terminal_expr);
+                },
+                hir::Decl::Stored { root_expr, .. } => {
+                    graph.add_edge(id, root_expr);
+                },
+            }
+        }
+        for i in 0..self.hir.exprs.len() {
+            let id = ExprId::new(i);
+            match self.hir.exprs[id] {
+                hir::Expr::Void | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
+                    | hir::Expr::CharLit { .. } | hir::Expr::ConstTy(_) => {},
+                hir::Expr::AddrOf { expr, .. } | hir::Expr::Deref(expr) | hir::Expr::Pointer { expr, .. } | hir::Expr::Cast { expr, .. }
+                    | hir::Expr::Ret { expr } => graph.add_edge(id, expr),
+
+                hir::Expr::DeclRef { ref arguments, .. } => {
+                    for &arg in arguments {
+                        graph.add_edge(id, arg);
+                    }
+                },
+                hir::Expr::Set { lhs, rhs } => {
+                    graph.add_edge(id, lhs);
+                    graph.add_edge(id, rhs);
+                },
+                hir::Expr::Do { scope } => {
+                    let terminal_expr = self.hir.scopes[scope].terminal_expr;
+                    graph.add_edge(id, terminal_expr);
+                },
+                hir::Expr::If { condition, then_scope, else_scope } => {
+                    graph.add_edge(id, condition);
+
+                    let then_expr = self.hir.scopes[then_scope].terminal_expr;
+                    let else_expr = if let Some(else_scope) = else_scope {
+                        self.hir.scopes[else_scope].terminal_expr
+                    } else {
+                        self.hir.void_expr
+                    };
+                    graph.add_edge(id, then_expr);
+                    graph.add_edge(id, else_expr);
+                }
+                hir::Expr::While { condition, scope } => {
+                    graph.add_edge(id, condition);
+                    let terminal_expr = self.hir.scopes[scope].terminal_expr;
+                    graph.add_edge(id, terminal_expr);
+                },
+            }
+        }
+
         self.print_graph(&graph).unwrap();
     }
 }

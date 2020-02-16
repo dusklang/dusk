@@ -72,12 +72,12 @@ impl Driver {
         for i in 0..self.hir.exprs.len() {
             let id = ExprId::new(i as usize);
             let range = self.hir.source_ranges[id].clone();
-            write!(w, "    expr{} [shape=plaintext", i)?;
             if range.start != range.end {
-                write!(
+                writeln!(
                     w,
-                    ",label=\"{}\"",
+                    "    expr{} [label=\"{}\"];",
                     // TODO: do something more efficient than calling replace multiple times
+                    i,
                     self.file.substring_from_range(range)
                         .replace("\\", "\\\\")
                         .replace("\"", "\\\"")
@@ -85,19 +85,11 @@ impl Driver {
                         .replace("\r", "\\r"),
                 )?;
             }
-            writeln!(w, "];")?;
-        }
-        for i in 0..self.hir.decls.len() {
-            writeln!(
-                w,
-                "    decl{} [shape=plaintext];",
-                i,
-            )?;
         }
         writeln!(w, "}}")?;
         w.flush()?;
 
-        let command = Command::new("neato")
+        let command = Command::new("sfdp")
             .args(&["-Tpdf", "tmp/tc_graph.gv", "-o", "tmp/tc_graph.pdf"])
             .stdout(Stdio::inherit())
             .output()
