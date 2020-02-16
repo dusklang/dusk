@@ -11,6 +11,8 @@ use crate::dep_vec::DepVec;
 use crate::hir;
 use crate::index_vec::{Idx, IdxVec};
 
+mod graph;
+
 newtype_index!(TreeId pub);
 newtype_index!(RetGroupId);
 
@@ -212,6 +214,8 @@ impl Builder {
 
 impl Driver {
     pub fn build_tir(&mut self) {
-        
+        let mut graph = graph::Graph::new();
+        graph.add_edge(ExprId::new(0), ExprId::new(1));
+        self.print_graph(&graph).unwrap();
     }
 }
