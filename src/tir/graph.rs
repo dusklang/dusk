@@ -82,8 +82,8 @@ impl Driver {
                 writeln!(
                     w,
                     "    expr{} [label=\"{}\\l\"];",
-                    // TODO: do something more efficient than calling replace multiple times
                     i,
+                    // TODO: do something more efficient than calling replace multiple times
                     self.file.substring_from_range(range)
                         .replace("\\", "\\\\")
                         .replace("\"", "\\\"")
