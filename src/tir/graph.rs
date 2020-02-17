@@ -5,13 +5,29 @@ use std::fs::{self, File};
 use std::path::PathBuf;
 
 use crate::builder::{ExprId, DeclId};
-use crate::index_vec::Idx;
+use crate::index_vec::{Idx, IdxVec};
 use crate::driver::Driver;
 
 #[derive(Debug, Copy, Clone)]
 pub enum ItemId {
     Expr(ExprId),
     Decl(DeclId),
+}
+
+pub trait Item {
+    fn adjacent(self, graph: &mut Graph) -> &mut Vec<ItemId>;
+}
+
+impl Item for ExprId {
+    fn adjacent(self, graph: &mut Graph) -> &mut Vec<ItemId> {
+        &mut graph.expr_adjacent[self]
+    }
+}
+
+impl Item for DeclId {
+    fn adjacent(self, graph: &mut Graph) -> &mut Vec<ItemId> {
+        &mut graph.decl_adjacent[self]
+    }
 }
 
 impl From<ExprId> for ItemId {
@@ -27,24 +43,19 @@ impl From<DeclId> for ItemId {
 }
 
 pub struct Graph {
-    edges: Vec<(ItemId, ItemId)>,
+    // TODO: consider putting ExprIds and DeclIds into separate arrays, or one sorted one, rather than all together in an enum
+    expr_adjacent: IdxVec<Vec<ItemId>, ExprId>,
+    decl_adjacent: IdxVec<Vec<ItemId>, DeclId>,
 }
 
 impl Graph {
-    pub fn new() -> Self {
-        Graph {
-            edges: Vec::new(),
-        }
-    }
-
-    pub fn add_type1_dep(&mut self, a: impl Into<ItemId>, b: impl Into<ItemId>) {
-        let a = a.into();
+    pub fn add_type1_dep(&mut self, a: impl Item, b: impl Into<ItemId>) {
         let b = b.into();
         // TODO: remove this HACK to prevent type 1 dependencies on the void expression
         if let ItemId::Expr(expr) = b {
             if expr.idx() == 0 { return; }
         }
-        self.edges.push((a, b));
+        a.adjacent(self).push(b);
     }
 }
 
@@ -59,6 +70,15 @@ impl ItemId {
 }
 
 impl Driver {
+    pub fn create_graph(&self) -> Graph {
+        let mut expr_adjacent = IdxVec::new();
+        expr_adjacent.resize_with(self.hir.exprs.len(), || Vec::new());
+        let mut decl_adjacent = IdxVec::new();
+        decl_adjacent.resize_with(self.hir.decls.len(), || Vec::new());
+
+        Graph { expr_adjacent, decl_adjacent }
+    }
+
     // Prints graph in Graphviz format, then opens a web browser to display the results.
     pub fn print_graph(&self, graph: &Graph) -> IoResult<()> {
         let tmp_dir = fs::read_dir(".")?.find(|entry| entry.as_ref().unwrap().file_name() == "tmp");
@@ -68,12 +88,25 @@ impl Driver {
         let mut w = File::create("tmp/tc_graph.gv")?;
         writeln!(w, "digraph G {{")?;
 
-        for (a, b) in &graph.edges {
-            write!(w, "    ")?;
-            a.write_node_name(&mut w)?;
-            write!(w, " -> ")?;
-            b.write_node_name(&mut w)?;
-            writeln!(w, ";")?;
+        for i in 0..graph.expr_adjacent.len() {
+            let a = ExprId::new(i);
+            for &b in &graph.expr_adjacent[a] {
+                write!(w, "    ")?;
+                write!(w, "expr{}", i)?;
+                write!(w, " -> ")?;
+                b.write_node_name(&mut w)?;
+                writeln!(w, ";")?;
+            }
+        }
+        for i in 0..graph.decl_adjacent.len() {
+            let a = DeclId::new(i);
+            for &b in &graph.decl_adjacent[a] {
+                write!(w, "    ")?;
+                write!(w, "decl{}", i)?;
+                write!(w, " -> ")?;
+                b.write_node_name(&mut w)?;
+                writeln!(w, ";")?;
+            }
         }
         for i in 0..self.hir.exprs.len() {
             let id = ExprId::new(i as usize);

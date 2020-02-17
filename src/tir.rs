@@ -215,7 +215,7 @@ impl Builder {
 
 impl Driver {
     pub fn build_tir(&mut self) {
-        let mut graph = Graph::new();
+        let mut graph = self.create_graph();
         
         // Add type 1 dependencies to the graph
         for i in 0..self.hir.decls.len() {
