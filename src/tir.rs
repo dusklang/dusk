@@ -272,7 +272,7 @@ impl Driver {
                 },
             }
         }
-
+        graph.split();
         self.print_graph(&graph).unwrap();
     }
 }
