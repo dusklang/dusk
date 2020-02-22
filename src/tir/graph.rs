@@ -6,10 +6,13 @@ use std::path::PathBuf;
 use std::iter::Chain;
 use std::slice::Iter as SliceIter;
 use std::mem;
+use std::ops::{Index, IndexMut};
 
 use crate::builder::{ExprId, DeclId};
 use crate::index_vec::{Idx, IdxVec};
 use crate::driver::Driver;
+
+newtype_index!(CompId);
 
 #[derive(Debug, Copy, Clone)]
 pub enum ItemId {
@@ -18,25 +21,24 @@ pub enum ItemId {
 }
 
 pub trait Item: Copy + Into<ItemId> {
-    fn dependees(self, graph: &mut Graph) -> &mut Vec<ItemId>;
-    fn dependers(self, graph: &mut Graph) -> &mut Vec<ItemId>;
-    fn adjacents<'a>(self, graph: &'a Graph) -> Chain<SliceIter<'a, ItemId>, SliceIter<'a, ItemId>>;
+    fn elem<T>(self, vec: &ItemIdxVec<T>) -> &T;
+    fn elem_mut<T>(self, vec: &mut ItemIdxVec<T>) -> &mut T;
+    fn write_node_name(self, w: &mut impl Write) -> IoResult<()>;
     fn set_visited(self, state: &mut ComponentState);
     fn add_to_component(self, state: &mut ComponentState);
 }
 
 impl Item for ExprId {
-    fn dependees(self, graph: &mut Graph) -> &mut Vec<ItemId> {
-        &mut graph.expr_dependees[self]
+    fn elem<T>(self, vec: &ItemIdxVec<T>) -> &T {
+        &vec.expr[self]
     }
 
-    fn dependers(self, graph: &mut Graph) -> &mut Vec<ItemId> {
-        &mut graph.expr_dependers[self]
+    fn elem_mut<T>(self, vec: &mut ItemIdxVec<T>) -> &mut T {
+        &mut vec.expr[self]
     }
 
-    fn adjacents<'a>(self, graph: &'a Graph) -> Chain<SliceIter<'a, ItemId>, SliceIter<'a, ItemId>> {
-        graph.expr_dependees[self].iter()
-            .chain(graph.expr_dependers[self].iter())
+    fn write_node_name(self, w: &mut impl Write) -> IoResult<()> {
+        write!(w, "expr{}", self.idx())
     }
 
     fn set_visited(self, state: &mut ComponentState) {
@@ -49,17 +51,16 @@ impl Item for ExprId {
 }
 
 impl Item for DeclId {
-    fn dependees(self, graph: &mut Graph) -> &mut Vec<ItemId> {
-        &mut graph.decl_dependees[self]
+    fn elem<T>(self, vec: &ItemIdxVec<T>) -> &T {
+        &vec.decl[self]
     }
 
-    fn dependers(self, graph: &mut Graph) -> &mut Vec<ItemId> {
-        &mut graph.decl_dependers[self]
+    fn elem_mut<T>(self, vec: &mut ItemIdxVec<T>) -> &mut T {
+        &mut vec.decl[self]
     }
 
-    fn adjacents<'a>(self, graph: &'a Graph) -> Chain<SliceIter<'a, ItemId>, SliceIter<'a, ItemId>> {
-        graph.decl_dependees[self].iter()
-            .chain(graph.decl_dependers[self].iter())
+    fn write_node_name(self, w: &mut impl Write) -> IoResult<()> {
+        write!(w, "decl{}", self.idx())
     }
 
     fn set_visited(self, state: &mut ComponentState) {
@@ -83,16 +84,53 @@ impl From<DeclId> for ItemId {
     }
 }
 
+pub struct ItemIdxVec<T> {
+    expr: IdxVec<T, ExprId>,
+    decl: IdxVec<T, DeclId>,
+}
+
+impl<T> ItemIdxVec<T> {
+    fn new() -> Self {
+        Self {
+            expr: IdxVec::new(),
+            decl: IdxVec::new(),
+        }
+    }
+
+    fn expr_len(&self) -> usize { self.expr.len() }
+    fn decl_len(&self) -> usize { self.decl.len() }
+}
+
+impl<T: Default> ItemIdxVec<T> {
+    fn resize(&mut self, num_exprs: usize, num_decls: usize) {
+        self.expr.resize_with(num_exprs, || Default::default());
+        self.decl.resize_with(num_decls, || Default::default());
+    }
+}
+
+impl<I: Item, T> Index<I> for ItemIdxVec<T> {
+    type Output = T;
+    fn index(&self, id: I) -> &Self::Output {
+        id.elem(self)
+    }
+}
+
+impl<I: Item, T> IndexMut<I> for ItemIdxVec<T> {
+    fn index_mut(&mut self, id: I) -> &mut Self::Output {
+        id.elem_mut(self)
+    }
+}
+
 pub struct Graph {
     // TODO: consider putting ExprIds and DeclIds into separate arrays, or one sorted one, rather than all together using an enum
-    expr_dependees: IdxVec<Vec<ItemId>, ExprId>,
-    decl_dependees: IdxVec<Vec<ItemId>, DeclId>,
+    dependees: ItemIdxVec<Vec<ItemId>>,
 
     // Used exclusively for finding connected components
-    expr_dependers: IdxVec<Vec<ItemId>, ExprId>,
-    decl_dependers: IdxVec<Vec<ItemId>, DeclId>,
+    dependers: ItemIdxVec<Vec<ItemId>>,
 
-    components: Option<Vec<Component>>,
+    item_to_components: ItemIdxVec<Vec<CompId>>,
+
+    components: Option<IdxVec<Component, CompId>>,
 }
 
 #[derive(Default)]
@@ -111,9 +149,8 @@ pub struct ComponentState {
     cur_component: Component,
 }
 
-
-
 impl Graph {
+    /// a and b must be in the *same* subprogram, and a must have a higher level than b
     pub fn add_type1_dep(&mut self, a: impl Item, b: impl Item) {
         let a_val = a.into();
         let b_val = b.into();
@@ -121,14 +158,32 @@ impl Graph {
         if let ItemId::Expr(expr) = b_val {
             if expr.idx() == 0 { return; }
         }
-        a.dependees(self).push(b_val);
-        b.dependers(self).push(a_val);
+        
+        self.dependees[a].push(b_val);
+        self.dependers[b].push(a_val);
+    }
+
+    /// a must either be in the same subprogram as b or a later subprogram, but if they are in the same subprogram, a must have a higher level than b
+    pub fn add_type2_dep(&mut self, a: impl Item, b: impl Item) {
+
+    }
+
+    /// a must either be in the same subprogram as b or a later subprogram, but their levels are independent
+    pub fn add_type3_dep(&mut self, a: impl Item, b: impl Item) {
+        
+    }
+
+    /// a must be in an later subprogram than b, but their levels are independent
+    pub fn add_type4_dep(&mut self, a: impl Item, b: impl Item) {
+        
     }
 
     fn find_component(&self, item: impl Item, state: &mut ComponentState) {
         item.set_visited(state);
         item.add_to_component(state);
-        for &adj in item.adjacents(self) {
+        let adjs = self.dependees[item].iter()
+            .chain(self.dependers[item].iter());
+        for &adj in adjs {
             let visited = match adj {
                 ItemId::Expr(expr) => if !state.expr_visited[expr] {
                     self.find_component(expr, state);
@@ -143,15 +198,15 @@ impl Graph {
     // Find the weak components of the graph
     pub fn split(&mut self) {
         let mut expr_visited = IdxVec::new();
-        expr_visited.resize_with(self.expr_dependees.len(), || false);
+        expr_visited.resize_with(self.dependees.expr_len(), || false);
         let mut decl_visited = IdxVec::new();
-        decl_visited.resize_with(self.decl_dependees.len(), || false);
+        decl_visited.resize_with(self.dependees.decl_len(), || false);
         let mut state = ComponentState {
             expr_visited, decl_visited, cur_component: Component::default(),
         };
         assert!(self.components.is_none());
-        let mut components = Vec::new();
-        for i in 0..self.expr_dependees.len() {
+        let mut components = IdxVec::new();
+        for i in 0..self.dependees.expr_len() {
             let id = ExprId::new(i);
             if !state.expr_visited[id] {
                 self.find_component(id, &mut state);
@@ -160,7 +215,7 @@ impl Graph {
             }
         }
 
-        for i in 0..self.decl_dependees.len() {
+        for i in 0..self.dependees.decl_len() {
             let id = DeclId::new(i);
             if !state.decl_visited[id] {
                 self.find_component(id, &mut state);
@@ -185,34 +240,22 @@ impl ItemId {
 
 impl Driver {
     pub fn create_graph(&self) -> Graph {
-        let mut expr_dependees = IdxVec::new();
-        expr_dependees.resize_with(self.hir.exprs.len(), || Vec::new());
-        let mut decl_dependees = IdxVec::new();
-        decl_dependees.resize_with(self.hir.decls.len(), || Vec::new());
+        let mut dependees = ItemIdxVec::new();
+        dependees.resize(self.hir.exprs.len(), self.hir.decls.len());
 
-        let mut expr_dependers = IdxVec::new();
-        expr_dependers.resize_with(self.hir.exprs.len(), || Vec::new());
-        let mut decl_dependers = IdxVec::new();
-        decl_dependers.resize_with(self.hir.decls.len(), || Vec::new());
+        let mut dependers = ItemIdxVec::new();
+        dependers.resize(self.hir.exprs.len(), self.hir.decls.len());
 
-        Graph { expr_dependees, decl_dependees, expr_dependers, decl_dependers, components: None }
+        let mut item_to_components = ItemIdxVec::new();
+        item_to_components.resize(self.hir.exprs.len(), self.hir.decls.len());
+
+        Graph { dependees, dependers, item_to_components, components: None }
     }
 
-    fn write_expr_deps(&self, w: &mut impl Write, a: ExprId, graph: &Graph) -> IoResult<()> {
-        for &b in &graph.expr_dependees[a] {
+    fn write_deps(&self, w: &mut impl Write, a: impl Item, graph: &Graph) -> IoResult<()> {
+        for &b in &graph.dependees[a] {
             write!(w, "    ")?;
-            write!(w, "expr{}", a.idx())?;
-            write!(w, " -> ")?;
-            b.write_node_name(w)?;
-            writeln!(w, ";")?;
-        }
-        Ok(())
-    }
-
-    fn write_decl_deps(&self, w: &mut impl Write, a: DeclId, graph: &Graph) -> IoResult<()> {
-        for &b in &graph.decl_dependees[a] {
-            write!(w, "    ")?;
-            write!(w, "decl{}", a.idx())?;
+            a.write_node_name(w)?;
             write!(w, " -> ")?;
             b.write_node_name(w)?;
             writeln!(w, ";")?;
@@ -256,23 +299,23 @@ impl Driver {
                 writeln!(w, "        color=lightgrey;")?;
                 writeln!(w, "        node [style=filled,color=white];")?;
                 for &expr in &component.exprs {
-                    self.write_expr_deps(&mut w, expr, graph)?;
+                    self.write_deps(&mut w, expr, graph)?;
                     self.write_expr_node(&mut w, expr)?;
                 }
                 for &decl in &component.decls {
-                    self.write_decl_deps(&mut w, decl, graph)?;
+                    self.write_deps(&mut w, decl, graph)?;
                 }
                 writeln!(w, "    }}")?;
             }
         } else {
-            for i in 0..graph.expr_dependees.len() {
+            for i in 0..graph.dependees.expr_len() {
                 let a = ExprId::new(i);
-                self.write_expr_deps(&mut w, a, graph)?;
+                self.write_deps(&mut w, a, graph)?;
                 self.write_expr_node(&mut w, a)?;
             }
-            for i in 0..graph.decl_dependees.len() {
+            for i in 0..graph.dependees.decl_len() {
                 let a = DeclId::new(i);
-                self.write_decl_deps(&mut w, a, graph)?;
+                self.write_deps(&mut w, a, graph)?;
             }
         }
         writeln!(w, "}}")?;
