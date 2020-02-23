@@ -176,8 +176,8 @@ impl Graph {
             .chain(self.dependers[item].iter());
         for &adj in adjs {
             match adj {
-                ItemId::Expr(expr) => self.find_component(expr, state),
-                ItemId::Decl(decl) => self.find_component(decl, state),
+                ItemId::Expr(expr) => if !state.visited.expr[expr] { self.find_subcomponent(expr, state) },
+                ItemId::Decl(decl) => if !state.visited.decl[decl] { self.find_subcomponent(decl, state) },
             };
         }
     }
