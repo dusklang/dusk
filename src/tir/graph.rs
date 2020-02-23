@@ -24,7 +24,6 @@ pub trait Item: Copy + Into<ItemId> {
     fn elem<T>(self, vec: &ItemIdxVec<T>) -> &T;
     fn elem_mut<T>(self, vec: &mut ItemIdxVec<T>) -> &mut T;
     fn write_node_name(self, w: &mut impl Write) -> IoResult<()>;
-    fn set_visited(self, state: &mut ComponentState);
     fn add_to_component(self, state: &mut ComponentState);
 }
 
@@ -39,10 +38,6 @@ impl Item for ExprId {
 
     fn write_node_name(self, w: &mut impl Write) -> IoResult<()> {
         write!(w, "expr{}", self.idx())
-    }
-
-    fn set_visited(self, state: &mut ComponentState) {
-        state.expr_visited[self] = true;
     }
 
     fn add_to_component(self, state: &mut ComponentState) {
@@ -61,10 +56,6 @@ impl Item for DeclId {
 
     fn write_node_name(self, w: &mut impl Write) -> IoResult<()> {
         write!(w, "decl{}", self.idx())
-    }
-
-    fn set_visited(self, state: &mut ComponentState) {
-        state.decl_visited[self] = true;
     }
 
     fn add_to_component(self, state: &mut ComponentState) {
@@ -99,12 +90,10 @@ impl<T> ItemIdxVec<T> {
 
     fn expr_len(&self) -> usize { self.expr.len() }
     fn decl_len(&self) -> usize { self.decl.len() }
-}
 
-impl<T: Default> ItemIdxVec<T> {
-    fn resize(&mut self, num_exprs: usize, num_decls: usize) {
-        self.expr.resize_with(num_exprs, || Default::default());
-        self.decl.resize_with(num_decls, || Default::default());
+    fn resize_with(&mut self, num_exprs: usize, num_decls: usize, mut f: impl FnMut() -> T) {
+        self.expr.resize_with(num_exprs, || f());
+        self.decl.resize_with(num_decls, || f());
     }
 }
 
@@ -128,7 +117,7 @@ pub struct Graph {
     // Used exclusively for finding connected components
     dependers: ItemIdxVec<Vec<ItemId>>,
 
-    item_to_components: ItemIdxVec<Vec<CompId>>,
+    item_to_components: ItemIdxVec<CompId>,
 
     components: Option<IdxVec<Component, CompId>>,
 }
@@ -143,10 +132,11 @@ struct Component {
 // So we need a better way to abstract over exprs and decls.
 pub struct ComponentState {
     // TODO: Vec of bools == gross
-    expr_visited: IdxVec<bool, ExprId>,
-    decl_visited: IdxVec<bool, DeclId>,
+    visited: ItemIdxVec<bool>,
 
     cur_component: Component,
+    components: IdxVec<Component, CompId>,
+    item_to_components: ItemIdxVec<CompId>,
 }
 
 impl Graph {
@@ -178,53 +168,46 @@ impl Graph {
         
     }
 
-    fn find_component(&self, item: impl Item, state: &mut ComponentState) {
-        item.set_visited(state);
+    fn find_subcomponent(&self, item: impl Item, state: &mut ComponentState) {
+        state.visited[item] = true;
         item.add_to_component(state);
+        state.item_to_components[item] = CompId::new(state.components.len());
         let adjs = self.dependees[item].iter()
             .chain(self.dependers[item].iter());
         for &adj in adjs {
-            let visited = match adj {
-                ItemId::Expr(expr) => if !state.expr_visited[expr] {
-                    self.find_component(expr, state);
-                },
-                ItemId::Decl(decl) => if !state.decl_visited[decl] {
-                    self.find_component(decl, state);
-                },
+            match adj {
+                ItemId::Expr(expr) => self.find_component(expr, state),
+                ItemId::Decl(decl) => self.find_component(decl, state),
             };
         }
     }
 
+    fn find_component(&self, item: impl Item, state: &mut ComponentState) {
+        if state.visited[item] { return; }
+        self.find_subcomponent(item, state);
+        let new_component = mem::replace(&mut state.cur_component, Component::default());
+        state.components.push(new_component);
+    }
+
     // Find the weak components of the graph
     pub fn split(&mut self) {
-        let mut expr_visited = IdxVec::new();
-        expr_visited.resize_with(self.dependees.expr_len(), || false);
-        let mut decl_visited = IdxVec::new();
-        decl_visited.resize_with(self.dependees.decl_len(), || false);
+        let mut visited = ItemIdxVec::new();
+        visited.resize_with(self.dependees.expr_len(), self.dependees.decl_len(), || false);
         let mut state = ComponentState {
-            expr_visited, decl_visited, cur_component: Component::default(),
+            visited, cur_component: Component::default(), components: IdxVec::new(), item_to_components: ItemIdxVec::new(),
         };
+        state.item_to_components.resize_with(self.dependees.expr_len(), self.dependees.decl_len(), || CompId::new(std::usize::MAX));
         assert!(self.components.is_none());
-        let mut components = IdxVec::new();
         for i in 0..self.dependees.expr_len() {
-            let id = ExprId::new(i);
-            if !state.expr_visited[id] {
-                self.find_component(id, &mut state);
-                let new_component = mem::replace(&mut state.cur_component, Component::default());
-                components.push(new_component);
-            }
+            self.find_component(ExprId::new(i), &mut state);
         }
 
         for i in 0..self.dependees.decl_len() {
-            let id = DeclId::new(i);
-            if !state.decl_visited[id] {
-                self.find_component(id, &mut state);
-                let new_component = mem::replace(&mut state.cur_component, Component::default());
-                components.push(new_component);
-            }
+            self.find_component(DeclId::new(i), &mut state);
         }
 
-        self.components = Some(components);
+        self.components = Some(state.components);
+        self.item_to_components = state.item_to_components;
     }
 }
 
@@ -241,13 +224,13 @@ impl ItemId {
 impl Driver {
     pub fn create_graph(&self) -> Graph {
         let mut dependees = ItemIdxVec::new();
-        dependees.resize(self.hir.exprs.len(), self.hir.decls.len());
+        dependees.resize_with(self.hir.exprs.len(), self.hir.decls.len(), || Vec::new());
 
         let mut dependers = ItemIdxVec::new();
-        dependers.resize(self.hir.exprs.len(), self.hir.decls.len());
+        dependers.resize_with(self.hir.exprs.len(), self.hir.decls.len(), || Vec::new());
 
         let mut item_to_components = ItemIdxVec::new();
-        item_to_components.resize(self.hir.exprs.len(), self.hir.decls.len());
+        item_to_components.resize_with(self.hir.exprs.len(), self.hir.decls.len(), || CompId::new(std::usize::MAX));
 
         Graph { dependees, dependers, item_to_components, components: None }
     }
