@@ -111,8 +111,10 @@ impl<I: Item, T> IndexMut<I> for ItemIdxVec<T> {
 }
 
 pub struct Graph {
-    // TODO: consider putting ExprIds and DeclIds into separate arrays, or one sorted one, rather than all together using an enum
     dependees: ItemIdxVec<Vec<ItemId>>,
+    t2_dependees: ItemIdxVec<Vec<ItemId>>,
+    t3_dependees: ItemIdxVec<Vec<ItemId>>,
+    t4_dependees: ItemIdxVec<Vec<ItemId>>,
 
     // Used exclusively for finding connected components
     dependers: ItemIdxVec<Vec<ItemId>>,
@@ -155,17 +157,17 @@ impl Graph {
 
     /// a must either be in the same subprogram as b or a later subprogram, but if they are in the same subprogram, a must have a higher level than b
     pub fn add_type2_dep(&mut self, a: impl Item, b: impl Item) {
-
+        self.t2_dependees[a].push(b.into());
     }
 
     /// a must either be in the same subprogram as b or a later subprogram, but their levels are independent
     pub fn add_type3_dep(&mut self, a: impl Item, b: impl Item) {
-        
+        self.t3_dependees[a].push(b.into());
     }
 
     /// a must be in an later subprogram than b, but their levels are independent
     pub fn add_type4_dep(&mut self, a: impl Item, b: impl Item) {
-        
+        self.t4_dependees[a].push(b.into());
     }
 
     fn find_subcomponent(&self, item: impl Item, state: &mut ComponentState) {
@@ -223,25 +225,44 @@ impl ItemId {
 
 impl Driver {
     pub fn create_graph(&self) -> Graph {
-        let mut dependees = ItemIdxVec::new();
-        dependees.resize_with(self.hir.exprs.len(), self.hir.decls.len(), || Vec::new());
-
-        let mut dependers = ItemIdxVec::new();
-        dependers.resize_with(self.hir.exprs.len(), self.hir.decls.len(), || Vec::new());
+        let mut deps = [ItemIdxVec::new(), ItemIdxVec::new(), ItemIdxVec::new(), ItemIdxVec::new(), ItemIdxVec::new()];
+        for dep in &mut deps {
+            dep.resize_with(self.hir.exprs.len(), self.hir.decls.len(), || Vec::new());
+        }
 
         let mut item_to_components = ItemIdxVec::new();
         item_to_components.resize_with(self.hir.exprs.len(), self.hir.decls.len(), || CompId::new(std::usize::MAX));
+        
+        let [dependees, t2_dependees, t3_dependees, t4_dependees, dependers] = deps;
+        Graph { dependees, t2_dependees, t3_dependees, t4_dependees, dependers, item_to_components, components: None }
+    }
 
-        Graph { dependees, dependers, item_to_components, components: None }
+    fn write_dep<W: Write>(&self, w: &mut W, a: impl Item, b: ItemId, write_attribs: impl FnOnce(&mut W) -> IoResult<()>) -> IoResult<()> {
+        write!(w, "    ")?;
+        a.write_node_name(w)?;
+        write!(w, " -> ")?;
+        b.write_node_name(w)?;
+        write_attribs(w)?;
+        writeln!(w, ";")?;
+        Ok(())
     }
 
     fn write_deps(&self, w: &mut impl Write, a: impl Item, graph: &Graph) -> IoResult<()> {
         for &b in &graph.dependees[a] {
-            write!(w, "    ")?;
-            a.write_node_name(w)?;
-            write!(w, " -> ")?;
-            b.write_node_name(w)?;
-            writeln!(w, ";")?;
+            self.write_dep(w, a, b, |_| Ok(()))?;
+        }
+        Ok(())
+    }
+
+    fn write_non_t1_deps(&self, w: &mut impl Write, a: impl Item, graph: &Graph) -> IoResult<()> {
+        for &b in &graph.t2_dependees[a] {
+            self.write_dep(w, a, b, |w| writeln!(w, " [style=dashed];"))?;
+        }
+        for &b in &graph.t3_dependees[a] {
+            self.write_dep(w, a, b, |w| writeln!(w, " [style=dashed; color=grey];"))?;
+        }
+        for &b in &graph.t4_dependees[a] {
+            self.write_dep(w, a, b, |w| writeln!(w, " [color=red];"))?;
         }
         Ok(())
     }
@@ -264,7 +285,7 @@ impl Driver {
         Ok(())
     }
 
-    // Prints graph in Graphviz format, then opens a web browser to display the results.
+    /// Prints graph in Graphviz format, then opens a web browser to display the results.
     pub fn print_graph(&self, graph: &Graph) -> IoResult<()> {
         let tmp_dir = fs::read_dir(".")?.find(|entry| entry.as_ref().unwrap().file_name() == "tmp");
         if tmp_dir.is_none() {
@@ -300,6 +321,14 @@ impl Driver {
                 let a = DeclId::new(i);
                 self.write_deps(&mut w, a, graph)?;
             }
+        }
+        for i in 0..graph.dependees.expr_len() {
+            let a = ExprId::new(i);
+            self.write_non_t1_deps(&mut w, a, graph)?;
+        }
+        for i in 0..graph.dependees.decl_len() {
+            let a = DeclId::new(i);
+            self.write_non_t1_deps(&mut w, a, graph)?;
         }
         writeln!(w, "}}")?;
         w.flush()?;
