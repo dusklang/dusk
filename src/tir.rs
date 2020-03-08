@@ -133,7 +133,6 @@ pub struct Builder {
     decl_levels: IdxVec<u32, DeclId>,
 
     global_decls: Vec<GlobalDeclGroup>,
-    comp_decl_stack: Vec<CompDeclState>,
 
     staged_ret_groups: Vec<(DeclId, RetGroup)>,
 }
@@ -148,42 +147,6 @@ struct GlobalDecl {
 struct GlobalDeclGroup {
     name: Sym,
     decls: Vec<GlobalDecl>,
-}
-
-#[derive(Debug)]
-struct LocalDecl {
-    name: Sym,
-    id: DeclId,
-}
-
-#[derive(Debug)]
-struct CompDeclState {
-    local_decls: Vec<LocalDecl>,
-    /// The size of `local_decls` before the current scope was started
-    scope_stack: Vec<usize>,
-
-    /// All the expressions to be put into this comp decl's RetGroup
-    returned_expressions: SmallVec<[ExprId; 1]>,
-}
-
-impl CompDeclState {
-    fn new() -> Self {
-        Self {
-            local_decls: Vec::new(),
-            scope_stack: Vec::new(),
-            returned_expressions: SmallVec::new(),
-        }
-    }
-
-    fn open_scope(&mut self) {
-        self.scope_stack.push(self.local_decls.len());
-    }
-
-    fn close_scope(&mut self) {
-        let new_len = self.scope_stack.pop().unwrap();
-        debug_assert!(new_len <= self.local_decls.len());
-        self.local_decls.truncate(new_len);
-    }
 }
 
 impl Builder {
@@ -201,7 +164,6 @@ impl Builder {
 
             decls: IdxVec::new(),
             global_decls: Vec::new(),
-            comp_decl_stack: Vec::new(),
             overloads: IdxVec::new(),
 
             staged_ret_groups: Vec::new(),
@@ -215,9 +177,53 @@ impl Builder {
 
 impl Driver {
     pub fn build_tir(&mut self) {
+        // Populate `decls`
+        for decl in &self.hir.decls {
+            let (is_mut, param_tys) = match *decl {
+                hir::Decl::Computed { ref param_tys, .. } => (
+                    false,
+                    param_tys.clone(),
+                ),
+                hir::Decl::Const(_) => (
+                    false,
+                    SmallVec::new(),
+                ),
+                hir::Decl::Intrinsic { ref param_tys, .. } => (
+                    false,
+                    param_tys.clone(),
+                ),
+                hir::Decl::Parameter { .. } => (
+                    false,
+                    SmallVec::new(),
+                ),
+                hir::Decl::Static(_) => (
+                    true,
+                    SmallVec::new(),
+                ),
+                hir::Decl::Stored { is_mut, .. } => (
+                    is_mut,
+                    SmallVec::new(),
+                ),
+            };
+            self.tir.decls.push(Decl { param_tys, is_mut });
+        }
+
+        // Populate `global_decls`
+        for &id in &self.hir.global_decls {
+            let name = self.hir.names[id];
+            let num_params = self.tir.decls[id].param_tys.len();
+            let group = match self.tir.global_decls.iter_mut().find(|group| group.name == name) {
+                Some(group) => group,
+                None => {
+                    self.tir.global_decls.push(GlobalDeclGroup { name, decls: Vec::new() });
+                    self.tir.global_decls.last_mut().unwrap()
+                },
+            };
+            group.decls.push(GlobalDecl { id, num_params });
+        }
+
+        // Add dependencies to the graph
         let mut graph = self.create_graph();
-        
-        // Add type 1 dependencies to the graph
         for i in 0..self.hir.decls.len() {
             let id = DeclId::new(i);
             match self.hir.decls[id] {
