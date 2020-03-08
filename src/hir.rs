@@ -20,7 +20,7 @@ pub enum Expr {
     StrLit { lit: CString },
     CharLit { lit: i8 },
     ConstTy(Type),
-    DeclRef { name: Sym, arguments: SmallVec<[ExprId; 2]>, id: DeclRefId },
+    DeclRef { name: Sym, arguments: SmallVec<[ExprId; 2]>, id: DeclRefId, namespace: Option<Namespace> },
     AddrOf { expr: ExprId, is_mut: bool },
     /// Transforms type into pointer type
     Pointer { expr: ExprId, is_mut: bool },
@@ -54,8 +54,15 @@ pub enum Item {
     ComputedDecl(DeclId),
 }
 
+#[derive(Debug, Copy, Clone)]
+pub struct Namespace {
+    pub scope: ScopeId,
+    pub end_offset: usize,
+}
+
 #[derive(Debug)]
 pub struct Scope {
+    pub parent: Option<Namespace>,
     pub items: Vec<Item>,
     pub terminal_expr: ExprId,
 }
@@ -213,14 +220,20 @@ impl Builder {
         self.push(Expr::Do { scope }, range)
     }
     pub fn begin_scope(&mut self) -> ScopeId { 
+        let parent = match self.comp_decl_stack.last().unwrap().scope_stack.last() {
+            Some(parent_scope) => Some(self.new_namespace(parent_scope.id)),
+            None => None,
+        };
+
+        let comp_decl = self.comp_decl_stack.last_mut().unwrap();
+        assert!(!comp_decl.scope_stack.is_empty() || comp_decl.has_scope.is_none(), "Can't add multiple top-level scopes to a computed decl");
         let id = self.scopes.push(
             Scope {
+                parent,
                 items: Vec::new(),
                 terminal_expr: self.void_expr,
             }
         );
-        let comp_decl = self.comp_decl_stack.last_mut().unwrap();
-        assert!(!comp_decl.scope_stack.is_empty() || comp_decl.has_scope.is_none(), "Can't add multiple top-level scopes to a computed decl");
         if comp_decl.scope_stack.is_empty() {
             comp_decl.has_scope = Some(id);
         }
@@ -284,9 +297,17 @@ impl Builder {
             panic!("Unexpected decl kind when ending computed decl!");
         }
     }
+    fn new_namespace(&self, scope: ScopeId) -> Namespace {
+        let end_offset = self.scopes[scope].items.len();
+        Namespace { scope, end_offset }
+    }
     pub fn decl_ref(&mut self, name: Sym, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
+        let namespace = match self.comp_decl_stack.last() {
+            Some(decl) => Some(self.new_namespace(decl.scope_stack.last().unwrap().id)),
+            None => None,
+        };
         let decl_ref_id = self.decl_ref_counter.next();
-        self.push(Expr::DeclRef { name, arguments, id: decl_ref_id }, range)
+        self.push(Expr::DeclRef { name, arguments, id: decl_ref_id, namespace }, range)
     }
     pub fn get_range(&self, id: ExprId) -> SourceRange { self.source_ranges[id].clone() }
     pub fn set_range(&mut self, id: ExprId, range: SourceRange) { self.source_ranges[id] = range; }
