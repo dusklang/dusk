@@ -256,10 +256,10 @@ impl Driver {
 
     fn write_non_t1_deps(&self, w: &mut impl Write, a: impl Item, graph: &Graph) -> IoResult<()> {
         for &b in &graph.t2_dependees[a] {
-            self.write_dep(w, a, b, |w| write!(w, " [style=dashed]"))?;
+            self.write_dep(w, a, b, |w| write!(w, " [style=dashed, constraint=false]"))?;
         }
         for &b in &graph.t3_dependees[a] {
-            self.write_dep(w, a, b, |w| write!(w, " [style=dashed; color=grey]"))?;
+            self.write_dep(w, a, b, |w| write!(w, " [style=dashed, color=grey]"))?;
         }
         for &b in &graph.t4_dependees[a] {
             self.write_dep(w, a, b, |w| write!(w, " [color=red]"))?;

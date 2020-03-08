@@ -11,6 +11,7 @@ use crate::source_info::SourceRange;
 use crate::ty::Type;
 
 newtype_index!(StoredDeclId pub);
+newtype_index!(DeclScopeId pub);
 
 #[derive(Debug)]
 pub enum Expr {
@@ -34,6 +35,25 @@ pub enum Expr {
 }
 
 #[derive(Debug)]
+pub struct LocalDecl {
+    pub name: Sym,
+    pub num_params: usize,
+    pub id: DeclId,
+}
+
+#[derive(Debug)]
+pub struct DeclScope {
+    pub decls: Vec<LocalDecl>,
+    pub parent: Option<Namespace>,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct Namespace {
+    pub scope: DeclScopeId,
+    pub end_offset: usize,
+}
+
+#[derive(Debug)]
 pub struct DeclRef {
     pub name: Sym,
     pub namespace: Option<Namespace>,
@@ -43,12 +63,14 @@ pub struct DeclRef {
 #[derive(Debug)]
 struct ScopeState {
     id: ScopeId,
+    decl_scope: DeclScopeId,
     stmt_buffer: Option<ExprId>,
 }
 
 #[derive(Debug)]
 struct CompDeclState {
     has_scope: Option<ScopeId>,
+    params: Range<DeclId>,
     id: DeclId,
     scope_stack: Vec<ScopeState>,
     stored_decl_counter: IdxCounter<StoredDeclId>,
@@ -61,15 +83,8 @@ pub enum Item {
     ComputedDecl(DeclId),
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct Namespace {
-    pub scope: ScopeId,
-    pub end_offset: usize,
-}
-
 #[derive(Debug)]
 pub struct Scope {
-    pub parent: Option<Namespace>,
     pub items: Vec<Item>,
     pub terminal_expr: ExprId,
 }
@@ -101,6 +116,7 @@ pub struct Builder {
     /// The subset of decls that are in the global scope
     pub global_decls: Vec<DeclId>,
     pub scopes: IdxVec<Scope, ScopeId>,
+    pub decl_scopes: IdxVec<DeclScope, DeclScopeId>,
     pub void_expr: ExprId,
     pub void_ty: ExprId,
     pub source_ranges: IdxVec<SourceRange, ExprId>,
@@ -119,6 +135,7 @@ impl Builder {
             explicit_tys: IdxVec::new(),
             global_decls: Vec::new(),
             scopes: IdxVec::new(),
+            decl_scopes: IdxVec::new(),
             void_expr: ExprId::new(0),
             void_ty: ExprId::new(1),
             source_ranges: IdxVec::new(),
@@ -186,6 +203,13 @@ impl Builder {
         self.push(Expr::Cast { expr, ty, cast_id }, range)
     }
 
+    fn local_decl(&mut self, decl: LocalDecl) {
+        if let Some(state) = self.comp_decl_stack.last() {
+            let decl_scope = state.scope_stack.last().unwrap().decl_scope;
+            self.decl_scopes[decl_scope].decls.push(decl);
+        }
+    }
+
     pub fn stored_decl(&mut self, name: Sym, explicit_ty: Option<ExprId>, is_mut: bool, root_expr: ExprId, _range: SourceRange) {
         self.flush_stmt_buffer();
         if self.comp_decl_stack.is_empty() {
@@ -204,6 +228,13 @@ impl Builder {
 
             let decl_id = self.decl(Decl::Stored { id, is_mut, root_expr }, name, explicit_ty);
             self.item(Item::StoredDecl { decl_id, id, root_expr });
+            self.local_decl(
+                LocalDecl {
+                    name,
+                    num_params: 0,
+                    id: decl_id,
+                }
+            );
         }
     }
     pub fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
@@ -228,7 +259,7 @@ impl Builder {
     }
     pub fn begin_scope(&mut self) -> ScopeId { 
         let parent = match self.comp_decl_stack.last().unwrap().scope_stack.last() {
-            Some(parent_scope) => Some(self.new_namespace(parent_scope.id)),
+            Some(parent_scope) => Some(self.new_namespace(parent_scope.decl_scope)),
             None => None,
         };
 
@@ -236,21 +267,58 @@ impl Builder {
         assert!(!comp_decl.scope_stack.is_empty() || comp_decl.has_scope.is_none(), "Can't add multiple top-level scopes to a computed decl");
         let id = self.scopes.push(
             Scope {
-                parent,
                 items: Vec::new(),
                 terminal_expr: self.void_expr,
             }
         );
-        if comp_decl.scope_stack.is_empty() {
+        let decl_scope = self.decl_scopes.push(
+            DeclScope {
+                decls: Vec::new(),
+                parent,
+            }
+        );
+
+        let is_first_scope = comp_decl.scope_stack.is_empty();
+        if is_first_scope {
             comp_decl.has_scope = Some(id);
         }
 
         comp_decl.scope_stack.push(
             ScopeState {
                 id,
+                decl_scope,
                 stmt_buffer: None,
             }
         );
+
+        if is_first_scope {
+            let name = self.names[comp_decl.id];
+            let num_params = comp_decl.params.end.idx() - comp_decl.params.start.idx();
+            let id = comp_decl.id;
+
+            let params = comp_decl.params.clone();
+
+            // Add the current comp decl to the decl scope, to enable recursion
+            self.local_decl(
+                LocalDecl {
+                    name,
+                    num_params,
+                    id
+                }
+            );
+
+            // Add parameters to decl scope
+            for i in params.start.idx()..params.end.idx() {
+                let id = DeclId::new(i);
+                self.local_decl(
+                    LocalDecl {
+                        name: self.names[id],
+                        num_params: 0,
+                        id,
+                    }
+                );
+            }
+        }
 
         id
     }
@@ -278,7 +346,7 @@ impl Builder {
         // `end_computed_decl` will attach the real scope to this decl; we don't have it yet
         self.decls[id] = Decl::Computed {
             param_tys,
-            params,
+            params: params.clone(),
             scope: ScopeId::new(std::usize::MAX)
         };
         if self.comp_decl_stack.is_empty() {
@@ -290,6 +358,7 @@ impl Builder {
         self.comp_decl_stack.push(
             CompDeclState {
                 has_scope: None,
+                params,
                 id,
                 scope_stack: Vec::new(),
                 stored_decl_counter: IdxCounter::new(),
@@ -304,13 +373,13 @@ impl Builder {
             panic!("Unexpected decl kind when ending computed decl!");
         }
     }
-    fn new_namespace(&self, scope: ScopeId) -> Namespace {
-        let end_offset = self.scopes[scope].items.len();
+    fn new_namespace(&self, scope: DeclScopeId) -> Namespace {
+        let end_offset = self.decl_scopes[scope].decls.len();
         Namespace { scope, end_offset }
     }
     pub fn decl_ref(&mut self, name: Sym, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
         let namespace = match self.comp_decl_stack.last() {
-            Some(decl) => Some(self.new_namespace(decl.scope_stack.last().unwrap().id)),
+            Some(decl) => Some(self.new_namespace(decl.scope_stack.last().unwrap().decl_scope)),
             None => None,
         };
         let id = self.decl_refs.push(

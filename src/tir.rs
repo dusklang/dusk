@@ -180,22 +180,18 @@ impl Driver {
         let mut overloads = Vec::new();
 
         if let Some(mut namespace) = decl_ref.namespace {
-            let mut scope = &self.hir.scopes[namespace.scope];
+            let mut scope = &self.hir.decl_scopes[namespace.scope];
             loop {
-                let result = scope.items[0..namespace.end_offset].iter()
-                    .filter_map(|&item| match item {
-                        hir::Item::ComputedDecl(decl_id) | hir::Item::StoredDecl { decl_id, .. } => Some(decl_id),
-                        hir::Item::Stmt(_) => None,
-                    })
+                let result = scope.decls[0..namespace.end_offset].iter()
                     .rev()
-                    .find(|&decl| self.hir.names[decl] == decl_ref.name && self.tir.decls[decl].param_tys.len() == decl_ref.num_arguments);
-                if let Some(id) = result {
-                    overloads.push(id);
+                    .find(|&decl| decl.name == decl_ref.name && decl.num_params == decl_ref.num_arguments);
+                if let Some(decl) = result {
+                    overloads.push(decl.id);
                     return overloads;
                 }
                 if let Some(parent) = scope.parent {
                     namespace = parent;
-                    scope = &self.hir.scopes[namespace.scope];
+                    scope = &self.hir.decl_scopes[namespace.scope];
                 } else {
                     break;
                 }
