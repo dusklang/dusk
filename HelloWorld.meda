@@ -46,6 +46,8 @@ fn fib(n: i32): i32 {
 
 fn strlen(str: u8*): usize {
     str := str
+    darba := str
+    derpa := darba
     len: usize = 0
     while *((str as usize + len) as u8*) != 0 {
         len = len + 1

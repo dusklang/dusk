@@ -8,7 +8,7 @@ use string_interner::Sym;
 use crate::driver::Driver;
 use crate::builder::*;
 use crate::dep_vec::DepVec;
-use crate::hir;
+use crate::hir::{self, Namespace};
 use crate::index_vec::{Idx, IdxVec};
 
 mod graph;
@@ -176,6 +176,38 @@ impl Builder {
 }
 
 impl Driver {
+    fn find_overloads(&self, decl_ref: &hir::DeclRef) -> Vec<DeclId> {
+        let mut overloads = Vec::new();
+
+        if let Some(mut namespace) = decl_ref.namespace {
+            let mut scope = &self.hir.scopes[namespace.scope];
+            loop {
+                let result = scope.items[0..namespace.end_offset].iter()
+                    .filter_map(|&item| match item {
+                        hir::Item::ComputedDecl(decl_id) | hir::Item::StoredDecl { decl_id, .. } => Some(decl_id),
+                        hir::Item::Stmt(_) => None,
+                    })
+                    .rev()
+                    .find(|&decl| self.hir.names[decl] == decl_ref.name && self.tir.decls[decl].param_tys.len() == decl_ref.num_arguments);
+                if let Some(id) = result {
+                    overloads.push(id);
+                    return overloads;
+                }
+                if let Some(parent) = scope.parent {
+                    namespace = parent;
+                    scope = &self.hir.scopes[namespace.scope];
+                } else {
+                    break;
+                }
+            }
+        }
+
+        if let Some(group) = self.tir.global_decls.iter().find(|group| group.name == decl_ref.name) {
+            overloads.extend(group.decls.iter().map(|decl| decl.id));
+        }
+
+        overloads
+    }
     pub fn build_tir(&mut self) {
         // Populate `decls`
         for decl in &self.hir.decls {
@@ -222,6 +254,15 @@ impl Driver {
             group.decls.push(GlobalDecl { id, num_params });
         }
 
+        debug_assert!(self.tir.overloads.is_empty());
+        self.tir.overloads.reserve(self.hir.decl_refs.len());
+        for i in 0..self.hir.decl_refs.len() {
+            let id = DeclRefId::new(i);
+            let decl_ref = &self.hir.decl_refs[id];
+            let overloads = self.find_overloads(decl_ref);
+            self.tir.overloads.push(overloads);
+        }
+
         // Add dependencies to the graph
         let mut graph = self.create_graph();
         for i in 0..self.hir.decls.len() {
@@ -246,7 +287,10 @@ impl Driver {
                 hir::Expr::AddrOf { expr, .. } | hir::Expr::Deref(expr) | hir::Expr::Pointer { expr, .. } | hir::Expr::Cast { expr, .. }
                     | hir::Expr::Ret { expr } => graph.add_type1_dep(id, expr),
 
-                hir::Expr::DeclRef { ref arguments, .. } => {
+                hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => {
+                    for &overload in &self.tir.overloads[decl_ref_id] {
+                        graph.add_type2_dep(id, overload);
+                    }
                     for &arg in arguments {
                         graph.add_type1_dep(id, arg);
                     }

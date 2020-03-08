@@ -20,7 +20,7 @@ pub enum Expr {
     StrLit { lit: CString },
     CharLit { lit: i8 },
     ConstTy(Type),
-    DeclRef { name: Sym, arguments: SmallVec<[ExprId; 2]>, id: DeclRefId, namespace: Option<Namespace> },
+    DeclRef { arguments: SmallVec<[ExprId; 2]>, id: DeclRefId },
     AddrOf { expr: ExprId, is_mut: bool },
     /// Transforms type into pointer type
     Pointer { expr: ExprId, is_mut: bool },
@@ -31,6 +31,13 @@ pub enum Expr {
     While { condition: ExprId, scope: ScopeId },
     Cast { expr: ExprId, ty: ExprId, cast_id: CastId },
     Ret { expr: ExprId },
+}
+
+#[derive(Debug)]
+pub struct DeclRef {
+    pub name: Sym,
+    pub namespace: Option<Namespace>,
+    pub num_arguments: usize,
 }
 
 #[derive(Debug)]
@@ -87,7 +94,7 @@ pub enum Decl {
 #[derive(Debug)]
 pub struct Builder {
     pub exprs: IdxVec<Expr, ExprId>,
-    pub decl_ref_counter: IdxCounter<DeclRefId>,
+    pub decl_refs: IdxVec<DeclRef, DeclRefId>,
     pub decls: IdxVec<Decl, DeclId>,
     pub names: IdxVec<Sym, DeclId>,
     pub explicit_tys: IdxVec<Option<ExprId>, DeclId>,
@@ -106,7 +113,7 @@ impl Builder {
     pub fn new() -> Self {
         let mut b = Self {
             exprs: IdxVec::new(),
-            decl_ref_counter: IdxCounter::new(),
+            decl_refs: IdxVec::new(),
             decls: IdxVec::new(),
             names: IdxVec::new(),
             explicit_tys: IdxVec::new(),
@@ -306,8 +313,14 @@ impl Builder {
             Some(decl) => Some(self.new_namespace(decl.scope_stack.last().unwrap().id)),
             None => None,
         };
-        let decl_ref_id = self.decl_ref_counter.next();
-        self.push(Expr::DeclRef { name, arguments, id: decl_ref_id, namespace }, range)
+        let id = self.decl_refs.push(
+            DeclRef {
+                name,
+                namespace,
+                num_arguments: arguments.len(),
+            }
+        );
+        self.push(Expr::DeclRef { arguments, id }, range)
     }
     pub fn get_range(&self, id: ExprId) -> SourceRange { self.source_ranges[id].clone() }
     pub fn set_range(&mut self, id: ExprId, range: SourceRange) { self.source_ranges[id] = range; }
