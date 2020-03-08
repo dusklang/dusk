@@ -264,15 +264,29 @@ impl Driver {
         for i in 0..self.hir.decls.len() {
             let id = DeclId::new(i);
             match self.hir.decls[id] {
-                hir::Decl::Parameter { .. } | hir::Decl::Intrinsic { .. } => {},
+                hir::Decl::Parameter { .. } => {},
+                hir::Decl::Intrinsic { ref param_tys, .. } => {
+                    for &ty in param_tys {
+                        graph.add_type4_dep(id, ty);
+                    }
+                },
                 hir::Decl::Static(assigned_expr) | hir::Decl::Const(assigned_expr) => graph.add_type1_dep(id, assigned_expr),
-                hir::Decl::Computed { scope, .. } => {
+                hir::Decl::Computed { scope, ref param_tys, .. } => {
                     let terminal_expr = self.hir.scopes[scope].terminal_expr;
                     graph.add_type1_dep(id, terminal_expr);
+                    for &ty in param_tys {
+                        graph.add_type4_dep(id, ty);
+                    }
+                    if self.hir.explicit_tys[id].is_none() {
+                        graph.add_type4_dep(id, self.hir.void_ty);
+                    }
                 },
                 hir::Decl::Stored { root_expr, .. } => {
                     graph.add_type1_dep(id, root_expr);
                 },
+            }
+            if let Some(ty) = self.hir.explicit_tys[id] {
+                graph.add_type4_dep(id, ty);
             }
         }
         for i in 0..self.hir.exprs.len() {
@@ -280,12 +294,31 @@ impl Driver {
             match self.hir.exprs[id] {
                 hir::Expr::Void | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
                     | hir::Expr::CharLit { .. } | hir::Expr::ConstTy(_) => {},
-                hir::Expr::AddrOf { expr, .. } | hir::Expr::Deref(expr) | hir::Expr::Pointer { expr, .. } | hir::Expr::Cast { expr, .. }
-                    | hir::Expr::Ret { expr } => graph.add_type1_dep(id, expr),
-
+                hir::Expr::AddrOf { expr, .. } | hir::Expr::Deref(expr) | hir::Expr::Pointer { expr, .. }
+                    => graph.add_type1_dep(id, expr),
+                hir::Expr::Cast { expr, ty, .. } => {
+                    graph.add_type1_dep(id, expr);
+                    graph.add_type4_dep(id, ty);
+                },
+                hir::Expr::Ret { expr, decl } => {
+                    graph.add_type1_dep(id, expr);
+                    let ty = decl
+                        .and_then(|decl| self.hir.explicit_tys[decl])
+                        .unwrap_or(self.hir.void_ty);
+                    graph.add_type4_dep(id, ty);
+                }
                 hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => {
                     for &overload in &self.tir.overloads[decl_ref_id] {
-                        graph.add_type2_dep(id, overload);
+                        match self.hir.decls[overload] {
+                            hir::Decl::Computed { ref param_tys, .. } => {
+                                let ty = self.hir.explicit_tys[overload].unwrap_or(self.hir.void_ty);
+                                graph.add_type4_dep(id, ty);
+                                for &ty in param_tys {
+                                    graph.add_type4_dep(id, ty);
+                                }
+                            },
+                            _ => graph.add_type2_dep(id, overload),
+                        }
                     }
                     for &arg in arguments {
                         graph.add_type1_dep(id, arg);

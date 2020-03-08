@@ -31,7 +31,7 @@ pub enum Expr {
     If { condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId> },
     While { condition: ExprId, scope: ScopeId },
     Cast { expr: ExprId, ty: ExprId, cast_id: CastId },
-    Ret { expr: ExprId },
+    Ret { expr: ExprId, decl: Option<DeclId> },
 }
 
 #[derive(Debug)]
@@ -238,7 +238,8 @@ impl Builder {
         }
     }
     pub fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
-        self.push(Expr::Ret { expr }, range)
+        let decl = self.comp_decl_stack.last().map(|decl| decl.id);
+        self.push(Expr::Ret { expr, decl }, range)
     }
     pub fn if_expr(&mut self, condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId>, range: SourceRange) -> ExprId {
         self.push(

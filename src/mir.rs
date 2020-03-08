@@ -887,7 +887,7 @@ impl Driver {
                     ControlDest::Block(_) => return val,
                 }
             },
-            Expr::Ret { expr } => {
+            Expr::Ret { expr, .. } => {
                 return self.build_expr(
                     b,
                     expr,
