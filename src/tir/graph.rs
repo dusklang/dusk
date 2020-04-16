@@ -128,6 +128,10 @@ pub struct Graph {
 struct Component {
     exprs: Vec<ExprId>,
     decls: Vec<DeclId>,
+
+    // At the component level, the difference between type 2 and 3 dependencies doesn't matter
+    type_2_and_3_deps: Vec<CompId>,
+    type_4_deps: Vec<CompId>,
 }
 
 // TODO: Make this private. Right now it's public only because it's used in the Item trait above.
@@ -254,19 +258,6 @@ impl Driver {
         Ok(())
     }
 
-    fn write_non_t1_deps(&self, w: &mut impl Write, a: impl Item, graph: &Graph) -> IoResult<()> {
-        for &b in &graph.t2_dependees[a] {
-            self.write_dep(w, a, b, |w| write!(w, " [style=dashed, constraint=false]"))?;
-        }
-        for &b in &graph.t3_dependees[a] {
-            self.write_dep(w, a, b, |w| write!(w, " [style=dashed, color=grey]"))?;
-        }
-        for &b in &graph.t4_dependees[a] {
-            self.write_dep(w, a, b, |w| write!(w, " [color=red]"))?;
-        }
-        Ok(())
-    }
-
     fn write_expr_node(&self, w: &mut impl Write, id: ExprId) -> IoResult<()> {
         let range = self.hir.source_ranges[id].clone();
         if range.start != range.end {
@@ -321,14 +312,6 @@ impl Driver {
                 let a = DeclId::new(i);
                 self.write_deps(&mut w, a, graph)?;
             }
-        }
-        for i in 0..graph.dependees.expr_len() {
-            let a = ExprId::new(i);
-            self.write_non_t1_deps(&mut w, a, graph)?;
-        }
-        for i in 0..graph.dependees.decl_len() {
-            let a = DeclId::new(i);
-            self.write_non_t1_deps(&mut w, a, graph)?;
         }
         writeln!(w, "}}")?;
         w.flush()?;
