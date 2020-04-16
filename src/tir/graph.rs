@@ -7,6 +7,9 @@ use std::iter::Chain;
 use std::slice::Iter as SliceIter;
 use std::mem;
 use std::ops::{Index, IndexMut};
+use std::collections::HashMap;
+
+use bitflags::bitflags;
 
 use crate::builder::{ExprId, DeclId};
 use crate::index_vec::{Idx, IdxVec};
@@ -124,14 +127,35 @@ pub struct Graph {
     components: Option<IdxVec<Component, CompId>>,
 }
 
+bitflags! {
+    struct ComponentRelation: u8 {
+        const BEFORE  = 1 << 0;
+        const SAME    = 1 << 1;
+        const AFTER   = 1 << 2;
+
+        // The idea here: we bitwise & these relations together to determine what relationship each component should have with others.
+        // If two mutually exclusive relations get AND'd together and it returns 0, there must be a direct cycle.
+        const CYCLE = 0;
+
+        // At the component level, the difference between type 2 and 3 dependencies doesn't matter
+        const TYPE_2_3_FORWARD  = Self::BEFORE.bits | Self::SAME.bits;
+        const TYPE_2_3_BACKWARD = Self::SAME.bits   | Self::AFTER.bits;
+
+        const ALL = Self::BEFORE.bits | Self::SAME.bits | Self::AFTER.bits;
+    }
+}
+
+impl Default for ComponentRelation {
+    fn default() -> Self { ComponentRelation::ALL }
+}
+
+
 #[derive(Default)]
 struct Component {
     exprs: Vec<ExprId>,
     decls: Vec<DeclId>,
 
-    // At the component level, the difference between type 2 and 3 dependencies doesn't matter
-    type_2_and_3_deps: Vec<CompId>,
-    type_4_deps: Vec<CompId>,
+    deps: HashMap<CompId, ComponentRelation>,
 }
 
 // TODO: Make this private. Right now it's public only because it's used in the Item trait above.
@@ -221,14 +245,16 @@ impl Graph {
                         ItemId::Decl(decl) => state.item_to_components[decl],
                         ItemId::Expr(expr) => state.item_to_components[expr],
                     };
-                    state.components[comp].type_2_and_3_deps.push(dependee);
+                    *state.components[comp].deps.entry(dependee).or_default() &= ComponentRelation::TYPE_2_3_FORWARD;
+                    *state.components[dependee].deps.entry(comp).or_default() &= ComponentRelation::TYPE_2_3_BACKWARD;
                 }
                 for &dependee in &self.t4_dependees[expr] {
                     let dependee = match dependee {
                         ItemId::Decl(decl) => state.item_to_components[decl],
                         ItemId::Expr(expr) => state.item_to_components[expr],
                     };
-                    state.components[comp].type_4_deps.push(dependee);
+                    *state.components[comp].deps.entry(dependee).or_default() &= ComponentRelation::BEFORE;
+                    *state.components[dependee].deps.entry(comp).or_default() &= ComponentRelation::AFTER;
                 }
             }
             for j in 0..state.components[comp].decls.len() {
@@ -238,14 +264,16 @@ impl Graph {
                         ItemId::Decl(decl) => state.item_to_components[decl],
                         ItemId::Expr(expr) => state.item_to_components[expr],
                     };
-                    state.components[comp].type_2_and_3_deps.push(dependee);
+                    *state.components[comp].deps.entry(dependee).or_default() &= ComponentRelation::TYPE_2_3_FORWARD;
+                    *state.components[dependee].deps.entry(comp).or_default() &= ComponentRelation::TYPE_2_3_BACKWARD;
                 }
                 for &dependee in &self.t4_dependees[decl] {
                     let dependee = match dependee {
                         ItemId::Decl(decl) => state.item_to_components[decl],
                         ItemId::Expr(expr) => state.item_to_components[expr],
                     };
-                    state.components[comp].type_4_deps.push(dependee);
+                    *state.components[comp].deps.entry(dependee).or_default() &= ComponentRelation::BEFORE;
+                    *state.components[dependee].deps.entry(comp).or_default() &= ComponentRelation::AFTER;
                 }
             }
         }
