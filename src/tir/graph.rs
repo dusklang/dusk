@@ -212,6 +212,44 @@ impl Graph {
             self.find_component(DeclId::new(i), &mut state);
         }
 
+        for i in 0..state.components.len() {
+            let comp = CompId::new(i);
+            for j in 0..state.components[comp].exprs.len() {
+                let expr = ExprId::new(j);
+                for &dependee in self.t2_dependees[expr].iter().chain(self.t3_dependees[expr].iter()) {
+                    let dependee = match dependee {
+                        ItemId::Decl(decl) => state.item_to_components[decl],
+                        ItemId::Expr(expr) => state.item_to_components[expr],
+                    };
+                    state.components[comp].type_2_and_3_deps.push(dependee);
+                }
+                for &dependee in &self.t4_dependees[expr] {
+                    let dependee = match dependee {
+                        ItemId::Decl(decl) => state.item_to_components[decl],
+                        ItemId::Expr(expr) => state.item_to_components[expr],
+                    };
+                    state.components[comp].type_4_deps.push(dependee);
+                }
+            }
+            for j in 0..state.components[comp].decls.len() {
+                let decl = DeclId::new(j);
+                for &dependee in self.t2_dependees[decl].iter().chain(self.t3_dependees[decl].iter()) {
+                    let dependee = match dependee {
+                        ItemId::Decl(decl) => state.item_to_components[decl],
+                        ItemId::Expr(expr) => state.item_to_components[expr],
+                    };
+                    state.components[comp].type_2_and_3_deps.push(dependee);
+                }
+                for &dependee in &self.t4_dependees[decl] {
+                    let dependee = match dependee {
+                        ItemId::Decl(decl) => state.item_to_components[decl],
+                        ItemId::Expr(expr) => state.item_to_components[expr],
+                    };
+                    state.components[comp].type_4_deps.push(dependee);
+                }
+            }
+        }
+
         self.components = Some(state.components);
         self.item_to_components = state.item_to_components;
     }
