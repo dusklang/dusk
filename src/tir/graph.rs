@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::iter::Chain;
 use std::slice::Iter as SliceIter;
 use std::mem;
-use std::ops::{Index, IndexMut};
+use std::ops::{Index, IndexMut, Range};
 use std::collections::HashMap;
 
 use bitflags::bitflags;
@@ -16,6 +16,7 @@ use crate::index_vec::{Idx, IdxVec};
 use crate::driver::Driver;
 
 newtype_index!(CompId);
+newtype_index!(UnitId);
 
 #[derive(Debug, Copy, Clone)]
 pub enum ItemId {
@@ -125,6 +126,7 @@ pub struct Graph {
     item_to_components: ItemIdxVec<CompId>,
 
     components: Option<IdxVec<Component, CompId>>,
+    units: Option<IdxVec<Unit, UnitId>>,
 }
 
 bitflags! {
@@ -167,6 +169,11 @@ pub struct ComponentState {
     cur_component: Component,
     components: IdxVec<Component, CompId>,
     item_to_components: ItemIdxVec<CompId>,
+}
+
+#[derive(Default)]
+struct Unit {
+    components: Vec<CompId>,
 }
 
 impl Graph {
@@ -281,6 +288,106 @@ impl Graph {
         self.components = Some(state.components);
         self.item_to_components = state.item_to_components;
     }
+
+    pub fn find_units(&mut self) {
+        let components = self.components.as_ref().unwrap();
+        let mut component_to_units = IdxVec::<UnitId, CompId>::new();
+        component_to_units.resize_with(components.len(), || UnitId::new(std::usize::MAX));
+        let mut units = IdxVec::<Unit, UnitId>::new();
+        for (i, component) in components.iter().enumerate() {
+            let comp = CompId::new(i);
+            if component_to_units[comp].idx() != std::usize::MAX { continue; }
+
+            let mut indices = IndexSet::new(units.len());
+            for (&dependee, &relation) in &component.deps {
+                println!("{} must come {:?} {}", dependee.idx(), relation, i);
+                let dependee_unit = component_to_units[dependee];
+                // If the dependee must be before or after this one, we can't be in the same unit as it
+                if relation == ComponentRelation::BEFORE || relation == ComponentRelation::AFTER {
+                    indices.remove(dependee_unit.idx());
+                }
+            }
+
+            let unit = if let Some(unit) = indices.first() {
+                UnitId::new(unit)
+            } else {
+                let unit = units.len();
+                units.push(Unit::default());
+                UnitId::new(unit)
+            };
+            units[unit].components.push(comp);
+            component_to_units[comp] = unit;
+        }
+
+        self.units = Some(units);
+    }
+}
+
+struct IndexSet {
+    ranges: Vec<Range<usize>>,
+    original_size: usize,
+}
+
+impl IndexSet {
+    fn new(size: usize) -> Self {
+        IndexSet { ranges: vec![0..size], original_size: size }
+    }
+
+    fn remove(&mut self, index: usize) {
+        let mut intersection = None;
+        for (i, range) in self.ranges.iter().enumerate() {
+            if range.contains(&index) {
+                intersection = Some(i);
+                break;
+            }
+            if range.start > index { return; }
+        }
+
+        if let Some(i) = intersection {
+            let intersection = &mut self.ranges[i];
+            if intersection.start == index {
+                intersection.start += 1;
+                if intersection.start >= intersection.end {
+                    self.ranges.remove(i);
+                }
+            } else if intersection.end - 1 == index {
+                intersection.end -= 1;
+                if intersection.start >= intersection.end {
+                    self.ranges.remove(i);
+                }
+            } else {
+                let old_end = intersection.end;
+                intersection.end = index;
+                self.ranges.insert(i+1, (index+1)..old_end);
+            }
+        }
+    }
+
+    fn first(&self) -> Option<usize> {
+        if self.ranges.is_empty() {
+            None
+        } else if self.ranges[0].start == self.ranges[0].end {
+            None
+        } else {
+            Some(self.ranges[0].start)
+        }
+    }
+
+    fn first_vacancy(&self) -> Option<usize> {
+        if self.ranges.is_empty() {
+            if self.original_size == 0 {
+                None
+            } else {
+                Some(0)
+            }
+        } else {
+            if self.ranges[0].end == self.original_size {
+                None
+            } else {
+                Some(self.ranges[0].end)
+            }
+        }
+    }
 }
 
 impl ItemId {
@@ -304,7 +411,7 @@ impl Driver {
         item_to_components.resize_with(self.hir.exprs.len(), self.hir.decls.len(), || CompId::new(std::usize::MAX));
         
         let [dependees, t2_dependees, t3_dependees, t4_dependees, dependers] = deps;
-        Graph { dependees, t2_dependees, t3_dependees, t4_dependees, dependers, item_to_components, components: None }
+        Graph { dependees, t2_dependees, t3_dependees, t4_dependees, dependers, item_to_components, components: None, units: None }
     }
 
     fn write_dep<W: Write>(&self, w: &mut W, a: impl Item, b: ItemId, write_attribs: impl FnOnce(&mut W) -> IoResult<()>) -> IoResult<()> {
@@ -342,6 +449,24 @@ impl Driver {
         Ok(())
     }
 
+    fn write_component(&self, w: &mut impl Write, graph: &Graph, unit: usize, i: usize, component: &Component) -> IoResult<()> {
+        writeln!(w, "    subgraph cluster{}_{} {{", unit, i)?;
+        writeln!(w, "        label=\"component {}\";", i)?;
+        writeln!(w, "        style=filled;")?;
+        writeln!(w, "        color=lightgrey;")?;
+        writeln!(w, "        node [style=filled,color=white];")?;
+        for &expr in &component.exprs {
+            self.write_deps(w, expr, graph)?;
+            self.write_expr_node(w, expr)?;
+        }
+        for &decl in &component.decls {
+            self.write_deps(w, decl, graph)?;
+        }
+        writeln!(w, "    }}")?;
+
+        Ok(())
+    }
+
     /// Prints graph in Graphviz format, then opens a web browser to display the results.
     pub fn print_graph(&self, graph: &Graph) -> IoResult<()> {
         let tmp_dir = fs::read_dir(".")?.find(|entry| entry.as_ref().unwrap().file_name() == "tmp");
@@ -352,21 +477,21 @@ impl Driver {
         writeln!(w, "digraph G {{")?;
         writeln!(w, "    node [shape=box];")?;
 
-        if let Some(components) = &graph.components {
-            for (i, component) in components.iter().enumerate() {
+        if let Some(units) = &graph.units {
+            let components = graph.components.as_ref().unwrap();
+            for (i, unit) in units.iter().enumerate() {
                 writeln!(w, "    subgraph cluster{} {{", i)?;
-                writeln!(w, "        label=cluster{};", i)?;
+                writeln!(w, "        label=\"unit {}\";", i)?;
                 writeln!(w, "        style=filled;")?;
-                writeln!(w, "        color=lightgrey;")?;
-                writeln!(w, "        node [style=filled,color=white];")?;
-                for &expr in &component.exprs {
-                    self.write_deps(&mut w, expr, graph)?;
-                    self.write_expr_node(&mut w, expr)?;
-                }
-                for &decl in &component.decls {
-                    self.write_deps(&mut w, decl, graph)?;
+                writeln!(w, "        color=blue;")?;
+                for &comp_id in &unit.components {
+                    self.write_component(&mut w, graph, i, comp_id.idx(), &components[comp_id])?;
                 }
                 writeln!(w, "    }}")?;
+            }
+        } else if let Some(components) = &graph.components {
+            for (i, component) in components.iter().enumerate() {
+                self.write_component(&mut w, graph, 0, i, component)?;
             }
         } else {
             for i in 0..graph.dependees.expr_len() {

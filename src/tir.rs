@@ -352,6 +352,7 @@ impl Driver {
             }
         }
         graph.split();
+        graph.find_units();
         self.print_graph(&graph).unwrap();
     }
 }
