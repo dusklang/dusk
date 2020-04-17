@@ -226,6 +226,32 @@ impl Graph {
         state.components.push(new_component);
     }
 
+    fn transfer_item_dep_to_component(
+        &self,
+        comp: CompId,
+        dependee: ItemId,
+        forward_mask: ComponentRelation,
+        backward_mask: ComponentRelation,
+        state: &mut ComponentState
+    ) {
+        let dependee = match dependee {
+            ItemId::Decl(decl) => state.item_to_components[decl],
+            ItemId::Expr(expr) => state.item_to_components[expr],
+        };
+        *state.components[comp].deps.entry(dependee).or_default() &= forward_mask;
+        *state.components[dependee].deps.entry(comp).or_default() &= backward_mask;
+    }
+
+    fn transfer_item_deps_to_component(&self, comp: CompId, item: impl Item, state: &mut ComponentState) {
+        let t2_and_t3_dependendees = self.t2_dependees[item].iter().chain(self.t3_dependees[item].iter());
+        for &dependee in t2_and_t3_dependendees {
+            self.transfer_item_dep_to_component(comp, dependee, ComponentRelation::TYPE_2_3_FORWARD, ComponentRelation::TYPE_2_3_BACKWARD, state);
+        }
+        for &dependee in &self.t4_dependees[item] {
+            self.transfer_item_dep_to_component(comp, dependee, ComponentRelation::BEFORE, ComponentRelation::AFTER, state);
+        }
+    }
+
     // Find the weak components of the graph
     pub fn split(&mut self) {
         let mut visited = ItemIdxVec::new();
@@ -246,42 +272,10 @@ impl Graph {
         for i in 0..state.components.len() {
             let comp = CompId::new(i);
             for j in 0..state.components[comp].exprs.len() {
-                let expr = ExprId::new(j);
-                for &dependee in self.t2_dependees[expr].iter().chain(self.t3_dependees[expr].iter()) {
-                    let dependee = match dependee {
-                        ItemId::Decl(decl) => state.item_to_components[decl],
-                        ItemId::Expr(expr) => state.item_to_components[expr],
-                    };
-                    *state.components[comp].deps.entry(dependee).or_default() &= ComponentRelation::TYPE_2_3_FORWARD;
-                    *state.components[dependee].deps.entry(comp).or_default() &= ComponentRelation::TYPE_2_3_BACKWARD;
-                }
-                for &dependee in &self.t4_dependees[expr] {
-                    let dependee = match dependee {
-                        ItemId::Decl(decl) => state.item_to_components[decl],
-                        ItemId::Expr(expr) => state.item_to_components[expr],
-                    };
-                    *state.components[comp].deps.entry(dependee).or_default() &= ComponentRelation::BEFORE;
-                    *state.components[dependee].deps.entry(comp).or_default() &= ComponentRelation::AFTER;
-                }
+                self.transfer_item_deps_to_component(comp, ExprId::new(j), &mut state);
             }
             for j in 0..state.components[comp].decls.len() {
-                let decl = DeclId::new(j);
-                for &dependee in self.t2_dependees[decl].iter().chain(self.t3_dependees[decl].iter()) {
-                    let dependee = match dependee {
-                        ItemId::Decl(decl) => state.item_to_components[decl],
-                        ItemId::Expr(expr) => state.item_to_components[expr],
-                    };
-                    *state.components[comp].deps.entry(dependee).or_default() &= ComponentRelation::TYPE_2_3_FORWARD;
-                    *state.components[dependee].deps.entry(comp).or_default() &= ComponentRelation::TYPE_2_3_BACKWARD;
-                }
-                for &dependee in &self.t4_dependees[decl] {
-                    let dependee = match dependee {
-                        ItemId::Decl(decl) => state.item_to_components[decl],
-                        ItemId::Expr(expr) => state.item_to_components[expr],
-                    };
-                    *state.components[comp].deps.entry(dependee).or_default() &= ComponentRelation::BEFORE;
-                    *state.components[dependee].deps.entry(comp).or_default() &= ComponentRelation::AFTER;
-                }
+                self.transfer_item_deps_to_component(comp, DeclId::new(j), &mut state);
             }
         }
 
@@ -436,7 +430,7 @@ impl Driver {
         if range.start != range.end {
             writeln!(
                 w,
-                "    expr{} [label=\"{}\\l\"];",
+                "    expr{0} [label=\"expr{0}:\n{1}\\l\"];",
                 id.idx(),
                 // TODO: do something more efficient than calling replace multiple times
                 self.file.substring_from_range(range)
