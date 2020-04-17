@@ -272,10 +272,10 @@ impl Graph {
         for i in 0..state.components.len() {
             let comp = CompId::new(i);
             for j in 0..state.components[comp].exprs.len() {
-                self.transfer_item_deps_to_component(comp, ExprId::new(j), &mut state);
+                self.transfer_item_deps_to_component(comp, state.components[comp].exprs[j], &mut state);
             }
             for j in 0..state.components[comp].decls.len() {
-                self.transfer_item_deps_to_component(comp, DeclId::new(j), &mut state);
+                self.transfer_item_deps_to_component(comp, state.components[comp].decls[j], &mut state);
             }
         }
 
