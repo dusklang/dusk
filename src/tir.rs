@@ -331,11 +331,7 @@ impl Driver {
                                 }
                                 graph.add_type3_dep(id, overload);
                             },
-                            _ => {
-                                println!("before! {}", self.interner.resolve(self.hir.names[overload]).unwrap());
-                                graph.add_type2_dep(id, overload);
-                                println!("after! {}", self.interner.resolve(self.hir.names[overload]).unwrap());
-                            },
+                            _ => graph.add_type2_dep(id, overload),
                         }
                     }
                     for &arg in arguments {

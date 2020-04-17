@@ -294,7 +294,6 @@ impl Graph {
 
             let mut indices = IndexSet::new(units.len());
             for (&dependee, &relation) in &component.deps {
-                println!("{} must come {:?} {}", dependee.idx(), relation, i);
                 let dependee_unit = component_to_units[dependee];
                 // If the dependee must be before or after this one, we can't be in the same unit as it
                 if relation == ComponentRelation::BEFORE || relation == ComponentRelation::AFTER {
