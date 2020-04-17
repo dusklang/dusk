@@ -1,4 +1,4 @@
-fn assert(condition: bool) {
+/*fn assert(condition: bool) {
     if !condition { panic("assertion failed") }
 }
 
@@ -138,7 +138,7 @@ fn main {
     fn float_const {
         blah: f32 = 5.2
     }
-}
+}*/
 /*
 // This works:
 fn ret_num(in: i32): i32 { var := 5 var }
@@ -158,3 +158,14 @@ fn main {
 fn compute_something(i: i32): i32 {
     i
 }*/
+
+fn compute_a_type: type {
+    u16
+}
+
+
+fn compute_a_number: u32 {
+    sixteen_bit_number: compute_a_type = 256
+
+    sixteen_bit_number as u32
+}

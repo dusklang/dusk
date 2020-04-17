@@ -204,6 +204,18 @@ impl Driver {
 
         overloads
     }
+
+    fn add_type3_scope_dep(&self, graph: &mut Graph, a: impl graph::Item, b: ScopeId) {
+        let scope = &self.hir.scopes[b];
+        for &item in &scope.items {
+            match item {
+                hir::Item::Stmt(expr) => graph.add_type3_dep(a, expr),
+                hir::Item::StoredDecl { decl_id, root_expr, .. } => graph.add_type3_dep(a, decl_id),
+                hir::Item::ComputedDecl(_) => {},
+            }
+        }
+    }
+
     pub fn build_tir(&mut self) {
         // Populate `decls`
         for decl in &self.hir.decls {
@@ -272,6 +284,7 @@ impl Driver {
                 },
                 hir::Decl::Static(assigned_expr) | hir::Decl::Const(assigned_expr) => graph.add_type1_dep(id, assigned_expr),
                 hir::Decl::Computed { scope, ref param_tys, .. } => {
+                    self.add_type3_scope_dep(&mut graph, id, scope);
                     let terminal_expr = self.hir.scopes[scope].terminal_expr;
                     graph.add_type1_dep(id, terminal_expr);
                     for &ty in param_tys {
@@ -316,6 +329,7 @@ impl Driver {
                                 for &ty in param_tys {
                                     graph.add_type4_dep(id, ty);
                                 }
+                                graph.add_type3_dep(id, overload);
                             },
                             _ => graph.add_type2_dep(id, overload),
                         }
@@ -329,14 +343,17 @@ impl Driver {
                     graph.add_type1_dep(id, rhs);
                 },
                 hir::Expr::Do { scope } => {
+                    self.add_type3_scope_dep(&mut graph, id, scope);
                     let terminal_expr = self.hir.scopes[scope].terminal_expr;
                     graph.add_type1_dep(id, terminal_expr);
                 },
                 hir::Expr::If { condition, then_scope, else_scope } => {
                     graph.add_type1_dep(id, condition);
 
+                    self.add_type3_scope_dep(&mut graph, id, then_scope);
                     let then_expr = self.hir.scopes[then_scope].terminal_expr;
                     let else_expr = if let Some(else_scope) = else_scope {
+                        self.add_type3_scope_dep(&mut graph, id, else_scope);
                         self.hir.scopes[else_scope].terminal_expr
                     } else {
                         self.hir.void_expr
@@ -346,6 +363,7 @@ impl Driver {
                 }
                 hir::Expr::While { condition, scope } => {
                     graph.add_type1_dep(id, condition);
+                    self.add_type3_scope_dep(&mut graph, id, scope);
                     let terminal_expr = self.hir.scopes[scope].terminal_expr;
                     graph.add_type1_dep(id, terminal_expr);
                 },
