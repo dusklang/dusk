@@ -8,6 +8,7 @@ use std::slice::Iter as SliceIter;
 use std::mem;
 use std::ops::{Index, IndexMut, Range};
 use std::collections::HashMap;
+use std::cmp::Ordering;
 
 use bitflags::bitflags;
 
@@ -288,98 +289,44 @@ impl Graph {
         let mut component_to_units = IdxVec::<UnitId, CompId>::new();
         component_to_units.resize_with(components.len(), || UnitId::new(std::usize::MAX));
         let mut units = IdxVec::<Unit, UnitId>::new();
-        for (i, component) in components.iter().enumerate() {
-            let comp = CompId::new(i);
-            if component_to_units[comp].idx() != std::usize::MAX { continue; }
 
-            let mut indices = IndexSet::new(units.len());
-            for (&dependee, &relation) in &component.deps {
-                let dependee_unit = component_to_units[dependee];
-                // If the dependee must be before or after this one, we can't be in the same unit as it
-                if relation == ComponentRelation::BEFORE || relation == ComponentRelation::AFTER {
-                    indices.remove(dependee_unit.idx());
+        // Sort the components by relation
+        let mut sorted_components: Vec<_> = components.iter()
+            .enumerate()
+            .map(|(i, c)| (CompId::new(i), c))
+            .collect();
+        sorted_components.sort_by(|(a_id, _), (_, b)| {
+            if let Some(&relation) = b.deps.get(&a_id) {
+                if relation.contains(ComponentRelation::BEFORE)  {
+                    Ordering::Less
+                } else if relation.contains(ComponentRelation::AFTER) {
+                    Ordering::Greater
+                } else {
+                    Ordering::Equal
+                }
+            } else {
+                Ordering::Equal
+            }
+        });
+
+        let mut cur_unit = units.push(Unit::default());
+        let mut comp_iter = sorted_components.iter().peekable();
+        while let Some(cur) = comp_iter.next() {
+            let &(a_id, _) = cur;
+            units.raw.last_mut().unwrap().components.push(a_id);
+            component_to_units[a_id] = cur_unit;
+
+            if let Some(next) = comp_iter.peek() {
+                let &(_, b) = next;
+                if let Some(&relation) = b.deps.get(&a_id) {
+                    if !relation.contains(ComponentRelation::SAME) {
+                        cur_unit = units.push(Unit::default());
+                    }
                 }
             }
-
-            let unit = if let Some(unit) = indices.first() {
-                UnitId::new(unit)
-            } else {
-                let unit = units.len();
-                units.push(Unit::default());
-                UnitId::new(unit)
-            };
-            units[unit].components.push(comp);
-            component_to_units[comp] = unit;
         }
 
         self.units = Some(units);
-    }
-}
-
-struct IndexSet {
-    ranges: Vec<Range<usize>>,
-    original_size: usize,
-}
-
-impl IndexSet {
-    fn new(size: usize) -> Self {
-        IndexSet { ranges: vec![0..size], original_size: size }
-    }
-
-    fn remove(&mut self, index: usize) {
-        let mut intersection = None;
-        for (i, range) in self.ranges.iter().enumerate() {
-            if range.contains(&index) {
-                intersection = Some(i);
-                break;
-            }
-            if range.start > index { return; }
-        }
-
-        if let Some(i) = intersection {
-            let intersection = &mut self.ranges[i];
-            if intersection.start == index {
-                intersection.start += 1;
-                if intersection.start >= intersection.end {
-                    self.ranges.remove(i);
-                }
-            } else if intersection.end - 1 == index {
-                intersection.end -= 1;
-                if intersection.start >= intersection.end {
-                    self.ranges.remove(i);
-                }
-            } else {
-                let old_end = intersection.end;
-                intersection.end = index;
-                self.ranges.insert(i+1, (index+1)..old_end);
-            }
-        }
-    }
-
-    fn first(&self) -> Option<usize> {
-        if self.ranges.is_empty() {
-            None
-        } else if self.ranges[0].start == self.ranges[0].end {
-            None
-        } else {
-            Some(self.ranges[0].start)
-        }
-    }
-
-    fn first_vacancy(&self) -> Option<usize> {
-        if self.ranges.is_empty() {
-            if self.original_size == 0 {
-                None
-            } else {
-                Some(0)
-            }
-        } else {
-            if self.ranges[0].end == self.original_size {
-                None
-            } else {
-                Some(self.ranges[0].end)
-            }
-        }
     }
 }
 
@@ -429,7 +376,7 @@ impl Driver {
         if range.start != range.end {
             writeln!(
                 w,
-                "    expr{0} [label=\"expr{0}:\n{1}\\l\"];",
+                "    expr{} [label=\"{}\\l\"];",
                 id.idx(),
                 // TODO: do something more efficient than calling replace multiple times
                 self.file.substring_from_range(range)

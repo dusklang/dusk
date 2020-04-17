@@ -139,7 +139,7 @@ fn main {
         blah: f32 = 5.2
     }
 }*/
-/*
+
 // This works:
 fn ret_num(in: i32): i32 { var := 5 var }
 
@@ -157,7 +157,7 @@ fn main {
 
 fn compute_something(i: i32): i32 {
     i
-}*/
+}
 
 fn compute_a_type: type {
     u16
