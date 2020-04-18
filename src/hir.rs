@@ -119,7 +119,7 @@ pub struct Builder {
     pub decl_scopes: IdxVec<DeclScope, DeclScopeId>,
     pub void_expr: ExprId,
     pub void_ty: ExprId,
-    pub source_ranges: IdxVec<SourceRange, ExprId>,
+    pub expr_source_ranges: IdxVec<SourceRange, ExprId>,
 
     cast_counter: IdxCounter<CastId>,
     comp_decl_stack: Vec<CompDeclState>,
@@ -138,7 +138,7 @@ impl Builder {
             decl_scopes: IdxVec::new(),
             void_expr: ExprId::new(0),
             void_ty: ExprId::new(1),
-            source_ranges: IdxVec::new(),
+            expr_source_ranges: IdxVec::new(),
             cast_counter: IdxCounter::new(),
             comp_decl_stack: Vec::new(),
         };
@@ -149,7 +149,7 @@ impl Builder {
 
     fn push(&mut self, expr: Expr, range: SourceRange) -> ExprId {
         let id1 = self.exprs.push(expr);
-        let id2 = self.source_ranges.push(range);
+        let id2 = self.expr_source_ranges.push(range);
         debug_assert_eq!(id1, id2);
         id1
     }
@@ -392,8 +392,8 @@ impl Builder {
         );
         self.push(Expr::DeclRef { arguments, id }, range)
     }
-    pub fn get_range(&self, id: ExprId) -> SourceRange { self.source_ranges[id].clone() }
-    pub fn set_range(&mut self, id: ExprId, range: SourceRange) { self.source_ranges[id] = range; }
+    pub fn get_range(&self, id: ExprId) -> SourceRange { self.expr_source_ranges[id].clone() }
+    pub fn set_range(&mut self, id: ExprId, range: SourceRange) { self.expr_source_ranges[id] = range; }
 }
 
 impl Driver {

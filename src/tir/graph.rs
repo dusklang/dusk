@@ -383,7 +383,7 @@ impl Driver {
     }
 
     fn write_expr_node(&self, w: &mut impl Write, id: ExprId) -> IoResult<()> {
-        let range = self.hir.source_ranges[id].clone();
+        let range = self.hir.expr_source_ranges[id].clone();
         if range.start != range.end {
             writeln!(
                 w,
