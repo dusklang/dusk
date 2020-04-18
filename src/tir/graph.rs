@@ -297,7 +297,8 @@ impl Graph {
         );
 
         while !outstanding_components.is_empty() {
-            let mut cur_unit = Unit::default();
+            // Get all components that have no type 4 dependencies on outstanding components
+            let mut cur_unit_comps = HashSet::<CompId>::new();
             for &comp in &outstanding_components {
                 let mut should_add = true;
                 for (&dependee, &relation) in &components[comp].deps {
@@ -307,10 +308,28 @@ impl Graph {
                     }
                 }
                 if should_add {
-                    cur_unit.components.push(comp);
+                    cur_unit_comps.insert(comp);
                 }
             }
+            
+            // Whittle down the components to only those that have type 2 or 3 dependencies on each other, or included components
+            // (and not other outstanding components)
+            loop {
+                // Yay borrow checker
+                let cur_unit_copy = cur_unit_comps.clone();
+                cur_unit_comps.retain(|&comp| {
+                    for (&dependee, &relation) in &components[comp].deps {
+                        if relation == ComponentRelation::TYPE_2_3_FORWARD && !cur_unit_copy.contains(&dependee) && !included_components.contains(&dependee) {
+                            return false;
+                        }
+                    }
+                    true
+                });
+                if cur_unit_copy.len() == cur_unit_comps.len() { break; }
+            }
 
+            let mut cur_unit = Unit::default();
+            cur_unit.components.extend(cur_unit_comps.iter());
             for &comp in &cur_unit.components {
                 included_components.insert(comp);
                 outstanding_components.remove(&comp);
