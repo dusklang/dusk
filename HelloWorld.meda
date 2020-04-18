@@ -159,13 +159,21 @@ fn compute_something(i: i32): i32 {
     i
 }
 
+OS_WINDOWS: u8: 0
+OS_MAC:     u8: 1
+OS_LINUX:   u8: 2
+os :: OS_WINDOWS
+
 fn compute_a_type: type {
-    u16
+    if os == OS_WINDOWS {
+        u16
+    } else {
+        u64
+    }
 }
 
-
 fn compute_a_number: u32 {
-    sixteen_bit_number: compute_a_type = 256
+    sixteen_bit_number: compute_a_type() = 256
 
     sixteen_bit_number as u32
 }

@@ -290,9 +290,8 @@ impl Driver {
                     for &ty in param_tys {
                         graph.add_type4_dep(id, ty);
                     }
-                    if self.hir.explicit_tys[id].is_none() {
-                        graph.add_type4_dep(id, self.hir.void_ty);
-                    }
+                    let ty = self.hir.explicit_tys[id].unwrap_or(self.hir.void_ty);
+                    graph.add_type4_dep(id, ty);
                 },
                 hir::Decl::Stored { root_expr, .. } => {
                     graph.add_type1_dep(id, root_expr);

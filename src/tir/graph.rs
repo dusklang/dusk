@@ -7,7 +7,8 @@ use std::iter::Chain;
 use std::slice::Iter as SliceIter;
 use std::mem;
 use std::ops::{Index, IndexMut, Range};
-use std::collections::HashMap;
+use std::iter::FromIterator;
+use std::collections::{HashMap, HashSet};
 use std::cmp::Ordering;
 
 use bitflags::bitflags;
@@ -289,41 +290,32 @@ impl Graph {
         let mut component_to_units = IdxVec::<UnitId, CompId>::new();
         component_to_units.resize_with(components.len(), || UnitId::new(std::usize::MAX));
         let mut units = IdxVec::<Unit, UnitId>::new();
+        let mut included_components = HashSet::<CompId>::new();
+        let mut outstanding_components = HashSet::<CompId>::from_iter(
+            (0..components.len())
+                .map(|i| CompId::new(i))
+        );
 
-        // Sort the components by relation
-        let mut sorted_components: Vec<_> = components.iter()
-            .enumerate()
-            .map(|(i, c)| (CompId::new(i), c))
-            .collect();
-        sorted_components.sort_by(|(a_id, _), (_, b)| {
-            if let Some(&relation) = b.deps.get(&a_id) {
-                if relation.contains(ComponentRelation::BEFORE)  {
-                    Ordering::Less
-                } else if relation.contains(ComponentRelation::AFTER) {
-                    Ordering::Greater
-                } else {
-                    Ordering::Equal
-                }
-            } else {
-                Ordering::Equal
-            }
-        });
-
-        let mut cur_unit = units.push(Unit::default());
-        let mut comp_iter = sorted_components.iter().peekable();
-        while let Some(cur) = comp_iter.next() {
-            let &(a_id, _) = cur;
-            units.raw.last_mut().unwrap().components.push(a_id);
-            component_to_units[a_id] = cur_unit;
-
-            if let Some(next) = comp_iter.peek() {
-                let &(_, b) = next;
-                if let Some(&relation) = b.deps.get(&a_id) {
-                    if !relation.contains(ComponentRelation::SAME) {
-                        cur_unit = units.push(Unit::default());
+        while !outstanding_components.is_empty() {
+            let mut cur_unit = Unit::default();
+            for &comp in &outstanding_components {
+                let mut should_add = true;
+                for (&dependee, &relation) in &components[comp].deps {
+                    if relation == ComponentRelation::BEFORE && !included_components.contains(&dependee) {
+                        should_add = false;
+                        break;
                     }
                 }
+                if should_add {
+                    cur_unit.components.push(comp);
+                }
             }
+
+            for &comp in &cur_unit.components {
+                included_components.insert(comp);
+                outstanding_components.remove(&comp);
+            }
+            units.push(cur_unit);
         }
 
         self.units = Some(units);
