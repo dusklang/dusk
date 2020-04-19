@@ -478,13 +478,17 @@ impl Driver {
         proto_range = source_info::concat(proto_range, self.cur(p).range.clone());
         let mut param_names = SmallVec::new();
         let mut param_tys = SmallVec::new();
+        let mut param_ranges = SmallVec::new();
         if let TokenKind::LeftParen = self.next(p).kind {
             self.next(p);
             while let TokenKind::Ident(name) = *self.cur(p).kind {
+                let mut param_range = self.cur(p).range.clone();
                 param_names.push(name);
                 assert_eq!(self.next(p).kind, &TokenKind::Colon);
                 self.next(p);
-                let (ty, _range) = self.parse_type(p);
+                let (ty, ty_range) = self.parse_type(p);
+                param_range = source_info::concat(param_range, ty_range);
+                param_ranges.push(param_range);
                 param_tys.push(ty);
                 while let TokenKind::Comma = self.cur(p).kind {
                     self.next(p);
@@ -505,7 +509,7 @@ impl Driver {
             TokenKind::Assign => None,
             tok => panic!("Invalid token {:?}", tok),
         };
-        self.hir.begin_computed_decl(name, param_names, param_tys, ty.clone(), proto_range);
+        self.hir.begin_computed_decl(name, param_names, param_tys, param_ranges, ty.clone(), proto_range);
         match self.cur(p).kind {
             TokenKind::OpenCurly => {
                 self.parse_scope(p);

@@ -120,6 +120,7 @@ pub struct Builder {
     pub void_expr: ExprId,
     pub void_ty: ExprId,
     pub expr_source_ranges: IdxVec<SourceRange, ExprId>,
+    pub decl_source_ranges: IdxVec<SourceRange, DeclId>,
 
     cast_counter: IdxCounter<CastId>,
     comp_decl_stack: Vec<CompDeclState>,
@@ -139,6 +140,7 @@ impl Builder {
             void_expr: ExprId::new(0),
             void_ty: ExprId::new(1),
             expr_source_ranges: IdxVec::new(),
+            decl_source_ranges: IdxVec::new(),
             cast_counter: IdxCounter::new(),
             comp_decl_stack: Vec::new(),
         };
@@ -171,18 +173,20 @@ impl Builder {
         self.scopes[scope].items.push(item);
     }
 
-    fn decl(&mut self, decl: Decl, name: Sym, explicit_ty: Option<ExprId>) -> DeclId {
+    fn decl(&mut self, decl: Decl, name: Sym, explicit_ty: Option<ExprId>, range: SourceRange) -> DeclId {
         let id1 = self.decls.push(decl);
         let id2 = self.explicit_tys.push(explicit_ty);
         let id3 = self.names.push(name);
+        let id4 = self.decl_source_ranges.push(range);
         debug_assert_eq!(id1, id2);
         debug_assert_eq!(id2, id3);
+        debug_assert_eq!(id3, id4);
 
         id1
     }
 
-    fn global_decl(&mut self, decl: Decl, name: Sym, explicit_ty: Option<ExprId>) {
-        let id = self.decl(decl, name, explicit_ty);
+    fn global_decl(&mut self, decl: Decl, name: Sym, explicit_ty: Option<ExprId>, range: SourceRange) {
+        let id = self.decl(decl, name, explicit_ty, range);
         self.global_decls.push(id);
     }
 
@@ -210,7 +214,7 @@ impl Builder {
         }
     }
 
-    pub fn stored_decl(&mut self, name: Sym, explicit_ty: Option<ExprId>, is_mut: bool, root_expr: ExprId, _range: SourceRange) {
+    pub fn stored_decl(&mut self, name: Sym, explicit_ty: Option<ExprId>, is_mut: bool, root_expr: ExprId, range: SourceRange) {
         self.flush_stmt_buffer();
         if self.comp_decl_stack.is_empty() {
             self.global_decl(
@@ -221,12 +225,13 @@ impl Builder {
                 },
                 name,
                 explicit_ty,
+                range,
             );
         } else {
             let decl = self.comp_decl_stack.last_mut().unwrap();
             let id = decl.stored_decl_counter.next();
 
-            let decl_id = self.decl(Decl::Stored { id, is_mut, root_expr }, name, explicit_ty);
+            let decl_id = self.decl(Decl::Stored { id, is_mut, root_expr }, name, explicit_ty, range);
             self.item(Item::StoredDecl { decl_id, id, root_expr });
             self.local_decl(
                 LocalDecl {
@@ -330,17 +335,18 @@ impl Builder {
             self.scopes[scope.id].terminal_expr = terminal_expr;
         }
     }
-    pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, explicit_ty: Option<ExprId>, _proto_range: SourceRange) {
+    pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, explicit_ty: Option<ExprId>, proto_range: SourceRange) {
         // This is a placeholder value that gets replaced once the parameter declarations get allocated.
-        let id = self.decl(Decl::Const(ExprId::new(std::usize::MAX)), name, explicit_ty);
+        let id = self.decl(Decl::Const(ExprId::new(std::usize::MAX)), name, explicit_ty, proto_range);
         assert_eq!(param_names.len(), param_tys.len());
         self.decls.reserve(param_tys.len());
         let first_param = DeclId::new(self.decls.len());
         param_tys.iter()
             .enumerate()
             .zip(&param_names)
-            .for_each(|((index, ty), &name)| {
-                self.decl(Decl::Parameter { index }, name, Some(ty.clone()));
+            .zip(&param_ranges)
+            .for_each(|(((index, ty), &name), range)| {
+                self.decl(Decl::Parameter { index }, name, Some(ty.clone()), range.clone());
             });
         let last_param = DeclId::new(self.decls.len());
         let params = first_param..last_param;
@@ -403,10 +409,9 @@ impl Driver {
         let name = self.interner.get_or_intern(intrinsic.name());
 
         use std::usize::MAX;
-        // We don't (yet?) read the source range of types, so MAX..MAX is ok
         let param_tys = param_tys.into_iter().map(|ty| self.hir.push(Expr::ConstTy(ty), MAX..MAX)).collect();
         let ret_ty = self.hir.push(Expr::ConstTy(ret_ty), MAX..MAX);
-        self.hir.global_decl(Decl::Intrinsic { intr: intrinsic, param_tys }, name, Some(ret_ty));
+        self.hir.global_decl(Decl::Intrinsic { intr: intrinsic, param_tys }, name, Some(ret_ty), MAX..MAX);
     }
     pub fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId {
         match op {
