@@ -1,5 +1,7 @@
 use std::ffi::CString;
 use std::ops::Range;
+use std::usize::MAX as USIZE_MAX;
+
 
 use smallvec::{SmallVec, smallvec};
 use string_interner::Sym;
@@ -403,15 +405,12 @@ impl Builder {
 }
 
 impl Driver {
-    // TODO: Efficiency. Right now, each call to add_intrinsic will add a bunch of new constant type expressions, many of which will
-    // be duplicates of those added in previous calls. This is a constant cost, but is still really dumb and should be fixed.
-    pub fn add_intrinsic(&mut self, intrinsic: Intrinsic, param_tys: SmallVec<[Type; 2]>, ret_ty: Type) {
+    pub fn add_const_ty(&mut self, ty: Type) -> ExprId {
+        self.hir.push(Expr::ConstTy(ty), USIZE_MAX..USIZE_MAX)
+    }
+    pub fn add_intrinsic(&mut self, intrinsic: Intrinsic, param_tys: SmallVec<[ExprId; 2]>, ret_ty: ExprId) {
         let name = self.interner.get_or_intern(intrinsic.name());
-
-        use std::usize::MAX;
-        let param_tys = param_tys.into_iter().map(|ty| self.hir.push(Expr::ConstTy(ty), MAX..MAX)).collect();
-        let ret_ty = self.hir.push(Expr::ConstTy(ret_ty), MAX..MAX);
-        self.hir.global_decl(Decl::Intrinsic { intr: intrinsic, param_tys }, name, Some(ret_ty), MAX..MAX);
+        self.hir.global_decl(Decl::Intrinsic { intr: intrinsic, param_tys }, name, Some(ret_ty), USIZE_MAX..USIZE_MAX);
     }
     pub fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId {
         match op {
