@@ -16,6 +16,8 @@ use bitflags::bitflags;
 use crate::builder::{ExprId, DeclId};
 use crate::index_vec::{Idx, IdxVec};
 use crate::driver::Driver;
+use crate::source_info::SourceRange;
+use crate::hir;
 
 newtype_index!(CompId);
 newtype_index!(UnitId);
@@ -29,6 +31,8 @@ pub enum ItemId {
 pub trait Item: Copy + Into<ItemId> {
     fn elem<T>(self, vec: &ItemIdxVec<T>) -> &T;
     fn elem_mut<T>(self, vec: &mut ItemIdxVec<T>) -> &mut T;
+    fn source_range(self, hir: &hir::Builder) -> &SourceRange;
+    fn write_debug(self, w: &mut impl Write, hir: &hir::Builder) -> IoResult<()>;
     fn write_node_name(self, w: &mut impl Write) -> IoResult<()>;
     fn add_to_component(self, state: &mut ComponentState);
 }
@@ -40,6 +44,14 @@ impl Item for ExprId {
 
     fn elem_mut<T>(self, vec: &mut ItemIdxVec<T>) -> &mut T {
         &mut vec.expr[self]
+    }
+
+    fn source_range(self, hir: &hir::Builder) -> &SourceRange {
+        &hir.expr_source_ranges[self]
+    }
+
+    fn write_debug(self, w: &mut impl Write, hir: &hir::Builder) -> IoResult<()> {
+        write!(w, "{:?}", hir.exprs[self])
     }
 
     fn write_node_name(self, w: &mut impl Write) -> IoResult<()> {
@@ -58,6 +70,14 @@ impl Item for DeclId {
 
     fn elem_mut<T>(self, vec: &mut ItemIdxVec<T>) -> &mut T {
         &mut vec.decl[self]
+    }
+
+    fn source_range(self, hir: &hir::Builder) -> &SourceRange {
+        &hir.decl_source_ranges[self]
+    }
+
+    fn write_debug(self, w: &mut impl Write, hir: &hir::Builder) -> IoResult<()> {
+        write!(w, "{:?}", hir.decls[self])
     }
 
     fn write_node_name(self, w: &mut impl Write) -> IoResult<()> {
@@ -382,13 +402,14 @@ impl Driver {
         Ok(())
     }
 
-    fn write_expr_node(&self, w: &mut impl Write, id: ExprId) -> IoResult<()> {
-        let range = self.hir.expr_source_ranges[id].clone();
+    fn write_item(&self, w: &mut impl Write, item: impl Item) -> IoResult<()> {
+        let range = item.source_range(&self.hir).clone();
+        write!(w, "    ")?;
+        item.write_node_name(w)?;
         if range.start != range.end {
             writeln!(
                 w,
-                "    expr{} [label=\"{}\\l\"];",
-                id.idx(),
+                " [label=\"{}\\l\"];",
                 // TODO: do something more efficient than calling replace multiple times
                 self.file.substring_from_range(range)
                     .replace("\\", "\\\\")
@@ -396,10 +417,14 @@ impl Driver {
                     .replace("\n", "\\n")
                     .replace("\r", ""),
             )?;
+        } else {
+            write!(w, " [label=\"")?;
+            item.write_debug(w, &self.hir)?;
+            writeln!(w, "\"];")?;
         }
         Ok(())
     }
-
+    
     fn write_component(&self, w: &mut impl Write, graph: &Graph, unit: usize, i: usize, component: &Component) -> IoResult<()> {
         writeln!(w, "    subgraph cluster{}_{} {{", unit, i)?;
         writeln!(w, "        label=\"component {}\";", i)?;
@@ -408,10 +433,11 @@ impl Driver {
         writeln!(w, "        node [style=filled,color=white];")?;
         for &expr in &component.exprs {
             self.write_deps(w, expr, graph)?;
-            self.write_expr_node(w, expr)?;
+            self.write_item(w, expr)?;
         }
         for &decl in &component.decls {
             self.write_deps(w, decl, graph)?;
+            self.write_item(w, decl)?;
         }
         writeln!(w, "    }}")?;
 
@@ -448,11 +474,12 @@ impl Driver {
             for i in 0..graph.dependees.expr_len() {
                 let a = ExprId::new(i);
                 self.write_deps(&mut w, a, graph)?;
-                self.write_expr_node(&mut w, a)?;
+                self.write_item(&mut w, a)?;
             }
             for i in 0..graph.dependees.decl_len() {
                 let a = DeclId::new(i);
                 self.write_deps(&mut w, a, graph)?;
+                self.write_item(&mut w, a)?;
             }
         }
         writeln!(w, "}}")?;
