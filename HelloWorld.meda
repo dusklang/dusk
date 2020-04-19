@@ -1,4 +1,4 @@
-/*fn assert(condition: bool) {
+fn assert(condition: bool) {
     if !condition { panic("assertion failed") }
 }
 
@@ -61,17 +61,17 @@ fn concat(a: u8*, b: u8*): u8* {
     ret_val :: buf
     a := a
     while *a != 0 {
-        (*buf) = *a
+        *buf = *a
         a = (a as usize + 1) as u8*
         buf = (buf as usize + 1) as u8 *mut
     }
     b := b
     while *b != 0 {
-        (*buf) = *b
+        *buf = *b
         b = (b as usize + 1) as u8*
         buf = (buf as usize + 1) as u8 *mut
     }
-    (*buf) = 0
+    *buf = 0
     ret_val
 }
 
@@ -105,9 +105,9 @@ fn take_a_type(T: type) {
 }
 
 fn main {
-    //fizz_buzz
-    //FIZZ_BUZZ_ITERATIONS = 200
-    //fizz_buzz
+    fizz_buzz
+    FIZZ_BUZZ_ITERATIONS = 200
+    fizz_buzz
 
     print("fib(")
     print_num(FIB_N)
@@ -117,9 +117,14 @@ fn main {
 
     print(generated_string)
 
+    // https://github.com/zachrwolfe/meda/issues/53
     h := (((((((("h" as u8) as u8) as i8) as i8) as u8) as i8) as isize) as u64)
+
     i: u64 = 24
+
+    // https://github.com/zachrwolfe/meda/issues/53
     //j := h as usize as u8*
+    
     k := 5 as u8
     l := k as u16
     m := l as i32
@@ -131,27 +136,12 @@ fn main {
     take_a_type(i8 *mut)
 
     // Allocate a single 8-bit integer on the heap
-    //num :: malloc(1) as u8 *mut
-    //(*num) = 12
-    //free(num as void *mut)
+    num :: malloc(1) as u8 *mut
+    *num = 12
+    free(num as void *mut)
 
     fn float_const {
         blah: f32 = 5.2
-    }
-}*/
-
-// This works:
-fn ret_num(in: i32): i32 { var := 5 var }
-
-var: i8 = 5
-
-fn main {
-    print("Hello world!\n")
-    var: i32 = 10
-
-    while var > 0 {
-        print("|")
-        var = var - 1
     }
 }
 
@@ -164,7 +154,7 @@ OS_MAC:     u8: 1
 OS_LINUX:   u8: 2
 os :: OS_WINDOWS
 
-fn compute_a_type: type {
+fn os_dependent_type: type {
     if os == OS_WINDOWS {
         u16
     } else {
@@ -172,8 +162,8 @@ fn compute_a_type: type {
     }
 }
 
-fn compute_a_number: u32 {
-    sixteen_bit_number: compute_a_type() = 256
+fn compute_a_number: os_dependent_type {
+    sixteen_bit_number: u16 = 256
 
-    sixteen_bit_number as u32
+    sixteen_bit_number as os_dependent_type()
 }
