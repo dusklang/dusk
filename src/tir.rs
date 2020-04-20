@@ -122,15 +122,10 @@ impl Subprogram {
 #[derive(Debug)]
 pub struct Builder {
     pub sub_progs: Vec<Subprogram>,
-    /// An expression to uniquely represent the void value
-    pub void_expr: ExprId,
     pub num_casts: usize,
     pub decls: IdxVec<Decl, DeclId>,
     /// Each declref's overload choices
     pub overloads: IdxVec<Vec<DeclId>, DeclRefId>,
-
-    expr_levels: IdxVec<u32, ExprId>,
-    decl_levels: IdxVec<u32, DeclId>,
 
     global_decls: Vec<GlobalDeclGroup>,
 
@@ -151,16 +146,9 @@ struct GlobalDeclGroup {
 
 impl Builder {
     pub fn new() -> Self {
-        // Create the void expression
-        let mut expr_levels = IdxVec::new();
-        let void_expr = expr_levels.push(0);
-
         Self {
             sub_progs: Vec::new(),
-            void_expr,
             num_casts: 0,
-            expr_levels,
-            decl_levels: IdxVec::new(),
 
             decls: IdxVec::new(),
             global_decls: Vec::new(),
@@ -168,10 +156,6 @@ impl Builder {
 
             staged_ret_groups: Vec::new(),
         }
-    }
-
-    pub fn num_exprs(&self) -> usize {
-        self.expr_levels.len()
     }
 }
 
@@ -370,6 +354,51 @@ impl Driver {
         }
         graph.split();
         graph.find_units();
-        println!("{:#?}", graph.solve());
+        let levels = graph.solve();
+        self.tir.sub_progs.resize_with(levels.num_units as usize, || Subprogram::new());
+
+        for (i, expr) in self.hir.exprs.iter().enumerate() {
+            let id = ExprId::new(i);
+            let level = levels.expr_levels[id];
+            let unit = levels.expr_units[id];
+
+            let sub_prog = &mut self.tir.sub_progs[unit as usize];
+
+            macro_rules! insert_item {
+                ($depvec:ident, $item:expr) => {{
+                    sub_prog.$depvec.insert(
+                        level,
+                        Expr { id, data: $item }
+                    );
+                }}
+            };
+
+            match expr {
+                hir::Expr::Void => {},
+                hir::Expr::IntLit { .. } => sub_prog.int_lits.push(id),
+                hir::Expr::DecLit { .. } => sub_prog.dec_lits.push(id),
+                hir::Expr::StrLit { .. } => sub_prog.str_lits.push(id),
+                hir::Expr::CharLit { .. } => sub_prog.char_lits.push(id),
+                hir::Expr::ConstTy(_) => sub_prog.const_tys.push(id),
+                &hir::Expr::AddrOf { expr, is_mut } => insert_item!(addr_ofs, AddrOf { expr, is_mut }),
+                &hir::Expr::Deref(expr) => insert_item!(derefs, Dereference { expr }),
+                &hir::Expr::Pointer { expr, .. } => insert_item!(pointers, Pointer { expr }),
+                &hir::Expr::Cast { expr, ty, cast_id } => sub_prog.casts.push(Expr { id, data: Cast { expr, ty, cast_id } }),
+                &hir::Expr::Ret { expr, decl } => sub_prog.explicit_rets.push(expr),
+                &hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => insert_item!(decl_refs, DeclRef { args: arguments.clone(), decl_ref_id }),
+                &hir::Expr::Set { lhs, rhs } => insert_item!(assignments, Assignment { lhs, rhs }),
+                &hir::Expr::Do { scope } => insert_item!(dos, Do { terminal_expr: self.hir.scopes[scope].terminal_expr }),
+                &hir::Expr::If { condition, then_scope, else_scope } => {
+                    let then_expr = self.hir.scopes[then_scope].terminal_expr;
+                    let else_expr = if let Some(else_scope) = else_scope {
+                        self.hir.scopes[else_scope].terminal_expr
+                    } else {
+                        self.hir.void_expr
+                    };
+                    insert_item!(ifs, If { condition, then_expr, else_expr });
+                },
+                &hir::Expr::While { condition, .. } => sub_prog.whiles.push(Expr { id, data: While { condition } }),
+            }
+        }
     }
 }

@@ -442,13 +442,13 @@ impl Graph {
 
 #[derive(Debug)]
 pub struct Levels {
-    expr_levels: IdxVec<u32, ExprId>,
-    decl_levels: IdxVec<u32, DeclId>,
+    pub expr_levels: IdxVec<u32, ExprId>,
+    pub decl_levels: IdxVec<u32, DeclId>,
     
-    num_units: u32,
+    pub num_units: u32,
 
-    expr_units: IdxVec<u32, ExprId>,
-    decl_units: IdxVec<u32, DeclId>,
+    pub expr_units: IdxVec<u32, ExprId>,
+    pub decl_units: IdxVec<u32, DeclId>,
 }
 
 impl ItemId {

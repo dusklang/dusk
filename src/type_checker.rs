@@ -112,10 +112,10 @@ impl Driver {
     }
 
     pub fn type_check(&mut self) {
-        self.tc.types.resize_with(self.tir.num_exprs(), Default::default);
-        self.tc.constraints.resize_with(self.tir.num_exprs(), Default::default);
+        self.tc.types.resize_with(self.hir.exprs.len(), Default::default);
+        self.tc.constraints.resize_with(self.hir.exprs.len(), Default::default);
         if self.tc.debug {
-            self.tc.constraints_copy.resize_with(self.tir.num_exprs(), Default::default);
+            self.tc.constraints_copy.resize_with(self.hir.exprs.len(), Default::default);
         }
         self.tc.overloads.resize_with(self.tir.overloads.len(), || None);
         self.tc.preferred_overloads.resize_with(self.tir.overloads.len(), || None);
@@ -128,8 +128,8 @@ impl Driver {
         }
 
         // Assign the type of the void expression to be void.
-        self.tc.constraints[self.tir.void_expr] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
-        self.tc.types[self.tir.void_expr] = Type::Void;
+        self.tc.constraints[self.hir.void_expr] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
+        self.tc.types[self.hir.void_expr] = Type::Void;
 
         for sp in 0..self.tir.sub_progs.len() {
             // Extend arrays as needed so they all have the same number of levels.
