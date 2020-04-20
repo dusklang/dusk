@@ -196,6 +196,9 @@ pub struct ComponentState {
 #[derive(Default)]
 struct Unit {
     components: Vec<CompId>,
+
+    expr_deps: HashMap<ExprId, ItemId>,
+    decl_deps: HashMap<DeclId, ItemId>,
 }
 
 impl Graph {
@@ -345,12 +348,38 @@ impl Graph {
                     }
                     true
                 });
+
+                // If we didn't remove anything this iteration, we're done
                 if cur_unit_copy.len() == cur_unit_comps.len() { break; }
             }
 
             let mut cur_unit = Unit::default();
             cur_unit.components.extend(cur_unit_comps.iter());
             for &comp in &cur_unit.components {
+                // Add intra-unit type 2 dependencies as type 1 dependencies, because they are equivalent after resolving units
+                let component = &components[comp];
+                for &expr in &component.exprs {
+                    for &dep in &self.t2_dependees[expr] {
+                        let component = match dep {
+                            ItemId::Expr(dep) => self.item_to_components[dep],
+                            ItemId::Decl(dep) => self.item_to_components[dep],
+                        };
+                        if cur_unit_comps.contains(&component) {
+                            self.dependees[expr].push(dep);
+                        }
+                    }
+                }
+                for &decl in &component.decls {
+                    for &dep in &self.t2_dependees[decl] {
+                        let component = match dep {
+                            ItemId::Expr(dep) => self.item_to_components[dep],
+                            ItemId::Decl(dep) => self.item_to_components[dep],
+                        };
+                        if cur_unit_comps.contains(&component) {
+                            self.dependees[decl].push(dep);
+                        }
+                    }
+                }
                 included_components.insert(comp);
                 outstanding_components.remove(&comp);
             }
@@ -432,14 +461,23 @@ impl Driver {
         writeln!(w, "        color=lightgrey;")?;
         writeln!(w, "        node [style=filled,color=white];")?;
         for &expr in &component.exprs {
-            self.write_deps(w, expr, graph)?;
             self.write_item(w, expr)?;
         }
         for &decl in &component.decls {
-            self.write_deps(w, decl, graph)?;
             self.write_item(w, decl)?;
         }
         writeln!(w, "    }}")?;
+
+        Ok(())
+    }
+
+    fn write_component_deps(&self, w: &mut impl Write, graph: &Graph, unit: usize, i: usize, component: &Component) -> IoResult<()> {
+        for &expr in &component.exprs {
+            self.write_deps(w, expr, graph)?;
+        }
+        for &decl in &component.decls {
+            self.write_deps(w, decl, graph)?;
+        }
 
         Ok(())
     }
@@ -464,22 +502,27 @@ impl Driver {
                 for &comp_id in &unit.components {
                     self.write_component(&mut w, graph, i, comp_id.idx(), &components[comp_id])?;
                 }
+                // This is done in a separate loop because 
+                for &comp_id in &unit.components {
+                    self.write_component_deps(&mut w, graph, i, comp_id.idx(), &components[comp_id])?;
+                }
                 writeln!(w, "    }}")?;
             }
         } else if let Some(components) = &graph.components {
             for (i, component) in components.iter().enumerate() {
                 self.write_component(&mut w, graph, 0, i, component)?;
+                self.write_component_deps(&mut w, graph, 0, i, component)?;
             }
         } else {
             for i in 0..graph.dependees.expr_len() {
                 let a = ExprId::new(i);
-                self.write_deps(&mut w, a, graph)?;
                 self.write_item(&mut w, a)?;
+                self.write_deps(&mut w, a, graph)?;
             }
             for i in 0..graph.dependees.decl_len() {
                 let a = DeclId::new(i);
-                self.write_deps(&mut w, a, graph)?;
                 self.write_item(&mut w, a)?;
+                self.write_deps(&mut w, a, graph)?;
             }
         }
         writeln!(w, "}}")?;
