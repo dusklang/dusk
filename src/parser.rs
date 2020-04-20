@@ -517,7 +517,7 @@ impl Driver {
             TokenKind::Assign => None,
             tok => panic!("Invalid token {:?}", tok),
         };
-        self.hir.begin_computed_decl(name, param_names, param_tys, param_ranges, ty.clone(), proto_range);
+        self.hir.begin_computed_decl(name, param_names, param_tys, param_ranges, ty, proto_range);
         match self.cur(p).kind {
             TokenKind::OpenCurly => {
                 self.parse_scope(p);

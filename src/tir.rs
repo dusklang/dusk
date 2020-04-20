@@ -1,5 +1,5 @@
-use std::cmp::max;
 use std::ops::{Deref, DerefMut};
+use std::collections::HashMap;
 
 use arrayvec::ArrayVec;
 use smallvec::SmallVec;
@@ -15,7 +15,6 @@ mod graph;
 use graph::Graph;
 
 newtype_index!(TreeId pub);
-newtype_index!(RetGroupId);
 
 #[derive(Debug)]
 pub struct RetGroup { pub ty: ExprId, pub exprs: SmallVec<[ExprId; 1]> }
@@ -72,8 +71,7 @@ pub struct Subprogram {
     pub const_tys: Vec<ExprId>,
     pub stmts: Vec<Stmt>,
     pub explicit_rets: Vec<ExprId>,
-    // Not public because RetGroupIds are not exposed outside of TIR. Instead, you get a slice via the `ret_groups()` method on `Subprogram`.
-    ret_groups: IdxVec<RetGroup, RetGroupId>,
+    pub ret_groups: Vec<RetGroup>,
     pub casts: Vec<Expr<Cast>>,
     pub whiles: Vec<Expr<While>>,
     pub dos: DepVec<Expr<Do>>,
@@ -99,7 +97,7 @@ impl Subprogram {
             const_tys: Vec::new(),
             stmts: Vec::new(),
             explicit_rets: Vec::new(),
-            ret_groups: IdxVec::new(),
+            ret_groups: Vec::new(),
             casts: Vec::new(),
             whiles: Vec::new(),
             dos: DepVec::new(),
@@ -113,9 +111,6 @@ impl Subprogram {
 
             eval_dependees: Vec::new(),
         }
-    }
-    pub fn ret_groups(&self) -> &[RetGroup] {
-        &self.ret_groups.raw[..]
     }
 }
 
@@ -352,11 +347,16 @@ impl Driver {
                 },
             }
         }
+
+        // Solve for the subprogram and level of each item
         graph.split();
         graph.find_units();
         let levels = graph.solve();
         self.tir.sub_progs.resize_with(levels.num_units as usize, || Subprogram::new());
 
+        let mut staged_ret_groups = HashMap::<DeclId, SmallVec<[ExprId; 1]>>::new();
+
+        // Finally, convert HIR items to TIR and add them to the correct spot
         for (i, expr) in self.hir.exprs.iter().enumerate() {
             let id = ExprId::new(i);
             let level = levels.expr_levels[id];
@@ -384,7 +384,11 @@ impl Driver {
                 &hir::Expr::Deref(expr) => insert_item!(derefs, Dereference { expr }),
                 &hir::Expr::Pointer { expr, .. } => insert_item!(pointers, Pointer { expr }),
                 &hir::Expr::Cast { expr, ty, cast_id } => sub_prog.casts.push(Expr { id, data: Cast { expr, ty, cast_id } }),
-                &hir::Expr::Ret { expr, decl } => sub_prog.explicit_rets.push(expr),
+                &hir::Expr::Ret { expr, decl } => {
+                    let decl = decl.expect("returning outside of a computed decl is invalid!");
+                    staged_ret_groups.entry(decl).or_default().push(expr);
+                    sub_prog.explicit_rets.push(expr);
+                }
                 &hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => insert_item!(decl_refs, DeclRef { args: arguments.clone(), decl_ref_id }),
                 &hir::Expr::Set { lhs, rhs } => insert_item!(assignments, Assignment { lhs, rhs }),
                 &hir::Expr::Do { scope } => insert_item!(dos, Do { terminal_expr: self.hir.scopes[scope].terminal_expr }),
@@ -398,6 +402,36 @@ impl Driver {
                     insert_item!(ifs, If { condition, then_expr, else_expr });
                 },
                 &hir::Expr::While { condition, .. } => sub_prog.whiles.push(Expr { id, data: While { condition } }),
+            }
+        }
+        for (i, decl) in self.hir.decls.iter().enumerate() {
+            let id = DeclId::new(i);
+            let level = levels.decl_levels[id];
+            let unit = levels.decl_units[id];
+
+            let sub_prog = &mut self.tir.sub_progs[unit as usize];
+
+            match decl {
+                // TODO: Add a parameter TIR item for (at least) checking that the type of the param is valid
+                hir::Decl::Parameter { .. } => {},
+                hir::Decl::Intrinsic { ref param_tys, .. } => {},
+                &hir::Decl::Static(root_expr) | &hir::Decl::Const(root_expr) | &hir::Decl::Stored { root_expr, .. } => {
+                    let explicit_ty = self.hir.explicit_tys[id];
+                    sub_prog.assigned_decls.insert(level, AssignedDecl { explicit_ty, root_expr, decl_id: id });
+                },
+                &hir::Decl::Computed { scope, ref param_tys, .. } => {
+                    let terminal_expr = self.hir.scopes[scope].terminal_expr;
+                    let mut exprs = staged_ret_groups.remove(&id).unwrap_or_default();
+                    exprs.push(terminal_expr);
+                    if let Some(ty) = self.hir.explicit_tys[id] {
+                        sub_prog.ret_groups.push(
+                            RetGroup { ty, exprs }
+                        );
+                    } else {
+                        assert_eq!(exprs.len(), 1, "explicit return statements are not allowed in assigned functions (yet?)");
+                        sub_prog.assigned_decls.insert(level, AssignedDecl { explicit_ty: None, root_expr: terminal_expr, decl_id: id });
+                    }
+                },
             }
         }
     }

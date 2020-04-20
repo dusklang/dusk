@@ -9,7 +9,7 @@ use std::mem;
 use std::ops::{Index, IndexMut, Range};
 use std::iter::FromIterator;
 use std::collections::{HashMap, HashSet};
-use std::cmp::Ordering;
+use std::cmp::max;
 
 use bitflags::bitflags;
 
@@ -399,7 +399,7 @@ impl Graph {
                 ItemId::Expr(dep) => self.find_level(dep, levels),
                 ItemId::Decl(dep) => self.find_level(dep, levels),
             };
-            max_level = std::cmp::max(max_level, level);
+            max_level = max(max_level, level);
             offset = 1;
         }
         let level = max_level + offset;

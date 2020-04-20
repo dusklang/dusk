@@ -359,7 +359,7 @@ impl Driver {
                 constraints.set_to(Type::Void);
             }
 
-            for group in self.tir.sub_progs[sp].ret_groups() {
+            for group in &self.tir.sub_progs[sp].ret_groups {
                 for &expr in &group.exprs {
                     let ty = self.tc.get_evaluated_type(group.ty).clone();
                     if let Some(err) = self.tc.constraints[expr].can_unify_to(&QualType::from(&ty)).err() {
