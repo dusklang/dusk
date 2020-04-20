@@ -87,7 +87,7 @@ impl Driver {
             let old_constraints = &mut self.tc.constraints_copy[i];
             if new_constraints != old_constraints {
                 self.file.print_commentated_source_ranges(&mut [
-                    CommentatedSourceRange::new(self.hir.source_ranges[i].clone(), "", '-')
+                    CommentatedSourceRange::new(self.hir.expr_source_ranges[i].clone(), "", '-')
                 ]);
                 old_constraints.print_diff(new_constraints);
                 *old_constraints = new_constraints.clone();
@@ -112,14 +112,14 @@ impl Driver {
     }
 
     pub fn type_check(&mut self) {
-        self.tc.types.resize_with(self.tir.num_exprs(), Default::default);
-        self.tc.constraints.resize_with(self.tir.num_exprs(), Default::default);
+        self.tc.types.resize_with(self.hir.exprs.len(), Default::default);
+        self.tc.constraints.resize_with(self.hir.exprs.len(), Default::default);
         if self.tc.debug {
-            self.tc.constraints_copy.resize_with(self.tir.num_exprs(), Default::default);
+            self.tc.constraints_copy.resize_with(self.hir.exprs.len(), Default::default);
         }
         self.tc.overloads.resize_with(self.tir.overloads.len(), || None);
         self.tc.preferred_overloads.resize_with(self.tir.overloads.len(), || None);
-        self.tc.cast_methods.resize_with(self.tir.num_casts, || CastMethod::Noop);
+        self.tc.cast_methods.resize_with(self.hir.cast_counter.len(), || CastMethod::Noop);
 
         for i in 0..self.tir.decls.len() {
             let id = DeclId::new(i);
@@ -128,16 +128,16 @@ impl Driver {
         }
 
         // Assign the type of the void expression to be void.
-        self.tc.constraints[self.tir.void_expr] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
-        self.tc.types[self.tir.void_expr] = Type::Void;
+        self.tc.constraints[self.hir.void_expr] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
+        self.tc.types[self.hir.void_expr] = Type::Void;
 
-        for sp in 0..self.tir.sub_progs.len() {
+        for sp in 0..self.tir.units.len() {
             // Extend arrays as needed so they all have the same number of levels.
-            let sub_prog = &mut self.tir.sub_progs[sp];
+            let unit = &mut self.tir.units[sp];
             let levels = dep_vec::unify_sizes(&mut [
-                &mut sub_prog.assigned_decls, &mut sub_prog.assignments, &mut sub_prog.decl_refs, 
-                &mut sub_prog.addr_ofs, &mut sub_prog.derefs, &mut sub_prog.pointers, &mut sub_prog.ifs,
-                &mut sub_prog.dos,
+                &mut unit.assigned_decls, &mut unit.assignments, &mut unit.decl_refs, 
+                &mut unit.addr_ofs, &mut unit.derefs, &mut unit.pointers, &mut unit.ifs,
+                &mut unit.dos,
             ]);
 
             // Pass 1: propagate info down from leaves to roots
@@ -149,12 +149,12 @@ impl Driver {
                     tys[id] = ty;
                 }
             }
-            independent_pass_1(&mut self.tc.constraints, &mut self.tc.types, &self.tir.sub_progs[sp].explicit_rets, |&id| (id, Type::Never));
-            independent_pass_1(&mut self.tc.constraints, &mut self.tc.types, &self.tir.sub_progs[sp].whiles, |item| (item.id, Type::Void));
+            independent_pass_1(&mut self.tc.constraints, &mut self.tc.types, &self.tir.units[sp].explicit_rets, |&id| (id, Type::Never));
+            independent_pass_1(&mut self.tc.constraints, &mut self.tc.types, &self.tir.units[sp].whiles, |item| (item.id, Type::Void));
 
             // This used to be a call to `independent_pass_1`, but it can't be anymore due to the borrow checker being dumb
-            for i in 0..self.tir.sub_progs[sp].casts.len() {
-                let item = &self.tir.sub_progs[sp].casts[i];
+            for i in 0..self.tir.units[sp].casts.len() {
+                let item = &self.tir.units[sp].casts[i];
                 let id = item.id;
                 let ty = item.ty;
                 let ty = self.tc.get_evaluated_type(ty).clone();
@@ -171,21 +171,21 @@ impl Driver {
                     );
                 }
             }
-            lit_pass_1(&mut self.tc.constraints, &self.tir.sub_progs[sp].int_lits, BuiltinTraits::INT, Type::i32());
-            lit_pass_1(&mut self.tc.constraints, &self.tir.sub_progs[sp].dec_lits, BuiltinTraits::DEC, Type::i32());
-            lit_pass_1(&mut self.tc.constraints, &self.tir.sub_progs[sp].str_lits, BuiltinTraits::STR, Type::u8().ptr());
-            lit_pass_1(&mut self.tc.constraints, &self.tir.sub_progs[sp].char_lits, BuiltinTraits::CHAR, Type::u8().ptr());
-            for &item in &self.tir.sub_progs[sp].const_tys {
+            lit_pass_1(&mut self.tc.constraints, &self.tir.units[sp].int_lits, BuiltinTraits::INT, Type::i32());
+            lit_pass_1(&mut self.tc.constraints, &self.tir.units[sp].dec_lits, BuiltinTraits::DEC, Type::i32());
+            lit_pass_1(&mut self.tc.constraints, &self.tir.units[sp].str_lits, BuiltinTraits::STR, Type::u8().ptr());
+            lit_pass_1(&mut self.tc.constraints, &self.tir.units[sp].char_lits, BuiltinTraits::CHAR, Type::u8().ptr());
+            for &item in &self.tir.units[sp].const_tys {
                 self.tc.constraints[item] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Ty.into()]), None);
                 self.tc.types[item] = Type::Ty;
             }
             for level in 0..levels {
-                for item in self.tir.sub_progs[sp].assigned_decls.get_level(level) {
+                for item in self.tir.units[sp].assigned_decls.get_level(level) {
                     let constraints = &self.tc.constraints[item.root_expr];
                     let ty = if let &Some(explicit_ty) = &item.explicit_ty {
                         let explicit_ty = self.tc.get_evaluated_type(explicit_ty).clone();
                         if let Some(err) = constraints.can_unify_to(&explicit_ty.clone().into()).err() {
-                            let range = self.hir.source_ranges[item.root_expr].clone();
+                            let range = self.hir.expr_source_ranges[item.root_expr].clone();
                             let mut error = Error::new(format!("Couldn't unify expression to assigned decl type `{:?}`", explicit_ty))
                                 .adding_primary_range(range.clone(), "expression here");
                             match err {
@@ -208,12 +208,12 @@ impl Driver {
                     };
                     self.tc.decl_types[item.decl_id].ty = ty;
                 }
-                for item in self.tir.sub_progs[sp].assignments.get_level(level) {
+                for item in self.tir.units[sp].assignments.get_level(level) {
                     self.tc.constraints[item.id].set_to(Type::Void);
                     self.tc.types[item.id] = Type::Void;
                 }
-                for i in 0..self.tir.sub_progs[sp].decl_refs.level_len(level) {
-                    let item = self.tir.sub_progs[sp].decl_refs.at(level, i);
+                for i in 0..self.tir.units[sp].decl_refs.level_len(level) {
+                    let item = self.tir.units[sp].decl_refs.at(level, i);
                     let id = item.id;
                     let args = item.args.clone();
                     let decl_ref_id = item.decl_ref_id;
@@ -258,7 +258,7 @@ impl Driver {
                     }
                     self.tc.constraints[id] = ConstraintList::new(BuiltinTraits::empty(), Some(one_of), pref);
                 }
-                for item in self.tir.sub_progs[sp].addr_ofs.get_level(level) {
+                for item in self.tir.units[sp].addr_ofs.get_level(level) {
                     let constraints = self.tc.constraints[item.expr].filter_map(|ty| {
                         if item.is_mut && !ty.is_mut { return None; }
                         Some(
@@ -269,7 +269,7 @@ impl Driver {
                     });
                     self.tc.constraints[item.id] = constraints;
                 }
-                for item in self.tir.sub_progs[sp].derefs.get_level(level) {
+                for item in self.tir.units[sp].derefs.get_level(level) {
                     let constraints = self.tc.constraints[item.expr].filter_map(|ty| {
                         if let Type::Pointer(pointee) = &ty.ty {
                             Some(pointee.as_ref().clone())
@@ -279,10 +279,10 @@ impl Driver {
                     });
                     self.tc.constraints[item.id] = constraints;
                 }
-                for item in self.tir.sub_progs[sp].pointers.get_level(level) {
+                for item in self.tir.units[sp].pointers.get_level(level) {
                     if let Some(err) = self.tc.constraints[item.expr].can_unify_to(&Type::Ty.into()).err() {
                         let mut error = Error::new("Expected type operand to pointer operator");
-                        let range = self.hir.source_ranges[item.expr].clone();
+                        let range = self.hir.expr_source_ranges[item.expr].clone();
                         match err {
                             UnificationError::InvalidChoice(choices)
                                 => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
@@ -299,10 +299,10 @@ impl Driver {
                     }
                     self.tc.constraints[item.id].set_to(Type::Ty);
                 }
-                for item in self.tir.sub_progs[sp].ifs.get_level(level) {
+                for item in self.tir.units[sp].ifs.get_level(level) {
                     if let Some(err) = self.tc.constraints[item.condition].can_unify_to(&Type::Bool.into()).err() {
                         let mut error = Error::new("Expected boolean condition in if expression");
-                        let range = self.hir.source_ranges[item.condition].clone();
+                        let range = self.hir.expr_source_ranges[item.condition].clone();
                         match err {
                             UnificationError::InvalidChoice(choices)
                                 => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
@@ -323,13 +323,13 @@ impl Driver {
                         // TODO: handle void expressions, which don't have appropriate source location info.
                         self.errors.push(
                             Error::new("Failed to unify branches of if expression")
-                                .adding_primary_range(self.hir.source_ranges[item.then_expr].clone(), "first terminal expression here")
-                                .adding_primary_range(self.hir.source_ranges[item.else_expr].clone(), "second terminal expression here")
+                                .adding_primary_range(self.hir.expr_source_ranges[item.then_expr].clone(), "first terminal expression here")
+                                .adding_primary_range(self.hir.expr_source_ranges[item.else_expr].clone(), "second terminal expression here")
                         );
                     }
                     self.tc.constraints[item.id] = constraints;
                 }
-                for item in self.tir.sub_progs[sp].dos.get_level(level) {
+                for item in self.tir.units[sp].dos.get_level(level) {
                     self.tc.constraints[item.id] = self.tc.constraints[item.terminal_expr].clone();
                 }
                 self.debug_output(level as usize);
@@ -337,11 +337,11 @@ impl Driver {
 
             // Pass 2: propagate info up from roots to leaves
             if self.tc.debug { println!("===============TYPECHECKING: PASS 2==============="); }
-            for item in &self.tir.sub_progs[sp].stmts {
+            for item in &self.tir.units[sp].stmts {
                 let constraints = &mut self.tc.constraints[item.root_expr];
                 if let Some(err) = constraints.can_unify_to(&Type::Void.into()).err() {
                     let mut error = Error::new("statements must return void");
-                    let range = self.hir.source_ranges[item.root_expr].clone();
+                    let range = self.hir.expr_source_ranges[item.root_expr].clone();
                     match err {
                         UnificationError::InvalidChoice(choices)
                             => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
@@ -359,11 +359,11 @@ impl Driver {
                 constraints.set_to(Type::Void);
             }
 
-            for group in self.tir.sub_progs[sp].ret_groups() {
+            for group in &self.tir.units[sp].ret_groups {
                 for &expr in &group.exprs {
                     let ty = self.tc.get_evaluated_type(group.ty).clone();
                     if let Some(err) = self.tc.constraints[expr].can_unify_to(&QualType::from(&ty)).err() {
-                        let range = self.hir.source_ranges[expr].clone();
+                        let range = self.hir.expr_source_ranges[expr].clone();
                         let mut error = Error::new(format!("can't unify expression to return type {:?}", ty))
                             .adding_primary_range(range.clone(), "expression here");
                         match err {
@@ -385,14 +385,14 @@ impl Driver {
                     self.tc.constraints[expr].set_to(ty);
                 }
             }
-            for item in &self.tir.sub_progs[sp].whiles {
+            for item in &self.tir.units[sp].whiles {
                 if self.tc.constraints[item.condition].can_unify_to(&Type::Bool.into()).is_ok() {
                     self.tc.constraints[item.condition].set_to(Type::Bool);
                 } else {
                     panic!("Expected boolean condition in while expression");
                 }
             }
-            for item in &self.tir.sub_progs[sp].casts {
+            for item in &self.tir.units[sp].casts {
                 let ty = self.tc.get_evaluated_type(item.ty).clone();
                 let constraints = &mut self.tc.constraints[item.expr];
                 let ty_and_method: Result<(Type, CastMethod), Vec<&QualType>> = if constraints.can_unify_to(&QualType::from(&ty)).is_ok() {
@@ -435,26 +435,26 @@ impl Driver {
                         self.tc.cast_methods[item.cast_id] = method;
                     },
                     Err(_) => {
-                        self.errors.push(Error::new("Invalid cast!").adding_primary_range(self.hir.source_ranges[item.id].clone(), "cast here"));
+                        self.errors.push(Error::new("Invalid cast!").adding_primary_range(self.hir.expr_source_ranges[item.id].clone(), "cast here"));
                         constraints.set_to(Type::Error);
                         self.tc.cast_methods[item.cast_id] = CastMethod::Noop;
                     }
                 }
             }
             for level in (0..levels).rev() {
-                for i in 0..self.tir.sub_progs[sp].assigned_decls.level_len(level) {
-                    let item = self.tir.sub_progs[sp].assigned_decls.at(level, i);
+                for i in 0..self.tir.units[sp].assigned_decls.level_len(level) {
+                    let item = self.tir.units[sp].assigned_decls.at(level, i);
                     let decl_id = item.decl_id;
                     let root_expr = item.root_expr;
                     // TODO: is it necessary to call this here or can we just directly look at `decl_types`?
                     let ty = self.fetch_decl_type(decl_id).clone();
                     self.tc.constraints[root_expr].set_to(ty);
                 }
-                for item in self.tir.sub_progs[sp].assignments.get_level(level) {
+                for item in self.tir.units[sp].assignments.get_level(level) {
                     let (lhs, rhs) = self.tc.constraints.index_mut(item.lhs, item.rhs);
                     lhs.lopsided_intersect_with(rhs);
                 }
-                for item in self.tir.sub_progs[sp].decl_refs.get_level(level) {
+                for item in self.tir.units[sp].decl_refs.get_level(level) {
                     let ty = self.tc.constraints[item.id].solve().unwrap_or(Type::Error.into());
                     self.tc.types[item.id] = ty.ty.clone();
 
@@ -480,7 +480,7 @@ impl Driver {
                     } else {
                         self.errors.push(
                             Error::new("ambiguous overload for declaration")
-                                .adding_primary_range(self.hir.source_ranges[item.id].clone(), "expression here")
+                                .adding_primary_range(self.hir.expr_source_ranges[item.id].clone(), "expression here")
                         );
                         for &arg in &item.args {
                             self.tc.constraints[arg].set_to(Type::Error);
@@ -489,7 +489,7 @@ impl Driver {
                     };
                     self.tc.overloads[item.decl_ref_id] = overload;
                 }
-                for item in self.tir.sub_progs[sp].addr_ofs.get_level(level) {
+                for item in self.tir.units[sp].addr_ofs.get_level(level) {
                     let pointer_ty = self.tc.constraints[item.id].solve()
                         .map(|ty| ty.ty)
                         .unwrap_or(Type::Error);
@@ -501,7 +501,7 @@ impl Driver {
                     self.tc.constraints[item.expr].set_to(pointee_ty);
                     self.tc.types[item.id] = pointer_ty;
                 }
-                for item in self.tir.sub_progs[sp].derefs.get_level(level) {
+                for item in self.tir.units[sp].derefs.get_level(level) {
                     let mut ty = self.tc.constraints[item.id].solve().unwrap_or(Type::Error.into());
                     self.tc.types[item.id] = ty.ty.clone();
 
@@ -510,7 +510,7 @@ impl Driver {
                     }
                     self.tc.constraints[item.expr].set_to(ty);
                 }
-                for item in self.tir.sub_progs[sp].pointers.get_level(level) {
+                for item in self.tir.units[sp].pointers.get_level(level) {
                     let expr = &mut self.tc.constraints[item.expr];
                     let expr_ty = expr.solve().map(|ty| ty.ty).unwrap_or(Type::Error);
                     // Don't bother checking if it's a type, because we already did that in pass 1
@@ -519,7 +519,7 @@ impl Driver {
                     debug_assert_eq!(ty.ty, Type::Ty);
                     self.tc.types[item.id] = Type::Ty;
                 }
-                for item in self.tir.sub_progs[sp].ifs.get_level(level) {
+                for item in self.tir.units[sp].ifs.get_level(level) {
                     let condition = &mut self.tc.constraints[item.condition];
                     let condition_ty = condition.solve().map(|ty| ty.ty).unwrap_or(Type::Error);
                     // Don't bother checking if bool, because we already did that in pass 1
@@ -529,7 +529,7 @@ impl Driver {
                     self.tc.constraints[item.then_expr].set_to(ty.clone());
                     self.tc.constraints[item.else_expr].set_to(ty);
                 }
-                for item in self.tir.sub_progs[sp].dos.get_level(level) {
+                for item in self.tir.units[sp].dos.get_level(level) {
                     let ty = self.tc.constraints[item.id].solve().expect("Ambiguous type for do expression");
                     self.tc.types[item.id] = ty.ty.clone();
                     self.tc.constraints[item.terminal_expr].set_to(ty);
@@ -548,14 +548,14 @@ impl Driver {
                     types[item] = constraints[item].solve().expect(format!("Ambiguous type for {} literal", lit_ty).as_ref()).ty;
                 }
             }
-            lit_pass_2(&self.tc.constraints, &mut self.tc.types, &self.tir.sub_progs[sp].int_lits, "integer");
-            lit_pass_2(&self.tc.constraints, &mut self.tc.types, &self.tir.sub_progs[sp].dec_lits, "decimal");
-            lit_pass_2(&self.tc.constraints, &mut self.tc.types, &self.tir.sub_progs[sp].str_lits, "string");
-            lit_pass_2(&self.tc.constraints, &mut self.tc.types, &self.tir.sub_progs[sp].char_lits, "character");
+            lit_pass_2(&self.tc.constraints, &mut self.tc.types, &self.tir.units[sp].int_lits, "integer");
+            lit_pass_2(&self.tc.constraints, &mut self.tc.types, &self.tir.units[sp].dec_lits, "decimal");
+            lit_pass_2(&self.tc.constraints, &mut self.tc.types, &self.tir.units[sp].str_lits, "string");
+            lit_pass_2(&self.tc.constraints, &mut self.tc.types, &self.tir.units[sp].char_lits, "character");
             self.debug_output(0);
 
-            for i in 0..self.tir.sub_progs[sp].eval_dependees.len() {
-                let expr = self.tir.sub_progs[sp].eval_dependees[i];
+            for i in 0..self.tir.units[sp].eval_dependees.len() {
+                let expr = self.tir.units[sp].eval_dependees[i];
                 let val = self.eval_expr(expr);
                 self.tc.eval_results.insert(expr, val);
             }

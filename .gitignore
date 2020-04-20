@@ -1,6 +1,9 @@
 # Rust stuff
 target/*
 
+# Visualization stuff
+tmp/*
+
 # General macOS stuff
 .DS_Store
 .AppleDouble

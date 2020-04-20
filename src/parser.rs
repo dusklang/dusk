@@ -18,14 +18,22 @@ impl Driver {
         // Add intrinsics
         {
             // Integers, floats and bool
-            let values = &[
+            let values: Vec<_> = [
                 Type::u8(), Type::u16(), Type::u32(), Type::u64(), Type::usize(),
                 Type::i8(), Type::i16(), Type::i32(), Type::i64(), Type::isize(),
                 Type::f32(), Type::f64(), Type::Bool
-            ];
+            ].iter().map(|ty| self.add_const_ty(ty.clone())).collect();
             let numerics = &values[0..12];
             let signed_numerics = &numerics[5..];
             let integers = &numerics[0..10];
+
+            let boool        = values[12];
+            let uu8          = values[0];
+            let never        = self.add_const_ty(Type::Never);
+            let uusize       = self.add_const_ty(Type::usize());
+            let u8_ptr       = self.add_const_ty(Type::u8().ptr());
+            let void_mut_ptr = self.add_const_ty(Type::Void.mut_ptr());
+            let type_type    = self.add_const_ty(Type::Ty);
 
             use Intrinsic::*;
             for &intr in &[Mult, Div, Mod, Add, Sub] {
@@ -35,21 +43,21 @@ impl Driver {
             }
             for &intr in &[Less, LessOrEq, Greater, GreaterOrEq] {
                 for ty in numerics {
-                    self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], Type::Bool);
+                    self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], boool);
                 }
             }
             for &intr in &[Eq, NotEq] {
-                for ty in values {
-                    self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], Type::Bool);
+                for ty in &values {
+                    self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], boool);
                 }
             }
             for &intr in &[BitwiseAnd, BitwiseOr] {
                 for ty in integers {
-                    self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], ty.clone());
+                    self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], boool);
                 }
             }
             for &intr in &[LogicalAnd, LogicalOr] {
-                self.add_intrinsic(intr, smallvec![Type::Bool, Type::Bool], Type::Bool);
+                self.add_intrinsic(intr, smallvec![boool, boool], boool);
             }
             for ty in signed_numerics {
                 self.add_intrinsic(Neg, smallvec![ty.clone()], ty.clone());
@@ -57,21 +65,21 @@ impl Driver {
             for ty in numerics {
                 self.add_intrinsic(Pos, smallvec![ty.clone()], ty.clone());
             }
-            self.add_intrinsic(LogicalNot, smallvec![Type::Bool], Type::Bool);
+            self.add_intrinsic(LogicalNot, smallvec![boool], boool);
 
-            self.add_intrinsic(Panic, SmallVec::new(), Type::Never);
-            self.add_intrinsic(Panic, smallvec![Type::u8().ptr()], Type::Never);
+            self.add_intrinsic(Panic, SmallVec::new(), never);
+            self.add_intrinsic(Panic, smallvec![u8_ptr], never);
 
-            self.add_intrinsic(Malloc, smallvec![Type::usize()], Type::Void.mut_ptr());
-            self.add_intrinsic(Free, smallvec![Type::Void.mut_ptr()], Type::Void);
+            self.add_intrinsic(Malloc, smallvec![uusize], void_mut_ptr);
+            self.add_intrinsic(Free, smallvec![void_mut_ptr], self.hir.void_ty);
 
-            self.add_intrinsic(Print, smallvec![Type::u8().ptr()], Type::Void);
-            self.add_intrinsic(Print, smallvec![Type::u8()], Type::Void);
-            self.add_intrinsic(PrintType, smallvec![Type::Ty], Type::Void);
+            self.add_intrinsic(Print, smallvec![u8_ptr], self.hir.void_ty);
+            self.add_intrinsic(Print, smallvec![uu8], self.hir.void_ty);
+            self.add_intrinsic(PrintType, smallvec![type_type], self.hir.void_ty);
 
             macro_rules! types {
                 ($($ty:ident),+) => {
-                    $(self.add_intrinsic($ty, SmallVec::new(), Type::Ty);)+
+                    $(self.add_intrinsic($ty, SmallVec::new(), type_type);)+
                 };
             }
             types!(
@@ -478,13 +486,17 @@ impl Driver {
         proto_range = source_info::concat(proto_range, self.cur(p).range.clone());
         let mut param_names = SmallVec::new();
         let mut param_tys = SmallVec::new();
+        let mut param_ranges = SmallVec::new();
         if let TokenKind::LeftParen = self.next(p).kind {
             self.next(p);
             while let TokenKind::Ident(name) = *self.cur(p).kind {
+                let mut param_range = self.cur(p).range.clone();
                 param_names.push(name);
                 assert_eq!(self.next(p).kind, &TokenKind::Colon);
                 self.next(p);
-                let (ty, _range) = self.parse_type(p);
+                let (ty, ty_range) = self.parse_type(p);
+                param_range = source_info::concat(param_range, ty_range);
+                param_ranges.push(param_range);
                 param_tys.push(ty);
                 while let TokenKind::Comma = self.cur(p).kind {
                     self.next(p);
@@ -505,7 +517,7 @@ impl Driver {
             TokenKind::Assign => None,
             tok => panic!("Invalid token {:?}", tok),
         };
-        self.hir.begin_computed_decl(name, param_names, param_tys, ty.clone(), proto_range);
+        self.hir.begin_computed_decl(name, param_names, param_tys, param_ranges, ty, proto_range);
         match self.cur(p).kind {
             TokenKind::OpenCurly => {
                 self.parse_scope(p);
