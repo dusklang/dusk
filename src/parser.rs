@@ -258,7 +258,9 @@ impl Driver {
                 let name_range = self.cur(p).range.clone();
                 let mut args = SmallVec::new();
                 let mut end_range = name_range.clone();
+                let mut has_parens = false;
                 if let TokenKind::LeftParen = self.next(p).kind {
+                    has_parens = true;
                     self.next(p);
                     loop {
                         // TODO: actually implement proper comma and newline handling like I've thought about
@@ -280,6 +282,7 @@ impl Driver {
                 let decl_ref = self.hir.decl_ref(
                     name,
                     args,
+                    has_parens,
                     source_info::concat(
                         name_range,
                         end_range,

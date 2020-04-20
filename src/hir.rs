@@ -60,6 +60,7 @@ pub struct DeclRef {
     pub name: Sym,
     pub namespace: Option<Namespace>,
     pub num_arguments: usize,
+    pub has_parens: bool,
 }
 
 #[derive(Debug)]
@@ -406,7 +407,7 @@ impl Builder {
         let end_offset = self.decl_scopes[scope].decls.len();
         Namespace { scope, end_offset }
     }
-    pub fn decl_ref(&mut self, name: Sym, arguments: SmallVec<[ExprId; 2]>, range: SourceRange) -> ExprId {
+    pub fn decl_ref(&mut self, name: Sym, arguments: SmallVec<[ExprId; 2]>, has_parens: bool, range: SourceRange) -> ExprId {
         let namespace = match self.comp_decl_stack.last() {
             Some(decl) => Some(self.new_namespace(decl.scope_stack.last().unwrap().decl_scope)),
             None => None,
@@ -416,6 +417,7 @@ impl Builder {
                 name,
                 namespace,
                 num_arguments: arguments.len(),
+                has_parens,
             }
         );
         self.push(Expr::DeclRef { arguments, id }, range)
@@ -437,7 +439,7 @@ impl Driver {
             BinOp::Assign => self.hir.push(Expr::Set { lhs, rhs }, range),
             _ => {
                 let name = self.interner.get_or_intern(op.symbol());
-                self.hir.decl_ref(name, smallvec![lhs, rhs], range)
+                self.hir.decl_ref(name, smallvec![lhs, rhs], true, range)
             }
         }
     }
@@ -450,7 +452,7 @@ impl Driver {
             UnOp::PointerMut => self.hir.push(Expr::Pointer { expr, is_mut: true }, range),
             _ => {
                 let name = self.interner.get_or_intern(op.symbol());
-                self.hir.decl_ref(name, smallvec![expr], range)
+                self.hir.decl_ref(name, smallvec![expr], true, range)
             },
         }
     }
