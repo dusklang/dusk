@@ -407,7 +407,7 @@ impl Graph {
         level
     }
 
-    pub fn solve(&self) -> Levels {
+    pub fn solve(self) -> Levels {
         let mut levels = ItemIdxVec::<u32>::new();
         levels.resize_with(self.dependees.expr_len(), self.dependees.decl_len(), || std::u32::MAX);
 
@@ -420,7 +420,23 @@ impl Graph {
             self.find_level(decl, &mut levels);
         }
 
-        Levels { expr_levels: levels.expr, decl_levels: levels.decl }
+        let mut item_to_units = ItemIdxVec::<u32>::new();
+        item_to_units.resize_with(self.dependees.expr_len(), self.dependees.decl_len(), || std::u32::MAX);
+
+        let units = self.units.unwrap();
+        for (i, unit) in units.iter().enumerate() {
+            for &comp in &unit.components {
+                let components = &self.components.as_ref().unwrap()[comp];
+                for &expr in &components.exprs {
+                    item_to_units[expr] = i as u32;
+                }
+                for &decl in &components.decls {
+                    item_to_units[decl] = i as u32;
+                }
+            }
+        }
+
+        Levels { expr_levels: levels.expr, decl_levels: levels.decl, num_units: units.len() as u32, expr_units: item_to_units.expr, decl_units: item_to_units.decl }
     }
 }
 
@@ -428,6 +444,11 @@ impl Graph {
 pub struct Levels {
     expr_levels: IdxVec<u32, ExprId>,
     decl_levels: IdxVec<u32, DeclId>,
+    
+    num_units: u32,
+
+    expr_units: IdxVec<u32, ExprId>,
+    decl_units: IdxVec<u32, DeclId>,
 }
 
 impl ItemId {
