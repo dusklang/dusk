@@ -13,7 +13,7 @@ use std::cmp::max;
 
 use bitflags::bitflags;
 
-use crate::builder::{ExprId, DeclId};
+use crate::builder::ItemId;
 use crate::index_vec::{Idx, IdxVec};
 use crate::driver::Driver;
 use crate::source_info::SourceRange;
@@ -22,130 +22,16 @@ use crate::hir;
 newtype_index!(CompId);
 newtype_index!(UnitId);
 
-#[derive(Debug, Copy, Clone)]
-pub enum ItemId {
-    Expr(ExprId),
-    Decl(DeclId),
-}
-
-pub trait Item: Copy + Into<ItemId> {
-    fn elem<T>(self, vec: &ItemIdxVec<T>) -> &T;
-    fn elem_mut<T>(self, vec: &mut ItemIdxVec<T>) -> &mut T;
-    fn source_range(self, hir: &hir::Builder) -> &SourceRange;
-    fn write_debug(self, w: &mut impl Write, hir: &hir::Builder) -> IoResult<()>;
-    fn write_node_name(self, w: &mut impl Write) -> IoResult<()>;
-    fn add_to_component(self, state: &mut ComponentState);
-}
-
-impl Item for ExprId {
-    fn elem<T>(self, vec: &ItemIdxVec<T>) -> &T {
-        &vec.expr[self]
-    }
-
-    fn elem_mut<T>(self, vec: &mut ItemIdxVec<T>) -> &mut T {
-        &mut vec.expr[self]
-    }
-
-    fn source_range(self, hir: &hir::Builder) -> &SourceRange {
-        &hir.expr_source_ranges[self]
-    }
-
-    fn write_debug(self, w: &mut impl Write, hir: &hir::Builder) -> IoResult<()> {
-        write!(w, "{:?}", hir.exprs[self])
-    }
-
-    fn write_node_name(self, w: &mut impl Write) -> IoResult<()> {
-        write!(w, "expr{}", self.idx())
-    }
-
-    fn add_to_component(self, state: &mut ComponentState) {
-        state.cur_component.exprs.push(self);
-    }
-}
-
-impl Item for DeclId {
-    fn elem<T>(self, vec: &ItemIdxVec<T>) -> &T {
-        &vec.decl[self]
-    }
-
-    fn elem_mut<T>(self, vec: &mut ItemIdxVec<T>) -> &mut T {
-        &mut vec.decl[self]
-    }
-
-    fn source_range(self, hir: &hir::Builder) -> &SourceRange {
-        &hir.decl_source_ranges[self]
-    }
-
-    fn write_debug(self, w: &mut impl Write, hir: &hir::Builder) -> IoResult<()> {
-        write!(w, "{:?}", hir.decls[self])
-    }
-
-    fn write_node_name(self, w: &mut impl Write) -> IoResult<()> {
-        write!(w, "decl{}", self.idx())
-    }
-
-    fn add_to_component(self, state: &mut ComponentState) {
-        state.cur_component.decls.push(self);
-    }
-}
-
-impl From<ExprId> for ItemId {
-    fn from(id: ExprId) -> Self {
-        Self::Expr(id)
-    }
-}
-
-impl From<DeclId> for ItemId {
-    fn from(id: DeclId) -> Self {
-        Self::Decl(id)
-    }
-}
-
-pub struct ItemIdxVec<T> {
-    expr: IdxVec<T, ExprId>,
-    decl: IdxVec<T, DeclId>,
-}
-
-impl<T> ItemIdxVec<T> {
-    fn new() -> Self {
-        Self {
-            expr: IdxVec::new(),
-            decl: IdxVec::new(),
-        }
-    }
-
-    fn expr_len(&self) -> usize { self.expr.len() }
-    fn decl_len(&self) -> usize { self.decl.len() }
-
-    fn resize_with(&mut self, num_exprs: usize, num_decls: usize, mut f: impl FnMut() -> T) {
-        self.expr.resize_with(num_exprs, || f());
-        self.decl.resize_with(num_decls, || f());
-    }
-}
-
-impl<I: Item, T> Index<I> for ItemIdxVec<T> {
-    type Output = T;
-    fn index(&self, id: I) -> &Self::Output {
-        id.elem(self)
-    }
-}
-
-impl<I: Item, T> IndexMut<I> for ItemIdxVec<T> {
-    fn index_mut(&mut self, id: I) -> &mut Self::Output {
-        id.elem_mut(self)
-    }
-}
-
 pub struct Graph {
-    dependees: ItemIdxVec<Vec<ItemId>>,
-    t2_dependees: ItemIdxVec<Vec<ItemId>>,
-    t3_dependees: ItemIdxVec<Vec<ItemId>>,
-    t4_dependees: ItemIdxVec<Vec<ItemId>>,
+    dependees: IdxVec<Vec<ItemId>, ItemId>,
+    t2_dependees: IdxVec<Vec<ItemId>, ItemId>,
+    t3_dependees: IdxVec<Vec<ItemId>, ItemId>,
+    t4_dependees: IdxVec<Vec<ItemId>, ItemId>,
 
     // Used exclusively for finding connected components
-    dependers: ItemIdxVec<Vec<ItemId>>,
+    dependers: IdxVec<Vec<ItemId>, ItemId>,
 
-    item_to_components: ItemIdxVec<CompId>,
+    item_to_components: IdxVec<CompId, ItemId>,
 
     components: Option<IdxVec<Component, CompId>>,
     units: Option<IdxVec<Unit, UnitId>>,
@@ -176,75 +62,64 @@ impl Default for ComponentRelation {
 
 #[derive(Default)]
 struct Component {
-    exprs: Vec<ExprId>,
-    decls: Vec<DeclId>,
+    items: Vec<ItemId>,
 
     deps: HashMap<CompId, ComponentRelation>,
 }
 
-// TODO: Make this private. Right now it's public only because it's used in the Item trait above.
-// So we need a better way to abstract over exprs and decls.
-pub struct ComponentState {
+struct ComponentState {
     // TODO: Vec of bools == gross
-    visited: ItemIdxVec<bool>,
+    visited: IdxVec<bool, ItemId>,
 
     cur_component: Component,
     components: IdxVec<Component, CompId>,
-    item_to_components: ItemIdxVec<CompId>,
+    item_to_components: IdxVec<CompId, ItemId>,
 }
 
 #[derive(Default)]
 struct Unit {
     components: Vec<CompId>,
 
-    expr_deps: HashMap<ExprId, ItemId>,
-    decl_deps: HashMap<DeclId, ItemId>,
+    deps: HashMap<ItemId, ItemId>,
 }
 
 impl Graph {
     /// a and b must be in the *same* unit, and a must have a higher level than b
-    pub fn add_type1_dep(&mut self, a: impl Item, b: impl Item) {
-        let a_val = a.into();
-        let b_val = b.into();
+    pub fn add_type1_dep(&mut self, a: ItemId, b: ItemId) {
         // TODO: remove this HACK to prevent type 1 dependencies on the void expression
-        if let ItemId::Expr(expr) = b_val {
-            if expr.idx() == 0 { return; }
-        }
+        if b.idx() == 0 { return; }
         
-        self.dependees[a].push(b_val);
-        self.dependers[b].push(a_val);
+        self.dependees[a].push(b);
+        self.dependers[b].push(a);
     }
 
     /// a must either be in the same unit as b or a later unit, but if they are in the same unit, a must have a higher level than b
-    pub fn add_type2_dep(&mut self, a: impl Item, b: impl Item) {
-        self.t2_dependees[a].push(b.into());
+    pub fn add_type2_dep(&mut self, a: ItemId, b: ItemId) {
+        self.t2_dependees[a].push(b);
     }
 
     /// a must either be in the same unit as b or a later unit, but their levels are independent
-    pub fn add_type3_dep(&mut self, a: impl Item, b: impl Item) {
-        self.t3_dependees[a].push(b.into());
+    pub fn add_type3_dep(&mut self, a: ItemId, b: ItemId) {
+        self.t3_dependees[a].push(b);
     }
 
     /// a must be in an later unit than b, but their levels are independent
-    pub fn add_type4_dep(&mut self, a: impl Item, b: impl Item) {
-        self.t4_dependees[a].push(b.into());
+    pub fn add_type4_dep(&mut self, a: ItemId, b: ItemId) {
+        self.t4_dependees[a].push(b);
     }
 
-    fn find_subcomponent(&self, item: impl Item, state: &mut ComponentState) {
+    fn find_subcomponent(&self, item: ItemId, state: &mut ComponentState) {
         state.visited[item] = true;
-        item.add_to_component(state);
+        state.cur_component.items.push(item);
         state.item_to_components[item] = CompId::new(state.components.len());
         let adjs = self.dependees[item].iter()
             .chain(self.dependers[item].iter());
         for &adj in adjs {
-            match adj {
-                ItemId::Expr(expr) => if !state.visited.expr[expr] { self.find_subcomponent(expr, state) },
-                ItemId::Decl(decl) => if !state.visited.decl[decl] { self.find_subcomponent(decl, state) },
-            };
+            if !state.visited[adj] { self.find_subcomponent(adj, state); }
         }
     }
 
-    fn find_component(&self, item: impl Item, state: &mut ComponentState) {
+    fn find_component(&self, item: ItemId, state: &mut ComponentState) {
         if state.visited[item] { return; }
         self.find_subcomponent(item, state);
         let new_component = mem::replace(&mut state.cur_component, Component::default());
@@ -259,15 +134,12 @@ impl Graph {
         backward_mask: ComponentRelation,
         state: &mut ComponentState
     ) {
-        let dependee = match dependee {
-            ItemId::Decl(decl) => state.item_to_components[decl],
-            ItemId::Expr(expr) => state.item_to_components[expr],
-        };
+        let dependee = state.item_to_components[dependee];
         *state.components[comp].deps.entry(dependee).or_default() &= forward_mask;
         *state.components[dependee].deps.entry(comp).or_default() &= backward_mask;
     }
 
-    fn transfer_item_deps_to_component(&self, comp: CompId, item: impl Item, state: &mut ComponentState) {
+    fn transfer_item_deps_to_component(&self, comp: CompId, item: ItemId, state: &mut ComponentState) {
         let t2_and_t3_dependendees = self.t2_dependees[item].iter().chain(self.t3_dependees[item].iter());
         for &dependee in t2_and_t3_dependendees {
             self.transfer_item_dep_to_component(comp, dependee, ComponentRelation::TYPE_2_3_FORWARD, ComponentRelation::TYPE_2_3_BACKWARD, state);
@@ -279,28 +151,21 @@ impl Graph {
 
     // Find the weak components of the graph
     pub fn split(&mut self) {
-        let mut visited = ItemIdxVec::new();
-        visited.resize_with(self.dependees.expr_len(), self.dependees.decl_len(), || false);
+        let mut visited = IdxVec::new();
+        visited.resize_with(self.dependees.len(), || false);
         let mut state = ComponentState {
-            visited, cur_component: Component::default(), components: IdxVec::new(), item_to_components: ItemIdxVec::new(),
+            visited, cur_component: Component::default(), components: IdxVec::new(), item_to_components: IdxVec::new(),
         };
-        state.item_to_components.resize_with(self.dependees.expr_len(), self.dependees.decl_len(), || CompId::new(std::usize::MAX));
+        state.item_to_components.resize_with(self.dependees.len(), || CompId::new(std::usize::MAX));
         assert!(self.components.is_none());
-        for i in 0..self.dependees.expr_len() {
-            self.find_component(ExprId::new(i), &mut state);
-        }
-
-        for i in 0..self.dependees.decl_len() {
-            self.find_component(DeclId::new(i), &mut state);
+        for i in 0..self.dependees.len() {
+            self.find_component(ItemId::new(i), &mut state);
         }
 
         for i in 0..state.components.len() {
             let comp = CompId::new(i);
-            for j in 0..state.components[comp].exprs.len() {
-                self.transfer_item_deps_to_component(comp, state.components[comp].exprs[j], &mut state);
-            }
-            for j in 0..state.components[comp].decls.len() {
-                self.transfer_item_deps_to_component(comp, state.components[comp].decls[j], &mut state);
+            for j in 0..state.components[comp].items.len() {
+                self.transfer_item_deps_to_component(comp, state.components[comp].items[j], &mut state);
             }
         }
 
@@ -358,25 +223,10 @@ impl Graph {
             for &comp in &cur_unit.components {
                 // Add intra-unit type 2 dependencies as type 1 dependencies, because they are equivalent after resolving units
                 let component = &components[comp];
-                for &expr in &component.exprs {
-                    for &dep in &self.t2_dependees[expr] {
-                        let component = match dep {
-                            ItemId::Expr(dep) => self.item_to_components[dep],
-                            ItemId::Decl(dep) => self.item_to_components[dep],
-                        };
-                        if cur_unit_comps.contains(&component) {
-                            self.dependees[expr].push(dep);
-                        }
-                    }
-                }
-                for &decl in &component.decls {
-                    for &dep in &self.t2_dependees[decl] {
-                        let component = match dep {
-                            ItemId::Expr(dep) => self.item_to_components[dep],
-                            ItemId::Decl(dep) => self.item_to_components[dep],
-                        };
-                        if cur_unit_comps.contains(&component) {
-                            self.dependees[decl].push(dep);
+                for &item in &component.items {
+                    for &dep in &self.t2_dependees[item] {
+                        if cur_unit_comps.contains(&self.item_to_components[dep]) {
+                            self.dependees[item].push(dep);
                         }
                     }
                 }
@@ -389,16 +239,13 @@ impl Graph {
         self.units = Some(units);
     }
 
-    fn find_level(&self, item: impl Item, levels: &mut ItemIdxVec<u32>) -> u32 {
+    fn find_level(&self, item: ItemId, levels: &mut IdxVec<u32, ItemId>) -> u32 {
         if levels[item] != std::u32::MAX { return levels[item]; }
 
         let mut max_level = 0;
         let mut offset = 0;
         for &dep in &self.dependees[item] {
-            let level = match dep {
-                ItemId::Expr(dep) => self.find_level(dep, levels),
-                ItemId::Decl(dep) => self.find_level(dep, levels),
-            };
+            let level = self.find_level(dep, levels);
             max_level = max(max_level, level);
             offset = 1;
         }
@@ -408,54 +255,51 @@ impl Graph {
     }
 
     pub fn solve(self) -> Levels {
-        let mut levels = ItemIdxVec::<u32>::new();
-        levels.resize_with(self.dependees.expr_len(), self.dependees.decl_len(), || std::u32::MAX);
+        let mut levels = IdxVec::<u32, ItemId>::new();
+        levels.resize_with(self.dependees.len(), || std::u32::MAX);
 
-        for i in 0..self.dependees.expr_len() {
-            let expr = ExprId::new(i);
-            self.find_level(expr, &mut levels);
-        }
-        for i in 0..self.dependees.decl_len() {
-            let decl = DeclId::new(i);
-            self.find_level(decl, &mut levels);
+        for i in 0..self.dependees.len() {
+            self.find_level(ItemId::new(i), &mut levels);
         }
 
-        let mut item_to_units = ItemIdxVec::<u32>::new();
-        item_to_units.resize_with(self.dependees.expr_len(), self.dependees.decl_len(), || std::u32::MAX);
+        let mut item_to_units = IdxVec::<u32, ItemId>::new();
+        item_to_units.resize_with(self.dependees.len(), || std::u32::MAX);
 
         let units = self.units.unwrap();
         for (i, unit) in units.iter().enumerate() {
             for &comp in &unit.components {
                 let components = &self.components.as_ref().unwrap()[comp];
-                for &expr in &components.exprs {
-                    item_to_units[expr] = i as u32;
-                }
-                for &decl in &components.decls {
-                    item_to_units[decl] = i as u32;
+                for &item in &components.items {
+                    item_to_units[item] = i as u32;
                 }
             }
         }
 
-        Levels { expr_levels: levels.expr, decl_levels: levels.decl, num_units: units.len() as u32, expr_units: item_to_units.expr, decl_units: item_to_units.decl }
+        Levels { levels, units: item_to_units, num_units: units.len() as u32 }
     }
 }
 
 #[derive(Debug)]
 pub struct Levels {
-    pub expr_levels: IdxVec<u32, ExprId>,
-    pub decl_levels: IdxVec<u32, DeclId>,
+    pub levels: IdxVec<u32, ItemId>,
+    pub units: IdxVec<u32, ItemId>,
     
     pub num_units: u32,
-
-    pub expr_units: IdxVec<u32, ExprId>,
-    pub decl_units: IdxVec<u32, DeclId>,
 }
 
 impl ItemId {
-    fn write_node_name<T: Write>(&self, w: &mut T) -> IoResult<()> {
-        match self {
-            ItemId::Expr(id) => write!(w, "expr{}", id.idx())?,
-            ItemId::Decl(id) => write!(w, "decl{}", id.idx())?,
+    fn write_node_name(self, w: &mut impl Write, hir: &hir::Builder) -> IoResult<()> {
+        match hir.items[self] {
+            hir::Item::Expr(id) => write!(w, "expr{}", id.idx())?,
+            hir::Item::Decl(id) => write!(w, "decl{}", id.idx())?,
+        }
+        Ok(())
+    }
+
+    fn write_debug(self, w: &mut impl Write, hir: &hir::Builder) -> IoResult<()> {
+        match hir.items[self] {
+            hir::Item::Expr(id) => write!(w, "{:?}", hir.exprs[id])?,
+            hir::Item::Decl(id) => write!(w, "{:?}", hir.decls[id])?,
         }
         Ok(())
     }
@@ -463,39 +307,39 @@ impl ItemId {
 
 impl Driver {
     pub fn create_graph(&self) -> Graph {
-        let mut deps = [ItemIdxVec::new(), ItemIdxVec::new(), ItemIdxVec::new(), ItemIdxVec::new(), ItemIdxVec::new()];
+        let mut deps = [IdxVec::new(), IdxVec::new(), IdxVec::new(), IdxVec::new(), IdxVec::new()];
         for dep in &mut deps {
-            dep.resize_with(self.hir.exprs.len(), self.hir.decls.len(), || Vec::new());
+            dep.resize_with(self.hir.items.len(), || Vec::new());
         }
 
-        let mut item_to_components = ItemIdxVec::new();
-        item_to_components.resize_with(self.hir.exprs.len(), self.hir.decls.len(), || CompId::new(std::usize::MAX));
+        let mut item_to_components = IdxVec::new();
+        item_to_components.resize_with(self.hir.items.len(), || CompId::new(std::usize::MAX));
         
         let [dependees, t2_dependees, t3_dependees, t4_dependees, dependers] = deps;
         Graph { dependees, t2_dependees, t3_dependees, t4_dependees, dependers, item_to_components, components: None, units: None }
     }
 
-    fn write_dep<W: Write>(&self, w: &mut W, a: impl Item, b: ItemId, write_attribs: impl FnOnce(&mut W) -> IoResult<()>) -> IoResult<()> {
+    fn write_dep<W: Write>(&self, w: &mut W, a: ItemId, b: ItemId, write_attribs: impl FnOnce(&mut W) -> IoResult<()>) -> IoResult<()> {
         write!(w, "    ")?;
-        a.write_node_name(w)?;
+        a.write_node_name(w, &self.hir)?;
         write!(w, " -> ")?;
-        b.write_node_name(w)?;
+        b.write_node_name(w, &self.hir)?;
         write_attribs(w)?;
         writeln!(w, ";")?;
         Ok(())
     }
 
-    fn write_deps(&self, w: &mut impl Write, a: impl Item, graph: &Graph) -> IoResult<()> {
+    fn write_deps(&self, w: &mut impl Write, a: ItemId, graph: &Graph) -> IoResult<()> {
         for &b in &graph.dependees[a] {
             self.write_dep(w, a, b, |_| Ok(()))?;
         }
         Ok(())
     }
 
-    fn write_item(&self, w: &mut impl Write, item: impl Item) -> IoResult<()> {
-        let range = item.source_range(&self.hir).clone();
+    fn write_item(&self, w: &mut impl Write, item: ItemId) -> IoResult<()> {
+        let range = self.hir.source_ranges[item].clone();
         write!(w, "    ")?;
-        item.write_node_name(w)?;
+        item.write_node_name(w, &self.hir)?;
         if range.start != range.end {
             writeln!(
                 w,
@@ -521,11 +365,8 @@ impl Driver {
         writeln!(w, "        style=filled;")?;
         writeln!(w, "        color=lightgrey;")?;
         writeln!(w, "        node [style=filled,color=white];")?;
-        for &expr in &component.exprs {
-            self.write_item(w, expr)?;
-        }
-        for &decl in &component.decls {
-            self.write_item(w, decl)?;
+        for &item in &component.items {
+            self.write_item(w, item)?;
         }
         writeln!(w, "    }}")?;
 
@@ -533,11 +374,8 @@ impl Driver {
     }
 
     fn write_component_deps(&self, w: &mut impl Write, graph: &Graph, unit: usize, i: usize, component: &Component) -> IoResult<()> {
-        for &expr in &component.exprs {
-            self.write_deps(w, expr, graph)?;
-        }
-        for &decl in &component.decls {
-            self.write_deps(w, decl, graph)?;
+        for &item in &component.items {
+            self.write_deps(w, item, graph)?;
         }
 
         Ok(())
@@ -575,13 +413,8 @@ impl Driver {
                 self.write_component_deps(&mut w, graph, 0, i, component)?;
             }
         } else {
-            for i in 0..graph.dependees.expr_len() {
-                let a = ExprId::new(i);
-                self.write_item(&mut w, a)?;
-                self.write_deps(&mut w, a, graph)?;
-            }
-            for i in 0..graph.dependees.decl_len() {
-                let a = DeclId::new(i);
+            for i in 0..graph.dependees.len() {
+                let a = ItemId::new(i);
                 self.write_item(&mut w, a)?;
                 self.write_deps(&mut w, a, graph)?;
             }

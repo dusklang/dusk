@@ -87,7 +87,7 @@ impl Driver {
             let old_constraints = &mut self.tc.constraints_copy[i];
             if new_constraints != old_constraints {
                 self.file.print_commentated_source_ranges(&mut [
-                    CommentatedSourceRange::new(self.hir.expr_source_ranges[i].clone(), "", '-')
+                    CommentatedSourceRange::new(self.hir.get_range(i), "", '-')
                 ]);
                 old_constraints.print_diff(new_constraints);
                 *old_constraints = new_constraints.clone();
@@ -185,7 +185,7 @@ impl Driver {
                     let ty = if let &Some(explicit_ty) = &item.explicit_ty {
                         let explicit_ty = self.tc.get_evaluated_type(explicit_ty).clone();
                         if let Some(err) = constraints.can_unify_to(&explicit_ty.clone().into()).err() {
-                            let range = self.hir.expr_source_ranges[item.root_expr].clone();
+                            let range = self.hir.get_range(item.root_expr);
                             let mut error = Error::new(format!("Couldn't unify expression to assigned decl type `{:?}`", explicit_ty))
                                 .adding_primary_range(range.clone(), "expression here");
                             match err {
@@ -282,7 +282,7 @@ impl Driver {
                 for item in self.tir.units[sp].pointers.get_level(level) {
                     if let Some(err) = self.tc.constraints[item.expr].can_unify_to(&Type::Ty.into()).err() {
                         let mut error = Error::new("Expected type operand to pointer operator");
-                        let range = self.hir.expr_source_ranges[item.expr].clone();
+                        let range = self.hir.get_range(item.expr);
                         match err {
                             UnificationError::InvalidChoice(choices)
                                 => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
@@ -302,7 +302,7 @@ impl Driver {
                 for item in self.tir.units[sp].ifs.get_level(level) {
                     if let Some(err) = self.tc.constraints[item.condition].can_unify_to(&Type::Bool.into()).err() {
                         let mut error = Error::new("Expected boolean condition in if expression");
-                        let range = self.hir.expr_source_ranges[item.condition].clone();
+                        let range = self.hir.get_range(item.condition);
                         match err {
                             UnificationError::InvalidChoice(choices)
                                 => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
@@ -323,8 +323,8 @@ impl Driver {
                         // TODO: handle void expressions, which don't have appropriate source location info.
                         self.errors.push(
                             Error::new("Failed to unify branches of if expression")
-                                .adding_primary_range(self.hir.expr_source_ranges[item.then_expr].clone(), "first terminal expression here")
-                                .adding_primary_range(self.hir.expr_source_ranges[item.else_expr].clone(), "second terminal expression here")
+                                .adding_primary_range(self.hir.get_range(item.then_expr), "first terminal expression here")
+                                .adding_primary_range(self.hir.get_range(item.else_expr), "second terminal expression here")
                         );
                     }
                     self.tc.constraints[item.id] = constraints;
@@ -341,7 +341,7 @@ impl Driver {
                 let constraints = &mut self.tc.constraints[item.root_expr];
                 if let Some(err) = constraints.can_unify_to(&Type::Void.into()).err() {
                     let mut error = Error::new("statements must return void");
-                    let range = self.hir.expr_source_ranges[item.root_expr].clone();
+                    let range = self.hir.get_range(item.root_expr);
                     match err {
                         UnificationError::InvalidChoice(choices)
                             => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
@@ -363,7 +363,7 @@ impl Driver {
                 for &expr in &group.exprs {
                     let ty = self.tc.get_evaluated_type(group.ty).clone();
                     if let Some(err) = self.tc.constraints[expr].can_unify_to(&QualType::from(&ty)).err() {
-                        let range = self.hir.expr_source_ranges[expr].clone();
+                        let range = self.hir.get_range(expr);
                         let mut error = Error::new(format!("can't unify expression to return type {:?}", ty))
                             .adding_primary_range(range.clone(), "expression here");
                         match err {
@@ -435,7 +435,7 @@ impl Driver {
                         self.tc.cast_methods[item.cast_id] = method;
                     },
                     Err(_) => {
-                        self.errors.push(Error::new("Invalid cast!").adding_primary_range(self.hir.expr_source_ranges[item.id].clone(), "cast here"));
+                        self.errors.push(Error::new("Invalid cast!").adding_primary_range(self.hir.get_range(item.id), "cast here"));
                         constraints.set_to(Type::Error);
                         self.tc.cast_methods[item.cast_id] = CastMethod::Noop;
                     }
@@ -480,7 +480,7 @@ impl Driver {
                     } else {
                         self.errors.push(
                             Error::new("ambiguous overload for declaration")
-                                .adding_primary_range(self.hir.expr_source_ranges[item.id].clone(), "expression here")
+                                .adding_primary_range(self.hir.get_range(item.id), "expression here")
                         );
                         for &arg in &item.args {
                             self.tc.constraints[arg].set_to(Type::Error);

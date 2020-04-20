@@ -181,13 +181,13 @@ impl Driver {
         overloads
     }
 
-    fn add_type3_scope_dep(&self, graph: &mut Graph, a: impl graph::Item, b: ScopeId) {
+    fn add_type3_scope_dep(&self, graph: &mut Graph, a: ItemId, b: ScopeId) {
         let scope = &self.hir.scopes[b];
         for &item in &scope.items {
             match item {
-                hir::Item::Stmt(expr) => graph.add_type3_dep(a, expr),
-                hir::Item::StoredDecl { decl_id, root_expr, .. } => graph.add_type3_dep(a, decl_id),
-                hir::Item::ComputedDecl(_) => {},
+                hir::ScopeItem::Stmt(expr) => graph.add_type3_dep(a, self.hir.expr_to_items[expr]),
+                hir::ScopeItem::StoredDecl { decl_id, root_expr, .. } => graph.add_type3_dep(a, self.hir.decl_to_items[decl_id]),
+                hir::ScopeItem::ComputedDecl(_) => {},
             }
         }
     }
@@ -252,53 +252,61 @@ impl Driver {
         // TODO: do something better than an array of bools :(
         let mut depended_on = IdxVec::<bool, ExprId>::new();
         depended_on.resize_with(self.hir.exprs.len(), || false);
+        macro_rules! ei {
+            ($a:expr) => { self.hir.expr_to_items[$a] }
+        }
+        macro_rules! di {
+            ($a:expr) => { self.hir.decl_to_items[$a] }
+        }
         macro_rules! add_eval_dep {
             ($a:expr, $b:expr) => {{
-                graph.add_type4_dep($a, $b);
+                graph.add_type4_dep($a, ei!($b));
                 depended_on[$b] = true;
             }}
         }
         for i in 0..self.hir.decls.len() {
-            let id = DeclId::new(i);
-            match self.hir.decls[id] {
+            let decl_id = DeclId::new(i);
+            let id = di!(decl_id);
+            match self.hir.decls[decl_id] {
                 hir::Decl::Parameter { .. } => {},
                 hir::Decl::Intrinsic { ref param_tys, .. } => {
                     for &ty in param_tys {
                         add_eval_dep!(id, ty);
                     }
                 },
-                hir::Decl::Static(assigned_expr) | hir::Decl::Const(assigned_expr) => graph.add_type1_dep(id, assigned_expr),
+                hir::Decl::Static(assigned_expr) | hir::Decl::Const(assigned_expr) => graph.add_type1_dep(id, ei!(assigned_expr)),
                 hir::Decl::Computed { scope, ref param_tys, .. } => {
                     self.add_type3_scope_dep(&mut graph, id, scope);
                     let terminal_expr = self.hir.scopes[scope].terminal_expr;
-                    graph.add_type1_dep(id, terminal_expr);
+                    graph.add_type1_dep(id, ei!(terminal_expr));
                     for &ty in param_tys {
                         add_eval_dep!(id, ty);
                     }
-                    let ty = self.hir.explicit_tys[id].unwrap_or(self.hir.void_ty);
+                    let ty = self.hir.explicit_tys[decl_id].unwrap_or(self.hir.void_ty);
                     add_eval_dep!(id, ty);
                 },
                 hir::Decl::Stored { root_expr, .. } => {
-                    graph.add_type1_dep(id, root_expr);
+                    graph.add_type1_dep(id, ei!(root_expr));
                 },
             }
-            if let Some(ty) = self.hir.explicit_tys[id] {
+            if let Some(ty) = self.hir.explicit_tys[decl_id] {
                 add_eval_dep!(id, ty);
             }
         }
         for i in 0..self.hir.exprs.len() {
-            let id = ExprId::new(i);
-            match self.hir.exprs[id] {
+            let expr_id = ExprId::new(i);
+            let id = ei!(expr_id);
+            match self.hir.exprs[expr_id] {
                 hir::Expr::Void | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
                     | hir::Expr::CharLit { .. } | hir::Expr::ConstTy(_) => {},
                 hir::Expr::AddrOf { expr, .. } | hir::Expr::Deref(expr) | hir::Expr::Pointer { expr, .. }
-                    => graph.add_type1_dep(id, expr),
+                    => graph.add_type1_dep(id, ei!(expr)),
                 hir::Expr::Cast { expr, ty, .. } => {
-                    graph.add_type1_dep(id, expr);
+                    graph.add_type1_dep(id, ei!(expr));
                     add_eval_dep!(id, ty);
                 },
                 hir::Expr::Ret { expr, decl } => {
-                    graph.add_type1_dep(id, expr);
+                    graph.add_type1_dep(id, ei!(expr));
                     let ty = decl
                         .and_then(|decl| self.hir.explicit_tys[decl])
                         .unwrap_or(self.hir.void_ty);
@@ -313,26 +321,26 @@ impl Driver {
                                 for &ty in param_tys {
                                     add_eval_dep!(id, ty);
                                 }
-                                graph.add_type3_dep(id, overload);
+                                graph.add_type3_dep(id, di!(overload));
                             },
-                            _ => graph.add_type2_dep(id, overload),
+                            _ => graph.add_type2_dep(id, di!(overload)),
                         }
                     }
                     for &arg in arguments {
-                        graph.add_type1_dep(id, arg);
+                        graph.add_type1_dep(id, ei!(arg));
                     }
                 },
                 hir::Expr::Set { lhs, rhs } => {
-                    graph.add_type1_dep(id, lhs);
-                    graph.add_type1_dep(id, rhs);
+                    graph.add_type1_dep(id, ei!(lhs));
+                    graph.add_type1_dep(id, ei!(rhs));
                 },
                 hir::Expr::Do { scope } => {
                     self.add_type3_scope_dep(&mut graph, id, scope);
                     let terminal_expr = self.hir.scopes[scope].terminal_expr;
-                    graph.add_type1_dep(id, terminal_expr);
+                    graph.add_type1_dep(id, ei!(terminal_expr));
                 },
                 hir::Expr::If { condition, then_scope, else_scope } => {
-                    graph.add_type1_dep(id, condition);
+                    graph.add_type1_dep(id, ei!(condition));
 
                     self.add_type3_scope_dep(&mut graph, id, then_scope);
                     let then_expr = self.hir.scopes[then_scope].terminal_expr;
@@ -342,14 +350,14 @@ impl Driver {
                     } else {
                         self.hir.void_expr
                     };
-                    graph.add_type1_dep(id, then_expr);
-                    graph.add_type1_dep(id, else_expr);
+                    graph.add_type1_dep(id, ei!(then_expr));
+                    graph.add_type1_dep(id, ei!(else_expr));
                 }
                 hir::Expr::While { condition, scope } => {
-                    graph.add_type1_dep(id, condition);
+                    graph.add_type1_dep(id, ei!(condition));
                     self.add_type3_scope_dep(&mut graph, id, scope);
                     let terminal_expr = self.hir.scopes[scope].terminal_expr;
-                    graph.add_type1_dep(id, terminal_expr);
+                    graph.add_type1_dep(id, ei!(terminal_expr));
                 },
             }
         }
@@ -365,8 +373,9 @@ impl Driver {
         // Finally, convert HIR items to TIR and add them to the correct spot
         for (i, expr) in self.hir.exprs.iter().enumerate() {
             let id = ExprId::new(i);
-            let level = levels.expr_levels[id];
-            let unit = levels.expr_units[id];
+            let item_id = ei!(id);
+            let level = levels.levels[item_id];
+            let unit = levels.units[item_id];
             let unit = &mut self.tir.units[unit as usize];
             if depended_on[id] { unit.eval_dependees.push(id); }
 
@@ -412,8 +421,9 @@ impl Driver {
         }
         for (i, decl) in self.hir.decls.iter().enumerate() {
             let id = DeclId::new(i);
-            let level = levels.decl_levels[id];
-            let unit = levels.decl_units[id];
+            let item_id = di!(id);
+            let level = levels.levels[item_id];
+            let unit = levels.units[item_id];
             let unit = &mut self.tir.units[unit as usize];
 
             match decl {
@@ -442,12 +452,12 @@ impl Driver {
         for scope in &self.hir.scopes {
             for &item in &scope.items {
                 match item {
-                    hir::Item::Stmt(expr) => {
-                        let unit = levels.expr_units[expr];
+                    hir::ScopeItem::Stmt(expr) => {
+                        let unit = levels.units[ei!(expr)];
                         let unit = &mut self.tir.units[unit as usize];
                         unit.stmts.push(Stmt { root_expr: expr });
                     },
-                    hir::Item::ComputedDecl(_) | hir::Item::StoredDecl { .. } => {},
+                    hir::ScopeItem::ComputedDecl(_) | hir::ScopeItem::StoredDecl { .. } => {},
                 }
             }
         }

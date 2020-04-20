@@ -8,7 +8,7 @@ use string_interner::Sym;
 
 use crate::driver::Driver;
 use crate::index_vec::{Idx, IdxVec, IdxCounter};
-use crate::builder::{BinOp, UnOp, ExprId, DeclId, ScopeId, DeclRefId, CastId, Intrinsic};
+use crate::builder::{BinOp, UnOp, ItemId, ExprId, DeclId, ScopeId, DeclRefId, CastId, Intrinsic};
 use crate::source_info::SourceRange;
 use crate::ty::Type;
 
@@ -80,6 +80,12 @@ struct CompDeclState {
 
 #[derive(Copy, Clone, Debug)]
 pub enum Item {
+    Expr(ExprId),
+    Decl(DeclId),
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum ScopeItem {
     Stmt(ExprId),
     StoredDecl { decl_id: DeclId, id: StoredDeclId, root_expr: ExprId },
     ComputedDecl(DeclId),
@@ -87,7 +93,7 @@ pub enum Item {
 
 #[derive(Debug)]
 pub struct Scope {
-    pub items: Vec<Item>,
+    pub items: Vec<ScopeItem>,
     pub terminal_expr: ExprId,
 }
 
@@ -110,9 +116,12 @@ pub enum Decl {
 
 #[derive(Debug)]
 pub struct Builder {
+    pub items: IdxVec<Item, ItemId>,
     pub exprs: IdxVec<Expr, ExprId>,
     pub decl_refs: IdxVec<DeclRef, DeclRefId>,
     pub decls: IdxVec<Decl, DeclId>,
+    pub expr_to_items: IdxVec<ItemId, ExprId>,
+    pub decl_to_items: IdxVec<ItemId, DeclId>,
     pub names: IdxVec<Sym, DeclId>,
     pub explicit_tys: IdxVec<Option<ExprId>, DeclId>,
     /// The subset of decls that are in the global scope
@@ -121,8 +130,7 @@ pub struct Builder {
     pub decl_scopes: IdxVec<DeclScope, DeclScopeId>,
     pub void_expr: ExprId,
     pub void_ty: ExprId,
-    pub expr_source_ranges: IdxVec<SourceRange, ExprId>,
-    pub decl_source_ranges: IdxVec<SourceRange, DeclId>,
+    pub source_ranges: IdxVec<SourceRange, ItemId>,
     pub cast_counter: IdxCounter<CastId>,
 
     comp_decl_stack: Vec<CompDeclState>,
@@ -131,9 +139,12 @@ pub struct Builder {
 impl Builder {
     pub fn new() -> Self {
         let mut b = Self {
+            items: IdxVec::new(),
             exprs: IdxVec::new(),
             decl_refs: IdxVec::new(),
             decls: IdxVec::new(),
+            expr_to_items: IdxVec::new(),
+            decl_to_items: IdxVec::new(),
             names: IdxVec::new(),
             explicit_tys: IdxVec::new(),
             global_decls: Vec::new(),
@@ -141,8 +152,7 @@ impl Builder {
             decl_scopes: IdxVec::new(),
             void_expr: ExprId::new(0),
             void_ty: ExprId::new(1),
-            expr_source_ranges: IdxVec::new(),
-            decl_source_ranges: IdxVec::new(),
+            source_ranges: IdxVec::new(),
             cast_counter: IdxCounter::new(),
             comp_decl_stack: Vec::new(),
         };
@@ -152,10 +162,15 @@ impl Builder {
     }
 
     fn push(&mut self, expr: Expr, range: SourceRange) -> ExprId {
-        let id1 = self.exprs.push(expr);
-        let id2 = self.expr_source_ranges.push(range);
-        debug_assert_eq!(id1, id2);
-        id1
+        let expr_id1 = self.exprs.push(expr);
+        let item_id1 = self.items.push(Item::Expr(expr_id1));
+        let expr_id2 = self.expr_to_items.push(item_id1);
+        let item_id2 = self.source_ranges.push(range);
+
+        debug_assert_eq!(expr_id1, expr_id2);
+        debug_assert_eq!(item_id1, item_id2);
+
+        expr_id1
     }
 
     fn flush_stmt_buffer(&mut self) {
@@ -165,26 +180,31 @@ impl Builder {
         if scope_state.is_none() { return }
         let scope_state = scope_state.unwrap();
         if let Some(stmt) = scope_state.stmt_buffer {
-            self.scopes[scope_state.id].items.push(Item::Stmt(stmt));
+            self.scopes[scope_state.id].items.push(ScopeItem::Stmt(stmt));
             scope_state.stmt_buffer = None;
         }
     }
 
-    fn item(&mut self, item: Item) {
+    fn scope_item(&mut self, item: ScopeItem) {
         let scope = self.comp_decl_stack.last().unwrap().scope_stack.last().unwrap().id;
         self.scopes[scope].items.push(item);
     }
 
     fn decl(&mut self, decl: Decl, name: Sym, explicit_ty: Option<ExprId>, range: SourceRange) -> DeclId {
-        let id1 = self.decls.push(decl);
-        let id2 = self.explicit_tys.push(explicit_ty);
-        let id3 = self.names.push(name);
-        let id4 = self.decl_source_ranges.push(range);
-        debug_assert_eq!(id1, id2);
-        debug_assert_eq!(id2, id3);
-        debug_assert_eq!(id3, id4);
+        let decl_id1 = self.decls.push(decl);
+        let decl_id2 = self.explicit_tys.push(explicit_ty);
+        let decl_id3 = self.names.push(name);
+        debug_assert_eq!(decl_id1, decl_id2);
+        debug_assert_eq!(decl_id2, decl_id3);
 
-        id1
+        let item_id1 = self.items.push(Item::Decl(decl_id1));
+        let decl_id4 = self.decl_to_items.push(item_id1);
+        debug_assert_eq!(decl_id3, decl_id4);
+
+        let item_id2 = self.source_ranges.push(range);
+        debug_assert_eq!(item_id1, item_id2);
+
+        decl_id1
     }
 
     fn global_decl(&mut self, decl: Decl, name: Sym, explicit_ty: Option<ExprId>, range: SourceRange) {
@@ -234,7 +254,7 @@ impl Builder {
             let id = decl.stored_decl_counter.next();
 
             let decl_id = self.decl(Decl::Stored { id, is_mut, root_expr }, name, explicit_ty, range);
-            self.item(Item::StoredDecl { decl_id, id, root_expr });
+            self.scope_item(ScopeItem::StoredDecl { decl_id, id, root_expr });
             self.local_decl(
                 LocalDecl {
                     name,
@@ -362,7 +382,7 @@ impl Builder {
             self.global_decls.push(id);
         } else {
             self.flush_stmt_buffer();
-            self.item(Item::ComputedDecl(id));
+            self.scope_item(ScopeItem::ComputedDecl(id));
         }
         self.comp_decl_stack.push(
             CompDeclState {
@@ -400,8 +420,8 @@ impl Builder {
         );
         self.push(Expr::DeclRef { arguments, id }, range)
     }
-    pub fn get_range(&self, id: ExprId) -> SourceRange { self.expr_source_ranges[id].clone() }
-    pub fn set_range(&mut self, id: ExprId, range: SourceRange) { self.expr_source_ranges[id] = range; }
+    pub fn get_range(&self, id: ExprId) -> SourceRange { self.source_ranges[self.expr_to_items[id]].clone() }
+    pub fn set_range(&mut self, id: ExprId, range: SourceRange) { self.source_ranges[self.expr_to_items[id]] = range; }
 }
 
 impl Driver {

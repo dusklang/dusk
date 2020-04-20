@@ -13,7 +13,7 @@ use crate::type_checker as tc;
 use tc::CastMethod;
 use crate::index_vec::{Idx, IdxVec};
 use crate::builder::{DeclId, ExprId, DeclRefId, ScopeId, Intrinsic};
-use crate::hir::{self, Expr, Item, StoredDeclId};
+use crate::hir::{self, Expr, ScopeItem, StoredDeclId};
 
 newtype_index!(InstrId pub);
 newtype_index!(BasicBlockId pub);
@@ -523,12 +523,12 @@ impl Driver {
         self.tc.types[expr].clone()
     }
 
-    fn build_item(&mut self, b: &mut FunctionBuilder, item: Item) {
+    fn build_scope_item(&mut self, b: &mut FunctionBuilder, item: ScopeItem) {
         match item {
-            Item::Stmt(expr) => {
+            ScopeItem::Stmt(expr) => {
                 self.build_expr(b, expr, Context::new(0, DataDest::Void, ControlDest::Continue));
             },
-            Item::StoredDecl { id, root_expr, .. } => {
+            ScopeItem::StoredDecl { id, root_expr, .. } => {
                 let ty = self.type_of(root_expr);
                 let location = b.code.push(Instr::Alloca(ty));
                 assert_eq!(b.stored_decl_locs.len(), id.idx());
@@ -536,14 +536,14 @@ impl Driver {
                 self.build_expr(b, root_expr, Context::new(0, DataDest::Store { location }, ControlDest::Continue));
             },
             // No need to give local computed decls special treatment at the MIR level
-            Item::ComputedDecl(_) => {},
+            ScopeItem::ComputedDecl(_) => {},
         }
     }
 
     fn build_scope(&mut self, b: &mut FunctionBuilder, scope: ScopeId, ctx: Context) -> InstrId {
         for i in 0..self.hir.scopes[scope].items.len() {
             let item = self.hir.scopes[scope].items[i];
-            self.build_item(b, item);
+            self.build_scope_item(b, item);
         }
         self.build_expr(b, self.hir.scopes[scope].terminal_expr, ctx)
     }

@@ -4,6 +4,7 @@ use bitflags::bitflags;
 
 use crate::index_vec::Idx;
 
+newtype_index!(ItemId pub);
 newtype_index!(ExprId pub);
 newtype_index!(DeclRefId pub);
 newtype_index!(DeclId pub);
