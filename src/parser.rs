@@ -540,7 +540,7 @@ impl Driver {
         //     For example: `foo: SomeType = ...` <- the parser would think you were assigning `...` to `SomeType` and
         //     taking the `void` result of that assignment as the type of variable declaration `foo`
         // TODO: add statements as a slight superset of expressions which includes assignments.
-        let ty = self.try_parse_term(p).unwrap();
+        let ty = self.try_parse_non_cast_term(p).unwrap();
         let end_range = self.cur(p).range.clone();
         let range = begin_range.start..end_range.start;
 

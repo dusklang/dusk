@@ -123,13 +123,11 @@ fn main {
 
     print(generated_string)
 
-    // https://github.com/zachrwolfe/meda/issues/53
-    h := (((((((("h" as u8) as u8) as i8) as i8) as u8) as i8) as isize) as u64)
+    h := "h" as u8 as u8 as i8 as i8 as u8 as i8 as isize as u64
 
     i: u64 = 24
 
-    // https://github.com/zachrwolfe/meda/issues/53
-    //j := h as usize as u8*
+    j := h as usize as u8*
     
     k := 5 as u8
     l := k as u16

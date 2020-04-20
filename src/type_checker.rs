@@ -405,7 +405,7 @@ impl Driver {
                             Type::Int { width, .. } if width == IntWidth::Pointer => 1,
                             _ => 0,
                         }
-                    ).expect("Invalid cast 1!").clone();
+                    ).expect("Invalid cast!").clone();
                     Ok((src_ty.ty.clone(), CastMethod::Reinterpret))
                 } else if let Type::Int { width, .. } = ty {
                     constraints.max_ranked_type_with_assoc_data(|ty|
