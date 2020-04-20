@@ -388,6 +388,46 @@ impl Graph {
 
         self.units = Some(units);
     }
+
+    fn find_level(&self, item: impl Item, levels: &mut ItemIdxVec<u32>) -> u32 {
+        if levels[item] != std::u32::MAX { return levels[item]; }
+
+        let mut max_level = 0;
+        let mut offset = 0;
+        for &dep in &self.dependees[item] {
+            let level = match dep {
+                ItemId::Expr(dep) => self.find_level(dep, levels),
+                ItemId::Decl(dep) => self.find_level(dep, levels),
+            };
+            max_level = std::cmp::max(max_level, level);
+            offset = 1;
+        }
+        let level = max_level + offset;
+        levels[item] = level;
+        level
+    }
+
+    pub fn solve(&self) -> Levels {
+        let mut levels = ItemIdxVec::<u32>::new();
+        levels.resize_with(self.dependees.expr_len(), self.dependees.decl_len(), || std::u32::MAX);
+
+        for i in 0..self.dependees.expr_len() {
+            let expr = ExprId::new(i);
+            self.find_level(expr, &mut levels);
+        }
+        for i in 0..self.dependees.decl_len() {
+            let decl = DeclId::new(i);
+            self.find_level(decl, &mut levels);
+        }
+
+        Levels { expr_levels: levels.expr, decl_levels: levels.decl }
+    }
+}
+
+#[derive(Debug)]
+pub struct Levels {
+    expr_levels: IdxVec<u32, ExprId>,
+    decl_levels: IdxVec<u32, DeclId>,
 }
 
 impl ItemId {
