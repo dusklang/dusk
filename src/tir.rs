@@ -63,7 +63,7 @@ pub struct Decl {
 }
 
 #[derive(Debug)]
-pub struct Subprogram {
+pub struct Unit {
     pub int_lits: Vec<ExprId>,
     pub dec_lits: Vec<ExprId>,
     pub str_lits: Vec<ExprId>,
@@ -83,11 +83,11 @@ pub struct Subprogram {
     pub pointers: DepVec<Expr<Pointer>>,
     pub ifs: DepVec<Expr<If>>,
 
-    /// The expressions in this subprogram that later subprograms have eval dependencies on
+    /// The expressions in this unit that later units have eval dependencies on
     pub eval_dependees: Vec<ExprId>,
 }
 
-impl Subprogram {
+impl Unit {
     fn new() -> Self {
         Self {
             int_lits: Vec::new(),
@@ -116,7 +116,7 @@ impl Subprogram {
 
 #[derive(Debug)]
 pub struct Builder {
-    pub sub_progs: Vec<Subprogram>,
+    pub units: Vec<Unit>,
     pub decls: IdxVec<Decl, DeclId>,
     /// Each declref's overload choices
     pub overloads: IdxVec<Vec<DeclId>, DeclRefId>,
@@ -139,7 +139,7 @@ struct GlobalDeclGroup {
 impl Builder {
     pub fn new() -> Self {
         Self {
-            sub_progs: Vec::new(),
+            units: Vec::new(),
             decls: IdxVec::new(),
             global_decls: Vec::new(),
             overloads: IdxVec::new(),
@@ -354,11 +354,11 @@ impl Driver {
             }
         }
 
-        // Solve for the subprogram and level of each item
+        // Solve for the unit and level of each item
         graph.split();
         graph.find_units();
         let levels = graph.solve();
-        self.tir.sub_progs.resize_with(levels.num_units as usize, || Subprogram::new());
+        self.tir.units.resize_with(levels.num_units as usize, || Unit::new());
 
         let mut staged_ret_groups = HashMap::<DeclId, SmallVec<[ExprId; 1]>>::new();
 
@@ -367,13 +367,12 @@ impl Driver {
             let id = ExprId::new(i);
             let level = levels.expr_levels[id];
             let unit = levels.expr_units[id];
-            
-            let sub_prog = &mut self.tir.sub_progs[unit as usize];
-            if depended_on[id] { sub_prog.eval_dependees.push(id); }
+            let unit = &mut self.tir.units[unit as usize];
+            if depended_on[id] { unit.eval_dependees.push(id); }
 
             macro_rules! insert_item {
                 ($depvec:ident, $item:expr) => {{
-                    sub_prog.$depvec.insert(
+                    unit.$depvec.insert(
                         level,
                         Expr { id, data: $item }
                     );
@@ -382,19 +381,19 @@ impl Driver {
 
             match expr {
                 hir::Expr::Void => {},
-                hir::Expr::IntLit { .. } => sub_prog.int_lits.push(id),
-                hir::Expr::DecLit { .. } => sub_prog.dec_lits.push(id),
-                hir::Expr::StrLit { .. } => sub_prog.str_lits.push(id),
-                hir::Expr::CharLit { .. } => sub_prog.char_lits.push(id),
-                hir::Expr::ConstTy(_) => sub_prog.const_tys.push(id),
+                hir::Expr::IntLit { .. } => unit.int_lits.push(id),
+                hir::Expr::DecLit { .. } => unit.dec_lits.push(id),
+                hir::Expr::StrLit { .. } => unit.str_lits.push(id),
+                hir::Expr::CharLit { .. } => unit.char_lits.push(id),
+                hir::Expr::ConstTy(_) => unit.const_tys.push(id),
                 &hir::Expr::AddrOf { expr, is_mut } => insert_item!(addr_ofs, AddrOf { expr, is_mut }),
                 &hir::Expr::Deref(expr) => insert_item!(derefs, Dereference { expr }),
                 &hir::Expr::Pointer { expr, .. } => insert_item!(pointers, Pointer { expr }),
-                &hir::Expr::Cast { expr, ty, cast_id } => sub_prog.casts.push(Expr { id, data: Cast { expr, ty, cast_id } }),
+                &hir::Expr::Cast { expr, ty, cast_id } => unit.casts.push(Expr { id, data: Cast { expr, ty, cast_id } }),
                 &hir::Expr::Ret { expr, decl } => {
                     let decl = decl.expect("returning outside of a computed decl is invalid!");
                     staged_ret_groups.entry(decl).or_default().push(expr);
-                    sub_prog.explicit_rets.push(expr);
+                    unit.explicit_rets.push(expr);
                 }
                 &hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => insert_item!(decl_refs, DeclRef { args: arguments.clone(), decl_ref_id }),
                 &hir::Expr::Set { lhs, rhs } => insert_item!(assignments, Assignment { lhs, rhs }),
@@ -408,15 +407,14 @@ impl Driver {
                     };
                     insert_item!(ifs, If { condition, then_expr, else_expr });
                 },
-                &hir::Expr::While { condition, .. } => sub_prog.whiles.push(Expr { id, data: While { condition } }),
+                &hir::Expr::While { condition, .. } => unit.whiles.push(Expr { id, data: While { condition } }),
             }
         }
         for (i, decl) in self.hir.decls.iter().enumerate() {
             let id = DeclId::new(i);
             let level = levels.decl_levels[id];
             let unit = levels.decl_units[id];
-
-            let sub_prog = &mut self.tir.sub_progs[unit as usize];
+            let unit = &mut self.tir.units[unit as usize];
 
             match decl {
                 // TODO: Add a parameter TIR item for (at least) checking that the type of the param is valid
@@ -424,19 +422,19 @@ impl Driver {
                 hir::Decl::Intrinsic { ref param_tys, .. } => {},
                 &hir::Decl::Static(root_expr) | &hir::Decl::Const(root_expr) | &hir::Decl::Stored { root_expr, .. } => {
                     let explicit_ty = self.hir.explicit_tys[id];
-                    sub_prog.assigned_decls.insert(level, AssignedDecl { explicit_ty, root_expr, decl_id: id });
+                    unit.assigned_decls.insert(level, AssignedDecl { explicit_ty, root_expr, decl_id: id });
                 },
                 &hir::Decl::Computed { scope, ref param_tys, .. } => {
                     let terminal_expr = self.hir.scopes[scope].terminal_expr;
                     let mut exprs = staged_ret_groups.remove(&id).unwrap_or_default();
                     exprs.push(terminal_expr);
                     if let Some(ty) = self.hir.explicit_tys[id] {
-                        sub_prog.ret_groups.push(
+                        unit.ret_groups.push(
                             RetGroup { ty, exprs }
                         );
                     } else {
                         assert_eq!(exprs.len(), 1, "explicit return statements are not allowed in assigned functions (yet?)");
-                        sub_prog.assigned_decls.insert(level, AssignedDecl { explicit_ty: None, root_expr: terminal_expr, decl_id: id });
+                        unit.assigned_decls.insert(level, AssignedDecl { explicit_ty: None, root_expr: terminal_expr, decl_id: id });
                     }
                 },
             }
@@ -446,8 +444,8 @@ impl Driver {
                 match item {
                     hir::Item::Stmt(expr) => {
                         let unit = levels.expr_units[expr];
-                        let sub_prog = &mut self.tir.sub_progs[unit as usize];
-                        sub_prog.stmts.push(Stmt { root_expr: expr });
+                        let unit = &mut self.tir.units[unit as usize];
+                        unit.stmts.push(Stmt { root_expr: expr });
                     },
                     hir::Item::ComputedDecl(_) | hir::Item::StoredDecl { .. } => {},
                 }

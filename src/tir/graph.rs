@@ -202,7 +202,7 @@ struct Unit {
 }
 
 impl Graph {
-    /// a and b must be in the *same* subprogram, and a must have a higher level than b
+    /// a and b must be in the *same* unit, and a must have a higher level than b
     pub fn add_type1_dep(&mut self, a: impl Item, b: impl Item) {
         let a_val = a.into();
         let b_val = b.into();
@@ -215,17 +215,17 @@ impl Graph {
         self.dependers[b].push(a_val);
     }
 
-    /// a must either be in the same subprogram as b or a later subprogram, but if they are in the same subprogram, a must have a higher level than b
+    /// a must either be in the same unit as b or a later unit, but if they are in the same unit, a must have a higher level than b
     pub fn add_type2_dep(&mut self, a: impl Item, b: impl Item) {
         self.t2_dependees[a].push(b.into());
     }
 
-    /// a must either be in the same subprogram as b or a later subprogram, but their levels are independent
+    /// a must either be in the same unit as b or a later unit, but their levels are independent
     pub fn add_type3_dep(&mut self, a: impl Item, b: impl Item) {
         self.t3_dependees[a].push(b.into());
     }
 
-    /// a must be in an later subprogram than b, but their levels are independent
+    /// a must be in an later unit than b, but their levels are independent
     pub fn add_type4_dep(&mut self, a: impl Item, b: impl Item) {
         self.t4_dependees[a].push(b.into());
     }
