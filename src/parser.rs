@@ -486,7 +486,8 @@ impl Driver {
         } else {
             panic!("expected function name after 'fn'")
         };
-        proto_range = source_info::concat(proto_range, self.cur(p).range.clone());
+        let name_range = self.cur(p).range.clone();
+        proto_range = source_info::concat(proto_range, name_range.clone());
         let mut param_names = SmallVec::new();
         let mut param_tys = SmallVec::new();
         let mut param_ranges = SmallVec::new();
@@ -508,6 +509,12 @@ impl Driver {
             assert_eq!(self.cur(p).kind, &TokenKind::RightParen);
             proto_range = source_info::concat(proto_range, self.cur(p).range.clone());
             self.next(p);
+        } else {
+            self.errors.push(
+                Error::new("function declaration must have parentheses")
+                    .adding_primary_range(name_range.clone(), "")
+                    .adding_secondary_range(name_range.end..(name_range.end+1), "add '()' here")
+            );
         }
         let ty = match self.cur(p).kind {
             TokenKind::Colon => {

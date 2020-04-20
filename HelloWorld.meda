@@ -16,7 +16,7 @@ fn print_num(num: i32) {
 
 FIZZ_BUZZ_ITERATIONS := 120
 
-fn fizz_buzz {
+fn fizz_buzz() {
     i := 1
     while i <= FIZZ_BUZZ_ITERATIONS {
         if i % 3 == 0 || i % 5 == 0 {
@@ -104,7 +104,7 @@ fn take_a_type(T: type) {
     print("\n")
 }
 
-fn main {
+fn main() {
     print("the number is ")
     print_num(compute_a_number() as i32)
     print(", and its type is ")
@@ -144,7 +144,7 @@ fn main {
     *num = 12
     free(num as void *mut)
 
-    fn float_const {
+    fn float_const() {
         blah: f32 = 5.2
     }
 }
@@ -158,7 +158,7 @@ OS_MAC:     u8: 1
 OS_LINUX:   u8: 2
 os :: OS_WINDOWS
 
-fn os_dependent_type: type {
+fn os_dependent_type(): type {
     if os == OS_WINDOWS {
         i32
     } else {
@@ -166,7 +166,7 @@ fn os_dependent_type: type {
     }
 }
 
-fn compute_a_number: os_dependent_type() {
+fn compute_a_number(): os_dependent_type() {
     sixteen_bit_number: u16 = 256
 
     sixteen_bit_number as os_dependent_type()
