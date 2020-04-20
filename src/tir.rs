@@ -171,7 +171,11 @@ impl Driver {
         }
 
         if let Some(group) = self.tir.global_decls.iter().find(|group| group.name == decl_ref.name) {
-            overloads.extend(group.decls.iter().map(|decl| decl.id));
+            overloads.extend(
+                group.decls.iter()
+                    .filter(|decl| decl.num_params == decl_ref.num_arguments)
+                    .map(|decl| decl.id)
+            );
         }
 
         overloads

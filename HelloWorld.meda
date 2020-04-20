@@ -105,6 +105,12 @@ fn take_a_type(T: type) {
 }
 
 fn main {
+    print("the number is ")
+    print_num(compute_a_number as i32)
+    print(", and its type is ")
+    print_type(os_dependent_type)
+    print("\n")
+
     fizz_buzz
     FIZZ_BUZZ_ITERATIONS = 200
     fizz_buzz
@@ -156,7 +162,7 @@ os :: OS_WINDOWS
 
 fn os_dependent_type: type {
     if os == OS_WINDOWS {
-        u16
+        i32
     } else {
         u64
     }
