@@ -296,6 +296,7 @@ impl Driver {
                 let (scope, scope_range) = self.parse_scope(p);
                 Ok(self.hir.do_expr(scope, source_info::concat(do_range, scope_range)))
             },
+            TokenKind::Module => Ok(self.parse_module(p)),
             TokenKind::If => Ok(self.parse_if(p)),
             TokenKind::While => {
                 let while_range = self.cur(p).range.clone();
@@ -443,6 +444,39 @@ impl Driver {
         let root = self.parse_expr(p);
         let root_range = self.hir.get_range(root);
         self.hir.stored_decl(name, explicit_ty, is_mut, root, source_info::concat(name_range, root_range));
+    }
+
+    fn parse_module(&mut self, p: &mut Parser) -> ExprId {
+        let Token { kind, range: mod_range } = self.cur(p);
+        let mod_range = mod_range.clone();
+        assert_eq!(kind, &TokenKind::Module);
+        self.next(p);
+
+        let module = self.hir.begin_module();
+        let Token { kind, range: open_curly_range } = self.cur(p);
+        let open_curly_range = open_curly_range.clone();
+        assert_eq!(kind, &TokenKind::OpenCurly);
+        self.next(p);
+        let close_curly_range = loop {
+            match self.cur(p).kind {
+                TokenKind::Eof => panic!("Unexpected eof while parsing scope"),
+                TokenKind::CloseCurly => {
+                    let close_curly_range = self.cur(p).range.clone();
+                    self.next(p);
+                    break close_curly_range;
+                },
+                _ => {
+                    if let Some(expr) = self.parse_node(p) {
+                        self.errors.push(
+                            Error::new("expressions are not allowed in the top-level of a module")
+                                .adding_primary_range(self.hir.get_range(expr), "delet this")
+                        );
+                    }
+                }
+            }
+        };
+        self.hir.end_module();
+        module
     }
 
     // Parses an open curly brace, then a list of nodes, then a closing curly brace.

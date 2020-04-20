@@ -314,6 +314,7 @@ impl Driver {
                 "struct" => Struct,
                 "do" => Do,
                 "mut" => Mut,
+                "mod" => Module,
                 _ => {
                     let ident = self.interner.get_or_intern(ident);
                     Ident(ident)

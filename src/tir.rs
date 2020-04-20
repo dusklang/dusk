@@ -359,6 +359,7 @@ impl Driver {
                     let terminal_expr = self.hir.scopes[scope].terminal_expr;
                     graph.add_type1_dep(id, ei!(terminal_expr));
                 },
+                hir::Expr::Mod {} => panic!("Unhandled case"),
             }
         }
 
@@ -417,6 +418,7 @@ impl Driver {
                     insert_item!(ifs, If { condition, then_expr, else_expr });
                 },
                 &hir::Expr::While { condition, .. } => unit.whiles.push(Expr { id, data: While { condition } }),
+                hir::Expr::Mod {} => panic!("Unhandled case"),
             }
         }
         for (i, decl) in self.hir.decls.iter().enumerate() {

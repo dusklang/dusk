@@ -32,6 +32,7 @@ pub enum TokenKind {
     Struct,
     Do,
     Mut,
+    Module,
 
     // Symbols
     Colon,

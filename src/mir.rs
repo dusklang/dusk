@@ -182,6 +182,7 @@ fn expr_to_const(expr: &Expr, ty: Type, strings: &mut IdxVec<CString, StrId>) ->
             _ => panic!("unexpected type for character")
         },
         Expr::ConstTy(ref ty) => Const::Ty(ty.clone()),
+        Expr::Mod { } => panic!("Unhandled case!"),
         _ => panic!("Cannot convert expression to constant: {:#?}", expr),
     }
 }
@@ -893,7 +894,8 @@ impl Driver {
                     expr,
                     Context::new(0, DataDest::Ret, ctx.control),
                 );
-            }
+            },
+            Expr::Mod { } => panic!("Unhandled case"),
         };
         
         self.handle_context(b, instr, expr, ty, ctx, should_allow_set)

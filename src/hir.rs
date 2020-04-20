@@ -34,6 +34,7 @@ pub enum Expr {
     While { condition: ExprId, scope: ScopeId },
     Cast { expr: ExprId, ty: ExprId, cast_id: CastId },
     Ret { expr: ExprId, decl: Option<DeclId> },
+    Mod { }
 }
 
 #[derive(Debug)]
@@ -357,6 +358,12 @@ impl Builder {
             let terminal_expr = scope.stmt_buffer.expect("must pass terminal expression via Builder::stmt()");
             self.scopes[scope.id].terminal_expr = terminal_expr;
         }
+    }
+    pub fn begin_module(&mut self) -> ExprId {
+        self.push(Expr::Mod {}, std::usize::MAX..std::usize::MAX)
+    }
+    pub fn end_module(&mut self) {
+        // TODO: something. anything.
     }
     pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, explicit_ty: Option<ExprId>, proto_range: SourceRange) {
         // This is a placeholder value that gets replaced once the parameter declarations get allocated.

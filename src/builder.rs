@@ -10,6 +10,7 @@ newtype_index!(DeclRefId pub);
 newtype_index!(DeclId pub);
 newtype_index!(ScopeId pub);
 newtype_index!(CastId pub);
+newtype_index!(ModId pub);
 
 #[derive(Clone, Copy, Debug)]
 pub enum BinOp {

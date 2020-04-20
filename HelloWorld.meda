@@ -70,7 +70,7 @@ fn fizz_buzz() {
                 print("Buzz")
             }
         } else {
-            std.print_num(i)
+            print_num(i)
         }
         print("\n")
         i = i + 1
@@ -83,14 +83,14 @@ fn print_and_return_fib(str: u8*, n: i32): i32 {
 }
 
 fn print_and_return_concatenated_string(a: u8*, b: u8*): u8* {
-    val :: std.concat(a, b)
+    val :: concat(a, b)
     print(val)
     val
 }
 
 FIB_N :: print_and_return_fib("printing at compile time while compiling constant!\n", 7)
 FIB :: print_and_return_fib("printing at compile time!\n", FIB_N)
-generated_string :: std.concat(std.concat("Hello, ", "world!"), " (from compile-time)\n")
+generated_string :: concat(concat("Hello, ", "world!"), " (from compile-time)\n")
 
 fn too_hype_for_types(a: i32, b: i32, c: i32) = a * b + c
 
@@ -108,7 +108,7 @@ fn take_a_type(T: type) {
 
 fn main() {
     print("the number is ")
-    std.print_num(compute_a_number() as i32)
+    print_num(compute_a_number() as i32)
     print(", and its type is ")
     print_type(os_dependent_type())
     print("\n")
@@ -118,9 +118,9 @@ fn main() {
     fizz_buzz()
 
     print("fib(")
-    std.print_num(FIB_N)
+    print_num(FIB_N)
     print(") = ")
-    std.print_num(FIB)
+    print_num(FIB)
     print("\n")
 
     print(generated_string)
