@@ -119,7 +119,7 @@ impl Driver {
         }
         self.tc.overloads.resize_with(self.tir.overloads.len(), || None);
         self.tc.preferred_overloads.resize_with(self.tir.overloads.len(), || None);
-        self.tc.cast_methods.resize_with(self.tir.num_casts, || CastMethod::Noop);
+        self.tc.cast_methods.resize_with(self.hir.cast_counter.len(), || CastMethod::Noop);
 
         for i in 0..self.tir.decls.len() {
             let id = DeclId::new(i);

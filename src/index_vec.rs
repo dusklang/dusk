@@ -145,4 +145,6 @@ impl<I: Idx> IdxCounter<I> {
         self.next_id += 1;
         next
     }
+
+    pub fn len(&self) -> usize { self.next_id as usize }
 }

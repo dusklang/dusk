@@ -117,14 +117,11 @@ impl Subprogram {
 #[derive(Debug)]
 pub struct Builder {
     pub sub_progs: Vec<Subprogram>,
-    pub num_casts: usize,
     pub decls: IdxVec<Decl, DeclId>,
     /// Each declref's overload choices
     pub overloads: IdxVec<Vec<DeclId>, DeclRefId>,
 
     global_decls: Vec<GlobalDeclGroup>,
-
-    staged_ret_groups: Vec<(DeclId, RetGroup)>,
 }
 
 #[derive(Debug)]
@@ -143,13 +140,9 @@ impl Builder {
     pub fn new() -> Self {
         Self {
             sub_progs: Vec::new(),
-            num_casts: 0,
-
             decls: IdxVec::new(),
             global_decls: Vec::new(),
             overloads: IdxVec::new(),
-
-            staged_ret_groups: Vec::new(),
         }
     }
 }
@@ -252,13 +245,22 @@ impl Driver {
 
         // Add dependencies to the graph
         let mut graph = self.create_graph();
+        // TODO: do something better than an array of bools :(
+        let mut depended_on = IdxVec::<bool, ExprId>::new();
+        depended_on.resize_with(self.hir.exprs.len(), || false);
+        macro_rules! add_eval_dep {
+            ($a:expr, $b:expr) => {{
+                graph.add_type4_dep($a, $b);
+                depended_on[$b] = true;
+            }}
+        }
         for i in 0..self.hir.decls.len() {
             let id = DeclId::new(i);
             match self.hir.decls[id] {
                 hir::Decl::Parameter { .. } => {},
                 hir::Decl::Intrinsic { ref param_tys, .. } => {
                     for &ty in param_tys {
-                        graph.add_type4_dep(id, ty);
+                        add_eval_dep!(id, ty);
                     }
                 },
                 hir::Decl::Static(assigned_expr) | hir::Decl::Const(assigned_expr) => graph.add_type1_dep(id, assigned_expr),
@@ -267,17 +269,17 @@ impl Driver {
                     let terminal_expr = self.hir.scopes[scope].terminal_expr;
                     graph.add_type1_dep(id, terminal_expr);
                     for &ty in param_tys {
-                        graph.add_type4_dep(id, ty);
+                        add_eval_dep!(id, ty);
                     }
                     let ty = self.hir.explicit_tys[id].unwrap_or(self.hir.void_ty);
-                    graph.add_type4_dep(id, ty);
+                    add_eval_dep!(id, ty);
                 },
                 hir::Decl::Stored { root_expr, .. } => {
                     graph.add_type1_dep(id, root_expr);
                 },
             }
             if let Some(ty) = self.hir.explicit_tys[id] {
-                graph.add_type4_dep(id, ty);
+                add_eval_dep!(id, ty);
             }
         }
         for i in 0..self.hir.exprs.len() {
@@ -289,23 +291,23 @@ impl Driver {
                     => graph.add_type1_dep(id, expr),
                 hir::Expr::Cast { expr, ty, .. } => {
                     graph.add_type1_dep(id, expr);
-                    graph.add_type4_dep(id, ty);
+                    add_eval_dep!(id, ty);
                 },
                 hir::Expr::Ret { expr, decl } => {
                     graph.add_type1_dep(id, expr);
                     let ty = decl
                         .and_then(|decl| self.hir.explicit_tys[decl])
                         .unwrap_or(self.hir.void_ty);
-                    graph.add_type4_dep(id, ty);
+                    add_eval_dep!(id, ty);
                 }
                 hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => {
                     for &overload in &self.tir.overloads[decl_ref_id] {
                         match self.hir.decls[overload] {
                             hir::Decl::Computed { ref param_tys, .. } => {
                                 let ty = self.hir.explicit_tys[overload].unwrap_or(self.hir.void_ty);
-                                graph.add_type4_dep(id, ty);
+                                add_eval_dep!(id, ty);
                                 for &ty in param_tys {
-                                    graph.add_type4_dep(id, ty);
+                                    add_eval_dep!(id, ty);
                                 }
                                 graph.add_type3_dep(id, overload);
                             },
@@ -361,8 +363,9 @@ impl Driver {
             let id = ExprId::new(i);
             let level = levels.expr_levels[id];
             let unit = levels.expr_units[id];
-
+            
             let sub_prog = &mut self.tir.sub_progs[unit as usize];
+            if depended_on[id] { sub_prog.eval_dependees.push(id); }
 
             macro_rules! insert_item {
                 ($depvec:ident, $item:expr) => {{

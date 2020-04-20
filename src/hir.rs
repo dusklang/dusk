@@ -123,8 +123,8 @@ pub struct Builder {
     pub void_ty: ExprId,
     pub expr_source_ranges: IdxVec<SourceRange, ExprId>,
     pub decl_source_ranges: IdxVec<SourceRange, DeclId>,
+    pub cast_counter: IdxCounter<CastId>,
 
-    cast_counter: IdxCounter<CastId>,
     comp_decl_stack: Vec<CompDeclState>,
 }
 
