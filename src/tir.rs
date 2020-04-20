@@ -434,5 +434,17 @@ impl Driver {
                 },
             }
         }
+        for scope in &self.hir.scopes {
+            for &item in &scope.items {
+                match item {
+                    hir::Item::Stmt(expr) => {
+                        let unit = levels.expr_units[expr];
+                        let sub_prog = &mut self.tir.sub_progs[unit as usize];
+                        sub_prog.stmts.push(Stmt { root_expr: expr });
+                    },
+                    hir::Item::ComputedDecl(_) | hir::Item::StoredDecl { .. } => {},
+                }
+            }
+        }
     }
 }
