@@ -14,6 +14,7 @@ use crate::index_vec::IdxVec;
 use crate::dep_vec;
 use crate::source_info::CommentatedSourceRange;
 use crate::mir::Const;
+use crate::hir;
 
 #[derive(Clone, Debug)]
 pub enum CastMethod {
@@ -471,6 +472,23 @@ impl Driver {
                         let overload = pref
                             .filter(|overload| overloads.contains(overload))
                             .unwrap_or_else(|| overloads[0]);
+                        let overload_is_function = match self.hir.decls[overload] {
+                            hir::Decl::Computed { .. } => true,
+                            hir::Decl::Intrinsic { function_like, .. } => function_like,
+                            _ => false,
+                        };
+                        let has_parens = self.hir.decl_refs[item.decl_ref_id].has_parens;
+                        if has_parens && !overload_is_function {
+                            self.errors.push(
+                                Error::new("reference to non-function must not have parentheses")
+                                    .adding_primary_range(self.hir.get_range(item.id), "")
+                            );
+                        } else if !has_parens && overload_is_function {
+                            self.errors.push(
+                                Error::new("function call must have parentheses")
+                                    .adding_primary_range(self.hir.get_range(item.id), "")
+                            );
+                        }
                         let decl = &decls[overload];
                         for (i, &arg) in item.args.iter().enumerate() {
                             let ty = self.tc.get_evaluated_type(decl.param_tys[i]).clone();

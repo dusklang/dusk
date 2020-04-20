@@ -110,7 +110,7 @@ pub enum Decl {
         /// Parameter index within the function
         index: usize,
     },
-    Intrinsic { intr: Intrinsic, param_tys: SmallVec<[ExprId; 2]>, },
+    Intrinsic { intr: Intrinsic, param_tys: SmallVec<[ExprId; 2]>, function_like: bool },
     Static(ExprId),
     Const(ExprId),
 }
@@ -430,16 +430,16 @@ impl Driver {
     pub fn add_const_ty(&mut self, ty: Type) -> ExprId {
         self.hir.push(Expr::ConstTy(ty), USIZE_MAX..USIZE_MAX)
     }
-    pub fn add_intrinsic(&mut self, intrinsic: Intrinsic, param_tys: SmallVec<[ExprId; 2]>, ret_ty: ExprId) {
+    pub fn add_intrinsic(&mut self, intrinsic: Intrinsic, param_tys: SmallVec<[ExprId; 2]>, ret_ty: ExprId, function_like: bool) {
         let name = self.interner.get_or_intern(intrinsic.name());
-        self.hir.global_decl(Decl::Intrinsic { intr: intrinsic, param_tys }, name, Some(ret_ty), USIZE_MAX..USIZE_MAX);
+        self.hir.global_decl(Decl::Intrinsic { intr: intrinsic, param_tys, function_like }, name, Some(ret_ty), USIZE_MAX..USIZE_MAX);
     }
     pub fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId {
         match op {
             BinOp::Assign => self.hir.push(Expr::Set { lhs, rhs }, range),
             _ => {
                 let name = self.interner.get_or_intern(op.symbol());
-                self.hir.decl_ref(name, smallvec![lhs, rhs], true, range)
+                self.hir.decl_ref(name, smallvec![lhs, rhs], false, range)
             }
         }
     }
@@ -452,7 +452,7 @@ impl Driver {
             UnOp::PointerMut => self.hir.push(Expr::Pointer { expr, is_mut: true }, range),
             _ => {
                 let name = self.interner.get_or_intern(op.symbol());
-                self.hir.decl_ref(name, smallvec![expr], true, range)
+                self.hir.decl_ref(name, smallvec![expr], false, range)
             },
         }
     }

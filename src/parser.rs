@@ -38,48 +38,48 @@ impl Driver {
             use Intrinsic::*;
             for &intr in &[Mult, Div, Mod, Add, Sub] {
                 for ty in numerics {
-                    self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], ty.clone());
+                    self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], ty.clone(), false);
                 }
             }
             for &intr in &[Less, LessOrEq, Greater, GreaterOrEq] {
                 for ty in numerics {
-                    self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], boool);
+                    self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], boool, false);
                 }
             }
             for &intr in &[Eq, NotEq] {
                 for ty in &values {
-                    self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], boool);
+                    self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], boool, false);
                 }
             }
             for &intr in &[BitwiseAnd, BitwiseOr] {
                 for ty in integers {
-                    self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], boool);
+                    self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], boool, false);
                 }
             }
             for &intr in &[LogicalAnd, LogicalOr] {
-                self.add_intrinsic(intr, smallvec![boool, boool], boool);
+                self.add_intrinsic(intr, smallvec![boool, boool], boool, false);
             }
             for ty in signed_numerics {
-                self.add_intrinsic(Neg, smallvec![ty.clone()], ty.clone());
+                self.add_intrinsic(Neg, smallvec![ty.clone()], ty.clone(), false);
             }
             for ty in numerics {
-                self.add_intrinsic(Pos, smallvec![ty.clone()], ty.clone());
+                self.add_intrinsic(Pos, smallvec![ty.clone()], ty.clone(), false);
             }
-            self.add_intrinsic(LogicalNot, smallvec![boool], boool);
+            self.add_intrinsic(LogicalNot, smallvec![boool], boool, false);
 
-            self.add_intrinsic(Panic, SmallVec::new(), never);
-            self.add_intrinsic(Panic, smallvec![u8_ptr], never);
+            self.add_intrinsic(Panic, SmallVec::new(), never, true);
+            self.add_intrinsic(Panic, smallvec![u8_ptr], never, true);
 
-            self.add_intrinsic(Malloc, smallvec![uusize], void_mut_ptr);
-            self.add_intrinsic(Free, smallvec![void_mut_ptr], self.hir.void_ty);
+            self.add_intrinsic(Malloc, smallvec![uusize], void_mut_ptr, true);
+            self.add_intrinsic(Free, smallvec![void_mut_ptr], self.hir.void_ty, true);
 
-            self.add_intrinsic(Print, smallvec![u8_ptr], self.hir.void_ty);
-            self.add_intrinsic(Print, smallvec![uu8], self.hir.void_ty);
-            self.add_intrinsic(PrintType, smallvec![type_type], self.hir.void_ty);
+            self.add_intrinsic(Print, smallvec![u8_ptr], self.hir.void_ty, true);
+            self.add_intrinsic(Print, smallvec![uu8], self.hir.void_ty, true);
+            self.add_intrinsic(PrintType, smallvec![type_type], self.hir.void_ty, true);
 
             macro_rules! types {
                 ($($ty:ident),+) => {
-                    $(self.add_intrinsic($ty, SmallVec::new(), type_type);)+
+                    $(self.add_intrinsic($ty, SmallVec::new(), type_type, false);)+
                 };
             }
             types!(

@@ -106,14 +106,14 @@ fn take_a_type(T: type) {
 
 fn main {
     print("the number is ")
-    print_num(compute_a_number as i32)
+    print_num(compute_a_number() as i32)
     print(", and its type is ")
-    print_type(os_dependent_type)
+    print_type(os_dependent_type())
     print("\n")
 
-    fizz_buzz
+    fizz_buzz()
     FIZZ_BUZZ_ITERATIONS = 200
-    fizz_buzz
+    fizz_buzz()
 
     print("fib(")
     print_num(FIB_N)
@@ -166,7 +166,7 @@ fn os_dependent_type: type {
     }
 }
 
-fn compute_a_number: os_dependent_type {
+fn compute_a_number: os_dependent_type() {
     sixteen_bit_number: u16 = 256
 
     sixteen_bit_number as os_dependent_type()
