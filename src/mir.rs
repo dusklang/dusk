@@ -12,7 +12,7 @@ use crate::ty::Type;
 use crate::type_checker as tc;
 use tc::CastMethod;
 use crate::index_vec::{Idx, IdxVec};
-use crate::builder::{DeclId, ExprId, DeclRefId, ScopeId, Intrinsic};
+use crate::builder::{DeclId, ExprId, DeclRefId, ImperScopeId, Intrinsic};
 use crate::hir::{self, Expr, ScopeItem, StoredDeclId};
 
 newtype_index!(InstrId pub);
@@ -451,7 +451,7 @@ impl Driver {
 
 #[derive(Copy, Clone)]
 enum FunctionBody {
-    Scope(ScopeId),
+    Scope(ImperScopeId),
     Expr(ExprId),
 }
 
@@ -541,12 +541,12 @@ impl Driver {
         }
     }
 
-    fn build_scope(&mut self, b: &mut FunctionBuilder, scope: ScopeId, ctx: Context) -> InstrId {
-        for i in 0..self.hir.scopes[scope].items.len() {
-            let item = self.hir.scopes[scope].items[i];
+    fn build_scope(&mut self, b: &mut FunctionBuilder, scope: ImperScopeId, ctx: Context) -> InstrId {
+        for i in 0..self.hir.imper_scopes[scope].items.len() {
+            let item = self.hir.imper_scopes[scope].items[i];
             self.build_scope_item(b, item);
         }
-        self.build_expr(b, self.hir.scopes[scope].terminal_expr, ctx)
+        self.build_expr(b, self.hir.imper_scopes[scope].terminal_expr, ctx)
     }
 
     fn get(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId) -> InstrId {

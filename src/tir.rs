@@ -120,20 +120,6 @@ pub struct Builder {
     pub decls: IdxVec<Decl, DeclId>,
     /// Each declref's overload choices
     pub overloads: IdxVec<Vec<DeclId>, DeclRefId>,
-
-    global_decls: Vec<GlobalDeclGroup>,
-}
-
-#[derive(Debug)]
-struct GlobalDecl {
-    id: DeclId,
-    num_params: usize,
-}
-
-#[derive(Debug)]
-struct GlobalDeclGroup {
-    name: Sym,
-    decls: Vec<GlobalDecl>,
 }
 
 impl Builder {
@@ -141,48 +127,58 @@ impl Builder {
         Self {
             units: Vec::new(),
             decls: IdxVec::new(),
-            global_decls: Vec::new(),
             overloads: IdxVec::new(),
         }
     }
 }
 
 impl Driver {
-    fn find_overloads(&self, decl_ref: &hir::DeclRef) -> Vec<DeclId> {
-        let mut overloads = Vec::new();
-
-        if let Some(mut namespace) = decl_ref.namespace {
-            let mut scope = &self.hir.decl_scopes[namespace.scope];
-            loop {
-                let result = scope.decls[0..namespace.end_offset].iter()
+    // Returns whether or not we found the last/only overload
+    fn find_overloads_from_namespace(&self, ns: Namespace, decl_ref: &hir::DeclRef, overloads: &mut Vec<DeclId>) -> bool {
+        match ns {
+            Namespace::Imper { scope, end_offset } => {
+                let namespace = &self.hir.imper_ns[scope];
+                let result = namespace.decls[0..end_offset].iter()
                     .rev()
                     .find(|&decl| decl.name == decl_ref.name && decl.num_params == decl_ref.num_arguments);
                 if let Some(decl) = result {
                     overloads.push(decl.id);
-                    return overloads;
+                    return true;
                 }
-                if let Some(parent) = scope.parent {
-                    namespace = parent;
-                    scope = &self.hir.decl_scopes[namespace.scope];
-                } else {
-                    break;
+            },
+            Namespace::Mod(scope) => {
+                let scope = self.hir.mod_ns[scope].scope;
+                if let Some(group) = self.hir.mod_scopes[scope].decl_groups.get(&decl_ref.name) {
+                    overloads.extend(
+                        group.iter()
+                            .filter(|decl| decl.num_params == decl_ref.num_arguments)
+                            .map(|decl| decl.id)
+                    );
                 }
             }
         }
+        false
+    }
 
-        if let Some(group) = self.tir.global_decls.iter().find(|group| group.name == decl_ref.name) {
-            overloads.extend(
-                group.decls.iter()
-                    .filter(|decl| decl.num_params == decl_ref.num_arguments)
-                    .map(|decl| decl.id)
-            );
+    fn find_overloads(&self, decl_ref: &hir::DeclRef) -> Vec<DeclId> {
+        let mut overloads = Vec::new();
+
+        let mut namespace = Some(decl_ref.namespace);
+        while let Some(ns) = namespace {
+            if self.find_overloads_from_namespace(ns, decl_ref, &mut overloads) {
+                break;
+            }
+            namespace = match ns {
+                Namespace::Imper { scope, .. } => self.hir.imper_ns[scope].parent,
+                Namespace::Mod(scope) => self.hir.mod_ns[scope].parent,
+            };
         }
 
         overloads
     }
 
-    fn add_type3_scope_dep(&self, graph: &mut Graph, a: ItemId, b: ScopeId) {
-        let scope = &self.hir.scopes[b];
+    fn add_type3_scope_dep(&self, graph: &mut Graph, a: ItemId, b: ImperScopeId) {
+        let scope = &self.hir.imper_scopes[b];
         for &item in &scope.items {
             match item {
                 hir::ScopeItem::Stmt(expr) => graph.add_type3_dep(a, self.hir.expr_to_items[expr]),
@@ -224,20 +220,6 @@ impl Driver {
             self.tir.decls.push(Decl { param_tys, is_mut });
         }
 
-        // Populate `global_decls`
-        for &id in &self.hir.global_decls {
-            let name = self.hir.names[id];
-            let num_params = self.tir.decls[id].param_tys.len();
-            let group = match self.tir.global_decls.iter_mut().find(|group| group.name == name) {
-                Some(group) => group,
-                None => {
-                    self.tir.global_decls.push(GlobalDeclGroup { name, decls: Vec::new() });
-                    self.tir.global_decls.last_mut().unwrap()
-                },
-            };
-            group.decls.push(GlobalDecl { id, num_params });
-        }
-
         debug_assert!(self.tir.overloads.is_empty());
         self.tir.overloads.reserve(self.hir.decl_refs.len());
         for i in 0..self.hir.decl_refs.len() {
@@ -277,7 +259,7 @@ impl Driver {
                 hir::Decl::Static(assigned_expr) | hir::Decl::Const(assigned_expr) => graph.add_type1_dep(id, ei!(assigned_expr)),
                 hir::Decl::Computed { scope, ref param_tys, .. } => {
                     self.add_type3_scope_dep(&mut graph, id, scope);
-                    let terminal_expr = self.hir.scopes[scope].terminal_expr;
+                    let terminal_expr = self.hir.imper_scopes[scope].terminal_expr;
                     graph.add_type1_dep(id, ei!(terminal_expr));
                     for &ty in param_tys {
                         add_eval_dep!(id, ty);
@@ -336,17 +318,17 @@ impl Driver {
                 },
                 hir::Expr::Do { scope } => {
                     self.add_type3_scope_dep(&mut graph, id, scope);
-                    let terminal_expr = self.hir.scopes[scope].terminal_expr;
+                    let terminal_expr = self.hir.imper_scopes[scope].terminal_expr;
                     graph.add_type1_dep(id, ei!(terminal_expr));
                 },
                 hir::Expr::If { condition, then_scope, else_scope } => {
                     graph.add_type1_dep(id, ei!(condition));
 
                     self.add_type3_scope_dep(&mut graph, id, then_scope);
-                    let then_expr = self.hir.scopes[then_scope].terminal_expr;
+                    let then_expr = self.hir.imper_scopes[then_scope].terminal_expr;
                     let else_expr = if let Some(else_scope) = else_scope {
                         self.add_type3_scope_dep(&mut graph, id, else_scope);
-                        self.hir.scopes[else_scope].terminal_expr
+                        self.hir.imper_scopes[else_scope].terminal_expr
                     } else {
                         self.hir.void_expr
                     };
@@ -356,7 +338,7 @@ impl Driver {
                 hir::Expr::While { condition, scope } => {
                     graph.add_type1_dep(id, ei!(condition));
                     self.add_type3_scope_dep(&mut graph, id, scope);
-                    let terminal_expr = self.hir.scopes[scope].terminal_expr;
+                    let terminal_expr = self.hir.imper_scopes[scope].terminal_expr;
                     graph.add_type1_dep(id, ei!(terminal_expr));
                 },
                 hir::Expr::Mod {} => panic!("Unhandled case"),
@@ -407,11 +389,11 @@ impl Driver {
                 }
                 &hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => insert_item!(decl_refs, DeclRef { args: arguments.clone(), decl_ref_id }),
                 &hir::Expr::Set { lhs, rhs } => insert_item!(assignments, Assignment { lhs, rhs }),
-                &hir::Expr::Do { scope } => insert_item!(dos, Do { terminal_expr: self.hir.scopes[scope].terminal_expr }),
+                &hir::Expr::Do { scope } => insert_item!(dos, Do { terminal_expr: self.hir.imper_scopes[scope].terminal_expr }),
                 &hir::Expr::If { condition, then_scope, else_scope } => {
-                    let then_expr = self.hir.scopes[then_scope].terminal_expr;
+                    let then_expr = self.hir.imper_scopes[then_scope].terminal_expr;
                     let else_expr = if let Some(else_scope) = else_scope {
-                        self.hir.scopes[else_scope].terminal_expr
+                        self.hir.imper_scopes[else_scope].terminal_expr
                     } else {
                         self.hir.void_expr
                     };
@@ -437,7 +419,7 @@ impl Driver {
                     unit.assigned_decls.insert(level, AssignedDecl { explicit_ty, root_expr, decl_id: id });
                 },
                 &hir::Decl::Computed { scope, ref param_tys, .. } => {
-                    let terminal_expr = self.hir.scopes[scope].terminal_expr;
+                    let terminal_expr = self.hir.imper_scopes[scope].terminal_expr;
                     let mut exprs = staged_ret_groups.remove(&id).unwrap_or_default();
                     exprs.push(terminal_expr);
                     if let Some(ty) = self.hir.explicit_tys[id] {
@@ -451,7 +433,7 @@ impl Driver {
                 },
             }
         }
-        for scope in &self.hir.scopes {
+        for scope in &self.hir.imper_scopes {
             for &item in &scope.items {
                 match item {
                     hir::ScopeItem::Stmt(expr) => {

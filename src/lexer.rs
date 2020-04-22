@@ -359,7 +359,7 @@ impl Driver {
                         }
                     )+
                     else { 
-                        panic!("unrecognized token")
+                        panic!("unrecognized token {}", self.cur_tok(l));
                     }
                 }
             }

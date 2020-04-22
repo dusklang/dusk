@@ -1,19 +1,20 @@
 use std::ffi::CString;
 use std::ops::Range;
 use std::usize::MAX as USIZE_MAX;
-
+use std::collections::HashMap;
 
 use smallvec::{SmallVec, smallvec};
 use string_interner::Sym;
 
 use crate::driver::Driver;
 use crate::index_vec::{Idx, IdxVec, IdxCounter};
-use crate::builder::{BinOp, UnOp, ItemId, ExprId, DeclId, ScopeId, DeclRefId, CastId, Intrinsic};
+use crate::builder::{BinOp, UnOp, ItemId, ExprId, DeclId, ImperScopeId, ModScopeId, DeclRefId, CastId, Intrinsic};
 use crate::source_info::SourceRange;
 use crate::ty::Type;
 
 newtype_index!(StoredDeclId pub);
-newtype_index!(DeclScopeId pub);
+newtype_index!(ImperScopeNsId pub);
+newtype_index!(ModScopeNsId pub);
 
 #[derive(Debug)]
 pub enum Expr {
@@ -29,54 +30,74 @@ pub enum Expr {
     Pointer { expr: ExprId, is_mut: bool },
     Deref(ExprId),
     Set { lhs: ExprId, rhs: ExprId },
-    Do { scope: ScopeId },
-    If { condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId> },
-    While { condition: ExprId, scope: ScopeId },
+    Do { scope: ImperScopeId },
+    If { condition: ExprId, then_scope: ImperScopeId, else_scope: Option<ImperScopeId> },
+    While { condition: ExprId, scope: ImperScopeId },
     Cast { expr: ExprId, ty: ExprId, cast_id: CastId },
     Ret { expr: ExprId, decl: Option<DeclId> },
     Mod { }
 }
 
+/// A declaration in local (imperative) scope
 #[derive(Debug)]
-pub struct LocalDecl {
+pub struct ImperScopedDecl {
     pub name: Sym,
     pub num_params: usize,
     pub id: DeclId,
 }
 
+/// A declaration in module scope
 #[derive(Debug)]
-pub struct DeclScope {
-    pub decls: Vec<LocalDecl>,
+pub struct ModScopedDecl {
+    pub num_params: usize,
+    pub id: DeclId,
+}
+
+#[derive(Debug)]
+pub struct ImperScopeNs {
+    pub decls: Vec<ImperScopedDecl>,
+    pub parent: Option<Namespace>,
+}
+
+#[derive(Debug)]
+pub struct ModScopeNs {
+    pub scope: ModScopeId,
     pub parent: Option<Namespace>,
 }
 
 #[derive(Debug, Copy, Clone)]
-pub struct Namespace {
-    pub scope: DeclScopeId,
-    pub end_offset: usize,
+pub enum Namespace {
+    Imper { scope: ImperScopeNsId, end_offset: usize },
+    Mod(ModScopeNsId),
 }
 
 #[derive(Debug)]
 pub struct DeclRef {
     pub name: Sym,
-    pub namespace: Option<Namespace>,
+    pub namespace: Namespace,
     pub num_arguments: usize,
     pub has_parens: bool,
 }
 
 #[derive(Debug)]
-struct ScopeState {
-    id: ScopeId,
-    decl_scope: DeclScopeId,
-    stmt_buffer: Option<ExprId>,
+enum ScopeState {
+    Imper {
+        id: ImperScopeId,
+        namespace: ImperScopeNsId,
+        stmt_buffer: Option<ExprId>,
+    },
+    Mod {
+        id: ModScopeId,
+        namespace: ModScopeNsId,
+    }
 }
 
 #[derive(Debug)]
 struct CompDeclState {
-    has_scope: Option<ScopeId>,
+    has_scope: Option<ImperScopeId>,
     params: Range<DeclId>,
     id: DeclId,
-    scope_stack: Vec<ScopeState>,
+    imper_scope_stack: u32,
     stored_decl_counter: IdxCounter<StoredDeclId>,
 }
 
@@ -94,9 +115,14 @@ pub enum ScopeItem {
 }
 
 #[derive(Debug)]
-pub struct Scope {
+pub struct ImperScope {
     pub items: Vec<ScopeItem>,
     pub terminal_expr: ExprId,
+}
+
+#[derive(Debug, Default)]
+pub struct ModScope {
+    pub decl_groups: HashMap<Sym, Vec<ModScopedDecl>>,
 }
 
 #[derive(Debug)]
@@ -104,7 +130,7 @@ pub enum Decl {
     Computed {
         param_tys: SmallVec<[ExprId; 2]>,
         params: Range<DeclId>,
-        scope: ScopeId,
+        scope: ImperScopeId,
     },
     Stored { id: StoredDeclId, is_mut: bool, root_expr: ExprId, },
     Parameter {
@@ -126,20 +152,32 @@ pub struct Builder {
     pub decl_to_items: IdxVec<ItemId, DeclId>,
     pub names: IdxVec<Sym, DeclId>,
     pub explicit_tys: IdxVec<Option<ExprId>, DeclId>,
-    /// The subset of decls that are in the global scope
-    pub global_decls: Vec<DeclId>,
-    pub scopes: IdxVec<Scope, ScopeId>,
-    pub decl_scopes: IdxVec<DeclScope, DeclScopeId>,
+    pub global_scope: ModScopeId,
+    pub imper_scopes: IdxVec<ImperScope, ImperScopeId>,
+    pub mod_scopes: IdxVec<ModScope, ModScopeId>,
+    pub imper_ns: IdxVec<ImperScopeNs, ImperScopeNsId>,
+    pub mod_ns: IdxVec<ModScopeNs, ModScopeNsId>,
     pub void_expr: ExprId,
     pub void_ty: ExprId,
     pub source_ranges: IdxVec<SourceRange, ItemId>,
     pub cast_counter: IdxCounter<CastId>,
 
     comp_decl_stack: Vec<CompDeclState>,
+    scope_stack: Vec<ScopeState>,
 }
 
 impl Builder {
     pub fn new() -> Self {
+        let mut mod_scopes = IdxVec::new();
+        let global_scope = mod_scopes.push(ModScope::default());
+        let mut mod_ns = IdxVec::new();
+        let global_namespace = mod_ns.push(
+            ModScopeNs {
+                scope: global_scope,
+                parent: None
+            }
+        );
+        let scope_stack = vec![ScopeState::Mod { id: global_scope, namespace: global_namespace }];
         let mut b = Self {
             items: IdxVec::new(),
             exprs: IdxVec::new(),
@@ -149,14 +187,17 @@ impl Builder {
             decl_to_items: IdxVec::new(),
             names: IdxVec::new(),
             explicit_tys: IdxVec::new(),
-            global_decls: Vec::new(),
-            scopes: IdxVec::new(),
-            decl_scopes: IdxVec::new(),
+            global_scope,
+            imper_scopes: IdxVec::new(),
+            mod_scopes,
+            imper_ns: IdxVec::new(),
+            mod_ns,
             void_expr: ExprId::new(0),
             void_ty: ExprId::new(1),
             source_ranges: IdxVec::new(),
             cast_counter: IdxCounter::new(),
             comp_decl_stack: Vec::new(),
+            scope_stack,
         };
         b.push(Expr::Void, 0..0);
         b.push(Expr::ConstTy(Type::Void), 0..0);
@@ -176,20 +217,18 @@ impl Builder {
     }
 
     fn flush_stmt_buffer(&mut self) {
-        let comp_decl = self.comp_decl_stack.last_mut();
-        if comp_decl.is_none() { return }
-        let scope_state = comp_decl.unwrap().scope_stack.last_mut();
-        if scope_state.is_none() { return }
-        let scope_state = scope_state.unwrap();
-        if let Some(stmt) = scope_state.stmt_buffer {
-            self.scopes[scope_state.id].items.push(ScopeItem::Stmt(stmt));
-            scope_state.stmt_buffer = None;
+        if let Some(ScopeState::Imper { id, namespace, stmt_buffer }) = self.scope_stack.last_mut() {
+            if let Some(stmt) = *stmt_buffer {
+                self.imper_scopes[*id].items.push(ScopeItem::Stmt(stmt));
+                *stmt_buffer = None;
+            }
         }
     }
 
     fn scope_item(&mut self, item: ScopeItem) {
-        let scope = self.comp_decl_stack.last().unwrap().scope_stack.last().unwrap().id;
-        self.scopes[scope].items.push(item);
+        if let &ScopeState::Imper { id, .. } = self.scope_stack.last().unwrap() {
+            self.imper_scopes[id].items.push(item);
+        }
     }
 
     fn decl(&mut self, decl: Decl, name: Sym, explicit_ty: Option<ExprId>, range: SourceRange) -> DeclId {
@@ -209,11 +248,6 @@ impl Builder {
         decl_id1
     }
 
-    fn global_decl(&mut self, decl: Decl, name: Sym, explicit_ty: Option<ExprId>, range: SourceRange) {
-        let id = self.decl(decl, name, explicit_ty, range);
-        self.global_decls.push(id);
-    }
-
     pub fn int_lit(&mut self, lit: u64, range: SourceRange) -> ExprId {
         self.push(Expr::IntLit { lit }, range)
     }
@@ -231,93 +265,109 @@ impl Builder {
         self.push(Expr::Cast { expr, ty, cast_id }, range)
     }
 
-    fn local_decl(&mut self, decl: LocalDecl) {
-        if let Some(state) = self.comp_decl_stack.last() {
-            let decl_scope = state.scope_stack.last().unwrap().decl_scope;
-            self.decl_scopes[decl_scope].decls.push(decl);
+    fn imper_scoped_decl(&mut self, decl: ImperScopedDecl) {
+        if let Some(&ScopeState::Imper { namespace, .. }) = self.scope_stack.last() {
+            self.imper_ns[namespace].decls.push(decl);
+        } else {
+            panic!("tried to add imperative-scoped declaration in a non-imperative scope");
+        }
+    }
+
+    fn mod_scoped_decl(&mut self, name: Sym, decl: ModScopedDecl) {
+        if let Some(&ScopeState::Mod { id, .. }) = self.scope_stack.last() {
+            self.mod_scopes[id].decl_groups.entry(name).or_default().push(decl);
+        } else {
+            panic!("tried to add module-scoped declaration in a non-module scope");
         }
     }
 
     pub fn stored_decl(&mut self, name: Sym, explicit_ty: Option<ExprId>, is_mut: bool, root_expr: ExprId, range: SourceRange) {
         self.flush_stmt_buffer();
-        if self.comp_decl_stack.is_empty() {
-            self.global_decl(
-                if is_mut {
-                    Decl::Static(root_expr)
-                } else {
-                    Decl::Const(root_expr)
-                },
-                name,
-                explicit_ty,
-                range,
-            );
-        } else {
-            let decl = self.comp_decl_stack.last_mut().unwrap();
-            let id = decl.stored_decl_counter.next();
+        match self.scope_stack.last().unwrap() {
+            ScopeState::Imper { .. } => {
+                let decl = self.comp_decl_stack.last_mut().unwrap();
+                let id = decl.stored_decl_counter.next();
 
-            let decl_id = self.decl(Decl::Stored { id, is_mut, root_expr }, name, explicit_ty, range);
-            self.scope_item(ScopeItem::StoredDecl { decl_id, id, root_expr });
-            self.local_decl(
-                LocalDecl {
+                let decl_id = self.decl(Decl::Stored { id, is_mut, root_expr }, name, explicit_ty, range);
+                self.scope_item(ScopeItem::StoredDecl { decl_id, id, root_expr });
+                self.imper_scoped_decl(
+                    ImperScopedDecl {
+                        name,
+                        num_params: 0,
+                        id: decl_id,
+                    }
+                );
+            }
+            ScopeState::Mod { .. } => {
+                let decl_id = self.decl(
+                        if is_mut {
+                        Decl::Static(root_expr)
+                    } else {
+                        Decl::Const(root_expr)
+                    },
                     name,
-                    num_params: 0,
-                    id: decl_id,
-                }
-            );
+                    explicit_ty,
+                    range,
+                );
+                self.mod_scoped_decl(
+                    name,
+                    ModScopedDecl {
+                        num_params: 0,
+                        id: decl_id
+                    }
+                );
+            },
         }
     }
     pub fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
         let decl = self.comp_decl_stack.last().map(|decl| decl.id);
         self.push(Expr::Ret { expr, decl }, range)
     }
-    pub fn if_expr(&mut self, condition: ExprId, then_scope: ScopeId, else_scope: Option<ScopeId>, range: SourceRange) -> ExprId {
+    pub fn if_expr(&mut self, condition: ExprId, then_scope: ImperScopeId, else_scope: Option<ImperScopeId>, range: SourceRange) -> ExprId {
         self.push(
             Expr::If { condition, then_scope, else_scope },
             range,
         )
     }
-    pub fn while_expr(&mut self, condition: ExprId, scope: ScopeId, range: SourceRange) -> ExprId {
+    pub fn while_expr(&mut self, condition: ExprId, scope: ImperScopeId, range: SourceRange) -> ExprId {
         self.push(Expr::While { condition, scope }, range)
     }
     pub fn stmt(&mut self, expr: ExprId) {
         self.flush_stmt_buffer();
-        let scope = self.comp_decl_stack.last_mut().unwrap().scope_stack.last_mut().unwrap();
-        scope.stmt_buffer = Some(expr);
+        if let Some(ScopeState::Imper { stmt_buffer, .. }) = self.scope_stack.last_mut() {
+            *stmt_buffer = Some(expr);
+        }
     }
-    pub fn do_expr(&mut self, scope: ScopeId, range: SourceRange) -> ExprId {
+    pub fn do_expr(&mut self, scope: ImperScopeId, range: SourceRange) -> ExprId {
         self.push(Expr::Do { scope }, range)
     }
-    pub fn begin_scope(&mut self) -> ScopeId { 
-        let parent = match self.comp_decl_stack.last().unwrap().scope_stack.last() {
-            Some(parent_scope) => Some(self.new_namespace(parent_scope.decl_scope)),
-            None => None,
-        };
+    pub fn begin_imper_scope(&mut self) -> ImperScopeId {
+        let parent = self.new_namespace(self.scope_stack.last().unwrap());
 
         let comp_decl = self.comp_decl_stack.last_mut().unwrap();
-        assert!(!comp_decl.scope_stack.is_empty() || comp_decl.has_scope.is_none(), "Can't add multiple top-level scopes to a computed decl");
-        let id = self.scopes.push(
-            Scope {
+        assert!(comp_decl.imper_scope_stack > 0 || comp_decl.has_scope.is_none(), "Can't add multiple top-level scopes to a computed decl");
+        let id = self.imper_scopes.push(
+            ImperScope {
                 items: Vec::new(),
                 terminal_expr: self.void_expr,
             }
         );
-        let decl_scope = self.decl_scopes.push(
-            DeclScope {
+        let namespace = self.imper_ns.push(
+            ImperScopeNs {
                 decls: Vec::new(),
-                parent,
+                parent: Some(parent),
             }
         );
-
-        let is_first_scope = comp_decl.scope_stack.is_empty();
+        
+        let is_first_scope = comp_decl.imper_scope_stack == 0;
         if is_first_scope {
             comp_decl.has_scope = Some(id);
         }
+        comp_decl.imper_scope_stack += 1;
 
-        comp_decl.scope_stack.push(
-            ScopeState {
-                id,
-                decl_scope,
-                stmt_buffer: None,
+        self.scope_stack.push(
+            ScopeState::Imper {
+                id, namespace, stmt_buffer: None,
             }
         );
 
@@ -329,8 +379,8 @@ impl Builder {
             let params = comp_decl.params.clone();
 
             // Add the current comp decl to the decl scope, to enable recursion
-            self.local_decl(
-                LocalDecl {
+            self.imper_scoped_decl(
+                ImperScopedDecl {
                     name,
                     num_params,
                     id
@@ -340,8 +390,8 @@ impl Builder {
             // Add parameters to decl scope
             for i in params.start.idx()..params.end.idx() {
                 let id = DeclId::new(i);
-                self.local_decl(
-                    LocalDecl {
+                self.imper_scoped_decl(
+                    ImperScopedDecl {
                         name: self.names[id],
                         num_params: 0,
                         id,
@@ -352,11 +402,15 @@ impl Builder {
 
         id
     }
-    pub fn end_scope(&mut self, has_terminal_expr: bool) {
-        let scope = self.comp_decl_stack.last_mut().unwrap().scope_stack.pop().unwrap();
-        if has_terminal_expr {
-            let terminal_expr = scope.stmt_buffer.expect("must pass terminal expression via Builder::stmt()");
-            self.scopes[scope.id].terminal_expr = terminal_expr;
+    pub fn end_imper_scope(&mut self, has_terminal_expr: bool) {
+        if let Some(&ScopeState::Imper { id, stmt_buffer, .. }) = self.scope_stack.last() {
+            if has_terminal_expr {
+                let terminal_expr = stmt_buffer.expect("must pass terminal expression via Builder::stmt()");
+                self.imper_scopes[id].terminal_expr = terminal_expr;
+            }
+            self.scope_stack.pop().unwrap();
+        } else {
+            panic!("tried to end the top scope in the stack is not an imperative scope");
         }
     }
     pub fn begin_module(&mut self) -> ExprId {
@@ -384,20 +438,23 @@ impl Builder {
         self.decls[id] = Decl::Computed {
             param_tys,
             params: params.clone(),
-            scope: ScopeId::new(std::usize::MAX)
+            scope: ImperScopeId::new(std::usize::MAX)
         };
-        if self.comp_decl_stack.is_empty() {
-            self.global_decls.push(id);
-        } else {
-            self.flush_stmt_buffer();
-            self.scope_item(ScopeItem::ComputedDecl(id));
+        match self.scope_stack.last().unwrap() {
+            ScopeState::Imper { .. } => {
+                self.flush_stmt_buffer();
+                self.scope_item(ScopeItem::ComputedDecl(id));
+            },
+            &ScopeState::Mod { id: scope_id, .. } => {
+                self.mod_scoped_decl(name, ModScopedDecl { num_params: param_names.len(), id });
+            }
         }
         self.comp_decl_stack.push(
             CompDeclState {
                 has_scope: None,
                 params,
                 id,
-                scope_stack: Vec::new(),
+                imper_scope_stack: 0,
                 stored_decl_counter: IdxCounter::new(),
             }
         );
@@ -410,15 +467,17 @@ impl Builder {
             panic!("Unexpected decl kind when ending computed decl!");
         }
     }
-    fn new_namespace(&self, scope: DeclScopeId) -> Namespace {
-        let end_offset = self.decl_scopes[scope].decls.len();
-        Namespace { scope, end_offset }
+    fn new_namespace(&self, scope: &ScopeState) -> Namespace {
+        match *scope {
+            ScopeState::Imper { namespace, .. } => {
+                let end_offset = self.imper_ns[namespace].decls.len();
+                Namespace::Imper { scope: namespace, end_offset }
+            },
+            ScopeState::Mod { namespace, .. } => Namespace::Mod(namespace),
+        }
     }
     pub fn decl_ref(&mut self, name: Sym, arguments: SmallVec<[ExprId; 2]>, has_parens: bool, range: SourceRange) -> ExprId {
-        let namespace = match self.comp_decl_stack.last() {
-            Some(decl) => Some(self.new_namespace(decl.scope_stack.last().unwrap().decl_scope)),
-            None => None,
-        };
+        let namespace = self.new_namespace(self.scope_stack.last().unwrap());
         let id = self.decl_refs.push(
             DeclRef {
                 name,
@@ -439,7 +498,13 @@ impl Driver {
     }
     pub fn add_intrinsic(&mut self, intrinsic: Intrinsic, param_tys: SmallVec<[ExprId; 2]>, ret_ty: ExprId, function_like: bool) {
         let name = self.interner.get_or_intern(intrinsic.name());
-        self.hir.global_decl(Decl::Intrinsic { intr: intrinsic, param_tys, function_like }, name, Some(ret_ty), USIZE_MAX..USIZE_MAX);
+        let num_params = param_tys.len();
+        let id = self.hir.decl(Decl::Intrinsic { intr: intrinsic, param_tys, function_like }, name, Some(ret_ty), USIZE_MAX..USIZE_MAX);
+        assert_eq!(self.hir.scope_stack.len(), 1, "cannot add intrinsic anywhere except global scope");
+        self.hir.mod_scoped_decl(
+            name,
+            ModScopedDecl { num_params, id }
+        );
     }
     pub fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId {
         match op {

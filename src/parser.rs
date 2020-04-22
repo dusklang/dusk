@@ -4,7 +4,7 @@ use string_interner::Sym;
 
 use crate::driver::Driver;
 use crate::token::{TokenKind, Token};
-use crate::builder::{ExprId, ScopeId, BinOp, UnOp, OpPlacement, Intrinsic};
+use crate::builder::{ExprId, ImperScopeId, BinOp, UnOp, OpPlacement, Intrinsic};
 use crate::ty::Type;
 use crate::error::Error;
 use crate::source_info::{self, SourceRange};
@@ -374,12 +374,12 @@ impl Driver {
         let else_scope = if let TokenKind::Else = self.cur(p).kind {
             match self.next(p).kind {
                 TokenKind::If => {
-                    let scope = self.hir.begin_scope();
+                    let scope = self.hir.begin_imper_scope();
                     let if_expr = self.parse_if(p);
                     let if_range = self.hir.get_range(if_expr);
                     range = source_info::concat(range, if_range);
                     self.hir.stmt(if_expr);
-                    self.hir.end_scope(true);
+                    self.hir.end_imper_scope(true);
                     Some(scope)
                 },
                 TokenKind::OpenCurly => {
@@ -480,8 +480,8 @@ impl Driver {
     }
 
     // Parses an open curly brace, then a list of nodes, then a closing curly brace.
-    fn parse_scope(&mut self, p: &mut Parser) -> (ScopeId, SourceRange) {
-        let scope = self.hir.begin_scope();
+    fn parse_scope(&mut self, p: &mut Parser) -> (ImperScopeId, SourceRange) {
+        let scope = self.hir.begin_imper_scope();
         let mut last_was_expr = false;
         let Token { kind, range: open_curly_range } = self.cur(p);
         let open_curly_range = open_curly_range.clone();
@@ -508,7 +508,7 @@ impl Driver {
                 }
             }
         };
-        self.hir.end_scope(last_was_expr);
+        self.hir.end_imper_scope(last_was_expr);
         (scope, source_info::concat(open_curly_range, close_curly_range))
     }
 
@@ -568,10 +568,10 @@ impl Driver {
             },
             TokenKind::Assign => {
                 self.next(p);
-                self.hir.begin_scope();
+                self.hir.begin_imper_scope();
                 let assigned_expr = self.parse_expr(p);
                 self.hir.stmt(assigned_expr);
-                self.hir.end_scope(true);
+                self.hir.end_imper_scope(true);
             },
             tok => panic!("Invalid token {:?}", tok),
         }
