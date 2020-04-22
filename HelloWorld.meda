@@ -2,6 +2,7 @@ std :: mod {
     fn assert(condition: bool) {
         if !condition { panic("assertion failed") }
     }
+}
 
     fn print_num(num: i32) {
         num := num
@@ -55,7 +56,6 @@ std :: mod {
             fib(n - 1) + fib(n - 2)
         }
     }
-}
 
 FIZZ_BUZZ_ITERATIONS := 120
 

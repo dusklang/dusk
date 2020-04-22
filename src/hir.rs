@@ -35,7 +35,7 @@ pub enum Expr {
     While { condition: ExprId, scope: ImperScopeId },
     Cast { expr: ExprId, ty: ExprId, cast_id: CastId },
     Ret { expr: ExprId, decl: Option<DeclId> },
-    Mod { }
+    Mod { id: ModScopeId },
 }
 
 /// A declaration in local (imperative) scope
@@ -410,15 +410,26 @@ impl Builder {
             }
             self.scope_stack.pop().unwrap();
         } else {
-            panic!("tried to end the top scope in the stack is not an imperative scope");
+            panic!("tried to end imperative scope, but the top scope in the stack is not an imperative scope");
         }
     }
     pub fn begin_module(&mut self) -> ExprId {
         let parent = self.cur_namespace();
-        self.push(Expr::Mod {}, std::usize::MAX..std::usize::MAX)
+        let id = self.mod_scopes.push(ModScope::default());
+        let namespace = self.mod_ns.push(
+            ModScopeNs {
+                scope: id, parent: Some(parent)
+            }
+        );
+        self.scope_stack.push(ScopeState::Mod { id, namespace });
+        self.push(Expr::Mod { id }, std::usize::MAX..std::usize::MAX)
     }
     pub fn end_module(&mut self) {
-        // TODO: something. anything.
+        if let Some(ScopeState::Mod { .. }) = self.scope_stack.last() {
+            self.scope_stack.pop().unwrap();
+        } else {
+            panic!("tried to end the module, but the top scope in the stack is not a module scope");
+        }
     }
     pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, explicit_ty: Option<ExprId>, proto_range: SourceRange) {
         // This is a placeholder value that gets replaced once the parameter declarations get allocated.

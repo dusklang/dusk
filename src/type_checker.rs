@@ -151,6 +151,7 @@ impl Driver {
                 }
             }
             independent_pass_1(&mut self.tc.constraints, &mut self.tc.types, &self.tir.units[sp].explicit_rets, |&id| (id, Type::Never));
+            independent_pass_1(&mut self.tc.constraints, &mut self.tc.types, &self.tir.units[sp].modules, |&id| (id, Type::Mod));
             independent_pass_1(&mut self.tc.constraints, &mut self.tc.types, &self.tir.units[sp].whiles, |item| (item.id, Type::Void));
 
             // This used to be a call to `independent_pass_1`, but it can't be anymore due to the borrow checker being dumb

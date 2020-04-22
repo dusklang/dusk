@@ -12,7 +12,7 @@ use crate::ty::Type;
 use crate::type_checker as tc;
 use tc::CastMethod;
 use crate::index_vec::{Idx, IdxVec};
-use crate::builder::{DeclId, ExprId, DeclRefId, ImperScopeId, Intrinsic};
+use crate::builder::{DeclId, ExprId, ModScopeId, DeclRefId, ImperScopeId, Intrinsic};
 use crate::hir::{self, Expr, ScopeItem, StoredDeclId};
 
 newtype_index!(InstrId pub);
@@ -29,6 +29,7 @@ pub enum Const {
     Str { id: StrId, ty: Type },
     Bool(bool),
     Ty(Type),
+    Mod(ModScopeId),
 }
 
 impl Const {
@@ -39,6 +40,7 @@ impl Const {
             Const::Str { ty, .. } => ty.clone(),
             Const::Bool(_) => Type::Bool,
             Const::Ty(_) => Type::Ty,
+            Const::Mod(_) => Type::Mod,
         }
     }
 }
@@ -182,7 +184,7 @@ fn expr_to_const(expr: &Expr, ty: Type, strings: &mut IdxVec<CString, StrId>) ->
             _ => panic!("unexpected type for character")
         },
         Expr::ConstTy(ref ty) => Const::Ty(ty.clone()),
-        Expr::Mod { } => panic!("Unhandled case!"),
+        Expr::Mod { id } => Const::Mod(id),
         _ => panic!("Cannot convert expression to constant: {:#?}", expr),
     }
 }
@@ -317,6 +319,7 @@ impl Driver {
             Const::Int { lit, ref ty } => writeln!(f, "{} as {:?}", lit, ty),
             Const::Str { id, ref ty } => writeln!(f, "%str{} ({:?}) as {:?}", id.idx(), self.mir.strings[id], ty),
             Const::Ty(ref ty) => writeln!(f, "`{:?}`", ty),
+            Const::Mod(id) => writeln!(f, "%mod{}", id.idx()),
         }
     }
 
@@ -610,7 +613,7 @@ impl Driver {
 
         let instr = match self.hir.exprs[expr] {
             Expr::Void => b.void_instr,
-            Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::StrLit { .. } | Expr::CharLit { .. } | Expr::ConstTy(_) => {
+            Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::StrLit { .. } | Expr::CharLit { .. } | Expr::ConstTy(_) | Expr::Mod { .. } => {
                 let konst = expr_to_const(&self.hir.exprs[expr], ty.clone(), &mut self.mir.strings);
                 b.code.push(Instr::Const(konst))
             },
@@ -894,8 +897,7 @@ impl Driver {
                     expr,
                     Context::new(0, DataDest::Ret, ctx.control),
                 );
-            },
-            Expr::Mod { } => panic!("Unhandled case"),
+            }
         };
         
         self.handle_context(b, instr, expr, ty, ctx, should_allow_set)

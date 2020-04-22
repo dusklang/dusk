@@ -74,6 +74,7 @@ pub struct Unit {
     pub ret_groups: Vec<RetGroup>,
     pub casts: Vec<Expr<Cast>>,
     pub whiles: Vec<Expr<While>>,
+    pub modules: Vec<ExprId>,
     pub dos: DepVec<Expr<Do>>,
     pub assigned_decls: DepVec<AssignedDecl>,
     pub assignments: DepVec<Expr<Assignment>>,
@@ -100,6 +101,7 @@ impl Unit {
             ret_groups: Vec::new(),
             casts: Vec::new(),
             whiles: Vec::new(),
+            modules: Vec::new(),
             dos: DepVec::new(),
             assigned_decls: DepVec::new(),
             assignments: DepVec::new(),
@@ -341,7 +343,13 @@ impl Driver {
                     let terminal_expr = self.hir.imper_scopes[scope].terminal_expr;
                     graph.add_type1_dep(id, ei!(terminal_expr));
                 },
-                hir::Expr::Mod {} => panic!("Unhandled case"),
+                hir::Expr::Mod { id: mod_id } => {
+                    for decl_group in self.hir.mod_scopes[mod_id].decl_groups.values() {
+                        for decl in decl_group {
+                            graph.add_type4_dep(id, di!(decl.id));
+                        }
+                    }
+                }
             }
         }
 
@@ -400,7 +408,7 @@ impl Driver {
                     insert_item!(ifs, If { condition, then_expr, else_expr });
                 },
                 &hir::Expr::While { condition, .. } => unit.whiles.push(Expr { id, data: While { condition } }),
-                hir::Expr::Mod {} => panic!("Unhandled case"),
+                hir::Expr::Mod { .. } => unit.modules.push(id),
             }
         }
         for (i, decl) in self.hir.decls.iter().enumerate() {
