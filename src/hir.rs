@@ -342,7 +342,7 @@ impl Builder {
         self.push(Expr::Do { scope }, range)
     }
     pub fn begin_imper_scope(&mut self) -> ImperScopeId {
-        let parent = self.new_namespace(self.scope_stack.last().unwrap());
+        let parent = self.cur_namespace();
 
         let comp_decl = self.comp_decl_stack.last_mut().unwrap();
         assert!(comp_decl.imper_scope_stack > 0 || comp_decl.has_scope.is_none(), "Can't add multiple top-level scopes to a computed decl");
@@ -414,6 +414,7 @@ impl Builder {
         }
     }
     pub fn begin_module(&mut self) -> ExprId {
+        let parent = self.cur_namespace();
         self.push(Expr::Mod {}, std::usize::MAX..std::usize::MAX)
     }
     pub fn end_module(&mut self) {
@@ -467,8 +468,8 @@ impl Builder {
             panic!("Unexpected decl kind when ending computed decl!");
         }
     }
-    fn new_namespace(&self, scope: &ScopeState) -> Namespace {
-        match *scope {
+    fn cur_namespace(&self) -> Namespace {
+        match *self.scope_stack.last().unwrap() {
             ScopeState::Imper { namespace, .. } => {
                 let end_offset = self.imper_ns[namespace].decls.len();
                 Namespace::Imper { scope: namespace, end_offset }
@@ -477,7 +478,7 @@ impl Builder {
         }
     }
     pub fn decl_ref(&mut self, name: Sym, arguments: SmallVec<[ExprId; 2]>, has_parens: bool, range: SourceRange) -> ExprId {
-        let namespace = self.new_namespace(self.scope_stack.last().unwrap());
+        let namespace = self.cur_namespace();
         let id = self.decl_refs.push(
             DeclRef {
                 name,
