@@ -136,9 +136,11 @@ impl Builder {
 
 impl Driver {
     // Returns whether or not we found the last/only overload
-    fn find_overloads_from_namespace(&self, ns: Namespace, decl_ref: &hir::DeclRef, overloads: &mut Vec<DeclId>) -> bool {
+    fn find_overloads_from_namespace(&self, ns: Namespace, decl_ref: &hir::DeclRef, last_was_imperative: bool, overloads: &mut Vec<DeclId>) -> bool {
         match ns {
             Namespace::Imper { scope, end_offset } => {
+                if !last_was_imperative { return true; }
+
                 let namespace = &self.hir.imper_ns[scope];
                 let result = namespace.decls[0..end_offset].iter()
                     .rev()
@@ -165,14 +167,21 @@ impl Driver {
     fn find_overloads(&self, decl_ref: &hir::DeclRef) -> Vec<DeclId> {
         let mut overloads = Vec::new();
 
+        let mut last_was_imperative = true;
         let mut namespace = Some(decl_ref.namespace);
         while let Some(ns) = namespace {
-            if self.find_overloads_from_namespace(ns, decl_ref, &mut overloads) {
+            if self.find_overloads_from_namespace(ns, decl_ref, last_was_imperative, &mut overloads) {
                 break;
             }
             namespace = match ns {
-                Namespace::Imper { scope, .. } => self.hir.imper_ns[scope].parent,
-                Namespace::Mod(scope) => self.hir.mod_ns[scope].parent,
+                Namespace::Imper { scope, .. } => {
+                    last_was_imperative = true;
+                    self.hir.imper_ns[scope].parent
+                },
+                Namespace::Mod(scope) => {
+                    last_was_imperative = false;
+                    self.hir.mod_ns[scope].parent
+                },
             };
         }
 
