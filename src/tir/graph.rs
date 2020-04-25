@@ -301,6 +301,36 @@ pub struct Levels {
     pub dependees: IdxVec<Vec<ItemId>, ItemId>,
 }
 
+struct SplitOp {
+    included: HashSet<ItemId>,
+    excluded: Vec<ItemId>,
+}
+
+impl Levels {
+    /// Recursively get the dependencies of `splits`, remove them from `unit`, and return them (including `splits`)
+    pub fn split_unit(&mut self, unit: UnitId, splits: &[ItemId]) -> Vec<ItemId> {
+        let mut split_op = SplitOp {
+            included: HashSet::from_iter(self.units[unit].iter().map(|unit| *unit)),
+            excluded: Vec::from_iter(splits.iter().map(|split| *split))
+        };
+        for &split in splits {
+            self.split_recurse(&mut split_op, split);
+        }
+
+        self.units[unit] = Vec::from_iter(split_op.included.into_iter());
+        split_op.excluded
+    }
+
+    fn split_recurse(&self, split_op: &mut SplitOp, split: ItemId) {
+        let removed = split_op.included.remove(&split);
+        assert!(removed);
+        split_op.excluded.push(split);
+        for &dep in &self.dependees[split] {
+            self.split_recurse(split_op, dep);
+        }
+    }
+}
+
 impl ItemId {
     fn write_node_name(self, w: &mut impl Write, hir: &hir::Builder) -> IoResult<()> {
         match hir.items[self] {
