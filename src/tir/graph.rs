@@ -20,7 +20,7 @@ use crate::source_info::SourceRange;
 use crate::hir;
 
 newtype_index!(CompId);
-newtype_index!(UnitId);
+newtype_index!(UnitId pub);
 
 pub struct Graph {
     dependees: IdxVec<Vec<ItemId>, ItemId>,
@@ -255,36 +255,50 @@ impl Graph {
     }
 
     pub fn solve(self) -> Levels {
-        let mut levels = IdxVec::<u32, ItemId>::new();
-        levels.resize_with(self.dependees.len(), || std::u32::MAX);
+        let mut item_to_levels = IdxVec::<u32, ItemId>::new();
+        item_to_levels.resize_with(self.dependees.len(), || std::u32::MAX);
 
         for i in 0..self.dependees.len() {
-            self.find_level(ItemId::new(i), &mut levels);
+            self.find_level(ItemId::new(i), &mut item_to_levels);
         }
 
-        let mut item_to_units = IdxVec::<u32, ItemId>::new();
-        item_to_units.resize_with(self.dependees.len(), || std::u32::MAX);
+        let mut item_to_units = IdxVec::<UnitId, ItemId>::new();
+        item_to_units.resize_with(self.dependees.len(), || UnitId::new(std::usize::MAX));
 
         let units = self.units.unwrap();
         for (i, unit) in units.iter().enumerate() {
             for &comp in &unit.components {
                 let components = &self.components.as_ref().unwrap()[comp];
                 for &item in &components.items {
-                    item_to_units[item] = i as u32;
+                    item_to_units[item] = UnitId::new(i);
                 }
             }
         }
 
-        Levels { levels, units: item_to_units, num_units: units.len() as u32 }
+        let components = self.components.unwrap();
+
+        Levels {
+            item_to_levels,
+            item_to_units,
+            units: IdxVec::from(
+                units.into_iter()
+                    .map(|unit| {
+                        unit.components.into_iter()
+                            .flat_map(|comp| components[comp].items.iter().map(|comp| *comp))
+                            .collect()
+                    }).collect::<Vec<Vec<ItemId>>>()
+            ),
+            dependees: self.dependees,
+        }
     }
 }
 
 #[derive(Debug)]
 pub struct Levels {
-    pub levels: IdxVec<u32, ItemId>,
-    pub units: IdxVec<u32, ItemId>,
-    
-    pub num_units: u32,
+    pub item_to_levels: IdxVec<u32, ItemId>,
+    pub item_to_units: IdxVec<UnitId, ItemId>,
+    pub units: IdxVec<Vec<ItemId>, UnitId>,
+    pub dependees: IdxVec<Vec<ItemId>, ItemId>,
 }
 
 impl ItemId {

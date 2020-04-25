@@ -13,6 +13,7 @@ use crate::index_vec::{Idx, IdxVec};
 
 mod graph;
 use graph::Graph;
+pub use graph::UnitId;
 
 newtype_index!(TreeId pub);
 
@@ -118,7 +119,7 @@ impl Unit {
 
 #[derive(Debug)]
 pub struct Builder {
-    pub units: Vec<Unit>,
+    pub units: IdxVec<Unit, UnitId>,
     pub decls: IdxVec<Decl, DeclId>,
     /// Each declref's overload choices
     pub overloads: IdxVec<Vec<DeclId>, DeclRefId>,
@@ -127,7 +128,7 @@ pub struct Builder {
 impl Builder {
     pub fn new() -> Self {
         Self {
-            units: Vec::new(),
+            units: IdxVec::new(),
             decls: IdxVec::new(),
             overloads: IdxVec::new(),
         }
@@ -366,7 +367,7 @@ impl Driver {
         graph.split();
         graph.find_units();
         let levels = graph.solve();
-        self.tir.units.resize_with(levels.num_units as usize, || Unit::new());
+        self.tir.units.resize_with(levels.units.len(), || Unit::new());
 
         let mut staged_ret_groups = HashMap::<DeclId, SmallVec<[ExprId; 1]>>::new();
 
@@ -374,9 +375,9 @@ impl Driver {
         for (i, expr) in self.hir.exprs.iter().enumerate() {
             let id = ExprId::new(i);
             let item_id = ei!(id);
-            let level = levels.levels[item_id];
-            let unit = levels.units[item_id];
-            let unit = &mut self.tir.units[unit as usize];
+            let level = levels.item_to_levels[item_id];
+            let unit = levels.item_to_units[item_id];
+            let unit = &mut self.tir.units[unit];
             if depended_on[id] { unit.eval_dependees.push(id); }
 
             macro_rules! insert_item {
@@ -423,9 +424,9 @@ impl Driver {
         for (i, decl) in self.hir.decls.iter().enumerate() {
             let id = DeclId::new(i);
             let item_id = di!(id);
-            let level = levels.levels[item_id];
-            let unit = levels.units[item_id];
-            let unit = &mut self.tir.units[unit as usize];
+            let level = levels.item_to_levels[item_id];
+            let unit = levels.item_to_units[item_id];
+            let unit = &mut self.tir.units[unit];
 
             match decl {
                 // TODO: Add a parameter TIR item for (at least) checking that the type of the param is valid
@@ -454,8 +455,8 @@ impl Driver {
             for &item in &scope.items {
                 match item {
                     hir::ScopeItem::Stmt(expr) => {
-                        let unit = levels.units[ei!(expr)];
-                        let unit = &mut self.tir.units[unit as usize];
+                        let unit = levels.item_to_units[ei!(expr)];
+                        let unit = &mut self.tir.units[unit];
                         unit.stmts.push(Stmt { root_expr: expr });
                     },
                     hir::ScopeItem::ComputedDecl(_) | hir::ScopeItem::StoredDecl { .. } => {},

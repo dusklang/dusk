@@ -39,11 +39,14 @@ impl<T: Debug, I: Idx> Debug for IdxVec<T, I> {
     }
 }
 
-impl<T, I: Idx> IdxVec<T, I> {
-    pub fn new() -> Self {
-        IdxVec { raw: Vec::new(), _marker: PhantomData }
+impl<T, I: Idx> From<Vec<T>> for IdxVec<T, I> {
+    fn from(raw: Vec<T>) -> Self {
+        Self { raw, _marker: PhantomData }
     }
+}
 
+impl<T, I: Idx> IdxVec<T, I> {
+    pub fn new() -> Self { IdxVec::from(Vec::new()) }
     pub fn len(&self) -> usize { self.raw.len() }
     pub fn is_empty(&self) -> bool { self.raw.is_empty() }
 
