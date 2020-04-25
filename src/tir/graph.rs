@@ -293,7 +293,7 @@ impl Graph {
     }
 }
 
-#[derive(Debug)]
+#[derive(Default, Debug)]
 pub struct Levels {
     pub item_to_levels: IdxVec<u32, ItemId>,
     pub item_to_units: IdxVec<UnitId, ItemId>,

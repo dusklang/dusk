@@ -45,6 +45,12 @@ impl<T, I: Idx> From<Vec<T>> for IdxVec<T, I> {
     }
 }
 
+impl<T, I: Idx> Default for IdxVec<T, I> {
+    fn default() -> Self {
+        Self::from(Vec::default())
+    }
+}
+
 impl<T, I: Idx> IdxVec<T, I> {
     pub fn new() -> Self { IdxVec::from(Vec::new()) }
     pub fn len(&self) -> usize { self.raw.len() }

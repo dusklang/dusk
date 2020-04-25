@@ -12,7 +12,7 @@ use crate::hir::{self, Namespace};
 use crate::index_vec::{Idx, IdxVec};
 
 mod graph;
-use graph::Graph;
+use graph::{Graph, Levels};
 pub use graph::UnitId;
 
 newtype_index!(TreeId pub);
@@ -123,6 +123,9 @@ pub struct Builder {
     pub decls: IdxVec<Decl, DeclId>,
     /// Each declref's overload choices
     pub overloads: IdxVec<Vec<DeclId>, DeclRefId>,
+
+    levels: Levels,
+    staged_ret_groups: HashMap<DeclId, SmallVec<[ExprId; 1]>>,
 }
 
 impl Builder {
@@ -131,6 +134,8 @@ impl Builder {
             units: IdxVec::new(),
             decls: IdxVec::new(),
             overloads: IdxVec::new(),
+            levels: Levels::default(),
+            staged_ret_groups: HashMap::new(),
         }
     }
 }
@@ -197,6 +202,98 @@ impl Driver {
                 hir::ScopeItem::StoredDecl { decl_id, root_expr, .. } => graph.add_type3_dep(a, self.hir.decl_to_items[decl_id]),
                 hir::ScopeItem::ComputedDecl(_) => {},
             }
+        }
+    }
+
+    pub fn add_dynamic_type_4_dependency(&mut self, items: &[ItemId]) -> Unit {
+        Unit::new()
+    }
+
+    fn flush_staged_ret_groups(&mut self) {
+        let staged_ret_groups = std::mem::replace(&mut self.tir.staged_ret_groups, HashMap::new());
+        for (decl, exprs) in staged_ret_groups {
+            let scope = if let hir::Decl::Computed { scope, .. } = self.hir.decls[decl] {
+                scope
+            } else {
+                panic!("Invalid staged ret group")
+            };
+
+            let ty = self.hir.explicit_tys[decl].expect("explicit return statements are not allowed in assigned functions (yet?)");
+            let item = self.hir.decl_to_items[decl];
+            let unit = self.tir.levels.item_to_units[item];
+            self.tir.units[unit].ret_groups.push(
+                RetGroup { ty, exprs }
+            );
+        }
+    }
+
+    fn build_tir_expr(&mut self, item_id: ItemId, id: ExprId) {
+        let level = self.tir.levels.item_to_levels[item_id];
+        let unit = self.tir.levels.item_to_units[item_id];
+        let unit = &mut self.tir.units[unit];
+
+        macro_rules! insert_item {
+            ($depvec:ident, $item:expr) => {{
+                unit.$depvec.insert(
+                    level,
+                    Expr { id, data: $item }
+                );
+            }}
+        };
+        match &self.hir.exprs[id] {
+            hir::Expr::Void => {},
+            hir::Expr::IntLit { .. } => unit.int_lits.push(id),
+            hir::Expr::DecLit { .. } => unit.dec_lits.push(id),
+            hir::Expr::StrLit { .. } => unit.str_lits.push(id),
+            hir::Expr::CharLit { .. } => unit.char_lits.push(id),
+            hir::Expr::ConstTy(_) => unit.const_tys.push(id),
+            &hir::Expr::AddrOf { expr, is_mut } => insert_item!(addr_ofs, AddrOf { expr, is_mut }),
+            &hir::Expr::Deref(expr) => insert_item!(derefs, Dereference { expr }),
+            &hir::Expr::Pointer { expr, .. } => insert_item!(pointers, Pointer { expr }),
+            &hir::Expr::Cast { expr, ty, cast_id } => unit.casts.push(Expr { id, data: Cast { expr, ty, cast_id } }),
+            &hir::Expr::Ret { expr, decl } => {
+                let decl = decl.expect("returning outside of a computed decl is invalid!");
+                self.tir.staged_ret_groups.entry(decl).or_default().push(expr);
+                unit.explicit_rets.push(expr);
+            }
+            &hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => insert_item!(decl_refs, DeclRef { args: arguments.clone(), decl_ref_id }),
+            &hir::Expr::Set { lhs, rhs } => insert_item!(assignments, Assignment { lhs, rhs }),
+            &hir::Expr::Do { scope } => insert_item!(dos, Do { terminal_expr: self.hir.imper_scopes[scope].terminal_expr }),
+            &hir::Expr::If { condition, then_scope, else_scope } => {
+                let then_expr = self.hir.imper_scopes[then_scope].terminal_expr;
+                let else_expr = if let Some(else_scope) = else_scope {
+                    self.hir.imper_scopes[else_scope].terminal_expr
+                } else {
+                    self.hir.void_expr
+                };
+                insert_item!(ifs, If { condition, then_expr, else_expr });
+            },
+            &hir::Expr::While { condition, .. } => unit.whiles.push(Expr { id, data: While { condition } }),
+            hir::Expr::Mod { .. } => unit.modules.push(id),
+        }
+    }
+
+    fn build_tir_decl(&mut self, item_id: ItemId, id: DeclId) {
+        let level = self.tir.levels.item_to_levels[item_id];
+        let unit = self.tir.levels.item_to_units[item_id];
+        let unit = &mut self.tir.units[unit];
+
+        match &self.hir.decls[id] {
+            // TODO: Add a parameter TIR item for (at least) checking that the type of the param is valid
+            hir::Decl::Parameter { .. } => {},
+            hir::Decl::Intrinsic { ref param_tys, .. } => {},
+            &hir::Decl::Static(root_expr) | &hir::Decl::Const(root_expr) | &hir::Decl::Stored { root_expr, .. } => {
+                let explicit_ty = self.hir.explicit_tys[id];
+                unit.assigned_decls.insert(level, AssignedDecl { explicit_ty, root_expr, decl_id: id });
+            },
+            &hir::Decl::Computed { scope, ref param_tys, .. } => {
+                let terminal_expr = self.hir.imper_scopes[scope].terminal_expr;
+                if let Some(ty) = self.hir.explicit_tys[id] {
+                    self.tir.staged_ret_groups.entry(id).or_default().push(terminal_expr);
+                } else {
+                    unit.assigned_decls.insert(level, AssignedDecl { explicit_ty: None, root_expr: terminal_expr, decl_id: id });
+                }
+            },
         }
     }
 
@@ -366,96 +463,30 @@ impl Driver {
         // Solve for the unit and level of each item
         graph.split();
         graph.find_units();
-        let levels = graph.solve();
-        self.tir.units.resize_with(levels.units.len(), || Unit::new());
-
-        let mut staged_ret_groups = HashMap::<DeclId, SmallVec<[ExprId; 1]>>::new();
+        self.tir.levels = graph.solve();
+        self.tir.units.resize_with(self.tir.levels.units.len(), || Unit::new());
 
         // Finally, convert HIR items to TIR and add them to the correct spot
-        for (i, expr) in self.hir.exprs.iter().enumerate() {
+        for i in 0..self.hir.exprs.len() {
             let id = ExprId::new(i);
             let item_id = ei!(id);
-            let level = levels.item_to_levels[item_id];
-            let unit = levels.item_to_units[item_id];
+            let unit = self.tir.levels.item_to_units[item_id];
             let unit = &mut self.tir.units[unit];
             if depended_on[id] { unit.eval_dependees.push(id); }
 
-            macro_rules! insert_item {
-                ($depvec:ident, $item:expr) => {{
-                    unit.$depvec.insert(
-                        level,
-                        Expr { id, data: $item }
-                    );
-                }}
-            };
-
-            match expr {
-                hir::Expr::Void => {},
-                hir::Expr::IntLit { .. } => unit.int_lits.push(id),
-                hir::Expr::DecLit { .. } => unit.dec_lits.push(id),
-                hir::Expr::StrLit { .. } => unit.str_lits.push(id),
-                hir::Expr::CharLit { .. } => unit.char_lits.push(id),
-                hir::Expr::ConstTy(_) => unit.const_tys.push(id),
-                &hir::Expr::AddrOf { expr, is_mut } => insert_item!(addr_ofs, AddrOf { expr, is_mut }),
-                &hir::Expr::Deref(expr) => insert_item!(derefs, Dereference { expr }),
-                &hir::Expr::Pointer { expr, .. } => insert_item!(pointers, Pointer { expr }),
-                &hir::Expr::Cast { expr, ty, cast_id } => unit.casts.push(Expr { id, data: Cast { expr, ty, cast_id } }),
-                &hir::Expr::Ret { expr, decl } => {
-                    let decl = decl.expect("returning outside of a computed decl is invalid!");
-                    staged_ret_groups.entry(decl).or_default().push(expr);
-                    unit.explicit_rets.push(expr);
-                }
-                &hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => insert_item!(decl_refs, DeclRef { args: arguments.clone(), decl_ref_id }),
-                &hir::Expr::Set { lhs, rhs } => insert_item!(assignments, Assignment { lhs, rhs }),
-                &hir::Expr::Do { scope } => insert_item!(dos, Do { terminal_expr: self.hir.imper_scopes[scope].terminal_expr }),
-                &hir::Expr::If { condition, then_scope, else_scope } => {
-                    let then_expr = self.hir.imper_scopes[then_scope].terminal_expr;
-                    let else_expr = if let Some(else_scope) = else_scope {
-                        self.hir.imper_scopes[else_scope].terminal_expr
-                    } else {
-                        self.hir.void_expr
-                    };
-                    insert_item!(ifs, If { condition, then_expr, else_expr });
-                },
-                &hir::Expr::While { condition, .. } => unit.whiles.push(Expr { id, data: While { condition } }),
-                hir::Expr::Mod { .. } => unit.modules.push(id),
-            }
+            self.build_tir_expr(item_id, id);
         }
-        for (i, decl) in self.hir.decls.iter().enumerate() {
+        for i in 0..self.hir.decls.len() {
             let id = DeclId::new(i);
             let item_id = di!(id);
-            let level = levels.item_to_levels[item_id];
-            let unit = levels.item_to_units[item_id];
-            let unit = &mut self.tir.units[unit];
-
-            match decl {
-                // TODO: Add a parameter TIR item for (at least) checking that the type of the param is valid
-                hir::Decl::Parameter { .. } => {},
-                hir::Decl::Intrinsic { ref param_tys, .. } => {},
-                &hir::Decl::Static(root_expr) | &hir::Decl::Const(root_expr) | &hir::Decl::Stored { root_expr, .. } => {
-                    let explicit_ty = self.hir.explicit_tys[id];
-                    unit.assigned_decls.insert(level, AssignedDecl { explicit_ty, root_expr, decl_id: id });
-                },
-                &hir::Decl::Computed { scope, ref param_tys, .. } => {
-                    let terminal_expr = self.hir.imper_scopes[scope].terminal_expr;
-                    let mut exprs = staged_ret_groups.remove(&id).unwrap_or_default();
-                    exprs.push(terminal_expr);
-                    if let Some(ty) = self.hir.explicit_tys[id] {
-                        unit.ret_groups.push(
-                            RetGroup { ty, exprs }
-                        );
-                    } else {
-                        assert_eq!(exprs.len(), 1, "explicit return statements are not allowed in assigned functions (yet?)");
-                        unit.assigned_decls.insert(level, AssignedDecl { explicit_ty: None, root_expr: terminal_expr, decl_id: id });
-                    }
-                },
-            }
+            self.build_tir_decl(item_id, id);
         }
+        self.flush_staged_ret_groups();
         for scope in &self.hir.imper_scopes {
             for &item in &scope.items {
                 match item {
                     hir::ScopeItem::Stmt(expr) => {
-                        let unit = levels.item_to_units[ei!(expr)];
+                        let unit = self.tir.levels.item_to_units[ei!(expr)];
                         let unit = &mut self.tir.units[unit];
                         unit.stmts.push(Stmt { root_expr: expr });
                     },
