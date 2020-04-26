@@ -140,7 +140,7 @@ impl Driver {
             let levels = dep_vec::unify_sizes(&mut [
                 &mut unit.assigned_decls, &mut unit.assignments, &mut unit.decl_refs, 
                 &mut unit.addr_ofs, &mut unit.derefs, &mut unit.pointers, &mut unit.ifs,
-                &mut unit.dos,
+                &mut unit.dos, &mut unit.ret_groups, &mut unit.casts, &mut unit.whiles,
             ]);
 
             // Pass 1: propagate info down from leaves to roots
@@ -154,17 +154,6 @@ impl Driver {
             }
             independent_pass_1(&mut self.tc.constraints, &mut self.tc.types, &self.tir.units[uid].explicit_rets, |&id| (id, Type::Never));
             independent_pass_1(&mut self.tc.constraints, &mut self.tc.types, &self.tir.units[uid].modules, |&id| (id, Type::Mod));
-            independent_pass_1(&mut self.tc.constraints, &mut self.tc.types, &self.tir.units[uid].whiles, |item| (item.id, Type::Void));
-
-            // This used to be a call to `independent_pass_1`, but it can't be anymore due to the borrow checker being dumb
-            for i in 0..self.tir.units[uid].casts.len() {
-                let item = &self.tir.units[uid].casts[i];
-                let id = item.id;
-                let ty = item.ty;
-                let ty = self.tc.get_evaluated_type(ty).clone();
-                self.tc.constraints[id] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![ty.clone().into()]), None);
-                self.tc.types[id] = ty;
-            }
 
             fn lit_pass_1(constraints: &mut IdxVec<ConstraintList, ExprId>, lits: &[ExprId], trait_impls: BuiltinTraits, pref: Type) {
                 for &item in lits {
@@ -214,6 +203,17 @@ impl Driver {
                 }
                 for item in self.tir.units[uid].assignments.get_level(level) {
                     self.tc.constraints[item.id].set_to(Type::Void);
+                    self.tc.types[item.id] = Type::Void;
+                }
+                for item in self.tir.units[uid].casts.get_level(level) {
+                    let id = item.id;
+                    let ty = item.ty;
+                    let ty = self.tc.get_evaluated_type(ty).clone();
+                    self.tc.constraints[id] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![ty.clone().into()]), None);
+                    self.tc.types[id] = ty;
+                }
+                for item in self.tir.units[uid].whiles.get_level(level) {
+                    self.tc.constraints[item.id] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
                     self.tc.types[item.id] = Type::Void;
                 }
                 for i in 0..self.tir.units[uid].decl_refs.level_len(level) {
@@ -322,7 +322,7 @@ impl Driver {
                         self.errors.push(error);
                     }
                     let constraints = self.tc.constraints[item.then_expr].intersect_with(&self.tc.constraints[item.else_expr]);
-                    
+
                     if constraints.solve().is_err() {
                         // TODO: handle void expressions, which don't have appropriate source location info.
                         self.errors.push(
@@ -363,88 +363,6 @@ impl Driver {
                 constraints.set_to(Type::Void);
             }
 
-            for group in &self.tir.units[uid].ret_groups {
-                for &expr in &group.exprs {
-                    let ty = self.tc.get_evaluated_type(group.ty).clone();
-                    if let Some(err) = self.tc.constraints[expr].can_unify_to(&QualType::from(&ty)).err() {
-                        let range = self.hir.get_range(expr);
-                        let mut error = Error::new(format!("can't unify expression to return type {:?}", ty))
-                            .adding_primary_range(range.clone(), "expression here");
-                        match err {
-                            UnificationError::InvalidChoice(choices)
-                                => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
-                            UnificationError::Trait(not_implemented)
-                                => error.add_secondary_range(
-                                    range,
-                                    format!(
-                                        "note: couldn't unify because expression requires implementations of {:?}",
-                                        not_implemented.names(),
-                                    ),
-                                ),
-                        }
-                        self.errors.push(error);
-                    }
-
-                    // Assume we panic above unless the returned expr can unify to the return type
-                    self.tc.constraints[expr].set_to(ty);
-                }
-            }
-            for item in &self.tir.units[uid].whiles {
-                if self.tc.constraints[item.condition].can_unify_to(&Type::Bool.into()).is_ok() {
-                    self.tc.constraints[item.condition].set_to(Type::Bool);
-                } else {
-                    panic!("Expected boolean condition in while expression");
-                }
-            }
-            for item in &self.tir.units[uid].casts {
-                let ty = self.tc.get_evaluated_type(item.ty).clone();
-                let constraints = &mut self.tc.constraints[item.expr];
-                let ty_and_method: Result<(Type, CastMethod), Vec<&QualType>> = if constraints.can_unify_to(&QualType::from(&ty)).is_ok() {
-                    Ok((ty, CastMethod::Noop))
-                } else if let Type::Pointer(dest_pointee_ty) = ty {
-                    let dest_pointee_ty = dest_pointee_ty.as_ref();
-                    let src_ty = constraints.max_ranked_type(|ty|
-                        match ty.ty {
-                            Type::Pointer(ref pointee) if pointee.is_mut || dest_pointee_ty.is_mut => 2,
-                            Type::Int { width, .. } if width == IntWidth::Pointer => 1,
-                            _ => 0,
-                        }
-                    ).expect("Invalid cast!").clone();
-                    Ok((src_ty.ty.clone(), CastMethod::Reinterpret))
-                } else if let Type::Int { width, .. } = ty {
-                    constraints.max_ranked_type_with_assoc_data(|ty|
-                        match ty.ty {
-                            Type::Int { .. } => (3, CastMethod::Int),
-                            Type::Float { .. } => (2, CastMethod::FloatToInt),
-                            Type::Pointer(_) if width == IntWidth::Pointer => (1, CastMethod::Reinterpret),
-                            _ => (0, CastMethod::Noop),
-                        }
-                    ).map(|(ty, method)| (ty.ty.clone(), method))
-                    .map_err(|options| options.iter().map(|(ty, _)| ty.clone()).collect())
-                } else if let Type::Float { .. } = ty {
-                    constraints.max_ranked_type_with_assoc_data(|ty|
-                        match ty.ty {
-                            Type::Float { .. } => (2, CastMethod::Float),
-                            Type::Int { .. } => (1, CastMethod::IntToFloat),
-                            _ => (0, CastMethod::Noop),
-                        }
-                    ).map(|(ty, method)| (ty.ty.clone(), method))
-                    .map_err(|options| options.iter().map(|(ty, _)| ty.clone()).collect())
-                } else {
-                    panic!("Invalid cast!")
-                };
-                match ty_and_method {
-                    Ok((ty, method)) => {
-                        constraints.set_to(ty);
-                        self.tc.cast_methods[item.cast_id] = method;
-                    },
-                    Err(_) => {
-                        self.errors.push(Error::new("Invalid cast!").adding_primary_range(self.hir.get_range(item.id), "cast here"));
-                        constraints.set_to(Type::Error);
-                        self.tc.cast_methods[item.cast_id] = CastMethod::Noop;
-                    }
-                }
-            }
             for level in (0..levels).rev() {
                 for i in 0..self.tir.units[uid].assigned_decls.level_len(level) {
                     let item = self.tir.units[uid].assigned_decls.at(level, i);
@@ -453,6 +371,88 @@ impl Driver {
                     // TODO: is it necessary to call this here or can we just directly look at `decl_types`?
                     let ty = self.fetch_decl_type(decl_id).clone();
                     self.tc.constraints[root_expr].set_to(ty);
+                }
+                for item in self.tir.units[uid].ret_groups.get_level(level) {
+                    for &expr in &item.exprs {
+                        let ty = self.tc.get_evaluated_type(item.ty).clone();
+                        if let Some(err) = self.tc.constraints[expr].can_unify_to(&QualType::from(&ty)).err() {
+                            let range = self.hir.get_range(expr);
+                            let mut error = Error::new(format!("can't unify expression to return type {:?}", ty))
+                                .adding_primary_range(range.clone(), "expression here");
+                            match err {
+                                UnificationError::InvalidChoice(choices)
+                                    => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                                UnificationError::Trait(not_implemented)
+                                    => error.add_secondary_range(
+                                        range,
+                                        format!(
+                                            "note: couldn't unify because expression requires implementations of {:?}",
+                                            not_implemented.names(),
+                                        ),
+                                    ),
+                            }
+                            self.errors.push(error);
+                        }
+    
+                        // Assume we panic above unless the returned expr can unify to the return type
+                        self.tc.constraints[expr].set_to(ty);
+                    }
+                }
+                for item in self.tir.units[uid].whiles.get_level(level) {
+                    if self.tc.constraints[item.condition].can_unify_to(&Type::Bool.into()).is_ok() {
+                        self.tc.constraints[item.condition].set_to(Type::Bool);
+                    } else {
+                        panic!("Expected boolean condition in while expression");
+                    }
+                }
+                for item in self.tir.units[uid].casts.get_level(level) {
+                    let ty = self.tc.get_evaluated_type(item.ty).clone();
+                    let constraints = &mut self.tc.constraints[item.expr];
+                    let ty_and_method: Result<(Type, CastMethod), Vec<&QualType>> = if constraints.can_unify_to(&QualType::from(&ty)).is_ok() {
+                        Ok((ty, CastMethod::Noop))
+                    } else if let Type::Pointer(dest_pointee_ty) = ty {
+                        let dest_pointee_ty = dest_pointee_ty.as_ref();
+                        let src_ty = constraints.max_ranked_type(|ty|
+                            match ty.ty {
+                                Type::Pointer(ref pointee) if pointee.is_mut || dest_pointee_ty.is_mut => 2,
+                                Type::Int { width, .. } if width == IntWidth::Pointer => 1,
+                                _ => 0,
+                            }
+                        ).expect("Invalid cast!").clone();
+                        Ok((src_ty.ty.clone(), CastMethod::Reinterpret))
+                    } else if let Type::Int { width, .. } = ty {
+                        constraints.max_ranked_type_with_assoc_data(|ty|
+                            match ty.ty {
+                                Type::Int { .. } => (3, CastMethod::Int),
+                                Type::Float { .. } => (2, CastMethod::FloatToInt),
+                                Type::Pointer(_) if width == IntWidth::Pointer => (1, CastMethod::Reinterpret),
+                                _ => (0, CastMethod::Noop),
+                            }
+                        ).map(|(ty, method)| (ty.ty.clone(), method))
+                        .map_err(|options| options.iter().map(|(ty, _)| ty.clone()).collect())
+                    } else if let Type::Float { .. } = ty {
+                        constraints.max_ranked_type_with_assoc_data(|ty|
+                            match ty.ty {
+                                Type::Float { .. } => (2, CastMethod::Float),
+                                Type::Int { .. } => (1, CastMethod::IntToFloat),
+                                _ => (0, CastMethod::Noop),
+                            }
+                        ).map(|(ty, method)| (ty.ty.clone(), method))
+                        .map_err(|options| options.iter().map(|(ty, _)| ty.clone()).collect())
+                    } else {
+                        panic!("Invalid cast!")
+                    };
+                    match ty_and_method {
+                        Ok((ty, method)) => {
+                            constraints.set_to(ty);
+                            self.tc.cast_methods[item.cast_id] = method;
+                        },
+                        Err(_) => {
+                            self.errors.push(Error::new("Invalid cast!").adding_primary_range(self.hir.get_range(item.id), "cast here"));
+                            constraints.set_to(Type::Error);
+                            self.tc.cast_methods[item.cast_id] = CastMethod::Noop;
+                        }
+                    }
                 }
                 for item in self.tir.units[uid].assignments.get_level(level) {
                     let (lhs, rhs) = self.tc.constraints.index_mut(item.lhs, item.rhs);

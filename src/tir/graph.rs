@@ -306,6 +306,18 @@ struct SplitOp {
     excluded: Vec<ItemId>,
 }
 
+impl SplitOp {
+    fn split_recurse(&mut self, item_to_units: &mut IdxVec<UnitId, ItemId>, dependees: &IdxVec<Vec<ItemId>, ItemId>, split: ItemId) {
+        let removed = self.included.remove(&split);
+        assert!(removed);
+        item_to_units[split] = UnitId::new(std::usize::MAX);
+        self.excluded.push(split);
+        for &dep in &dependees[split] {
+            self.split_recurse(item_to_units, dependees, dep);
+        }
+    }
+}
+
 impl Levels {
     /// Recursively get the dependencies of `splits`, remove them from `unit`, and return them (including `splits`)
     pub fn split_unit(&mut self, unit: UnitId, splits: &[ItemId]) -> Vec<ItemId> {
@@ -314,20 +326,11 @@ impl Levels {
             excluded: Vec::from_iter(splits.iter().map(|split| *split))
         };
         for &split in splits {
-            self.split_recurse(&mut split_op, split);
+            split_op.split_recurse(&mut self.item_to_units, &self.dependees, split);
         }
 
         self.units[unit] = Vec::from_iter(split_op.included.into_iter());
         split_op.excluded
-    }
-
-    fn split_recurse(&self, split_op: &mut SplitOp, split: ItemId) {
-        let removed = split_op.included.remove(&split);
-        assert!(removed);
-        split_op.excluded.push(split);
-        for &dep in &self.dependees[split] {
-            self.split_recurse(split_op, dep);
-        }
     }
 }
 

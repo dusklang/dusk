@@ -72,9 +72,9 @@ pub struct Unit {
     pub const_tys: Vec<ExprId>,
     pub stmts: Vec<Stmt>,
     pub explicit_rets: Vec<ExprId>,
-    pub ret_groups: Vec<RetGroup>,
-    pub casts: Vec<Expr<Cast>>,
-    pub whiles: Vec<Expr<While>>,
+    pub ret_groups: DepVec<RetGroup>,
+    pub casts: DepVec<Expr<Cast>>,
+    pub whiles: DepVec<Expr<While>>,
     pub modules: Vec<ExprId>,
     pub dos: DepVec<Expr<Do>>,
     pub assigned_decls: DepVec<AssignedDecl>,
@@ -99,9 +99,9 @@ impl Unit {
             const_tys: Vec::new(),
             stmts: Vec::new(),
             explicit_rets: Vec::new(),
-            ret_groups: Vec::new(),
-            casts: Vec::new(),
-            whiles: Vec::new(),
+            ret_groups: DepVec::new(),
+            casts: DepVec::new(),
+            whiles: DepVec::new(),
             modules: Vec::new(),
             dos: DepVec::new(),
             assigned_decls: DepVec::new(),
@@ -209,7 +209,7 @@ impl Driver {
         Unit::new()
     }
 
-    fn flush_staged_ret_groups(&mut self) {
+    fn flush_staged_ret_groups(&mut self, mut unit: Option<&mut Unit>) {
         let staged_ret_groups = std::mem::replace(&mut self.tir.staged_ret_groups, HashMap::new());
         for (decl, exprs) in staged_ret_groups {
             let scope = if let hir::Decl::Computed { scope, .. } = self.hir.decls[decl] {
@@ -219,10 +219,17 @@ impl Driver {
             };
 
             let ty = self.hir.explicit_tys[decl].expect("explicit return statements are not allowed in assigned functions (yet?)");
+            
             let item = self.hir.decl_to_items[decl];
-            let unit = self.tir.levels.item_to_units[item];
-            self.tir.units[unit].ret_groups.push(
-                RetGroup { ty, exprs }
+            let unit_id = self.tir.levels.item_to_units[item];
+            let level = self.tir.levels.item_to_levels[item];
+            let unit = match unit {
+                Some(ref mut unit) if unit_id == UnitId::new(std::usize::MAX) => unit,
+                _ => &mut self.tir.units[unit_id],
+            };
+            unit.ret_groups.insert(
+                level,
+                RetGroup { ty, exprs },
             );
         }
     }
@@ -240,21 +247,27 @@ impl Driver {
                 );
             }}
         };
+        macro_rules! flat_insert_item {
+            ($vec:ident, $item:expr) => {{
+                assert_eq!(level, 0);
+                unit.$vec.push($item);
+            }}
+        }
         match &self.hir.exprs[id] {
             hir::Expr::Void => {},
-            hir::Expr::IntLit { .. } => unit.int_lits.push(id),
-            hir::Expr::DecLit { .. } => unit.dec_lits.push(id),
-            hir::Expr::StrLit { .. } => unit.str_lits.push(id),
-            hir::Expr::CharLit { .. } => unit.char_lits.push(id),
-            hir::Expr::ConstTy(_) => unit.const_tys.push(id),
+            hir::Expr::IntLit { .. } => flat_insert_item!(int_lits, id),
+            hir::Expr::DecLit { .. } => flat_insert_item!(dec_lits, id),
+            hir::Expr::StrLit { .. } => flat_insert_item!(str_lits, id),
+            hir::Expr::CharLit { .. } => flat_insert_item!(char_lits, id),
+            hir::Expr::ConstTy(_) => flat_insert_item!(const_tys, id),
             &hir::Expr::AddrOf { expr, is_mut } => insert_item!(addr_ofs, AddrOf { expr, is_mut }),
             &hir::Expr::Deref(expr) => insert_item!(derefs, Dereference { expr }),
             &hir::Expr::Pointer { expr, .. } => insert_item!(pointers, Pointer { expr }),
-            &hir::Expr::Cast { expr, ty, cast_id } => unit.casts.push(Expr { id, data: Cast { expr, ty, cast_id } }),
+            &hir::Expr::Cast { expr, ty, cast_id } => insert_item!(casts, Cast { expr, ty, cast_id }),
             &hir::Expr::Ret { expr, decl } => {
                 let decl = decl.expect("returning outside of a computed decl is invalid!");
                 self.tir.staged_ret_groups.entry(decl).or_default().push(expr);
-                unit.explicit_rets.push(expr);
+                unit.explicit_rets.push(id);
             }
             &hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => insert_item!(decl_refs, DeclRef { args: arguments.clone(), decl_ref_id }),
             &hir::Expr::Set { lhs, rhs } => insert_item!(assignments, Assignment { lhs, rhs }),
@@ -268,7 +281,7 @@ impl Driver {
                 };
                 insert_item!(ifs, If { condition, then_expr, else_expr });
             },
-            &hir::Expr::While { condition, .. } => unit.whiles.push(Expr { id, data: While { condition } }),
+            &hir::Expr::While { condition, .. } => insert_item!(whiles, While { condition }),
             hir::Expr::Mod { .. } => unit.modules.push(id),
         }
     }
@@ -481,7 +494,7 @@ impl Driver {
             let item_id = di!(id);
             self.build_tir_decl(item_id, id);
         }
-        self.flush_staged_ret_groups();
+        self.flush_staged_ret_groups(None);
         for scope in &self.hir.imper_scopes {
             for &item in &scope.items {
                 match item {
