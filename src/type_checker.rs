@@ -109,8 +109,6 @@ impl TypeChecker {
     }
 }
 
-
-
 enum UnitRef<'a> {
     Id(UnitId),
     Ref(&'a mut Unit),
