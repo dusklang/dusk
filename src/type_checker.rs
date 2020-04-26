@@ -140,7 +140,7 @@ impl Driver {
         self.hir.explicit_tys[id].map(|ty| self.tc.get_evaluated_type(ty)).unwrap_or(&Type::Error)
     }
 
-    fn run_pass_1(&mut self, unit: UnitRef<'_>) -> u32 {
+    fn run_pass_1(&mut self, unit: UnitRef) -> u32 {
         let unit = match unit {
             UnitRef::Id(uid) => &mut self.tir.units[uid],
             UnitRef::Ref(unit) => unit,
@@ -356,7 +356,7 @@ impl Driver {
         levels
     }
 
-    fn run_pass_2(&mut self, unit: UnitRef<'_>, levels: u32) {
+    fn run_pass_2(&mut self, unit: UnitRef, levels: u32) {
         let unit = match unit {
             UnitRef::Id(uid) => &mut self.tir.units[uid],
             UnitRef::Ref(unit) => unit,
