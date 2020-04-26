@@ -313,12 +313,12 @@ impl Driver {
                 Ok(self.hir.ret(ret_expr, source_info::concat(ret_range, expr_range)))
             },
             x => Err(x.clone()),
-        }.map(|expr| match self.parse_postfix_operator(p) {
-            None => expr,
-            Some((op, mut range)) => {
+        }.map(|mut expr| {
+            while let Some((op, mut range)) = self.parse_postfix_operator(p) {
                 range = source_info::concat(range, self.hir.get_range(expr));
-                self.un_op(op, expr, range)
+                expr = self.un_op(op, expr, range);
             }
+            expr
         })
     }
 
