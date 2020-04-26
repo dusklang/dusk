@@ -488,7 +488,8 @@ impl Builder {
             ScopeState::Mod { namespace, .. } => Namespace::Mod(namespace),
         }
     }
-    fn raw_decl_ref(&mut self, namespace: Namespace, name: Sym, arguments: SmallVec<[ExprId; 2]>, has_parens: bool, range: SourceRange) -> ExprId {
+    pub fn decl_ref(&mut self, _base_expr: Option<ExprId>, name: Sym, arguments: SmallVec<[ExprId; 2]>, has_parens: bool, range: SourceRange) -> ExprId {
+        let namespace = self.cur_namespace();
         let id = self.decl_refs.push(
             DeclRef {
                 name,
@@ -498,15 +499,6 @@ impl Builder {
             }
         );
         self.push(Expr::DeclRef { arguments, id }, range)
-    }
-    pub fn decl_ref(&mut self, name: Sym, arguments: SmallVec<[ExprId; 2]>, has_parens: bool, range: SourceRange) -> ExprId {
-        let namespace = self.cur_namespace();
-        self.raw_decl_ref(namespace, name, arguments, has_parens, range)
-    }
-    pub fn member_ref(&mut self, _base_expr: ExprId, name: Sym, arguments: SmallVec<[ExprId; 2]>, has_parens: bool, range: SourceRange) -> ExprId {
-        // TODO: use base_expr's namespace
-        let namespace = self.cur_namespace();
-        self.decl_ref(name, arguments, has_parens, range)
     }
     pub fn get_range(&self, id: ExprId) -> SourceRange { self.source_ranges[self.expr_to_items[id]].clone() }
     pub fn set_range(&mut self, id: ExprId, range: SourceRange) { self.source_ranges[self.expr_to_items[id]] = range; }
@@ -531,20 +523,20 @@ impl Driver {
             BinOp::Assign => self.hir.push(Expr::Set { lhs, rhs }, range),
             _ => {
                 let name = self.interner.get_or_intern(op.symbol());
-                self.hir.decl_ref(name, smallvec![lhs, rhs], false, range)
+                self.hir.decl_ref(None, name, smallvec![lhs, rhs], false, range)
             }
         }
     }
     pub fn un_op(&mut self, op: UnOp, expr: ExprId, range: SourceRange) -> ExprId {
         match op {
-            UnOp::Deref => self.hir.push(Expr::Deref(expr), range),
-            UnOp::AddrOf => self.hir.push(Expr::AddrOf { expr, is_mut: false }, range),
-            UnOp::AddrOfMut => self.hir.push(Expr::AddrOf { expr, is_mut: true }, range),
-            UnOp::Pointer => self.hir.push(Expr::Pointer { expr, is_mut: false }, range),
-            UnOp::PointerMut => self.hir.push(Expr::Pointer { expr, is_mut: true }, range),
+            UnOp::Deref      => self.hir.push(Expr::Deref(expr), range),
+            UnOp::AddrOf     => self.hir.push(Expr::AddrOf  { expr, is_mut: false }, range),
+            UnOp::AddrOfMut  => self.hir.push(Expr::AddrOf  { expr, is_mut: true  }, range),
+            UnOp::Pointer    => self.hir.push(Expr::Pointer { expr, is_mut: false }, range),
+            UnOp::PointerMut => self.hir.push(Expr::Pointer { expr, is_mut: true  }, range),
             _ => {
                 let name = self.interner.get_or_intern(op.symbol());
-                self.hir.decl_ref(name, smallvec![expr], false, range)
+                self.hir.decl_ref(None, name, smallvec![expr], false, range)
             },
         }
     }

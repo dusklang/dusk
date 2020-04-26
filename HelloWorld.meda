@@ -140,7 +140,8 @@ fn main() {
     p :: 45 | 12
 
     // Intentionally fail, just to test module member lookup
-    std.assert(3 == 0)
+    std.45
+    //assert(3 == 0)
     take_a_type(i8 *mut *mut)
 
     // Allocate a single 8-bit integer on the heap

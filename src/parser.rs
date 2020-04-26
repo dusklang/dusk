@@ -208,6 +208,48 @@ impl Driver {
         Ok(term)
     }
 
+    fn parse_decl_ref(&mut self, p: &mut Parser, base_expr: Option<ExprId>, name: Sym) -> ExprId {
+        let name_range = self.cur(p).range.clone();
+        let begin_range = if let Some(base_expr) = base_expr {
+            self.hir.get_range(base_expr)
+        } else {
+            name_range.clone()
+        };
+        let mut args = SmallVec::new();
+        let mut end_range = name_range.clone();
+        let mut has_parens = false;
+        if let TokenKind::LeftParen = self.next(p).kind {
+            has_parens = true;
+            self.next(p);
+            loop {
+                // TODO: actually implement proper comma and newline handling like I've thought about
+                let Token { kind, range } = self.cur(p);
+                match kind {
+                    TokenKind::RightParen => {
+                        end_range = range.clone();
+                        self.next(p);
+                        break;
+                    }
+                    TokenKind::Comma => { self.next(p); }
+                    TokenKind::Eof => {
+                        panic!("Reached eof in middle of decl ref");
+                    }
+                    _ => { args.push(self.parse_expr(p)); }
+                }
+            }
+        }
+        self.hir.decl_ref(
+            base_expr,
+            name,
+            args,
+            has_parens,
+            source_info::concat(
+                begin_range,
+                end_range,
+            )
+        )
+    }
+
     fn try_parse_non_cast_term(&mut self, p: &mut Parser) -> Result<ExprId, TokenKind> {
         if let Some((op, op_range)) = self.parse_prefix_operator(p) {
             let term = self.try_parse_non_cast_term(p)
@@ -254,42 +296,7 @@ impl Driver {
                 self.next(p);
                 Ok(lit)
             },
-            &TokenKind::Ident(name) => {
-                let name_range = self.cur(p).range.clone();
-                let mut args = SmallVec::new();
-                let mut end_range = name_range.clone();
-                let mut has_parens = false;
-                if let TokenKind::LeftParen = self.next(p).kind {
-                    has_parens = true;
-                    self.next(p);
-                    loop {
-                        // TODO: actually implement proper comma and newline handling like I've thought about
-                        let Token { kind, range } = self.cur(p);
-                        match kind {
-                            TokenKind::RightParen => {
-                                end_range = range.clone();
-                                self.next(p);
-                                break;
-                            }
-                            TokenKind::Comma => { self.next(p); }
-                            TokenKind::Eof => {
-                                panic!("Reached eof in middle of decl ref");
-                            }
-                            _ => { args.push(self.parse_expr(p)); }
-                        }
-                    }
-                }
-                let decl_ref = self.hir.decl_ref(
-                    name,
-                    args,
-                    has_parens,
-                    source_info::concat(
-                        name_range,
-                        end_range,
-                    )
-                );
-                Ok(decl_ref)
-            },
+            &TokenKind::Ident(name) => Ok(self.parse_decl_ref(p, None, name)),
             TokenKind::Do => {
                 let do_range = self.cur(p).range.clone();
                 self.next(p);
@@ -330,41 +337,13 @@ impl Driver {
                     } else {
                         self.errors.push(
                             Error::new("expected identifier after '.'")
-                                .adding_primary_range(self.cur(p).range.clone(), "found this instead")
-                                .adding_secondary_range(dot_range, "'.' here")
+                                .adding_primary_range(dot_range, "'.' here")
+                                .adding_secondary_range(self.cur(p).range.clone(), "note: found this instead")
                         );
+                        self.next(p);
                         return expr
                     };
-                    let name_range = self.cur(p).range.clone();
-                    let mut args = SmallVec::new();
-                    let mut end_range = name_range.clone();
-                    let mut has_parens = false;
-                    if let TokenKind::LeftParen = self.next(p).kind {
-                        has_parens = true;
-                        self.next(p);
-                        loop {
-                            // TODO: actually implement proper comma and newline handling like I've thought about
-                            let Token { kind, range } = self.cur(p);
-                            match kind {
-                                TokenKind::RightParen => {
-                                    end_range = range.clone();
-                                    self.next(p);
-                                    break;
-                                }
-                                TokenKind::Comma => { self.next(p); }
-                                TokenKind::Eof => {
-                                    panic!("Reached eof in middle of decl ref");
-                                }
-                                _ => { args.push(self.parse_expr(p)); }
-                            }
-                        }
-                    }
-
-                    let range = source_info::concat(
-                        self.hir.get_range(expr),
-                        end_range,
-                    );
-                    expr = self.hir.member_ref(expr, name, args, has_parens, range);
+                    expr = self.parse_decl_ref(p, Some(expr), name);
 
                     modified = true;
                 }
