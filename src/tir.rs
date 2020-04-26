@@ -97,7 +97,7 @@ impl Unit {
         self.char_lits.clear();
         self.const_tys.clear();
 
-        // Intentionally don't clear stmts; they are added from scopes, not items, and they are only processed at the end of a unit
+        // Intentionally don't clear stmts; they are added from scopes, not items, and they are processed at the end of pass 1
 
         self.explicit_rets.clear_up_to(level);
         self.ret_groups.clear_up_to(level);

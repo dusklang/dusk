@@ -356,6 +356,226 @@ impl Driver {
         levels
     }
 
+    fn run_pass_2(&mut self, unit: UnitRef<'_>, levels: u32) {
+        let unit = match unit {
+            UnitRef::Id(uid) => &mut self.tir.units[uid],
+            UnitRef::Ref(unit) => unit,
+        };
+
+        if self.tc.debug { println!("===============TYPECHECKING: PASS 2==============="); }
+        for level in (0..levels).rev() {
+            for i in 0..unit.assigned_decls.level_len(level) {
+                let item = unit.assigned_decls.at(level, i);
+                let decl_id = item.decl_id;
+                let root_expr = item.root_expr;
+                // TODO: is it necessary to call this here or can we just directly look at `decl_types`?
+                let ty = self.tc.fetch_decl_type(&self.hir, decl_id).clone();
+                self.tc.constraints[root_expr].set_to(ty);
+            }
+            for item in unit.ret_groups.get_level(level) {
+                for &expr in &item.exprs {
+                    let ty = self.tc.get_evaluated_type(item.ty).clone();
+                    if let Some(err) = self.tc.constraints[expr].can_unify_to(&QualType::from(&ty)).err() {
+                        let range = self.hir.get_range(expr);
+                        let mut error = Error::new(format!("can't unify expression to return type {:?}", ty))
+                            .adding_primary_range(range.clone(), "expression here");
+                        match err {
+                            UnificationError::InvalidChoice(choices)
+                                => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                            UnificationError::Trait(not_implemented)
+                                => error.add_secondary_range(
+                                    range,
+                                    format!(
+                                        "note: couldn't unify because expression requires implementations of {:?}",
+                                        not_implemented.names(),
+                                    ),
+                                ),
+                        }
+                        self.errors.push(error);
+                    }
+
+                    // Assume we panic above unless the returned expr can unify to the return type
+                    self.tc.constraints[expr].set_to(ty);
+                }
+            }
+            for item in unit.whiles.get_level(level) {
+                if self.tc.constraints[item.condition].can_unify_to(&Type::Bool.into()).is_ok() {
+                    self.tc.constraints[item.condition].set_to(Type::Bool);
+                } else {
+                    panic!("Expected boolean condition in while expression");
+                }
+            }
+            for item in unit.casts.get_level(level) {
+                let ty = self.tc.get_evaluated_type(item.ty).clone();
+                let constraints = &mut self.tc.constraints[item.expr];
+                let ty_and_method: Result<(Type, CastMethod), Vec<&QualType>> = if constraints.can_unify_to(&QualType::from(&ty)).is_ok() {
+                    Ok((ty, CastMethod::Noop))
+                } else if let Type::Pointer(dest_pointee_ty) = ty {
+                    let dest_pointee_ty = dest_pointee_ty.as_ref();
+                    let src_ty = constraints.max_ranked_type(|ty|
+                        match ty.ty {
+                            Type::Pointer(ref pointee) if pointee.is_mut || dest_pointee_ty.is_mut => 2,
+                            Type::Int { width, .. } if width == IntWidth::Pointer => 1,
+                            _ => 0,
+                        }
+                    ).expect("Invalid cast!").clone();
+                    Ok((src_ty.ty.clone(), CastMethod::Reinterpret))
+                } else if let Type::Int { width, .. } = ty {
+                    constraints.max_ranked_type_with_assoc_data(|ty|
+                        match ty.ty {
+                            Type::Int { .. } => (3, CastMethod::Int),
+                            Type::Float { .. } => (2, CastMethod::FloatToInt),
+                            Type::Pointer(_) if width == IntWidth::Pointer => (1, CastMethod::Reinterpret),
+                            _ => (0, CastMethod::Noop),
+                        }
+                    ).map(|(ty, method)| (ty.ty.clone(), method))
+                    .map_err(|options| options.iter().map(|(ty, _)| ty.clone()).collect())
+                } else if let Type::Float { .. } = ty {
+                    constraints.max_ranked_type_with_assoc_data(|ty|
+                        match ty.ty {
+                            Type::Float { .. } => (2, CastMethod::Float),
+                            Type::Int { .. } => (1, CastMethod::IntToFloat),
+                            _ => (0, CastMethod::Noop),
+                        }
+                    ).map(|(ty, method)| (ty.ty.clone(), method))
+                    .map_err(|options| options.iter().map(|(ty, _)| ty.clone()).collect())
+                } else {
+                    panic!("Invalid cast!")
+                };
+                match ty_and_method {
+                    Ok((ty, method)) => {
+                        constraints.set_to(ty);
+                        self.tc.cast_methods[item.cast_id] = method;
+                    },
+                    Err(_) => {
+                        self.errors.push(Error::new("Invalid cast!").adding_primary_range(self.hir.get_range(item.id), "cast here"));
+                        constraints.set_to(Type::Error);
+                        self.tc.cast_methods[item.cast_id] = CastMethod::Noop;
+                    }
+                }
+            }
+            for item in unit.assignments.get_level(level) {
+                let (lhs, rhs) = self.tc.constraints.index_mut(item.lhs, item.rhs);
+                lhs.lopsided_intersect_with(rhs);
+            }
+            for item in unit.decl_refs.get_level(level) {
+                let ty = self.tc.constraints[item.id].solve().unwrap_or(Type::Error.into());
+                self.tc.types[item.id] = ty.ty.clone();
+
+                // P.S. These borrows are only here because the borrow checker is dumb
+                let decls = &self.tir.decls;
+                let overloads = &mut self.tir.overloads[item.decl_ref_id];
+                let decl_types = &self.tc.decl_types;
+                overloads.retain(|&overload| {
+                    decl_types[overload].trivially_convertible_to(&ty)
+                });
+                let pref = self.tc.preferred_overloads[item.decl_ref_id];
+
+                let overload = if !overloads.is_empty() {
+                    let overload = pref
+                        .filter(|overload| overloads.contains(overload))
+                        .unwrap_or_else(|| overloads[0]);
+                    let overload_is_function = match self.hir.decls[overload] {
+                        hir::Decl::Computed { .. } => true,
+                        hir::Decl::Intrinsic { function_like, .. } => function_like,
+                        _ => false,
+                    };
+                    let has_parens = self.hir.decl_refs[item.decl_ref_id].has_parens;
+                    if has_parens && !overload_is_function {
+                        self.errors.push(
+                            Error::new("reference to non-function must not have parentheses")
+                                .adding_primary_range(self.hir.get_range(item.id), "")
+                        );
+                    } else if !has_parens && overload_is_function {
+                        self.errors.push(
+                            Error::new("function call must have parentheses")
+                                .adding_primary_range(self.hir.get_range(item.id), "")
+                        );
+                    }
+                    let decl = &decls[overload];
+                    for (i, &arg) in item.args.iter().enumerate() {
+                        let ty = self.tc.get_evaluated_type(decl.param_tys[i]).clone();
+                        self.tc.constraints[arg].set_to(ty);
+                    }
+                    Some(overload)
+                } else {
+                    self.errors.push(
+                        Error::new("ambiguous overload for declaration")
+                            .adding_primary_range(self.hir.get_range(item.id), "expression here")
+                    );
+                    for &arg in &item.args {
+                        self.tc.constraints[arg].set_to(Type::Error);
+                    }
+                    None
+                };
+                self.tc.overloads[item.decl_ref_id] = overload;
+            }
+            for item in unit.addr_ofs.get_level(level) {
+                let pointer_ty = self.tc.constraints[item.id].solve()
+                    .map(|ty| ty.ty)
+                    .unwrap_or(Type::Error);
+                let pointee_ty = match pointer_ty {
+                    Type::Pointer(ref pointee) => pointee.as_ref().clone(),
+                    Type::Error => Type::Error.into(),
+                    _ => panic!("unexpected non-pointer, non-error type for addr of expression"),
+                };
+                self.tc.constraints[item.expr].set_to(pointee_ty);
+                self.tc.types[item.id] = pointer_ty;
+            }
+            for item in unit.derefs.get_level(level) {
+                let mut ty = self.tc.constraints[item.id].solve().unwrap_or(Type::Error.into());
+                self.tc.types[item.id] = ty.ty.clone();
+
+                if ty.ty != Type::Error {
+                    ty = ty.ptr().into();
+                }
+                self.tc.constraints[item.expr].set_to(ty);
+            }
+            for item in unit.pointers.get_level(level) {
+                let expr = &mut self.tc.constraints[item.expr];
+                let expr_ty = expr.solve().map(|ty| ty.ty).unwrap_or(Type::Error);
+                // Don't bother checking if it's a type, because we already did that in pass 1
+                self.tc.constraints[item.expr].set_to(expr_ty);
+                let ty = self.tc.constraints[item.id].solve().expect("Ambiguous type for pointer expression");
+                debug_assert_eq!(ty.ty, Type::Ty);
+                self.tc.types[item.id] = Type::Ty;
+            }
+            for item in unit.ifs.get_level(level) {
+                let condition = &mut self.tc.constraints[item.condition];
+                let condition_ty = condition.solve().map(|ty| ty.ty).unwrap_or(Type::Error);
+                // Don't bother checking if bool, because we already did that in pass 1
+                self.tc.constraints[item.condition].set_to(condition_ty);
+                let ty = self.tc.constraints[item.id].solve().expect("ambiguous type for if expression");
+                self.tc.types[item.id] = ty.ty.clone();
+                self.tc.constraints[item.then_expr].set_to(ty.clone());
+                self.tc.constraints[item.else_expr].set_to(ty);
+            }
+            for item in unit.dos.get_level(level) {
+                let ty = self.tc.constraints[item.id].solve().expect("Ambiguous type for do expression");
+                self.tc.types[item.id] = ty.ty.clone();
+                self.tc.constraints[item.terminal_expr].set_to(ty);
+            }
+            if level > 0 {
+                self.tc.debug_output(&self.hir, &self.file, level as usize);
+            }
+        }
+        fn lit_pass_2(
+            constraints: &IdxVec<ConstraintList, ExprId>,
+            types: &mut IdxVec<Type, ExprId>,
+            lits: &[ExprId],
+            lit_ty: &str
+        ) {
+            for &item in lits {
+                types[item] = constraints[item].solve().expect(format!("Ambiguous type for {} literal", lit_ty).as_ref()).ty;
+            }
+        }
+        lit_pass_2(&self.tc.constraints, &mut self.tc.types, &unit.int_lits, "integer");
+        lit_pass_2(&self.tc.constraints, &mut self.tc.types, &unit.dec_lits, "decimal");
+        lit_pass_2(&self.tc.constraints, &mut self.tc.types, &unit.str_lits, "string");
+        lit_pass_2(&self.tc.constraints, &mut self.tc.types, &unit.char_lits, "character");
+        self.tc.debug_output(&self.hir, &self.file, 0);
+    }
+
     pub fn type_check(&mut self) {
         self.tc.types.resize_with(self.hir.exprs.len(), Default::default);
         self.tc.constraints.resize_with(self.hir.exprs.len(), Default::default);
@@ -378,12 +598,11 @@ impl Driver {
 
         for unit_i in 0..self.tir.units.len() {
             let uid = UnitId::new(unit_i);
-            // Extend arrays as needed so they all have the same number of levels.
-            let unit = &mut self.tir.units[uid];
-            let levels = self.run_pass_1(UnitRef::Id(uid));
 
-            // Pass 2: propagate info up from roots to leaves
-            if self.tc.debug { println!("===============TYPECHECKING: PASS 2==============="); }
+            // Pass 1: propagate info down from leaves to roots
+            let levels = self.run_pass_1(UnitRef::Id(uid));
+            
+            // NOTE: statements are handled specially, and don't need to be broken off in the event of a dynamically-discovered type 4 dependency
             for item in &self.tir.units[uid].stmts {
                 let constraints = &mut self.tc.constraints[item.root_expr];
                 if let Some(err) = constraints.can_unify_to(&Type::Void.into()).err() {
@@ -391,232 +610,23 @@ impl Driver {
                     let range = self.hir.get_range(item.root_expr);
                     match err {
                         UnificationError::InvalidChoice(choices)
-                            => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                        => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
                         UnificationError::Trait(not_implemented)
-                            => error.add_secondary_range(
-                                range,
-                                format!(
-                                    "note: couldn't unify because expression requires implementations of {:?}",
-                                    not_implemented.names(),
-                                ),
+                        => error.add_secondary_range(
+                            range,
+                            format!(
+                                "note: couldn't unify because expression requires implementations of {:?}",
+                                not_implemented.names(),
                             ),
+                        ),
                     }
                     self.errors.push(error);
                 }
                 constraints.set_to(Type::Void);
             }
-
-            for level in (0..levels).rev() {
-                for i in 0..self.tir.units[uid].assigned_decls.level_len(level) {
-                    let item = self.tir.units[uid].assigned_decls.at(level, i);
-                    let decl_id = item.decl_id;
-                    let root_expr = item.root_expr;
-                    // TODO: is it necessary to call this here or can we just directly look at `decl_types`?
-                    let ty = self.tc.fetch_decl_type(&self.hir, decl_id).clone();
-                    self.tc.constraints[root_expr].set_to(ty);
-                }
-                for item in self.tir.units[uid].ret_groups.get_level(level) {
-                    for &expr in &item.exprs {
-                        let ty = self.tc.get_evaluated_type(item.ty).clone();
-                        if let Some(err) = self.tc.constraints[expr].can_unify_to(&QualType::from(&ty)).err() {
-                            let range = self.hir.get_range(expr);
-                            let mut error = Error::new(format!("can't unify expression to return type {:?}", ty))
-                                .adding_primary_range(range.clone(), "expression here");
-                            match err {
-                                UnificationError::InvalidChoice(choices)
-                                    => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
-                                UnificationError::Trait(not_implemented)
-                                    => error.add_secondary_range(
-                                        range,
-                                        format!(
-                                            "note: couldn't unify because expression requires implementations of {:?}",
-                                            not_implemented.names(),
-                                        ),
-                                    ),
-                            }
-                            self.errors.push(error);
-                        }
-    
-                        // Assume we panic above unless the returned expr can unify to the return type
-                        self.tc.constraints[expr].set_to(ty);
-                    }
-                }
-                for item in self.tir.units[uid].whiles.get_level(level) {
-                    if self.tc.constraints[item.condition].can_unify_to(&Type::Bool.into()).is_ok() {
-                        self.tc.constraints[item.condition].set_to(Type::Bool);
-                    } else {
-                        panic!("Expected boolean condition in while expression");
-                    }
-                }
-                for item in self.tir.units[uid].casts.get_level(level) {
-                    let ty = self.tc.get_evaluated_type(item.ty).clone();
-                    let constraints = &mut self.tc.constraints[item.expr];
-                    let ty_and_method: Result<(Type, CastMethod), Vec<&QualType>> = if constraints.can_unify_to(&QualType::from(&ty)).is_ok() {
-                        Ok((ty, CastMethod::Noop))
-                    } else if let Type::Pointer(dest_pointee_ty) = ty {
-                        let dest_pointee_ty = dest_pointee_ty.as_ref();
-                        let src_ty = constraints.max_ranked_type(|ty|
-                            match ty.ty {
-                                Type::Pointer(ref pointee) if pointee.is_mut || dest_pointee_ty.is_mut => 2,
-                                Type::Int { width, .. } if width == IntWidth::Pointer => 1,
-                                _ => 0,
-                            }
-                        ).expect("Invalid cast!").clone();
-                        Ok((src_ty.ty.clone(), CastMethod::Reinterpret))
-                    } else if let Type::Int { width, .. } = ty {
-                        constraints.max_ranked_type_with_assoc_data(|ty|
-                            match ty.ty {
-                                Type::Int { .. } => (3, CastMethod::Int),
-                                Type::Float { .. } => (2, CastMethod::FloatToInt),
-                                Type::Pointer(_) if width == IntWidth::Pointer => (1, CastMethod::Reinterpret),
-                                _ => (0, CastMethod::Noop),
-                            }
-                        ).map(|(ty, method)| (ty.ty.clone(), method))
-                        .map_err(|options| options.iter().map(|(ty, _)| ty.clone()).collect())
-                    } else if let Type::Float { .. } = ty {
-                        constraints.max_ranked_type_with_assoc_data(|ty|
-                            match ty.ty {
-                                Type::Float { .. } => (2, CastMethod::Float),
-                                Type::Int { .. } => (1, CastMethod::IntToFloat),
-                                _ => (0, CastMethod::Noop),
-                            }
-                        ).map(|(ty, method)| (ty.ty.clone(), method))
-                        .map_err(|options| options.iter().map(|(ty, _)| ty.clone()).collect())
-                    } else {
-                        panic!("Invalid cast!")
-                    };
-                    match ty_and_method {
-                        Ok((ty, method)) => {
-                            constraints.set_to(ty);
-                            self.tc.cast_methods[item.cast_id] = method;
-                        },
-                        Err(_) => {
-                            self.errors.push(Error::new("Invalid cast!").adding_primary_range(self.hir.get_range(item.id), "cast here"));
-                            constraints.set_to(Type::Error);
-                            self.tc.cast_methods[item.cast_id] = CastMethod::Noop;
-                        }
-                    }
-                }
-                for item in self.tir.units[uid].assignments.get_level(level) {
-                    let (lhs, rhs) = self.tc.constraints.index_mut(item.lhs, item.rhs);
-                    lhs.lopsided_intersect_with(rhs);
-                }
-                for item in self.tir.units[uid].decl_refs.get_level(level) {
-                    let ty = self.tc.constraints[item.id].solve().unwrap_or(Type::Error.into());
-                    self.tc.types[item.id] = ty.ty.clone();
-
-                    // P.S. These borrows are only here because the borrow checker is dumb
-                    let decls = &self.tir.decls;
-                    let overloads = &mut self.tir.overloads[item.decl_ref_id];
-                    let decl_types = &self.tc.decl_types;
-                    overloads.retain(|&overload| {
-                        decl_types[overload].trivially_convertible_to(&ty)
-                    });
-                    let pref = self.tc.preferred_overloads[item.decl_ref_id];
-
-                    let overload = if !overloads.is_empty() {
-                        let overload = pref
-                            .filter(|overload| overloads.contains(overload))
-                            .unwrap_or_else(|| overloads[0]);
-                        let overload_is_function = match self.hir.decls[overload] {
-                            hir::Decl::Computed { .. } => true,
-                            hir::Decl::Intrinsic { function_like, .. } => function_like,
-                            _ => false,
-                        };
-                        let has_parens = self.hir.decl_refs[item.decl_ref_id].has_parens;
-                        if has_parens && !overload_is_function {
-                            self.errors.push(
-                                Error::new("reference to non-function must not have parentheses")
-                                    .adding_primary_range(self.hir.get_range(item.id), "")
-                            );
-                        } else if !has_parens && overload_is_function {
-                            self.errors.push(
-                                Error::new("function call must have parentheses")
-                                    .adding_primary_range(self.hir.get_range(item.id), "")
-                            );
-                        }
-                        let decl = &decls[overload];
-                        for (i, &arg) in item.args.iter().enumerate() {
-                            let ty = self.tc.get_evaluated_type(decl.param_tys[i]).clone();
-                            self.tc.constraints[arg].set_to(ty);
-                        }
-                        Some(overload)
-                    } else {
-                        self.errors.push(
-                            Error::new("ambiguous overload for declaration")
-                                .adding_primary_range(self.hir.get_range(item.id), "expression here")
-                        );
-                        for &arg in &item.args {
-                            self.tc.constraints[arg].set_to(Type::Error);
-                        }
-                        None
-                    };
-                    self.tc.overloads[item.decl_ref_id] = overload;
-                }
-                for item in self.tir.units[uid].addr_ofs.get_level(level) {
-                    let pointer_ty = self.tc.constraints[item.id].solve()
-                        .map(|ty| ty.ty)
-                        .unwrap_or(Type::Error);
-                    let pointee_ty = match pointer_ty {
-                        Type::Pointer(ref pointee) => pointee.as_ref().clone(),
-                        Type::Error => Type::Error.into(),
-                        _ => panic!("unexpected non-pointer, non-error type for addr of expression"),
-                    };
-                    self.tc.constraints[item.expr].set_to(pointee_ty);
-                    self.tc.types[item.id] = pointer_ty;
-                }
-                for item in self.tir.units[uid].derefs.get_level(level) {
-                    let mut ty = self.tc.constraints[item.id].solve().unwrap_or(Type::Error.into());
-                    self.tc.types[item.id] = ty.ty.clone();
-
-                    if ty.ty != Type::Error {
-                        ty = ty.ptr().into();
-                    }
-                    self.tc.constraints[item.expr].set_to(ty);
-                }
-                for item in self.tir.units[uid].pointers.get_level(level) {
-                    let expr = &mut self.tc.constraints[item.expr];
-                    let expr_ty = expr.solve().map(|ty| ty.ty).unwrap_or(Type::Error);
-                    // Don't bother checking if it's a type, because we already did that in pass 1
-                    self.tc.constraints[item.expr].set_to(expr_ty);
-                    let ty = self.tc.constraints[item.id].solve().expect("Ambiguous type for pointer expression");
-                    debug_assert_eq!(ty.ty, Type::Ty);
-                    self.tc.types[item.id] = Type::Ty;
-                }
-                for item in self.tir.units[uid].ifs.get_level(level) {
-                    let condition = &mut self.tc.constraints[item.condition];
-                    let condition_ty = condition.solve().map(|ty| ty.ty).unwrap_or(Type::Error);
-                    // Don't bother checking if bool, because we already did that in pass 1
-                    self.tc.constraints[item.condition].set_to(condition_ty);
-                    let ty = self.tc.constraints[item.id].solve().expect("ambiguous type for if expression");
-                    self.tc.types[item.id] = ty.ty.clone();
-                    self.tc.constraints[item.then_expr].set_to(ty.clone());
-                    self.tc.constraints[item.else_expr].set_to(ty);
-                }
-                for item in self.tir.units[uid].dos.get_level(level) {
-                    let ty = self.tc.constraints[item.id].solve().expect("Ambiguous type for do expression");
-                    self.tc.types[item.id] = ty.ty.clone();
-                    self.tc.constraints[item.terminal_expr].set_to(ty);
-                }
-                if level > 0 {
-                    self.tc.debug_output(&self.hir, &self.file, level as usize);
-                }
-            }
-            fn lit_pass_2(
-                constraints: &IdxVec<ConstraintList, ExprId>,
-                types: &mut IdxVec<Type, ExprId>,
-                lits: &[ExprId],
-                lit_ty: &str
-            ) {
-                for &item in lits {
-                    types[item] = constraints[item].solve().expect(format!("Ambiguous type for {} literal", lit_ty).as_ref()).ty;
-                }
-            }
-            lit_pass_2(&self.tc.constraints, &mut self.tc.types, &self.tir.units[uid].int_lits, "integer");
-            lit_pass_2(&self.tc.constraints, &mut self.tc.types, &self.tir.units[uid].dec_lits, "decimal");
-            lit_pass_2(&self.tc.constraints, &mut self.tc.types, &self.tir.units[uid].str_lits, "string");
-            lit_pass_2(&self.tc.constraints, &mut self.tc.types, &self.tir.units[uid].char_lits, "character");
-            self.tc.debug_output(&self.hir, &self.file, 0);
+            
+            // Pass 2: propagate info up from roots to leaves
+            self.run_pass_2(UnitRef::Id(uid), levels);
 
             for i in 0..self.tir.units[uid].eval_dependees.len() {
                 let expr = self.tir.units[uid].eval_dependees[i];
