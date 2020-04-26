@@ -5,6 +5,7 @@ use smallvec::{SmallVec, smallvec};
 mod constraints;
 use constraints::{ConstraintList, UnificationError};
 
+use crate::source_info::SourceFile;
 use crate::driver::Driver;
 use crate::error::Error;
 use crate::builder::{ExprId, DeclId, DeclRefId, CastId};
@@ -15,7 +16,7 @@ use crate::dep_vec;
 use crate::source_info::CommentatedSourceRange;
 use crate::mir::Const;
 use crate::hir;
-use crate::tir::UnitId;
+use crate::tir::{UnitId, Unit};
 
 #[derive(Clone, Debug)]
 pub enum CastMethod {
@@ -76,6 +77,43 @@ impl TypeChecker {
             x => panic!("Expected type! Found {:?}", x),
         }
     }
+
+    fn fetch_decl_type(&mut self, hir: &hir::Builder, id: DeclId) -> &Type {
+        if let Type::Error = self.decl_types[id].ty {
+            if let Some(expr) = hir.explicit_tys[id] {
+                let ty = self.get_evaluated_type(expr).clone();
+                self.decl_types[id].ty = ty;
+            }
+        }
+
+        &self.decl_types[id].ty
+    }
+
+    fn debug_output(&mut self, hir: &hir::Builder, file: &SourceFile, level: usize) {
+        if !self.debug { return; }
+        println!("LEVEL {}", level);
+        assert_eq!(self.constraints.len(), self.constraints_copy.len());
+        for i in 0..self.constraints.len() {
+            let i = ExprId::new(i);
+            let new_constraints = &self.constraints[i];
+            let old_constraints = &mut self.constraints_copy[i];
+            if new_constraints != old_constraints {
+                file.print_commentated_source_ranges(&mut [
+                    CommentatedSourceRange::new(hir.get_range(i), "", '-')
+                ]);
+                old_constraints.print_diff(new_constraints);
+                *old_constraints = new_constraints.clone();
+                println!("============================================================================================\n")
+            }
+        }
+    }
+}
+
+
+
+enum UnitRef<'a> {
+    Id(UnitId),
+    Ref(&'a mut Unit),
 }
 
 impl Driver {
@@ -102,15 +140,220 @@ impl Driver {
         self.hir.explicit_tys[id].map(|ty| self.tc.get_evaluated_type(ty)).unwrap_or(&Type::Error)
     }
 
-    pub fn fetch_decl_type(&mut self, id: DeclId) -> &Type {
-        if let Type::Error = self.tc.decl_types[id].ty {
-            if let Some(expr) = self.hir.explicit_tys[id] {
-                let ty = self.tc.get_evaluated_type(expr).clone();
-                self.tc.decl_types[id].ty = ty;
+    fn run_pass_1(&mut self, unit: UnitRef<'_>) -> u32 {
+        let unit = match unit {
+            UnitRef::Id(uid) => &mut self.tir.units[uid],
+            UnitRef::Ref(unit) => unit,
+        };
+
+        let levels = dep_vec::unify_sizes(&mut [
+            &mut unit.assigned_decls, &mut unit.assignments, &mut unit.decl_refs, 
+            &mut unit.addr_ofs, &mut unit.derefs, &mut unit.pointers, &mut unit.ifs,
+            &mut unit.dos, &mut unit.ret_groups, &mut unit.casts, &mut unit.whiles,
+            &mut unit.explicit_rets, &mut unit.modules,
+        ]);
+
+        // Pass 1: propagate info down from leaves to roots
+        if self.tc.debug { println!("===============TYPECHECKING: PASS 1==============="); }
+        fn independent_pass_1<T>(constraints: &mut IdxVec<ConstraintList, ExprId>, tys: &mut IdxVec<Type, ExprId>, exprs: &[T], data: impl Fn(&T) -> (ExprId, Type)) {
+            for item in exprs {
+                let (id, ty) = data(item);
+                constraints[id] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![ty.clone().into()]), None);
+                tys[id] = ty;
             }
         }
 
-        &self.tc.decl_types[id].ty
+        fn lit_pass_1(constraints: &mut IdxVec<ConstraintList, ExprId>, lits: &[ExprId], trait_impls: BuiltinTraits, pref: Type) {
+            for &item in lits {
+                constraints[item] = ConstraintList::new(
+                    trait_impls, 
+                    None,
+                    Some(pref.clone().into())
+                );
+            }
+        }
+        lit_pass_1(&mut self.tc.constraints, &unit.int_lits, BuiltinTraits::INT, Type::i32());
+        lit_pass_1(&mut self.tc.constraints, &unit.dec_lits, BuiltinTraits::DEC, Type::i32());
+        lit_pass_1(&mut self.tc.constraints, &unit.str_lits, BuiltinTraits::STR, Type::u8().ptr());
+        lit_pass_1(&mut self.tc.constraints, &unit.char_lits, BuiltinTraits::CHAR, Type::u8().ptr());
+        for &item in &unit.const_tys {
+            self.tc.constraints[item] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Ty.into()]), None);
+            self.tc.types[item] = Type::Ty;
+        }
+        for level in 0..levels {
+            for item in unit.assigned_decls.get_level(level) {
+                let constraints = &self.tc.constraints[item.root_expr];
+                let ty = if let &Some(explicit_ty) = &item.explicit_ty {
+                    let explicit_ty = self.tc.get_evaluated_type(explicit_ty).clone();
+                    if let Some(err) = constraints.can_unify_to(&explicit_ty.clone().into()).err() {
+                        let range = self.hir.get_range(item.root_expr);
+                        let mut error = Error::new(format!("Couldn't unify expression to assigned decl type `{:?}`", explicit_ty))
+                            .adding_primary_range(range.clone(), "expression here");
+                        match err {
+                            UnificationError::InvalidChoice(choices)
+                                => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                            UnificationError::Trait(not_implemented)
+                                => error.add_secondary_range(
+                                    range,
+                                    format!(
+                                        "note: couldn't unify because expression requires implementations of {:?}",
+                                        not_implemented.names(),
+                                    ),
+                                ),
+                        }
+                        self.errors.push(error);
+                    }
+                    explicit_ty
+                } else {
+                    constraints.solve().expect("Ambiguous type for assigned declaration").ty
+                };
+                self.tc.decl_types[item.decl_id].ty = ty;
+            }
+            for item in unit.assignments.get_level(level) {
+                self.tc.constraints[item.id].set_to(Type::Void);
+                self.tc.types[item.id] = Type::Void;
+            }
+            for item in unit.casts.get_level(level) {
+                let ty = self.tc.get_evaluated_type(item.ty).clone();
+                self.tc.constraints[item.id] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![ty.clone().into()]), None);
+                self.tc.types[item.id] = ty;
+            }
+            for item in unit.whiles.get_level(level) {
+                self.tc.constraints[item.id] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
+                self.tc.types[item.id] = Type::Void;
+            }
+            for &item in unit.explicit_rets.get_level(level) {
+                self.tc.constraints[item] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Never.into()]), None);
+                self.tc.types[item] = Type::Never;
+            }
+            for &item in unit.modules.get_level(level) {
+                self.tc.constraints[item] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Mod.into()]), None);
+                self.tc.types[item] = Type::Mod;
+            }
+            for i in 0..unit.decl_refs.level_len(level) {
+                let item = unit.decl_refs.at(level, i);
+                let id = item.id;
+                let args = item.args.clone();
+                let decl_ref_id = item.decl_ref_id;
+
+                // Filter overloads that don't match the constraints of the parameters.
+                // These borrows are only here because the borrow checker is dumb
+                let decls = &self.tir.decls;
+                let tc = &self.tc;
+                // Rule out overloads that don't match the arguments
+                self.tir.overloads[decl_ref_id].retain(|&overload| {
+                    assert_eq!(decls[overload].param_tys.len(), args.len());
+                    let arg_constraints = args.iter().map(|&arg| &tc.constraints[arg]);
+                    let param_tys = decls[overload].param_tys.iter().map(|&expr| tc.get_evaluated_type(expr));
+                    for (constraints, ty) in arg_constraints.zip(param_tys) {
+                        if constraints.can_unify_to(&ty.into()).is_err() { return false; }
+                    }
+                    true
+                });
+
+                let mut one_of = SmallVec::new();
+                one_of.reserve(self.tir.overloads[decl_ref_id].len());
+                for i in 0..self.tir.overloads[decl_ref_id].len() {
+                    let overload = self.tir.overloads[decl_ref_id][i];
+                    let ty = self.tc.fetch_decl_type(&self.hir, overload).clone();
+                    let is_mut = self.tir.decls[overload].is_mut;
+                    one_of.push(QualType { ty, is_mut });
+                }
+                let mut pref = None;
+                'find_preference: for (i, &arg) in args.iter().enumerate() {
+                    if let Some(ty) = self.tc.constraints[arg].preferred_type() {
+                        for &overload in &self.tir.overloads[decl_ref_id] {
+                            let decl = &self.tir.decls[overload];
+                            if ty.ty.trivially_convertible_to(self.tc.get_evaluated_type(decl.param_tys[i])) {
+                                // NOTE: We assume here that fetch_decl type will have already been called on all overloads above!
+                                let ty = self.tc.decl_types[overload].clone();
+                                pref = Some(ty);
+                                self.tc.preferred_overloads[decl_ref_id] = Some(overload);
+                                break 'find_preference;
+                            }
+                        }
+                    }
+                }
+                self.tc.constraints[id] = ConstraintList::new(BuiltinTraits::empty(), Some(one_of), pref);
+            }
+            for item in unit.addr_ofs.get_level(level) {
+                let constraints = self.tc.constraints[item.expr].filter_map(|ty| {
+                    if item.is_mut && !ty.is_mut { return None; }
+                    Some(
+                        QualType::from(
+                            ty.ty.clone().ptr_with_mut(item.is_mut)
+                        )
+                    )
+                });
+                self.tc.constraints[item.id] = constraints;
+            }
+            for item in unit.derefs.get_level(level) {
+                let constraints = self.tc.constraints[item.expr].filter_map(|ty| {
+                    if let Type::Pointer(pointee) = &ty.ty {
+                        Some(pointee.as_ref().clone())
+                    } else {
+                        None
+                    }
+                });
+                self.tc.constraints[item.id] = constraints;
+            }
+            for item in unit.pointers.get_level(level) {
+                if let Some(err) = self.tc.constraints[item.expr].can_unify_to(&Type::Ty.into()).err() {
+                    let mut error = Error::new("Expected type operand to pointer operator");
+                    let range = self.hir.get_range(item.expr);
+                    match err {
+                        UnificationError::InvalidChoice(choices)
+                            => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                        UnificationError::Trait(not_implemented)
+                            => error.add_secondary_range(
+                                range,
+                                format!(
+                                    "note: couldn't unify because expression requires implementations of {:?}",
+                                    not_implemented.names(),
+                                ),
+                            ),
+                    }
+                    self.errors.push(error);
+                }
+                self.tc.constraints[item.id].set_to(Type::Ty);
+            }
+            for item in unit.ifs.get_level(level) {
+                if let Some(err) = self.tc.constraints[item.condition].can_unify_to(&Type::Bool.into()).err() {
+                    let mut error = Error::new("Expected boolean condition in if expression");
+                    let range = self.hir.get_range(item.condition);
+                    match err {
+                        UnificationError::InvalidChoice(choices)
+                            => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                        UnificationError::Trait(not_implemented)
+                            => error.add_secondary_range(
+                                range,
+                                format!(
+                                    "note: couldn't unify because expression requires implementations of {:?}",
+                                    not_implemented.names(),
+                                ),
+                            ),
+                    }
+                    self.errors.push(error);
+                }
+                let constraints = self.tc.constraints[item.then_expr].intersect_with(&self.tc.constraints[item.else_expr]);
+
+                if constraints.solve().is_err() {
+                    // TODO: handle void expressions, which don't have appropriate source location info.
+                    self.errors.push(
+                        Error::new("Failed to unify branches of if expression")
+                            .adding_primary_range(self.hir.get_range(item.then_expr), "first terminal expression here")
+                            .adding_primary_range(self.hir.get_range(item.else_expr), "second terminal expression here")
+                    );
+                }
+                self.tc.constraints[item.id] = constraints;
+            }
+            for item in unit.dos.get_level(level) {
+                self.tc.constraints[item.id] = self.tc.constraints[item.terminal_expr].clone();
+            }
+            self.tc.debug_output(&self.hir, &self.file, level as usize);
+        }
+
+        levels
     }
 
     pub fn type_check(&mut self) {
@@ -137,212 +380,7 @@ impl Driver {
             let uid = UnitId::new(unit_i);
             // Extend arrays as needed so they all have the same number of levels.
             let unit = &mut self.tir.units[uid];
-            let levels = dep_vec::unify_sizes(&mut [
-                &mut unit.assigned_decls, &mut unit.assignments, &mut unit.decl_refs, 
-                &mut unit.addr_ofs, &mut unit.derefs, &mut unit.pointers, &mut unit.ifs,
-                &mut unit.dos, &mut unit.ret_groups, &mut unit.casts, &mut unit.whiles,
-                &mut unit.explicit_rets, &mut unit.modules,
-            ]);
-
-            // Pass 1: propagate info down from leaves to roots
-            if self.tc.debug { println!("===============TYPECHECKING: PASS 1==============="); }
-            fn independent_pass_1<T>(constraints: &mut IdxVec<ConstraintList, ExprId>, tys: &mut IdxVec<Type, ExprId>, exprs: &[T], data: impl Fn(&T) -> (ExprId, Type)) {
-                for item in exprs {
-                    let (id, ty) = data(item);
-                    constraints[id] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![ty.clone().into()]), None);
-                    tys[id] = ty;
-                }
-            }
-
-            fn lit_pass_1(constraints: &mut IdxVec<ConstraintList, ExprId>, lits: &[ExprId], trait_impls: BuiltinTraits, pref: Type) {
-                for &item in lits {
-                    constraints[item] = ConstraintList::new(
-                        trait_impls, 
-                        None,
-                        Some(pref.clone().into())
-                    );
-                }
-            }
-            lit_pass_1(&mut self.tc.constraints, &self.tir.units[uid].int_lits, BuiltinTraits::INT, Type::i32());
-            lit_pass_1(&mut self.tc.constraints, &self.tir.units[uid].dec_lits, BuiltinTraits::DEC, Type::i32());
-            lit_pass_1(&mut self.tc.constraints, &self.tir.units[uid].str_lits, BuiltinTraits::STR, Type::u8().ptr());
-            lit_pass_1(&mut self.tc.constraints, &self.tir.units[uid].char_lits, BuiltinTraits::CHAR, Type::u8().ptr());
-            for &item in &self.tir.units[uid].const_tys {
-                self.tc.constraints[item] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Ty.into()]), None);
-                self.tc.types[item] = Type::Ty;
-            }
-            for level in 0..levels {
-                for item in self.tir.units[uid].assigned_decls.get_level(level) {
-                    let constraints = &self.tc.constraints[item.root_expr];
-                    let ty = if let &Some(explicit_ty) = &item.explicit_ty {
-                        let explicit_ty = self.tc.get_evaluated_type(explicit_ty).clone();
-                        if let Some(err) = constraints.can_unify_to(&explicit_ty.clone().into()).err() {
-                            let range = self.hir.get_range(item.root_expr);
-                            let mut error = Error::new(format!("Couldn't unify expression to assigned decl type `{:?}`", explicit_ty))
-                                .adding_primary_range(range.clone(), "expression here");
-                            match err {
-                                UnificationError::InvalidChoice(choices)
-                                    => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
-                                UnificationError::Trait(not_implemented)
-                                    => error.add_secondary_range(
-                                        range,
-                                        format!(
-                                            "note: couldn't unify because expression requires implementations of {:?}",
-                                            not_implemented.names(),
-                                        ),
-                                    ),
-                            }
-                            self.errors.push(error);
-                        }
-                        explicit_ty
-                    } else {
-                        constraints.solve().expect("Ambiguous type for assigned declaration").ty
-                    };
-                    self.tc.decl_types[item.decl_id].ty = ty;
-                }
-                for item in self.tir.units[uid].assignments.get_level(level) {
-                    self.tc.constraints[item.id].set_to(Type::Void);
-                    self.tc.types[item.id] = Type::Void;
-                }
-                for item in self.tir.units[uid].casts.get_level(level) {
-                    let ty = self.tc.get_evaluated_type(item.ty).clone();
-                    self.tc.constraints[item.id] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![ty.clone().into()]), None);
-                    self.tc.types[item.id] = ty;
-                }
-                for item in self.tir.units[uid].whiles.get_level(level) {
-                    self.tc.constraints[item.id] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
-                    self.tc.types[item.id] = Type::Void;
-                }
-                for &item in self.tir.units[uid].explicit_rets.get_level(level) {
-                    self.tc.constraints[item] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Never.into()]), None);
-                    self.tc.types[item] = Type::Never;
-                }
-                for &item in self.tir.units[uid].modules.get_level(level) {
-                    self.tc.constraints[item] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Mod.into()]), None);
-                    self.tc.types[item] = Type::Mod;
-                }
-                for i in 0..self.tir.units[uid].decl_refs.level_len(level) {
-                    let item = self.tir.units[uid].decl_refs.at(level, i);
-                    let id = item.id;
-                    let args = item.args.clone();
-                    let decl_ref_id = item.decl_ref_id;
-
-                    // Filter overloads that don't match the constraints of the parameters.
-                    // These borrows are only here because the borrow checker is dumb
-                    let decls = &self.tir.decls;
-                    let tc = &self.tc;
-                    // Rule out overloads that don't match the arguments
-                    self.tir.overloads[decl_ref_id].retain(|&overload| {
-                        assert_eq!(decls[overload].param_tys.len(), args.len());
-                        let arg_constraints = args.iter().map(|&arg| &tc.constraints[arg]);
-                        let param_tys = decls[overload].param_tys.iter().map(|&expr| tc.get_evaluated_type(expr));
-                        for (constraints, ty) in arg_constraints.zip(param_tys) {
-                            if constraints.can_unify_to(&ty.into()).is_err() { return false; }
-                        }
-                        true
-                    });
-
-                    let mut one_of = SmallVec::new();
-                    one_of.reserve(self.tir.overloads[decl_ref_id].len());
-                    for i in 0..self.tir.overloads[decl_ref_id].len() {
-                        let overload = self.tir.overloads[decl_ref_id][i];
-                        let ty = self.fetch_decl_type(overload).clone();
-                        let is_mut = self.tir.decls[overload].is_mut;
-                        one_of.push(QualType { ty, is_mut });
-                    }
-                    let mut pref = None;
-                    'find_preference: for (i, &arg) in args.iter().enumerate() {
-                        if let Some(ty) = self.tc.constraints[arg].preferred_type() {
-                            for &overload in &self.tir.overloads[decl_ref_id] {
-                                let decl = &self.tir.decls[overload];
-                                if ty.ty.trivially_convertible_to(self.tc.get_evaluated_type(decl.param_tys[i])) {
-                                    // NOTE: We assume here that fetch_decl type will have already been called on all overloads above!
-                                    let ty = self.tc.decl_types[overload].clone();
-                                    pref = Some(ty);
-                                    self.tc.preferred_overloads[decl_ref_id] = Some(overload);
-                                    break 'find_preference;
-                                }
-                            }
-                        }
-                    }
-                    self.tc.constraints[id] = ConstraintList::new(BuiltinTraits::empty(), Some(one_of), pref);
-                }
-                for item in self.tir.units[uid].addr_ofs.get_level(level) {
-                    let constraints = self.tc.constraints[item.expr].filter_map(|ty| {
-                        if item.is_mut && !ty.is_mut { return None; }
-                        Some(
-                            QualType::from(
-                                ty.ty.clone().ptr_with_mut(item.is_mut)
-                            )
-                        )
-                    });
-                    self.tc.constraints[item.id] = constraints;
-                }
-                for item in self.tir.units[uid].derefs.get_level(level) {
-                    let constraints = self.tc.constraints[item.expr].filter_map(|ty| {
-                        if let Type::Pointer(pointee) = &ty.ty {
-                            Some(pointee.as_ref().clone())
-                        } else {
-                            None
-                        }
-                    });
-                    self.tc.constraints[item.id] = constraints;
-                }
-                for item in self.tir.units[uid].pointers.get_level(level) {
-                    if let Some(err) = self.tc.constraints[item.expr].can_unify_to(&Type::Ty.into()).err() {
-                        let mut error = Error::new("Expected type operand to pointer operator");
-                        let range = self.hir.get_range(item.expr);
-                        match err {
-                            UnificationError::InvalidChoice(choices)
-                                => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
-                            UnificationError::Trait(not_implemented)
-                                => error.add_secondary_range(
-                                    range,
-                                    format!(
-                                        "note: couldn't unify because expression requires implementations of {:?}",
-                                        not_implemented.names(),
-                                    ),
-                                ),
-                        }
-                        self.errors.push(error);
-                    }
-                    self.tc.constraints[item.id].set_to(Type::Ty);
-                }
-                for item in self.tir.units[uid].ifs.get_level(level) {
-                    if let Some(err) = self.tc.constraints[item.condition].can_unify_to(&Type::Bool.into()).err() {
-                        let mut error = Error::new("Expected boolean condition in if expression");
-                        let range = self.hir.get_range(item.condition);
-                        match err {
-                            UnificationError::InvalidChoice(choices)
-                                => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
-                            UnificationError::Trait(not_implemented)
-                                => error.add_secondary_range(
-                                    range,
-                                    format!(
-                                        "note: couldn't unify because expression requires implementations of {:?}",
-                                        not_implemented.names(),
-                                    ),
-                                ),
-                        }
-                        self.errors.push(error);
-                    }
-                    let constraints = self.tc.constraints[item.then_expr].intersect_with(&self.tc.constraints[item.else_expr]);
-
-                    if constraints.solve().is_err() {
-                        // TODO: handle void expressions, which don't have appropriate source location info.
-                        self.errors.push(
-                            Error::new("Failed to unify branches of if expression")
-                                .adding_primary_range(self.hir.get_range(item.then_expr), "first terminal expression here")
-                                .adding_primary_range(self.hir.get_range(item.else_expr), "second terminal expression here")
-                        );
-                    }
-                    self.tc.constraints[item.id] = constraints;
-                }
-                for item in self.tir.units[uid].dos.get_level(level) {
-                    self.tc.constraints[item.id] = self.tc.constraints[item.terminal_expr].clone();
-                }
-                self.debug_output(level as usize);
-            }
+            let levels = self.run_pass_1(UnitRef::Id(uid));
 
             // Pass 2: propagate info up from roots to leaves
             if self.tc.debug { println!("===============TYPECHECKING: PASS 2==============="); }
@@ -374,7 +412,7 @@ impl Driver {
                     let decl_id = item.decl_id;
                     let root_expr = item.root_expr;
                     // TODO: is it necessary to call this here or can we just directly look at `decl_types`?
-                    let ty = self.fetch_decl_type(decl_id).clone();
+                    let ty = self.tc.fetch_decl_type(&self.hir, decl_id).clone();
                     self.tc.constraints[root_expr].set_to(ty);
                 }
                 for item in self.tir.units[uid].ret_groups.get_level(level) {
@@ -561,7 +599,7 @@ impl Driver {
                     self.tc.constraints[item.terminal_expr].set_to(ty);
                 }
                 if level > 0 {
-                    self.debug_output(level as usize);
+                    self.tc.debug_output(&self.hir, &self.file, level as usize);
                 }
             }
             fn lit_pass_2(
@@ -578,7 +616,7 @@ impl Driver {
             lit_pass_2(&self.tc.constraints, &mut self.tc.types, &self.tir.units[uid].dec_lits, "decimal");
             lit_pass_2(&self.tc.constraints, &mut self.tc.types, &self.tir.units[uid].str_lits, "string");
             lit_pass_2(&self.tc.constraints, &mut self.tc.types, &self.tir.units[uid].char_lits, "character");
-            self.debug_output(0);
+            self.tc.debug_output(&self.hir, &self.file, 0);
 
             for i in 0..self.tir.units[uid].eval_dependees.len() {
                 let expr = self.tir.units[uid].eval_dependees[i];
