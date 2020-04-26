@@ -314,9 +314,61 @@ impl Driver {
             },
             x => Err(x.clone()),
         }.map(|mut expr| {
-            while let Some((op, mut range)) = self.parse_postfix_operator(p) {
-                range = source_info::concat(range, self.hir.get_range(expr));
-                expr = self.un_op(op, expr, range);
+            // Parse arbitrary sequence of postfix operators and member refs
+            loop {
+                let mut modified = false;
+                while let Some((op, mut range)) = self.parse_postfix_operator(p) {
+                    range = source_info::concat(range, self.hir.get_range(expr));
+                    expr = self.un_op(op, expr, range);
+
+                    modified = true;
+                }
+                while self.cur(p).kind == &TokenKind::Dot {
+                    let dot_range = self.cur(p).range.clone();
+                    let name = if let &TokenKind::Ident(name) = self.next(p).kind {
+                        name
+                    } else {
+                        self.errors.push(
+                            Error::new("expected identifier after '.'")
+                                .adding_primary_range(self.cur(p).range.clone(), "found this instead")
+                                .adding_secondary_range(dot_range, "'.' here")
+                        );
+                        return expr
+                    };
+                    let name_range = self.cur(p).range.clone();
+                    let mut args = SmallVec::new();
+                    let mut end_range = name_range.clone();
+                    let mut has_parens = false;
+                    if let TokenKind::LeftParen = self.next(p).kind {
+                        has_parens = true;
+                        self.next(p);
+                        loop {
+                            // TODO: actually implement proper comma and newline handling like I've thought about
+                            let Token { kind, range } = self.cur(p);
+                            match kind {
+                                TokenKind::RightParen => {
+                                    end_range = range.clone();
+                                    self.next(p);
+                                    break;
+                                }
+                                TokenKind::Comma => { self.next(p); }
+                                TokenKind::Eof => {
+                                    panic!("Reached eof in middle of decl ref");
+                                }
+                                _ => { args.push(self.parse_expr(p)); }
+                            }
+                        }
+                    }
+
+                    let range = source_info::concat(
+                        self.hir.get_range(expr),
+                        end_range,
+                    );
+                    expr = self.hir.member_ref(expr, name, args, has_parens, range);
+
+                    modified = true;
+                }
+                if !modified { break; }
             }
             expr
         })
