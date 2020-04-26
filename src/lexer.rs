@@ -323,24 +323,28 @@ impl Driver {
             self.pack_tok(l, kind)
         } else if l.has_chars() && self.is_num(l) {
             let mut has_dot = false;
+            let mut last_was_dot = None;
             loop {
-                // TODO: When the char after the '.' is not a number,
-                // we should output the '.' as its own token so something
-                // like 5.member would work. Not a priority right now though,
-                // obviously.
+                if !l.has_chars() || (!self.is_num(l) && !self.is(l, b'.')) {
+                    break;
+                }
                 if self.is(l, b'.') {
                     if has_dot {
                         break;
                     } else {
                         has_dot = true;
                     }
-                }
-                if !l.has_chars() || (!self.is_num(l) && !self.is(l, b'.')) {
-                    break;
+                    last_was_dot = Some(l.cur_loc());
+                } else {
+                    last_was_dot = None;
                 }
                 self.advance(l);
             }
 
+            if let Some(dot_pos) = last_was_dot {
+                self.set_pos(l, dot_pos);
+                has_dot = false;
+            }
             let lit = &self.file.src[l.tok_start_loc..l.cur_loc()];
             if has_dot {
                 self.pack_tok(l, TokenKind::DecLit(lit.parse().unwrap()))
