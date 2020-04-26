@@ -1,4 +1,4 @@
-use std::cmp::max;
+use std::cmp::{max, min};
 
 /// A growable array for encoding data dependencies
 #[derive(Debug)]
@@ -26,6 +26,13 @@ impl<T> DepVec<T> {
     /// Get slice containing the specified level of elements
     pub fn get_level(&self, level: u32) -> &[T] {
         &self.storage[level as usize]
+    }
+
+    pub fn clear_up_to(&mut self, level: u32) {
+        let upper_bound = min(self.storage.len(), (level as usize) + 1);
+        for level in &mut self.storage[..upper_bound] {
+            level.clear();
+        }
     }
 }
 

@@ -141,6 +141,7 @@ impl Driver {
                 &mut unit.assigned_decls, &mut unit.assignments, &mut unit.decl_refs, 
                 &mut unit.addr_ofs, &mut unit.derefs, &mut unit.pointers, &mut unit.ifs,
                 &mut unit.dos, &mut unit.ret_groups, &mut unit.casts, &mut unit.whiles,
+                &mut unit.explicit_rets, &mut unit.modules,
             ]);
 
             // Pass 1: propagate info down from leaves to roots
@@ -152,8 +153,6 @@ impl Driver {
                     tys[id] = ty;
                 }
             }
-            independent_pass_1(&mut self.tc.constraints, &mut self.tc.types, &self.tir.units[uid].explicit_rets, |&id| (id, Type::Never));
-            independent_pass_1(&mut self.tc.constraints, &mut self.tc.types, &self.tir.units[uid].modules, |&id| (id, Type::Mod));
 
             fn lit_pass_1(constraints: &mut IdxVec<ConstraintList, ExprId>, lits: &[ExprId], trait_impls: BuiltinTraits, pref: Type) {
                 for &item in lits {
@@ -206,15 +205,21 @@ impl Driver {
                     self.tc.types[item.id] = Type::Void;
                 }
                 for item in self.tir.units[uid].casts.get_level(level) {
-                    let id = item.id;
-                    let ty = item.ty;
-                    let ty = self.tc.get_evaluated_type(ty).clone();
-                    self.tc.constraints[id] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![ty.clone().into()]), None);
-                    self.tc.types[id] = ty;
+                    let ty = self.tc.get_evaluated_type(item.ty).clone();
+                    self.tc.constraints[item.id] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![ty.clone().into()]), None);
+                    self.tc.types[item.id] = ty;
                 }
                 for item in self.tir.units[uid].whiles.get_level(level) {
                     self.tc.constraints[item.id] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
                     self.tc.types[item.id] = Type::Void;
+                }
+                for &item in self.tir.units[uid].explicit_rets.get_level(level) {
+                    self.tc.constraints[item] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Never.into()]), None);
+                    self.tc.types[item] = Type::Never;
+                }
+                for &item in self.tir.units[uid].modules.get_level(level) {
+                    self.tc.constraints[item] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Mod.into()]), None);
+                    self.tc.types[item] = Type::Mod;
                 }
                 for i in 0..self.tir.units[uid].decl_refs.level_len(level) {
                     let item = self.tir.units[uid].decl_refs.at(level, i);

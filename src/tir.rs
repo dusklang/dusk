@@ -71,11 +71,11 @@ pub struct Unit {
     pub char_lits: Vec<ExprId>,
     pub const_tys: Vec<ExprId>,
     pub stmts: Vec<Stmt>,
-    pub explicit_rets: Vec<ExprId>,
+    pub explicit_rets: DepVec<ExprId>,
     pub ret_groups: DepVec<RetGroup>,
     pub casts: DepVec<Expr<Cast>>,
     pub whiles: DepVec<Expr<While>>,
-    pub modules: Vec<ExprId>,
+    pub modules: DepVec<ExprId>,
     pub dos: DepVec<Expr<Do>>,
     pub assigned_decls: DepVec<AssignedDecl>,
     pub assignments: DepVec<Expr<Assignment>>,
@@ -90,6 +90,29 @@ pub struct Unit {
 }
 
 impl Unit {
+    fn clear_up_to(&mut self, level: u32) {
+        self.int_lits.clear();
+        self.dec_lits.clear();
+        self.str_lits.clear();
+        self.char_lits.clear();
+        self.const_tys.clear();
+
+        // Intentionally don't clear stmts; they are added from scopes, not items, and they are only processed at the end of a unit
+
+        self.explicit_rets.clear_up_to(level);
+        self.ret_groups.clear_up_to(level);
+        self.casts.clear_up_to(level);
+        self.whiles.clear_up_to(level);
+        self.modules.clear_up_to(level);
+        self.dos.clear_up_to(level);
+        self.assigned_decls.clear_up_to(level);
+        self.assignments.clear_up_to(level);
+        self.decl_refs.clear_up_to(level);
+        self.addr_ofs.clear_up_to(level);
+        self.derefs.clear_up_to(level);
+        self.pointers.clear_up_to(level);
+        self.ifs.clear_up_to(level);
+    }
     fn new() -> Self {
         Self {
             int_lits: Vec::new(),
@@ -98,11 +121,11 @@ impl Unit {
             char_lits: Vec::new(),
             const_tys: Vec::new(),
             stmts: Vec::new(),
-            explicit_rets: Vec::new(),
+            explicit_rets: DepVec::new(),
             ret_groups: DepVec::new(),
             casts: DepVec::new(),
             whiles: DepVec::new(),
-            modules: Vec::new(),
+            modules: DepVec::new(),
             dos: DepVec::new(),
             assigned_decls: DepVec::new(),
             assignments: DepVec::new(),
@@ -115,6 +138,7 @@ impl Unit {
             eval_dependees: Vec::new(),
         }
     }
+
 }
 
 #[derive(Debug)]
@@ -205,8 +229,33 @@ impl Driver {
         }
     }
 
-    pub fn add_dynamic_type_4_dependency(&mut self, items: &[ItemId]) -> Unit {
-        Unit::new()
+    // Returns a new unit with the passed-in `items` and their dependencies if any are in the current `unit`. Otherwise, returns `None`.
+    pub fn add_dynamic_type4_dependency(&mut self, unit: UnitId, items: &[ItemId]) -> Option<Unit> {
+        let items: Vec<_> = items.iter()
+            .map(|item| *item)
+            .filter(|&item| self.tir.levels.item_to_units[item] == unit)
+            .collect();
+        if items.is_empty() { return None; }
+
+        let removed_items = self.tir.levels.split_unit(unit, &items);
+
+        let max_level = items.iter().map(|&item| self.tir.levels.item_to_levels[item]).max().unwrap();
+        self.tir.units[unit].clear_up_to(max_level);
+        let mut new_unit = Unit::new();
+
+        // Recreate the portion of the old unit that we want
+        for i in 0..self.tir.levels.units[unit].len() {
+            let id = self.tir.levels.units[unit][i];
+            self.build_tir_item(id, None);
+        }
+        self.flush_staged_ret_groups(None);
+
+        for id in removed_items {
+            self.build_tir_item(id, Some(&mut new_unit));
+        }
+        self.flush_staged_ret_groups(Some(&mut new_unit));
+
+        Some(new_unit)
     }
 
     fn flush_staged_ret_groups(&mut self, mut unit: Option<&mut Unit>) {
@@ -223,9 +272,10 @@ impl Driver {
             let item = self.hir.decl_to_items[decl];
             let unit_id = self.tir.levels.item_to_units[item];
             let level = self.tir.levels.item_to_levels[item];
-            let unit = match unit {
-                Some(ref mut unit) if unit_id == UnitId::new(std::usize::MAX) => unit,
-                _ => &mut self.tir.units[unit_id],
+            let unit = if let Some(unit) = &mut unit {
+                unit
+            } else {
+                &mut self.tir.units[unit_id]
             };
             unit.ret_groups.insert(
                 level,
@@ -234,17 +284,31 @@ impl Driver {
         }
     }
 
-    fn build_tir_expr(&mut self, item_id: ItemId, id: ExprId) {
-        let level = self.tir.levels.item_to_levels[item_id];
-        let unit = self.tir.levels.item_to_units[item_id];
-        let unit = &mut self.tir.units[unit];
+    fn build_tir_item(&mut self, id: ItemId, unit: Option<&mut Unit>) {
+        match self.hir.items[id] {
+            hir::Item::Expr(expr_id) => self.build_tir_expr(id, expr_id, unit),
+            hir::Item::Decl(decl_id) => self.build_tir_decl(id, decl_id, unit),
+        }
+    }
 
+    fn build_tir_expr(&mut self, item_id: ItemId, id: ExprId, unit: Option<&mut Unit>) {
+        let level = self.tir.levels.item_to_levels[item_id];
+        let unit = if let Some(unit) = unit {
+            unit
+        } else {
+            let unit = self.tir.levels.item_to_units[item_id];
+            &mut self.tir.units[unit]
+        };
         macro_rules! insert_item {
             ($depvec:ident, $item:expr) => {{
                 unit.$depvec.insert(
-                    level,
-                    Expr { id, data: $item }
+                    level, $item,
                 );
+            }}
+        };
+        macro_rules! insert_expr {
+            ($depvec:ident, $expr:expr) => {{
+                insert_item!($depvec, Expr { id, data: $expr, });
             }}
         };
         macro_rules! flat_insert_item {
@@ -260,18 +324,18 @@ impl Driver {
             hir::Expr::StrLit { .. } => flat_insert_item!(str_lits, id),
             hir::Expr::CharLit { .. } => flat_insert_item!(char_lits, id),
             hir::Expr::ConstTy(_) => flat_insert_item!(const_tys, id),
-            &hir::Expr::AddrOf { expr, is_mut } => insert_item!(addr_ofs, AddrOf { expr, is_mut }),
-            &hir::Expr::Deref(expr) => insert_item!(derefs, Dereference { expr }),
-            &hir::Expr::Pointer { expr, .. } => insert_item!(pointers, Pointer { expr }),
-            &hir::Expr::Cast { expr, ty, cast_id } => insert_item!(casts, Cast { expr, ty, cast_id }),
+            &hir::Expr::AddrOf { expr, is_mut } => insert_expr!(addr_ofs, AddrOf { expr, is_mut }),
+            &hir::Expr::Deref(expr) => insert_expr!(derefs, Dereference { expr }),
+            &hir::Expr::Pointer { expr, .. } => insert_expr!(pointers, Pointer { expr }),
+            &hir::Expr::Cast { expr, ty, cast_id } => insert_expr!(casts, Cast { expr, ty, cast_id }),
             &hir::Expr::Ret { expr, decl } => {
                 let decl = decl.expect("returning outside of a computed decl is invalid!");
                 self.tir.staged_ret_groups.entry(decl).or_default().push(expr);
-                unit.explicit_rets.push(id);
+                insert_item!(explicit_rets, id);
             }
-            &hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => insert_item!(decl_refs, DeclRef { args: arguments.clone(), decl_ref_id }),
-            &hir::Expr::Set { lhs, rhs } => insert_item!(assignments, Assignment { lhs, rhs }),
-            &hir::Expr::Do { scope } => insert_item!(dos, Do { terminal_expr: self.hir.imper_scopes[scope].terminal_expr }),
+            &hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => insert_expr!(decl_refs, DeclRef { args: arguments.clone(), decl_ref_id }),
+            &hir::Expr::Set { lhs, rhs } => insert_expr!(assignments, Assignment { lhs, rhs }),
+            &hir::Expr::Do { scope } => insert_expr!(dos, Do { terminal_expr: self.hir.imper_scopes[scope].terminal_expr }),
             &hir::Expr::If { condition, then_scope, else_scope } => {
                 let then_expr = self.hir.imper_scopes[then_scope].terminal_expr;
                 let else_expr = if let Some(else_scope) = else_scope {
@@ -279,17 +343,21 @@ impl Driver {
                 } else {
                     self.hir.void_expr
                 };
-                insert_item!(ifs, If { condition, then_expr, else_expr });
+                insert_expr!(ifs, If { condition, then_expr, else_expr });
             },
-            &hir::Expr::While { condition, .. } => insert_item!(whiles, While { condition }),
-            hir::Expr::Mod { .. } => unit.modules.push(id),
+            &hir::Expr::While { condition, .. } => insert_expr!(whiles, While { condition }),
+            hir::Expr::Mod { .. } => insert_item!(modules, id),
         }
     }
 
-    fn build_tir_decl(&mut self, item_id: ItemId, id: DeclId) {
+    fn build_tir_decl(&mut self, item_id: ItemId, id: DeclId, unit: Option<&mut Unit>) {
         let level = self.tir.levels.item_to_levels[item_id];
-        let unit = self.tir.levels.item_to_units[item_id];
-        let unit = &mut self.tir.units[unit];
+        let unit = if let Some(unit) = unit {
+            unit
+        } else {
+            let unit = self.tir.levels.item_to_units[item_id];
+            &mut self.tir.units[unit]
+        };
 
         match &self.hir.decls[id] {
             // TODO: Add a parameter TIR item for (at least) checking that the type of the param is valid
@@ -486,13 +554,13 @@ impl Driver {
             let unit = self.tir.levels.item_to_units[item_id];
             let unit = &mut self.tir.units[unit];
             if depended_on[id] { unit.eval_dependees.push(id); }
-
-            self.build_tir_expr(item_id, id);
+            self.build_tir_expr(item_id, id, None);
         }
         for i in 0..self.hir.decls.len() {
             let id = DeclId::new(i);
             let item_id = di!(id);
-            self.build_tir_decl(item_id, id);
+            let unit = self.tir.levels.item_to_units[item_id];
+            self.build_tir_decl(item_id, id, None);
         }
         self.flush_staged_ret_groups(None);
         for scope in &self.hir.imper_scopes {
