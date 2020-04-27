@@ -189,7 +189,10 @@ impl Driver {
                             .map(|decl| decl.id)
                     );
                 }
-            }
+            },
+
+            // TODO: get the overloads
+            Namespace::MemberRef { .. } => return true,
         }
         false
     }
@@ -212,6 +215,7 @@ impl Driver {
                     last_was_imperative = false;
                     self.hir.mod_ns[scope].parent
                 },
+                Namespace::MemberRef { .. } => panic!("should be unreachable"),
             };
         }
 
