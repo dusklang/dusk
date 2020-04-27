@@ -4,58 +4,58 @@ std :: mod {
     }
 }
 
-    fn print_num(num: i32) {
-        num := num
-        if num < 0 {
-            print("-")
-            num = -num
-        }
-        if num >= 10 {
-            print_num(num / 10)
-        }
-        print((num % 10) as u8 + "0")
+fn print_num(num: i32) {
+    num := num
+    if num < 0 {
+        print("-")
+        num = -num
     }
+    if num >= 10 {
+        print_num(num / 10)
+    }
+    print((num % 10) as u8 + "0")
+}
 
-    fn strlen(str: u8*): usize {
-        str := str
-        darba := str
-        derpa := darba
-        len: usize = 0
-        while *((str as usize + len) as u8*) != 0 {
-            len = len + 1
-        }
-        len
+fn strlen(str: u8*): usize {
+    str := str
+    darba := str
+    derpa := darba
+    len: usize = 0
+    while *((str as usize + len) as u8*) != 0 {
+        len = len + 1
     }
+    len
+}
 
-    fn concat(a: u8*, b: u8*): u8* {
-        len :: strlen(a) + strlen(b)
-        buf := malloc(len + 1) as u8 *mut
-        ret_val :: buf
-        a := a
-        while *a != 0 {
-            *buf = *a
-            a = (a as usize + 1) as u8*
-            buf = (buf as usize + 1) as u8 *mut
-        }
-        b := b
-        while *b != 0 {
-            *buf = *b
-            b = (b as usize + 1) as u8*
-            buf = (buf as usize + 1) as u8 *mut
-        }
-        *buf = 0
-        ret_val
+fn concat(a: u8*, b: u8*): u8* {
+    len :: strlen(a) + strlen(b)
+    buf := malloc(len + 1) as u8 *mut
+    ret_val :: buf
+    a := a
+    while *a != 0 {
+        *buf = *a
+        a = (a as usize + 1) as u8*
+        buf = (buf as usize + 1) as u8 *mut
     }
+    b := b
+    while *b != 0 {
+        *buf = *b
+        b = (b as usize + 1) as u8*
+        buf = (buf as usize + 1) as u8 *mut
+    }
+    *buf = 0
+    ret_val
+}
 
-    fn fib(n: i32): i32 {
-        if n == 0 {
-            0
-        } else if n == 1 {
-            1
-        } else {
-            fib(n - 1) + fib(n - 2)
-        }
+fn fib(n: i32): i32 {
+    if n == 0 {
+        0
+    } else if n == 1 {
+        1
+    } else {
+        fib(n - 1) + fib(n - 2)
     }
+}
 
 FIZZ_BUZZ_ITERATIONS := 120
 
@@ -140,8 +140,7 @@ fn main() {
     p :: 45 | 12
 
     // Intentionally fail, just to test module member lookup
-    std.45
-    //assert(3 == 0)
+    std.assert(3 == 0)
     take_a_type(i8 *mut *mut)
 
     // Allocate a single 8-bit integer on the heap

@@ -69,6 +69,7 @@ pub struct ModScopeNs {
 pub enum Namespace {
     Imper { scope: ImperScopeNsId, end_offset: usize },
     Mod(ModScopeNsId),
+    MemberRef { base_expr: ExprId, },
 }
 
 #[derive(Debug)]
@@ -488,8 +489,11 @@ impl Builder {
             ScopeState::Mod { namespace, .. } => Namespace::Mod(namespace),
         }
     }
-    pub fn decl_ref(&mut self, _base_expr: Option<ExprId>, name: Sym, arguments: SmallVec<[ExprId; 2]>, has_parens: bool, range: SourceRange) -> ExprId {
-        let namespace = self.cur_namespace();
+    pub fn decl_ref(&mut self, base_expr: Option<ExprId>, name: Sym, arguments: SmallVec<[ExprId; 2]>, has_parens: bool, range: SourceRange) -> ExprId {
+        let namespace = match base_expr {
+            Some(base_expr) => Namespace::MemberRef { base_expr },
+            None => self.cur_namespace(),
+        };
         let id = self.decl_refs.push(
             DeclRef {
                 name,
