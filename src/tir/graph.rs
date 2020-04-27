@@ -33,7 +33,7 @@ pub struct Graph {
 
     item_to_components: IdxVec<CompId, ItemId>,
 
-    components: Option<IdxVec<Component, CompId>>,
+    components: IdxVec<Component, CompId>,
     units: Option<IdxVec<Unit, UnitId>>,
 }
 
@@ -157,7 +157,7 @@ impl Graph {
             visited, cur_component: Component::default(), components: IdxVec::new(), item_to_components: IdxVec::new(),
         };
         state.item_to_components.resize_with(self.dependees.len(), || CompId::new(std::usize::MAX));
-        assert!(self.components.is_none());
+        assert!(self.components.is_empty());
         for i in 0..self.dependees.len() {
             self.find_component(ItemId::new(i), &mut state);
         }
@@ -169,18 +169,17 @@ impl Graph {
             }
         }
 
-        self.components = Some(state.components);
+        self.components = state.components;
         self.item_to_components = state.item_to_components;
     }
 
     pub fn find_units(&mut self) {
-        let components = self.components.as_ref().unwrap();
         let mut component_to_units = IdxVec::<UnitId, CompId>::new();
-        component_to_units.resize_with(components.len(), || UnitId::new(std::usize::MAX));
+        component_to_units.resize_with(self.components.len(), || UnitId::new(std::usize::MAX));
         let mut units = IdxVec::<Unit, UnitId>::new();
         let mut included_components = HashSet::<CompId>::new();
         let mut outstanding_components = HashSet::<CompId>::from_iter(
-            (0..components.len())
+            (0..self.components.len())
                 .map(|i| CompId::new(i))
         );
 
@@ -189,7 +188,7 @@ impl Graph {
             let mut cur_unit_comps = HashSet::<CompId>::new();
             for &comp in &outstanding_components {
                 let mut should_add = true;
-                for (&dependee, &relation) in &components[comp].deps {
+                for (&dependee, &relation) in &self.components[comp].deps {
                     if relation == ComponentRelation::BEFORE && !included_components.contains(&dependee) {
                         should_add = false;
                         break;
@@ -206,7 +205,7 @@ impl Graph {
                 // Yay borrow checker
                 let cur_unit_copy = cur_unit_comps.clone();
                 cur_unit_comps.retain(|&comp| {
-                    for (&dependee, &relation) in &components[comp].deps {
+                    for (&dependee, &relation) in &self.components[comp].deps {
                         if relation == ComponentRelation::TYPE_2_3_FORWARD && !cur_unit_copy.contains(&dependee) && !included_components.contains(&dependee) {
                             return false;
                         }
@@ -222,7 +221,7 @@ impl Graph {
             cur_unit.components.extend(cur_unit_comps.iter());
             for &comp in &cur_unit.components {
                 // Add intra-unit type 2 dependencies as type 1 dependencies, because they are equivalent after resolving units
-                let component = &components[comp];
+                let component = &self.components[comp];
                 for &item in &component.items {
                     for &dep in &self.t2_dependees[item] {
                         if cur_unit_comps.contains(&self.item_to_components[dep]) {
@@ -268,14 +267,14 @@ impl Graph {
         let units = self.units.unwrap();
         for (i, unit) in units.iter().enumerate() {
             for &comp in &unit.components {
-                let components = &self.components.as_ref().unwrap()[comp];
+                let components = &self.components[comp];
                 for &item in &components.items {
                     item_to_units[item] = UnitId::new(i);
                 }
             }
         }
 
-        let components = self.components.unwrap();
+        let components = self.components;
 
         Levels {
             item_to_levels,
@@ -363,7 +362,7 @@ impl Driver {
         item_to_components.resize_with(self.hir.items.len(), || CompId::new(std::usize::MAX));
         
         let [dependees, t2_dependees, t3_dependees, t4_dependees, dependers] = deps;
-        Graph { dependees, t2_dependees, t3_dependees, t4_dependees, dependers, item_to_components, components: None, units: None }
+        Graph { dependees, t2_dependees, t3_dependees, t4_dependees, dependers, item_to_components, components: IdxVec::new(), units: None }
     }
 
     fn write_dep<W: Write>(&self, w: &mut W, a: ItemId, b: ItemId, write_attribs: impl FnOnce(&mut W) -> IoResult<()>) -> IoResult<()> {
@@ -439,23 +438,22 @@ impl Driver {
         writeln!(w, "    node [shape=box];")?;
 
         if let Some(units) = &graph.units {
-            let components = graph.components.as_ref().unwrap();
             for (i, unit) in units.iter().enumerate() {
                 writeln!(w, "    subgraph cluster{} {{", i)?;
                 writeln!(w, "        label=\"unit {}\";", i)?;
                 writeln!(w, "        style=filled;")?;
                 writeln!(w, "        color=blue;")?;
                 for &comp_id in &unit.components {
-                    self.write_component(&mut w, graph, i, comp_id.idx(), &components[comp_id])?;
+                    self.write_component(&mut w, graph, i, comp_id.idx(), &graph.components[comp_id])?;
                 }
                 // This is done in a separate loop because 
                 for &comp_id in &unit.components {
-                    self.write_component_deps(&mut w, graph, i, comp_id.idx(), &components[comp_id])?;
+                    self.write_component_deps(&mut w, graph, i, comp_id.idx(), &graph.components[comp_id])?;
                 }
                 writeln!(w, "    }}")?;
             }
-        } else if let Some(components) = &graph.components {
-            for (i, component) in components.iter().enumerate() {
+        } else if !graph.components.is_empty() {
+            for (i, component) in graph.components.iter().enumerate() {
                 self.write_component(&mut w, graph, 0, i, component)?;
                 self.write_component_deps(&mut w, graph, 0, i, component)?;
             }
