@@ -482,6 +482,9 @@ impl Driver {
                 },
             }
         }
+
+        // Split the graph into components
+        graph.split();
         
         // Add types 2-4 dependencies to graph
 
@@ -571,7 +574,6 @@ impl Driver {
         }
 
         // Solve for the unit and level of each item
-        graph.split();
         graph.find_units();
         self.tir.levels = graph.solve();
         self.tir.units.resize_with(self.tir.levels.units.len(), || Unit::new());

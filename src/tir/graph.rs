@@ -93,16 +93,22 @@ impl Graph {
     /// a must either be in the same unit as b or a later unit, but if they are in the same unit, a must have a higher level than b
     pub fn add_type2_dep(&mut self, a: ItemId, b: ItemId) {
         self.t2_dependees[a].push(b);
+        let a_comp = self.item_to_components[a];
+        self.transfer_item_dep_to_component(a_comp, b, ComponentRelation::TYPE_2_3_FORWARD, ComponentRelation::TYPE_2_3_BACKWARD);
     }
 
     /// a must either be in the same unit as b or a later unit, but their levels are independent
     pub fn add_type3_dep(&mut self, a: ItemId, b: ItemId) {
         self.t3_dependees[a].push(b);
+        let a_comp = self.item_to_components[a];
+        self.transfer_item_dep_to_component(a_comp, b, ComponentRelation::TYPE_2_3_FORWARD, ComponentRelation::TYPE_2_3_BACKWARD);
     }
 
     /// a must be in an later unit than b, but their levels are independent
     pub fn add_type4_dep(&mut self, a: ItemId, b: ItemId) {
         self.t4_dependees[a].push(b);
+        let a_comp = self.item_to_components[a];
+        self.transfer_item_dep_to_component(a_comp, b, ComponentRelation::BEFORE, ComponentRelation::AFTER);
     }
 
     fn find_subcomponent(&mut self, item: ItemId, state: &mut ComponentState) {
@@ -128,20 +134,16 @@ impl Graph {
         self.components.push(new_component);
     }
 
-    fn transfer_item_deps_to_component(&mut self, comp: CompId, item: ItemId) {
-        macro_rules! perform_transfers {
-            ($dependee_array:ident, $forward:ident, $backward:ident) => {{
-                for i in 0..self.$dependee_array[item].len() {
-                    let dependee = self.$dependee_array[item][i];
-                    let dependee = self.item_to_components[dependee];
-                    *self.components[comp].deps.entry(dependee).or_default() &= ComponentRelation::$forward;
-                    *self.components[dependee].deps.entry(comp).or_default() &= ComponentRelation::$backward;
-                }
-            }}
-        }
-        perform_transfers!(t2_dependees, TYPE_2_3_FORWARD, TYPE_2_3_BACKWARD);
-        perform_transfers!(t3_dependees, TYPE_2_3_FORWARD, TYPE_2_3_BACKWARD);
-        perform_transfers!(t4_dependees, BEFORE, AFTER);
+    fn transfer_item_dep_to_component(
+        &mut self,
+        comp: CompId,
+        dependee: ItemId,
+        forward_mask: ComponentRelation,
+        backward_mask: ComponentRelation,
+    ) {
+        let dependee = self.item_to_components[dependee];
+        *self.components[comp].deps.entry(dependee).or_default() &= forward_mask;
+        *self.components[dependee].deps.entry(comp).or_default() &= backward_mask;
     }
 
     // Find the weak components of the graph
@@ -155,13 +157,6 @@ impl Graph {
         assert!(self.components.is_empty());
         for i in 0..self.dependees.len() {
             self.find_component(ItemId::new(i), &mut state);
-        }
-
-        for i in 0..self.components.len() {
-            let comp = CompId::new(i);
-            for j in 0..self.components[comp].items.len() {
-                self.transfer_item_deps_to_component(comp, self.components[comp].items[j]);
-            }
         }
     }
 
