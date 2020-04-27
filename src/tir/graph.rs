@@ -70,10 +70,7 @@ struct Component {
 struct ComponentState {
     // TODO: Vec of bools == gross
     visited: IdxVec<bool, ItemId>,
-
     cur_component: Component,
-    components: IdxVec<Component, CompId>,
-    item_to_components: IdxVec<CompId, ItemId>,
 }
 
 #[derive(Default)]
@@ -108,45 +105,43 @@ impl Graph {
         self.t4_dependees[a].push(b);
     }
 
-    fn find_subcomponent(&self, item: ItemId, state: &mut ComponentState) {
+    fn find_subcomponent(&mut self, item: ItemId, state: &mut ComponentState) {
         state.visited[item] = true;
         state.cur_component.items.push(item);
-        state.item_to_components[item] = CompId::new(state.components.len());
-        let adjs = self.dependees[item].iter()
-            .chain(self.dependers[item].iter());
-        for &adj in adjs {
-            if !state.visited[adj] { self.find_subcomponent(adj, state); }
+        self.item_to_components[item] = CompId::new(self.components.len());
+        macro_rules! find_subcomponents {
+            ($item_array:ident) => {{
+                for i in 0..self.$item_array[item].len() {
+                    let adj = self.$item_array[item][i];
+                    if !state.visited[adj] { self.find_subcomponent(adj, state); }
+                }
+            }}
         }
+        find_subcomponents!(dependees);
+        find_subcomponents!(dependers);
     }
 
-    fn find_component(&self, item: ItemId, state: &mut ComponentState) {
+    fn find_component(&mut self, item: ItemId, state: &mut ComponentState) {
         if state.visited[item] { return; }
         self.find_subcomponent(item, state);
         let new_component = mem::replace(&mut state.cur_component, Component::default());
-        state.components.push(new_component);
+        self.components.push(new_component);
     }
 
-    fn transfer_item_dep_to_component(
-        &self,
-        comp: CompId,
-        dependee: ItemId,
-        forward_mask: ComponentRelation,
-        backward_mask: ComponentRelation,
-        state: &mut ComponentState
-    ) {
-        let dependee = state.item_to_components[dependee];
-        *state.components[comp].deps.entry(dependee).or_default() &= forward_mask;
-        *state.components[dependee].deps.entry(comp).or_default() &= backward_mask;
-    }
-
-    fn transfer_item_deps_to_component(&self, comp: CompId, item: ItemId, state: &mut ComponentState) {
-        let t2_and_t3_dependendees = self.t2_dependees[item].iter().chain(self.t3_dependees[item].iter());
-        for &dependee in t2_and_t3_dependendees {
-            self.transfer_item_dep_to_component(comp, dependee, ComponentRelation::TYPE_2_3_FORWARD, ComponentRelation::TYPE_2_3_BACKWARD, state);
+    fn transfer_item_deps_to_component(&mut self, comp: CompId, item: ItemId) {
+        macro_rules! perform_transfers {
+            ($dependee_array:ident, $forward:ident, $backward:ident) => {{
+                for i in 0..self.$dependee_array[item].len() {
+                    let dependee = self.$dependee_array[item][i];
+                    let dependee = self.item_to_components[dependee];
+                    *self.components[comp].deps.entry(dependee).or_default() &= ComponentRelation::$forward;
+                    *self.components[dependee].deps.entry(comp).or_default() &= ComponentRelation::$backward;
+                }
+            }}
         }
-        for &dependee in &self.t4_dependees[item] {
-            self.transfer_item_dep_to_component(comp, dependee, ComponentRelation::BEFORE, ComponentRelation::AFTER, state);
-        }
+        perform_transfers!(t2_dependees, TYPE_2_3_FORWARD, TYPE_2_3_BACKWARD);
+        perform_transfers!(t3_dependees, TYPE_2_3_FORWARD, TYPE_2_3_BACKWARD);
+        perform_transfers!(t4_dependees, BEFORE, AFTER);
     }
 
     // Find the weak components of the graph
@@ -154,23 +149,20 @@ impl Graph {
         let mut visited = IdxVec::new();
         visited.resize_with(self.dependees.len(), || false);
         let mut state = ComponentState {
-            visited, cur_component: Component::default(), components: IdxVec::new(), item_to_components: IdxVec::new(),
+            visited, cur_component: Component::default(),
         };
-        state.item_to_components.resize_with(self.dependees.len(), || CompId::new(std::usize::MAX));
+        self.item_to_components.resize_with(self.dependees.len(), || CompId::new(std::usize::MAX));
         assert!(self.components.is_empty());
         for i in 0..self.dependees.len() {
             self.find_component(ItemId::new(i), &mut state);
         }
 
-        for i in 0..state.components.len() {
+        for i in 0..self.components.len() {
             let comp = CompId::new(i);
-            for j in 0..state.components[comp].items.len() {
-                self.transfer_item_deps_to_component(comp, state.components[comp].items[j], &mut state);
+            for j in 0..self.components[comp].items.len() {
+                self.transfer_item_deps_to_component(comp, self.components[comp].items[j]);
             }
         }
-
-        self.components = state.components;
-        self.item_to_components = state.item_to_components;
     }
 
     pub fn find_units(&mut self) {
