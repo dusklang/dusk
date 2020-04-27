@@ -423,17 +423,71 @@ impl Driver {
             self.tir.overloads.push(overloads);
         }
 
-        // Add dependencies to the graph
         let mut graph = self.create_graph();
-        // TODO: do something better than an array of bools :(
-        let mut depended_on = IdxVec::<bool, ExprId>::new();
-        depended_on.resize_with(self.hir.exprs.len(), || false);
         macro_rules! ei {
             ($a:expr) => { self.hir.expr_to_items[$a] }
         }
         macro_rules! di {
             ($a:expr) => { self.hir.decl_to_items[$a] }
         }
+        // Add type 1 dependencies to the graph
+        for i in 0..self.hir.decls.len() {
+            let decl_id = DeclId::new(i);
+            let id = di!(decl_id);
+            match self.hir.decls[decl_id] {
+                hir::Decl::Parameter { .. } | hir::Decl::Intrinsic { .. } => {},
+                hir::Decl::Static(expr) | hir::Decl::Const(expr) | hir::Decl::Stored { root_expr: expr, .. } => graph.add_type1_dep(id, ei!(expr)),
+                hir::Decl::Computed { scope, .. } => {
+                    let terminal_expr = self.hir.imper_scopes[scope].terminal_expr;
+                    graph.add_type1_dep(id, ei!(terminal_expr));
+                },
+            }
+        }
+        for i in 0..self.hir.exprs.len() {
+            let expr_id = ExprId::new(i);
+            let id = ei!(expr_id);
+            match self.hir.exprs[expr_id] {
+                hir::Expr::Void | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
+                    | hir::Expr::CharLit { .. } | hir::Expr::ConstTy(_) | hir::Expr::Mod { .. } => {},
+                hir::Expr::AddrOf { expr, .. } | hir::Expr::Deref(expr) | hir::Expr::Pointer { expr, .. }
+                    | hir::Expr::Cast { expr, .. } | hir::Expr::Ret { expr, .. } => graph.add_type1_dep(id, ei!(expr)),
+                hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => {
+                    for &arg in arguments {
+                        graph.add_type1_dep(id, ei!(arg));
+                    }
+                },
+                hir::Expr::Set { lhs, rhs } => {
+                    graph.add_type1_dep(id, ei!(lhs));
+                    graph.add_type1_dep(id, ei!(rhs));
+                },
+                hir::Expr::Do { scope } => {
+                    let terminal_expr = self.hir.imper_scopes[scope].terminal_expr;
+                    graph.add_type1_dep(id, ei!(terminal_expr));
+                },
+                hir::Expr::If { condition, then_scope, else_scope } => {
+                    graph.add_type1_dep(id, ei!(condition));
+                    let then_expr = self.hir.imper_scopes[then_scope].terminal_expr;
+                    let else_expr = if let Some(else_scope) = else_scope {
+                        self.hir.imper_scopes[else_scope].terminal_expr
+                    } else {
+                        self.hir.void_expr
+                    };
+                    graph.add_type1_dep(id, ei!(then_expr));
+                    graph.add_type1_dep(id, ei!(else_expr));
+                }
+                hir::Expr::While { condition, scope } => {
+                    graph.add_type1_dep(id, ei!(condition));
+                    let terminal_expr = self.hir.imper_scopes[scope].terminal_expr;
+                    graph.add_type1_dep(id, ei!(terminal_expr));
+                },
+            }
+        }
+        
+        // Add types 2-4 dependencies to graph
+
+        // TODO: do something better than an array of bools :(
+        let mut depended_on = IdxVec::<bool, ExprId>::new();
+        depended_on.resize_with(self.hir.exprs.len(), || false);
         macro_rules! add_eval_dep {
             ($a:expr, $b:expr) => {{
                 graph.add_type4_dep($a, ei!($b));
@@ -444,25 +498,19 @@ impl Driver {
             let decl_id = DeclId::new(i);
             let id = di!(decl_id);
             match self.hir.decls[decl_id] {
-                hir::Decl::Parameter { .. } => {},
+                hir::Decl::Parameter { .. } | hir::Decl::Static(_) | hir::Decl::Const(_) | hir::Decl::Stored { .. } => {},
                 hir::Decl::Intrinsic { ref param_tys, .. } => {
                     for &ty in param_tys {
                         add_eval_dep!(id, ty);
                     }
                 },
-                hir::Decl::Static(assigned_expr) | hir::Decl::Const(assigned_expr) => graph.add_type1_dep(id, ei!(assigned_expr)),
                 hir::Decl::Computed { scope, ref param_tys, .. } => {
                     self.add_type3_scope_dep(&mut graph, id, scope);
-                    let terminal_expr = self.hir.imper_scopes[scope].terminal_expr;
-                    graph.add_type1_dep(id, ei!(terminal_expr));
                     for &ty in param_tys {
                         add_eval_dep!(id, ty);
                     }
                     let ty = self.hir.explicit_tys[decl_id].unwrap_or(self.hir.void_ty);
                     add_eval_dep!(id, ty);
-                },
-                hir::Decl::Stored { root_expr, .. } => {
-                    graph.add_type1_dep(id, ei!(root_expr));
                 },
             }
             if let Some(ty) = self.hir.explicit_tys[decl_id] {
@@ -474,15 +522,12 @@ impl Driver {
             let id = ei!(expr_id);
             match self.hir.exprs[expr_id] {
                 hir::Expr::Void | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
-                    | hir::Expr::CharLit { .. } | hir::Expr::ConstTy(_) => {},
-                hir::Expr::AddrOf { expr, .. } | hir::Expr::Deref(expr) | hir::Expr::Pointer { expr, .. }
-                    => graph.add_type1_dep(id, ei!(expr)),
+                    | hir::Expr::CharLit { .. } | hir::Expr::ConstTy(_) | hir::Expr::AddrOf { .. } | hir::Expr::Deref(_)
+                    | hir::Expr::Pointer { .. } | hir::Expr::Set { .. } => {},
                 hir::Expr::Cast { expr, ty, .. } => {
-                    graph.add_type1_dep(id, ei!(expr));
                     add_eval_dep!(id, ty);
                 },
                 hir::Expr::Ret { expr, decl } => {
-                    graph.add_type1_dep(id, ei!(expr));
                     let ty = decl
                         .and_then(|decl| self.hir.explicit_tys[decl])
                         .unwrap_or(self.hir.void_ty);
@@ -502,38 +547,18 @@ impl Driver {
                             _ => graph.add_type2_dep(id, di!(overload)),
                         }
                     }
-                    for &arg in arguments {
-                        graph.add_type1_dep(id, ei!(arg));
-                    }
-                },
-                hir::Expr::Set { lhs, rhs } => {
-                    graph.add_type1_dep(id, ei!(lhs));
-                    graph.add_type1_dep(id, ei!(rhs));
                 },
                 hir::Expr::Do { scope } => {
                     self.add_type3_scope_dep(&mut graph, id, scope);
-                    let terminal_expr = self.hir.imper_scopes[scope].terminal_expr;
-                    graph.add_type1_dep(id, ei!(terminal_expr));
                 },
                 hir::Expr::If { condition, then_scope, else_scope } => {
-                    graph.add_type1_dep(id, ei!(condition));
-
                     self.add_type3_scope_dep(&mut graph, id, then_scope);
-                    let then_expr = self.hir.imper_scopes[then_scope].terminal_expr;
-                    let else_expr = if let Some(else_scope) = else_scope {
+                    if let Some(else_scope) = else_scope {
                         self.add_type3_scope_dep(&mut graph, id, else_scope);
-                        self.hir.imper_scopes[else_scope].terminal_expr
-                    } else {
-                        self.hir.void_expr
-                    };
-                    graph.add_type1_dep(id, ei!(then_expr));
-                    graph.add_type1_dep(id, ei!(else_expr));
+                    }
                 }
                 hir::Expr::While { condition, scope } => {
-                    graph.add_type1_dep(id, ei!(condition));
                     self.add_type3_scope_dep(&mut graph, id, scope);
-                    let terminal_expr = self.hir.imper_scopes[scope].terminal_expr;
-                    graph.add_type1_dep(id, ei!(terminal_expr));
                 },
                 hir::Expr::Mod { id: mod_id } => {
                     for decl_group in self.hir.mod_scopes[mod_id].decl_groups.values() {

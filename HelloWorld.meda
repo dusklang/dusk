@@ -139,7 +139,7 @@ fn main() {
 
     p :: 45 | 12
 
-    // Intentionally fail, just to test module member lookup
+    // Condition is intentionally false, just to test module member lookup
     std.assert(3 == 0)
     take_a_type(i8 *mut *mut)
 
