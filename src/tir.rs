@@ -416,12 +416,6 @@ impl Driver {
 
         debug_assert!(self.tir.overloads.is_empty());
         self.tir.overloads.reserve(self.hir.decl_refs.len());
-        for i in 0..self.hir.decl_refs.len() {
-            let id = DeclRefId::new(i);
-            let decl_ref = &self.hir.decl_refs[id];
-            let overloads = self.find_overloads(decl_ref);
-            self.tir.overloads.push(overloads);
-        }
 
         let mut graph = self.create_graph();
         macro_rules! ei {
@@ -486,8 +480,6 @@ impl Driver {
         // Split the graph into components
         graph.split();
         
-        // Add types 2-4 dependencies to graph
-
         // TODO: do something better than an array of bools :(
         let mut depended_on = IdxVec::<bool, ExprId>::new();
         depended_on.resize_with(self.hir.exprs.len(), || false);
@@ -497,6 +489,8 @@ impl Driver {
                 depended_on[$b] = true;
             }}
         }
+
+        // Add types 2-4 dependencies to graph
         for i in 0..self.hir.decls.len() {
             let decl_id = DeclId::new(i);
             let id = di!(decl_id);
@@ -537,6 +531,9 @@ impl Driver {
                     add_eval_dep!(id, ty);
                 }
                 hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => {
+                    let decl_ref = &self.hir.decl_refs[decl_ref_id];
+                    let overloads = self.find_overloads(decl_ref);
+                    self.tir.overloads.push(overloads);
                     for &overload in &self.tir.overloads[decl_ref_id] {
                         match self.hir.decls[overload] {
                             hir::Decl::Computed { ref param_tys, .. } => {
