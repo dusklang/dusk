@@ -23,6 +23,7 @@ use std::fs;
 
 use string_interner::DefaultStringInterner;
 
+use arch::Arch;
 use interpreter::InterpMode;
 use index_vec::Idx;
 use ty::Type;
@@ -38,7 +39,7 @@ fn main() {
     );
     let mut interner = DefaultStringInterner::new();
     let main_sym = interner.get_or_intern("main");
-    let mut driver = Driver::new(file, interner, false, arch::Arch::X86_64);
+    let mut driver = Driver::new(file, interner, false, Arch::X86_64);
     driver.lex();
     driver.parse();
     driver.build_tir();
