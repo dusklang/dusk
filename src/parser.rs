@@ -16,7 +16,7 @@ impl Driver {
         let mut p = Parser { cur: 0 };
 
         // Add intrinsics
-        {
+        loop { break;
             // Integers, floats and bool
             let values: Vec<_> = [
                 Type::u8(), Type::u16(), Type::u32(), Type::u64(), Type::usize(),

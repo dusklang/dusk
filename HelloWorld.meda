@@ -1,4 +1,4 @@
-std :: mod {
+/*std :: mod {
     fn assert(condition: bool) {
         if !condition { panic("assertion failed") }
     }
@@ -174,4 +174,16 @@ fn compute_a_number(): os_dependent_type() {
     sixteen_bit_number: u16 = 256
 
     sixteen_bit_number as os_dependent_type()
+}*/
+
+std :: mod {
+    fn blah() {
+        core.blooh()
+    }
+}
+
+core :: mod {
+    fn blooh() {
+        std.blah()
+    }
 }

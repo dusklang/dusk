@@ -272,7 +272,7 @@ impl Driver {
             };
 
             let ty = self.hir.explicit_tys[decl].expect("explicit return statements are not allowed in assigned functions (yet?)");
-            
+
             let item = self.hir.decl_to_items[decl];
             let unit_id = self.tir.levels.item_to_units[item];
             let level = self.tir.levels.item_to_levels[item];
@@ -479,7 +479,9 @@ impl Driver {
 
         // Split the graph into components
         graph.split();
-        
+
+        self.print_graph(&graph).unwrap();
+
         // TODO: do something better than an array of bools :(
         let mut depended_on = IdxVec::<bool, ExprId>::new();
         depended_on.resize_with(self.hir.exprs.len(), || false);
