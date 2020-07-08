@@ -506,7 +506,7 @@ impl Driver {
                 }
             }
         };
-        self.hir.end_module();
+        self.hir.end_module(module, source_info::concat(mod_range, close_curly_range));
         module
     }
 

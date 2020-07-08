@@ -425,8 +425,11 @@ impl Builder {
         self.scope_stack.push(ScopeState::Mod { id, namespace });
         self.push(Expr::Mod { id }, std::usize::MAX..std::usize::MAX)
     }
-    pub fn end_module(&mut self) {
+    pub fn end_module(&mut self, mod_expr: ExprId, range: SourceRange) {
+        debug_assert!(matches!(self.exprs[mod_expr], Expr::Mod { .. }));
+
         if let Some(ScopeState::Mod { .. }) = self.scope_stack.last() {
+            self.source_ranges[self.expr_to_items[mod_expr]] = range;
             self.scope_stack.pop().unwrap();
         } else {
             panic!("tried to end the module, but the top scope in the stack is not a module scope");
