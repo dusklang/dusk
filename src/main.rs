@@ -42,7 +42,8 @@ fn main() {
     let mut driver = Driver::new(file, interner, false, Arch::X86_64);
     driver.lex();
     driver.parse();
-    driver.build_tir();
+    driver.initialize_tir();
+    driver.build_more_tir();
     driver.type_check();
 
     if driver.report_errors() { return; }

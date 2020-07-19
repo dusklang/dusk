@@ -148,6 +148,7 @@ pub struct Builder {
     /// Each declref's overload choices
     pub overloads: IdxVec<Vec<DeclId>, DeclRefId>,
 
+    graph: Graph,
     depended_on: IdxVec<bool, ExprId>,
 
     levels: Levels,
@@ -160,6 +161,7 @@ impl Builder {
             units: IdxVec::new(),
             decls: IdxVec::new(),
             overloads: IdxVec::new(),
+            graph: Graph::default(),
             depended_on: IdxVec::new(),
             levels: Levels::default(),
             staged_ret_groups: HashMap::new(),
@@ -182,11 +184,11 @@ macro_rules! di_injector {
     }
 }
 macro_rules! add_eval_dep_injector {
-    ($self:expr, $graph: expr, $name: ident) => {
+    ($self:expr, $name: ident) => {
         macro_rules! $name {
             ($a:expr, $b:expr) => {{
                 ei_injector!($self, ei_inner);
-                $graph.add_type4_dep($a, ei_inner!($b));
+                $self.tir.graph.add_type4_dep($a, ei_inner!($b));
                 $self.tir.depended_on[$b] = true;
             }}
         }
@@ -246,8 +248,8 @@ impl Driver {
         Some(overloads)
     }
 
-    fn add_types_2_to_4_deps_to_member_ref(&mut self, graph: &mut Graph, id: ItemId, arguments: &[ExprId], decl_ref_id: DeclRefId) {
-        add_eval_dep_injector!(self, graph, add_eval_dep);
+    fn add_types_2_to_4_deps_to_member_ref(&mut self, id: ItemId, arguments: &[ExprId], decl_ref_id: DeclRefId) {
+        add_eval_dep_injector!(self, add_eval_dep);
         di_injector!(self, di);
         let decl_ref = &self.hir.decl_refs[decl_ref_id];
         let overloads = self.find_overloads(decl_ref);
@@ -260,19 +262,19 @@ impl Driver {
                     for &ty in param_tys {
                         add_eval_dep!(id, ty);
                     }
-                    graph.add_type3_dep(id, di!(overload));
+                    self.tir.graph.add_type3_dep(id, di!(overload));
                 },
-                _ => graph.add_type2_dep(id, di!(overload)),
+                _ => self.tir.graph.add_type2_dep(id, di!(overload)),
             }
         }
     }
 
-    fn add_type3_scope_dep(&self, graph: &mut Graph, a: ItemId, b: ImperScopeId) {
+    fn add_type3_scope_dep(&mut self, a: ItemId, b: ImperScopeId) {
         let scope = &self.hir.imper_scopes[b];
         for &item in &scope.items {
             match item {
-                hir::ScopeItem::Stmt(expr) => graph.add_type3_dep(a, self.hir.expr_to_items[expr]),
-                hir::ScopeItem::StoredDecl { decl_id, root_expr, .. } => graph.add_type3_dep(a, self.hir.decl_to_items[decl_id]),
+                hir::ScopeItem::Stmt(expr) => self.tir.graph.add_type3_dep(a, self.hir.expr_to_items[expr]),
+                hir::ScopeItem::StoredDecl { decl_id, root_expr, .. } => self.tir.graph.add_type3_dep(a, self.hir.decl_to_items[decl_id]),
                 hir::ScopeItem::ComputedDecl(_) => {},
             }
         }
@@ -427,7 +429,7 @@ impl Driver {
         }
     }
 
-    pub fn build_tir(&mut self) {
+    pub fn initialize_tir(&mut self) {
         // Populate `decls`
         for decl in &self.hir.decls {
             let (is_mut, param_tys) = match *decl {
@@ -462,20 +464,20 @@ impl Driver {
         debug_assert!(self.tir.overloads.is_empty());
         self.tir.overloads.reserve(self.hir.decl_refs.len());
 
-        let mut graph = self.create_graph();
+        self.initialize_graph();
         ei_injector!(self, ei);
         di_injector!(self, di);
-        add_eval_dep_injector!(self, graph, add_eval_dep);
+        add_eval_dep_injector!(self, add_eval_dep);
         // Add type 1 dependencies to the graph
         for i in 0..self.hir.decls.len() {
             let decl_id = DeclId::new(i);
             let id = di!(decl_id);
             match self.hir.decls[decl_id] {
                 hir::Decl::Parameter { .. } | hir::Decl::Intrinsic { .. } => {},
-                hir::Decl::Static(expr) | hir::Decl::Const(expr) | hir::Decl::Stored { root_expr: expr, .. } => graph.add_type1_dep(id, ei!(expr)),
+                hir::Decl::Static(expr) | hir::Decl::Const(expr) | hir::Decl::Stored { root_expr: expr, .. } => self.tir.graph.add_type1_dep(id, ei!(expr)),
                 hir::Decl::Computed { scope, .. } => {
                     let terminal_expr = self.hir.imper_scopes[scope].terminal_expr;
-                    graph.add_type1_dep(id, ei!(terminal_expr));
+                    self.tir.graph.add_type1_dep(id, ei!(terminal_expr));
                 },
             }
         }
@@ -486,41 +488,41 @@ impl Driver {
                 hir::Expr::Void | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
                     | hir::Expr::CharLit { .. } | hir::Expr::ConstTy(_) | hir::Expr::Mod { .. } => {},
                 hir::Expr::AddrOf { expr, .. } | hir::Expr::Deref(expr) | hir::Expr::Pointer { expr, .. }
-                    | hir::Expr::Cast { expr, .. } | hir::Expr::Ret { expr, .. } => graph.add_type1_dep(id, ei!(expr)),
+                    | hir::Expr::Cast { expr, .. } | hir::Expr::Ret { expr, .. } => self.tir.graph.add_type1_dep(id, ei!(expr)),
                 hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => {
                     for &arg in arguments {
-                        graph.add_type1_dep(id, ei!(arg));
+                        self.tir.graph.add_type1_dep(id, ei!(arg));
                     }
                 },
                 hir::Expr::Set { lhs, rhs } => {
-                    graph.add_type1_dep(id, ei!(lhs));
-                    graph.add_type1_dep(id, ei!(rhs));
+                    self.tir.graph.add_type1_dep(id, ei!(lhs));
+                    self.tir.graph.add_type1_dep(id, ei!(rhs));
                 },
                 hir::Expr::Do { scope } => {
                     let terminal_expr = self.hir.imper_scopes[scope].terminal_expr;
-                    graph.add_type1_dep(id, ei!(terminal_expr));
+                    self.tir.graph.add_type1_dep(id, ei!(terminal_expr));
                 },
                 hir::Expr::If { condition, then_scope, else_scope } => {
-                    graph.add_type1_dep(id, ei!(condition));
+                    self.tir.graph.add_type1_dep(id, ei!(condition));
                     let then_expr = self.hir.imper_scopes[then_scope].terminal_expr;
                     let else_expr = if let Some(else_scope) = else_scope {
                         self.hir.imper_scopes[else_scope].terminal_expr
                     } else {
                         self.hir.void_expr
                     };
-                    graph.add_type1_dep(id, ei!(then_expr));
-                    graph.add_type1_dep(id, ei!(else_expr));
+                    self.tir.graph.add_type1_dep(id, ei!(then_expr));
+                    self.tir.graph.add_type1_dep(id, ei!(else_expr));
                 }
                 hir::Expr::While { condition, scope } => {
-                    graph.add_type1_dep(id, ei!(condition));
+                    self.tir.graph.add_type1_dep(id, ei!(condition));
                     let terminal_expr = self.hir.imper_scopes[scope].terminal_expr;
-                    graph.add_type1_dep(id, ei!(terminal_expr));
+                    self.tir.graph.add_type1_dep(id, ei!(terminal_expr));
                 },
             }
         }
 
         // Split the graph into components
-        graph.split();
+        self.tir.graph.split();
 
         // TODO: do something better than an array of bools :(
         self.tir.depended_on.resize_with(self.hir.exprs.len(), || false);
@@ -538,10 +540,10 @@ impl Driver {
                     }
                 },
                 hir::Decl::Computed { scope, ref param_tys, .. } => {
-                    self.add_type3_scope_dep(&mut graph, id, scope);
                     for &ty in param_tys {
                         add_eval_dep!(id, ty);
                     }
+                    self.add_type3_scope_dep(id, scope);
                     let ty = self.hir.explicit_tys[decl_id].unwrap_or(self.hir.void_ty);
                     add_eval_dep!(id, ty);
                 },
@@ -569,30 +571,34 @@ impl Driver {
                 hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => {
                     // Yay borrow-checker
                     let arguments = arguments.clone();
-                    self.add_types_2_to_4_deps_to_member_ref(&mut graph, id, &arguments, decl_ref_id);
+                    self.add_types_2_to_4_deps_to_member_ref(id, &arguments, decl_ref_id);
                 },
                 hir::Expr::Do { scope } => {
-                    self.add_type3_scope_dep(&mut graph, id, scope);
+                    self.add_type3_scope_dep(id, scope);
                 },
                 hir::Expr::If { condition, then_scope, else_scope } => {
-                    self.add_type3_scope_dep(&mut graph, id, then_scope);
+                    self.add_type3_scope_dep(id, then_scope);
                     if let Some(else_scope) = else_scope {
-                        self.add_type3_scope_dep(&mut graph, id, else_scope);
+                        self.add_type3_scope_dep(id, else_scope);
                     }
                 }
                 hir::Expr::While { condition, scope } => {
-                    self.add_type3_scope_dep(&mut graph, id, scope);
+                    self.add_type3_scope_dep(id, scope);
                 },
                 hir::Expr::Mod { id: mod_id } => {
                     for decl_group in self.hir.mod_scopes[mod_id].decl_groups.values() {
                         for decl in decl_group {
-                            graph.add_type4_dep(id, di!(decl.id));
+                            self.tir.graph.add_type4_dep(id, di!(decl.id));
                         }
                     }
                 }
             }
         }
+    }
 
+    pub fn build_more_tir(&mut self) {
+        ei_injector!(self, ei);
+        di_injector!(self, di);
         // Imagined typechecking flow:
         // - Driver calls a TIR generation method, which does the following:
         //   - Gets the set of declrefs for which we now have namespace info (if any), and adds types 2-4 dependencies to them (thus resolving the metadependencies)
@@ -602,8 +608,9 @@ impl Driver {
         // - Driver repeats from the beginning until there are no more items, or nothing happened in the previous iteration (possible?)
 
         // Solve for the unit and level of each item
-        graph.find_units();
-        self.print_graph(&graph).unwrap();
+        self.tir.graph.find_units();
+        self.print_graph().unwrap();
+        let graph = std::mem::replace(&mut self.tir.graph, Graph::default());
         self.tir.levels = graph.solve();
         self.tir.units.resize_with(self.tir.levels.units.len(), || Unit::new());
 

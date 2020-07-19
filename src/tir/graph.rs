@@ -22,6 +22,7 @@ use crate::hir;
 newtype_index!(CompId);
 newtype_index!(UnitId pub);
 
+#[derive(Debug, Default)]
 pub struct Graph {
     dependees: IdxVec<Vec<ItemId>, ItemId>,
     t2_dependees: IdxVec<Vec<ItemId>, ItemId>,
@@ -60,7 +61,7 @@ impl Default for ComponentRelation {
 }
 
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct Component {
     items: Vec<ItemId>,
 
@@ -73,7 +74,7 @@ struct ComponentState {
     cur_component: Component,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct Unit {
     components: Vec<CompId>,
 
@@ -339,17 +340,19 @@ impl ItemId {
 }
 
 impl Driver {
-    pub fn create_graph(&self) -> Graph {
-        let mut deps = [IdxVec::new(), IdxVec::new(), IdxVec::new(), IdxVec::new(), IdxVec::new()];
+    pub fn initialize_graph(&mut self) {
+        let mut deps = [
+            &mut self.tir.graph.dependees,
+            &mut self.tir.graph.t2_dependees,
+            &mut self.tir.graph.t3_dependees,
+            &mut self.tir.graph.t4_dependees,
+            &mut self.tir.graph.dependers
+        ];
         for dep in &mut deps {
             dep.resize_with(self.hir.items.len(), || Vec::new());
         }
 
-        let mut item_to_components = IdxVec::new();
-        item_to_components.resize_with(self.hir.items.len(), || CompId::new(std::usize::MAX));
-        
-        let [dependees, t2_dependees, t3_dependees, t4_dependees, dependers] = deps;
-        Graph { dependees, t2_dependees, t3_dependees, t4_dependees, dependers, item_to_components, components: IdxVec::new(), units: None }
+        self.tir.graph.item_to_components.resize_with(self.hir.items.len(), || CompId::new(std::usize::MAX));
     }
 
     fn write_dep<W: Write>(&self, w: &mut W, a: ItemId, b: ItemId, write_attribs: impl FnOnce(&mut W) -> IoResult<()>) -> IoResult<()> {
@@ -415,7 +418,8 @@ impl Driver {
     }
 
     /// Prints graph in Graphviz format, then opens a web browser to display the results.
-    pub fn print_graph(&self, graph: &Graph) -> IoResult<()> {
+    pub fn print_graph(&self) -> IoResult<()> {
+        let graph = &self.tir.graph;
         let tmp_dir = fs::read_dir(".")?.find(|entry| entry.as_ref().unwrap().file_name() == "tmp");
         if tmp_dir.is_none() {
             fs::create_dir("tmp")?;
