@@ -148,6 +148,8 @@ pub struct Builder {
     /// Each declref's overload choices
     pub overloads: IdxVec<Vec<DeclId>, DeclRefId>,
 
+    depended_on: IdxVec<bool, ExprId>,
+
     levels: Levels,
     staged_ret_groups: HashMap<DeclId, SmallVec<[ExprId; 1]>>,
 }
@@ -158,17 +160,46 @@ impl Builder {
             units: IdxVec::new(),
             decls: IdxVec::new(),
             overloads: IdxVec::new(),
+            depended_on: IdxVec::new(),
             levels: Levels::default(),
             staged_ret_groups: HashMap::new(),
         }
     }
 }
 
+macro_rules! ei_injector {
+    ($self:expr, $name:ident) => { 
+        macro_rules! $name {
+            ($a: expr) => { $self.hir.expr_to_items[$a] }
+        }
+    }
+}
+macro_rules! di_injector {
+    ($self:expr, $name:ident) => { 
+        macro_rules! $name {
+            ($a: expr) => { $self.hir.decl_to_items[$a] }
+        }
+    }
+}
+macro_rules! add_eval_dep_injector {
+    ($self:expr, $graph: expr, $name: ident) => {
+        macro_rules! $name {
+            ($a:expr, $b:expr) => {{
+                ei_injector!($self, ei_inner);
+                $graph.add_type4_dep($a, ei_inner!($b));
+                $self.tir.depended_on[$b] = true;
+            }}
+        }
+    }
+}
+
 impl Driver {
-    fn find_overloads(&self, decl_ref: &hir::DeclRef) -> Vec<DeclId> {
+    // Returns the overloads for a declref, if they are known (they won't be if it's a member ref)
+    fn find_overloads(&self, decl_ref: &hir::DeclRef) -> Option<Vec<DeclId>> {
         let mut overloads = Vec::new();
 
         let mut last_was_imperative = true;
+        let mut root_namespace = true;
         let mut namespace = Some(decl_ref.namespace);
         while let Some(ns) = namespace {
             namespace = match ns {
@@ -202,11 +233,38 @@ impl Driver {
                 },
     
                 // TODO: get the overloads
-                Namespace::MemberRef { .. } => break,
+                Namespace::MemberRef { .. } => {
+                    assert!(root_namespace, "member refs currently must be at the root of a namespace hierarchy");
+
+                    return None;
+                },
             };
+
+            root_namespace = false;
         }
 
-        overloads
+        Some(overloads)
+    }
+
+    fn add_types_2_to_4_deps_to_member_ref(&mut self, graph: &mut Graph, id: ItemId, arguments: &[ExprId], decl_ref_id: DeclRefId) {
+        add_eval_dep_injector!(self, graph, add_eval_dep);
+        di_injector!(self, di);
+        let decl_ref = &self.hir.decl_refs[decl_ref_id];
+        let overloads = self.find_overloads(decl_ref);
+        self.tir.overloads[decl_ref_id] = overloads.unwrap_or_default();
+        for &overload in &self.tir.overloads[decl_ref_id] {
+            match self.hir.decls[overload] {
+                hir::Decl::Computed { ref param_tys, .. } => {
+                    let ty = self.hir.explicit_tys[overload].unwrap_or(self.hir.void_ty);
+                    add_eval_dep!(id, ty);
+                    for &ty in param_tys {
+                        add_eval_dep!(id, ty);
+                    }
+                    graph.add_type3_dep(id, di!(overload));
+                },
+                _ => graph.add_type2_dep(id, di!(overload)),
+            }
+        }
     }
 
     fn add_type3_scope_dep(&self, graph: &mut Graph, a: ItemId, b: ImperScopeId) {
@@ -405,12 +463,9 @@ impl Driver {
         self.tir.overloads.reserve(self.hir.decl_refs.len());
 
         let mut graph = self.create_graph();
-        macro_rules! ei {
-            ($a:expr) => { self.hir.expr_to_items[$a] }
-        }
-        macro_rules! di {
-            ($a:expr) => { self.hir.decl_to_items[$a] }
-        }
+        ei_injector!(self, ei);
+        di_injector!(self, di);
+        add_eval_dep_injector!(self, graph, add_eval_dep);
         // Add type 1 dependencies to the graph
         for i in 0..self.hir.decls.len() {
             let decl_id = DeclId::new(i);
@@ -468,14 +523,8 @@ impl Driver {
         graph.split();
 
         // TODO: do something better than an array of bools :(
-        let mut depended_on = IdxVec::<bool, ExprId>::new();
-        depended_on.resize_with(self.hir.exprs.len(), || false);
-        macro_rules! add_eval_dep {
-            ($a:expr, $b:expr) => {{
-                graph.add_type4_dep($a, ei!($b));
-                depended_on[$b] = true;
-            }}
-        }
+        self.tir.depended_on.resize_with(self.hir.exprs.len(), || false);
+        self.tir.overloads.resize_with(self.hir.decl_refs.len(), Default::default);
 
         // Add types 2-4 dependencies to graph
         for i in 0..self.hir.decls.len() {
@@ -518,22 +567,9 @@ impl Driver {
                     add_eval_dep!(id, ty);
                 }
                 hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => {
-                    let decl_ref = &self.hir.decl_refs[decl_ref_id];
-                    let overloads = self.find_overloads(decl_ref);
-                    self.tir.overloads.push(overloads);
-                    for &overload in &self.tir.overloads[decl_ref_id] {
-                        match self.hir.decls[overload] {
-                            hir::Decl::Computed { ref param_tys, .. } => {
-                                let ty = self.hir.explicit_tys[overload].unwrap_or(self.hir.void_ty);
-                                add_eval_dep!(id, ty);
-                                for &ty in param_tys {
-                                    add_eval_dep!(id, ty);
-                                }
-                                graph.add_type3_dep(id, di!(overload));
-                            },
-                            _ => graph.add_type2_dep(id, di!(overload)),
-                        }
-                    }
+                    // Yay borrow-checker
+                    let arguments = arguments.clone();
+                    self.add_types_2_to_4_deps_to_member_ref(&mut graph, id, &arguments, decl_ref_id);
                 },
                 hir::Expr::Do { scope } => {
                     self.add_type3_scope_dep(&mut graph, id, scope);
@@ -577,7 +613,7 @@ impl Driver {
             let item_id = ei!(id);
             let unit = self.tir.levels.item_to_units[item_id];
             let unit = &mut self.tir.units[unit];
-            if depended_on[id] { unit.eval_dependees.push(id); }
+            if self.tir.depended_on[id] { unit.eval_dependees.push(id); }
             self.build_tir_expr(item_id, id, None);
         }
         for i in 0..self.hir.decls.len() {
