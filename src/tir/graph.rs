@@ -28,6 +28,8 @@ pub struct Graph {
     t2_dependees: IdxVec<Vec<ItemId>, ItemId>,
     t3_dependees: IdxVec<Vec<ItemId>, ItemId>,
     t4_dependees: IdxVec<Vec<ItemId>, ItemId>,
+    meta_dependees: IdxVec<Vec<ItemId>, ItemId>,
+    meta_dependers: IdxVec<Vec<ItemId>, ItemId>,
 
     // Used exclusively for finding connected components
     dependers: IdxVec<Vec<ItemId>, ItemId>,
@@ -110,6 +112,13 @@ impl Graph {
         self.t4_dependees[a].push(b);
         let a_comp = self.item_to_components[a];
         self.transfer_item_dep_to_component(a_comp, b, ComponentRelation::BEFORE, ComponentRelation::AFTER);
+    }
+
+    /// a has type 1 dependency on b, and in order to know the type 2-4 dependencies of a, we need to know all possible members of b
+    pub fn add_meta_dep(&mut self, a: ItemId, b: ItemId) {
+        self.add_type1_dep(a, b);
+        self.meta_dependees[a].push(b);
+        self.meta_dependers[b].push(a);
     }
 
     fn find_subcomponent(&mut self, item: ItemId, state: &mut ComponentState) {
@@ -346,6 +355,8 @@ impl Driver {
             &mut self.tir.graph.t2_dependees,
             &mut self.tir.graph.t3_dependees,
             &mut self.tir.graph.t4_dependees,
+            &mut self.tir.graph.meta_dependees,
+            &mut self.tir.graph.meta_dependers,
             &mut self.tir.graph.dependers
         ];
         for dep in &mut deps {

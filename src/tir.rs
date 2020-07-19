@@ -250,8 +250,12 @@ impl Driver {
 
     fn add_types_2_to_4_deps_to_member_ref(&mut self, id: ItemId, arguments: &[ExprId], decl_ref_id: DeclRefId) {
         add_eval_dep_injector!(self, add_eval_dep);
+        ei_injector!(self, ei);
         di_injector!(self, di);
         let decl_ref = &self.hir.decl_refs[decl_ref_id];
+        if let hir::Namespace::MemberRef { base_expr } = decl_ref.namespace {
+            self.tir.graph.add_meta_dep(id, ei!(base_expr));
+        }
         let overloads = self.find_overloads(decl_ref);
         self.tir.overloads[decl_ref_id] = overloads.unwrap_or_default();
         for &overload in &self.tir.overloads[decl_ref_id] {
