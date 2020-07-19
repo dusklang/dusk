@@ -557,6 +557,14 @@ impl Driver {
             }
         }
 
+        // Imagined typechecking flow:
+        // - Driver calls a TIR generation method, which does the following:
+        //   - Gets the set of declrefs for which we now have namespace info (if any), and adds types 2-4 dependencies to them (thus resolving the metadependencies)
+        //   - Find and solve for the next few units
+        //   - Build TIR for each item in each unit (including mock TIR units for any meta-dependees)
+        // - Driver calls typechecker on the units it got from tir.rs (which also should figure out all member ref namepsaces via the mock units)
+        // - Driver repeats from the beginning until there are no more items, or nothing happened in the previous iteration (possible?)
+
         // Solve for the unit and level of each item
         graph.find_units();
         self.print_graph(&graph).unwrap();
