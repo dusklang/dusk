@@ -114,9 +114,8 @@ impl Graph {
         self.transfer_item_dep_to_component(a_comp, b, ComponentRelation::BEFORE, ComponentRelation::AFTER);
     }
 
-    /// a has type 1 dependency on b, and in order to know the type 2-4 dependencies of a, we need to know all possible members of b
+    /// in order to know the type 2-4 dependencies of a, we need to know all possible members of b
     pub fn add_meta_dep(&mut self, a: ItemId, b: ItemId) {
-        self.add_type1_dep(a, b);
         self.meta_dependees[a].push(b);
         self.meta_dependers[b].push(a);
     }

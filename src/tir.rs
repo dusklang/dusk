@@ -494,6 +494,10 @@ impl Driver {
                 hir::Expr::AddrOf { expr, .. } | hir::Expr::Deref(expr) | hir::Expr::Pointer { expr, .. }
                     | hir::Expr::Cast { expr, .. } | hir::Expr::Ret { expr, .. } => self.tir.graph.add_type1_dep(id, ei!(expr)),
                 hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => {
+                    let decl_ref = &self.hir.decl_refs[decl_ref_id];
+                    if let hir::Namespace::MemberRef { base_expr } = decl_ref.namespace {
+                        self.tir.graph.add_type1_dep(id, ei!(base_expr));
+                    }
                     for &arg in arguments {
                         self.tir.graph.add_type1_dep(id, ei!(arg));
                     }
@@ -525,9 +529,11 @@ impl Driver {
             }
         }
 
+        
         // Split the graph into components
         self.tir.graph.split();
-
+        
+        self.print_graph().unwrap();
         // TODO: do something better than an array of bools :(
         self.tir.depended_on.resize_with(self.hir.exprs.len(), || false);
         self.tir.overloads.resize_with(self.hir.decl_refs.len(), Default::default);
