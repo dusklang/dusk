@@ -532,8 +532,7 @@ impl Driver {
         
         // Split the graph into components
         self.tir.graph.split();
-        
-        self.print_graph().unwrap();
+
         // TODO: do something better than an array of bools :(
         self.tir.depended_on.resize_with(self.hir.exprs.len(), || false);
         self.tir.overloads.resize_with(self.hir.decl_refs.len(), Default::default);
@@ -568,7 +567,7 @@ impl Driver {
             match self.hir.exprs[expr_id] {
                 hir::Expr::Void | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
                     | hir::Expr::CharLit { .. } | hir::Expr::ConstTy(_) | hir::Expr::AddrOf { .. } | hir::Expr::Deref(_)
-                    | hir::Expr::Pointer { .. } | hir::Expr::Set { .. } => {},
+                    | hir::Expr::Pointer { .. } | hir::Expr::Set { .. } | hir::Expr::Mod { .. } => {},
                 hir::Expr::Cast { expr, ty, .. } => {
                     add_eval_dep!(id, ty);
                 },
@@ -594,13 +593,6 @@ impl Driver {
                 }
                 hir::Expr::While { condition, scope } => {
                     self.add_type3_scope_dep(id, scope);
-                },
-                hir::Expr::Mod { id: mod_id } => {
-                    for decl_group in self.hir.mod_scopes[mod_id].decl_groups.values() {
-                        for decl in decl_group {
-                            self.tir.graph.add_type4_dep(id, di!(decl.id));
-                        }
-                    }
                 }
             }
         }

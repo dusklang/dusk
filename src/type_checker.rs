@@ -371,8 +371,8 @@ impl Driver {
                 self.tc.constraints[root_expr].set_to(ty);
             }
             for item in unit.ret_groups.get_level(level) {
+                let ty = self.tc.get_evaluated_type(item.ty).clone();
                 for &expr in &item.exprs {
-                    let ty = self.tc.get_evaluated_type(item.ty).clone();
                     if let Some(err) = self.tc.constraints[expr].can_unify_to(&QualType::from(&ty)).err() {
                         let range = self.hir.get_range(expr);
                         let mut error = Error::new(format!("can't unify expression to return type {:?}", ty))
@@ -393,7 +393,7 @@ impl Driver {
                     }
 
                     // Assume we panic above unless the returned expr can unify to the return type
-                    self.tc.constraints[expr].set_to(ty);
+                    self.tc.constraints[expr].set_to(ty.clone());
                 }
             }
             for item in unit.whiles.get_level(level) {
