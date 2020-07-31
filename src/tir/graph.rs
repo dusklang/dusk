@@ -162,7 +162,7 @@ impl Graph {
         let mut state = ComponentState {
             visited, cur_component: Component::default(),
         };
-        self.item_to_components.resize_with(self.dependees.len(), || CompId::new(std::usize::MAX));
+        self.item_to_components.resize_with(self.dependees.len(), || CompId::new(usize::MAX));
         assert!(self.components.is_empty());
         for i in 0..self.dependees.len() {
             self.find_component(ItemId::new(i), &mut state);
@@ -171,7 +171,7 @@ impl Graph {
 
     pub fn find_units(&mut self) {
         let mut component_to_units = IdxVec::<UnitId, CompId>::new();
-        component_to_units.resize_with(self.components.len(), || UnitId::new(std::usize::MAX));
+        component_to_units.resize_with(self.components.len(), || UnitId::new(usize::MAX));
         let mut units = IdxVec::<Unit, UnitId>::new();
         let mut included_components = HashSet::<CompId>::new();
         let mut outstanding_components = HashSet::<CompId>::from_iter(
@@ -235,7 +235,7 @@ impl Graph {
     }
 
     fn find_level(&self, item: ItemId, levels: &mut IdxVec<u32, ItemId>) -> u32 {
-        if levels[item] != std::u32::MAX { return levels[item]; }
+        if levels[item] != u32::MAX { return levels[item]; }
 
         let mut max_level = 0;
         let mut offset = 0;
@@ -251,14 +251,14 @@ impl Graph {
 
     pub fn solve(self) -> Levels {
         let mut item_to_levels = IdxVec::<u32, ItemId>::new();
-        item_to_levels.resize_with(self.dependees.len(), || std::u32::MAX);
+        item_to_levels.resize_with(self.dependees.len(), || u32::MAX);
 
         for i in 0..self.dependees.len() {
             self.find_level(ItemId::new(i), &mut item_to_levels);
         }
 
         let mut item_to_units = IdxVec::<UnitId, ItemId>::new();
-        item_to_units.resize_with(self.dependees.len(), || UnitId::new(std::usize::MAX));
+        item_to_units.resize_with(self.dependees.len(), || UnitId::new(usize::MAX));
 
         let units = self.units.unwrap();
         for (i, unit) in units.iter().enumerate() {
@@ -305,7 +305,7 @@ impl SplitOp {
     fn split_recurse(&mut self, item_to_units: &mut IdxVec<UnitId, ItemId>, dependees: &IdxVec<Vec<ItemId>, ItemId>, split: ItemId) {
         let removed = self.included.remove(&split);
         assert!(removed);
-        item_to_units[split] = UnitId::new(std::usize::MAX);
+        item_to_units[split] = UnitId::new(usize::MAX);
         self.excluded.push(split);
         for &dep in &dependees[split] {
             self.split_recurse(item_to_units, dependees, dep);
@@ -362,7 +362,7 @@ impl Driver {
             dep.resize_with(self.hir.items.len(), || Vec::new());
         }
 
-        self.tir.graph.item_to_components.resize_with(self.hir.items.len(), || CompId::new(std::usize::MAX));
+        self.tir.graph.item_to_components.resize_with(self.hir.items.len(), || CompId::new(usize::MAX));
     }
 
     fn write_dep<W: Write>(&self, w: &mut W, a: ItemId, b: ItemId, write_attribs: impl FnOnce(&mut W) -> IoResult<()>) -> IoResult<()> {

@@ -1,6 +1,5 @@
 use std::ffi::CString;
 use std::ops::Range;
-use std::usize::MAX as USIZE_MAX;
 use std::collections::HashMap;
 
 use smallvec::{SmallVec, smallvec};
@@ -423,7 +422,7 @@ impl Builder {
             }
         );
         self.scope_stack.push(ScopeState::Mod { id, namespace });
-        self.push(Expr::Mod { id }, std::usize::MAX..std::usize::MAX)
+        self.push(Expr::Mod { id }, usize::MAX..usize::MAX)
     }
     pub fn end_module(&mut self, mod_expr: ExprId, range: SourceRange) {
         debug_assert!(matches!(self.exprs[mod_expr], Expr::Mod { .. }));
@@ -437,7 +436,7 @@ impl Builder {
     }
     pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, explicit_ty: Option<ExprId>, proto_range: SourceRange) {
         // This is a placeholder value that gets replaced once the parameter declarations get allocated.
-        let id = self.decl(Decl::Const(ExprId::new(std::usize::MAX)), name, explicit_ty, proto_range);
+        let id = self.decl(Decl::Const(ExprId::new(usize::MAX)), name, explicit_ty, proto_range);
         assert_eq!(param_names.len(), param_tys.len());
         self.decls.reserve(param_tys.len());
         let first_param = DeclId::new(self.decls.len());
@@ -454,7 +453,7 @@ impl Builder {
         self.decls[id] = Decl::Computed {
             param_tys,
             params: params.clone(),
-            scope: ImperScopeId::new(std::usize::MAX)
+            scope: ImperScopeId::new(usize::MAX)
         };
         match self.scope_stack.last().unwrap() {
             ScopeState::Imper { .. } => {
@@ -513,12 +512,12 @@ impl Builder {
 
 impl Driver {
     pub fn add_const_ty(&mut self, ty: Type) -> ExprId {
-        self.hir.push(Expr::ConstTy(ty), USIZE_MAX..USIZE_MAX)
+        self.hir.push(Expr::ConstTy(ty), usize::MAX..usize::MAX)
     }
     pub fn add_intrinsic(&mut self, intrinsic: Intrinsic, param_tys: SmallVec<[ExprId; 2]>, ret_ty: ExprId, function_like: bool) {
         let name = self.interner.get_or_intern(intrinsic.name());
         let num_params = param_tys.len();
-        let id = self.hir.decl(Decl::Intrinsic { intr: intrinsic, param_tys, function_like }, name, Some(ret_ty), USIZE_MAX..USIZE_MAX);
+        let id = self.hir.decl(Decl::Intrinsic { intr: intrinsic, param_tys, function_like }, name, Some(ret_ty), usize::MAX..usize::MAX);
         assert_eq!(self.hir.scope_stack.len(), 1, "cannot add intrinsic anywhere except global scope");
         self.hir.mod_scoped_decl(
             name,
