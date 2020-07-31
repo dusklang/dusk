@@ -3,7 +3,10 @@ use std::collections::HashMap;
 use smallvec::{SmallVec, smallvec};
 
 mod constraints;
+pub mod type_provider;
+
 use constraints::{ConstraintList, UnificationError};
+use type_provider::TypeProvider;
 
 use crate::source_info::SourceFile;
 use crate::driver::Driver;
@@ -18,7 +21,7 @@ use crate::mir::Const;
 use crate::hir;
 use crate::tir::{UnitId, Unit};
 
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub enum CastMethod {
     Noop,
     Reinterpret,
@@ -69,71 +72,12 @@ impl TypeChecker {
     }
 }
 
-impl TypeChecker {
-    /// Doesn't get the type *of* `id`, gets the type that `id` as an expression *is*
-    pub fn get_evaluated_type(&self, id: ExprId) -> &Type {
-        match &self.eval_results[&id] {
-            Const::Ty(ty) => ty,
-            x => panic!("Expected type! Found {:?}", x),
-        }
-    }
-
-    fn fetch_decl_type(&mut self, hir: &hir::Builder, id: DeclId) -> &Type {
-        if let Type::Error = self.decl_types[id].ty {
-            if let Some(expr) = hir.explicit_tys[id] {
-                let ty = self.get_evaluated_type(expr).clone();
-                self.decl_types[id].ty = ty;
-            }
-        }
-
-        &self.decl_types[id].ty
-    }
-
-    fn debug_output(&mut self, hir: &hir::Builder, file: &SourceFile, level: usize) {
-        if !self.debug { return; }
-        println!("LEVEL {}", level);
-        assert_eq!(self.constraints.len(), self.constraints_copy.len());
-        for i in 0..self.constraints.len() {
-            let i = ExprId::new(i);
-            let new_constraints = &self.constraints[i];
-            let old_constraints = &mut self.constraints_copy[i];
-            if new_constraints != old_constraints {
-                file.print_commentated_source_ranges(&mut [
-                    CommentatedSourceRange::new(hir.get_range(i), "", '-')
-                ]);
-                old_constraints.print_diff(new_constraints);
-                *old_constraints = new_constraints.clone();
-                println!("============================================================================================\n")
-            }
-        }
-    }
-}
-
 enum UnitRef<'a> {
     Id(UnitId),
     Ref(&'a mut Unit),
 }
 
 impl Driver {
-    fn debug_output(&mut self, level: usize) {
-        if !self.tc.debug { return; }
-        println!("LEVEL {}", level);
-        assert_eq!(self.tc.constraints.len(), self.tc.constraints_copy.len());
-        for i in 0..self.tc.constraints.len() {
-            let i = ExprId::new(i);
-            let new_constraints = &self.tc.constraints[i];
-            let old_constraints = &mut self.tc.constraints_copy[i];
-            if new_constraints != old_constraints {
-                self.file.print_commentated_source_ranges(&mut [
-                    CommentatedSourceRange::new(self.hir.get_range(i), "", '-')
-                ]);
-                old_constraints.print_diff(new_constraints);
-                *old_constraints = new_constraints.clone();
-                println!("============================================================================================\n")
-            }
-        }
-    }
-
     pub fn decl_type(&self, id: DeclId) -> &Type {
         self.hir.explicit_tys[id].map(|ty| self.tc.get_evaluated_type(ty)).unwrap_or(&Type::Error)
     }
@@ -153,34 +97,27 @@ impl Driver {
 
         // Pass 1: propagate info down from leaves to roots
         if self.tc.debug { println!("===============TYPECHECKING: PASS 1==============="); }
-        fn independent_pass_1<T>(constraints: &mut IdxVec<ConstraintList, ExprId>, tys: &mut IdxVec<Type, ExprId>, exprs: &[T], data: impl Fn(&T) -> (ExprId, Type)) {
-            for item in exprs {
-                let (id, ty) = data(item);
-                constraints[id] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![ty.clone().into()]), None);
-                tys[id] = ty;
-            }
-        }
-
-        fn lit_pass_1(constraints: &mut IdxVec<ConstraintList, ExprId>, lits: &[ExprId], trait_impls: BuiltinTraits, pref: Type) {
+        fn lit_pass_1(tp: &mut impl TypeProvider, lits: &[ExprId], trait_impls: BuiltinTraits, pref: Type) {
             for &item in lits {
-                constraints[item] = ConstraintList::new(
+                *tp.constraints_mut(item) = ConstraintList::new(
                     trait_impls, 
                     None,
                     Some(pref.clone().into())
                 );
             }
         }
-        lit_pass_1(&mut self.tc.constraints, &unit.int_lits, BuiltinTraits::INT, Type::i32());
-        lit_pass_1(&mut self.tc.constraints, &unit.dec_lits, BuiltinTraits::DEC, Type::i32());
-        lit_pass_1(&mut self.tc.constraints, &unit.str_lits, BuiltinTraits::STR, Type::u8().ptr());
-        lit_pass_1(&mut self.tc.constraints, &unit.char_lits, BuiltinTraits::CHAR, Type::u8().ptr());
+        lit_pass_1(&mut self.tc, &unit.int_lits, BuiltinTraits::INT, Type::i32());
+        lit_pass_1(&mut self.tc, &unit.dec_lits, BuiltinTraits::DEC, Type::i32());
+        lit_pass_1(&mut self.tc, &unit.str_lits, BuiltinTraits::STR, Type::u8().ptr());
+        lit_pass_1(&mut self.tc, &unit.char_lits, BuiltinTraits::CHAR, Type::u8().ptr());
         for &item in &unit.const_tys {
-            self.tc.constraints[item] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Ty.into()]), None);
-            self.tc.types[item] = Type::Ty;
+            *self.tc.constraints_mut(item) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Ty.into()]), None);
+            *self.tc.ty_mut(item) = Type::Ty;
         }
         for level in 0..levels {
             for item in unit.assigned_decls.get_level(level) {
-                let constraints = &self.tc.constraints[item.root_expr];
+
+                let constraints = self.tc.constraints(item.root_expr);
                 let ty = if let &Some(explicit_ty) = &item.explicit_ty {
                     let explicit_ty = self.tc.get_evaluated_type(explicit_ty).clone();
                     if let Some(err) = constraints.can_unify_to(&explicit_ty.clone().into()).err() {
@@ -205,28 +142,28 @@ impl Driver {
                 } else {
                     constraints.solve().expect("Ambiguous type for assigned declaration").ty
                 };
-                self.tc.decl_types[item.decl_id].ty = ty;
+                self.tc.decl_type_mut(item.decl_id).ty = ty;
             }
             for item in unit.assignments.get_level(level) {
-                self.tc.constraints[item.id].set_to(Type::Void);
-                self.tc.types[item.id] = Type::Void;
+                self.tc.constraints_mut(item.id).set_to(Type::Void);
+                *self.tc.ty_mut(item.id) = Type::Void;
             }
             for item in unit.casts.get_level(level) {
                 let ty = self.tc.get_evaluated_type(item.ty).clone();
-                self.tc.constraints[item.id] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![ty.clone().into()]), None);
-                self.tc.types[item.id] = ty;
+                *self.tc.constraints_mut(item.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![ty.clone().into()]), None);
+                *self.tc.ty_mut(item.id) = ty;
             }
             for item in unit.whiles.get_level(level) {
-                self.tc.constraints[item.id] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
-                self.tc.types[item.id] = Type::Void;
+                *self.tc.constraints_mut(item.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
+                *self.tc.ty_mut(item.id) = Type::Void;
             }
             for &item in unit.explicit_rets.get_level(level) {
-                self.tc.constraints[item] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Never.into()]), None);
-                self.tc.types[item] = Type::Never;
+                *self.tc.constraints_mut(item) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Never.into()]), None);
+                *self.tc.ty_mut(item) = Type::Never;
             }
             for &item in unit.modules.get_level(level) {
-                self.tc.constraints[item] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Mod.into()]), None);
-                self.tc.types[item] = Type::Mod;
+                *self.tc.constraints_mut(item) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Mod.into()]), None);
+                *self.tc.ty_mut(item) = Type::Mod;
             }
             for i in 0..unit.decl_refs.level_len(level) {
                 let item = unit.decl_refs.at(level, i);
@@ -241,7 +178,7 @@ impl Driver {
                 // Rule out overloads that don't match the arguments
                 self.tir.overloads[decl_ref_id].retain(|&overload| {
                     assert_eq!(decls[overload].param_tys.len(), args.len());
-                    let arg_constraints = args.iter().map(|&arg| &tc.constraints[arg]);
+                    let arg_constraints = args.iter().map(|&arg| tc.constraints(arg));
                     let param_tys = decls[overload].param_tys.iter().map(|&expr| tc.get_evaluated_type(expr));
                     for (constraints, ty) in arg_constraints.zip(param_tys) {
                         if constraints.can_unify_to(&ty.into()).is_err() { return false; }
@@ -253,29 +190,28 @@ impl Driver {
                 one_of.reserve(self.tir.overloads[decl_ref_id].len());
                 for i in 0..self.tir.overloads[decl_ref_id].len() {
                     let overload = self.tir.overloads[decl_ref_id][i];
-                    let ty = self.tc.fetch_decl_type(&self.hir, overload).clone();
+                    let ty = self.tc.fetch_decl_type(&self.hir, overload).ty.clone();
                     let is_mut = self.tir.decls[overload].is_mut;
                     one_of.push(QualType { ty, is_mut });
                 }
                 let mut pref = None;
                 'find_preference: for (i, &arg) in args.iter().enumerate() {
-                    if let Some(ty) = self.tc.constraints[arg].preferred_type() {
+                    if let Some(ty) = self.tc.constraints(arg).preferred_type() {
                         for &overload in &self.tir.overloads[decl_ref_id] {
                             let decl = &self.tir.decls[overload];
                             if ty.ty.trivially_convertible_to(self.tc.get_evaluated_type(decl.param_tys[i])) {
-                                // NOTE: We assume here that fetch_decl type will have already been called on all overloads above!
-                                let ty = self.tc.decl_types[overload].clone();
+                                let ty = self.tc.fetch_decl_type(&self.hir, overload).clone();
                                 pref = Some(ty);
-                                self.tc.preferred_overloads[decl_ref_id] = Some(overload);
+                                *self.tc.preferred_overload_mut(decl_ref_id) = Some(overload);
                                 break 'find_preference;
                             }
                         }
                     }
                 }
-                self.tc.constraints[id] = ConstraintList::new(BuiltinTraits::empty(), Some(one_of), pref);
+                *self.tc.constraints_mut(id) = ConstraintList::new(BuiltinTraits::empty(), Some(one_of), pref);
             }
             for item in unit.addr_ofs.get_level(level) {
-                let constraints = self.tc.constraints[item.expr].filter_map(|ty| {
+                let constraints = self.tc.constraints(item.expr).filter_map(|ty| {
                     if item.is_mut && !ty.is_mut { return None; }
                     Some(
                         QualType::from(
@@ -283,20 +219,20 @@ impl Driver {
                         )
                     )
                 });
-                self.tc.constraints[item.id] = constraints;
+                *self.tc.constraints_mut(item.id) = constraints;
             }
             for item in unit.derefs.get_level(level) {
-                let constraints = self.tc.constraints[item.expr].filter_map(|ty| {
+                let constraints = self.tc.constraints(item.expr).filter_map(|ty| {
                     if let Type::Pointer(pointee) = &ty.ty {
                         Some(pointee.as_ref().clone())
                     } else {
                         None
                     }
                 });
-                self.tc.constraints[item.id] = constraints;
+                *self.tc.constraints_mut(item.id) = constraints;
             }
             for item in unit.pointers.get_level(level) {
-                if let Some(err) = self.tc.constraints[item.expr].can_unify_to(&Type::Ty.into()).err() {
+                if let Some(err) = self.tc.constraints(item.expr).can_unify_to(&Type::Ty.into()).err() {
                     let mut error = Error::new("Expected type operand to pointer operator");
                     let range = self.hir.get_range(item.expr);
                     match err {
@@ -313,10 +249,10 @@ impl Driver {
                     }
                     self.errors.push(error);
                 }
-                self.tc.constraints[item.id].set_to(Type::Ty);
+                self.tc.constraints_mut(item.id).set_to(Type::Ty);
             }
             for item in unit.ifs.get_level(level) {
-                if let Some(err) = self.tc.constraints[item.condition].can_unify_to(&Type::Bool.into()).err() {
+                if let Some(err) = self.tc.constraints(item.condition).can_unify_to(&Type::Bool.into()).err() {
                     let mut error = Error::new("Expected boolean condition in if expression");
                     let range = self.hir.get_range(item.condition);
                     match err {
@@ -333,7 +269,7 @@ impl Driver {
                     }
                     self.errors.push(error);
                 }
-                let constraints = self.tc.constraints[item.then_expr].intersect_with(&self.tc.constraints[item.else_expr]);
+                let constraints = self.tc.constraints(item.then_expr).intersect_with(self.tc.constraints(item.else_expr));
 
                 if constraints.solve().is_err() {
                     // TODO: handle void expressions, which don't have appropriate source location info.
@@ -343,10 +279,10 @@ impl Driver {
                             .adding_primary_range(self.hir.get_range(item.else_expr), "second terminal expression here")
                     );
                 }
-                self.tc.constraints[item.id] = constraints;
+                *self.tc.constraints_mut(item.id) = constraints;
             }
             for item in unit.dos.get_level(level) {
-                self.tc.constraints[item.id] = self.tc.constraints[item.terminal_expr].clone();
+                *self.tc.constraints_mut(item.id) = self.tc.constraints(item.terminal_expr).clone();
             }
             self.tc.debug_output(&self.hir, &self.file, level as usize);
         }
@@ -366,14 +302,13 @@ impl Driver {
                 let item = unit.assigned_decls.at(level, i);
                 let decl_id = item.decl_id;
                 let root_expr = item.root_expr;
-                // TODO: is it necessary to call this here or can we just directly look at `decl_types`?
-                let ty = self.tc.fetch_decl_type(&self.hir, decl_id).clone();
-                self.tc.constraints[root_expr].set_to(ty);
+                let ty = self.tc.fetch_decl_type(&self.hir, decl_id).ty.clone();
+                self.tc.constraints_mut(root_expr).set_to(ty);
             }
             for item in unit.ret_groups.get_level(level) {
                 let ty = self.tc.get_evaluated_type(item.ty).clone();
                 for &expr in &item.exprs {
-                    if let Some(err) = self.tc.constraints[expr].can_unify_to(&QualType::from(&ty)).err() {
+                    if let Some(err) = self.tc.constraints(expr).can_unify_to(&QualType::from(&ty)).err() {
                         let range = self.hir.get_range(expr);
                         let mut error = Error::new(format!("can't unify expression to return type {:?}", ty))
                             .adding_primary_range(range.clone(), "expression here");
@@ -393,19 +328,19 @@ impl Driver {
                     }
 
                     // Assume we panic above unless the returned expr can unify to the return type
-                    self.tc.constraints[expr].set_to(ty.clone());
+                    self.tc.constraints_mut(expr).set_to(ty.clone());
                 }
             }
             for item in unit.whiles.get_level(level) {
-                if self.tc.constraints[item.condition].can_unify_to(&Type::Bool.into()).is_ok() {
-                    self.tc.constraints[item.condition].set_to(Type::Bool);
+                if self.tc.constraints(item.condition).can_unify_to(&Type::Bool.into()).is_ok() {
+                    self.tc.constraints_mut(item.condition).set_to(Type::Bool);
                 } else {
                     panic!("Expected boolean condition in while expression");
                 }
             }
             for item in unit.casts.get_level(level) {
                 let ty = self.tc.get_evaluated_type(item.ty).clone();
-                let constraints = &mut self.tc.constraints[item.expr];
+                let constraints = self.tc.constraints_mut(item.expr);
                 let ty_and_method: Result<(Type, CastMethod), Vec<&QualType>> = if constraints.can_unify_to(&QualType::from(&ty)).is_ok() {
                     Ok((ty, CastMethod::Noop))
                 } else if let Type::Pointer(dest_pointee_ty) = ty {
@@ -443,12 +378,12 @@ impl Driver {
                 match ty_and_method {
                     Ok((ty, method)) => {
                         constraints.set_to(ty);
-                        self.tc.cast_methods[item.cast_id] = method;
+                        *self.tc.cast_method_mut(item.cast_id) = method;
                     },
                     Err(_) => {
                         self.errors.push(Error::new("Invalid cast!").adding_primary_range(self.hir.get_range(item.id), "cast here"));
                         constraints.set_to(Type::Error);
-                        self.tc.cast_methods[item.cast_id] = CastMethod::Noop;
+                        *self.tc.cast_method_mut(item.cast_id) = CastMethod::Noop;
                     }
                 }
             }
@@ -457,17 +392,18 @@ impl Driver {
                 lhs.lopsided_intersect_with(rhs);
             }
             for item in unit.decl_refs.get_level(level) {
-                let ty = self.tc.constraints[item.id].solve().unwrap_or(Type::Error.into());
-                self.tc.types[item.id] = ty.ty.clone();
+                let ty = self.tc.constraints(item.id).solve().unwrap_or(Type::Error.into());
+                *self.tc.ty_mut(item.id) = ty.ty.clone();
 
                 // P.S. These borrows are only here because the borrow checker is dumb
                 let decls = &self.tir.decls;
                 let overloads = &mut self.tir.overloads[item.decl_ref_id];
-                let decl_types = &self.tc.decl_types;
+                let tc = &mut self.tc;
+                let hir = &self.hir;
                 overloads.retain(|&overload| {
-                    decl_types[overload].trivially_convertible_to(&ty)
+                    tc.fetch_decl_type(hir, overload).trivially_convertible_to(&ty)
                 });
-                let pref = self.tc.preferred_overloads[item.decl_ref_id];
+                let pref = self.tc.preferred_overload(item.decl_ref_id);
 
                 let overload = if !overloads.is_empty() {
                     let overload = pref
@@ -493,7 +429,7 @@ impl Driver {
                     let decl = &decls[overload];
                     for (i, &arg) in item.args.iter().enumerate() {
                         let ty = self.tc.get_evaluated_type(decl.param_tys[i]).clone();
-                        self.tc.constraints[arg].set_to(ty);
+                        self.tc.constraints_mut(arg).set_to(ty);
                     }
                     Some(overload)
                 } else {
@@ -502,14 +438,14 @@ impl Driver {
                             .adding_primary_range(self.hir.get_range(item.id), "expression here")
                     );
                     for &arg in &item.args {
-                        self.tc.constraints[arg].set_to(Type::Error);
+                        self.tc.constraints_mut(arg).set_to(Type::Error);
                     }
                     None
                 };
-                self.tc.overloads[item.decl_ref_id] = overload;
+                *self.tc.overload_mut(item.decl_ref_id) = overload;
             }
             for item in unit.addr_ofs.get_level(level) {
-                let pointer_ty = self.tc.constraints[item.id].solve()
+                let pointer_ty = self.tc.constraints(item.id).solve()
                     .map(|ty| ty.ty)
                     .unwrap_or(Type::Error);
                 let pointee_ty = match pointer_ty {
@@ -517,82 +453,67 @@ impl Driver {
                     Type::Error => Type::Error.into(),
                     _ => panic!("unexpected non-pointer, non-error type for addr of expression"),
                 };
-                self.tc.constraints[item.expr].set_to(pointee_ty);
-                self.tc.types[item.id] = pointer_ty;
+                self.tc.constraints_mut(item.expr).set_to(pointee_ty);
+                *self.tc.ty_mut(item.id) = pointer_ty;
             }
             for item in unit.derefs.get_level(level) {
-                let mut ty = self.tc.constraints[item.id].solve().unwrap_or(Type::Error.into());
-                self.tc.types[item.id] = ty.ty.clone();
+                let mut ty = self.tc.constraints(item.id).solve().unwrap_or(Type::Error.into());
+                *self.tc.ty_mut(item.id) = ty.ty.clone();
 
                 if ty.ty != Type::Error {
                     ty = ty.ptr().into();
                 }
-                self.tc.constraints[item.expr].set_to(ty);
+                self.tc.constraints_mut(item.expr).set_to(ty);
             }
             for item in unit.pointers.get_level(level) {
-                let expr = &mut self.tc.constraints[item.expr];
-                let expr_ty = expr.solve().map(|ty| ty.ty).unwrap_or(Type::Error);
+                let expr_ty = self.tc.constraints(item.expr).solve().map(|ty| ty.ty).unwrap_or(Type::Error);
                 // Don't bother checking if it's a type, because we already did that in pass 1
-                self.tc.constraints[item.expr].set_to(expr_ty);
-                let ty = self.tc.constraints[item.id].solve().expect("Ambiguous type for pointer expression");
+                self.tc.constraints_mut(item.expr).set_to(expr_ty);
+                let ty = self.tc.constraints(item.id).solve().expect("Ambiguous type for pointer expression");
                 debug_assert_eq!(ty.ty, Type::Ty);
-                self.tc.types[item.id] = Type::Ty;
+                *self.tc.ty_mut(item.id) = Type::Ty;
             }
             for item in unit.ifs.get_level(level) {
-                let condition = &mut self.tc.constraints[item.condition];
-                let condition_ty = condition.solve().map(|ty| ty.ty).unwrap_or(Type::Error);
+                let condition_ty = self.tc.constraints(item.condition).solve().map(|ty| ty.ty).unwrap_or(Type::Error);
                 // Don't bother checking if bool, because we already did that in pass 1
-                self.tc.constraints[item.condition].set_to(condition_ty);
-                let ty = self.tc.constraints[item.id].solve().expect("ambiguous type for if expression");
-                self.tc.types[item.id] = ty.ty.clone();
-                self.tc.constraints[item.then_expr].set_to(ty.clone());
-                self.tc.constraints[item.else_expr].set_to(ty);
+                self.tc.constraints_mut(item.condition).set_to(condition_ty);
+                let ty = self.tc.constraints(item.id).solve().expect("ambiguous type for if expression");
+                *self.tc.ty_mut(item.id) = ty.ty.clone();
+                self.tc.constraints_mut(item.then_expr).set_to(ty.clone());
+                self.tc.constraints_mut(item.else_expr).set_to(ty);
             }
             for item in unit.dos.get_level(level) {
-                let ty = self.tc.constraints[item.id].solve().expect("Ambiguous type for do expression");
-                self.tc.types[item.id] = ty.ty.clone();
-                self.tc.constraints[item.terminal_expr].set_to(ty);
+                let ty = self.tc.constraints(item.id).solve().expect("Ambiguous type for do expression");
+                *self.tc.ty_mut(item.id) = ty.ty.clone();
+                self.tc.constraints_mut(item.terminal_expr).set_to(ty);
             }
             if level > 0 {
                 self.tc.debug_output(&self.hir, &self.file, level as usize);
             }
         }
         fn lit_pass_2(
-            constraints: &IdxVec<ConstraintList, ExprId>,
-            types: &mut IdxVec<Type, ExprId>,
+            tp: &mut impl TypeProvider,
             lits: &[ExprId],
             lit_ty: &str
         ) {
             for &item in lits {
-                types[item] = constraints[item].solve().expect(format!("Ambiguous type for {} literal", lit_ty).as_ref()).ty;
+                *tp.ty_mut(item) = tp.constraints(item).solve().expect(format!("Ambiguous type for {} literal", lit_ty).as_ref()).ty;
             }
         }
-        lit_pass_2(&self.tc.constraints, &mut self.tc.types, &unit.int_lits, "integer");
-        lit_pass_2(&self.tc.constraints, &mut self.tc.types, &unit.dec_lits, "decimal");
-        lit_pass_2(&self.tc.constraints, &mut self.tc.types, &unit.str_lits, "string");
-        lit_pass_2(&self.tc.constraints, &mut self.tc.types, &unit.char_lits, "character");
+        lit_pass_2(&mut self.tc, &unit.int_lits, "integer");
+        lit_pass_2(&mut self.tc, &unit.dec_lits, "decimal");
+        lit_pass_2(&mut self.tc, &unit.str_lits, "string");
+        lit_pass_2(&mut self.tc, &unit.char_lits, "character");
         self.tc.debug_output(&self.hir, &self.file, 0);
     }
 
     pub fn type_check(&mut self) {
-        self.tc.types.resize_with(self.hir.exprs.len(), Default::default);
-        self.tc.constraints.resize_with(self.hir.exprs.len(), Default::default);
-        if self.tc.debug {
-            self.tc.constraints_copy.resize_with(self.hir.exprs.len(), Default::default);
-        }
-        self.tc.overloads.resize_with(self.tir.overloads.len(), || None);
-        self.tc.preferred_overloads.resize_with(self.tir.overloads.len(), || None);
-        self.tc.cast_methods.resize_with(self.hir.cast_counter.len(), || CastMethod::Noop);
-
-        for i in 0..self.tir.decls.len() {
-            let id = DeclId::new(i);
-            let is_mut = self.tir.decls[id].is_mut;
-            self.tc.decl_types.push(QualType { ty: Type::Error, is_mut });
-        }
+        // TODO: This stuff should all be moved into RealTypeProvider
+        self.tc.init(self.tc.debug, &self.hir, &self.tir);
 
         // Assign the type of the void expression to be void.
-        self.tc.constraints[self.hir.void_expr] = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
-        self.tc.types[self.hir.void_expr] = Type::Void;
+        *self.tc.constraints_mut(self.hir.void_expr) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
+        *self.tc.ty_mut(self.hir.void_expr) = Type::Void;
 
         for unit_i in 0..self.tir.units.len() {
             let uid = UnitId::new(unit_i);
@@ -602,7 +523,7 @@ impl Driver {
             
             // NOTE: statements are handled specially, and don't need to be broken off in the event of a dynamically-discovered type 4 dependency
             for item in &self.tir.units[uid].stmts {
-                let constraints = &mut self.tc.constraints[item.root_expr];
+                let constraints = self.tc.constraints_mut(item.root_expr);
                 if let Some(err) = constraints.can_unify_to(&Type::Void.into()).err() {
                     let mut error = Error::new("statements must return void");
                     let range = self.hir.get_range(item.root_expr);
@@ -629,7 +550,7 @@ impl Driver {
             for i in 0..self.tir.units[uid].eval_dependees.len() {
                 let expr = self.tir.units[uid].eval_dependees[i];
                 let val = self.eval_expr(expr);
-                self.tc.eval_results.insert(expr, val);
+                self.tc.insert_eval_result(expr, val);
             }
         }
     }

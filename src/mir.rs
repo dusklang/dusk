@@ -10,6 +10,7 @@ use crate::arch::Arch;
 use crate::driver::Driver;
 use crate::ty::Type;
 use crate::type_checker as tc;
+use tc::type_provider::TypeProvider;
 use tc::CastMethod;
 use crate::index_vec::{Idx, IdxVec};
 use crate::builder::{DeclId, ExprId, ModScopeId, DeclRefId, ImperScopeId, Intrinsic};
