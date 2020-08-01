@@ -9,8 +9,6 @@ use crate::index_vec::{IdxVec, Idx};
 use crate::source_info::{SourceFile, CommentatedSourceRange};
 
 pub trait TypeProvider {
-    fn new(debug: bool, hir: &hir::Builder, tir: &tir::Builder) -> Self;
-
     fn debug(&self) -> bool;
     fn debug_output(&mut self, hir: &hir::Builder, file: &SourceFile, level: usize);
 
@@ -59,8 +57,8 @@ pub struct RealTypeProvider {
     debug: bool,
 }
 
-impl TypeProvider for RealTypeProvider {
-    fn new(debug: bool, hir: &hir::Builder, tir: &tir::Builder) -> Self {
+impl RealTypeProvider {
+    pub fn new(debug: bool, hir: &hir::Builder, tir: &tir::Builder) -> Self {
         let mut tp = RealTypeProvider {
             types: IdxVec::new(),
             overloads: IdxVec::new(),
@@ -68,11 +66,11 @@ impl TypeProvider for RealTypeProvider {
             constraints: IdxVec::new(),
             constraints_copy: IdxVec::new(),
             preferred_overloads: IdxVec::new(),
-
+            
             decl_types: IdxVec::new(),
-
+            
             eval_results: HashMap::new(),
-
+            
             debug,
         };
         tp.types.resize_with(hir.exprs.len(), Default::default);
@@ -83,16 +81,29 @@ impl TypeProvider for RealTypeProvider {
         tp.overloads.resize_with(tir.overloads.len(), || None);
         tp.preferred_overloads.resize_with(tir.overloads.len(), || None);
         tp.cast_methods.resize_with(hir.cast_counter.len(), || CastMethod::Noop);
-
+        
         for i in 0..tir.decls.len() {
             let id = DeclId::new(i);
             let is_mut = tir.decls[id].is_mut;
             tp.decl_types.push(QualType { ty: Type::Error, is_mut });
         }
-
+        
         tp
     }
+}
 
+fn print_debug_diff_and_set_old_constraints(id: ExprId, old_constraints: &mut ConstraintList, new_constraints: &ConstraintList, hir: &hir::Builder, file: &SourceFile) {
+    if new_constraints != old_constraints {
+        file.print_commentated_source_ranges(&mut [
+            CommentatedSourceRange::new(hir.get_range(id), "", '-')
+        ]);
+        old_constraints.print_diff(new_constraints);
+        *old_constraints = new_constraints.clone();
+        println!("============================================================================================\n")
+    }
+}
+
+impl TypeProvider for RealTypeProvider {
     fn debug(&self) -> bool { self.debug }
 
     fn debug_output(&mut self, hir: &hir::Builder, file: &SourceFile, level: usize) {
@@ -100,17 +111,8 @@ impl TypeProvider for RealTypeProvider {
         println!("LEVEL {}", level);
         assert_eq!(self.constraints.len(), self.constraints_copy.len());
         for i in 0..self.constraints.len() {
-            let i = ExprId::new(i);
-            let new_constraints = &self.constraints[i];
-            let old_constraints = &mut self.constraints_copy[i];
-            if new_constraints != old_constraints {
-                file.print_commentated_source_ranges(&mut [
-                    CommentatedSourceRange::new(hir.get_range(i), "", '-')
-                ]);
-                old_constraints.print_diff(new_constraints);
-                *old_constraints = new_constraints.clone();
-                println!("============================================================================================\n")
-            }
+            let id = ExprId::new(i);
+            print_debug_diff_and_set_old_constraints(id, &mut self.constraints_copy[id], &self.constraints[id], hir, file);
         }
     }
 
@@ -176,5 +178,163 @@ impl TypeProvider for RealTypeProvider {
     }
     fn preferred_overload_mut(&mut self, decl_ref: DeclRefId) -> &mut Option<DeclId> {
         &mut self.preferred_overloads[decl_ref]
+    }
+}
+
+pub struct MockTypeProvider<'real> {
+    real: &'real RealTypeProvider,
+
+    /// The type of each expression
+    types: HashMap<ExprId, Type>,
+    /// The selected overload for each decl ref
+    overloads: HashMap<DeclRefId, Option<DeclId>>,
+    /// The cast method for each cast expression
+    cast_methods: HashMap<CastId, CastMethod>,
+    /// The constraints on each expression's type
+    constraints: HashMap<ExprId, ConstraintList>,
+    /// A copy of the constraints, used for debugging the typechecker
+    constraints_copy: HashMap<ExprId, ConstraintList>,
+    /// The preferred overload for each decl ref (currently only ever originates from literals)
+    preferred_overloads: HashMap<DeclRefId, Option<DeclId>>,
+
+    decl_types: HashMap<DeclId, QualType>,
+
+    eval_results: HashMap<ExprId, Const>,
+}
+
+macro_rules! addr {
+    ($id:expr) => {{&$id}}
+}
+
+macro_rules! no_addr {
+    ($id:expr) => {{$id}}
+}
+
+macro_rules! forward_mock {
+    ($field_name:ident, $fw_name:ident, $fw_name_mut:ident, $id_ty:ty, $val_ty:ty, $addr:ident) => {
+        fn $fw_name(&self, id: $id_ty) -> &$val_ty {
+            self.$field_name.get(&id).unwrap_or_else(|| &self.real.$field_name[$addr!(id)])
+        }
+
+        fn $fw_name_mut(&mut self, id: $id_ty) -> &mut $val_ty {
+            let real = self.real;
+            self.$field_name.entry(id).or_insert_with(|| real.$field_name[$addr!(id)].clone())
+        }
+    };
+    ($field_name:ident, $fw_name:ident, $fw_name_mut:ident, $id_ty:ty, $val_ty:ty) => {
+        forward_mock!($field_name, $fw_name, $fw_name_mut, $id_ty, $val_ty, no_addr);
+    };
+}
+
+impl<'real> MockTypeProvider<'real> {
+    pub fn new(real: &'real RealTypeProvider) -> Self {
+        MockTypeProvider {
+            real,
+            types: HashMap::new(),
+            overloads: HashMap::new(),
+            cast_methods: HashMap::new(),
+            constraints: HashMap::new(),
+            constraints_copy: HashMap::new(),
+            preferred_overloads: HashMap::new(),
+            decl_types: HashMap::new(),
+            eval_results: HashMap::new(),
+        }
+    }
+
+    forward_mock!(types, fw_types, fw_types_mut, ExprId, Type);
+    forward_mock!(overloads, fw_overloads, fw_overloads_mut, DeclRefId, Option<DeclId>);
+    forward_mock!(cast_methods, fw_cast_methods, fw_cast_methods_mut, CastId, CastMethod);
+    forward_mock!(constraints, fw_constraints, fw_constraints_mut, ExprId, ConstraintList);
+    forward_mock!(preferred_overloads, fw_preferred_overloads, fw_preferred_overloads_mut, DeclRefId, Option<DeclId>);
+    forward_mock!(decl_types, fw_decl_types, fw_decl_types_mut, DeclId, QualType);
+    forward_mock!(eval_results, fw_eval_results, fw_eval_results_mut, ExprId, Const, addr);
+}
+
+impl<'real> TypeProvider for MockTypeProvider<'real> {
+    fn debug(&self) -> bool { self.real.debug }
+
+    fn debug_output(&mut self, hir: &hir::Builder, file: &SourceFile, level: usize) {
+        if !self.real.debug { return; }
+        println!("LEVEL {}", level);
+        assert_eq!(self.constraints.len(), self.constraints_copy.len());
+        let real = self.real;
+        for (&id, new_constraints) in &self.constraints {
+            let old_constraints = self.constraints_copy.entry(id).or_insert_with(|| real.constraints(id).clone());
+            print_debug_diff_and_set_old_constraints(id, old_constraints, new_constraints, hir, file);
+        }
+    }
+
+    fn insert_eval_result(&mut self, expr: ExprId, result: Const) {
+        self.eval_results.insert(expr, result);
+    }
+    fn get_evaluated_type(&self, id: ExprId) -> &Type {
+        match self.fw_eval_results(id) {
+            Const::Ty(ty) => ty,
+            x => panic!("Expected type! Found {:?}", x),
+        }
+    }
+
+    fn fetch_decl_type(&mut self, hir: &hir::Builder, id: DeclId) -> &QualType {
+        if let Type::Error = self.fw_decl_types(id).ty {
+            if let Some(expr) = hir.explicit_tys[id] {
+                let ty = self.get_evaluated_type(expr).clone();
+                self.fw_decl_types_mut(id).ty = ty;
+            }
+        }
+
+        self.fw_decl_types(id)
+    }
+
+    fn decl_type_mut(&mut self, decl: DeclId) -> &mut QualType {
+        self.fw_decl_types_mut(decl)
+    }
+
+    fn ty(&self, expr: ExprId) -> &Type {
+        self.fw_types(expr)
+    }
+
+    fn ty_mut(&mut self, expr: ExprId) -> &mut Type {
+        self.fw_types_mut(expr)
+    }
+
+    fn overload(&self, decl_ref: DeclRefId) -> Option<DeclId> {
+        *self.fw_overloads(decl_ref)
+    }
+    fn overload_mut(&mut self, decl_ref: DeclRefId) -> &mut Option<DeclId> {
+        self.fw_overloads_mut(decl_ref)
+    }
+
+    fn cast_method(&self, cast: CastId) -> CastMethod {
+        *self.fw_cast_methods(cast)
+    }
+    fn cast_method_mut(&mut self, cast: CastId) -> &mut CastMethod {
+        self.fw_cast_methods_mut(cast)
+    }
+
+    fn constraints(&self, expr: ExprId) -> &ConstraintList {
+        self.fw_constraints(expr)
+    }
+    fn constraints_mut(&mut self, expr: ExprId) -> &mut ConstraintList {
+        self.fw_constraints_mut(expr)
+    }
+    fn multi_constraints_mut<'a>(&'a mut self, a: ExprId, b: ExprId) -> (&'a mut ConstraintList, &'a mut ConstraintList) {
+        unsafe {
+            assert_ne!(a, b, "`a` ({:?}) must not equal `b` ({:?})", a, b);
+            let real = self.real;
+
+            // Insert b, then insert a and hold on to the reference, then get a reference to what we inserted to b.
+            // I think (but don't know) that this is necessary, due to potential iterator invalidation.
+            self.constraints.entry(b).or_insert_with(|| real.constraints(b).clone());
+            let a = self.constraints.entry(a).or_insert_with(|| real.constraints(a).clone()) as *mut _;
+            let b = self.constraints.get_mut(&b).unwrap() as *mut _;
+            (&mut *a, &mut *b)
+        }
+    }
+
+    fn preferred_overload(&self, decl_ref: DeclRefId) -> Option<DeclId> {
+        *self.fw_preferred_overloads(decl_ref)
+    }
+    fn preferred_overload_mut(&mut self, decl_ref: DeclRefId) -> &mut Option<DeclId> {
+        self.fw_preferred_overloads_mut(decl_ref)
     }
 }
