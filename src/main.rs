@@ -29,6 +29,7 @@ use index_vec::Idx;
 use ty::Type;
 use mir::FunctionRef;
 use driver::Driver;
+use type_checker::type_provider::{RealTypeProvider, TypeProvider};
 
 fn main() {
     let contents = fs::read_to_string("HelloWorld.meda")
@@ -39,15 +40,16 @@ fn main() {
     );
     let mut interner = DefaultStringInterner::new();
     let main_sym = interner.get_or_intern("main");
-    let mut driver = Driver::new(file, interner, false, Arch::X86_64);
+    let mut driver = Driver::new(file, interner, Arch::X86_64);
     driver.lex();
     driver.parse();
     driver.initialize_tir();
     driver.build_more_tir();
-    driver.type_check();
+    let mut tp = RealTypeProvider::new(false, &driver.hir, &driver.tir);
+    driver.type_check(&mut tp);
 
     if driver.report_errors() { return; }
-    driver.build_mir();
+    driver.build_mir(&tp);
     let main = driver.mir.functions.iter()
         .position(|func| {
             match func.name {

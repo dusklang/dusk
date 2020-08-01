@@ -1,14 +1,17 @@
+use std::collections::HashMap;
+
 use crate::builder::{ExprId, DeclId, DeclRefId, CastId};
 use crate::ty::{Type, QualType};
 use super::{CastMethod, constraints::ConstraintList};
 use crate::{hir, tir};
 use crate::mir::Const;
-use crate::index_vec::Idx;
+use crate::index_vec::{IdxVec, Idx};
 use crate::source_info::{SourceFile, CommentatedSourceRange};
 
 pub trait TypeProvider {
-    fn init(&mut self, debug: bool, hir: &hir::Builder, tir: &tir::Builder);
+    fn new(debug: bool, hir: &hir::Builder, tir: &tir::Builder) -> Self;
 
+    fn debug(&self) -> bool;
     fn debug_output(&mut self, hir: &hir::Builder, file: &SourceFile, level: usize);
 
     fn ty(&self, expr: ExprId) -> &Type;
@@ -22,6 +25,7 @@ pub trait TypeProvider {
 
     fn constraints(&self, expr: ExprId) -> &ConstraintList;
     fn constraints_mut(&mut self, expr: ExprId) -> &mut ConstraintList;
+    fn multi_constraints_mut(&mut self, a: ExprId, b: ExprId) -> (&mut ConstraintList, &mut ConstraintList);
 
     fn preferred_overload(&self, decl_ref: DeclRefId) -> Option<DeclId>;
     fn preferred_overload_mut(&mut self, decl_ref: DeclRefId) -> &mut Option<DeclId>;
@@ -32,27 +36,64 @@ pub trait TypeProvider {
 
     fn fetch_decl_type(&mut self, hir: &hir::Builder, id: DeclId) -> &QualType;
     fn decl_type_mut(&mut self, decl: DeclId) -> &mut QualType;
-
 }
 
-impl TypeProvider for super::TypeChecker {
-    fn init(&mut self, debug: bool, hir: &hir::Builder, tir: &tir::Builder) {
-        self.debug = debug;
-        self.types.resize_with(hir.exprs.len(), Default::default);
-        self.constraints.resize_with(hir.exprs.len(), Default::default);
-        if self.debug {
-            self.constraints_copy.resize_with(hir.exprs.len(), Default::default);
+pub struct RealTypeProvider {
+    /// The type of each expression
+    types: IdxVec<Type, ExprId>,
+    /// The selected overload for each decl ref
+    overloads: IdxVec<Option<DeclId>, DeclRefId>,
+    /// The cast method for each cast expression
+    cast_methods: IdxVec<CastMethod, CastId>,
+    /// The constraints on each expression's type
+    constraints: IdxVec<ConstraintList, ExprId>,
+    /// A copy of the constraints, used for debugging the typechecker
+    constraints_copy: IdxVec<ConstraintList, ExprId>,
+    /// The preferred overload for each decl ref (currently only ever originates from literals)
+    preferred_overloads: IdxVec<Option<DeclId>, DeclRefId>,
+
+    decl_types: IdxVec<QualType, DeclId>,
+
+    eval_results: HashMap<ExprId, Const>,
+
+    debug: bool,
+}
+
+impl TypeProvider for RealTypeProvider {
+    fn new(debug: bool, hir: &hir::Builder, tir: &tir::Builder) -> Self {
+        let mut tp = RealTypeProvider {
+            types: IdxVec::new(),
+            overloads: IdxVec::new(),
+            cast_methods: IdxVec::new(),
+            constraints: IdxVec::new(),
+            constraints_copy: IdxVec::new(),
+            preferred_overloads: IdxVec::new(),
+
+            decl_types: IdxVec::new(),
+
+            eval_results: HashMap::new(),
+
+            debug,
+        };
+        tp.types.resize_with(hir.exprs.len(), Default::default);
+        tp.constraints.resize_with(hir.exprs.len(), Default::default);
+        if debug {
+            tp.constraints_copy.resize_with(hir.exprs.len(), Default::default);
         }
-        self.overloads.resize_with(tir.overloads.len(), || None);
-        self.preferred_overloads.resize_with(tir.overloads.len(), || None);
-        self.cast_methods.resize_with(hir.cast_counter.len(), || CastMethod::Noop);
+        tp.overloads.resize_with(tir.overloads.len(), || None);
+        tp.preferred_overloads.resize_with(tir.overloads.len(), || None);
+        tp.cast_methods.resize_with(hir.cast_counter.len(), || CastMethod::Noop);
 
         for i in 0..tir.decls.len() {
             let id = DeclId::new(i);
             let is_mut = tir.decls[id].is_mut;
-            self.decl_types.push(QualType { ty: Type::Error, is_mut });
+            tp.decl_types.push(QualType { ty: Type::Error, is_mut });
         }
+
+        tp
     }
+
+    fn debug(&self) -> bool { self.debug }
 
     fn debug_output(&mut self, hir: &hir::Builder, file: &SourceFile, level: usize) {
         if !self.debug { return; }
@@ -74,7 +115,7 @@ impl TypeProvider for super::TypeChecker {
     }
 
     fn insert_eval_result(&mut self, expr: ExprId, result: Const) {
-        self.eval_results.insert(expr, result).unwrap();
+        self.eval_results.insert(expr, result);
     }
     fn get_evaluated_type(&self, id: ExprId) -> &Type {
         match &self.eval_results[&id] {
@@ -125,6 +166,9 @@ impl TypeProvider for super::TypeChecker {
     }
     fn constraints_mut(&mut self, expr: ExprId) -> &mut ConstraintList {
         &mut self.constraints[expr]
+    }
+    fn multi_constraints_mut(&mut self, a: ExprId, b: ExprId) -> (&mut ConstraintList, &mut ConstraintList) {
+        self.constraints.index_mut(a, b)
     }
 
     fn preferred_overload(&self, decl_ref: DeclRefId) -> Option<DeclId> {
