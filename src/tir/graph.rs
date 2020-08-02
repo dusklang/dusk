@@ -68,6 +68,8 @@ struct Component {
     items: Vec<ItemId>,
 
     deps: HashMap<CompId, ComponentRelation>,
+
+    has_meta_dependees: bool,
 }
 
 struct ComponentState {
@@ -116,6 +118,8 @@ impl Graph {
 
     /// in order to know the type 2-4 dependencies of a, we need to know all possible members of b
     pub fn add_meta_dep(&mut self, a: ItemId, b: ItemId) {
+        let comp = self.item_to_components[a];
+        self.components[comp].has_meta_dependees = true;
         self.meta_dependees[a].push(b);
         self.meta_dependers[b].push(a);
     }
@@ -178,20 +182,36 @@ impl Graph {
             (0..self.components.len())
                 .map(|i| CompId::new(i))
         );
+        let mut excluded_components = HashSet::<CompId>::new();
+
+        // Exclude all components with meta-dependencies
+        outstanding_components.retain(|&id| 
+            if self.components[id].has_meta_dependees {
+                excluded_components.insert(id);
+                false
+            } else {
+                true
+            }
+        );
 
         while !outstanding_components.is_empty() {
             // Get all components that have no type 4 dependencies on outstanding components
             let mut cur_unit_comps = HashSet::<CompId>::new();
-            for &comp in &outstanding_components {
+            for &comp_id in &outstanding_components {
                 let mut should_add = true;
-                for (&dependee, &relation) in &self.components[comp].deps {
+                for (&dependee, &relation) in &self.components[comp_id].deps {
                     if relation == ComponentRelation::BEFORE && !included_components.contains(&dependee) {
                         should_add = false;
-                        break;
+
+                        // If the current component depends on an excluded component,
+                        // it should itself be excluded
+                        if excluded_components.contains(&dependee) {
+                            excluded_components.insert(comp_id);
+                        }
                     }
                 }
                 if should_add {
-                    cur_unit_comps.insert(comp);
+                    cur_unit_comps.insert(comp_id);
                 }
             }
             
@@ -201,12 +221,19 @@ impl Graph {
                 // Yay borrow checker
                 let cur_unit_copy = cur_unit_comps.clone();
                 cur_unit_comps.retain(|&comp| {
+                    let mut should_retain = true;
                     for (&dependee, &relation) in &self.components[comp].deps {
                         if relation == ComponentRelation::TYPE_2_3_FORWARD && !cur_unit_copy.contains(&dependee) && !included_components.contains(&dependee) {
-                            return false;
+                            should_retain = false;
+
+                            // If the current component depends on an excluded component,
+                            // it should itself be excluded
+                            if excluded_components.contains(&dependee) {
+                                excluded_components.insert(comp);
+                            }
                         }
                     }
-                    true
+                    should_retain
                 });
 
                 // If we didn't remove anything this iteration, we're done
@@ -228,8 +255,11 @@ impl Graph {
                 included_components.insert(comp);
                 outstanding_components.remove(&comp);
             }
+            outstanding_components.retain(|id| !excluded_components.contains(id));
             units.push(cur_unit);
         }
+
+        println!("excluded components: {:#?}", excluded_components);
 
         self.units = Some(units);
     }
