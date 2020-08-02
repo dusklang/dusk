@@ -15,7 +15,7 @@ use crate::builder::{ExprId, DeclId, DeclRefId, CastId};
 use crate::index_vec::Idx;
 use crate::ty::{BuiltinTraits, Type, QualType, IntWidth};
 use crate::index_vec::IdxVec;
-use crate::dep_vec;
+use crate::dep_vec::{self, AnyDepVec};
 use crate::source_info::CommentatedSourceRange;
 use crate::mir::Const;
 use crate::hir;
@@ -33,7 +33,7 @@ pub enum CastMethod {
 
 enum UnitRef<'a> {
     Id(UnitId),
-    Ref(&'a mut Unit),
+    Ref(&'a Unit),
 }
 
 impl Driver {
@@ -43,16 +43,12 @@ impl Driver {
 
     fn run_pass_1(&mut self, unit: UnitRef, tp: &mut impl TypeProvider) -> u32 {
         let unit = match unit {
-            UnitRef::Id(uid) => &mut self.tir.units[uid],
+            UnitRef::Id(uid) => &self.tir.units[uid],
             UnitRef::Ref(unit) => unit,
         };
 
-        let levels = dep_vec::unify_sizes(&mut [
-            &mut unit.assigned_decls, &mut unit.assignments, &mut unit.decl_refs, 
-            &mut unit.addr_ofs, &mut unit.derefs, &mut unit.pointers, &mut unit.ifs,
-            &mut unit.dos, &mut unit.ret_groups, &mut unit.casts, &mut unit.whiles,
-            &mut unit.explicit_rets, &mut unit.modules,
-        ]);
+        // Assumption: all DepVecs in the unit have the same number of levels
+        let levels = unit.assigned_decls.num_levels();
 
         // Pass 1: propagate info down from leaves to roots
         if tp.debug() { println!("===============TYPECHECKING: PASS 1==============="); }
@@ -251,7 +247,7 @@ impl Driver {
 
     fn run_pass_2(&mut self, unit: UnitRef, levels: u32, tp: &mut impl TypeProvider) {
         let unit = match unit {
-            UnitRef::Id(uid) => &mut self.tir.units[uid],
+            UnitRef::Id(uid) => &self.tir.units[uid],
             UnitRef::Ref(unit) => unit,
         };
 
@@ -472,6 +468,14 @@ impl Driver {
 
         for unit_i in 0..self.tir.units.len() {
             let uid = UnitId::new(unit_i);
+            let unit = &mut self.tir.units[uid];
+
+            dep_vec::unify_sizes(&mut [
+                &mut unit.assigned_decls, &mut unit.assignments, &mut unit.decl_refs, 
+                &mut unit.addr_ofs, &mut unit.derefs, &mut unit.pointers, &mut unit.ifs,
+                &mut unit.dos, &mut unit.ret_groups, &mut unit.casts, &mut unit.whiles,
+                &mut unit.explicit_rets, &mut unit.modules,
+            ]);
 
             // Pass 1: propagate info down from leaves to roots
             let levels = self.run_pass_1(UnitRef::Id(uid), tp);
