@@ -206,14 +206,25 @@ macro_rules! addr {
     ($id:expr) => {{&$id}}
 }
 
+macro_rules! deref {
+    (val: $expr:expr) => {{*$expr}};
+    (type: $ty:ty) => {$ty};
+}
+
+macro_rules! no_deref {
+    (val: $expr:expr) => {{$expr}};
+    (type: $ty:ty) => {&$ty};
+}
+
 macro_rules! no_addr {
     ($id:expr) => {{$id}}
 }
 
 macro_rules! forward_mock {
-    ($field_name:ident, $fw_name:ident, $fw_name_mut:ident, $id_ty:ty, $val_ty:ty, $addr:ident) => {
-        fn $fw_name(&self, id: $id_ty) -> &$val_ty {
-            self.$field_name.get(&id).unwrap_or_else(|| &self.real.$field_name[$addr!(id)])
+    ($field_name:ident, $fw_name:ident, $fw_name_mut:ident, $id_ty:ty, $val_ty:ty, $addr:ident, $deref:ident) => {
+        fn $fw_name(&self, id: $id_ty) -> $deref!(type: $val_ty) {
+            let val = self.$field_name.get(&id).unwrap_or_else(|| &self.real.$field_name[$addr!(id)]);
+            $deref!(val: val)
         }
 
         fn $fw_name_mut(&mut self, id: $id_ty) -> &mut $val_ty {
@@ -222,7 +233,13 @@ macro_rules! forward_mock {
         }
     };
     ($field_name:ident, $fw_name:ident, $fw_name_mut:ident, $id_ty:ty, $val_ty:ty) => {
-        forward_mock!($field_name, $fw_name, $fw_name_mut, $id_ty, $val_ty, no_addr);
+        forward_mock!($field_name, $fw_name, $fw_name_mut, $id_ty, $val_ty, no_addr, no_deref);
+    };
+    ($field_name:ident, $fw_name:ident, $fw_name_mut:ident, $id_ty:ty, $val_ty:ty, addr: $addr:ident) => {
+        forward_mock!($field_name, $fw_name, $fw_name_mut, $id_ty, $val_ty, $addr, no_deref);
+    };
+    ($field_name:ident, $fw_name:ident, $fw_name_mut:ident, $id_ty:ty, $val_ty:ty, deref: $deref:ident) => {
+        forward_mock!($field_name, $fw_name, $fw_name_mut, $id_ty, $val_ty, no_addr, $deref);
     };
 }
 
@@ -241,13 +258,8 @@ impl<'real> MockTypeProvider<'real> {
         }
     }
 
-    forward_mock!(types, fw_types, fw_types_mut, ExprId, Type);
-    forward_mock!(overloads, fw_overloads, fw_overloads_mut, DeclRefId, Option<DeclId>);
-    forward_mock!(cast_methods, fw_cast_methods, fw_cast_methods_mut, CastId, CastMethod);
-    forward_mock!(constraints, fw_constraints, fw_constraints_mut, ExprId, ConstraintList);
-    forward_mock!(preferred_overloads, fw_preferred_overloads, fw_preferred_overloads_mut, DeclRefId, Option<DeclId>);
     forward_mock!(decl_types, fw_decl_types, fw_decl_types_mut, DeclId, QualType);
-    forward_mock!(eval_results, fw_eval_results, fw_eval_results_mut, ExprId, Const, addr);
+    forward_mock!(eval_results, fw_eval_results, fw_eval_results_mut, ExprId, Const, addr: addr);
 }
 
 impl<'real> TypeProvider for MockTypeProvider<'real> {
@@ -289,34 +301,12 @@ impl<'real> TypeProvider for MockTypeProvider<'real> {
         self.fw_decl_types_mut(decl)
     }
 
-    fn ty(&self, expr: ExprId) -> &Type {
-        self.fw_types(expr)
-    }
+    forward_mock!(overloads, overload, overload_mut, DeclRefId, Option<DeclId>, deref: deref);
+    forward_mock!(cast_methods, cast_method, cast_method_mut, CastId, CastMethod, deref: deref);
+    forward_mock!(types, ty, ty_mut, ExprId, Type);
+    forward_mock!(constraints, constraints, constraints_mut, ExprId, ConstraintList);
+    forward_mock!(preferred_overloads, preferred_overload, preferred_overload_mut, DeclRefId, Option<DeclId>, deref: deref);
 
-    fn ty_mut(&mut self, expr: ExprId) -> &mut Type {
-        self.fw_types_mut(expr)
-    }
-
-    fn overload(&self, decl_ref: DeclRefId) -> Option<DeclId> {
-        *self.fw_overloads(decl_ref)
-    }
-    fn overload_mut(&mut self, decl_ref: DeclRefId) -> &mut Option<DeclId> {
-        self.fw_overloads_mut(decl_ref)
-    }
-
-    fn cast_method(&self, cast: CastId) -> CastMethod {
-        *self.fw_cast_methods(cast)
-    }
-    fn cast_method_mut(&mut self, cast: CastId) -> &mut CastMethod {
-        self.fw_cast_methods_mut(cast)
-    }
-
-    fn constraints(&self, expr: ExprId) -> &ConstraintList {
-        self.fw_constraints(expr)
-    }
-    fn constraints_mut(&mut self, expr: ExprId) -> &mut ConstraintList {
-        self.fw_constraints_mut(expr)
-    }
     fn multi_constraints_mut<'a>(&'a mut self, a: ExprId, b: ExprId) -> (&'a mut ConstraintList, &'a mut ConstraintList) {
         unsafe {
             assert_ne!(a, b, "`a` ({:?}) must not equal `b` ({:?})", a, b);
@@ -329,12 +319,5 @@ impl<'real> TypeProvider for MockTypeProvider<'real> {
             let b = self.constraints.get_mut(&b).unwrap() as *mut _;
             (&mut *a, &mut *b)
         }
-    }
-
-    fn preferred_overload(&self, decl_ref: DeclRefId) -> Option<DeclId> {
-        *self.fw_preferred_overloads(decl_ref)
-    }
-    fn preferred_overload_mut(&mut self, decl_ref: DeclRefId) -> &mut Option<DeclId> {
-        self.fw_preferred_overloads_mut(decl_ref)
     }
 }
