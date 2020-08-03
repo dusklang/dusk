@@ -609,8 +609,7 @@ impl Driver {
         // - Driver repeats from the beginning until there are no more items, or nothing happened in the previous iteration (possible?)
 
         // Solve for the unit and level of each item
-        self.tir.graph.find_units();
-        self.print_graph().unwrap();
+        self.print_graph(None).unwrap();
         let graph = std::mem::replace(&mut self.tir.graph, Graph::default());
         let levels = graph.solve();
 

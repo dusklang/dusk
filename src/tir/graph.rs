@@ -36,7 +36,6 @@ pub struct Graph {
     item_to_components: IdxVec<CompId, ItemId>,
 
     components: IdxVec<Component, CompId>,
-    units: Option<Vec<Unit>>,
 }
 
 bitflags! {
@@ -172,7 +171,22 @@ impl Graph {
         }
     }
 
-    pub fn find_units(&mut self) {
+    fn find_level(&self, item: ItemId, levels: &mut IdxVec<u32, ItemId>) -> u32 {
+        if levels[item] != u32::MAX { return levels[item]; }
+
+        let mut max_level = 0;
+        let mut offset = 0;
+        for &dep in &self.dependees[item] {
+            let level = self.find_level(dep, levels);
+            max_level = max(max_level, level);
+            offset = 1;
+        }
+        let level = max_level + offset;
+        levels[item] = level;
+        level
+    }
+
+    pub fn solve(self) -> Levels {
         let mut units = Vec::<Unit>::new();
         let mut included_components = HashSet::<CompId>::new();
         let mut outstanding_components = HashSet::<CompId>::from_iter(
@@ -256,27 +270,6 @@ impl Graph {
             units.push(cur_unit);
         }
 
-        println!("excluded components: {:#?}", excluded_components);
-
-        self.units = Some(units);
-    }
-
-    fn find_level(&self, item: ItemId, levels: &mut IdxVec<u32, ItemId>) -> u32 {
-        if levels[item] != u32::MAX { return levels[item]; }
-
-        let mut max_level = 0;
-        let mut offset = 0;
-        for &dep in &self.dependees[item] {
-            let level = self.find_level(dep, levels);
-            max_level = max(max_level, level);
-            offset = 1;
-        }
-        let level = max_level + offset;
-        levels[item] = level;
-        level
-    }
-
-    pub fn solve(self) -> Levels {
         let mut item_to_levels = IdxVec::<u32, ItemId>::new();
         item_to_levels.resize_with(self.dependees.len(), || u32::MAX);
 
@@ -287,7 +280,6 @@ impl Graph {
         let mut item_to_units = IdxVec::<u32, ItemId>::new();
         item_to_units.resize_with(self.dependees.len(), || u32::MAX);
 
-        let units = self.units.unwrap();
         for (i, unit) in units.iter().enumerate() {
             for &comp in &unit.components {
                 let components = &self.components[comp];
@@ -453,7 +445,7 @@ impl Driver {
     }
 
     /// Prints graph in Graphviz format, then opens a web browser to display the results.
-    pub fn print_graph(&self) -> IoResult<()> {
+    pub fn print_graph(&self, units: Option<&[Unit]>) -> IoResult<()> {
         let graph = &self.tir.graph;
         let tmp_dir = fs::read_dir(".")?.find(|entry| entry.as_ref().unwrap().file_name() == "tmp");
         if tmp_dir.is_none() {
@@ -463,7 +455,7 @@ impl Driver {
         writeln!(w, "digraph G {{")?;
         writeln!(w, "    node [shape=box];")?;
 
-        if let Some(units) = &graph.units {
+        if let Some(units) = units {
             for (i, unit) in units.iter().enumerate() {
                 writeln!(w, "    subgraph cluster{} {{", i)?;
                 writeln!(w, "        label=\"unit {}\";", i)?;
