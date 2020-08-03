@@ -229,6 +229,27 @@ impl Driver {
             for item in unit.dos.get_level(level) {
                 *tp.constraints_mut(item.id) = tp.constraints(item.terminal_expr).clone();
             }
+            for item in &unit.stmts {
+                let constraints = tp.constraints_mut(item.root_expr);
+                if let Some(err) = constraints.can_unify_to(&Type::Void.into()).err() {
+                    let mut error = Error::new("statements must return void");
+                    let range = self.hir.get_range(item.root_expr);
+                    match err {
+                        UnificationError::InvalidChoice(choices)
+                        => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                        UnificationError::Trait(not_implemented)
+                        => error.add_secondary_range(
+                            range,
+                            format!(
+                                "note: couldn't unify because expression requires implementations of {:?}",
+                                not_implemented.names(),
+                            ),
+                        ),
+                    }
+                    self.errors.push(error);
+                }
+                constraints.set_to(Type::Void);
+            }
             tp.debug_output(&self.hir, &self.file, level as usize);
         }
 
@@ -454,29 +475,6 @@ impl Driver {
         for unit in units {
             // Pass 1: propagate info down from leaves to roots
             let levels = self.run_pass_1(unit, tp);
-            
-            // NOTE: statements are handled specially, and don't need to be broken off in the event of a dynamically-discovered type 4 dependency
-            for item in &unit.stmts {
-                let constraints = tp.constraints_mut(item.root_expr);
-                if let Some(err) = constraints.can_unify_to(&Type::Void.into()).err() {
-                    let mut error = Error::new("statements must return void");
-                    let range = self.hir.get_range(item.root_expr);
-                    match err {
-                        UnificationError::InvalidChoice(choices)
-                        => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
-                        UnificationError::Trait(not_implemented)
-                        => error.add_secondary_range(
-                            range,
-                            format!(
-                                "note: couldn't unify because expression requires implementations of {:?}",
-                                not_implemented.names(),
-                            ),
-                        ),
-                    }
-                    self.errors.push(error);
-                }
-                constraints.set_to(Type::Void);
-            }
             
             // Pass 2: propagate info up from roots to leaves
             self.run_pass_2(unit, levels, tp);
