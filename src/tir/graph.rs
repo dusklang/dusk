@@ -36,6 +36,10 @@ pub struct Graph {
     item_to_components: IdxVec<CompId, ItemId>,
 
     components: IdxVec<Component, CompId>,
+
+    included_components: HashSet<CompId>,
+    excluded_components: HashSet<CompId>,
+    outstanding_components: HashSet<CompId>,
 }
 
 bitflags! {
@@ -157,20 +161,6 @@ impl Graph {
         *self.components[dependee].deps.entry(comp).or_default() &= backward_mask;
     }
 
-    // Find the weak components of the graph
-    pub fn split(&mut self) {
-        let mut visited = IdxVec::new();
-        visited.resize_with(self.dependees.len(), || false);
-        let mut state = ComponentState {
-            visited, cur_component: Component::default(),
-        };
-        self.item_to_components.resize_with(self.dependees.len(), || CompId::new(usize::MAX));
-        assert!(self.components.is_empty());
-        for i in 0..self.dependees.len() {
-            self.find_component(ItemId::new(i), &mut state);
-        }
-    }
-
     fn find_level(&self, item: ItemId, levels: &mut IdxVec<u32, ItemId>) -> u32 {
         if levels[item] != u32::MAX { return levels[item]; }
 
@@ -186,18 +176,37 @@ impl Graph {
         level
     }
 
-    pub fn solve(self) -> Levels {
-        let mut units = Vec::<Unit>::new();
-        let mut included_components = HashSet::<CompId>::new();
-        let mut outstanding_components = HashSet::<CompId>::from_iter(
+    // Find the weak components of the graph
+    pub fn split(&mut self) {
+        let mut visited = IdxVec::new();
+        visited.resize_with(self.dependees.len(), || false);
+        let mut state = ComponentState {
+            visited, cur_component: Component::default(),
+        };
+        self.item_to_components.resize_with(self.dependees.len(), || CompId::new(usize::MAX));
+        assert!(self.components.is_empty());
+        for i in 0..self.dependees.len() {
+            self.find_component(ItemId::new(i), &mut state);
+        }
+
+        self.excluded_components = HashSet::<CompId>::from_iter(
             (0..self.components.len())
                 .map(|i| CompId::new(i))
         );
-        let mut excluded_components = HashSet::<CompId>::new();
+    }
+
+    pub fn solve(&mut self) -> Option<Levels> {
+        let mut units = Vec::<Unit>::new();
+        assert!(self.included_components.is_empty() && self.outstanding_components.is_empty());
+        if self.excluded_components.is_empty() { return None; }
+
+        mem::swap(&mut self.outstanding_components, &mut self.excluded_components);
 
         // Exclude all components with meta-dependencies
-        outstanding_components.retain(|&id| 
-            if self.components[id].has_meta_dependees {
+        let excluded_components = &mut self.excluded_components;
+        let components = &self.components;
+        self.outstanding_components.retain(|&id| 
+            if components[id].has_meta_dependees {
                 excluded_components.insert(id);
                 false
             } else {
@@ -205,19 +214,19 @@ impl Graph {
             }
         );
 
-        while !outstanding_components.is_empty() {
+        while !self.outstanding_components.is_empty() {
             // Get all components that have no type 4 dependencies on outstanding components
             let mut cur_unit_comps = HashSet::<CompId>::new();
-            for &comp_id in &outstanding_components {
+            for &comp_id in &self.outstanding_components {
                 let mut should_add = true;
                 for (&dependee, &relation) in &self.components[comp_id].deps {
-                    if relation == ComponentRelation::BEFORE && !included_components.contains(&dependee) {
+                    if relation == ComponentRelation::BEFORE && !self.included_components.contains(&dependee) {
                         should_add = false;
 
                         // If the current component depends on an excluded component,
                         // it should itself be excluded
-                        if excluded_components.contains(&dependee) {
-                            excluded_components.insert(comp_id);
+                        if self.excluded_components.contains(&dependee) {
+                            self.excluded_components.insert(comp_id);
                         }
                     }
                 }
@@ -234,13 +243,13 @@ impl Graph {
                 cur_unit_comps.retain(|&comp| {
                     let mut should_retain = true;
                     for (&dependee, &relation) in &self.components[comp].deps {
-                        if relation == ComponentRelation::TYPE_2_3_FORWARD && !cur_unit_copy.contains(&dependee) && !included_components.contains(&dependee) {
+                        if relation == ComponentRelation::TYPE_2_3_FORWARD && !cur_unit_copy.contains(&dependee) && !self.included_components.contains(&dependee) {
                             should_retain = false;
 
                             // If the current component depends on an excluded component,
                             // it should itself be excluded
-                            if excluded_components.contains(&dependee) {
-                                excluded_components.insert(comp);
+                            if self.excluded_components.contains(&dependee) {
+                                self.excluded_components.insert(comp);
                             }
                         }
                     }
@@ -263,10 +272,11 @@ impl Graph {
                         }
                     }
                 }
-                included_components.insert(comp);
-                outstanding_components.remove(&comp);
+                self.included_components.insert(comp);
+                self.outstanding_components.remove(&comp);
             }
-            outstanding_components.retain(|id| !excluded_components.contains(id));
+            let excluded_components = &self.excluded_components;
+            self.outstanding_components.retain(|id| !excluded_components.contains(id));
             units.push(cur_unit);
         }
 
@@ -289,19 +299,20 @@ impl Graph {
             }
         }
 
-        let components = self.components;
+        let components = &self.components;
 
-        Levels {
-            item_to_levels,
-            item_to_units,
-            units: units.into_iter()
-                .map(|unit| {
-                    unit.components.into_iter()
-                        .flat_map(|comp| components[comp].items.iter().map(|comp| *comp))
-                        .collect()
-                }).collect::<Vec<Vec<ItemId>>>(),
-            dependees: self.dependees,
-        }
+        Some(
+            Levels {
+                item_to_levels,
+                item_to_units,
+                units: units.into_iter()
+                    .map(|unit| {
+                        unit.components.into_iter()
+                            .flat_map(|comp| components[comp].items.iter().map(|comp| *comp))
+                            .collect()
+                    }).collect::<Vec<Vec<ItemId>>>(),
+            }
+        )
     }
 }
 
@@ -310,7 +321,6 @@ pub struct Levels {
     pub item_to_levels: IdxVec<u32, ItemId>,
     pub item_to_units: IdxVec<u32, ItemId>,
     pub units: Vec<Vec<ItemId>>,
-    pub dependees: IdxVec<Vec<ItemId>, ItemId>,
 }
 
 struct SplitOp {
@@ -429,7 +439,7 @@ impl Driver {
     }
 
     /// Prints graph in Graphviz format, then opens a web browser to display the results.
-    pub fn print_graph(&self, units: Option<&[Unit]>) -> IoResult<()> {
+    pub fn print_graph(&self) -> IoResult<()> {
         let graph = &self.tir.graph;
         let tmp_dir = fs::read_dir(".")?.find(|entry| entry.as_ref().unwrap().file_name() == "tmp");
         if tmp_dir.is_none() {
@@ -439,22 +449,7 @@ impl Driver {
         writeln!(w, "digraph G {{")?;
         writeln!(w, "    node [shape=box];")?;
 
-        if let Some(units) = units {
-            for (i, unit) in units.iter().enumerate() {
-                writeln!(w, "    subgraph cluster{} {{", i)?;
-                writeln!(w, "        label=\"unit {}\";", i)?;
-                writeln!(w, "        style=filled;")?;
-                writeln!(w, "        color=blue;")?;
-                for &comp_id in &unit.components {
-                    self.write_component(&mut w, graph, i, comp_id.idx(), &graph.components[comp_id])?;
-                }
-                // This is done in a separate loop because 
-                for &comp_id in &unit.components {
-                    self.write_component_deps(&mut w, graph, i, comp_id.idx(), &graph.components[comp_id])?;
-                }
-                writeln!(w, "    }}")?;
-            }
-        } else if !graph.components.is_empty() {
+        if !graph.components.is_empty() {
             for (i, component) in graph.components.iter().enumerate() {
                 self.write_component(&mut w, graph, 0, i, component)?;
                 self.write_component_deps(&mut w, graph, 0, i, component)?;

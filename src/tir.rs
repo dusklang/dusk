@@ -580,9 +580,8 @@ impl Driver {
         // - Driver repeats from the beginning until there are no more items, or nothing happened in the previous iteration (possible?)
 
         // Solve for the unit and level of each item
-        self.print_graph(None).unwrap();
-        let graph = std::mem::replace(&mut self.tir.graph, Graph::default());
-        let levels = graph.solve();
+        self.print_graph().unwrap();
+        let levels = self.tir.graph.solve().unwrap();
 
         let mut sp = Subprogram { units: Vec::new(), levels };
         sp.units.resize_with(sp.levels.units.len(), || Unit::new());
