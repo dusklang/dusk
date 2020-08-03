@@ -13,7 +13,6 @@ use crate::index_vec::{Idx, IdxVec};
 
 mod graph;
 use graph::{Graph, Levels};
-pub use graph::UnitId;
 
 newtype_index!(TreeId pub);
 
@@ -143,7 +142,7 @@ impl Unit {
 
 #[derive(Debug)]
 pub struct Builder {
-    pub units: IdxVec<Unit, UnitId>,
+    pub units: Vec<Unit>,
     pub decls: IdxVec<Decl, DeclId>,
     /// Each declref's overload choices
     pub overloads: IdxVec<Vec<DeclId>, DeclRefId>,
@@ -158,7 +157,7 @@ pub struct Builder {
 impl Builder {
     pub fn new() -> Self {
         Self {
-            units: IdxVec::new(),
+            units: Vec::new(),
             decls: IdxVec::new(),
             overloads: IdxVec::new(),
             graph: Graph::default(),
@@ -285,7 +284,7 @@ impl Driver {
     }
 
     // Returns a new unit with the passed-in `items` and their dependencies if any are in the current `unit`. Otherwise, returns `None`.
-    pub fn add_dynamic_type4_dependency(&mut self, unit: UnitId, items: &[ItemId]) -> Option<Unit> {
+    pub fn add_dynamic_type4_dependency(&mut self, unit: u32, items: &[ItemId]) -> Option<Unit> {
         let items: Vec<_> = items.iter()
             .map(|item| *item)
             .filter(|&item| self.tir.levels.item_to_units[item] == unit)
@@ -295,12 +294,12 @@ impl Driver {
         let removed_items = self.tir.levels.split_unit(unit, &items);
 
         let max_level = items.iter().map(|&item| self.tir.levels.item_to_levels[item]).max().unwrap();
-        self.tir.units[unit].clear_up_to(max_level);
+        self.tir.units[unit as usize].clear_up_to(max_level);
         let mut new_unit = Unit::new();
 
         // Recreate the portion of the old unit that we want
-        for i in 0..self.tir.levels.units[unit].len() {
-            let id = self.tir.levels.units[unit][i];
+        for i in 0..self.tir.levels.units[unit as usize].len() {
+            let id = self.tir.levels.units[unit as usize][i];
             self.build_tir_item(id, None);
         }
         self.flush_staged_ret_groups(None);
@@ -330,7 +329,7 @@ impl Driver {
             let unit = if let Some(unit) = &mut unit {
                 unit
             } else {
-                &mut self.tir.units[unit_id]
+                &mut self.tir.units[unit_id as usize]
             };
             unit.ret_groups.insert(
                 level,
@@ -352,7 +351,7 @@ impl Driver {
             unit
         } else {
             let unit = self.tir.levels.item_to_units[item_id];
-            &mut self.tir.units[unit]
+            &mut self.tir.units[unit as usize]
         };
         macro_rules! insert_item {
             ($depvec:ident, $item:expr) => {{
@@ -411,7 +410,7 @@ impl Driver {
             unit
         } else {
             let unit = self.tir.levels.item_to_units[item_id];
-            &mut self.tir.units[unit]
+            &mut self.tir.units[unit as usize]
         };
 
         match &self.hir.decls[id] {
@@ -616,16 +615,15 @@ impl Driver {
         self.tir.units.resize_with(self.tir.levels.units.len(), || Unit::new());
 
         // Finally, convert HIR items to TIR and add them to the correct spot
-        for i in 0..self.tir.levels.units.len() {
-            let unit_id = UnitId::new(i);
-            for i in 0..self.tir.levels.units[unit_id].len() {
-                let item_id = self.tir.levels.units[unit_id][i];
+        for unit in 0..self.tir.levels.units.len() {
+            for i in 0..self.tir.levels.units[unit].len() {
+                let item_id = self.tir.levels.units[unit][i];
                 match self.hir.items[item_id] {
                     hir::Item::Decl(id) => {
                         self.build_tir_decl(item_id, id, None);
                     }
                     hir::Item::Expr(id) => {
-                        let unit = &mut self.tir.units[unit_id];
+                        let unit = &mut self.tir.units[unit];
                         if self.tir.depended_on[id] { unit.eval_dependees.push(id); }
                         self.build_tir_expr(item_id, id, None);
                     }
@@ -638,7 +636,7 @@ impl Driver {
                 match item {
                     hir::ScopeItem::Stmt(expr) => {
                         let unit = self.tir.levels.item_to_units[ei!(expr)];
-                        let unit = &mut self.tir.units[unit];
+                        let unit = &mut self.tir.units[unit as usize];
                         unit.stmts.push(Stmt { root_expr: expr });
                     },
                     hir::ScopeItem::ComputedDecl(_) | hir::ScopeItem::StoredDecl { .. } => {},

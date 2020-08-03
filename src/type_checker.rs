@@ -19,7 +19,7 @@ use crate::dep_vec::{self, AnyDepVec};
 use crate::source_info::CommentatedSourceRange;
 use crate::mir::Const;
 use crate::hir;
-use crate::tir::{UnitId, Unit};
+use crate::tir::Unit;
 
 #[derive(Copy, Clone, Debug)]
 pub enum CastMethod {
@@ -32,7 +32,7 @@ pub enum CastMethod {
 }
 
 enum UnitRef<'a> {
-    Id(UnitId),
+    Id(u32),
     Ref(&'a Unit),
 }
 
@@ -43,7 +43,7 @@ impl Driver {
 
     fn run_pass_1(&mut self, unit: UnitRef, tp: &mut impl TypeProvider) -> u32 {
         let unit = match unit {
-            UnitRef::Id(uid) => &self.tir.units[uid],
+            UnitRef::Id(uid) => &self.tir.units[uid as usize],
             UnitRef::Ref(unit) => unit,
         };
 
@@ -247,7 +247,7 @@ impl Driver {
 
     fn run_pass_2(&mut self, unit: UnitRef, levels: u32, tp: &mut impl TypeProvider) {
         let unit = match unit {
-            UnitRef::Id(uid) => &self.tir.units[uid],
+            UnitRef::Id(uid) => &self.tir.units[uid as usize],
             UnitRef::Ref(unit) => unit,
         };
 
@@ -467,8 +467,8 @@ impl Driver {
         *tp.ty_mut(self.hir.void_expr) = Type::Void;
 
         for unit_i in 0..self.tir.units.len() {
-            let uid = UnitId::new(unit_i);
-            let unit = &mut self.tir.units[uid];
+            let uid = unit_i as u32;
+            let unit = &mut self.tir.units[unit_i];
 
             dep_vec::unify_sizes(&mut [
                 &mut unit.assigned_decls, &mut unit.assignments, &mut unit.decl_refs, 
@@ -481,7 +481,7 @@ impl Driver {
             let levels = self.run_pass_1(UnitRef::Id(uid), tp);
             
             // NOTE: statements are handled specially, and don't need to be broken off in the event of a dynamically-discovered type 4 dependency
-            for item in &self.tir.units[uid].stmts {
+            for item in &self.tir.units[unit_i].stmts {
                 let constraints = tp.constraints_mut(item.root_expr);
                 if let Some(err) = constraints.can_unify_to(&Type::Void.into()).err() {
                     let mut error = Error::new("statements must return void");
@@ -506,8 +506,8 @@ impl Driver {
             // Pass 2: propagate info up from roots to leaves
             self.run_pass_2(UnitRef::Id(uid), levels, tp);
 
-            for i in 0..self.tir.units[uid].eval_dependees.len() {
-                let expr = self.tir.units[uid].eval_dependees[i];
+            for i in 0..self.tir.units[unit_i].eval_dependees.len() {
+                let expr = self.tir.units[unit_i].eval_dependees[i];
                 let val = self.eval_expr(expr, tp);
                 tp.insert_eval_result(expr, val);
             }

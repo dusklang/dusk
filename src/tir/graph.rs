@@ -20,7 +20,6 @@ use crate::source_info::SourceRange;
 use crate::hir;
 
 newtype_index!(CompId);
-newtype_index!(UnitId pub);
 
 #[derive(Debug, Default)]
 pub struct Graph {
@@ -37,7 +36,7 @@ pub struct Graph {
     item_to_components: IdxVec<CompId, ItemId>,
 
     components: IdxVec<Component, CompId>,
-    units: Option<IdxVec<Unit, UnitId>>,
+    units: Option<Vec<Unit>>,
 }
 
 bitflags! {
@@ -174,7 +173,7 @@ impl Graph {
     }
 
     pub fn find_units(&mut self) {
-        let mut units = IdxVec::<Unit, UnitId>::new();
+        let mut units = Vec::<Unit>::new();
         let mut included_components = HashSet::<CompId>::new();
         let mut outstanding_components = HashSet::<CompId>::from_iter(
             (0..self.components.len())
@@ -285,15 +284,15 @@ impl Graph {
             self.find_level(ItemId::new(i), &mut item_to_levels);
         }
 
-        let mut item_to_units = IdxVec::<UnitId, ItemId>::new();
-        item_to_units.resize_with(self.dependees.len(), || UnitId::new(usize::MAX));
+        let mut item_to_units = IdxVec::<u32, ItemId>::new();
+        item_to_units.resize_with(self.dependees.len(), || u32::MAX);
 
         let units = self.units.unwrap();
         for (i, unit) in units.iter().enumerate() {
             for &comp in &unit.components {
                 let components = &self.components[comp];
                 for &item in &components.items {
-                    item_to_units[item] = UnitId::new(i);
+                    item_to_units[item] = i as u32;
                 }
             }
         }
@@ -303,14 +302,12 @@ impl Graph {
         Levels {
             item_to_levels,
             item_to_units,
-            units: IdxVec::from(
-                units.into_iter()
-                    .map(|unit| {
-                        unit.components.into_iter()
-                            .flat_map(|comp| components[comp].items.iter().map(|comp| *comp))
-                            .collect()
-                    }).collect::<Vec<Vec<ItemId>>>()
-            ),
+            units: units.into_iter()
+                .map(|unit| {
+                    unit.components.into_iter()
+                        .flat_map(|comp| components[comp].items.iter().map(|comp| *comp))
+                        .collect()
+                }).collect::<Vec<Vec<ItemId>>>(),
             dependees: self.dependees,
         }
     }
@@ -319,8 +316,8 @@ impl Graph {
 #[derive(Default, Debug)]
 pub struct Levels {
     pub item_to_levels: IdxVec<u32, ItemId>,
-    pub item_to_units: IdxVec<UnitId, ItemId>,
-    pub units: IdxVec<Vec<ItemId>, UnitId>,
+    pub item_to_units: IdxVec<u32, ItemId>,
+    pub units: Vec<Vec<ItemId>>,
     pub dependees: IdxVec<Vec<ItemId>, ItemId>,
 }
 
@@ -330,10 +327,10 @@ struct SplitOp {
 }
 
 impl SplitOp {
-    fn split_recurse(&mut self, item_to_units: &mut IdxVec<UnitId, ItemId>, dependees: &IdxVec<Vec<ItemId>, ItemId>, split: ItemId) {
+    fn split_recurse(&mut self, item_to_units: &mut IdxVec<u32, ItemId>, dependees: &IdxVec<Vec<ItemId>, ItemId>, split: ItemId) {
         let removed = self.included.remove(&split);
         assert!(removed);
-        item_to_units[split] = UnitId::new(usize::MAX);
+        item_to_units[split] = u32::MAX;
         self.excluded.push(split);
         for &dep in &dependees[split] {
             self.split_recurse(item_to_units, dependees, dep);
@@ -343,16 +340,16 @@ impl SplitOp {
 
 impl Levels {
     /// Recursively get the dependencies of `splits`, remove them from `unit`, and return them (including `splits`)
-    pub fn split_unit(&mut self, unit: UnitId, splits: &[ItemId]) -> Vec<ItemId> {
+    pub fn split_unit(&mut self, unit: u32, splits: &[ItemId]) -> Vec<ItemId> {
         let mut split_op = SplitOp {
-            included: HashSet::from_iter(self.units[unit].iter().map(|unit| *unit)),
+            included: HashSet::from_iter(self.units[unit as usize].iter().map(|unit| *unit)),
             excluded: Vec::from_iter(splits.iter().map(|split| *split))
         };
         for &split in splits {
             split_op.split_recurse(&mut self.item_to_units, &self.dependees, split);
         }
 
-        self.units[unit] = Vec::from_iter(split_op.included.into_iter());
+        self.units[unit as usize] = Vec::from_iter(split_op.included.into_iter());
         split_op.excluded
     }
 }
