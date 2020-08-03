@@ -31,22 +31,12 @@ pub enum CastMethod {
     IntToFloat,
 }
 
-enum UnitRef<'a> {
-    Id(u32),
-    Ref(&'a Unit),
-}
-
 impl Driver {
     pub fn decl_type<'a>(&'a self, id: DeclId, tp: &'a impl TypeProvider) -> &Type {
         self.hir.explicit_tys[id].map(|ty| tp.get_evaluated_type(ty)).unwrap_or(&Type::Error)
     }
 
-    fn run_pass_1(&mut self, unit: UnitRef, tp: &mut impl TypeProvider) -> u32 {
-        let unit = match unit {
-            UnitRef::Id(uid) => &self.tir.units[uid as usize],
-            UnitRef::Ref(unit) => unit,
-        };
-
+    fn run_pass_1(&mut self, unit: &Unit, tp: &mut impl TypeProvider) -> u32 {
         // Assumption: all DepVecs in the unit have the same number of levels
         let levels = unit.assigned_decls.num_levels();
 
@@ -245,12 +235,7 @@ impl Driver {
         levels
     }
 
-    fn run_pass_2(&mut self, unit: UnitRef, levels: u32, tp: &mut impl TypeProvider) {
-        let unit = match unit {
-            UnitRef::Id(uid) => &self.tir.units[uid as usize],
-            UnitRef::Ref(unit) => unit,
-        };
-
+    fn run_pass_2(&mut self, unit: &Unit, levels: u32, tp: &mut impl TypeProvider) {
         if tp.debug() { println!("===============TYPECHECKING: PASS 2==============="); }
         for level in (0..levels).rev() {
             for i in 0..unit.assigned_decls.level_len(level) {
@@ -461,27 +446,17 @@ impl Driver {
         tp.debug_output(&self.hir, &self.file, 0);
     }
 
-    pub fn type_check(&mut self, tp: &mut impl TypeProvider) {
+    pub fn type_check(&mut self, units: &[Unit], tp: &mut impl TypeProvider) {
         // Assign the type of the void expression to be void.
         *tp.constraints_mut(self.hir.void_expr) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
         *tp.ty_mut(self.hir.void_expr) = Type::Void;
 
-        for unit_i in 0..self.tir.units.len() {
-            let uid = unit_i as u32;
-            let unit = &mut self.tir.units[unit_i];
-
-            dep_vec::unify_sizes(&mut [
-                &mut unit.assigned_decls, &mut unit.assignments, &mut unit.decl_refs, 
-                &mut unit.addr_ofs, &mut unit.derefs, &mut unit.pointers, &mut unit.ifs,
-                &mut unit.dos, &mut unit.ret_groups, &mut unit.casts, &mut unit.whiles,
-                &mut unit.explicit_rets, &mut unit.modules,
-            ]);
-
+        for unit in units {
             // Pass 1: propagate info down from leaves to roots
-            let levels = self.run_pass_1(UnitRef::Id(uid), tp);
+            let levels = self.run_pass_1(unit, tp);
             
             // NOTE: statements are handled specially, and don't need to be broken off in the event of a dynamically-discovered type 4 dependency
-            for item in &self.tir.units[unit_i].stmts {
+            for item in &unit.stmts {
                 let constraints = tp.constraints_mut(item.root_expr);
                 if let Some(err) = constraints.can_unify_to(&Type::Void.into()).err() {
                     let mut error = Error::new("statements must return void");
@@ -504,10 +479,10 @@ impl Driver {
             }
             
             // Pass 2: propagate info up from roots to leaves
-            self.run_pass_2(UnitRef::Id(uid), levels, tp);
+            self.run_pass_2(unit, levels, tp);
 
-            for i in 0..self.tir.units[unit_i].eval_dependees.len() {
-                let expr = self.tir.units[unit_i].eval_dependees[i];
+            for i in 0..unit.eval_dependees.len() {
+                let expr = unit.eval_dependees[i];
                 let val = self.eval_expr(expr, tp);
                 tp.insert_eval_result(expr, val);
             }

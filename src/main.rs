@@ -44,9 +44,9 @@ fn main() {
     driver.lex();
     driver.parse();
     driver.initialize_tir();
-    driver.build_more_tir();
+    let units = driver.build_more_tir();
     let mut tp = RealTypeProvider::new(false, &driver.hir, &driver.tir);
-    driver.type_check(&mut tp);
+    driver.type_check(&units, &mut tp);
 
     if driver.report_errors() { return; }
     driver.build_mir(&tp);

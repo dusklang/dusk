@@ -7,7 +7,7 @@ use string_interner::Sym;
 
 use crate::driver::Driver;
 use crate::builder::*;
-use crate::dep_vec::DepVec;
+use crate::dep_vec::{self, DepVec};
 use crate::hir::{self, Namespace};
 use crate::index_vec::{Idx, IdxVec};
 
@@ -60,6 +60,11 @@ impl<T> DerefMut for Expr<T> {
 pub struct Decl {
     pub param_tys: SmallVec<[ExprId; 2]>,
     pub is_mut: bool,
+}
+
+struct Subprogram {
+    units: Vec<Unit>,
+    levels: Levels,
 }
 
 #[derive(Debug)]
@@ -142,7 +147,6 @@ impl Unit {
 
 #[derive(Debug)]
 pub struct Builder {
-    pub units: Vec<Unit>,
     pub decls: IdxVec<Decl, DeclId>,
     /// Each declref's overload choices
     pub overloads: IdxVec<Vec<DeclId>, DeclRefId>,
@@ -150,19 +154,16 @@ pub struct Builder {
     graph: Graph,
     depended_on: IdxVec<bool, ExprId>,
 
-    levels: Levels,
     staged_ret_groups: HashMap<DeclId, SmallVec<[ExprId; 1]>>,
 }
 
 impl Builder {
     pub fn new() -> Self {
         Self {
-            units: Vec::new(),
             decls: IdxVec::new(),
             overloads: IdxVec::new(),
             graph: Graph::default(),
             depended_on: IdxVec::new(),
-            levels: Levels::default(),
             staged_ret_groups: HashMap::new(),
         }
     }
@@ -284,35 +285,35 @@ impl Driver {
     }
 
     // Returns a new unit with the passed-in `items` and their dependencies if any are in the current `unit`. Otherwise, returns `None`.
-    pub fn add_dynamic_type4_dependency(&mut self, unit: u32, items: &[ItemId]) -> Option<Unit> {
+    fn add_dynamic_type4_dependency(&mut self, sp: &mut Subprogram, unit: u32, items: &[ItemId]) -> Option<Unit> {
         let items: Vec<_> = items.iter()
             .map(|item| *item)
-            .filter(|&item| self.tir.levels.item_to_units[item] == unit)
+            .filter(|&item| sp.levels.item_to_units[item] == unit)
             .collect();
         if items.is_empty() { return None; }
 
-        let removed_items = self.tir.levels.split_unit(unit, &items);
+        let removed_items = sp.levels.split_unit(unit, &items);
 
-        let max_level = items.iter().map(|&item| self.tir.levels.item_to_levels[item]).max().unwrap();
-        self.tir.units[unit as usize].clear_up_to(max_level);
+        let max_level = items.iter().map(|&item| sp.levels.item_to_levels[item]).max().unwrap();
+        sp.units[unit as usize].clear_up_to(max_level);
         let mut new_unit = Unit::new();
 
         // Recreate the portion of the old unit that we want
-        for i in 0..self.tir.levels.units[unit as usize].len() {
-            let id = self.tir.levels.units[unit as usize][i];
-            self.build_tir_item(id, None);
+        for i in 0..sp.levels.units[unit as usize].len() {
+            let id = sp.levels.units[unit as usize][i];
+            self.build_tir_item(sp, id, None);
         }
-        self.flush_staged_ret_groups(None);
+        self.flush_staged_ret_groups(sp, None);
 
         for id in removed_items {
-            self.build_tir_item(id, Some(&mut new_unit));
+            self.build_tir_item(sp, id, Some(&mut new_unit));
         }
-        self.flush_staged_ret_groups(Some(&mut new_unit));
+        self.flush_staged_ret_groups(sp, Some(&mut new_unit));
 
         Some(new_unit)
     }
 
-    fn flush_staged_ret_groups(&mut self, mut unit: Option<&mut Unit>) {
+    fn flush_staged_ret_groups(&mut self, sp: &mut Subprogram, mut unit: Option<&mut Unit>) {
         let staged_ret_groups = std::mem::replace(&mut self.tir.staged_ret_groups, HashMap::new());
         for (decl, exprs) in staged_ret_groups {
             let scope = if let hir::Decl::Computed { scope, .. } = self.hir.decls[decl] {
@@ -324,12 +325,12 @@ impl Driver {
             let ty = self.hir.explicit_tys[decl].expect("explicit return statements are not allowed in assigned functions (yet?)");
 
             let item = self.hir.decl_to_items[decl];
-            let unit_id = self.tir.levels.item_to_units[item];
-            let level = self.tir.levels.item_to_levels[item];
+            let unit_id = sp.levels.item_to_units[item];
+            let level = sp.levels.item_to_levels[item];
             let unit = if let Some(unit) = &mut unit {
                 unit
             } else {
-                &mut self.tir.units[unit_id as usize]
+                &mut sp.units[unit_id as usize]
             };
             unit.ret_groups.insert(
                 level,
@@ -338,20 +339,20 @@ impl Driver {
         }
     }
 
-    fn build_tir_item(&mut self, id: ItemId, unit: Option<&mut Unit>) {
+    fn build_tir_item(&mut self, sp: &mut Subprogram, id: ItemId, unit: Option<&mut Unit>) {
         match self.hir.items[id] {
-            hir::Item::Expr(expr_id) => self.build_tir_expr(id, expr_id, unit),
-            hir::Item::Decl(decl_id) => self.build_tir_decl(id, decl_id, unit),
+            hir::Item::Expr(expr_id) => self.build_tir_expr(sp, id, expr_id, unit),
+            hir::Item::Decl(decl_id) => self.build_tir_decl(sp, id, decl_id, unit),
         }
     }
 
-    fn build_tir_expr(&mut self, item_id: ItemId, id: ExprId, unit: Option<&mut Unit>) {
-        let level = self.tir.levels.item_to_levels[item_id];
+    fn build_tir_expr(&mut self, sp: &mut Subprogram, item_id: ItemId, id: ExprId, unit: Option<&mut Unit>) {
+        let level = sp.levels.item_to_levels[item_id];
         let unit = if let Some(unit) = unit {
             unit
         } else {
-            let unit = self.tir.levels.item_to_units[item_id];
-            &mut self.tir.units[unit as usize]
+            let unit = sp.levels.item_to_units[item_id];
+            &mut sp.units[unit as usize]
         };
         macro_rules! insert_item {
             ($depvec:ident, $item:expr) => {{
@@ -404,13 +405,13 @@ impl Driver {
         }
     }
 
-    fn build_tir_decl(&mut self, item_id: ItemId, id: DeclId, unit: Option<&mut Unit>) {
-        let level = self.tir.levels.item_to_levels[item_id];
+    fn build_tir_decl(&mut self, sp: &mut Subprogram, item_id: ItemId, id: DeclId, unit: Option<&mut Unit>) {
+        let level = sp.levels.item_to_levels[item_id];
         let unit = if let Some(unit) = unit {
             unit
         } else {
-            let unit = self.tir.levels.item_to_units[item_id];
-            &mut self.tir.units[unit as usize]
+            let unit = sp.levels.item_to_units[item_id];
+            &mut sp.units[unit as usize]
         };
 
         match &self.hir.decls[id] {
@@ -597,7 +598,7 @@ impl Driver {
         }
     }
 
-    pub fn build_more_tir(&mut self) {
+    pub fn build_more_tir(&mut self) -> Vec<Unit> {
         ei_injector!(self, ei);
         // Imagined typechecking flow:
         // - Driver calls a TIR generation method, which does the following:
@@ -611,37 +612,50 @@ impl Driver {
         self.tir.graph.find_units();
         self.print_graph().unwrap();
         let graph = std::mem::replace(&mut self.tir.graph, Graph::default());
-        self.tir.levels = graph.solve();
-        self.tir.units.resize_with(self.tir.levels.units.len(), || Unit::new());
+        let levels = graph.solve();
+
+        let mut sp = Subprogram { units: Vec::new(), levels };
+        sp.units.resize_with(sp.levels.units.len(), || Unit::new());
 
         // Finally, convert HIR items to TIR and add them to the correct spot
-        for unit in 0..self.tir.levels.units.len() {
-            for i in 0..self.tir.levels.units[unit].len() {
-                let item_id = self.tir.levels.units[unit][i];
+        for unit in 0..sp.levels.units.len() {
+            for i in 0..sp.levels.units[unit].len() {
+                let item_id = sp.levels.units[unit][i];
                 match self.hir.items[item_id] {
                     hir::Item::Decl(id) => {
-                        self.build_tir_decl(item_id, id, None);
+                        self.build_tir_decl(&mut sp, item_id, id, None);
                     }
                     hir::Item::Expr(id) => {
-                        let unit = &mut self.tir.units[unit];
+                        let unit = &mut sp.units[unit];
                         if self.tir.depended_on[id] { unit.eval_dependees.push(id); }
-                        self.build_tir_expr(item_id, id, None);
+                        self.build_tir_expr(&mut sp, item_id, id, None);
                     }
                 }
             }
         }
-        self.flush_staged_ret_groups(None);
+        self.flush_staged_ret_groups(&mut sp, None);
         for scope in &self.hir.imper_scopes {
             for &item in &scope.items {
                 match item {
                     hir::ScopeItem::Stmt(expr) => {
-                        let unit = self.tir.levels.item_to_units[ei!(expr)];
-                        let unit = &mut self.tir.units[unit as usize];
+                        let unit = sp.levels.item_to_units[ei!(expr)];
+                        let unit = &mut sp.units[unit as usize];
                         unit.stmts.push(Stmt { root_expr: expr });
                     },
                     hir::ScopeItem::ComputedDecl(_) | hir::ScopeItem::StoredDecl { .. } => {},
                 }
             }
         }
+
+        for unit in &mut sp.units {
+            dep_vec::unify_sizes(&mut [
+                &mut unit.assigned_decls, &mut unit.assignments, &mut unit.decl_refs, 
+                &mut unit.addr_ofs, &mut unit.derefs, &mut unit.pointers, &mut unit.ifs,
+                &mut unit.dos, &mut unit.ret_groups, &mut unit.casts, &mut unit.whiles,
+                &mut unit.explicit_rets, &mut unit.modules,
+            ]);
+        }
+
+        sp.units
     }
 }
