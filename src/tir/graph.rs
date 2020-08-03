@@ -174,8 +174,6 @@ impl Graph {
     }
 
     pub fn find_units(&mut self) {
-        let mut component_to_units = IdxVec::<UnitId, CompId>::new();
-        component_to_units.resize_with(self.components.len(), || UnitId::new(usize::MAX));
         let mut units = IdxVec::<Unit, UnitId>::new();
         let mut included_components = HashSet::<CompId>::new();
         let mut outstanding_components = HashSet::<CompId>::from_iter(

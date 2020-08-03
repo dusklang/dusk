@@ -600,7 +600,6 @@ impl Driver {
 
     pub fn build_more_tir(&mut self) {
         ei_injector!(self, ei);
-        di_injector!(self, di);
         // Imagined typechecking flow:
         // - Driver calls a TIR generation method, which does the following:
         //   - Gets the set of declrefs for which we now have namespace info (if any), and adds types 2-4 dependencies to them (thus resolving the metadependencies)
@@ -617,19 +616,21 @@ impl Driver {
         self.tir.units.resize_with(self.tir.levels.units.len(), || Unit::new());
 
         // Finally, convert HIR items to TIR and add them to the correct spot
-        for i in 0..self.hir.exprs.len() {
-            let id = ExprId::new(i);
-            let item_id = ei!(id);
-            let unit = self.tir.levels.item_to_units[item_id];
-            let unit = &mut self.tir.units[unit];
-            if self.tir.depended_on[id] { unit.eval_dependees.push(id); }
-            self.build_tir_expr(item_id, id, None);
-        }
-        for i in 0..self.hir.decls.len() {
-            let id = DeclId::new(i);
-            let item_id = di!(id);
-            let unit = self.tir.levels.item_to_units[item_id];
-            self.build_tir_decl(item_id, id, None);
+        for i in 0..self.tir.levels.units.len() {
+            let unit_id = UnitId::new(i);
+            for i in 0..self.tir.levels.units[unit_id].len() {
+                let item_id = self.tir.levels.units[unit_id][i];
+                match self.hir.items[item_id] {
+                    hir::Item::Decl(id) => {
+                        self.build_tir_decl(item_id, id, None);
+                    }
+                    hir::Item::Expr(id) => {
+                        let unit = &mut self.tir.units[unit_id];
+                        if self.tir.depended_on[id] { unit.eval_dependees.push(id); }
+                        self.build_tir_expr(item_id, id, None);
+                    }
+                }
+            }
         }
         self.flush_staged_ret_groups(None);
         for scope in &self.hir.imper_scopes {
