@@ -330,22 +330,6 @@ impl SplitOp {
     }
 }
 
-impl Levels {
-    /// Recursively get the dependencies of `splits`, remove them from `unit`, and return them (including `splits`)
-    pub fn split_unit(&mut self, unit: u32, splits: &[ItemId]) -> Vec<ItemId> {
-        let mut split_op = SplitOp {
-            included: HashSet::from_iter(self.units[unit as usize].iter().map(|unit| *unit)),
-            excluded: Vec::from_iter(splits.iter().map(|split| *split))
-        };
-        for &split in splits {
-            split_op.split_recurse(&mut self.item_to_units, &self.dependees, split);
-        }
-
-        self.units[unit as usize] = Vec::from_iter(split_op.included.into_iter());
-        split_op.excluded
-    }
-}
-
 impl ItemId {
     fn write_node_name(self, w: &mut impl Write, hir: &hir::Builder) -> IoResult<()> {
         match hir.items[self] {

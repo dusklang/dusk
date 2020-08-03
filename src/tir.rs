@@ -284,35 +284,6 @@ impl Driver {
         }
     }
 
-    // Returns a new unit with the passed-in `items` and their dependencies if any are in the current `unit`. Otherwise, returns `None`.
-    fn add_dynamic_type4_dependency(&mut self, sp: &mut Subprogram, unit: u32, items: &[ItemId]) -> Option<Unit> {
-        let items: Vec<_> = items.iter()
-            .map(|item| *item)
-            .filter(|&item| sp.levels.item_to_units[item] == unit)
-            .collect();
-        if items.is_empty() { return None; }
-
-        let removed_items = sp.levels.split_unit(unit, &items);
-
-        let max_level = items.iter().map(|&item| sp.levels.item_to_levels[item]).max().unwrap();
-        sp.units[unit as usize].clear_up_to(max_level);
-        let mut new_unit = Unit::new();
-
-        // Recreate the portion of the old unit that we want
-        for i in 0..sp.levels.units[unit as usize].len() {
-            let id = sp.levels.units[unit as usize][i];
-            self.build_tir_item(sp, id, None);
-        }
-        self.flush_staged_ret_groups(sp, None);
-
-        for id in removed_items {
-            self.build_tir_item(sp, id, Some(&mut new_unit));
-        }
-        self.flush_staged_ret_groups(sp, Some(&mut new_unit));
-
-        Some(new_unit)
-    }
-
     fn flush_staged_ret_groups(&mut self, sp: &mut Subprogram, mut unit: Option<&mut Unit>) {
         let staged_ret_groups = std::mem::replace(&mut self.tir.staged_ret_groups, HashMap::new());
         for (decl, exprs) in staged_ret_groups {
