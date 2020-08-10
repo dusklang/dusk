@@ -36,9 +36,6 @@ pub struct Graph {
     item_to_components: IdxVec<CompId, ItemId>,
 
     components: IdxVec<Component, CompId>,
-
-    included_components: HashSet<CompId>,
-    excluded_components: HashSet<CompId>,
 }
 
 bitflags! {
@@ -69,8 +66,6 @@ struct Component {
     items: Vec<ItemId>,
 
     deps: HashMap<CompId, ComponentRelation>,
-
-    has_meta_dependees: bool,
 }
 
 struct ComponentState {
@@ -185,49 +180,15 @@ impl Graph {
         for i in 0..self.dependees.len() {
             self.find_component(ItemId::new(i), &mut state);
         }
+    }
 
-        self.excluded_components = HashSet::<CompId>::from_iter(
+    pub fn solve(&mut self) -> Levels {
+        // The outstanding components are the ones excluded last time
+        let mut outstanding_components = HashSet::<CompId>::from_iter(
             (0..self.components.len())
                 .map(|i| CompId::new(i))
         );
-    }
-
-    pub fn update_meta_deps(&mut self) {
-        for &comp in &self.excluded_components {
-            let has_meta_dep = self.component_has_meta_dep(comp);
-            self.components[comp].has_meta_dependees = has_meta_dep;
-        }
-    }
-
-    fn component_has_meta_dep(&self, comp: CompId) -> bool {
-        self.components[comp].items.iter().any(|&item| self.item_has_meta_dep(item))
-    }
-
-    fn item_has_meta_dep(&self, item: ItemId) -> bool {
-        self.t2_dependees[item].iter()
-            .chain(self.t3_dependees[item].iter())
-            .chain(self.t4_dependees[item].iter())
-            .any(|&dep| self.excluded_components.contains(&self.item_to_components[dep])) ||
-        self.meta_dependees[item].iter().any(|&dep| self.item_has_meta_dep(dep))
-    }
-
-    pub fn solve(&mut self) -> Option<Levels> {
-        if self.excluded_components.is_empty() { return None; }
-
-        // The outstanding components are the ones excluded last time
-        let mut outstanding_components = mem::replace(&mut self.excluded_components, HashSet::new());
-
-        // Exclude all components with unresolved meta-dependencies
-        let excluded_components = &mut self.excluded_components;
-        let components = &self.components;
-        outstanding_components.retain(|&id| 
-            if components[id].has_meta_dependees {
-                excluded_components.insert(id);
-                false
-            } else {
-                true
-            }
-        );
+        let mut included_components = HashSet::<CompId>::new();
         
         let mut units = Vec::<Unit>::new();
         while !outstanding_components.is_empty() {
@@ -236,7 +197,7 @@ impl Graph {
             for &comp_id in &outstanding_components {
                 let mut should_add = true;
                 for (&dependee, &relation) in &self.components[comp_id].deps {
-                    if relation == ComponentRelation::BEFORE && !self.included_components.contains(&dependee) {
+                    if relation == ComponentRelation::BEFORE && !included_components.contains(&dependee) {
                         should_add = false;
                     }
                 }
@@ -256,7 +217,7 @@ impl Graph {
                         if
                             relation == ComponentRelation::TYPE_2_3_FORWARD &&
                             !cur_unit_copy.contains(&dependee) &&
-                            !self.included_components.contains(&dependee)
+                            !included_components.contains(&dependee)
                         {
                             should_retain = false;
                         }
@@ -280,11 +241,9 @@ impl Graph {
                         }
                     }
                 }
-                self.included_components.insert(comp);
+                included_components.insert(comp);
                 outstanding_components.remove(&comp);
             }
-            let excluded_components = &self.excluded_components;
-            outstanding_components.retain(|id| !excluded_components.contains(id));
             units.push(cur_unit);
         }
 
@@ -307,22 +266,18 @@ impl Graph {
             }
         }
 
-        self.update_meta_deps();
-
         let components = &self.components;
 
-        Some(
-            Levels {
-                item_to_levels,
-                item_to_units,
-                units: units.into_iter()
-                    .map(|unit| {
-                        unit.components.into_iter()
-                            .flat_map(|comp| components[comp].items.iter().map(|comp| *comp))
-                            .collect()
-                    }).collect::<Vec<Vec<ItemId>>>(),
-            }
-        )
+        Levels {
+            item_to_levels,
+            item_to_units,
+            units: units.into_iter()
+                .map(|unit| {
+                    unit.components.into_iter()
+                        .flat_map(|comp| components[comp].items.iter().map(|comp| *comp))
+                        .collect()
+                }).collect::<Vec<Vec<ItemId>>>(),
+        }
     }
 }
 

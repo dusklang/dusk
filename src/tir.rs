@@ -273,6 +273,9 @@ impl Driver {
         }
     }
 
+    /// IMPORTANT NOTE: When/if we stop adding type3 deps to all items in a function's scope,
+    /// we will need to bring back the original idea of meta-dependencies:
+    /// https://github.com/zachrwolfe/meda/issues/58
     fn add_type3_scope_dep(&mut self, a: ItemId, b: ImperScopeId) {
         let scope = &self.hir.imper_scopes[b];
         for &item in &scope.items {
@@ -538,7 +541,14 @@ impl Driver {
             match self.hir.exprs[expr_id] {
                 hir::Expr::Void | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
                     | hir::Expr::CharLit { .. } | hir::Expr::ConstTy(_) | hir::Expr::AddrOf { .. } | hir::Expr::Deref(_)
-                    | hir::Expr::Pointer { .. } | hir::Expr::Set { .. } | hir::Expr::Mod { .. } => {},
+                    | hir::Expr::Pointer { .. } | hir::Expr::Set { .. } => {},
+                hir::Expr::Mod { id: mod_scope_id } => {
+                    for decl_group in self.hir.mod_scopes[mod_scope_id].decl_groups.values() {
+                        for decl in decl_group {
+                            self.tir.graph.add_type3_dep(id, di!(decl.id));
+                        }
+                    }
+                },
                 hir::Expr::Cast { expr, ty, .. } => {
                     add_eval_dep!(id, ty);
                 },
@@ -567,24 +577,14 @@ impl Driver {
                 }
             }
         }
-
-
-        self.tir.graph.update_meta_deps();
     }
 
     pub fn build_more_tir(&mut self) -> Vec<Unit> {
         ei_injector!(self, ei);
-        // Imagined typechecking flow:
-        // - Driver calls a TIR generation method, which does the following:
-        //   - Gets the set of declrefs for which we now have namespace info (if any), and adds types 2-4 dependencies to them (thus resolving the metadependencies)
-        //   - Find and solve for the next few units
-        //   - Build TIR for each item in each unit (including mock TIR units for any meta-dependees)
-        // - Driver calls typechecker on the units it got from tir.rs (which also should figure out all member ref namepsaces via the mock units)
-        // - Driver repeats from the beginning until there are no more items, or nothing happened in the previous iteration (possible?)
 
         // Solve for the unit and level of each item
         self.print_graph().unwrap();
-        let levels = self.tir.graph.solve().unwrap();
+        let levels = self.tir.graph.solve();
 
         let mut sp = Subprogram { units: Vec::new(), levels };
         sp.units.resize_with(sp.levels.units.len(), || Unit::new());
