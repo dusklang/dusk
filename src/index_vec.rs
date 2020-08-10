@@ -39,6 +39,12 @@ impl<T: Debug, I: Idx> Debug for IdxVec<T, I> {
     }
 }
 
+impl<T: Clone, I: Idx> Clone for IdxVec<T, I> {
+    fn clone(&self) -> Self {
+        self.raw.clone().into()
+    }
+}
+
 impl<T, I: Idx> From<Vec<T>> for IdxVec<T, I> {
     fn from(raw: Vec<T>) -> Self {
         Self { raw, _marker: PhantomData }

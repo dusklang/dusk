@@ -27,8 +27,7 @@ pub struct Graph {
     t2_dependees: IdxVec<Vec<ItemId>, ItemId>,
     t3_dependees: IdxVec<Vec<ItemId>, ItemId>,
     t4_dependees: IdxVec<Vec<ItemId>, ItemId>,
-    meta_dependees: IdxVec<Vec<ItemId>, ItemId>,
-    meta_dependers: IdxVec<Vec<ItemId>, ItemId>,
+    meta_dependees: HashSet<ItemId>,
 
     // Used exclusively for finding connected components
     dependers: IdxVec<Vec<ItemId>, ItemId>,
@@ -75,7 +74,7 @@ struct ComponentState {
 }
 
 #[derive(Debug, Default)]
-struct Unit {
+struct InternalUnit {
     components: Vec<CompId>,
 
     deps: HashMap<ItemId, ItemId>,
@@ -114,8 +113,7 @@ impl Graph {
 
     /// in order to know the type 2-4 dependencies of a, we need to know all possible members of b
     pub fn add_meta_dep(&mut self, a: ItemId, b: ItemId) {
-        self.meta_dependees[a].push(b);
-        self.meta_dependers[b].push(a);
+        self.meta_dependees.insert(b);
     }
 
     fn find_subcomponent(&mut self, item: ItemId, state: &mut ComponentState) {
@@ -190,7 +188,7 @@ impl Graph {
         );
         let mut included_components = HashSet::<CompId>::new();
         
-        let mut units = Vec::<Unit>::new();
+        let mut units = Vec::<InternalUnit>::new();
         while !outstanding_components.is_empty() {
             // Get all components that have no type 4 dependencies on outstanding components
             let mut cur_unit_comps = HashSet::<CompId>::new();
@@ -229,7 +227,7 @@ impl Graph {
                 if cur_unit_copy.len() == cur_unit_comps.len() { break; }
             }
 
-            let mut cur_unit = Unit::default();
+            let mut cur_unit = InternalUnit::default();
             cur_unit.components.extend(cur_unit_comps.iter());
             for &comp in &cur_unit.components {
                 // Add intra-unit type 2 dependencies as type 1 dependencies, because they are equivalent after resolving units
@@ -269,23 +267,49 @@ impl Graph {
         let components = &self.components;
 
         Levels {
-            item_to_levels,
+            item_to_levels: item_to_levels.clone(),
             item_to_units,
             units: units.into_iter()
                 .map(|unit| {
-                    unit.components.into_iter()
+                    let mut meta_deps = HashMap::<u32, Vec<ItemId>>::new();
+                    let items = unit.components.into_iter()
                         .flat_map(|comp| components[comp].items.iter().map(|comp| *comp))
-                        .collect()
-                }).collect::<Vec<Vec<ItemId>>>(),
+                        .collect();
+                    for &item in &items {
+                        if self.meta_dependees.contains(&item) {
+                            meta_deps.entry(item_to_levels[item]).or_default().push(item);
+                        }
+                    }
+                    let mut meta_dependees = meta_deps.into_iter()
+                        .map(|(level, meta_dependees)| LevelMetaDependees { level, meta_dependees })
+                        .collect::<Vec<_>>();
+                    meta_dependees.sort_by_key(|level| level.level);
+                    Unit { 
+                        items,
+                        meta_dependees,
+                    }
+                }).collect::<Vec<Unit>>(),
         }
     }
+}
+
+#[derive(Default, Debug)]
+pub struct LevelMetaDependees {
+    pub level: u32,
+    pub meta_dependees: Vec<ItemId>,
+}
+
+#[derive(Default, Debug)]
+pub struct Unit {
+    pub items: Vec<ItemId>,
+    pub meta_dependees: Vec<LevelMetaDependees>,
 }
 
 #[derive(Default, Debug)]
 pub struct Levels {
     pub item_to_levels: IdxVec<u32, ItemId>,
     pub item_to_units: IdxVec<u32, ItemId>,
-    pub units: Vec<Vec<ItemId>>,
+    pub units: Vec<Unit>,
 }
 
 struct SplitOp {
@@ -330,8 +354,6 @@ impl Driver {
             &mut self.tir.graph.t2_dependees,
             &mut self.tir.graph.t3_dependees,
             &mut self.tir.graph.t4_dependees,
-            &mut self.tir.graph.meta_dependees,
-            &mut self.tir.graph.meta_dependers,
             &mut self.tir.graph.dependers
         ];
         for dep in &mut deps {

@@ -591,8 +591,8 @@ impl Driver {
 
         // Finally, convert HIR items to TIR and add them to the correct spot
         for unit in 0..sp.levels.units.len() {
-            for i in 0..sp.levels.units[unit].len() {
-                let item_id = sp.levels.units[unit][i];
+            for i in 0..sp.levels.units[unit].items.len() {
+                let item_id = sp.levels.units[unit].items[i];
                 match self.hir.items[item_id] {
                     hir::Item::Decl(id) => {
                         self.build_tir_decl(&mut sp, item_id, id, None);
