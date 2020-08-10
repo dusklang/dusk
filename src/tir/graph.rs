@@ -37,9 +37,7 @@ pub struct Graph {
 
     components: IdxVec<Component, CompId>,
 
-    included_components: HashSet<CompId>,
     excluded_components: HashSet<CompId>,
-    outstanding_components: HashSet<CompId>,
 }
 
 bitflags! {
@@ -120,8 +118,6 @@ impl Graph {
 
     /// in order to know the type 2-4 dependencies of a, we need to know all possible members of b
     pub fn add_meta_dep(&mut self, a: ItemId, b: ItemId) {
-        let comp = self.item_to_components[a];
-        self.components[comp].has_meta_dependees = true;
         self.meta_dependees[a].push(b);
         self.meta_dependers[b].push(a);
     }
@@ -195,17 +191,37 @@ impl Graph {
         );
     }
 
+    fn component_has_meta_dep(&self, comp: CompId) -> bool {
+        self.components[comp].items.iter().any(|&item| self.item_has_meta_dep(item))
+    }
+
+    fn item_has_meta_dep(&self, item: ItemId) -> bool {
+        self.t2_dependees[item].iter()
+            .chain(self.t3_dependees[item].iter())
+            .chain(self.t4_dependees[item].iter())
+            .any(|&dep| self.excluded_components.contains(&self.item_to_components[dep])) ||
+        self.meta_dependees[item].iter().any(|&dep| self.item_has_meta_dep(dep))
+    }
+
     pub fn solve(&mut self) -> Option<Levels> {
-        let mut units = Vec::<Unit>::new();
-        assert!(self.included_components.is_empty() && self.outstanding_components.is_empty());
         if self.excluded_components.is_empty() { return None; }
 
-        mem::swap(&mut self.outstanding_components, &mut self.excluded_components);
+        // Update the excluded components' has_meta_dependees fields
+        // TODO: Get rid of the field and just compute maybe?
+        //       This is made a little more complicated by the borrow checker :(
+        for &comp in &self.excluded_components {
+            let has_meta_dep = self.component_has_meta_dep(comp);
+            self.components[comp].has_meta_dependees = has_meta_dep;
+        }
 
-        // Exclude all components with meta-dependencies
+        // The outstanding components are the ones excluded last time
+        let mut outstanding_components = mem::replace(&mut self.excluded_components, HashSet::new());
+        let mut included_components = HashSet::new();
+        
+        // Exclude all components with unresolved meta-dependencies
         let excluded_components = &mut self.excluded_components;
         let components = &self.components;
-        self.outstanding_components.retain(|&id| 
+        outstanding_components.retain(|&id| 
             if components[id].has_meta_dependees {
                 excluded_components.insert(id);
                 false
@@ -213,14 +229,15 @@ impl Graph {
                 true
             }
         );
-
-        while !self.outstanding_components.is_empty() {
+        
+        let mut units = Vec::<Unit>::new();
+        while !outstanding_components.is_empty() {
             // Get all components that have no type 4 dependencies on outstanding components
             let mut cur_unit_comps = HashSet::<CompId>::new();
-            for &comp_id in &self.outstanding_components {
+            for &comp_id in &outstanding_components {
                 let mut should_add = true;
                 for (&dependee, &relation) in &self.components[comp_id].deps {
-                    if relation == ComponentRelation::BEFORE && !self.included_components.contains(&dependee) {
+                    if relation == ComponentRelation::BEFORE && !included_components.contains(&dependee) {
                         should_add = false;
 
                         // If the current component depends on an excluded component,
@@ -243,7 +260,7 @@ impl Graph {
                 cur_unit_comps.retain(|&comp| {
                     let mut should_retain = true;
                     for (&dependee, &relation) in &self.components[comp].deps {
-                        if relation == ComponentRelation::TYPE_2_3_FORWARD && !cur_unit_copy.contains(&dependee) && !self.included_components.contains(&dependee) {
+                        if relation == ComponentRelation::TYPE_2_3_FORWARD && !cur_unit_copy.contains(&dependee) && !included_components.contains(&dependee) {
                             should_retain = false;
 
                             // If the current component depends on an excluded component,
@@ -272,11 +289,11 @@ impl Graph {
                         }
                     }
                 }
-                self.included_components.insert(comp);
-                self.outstanding_components.remove(&comp);
+                included_components.insert(comp);
+                outstanding_components.remove(&comp);
             }
             let excluded_components = &self.excluded_components;
-            self.outstanding_components.retain(|id| !excluded_components.contains(id));
+            outstanding_components.retain(|id| !excluded_components.contains(id));
             units.push(cur_unit);
         }
 
