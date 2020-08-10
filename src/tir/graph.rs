@@ -37,6 +37,7 @@ pub struct Graph {
 
     components: IdxVec<Component, CompId>,
 
+    included_components: HashSet<CompId>,
     excluded_components: HashSet<CompId>,
 }
 
@@ -191,6 +192,13 @@ impl Graph {
         );
     }
 
+    pub fn update_meta_deps(&mut self) {
+        for &comp in &self.excluded_components {
+            let has_meta_dep = self.component_has_meta_dep(comp);
+            self.components[comp].has_meta_dependees = has_meta_dep;
+        }
+    }
+
     fn component_has_meta_dep(&self, comp: CompId) -> bool {
         self.components[comp].items.iter().any(|&item| self.item_has_meta_dep(item))
     }
@@ -206,18 +214,9 @@ impl Graph {
     pub fn solve(&mut self) -> Option<Levels> {
         if self.excluded_components.is_empty() { return None; }
 
-        // Update the excluded components' has_meta_dependees fields
-        // TODO: Get rid of the field and just compute maybe?
-        //       This is made a little more complicated by the borrow checker :(
-        for &comp in &self.excluded_components {
-            let has_meta_dep = self.component_has_meta_dep(comp);
-            self.components[comp].has_meta_dependees = has_meta_dep;
-        }
-
         // The outstanding components are the ones excluded last time
         let mut outstanding_components = mem::replace(&mut self.excluded_components, HashSet::new());
-        let mut included_components = HashSet::new();
-        
+
         // Exclude all components with unresolved meta-dependencies
         let excluded_components = &mut self.excluded_components;
         let components = &self.components;
@@ -237,14 +236,8 @@ impl Graph {
             for &comp_id in &outstanding_components {
                 let mut should_add = true;
                 for (&dependee, &relation) in &self.components[comp_id].deps {
-                    if relation == ComponentRelation::BEFORE && !included_components.contains(&dependee) {
+                    if relation == ComponentRelation::BEFORE && !self.included_components.contains(&dependee) {
                         should_add = false;
-
-                        // If the current component depends on an excluded component,
-                        // it should itself be excluded
-                        if self.excluded_components.contains(&dependee) {
-                            self.excluded_components.insert(comp_id);
-                        }
                     }
                 }
                 if should_add {
@@ -260,14 +253,12 @@ impl Graph {
                 cur_unit_comps.retain(|&comp| {
                     let mut should_retain = true;
                     for (&dependee, &relation) in &self.components[comp].deps {
-                        if relation == ComponentRelation::TYPE_2_3_FORWARD && !cur_unit_copy.contains(&dependee) && !included_components.contains(&dependee) {
+                        if
+                            relation == ComponentRelation::TYPE_2_3_FORWARD &&
+                            !cur_unit_copy.contains(&dependee) &&
+                            !self.included_components.contains(&dependee)
+                        {
                             should_retain = false;
-
-                            // If the current component depends on an excluded component,
-                            // it should itself be excluded
-                            if self.excluded_components.contains(&dependee) {
-                                self.excluded_components.insert(comp);
-                            }
                         }
                     }
                     should_retain
@@ -289,7 +280,7 @@ impl Graph {
                         }
                     }
                 }
-                included_components.insert(comp);
+                self.included_components.insert(comp);
                 outstanding_components.remove(&comp);
             }
             let excluded_components = &self.excluded_components;
@@ -315,6 +306,8 @@ impl Graph {
                 }
             }
         }
+
+        self.update_meta_deps();
 
         let components = &self.components;
 

@@ -567,6 +567,9 @@ impl Driver {
                 }
             }
         }
+
+
+        self.tir.graph.update_meta_deps();
     }
 
     pub fn build_more_tir(&mut self) -> Vec<Unit> {
