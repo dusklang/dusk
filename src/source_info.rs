@@ -3,6 +3,9 @@ use std::cmp::{min, max};
 use std::ops::Range;
 use std::str;
 
+use crate::driver::Driver;
+use crate::builder::{ExprId, DeclId};
+
 pub type SourceRange = Range<usize>;
 
 pub fn concat(a: SourceRange, b: SourceRange) -> SourceRange {
@@ -36,6 +39,23 @@ impl CommentatedSourceRange {
             message: message.into(),
             highlight,
         }
+    }
+}
+
+impl Driver {
+    pub fn print_range(&self, range: SourceRange) {
+        self.file.print_commentated_source_ranges(&mut [
+            CommentatedSourceRange::new(range, "", '-')
+        ]);
+    }
+
+    pub fn print_expr(&self, id: ExprId) {
+        self.print_range(self.hir.get_range(id));
+    }
+
+    pub fn print_decl(&self, id: DeclId) {
+        let item = self.hir.decl_to_items[id];
+        self.print_range(self.hir.source_ranges[item].clone());
     }
 }
 
