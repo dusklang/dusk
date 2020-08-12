@@ -180,7 +180,7 @@ macro_rules! add_eval_dep_injector {
 
 impl Driver {
     // Returns the overloads for a declref, if they are known (they won't be if it's a member ref)
-    fn find_overloads(&self, decl_ref: &hir::DeclRef) -> Option<Vec<DeclId>> {
+    pub fn find_overloads(&self, decl_ref: &hir::DeclRef) -> Option<Vec<DeclId>> {
         let mut overloads = Vec::new();
 
         let mut last_was_imperative = true;
@@ -239,9 +239,8 @@ impl Driver {
         if let hir::Namespace::MemberRef { base_expr } = decl_ref.namespace {
             self.tir.graph.add_meta_dep(id, ei!(base_expr));
         }
-        let overloads = self.find_overloads(decl_ref);
-        self.tir.overloads[decl_ref_id] = overloads.unwrap_or_default();
-        for &overload in &self.tir.overloads[decl_ref_id] {
+        let overloads = self.find_overloads(decl_ref).unwrap_or_default();
+        for overload in overloads {
             match self.hir.decls[overload] {
                 hir::Decl::Computed { ref param_tys, .. } => {
                     let ty = self.hir.explicit_tys[overload].unwrap_or(self.hir.void_ty);

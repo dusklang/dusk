@@ -120,8 +120,9 @@ impl Driver {
                 // These borrows are only here because the borrow checker is dumb
                 let decls = &self.tir.decls;
                 let tc = &tp;
+                let mut overloads = self.find_overloads(&self.hir.decl_refs[decl_ref_id]).unwrap_or_default();
                 // Rule out overloads that don't match the arguments
-                self.tir.overloads[decl_ref_id].retain(|&overload| {
+                overloads.retain(|&overload| {
                     assert_eq!(decls[overload].param_tys.len(), args.len());
                     let arg_constraints = args.iter().map(|&arg| tc.constraints(arg));
                     let param_tys = decls[overload].param_tys.iter().map(|&expr| tc.get_evaluated_type(expr));
@@ -132,9 +133,9 @@ impl Driver {
                 });
 
                 let mut one_of = SmallVec::new();
-                one_of.reserve(self.tir.overloads[decl_ref_id].len());
-                for i in 0..self.tir.overloads[decl_ref_id].len() {
-                    let overload = self.tir.overloads[decl_ref_id][i];
+                one_of.reserve(overloads.len());
+                for i in 0..overloads.len() {
+                    let overload = overloads[i];
                     let ty = tp.fetch_decl_type(&self.hir, overload).ty.clone();
                     let is_mut = self.tir.decls[overload].is_mut;
                     one_of.push(QualType { ty, is_mut });
@@ -142,7 +143,7 @@ impl Driver {
                 let mut pref = None;
                 'find_preference: for (i, &arg) in args.iter().enumerate() {
                     if let Some(ty) = tp.constraints(arg).preferred_type() {
-                        for &overload in &self.tir.overloads[decl_ref_id] {
+                        for &overload in &overloads {
                             let decl = &self.tir.decls[overload];
                             if ty.ty.trivially_convertible_to(tp.get_evaluated_type(decl.param_tys[i])) {
                                 let ty = tp.fetch_decl_type(&self.hir, overload).clone();
@@ -154,6 +155,7 @@ impl Driver {
                     }
                 }
                 *tp.constraints_mut(id) = ConstraintList::new(BuiltinTraits::empty(), Some(one_of), pref);
+                self.tir.overloads[decl_ref_id] = overloads;
             }
             for item in unit.addr_ofs.get_level(level) {
                 let constraints = tp.constraints(item.expr).filter_map(|ty| {
