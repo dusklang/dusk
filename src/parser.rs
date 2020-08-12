@@ -86,7 +86,7 @@ impl Driver {
             I8, I16, I32, I64, Isize,
             U8, U16, U32, U64, Usize,
             F32, F64,
-            Never, Bool, Void, Ty
+            Never, Bool, Void, Ty, Module
         );
 
         self.skip_insignificant(&mut p);

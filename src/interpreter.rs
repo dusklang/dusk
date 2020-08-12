@@ -886,6 +886,7 @@ impl Driver {
                     Intrinsic::Bool => Value::from_ty(Type::Bool),
                     Intrinsic::Void => Value::from_ty(Type::Void),
                     Intrinsic::Ty => Value::from_ty(Type::Ty),
+                    Intrinsic::Module => Value::from_ty(Type::Mod),
                     Intrinsic::PrintType => {
                         assert_eq!(arguments.len(), 1);
                         print!("{:?}", frame.results[arguments[0]].as_ty());
