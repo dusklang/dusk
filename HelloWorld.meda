@@ -187,3 +187,7 @@ core :: mod {
         std.blah()
     }
 }
+
+fn main() {
+    std.blah()
+}

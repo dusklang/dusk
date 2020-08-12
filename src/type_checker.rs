@@ -19,7 +19,7 @@ use crate::dep_vec::{self, AnyDepVec};
 use crate::source_info::CommentatedSourceRange;
 use crate::mir::Const;
 use crate::hir;
-use crate::tir::Unit;
+use crate::tir::{Unit, ExprNamespace};
 
 #[derive(Copy, Clone, Debug)]
 pub enum CastMethod {
@@ -121,7 +121,7 @@ impl Driver {
                 // These borrows are only here because the borrow checker is dumb
                 let decls = &self.tir.decls;
                 let tc = &tp;
-                let mut overloads = self.find_overloads(&self.hir.decl_refs[decl_ref_id]).unwrap_or_default();
+                let mut overloads = self.find_overloads(&self.hir.decl_refs[decl_ref_id]);
                 // Rule out overloads that don't match the arguments
                 overloads.retain(|&overload| {
                     assert_eq!(decls[overload].param_tys.len(), args.len());
@@ -266,11 +266,12 @@ impl Driver {
                 }
                 if !mods.is_empty() {
                     self.run_pass_2(unit, level+1, &mut mock);
-                    for module in mods {
-                        let module = self.eval_expr(module, &mock);
+                    for module_expr in mods {
+                        let module = self.eval_expr(module_expr, &mock);
                         match module {
-                            Const::Mod(scope) => println!("Scope: {:?}", scope),
-                            _ => panic!("Unexpected const kind!"),
+                            Const::Mod(scope) => self.tir.expr_namespaces.entry(module_expr).or_default()
+                                .push(ExprNamespace::Mod(scope)),
+                            _ => panic!("Unexpected const kind, expected module!"),
                         }
                     }
                 }

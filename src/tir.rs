@@ -127,9 +127,17 @@ impl Unit {
     }
 }
 
+/// The namespace "inside" an expression,
+/// i.e. what are all the declarations that you might be able to access as members of an expression
+#[derive(Debug)]
+pub enum ExprNamespace {
+    Mod(ModScopeId)
+}
+
 #[derive(Debug)]
 pub struct Builder {
     pub decls: IdxVec<Decl, DeclId>,
+    pub expr_namespaces: HashMap<ExprId, Vec<ExprNamespace>>,
     graph: Graph,
     depended_on: IdxVec<bool, ExprId>,
 
@@ -140,6 +148,7 @@ impl Builder {
     pub fn new() -> Self {
         Self {
             decls: IdxVec::new(),
+            expr_namespaces: HashMap::new(),
             graph: Graph::default(),
             depended_on: IdxVec::new(),
             staged_ret_groups: HashMap::new(),
@@ -174,8 +183,17 @@ macro_rules! add_eval_dep_injector {
 }
 
 impl Driver {
+    fn find_overloads_in_mod(&self, decl_ref: &hir::DeclRef, scope: ModScopeId, overloads: &mut Vec<DeclId>) {
+        if let Some(group) = self.hir.mod_scopes[scope].decl_groups.get(&decl_ref.name) {
+            overloads.extend(
+                group.iter()
+                    .filter(|decl| decl.num_params == decl_ref.num_arguments)
+                    .map(|decl| decl.id)
+            );
+        }
+    }
     // Returns the overloads for a declref, if they are known (they won't be if it's a member ref)
-    pub fn find_overloads(&self, decl_ref: &hir::DeclRef) -> Option<Vec<DeclId>> {
+    pub fn find_overloads(&self, decl_ref: &hir::DeclRef) -> Vec<DeclId> {
         let mut overloads = Vec::new();
 
         let mut last_was_imperative = true;
@@ -200,30 +218,32 @@ impl Driver {
                 },
                 Namespace::Mod(scope_ns) => {
                     let scope = self.hir.mod_ns[scope_ns].scope;
-                    if let Some(group) = self.hir.mod_scopes[scope].decl_groups.get(&decl_ref.name) {
-                        overloads.extend(
-                            group.iter()
-                                .filter(|decl| decl.num_params == decl_ref.num_arguments)
-                                .map(|decl| decl.id)
-                        );
-                    }
+                    self.find_overloads_in_mod(decl_ref, scope, &mut overloads);
 
                     last_was_imperative = false;
                     self.hir.mod_ns[scope_ns].parent
                 },
     
                 // TODO: get the overloads
-                Namespace::MemberRef { .. } => {
+                Namespace::MemberRef { base_expr } => {
                     assert!(root_namespace, "member refs currently must be at the root of a namespace hierarchy");
 
-                    return None;
+                    if let Some(expr_namespaces) = self.tir.expr_namespaces.get(&base_expr) {
+                        for ns in expr_namespaces {
+                            match *ns {
+                                ExprNamespace::Mod(scope) => self.find_overloads_in_mod(decl_ref, scope, &mut overloads),
+                            }
+                        }
+                    }
+
+                    break;
                 },
             };
 
             root_namespace = false;
         }
 
-        Some(overloads)
+        overloads
     }
 
     fn add_types_2_to_4_deps_to_member_ref(&mut self, id: ItemId, arguments: &[ExprId], decl_ref_id: DeclRefId) {
@@ -234,7 +254,7 @@ impl Driver {
         if let hir::Namespace::MemberRef { base_expr } = decl_ref.namespace {
             self.tir.graph.add_meta_dep(id, ei!(base_expr));
         }
-        let overloads = self.find_overloads(decl_ref).unwrap_or_default();
+        let overloads = self.find_overloads(decl_ref);
         for overload in overloads {
             match self.hir.decls[overload] {
                 hir::Decl::Computed { ref param_tys, .. } => {
