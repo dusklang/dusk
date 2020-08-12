@@ -70,8 +70,7 @@ struct Subprogram {
 #[derive(Debug)]
 pub struct LevelMetaDependees {
     pub level: u32,
-    pub exprs: Vec<ExprId>,
-    pub decls: Vec<DeclId>,
+    pub meta_dependees: Vec<ExprId>,
 }
 
 #[derive(Debug, Default)]
@@ -588,19 +587,17 @@ impl Driver {
             }
 
             for item in &sp.levels.units[unit].meta_dependees {
-                let mut exprs = Vec::new();
-                let mut decls = Vec::new();
+                let mut meta_dependees = Vec::new();
                 for &item in &item.meta_dependees {
                     match self.hir.items[item] {
-                        hir::Item::Expr(id) => exprs.push(id),
-                        hir::Item::Decl(id) => decls.push(id),
+                        hir::Item::Expr(id) => meta_dependees.push(id),
+                        hir::Item::Decl(id) => panic!("Can't have metadependency on a declaration!"),
                     }
                 }
                 sp.units[unit].meta_dependees.push(
                     LevelMetaDependees {
                         level: item.level,
-                        exprs,
-                        decls,
+                        meta_dependees,
                     }
                 )
             }
