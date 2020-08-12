@@ -15,35 +15,37 @@ std :: mod {
         print((num % 10) as u8 + "0")
     }
 
-    fn strlen(str: u8*): usize {
-        str := str
-        darba := str
-        derpa := darba
-        len: usize = 0
-        while *((str as usize + len) as u8*) != 0 {
-            len = len + 1
+    str :: mod {
+        fn len(str: u8*): usize {
+            str := str
+            darba := str
+            derpa := darba
+            len: usize = 0
+            while *((str as usize + len) as u8*) != 0 {
+                len = len + 1
+            }
+            len
         }
-        len
-    }
 
-    fn concat(a: u8*, b: u8*): u8* {
-        len :: std.strlen(a) + std.strlen(b)
-        buf := malloc(len + 1) as u8 *mut
-        ret_val :: buf
-        a := a
-        while *a != 0 {
-            *buf = *a
-            a = (a as usize + 1) as u8*
-            buf = (buf as usize + 1) as u8 *mut
+        fn concat(a: u8*, b: u8*): u8* {
+            len :: str.len(a) + str.len(b)
+            buf := malloc(len + 1) as u8 *mut
+            ret_val :: buf
+            a := a
+            while *a != 0 {
+                *buf = *a
+                a = (a as usize + 1) as u8*
+                buf = (buf as usize + 1) as u8 *mut
+            }
+            b := b
+            while *b != 0 {
+                *buf = *b
+                b = (b as usize + 1) as u8*
+                buf = (buf as usize + 1) as u8 *mut
+            }
+            *buf = 0
+            ret_val
         }
-        b := b
-        while *b != 0 {
-            *buf = *b
-            b = (b as usize + 1) as u8*
-            buf = (buf as usize + 1) as u8 *mut
-        }
-        *buf = 0
-        ret_val
     }
 }
 
@@ -83,14 +85,14 @@ fn print_and_return_fib(str: u8*, n: i32): i32 {
 }
 
 fn print_and_return_concatenated_string(a: u8*, b: u8*): u8* {
-    val :: std.concat(a, b)
+    val :: std.str.concat(a, b)
     print(val)
     val
 }
 
 FIB_N :: print_and_return_fib("printing at compile time while compiling constant!\n", 7)
 FIB :: print_and_return_fib("printing at compile time!\n", FIB_N)
-generated_string :: std.concat(std.concat("Hello, ", "world!"), " (from compile-time)\n")
+generated_string :: std.str.concat(std.str.concat("Hello, ", "world!"), " (from compile-time)\n")
 
 fn too_hype_for_types(a: i32, b: i32, c: i32) = a * b + c
 
