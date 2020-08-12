@@ -271,13 +271,17 @@ impl Graph {
             item_to_units,
             units: units.into_iter()
                 .map(|unit| {
-                    let mut meta_deps = HashMap::<u32, Vec<ItemId>>::new();
+                    let mut meta_deps = HashMap::<u32, Vec<MetaDependee>>::new();
                     let items = unit.components.into_iter()
                         .flat_map(|comp| components[comp].items.iter().map(|comp| *comp))
                         .collect();
                     for &item in &items {
                         if self.meta_dependees.contains(&item) {
-                            meta_deps.entry(item_to_levels[item]).or_default().push(item);
+                            let mut deps = Vec::new();
+                            self.get_deps(item, &mut deps);
+                            meta_deps.entry(item_to_levels[item])
+                                .or_default()
+                                .push(MetaDependee { item, deps });
                         }
                     }
                     let mut meta_dependees = meta_deps.into_iter()
@@ -291,12 +295,25 @@ impl Graph {
                 }).collect::<Vec<Unit>>(),
         }
     }
+
+    fn get_deps(&self, item: ItemId, out: &mut Vec<ItemId>) {
+        out.extend(&self.dependees[item]);
+        for &dependee in &self.dependees[item] {
+            self.get_deps(dependee, out);
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct MetaDependee {
+    pub item: ItemId,
+    pub deps: Vec<ItemId>,
 }
 
 #[derive(Default, Debug)]
 pub struct LevelMetaDependees {
     pub level: u32,
-    pub meta_dependees: Vec<ItemId>,
+    pub meta_dependees: Vec<MetaDependee>,
 }
 
 #[derive(Default, Debug)]

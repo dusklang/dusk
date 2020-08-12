@@ -19,7 +19,7 @@ use crate::dep_vec::{self, AnyDepVec};
 use crate::source_info::CommentatedSourceRange;
 use crate::mir::Const;
 use crate::hir;
-use crate::tir::{Unit, ExprNamespace};
+use crate::tir::{Unit, UnitItems, LevelMetaDependees, ExprNamespace};
 
 #[derive(Copy, Clone, Debug)]
 pub enum CastMethod {
@@ -36,7 +36,7 @@ impl Driver {
         self.hir.explicit_tys[id].map(|ty| tp.get_evaluated_type(ty)).unwrap_or(&Type::Error)
     }
 
-    fn run_pass_1(&mut self, unit: &Unit, tp: &mut RealTypeProvider) -> u32 {
+    fn run_pass_1(&mut self, unit: &UnitItems, meta_dependees: &[LevelMetaDependees], tp: &mut RealTypeProvider) -> u32 {
         // Assumption: all DepVecs in the unit have the same number of levels
         let levels = unit.assigned_decls.num_levels();
 
@@ -255,21 +255,15 @@ impl Driver {
             }
             tp.debug_output(&self.hir, &self.file, level as usize);
 
-            if meta_dependee_i < unit.meta_dependees.len() && unit.meta_dependees[meta_dependee_i].level == level {
+            if meta_dependee_i < meta_dependees.len() && meta_dependees[meta_dependee_i].level == level {
                 let mut mock = MockTypeProvider::new(tp);
-                let mut mods = Vec::new();
-                for &dep in &unit.meta_dependees[meta_dependee_i].meta_dependees {
-                    if mock.constraints(dep).can_unify_to(&Type::Mod.into()).is_ok() {
-                        mock.constraints_mut(dep).set_to(&Type::Mod);
-                        mods.push(dep);
-                    }
-                }
-                if !mods.is_empty() {
-                    self.run_pass_2(unit, level+1, &mut mock);
-                    for module_expr in mods {
-                        let module = self.eval_expr(module_expr, &mock);
+                for dep in &meta_dependees[meta_dependee_i].meta_dependees {
+                    if mock.constraints(dep.dependee).can_unify_to(&Type::Mod.into()).is_ok() {
+                        mock.constraints_mut(dep.dependee).set_to(&Type::Mod);
+                        self.run_pass_2(&dep.items, level+1, &mut mock);
+                        let module = self.eval_expr(dep.dependee, &mock);
                         match module {
-                            Const::Mod(scope) => self.tir.expr_namespaces.entry(module_expr).or_default()
+                            Const::Mod(scope) => self.tir.expr_namespaces.entry(dep.dependee).or_default()
                                 .push(ExprNamespace::Mod(scope)),
                             _ => panic!("Unexpected const kind, expected module!"),
                         }
@@ -282,7 +276,7 @@ impl Driver {
         levels
     }
 
-    fn run_pass_2(&mut self, unit: &Unit, levels: u32, tp: &mut impl TypeProvider) {
+    fn run_pass_2(&mut self, unit: &UnitItems, levels: u32, tp: &mut impl TypeProvider) {
         if tp.debug() { println!("===============TYPECHECKING: PASS 2==============="); }
         for level in (0..levels).rev() {
             for i in 0..unit.assigned_decls.level_len(level) {
@@ -502,10 +496,10 @@ impl Driver {
 
         for unit in units {
             // Pass 1: propagate info down from leaves to roots
-            let levels = self.run_pass_1(unit, &mut tp);
+            let levels = self.run_pass_1(&unit.items, &unit.meta_dependees, &mut tp);
             
             // Pass 2: propagate info up from roots to leaves
-            self.run_pass_2(unit, levels, &mut tp);
+            self.run_pass_2(&unit.items, levels, &mut tp);
 
             for i in 0..unit.eval_dependees.len() {
                 let expr = unit.eval_dependees[i];

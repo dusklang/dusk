@@ -67,14 +67,8 @@ struct Subprogram {
     levels: Levels,
 }
 
-#[derive(Debug)]
-pub struct LevelMetaDependees {
-    pub level: u32,
-    pub meta_dependees: Vec<ExprId>,
-}
-
-#[derive(Debug, Default)]
-pub struct Unit {
+#[derive(Default, Debug)]
+pub struct UnitItems {
     pub int_lits: Vec<ExprId>,
     pub dec_lits: Vec<ExprId>,
     pub str_lits: Vec<ExprId>,
@@ -94,37 +88,39 @@ pub struct Unit {
     pub derefs: DepVec<Expr<Dereference>>,
     pub pointers: DepVec<Expr<Pointer>>,
     pub ifs: DepVec<Expr<If>>,
+}
+
+impl UnitItems {
+    fn unify_sizes(&mut self) {
+        dep_vec::unify_sizes(&mut [
+            &mut self.assigned_decls, &mut self.assignments, &mut self.decl_refs, 
+            &mut self.addr_ofs, &mut self.derefs, &mut self.pointers, &mut self.ifs,
+            &mut self.dos, &mut self.ret_groups, &mut self.casts, &mut self.whiles,
+            &mut self.explicit_rets, &mut self.modules,
+        ]);
+    }
+}
+
+#[derive(Debug)]
+pub struct MetaDependee {
+    pub dependee: ExprId,
+    pub items: UnitItems,
+}
+
+#[derive(Debug)]
+pub struct LevelMetaDependees {
+    pub level: u32,
+    pub meta_dependees: Vec<MetaDependee>,
+}
+
+#[derive(Debug, Default)]
+pub struct Unit {
+    pub items: UnitItems,
 
     /// The expressions in this unit that later units have eval dependencies on
     pub eval_dependees: Vec<ExprId>,
 
     pub meta_dependees: Vec<LevelMetaDependees>,
-}
-
-impl Unit {
-    fn clear_up_to(&mut self, level: u32) {
-        self.int_lits.clear();
-        self.dec_lits.clear();
-        self.str_lits.clear();
-        self.char_lits.clear();
-        self.const_tys.clear();
-
-        // Intentionally don't clear stmts; they are added from scopes, not items, and they are processed at the end of pass 1
-
-        self.explicit_rets.clear_up_to(level);
-        self.ret_groups.clear_up_to(level);
-        self.casts.clear_up_to(level);
-        self.whiles.clear_up_to(level);
-        self.modules.clear_up_to(level);
-        self.dos.clear_up_to(level);
-        self.assigned_decls.clear_up_to(level);
-        self.assignments.clear_up_to(level);
-        self.decl_refs.clear_up_to(level);
-        self.addr_ofs.clear_up_to(level);
-        self.derefs.clear_up_to(level);
-        self.pointers.clear_up_to(level);
-        self.ifs.clear_up_to(level);
-    }
 }
 
 /// The namespace "inside" an expression,
@@ -284,7 +280,7 @@ impl Driver {
         }
     }
 
-    fn flush_staged_ret_groups(&mut self, sp: &mut Subprogram, mut unit: Option<&mut Unit>) {
+    fn flush_staged_ret_groups(&mut self, sp: &mut Subprogram) {
         let staged_ret_groups = std::mem::replace(&mut self.tir.staged_ret_groups, HashMap::new());
         for (decl, exprs) in staged_ret_groups {
             let scope = if let hir::Decl::Computed { scope, .. } = self.hir.decls[decl] {
@@ -298,33 +294,15 @@ impl Driver {
             let item = self.hir.decl_to_items[decl];
             let unit_id = sp.levels.item_to_units[item];
             let level = sp.levels.item_to_levels[item];
-            let unit = if let Some(unit) = &mut unit {
-                unit
-            } else {
-                &mut sp.units[unit_id as usize]
-            };
-            unit.ret_groups.insert(
+            let unit = &mut sp.units[unit_id as usize];
+            unit.items.ret_groups.insert(
                 level,
                 RetGroup { ty, exprs },
             );
         }
     }
 
-    fn build_tir_item(&mut self, sp: &mut Subprogram, id: ItemId, unit: Option<&mut Unit>) {
-        match self.hir.items[id] {
-            hir::Item::Expr(expr_id) => self.build_tir_expr(sp, id, expr_id, unit),
-            hir::Item::Decl(decl_id) => self.build_tir_decl(sp, id, decl_id, unit),
-        }
-    }
-
-    fn build_tir_expr(&mut self, sp: &mut Subprogram, item_id: ItemId, id: ExprId, unit: Option<&mut Unit>) {
-        let level = sp.levels.item_to_levels[item_id];
-        let unit = if let Some(unit) = unit {
-            unit
-        } else {
-            let unit = sp.levels.item_to_units[item_id];
-            &mut sp.units[unit as usize]
-        };
+    fn build_tir_expr(&mut self, unit: &mut UnitItems, level: u32, item_id: ItemId, id: ExprId) {
         macro_rules! insert_item {
             ($depvec:ident, $item:expr) => {{
                 unit.$depvec.insert(
@@ -376,15 +354,7 @@ impl Driver {
         }
     }
 
-    fn build_tir_decl(&mut self, sp: &mut Subprogram, item_id: ItemId, id: DeclId, unit: Option<&mut Unit>) {
-        let level = sp.levels.item_to_levels[item_id];
-        let unit = if let Some(unit) = unit {
-            unit
-        } else {
-            let unit = sp.levels.item_to_units[item_id];
-            &mut sp.units[unit as usize]
-        };
-
+    fn build_tir_decl(&mut self, unit: &mut UnitItems, level: u32, item_id: ItemId, id: DeclId) {
         match &self.hir.decls[id] {
             // TODO: Add a parameter TIR item for (at least) checking that the type of the param is valid
             hir::Decl::Parameter { .. } => {},
@@ -582,45 +552,67 @@ impl Driver {
         sp.units.resize_with(sp.levels.units.len(), || Unit::default());
 
         // Finally, convert HIR items to TIR and add them to the correct spot
-        for unit in 0..sp.levels.units.len() {
-            for i in 0..sp.levels.units[unit].items.len() {
-                let item_id = sp.levels.units[unit].items[i];
+        for unit_id in 0..sp.levels.units.len() {
+            let unit = &mut sp.units[unit_id];
+            for i in 0..sp.levels.units[unit_id].items.len() {
+                let item_id = sp.levels.units[unit_id].items[i];
+                let level = sp.levels.item_to_levels[item_id];
                 match self.hir.items[item_id] {
                     hir::Item::Decl(id) => {
-                        self.build_tir_decl(&mut sp, item_id, id, None);
+                        self.build_tir_decl(&mut unit.items, level, item_id, id);
                     }
                     hir::Item::Expr(id) => {
-                        let unit = &mut sp.units[unit];
                         if self.tir.depended_on[id] { unit.eval_dependees.push(id); }
-                        self.build_tir_expr(&mut sp, item_id, id, None);
+                        self.build_tir_expr(&mut unit.items, level, item_id, id);
                     }
                 }
             }
 
-            for item in &sp.levels.units[unit].meta_dependees {
+            for level_dep in &sp.levels.units[unit_id].meta_dependees {
                 let mut meta_dependees = Vec::new();
-                for &item in &item.meta_dependees {
-                    match self.hir.items[item] {
-                        hir::Item::Expr(id) => meta_dependees.push(id),
+                for dep in &level_dep.meta_dependees {
+                    let expr = match self.hir.items[dep.item] {
+                        hir::Item::Expr(id) => id,
                         hir::Item::Decl(id) => panic!("Can't have metadependency on a declaration!"),
+                    };
+                    let mut items = UnitItems::default();
+                    let level = sp.levels.item_to_levels[dep.item];
+                    self.build_tir_expr(&mut items, level, dep.item, expr);
+                    for &item_id in &dep.deps {
+                        let level = sp.levels.item_to_levels[item_id];
+                        match self.hir.items[item_id] {
+                            hir::Item::Decl(id) => {
+                                self.build_tir_decl(&mut items, level, item_id, id);
+                            }
+                            hir::Item::Expr(id) => {
+                                self.build_tir_expr(&mut items, level, item_id, id);
+                            }
+                        }
                     }
+                    items.unify_sizes();
+                    meta_dependees.push(
+                        MetaDependee {
+                            dependee: expr,
+                            items,
+                        }
+                    );
                 }
-                sp.units[unit].meta_dependees.push(
+                sp.units[unit_id].meta_dependees.push(
                     LevelMetaDependees {
-                        level: item.level,
+                        level: level_dep.level,
                         meta_dependees,
                     }
                 )
             }
         }
-        self.flush_staged_ret_groups(&mut sp, None);
+        self.flush_staged_ret_groups(&mut sp);
         for scope in &self.hir.imper_scopes {
             for &item in &scope.items {
                 match item {
                     hir::ScopeItem::Stmt(expr) => {
                         let unit = sp.levels.item_to_units[ei!(expr)];
                         let unit = &mut sp.units[unit as usize];
-                        unit.stmts.push(Stmt { root_expr: expr });
+                        unit.items.stmts.push(Stmt { root_expr: expr });
                     },
                     hir::ScopeItem::ComputedDecl(_) | hir::ScopeItem::StoredDecl { .. } => {},
                 }
@@ -628,12 +620,7 @@ impl Driver {
         }
 
         for unit in &mut sp.units {
-            dep_vec::unify_sizes(&mut [
-                &mut unit.assigned_decls, &mut unit.assignments, &mut unit.decl_refs, 
-                &mut unit.addr_ofs, &mut unit.derefs, &mut unit.pointers, &mut unit.ifs,
-                &mut unit.dos, &mut unit.ret_groups, &mut unit.casts, &mut unit.whiles,
-                &mut unit.explicit_rets, &mut unit.modules,
-            ]);
+            unit.items.unify_sizes();
         }
 
         sp.units
