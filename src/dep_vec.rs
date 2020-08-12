@@ -6,6 +6,10 @@ pub struct DepVec<T> {
     storage: Vec<Vec<T>>,
 }
 
+impl<T> Default for DepVec<T> {
+    fn default() -> Self { Self::new() }
+}
+
 impl<T> DepVec<T> {
     pub fn new() -> Self {
         DepVec { storage: Vec::new() }

@@ -68,6 +68,13 @@ struct Subprogram {
 }
 
 #[derive(Debug)]
+pub struct LevelMetaDependees {
+    pub level: u32,
+    pub exprs: Vec<ExprId>,
+    pub decls: Vec<DeclId>,
+}
+
+#[derive(Debug, Default)]
 pub struct Unit {
     pub int_lits: Vec<ExprId>,
     pub dec_lits: Vec<ExprId>,
@@ -91,6 +98,8 @@ pub struct Unit {
 
     /// The expressions in this unit that later units have eval dependencies on
     pub eval_dependees: Vec<ExprId>,
+
+    pub meta_dependees: Vec<LevelMetaDependees>,
 }
 
 impl Unit {
@@ -117,32 +126,6 @@ impl Unit {
         self.pointers.clear_up_to(level);
         self.ifs.clear_up_to(level);
     }
-    fn new() -> Self {
-        Self {
-            int_lits: Vec::new(),
-            dec_lits: Vec::new(),
-            str_lits: Vec::new(),
-            char_lits: Vec::new(),
-            const_tys: Vec::new(),
-            stmts: Vec::new(),
-            explicit_rets: DepVec::new(),
-            ret_groups: DepVec::new(),
-            casts: DepVec::new(),
-            whiles: DepVec::new(),
-            modules: DepVec::new(),
-            dos: DepVec::new(),
-            assigned_decls: DepVec::new(),
-            assignments: DepVec::new(),
-            decl_refs: DepVec::new(),
-            addr_ofs: DepVec::new(),
-            derefs: DepVec::new(),
-            pointers: DepVec::new(),
-            ifs: DepVec::new(),
-
-            eval_dependees: Vec::new(),
-        }
-    }
-
 }
 
 #[derive(Debug)]
@@ -587,7 +570,7 @@ impl Driver {
         let levels = self.tir.graph.solve();
 
         let mut sp = Subprogram { units: Vec::new(), levels };
-        sp.units.resize_with(sp.levels.units.len(), || Unit::new());
+        sp.units.resize_with(sp.levels.units.len(), || Unit::default());
 
         // Finally, convert HIR items to TIR and add them to the correct spot
         for unit in 0..sp.levels.units.len() {
@@ -603,6 +586,24 @@ impl Driver {
                         self.build_tir_expr(&mut sp, item_id, id, None);
                     }
                 }
+            }
+
+            for item in &sp.levels.units[unit].meta_dependees {
+                let mut exprs = Vec::new();
+                let mut decls = Vec::new();
+                for &item in &item.meta_dependees {
+                    match self.hir.items[item] {
+                        hir::Item::Expr(id) => exprs.push(id),
+                        hir::Item::Decl(id) => decls.push(id),
+                    }
+                }
+                sp.units[unit].meta_dependees.push(
+                    LevelMetaDependees {
+                        level: item.level,
+                        exprs,
+                        decls,
+                    }
+                )
             }
         }
         self.flush_staged_ret_groups(&mut sp, None);
