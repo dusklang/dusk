@@ -256,8 +256,8 @@ impl Driver {
             tp.debug_output(&self.hir, &self.file, level as usize);
 
             if meta_dependee_i < meta_dependees.len() && meta_dependees[meta_dependee_i].level == level {
-                let mut mock = MockTypeProvider::new(tp);
                 for dep in &meta_dependees[meta_dependee_i].meta_dependees {
+                    let mut mock = MockTypeProvider::new(tp);
                     if mock.constraints(dep.dependee).can_unify_to(&Type::Mod.into()).is_ok() {
                         mock.constraints_mut(dep.dependee).set_to(&Type::Mod);
                         self.run_pass_2(&dep.items, level+1, &mut mock);
