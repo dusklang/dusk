@@ -6,7 +6,7 @@ mod constraints;
 pub mod type_provider;
 
 use constraints::{ConstraintList, UnificationError};
-use type_provider::TypeProvider;
+use type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 
 use crate::source_info::SourceFile;
 use crate::driver::Driver;
@@ -36,7 +36,7 @@ impl Driver {
         self.hir.explicit_tys[id].map(|ty| tp.get_evaluated_type(ty)).unwrap_or(&Type::Error)
     }
 
-    fn run_pass_1(&mut self, unit: &Unit, tp: &mut impl TypeProvider) -> u32 {
+    fn run_pass_1(&mut self, unit: &Unit, tp: &mut RealTypeProvider) -> u32 {
         // Assumption: all DepVecs in the unit have the same number of levels
         let levels = unit.assigned_decls.num_levels();
 
@@ -59,6 +59,7 @@ impl Driver {
             *tp.constraints_mut(item) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Ty.into()]), None);
             *tp.ty_mut(item) = Type::Ty;
         }
+        let mut meta_dependee_i = 0;
         for level in 0..levels {
             for item in unit.assigned_decls.get_level(level) {
 
@@ -155,7 +156,7 @@ impl Driver {
                     }
                 }
                 *tp.constraints_mut(id) = ConstraintList::new(BuiltinTraits::empty(), Some(one_of), pref);
-                self.tir.overloads[decl_ref_id] = overloads;
+                *tp.overloads_mut(decl_ref_id) = overloads;
             }
             for item in unit.addr_ofs.get_level(level) {
                 let constraints = tp.constraints(item.expr).filter_map(|ty| {
@@ -253,6 +254,28 @@ impl Driver {
                 constraints.set_to(Type::Void);
             }
             tp.debug_output(&self.hir, &self.file, level as usize);
+
+            if meta_dependee_i < unit.meta_dependees.len() && unit.meta_dependees[meta_dependee_i].level == level {
+                let mut mock = MockTypeProvider::new(tp);
+                let mut mods = Vec::new();
+                for &dep in &unit.meta_dependees[meta_dependee_i].meta_dependees {
+                    if mock.constraints(dep).can_unify_to(&Type::Mod.into()).is_ok() {
+                        mock.constraints_mut(dep).set_to(&Type::Mod);
+                        mods.push(dep);
+                    }
+                }
+                if !mods.is_empty() {
+                    self.run_pass_2(unit, level+1, &mut mock);
+                    for module in mods {
+                        let module = self.eval_expr(module, &mock);
+                        match module {
+                            Const::Mod(scope) => println!("Scope: {:?}", scope),
+                            _ => panic!("Unexpected const kind!"),
+                        }
+                    }
+                }
+                meta_dependee_i += 1;
+            }
         }
 
         levels
@@ -360,7 +383,7 @@ impl Driver {
 
                 // P.S. These borrows are only here because the borrow checker is dumb
                 let decls = &self.tir.decls;
-                let overloads = &mut self.tir.overloads[item.decl_ref_id];
+                let mut overloads = tp.overloads(item.decl_ref_id).clone();
                 let hir = &self.hir;
                 overloads.retain(|&overload| {
                     tp.fetch_decl_type(hir, overload).trivially_convertible_to(&ty)
@@ -404,7 +427,8 @@ impl Driver {
                     }
                     None
                 };
-                *tp.overload_mut(item.decl_ref_id) = overload;
+                *tp.overloads_mut(item.decl_ref_id) = overloads;
+                *tp.selected_overload_mut(item.decl_ref_id) = overload;
             }
             for item in unit.addr_ofs.get_level(level) {
                 let pointer_ty = tp.constraints(item.id).solve()
@@ -469,23 +493,26 @@ impl Driver {
         tp.debug_output(&self.hir, &self.file, 0);
     }
 
-    pub fn type_check(&mut self, units: &[Unit], tp: &mut impl TypeProvider) {
+    pub fn type_check(&mut self, units: &[Unit], dbg: bool) -> RealTypeProvider {
         // Assign the type of the void expression to be void.
+        let mut tp = RealTypeProvider::new(dbg, &self.hir, &self.tir);
         *tp.constraints_mut(self.hir.void_expr) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
         *tp.ty_mut(self.hir.void_expr) = Type::Void;
 
         for unit in units {
             // Pass 1: propagate info down from leaves to roots
-            let levels = self.run_pass_1(unit, tp);
+            let levels = self.run_pass_1(unit, &mut tp);
             
             // Pass 2: propagate info up from roots to leaves
-            self.run_pass_2(unit, levels, tp);
+            self.run_pass_2(unit, levels, &mut tp);
 
             for i in 0..unit.eval_dependees.len() {
                 let expr = unit.eval_dependees[i];
-                let val = self.eval_expr(expr, tp);
+                let val = self.eval_expr(expr, &tp);
                 tp.insert_eval_result(expr, val);
             }
         }
+
+        tp
     }
 }

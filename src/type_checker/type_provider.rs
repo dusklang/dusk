@@ -15,8 +15,11 @@ pub trait TypeProvider {
     fn ty(&self, expr: ExprId) -> &Type;
     fn ty_mut(&mut self, expr: ExprId) -> &mut Type;
 
-    fn overload(&self, decl_ref: DeclRefId) -> Option<DeclId>;
-    fn overload_mut(&mut self, decl_ref: DeclRefId) -> &mut Option<DeclId>;
+    fn overloads(&self, decl_ref: DeclRefId) -> &Vec<DeclId>;
+    fn overloads_mut(&mut self, decl_ref: DeclRefId) -> &mut Vec<DeclId>;
+
+    fn selected_overload(&self, decl_ref: DeclRefId) -> Option<DeclId>;
+    fn selected_overload_mut(&mut self, decl_ref: DeclRefId) -> &mut Option<DeclId>;
 
     fn cast_method(&self, cast: CastId) -> CastMethod;
     fn cast_method_mut(&mut self, cast: CastId) -> &mut CastMethod;
@@ -39,8 +42,10 @@ pub trait TypeProvider {
 pub struct RealTypeProvider {
     /// The type of each expression
     types: IdxVec<Type, ExprId>,
+    /// The list of overloads for each decl ref
+    overloads: IdxVec<Vec<DeclId>, DeclRefId>,
     /// The selected overload for each decl ref
-    overloads: IdxVec<Option<DeclId>, DeclRefId>,
+    selected_overloads: IdxVec<Option<DeclId>, DeclRefId>,
     /// The cast method for each cast expression
     cast_methods: IdxVec<CastMethod, CastId>,
     /// The constraints on each expression's type
@@ -62,6 +67,7 @@ impl RealTypeProvider {
         let mut tp = RealTypeProvider {
             types: IdxVec::new(),
             overloads: IdxVec::new(),
+            selected_overloads: IdxVec::new(),
             cast_methods: IdxVec::new(),
             constraints: IdxVec::new(),
             constraints_copy: IdxVec::new(),
@@ -73,13 +79,14 @@ impl RealTypeProvider {
             
             debug,
         };
+        tp.overloads.resize_with(hir.decl_refs.len(), Default::default);
         tp.types.resize_with(hir.exprs.len(), Default::default);
         tp.constraints.resize_with(hir.exprs.len(), Default::default);
         if debug {
             tp.constraints_copy.resize_with(hir.exprs.len(), Default::default);
         }
-        tp.overloads.resize_with(tir.overloads.len(), || None);
-        tp.preferred_overloads.resize_with(tir.overloads.len(), || None);
+        tp.selected_overloads.resize_with(hir.decl_refs.len(), || None);
+        tp.preferred_overloads.resize_with(hir.decl_refs.len(), || None);
         tp.cast_methods.resize_with(hir.cast_counter.len(), || CastMethod::Noop);
         
         for i in 0..tir.decls.len() {
@@ -149,11 +156,18 @@ impl TypeProvider for RealTypeProvider {
         &mut self.types[expr]
     }
 
-    fn overload(&self, decl_ref: DeclRefId) -> Option<DeclId> {
-        self.overloads[decl_ref]
+    fn overloads(&self, decl_ref: DeclRefId) -> &Vec<DeclId> {
+        &self.overloads[decl_ref]
     }
-    fn overload_mut(&mut self, decl_ref: DeclRefId) -> &mut Option<DeclId> {
+    fn overloads_mut(&mut self, decl_ref: DeclRefId) -> &mut Vec<DeclId> {
         &mut self.overloads[decl_ref]
+    }
+
+    fn selected_overload(&self, decl_ref: DeclRefId) -> Option<DeclId> {
+        self.selected_overloads[decl_ref]
+    }
+    fn selected_overload_mut(&mut self, decl_ref: DeclRefId) -> &mut Option<DeclId> {
+        &mut self.selected_overloads[decl_ref]
     }
 
     fn cast_method(&self, cast: CastId) -> CastMethod {
@@ -186,8 +200,10 @@ pub struct MockTypeProvider<'real> {
 
     /// The type of each expression
     types: HashMap<ExprId, Type>,
+    /// The list of overloads for each decl ref
+    overloads: HashMap<DeclRefId, Vec<DeclId>>,
     /// The selected overload for each decl ref
-    overloads: HashMap<DeclRefId, Option<DeclId>>,
+    selected_overloads: HashMap<DeclRefId, Option<DeclId>>,
     /// The cast method for each cast expression
     cast_methods: HashMap<CastId, CastMethod>,
     /// The constraints on each expression's type
@@ -249,6 +265,7 @@ impl<'real> MockTypeProvider<'real> {
             real,
             types: HashMap::new(),
             overloads: HashMap::new(),
+            selected_overloads: HashMap::new(),
             cast_methods: HashMap::new(),
             constraints: HashMap::new(),
             constraints_copy: HashMap::new(),
@@ -301,7 +318,8 @@ impl<'real> TypeProvider for MockTypeProvider<'real> {
         self.fw_decl_types_mut(decl)
     }
 
-    forward_mock!(overloads, overload, overload_mut, DeclRefId, Option<DeclId>, deref: deref);
+    forward_mock!(overloads, overloads, overloads_mut, DeclRefId, Vec<DeclId>);
+    forward_mock!(selected_overloads, selected_overload, selected_overload_mut, DeclRefId, Option<DeclId>, deref: deref);
     forward_mock!(cast_methods, cast_method, cast_method_mut, CastId, CastMethod, deref: deref);
     forward_mock!(types, ty, ty_mut, ExprId, Type);
     forward_mock!(constraints, constraints, constraints_mut, ExprId, ConstraintList);

@@ -556,7 +556,7 @@ impl Driver {
     }
 
     fn get(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId, tp: &impl TypeProvider) -> InstrId {
-        let id = tp.overload(id).expect("No overload found!");
+        let id = tp.selected_overload(id).expect("No overload found!");
         match self.get_decl(id, tp) {
             Decl::Computed { get } => b.code.push(Instr::Call { arguments, func: get }),
             Decl::Stored(id) => {
@@ -577,7 +577,7 @@ impl Driver {
     }
 
     fn set(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId, value: InstrId, tp: &impl TypeProvider) -> InstrId {
-        let id = tp.overload(id).expect("No overload found!");
+        let id = tp.selected_overload(id).expect("No overload found!");
         match self.get_decl(id, tp) {
             Decl::Computed { .. } => panic!("setters not yet implemented!"),
             Decl::Stored(id) => {
@@ -595,7 +595,7 @@ impl Driver {
     }
 
     fn modify(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId, tp: &impl TypeProvider) -> InstrId {
-        let id = tp.overload(id).expect("No overload found!");
+        let id = tp.selected_overload(id).expect("No overload found!");
         match self.get_decl(id, tp) {
             Decl::Computed { .. } => panic!("modify accessors not yet implemented!"),
             Decl::Stored(id) => {
@@ -637,7 +637,7 @@ impl Driver {
             // that you can't chain `if let`s in Rust.
             Expr::DeclRef { ref arguments, id } => loop {
                 // Check if the declaration is an intrinsic
-                let decl_id = tp.overload(id).unwrap();
+                let decl_id = tp.selected_overload(id).unwrap();
                 if let hir::Decl::Intrinsic { intr, .. } = self.hir.decls[decl_id] {
                     // Check if we need to special case the intrinsic
                     match intr {

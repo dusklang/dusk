@@ -130,9 +130,6 @@ impl Unit {
 #[derive(Debug)]
 pub struct Builder {
     pub decls: IdxVec<Decl, DeclId>,
-    /// Each declref's overload choices
-    pub overloads: IdxVec<Vec<DeclId>, DeclRefId>,
-
     graph: Graph,
     depended_on: IdxVec<bool, ExprId>,
 
@@ -143,7 +140,6 @@ impl Builder {
     pub fn new() -> Self {
         Self {
             decls: IdxVec::new(),
-            overloads: IdxVec::new(),
             graph: Graph::default(),
             depended_on: IdxVec::new(),
             staged_ret_groups: HashMap::new(),
@@ -420,9 +416,6 @@ impl Driver {
             self.tir.decls.push(Decl { param_tys, is_mut });
         }
 
-        debug_assert!(self.tir.overloads.is_empty());
-        self.tir.overloads.reserve(self.hir.decl_refs.len());
-
         self.initialize_graph();
         ei_injector!(self, ei);
         di_injector!(self, di);
@@ -490,7 +483,6 @@ impl Driver {
 
         // TODO: do something better than an array of bools :(
         self.tir.depended_on.resize_with(self.hir.exprs.len(), || false);
-        self.tir.overloads.resize_with(self.hir.decl_refs.len(), Default::default);
 
         // Add types 2-4 dependencies to graph
         for i in 0..self.hir.decls.len() {
