@@ -192,31 +192,30 @@ impl Driver {
     pub fn find_overloads(&self, decl_ref: &hir::DeclRef) -> Vec<DeclId> {
         let mut overloads = Vec::new();
 
-        let mut last_was_imperative = true;
+        let mut started_at_mod_scope = false;
         let mut root_namespace = true;
         let mut namespace = Some(decl_ref.namespace);
         while let Some(ns) = namespace {
             namespace = match ns {
                 Namespace::Imper { scope, end_offset } => {
-                    if !last_was_imperative { break; }
-    
-                    let namespace = &self.hir.imper_ns[scope];
-                    let result = namespace.decls[0..end_offset].iter()
-                        .rev()
-                        .find(|&decl| decl.name == decl_ref.name && decl.num_params == decl_ref.num_arguments);
-                    if let Some(decl) = result {
-                        overloads.push(decl.id);
-                        break;
+                    if !started_at_mod_scope {
+                        let namespace = &self.hir.imper_ns[scope];
+                        let result = namespace.decls[0..end_offset].iter()
+                            .rev()
+                            .find(|&decl| decl.name == decl_ref.name && decl.num_params == decl_ref.num_arguments);
+                        if let Some(decl) = result {
+                            overloads.push(decl.id);
+                            break;
+                        }
                     }
 
-                    last_was_imperative = true;
                     self.hir.imper_ns[scope].parent
                 },
                 Namespace::Mod(scope_ns) => {
                     let scope = self.hir.mod_ns[scope_ns].scope;
                     self.find_overloads_in_mod(decl_ref, scope, &mut overloads);
 
-                    last_was_imperative = false;
+                    if root_namespace { started_at_mod_scope = true; }
                     self.hir.mod_ns[scope_ns].parent
                 },
     

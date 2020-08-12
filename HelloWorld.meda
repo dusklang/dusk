@@ -108,6 +108,42 @@ fn take_a_type(T: type) {
     print("\n")
 }
 
+fn compute_a_module(switch: u32): module {
+    if switch == 0 {
+        mod {
+            fn print_the_switch() {
+                print("The switch is 0!\n")
+            }
+        }
+    } else if switch == 1 {
+        mod {
+            fn print_the_switch() {
+                print("The switch is 1!\n")
+            }
+        }
+    } else if switch == 2 {
+        mod {
+            fn print_the_switch() {
+                print("The switch is 1!\n")
+            }
+        }
+    } else if switch == 3 {
+        mod {
+            fn print_the_switch() {
+                print("The switch is 1!\n")
+            }
+        }
+    } else {
+        mod {
+            fn print_the_switch() {
+                print("I don't know what the switch is!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+            }
+        }
+    }
+}
+
+mawd :: compute_a_module(2)
+
 fn main() {
     print("the number is ")
     std.print_num(compute_a_number() as i32)
@@ -141,13 +177,14 @@ fn main() {
 
     p :: 45 | 12
 
-    // Condition is intentionally false, just to test module member lookup
     take_a_type(i8 *mut *mut)
 
     // Allocate a single 8-bit integer on the heap
     num :: malloc(1) as u8 *mut
     *num = 12
     free(num as void *mut)
+
+    mawd.print_the_switch()
 
     fn float_const() {
         blah: f32 = 5.2
