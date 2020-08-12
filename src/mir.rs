@@ -10,9 +10,10 @@ use crate::arch::Arch;
 use crate::driver::Driver;
 use crate::ty::Type;
 use crate::type_checker as tc;
+use tc::type_provider::TypeProvider;
 use tc::CastMethod;
 use crate::index_vec::{Idx, IdxVec};
-use crate::builder::{DeclId, ExprId, DeclRefId, ScopeId, Intrinsic};
+use crate::builder::{DeclId, ExprId, ModScopeId, DeclRefId, ImperScopeId, Intrinsic};
 use crate::hir::{self, Expr, ScopeItem, StoredDeclId};
 
 newtype_index!(InstrId pub);
@@ -29,6 +30,7 @@ pub enum Const {
     Str { id: StrId, ty: Type },
     Bool(bool),
     Ty(Type),
+    Mod(ModScopeId),
 }
 
 impl Const {
@@ -39,6 +41,7 @@ impl Const {
             Const::Str { ty, .. } => ty.clone(),
             Const::Bool(_) => Type::Bool,
             Const::Ty(_) => Type::Ty,
+            Const::Mod(_) => Type::Mod,
         }
     }
 }
@@ -182,6 +185,7 @@ fn expr_to_const(expr: &Expr, ty: Type, strings: &mut IdxVec<CString, StrId>) ->
             _ => panic!("unexpected type for character")
         },
         Expr::ConstTy(ref ty) => Const::Ty(ty.clone()),
+        Expr::Mod { id } => Const::Mod(id),
         _ => panic!("Cannot convert expression to constant: {:#?}", expr),
     }
 }
@@ -247,24 +251,24 @@ impl Builder {
 }
 
 impl Driver {
-    pub fn build_mir(&mut self) {
+    pub fn build_mir(&mut self, tp: &impl TypeProvider) {
         for i in 0..self.hir.decls.len() {
-            self.get_decl(DeclId::new(i));
+            self.get_decl(DeclId::new(i), tp);
         }
 
         for i in 0..self.mir.static_inits.len() {
             let id = StaticId::new(i);
             let init = self.mir.static_inits[id];
-            let konst = self.eval_expr(init);
+            let konst = self.eval_expr(init, tp);
             self.mir.statics.push(konst);
         }
     }
 
-    pub fn build_standalone_expr(&mut self, expr: ExprId) -> Function {
-        self.build_function(None, self.tc.types[expr].clone(), FunctionBody::Expr(expr), DeclId::new(0)..DeclId::new(0))
+    pub fn build_standalone_expr(&mut self, expr: ExprId, tp: &impl TypeProvider) -> Function {
+        self.build_function(None, tp.ty(expr).clone(), FunctionBody::Expr(expr), DeclId::new(0)..DeclId::new(0), tp)
     }
 
-    fn get_decl(&mut self, id: DeclId) -> Decl {
+    fn get_decl(&mut self, id: DeclId, tp: &impl TypeProvider) -> Decl {
         if let Some(decl) = self.mir.decls.get(&id) { return decl.clone(); }
         match self.hir.decls[id] {
             hir::Decl::Computed { ref params, scope, .. } => {
@@ -272,7 +276,13 @@ impl Driver {
                 let decl = Decl::Computed { get };
                 self.mir.decls.insert(id, decl.clone());
                 let params = params.clone();
-                let func = self.build_function(Some(self.hir.names[id]), self.decl_type(id).clone(), FunctionBody::Scope(scope), params.clone());
+                let func = self.build_function(
+                    Some(self.hir.names[id]),
+                    self.decl_type(id, tp).clone(),
+                    FunctionBody::Scope(scope),
+                    params.clone(),
+                    tp
+                );
                 self.mir.functions.push(func);
                 decl
             },
@@ -287,7 +297,7 @@ impl Driver {
                 decl
             },
             hir::Decl::Intrinsic { intr, .. } => {
-                let decl = Decl::Intrinsic(intr, self.decl_type(id).clone());
+                let decl = Decl::Intrinsic(intr, self.decl_type(id, tp).clone());
                 self.mir.decls.insert(id, decl.clone());
                 decl
             },
@@ -298,7 +308,7 @@ impl Driver {
                 decl
             },
             hir::Decl::Const(root_expr) => {
-                let konst = self.eval_expr(root_expr);
+                let konst = self.eval_expr(root_expr, tp);
 
                 // TODO: Deal with cycles!
                 let decl = Decl::Const(konst);
@@ -316,6 +326,7 @@ impl Driver {
             Const::Int { lit, ref ty } => writeln!(f, "{} as {:?}", lit, ty),
             Const::Str { id, ref ty } => writeln!(f, "%str{} ({:?}) as {:?}", id.idx(), self.mir.strings[id], ty),
             Const::Ty(ref ty) => writeln!(f, "`{:?}`", ty),
+            Const::Mod(id) => writeln!(f, "%mod{}", id.idx()),
         }
     }
 
@@ -450,7 +461,7 @@ impl Driver {
 
 #[derive(Copy, Clone)]
 enum FunctionBody {
-    Scope(ScopeId),
+    Scope(ImperScopeId),
     Expr(ExprId),
 }
 
@@ -485,13 +496,13 @@ impl FunctionBuilder {
 }
 
 impl Driver {
-    fn build_function(&mut self, name: Option<Sym>, ret_ty: Type, body: FunctionBody, params: Range<DeclId>) -> Function {
+    fn build_function(&mut self, name: Option<Sym>, ret_ty: Type, body: FunctionBody, params: Range<DeclId>, tp: &impl TypeProvider) -> Function {
         let mut code = IdxVec::new();
         let void_instr = code.push(Instr::Void);
         for param in params.start.idx()..params.end.idx() {
             let param = DeclId::new(param);
             if let hir::Decl::Parameter { .. } = self.hir.decls[param] {
-                code.push(Instr::Parameter(self.decl_type(param).clone()));
+                code.push(Instr::Parameter(self.decl_type(param, tp).clone()));
             } else {
                 panic!("unexpected non-parameter as parameter decl");
             }
@@ -508,8 +519,8 @@ impl Driver {
         };
         let ctx = Context::new(0, DataDest::Ret, ControlDest::Unreachable);
         match body {
-            FunctionBody::Expr(expr) => self.build_expr(&mut b, expr, ctx),
-            FunctionBody::Scope(scope) => self.build_scope(&mut b, scope, ctx),
+            FunctionBody::Expr(expr) => self.build_expr(&mut b, expr, ctx, tp),
+            FunctionBody::Scope(scope) => self.build_scope(&mut b, scope, ctx, tp),
         };
         Function {
             name: b.name,
@@ -519,38 +530,34 @@ impl Driver {
         }
     }
 
-    fn type_of(&self, expr: ExprId) -> Type {
-        self.tc.types[expr].clone()
-    }
-
-    fn build_scope_item(&mut self, b: &mut FunctionBuilder, item: ScopeItem) {
+    fn build_scope_item(&mut self, b: &mut FunctionBuilder, item: ScopeItem, tp: &impl TypeProvider) {
         match item {
             ScopeItem::Stmt(expr) => {
-                self.build_expr(b, expr, Context::new(0, DataDest::Void, ControlDest::Continue));
+                self.build_expr(b, expr, Context::new(0, DataDest::Void, ControlDest::Continue), tp);
             },
             ScopeItem::StoredDecl { id, root_expr, .. } => {
-                let ty = self.type_of(root_expr);
+                let ty = tp.ty(root_expr).clone();
                 let location = b.code.push(Instr::Alloca(ty));
                 assert_eq!(b.stored_decl_locs.len(), id.idx());
                 b.stored_decl_locs.push(location);
-                self.build_expr(b, root_expr, Context::new(0, DataDest::Store { location }, ControlDest::Continue));
+                self.build_expr(b, root_expr, Context::new(0, DataDest::Store { location }, ControlDest::Continue), tp);
             },
             // No need to give local computed decls special treatment at the MIR level
             ScopeItem::ComputedDecl(_) => {},
         }
     }
 
-    fn build_scope(&mut self, b: &mut FunctionBuilder, scope: ScopeId, ctx: Context) -> InstrId {
-        for i in 0..self.hir.scopes[scope].items.len() {
-            let item = self.hir.scopes[scope].items[i];
-            self.build_scope_item(b, item);
+    fn build_scope(&mut self, b: &mut FunctionBuilder, scope: ImperScopeId, ctx: Context, tp: &impl TypeProvider) -> InstrId {
+        for i in 0..self.hir.imper_scopes[scope].items.len() {
+            let item = self.hir.imper_scopes[scope].items[i];
+            self.build_scope_item(b, item, tp);
         }
-        self.build_expr(b, self.hir.scopes[scope].terminal_expr, ctx)
+        self.build_expr(b, self.hir.imper_scopes[scope].terminal_expr, ctx, tp)
     }
 
-    fn get(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId) -> InstrId {
-        let id = self.tc.overloads[id].expect("No overload found!");
-        match self.get_decl(id) {
+    fn get(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId, tp: &impl TypeProvider) -> InstrId {
+        let id = tp.selected_overload(id).expect("No overload found!");
+        match self.get_decl(id, tp) {
             Decl::Computed { get } => b.code.push(Instr::Call { arguments, func: get }),
             Decl::Stored(id) => {
                 assert!(arguments.is_empty());
@@ -569,9 +576,9 @@ impl Driver {
         }
     }
 
-    fn set(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId, value: InstrId) -> InstrId {
-        let id = self.tc.overloads[id].expect("No overload found!");
-        match self.get_decl(id) {
+    fn set(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId, value: InstrId, tp: &impl TypeProvider) -> InstrId {
+        let id = tp.selected_overload(id).expect("No overload found!");
+        match self.get_decl(id, tp) {
             Decl::Computed { .. } => panic!("setters not yet implemented!"),
             Decl::Stored(id) => {
                 assert!(arguments.is_empty());
@@ -587,9 +594,9 @@ impl Driver {
         }
     }
 
-    fn modify(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId) -> InstrId {
-        let id = self.tc.overloads[id].expect("No overload found!");
-        match self.get_decl(id) {
+    fn modify(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId, tp: &impl TypeProvider) -> InstrId {
+        let id = tp.selected_overload(id).expect("No overload found!");
+        match self.get_decl(id, tp) {
             Decl::Computed { .. } => panic!("modify accessors not yet implemented!"),
             Decl::Stored(id) => {
                 assert!(arguments.is_empty());
@@ -601,15 +608,15 @@ impl Driver {
         }
     }
 
-    fn build_expr(&mut self, b: &mut FunctionBuilder, expr: ExprId, mut ctx: Context) -> InstrId {
+    fn build_expr(&mut self, b: &mut FunctionBuilder, expr: ExprId, mut ctx: Context, tp: &impl TypeProvider) -> InstrId {
         // HACK!!!!
         let mut should_allow_set = false;
 
-        let ty = self.type_of(expr);
+        let ty = tp.ty(expr).clone();
 
         let instr = match self.hir.exprs[expr] {
             Expr::Void => b.void_instr,
-            Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::StrLit { .. } | Expr::CharLit { .. } | Expr::ConstTy(_) => {
+            Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::StrLit { .. } | Expr::CharLit { .. } | Expr::ConstTy(_) | Expr::Mod { .. } => {
                 let konst = expr_to_const(&self.hir.exprs[expr], ty.clone(), &mut self.mir.strings);
                 b.code.push(Instr::Const(konst))
             },
@@ -618,6 +625,7 @@ impl Driver {
                     b,
                     rhs,
                     Context::new(0, DataDest::Set { dest: lhs }, ctx.control.clone()),
+                    tp,
                 );
                 // Because we override the data destination above, we need to handle it ourselves
                 return match ctx.data {
@@ -629,7 +637,7 @@ impl Driver {
             // that you can't chain `if let`s in Rust.
             Expr::DeclRef { ref arguments, id } => loop {
                 // Check if the declaration is an intrinsic
-                let decl_id = self.tc.overloads[id].unwrap();
+                let decl_id = tp.selected_overload(id).unwrap();
                 if let hir::Decl::Intrinsic { intr, .. } = self.hir.decls[decl_id] {
                     // Check if we need to special case the intrinsic
                     match intr {
@@ -648,6 +656,7 @@ impl Driver {
                                     b,
                                     lhs,
                                     Context::new(0, DataDest::Branch(left_true_bb, false_bb), ControlDest::Continue),
+                                    tp,
                                 );
 
                                 b.begin_bb(left_true_bb);
@@ -655,6 +664,7 @@ impl Driver {
                                     b,
                                     rhs,
                                     Context::new(0, DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
+                                    tp,
                                 );
                             } else {
                                 let left_false_bb = b.new_bb();
@@ -663,16 +673,17 @@ impl Driver {
                                     b,
                                     lhs,
                                     Context::new(0, DataDest::Branch(left_true_bb, left_false_bb), ControlDest::Continue),
+                                    tp,
                                 );
 
                                 b.begin_bb(left_true_bb);
                                 // No further branching required, because (true && foo) <=> foo
                                 let branch_ctx = ctx.redirect(location, Some(after_bb));
-                                self.build_expr(b, rhs, branch_ctx.clone());
+                                self.build_expr(b, rhs, branch_ctx.clone(), tp);
 
                                 b.begin_bb(left_false_bb);
                                 let false_val = b.code.push(Instr::Const(Const::Bool(false)));
-                                self.handle_context(b, false_val, expr, Type::Bool, branch_ctx, false);
+                                self.handle_context(b, false_val, expr, Type::Bool, branch_ctx, false, tp);
 
                                 b.begin_bb(after_bb);
                                 if let Some(location) = location {
@@ -692,6 +703,7 @@ impl Driver {
                                     b,
                                     lhs,
                                     Context::new(0, DataDest::Branch(true_bb, left_false_bb), ControlDest::Continue),
+                                    tp,
                                 );
 
                                 b.begin_bb(left_false_bb);
@@ -699,6 +711,7 @@ impl Driver {
                                     b,
                                     rhs,
                                     Context::new(0, DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
+                                    tp
                                 );
                             } else {
                                 let left_true_bb = b.new_bb();
@@ -712,15 +725,16 @@ impl Driver {
                                     b,
                                     lhs,
                                     Context::new(0, DataDest::Branch(left_true_bb, left_false_bb), ControlDest::Continue),
+                                    tp,
                                 );
 
                                 b.begin_bb(left_true_bb);
                                 let true_val = b.code.push(Instr::Const(Const::Bool(true)));
                                 let branch_ctx = ctx.redirect(location, Some(after_bb));
-                                self.handle_context(b, true_val, expr, Type::Bool, branch_ctx.clone(), false);
+                                self.handle_context(b, true_val, expr, Type::Bool, branch_ctx.clone(), false, tp);
 
                                 b.begin_bb(left_false_bb);
-                                self.build_expr(b, rhs, branch_ctx);
+                                self.build_expr(b, rhs, branch_ctx, tp);
 
                                 b.begin_bb(after_bb);
                                 if let Some(location) = location {
@@ -734,9 +748,9 @@ impl Driver {
                             assert_eq!(arguments.len(), 1);
                             let operand = arguments[0];
                             if let DataDest::Branch(true_bb, false_bb) = ctx.data {
-                                return self.build_expr(b, operand, Context::new(0, DataDest::Branch(false_bb, true_bb), ctx.control))
+                                return self.build_expr(b, operand, Context::new(0, DataDest::Branch(false_bb, true_bb), ctx.control), tp)
                             } else {
-                                let operand = self.build_expr(b, operand, Context::new(0, DataDest::Read, ControlDest::Continue));
+                                let operand = self.build_expr(b, operand, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
                                 b.code.push(Instr::LogicalNot(operand))
                             }
                         },
@@ -748,42 +762,42 @@ impl Driver {
                 should_allow_set = true;
                 // TODO: Don't clone arguments
                 let arguments = arguments.clone().iter().map(|&argument|
-                    self.build_expr(b, argument, Context::new(0, DataDest::Read, ControlDest::Continue))
+                    self.build_expr(b, argument, Context::new(0, DataDest::Read, ControlDest::Continue), tp)
                 ).collect();
 
                 break if ctx.indirection < 0 {
                     ctx.indirection += 1;
-                    self.modify(b, arguments, id)
+                    self.modify(b, arguments, id, tp)
                 } else {
                     match ctx.data {
                         DataDest::Receive { value, .. } => if ctx.indirection > 0 {
-                            let mut location = self.get(b, arguments, id);
+                            let mut location = self.get(b, arguments, id, tp);
                             location = self.handle_indirection(b, location, ty.clone(), ctx.indirection, 1);
                             ctx.indirection = 0;
                             b.code.push(Instr::Store { location, value })
                         } else {
-                            self.set(b, arguments, id, value)
+                            self.set(b, arguments, id, value, tp)
                         },
-                        _ => self.get(b, arguments, id),
+                        _ => self.get(b, arguments, id, tp),
                     }
                 }
             },
             Expr::Cast { expr, ty: dest_ty, cast_id } => {
-                let dest_ty = self.tc.get_evaluated_type(dest_ty).clone();
-                match &self.tc.cast_methods[cast_id] {
-                    CastMethod::Noop => return self.build_expr(b, expr, ctx),
+                let dest_ty = tp.get_evaluated_type(dest_ty).clone();
+                match tp.cast_method(cast_id) {
+                    CastMethod::Noop => return self.build_expr(b, expr, ctx, tp),
                     CastMethod::Reinterpret => {
-                        let value = self.build_expr(b, expr, Context::new(0, DataDest::Read, ControlDest::Continue));
+                        let value = self.build_expr(b, expr, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
                         b.code.push(Instr::Reinterpret(value, dest_ty))
                     },
                     CastMethod::Int => {
-                        let (src_width, _src_is_signed, dest_width, dest_is_signed) = match (&self.tc.types[expr], &dest_ty) {
+                        let (src_width, _src_is_signed, dest_width, dest_is_signed) = match (tp.ty(expr), &dest_ty) {
                             (&Type::Int { width: ref src_width, is_signed: src_is_signed }, &Type::Int { width: ref dest_width, is_signed: dest_is_signed })
                                 => (src_width.clone(), src_is_signed, dest_width.clone(), dest_is_signed),
                             _ => panic!("Internal compiler error: found invalid cast types while generating MIR")
                         };
                         let (src_bit_width, dest_bit_width) = (src_width.bit_width(self.mir.arch), dest_width.bit_width(self.mir.arch));
-                        let value = self.build_expr(b, expr, Context::new(0, DataDest::Read, ControlDest::Continue));
+                        let value = self.build_expr(b, expr, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
 
                         if src_bit_width == dest_bit_width {
                             // TODO: Bounds checking
@@ -804,27 +818,42 @@ impl Driver {
                         }
                     },
                     CastMethod::Float => {
-                        let value = self.build_expr(b, expr, Context::new(0, DataDest::Read, ControlDest::Continue));
+                        let value = self.build_expr(b, expr, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
                         b.code.push(Instr::FloatCast(value, dest_ty))
                     },
                     CastMethod::FloatToInt => {
-                        let value = self.build_expr(b, expr, Context::new(0, DataDest::Read, ControlDest::Continue));
+                        let value = self.build_expr(b, expr, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
                         b.code.push(Instr::FloatToInt(value, dest_ty))
                     },
                     CastMethod::IntToFloat => {
-                        let value = self.build_expr(b, expr, Context::new(0, DataDest::Read, ControlDest::Continue));
+                        let value = self.build_expr(b, expr, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
                         b.code.push(Instr::IntToFloat(value, dest_ty))
                     },
                 }
             },
-            Expr::AddrOf { expr: operand, .. } => return self.build_expr(b, operand, Context::new(ctx.indirection - 1, ctx.data, ctx.control)),
+            Expr::AddrOf { expr: operand, .. } => return self.build_expr(
+                b,
+                operand,
+                Context::new(ctx.indirection - 1, ctx.data, ctx.control),
+                tp,
+            ),
             Expr::Pointer { expr, is_mut } => {
                 assert_eq!(ctx.indirection, 0);
-                let op = self.build_expr(b, expr, Context::new(0, DataDest::Read, ControlDest::Continue));
+                let op = self.build_expr(
+                    b,
+                    expr,
+                    Context::new(0, DataDest::Read, ControlDest::Continue),
+                    tp,
+                );
                 b.code.push(Instr::Pointer { op, is_mut })
             },
-            Expr::Deref(operand) => return self.build_expr(b, operand, Context::new(ctx.indirection + 1, ctx.data, ctx.control)),
-            Expr::Do { scope } => return self.build_scope(b, scope, ctx),
+            Expr::Deref(operand) => return self.build_expr(
+                b,
+                operand,
+                Context::new(ctx.indirection + 1, ctx.data, ctx.control),
+                tp,
+            ),
+            Expr::Do { scope } => return self.build_scope(b, scope, ctx, tp),
             Expr::If { condition, then_scope, else_scope } => {
                 let true_bb = b.new_bb();
                 let false_bb = b.new_bb();
@@ -845,13 +874,14 @@ impl Driver {
                     b,
                     condition,
                     Context::new(0, DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
+                    tp,
                 );
                 b.begin_bb(true_bb);
                 let scope_ctx = ctx.redirect(result_location, Some(post_bb));
-                self.build_scope(b, then_scope, scope_ctx.clone());
+                self.build_scope(b, then_scope, scope_ctx.clone(), tp);
                 if let Some(else_scope) = else_scope {
                     b.begin_bb(false_bb);
-                    self.build_scope(b, else_scope, scope_ctx);
+                    self.build_scope(b, else_scope, scope_ctx, tp);
                 }
 
                 b.begin_bb(post_bb);
@@ -874,10 +904,10 @@ impl Driver {
 
                 b.code.push(Instr::Br(test_bb));
                 b.begin_bb(test_bb);
-                self.build_expr(b, condition, Context::new(0, DataDest::Branch(loop_bb, post_bb), ControlDest::Continue));
+                self.build_expr(b, condition, Context::new(0, DataDest::Branch(loop_bb, post_bb), ControlDest::Continue), tp);
 
                 b.begin_bb(loop_bb);
-                let val = self.build_scope(b, scope, Context::new(0, DataDest::Void, ControlDest::Block(test_bb)));
+                let val = self.build_scope(b, scope, Context::new(0, DataDest::Void, ControlDest::Block(test_bb)), tp);
 
                 match ctx.control {
                     ControlDest::Continue | ControlDest::Unreachable => {
@@ -892,11 +922,12 @@ impl Driver {
                     b,
                     expr,
                     Context::new(0, DataDest::Ret, ctx.control),
+                    tp,
                 );
             }
         };
         
-        self.handle_context(b, instr, expr, ty, ctx, should_allow_set)
+        self.handle_context(b, instr, expr, ty, ctx, should_allow_set, tp)
     }
 
     fn handle_indirection(&mut self, b: &mut FunctionBuilder, mut instr: InstrId, ty: Type, mut indirection: i8, target: i8) -> InstrId {
@@ -925,7 +956,7 @@ impl Driver {
         }
     }
 
-    fn handle_context(&mut self, b: &mut FunctionBuilder, instr: InstrId, expr: ExprId, ty: Type, ctx: Context, should_allow_set: bool) -> InstrId {
+    fn handle_context(&mut self, b: &mut FunctionBuilder, instr: InstrId, expr: ExprId, ty: Type, ctx: Context, should_allow_set: bool, tp: &impl TypeProvider) -> InstrId {
         let instr = self.handle_indirection(b, instr, ty, ctx.indirection, 0);
         match ctx.data {
             DataDest::Read => return instr,
@@ -943,6 +974,7 @@ impl Driver {
                     b,
                     dest,
                     Context::new(0, DataDest::Receive { value: instr, expr }, ctx.control.clone()),
+                    tp,
                 );
             }
             DataDest::Void => {},

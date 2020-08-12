@@ -8,11 +8,17 @@ use std::slice;
 use arrayvec::ArrayVec;
 
 use crate::arch::Arch;
-use crate::builder::Intrinsic;
+use crate::builder::{Intrinsic, ModScopeId};
 use crate::driver::Driver;
 use crate::index_vec::{IdxVec, Idx};
 use crate::mir::{self, Const, Function, FunctionRef, Instr, InstrId, StaticId, StrId};
 use crate::ty::{Type, IntWidth, FloatWidth};
+
+#[derive(Debug, Clone)]
+pub enum InternalValue {
+    Ty(Type),
+    Mod(ModScopeId),
+}
 
 #[derive(Debug)]
 pub enum Value {
@@ -20,7 +26,7 @@ pub enum Value {
     Inline(ArrayVec<[u8; 64 / 8]>),
     /// A *pointer* to a piece of memory
     Dynamic(Box<[u8]>),
-    Ty { ty: Type, indirection: u8 },
+    Internal { val: InternalValue, indirection: u8 },
     Nothing,
 }
 
@@ -29,7 +35,7 @@ impl Clone for Value {
         match self {
             Value::Inline(storage) => Value::Inline(storage.clone()),
             Value::Dynamic(_) => Value::from_bytes(self.as_bytes()),
-            &Value::Ty { ref ty, indirection } => Value::Ty { ty: ty.clone(), indirection },
+            &Value::Internal { ref val, indirection } => Value::Internal { val: val.clone(), indirection },
             Value::Nothing => Value::Nothing,
         }
     }
@@ -43,7 +49,7 @@ impl Value {
                 let address_bits = mem::transmute::<&Box<_>, *const u8>(ptr);
                 slice::from_raw_parts(address_bits, mem::size_of::<usize>())
             },
-            Value::Ty { .. } => panic!("Can't get bytes of a type!"),
+            Value::Internal { .. } => panic!("Can't get bytes of a compiler internal data structure!"),
             Value::Nothing => &[],
         }
     }
@@ -66,14 +72,14 @@ impl Value {
                 }
                 Value::Inline(buf)
             },
-            Value::Ty { ty, indirection } => Value::Ty { ty: ty.clone(), indirection: indirection - 1 },
+            Value::Internal { val, indirection } => Value::Internal { val: val.clone(), indirection: indirection - 1 },
             Value::Nothing => panic!("can't load from nothing"),
         }
     }
 
     fn store(&mut self, val: Value) {
         match val {
-            Value::Ty { ty, indirection } => *self = Value::Ty { ty, indirection: indirection + 1 },
+            Value::Internal { val, indirection } => *self = Value::Internal { val, indirection: indirection + 1 },
             _ => {
                 let ptr = self.as_raw_ptr();
                 let val = val.as_bytes();
@@ -134,13 +140,27 @@ impl Value {
         unsafe { mem::transmute(bytes[0]) }
     }
 
-    fn as_ty(&self) -> &Type {
+    fn as_internal(&self) -> &InternalValue {
         match self {
-            &Value::Ty { ref ty, indirection } => {
-                assert_eq!(indirection, 0, "can't get pointer to type as type");
-                ty
+            Value::Internal { val, indirection } => {
+                assert_eq!(*indirection, 0, "can't get pointer to internal compiler data structure without dereferencing");
+                val
             },
+            _ => panic!("Can't get non-internal compiler data structure as internal compiler data structure"),
+        }
+    }
+
+    fn as_ty(&self) -> &Type {
+        match self.as_internal() {
+            InternalValue::Ty(ty) => ty,
             _ => panic!("Can't get non-type as type"),
+        }
+    }
+
+    fn as_mod(&self) -> ModScopeId {
+        match *self.as_internal() {
+            InternalValue::Mod(id) => id,
+            _ => panic!("Can't get non-module as module"),
         }
     }
 
@@ -186,6 +206,7 @@ impl Value {
                 Value::from_usize(unsafe { mem::transmute(ptr) })
             },
             Const::Ty(ref ty) => Value::from_ty(ty.clone()),
+            Const::Mod(id) => Value::from_mod(id),
         }
     }
 
@@ -224,7 +245,8 @@ impl Value {
                 Const::Str { id, ty }
             },
             Type::Ty => Const::Ty(self.as_ty().clone()),
-            _ => panic!("Can't output value of type {:?} as constant", ty),
+            Type::Mod => Const::Mod(self.as_mod()),
+            _ => panic!("Can't output value of type `{:?}` as constant", ty),
         }
     }
 
@@ -276,8 +298,16 @@ impl Value {
         Value::from_u8(unsafe { mem::transmute(val) })
     }
 
+    fn from_internal(val: InternalValue) -> Value {
+        Value::Internal { val, indirection: 0 }
+    }
+
     fn from_ty(ty: Type) -> Value {
-        Value::Ty { ty, indirection: 0 }
+        Self::from_internal(InternalValue::Ty(ty))
+    }
+
+    fn from_mod(id: ModScopeId) -> Value {
+        Self::from_internal(InternalValue::Mod(id))
     }
 }
 

@@ -4,7 +4,7 @@ use string_interner::Sym;
 
 use crate::driver::Driver;
 use crate::token::{TokenKind, Token};
-use crate::builder::{ExprId, ScopeId, BinOp, UnOp, OpPlacement, Intrinsic};
+use crate::builder::{ExprId, ImperScopeId, BinOp, UnOp, OpPlacement, Intrinsic};
 use crate::ty::Type;
 use crate::error::Error;
 use crate::source_info::{self, SourceRange};
@@ -16,79 +16,78 @@ impl Driver {
         let mut p = Parser { cur: 0 };
 
         // Add intrinsics
-        {
-            // Integers, floats and bool
-            let values: Vec<_> = [
-                Type::u8(), Type::u16(), Type::u32(), Type::u64(), Type::usize(),
-                Type::i8(), Type::i16(), Type::i32(), Type::i64(), Type::isize(),
-                Type::f32(), Type::f64(), Type::Bool
-            ].iter().map(|ty| self.add_const_ty(ty.clone())).collect();
-            let numerics = &values[0..12];
-            let signed_numerics = &numerics[5..];
-            let integers = &numerics[0..10];
 
-            let boool        = values[12];
-            let uu8          = values[0];
-            let never        = self.add_const_ty(Type::Never);
-            let uusize       = self.add_const_ty(Type::usize());
-            let u8_ptr       = self.add_const_ty(Type::u8().ptr());
-            let void_mut_ptr = self.add_const_ty(Type::Void.mut_ptr());
-            let type_type    = self.add_const_ty(Type::Ty);
+        // Integers, floats and bool
+        let values: Vec<_> = [
+            Type::u8(), Type::u16(), Type::u32(), Type::u64(), Type::usize(),
+            Type::i8(), Type::i16(), Type::i32(), Type::i64(), Type::isize(),
+            Type::f32(), Type::f64(), Type::Bool
+        ].iter().map(|ty| self.add_const_ty(ty.clone())).collect();
+        let numerics = &values[0..12];
+        let signed_numerics = &numerics[5..];
+        let integers = &numerics[0..10];
 
-            use Intrinsic::*;
-            for &intr in &[Mult, Div, Mod, Add, Sub] {
-                for ty in numerics {
-                    self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], ty.clone(), false);
-                }
-            }
-            for &intr in &[Less, LessOrEq, Greater, GreaterOrEq] {
-                for ty in numerics {
-                    self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], boool, false);
-                }
-            }
-            for &intr in &[Eq, NotEq] {
-                for ty in &values {
-                    self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], boool, false);
-                }
-            }
-            for &intr in &[BitwiseAnd, BitwiseOr] {
-                for ty in integers {
-                    self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], boool, false);
-                }
-            }
-            for &intr in &[LogicalAnd, LogicalOr] {
-                self.add_intrinsic(intr, smallvec![boool, boool], boool, false);
-            }
-            for ty in signed_numerics {
-                self.add_intrinsic(Neg, smallvec![ty.clone()], ty.clone(), false);
-            }
+        let boool        = values[12];
+        let uu8          = values[0];
+        let never        = self.add_const_ty(Type::Never);
+        let uusize       = self.add_const_ty(Type::usize());
+        let u8_ptr       = self.add_const_ty(Type::u8().ptr());
+        let void_mut_ptr = self.add_const_ty(Type::Void.mut_ptr());
+        let type_type    = self.add_const_ty(Type::Ty);
+
+        use Intrinsic::*;
+        for &intr in &[Mult, Div, Mod, Add, Sub] {
             for ty in numerics {
-                self.add_intrinsic(Pos, smallvec![ty.clone()], ty.clone(), false);
+                self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], ty.clone(), false);
             }
-            self.add_intrinsic(LogicalNot, smallvec![boool], boool, false);
-
-            self.add_intrinsic(Panic, SmallVec::new(), never, true);
-            self.add_intrinsic(Panic, smallvec![u8_ptr], never, true);
-
-            self.add_intrinsic(Malloc, smallvec![uusize], void_mut_ptr, true);
-            self.add_intrinsic(Free, smallvec![void_mut_ptr], self.hir.void_ty, true);
-
-            self.add_intrinsic(Print, smallvec![u8_ptr], self.hir.void_ty, true);
-            self.add_intrinsic(Print, smallvec![uu8], self.hir.void_ty, true);
-            self.add_intrinsic(PrintType, smallvec![type_type], self.hir.void_ty, true);
-
-            macro_rules! types {
-                ($($ty:ident),+) => {
-                    $(self.add_intrinsic($ty, SmallVec::new(), type_type, false);)+
-                };
-            }
-            types!(
-                I8, I16, I32, I64, Isize,
-                U8, U16, U32, U64, Usize,
-                F32, F64,
-                Never, Bool, Void, Ty
-            );
         }
+        for &intr in &[Less, LessOrEq, Greater, GreaterOrEq] {
+            for ty in numerics {
+                self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], boool, false);
+            }
+        }
+        for &intr in &[Eq, NotEq] {
+            for ty in &values {
+                self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], boool, false);
+            }
+        }
+        for &intr in &[BitwiseAnd, BitwiseOr] {
+            for ty in integers {
+                self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], boool, false);
+            }
+        }
+        for &intr in &[LogicalAnd, LogicalOr] {
+            self.add_intrinsic(intr, smallvec![boool, boool], boool, false);
+        }
+        for ty in signed_numerics {
+            self.add_intrinsic(Neg, smallvec![ty.clone()], ty.clone(), false);
+        }
+        for ty in numerics {
+            self.add_intrinsic(Pos, smallvec![ty.clone()], ty.clone(), false);
+        }
+        self.add_intrinsic(LogicalNot, smallvec![boool], boool, false);
+
+        self.add_intrinsic(Panic, SmallVec::new(), never, true);
+        self.add_intrinsic(Panic, smallvec![u8_ptr], never, true);
+
+        self.add_intrinsic(Malloc, smallvec![uusize], void_mut_ptr, true);
+        self.add_intrinsic(Free, smallvec![void_mut_ptr], self.hir.void_ty, true);
+
+        self.add_intrinsic(Print, smallvec![u8_ptr], self.hir.void_ty, true);
+        self.add_intrinsic(Print, smallvec![uu8], self.hir.void_ty, true);
+        self.add_intrinsic(PrintType, smallvec![type_type], self.hir.void_ty, true);
+
+        macro_rules! types {
+            ($($ty:ident),+) => {
+                $(self.add_intrinsic($ty, SmallVec::new(), type_type, false);)+
+            };
+        }
+        types!(
+            I8, I16, I32, I64, Isize,
+            U8, U16, U32, U64, Usize,
+            F32, F64,
+            Never, Bool, Void, Ty
+        );
 
         self.skip_insignificant(&mut p);
         loop {
@@ -208,6 +207,48 @@ impl Driver {
         Ok(term)
     }
 
+    fn parse_decl_ref(&mut self, p: &mut Parser, base_expr: Option<ExprId>, name: Sym) -> ExprId {
+        let name_range = self.cur(p).range.clone();
+        let begin_range = if let Some(base_expr) = base_expr {
+            self.hir.get_range(base_expr)
+        } else {
+            name_range.clone()
+        };
+        let mut args = SmallVec::new();
+        let mut end_range = name_range.clone();
+        let mut has_parens = false;
+        if let TokenKind::LeftParen = self.next(p).kind {
+            has_parens = true;
+            self.next(p);
+            loop {
+                // TODO: actually implement proper comma and newline handling like I've thought about
+                let Token { kind, range } = self.cur(p);
+                match kind {
+                    TokenKind::RightParen => {
+                        end_range = range.clone();
+                        self.next(p);
+                        break;
+                    }
+                    TokenKind::Comma => { self.next(p); }
+                    TokenKind::Eof => {
+                        panic!("Reached eof in middle of decl ref");
+                    }
+                    _ => { args.push(self.parse_expr(p)); }
+                }
+            }
+        }
+        self.hir.decl_ref(
+            base_expr,
+            name,
+            args,
+            has_parens,
+            source_info::concat(
+                begin_range,
+                end_range,
+            )
+        )
+    }
+
     fn try_parse_non_cast_term(&mut self, p: &mut Parser) -> Result<ExprId, TokenKind> {
         if let Some((op, op_range)) = self.parse_prefix_operator(p) {
             let term = self.try_parse_non_cast_term(p)
@@ -254,48 +295,14 @@ impl Driver {
                 self.next(p);
                 Ok(lit)
             },
-            &TokenKind::Ident(name) => {
-                let name_range = self.cur(p).range.clone();
-                let mut args = SmallVec::new();
-                let mut end_range = name_range.clone();
-                let mut has_parens = false;
-                if let TokenKind::LeftParen = self.next(p).kind {
-                    has_parens = true;
-                    self.next(p);
-                    loop {
-                        // TODO: actually implement proper comma and newline handling like I've thought about
-                        let Token { kind, range } = self.cur(p);
-                        match kind {
-                            TokenKind::RightParen => {
-                                end_range = range.clone();
-                                self.next(p);
-                                break;
-                            }
-                            TokenKind::Comma => { self.next(p); }
-                            TokenKind::Eof => {
-                                panic!("Reached eof in middle of decl ref");
-                            }
-                            _ => { args.push(self.parse_expr(p)); }
-                        }
-                    }
-                }
-                let decl_ref = self.hir.decl_ref(
-                    name,
-                    args,
-                    has_parens,
-                    source_info::concat(
-                        name_range,
-                        end_range,
-                    )
-                );
-                Ok(decl_ref)
-            },
+            &TokenKind::Ident(name) => Ok(self.parse_decl_ref(p, None, name)),
             TokenKind::Do => {
                 let do_range = self.cur(p).range.clone();
                 self.next(p);
                 let (scope, scope_range) = self.parse_scope(p);
                 Ok(self.hir.do_expr(scope, source_info::concat(do_range, scope_range)))
             },
+            TokenKind::Module => Ok(self.parse_module(p)),
             TokenKind::If => Ok(self.parse_if(p)),
             TokenKind::While => {
                 let while_range = self.cur(p).range.clone();
@@ -312,12 +319,36 @@ impl Driver {
                 Ok(self.hir.ret(ret_expr, source_info::concat(ret_range, expr_range)))
             },
             x => Err(x.clone()),
-        }.map(|expr| match self.parse_postfix_operator(p) {
-            None => expr,
-            Some((op, mut range)) => {
-                range = source_info::concat(range, self.hir.get_range(expr));
-                self.un_op(op, expr, range)
+        }.map(|mut expr| {
+            // Parse arbitrary sequence of postfix operators and member refs
+            loop {
+                let mut modified = false;
+                while let Some((op, mut range)) = self.parse_postfix_operator(p) {
+                    range = source_info::concat(range, self.hir.get_range(expr));
+                    expr = self.un_op(op, expr, range);
+
+                    modified = true;
+                }
+                while self.cur(p).kind == &TokenKind::Dot {
+                    let dot_range = self.cur(p).range.clone();
+                    let name = if let &TokenKind::Ident(name) = self.next(p).kind {
+                        name
+                    } else {
+                        self.errors.push(
+                            Error::new("expected identifier after '.'")
+                                .adding_primary_range(dot_range, "'.' here")
+                                .adding_secondary_range(self.cur(p).range.clone(), "note: found this instead")
+                        );
+                        self.next(p);
+                        return expr
+                    };
+                    expr = self.parse_decl_ref(p, Some(expr), name);
+
+                    modified = true;
+                }
+                if !modified { break; }
             }
+            expr
         })
     }
 
@@ -373,12 +404,12 @@ impl Driver {
         let else_scope = if let TokenKind::Else = self.cur(p).kind {
             match self.next(p).kind {
                 TokenKind::If => {
-                    let scope = self.hir.begin_scope();
+                    let scope = self.hir.begin_imper_scope();
                     let if_expr = self.parse_if(p);
                     let if_range = self.hir.get_range(if_expr);
                     range = source_info::concat(range, if_range);
                     self.hir.stmt(if_expr);
-                    self.hir.end_scope(true);
+                    self.hir.end_imper_scope(true);
                     Some(scope)
                 },
                 TokenKind::OpenCurly => {
@@ -445,9 +476,42 @@ impl Driver {
         self.hir.stored_decl(name, explicit_ty, is_mut, root, source_info::concat(name_range, root_range));
     }
 
+    fn parse_module(&mut self, p: &mut Parser) -> ExprId {
+        let Token { kind, range: mod_range } = self.cur(p);
+        let mod_range = mod_range.clone();
+        assert_eq!(kind, &TokenKind::Module);
+        self.next(p);
+
+        let module = self.hir.begin_module();
+        let Token { kind, range: open_curly_range } = self.cur(p);
+        let open_curly_range = open_curly_range.clone();
+        assert_eq!(kind, &TokenKind::OpenCurly);
+        self.next(p);
+        let close_curly_range = loop {
+            match self.cur(p).kind {
+                TokenKind::Eof => panic!("Unexpected eof while parsing scope"),
+                TokenKind::CloseCurly => {
+                    let close_curly_range = self.cur(p).range.clone();
+                    self.next(p);
+                    break close_curly_range;
+                },
+                _ => {
+                    if let Some(expr) = self.parse_node(p) {
+                        self.errors.push(
+                            Error::new("expressions are not allowed in the top-level of a module")
+                                .adding_primary_range(self.hir.get_range(expr), "delet this")
+                        );
+                    }
+                }
+            }
+        };
+        self.hir.end_module(module, source_info::concat(mod_range, close_curly_range));
+        module
+    }
+
     // Parses an open curly brace, then a list of nodes, then a closing curly brace.
-    fn parse_scope(&mut self, p: &mut Parser) -> (ScopeId, SourceRange) {
-        let scope = self.hir.begin_scope();
+    fn parse_scope(&mut self, p: &mut Parser) -> (ImperScopeId, SourceRange) {
+        let scope = self.hir.begin_imper_scope();
         let mut last_was_expr = false;
         let Token { kind, range: open_curly_range } = self.cur(p);
         let open_curly_range = open_curly_range.clone();
@@ -474,7 +538,7 @@ impl Driver {
                 }
             }
         };
-        self.hir.end_scope(last_was_expr);
+        self.hir.end_imper_scope(last_was_expr);
         (scope, source_info::concat(open_curly_range, close_curly_range))
     }
 
@@ -534,10 +598,10 @@ impl Driver {
             },
             TokenKind::Assign => {
                 self.next(p);
-                self.hir.begin_scope();
+                self.hir.begin_imper_scope();
                 let assigned_expr = self.parse_expr(p);
                 self.hir.stmt(assigned_expr);
-                self.hir.end_scope(true);
+                self.hir.end_imper_scope(true);
             },
             tok => panic!("Invalid token {:?}", tok),
         }

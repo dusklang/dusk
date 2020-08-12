@@ -70,6 +70,7 @@ pub enum Type {
     Pointer(Box<QualType>),
     Bool,
     Void,
+    Mod,
     Ty,
     Never,
 }
@@ -101,7 +102,7 @@ impl Type {
     /// Size of an instance of the type in bytes
     pub fn size(&self, arch: Arch) -> usize {
         match self {
-            Type::Error | Type::Void | Type::Never | Type::Ty => 0,
+            Type::Error | Type::Void | Type::Never | Type::Ty | Type::Mod => 0,
             Type::Int { width, .. } => {
                 let bit_width = width.bit_width(arch);
                 assert_eq!(bit_width % 8, 0, "Unexpected bit width: not a multiple of eight!");
@@ -235,6 +236,7 @@ impl fmt::Debug for Type {
             Type::Never => write!(f, "never"),
             Type::Bool => write!(f, "bool"),
             Type::Void => write!(f, "void"),
+            Type::Mod => write!(f, "module"),
             Type::Ty => write!(f, "type"),
             Type::Int { width, is_signed } => write!(
                 f,

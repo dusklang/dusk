@@ -23,11 +23,13 @@ use std::fs;
 
 use string_interner::DefaultStringInterner;
 
+use arch::Arch;
 use interpreter::InterpMode;
 use index_vec::Idx;
 use ty::Type;
 use mir::FunctionRef;
 use driver::Driver;
+use type_checker::type_provider::{RealTypeProvider, TypeProvider};
 
 fn main() {
     let contents = fs::read_to_string("HelloWorld.meda")
@@ -38,14 +40,15 @@ fn main() {
     );
     let mut interner = DefaultStringInterner::new();
     let main_sym = interner.get_or_intern("main");
-    let mut driver = Driver::new(file, interner, false, arch::Arch::X86_64);
+    let mut driver = Driver::new(file, interner, Arch::X86_64);
     driver.lex();
     driver.parse();
-    driver.build_tir();
-    driver.type_check();
+    driver.initialize_tir();
+    let units = driver.build_more_tir();
+    let tp = driver.type_check(&units, false);
 
     if driver.report_errors() { return; }
-    driver.build_mir();
+    driver.build_mir(&tp);
     let main = driver.mir.functions.iter()
         .position(|func| {
             match func.name {

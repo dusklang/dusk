@@ -8,7 +8,8 @@ newtype_index!(ItemId pub);
 newtype_index!(ExprId pub);
 newtype_index!(DeclRefId pub);
 newtype_index!(DeclId pub);
-newtype_index!(ScopeId pub);
+newtype_index!(ImperScopeId pub);
+newtype_index!(ModScopeId pub);
 newtype_index!(CastId pub);
 
 #[derive(Clone, Copy, Debug)]
