@@ -1,50 +1,50 @@
-/*std :: mod {
+std :: mod {
     fn assert(condition: bool) {
         if !condition { panic("assertion failed") }
     }
-}
 
-fn print_num(num: i32) {
-    num := num
-    if num < 0 {
-        print("-")
-        num = -num
+    fn print_num(num: i32) {
+        num := num
+        if num < 0 {
+            print("-")
+            num = -num
+        }
+        if num >= 10 {
+            print_num(num / 10)
+        }
+        print((num % 10) as u8 + "0")
     }
-    if num >= 10 {
-        print_num(num / 10)
-    }
-    print((num % 10) as u8 + "0")
-}
 
-fn strlen(str: u8*): usize {
-    str := str
-    darba := str
-    derpa := darba
-    len: usize = 0
-    while *((str as usize + len) as u8*) != 0 {
-        len = len + 1
+    fn strlen(str: u8*): usize {
+        str := str
+        darba := str
+        derpa := darba
+        len: usize = 0
+        while *((str as usize + len) as u8*) != 0 {
+            len = len + 1
+        }
+        len
     }
-    len
-}
 
-fn concat(a: u8*, b: u8*): u8* {
-    len :: strlen(a) + strlen(b)
-    buf := malloc(len + 1) as u8 *mut
-    ret_val :: buf
-    a := a
-    while *a != 0 {
-        *buf = *a
-        a = (a as usize + 1) as u8*
-        buf = (buf as usize + 1) as u8 *mut
+    fn concat(a: u8*, b: u8*): u8* {
+        len :: std.strlen(a) + std.strlen(b)
+        buf := malloc(len + 1) as u8 *mut
+        ret_val :: buf
+        a := a
+        while *a != 0 {
+            *buf = *a
+            a = (a as usize + 1) as u8*
+            buf = (buf as usize + 1) as u8 *mut
+        }
+        b := b
+        while *b != 0 {
+            *buf = *b
+            b = (b as usize + 1) as u8*
+            buf = (buf as usize + 1) as u8 *mut
+        }
+        *buf = 0
+        ret_val
     }
-    b := b
-    while *b != 0 {
-        *buf = *b
-        b = (b as usize + 1) as u8*
-        buf = (buf as usize + 1) as u8 *mut
-    }
-    *buf = 0
-    ret_val
 }
 
 fn fib(n: i32): i32 {
@@ -70,7 +70,7 @@ fn fizz_buzz() {
                 print("Buzz")
             }
         } else {
-            print_num(i)
+            std.print_num(i)
         }
         print("\n")
         i = i + 1
@@ -83,14 +83,14 @@ fn print_and_return_fib(str: u8*, n: i32): i32 {
 }
 
 fn print_and_return_concatenated_string(a: u8*, b: u8*): u8* {
-    val :: concat(a, b)
+    val :: std.concat(a, b)
     print(val)
     val
 }
 
 FIB_N :: print_and_return_fib("printing at compile time while compiling constant!\n", 7)
 FIB :: print_and_return_fib("printing at compile time!\n", FIB_N)
-generated_string :: concat(concat("Hello, ", "world!"), " (from compile-time)\n")
+generated_string :: std.concat(std.concat("Hello, ", "world!"), " (from compile-time)\n")
 
 fn too_hype_for_types(a: i32, b: i32, c: i32) = a * b + c
 
@@ -108,7 +108,7 @@ fn take_a_type(T: type) {
 
 fn main() {
     print("the number is ")
-    print_num(compute_a_number() as i32)
+    std.print_num(compute_a_number() as i32)
     print(", and its type is ")
     print_type(os_dependent_type())
     print("\n")
@@ -118,9 +118,9 @@ fn main() {
     fizz_buzz()
 
     print("fib(")
-    print_num(FIB_N)
+    std.print_num(FIB_N)
     print(") = ")
-    print_num(FIB)
+    std.print_num(FIB)
     print("\n")
 
     print(generated_string)
@@ -140,7 +140,6 @@ fn main() {
     p :: 45 | 12
 
     // Condition is intentionally false, just to test module member lookup
-    std.assert(3 == 0)
     take_a_type(i8 *mut *mut)
 
     // Allocate a single 8-bit integer on the heap
@@ -174,20 +173,4 @@ fn compute_a_number(): os_dependent_type() {
     sixteen_bit_number: u16 = 256
 
     sixteen_bit_number as os_dependent_type()
-}*/
-
-std :: mod {
-    fn blah() {
-        core.blooh()
-    }
-}
-
-core :: mod {
-    fn blooh() {
-        std.blah()
-    }
-}
-
-fn main() {
-    std.blah()
 }

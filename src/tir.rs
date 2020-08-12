@@ -576,7 +576,6 @@ impl Driver {
         ei_injector!(self, ei);
 
         // Solve for the unit and level of each item
-        self.print_graph().unwrap();
         let levels = self.tir.graph.solve();
 
         let mut sp = Subprogram { units: Vec::new(), levels };
