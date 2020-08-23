@@ -75,7 +75,7 @@ struct ComponentState {
 
 #[derive(Debug, Default)]
 struct InternalUnit {
-    components: Vec<CompId>,
+    components: HashSet<CompId>,
 
     deps: HashMap<ItemId, ItemId>,
 }
@@ -272,16 +272,16 @@ impl Graph {
             units: units.into_iter()
                 .map(|unit| {
                     let mut meta_deps = HashMap::<u32, Vec<MetaDependee>>::new();
-                    let items = unit.components.into_iter()
-                        .flat_map(|comp| components[comp].items.iter().map(|comp| *comp))
+                    let items = unit.components.iter()
+                        .flat_map(|&comp| components[comp].items.iter().map(|comp| *comp))
                         .collect();
                     for &item in &items {
                         if self.meta_dependees.contains(&item) {
-                            let mut deps = Vec::new();
-                            self.get_deps(item, &mut deps);
+                            let mut deps = HashSet::new();
+                            self.get_deps(item, &mut deps, &unit.components);
                             meta_deps.entry(item_to_levels[item])
                                 .or_default()
-                                .push(MetaDependee { item, deps });
+                                .push(MetaDependee { item, deps: deps.into_iter().collect() });
                         }
                     }
                     let mut meta_dependees = meta_deps.into_iter()
@@ -296,10 +296,18 @@ impl Graph {
         }
     }
 
-    fn get_deps(&self, item: ItemId, out: &mut Vec<ItemId>) {
+    fn get_deps(&self, item: ItemId, out: &mut HashSet<ItemId>, components: &HashSet<CompId>) {
         out.extend(&self.dependees[item]);
         for &dependee in &self.dependees[item] {
-            self.get_deps(dependee, out);
+            self.get_deps(dependee, out, components);
+        }
+        for &dependee in &self.t3_dependees[item] {
+            if out.contains(&dependee) { continue; }
+            let comp = self.item_to_components[dependee];
+            if components.contains(&comp) {
+                out.insert(dependee);
+                self.get_deps(dependee, out, components);
+            }
         }
     }
 }
