@@ -124,13 +124,13 @@ fn compute_a_module(switch: u32): module {
     } else if switch == 2 {
         mod {
             fn print_the_switch() {
-                print("The switch is 1!\n")
+                print("The switch is 2!\n")
             }
         }
     } else if switch == 3 {
         mod {
             fn print_the_switch() {
-                print("The switch is 1!\n")
+                print("The switch is 3!\n")
             }
         }
     } else {
@@ -142,7 +142,7 @@ fn compute_a_module(switch: u32): module {
     }
 }
 
-mawd :: compute_a_module(2)
+mawd :: compute_a_module(4)
 
 fn main() {
     print("the number is ")
@@ -184,12 +184,64 @@ fn main() {
     *num = 12
     free(num as void *mut)
 
-    mawd.print_the_switch()
+    //mawd.print_the_switch()
+
+    os.read_file("GGGGGGGGGGGGGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHHHHHHHHHHHHHHH.txt")
 
     fn float_const() {
         blah: f32 = 5.2
     }
 }
+
+fn read_file_common(path: u8*, platform: u8*) {
+    print("Reading path ")
+    print(path)
+    print(" on ")
+    print(platform)
+    print("!\n")
+}
+
+fn os_computer(): module {
+    if os == OS_WINDOWS {
+        mod {
+            fn read_file(path: u8*) { read_file_common(path, "Windows") }
+        }
+    } else if os == OS_MAC {
+        mod {
+            fn read_file(path: u8*) { read_file_common(path, "macOS") }
+        }
+    } else if os == OS_LINUX {
+        mod {
+            fn read_file(path: u8*) { read_file_common(path, "Linux") }
+        }
+    } else {
+        mod {
+            fn read_file(path: u8*) { read_file_common(path, "an unknown OS") }
+        }
+    }
+}
+
+os :: os_computer()
+
+
+/*
+os :: if os == OS_WINDOWS {
+    mod {
+        fn read_file(path: u8*) { read_file_common(path, "Windows") }
+    }
+} else if os == OS_MAC {
+    mod {
+        fn read_file(path: u8*) { read_file_common(path, "macOS") }
+    }
+} else if os == OS_LINUX {
+    mod {
+        fn read_file(path: u8*) { read_file_common(path, "Linux") }
+    }
+} else {
+    mod {
+        fn read_file(path: u8*) { read_file_common(path, "an unknown OS") }
+    }
+}*/
 
 fn compute_something(i: i32): i32 {
     i
