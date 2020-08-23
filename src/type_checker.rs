@@ -36,7 +36,7 @@ impl Driver {
         self.hir.explicit_tys[id].map(|ty| tp.get_evaluated_type(ty)).unwrap_or(&Type::Error)
     }
 
-    fn run_pass_1(&mut self, unit: &UnitItems, meta_dependees: &[LevelMetaDependees], tp: &mut RealTypeProvider) -> u32 {
+    fn run_pass_1(&mut self, unit: &UnitItems, start_level: u32, meta_dependees: &[LevelMetaDependees], tp: &mut impl TypeProvider) -> u32 {
         // Assumption: all DepVecs in the unit have the same number of levels
         let levels = unit.assigned_decls.num_levels();
 
@@ -60,9 +60,8 @@ impl Driver {
             *tp.ty_mut(item) = Type::Ty;
         }
         let mut meta_dependee_i = 0;
-        for level in 0..levels {
+        for level in start_level..levels {
             for item in unit.assigned_decls.get_level(level) {
-
                 let constraints = tp.constraints(item.root_expr);
                 let ty = if let &Some(explicit_ty) = &item.explicit_ty {
                     let explicit_ty = tp.get_evaluated_type(explicit_ty).clone();
@@ -255,10 +254,13 @@ impl Driver {
             }
             tp.debug_output(&self.hir, &self.file, level as usize);
 
+            // Evaluate meta-dependees to build namespaces for expressions
             if meta_dependee_i < meta_dependees.len() && meta_dependees[meta_dependee_i].level == level {
                 for dep in &meta_dependees[meta_dependee_i].meta_dependees {
                     let mut mock = MockTypeProvider::new(tp);
                     if mock.constraints(dep.dependee).can_unify_to(&Type::Mod.into()).is_ok() {
+                        // TODO: Pass the necessary meta-dependees up to higher levels...maybe?
+                        self.run_pass_1(&dep.items, level+1, &[], &mut mock);
                         mock.constraints_mut(dep.dependee).set_to(&Type::Mod);
                         self.run_pass_2(&dep.items, level+1, &mut mock);
                         let module = self.eval_expr(dep.dependee, &mock);
@@ -496,7 +498,7 @@ impl Driver {
 
         for unit in units {
             // Pass 1: propagate info down from leaves to roots
-            let levels = self.run_pass_1(&unit.items, &unit.meta_dependees, &mut tp);
+            let levels = self.run_pass_1(&unit.items, 0, &unit.meta_dependees, &mut tp);
             
             // Pass 2: propagate info up from roots to leaves
             self.run_pass_2(&unit.items, levels, &mut tp);
