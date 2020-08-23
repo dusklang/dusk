@@ -1,5 +1,5 @@
 use std::ops::{Deref, DerefMut};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use arrayvec::ArrayVec;
 use smallvec::SmallVec;
@@ -179,7 +179,7 @@ macro_rules! add_eval_dep_injector {
 }
 
 impl Driver {
-    fn find_overloads_in_mod(&self, decl_ref: &hir::DeclRef, scope: ModScopeId, overloads: &mut Vec<DeclId>) {
+    fn find_overloads_in_mod(&self, decl_ref: &hir::DeclRef, scope: ModScopeId, overloads: &mut HashSet<DeclId>) {
         if let Some(group) = self.hir.mod_scopes[scope].decl_groups.get(&decl_ref.name) {
             overloads.extend(
                 group.iter()
@@ -190,7 +190,7 @@ impl Driver {
     }
     // Returns the overloads for a declref, if they are known (they won't be if it's a member ref)
     pub fn find_overloads(&self, decl_ref: &hir::DeclRef) -> Vec<DeclId> {
-        let mut overloads = Vec::new();
+        let mut overloads = HashSet::new();
 
         let mut started_at_mod_scope = false;
         let mut root_namespace = true;
@@ -204,7 +204,7 @@ impl Driver {
                             .rev()
                             .find(|&decl| decl.name == decl_ref.name && decl.num_params == decl_ref.num_arguments);
                         if let Some(decl) = result {
-                            overloads.push(decl.id);
+                            overloads.insert(decl.id);
                             break;
                         }
                     }
@@ -218,8 +218,6 @@ impl Driver {
                     if root_namespace { started_at_mod_scope = true; }
                     self.hir.mod_ns[scope_ns].parent
                 },
-    
-                // TODO: get the overloads
                 Namespace::MemberRef { base_expr } => {
                     assert!(root_namespace, "member refs currently must be at the root of a namespace hierarchy");
 
@@ -238,7 +236,7 @@ impl Driver {
             root_namespace = false;
         }
 
-        overloads
+        overloads.into_iter().collect()
     }
 
     fn add_types_2_to_4_deps_to_member_ref(&mut self, id: ItemId, arguments: &[ExprId], decl_ref_id: DeclRefId) {
