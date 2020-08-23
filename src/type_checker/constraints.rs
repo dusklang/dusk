@@ -16,24 +16,40 @@ pub enum UnificationError<'a> {
     InvalidChoice(&'a [QualType]),
 }
 
+#[derive(Debug)]
+pub enum SolveError<'a> {
+    NoValidChoices,
+    CantUnifyToPreferredType,
+    Ambiguous { choices: &'a [QualType] }
+}
+
 impl ConstraintList {
     pub const fn new(trait_impls: BuiltinTraits, one_of: Option<SmallVec<[QualType; 1]>>, preferred_type: Option<QualType>) -> Self {
         Self { trait_impls, one_of, preferred_type }
     }
 
-    pub fn solve(&self) -> Result<QualType, ()> {
+    pub fn solve(&self) -> Result<QualType, SolveError> {
         if let Some(one_of) = &self.one_of {
-            if one_of.is_empty() {
-                return Err(());
-            } else if one_of.len() == 1 {
-                return Ok(one_of[0].clone());
+            if one_of.len() == 1 {
+                return Ok(one_of[0].clone())
+            } else if one_of.is_empty() {
+                return Err(SolveError::NoValidChoices)
             }
         }
-
-        // At this point either there are multiple candidate types (one_of.len() > 1), or one_of is None
+        
         match self.preferred_type {
-            Some(ref pref) if self.can_unify_to(pref).is_ok() => Ok(pref.clone()),
-            _ => Err(()),
+            Some(ref pref) => if self.can_unify_to(pref).is_ok() {
+                Ok(pref.clone())
+            } else if let Some(one_of) = &self.one_of {
+                if one_of.is_empty() {
+                    Err(SolveError::NoValidChoices)
+                } else {
+                    Err(SolveError::Ambiguous { choices: one_of })
+                }
+            } else {
+                Err(SolveError::CantUnifyToPreferredType)
+            },
+            None => Err(SolveError::NoValidChoices),
         }
     }
 
@@ -176,7 +192,7 @@ impl ConstraintList {
     //  - mutates `self` and `other` in-place instead of creating a new `ConstraintList`
     //  - evaluates mutability independently between the arguments, with precedence given to self
     //  - is literally just used for assignment expressions
-    //  - terrible abstraction :(
+    //  - is a terrible abstraction :(
     pub fn lopsided_intersect_with(&mut self, other: &mut ConstraintList) {
         let trait_impls = self.trait_impls | other.trait_impls;
         self.trait_impls = trait_impls;
