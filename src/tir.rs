@@ -1,9 +1,7 @@
 use std::ops::{Deref, DerefMut};
 use std::collections::{HashMap, HashSet};
 
-use arrayvec::ArrayVec;
 use smallvec::SmallVec;
-use string_interner::Sym;
 
 use crate::driver::Driver;
 use crate::builder::*;

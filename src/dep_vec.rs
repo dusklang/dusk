@@ -1,4 +1,4 @@
-use std::cmp::{max, min};
+use std::cmp::max;
 
 /// A growable array for encoding data dependencies
 #[derive(Debug)]

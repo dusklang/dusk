@@ -1,12 +1,8 @@
-use std::convert::From;
-use std::io::{Read, Write, Result as IoResult};
+use std::io::{Write, Result as IoResult};
 use std::process::{Command, Stdio};
 use std::fs::{self, File};
 use std::path::PathBuf;
-use std::iter::Chain;
-use std::slice::Iter as SliceIter;
 use std::mem;
-use std::ops::{Index, IndexMut, Range};
 use std::iter::FromIterator;
 use std::collections::{HashMap, HashSet};
 use std::cmp::max;
@@ -16,7 +12,6 @@ use bitflags::bitflags;
 use crate::builder::ItemId;
 use crate::index_vec::{Idx, IdxVec};
 use crate::driver::Driver;
-use crate::source_info::SourceRange;
 use crate::hir;
 
 newtype_index!(CompId);

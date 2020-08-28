@@ -1,5 +1,5 @@
 // TODO: GET RID OF THIS
-#![allow(unused_imports, unused_variables)]
+#![allow(unused_variables)]
 
 mod dep_vec;
 #[macro_use]
@@ -29,7 +29,6 @@ use index_vec::Idx;
 use ty::Type;
 use mir::FunctionRef;
 use driver::Driver;
-use type_checker::type_provider::{RealTypeProvider, TypeProvider};
 
 fn main() {
     let contents = fs::read_to_string("HelloWorld.meda")

@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use smallvec::{SmallVec, smallvec};
 
 mod constraints;
@@ -8,15 +6,11 @@ pub mod type_provider;
 use constraints::{ConstraintList, UnificationError};
 use type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 
-use crate::source_info::SourceFile;
 use crate::driver::Driver;
 use crate::error::Error;
-use crate::builder::{ExprId, DeclId, DeclRefId, CastId};
-use crate::index_vec::Idx;
+use crate::builder::{ExprId, DeclId};
 use crate::ty::{BuiltinTraits, Type, QualType, IntWidth};
-use crate::index_vec::IdxVec;
-use crate::dep_vec::{self, AnyDepVec};
-use crate::source_info::CommentatedSourceRange;
+use crate::dep_vec::AnyDepVec;
 use crate::mir::Const;
 use crate::hir;
 use crate::tir::{Unit, UnitItems, LevelMetaDependees, ExprNamespace};
