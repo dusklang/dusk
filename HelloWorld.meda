@@ -28,7 +28,7 @@ std :: mod {
         }
 
         fn concat(a: u8*, b: u8*): u8* {
-            len :: str.len(a) + str.len(b)
+            len :: len(a) + len(b)
             buf := malloc(len + 1) as u8 *mut
             ret_val :: buf
             a := a
@@ -186,7 +186,7 @@ fn main() {
 
     //mawd.print_the_switch()
 
-    os.read_file("GGGGGGGGGGGGGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHHHHHHHHHHHHHHH.txt")
+    fs.read_file("GGGGGGGGGGGGGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHHHHHHHHHHHHHHH.txt")
 
     fn float_const() {
         blah: f32 = 5.2
@@ -218,14 +218,14 @@ fn os_computer(): module {
         mod {
             fn read_file(path: u8*) { read_file_common(path, "an unknown OS") }
         }
-    }
+    }*/
 }
 
-os :: os_computer()
+fs :: os_computer()
 
 
 /*
-os :: if os == OS_WINDOWS {
+fs :: if os == OS_WINDOWS {
     mod {
         fn read_file(path: u8*) { read_file_common(path, "Windows") }
     }
