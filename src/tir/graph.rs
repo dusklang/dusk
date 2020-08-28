@@ -337,23 +337,6 @@ pub struct Levels {
     pub units: Vec<Unit>,
 }
 
-struct SplitOp {
-    included: HashSet<ItemId>,
-    excluded: Vec<ItemId>,
-}
-
-impl SplitOp {
-    fn split_recurse(&mut self, item_to_units: &mut IdxVec<u32, ItemId>, dependees: &IdxVec<Vec<ItemId>, ItemId>, split: ItemId) {
-        let removed = self.included.remove(&split);
-        assert!(removed);
-        item_to_units[split] = u32::MAX;
-        self.excluded.push(split);
-        for &dep in &dependees[split] {
-            self.split_recurse(item_to_units, dependees, dep);
-        }
-    }
-}
-
 impl ItemId {
     fn write_node_name(self, w: &mut impl Write, hir: &hir::Builder) -> IoResult<()> {
         match hir.items[self] {
@@ -451,6 +434,7 @@ impl Driver {
     }
 
     /// Prints graph in Graphviz format, then opens a web browser to display the results.
+    #[allow(dead_code)]
     pub fn print_graph(&self) -> IoResult<()> {
         let graph = &self.tir.graph;
         let tmp_dir = fs::read_dir(".")?.find(|entry| entry.as_ref().unwrap().file_name() == "tmp");

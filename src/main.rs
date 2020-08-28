@@ -1,5 +1,5 @@
 // TODO: GET RID OF THIS
-#![allow(dead_code, unused_imports, unused_variables)]
+#![allow(unused_imports, unused_variables)]
 
 mod dep_vec;
 #[macro_use]

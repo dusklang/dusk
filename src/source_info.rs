@@ -43,16 +43,19 @@ impl CommentatedSourceRange {
 }
 
 impl Driver {
+    #[allow(dead_code)]
     pub fn print_range(&self, range: SourceRange) {
         self.file.print_commentated_source_ranges(&mut [
             CommentatedSourceRange::new(range, "", '-')
         ]);
     }
 
+    #[allow(dead_code)]
     pub fn print_expr(&self, id: ExprId) {
         self.print_range(self.hir.get_range(id));
     }
 
+    #[allow(dead_code)]
     pub fn print_decl(&self, id: DeclId) {
         let item = self.hir.decl_to_items[id];
         self.print_range(self.hir.source_ranges[item].clone());

@@ -31,13 +31,6 @@ impl<T> DepVec<T> {
     pub fn get_level(&self, level: u32) -> &[T] {
         &self.storage[level as usize]
     }
-
-    pub fn clear_up_to(&mut self, level: u32) {
-        let upper_bound = min(self.storage.len(), (level as usize) + 1);
-        for level in &mut self.storage[..upper_bound] {
-            level.clear();
-        }
-    }
 }
 
 // Type eraser for DepVecs with different Ts.
