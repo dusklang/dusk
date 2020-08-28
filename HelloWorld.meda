@@ -202,7 +202,10 @@ fn read_file_common(path: u8*, platform: u8*) {
 }
 
 fn os_computer(): module {
-    if os == OS_WINDOWS {
+    mod {
+            fn read_file(path: u8*) { read_file_common(path, "Windows") }
+        }
+    /*if os == OS_WINDOWS {
         mod {
             fn read_file(path: u8*) { read_file_common(path, "Windows") }
         }
