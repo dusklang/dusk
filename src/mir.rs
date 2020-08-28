@@ -353,26 +353,22 @@ impl Driver {
         }
 
         for (i, func) in self.mir.functions.iter().enumerate() {
-            write!(f, "fn {}", self.fn_name(func.name))?;
+            write!(f, "fn {}(", self.fn_name(func.name))?;
             assert_eq!(&func.code.raw[0], &Instr::Void);
             let mut first = true;
             for i in 1..func.code.len() {
                 if let Instr::Parameter(ty) = &func.code.raw[i] {
                     if first {
-                        write!(f, "(")?;
                         first = false;
                     } else {
                         write!(f, ", ")?;
                     }
                     write!(f, "%{}: {:?}", i, ty)?;
                 } else {
-                    if !first {
-                        write!(f, ")")?;
-                    }
                     break;
                 }
             }
-            writeln!(f, ": {:?} {{", func.ret_ty)?;
+            writeln!(f, "): {:?} {{", func.ret_ty)?;
             struct BB {
                 id: BasicBlockId,
                 instr: InstrId,
