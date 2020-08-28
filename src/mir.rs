@@ -339,7 +339,11 @@ impl Driver {
     }
 
     #[allow(dead_code)]
-    pub fn fmt_mir(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    pub fn display_mir<'a>(&'a self) -> impl fmt::Display + 'a {
+        MirDisplay(self)
+    }
+
+    fn display_mir_impl(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if !self.mir.statics.raw.is_empty() {
             for (i, statik) in self.mir.statics.iter().enumerate() {
                 write!(f, "%static{} = ", i)?;
@@ -456,6 +460,15 @@ impl Driver {
             }
         }
         Ok(())
+    }
+}
+
+#[must_use]
+struct MirDisplay<'a>(&'a Driver);
+
+impl fmt::Display for MirDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.0.display_mir_impl(f)
     }
 }
 
