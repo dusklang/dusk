@@ -316,23 +316,6 @@ struct StackFrame {
     results: IdxVec<Value, InstrId>,
 }
 
-impl StackFrame {
-    fn new(func: &Function, arguments: Vec<Value>) -> Self {
-        let mut results = IdxVec::new();
-        results.resize_with(func.code.len(), || Value::Nothing);
-
-        let num_parameters = func.num_parameters();
-        assert_eq!(num_parameters, arguments.len());
-        for (i, arg) in arguments.into_iter().enumerate() {
-            results.raw[i + 1] = arg;
-        }
-        Self {
-            pc: InstrId::new(num_parameters + 1),
-            results,
-        }
-    }
-}
-
 #[derive(Copy, Clone)]
 pub enum InterpMode {
     CompileTime,
@@ -358,9 +341,33 @@ impl Interpreter {
 }
 
 impl Driver {
+    fn new_stack_frame(&self, func: &Function, arguments: Vec<Value>) -> StackFrame {
+        let mut results = IdxVec::new();
+        results.resize_with(func.code.len(), || Value::Nothing);
+
+        let num_parameters = func.num_parameters();
+        if num_parameters != arguments.len() {
+            let interner = &self.interner;
+            let func_name = func.name.map(|name| interner.resolve(name).unwrap()).unwrap_or("<anonymous func>");
+            panic!(
+                "Compiler bug! Tried to call {} with {} arguments, but {} were expected.",
+                func_name,
+                arguments.len(),
+                num_parameters
+            );
+        }
+        for (i, arg) in arguments.into_iter().enumerate() {
+            results.raw[i + 1] = arg;
+        }
+        StackFrame {
+            pc: InstrId::new(num_parameters + 1),
+            results,
+        }
+    }
+
     pub fn call(&mut self, func_ref: FunctionRef, arguments: Vec<Value>) -> Value {
         let func = self.mir.function_by_ref(&func_ref);
-        let frame = StackFrame::new(func, arguments);
+        let frame = self.new_stack_frame(func, arguments);
         self.interp.stack.push((func_ref, frame));
         loop {
             if let Some(val) = self.execute_next() {
