@@ -1,6 +1,3 @@
-// TODO: GET RID OF THIS
-#![allow(unused_variables)]
-
 mod dep_vec;
 #[macro_use]
 mod index_vec;

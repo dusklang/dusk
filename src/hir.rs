@@ -217,7 +217,7 @@ impl Builder {
     }
 
     fn flush_stmt_buffer(&mut self) {
-        if let Some(ScopeState::Imper { id, namespace, stmt_buffer }) = self.scope_stack.last_mut() {
+        if let Some(ScopeState::Imper { id, stmt_buffer, .. }) = self.scope_stack.last_mut() {
             if let Some(stmt) = *stmt_buffer {
                 self.imper_scopes[*id].items.push(ScopeItem::Stmt(stmt));
                 *stmt_buffer = None;
@@ -460,7 +460,7 @@ impl Builder {
                 self.flush_stmt_buffer();
                 self.scope_item(ScopeItem::ComputedDecl(id));
             },
-            &ScopeState::Mod { id: scope_id, .. } => {
+            &ScopeState::Mod { .. } => {
                 self.mod_scoped_decl(name, ModScopedDecl { num_params: param_names.len(), id });
             }
         }

@@ -107,7 +107,7 @@ impl Graph {
     }
 
     /// in order to know the type 2-4 dependencies of a, we need to know all possible members of b
-    pub fn add_meta_dep(&mut self, a: ItemId, b: ItemId) {
+    pub fn add_meta_dep(&mut self, _a: ItemId, b: ItemId) {
         self.meta_dependees.insert(b);
     }
 
@@ -406,7 +406,7 @@ impl Driver {
         Ok(())
     }
     
-    fn write_component(&self, w: &mut impl Write, graph: &Graph, unit: usize, i: usize, component: &Component) -> IoResult<()> {
+    fn write_component(&self, w: &mut impl Write, unit: usize, i: usize, component: &Component) -> IoResult<()> {
         writeln!(w, "    subgraph cluster{}_{} {{", unit, i)?;
         writeln!(w, "        label=\"component {}\";", i)?;
         writeln!(w, "        style=filled;")?;
@@ -420,7 +420,7 @@ impl Driver {
         Ok(())
     }
 
-    fn write_component_deps(&self, w: &mut impl Write, graph: &Graph, unit: usize, i: usize, component: &Component) -> IoResult<()> {
+    fn write_component_deps(&self, w: &mut impl Write, graph: &Graph, component: &Component) -> IoResult<()> {
         for &item in &component.items {
             self.write_deps(w, item, graph)?;
         }
@@ -442,8 +442,8 @@ impl Driver {
 
         if !graph.components.is_empty() {
             for (i, component) in graph.components.iter().enumerate() {
-                self.write_component(&mut w, graph, 0, i, component)?;
-                self.write_component_deps(&mut w, graph, 0, i, component)?;
+                self.write_component(&mut w, 0, i, component)?;
+                self.write_component_deps(&mut w, graph, component)?;
             }
         } else {
             for i in 0..graph.dependees.len() {
@@ -455,7 +455,7 @@ impl Driver {
         writeln!(w, "}}")?;
         w.flush()?;
 
-        let command = Command::new("dot")
+        Command::new("dot")
             .args(&["-Tsvg", "tmp/tc_graph.gv", "-o", "tmp/tc_graph.svg"])
             .stdout(Stdio::inherit())
             .output()

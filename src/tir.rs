@@ -237,7 +237,7 @@ impl Driver {
         overloads.into_iter().collect()
     }
 
-    fn add_types_2_to_4_deps_to_member_ref(&mut self, id: ItemId, arguments: &[ExprId], decl_ref_id: DeclRefId) {
+    fn add_types_2_to_4_deps_to_member_ref(&mut self, id: ItemId, decl_ref_id: DeclRefId) {
         add_eval_dep_injector!(self, add_eval_dep);
         ei_injector!(self, ei);
         di_injector!(self, di);
@@ -269,7 +269,7 @@ impl Driver {
         for &item in &scope.items {
             match item {
                 hir::ScopeItem::Stmt(expr) => self.tir.graph.add_type3_dep(a, self.hir.expr_to_items[expr]),
-                hir::ScopeItem::StoredDecl { decl_id, root_expr, .. } => self.tir.graph.add_type3_dep(a, self.hir.decl_to_items[decl_id]),
+                hir::ScopeItem::StoredDecl { decl_id, .. } => self.tir.graph.add_type3_dep(a, self.hir.decl_to_items[decl_id]),
                 hir::ScopeItem::ComputedDecl(_) => {},
             }
         }
@@ -278,11 +278,7 @@ impl Driver {
     fn flush_staged_ret_groups(&mut self, sp: &mut Subprogram) {
         let staged_ret_groups = std::mem::replace(&mut self.tir.staged_ret_groups, HashMap::new());
         for (decl, exprs) in staged_ret_groups {
-            let scope = if let hir::Decl::Computed { scope, .. } = self.hir.decls[decl] {
-                scope
-            } else {
-                panic!("Invalid staged ret group")
-            };
+            assert!(matches!(self.hir.decls[decl], hir::Decl::Computed { .. }));
 
             let ty = self.hir.explicit_tys[decl].expect("explicit return statements are not allowed in assigned functions (yet?)");
 
@@ -297,7 +293,7 @@ impl Driver {
         }
     }
 
-    fn build_tir_expr(&mut self, unit: &mut UnitItems, level: u32, item_id: ItemId, id: ExprId) {
+    fn build_tir_expr(&mut self, unit: &mut UnitItems, level: u32, id: ExprId) {
         macro_rules! insert_item {
             ($depvec:ident, $item:expr) => {{
                 unit.$depvec.insert(
@@ -349,18 +345,18 @@ impl Driver {
         }
     }
 
-    fn build_tir_decl(&mut self, unit: &mut UnitItems, level: u32, item_id: ItemId, id: DeclId) {
+    fn build_tir_decl(&mut self, unit: &mut UnitItems, level: u32, id: DeclId) {
         match &self.hir.decls[id] {
             // TODO: Add a parameter TIR item for (at least) checking that the type of the param is valid
             hir::Decl::Parameter { .. } => {},
-            hir::Decl::Intrinsic { ref param_tys, .. } => {},
+            hir::Decl::Intrinsic { .. } => {},
             &hir::Decl::Static(root_expr) | &hir::Decl::Const(root_expr) | &hir::Decl::Stored { root_expr, .. } => {
                 let explicit_ty = self.hir.explicit_tys[id];
                 unit.assigned_decls.insert(level, AssignedDecl { explicit_ty, root_expr, decl_id: id });
             },
-            &hir::Decl::Computed { scope, ref param_tys, .. } => {
+            &hir::Decl::Computed { scope, .. } => {
                 let terminal_expr = self.hir.imper_scopes[scope].terminal_expr;
-                if let Some(ty) = self.hir.explicit_tys[id] {
+                if let Some(_) = self.hir.explicit_tys[id] {
                     self.tir.staged_ret_groups.entry(id).or_default().push(terminal_expr);
                 } else {
                     unit.assigned_decls.insert(level, AssignedDecl { explicit_ty: None, root_expr: terminal_expr, decl_id: id });
@@ -507,30 +503,28 @@ impl Driver {
                         }
                     }
                 },
-                hir::Expr::Cast { expr, ty, .. } => {
+                hir::Expr::Cast { ty, .. } => {
                     add_eval_dep!(id, ty);
                 },
-                hir::Expr::Ret { expr, decl } => {
+                hir::Expr::Ret { decl, .. } => {
                     let ty = decl
                         .and_then(|decl| self.hir.explicit_tys[decl])
                         .unwrap_or(self.hir.void_ty);
                     add_eval_dep!(id, ty);
                 }
-                hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => {
-                    // Yay borrow-checker
-                    let arguments = arguments.clone();
-                    self.add_types_2_to_4_deps_to_member_ref(id, &arguments, decl_ref_id);
+                hir::Expr::DeclRef { id: decl_ref_id, .. } => {
+                    self.add_types_2_to_4_deps_to_member_ref(id, decl_ref_id);
                 },
                 hir::Expr::Do { scope } => {
                     self.add_type3_scope_dep(id, scope);
                 },
-                hir::Expr::If { condition, then_scope, else_scope } => {
+                hir::Expr::If { then_scope, else_scope, .. } => {
                     self.add_type3_scope_dep(id, then_scope);
                     if let Some(else_scope) = else_scope {
                         self.add_type3_scope_dep(id, else_scope);
                     }
                 }
-                hir::Expr::While { condition, scope } => {
+                hir::Expr::While { scope, .. } => {
                     self.add_type3_scope_dep(id, scope);
                 }
             }
@@ -554,11 +548,11 @@ impl Driver {
                 let level = sp.levels.item_to_levels[item_id];
                 match self.hir.items[item_id] {
                     hir::Item::Decl(id) => {
-                        self.build_tir_decl(&mut unit.items, level, item_id, id);
+                        self.build_tir_decl(&mut unit.items, level, id);
                     }
                     hir::Item::Expr(id) => {
                         if self.tir.depended_on[id] { unit.eval_dependees.push(id); }
-                        self.build_tir_expr(&mut unit.items, level, item_id, id);
+                        self.build_tir_expr(&mut unit.items, level, id);
                     }
                 }
             }
@@ -568,19 +562,19 @@ impl Driver {
                 for dep in &level_dep.meta_dependees {
                     let expr = match self.hir.items[dep.item] {
                         hir::Item::Expr(id) => id,
-                        hir::Item::Decl(id) => panic!("Can't have metadependency on a declaration!"),
+                        hir::Item::Decl(_) => panic!("Can't have metadependency on a declaration!"),
                     };
                     let mut items = UnitItems::default();
                     let level = sp.levels.item_to_levels[dep.item];
-                    self.build_tir_expr(&mut items, level, dep.item, expr);
+                    self.build_tir_expr(&mut items, level, expr);
                     for &item_id in &dep.deps {
                         let level = sp.levels.item_to_levels[item_id];
                         match self.hir.items[item_id] {
                             hir::Item::Decl(id) => {
-                                self.build_tir_decl(&mut items, level, item_id, id);
+                                self.build_tir_decl(&mut items, level, id);
                             }
                             hir::Item::Expr(id) => {
-                                self.build_tir_expr(&mut items, level, item_id, id);
+                                self.build_tir_expr(&mut items, level, id);
                             }
                         }
                     }

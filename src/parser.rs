@@ -483,9 +483,7 @@ impl Driver {
         self.next(p);
 
         let module = self.hir.begin_module();
-        let Token { kind, range: open_curly_range } = self.cur(p);
-        let open_curly_range = open_curly_range.clone();
-        assert_eq!(kind, &TokenKind::OpenCurly);
+        assert_eq!(self.cur(p).kind, &TokenKind::OpenCurly);
         self.next(p);
         let close_curly_range = loop {
             match self.cur(p).kind {
