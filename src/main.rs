@@ -18,8 +18,6 @@ mod interpreter;
 
 use std::fs;
 
-use string_interner::DefaultStringInterner;
-
 use arch::Arch;
 use interpreter::InterpMode;
 use index_vec::Idx;
@@ -34,9 +32,7 @@ fn main() {
         String::from("HelloWorld.meda"), 
         contents
     );
-    let mut interner = DefaultStringInterner::new();
-    let main_sym = interner.get_or_intern("main");
-    let mut driver = Driver::new(file, interner, Arch::X86_64);
+    let mut driver = Driver::new(file, Arch::X86_64);
     driver.lex();
     driver.parse();
     driver.initialize_tir();
@@ -45,6 +41,8 @@ fn main() {
 
     if driver.report_errors() { return; }
     driver.build_mir(&tp);
+
+    let main_sym = driver.interner.get_or_intern("main");
     let main = driver.mir.functions.iter()
         .position(|func| {
             match func.name {
