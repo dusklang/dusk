@@ -82,7 +82,7 @@ enum Decl {
     Const(Const),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Function {
     pub name: Option<Sym>,
     pub ret_ty: Type,
@@ -272,7 +272,8 @@ impl Driver {
         if let Some(decl) = self.mir.decls.get(&id) { return decl.clone(); }
         match self.hir.decls[id] {
             hir::Decl::Computed { ref params, scope, .. } => {
-                let get = FuncId::new(self.mir.functions.len());
+                // Add placeholder function to reserve ID ahead of time
+                let get = self.mir.functions.push(Function::default());
                 let decl = Decl::Computed { get };
                 self.mir.decls.insert(id, decl.clone());
                 let params = params.clone();
@@ -283,7 +284,7 @@ impl Driver {
                     params.clone(),
                     tp
                 );
-                self.mir.functions.push(func);
+                self.mir.functions[get] = func;
                 decl
             },
             hir::Decl::Stored { id: index, .. } => {
