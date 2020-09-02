@@ -292,13 +292,14 @@ impl Graph {
     }
 
     fn get_deps(&self, item: ItemId, out: &mut HashSet<ItemId>, components: &HashSet<CompId>) {
-        out.extend(&self.dependees[item]);
         for &dependee in &self.dependees[item] {
+            out.insert(dependee);
             self.get_deps(dependee, out, components);
         }
         for &dependee in &self.t3_dependees[item] {
             if out.contains(&dependee) { continue; }
             let comp = self.item_to_components[dependee];
+            // If the dependee is in the same unit as the depender:
             if components.contains(&comp) {
                 out.insert(dependee);
                 self.get_deps(dependee, out, components);
