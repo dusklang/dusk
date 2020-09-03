@@ -20,6 +20,8 @@ pub struct Driver {
     pub errors: Vec<Error>,
     pub mir: mir::Builder,
     pub interp: Interpreter,
+    /// Total number of errors that have been flushed
+    pub flushed_errors: u32,
 }
 
 impl Driver {
@@ -33,6 +35,7 @@ impl Driver {
             errors: Vec::new(),
             mir: mir::Builder::new(arch),
             interp: Interpreter::new(),
+            flushed_errors: 0,
         }
     }
 

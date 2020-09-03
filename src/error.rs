@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::mem;
 
 use crate::driver::Driver;
 use crate::source_info::{SourceFile, SourceRange, CommentatedSourceRange};
@@ -35,21 +36,26 @@ impl Error {
         self
     }
 
-    pub fn report(&mut self, file: &SourceFile) {
+    pub fn report(mut self, file: &SourceFile) {
         println!("\u{001B}[31merror:\u{001B}[0m {}", &self.message);
         file.print_commentated_source_ranges(&mut self.ranges);
     }
 }
 
 impl Driver {
-    pub fn report_errors(&mut self) -> bool {
-        for err in &mut self.errors { err.report(&mut self.file); }
-        if !self.errors.is_empty() {
+    pub fn flush_errors(&mut self) {
+        let errors = mem::replace(&mut self.errors, Vec::new());
+        self.flushed_errors += errors.len() as u32;
+        for err in errors { err.report(&self.file); }
+    }
+
+    pub fn check_for_failure(&self) -> bool {
+        if self.flushed_errors > 0 {
             print!("\n\u{001B}[31mcompilation failed due to previous ");
-            if self.errors.len() == 1 {
+            if self.flushed_errors == 1 {
                 print!("error");
             } else {
-                print!("{} errors", self.errors.len());
+                print!("{} errors", self.flushed_errors);
             }
             println!("\u{001B}[0m");
             true
