@@ -72,12 +72,11 @@ struct Opt {
 
 fn main() {
     let opt = Opt::parse();
-    println!("options: {:#?}", opt);
 
-    let contents = fs::read_to_string("HelloWorld.meda")
+    let contents = fs::read_to_string(&opt.input)
         .expect("unable to read input file");
     let file = source_info::SourceFile::new(
-        String::from("HelloWorld.meda"), 
+        opt.input,
         contents
     );
     let mut driver = Driver::new(file, Arch::X86_64);

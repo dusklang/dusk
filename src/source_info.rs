@@ -2,6 +2,8 @@ use std::borrow::Cow;
 use std::cmp::{min, max};
 use std::ops::Range;
 use std::str;
+use std::path::PathBuf;
+use std::fs;
 
 use crate::driver::Driver;
 use crate::builder::{ExprId, DeclId};
@@ -20,7 +22,7 @@ struct LineRange {
 }
 
 pub struct SourceFile {
-    pub name: String,
+    pub path: PathBuf,
     pub src: String,
     /// The starting position of each line.
     pub lines: Vec<usize>,
@@ -63,9 +65,9 @@ impl Driver {
 }
 
 impl SourceFile {
-    pub fn new(name: String, source: String) -> SourceFile {
+    pub fn new(path: PathBuf, source: String) -> SourceFile {
         SourceFile {
-            name,
+            path: fs::canonicalize(path).unwrap(),
             src: source,
             lines: vec![0],
         }
