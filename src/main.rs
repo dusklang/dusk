@@ -27,10 +27,8 @@ use ty::Type;
 use mir::FunctionRef;
 use driver::Driver;
 
-
 #[derive(Clap, Debug)]
-enum TirGraphOutput {
-    None,
+pub enum TirGraphOutput {
     Items,
     Components,
     Units,
@@ -39,12 +37,12 @@ enum TirGraphOutput {
 #[repr(u8)]
 #[derive(Clap, Copy, Clone, Debug)]
 enum StopPhase {
-    Lexing,
-    Parsing,
+    Lex,
+    Parse,
     Tir,
-    TypeChecking,
+    Typecheck,
     Mir,
-    Interpretation,
+    Interp,
 }
 
 #[derive(Clap, Debug)]
@@ -55,15 +53,15 @@ struct Opt {
     output_tc_diff: bool,
 
     /// The mode for displaying the TIR graph
-    #[clap(arg_enum, short="g", long, default_value="none", case_insensitive = true)]
-    tir_output: TirGraphOutput,
+    #[clap(arg_enum, short="g", long, case_insensitive = true)]
+    tir_output: Option<TirGraphOutput>,
 
     /// Output MIR in textual format
     #[clap(short="m", long)]
     output_mir: bool,
 
     /// The phase to stop the compiler at
-    #[clap(arg_enum, short="s", long, default_value="interpretation", case_insensitive = true)]
+    #[clap(arg_enum, short="s", long, default_value="interp", case_insensitive = true)]
     stop_phase: StopPhase,
 
     /// Input file
@@ -92,17 +90,17 @@ fn main() {
         }}
     }
 
-    begin_phase!(Lexing);
+    begin_phase!(Lex);
     driver.lex();
 
-    begin_phase!(Parsing);
+    begin_phase!(Parse);
     driver.parse();
 
     begin_phase!(Tir);
     driver.initialize_tir();
     let units = driver.build_more_tir();
 
-    begin_phase!(TypeChecking);
+    begin_phase!(Typecheck);
     let tp = driver.type_check(&units, opt.output_tc_diff);
 
     driver.flush_errors();
@@ -115,7 +113,7 @@ fn main() {
         println!("{}", driver.display_mir());
     }
 
-    begin_phase!(Interpretation);
+    begin_phase!(Interp);
     let main_sym = driver.interner.get_or_intern("main");
     let main = driver.mir.functions.iter()
         .position(|func| {
