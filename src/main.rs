@@ -110,6 +110,10 @@ fn main() {
 
     begin_phase!(Mir);
     driver.build_mir(&tp);
+    
+    if opt.output_mir {
+        println!("{}", driver.display_mir());
+    }
 
     begin_phase!(Interpretation);
     let main_sym = driver.interner.get_or_intern("main");
