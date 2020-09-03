@@ -103,7 +103,7 @@ fn main() {
     let units = driver.build_more_tir();
 
     begin_phase!(TypeChecking);
-    let tp = driver.type_check(&units, false);
+    let tp = driver.type_check(&units, opt.output_tc_diff);
 
     driver.flush_errors();
     if driver.check_for_failure() { return; }
