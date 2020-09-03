@@ -36,7 +36,8 @@ enum TirGraphOutput {
     Units,
 }
 
-#[derive(Clap, Debug)]
+#[repr(u8)]
+#[derive(Clap, Copy, Clone, Debug)]
 enum StopPhase {
     Lexing,
     Parsing,
@@ -73,6 +74,14 @@ struct Opt {
 fn main() {
     let opt = Opt::parse();
 
+    macro_rules! begin_phase {
+        ($phase:ident) => {{
+            if (opt.stop_phase as u8) < (StopPhase::$phase as u8) {
+                return;
+            }
+        }}
+    }
+
     let contents = fs::read_to_string(&opt.input)
         .expect("unable to read input file");
     let file = source_info::SourceFile::new(
@@ -80,15 +89,26 @@ fn main() {
         contents
     );
     let mut driver = Driver::new(file, Arch::X86_64);
+
+    begin_phase!(Lexing);
     driver.lex();
+
+    begin_phase!(Parsing);
     driver.parse();
+
+    begin_phase!(Tir);
     driver.initialize_tir();
     let units = driver.build_more_tir();
+
+    begin_phase!(TypeChecking);
     let tp = driver.type_check(&units, false);
 
     if driver.report_errors() { return; }
+
+    begin_phase!(Mir);
     driver.build_mir(&tp);
 
+    begin_phase!(Interpretation);
     let main_sym = driver.interner.get_or_intern("main");
     let main = driver.mir.functions.iter()
         .position(|func| {
