@@ -458,7 +458,6 @@ impl Driver {
             }
         }
 
-        
         // Split the graph into components
         self.tir.graph.split();
 
