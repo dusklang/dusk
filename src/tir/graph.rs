@@ -13,6 +13,7 @@ use crate::builder::ItemId;
 use crate::index_vec::{Idx, IdxVec};
 use crate::driver::Driver;
 use crate::hir;
+use crate::TirGraphOutput;
 
 newtype_index!(CompId);
 
@@ -430,8 +431,7 @@ impl Driver {
     }
 
     /// Prints graph in Graphviz format, then opens a web browser to display the results.
-    #[allow(dead_code)]
-    pub fn print_graph(&self) -> IoResult<()> {
+    pub fn print_graph(&self, output: TirGraphOutput) -> IoResult<()> {
         let graph = &self.tir.graph;
         let tmp_dir = fs::read_dir(".")?.find(|entry| entry.as_ref().unwrap().file_name() == "tmp");
         if tmp_dir.is_none() {
@@ -441,16 +441,22 @@ impl Driver {
         writeln!(w, "digraph G {{")?;
         writeln!(w, "    node [shape=box];")?;
 
-        if !graph.components.is_empty() {
-            for (i, component) in graph.components.iter().enumerate() {
-                self.write_component(&mut w, 0, i, component)?;
-                self.write_component_deps(&mut w, graph, component)?;
+        match output {
+            TirGraphOutput::Items => {
+                for i in 0..graph.dependees.len() {
+                    let a = ItemId::new(i);
+                    self.write_item(&mut w, a)?;
+                    self.write_deps(&mut w, a, graph)?;
+                }
             }
-        } else {
-            for i in 0..graph.dependees.len() {
-                let a = ItemId::new(i);
-                self.write_item(&mut w, a)?;
-                self.write_deps(&mut w, a, graph)?;
+            TirGraphOutput::Components => {
+                for (i, component) in graph.components.iter().enumerate() {
+                    self.write_component(&mut w, 0, i, component)?;
+                    self.write_component_deps(&mut w, graph, component)?;
+                }
+            }
+            TirGraphOutput::Units => {
+                panic!("Unimplemented graph output mode \"units\"");
             }
         }
         writeln!(w, "}}")?;

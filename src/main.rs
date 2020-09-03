@@ -100,6 +100,10 @@ fn main() {
     driver.initialize_tir();
     let units = driver.build_more_tir();
 
+    if let Some(output) = opt.tir_output {
+        driver.print_graph(output).unwrap();
+    }
+
     begin_phase!(Typecheck);
     let tp = driver.type_check(&units, opt.output_tc_diff);
 
