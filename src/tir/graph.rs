@@ -431,7 +431,7 @@ impl Driver {
     }
 
     /// Prints graph in Graphviz format, then opens a web browser to display the results.
-    pub fn print_graph(&self, output: TirGraphOutput) -> IoResult<()> {
+    pub fn print_graph(&self, output: TirGraphOutput, levels: &Levels) -> IoResult<()> {
         let graph = &self.tir.graph;
         let tmp_dir = fs::read_dir(".")?.find(|entry| entry.as_ref().unwrap().file_name() == "tmp");
         if tmp_dir.is_none() {
@@ -456,7 +456,50 @@ impl Driver {
                 }
             }
             TirGraphOutput::Units => {
-                panic!("Unimplemented graph output mode \"units\"");
+                writeln!(w, "    newrank=true;")?;
+                writeln!(w, "    rankdir = tb;")?;
+                let item_to_levels = &levels.item_to_levels;
+                let max_level = levels.units.iter()
+                    .flat_map(|unit| &unit.items)
+                    .map(|&item| item_to_levels[item])
+                    .max()
+                    .unwrap_or(0);
+
+                writeln!(w, "    subgraph cluster_levels {{")?;
+                writeln!(w, "        label=\"Levels\";")?;
+                writeln!(w, "        style=filled;")?;
+                writeln!(w, "        color=lightgrey;")?;
+                writeln!(w, "        node [style=filled,color=white];")?;
+                write!(w, "    ")?;
+                for i in 0..=max_level {
+                    if i != 0 {
+                        write!(w, " -> ")?;
+                    }
+                    write!(w, "level{}", i)?;
+                }
+                writeln!(w, ";")?;
+                writeln!(w, "    }}")?;
+
+                for (i, unit) in levels.units.iter().enumerate() {
+                    writeln!(w, "    subgraph cluster_unit{} {{", i)?;
+                    writeln!(w, "        label=\"Unit {}\";", i)?;
+                    writeln!(w, "        style=filled;")?;
+                    writeln!(w, "        color=lightgrey;")?;
+                    writeln!(w, "        node [style=filled,color=white];")?;
+                    for &item in &unit.items {
+                        let level = levels.item_to_levels[item];
+                        self.write_item(&mut w, item)?;
+                        write!(w, "        {{ rank=same; level{}; ", level)?;
+                        item.write_node_name(&mut w, &self.hir)?;
+                        writeln!(w, "; }}")?;
+                        if level < max_level {
+                            write!(w, "        ")?;
+                            item.write_node_name(&mut w, &self.hir)?;
+                            writeln!(w, " -> level{} [style=invis];", level + 1)?;
+                        }
+                    }
+                    writeln!(w, "    }}")?;
+                }
             }
         }
         writeln!(w, "}}")?;

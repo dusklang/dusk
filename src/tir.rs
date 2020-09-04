@@ -8,6 +8,7 @@ use crate::builder::*;
 use crate::dep_vec::{self, DepVec};
 use crate::hir::{self, Namespace};
 use crate::index_vec::{Idx, IdxVec};
+use crate::TirGraphOutput;
 
 mod graph;
 use graph::{Graph, Levels};
@@ -530,11 +531,16 @@ impl Driver {
         }
     }
 
-    pub fn build_more_tir(&mut self) -> Vec<Unit> {
+    pub fn build_more_tir(&mut self, output: Option<TirGraphOutput>) -> Vec<Unit> {
         ei_injector!(self, ei);
 
         // Solve for the unit and level of each item
         let levels = self.tir.graph.solve();
+
+        // Output TIR graph if necessary
+        if let Some(output) = output {
+            self.print_graph(output, &levels).unwrap();
+        }
 
         let mut sp = Subprogram { units: Vec::new(), levels };
         sp.units.resize_with(sp.levels.units.len(), || Unit::default());
