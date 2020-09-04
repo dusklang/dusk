@@ -378,9 +378,18 @@ impl Driver {
         Ok(())
     }
 
-    fn write_deps(&self, w: &mut impl Write, a: ItemId, graph: &Graph) -> IoResult<()> {
+    fn write_deps(&self, w: &mut impl Write, a: ItemId, graph: &Graph, constraint: bool) -> IoResult<()> {
         for &b in &graph.dependees[a] {
-            self.write_dep(w, a, b, |_| Ok(()))?;
+            self.write_dep(
+                w,
+                a,
+                b,
+                |w| {
+                    if !constraint {
+                        write!(w, " [constraint=false]")?
+                    }
+                    Ok(())
+                })?;
         }
         Ok(())
     }
@@ -424,7 +433,7 @@ impl Driver {
 
     fn write_component_deps(&self, w: &mut impl Write, graph: &Graph, component: &Component) -> IoResult<()> {
         for &item in &component.items {
-            self.write_deps(w, item, graph)?;
+            self.write_deps(w, item, graph, true)?;
         }
 
         Ok(())
@@ -446,7 +455,7 @@ impl Driver {
                 for i in 0..graph.dependees.len() {
                     let a = ItemId::new(i);
                     self.write_item(&mut w, a)?;
-                    self.write_deps(&mut w, a, graph)?;
+                    self.write_deps(&mut w, a, graph, true)?;
                 }
             }
             TirGraphOutput::Components => {
@@ -456,8 +465,9 @@ impl Driver {
                 }
             }
             TirGraphOutput::Units => {
+                writeln!(w, "    splines=ortho;")?;
                 writeln!(w, "    newrank=true;")?;
-                writeln!(w, "    rankdir = tb;")?;
+                writeln!(w, "    rankdir = BT;")?;
                 let item_to_levels = &levels.item_to_levels;
                 let max_level = levels.units.iter()
                     .flat_map(|unit| &unit.items)
@@ -477,7 +487,7 @@ impl Driver {
                     }
                     write!(w, "level{}", i)?;
                 }
-                writeln!(w, ";")?;
+                writeln!(w, " [style=invis];")?;
                 writeln!(w, "    }}")?;
 
                 for (i, unit) in levels.units.iter().enumerate() {
@@ -492,6 +502,7 @@ impl Driver {
                         write!(w, "        {{ rank=same; level{}; ", level)?;
                         item.write_node_name(&mut w, &self.hir)?;
                         writeln!(w, "; }}")?;
+                        self.write_deps(&mut w, item, graph, false)?;
                         if level < max_level {
                             write!(w, "        ")?;
                             item.write_node_name(&mut w, &self.hir)?;
