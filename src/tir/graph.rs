@@ -499,14 +499,18 @@ impl Driver {
                     for &item in &unit.items {
                         let level = levels.item_to_levels[item];
                         self.write_item(&mut w, item)?;
-                        write!(w, "        {{ rank=same; level{}; ", level)?;
-                        item.write_node_name(&mut w, &self.hir)?;
-                        writeln!(w, "; }}")?;
                         self.write_deps(&mut w, item, graph, false)?;
+
+                        // Constrain items to be in the correct level
                         if level < max_level {
                             write!(w, "        ")?;
                             item.write_node_name(&mut w, &self.hir)?;
                             writeln!(w, " -> level{} [style=invis];", level + 1)?;
+                        }
+                        if level > 0 {
+                            write!(w, "        level{} -> ", level - 1)?;
+                            item.write_node_name(&mut w, &self.hir)?;
+                            writeln!(w, " [style=invis];")?;
                         }
                     }
                     writeln!(w, "    }}")?;
