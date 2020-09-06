@@ -7,6 +7,9 @@ use std::fs;
 
 use crate::driver::Driver;
 use crate::builder::{ExprId, DeclId};
+use crate::index_vec::Idx;
+
+newtype_index!(SourceFileId pub);
 
 pub type SourceRange = Range<usize>;
 
