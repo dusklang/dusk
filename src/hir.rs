@@ -8,7 +8,7 @@ use string_interner::Sym;
 use crate::driver::Driver;
 use crate::index_vec::{Idx, IdxVec, IdxCounter};
 use crate::builder::{BinOp, UnOp, ItemId, ExprId, DeclId, ImperScopeId, ModScopeId, DeclRefId, CastId, Intrinsic};
-use crate::source_info::SourceRange;
+use crate::source_info::{SourceRange, SourceFileId};
 use crate::ty::Type;
 
 newtype_index!(StoredDeclId pub);
@@ -152,7 +152,7 @@ pub struct Builder {
     pub decl_to_items: IdxVec<ItemId, DeclId>,
     pub names: IdxVec<Sym, DeclId>,
     pub explicit_tys: IdxVec<Option<ExprId>, DeclId>,
-    pub global_scope: ModScopeId,
+    pub global_scopes: IdxVec<ModScopeId, SourceFileId>,
     pub imper_scopes: IdxVec<ImperScope, ImperScopeId>,
     pub mod_scopes: IdxVec<ModScope, ModScopeId>,
     pub imper_ns: IdxVec<ImperScopeNs, ImperScopeNsId>,
@@ -168,16 +168,6 @@ pub struct Builder {
 
 impl Builder {
     pub fn new() -> Self {
-        let mut mod_scopes = IdxVec::new();
-        let global_scope = mod_scopes.push(ModScope::default());
-        let mut mod_ns = IdxVec::new();
-        let global_namespace = mod_ns.push(
-            ModScopeNs {
-                scope: global_scope,
-                parent: None
-            }
-        );
-        let scope_stack = vec![ScopeState::Mod { id: global_scope, namespace: global_namespace }];
         let mut b = Self {
             items: IdxVec::new(),
             exprs: IdxVec::new(),
@@ -187,21 +177,33 @@ impl Builder {
             decl_to_items: IdxVec::new(),
             names: IdxVec::new(),
             explicit_tys: IdxVec::new(),
-            global_scope,
+            global_scopes: IdxVec::new(),
             imper_scopes: IdxVec::new(),
-            mod_scopes,
+            mod_scopes: IdxVec::new(),
             imper_ns: IdxVec::new(),
-            mod_ns,
+            mod_ns: IdxVec::new(),
             void_expr: ExprId::new(0),
             void_ty: ExprId::new(1),
             source_ranges: IdxVec::new(),
             cast_counter: IdxCounter::new(),
             comp_decl_stack: Vec::new(),
-            scope_stack,
+            scope_stack: Vec::new(),
         };
         b.push(Expr::Void, SourceRange::default());
         b.push(Expr::ConstTy(Type::Void), SourceRange::default());
         b
+    }
+
+    pub fn start_new_file(&mut self) {
+        let global_scope = self.mod_scopes.push(ModScope::default());
+        let global_namespace = self.mod_ns.push(
+            ModScopeNs {
+                scope: global_scope,
+                parent: None
+            }
+        );
+        self.scope_stack = vec![ScopeState::Mod { id: global_scope, namespace: global_namespace }];
+        self.global_scopes.push(global_scope);
     }
 
     fn push(&mut self, expr: Expr, range: SourceRange) -> ExprId {

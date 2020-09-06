@@ -13,6 +13,7 @@ struct Parser { cur: usize }
 
 impl Driver {
     pub fn parse(&mut self) {
+        self.hir.start_new_file();
         let mut p = Parser { cur: 0 };
 
         // Add intrinsics
@@ -101,6 +102,10 @@ impl Driver {
                 },
                 _ => { self.parse_node(&mut p); }
             }
+        }
+
+        if self.hir.global_scopes.len() < self.src_map.files.len() {
+            self.parse();
         }
     }
 
