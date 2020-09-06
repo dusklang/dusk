@@ -96,7 +96,7 @@ impl Driver {
                 TokenKind::CloseCurly => {
                     self.errors.push(
                         Error::new("Extraneous closing brace '}'")
-                            .adding_primary_range(self.cur(&p).range.clone(), "brace here")
+                            .adding_primary_range(self.cur(&p).range, "brace here")
                     );
                 },
                 _ => { self.parse_node(&mut p); }
@@ -146,14 +146,14 @@ impl Driver {
 
     fn parse_prefix_operator(&mut self, p: &mut Parser) -> Option<(UnOp, SourceRange)> {
         let tok = self.cur(p);
-        let mut range = tok.range.clone();
+        let mut range = tok.range;
         let op = match tok.kind {
             TokenKind::Sub        => UnOp::Neg,
             TokenKind::Add        => UnOp::Plus,
             TokenKind::LogicalNot => UnOp::Not,
             TokenKind::Asterisk   => UnOp::Deref,
             TokenKind::Ampersand  => if let TokenKind::Mut = self.peek_next(p).kind {
-                let mut_range = self.next(p).range.clone();
+                let mut_range = self.next(p).range;
                 range = source_info::concat(range, mut_range);
                 UnOp::AddrOfMut
             } else {
@@ -169,10 +169,10 @@ impl Driver {
     fn parse_postfix_operator(&mut self, p: &mut Parser) -> Option<(UnOp, SourceRange)> {
         let lhs_whitespace = self.peek_prev_including_insignificant(p).kind.is_insignificant();
         let tok = self.cur(p);
-        let mut range = tok.range.clone();
+        let mut range = tok.range;
         let op = match tok.kind {
             TokenKind::Asterisk => if let TokenKind::Mut = self.peek_next(p).kind {
-                let mut_range = self.next(p).range.clone();
+                let mut_range = self.next(p).range;
                 range = source_info::concat(range, mut_range);
                 UnOp::PointerMut
             } else {
@@ -202,20 +202,20 @@ impl Driver {
             self.next(p);
             let (ty, ty_range) = self.parse_type(p);
             range = source_info::concat(range, ty_range);
-            term = self.hir.cast(term, ty, range.clone());
+            term = self.hir.cast(term, ty, range);
         }
         Ok(term)
     }
 
     fn parse_decl_ref(&mut self, p: &mut Parser, base_expr: Option<ExprId>, name: Sym) -> ExprId {
-        let name_range = self.cur(p).range.clone();
+        let name_range = self.cur(p).range;
         let begin_range = if let Some(base_expr) = base_expr {
             self.hir.get_range(base_expr)
         } else {
-            name_range.clone()
+            name_range
         };
         let mut args = SmallVec::new();
-        let mut end_range = name_range.clone();
+        let mut end_range = name_range;
         let mut has_parens = false;
         if let TokenKind::LeftParen = self.next(p).kind {
             has_parens = true;
@@ -225,7 +225,7 @@ impl Driver {
                 let Token { kind, range } = self.cur(p);
                 match kind {
                     TokenKind::RightParen => {
-                        end_range = range.clone();
+                        end_range = range;
                         self.next(p);
                         break;
                     }
@@ -259,45 +259,45 @@ impl Driver {
 
         match self.cur(p).kind {
             TokenKind::LeftParen => {
-                let open_paren_range = self.cur(p).range.clone();
+                let open_paren_range = self.cur(p).range;
                 self.next(p);
                 let expr = self.parse_expr(p);
                 if let TokenKind::RightParen = self.cur(p).kind {}
                 else {
                     self.errors.push(
                         Error::new("unclosed parentheses")
-                            .adding_primary_range(self.cur(p).range.clone(), "paren here")
+                            .adding_primary_range(self.cur(p).range, "paren here")
                     );
                 }
-                let close_paren_range = self.cur(p).range.clone();
+                let close_paren_range = self.cur(p).range;
                 self.hir.set_range(expr, source_info::concat(open_paren_range, close_paren_range));
                 self.next(p);
                 Ok(expr)
             },
             &TokenKind::IntLit(val) => {
-                let lit = self.hir.int_lit(val, self.cur(p).range.clone());
+                let lit = self.hir.int_lit(val, self.cur(p).range);
                 self.next(p);
                 Ok(lit)
             },
             &TokenKind::DecLit(val) => {
-                let lit = self.hir.dec_lit(val, self.cur(p).range.clone());
+                let lit = self.hir.dec_lit(val, self.cur(p).range);
                 self.next(p);
                 Ok(lit)
             },
             TokenKind::StrLit(val) => {
                 let val = val.clone();
-                let lit = self.hir.str_lit(val, self.cur(p).range.clone());
+                let lit = self.hir.str_lit(val, self.cur(p).range);
                 self.next(p);
                 Ok(lit)
             },
             &TokenKind::CharLit(val) => {
-                let lit = self.hir.char_lit(val, self.cur(p).range.clone());
+                let lit = self.hir.char_lit(val, self.cur(p).range);
                 self.next(p);
                 Ok(lit)
             },
             &TokenKind::Ident(name) => Ok(self.parse_decl_ref(p, None, name)),
             TokenKind::Do => {
-                let do_range = self.cur(p).range.clone();
+                let do_range = self.cur(p).range;
                 self.next(p);
                 let (scope, scope_range) = self.parse_scope(p);
                 Ok(self.hir.do_expr(scope, source_info::concat(do_range, scope_range)))
@@ -305,14 +305,14 @@ impl Driver {
             TokenKind::Module => Ok(self.parse_module(p)),
             TokenKind::If => Ok(self.parse_if(p)),
             TokenKind::While => {
-                let while_range = self.cur(p).range.clone();
+                let while_range = self.cur(p).range;
                 self.next(p);
                 let condition = self.parse_expr(p);
                 let (scope, scope_range) = self.parse_scope(p);
                 Ok(self.hir.while_expr(condition, scope, source_info::concat(while_range, scope_range)))
             },
             TokenKind::Return => {
-                let ret_range = self.cur(p).range.clone();
+                let ret_range = self.cur(p).range;
                 self.next(p);
                 let ret_expr = self.try_parse_expr(p).unwrap_or_else(|_| self.hir.void_expr);
                 let expr_range = self.hir.get_range(ret_expr);
@@ -330,14 +330,14 @@ impl Driver {
                     modified = true;
                 }
                 while self.cur(p).kind == &TokenKind::Dot {
-                    let dot_range = self.cur(p).range.clone();
+                    let dot_range = self.cur(p).range;
                     let name = if let &TokenKind::Ident(name) = self.next(p).kind {
                         name
                     } else {
                         self.errors.push(
                             Error::new("expected identifier after '.'")
                                 .adding_primary_range(dot_range, "'.' here")
-                                .adding_secondary_range(self.cur(p).range.clone(), "note: found this instead")
+                                .adding_secondary_range(self.cur(p).range, "note: found this instead")
                         );
                         self.next(p);
                         return expr
@@ -395,7 +395,7 @@ impl Driver {
 
     fn parse_if(&mut self, p: &mut Parser) -> ExprId {
         let Token { kind, range: if_range } = self.cur(p);
-        let if_range = if_range.clone();
+        let if_range = if_range;
         assert_eq!(kind, &TokenKind::If);
         self.next(p);
         let condition = self.parse_expr(p);
@@ -445,9 +445,9 @@ impl Driver {
     }
 
     fn parse_decl(&mut self, name: Sym, p: &mut Parser) {
-        let name_range = self.cur(p).range.clone();
+        let name_range = self.cur(p).range;
         // Skip to colon, get range.
-        let colon_range = self.next(p).range.clone();
+        let colon_range = self.next(p).range;
         let mut found_separator = true;
         let explicit_ty = match self.next(p).kind {
             TokenKind::Ident(_) => Some(self.parse_type(p).0),
@@ -478,7 +478,7 @@ impl Driver {
 
     fn parse_module(&mut self, p: &mut Parser) -> ExprId {
         let Token { kind, range: mod_range } = self.cur(p);
-        let mod_range = mod_range.clone();
+        let mod_range = mod_range;
         assert_eq!(kind, &TokenKind::Module);
         self.next(p);
 
@@ -489,7 +489,7 @@ impl Driver {
             match self.cur(p).kind {
                 TokenKind::Eof => panic!("Unexpected eof while parsing scope"),
                 TokenKind::CloseCurly => {
-                    let close_curly_range = self.cur(p).range.clone();
+                    let close_curly_range = self.cur(p).range;
                     self.next(p);
                     break close_curly_range;
                 },
@@ -512,14 +512,14 @@ impl Driver {
         let scope = self.hir.begin_imper_scope();
         let mut last_was_expr = false;
         let Token { kind, range: open_curly_range } = self.cur(p);
-        let open_curly_range = open_curly_range.clone();
+        let open_curly_range = open_curly_range;
         assert_eq!(kind, &TokenKind::OpenCurly);
         self.next(p);
         let close_curly_range = loop {
             match self.cur(p).kind {
                 TokenKind::Eof => panic!("Unexpected eof while parsing scope"),
                 TokenKind::CloseCurly => {
-                    let close_curly_range = self.cur(p).range.clone();
+                    let close_curly_range = self.cur(p).range;
                     self.next(p);
                     break close_curly_range;
                 },
@@ -542,21 +542,21 @@ impl Driver {
 
     fn parse_comp_decl(&mut self, p: &mut Parser) {
         assert_eq!(self.cur(p).kind, &TokenKind::Fn);
-        let mut proto_range = self.cur(p).range.clone();
+        let mut proto_range = self.cur(p).range;
         let name = if let TokenKind::Ident(name) = *self.next(p).kind {
             name
         } else {
             panic!("expected function name after 'fn'")
         };
-        let name_range = self.cur(p).range.clone();
-        proto_range = source_info::concat(proto_range, name_range.clone());
+        let name_range = self.cur(p).range;
+        proto_range = source_info::concat(proto_range, name_range);
         let mut param_names = SmallVec::new();
         let mut param_tys = SmallVec::new();
         let mut param_ranges = SmallVec::new();
         if let TokenKind::LeftParen = self.next(p).kind {
             self.next(p);
             while let TokenKind::Ident(name) = *self.cur(p).kind {
-                let mut param_range = self.cur(p).range.clone();
+                let mut param_range = self.cur(p).range;
                 param_names.push(name);
                 assert_eq!(self.next(p).kind, &TokenKind::Colon);
                 self.next(p);
@@ -569,13 +569,17 @@ impl Driver {
                 }
             }
             assert_eq!(self.cur(p).kind, &TokenKind::RightParen);
-            proto_range = source_info::concat(proto_range, self.cur(p).range.clone());
+            proto_range = source_info::concat(proto_range, self.cur(p).range);
             self.next(p);
         } else {
+            //let 
             self.errors.push(
                 Error::new("function declaration must have parentheses")
-                    .adding_primary_range(name_range.clone(), "")
-                    .adding_secondary_range(name_range.end..(name_range.end+1), "add '()' here")
+                    .adding_primary_range(name_range, "")
+                    .adding_secondary_range(
+                        SourceRange::from_single_char(name_range.end),
+                        "add '()' here"
+                    )
             );
         }
         let ty = match self.cur(p).kind {
@@ -607,14 +611,14 @@ impl Driver {
     }
 
     fn parse_type(&mut self, p: &mut Parser) -> (ExprId, SourceRange) {
-        let begin_range = self.cur(p).range.clone();
+        let begin_range = self.cur(p).range;
         // This is a term and not an expression because assignments are valid expressions.
         //     For example: `foo: SomeType = ...` <- the parser would think you were assigning `...` to `SomeType` and
         //     taking the `void` result of that assignment as the type of variable declaration `foo`
         // TODO: add statements as a slight superset of expressions which includes assignments.
         let ty = self.try_parse_non_cast_term(p).unwrap();
-        let end_range = self.cur(p).range.clone();
-        let range = begin_range.start..end_range.start;
+        let end_range = self.cur(p).range;
+        let range = source_info::concat(begin_range, end_range);
 
         (ty, range)
     }

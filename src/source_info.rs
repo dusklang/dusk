@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 use std::cmp::{min, max};
-use std::ops::Range;
 use std::str;
 use std::path::PathBuf;
 use std::fs;
@@ -11,10 +10,39 @@ use crate::index_vec::Idx;
 
 newtype_index!(SourceFileId pub);
 
-pub type SourceRange = Range<usize>;
+#[derive(Copy, Clone, Debug)]
+pub struct SourceRange {
+    pub start: usize,
+    pub end: usize,
+}
+
+impl Default for SourceRange {
+    fn default() -> Self {
+        SourceRange {
+            start: usize::MAX,
+            end: usize::MAX,
+        }
+    }
+}
+
+impl SourceRange {
+    pub fn from_single_char(index: usize) -> SourceRange {
+        SourceRange {
+            start: index,
+            end: index+1
+        }
+    }
+
+    pub fn to_range(self) -> std::ops::Range<usize> {
+        self.start..self.end
+    }
+}
 
 pub fn concat(a: SourceRange, b: SourceRange) -> SourceRange {
-    min(a.start, b.start)..max(a.end, b.end)
+    SourceRange {
+        start: min(a.start, b.start),
+        end:   max(a.end, b.end),
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -77,7 +105,7 @@ impl SourceFile {
     }
 
     pub fn substring_from_range(&self, range: SourceRange) -> &str {
-        let slice = &self.src.as_bytes()[range];
+        let slice = &self.src.as_bytes()[range.to_range()];
         str::from_utf8(slice).unwrap()
     }
 
@@ -88,7 +116,7 @@ impl SourceFile {
         } else {
             self.lines[line + 1]
         };
-        self.substring_from_range(start..end)
+        self.substring_from_range(SourceRange { start, end })
     }
 
     fn lines_in_range(&self, range: SourceRange) -> Vec<LineRange> {
@@ -147,7 +175,7 @@ impl SourceFile {
         }
         let mut max_line_number_digits = 0;
         for range in ranges {
-            let line_ranges = self.lines_in_range(range.range.clone());
+            let line_ranges = self.lines_in_range(range.range);
             for range in &line_ranges {
                 max_line_number_digits = max(max_line_number_digits, num_digits(range.line + 1));
             }

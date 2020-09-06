@@ -79,7 +79,7 @@ pub struct TokenVec {
 #[derive(Debug)]
 pub struct Token<'src> {
     pub kind: &'src TokenKind,
-    pub range: &'src SourceRange,
+    pub range: SourceRange,
 }
 
 impl TokenVec {
@@ -98,7 +98,7 @@ impl TokenVec {
     pub fn at<'src>(&'src self, i: usize) -> Token<'src> {
         Token {
             kind: &self.kinds[i],
-            range: &self.ranges[i],
+            range: self.ranges[i],
         }
     }
 

@@ -199,8 +199,8 @@ impl Builder {
             comp_decl_stack: Vec::new(),
             scope_stack,
         };
-        b.push(Expr::Void, 0..0);
-        b.push(Expr::ConstTy(Type::Void), 0..0);
+        b.push(Expr::Void, SourceRange::default());
+        b.push(Expr::ConstTy(Type::Void), SourceRange::default());
         b
     }
 
@@ -422,7 +422,7 @@ impl Builder {
             }
         );
         self.scope_stack.push(ScopeState::Mod { id, namespace });
-        self.push(Expr::Mod { id }, usize::MAX..usize::MAX)
+        self.push(Expr::Mod { id }, SourceRange::default())
     }
     pub fn end_module(&mut self, mod_expr: ExprId, range: SourceRange) {
         debug_assert!(matches!(self.exprs[mod_expr], Expr::Mod { .. }));
@@ -444,8 +444,8 @@ impl Builder {
             .enumerate()
             .zip(&param_names)
             .zip(&param_ranges)
-            .for_each(|(((index, ty), &name), range)| {
-                self.decl(Decl::Parameter { index }, name, Some(ty.clone()), range.clone());
+            .for_each(|(((index, ty), &name), &range)| {
+                self.decl(Decl::Parameter { index }, name, Some(ty.clone()), range);
             });
         let last_param = DeclId::new(self.decls.len());
         let params = first_param..last_param;
@@ -512,12 +512,12 @@ impl Builder {
 
 impl Driver {
     pub fn add_const_ty(&mut self, ty: Type) -> ExprId {
-        self.hir.push(Expr::ConstTy(ty), usize::MAX..usize::MAX)
+        self.hir.push(Expr::ConstTy(ty), SourceRange::default())
     }
     pub fn add_intrinsic(&mut self, intrinsic: Intrinsic, param_tys: SmallVec<[ExprId; 2]>, ret_ty: ExprId, function_like: bool) {
         let name = self.interner.get_or_intern(intrinsic.name());
         let num_params = param_tys.len();
-        let id = self.hir.decl(Decl::Intrinsic { intr: intrinsic, param_tys, function_like }, name, Some(ret_ty), usize::MAX..usize::MAX);
+        let id = self.hir.decl(Decl::Intrinsic { intr: intrinsic, param_tys, function_like }, name, Some(ret_ty), SourceRange::default());
         assert_eq!(self.hir.scope_stack.len(), 1, "cannot add intrinsic anywhere except global scope");
         self.hir.mod_scoped_decl(
             name,

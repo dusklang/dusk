@@ -1,6 +1,7 @@
 
 use std::collections::HashMap;
 use std::ffi::CString;
+use std::ops::Range;
 
 use unicode_segmentation::GraphemeCursor;
 
@@ -10,14 +11,34 @@ use crate::error::Error;
 use crate::source_info::SourceRange;
 
 struct Lexer {
-    /// Start of current grapheme
+    /// Byte offset of the current file in the global source map
+    file_offset: usize,
+
+    /// Start of current grapheme (relative to file_offset)
     start: usize,
-    /// End of current grapheme
+    /// End of current grapheme (relative to file_offset)
     end: GraphemeCursor,
 
     tok_start_loc: usize,
 
     special_escape_characters: HashMap<&'static str, &'static str>,
+}
+
+impl Lexer {
+    fn cur_loc(&self) -> usize {
+        self.start
+    }
+
+    fn has_chars(&self) -> bool {
+        self.start < self.end.cur_cursor()
+    }
+
+    fn make_src_range(&self, range: Range<usize>) -> SourceRange {
+        SourceRange {
+            start: range.start + self.file_offset,
+            end: range.end + self.file_offset,
+        }
+    }
 }
 
 impl Driver {
@@ -32,6 +53,8 @@ impl Driver {
         };
 
         let mut l = Lexer {
+            // TODO: add a meaningful value here
+            file_offset: 0,
             start: 0,
             end:   GraphemeCursor::new(0, self.file.src.len(), true),
             tok_start_loc: 0,
@@ -63,19 +86,7 @@ impl Driver {
             if should_break { break; }
         }
     }
-}
 
-impl Lexer {
-    fn cur_loc(&self) -> usize {
-        self.start
-    }
-
-    fn has_chars(&self) -> bool {
-        self.start < self.end.cur_cursor()
-    }
-}
-
-impl Driver {
     fn cur_tok(&self, l: &Lexer) -> &str {
         &self.file.src[l.start..l.end.cur_cursor()]
     }
@@ -153,6 +164,7 @@ impl Driver {
 
     fn pack_tok(&self, l: &mut Lexer, kind: TokenKind) -> (TokenKind, SourceRange) {
         let range = l.tok_start_loc..l.cur_loc();
+        let range = l.make_src_range(range);
         l.tok_start_loc = l.cur_loc();
         (kind, range)
     }
@@ -199,14 +211,18 @@ impl Driver {
                 self.advance(l);
             }
             if levels > 0 {
+                let range = l.make_src_range(comment_begin..l.cur_loc());
                 let mut err = Error::new(
                     "unterminated '/*' comment"
                 ).adding_primary_range(
-                    comment_begin..l.cur_loc(),
+                    range,
                     "previous '/*' delimiter here"
                 );
                 if let Some(prev_ending_delimiter) = prev_ending_delimiter {
-                    err.add_primary_range(prev_ending_delimiter..(prev_ending_delimiter + 2), "previous '*/' delimiter here");
+                    let range = l.make_src_range(
+                        prev_ending_delimiter..(prev_ending_delimiter + 2)
+                    );
+                    err.add_primary_range(range, "previous '*/' delimiter here");
                     // Reset the position to the position right after the previous ending delimiter so we can keep lexing.
                     // This might be a terrible idea, we'll just have to wait and see.
                     self.set_pos(l, prev_ending_delimiter + 2);
@@ -216,11 +232,12 @@ impl Driver {
             self.pack_tok(l, TokenKind::MultiLineComment)
         } else if self.is_str(l, b"*/") {
             unsafe { self.advance_by_ascii(l, 2); }
+            let range = l.make_src_range(l.tok_start_loc..l.cur_loc());
             self.errors.push(
                 Error::new(
                     "unexpected '*/' delimiter"
                 ).adding_primary_range(
-                    l.tok_start_loc..l.cur_loc(),
+                    range,
                     "no previous '/*' to match"
                 )
             );
@@ -236,11 +253,12 @@ impl Driver {
                     if let Some(character) = l.special_escape_characters.get(self.cur_tok(l)) {
                         character
                     } else {
+                        let range = l.make_src_range(l.cur_loc()..(l.cur_loc() + 1));
                         self.errors.push(
                             Error::new(
                                 format!("invalid escape character '{}'", self.cur_tok(l))
                             ).adding_primary_range(
-                                l.cur_loc()..(l.cur_loc() + 1), 
+                                range,
                                 "escaped here"
                             )
                         );
@@ -272,11 +290,12 @@ impl Driver {
                 } else {
                     "unterminated string literal"
                 };
+                let range = l.make_src_range(l.tok_start_loc..l.tok_start_loc + 1);
                 self.errors.push(
                     Error::new(
                         msg
                     ).adding_primary_range(
-                        l.tok_start_loc..l.tok_start_loc + 1,
+                        range,
                         "literal begins here"
                     )
                 );

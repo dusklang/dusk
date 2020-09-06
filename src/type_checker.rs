@@ -58,7 +58,7 @@ impl Driver {
                     if let Some(err) = constraints.can_unify_to(&explicit_ty.clone().into()).err() {
                         let range = self.hir.get_range(item.root_expr);
                         let mut error = Error::new(format!("Couldn't unify expression to assigned decl type `{:?}`", explicit_ty))
-                            .adding_primary_range(range.clone(), "expression here");
+                            .adding_primary_range(range, "expression here");
                         match err {
                             UnificationError::InvalidChoice(choices)
                                 => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
@@ -281,7 +281,7 @@ impl Driver {
                     if let Some(err) = tp.constraints(expr).can_unify_to(&QualType::from(&ty)).err() {
                         let range = self.hir.get_range(expr);
                         let mut error = Error::new(format!("can't unify expression to return type {:?}", ty))
-                            .adding_primary_range(range.clone(), "expression here");
+                            .adding_primary_range(range, "expression here");
                         match err {
                             UnificationError::InvalidChoice(choices)
                                 => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
