@@ -10,7 +10,6 @@ use crate::driver::Driver;
 use crate::error::Error;
 use crate::builder::{ExprId, DeclId};
 use crate::ty::{BuiltinTraits, Type, QualType, IntWidth};
-use crate::dep_vec::AnyDepVec;
 use crate::mir::Const;
 use crate::hir;
 use crate::tir::{Unit, UnitItems, LevelMetaDependees, ExprNamespace};

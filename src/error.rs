@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::mem;
 
 use crate::driver::Driver;
-use crate::source_info::{SourceFile, SourceRange, CommentatedSourceRange};
+use crate::source_info::{SourceRange, CommentatedSourceRange};
 
 pub struct Error {
     message: Cow<'static, str>,
