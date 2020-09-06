@@ -201,23 +201,21 @@ fn read_file_common(path: u8*, platform: u8*) {
     print("!\n")
 }
 
-fn os_computer(): module {
-    if os == OS_WINDOWS {
-        mod {
-            fn read_file(path: u8*) { read_file_common(path, "Windows") }
-        }
-    } else if os == OS_MAC {
-        mod {
-            fn read_file(path: u8*) { read_file_common(path, "macOS") }
-        }
-    } else if os == OS_LINUX {
-        mod {
-            fn read_file(path: u8*) { read_file_common(path, "Linux") }
-        }
-    } else {
-        mod {
-            fn read_file(path: u8*) { read_file_common(path, "an unknown OS") }
-        }
+fn os_computer(): module = if os == OS_WINDOWS {
+    mod {
+        fn read_file(path: u8*) { read_file_common(path, "Windows") }
+    }
+} else if os == OS_MAC {
+    mod {
+        fn read_file(path: u8*) { read_file_common(path, "macOS") }
+    }
+} else if os == OS_LINUX {
+    mod {
+        fn read_file(path: u8*) { read_file_common(path, "Linux") }
+    }
+} else {
+    mod {
+        fn read_file(path: u8*) { read_file_common(path, "an unknown OS") }
     }
 }
 
