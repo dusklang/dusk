@@ -5,7 +5,7 @@ use smallvec::SmallVec;
 
 use crate::driver::Driver;
 use crate::builder::*;
-use crate::dep_vec::{self, DepVec};
+use crate::dep_vec::{self, DepVec, AnyDepVec};
 use crate::hir::{self, Namespace};
 use crate::index_vec::{Idx, IdxVec};
 use crate::TirGraphOutput;
@@ -87,6 +87,13 @@ pub struct UnitItems {
     pub derefs: DepVec<Expr<Dereference>>,
     pub pointers: DepVec<Expr<Pointer>>,
     pub ifs: DepVec<Expr<If>>,
+}
+
+impl UnitItems {
+    pub fn num_levels(&self) -> u32 {
+        // Assumption: all DepVecs in the unit have the same number of levels!
+        self.assigned_decls.num_levels()
+    }
 }
 
 impl UnitItems {

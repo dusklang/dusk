@@ -646,8 +646,9 @@ impl Driver {
             // This isn't really a loop! It's just a control flow hack to get around the fact
             // that you can't chain `if let`s in Rust.
             Expr::DeclRef { ref arguments, id } => loop {
-                // Check if the declaration is an intrinsic
                 let decl_id = tp.selected_overload(id).unwrap();
+
+                // Check if the declaration is an intrinsic
                 if let hir::Decl::Intrinsic { intr, .. } = self.hir.decls[decl_id] {
                     // Check if we need to special case the intrinsic
                     match intr {
