@@ -35,18 +35,16 @@ impl Error {
         self.add_secondary_range(range, message);
         self
     }
-
-    pub fn report(mut self, file: &SourceFile) {
-        println!("\u{001B}[31merror:\u{001B}[0m {}", &self.message);
-        file.print_commentated_source_ranges(&mut self.ranges);
-    }
 }
 
 impl Driver {
     pub fn flush_errors(&mut self) {
         let errors = mem::replace(&mut self.errors, Vec::new());
         self.flushed_errors += errors.len() as u32;
-        for err in errors { err.report(&self.file); }
+        for mut err in errors {
+            println!("\u{001B}[31merror:\u{001B}[0m {}", &err.message);
+            self.file.print_commentated_source_ranges(&mut err.ranges);
+        }
     }
 
     pub fn check_for_failure(&self) -> bool {
