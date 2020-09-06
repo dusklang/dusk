@@ -1,6 +1,6 @@
 use string_interner::DefaultStringInterner;
 
-use crate::source_info::SourceFile;
+use crate::source_info::SourceMap;
 use crate::builder::ExprId;
 use crate::token::TokenVec;
 use crate::arch::Arch;
@@ -12,7 +12,7 @@ use crate::interpreter::Interpreter;
 use crate::type_checker::type_provider::TypeProvider;
 
 pub struct Driver {
-    pub file: SourceFile,
+    pub src_map: SourceMap,
     pub toks: TokenVec,
     pub interner: DefaultStringInterner,
     pub hir: hir::Builder,
@@ -25,9 +25,9 @@ pub struct Driver {
 }
 
 impl Driver {
-    pub fn new(file: SourceFile, arch: Arch) -> Self {
+    pub fn new(src_map: SourceMap, arch: Arch) -> Self {
         Self {
-            file,
+            src_map,
             toks: TokenVec::new(),
             interner: DefaultStringInterner::new(),
             hir: hir::Builder::new(),

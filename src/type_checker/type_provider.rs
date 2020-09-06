@@ -6,7 +6,7 @@ use super::{CastMethod, constraints::ConstraintList};
 use crate::{hir, tir};
 use crate::mir::Const;
 use crate::index_vec::{IdxVec, Idx};
-use crate::source_info::{SourceFile, CommentatedSourceRange};
+use crate::source_info::{SourceMap, CommentatedSourceRange};
 
 mod private {
     pub trait Sealed {}
@@ -14,7 +14,7 @@ mod private {
 
 pub trait TypeProvider: private::Sealed {
     fn debug(&self) -> bool;
-    fn debug_output(&mut self, hir: &hir::Builder, file: &SourceFile, level: usize);
+    fn debug_output(&mut self, hir: &hir::Builder, map: &SourceMap, level: usize);
 
     fn ty(&self, expr: ExprId) -> &Type;
     fn ty_mut(&mut self, expr: ExprId) -> &mut Type;
@@ -113,9 +113,9 @@ impl RealTypeProvider {
     }
 }
 
-fn print_debug_diff_and_set_old_constraints(id: ExprId, old_constraints: &mut ConstraintList, new_constraints: &ConstraintList, hir: &hir::Builder, file: &SourceFile) {
+fn print_debug_diff_and_set_old_constraints(id: ExprId, old_constraints: &mut ConstraintList, new_constraints: &ConstraintList, hir: &hir::Builder, map: &SourceMap) {
     if new_constraints != old_constraints {
-        file.print_commentated_source_ranges(&mut [
+        map.print_commentated_source_ranges(&mut [
             CommentatedSourceRange::new(hir.get_range(id), "", '-')
         ]);
         old_constraints.print_diff(new_constraints);
@@ -129,13 +129,13 @@ impl private::Sealed for RealTypeProvider {}
 impl TypeProvider for RealTypeProvider {
     fn debug(&self) -> bool { self.debug }
 
-    fn debug_output(&mut self, hir: &hir::Builder, file: &SourceFile, level: usize) {
+    fn debug_output(&mut self, hir: &hir::Builder, map: &SourceMap, level: usize) {
         if !self.debug { return; }
         println!("LEVEL {}", level);
         assert_eq!(self.constraints.len(), self.constraints_copy.len());
         for i in 0..self.constraints.len() {
             let id = ExprId::new(i);
-            print_debug_diff_and_set_old_constraints(id, &mut self.constraints_copy[id], &self.constraints[id], hir, file);
+            print_debug_diff_and_set_old_constraints(id, &mut self.constraints_copy[id], &self.constraints[id], hir, map);
         }
     }
 
@@ -311,14 +311,14 @@ impl private::Sealed for MockTypeProvider<'_> {}
 impl<'base> TypeProvider for MockTypeProvider<'base> {
     fn debug(&self) -> bool { self.base.debug() }
 
-    fn debug_output(&mut self, hir: &hir::Builder, file: &SourceFile, level: usize) {
+    fn debug_output(&mut self, hir: &hir::Builder, map: &SourceMap, level: usize) {
         if !self.debug() { return; }
         println!("LEVEL {}", level);
         assert_eq!(self.constraints.len(), self.constraints_copy.len());
         let base = self.base;
         for (&id, new_constraints) in &self.constraints {
             let old_constraints = self.constraints_copy.entry(id).or_insert_with(|| base.constraints(id).clone());
-            print_debug_diff_and_set_old_constraints(id, old_constraints, new_constraints, hir, file);
+            print_debug_diff_and_set_old_constraints(id, old_constraints, new_constraints, hir, map);
         }
     }
 

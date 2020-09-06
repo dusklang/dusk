@@ -1,5 +1,4 @@
 use clap::Clap;
-use std::fs;
 use std::path::PathBuf;
 
 mod dep_vec;
@@ -26,6 +25,7 @@ use index_vec::Idx;
 use ty::Type;
 use mir::FunctionRef;
 use driver::Driver;
+use source_info::SourceMap;
 
 #[derive(Clap, Debug)]
 pub enum TirGraphOutput {
@@ -72,13 +72,9 @@ struct Opt {
 fn main() {
     let opt = Opt::parse();
 
-    let contents = fs::read_to_string(&opt.input)
-        .expect("unable to read input file");
-    let file = source_info::SourceFile::new(
-        opt.input,
-        contents
-    );
-    let mut driver = Driver::new(file, Arch::X86_64);
+    let mut src_map = SourceMap::new();
+    let main_file = src_map.add_file(opt.input).unwrap();
+    let mut driver = Driver::new(src_map, Arch::X86_64);
 
     macro_rules! begin_phase {
         ($phase:ident) => {{
@@ -91,7 +87,7 @@ fn main() {
     }
 
     begin_phase!(Lex);
-    driver.lex();
+    driver.lex(main_file);
 
     begin_phase!(Parse);
     driver.parse();

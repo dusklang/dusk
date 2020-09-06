@@ -43,7 +43,7 @@ impl Driver {
         self.flushed_errors += errors.len() as u32;
         for mut err in errors {
             println!("\u{001B}[31merror:\u{001B}[0m {}", &err.message);
-            self.file.print_commentated_source_ranges(&mut err.ranges);
+            self.src_map.print_commentated_source_ranges(&mut err.ranges);
         }
     }
 

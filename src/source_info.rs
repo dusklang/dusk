@@ -3,12 +3,26 @@ use std::cmp::{min, max};
 use std::str;
 use std::path::PathBuf;
 use std::fs;
+use std::io;
+use std::collections::HashMap;
+use std::ops::Range;
 
 use crate::driver::Driver;
 use crate::builder::{ExprId, DeclId};
-use crate::index_vec::Idx;
+use crate::index_vec::{Idx, IdxVec};
 
 newtype_index!(SourceFileId pub);
+
+pub struct SourceMap {
+    pub files: IdxVec<SourceFile, SourceFileId>,
+    paths: HashMap<PathBuf, SourceFileId>,
+
+    /// Contains vec![0, end(0), end(1), end(2)], etc.,
+    /// where end(i) is the global byte index of the end of the file with id SourceFileId(i).
+    ///
+    /// Used to search for the right file for SourceRanges
+    file_ends: Vec<usize>,
+}
 
 #[derive(Copy, Clone, Debug)]
 pub struct SourceRange {
@@ -32,10 +46,6 @@ impl SourceRange {
             end: index+1
         }
     }
-
-    pub fn to_range(self) -> std::ops::Range<usize> {
-        self.start..self.end
-    }
 }
 
 pub fn concat(a: SourceRange, b: SourceRange) -> SourceRange {
@@ -52,10 +62,14 @@ struct LineRange {
     line: usize,
 }
 
+struct LineRangeGroup {
+    ranges: Vec<LineRange>,
+    file: SourceFileId,
+}
+
 pub struct SourceFile {
-    pub path: PathBuf,
     pub src: String,
-    /// The starting position of each line.
+    /// The starting position of each line (relative to this source file!!!).
     pub lines: Vec<usize>,
 }
 
@@ -78,7 +92,7 @@ impl CommentatedSourceRange {
 impl Driver {
     #[allow(dead_code)]
     pub fn print_range(&self, range: SourceRange) {
-        self.file.print_commentated_source_ranges(&mut [
+        self.src_map.print_commentated_source_ranges(&mut [
             CommentatedSourceRange::new(range, "", '-')
         ]);
     }
@@ -95,17 +109,141 @@ impl Driver {
     }
 }
 
-impl SourceFile {
-    pub fn new(path: PathBuf, source: String) -> SourceFile {
-        SourceFile {
-            path: fs::canonicalize(path).unwrap(),
-            src: source,
-            lines: vec![0],
+impl SourceMap {
+    pub fn new() -> Self {
+        SourceMap {
+            files: IdxVec::new(),
+            paths: HashMap::new(),
+            file_ends: vec![0],
         }
     }
 
+    pub fn add_file(&mut self, path: impl Into<PathBuf>) -> io::Result<SourceFileId> {
+        let path = fs::canonicalize(path.into())?;
+        if let Some(&id) = self.paths.get(&path) {
+            return Ok(id);
+        }
+
+        let src = fs::read_to_string(&path)?;
+        let file_len = src.len();
+        let id = self.files.push(
+            SourceFile { src, lines: vec![0] }
+        );
+        let had_result = self.paths.insert(path, id);
+        debug_assert_eq!(had_result, None);
+        let end = self.file_ends.last().unwrap() + file_len;
+        self.file_ends.push(end);
+        debug_assert_eq!(self.file_ends.len(), self.files.len() + 1);
+        Ok(id)
+    }
+
+    fn lookup_file(&self, range: SourceRange) -> (SourceFileId, Range<usize>) {
+        // TODO: Speed. Binary search would be better.
+        for (i, &end) in self.file_ends.iter().enumerate() {
+            if end >= range.end {
+                let i = i.saturating_sub(1);
+                let start = self.file_ends[i];
+                let adjusted_range = (range.start-start)..(range.end-start);
+                return (SourceFileId::new(i), adjusted_range);
+            }
+        }
+
+        // At this point, range.end must be past the end of any file.
+        // So make sure it has zero content.
+        assert_eq!(range.start, range.end, "Invalid range");
+
+        assert!(!self.files.is_empty());
+        (SourceFileId::new(0), 0..0)
+    }
+
     pub fn substring_from_range(&self, range: SourceRange) -> &str {
-        let slice = &self.src.as_bytes()[range.to_range()];
+        let (file, range) = self.lookup_file(range);
+        &self.files[file].substring_from_range(range)
+    }
+
+    pub fn print_commentated_source_ranges(&self, ranges: &mut [CommentatedSourceRange]) {
+        ranges.sort_by_key(|range| range.range.start);
+        let ranges = &*ranges;
+        let mut line_range_groups: Vec<LineRangeGroup> = Vec::new();
+        fn num_digits(num: usize) -> usize {
+            let mut digits = 0;
+            let mut num = num;
+            while num > 0 {
+                num /= 10;
+                digits += 1;
+            }
+
+            digits
+        }
+        fn print_times(chr: char, n: usize) {
+            for _ in 0..n { print!("{}", chr); }
+        }
+        fn print_whitespace(n: usize) {
+            print_times(' ', n);
+        }
+        let mut max_line_number_digits = 0;
+        for range in ranges {
+            let (file, range) = self.lookup_file(range.range);
+            let ranges = self.files[file].lines_in_range(range);
+            for range in &ranges {
+                max_line_number_digits = max(max_line_number_digits, num_digits(range.line + 1));
+            }
+            let group = LineRangeGroup {
+                ranges,
+                file
+            };
+            line_range_groups.push(group);
+        }
+        let print_source_line = |file: SourceFileId, line: usize| {
+            let line_no_as_string = format!("{}", line + 1);
+            print!("{}", line_no_as_string);
+            print_whitespace(max_line_number_digits - line_no_as_string.len());
+            let file = &self.files[file];
+            print!(" | {}", file.substring_from_line(line));
+        };
+        for (i, range) in ranges.iter().enumerate() {
+            let group = &line_range_groups[i];
+            let next_group = if i + 1 < ranges.len() {
+                Some(&line_range_groups[i + 1])
+            } else {
+                None
+            };
+            let mut first = true;
+            for line in &group.ranges {
+                if !first {
+                    println!();
+                } else {
+                    first = false;
+                }
+
+                print_source_line(group.file, line.line);
+                print_whitespace(max_line_number_digits);
+                print!(" | ");
+                print_whitespace(line.start_column);
+                let number_of_highlights = line.end_column - line.start_column;
+                print_times(range.highlight, number_of_highlights);
+            }
+            if !range.message.is_empty() {
+                // TODO: Wrap the range message on to multiple lines if necessary.
+                print!(" {}", range.message);
+            }
+            println!();
+            match next_group {
+                Some(next_group) if next_group.file == group.file && next_group.ranges.first().unwrap().line <= group.ranges.last().unwrap().line + 2 => {
+                    for i in (group.ranges.last().unwrap().line + 1)..next_group.ranges.first().unwrap().line {
+                        print_source_line(next_group.file, i);
+                    }
+                },
+                None => println!(),
+                Some(_) => println!("..."),
+            }
+        }
+    }
+}
+
+impl SourceFile {
+    fn substring_from_range(&self, range: Range<usize>) -> &str {
+        let slice = &self.src.as_bytes()[range];
         str::from_utf8(slice).unwrap()
     }
 
@@ -116,10 +254,10 @@ impl SourceFile {
         } else {
             self.lines[line + 1]
         };
-        self.substring_from_range(SourceRange { start, end })
+        self.substring_from_range(start..end)
     }
 
-    fn lines_in_range(&self, range: SourceRange) -> Vec<LineRange> {
+    fn lines_in_range(&self, range: Range<usize>) -> Vec<LineRange> {
         let mut result = Vec::new();
         for (i, &line_start) in self.lines.iter().enumerate() {
             let line_end = if i == self.lines.len() - 1 {
@@ -144,85 +282,14 @@ impl SourceFile {
                 continue;
             }
 
-            result.push(LineRange { 
-                start_column,
-                end_column,
-                line: i,
-            });
+            result.push(
+                LineRange { 
+                    start_column,
+                    end_column,
+                    line: i,
+                }
+            );
         }
         result
-    }
-
-    pub fn print_commentated_source_ranges(&self, ranges: &mut [CommentatedSourceRange]) {
-        ranges.sort_by_key(|range| range.range.start);
-        let ranges = &*ranges;
-        let mut line_range_lists: Vec<Vec<LineRange>> = Vec::new();
-        fn num_digits(num: usize) -> usize {
-            let mut digits = 0;
-            let mut num = num;
-            while num > 0 {
-                num /= 10;
-                digits += 1;
-            }
-
-            digits
-        }
-        fn print_times(chr: char, n: usize) {
-            for _ in 0..n { print!("{}", chr); }
-        }
-        fn print_whitespace(n: usize) {
-            print_times(' ', n);
-        }
-        let mut max_line_number_digits = 0;
-        for range in ranges {
-            let line_ranges = self.lines_in_range(range.range);
-            for range in &line_ranges {
-                max_line_number_digits = max(max_line_number_digits, num_digits(range.line + 1));
-            }
-            line_range_lists.push(line_ranges);
-        }
-        let print_source_line = |line: usize| {
-            let line_no_as_string = format!("{}", line + 1);
-            print!("{}", line_no_as_string);
-            print_whitespace(max_line_number_digits - line_no_as_string.len());
-            print!(" | {}", self.substring_from_line(line));
-        };
-        for (i, range) in ranges.iter().enumerate() {
-            let lines = &line_range_lists[i];
-            let next_lines = if i + 1 < ranges.len() {
-                Some(&line_range_lists[i + 1])
-            } else {
-                None
-            };
-            let mut first = true;
-            for line in lines {
-                if !first {
-                    println!();
-                } else {
-                    first = false;
-                }
-
-                print_source_line(line.line);
-                print_whitespace(max_line_number_digits);
-                print!(" | ");
-                print_whitespace(line.start_column);
-                let number_of_highlights = line.end_column - line.start_column;
-                print_times(range.highlight, number_of_highlights);
-            }
-            if !range.message.is_empty() {
-                // TODO: Wrap the range message on to multiple lines if necessary.
-                print!(" {}", range.message);
-            }
-            println!();
-            match next_lines {
-                Some(next_lines) if next_lines.first().unwrap().line <= lines.last().unwrap().line + 2 => {
-                    for i in (lines.last().unwrap().line + 1)..next_lines.first().unwrap().line {
-                        print_source_line(i);
-                    }
-                },
-                None => println!(),
-                Some(_) => println!("..."),
-            }
-        }
     }
 }

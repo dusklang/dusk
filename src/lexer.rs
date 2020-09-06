@@ -8,7 +8,7 @@ use unicode_segmentation::GraphemeCursor;
 use crate::driver::Driver;
 use crate::token::TokenKind;
 use crate::error::Error;
-use crate::source_info::SourceRange;
+use crate::source_info::{SourceRange, SourceFile, SourceFileId};
 
 struct Lexer {
     /// Byte offset of the current file in the global source map
@@ -22,6 +22,8 @@ struct Lexer {
     tok_start_loc: usize,
 
     special_escape_characters: HashMap<&'static str, &'static str>,
+
+    file: SourceFileId,
 }
 
 impl Lexer {
@@ -42,7 +44,7 @@ impl Lexer {
 }
 
 impl Driver {
-    pub fn lex(&mut self) {
+    pub fn lex(&mut self, file: SourceFileId) {
         let special_escape_characters = {
             let mut map = HashMap::new();
             map.insert("n", "\n");
@@ -52,13 +54,16 @@ impl Driver {
             map
         };
 
+        let f = &self.src_map.files[file];
+
         let mut l = Lexer {
             // TODO: add a meaningful value here
             file_offset: 0,
             start: 0,
-            end:   GraphemeCursor::new(0, self.file.src.len(), true),
+            end:   GraphemeCursor::new(0, f.src.len(), true),
             tok_start_loc: 0,
             special_escape_characters,
+            file,
         };
         self.next_boundary(&mut l);
 
@@ -66,13 +71,13 @@ impl Driver {
         while l.has_chars() {
             if self.is(&l, b'\n') {
                 self.advance(&mut l);
-                self.file.lines.push(l.cur_loc());
+                self.src_map.files[file].lines.push(l.cur_loc());
             } else if self.is_str(&l, b"\r\n") {
                 unsafe { self.advance_by_ascii(&mut l, 2); }
-                self.file.lines.push(l.cur_loc());
+                self.src_map.files[file].lines.push(l.cur_loc());
             } else if self.is(&l, b'\r') {
                 self.advance(&mut l);
-                self.file.lines.push(l.cur_loc());
+                self.src_map.files[file].lines.push(l.cur_loc());
             } else {
                 self.advance(&mut l);
             }
@@ -87,8 +92,12 @@ impl Driver {
         }
     }
 
+    fn file(&self, l: &Lexer) -> &SourceFile {
+        &self.src_map.files[l.file]
+    }
+
     fn cur_tok(&self, l: &Lexer) -> &str {
-        &self.file.src[l.start..l.end.cur_cursor()]
+        &self.file(l).src[l.start..l.end.cur_cursor()]
     }
 
     /// Calls `self.end.next_boundary()`, with a fast-path for ASCII
@@ -97,14 +106,14 @@ impl Driver {
     }
 
     fn next_boundary_from(&mut self, l: &mut Lexer, start: usize) {
-        if start == self.file.src.len() { return; }
+        if start == self.file(l).src.len() { return; }
 
-        let cur_byte = self.file.src.as_bytes()[start];
+        let cur_byte = self.file(l).src.as_bytes()[start];
         if cur_byte & 0x80 == 0 {
-            let next_cursor = std::cmp::min(start + 1, self.file.src.len());
+            let next_cursor = std::cmp::min(start + 1, self.file(l).src.len());
             l.end.set_cursor(next_cursor);
         } else {
-            l.end.next_boundary(&self.file.src, 0).unwrap();
+            l.end.next_boundary(&self.file(l).src, 0).unwrap();
         }
     }
 
@@ -121,17 +130,17 @@ impl Driver {
 
     fn is(&self, l: &Lexer, character: u8) -> bool {
         if l.has_chars() {
-            self.file.src.as_bytes()[l.start] == character
+            self.file(l).src.as_bytes()[l.start] == character
         } else {
             false
         }
     }
 
     fn is_str(&self, l: &Lexer, slice: &[u8]) -> bool {
-        if slice.len() > self.file.src.len() - l.start {
+        if slice.len() > self.file(l).src.len() - l.start {
             return false;
         }
-        for (a, b) in self.file.src.as_bytes()[l.start..].iter().zip(slice.iter()) {
+        for (a, b) in self.file(l).src.as_bytes()[l.start..].iter().zip(slice.iter()) {
             if a != b { return false; }
         }
         true
@@ -139,7 +148,7 @@ impl Driver {
 
     /// Skip over `n` bytes of known-ASCII text
     unsafe fn advance_by_ascii(&mut self, l: &mut Lexer, n: usize) {
-        l.start = std::cmp::min(l.start + n, self.file.src.len());
+        l.start = std::cmp::min(l.start + n, self.file(l).src.len());
         self.next_boundary_from(l, l.end.cur_cursor() + n - 1);
     }
 
@@ -317,7 +326,7 @@ impl Driver {
                 }
             }
 
-            let ident_bytes = &self.file.src.as_bytes()[ident_start..ident_end];
+            let ident_bytes = &self.src_map.files[l.file].src.as_bytes()[ident_start..ident_end];
             let ident = unsafe { std::str::from_utf8_unchecked(ident_bytes) };
 
             use TokenKind::*;
@@ -364,7 +373,7 @@ impl Driver {
                 self.set_pos(l, dot_pos);
                 has_dot = false;
             }
-            let lit = &self.file.src[l.tok_start_loc..l.cur_loc()];
+            let lit = &self.file(l).src[l.tok_start_loc..l.cur_loc()];
             if has_dot {
                 self.pack_tok(l, TokenKind::DecLit(lit.parse().unwrap()))
             } else {

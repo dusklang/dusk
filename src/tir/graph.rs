@@ -403,7 +403,7 @@ impl Driver {
                 w,
                 " [label=\"{}\\l\"];",
                 // TODO: do something more efficient than calling replace multiple times
-                self.file.substring_from_range(range)
+                self.src_map.substring_from_range(range)
                     .replace("\\", "\\\\")
                     .replace("\"", "\\\"")
                     .replace("\n", "\\n")

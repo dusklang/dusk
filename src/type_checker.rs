@@ -242,7 +242,7 @@ impl Driver {
                 }
                 constraints.set_to(Type::Void);
             }
-            tp.debug_output(&self.hir, &self.file, level as usize);
+            tp.debug_output(&self.hir, &self.src_map, level as usize);
 
             // Evaluate meta-dependees to build namespaces for expressions
             if meta_dependee_i < meta_dependees.len() && meta_dependees[meta_dependee_i].level == level {
@@ -458,7 +458,7 @@ impl Driver {
                 tp.constraints_mut(item.terminal_expr).set_to(ty);
             }
             if level > 0 {
-                tp.debug_output(&self.hir, &self.file, level as usize);
+                tp.debug_output(&self.hir, &self.src_map, level as usize);
             }
         }
         fn lit_pass_2(
@@ -474,7 +474,7 @@ impl Driver {
         lit_pass_2(tp, &unit.dec_lits, "decimal");
         lit_pass_2(tp, &unit.str_lits, "string");
         lit_pass_2(tp, &unit.char_lits, "character");
-        tp.debug_output(&self.hir, &self.file, 0);
+        tp.debug_output(&self.hir, &self.src_map, 0);
     }
 
     pub fn type_check(&mut self, units: &[Unit], dbg: bool) -> RealTypeProvider {
