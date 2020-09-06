@@ -162,31 +162,35 @@ impl Context {
     }
 }
 
-fn expr_to_const(expr: &Expr, ty: Type, strings: &mut IdxVec<CString, StrId>) -> Const {
-    match *expr {
-        Expr::IntLit { lit } => {
-            match ty {
-                Type::Int { .. } => Const::Int { lit, ty },
-                Type::Float(_)   => Const::Float { lit: lit as f64, ty },
-                _ => panic!("Unrecognized integer literal type {:?}", ty),
-            }
-        },
-        Expr::DecLit { lit } => Const::Float { lit, ty },
-        Expr::StrLit { ref lit } => {
-            let id = strings.push(lit.clone());
-            Const::Str { id, ty }
-        },
-        Expr::CharLit { lit } => match ty {
-            Type::Int { .. } => Const::Int { lit: lit as u64, ty },
-            Type::Pointer(_) => {
-                let id = strings.push(CString::new([lit as u8].as_ref()).unwrap());
+
+impl Driver {
+    fn expr_to_const(&mut self, expr: ExprId, ty: Type) -> Const {
+        match self.hir.exprs[expr] {
+            Expr::IntLit { lit } => {
+                match ty {
+                    Type::Int { .. } => Const::Int { lit, ty },
+                    Type::Float(_)   => Const::Float { lit: lit as f64, ty },
+                    _ => panic!("Unrecognized integer literal type {:?}", ty),
+                }
+            },
+            Expr::DecLit { lit } => Const::Float { lit, ty },
+            Expr::StrLit { ref lit } => {
+                let id = self.mir.strings.push(lit.clone());
                 Const::Str { id, ty }
             },
-            _ => panic!("unexpected type for character")
-        },
-        Expr::ConstTy(ref ty) => Const::Ty(ty.clone()),
-        Expr::Mod { id } => Const::Mod(id),
-        _ => panic!("Cannot convert expression to constant: {:#?}", expr),
+            Expr::CharLit { lit } => match ty {
+                Type::Int { .. } => Const::Int { lit: lit as u64, ty },
+                Type::Pointer(_) => {
+                    let id = self.mir.strings.push(CString::new([lit as u8].as_ref()).unwrap());
+                    Const::Str { id, ty }
+                },
+                _ => panic!("unexpected type for character")
+            },
+            Expr::ConstTy(ref ty) => Const::Ty(ty.clone()),
+            Expr::Mod { id } => Const::Mod(id),
+            Expr::Import { file } => Const::Mod(self.hir.global_scopes[file]),
+            _ => panic!("Cannot convert expression to constant: {:#?}", expr),
+        }
     }
 }
 
@@ -626,8 +630,8 @@ impl Driver {
 
         let instr = match self.hir.exprs[expr] {
             Expr::Void => b.void_instr,
-            Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::StrLit { .. } | Expr::CharLit { .. } | Expr::ConstTy(_) | Expr::Mod { .. } => {
-                let konst = expr_to_const(&self.hir.exprs[expr], ty.clone(), &mut self.mir.strings);
+            Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::StrLit { .. } | Expr::CharLit { .. } | Expr::ConstTy(_) | Expr::Mod { .. } | Expr::Import { .. } => {
+                let konst = self.expr_to_const(expr, ty.clone());
                 b.code.push(Instr::Const(konst))
             },
             Expr::Set { lhs, rhs } => {

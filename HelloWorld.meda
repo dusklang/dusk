@@ -188,10 +188,16 @@ fn main() {
 
     fs.read_file("GGGGGGGGGGGGGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHHHHHHHHHHHHHHH.txt")
 
+    //external_mod.do_something_cool()
+
+    mawdewl := import("other_file.meda")
+
     fn float_const() {
         blah: f32 = 5.2
     }
 }
+
+external_mod :: import("other_file.meda")
 
 fn read_file_common(path: u8*, platform: u8*) {
     print("Reading path ")

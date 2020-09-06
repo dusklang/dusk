@@ -79,6 +79,7 @@ pub struct UnitItems {
     pub casts: DepVec<Expr<Cast>>,
     pub whiles: DepVec<Expr<While>>,
     pub modules: DepVec<ExprId>,
+    pub imports: DepVec<ExprId>,
     pub dos: DepVec<Expr<Do>>,
     pub assigned_decls: DepVec<AssignedDecl>,
     pub assignments: DepVec<Expr<Assignment>>,
@@ -102,7 +103,7 @@ impl UnitItems {
             &mut self.assigned_decls, &mut self.assignments, &mut self.decl_refs, 
             &mut self.addr_ofs, &mut self.derefs, &mut self.pointers, &mut self.ifs,
             &mut self.dos, &mut self.ret_groups, &mut self.casts, &mut self.whiles,
-            &mut self.explicit_rets, &mut self.modules,
+            &mut self.explicit_rets, &mut self.modules, &mut self.imports,
         ]);
     }
 }
@@ -269,6 +270,16 @@ impl Driver {
         }
     }
 
+    // Used for both `mod {}` expressions and `import("")` expressions
+    fn add_types_2_to_4_deps_to_module(&mut self, id: ItemId, mod_scope_id: ModScopeId) {
+        di_injector!(self, di);
+        for decl_group in self.hir.mod_scopes[mod_scope_id].decl_groups.values() {
+            for decl in decl_group {
+                self.tir.graph.add_type3_dep(id, di!(decl.id));
+            }
+        }
+    }
+
     /// IMPORTANT NOTE: When/if we stop adding type3 deps to all items in a function's scope,
     /// we will need to bring back the original idea of meta-dependencies:
     /// https://github.com/zachrwolfe/meda/issues/58
@@ -350,6 +361,7 @@ impl Driver {
             },
             &hir::Expr::While { condition, .. } => insert_expr!(whiles, While { condition }),
             hir::Expr::Mod { .. } => insert_item!(modules, id),
+            hir::Expr::Import { .. } => insert_item!(imports, id),
         }
     }
 
@@ -427,7 +439,7 @@ impl Driver {
             let id = ei!(expr_id);
             match self.hir.exprs[expr_id] {
                 hir::Expr::Void | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
-                    | hir::Expr::CharLit { .. } | hir::Expr::ConstTy(_) | hir::Expr::Mod { .. } => {},
+                    | hir::Expr::CharLit { .. } | hir::Expr::ConstTy(_) | hir::Expr::Mod { .. } | hir::Expr::Import { .. } => {},
                 hir::Expr::AddrOf { expr, .. } | hir::Expr::Deref(expr) | hir::Expr::Pointer { expr, .. }
                     | hir::Expr::Cast { expr, .. } | hir::Expr::Ret { expr, .. } => self.tir.graph.add_type1_dep(id, ei!(expr)),
                 hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => {
@@ -503,12 +515,11 @@ impl Driver {
                 hir::Expr::Void | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
                     | hir::Expr::CharLit { .. } | hir::Expr::ConstTy(_) | hir::Expr::AddrOf { .. } | hir::Expr::Deref(_)
                     | hir::Expr::Pointer { .. } | hir::Expr::Set { .. } => {},
-                hir::Expr::Mod { id: mod_scope_id } => {
-                    for decl_group in self.hir.mod_scopes[mod_scope_id].decl_groups.values() {
-                        for decl in decl_group {
-                            self.tir.graph.add_type3_dep(id, di!(decl.id));
-                        }
-                    }
+                hir::Expr::Mod { id: mod_scope_id } =>
+                    self.add_types_2_to_4_deps_to_module(id, mod_scope_id),
+                hir::Expr::Import { file } => {
+                    let mod_scope_id = self.hir.global_scopes[file];
+                    self.add_types_2_to_4_deps_to_module(id, mod_scope_id);
                 },
                 hir::Expr::Cast { ty, .. } => {
                     add_eval_dep!(id, ty);

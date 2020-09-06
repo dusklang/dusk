@@ -100,6 +100,10 @@ impl Driver {
                 *tp.constraints_mut(item) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Mod.into()]), None);
                 *tp.ty_mut(item) = Type::Mod;
             }
+            for &item in unit.imports.get_level(level) {
+                *tp.constraints_mut(item) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Mod.into()]), None);
+                *tp.ty_mut(item) = Type::Mod;
+            }
             for i in 0..unit.decl_refs.level_len(level) {
                 let item = unit.decl_refs.at(level, i);
                 let id = item.id;

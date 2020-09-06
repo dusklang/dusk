@@ -212,6 +212,25 @@ impl Driver {
         Ok(term)
     }
 
+    fn parse_import(&mut self, p: &mut Parser) -> ExprId {
+        let import_range = self.cur(p).range;
+        let paren = self.next(p).kind;
+        assert!(matches!(paren, TokenKind::LeftParen));
+        let path = self.next(p).kind;
+        let file = if let TokenKind::StrLit(path) = path {
+            let path = path.to_str().unwrap().to_string();
+            self.src_map.add_file(path).unwrap()
+        } else {
+            panic!("unexpected token");
+        };
+
+        let Token { kind: paren, range: paren_range } = self.next(p);
+        assert!(matches!(paren, TokenKind::RightParen));
+        self.next(p);
+
+        self.hir.import(file, source_info::concat(import_range, paren_range))
+    }
+
     fn parse_decl_ref(&mut self, p: &mut Parser, base_expr: Option<ExprId>, name: Sym) -> ExprId {
         let name_range = self.cur(p).range;
         let begin_range = if let Some(base_expr) = base_expr {
@@ -308,6 +327,7 @@ impl Driver {
                 Ok(self.hir.do_expr(scope, source_info::concat(do_range, scope_range)))
             },
             TokenKind::Module => Ok(self.parse_module(p)),
+            TokenKind::Import => Ok(self.parse_import(p)),
             TokenKind::If => Ok(self.parse_if(p)),
             TokenKind::While => {
                 let while_range = self.cur(p).range;

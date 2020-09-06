@@ -33,6 +33,7 @@ pub enum TokenKind {
     Do,
     Mut,
     Module,
+    Import,
 
     // Symbols
     Colon,

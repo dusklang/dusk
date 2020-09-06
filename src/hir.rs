@@ -35,6 +35,7 @@ pub enum Expr {
     Cast { expr: ExprId, ty: ExprId, cast_id: CastId },
     Ret { expr: ExprId, decl: Option<DeclId> },
     Mod { id: ModScopeId },
+    Import { file: SourceFileId },
 }
 
 /// A declaration in local (imperative) scope
@@ -204,6 +205,10 @@ impl Builder {
         );
         self.scope_stack = vec![ScopeState::Mod { id: global_scope, namespace: global_namespace }];
         self.global_scopes.push(global_scope);
+    }
+
+    pub fn import(&mut self, file: SourceFileId, range: SourceRange) -> ExprId {
+        self.push(Expr::Import { file }, range)
     }
 
     fn push(&mut self, expr: Expr, range: SourceRange) -> ExprId {

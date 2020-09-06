@@ -343,6 +343,7 @@ impl Driver {
                 "do" => Do,
                 "mut" => Mut,
                 "mod" => Module,
+                "import" => Import,
                 _ => {
                     let ident = self.interner.get_or_intern(ident);
                     Ident(ident)
