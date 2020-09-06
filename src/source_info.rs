@@ -119,6 +119,10 @@ impl SourceMap {
         }
     }
 
+    pub fn get_begin_offset(&self, file: SourceFileId) -> usize {
+        self.file_ends[file.idx()]
+    }
+
     pub fn add_file(&mut self, path: impl Into<PathBuf>) -> io::Result<SourceFileId> {
         let path = fs::canonicalize(path.into())?;
         if let Some(&id) = self.paths.get(&path) {

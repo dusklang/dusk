@@ -57,10 +57,10 @@ impl Driver {
 
         let file = SourceFileId::new(self.toks.len());
         let f = &self.src_map.files[file];
+        let file_offset = self.src_map.get_begin_offset(file);
 
         let mut l = Lexer {
-            // TODO: add a meaningful value here
-            file_offset: 0,
+            file_offset,
             start: 0,
             end:   GraphemeCursor::new(0, f.src.len(), true),
             tok_start_loc: 0,
