@@ -71,6 +71,7 @@ pub struct SourceFile {
     pub src: String,
     /// The starting position of each line (relative to this source file!!!).
     pub lines: Vec<usize>,
+    pub path: PathBuf,
 }
 
 pub struct CommentatedSourceRange {
@@ -127,7 +128,7 @@ impl SourceMap {
         let src = fs::read_to_string(&path)?;
         let file_len = src.len();
         let id = self.files.push(
-            SourceFile { src, lines: vec![0] }
+            SourceFile { src, lines: vec![0], path: path.clone() }
         );
         let had_result = self.paths.insert(path, id);
         debug_assert_eq!(had_result, None);
@@ -201,8 +202,14 @@ impl SourceMap {
             let file = &self.files[file];
             print!(" | {}", file.substring_from_line(line));
         };
+        // Pick an impossible file ID so it will be unequal to the file in the 0th group.
+        let mut prev_file = SourceFileId::new(usize::MAX);
         for (i, range) in ranges.iter().enumerate() {
             let group = &line_range_groups[i];
+            if group.file != prev_file {
+                println!("  --> {}", self.files[group.file].path.display());
+                prev_file = group.file;
+            }
             let next_group = if i + 1 < ranges.len() {
                 Some(&line_range_groups[i + 1])
             } else {
