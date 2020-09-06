@@ -1,0 +1,48 @@
+fn assert(condition: bool) {
+    if !condition { panic("assertion failed") }
+}
+
+fn print_num(num: i32) {
+    num := num
+    if num < 0 {
+        print("-")
+        num = -num
+    }
+    if num >= 10 {
+        print_num(num / 10)
+    }
+    print((num % 10) as u8 + "0")
+}
+
+str :: mod {
+    fn len(str: u8*): usize {
+        str := str
+        darba := str
+        derpa := darba
+        len: usize = 0
+        while *((str as usize + len) as u8*) != 0 {
+            len = len + 1
+        }
+        len
+    }
+
+    fn concat(a: u8*, b: u8*): u8* {
+        len :: len(a) + len(b)
+        buf := malloc(len + 1) as u8 *mut
+        ret_val :: buf
+        a := a
+        while *a != 0 {
+            *buf = *a
+            a = (a as usize + 1) as u8*
+            buf = (buf as usize + 1) as u8 *mut
+        }
+        b := b
+        while *b != 0 {
+            *buf = *b
+            b = (b as usize + 1) as u8*
+            buf = (buf as usize + 1) as u8 *mut
+        }
+        *buf = 0
+        ret_val
+    }
+}

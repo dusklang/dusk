@@ -7,15 +7,27 @@ use crate::token::{TokenKind, Token};
 use crate::builder::{ExprId, ImperScopeId, BinOp, UnOp, OpPlacement, Intrinsic};
 use crate::ty::Type;
 use crate::error::Error;
-use crate::source_info::{self, SourceRange};
+use crate::source_info::{self, SourceRange, SourceFileId};
 
-struct Parser { cur: usize }
+struct Parser {
+    file: SourceFileId,
+    cur: usize,
+}
 
 impl Driver {
     pub fn parse(&mut self) {
-        self.hir.start_new_file();
-        let mut p = Parser { cur: 0 };
+        while self.hir.global_scopes.len() < self.src_map.files.len() {
+            self.parse_single_file();
+        }
+    }
 
+    fn parse_single_file(&mut self) {
+        let file = self.lex();
+        let hir_file = self.hir.start_new_file();
+        debug_assert_eq!(file, hir_file);
+        let mut p = Parser { file, cur: 0 };
+
+        // TODO: Don't duplicate intrinsics in every file!
         // Add intrinsics
 
         // Integers, floats and bool
@@ -102,10 +114,6 @@ impl Driver {
                 },
                 _ => { self.parse_node(&mut p); }
             }
-        }
-
-        if self.hir.global_scopes.len() < self.src_map.files.len() {
-            self.parse();
         }
     }
 
@@ -649,7 +657,7 @@ impl Driver {
     }
 
     fn cur(&self, p: &Parser) -> Token {
-        self.toks.at(p.cur)
+        self.toks[p.file].at(p.cur)
     }
 
     // TODO: come up with a better term for whitespace and comments than "insignificant".
@@ -672,16 +680,16 @@ impl Driver {
     }
 
     fn peek_next_including_insignificant(&self, p: &Parser) -> Token {
-        self.toks.at(p.cur+1)
+        self.toks[p.file].at(p.cur+1)
     }
 
     fn peek_prev_including_insignificant(&self, p: &Parser) -> Token {
-        self.toks.at(p.cur - 1)
+        self.toks[p.file].at(p.cur - 1)
     }
 
     fn peek_next(&self, p: &Parser) -> Token {
-        for i in (p.cur+1)..self.toks.len() {
-            let cur = self.toks.at(i);
+        for i in (p.cur+1)..self.toks[p.file].len() {
+            let cur = self.toks[p.file].at(i);
             if cur.kind.is_significant() {
                 return cur
             }

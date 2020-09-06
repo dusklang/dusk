@@ -195,7 +195,7 @@ impl Builder {
         b
     }
 
-    pub fn start_new_file(&mut self) {
+    pub fn start_new_file(&mut self) -> SourceFileId {
         let global_scope = self.mod_scopes.push(ModScope::default());
         let global_namespace = self.mod_ns.push(
             ModScopeNs {
@@ -204,7 +204,7 @@ impl Builder {
             }
         );
         self.scope_stack = vec![ScopeState::Mod { id: global_scope, namespace: global_namespace }];
-        self.global_scopes.push(global_scope);
+        self.global_scopes.push(global_scope)
     }
 
     pub fn import(&mut self, file: SourceFileId, range: SourceRange) -> ExprId {

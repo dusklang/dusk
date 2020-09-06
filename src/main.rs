@@ -37,7 +37,6 @@ pub enum TirGraphOutput {
 #[repr(u8)]
 #[derive(Clap, Copy, Clone, Debug)]
 enum StopPhase {
-    Lex,
     Parse,
     Tir,
     Typecheck,
@@ -73,7 +72,7 @@ fn main() {
     let opt = Opt::parse();
 
     let mut src_map = SourceMap::new();
-    let main_file = src_map.add_file(opt.input).unwrap();
+    src_map.add_file(opt.input).unwrap();
     let mut driver = Driver::new(src_map, Arch::X86_64);
 
     macro_rules! begin_phase {
@@ -85,9 +84,6 @@ fn main() {
             }
         }}
     }
-
-    begin_phase!(Lex);
-    driver.lex(main_file);
 
     begin_phase!(Parse);
     driver.parse();
