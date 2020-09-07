@@ -232,6 +232,11 @@ impl Graph {
                     for &dep in &self.t2_dependees[item] {
                         if cur_unit_comps.contains(&self.item_to_components[dep]) {
                             self.dependees[item].push(dep);
+
+                            // NOTE: Adding to `dependers` here isn't required for ordinary operation
+                            // of the compiler, but it is used by the graph output code to decide
+                            // which items to cull.
+                            self.dependers[dep].push(item);
                         }
                     }
                 }
@@ -424,6 +429,7 @@ impl Driver {
         writeln!(w, "        color=lightgrey;")?;
         writeln!(w, "        node [style=filled,color=white];")?;
         for &item in &component.items {
+            if self.should_exclude_item_from_output(item) { continue; }
             self.write_item(w, item)?;
         }
         writeln!(w, "    }}")?;
@@ -433,10 +439,21 @@ impl Driver {
 
     fn write_component_deps(&self, w: &mut impl Write, graph: &Graph, component: &Component) -> IoResult<()> {
         for &item in &component.items {
+            if self.should_exclude_item_from_output(item) { continue; }
             self.write_deps(w, item, graph, true)?;
         }
 
         Ok(())
+    }
+
+    fn should_exclude_item_from_output(&self, item: ItemId) -> bool {
+        let decl = match self.hir.items[item] {
+            hir::Item::Decl(decl) => decl,
+            hir::Item::Expr(_) => return false,
+        };
+        let is_intrinsic = matches!(self.hir.decls[decl], hir::Decl::Intrinsic { .. });
+        let is_not_depended_on = self.tir.graph.dependers[item].is_empty();
+        is_intrinsic && is_not_depended_on
     }
 
     /// Prints graph in Graphviz format, then opens a web browser to display the results.
@@ -454,6 +471,8 @@ impl Driver {
             TirGraphOutput::Items => {
                 for i in 0..graph.dependees.len() {
                     let a = ItemId::new(i);
+                    if self.should_exclude_item_from_output(a) { continue; }
+
                     self.write_item(&mut w, a)?;
                     self.write_deps(&mut w, a, graph, true)?;
                 }
@@ -497,6 +516,8 @@ impl Driver {
                     writeln!(w, "        color=lightgrey;")?;
                     writeln!(w, "        node [style=filled,color=white];")?;
                     for &item in &unit.items {
+                        if self.should_exclude_item_from_output(item) { continue; }
+
                         let level = levels.item_to_levels[item];
                         self.write_item(&mut w, item)?;
                         self.write_deps(&mut w, item, graph, false)?;
