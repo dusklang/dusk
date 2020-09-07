@@ -16,7 +16,7 @@ mod mir;
 mod ty;
 mod arch;
 mod driver;
-mod type_checker;
+mod typechecker;
 mod interpreter;
 
 use arch::Arch;

@@ -9,7 +9,7 @@ use string_interner::Sym;
 use crate::arch::Arch;
 use crate::driver::Driver;
 use crate::ty::Type;
-use crate::type_checker as tc;
+use crate::typechecker as tc;
 use tc::type_provider::TypeProvider;
 use tc::CastMethod;
 use crate::index_vec::{Idx, IdxVec};

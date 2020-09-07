@@ -9,7 +9,7 @@ use crate::tir;
 use crate::error::Error;
 use crate::mir::{self, FunctionRef, Const};
 use crate::interpreter::Interpreter;
-use crate::type_checker::type_provider::TypeProvider;
+use crate::typechecker::type_provider::TypeProvider;
 use crate::index_vec::IdxVec;
 
 pub struct Driver {
