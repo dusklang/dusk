@@ -24,14 +24,26 @@ pub enum CastMethod {
     IntToFloat,
 }
 
+fn unit_string(unit_num: Option<usize>) -> String {
+    match unit_num {
+        Some(num) => format!("UNIT {}", num),
+        None => "MOCK UNIT".to_string()
+    }
+}
+
 impl Driver {
     pub fn decl_type<'a>(&'a self, id: DeclId, tp: &'a impl TypeProvider) -> &Type {
         self.hir.explicit_tys[id].map(|ty| tp.get_evaluated_type(ty)).unwrap_or(&Type::Error)
     }
 
-    fn run_pass_1(&mut self, unit: &UnitItems, start_level: u32, meta_dependees: &[LevelMetaDependees], tp: &mut impl TypeProvider) {
+    fn run_pass_1(&mut self, unit: &UnitItems, unit_num: Option<usize>, start_level: u32, meta_dependees: &[LevelMetaDependees], tp: &mut impl TypeProvider) {
         // Pass 1: propagate info down from leaves to roots
-        if tp.debug() { println!("===============TYPECHECKING: PASS 1==============="); }
+        if tp.debug() {
+            println!(
+                "===============TYPECHECKING {}: PASS 1===============",
+                unit_string(unit_num),
+            );
+        }
         fn lit_pass_1(tp: &mut impl TypeProvider, lits: &[ExprId], trait_impls: BuiltinTraits, pref: Type) {
             for &item in lits {
                 *tp.constraints_mut(item) = ConstraintList::new(
@@ -253,9 +265,9 @@ impl Driver {
                 for dep in &meta_dependees[meta_dependee_i].meta_dependees {
                     let mut mock = MockTypeProvider::new(tp);
                     if mock.constraints(dep.dependee).can_unify_to(&Type::Mod.into()).is_ok() {
-                        self.run_pass_1(&dep.items, level+1, &[], &mut mock);
+                        self.run_pass_1(&dep.items, None, level+1, &[], &mut mock);
                         mock.constraints_mut(dep.dependee).set_to(&Type::Mod);
-                        self.run_pass_2(&dep.items, &mut mock);
+                        self.run_pass_2(&dep.items, None, &mut mock);
                         let module = self.eval_expr(dep.dependee, &mock);
                         match module {
                             Const::Mod(scope) => self.tir.expr_namespaces.entry(dep.dependee).or_default()
@@ -269,8 +281,13 @@ impl Driver {
         }
     }
 
-    fn run_pass_2(&mut self, unit: &UnitItems, tp: &mut impl TypeProvider) {
-        if tp.debug() { println!("===============TYPECHECKING: PASS 2==============="); }
+    fn run_pass_2(&mut self, unit: &UnitItems, unit_num: Option<usize>, tp: &mut impl TypeProvider) {
+        if tp.debug() {
+            println!(
+                "===============TYPECHECKING {}: PASS 2===============",
+                unit_string(unit_num)
+            );
+        }
         for level in (0..unit.num_levels()).rev() {
             for i in 0..unit.assigned_decls.level_len(level) {
                 let item = unit.assigned_decls.at(level, i);
@@ -487,12 +504,12 @@ impl Driver {
         *tp.constraints_mut(self.hir.void_expr) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
         *tp.ty_mut(self.hir.void_expr) = Type::Void;
 
-        for unit in units {
+        for (num, unit) in units.iter().enumerate() {
             // Pass 1: propagate info down from leaves to roots
-            self.run_pass_1(&unit.items, 0, &unit.meta_dependees, &mut tp);
+            self.run_pass_1(&unit.items, Some(num), 0, &unit.meta_dependees, &mut tp);
             
             // Pass 2: propagate info up from roots to leaves
-            self.run_pass_2(&unit.items, &mut tp);
+            self.run_pass_2(&unit.items, Some(num), &mut tp);
 
             for i in 0..unit.eval_dependees.len() {
                 let expr = unit.eval_dependees[i];
