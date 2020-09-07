@@ -55,21 +55,21 @@ pub trait TypeProvider: private::Sealed {
 
 pub struct RealTypeProvider {
     /// The type of each expression
-    types: IdxVec<Type, ExprId>,
+    types: IdxVec<ExprId, Type>,
     /// The list of overloads for each decl ref
-    overloads: IdxVec<Vec<DeclId>, DeclRefId>,
+    overloads: IdxVec<DeclRefId, Vec<DeclId>>,
     /// The selected overload for each decl ref
-    selected_overloads: IdxVec<Option<DeclId>, DeclRefId>,
+    selected_overloads: IdxVec<DeclRefId, Option<DeclId>>,
     /// The cast method for each cast expression
-    cast_methods: IdxVec<CastMethod, CastId>,
+    cast_methods: IdxVec<CastId, CastMethod>,
     /// The constraints on each expression's type
-    constraints: IdxVec<ConstraintList, ExprId>,
+    constraints: IdxVec<ExprId, ConstraintList>,
     /// A copy of the constraints, used for debugging the typechecker
-    constraints_copy: IdxVec<ConstraintList, ExprId>,
+    constraints_copy: IdxVec<ExprId, ConstraintList>,
     /// The preferred overload for each decl ref (currently only ever originates from literals)
-    preferred_overloads: IdxVec<Option<DeclId>, DeclRefId>,
+    preferred_overloads: IdxVec<DeclRefId, Option<DeclId>>,
 
-    decl_types: IdxVec<QualType, DeclId>,
+    decl_types: IdxVec<DeclId, QualType>,
 
     eval_results: HashMap<ExprId, Const>,
 

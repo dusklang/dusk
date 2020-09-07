@@ -139,10 +139,10 @@ pub enum ExprNamespace {
 
 #[derive(Debug)]
 pub struct Builder {
-    pub decls: IdxVec<Decl, DeclId>,
+    pub decls: IdxVec<DeclId, Decl>,
     pub expr_namespaces: HashMap<ExprId, Vec<ExprNamespace>>,
     graph: Graph,
-    depended_on: IdxVec<bool, ExprId>,
+    depended_on: IdxVec<ExprId, bool>,
 
     staged_ret_groups: HashMap<DeclId, SmallVec<[ExprId; 1]>>,
 }

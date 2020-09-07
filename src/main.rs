@@ -23,7 +23,7 @@ use arch::Arch;
 use interpreter::InterpMode;
 use index_vec::Idx;
 use ty::Type;
-use mir::FunctionRef;
+use mir::{FunctionRef, FuncId};
 use driver::Driver;
 use source_info::SourceMap;
 
@@ -118,5 +118,5 @@ fn main() {
 
     println!("Running the user's program in the interpreter:\n");
     driver.interp.mode = InterpMode::RunTime;
-    driver.call(FunctionRef::Id(Idx::new(main)), Vec::new());
+    driver.call(FunctionRef::Id(FuncId::new(main)), Vec::new());
 }

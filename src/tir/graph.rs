@@ -19,18 +19,18 @@ newtype_index!(CompId);
 
 #[derive(Debug, Default)]
 pub struct Graph {
-    dependees: IdxVec<Vec<ItemId>, ItemId>,
-    t2_dependees: IdxVec<Vec<ItemId>, ItemId>,
-    t3_dependees: IdxVec<Vec<ItemId>, ItemId>,
-    t4_dependees: IdxVec<Vec<ItemId>, ItemId>,
+    dependees: IdxVec<ItemId, Vec<ItemId>>,
+    t2_dependees: IdxVec<ItemId, Vec<ItemId>>,
+    t3_dependees: IdxVec<ItemId, Vec<ItemId>>,
+    t4_dependees: IdxVec<ItemId, Vec<ItemId>>,
     meta_dependees: HashSet<ItemId>,
 
     // Used exclusively for finding connected components
-    dependers: IdxVec<Vec<ItemId>, ItemId>,
+    dependers: IdxVec<ItemId, Vec<ItemId>>,
 
-    item_to_components: IdxVec<CompId, ItemId>,
+    item_to_components: IdxVec<ItemId, CompId>,
 
-    components: IdxVec<Component, CompId>,
+    components: IdxVec<CompId, Component>,
 }
 
 bitflags! {
@@ -65,7 +65,7 @@ struct Component {
 
 struct ComponentState {
     // TODO: Vec of bools == gross
-    visited: IdxVec<bool, ItemId>,
+    visited: IdxVec<ItemId, bool>,
     cur_component: Component,
 }
 
@@ -147,7 +147,7 @@ impl Graph {
         *self.components[dependee].deps.entry(comp).or_default() &= backward_mask;
     }
 
-    fn find_level(&self, item: ItemId, levels: &mut IdxVec<u32, ItemId>) -> u32 {
+    fn find_level(&self, item: ItemId, levels: &mut IdxVec<ItemId, u32>) -> u32 {
         if levels[item] != u32::MAX { return levels[item]; }
 
         let mut max_level = 0;
@@ -246,14 +246,14 @@ impl Graph {
             units.push(cur_unit);
         }
 
-        let mut item_to_levels = IdxVec::<u32, ItemId>::new();
+        let mut item_to_levels = IdxVec::<ItemId, u32>::new();
         item_to_levels.resize_with(self.dependees.len(), || u32::MAX);
 
         for i in 0..self.dependees.len() {
             self.find_level(ItemId::new(i), &mut item_to_levels);
         }
 
-        let mut item_to_units = IdxVec::<u32, ItemId>::new();
+        let mut item_to_units = IdxVec::<ItemId, u32>::new();
         item_to_units.resize_with(self.dependees.len(), || u32::MAX);
 
         for (i, unit) in units.iter().enumerate() {
@@ -334,8 +334,8 @@ pub struct Unit {
 
 #[derive(Default, Debug)]
 pub struct Levels {
-    pub item_to_levels: IdxVec<u32, ItemId>,
-    pub item_to_units: IdxVec<u32, ItemId>,
+    pub item_to_levels: IdxVec<ItemId, u32>,
+    pub item_to_units: IdxVec<ItemId, u32>,
     pub units: Vec<Unit>,
 }
 

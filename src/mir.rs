@@ -86,8 +86,8 @@ enum Decl {
 pub struct Function {
     pub name: Option<Sym>,
     pub ret_ty: Type,
-    pub code: IdxVec<Instr, InstrId>,
-    pub basic_blocks: IdxVec<InstrId, BasicBlockId>,
+    pub code: IdxVec<InstrId, Instr>,
+    pub basic_blocks: IdxVec<BasicBlockId, InstrId>,
 }
 
 impl Function {
@@ -201,11 +201,11 @@ pub enum FunctionRef {
 
 pub struct Builder {
     decls: HashMap<DeclId, Decl>,
-    static_inits: IdxVec<ExprId, StaticId>,
+    static_inits: IdxVec<StaticId, ExprId>,
     pub arch: Arch,
-    pub strings: IdxVec<CString, StrId>,
-    pub functions: IdxVec<Function, FuncId>,
-    pub statics: IdxVec<Const, StaticId>,
+    pub strings: IdxVec<StrId, CString>,
+    pub functions: IdxVec<FuncId, Function>,
+    pub statics: IdxVec<StaticId, Const>,
 }
 
 impl Builder {
@@ -483,9 +483,9 @@ struct FunctionBuilder {
     name: Option<Sym>,
     ret_ty: Type,
     void_instr: InstrId,
-    code: IdxVec<Instr, InstrId>,
-    basic_blocks: IdxVec<InstrId, BasicBlockId>,
-    stored_decl_locs: IdxVec<InstrId, StoredDeclId>,
+    code: IdxVec<InstrId, Instr>,
+    basic_blocks: IdxVec<BasicBlockId, InstrId>,
+    stored_decl_locs: IdxVec<StoredDeclId, InstrId>,
 }
 
 impl FunctionBuilder {

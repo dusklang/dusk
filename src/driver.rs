@@ -14,7 +14,7 @@ use crate::index_vec::IdxVec;
 
 pub struct Driver {
     pub src_map: SourceMap,
-    pub toks: IdxVec<TokenVec, SourceFileId>,
+    pub toks: IdxVec<SourceFileId, TokenVec>,
     pub interner: DefaultStringInterner,
     pub hir: hir::Builder,
     pub tir: tir::Builder,

@@ -14,7 +14,7 @@ use crate::index_vec::{Idx, IdxVec};
 newtype_index!(SourceFileId pub);
 
 pub struct SourceMap {
-    pub files: IdxVec<SourceFile, SourceFileId>,
+    pub files: IdxVec<SourceFileId, SourceFile>,
     paths: HashMap<PathBuf, SourceFileId>,
 
     /// Contains vec![0, end(0), end(1), end(2)], etc.,

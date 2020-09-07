@@ -210,7 +210,7 @@ impl Value {
         }
     }
 
-    pub fn to_const(&self, arch: Arch, ty: Type, strings: &mut IdxVec<CString, StrId>) -> Const {
+    pub fn to_const(&self, arch: Arch, ty: Type, strings: &mut IdxVec<StrId, CString>) -> Const {
         match ty {
             Type::Int { width, is_signed } => {
                 use IntWidth::*;
@@ -313,7 +313,7 @@ impl Value {
 
 struct StackFrame {
     pc: InstrId,
-    results: IdxVec<Value, InstrId>,
+    results: IdxVec<InstrId, Value>,
 }
 
 #[derive(Copy, Clone)]

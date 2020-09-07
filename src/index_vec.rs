@@ -28,36 +28,36 @@ macro_rules! newtype_index {
     }
 }
 
-pub struct IdxVec<T, I: Idx> {
+pub struct IdxVec<I: Idx, T> {
     pub raw: Vec<T>,
     _marker: PhantomData<fn(&I)>,
 }
 
-impl<T: Debug, I: Idx> Debug for IdxVec<T, I> {
+impl<I: Idx, T: Debug> Debug for IdxVec<I, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         self.raw.fmt(f)
     }
 }
 
-impl<T: Clone, I: Idx> Clone for IdxVec<T, I> {
+impl<I: Idx, T: Clone> Clone for IdxVec<I, T> {
     fn clone(&self) -> Self {
         self.raw.clone().into()
     }
 }
 
-impl<T, I: Idx> From<Vec<T>> for IdxVec<T, I> {
+impl<I: Idx, T> From<Vec<T>> for IdxVec<I, T> {
     fn from(raw: Vec<T>) -> Self {
         Self { raw, _marker: PhantomData }
     }
 }
 
-impl<T, I: Idx> Default for IdxVec<T, I> {
+impl<I: Idx, T> Default for IdxVec<I, T> {
     fn default() -> Self {
         Self::from(Vec::default())
     }
 }
 
-impl<T, I: Idx> IdxVec<T, I> {
+impl<I: Idx, T> IdxVec<I, T> {
     pub fn new() -> Self { IdxVec::from(Vec::new()) }
     pub fn len(&self) -> usize { self.raw.len() }
     pub fn is_empty(&self) -> bool { self.raw.is_empty() }
@@ -102,7 +102,7 @@ impl<T, I: Idx> IdxVec<T, I> {
     }
 }
 
-impl<T, I: Idx> IntoIterator for IdxVec<T, I> {
+impl<I: Idx, T> IntoIterator for IdxVec<I, T> {
     type Item = T;
     type IntoIter = std::vec::IntoIter<T>;
 
@@ -111,7 +111,7 @@ impl<T, I: Idx> IntoIterator for IdxVec<T, I> {
     }
 }
 
-impl<'a, T, I: Idx> IntoIterator for &'a IdxVec<T, I> {
+impl<'a, I: Idx, T> IntoIterator for &'a IdxVec<I, T> {
     type Item = &'a T;
     type IntoIter = std::slice::Iter<'a, T>;
 
@@ -120,7 +120,7 @@ impl<'a, T, I: Idx> IntoIterator for &'a IdxVec<T, I> {
     }
 }
 
-impl<'a, T, I: Idx> IntoIterator for &'a mut IdxVec<T, I> {
+impl<'a, I: Idx, T> IntoIterator for &'a mut IdxVec<I, T> {
     type Item = &'a mut T;
     type IntoIter = std::slice::IterMut<'a, T>;
 
@@ -129,16 +129,16 @@ impl<'a, T, I: Idx> IntoIterator for &'a mut IdxVec<T, I> {
     }
 }
 
-unsafe impl<T, I: Idx> Send for IdxVec<T, I> where T: Send {}
+unsafe impl<I: Idx, T> Send for IdxVec<I, T> where T: Send {}
 
-impl<T, I: Idx> Index<I> for IdxVec<T, I> {
+impl<I: Idx, T> Index<I> for IdxVec<I, T> {
     type Output = T;
     fn index(&self, idx: I) -> &T {
         &self.raw[idx.idx()]
     }
 }
 
-impl<T, I: Idx> IndexMut<I> for IdxVec<T, I> {
+impl<I: Idx, T> IndexMut<I> for IdxVec<I, T> {
     fn index_mut(&mut self, idx: I) -> &mut T {
         &mut self.raw[idx.idx()]
     }
