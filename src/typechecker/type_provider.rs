@@ -314,10 +314,10 @@ impl<'base> TypeProvider for MockTypeProvider<'base> {
     fn debug_output(&mut self, hir: &hir::Builder, map: &SourceMap, level: usize) {
         if !self.debug() { return; }
         println!("LEVEL {}", level);
-        assert_eq!(self.constraints.len(), self.constraints_copy.len());
         let base = self.base;
         for (&id, new_constraints) in &self.constraints {
-            let old_constraints = self.constraints_copy.entry(id).or_insert_with(|| base.constraints(id).clone());
+            let old_constraints = self.constraints_copy.entry(id)
+                .or_insert_with(|| base.constraints(id).clone());
             print_debug_diff_and_set_old_constraints(id, old_constraints, new_constraints, hir, map);
         }
     }
