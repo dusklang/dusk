@@ -424,7 +424,7 @@ impl Driver {
                     Some(overload)
                 } else {
                     self.errors.push(
-                        Error::new("ambiguous overload for declaration")
+                        Error::new("no matching overload for declaration")
                             .adding_primary_range(self.hir.get_range(item.id), "expression here")
                     );
                     for &arg in &item.args {
