@@ -274,7 +274,7 @@ impl Graph {
                 .map(|unit| {
                     let mut meta_deps = HashMap::<u32, Vec<MetaDependee>>::new();
                     let items = unit.components.iter()
-                        .flat_map(|&comp| components[comp].items.iter().map(|comp| *comp))
+                        .flat_map(|&comp| components[comp].items.iter().map(|&item| item))
                         .collect();
                     for &item in &items {
                         if self.meta_dependees.contains(&item) {
