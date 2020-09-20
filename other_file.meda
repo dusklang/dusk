@@ -1,3 +1,5 @@
 fn do_something_cool() {
-    print("Doing something cool!\n")
+    hello_world :: import("HelloWorld.meda")
+    print("Doint somethin cool!\n")
+    import("std.meda").print_num(256 + 34)
 }
