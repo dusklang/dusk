@@ -23,7 +23,8 @@ pub struct Graph {
     t2_dependees: IdxVec<ItemId, Vec<ItemId>>,
     t3_dependees: IdxVec<ItemId, Vec<ItemId>>,
     t4_dependees: IdxVec<ItemId, Vec<ItemId>>,
-    meta_dependees: HashSet<ItemId>,
+    meta_dependees: HashMap<ItemId, Vec<ItemId>>,
+    global_meta_dependees: HashSet<ItemId>,
 
     // Used exclusively for finding connected components
     dependers: IdxVec<ItemId, Vec<ItemId>>,
@@ -82,6 +83,8 @@ struct Component {
     items: Vec<ItemId>,
 
     deps: HashMap<CompId, ComponentRelation>,
+
+    has_meta_dependees: bool,
 }
 
 struct ComponentState {
@@ -129,8 +132,9 @@ impl Graph {
     }
 
     /// in order to know the type 2-4 dependencies of a, we need to know all possible members of b
-    pub fn add_meta_dep(&mut self, _a: ItemId, b: ItemId) {
-        self.meta_dependees.insert(b);
+    pub fn add_meta_dep(&mut self, a: ItemId, b: ItemId) {
+        self.meta_dependees.entry(a).or_default().push(b);
+        self.global_meta_dependees.insert(b);
     }
 
     fn find_subcomponent(&mut self, item: ItemId, state: &mut ComponentState) {
@@ -200,10 +204,37 @@ impl Graph {
             (0..self.components.len())
                 .map(|i| CompId::new(i))
         );
+
+        self.update_meta_deps();
+    }
+
+    pub fn update_meta_deps(&mut self) {
+        for &comp in &self.outstanding_components {
+            let has_meta_dep = self.component_has_meta_dep(comp);
+            self.components[comp].has_meta_dependees = has_meta_dep;
+        }
+    }
+
+    fn component_has_meta_dep(&self, comp: CompId) -> bool {
+        self.components[comp].items.iter().any(|&item| self.item_has_meta_dep(item))
+    }
+
+    fn item_has_meta_dep(&self, item: ItemId) -> bool {
+        self.t2_dependees[item].iter()
+            .chain(self.t3_dependees[item].iter())
+            .chain(self.t4_dependees[item].iter())
+            .any(|&dep| self.outstanding_components.contains(&self.item_to_components[dep])) ||
+        self.meta_dependees.get(&item).unwrap_or(&Vec::new()).iter().any(|&dep| self.item_has_meta_dep(dep))
     }
 
     pub fn solve(&mut self) -> Levels {
-        // The outstanding components are the ones excluded last time
+        let mut excluded_components = HashSet::<CompId>::new();
+        for &id in &self.outstanding_components {
+            if self.components[id].has_meta_dependees {
+                excluded_components.insert(id);
+            }
+        }
+
         let mut included_components = HashSet::<CompId>::new();
         
         let mut units = Vec::<InternalUnit>::new();
@@ -287,6 +318,8 @@ impl Graph {
             }
         }
 
+        self.update_meta_deps();
+
         let components = &self.components;
 
         Levels {
@@ -299,7 +332,7 @@ impl Graph {
                         .flat_map(|&comp| components[comp].items.iter().map(|&item| item))
                         .collect();
                     for &item in &items {
-                        if self.meta_dependees.contains(&item) {
+                        if self.global_meta_dependees.contains(&item) {
                             let mut deps = HashSet::new();
                             self.get_deps(item, &mut deps, &unit.components);
                             meta_deps.entry(item_to_levels[item])
