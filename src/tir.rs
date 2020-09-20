@@ -500,10 +500,14 @@ impl Driver {
                         add_eval_dep!(id, ty);
                     }
                     self.add_type3_scope_dep(id, scope);
-                    let ty = self.hir.explicit_tys[decl_id].unwrap_or(self.hir.void_ty);
-                    add_eval_dep!(id, ty);
+                    // NOTE: the Some case is handled below this match expression
+                    if self.hir.explicit_tys[decl_id].is_none() {
+                        add_eval_dep!(id, self.hir.void_ty);
+                    }
                 },
             }
+
+            // NOTE: The computed decl case in the above match expression depends on this!
             if let Some(ty) = self.hir.explicit_tys[decl_id] {
                 add_eval_dep!(id, ty);
             }
