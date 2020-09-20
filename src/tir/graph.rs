@@ -31,6 +31,27 @@ pub struct Graph {
     item_to_components: IdxVec<ItemId, CompId>,
 
     components: IdxVec<CompId, Component>,
+
+
+    /// Components that have not yet been added to a unit, or a mock unit
+    outstanding_components: HashSet<CompId>,
+
+    /// Components whose items have been added to one or more mock units, but who have not yet
+    /// been added to a regular unit in their entirety
+    staged_components: HashMap<CompId, CompStageState>,
+
+    /// Components that have been added to a unit
+    used_components: HashSet<CompId>,
+}
+
+#[derive(Debug)]
+struct CompStageState {
+    // Consider the component below. `other_file`, `std`, and `fs` can all be output as mock units
+    // at the same time, and typechecked concurrently. `str` must be output from a later call to
+    // solve(), because it depends on `std`. Then, we can finally put this component into a real
+    // unit.
+    //
+    //      other_file.foo(std.str.concat("Hello, ", "world!"), fs.read("HAASDASKJFD.txt"))
 }
 
 bitflags! {
