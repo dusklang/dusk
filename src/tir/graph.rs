@@ -195,21 +195,22 @@ impl Graph {
         for i in 0..self.dependees.len() {
             self.find_component(ItemId::new(i), &mut state);
         }
+
+        self.outstanding_components = HashSet::<CompId>::from_iter(
+            (0..self.components.len())
+                .map(|i| CompId::new(i))
+        );
     }
 
     pub fn solve(&mut self) -> Levels {
         // The outstanding components are the ones excluded last time
-        let mut outstanding_components = HashSet::<CompId>::from_iter(
-            (0..self.components.len())
-                .map(|i| CompId::new(i))
-        );
         let mut included_components = HashSet::<CompId>::new();
         
         let mut units = Vec::<InternalUnit>::new();
-        while !outstanding_components.is_empty() {
+        while !self.outstanding_components.is_empty() {
             // Get all components that have no type 4 dependencies on outstanding components
             let mut cur_unit_comps = HashSet::<CompId>::new();
-            for &comp_id in &outstanding_components {
+            for &comp_id in &self.outstanding_components {
                 let mut should_add = true;
                 for (&dependee, &relation) in &self.components[comp_id].deps {
                     if relation == ComponentRelation::BEFORE && !included_components.contains(&dependee) {
@@ -262,7 +263,7 @@ impl Graph {
                     }
                 }
                 included_components.insert(comp);
-                outstanding_components.remove(&comp);
+                self.outstanding_components.remove(&comp);
             }
             units.push(cur_unit);
         }
