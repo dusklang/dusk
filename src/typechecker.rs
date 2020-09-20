@@ -122,10 +122,14 @@ impl Driver {
                 let args = item.args.clone();
                 let decl_ref_id = item.decl_ref_id;
 
+                if id == crate::index_vec::Idx::new(21) {
+                    println!("fuck yea");
+                }
+
                 // Filter overloads that don't match the constraints of the parameters.
                 // These borrows are only here because the borrow checker is dumb
                 let decls = &self.tir.decls;
-                let tc = &tp;
+                let tc = &*tp;
                 let mut overloads = self.find_overloads(&self.hir.decl_refs[decl_ref_id]);
                 // Rule out overloads that don't match the arguments
                 overloads.retain(|&overload| {
