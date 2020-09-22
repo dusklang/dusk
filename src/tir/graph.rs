@@ -204,11 +204,9 @@ impl Graph {
             (0..self.components.len())
                 .map(|i| CompId::new(i))
         );
-
-        self.update_meta_deps();
     }
 
-    pub fn update_meta_deps(&mut self) {
+    fn update_meta_deps(&mut self) {
         for &comp in &self.outstanding_components {
             let has_meta_dep = self.component_has_meta_dep(comp);
             self.components[comp].has_meta_dependees = has_meta_dep;
@@ -228,12 +226,16 @@ impl Graph {
     }
 
     pub fn solve(&mut self) -> Levels {
+        self.update_meta_deps();
+
         let mut excluded_components = HashSet::<CompId>::new();
         for &id in &self.outstanding_components {
             if self.components[id].has_meta_dependees {
                 excluded_components.insert(id);
             }
         }
+
+        println!("{:#?}\n There are {} excluded components", excluded_components, excluded_components.len());
 
         let mut included_components = HashSet::<CompId>::new();
         
@@ -317,8 +319,6 @@ impl Graph {
                 }
             }
         }
-
-        self.update_meta_deps();
 
         let components = &self.components;
 
