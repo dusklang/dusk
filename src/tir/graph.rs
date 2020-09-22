@@ -33,7 +33,6 @@ pub struct Graph {
 
     components: IdxVec<CompId, Component>,
 
-
     /// Components that have not yet been added to a unit, or a mock unit
     outstanding_components: HashSet<CompId>,
 
@@ -42,7 +41,7 @@ pub struct Graph {
     staged_components: HashMap<CompId, CompStageState>,
 
     /// Components that have been added to a unit
-    used_components: HashSet<CompId>,
+    included_components: HashSet<CompId>,
 }
 
 #[derive(Debug)]
@@ -237,8 +236,6 @@ impl Graph {
 
         println!("{:#?}\n There are {} excluded components", excluded_components, excluded_components.len());
 
-        let mut included_components = HashSet::<CompId>::new();
-        
         let mut units = Vec::<InternalUnit>::new();
         while !self.outstanding_components.is_empty() {
             // Get all components that have no type 4 dependencies on outstanding components
@@ -246,7 +243,7 @@ impl Graph {
             for &comp_id in &self.outstanding_components {
                 let mut should_add = true;
                 for (&dependee, &relation) in &self.components[comp_id].deps {
-                    if relation == ComponentRelation::BEFORE && !included_components.contains(&dependee) {
+                    if relation == ComponentRelation::BEFORE && !self.included_components.contains(&dependee) {
                         should_add = false;
                     }
                 }
@@ -266,7 +263,7 @@ impl Graph {
                         if
                             relation == ComponentRelation::TYPE_2_3_FORWARD &&
                             !cur_unit_copy.contains(&dependee) &&
-                            !included_components.contains(&dependee)
+                            !self.included_components.contains(&dependee)
                         {
                             should_retain = false;
                         }
@@ -295,7 +292,7 @@ impl Graph {
                         }
                     }
                 }
-                included_components.insert(comp);
+                self.included_components.insert(comp);
                 self.outstanding_components.remove(&comp);
             }
             units.push(cur_unit);
