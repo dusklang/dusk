@@ -220,8 +220,8 @@ impl Graph {
         self.t2_dependees[item].iter()
             .chain(self.t3_dependees[item].iter())
             .chain(self.t4_dependees[item].iter())
-            .any(|&dep| self.outstanding_components.contains(&self.item_to_components[dep])) ||
-        self.meta_dependees.get(&item).unwrap_or(&Vec::new()).iter().any(|&dep| self.item_has_meta_dep(dep))
+            .any(|&dep| self.item_has_meta_dep(dep)) ||
+        self.meta_dependees.get(&item).unwrap_or(&Vec::new()).iter().any(|&dep| self.outstanding_components.contains(&self.item_to_components[dep]))
     }
 
     pub fn solve(&mut self) -> Levels {
@@ -234,7 +234,7 @@ impl Graph {
             }
         }
 
-        println!("{:#?}\n There are {} excluded components", excluded_components, excluded_components.len());
+        println!("{:#?}\nThere are {} total components and {} excluded components", excluded_components, self.components.len(), excluded_components.len());
 
         let mut units = Vec::<InternalUnit>::new();
         while !self.outstanding_components.is_empty() {
