@@ -221,14 +221,39 @@ impl Graph {
     pub fn solve(&mut self) -> Levels {
         self.update_meta_deps();
 
-        let mut excluded_components = HashSet::<CompId>::new();
+        // Get the outstanding components with meta-dependees in them
+        let mut meta_dep_components = HashSet::<CompId>::new();
         for &id in &self.outstanding_components {
             if self.components[id].has_meta_dep {
-                excluded_components.insert(id);
+                meta_dep_components.insert(id);
             }
         }
 
-        println!("{:#?}\nThere are {} total components and {} excluded components", excluded_components, self.components.len(), excluded_components.len());
+        // Get the components that depend (either directly or indirectly) on components with meta-dependees in them 
+        let excluded_components = {
+            let mut excluded_components = HashSet::new();
+            let mut potentially_excluded_components: HashSet<CompId> = self.outstanding_components
+                .difference(&meta_dep_components)
+                .copied()
+                .collect();
+            let mut added_to_excluded_set = true;
+            while added_to_excluded_set {
+                added_to_excluded_set = false;
+                potentially_excluded_components.retain(|&comp_id| {
+                    let comp = &self.components[comp_id];
+                    for (dep, &relation) in &comp.deps {
+                        if !relation.contains(ComponentRelation::AFTER) && (meta_dep_components.contains(dep) || excluded_components.contains(dep)) {
+                            excluded_components.insert(comp_id);
+                            added_to_excluded_set = true;
+                            return false;
+                        }
+                    }
+                    true
+                });
+            }
+
+            excluded_components
+        };
 
         let mut units = Vec::<InternalUnit>::new();
         while !self.outstanding_components.is_empty() {
