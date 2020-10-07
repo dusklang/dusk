@@ -218,4 +218,5 @@ fn compute_a_number(): os_dependent_type() {
 
 fn main() {
     import("other_file.meda").do_something_cool()
+    var: import("other_file.meda").type_alias = 12
 }

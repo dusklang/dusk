@@ -83,7 +83,7 @@ struct Component {
 
     deps: HashMap<CompId, ComponentRelation>,
 
-    has_meta_dependees: bool,
+    has_meta_dep: bool,
 }
 
 struct ComponentState {
@@ -131,6 +131,11 @@ impl Graph {
     }
 
     /// in order to know the type 2-4 dependencies of a, we need to know all possible members of b
+    ///
+    /// NOTE: An item meta-depending on another does not imply anything about their relative units
+    ///       or levels. For this reason, I'm pretty sure that a meta-dependency should always
+    ///       be paired with a type 1-4 dependency. But maybe there are exceptions I haven't
+    ///       thought about.
     pub fn add_meta_dep(&mut self, a: ItemId, b: ItemId) {
         self.meta_dependees.entry(a).or_default().push(b);
         self.global_meta_dependees.insert(b);
@@ -207,21 +212,10 @@ impl Graph {
 
     fn update_meta_deps(&mut self) {
         for &comp in &self.outstanding_components {
-            let has_meta_dep = self.component_has_meta_dep(comp);
-            self.components[comp].has_meta_dependees = has_meta_dep;
+            let has_meta_dep = self.components[comp].items.iter()
+                .any(|item| self.global_meta_dependees.contains(item));
+            self.components[comp].has_meta_dep = has_meta_dep;
         }
-    }
-
-    fn component_has_meta_dep(&self, comp: CompId) -> bool {
-        self.components[comp].items.iter().any(|&item| self.item_has_meta_dep(item))
-    }
-
-    fn item_has_meta_dep(&self, item: ItemId) -> bool {
-        self.t2_dependees[item].iter()
-            .chain(self.t3_dependees[item].iter())
-            .chain(self.t4_dependees[item].iter())
-            .any(|&dep| self.item_has_meta_dep(dep)) ||
-        self.meta_dependees.get(&item).unwrap_or(&Vec::new()).iter().any(|&dep| self.outstanding_components.contains(&self.item_to_components[dep]))
     }
 
     pub fn solve(&mut self) -> Levels {
@@ -229,7 +223,7 @@ impl Graph {
 
         let mut excluded_components = HashSet::<CompId>::new();
         for &id in &self.outstanding_components {
-            if self.components[id].has_meta_dependees {
+            if self.components[id].has_meta_dep {
                 excluded_components.insert(id);
             }
         }
@@ -251,7 +245,7 @@ impl Graph {
                     cur_unit_comps.insert(comp_id);
                 }
             }
-            
+
             // Whittle down the components to only those that have type 2 or 3 dependencies on each other, or included components
             // (and not other outstanding components)
             loop {
