@@ -218,6 +218,45 @@ impl Graph {
         }
     }
 
+    fn find_comps_without_outstanding_type_4_deps(&self, comps: &HashSet<CompId>, output: &mut HashSet<CompId>) {
+        'comps: for &comp_id in comps {
+            for (&dependee, &relation) in &self.components[comp_id].deps {
+                if relation == ComponentRelation::BEFORE && !self.included_components.contains(&dependee) {
+                    // Found a type 4 dependency, so we wont add this component. Continue to the next component.
+                    continue 'comps;
+                }
+            }
+            output.insert(comp_id);
+        }
+    }
+
+    fn remove_comps_with_outstanding_deps(&self, comps: &mut HashSet<CompId>, should_check_current_unit: bool) {
+        loop {
+            // Yay borrow checker
+            let comps_copy = comps.clone();
+            comps.retain(|&comp| {
+                for (&dependee, &relation) in &self.components[comp].deps {
+                    let in_current_unit = if should_check_current_unit {
+                        false
+                    } else {
+                        comps_copy.contains(&dependee)
+                    };
+                    if
+                        relation == ComponentRelation::TYPE_2_3_FORWARD &&
+                        !in_current_unit &&
+                        !self.included_components.contains(&dependee)
+                    {
+                        return false;
+                    }
+                }
+                true
+            });
+
+            // If we didn't remove anything this iteration, we're done
+            if comps_copy.len() == comps.len() { break; }
+        }
+    }
+
     pub fn solve(&mut self) -> Levels {
         self.update_meta_deps();
 
@@ -255,44 +294,18 @@ impl Graph {
             excluded_components
         };
 
+        // Temporarily remove all excluded components. Those that don't get staged will be added back after finding the units
+        self.outstanding_components.retain(|comp| !meta_dep_components.contains(comp) && !excluded_components.contains(comp));
+
         let mut units = Vec::<InternalUnit>::new();
         while !self.outstanding_components.is_empty() {
             // Get all components that have no type 4 dependencies on outstanding components
             let mut cur_unit_comps = HashSet::<CompId>::new();
-            for &comp_id in &self.outstanding_components {
-                let mut should_add = true;
-                for (&dependee, &relation) in &self.components[comp_id].deps {
-                    if relation == ComponentRelation::BEFORE && !self.included_components.contains(&dependee) {
-                        should_add = false;
-                    }
-                }
-                if should_add {
-                    cur_unit_comps.insert(comp_id);
-                }
-            }
+            self.find_comps_without_outstanding_type_4_deps(&self.outstanding_components, &mut cur_unit_comps);
 
             // Whittle down the components to only those that have type 2 or 3 dependencies on each other, or included components
             // (and not other outstanding components)
-            loop {
-                // Yay borrow checker
-                let cur_unit_copy = cur_unit_comps.clone();
-                cur_unit_comps.retain(|&comp| {
-                    let mut should_retain = true;
-                    for (&dependee, &relation) in &self.components[comp].deps {
-                        if
-                            relation == ComponentRelation::TYPE_2_3_FORWARD &&
-                            !cur_unit_copy.contains(&dependee) &&
-                            !self.included_components.contains(&dependee)
-                        {
-                            should_retain = false;
-                        }
-                    }
-                    should_retain
-                });
-
-                // If we didn't remove anything this iteration, we're done
-                if cur_unit_copy.len() == cur_unit_comps.len() { break; }
-            }
+            self.remove_comps_with_outstanding_deps(&mut cur_unit_comps, true);
 
             let mut cur_unit = InternalUnit::default();
             cur_unit.components.extend(cur_unit_comps.iter());
@@ -315,6 +328,20 @@ impl Graph {
                 self.outstanding_components.remove(&comp);
             }
             units.push(cur_unit);
+        }
+
+        // Stage viable components
+        {
+            // Get all meta-dep components that have no type 4 dependencies on outstanding components
+            let mut comps_to_stage = HashSet::<CompId>::new();
+            self.find_comps_without_outstanding_type_4_deps(&meta_dep_components, &mut comps_to_stage);
+
+            // Whittle down the components to only those that have type 2 or 3 dependencies on included components
+            // (and not other outstanding components, or each other)
+            self.remove_comps_with_outstanding_deps(&mut comps_to_stage, false);
+            
+            println!("Staged components: {:?}", comps_to_stage);
+            println!("Unviable components: {:?}", meta_dep_components.difference(&comps_to_stage));
         }
 
         let mut item_to_levels = IdxVec::<ItemId, u32>::new();
