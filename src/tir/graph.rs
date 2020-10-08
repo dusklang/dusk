@@ -46,12 +46,13 @@ pub struct Graph {
 
 #[derive(Debug)]
 struct CompStageState {
-    // Consider the component below. `other_file`, `std`, and `fs` can all be output as mock units
-    // at the same time, and typechecked concurrently. `str` must be output from a later call to
-    // solve(), because it depends on `std`. Then, we can finally put this component into a real
-    // unit.
-    //
-    //      other_file.foo(std.str.concat("Hello, ", "world!"), fs.read("HAASDASKJFD.txt"))
+    /// Each element of this Vec is a Vec of meta-dependees that can form independent mock units with no dependencies on each other.
+    /// Each call to `solve()` pops another Vec off the end of the outer Vec, and adds them as mock units to the next set. When the
+    /// outer Vec is emptied, it means this component can be added to the next Unit proper.
+    ///
+    /// Example: consider the component below. The correct initial value of `meta_deps` would be [[std.str], [other_file, std, fs]]:
+    ///     other_file.foo(std.str.concat("Hello, ", "world!"), fs.read("HAASDASKJFD.txt"))
+    meta_deps: Vec<Vec<ItemId>>,
 }
 
 bitflags! {
@@ -176,19 +177,26 @@ impl Graph {
         *self.components[dependee].deps.entry(comp).or_default() &= backward_mask;
     }
 
-    fn find_level(&self, item: ItemId, levels: &mut IdxVec<ItemId, u32>) -> u32 {
-        if levels[item] != u32::MAX { return levels[item]; }
+    // The whole purpose of this method existing as opposed to just having `find_level` is so we can call `find_level` with an ordinary closure (not a reference), then
+    // pass that same closure on recursively without moving it.
+    fn find_level_recursive(&self, item: ItemId, levels: &mut HashMap<ItemId, u32>, filter: &mut impl FnMut(ItemId) -> bool) -> u32 {
+        if let Some(&level) = levels.get(&item) { return level; }
 
         let mut max_level = 0;
         let mut offset = 0;
         for &dep in &self.dependees[item] {
-            let level = self.find_level(dep, levels);
+            let level = self.find_level_recursive(dep, levels, filter);
             max_level = max(max_level, level);
             offset = 1;
         }
+        if !filter(item) { offset = 0; }
         let level = max_level + offset;
-        levels[item] = level;
+        levels.insert(item, level);
         level
+    }
+
+    fn find_level(&self, item: ItemId, levels: &mut HashMap<ItemId, u32>, mut filter: impl Clone + Fn(ItemId) -> bool) -> u32 {
+        self.find_level_recursive(item, levels, &mut filter)
     }
 
     // Find the weak components of the graph
@@ -255,6 +263,30 @@ impl Graph {
             // If we didn't remove anything this iteration, we're done
             if comps_copy.len() == comps.len() { break; }
         }
+    }
+
+    fn stage_component(&mut self, comp: CompId) {
+        let mut levels: HashMap<ItemId, u32> = HashMap::new();
+        let mut max_level = 0;
+        let items = &self.components[comp].items;
+        for &item in items {
+            let level = self.find_level(item, &mut levels, |item| self.global_meta_dependees.contains(&item));
+            max_level = max(max_level, level);
+        }
+
+        let mut meta_deps = Vec::<Vec<ItemId>>::new();
+        meta_deps.resize_with(max_level as usize + 1, Default::default);
+
+        for &item in items {
+            if !self.global_meta_dependees.contains(&item) { continue; }
+            // Invert the level so that lower levels can be popped off the end of the array
+            let level = max_level - levels[&item];
+            meta_deps[level as usize].push(item);
+        }
+
+        let state = CompStageState { meta_deps };
+        let old_val = self.staged_components.insert(comp, state);
+        assert!(old_val.is_none());
     }
 
     pub fn solve(&mut self) -> Levels {
@@ -339,17 +371,23 @@ impl Graph {
             // Whittle down the components to only those that have type 2 or 3 dependencies on included components
             // (and not other outstanding components, or each other)
             self.remove_comps_with_outstanding_deps(&mut comps_to_stage, false);
+
+            // Add excluded components back to `outstanding_components`.
+            for &comp in meta_dep_components.difference(&comps_to_stage).chain(&excluded_components) {
+                self.outstanding_components.insert(comp);
+            }
+
+            for comp in comps_to_stage {
+                self.stage_component(comp);
+            }
             
-            println!("Staged components: {:?}", comps_to_stage);
-            println!("Unviable components: {:?}", meta_dep_components.difference(&comps_to_stage));
-            println!("Excluded components: {:?}", excluded_components);
+            println!("Staged components: {:#?}", self.staged_components);
         }
 
-        let mut item_to_levels = IdxVec::<ItemId, u32>::new();
-        item_to_levels.resize_with(self.dependees.len(), || u32::MAX);
+        let mut item_to_levels = HashMap::<ItemId, u32>::new();
 
         for i in 0..self.dependees.len() {
-            self.find_level(ItemId::new(i), &mut item_to_levels);
+            self.find_level(ItemId::new(i), &mut item_to_levels, |_| true);
         }
 
         let mut item_to_units = IdxVec::<ItemId, u32>::new();
@@ -379,7 +417,7 @@ impl Graph {
                         if self.global_meta_dependees.contains(&item) {
                             let mut deps = HashSet::new();
                             self.get_deps(item, &mut deps, &unit.components);
-                            meta_deps.entry(item_to_levels[item])
+                            meta_deps.entry(item_to_levels[&item])
                                 .or_default()
                                 .push(MetaDependee { item, deps: deps.into_iter().collect() });
                         }
@@ -433,7 +471,7 @@ pub struct Unit {
 
 #[derive(Default, Debug)]
 pub struct Levels {
-    pub item_to_levels: IdxVec<ItemId, u32>,
+    pub item_to_levels: HashMap<ItemId, u32>,
     pub item_to_units: IdxVec<ItemId, u32>,
     pub units: Vec<Unit>,
 }
@@ -441,8 +479,8 @@ pub struct Levels {
 impl ItemId {
     fn write_node_name(self, w: &mut impl Write, hir: &hir::Builder) -> IoResult<()> {
         match hir.items[self] {
-            hir::Item::Expr(id) => write!(w, "expr{}", id.idx())?,
-            hir::Item::Decl(id) => write!(w, "decl{}", id.idx())?,
+            hir::Item::Expr(id) => write!(w, "item{}expr{}", self.idx(), id.idx())?,
+            hir::Item::Decl(id) => write!(w, "item{}decl{}", self.idx(), id.idx())?,
         }
         Ok(())
     }
@@ -589,7 +627,7 @@ impl Driver {
                 let item_to_levels = &levels.item_to_levels;
                 let max_level = levels.units.iter()
                     .flat_map(|unit| &unit.items)
-                    .map(|&item| item_to_levels[item])
+                    .map(|&item| item_to_levels[&item])
                     .max()
                     .unwrap_or(0);
 
@@ -617,7 +655,7 @@ impl Driver {
                     for &item in &unit.items {
                         if self.should_exclude_item_from_output(item) { continue; }
 
-                        let level = levels.item_to_levels[item];
+                        let level = levels.item_to_levels[&item];
                         self.write_item(&mut w, item)?;
                         self.write_deps(&mut w, item, graph, false)?;
 

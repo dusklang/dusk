@@ -293,7 +293,7 @@ impl Driver {
 
             let item = self.hir.decl_to_items[decl];
             let unit_id = sp.levels.item_to_units[item];
-            let level = sp.levels.item_to_levels[item];
+            let level = sp.levels.item_to_levels[&item];
             let unit = &mut sp.units[unit_id as usize];
             unit.items.ret_groups.insert(
                 level,
@@ -556,7 +556,7 @@ impl Driver {
             let unit = &mut sp.units[unit_id];
             for i in 0..sp.levels.units[unit_id].items.len() {
                 let item_id = sp.levels.units[unit_id].items[i];
-                let level = sp.levels.item_to_levels[item_id];
+                let level = sp.levels.item_to_levels[&item_id];
                 match self.hir.items[item_id] {
                     hir::Item::Decl(id) => {
                         self.build_tir_decl(&mut unit.items, level, id);
@@ -576,10 +576,10 @@ impl Driver {
                         hir::Item::Decl(_) => panic!("Can't have metadependency on a declaration!"),
                     };
                     let mut items = UnitItems::default();
-                    let level = sp.levels.item_to_levels[dep.item];
+                    let level = sp.levels.item_to_levels[&dep.item];
                     self.build_tir_expr(&mut items, level, expr);
                     for &item_id in &dep.deps {
-                        let level = sp.levels.item_to_levels[item_id];
+                        let level = sp.levels.item_to_levels[&item_id];
                         match self.hir.items[item_id] {
                             hir::Item::Decl(id) => {
                                 self.build_tir_decl(&mut items, level, id);
