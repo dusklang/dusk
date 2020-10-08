@@ -342,6 +342,7 @@ impl Graph {
             
             println!("Staged components: {:?}", comps_to_stage);
             println!("Unviable components: {:?}", meta_dep_components.difference(&comps_to_stage));
+            println!("Excluded components: {:?}", excluded_components);
         }
 
         let mut item_to_levels = IdxVec::<ItemId, u32>::new();

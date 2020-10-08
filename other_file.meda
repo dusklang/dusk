@@ -1,4 +1,6 @@
-type_alias :: u8
+some_mod :: mod {
+    type_alias :: u8
+}
 
 fn do_something_cool() {
     hello_world :: import("HelloWorld.meda")
