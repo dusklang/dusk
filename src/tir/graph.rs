@@ -403,10 +403,10 @@ impl Graph {
             }
         }
 
-        let components = &self.components;
-
         let mut mock_units = Vec::new();
-        'mock_staged_comps: for &comp_id in self.staged_components.keys() {
+        // TODO: Borrow checker :(
+        let staged_comps_keys: Vec<_> = self.staged_components.keys().copied().collect();
+        'mock_staged_comps: for comp_id in staged_comps_keys {
             // Check dependencies of the component before adding it to a mock unit. This is necessary because:
             //   - Meta-dependers can add dependencies to themselves after a meta-dependee is mocked
             //     (in fact, that's the whole point of all this)
@@ -421,7 +421,7 @@ impl Graph {
                 }
             }
             
-            let meta_deps = self.staged_components[&comp_id].meta_deps.pop().unwrap();
+            let meta_deps = self.staged_components.get_mut(&comp_id).unwrap().meta_deps.pop().unwrap();
             for dep in meta_deps {
                 let mut item_to_levels: HashMap<ItemId, u32> = HashMap::new();
 
@@ -452,12 +452,15 @@ impl Graph {
                 self.outstanding_components.insert(comp_id);
 
                 // Update state to reflect the fact that the component no longer has meta-dependees
-                for &item in &comp.items {
+                for i in 0..comp.items.len() {
+                    let comp = &self.components[comp_id];
+                    let item = comp.items[i];
                     self.remove_meta_dep_status(item);
                 }
             }
         }
 
+        let components = &self.components;
         Levels {
             item_to_levels: item_to_levels.clone(),
             item_to_units,
@@ -483,7 +486,8 @@ impl Graph {
         let was_removed = self.global_meta_dependees.remove(&item);
         // Short-circuit the recursive chain
         if !was_removed { return; }
-        for &dependee in &self.dependees[item] {
+        for i in 0..self.dependees[item].len() {
+            let item = self.dependees[item][i];
             self.remove_meta_dep_status(item);
         }
     }

@@ -109,18 +109,6 @@ impl UnitItems {
     }
 }
 
-#[derive(Debug)]
-pub struct MetaDependee {
-    pub dependee: ExprId,
-    pub items: UnitItems,
-}
-
-#[derive(Debug)]
-pub struct LevelMetaDependees {
-    pub level: u32,
-    pub meta_dependees: Vec<MetaDependee>,
-}
-
 #[derive(Debug, Default)]
 pub struct Unit {
     pub items: UnitItems,

@@ -12,7 +12,7 @@ use crate::builder::{ExprId, DeclId};
 use crate::ty::{BuiltinTraits, Type, QualType, IntWidth};
 use crate::mir::Const;
 use crate::hir;
-use crate::tir::{Unit, UnitItems, LevelMetaDependees, ExprNamespace};
+use crate::tir::{Units, UnitItems, ExprNamespace};
 
 #[derive(Copy, Clone, Debug)]
 pub enum CastMethod {
@@ -24,11 +24,16 @@ pub enum CastMethod {
     IntToFloat,
 }
 
-fn unit_string(unit_num: Option<usize>) -> String {
-    match unit_num {
-        Some(num) => format!("UNIT {}", num),
-        None => "MOCK UNIT".to_string()
+fn unit_string(unit_kind: UnitKind) -> String {
+    match unit_kind {
+        UnitKind::Normal(num) => format!("UNIT {}", num),
+        UnitKind::Mock(num) => format!("MOCK UNIT {}", num),
     }
+}
+
+enum UnitKind {
+    Normal(usize),
+    Mock(usize),
 }
 
 impl Driver {
@@ -36,12 +41,12 @@ impl Driver {
         self.hir.explicit_tys[id].map(|ty| tp.get_evaluated_type(ty)).unwrap_or(&Type::Error)
     }
 
-    fn run_pass_1(&mut self, unit: &UnitItems, unit_num: Option<usize>, start_level: u32, meta_dependees: &[LevelMetaDependees], tp: &mut impl TypeProvider) {
+    fn run_pass_1(&mut self, unit: &UnitItems, unit_kind: UnitKind, start_level: u32, tp: &mut impl TypeProvider) {
         // Pass 1: propagate info down from leaves to roots
         if tp.debug() {
             println!(
                 "===============TYPECHECKING {}: PASS 1===============",
-                unit_string(unit_num),
+                unit_string(unit_kind),
             );
         }
         fn lit_pass_1(tp: &mut impl TypeProvider, lits: &[ExprId], trait_impls: BuiltinTraits, pref: Type) {
@@ -61,7 +66,6 @@ impl Driver {
             *tp.constraints_mut(item) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Ty.into()]), None);
             *tp.ty_mut(item) = Type::Ty;
         }
-        let mut meta_dependee_i = 0;
         for level in start_level..unit.num_levels() {
             for item in unit.assigned_decls.get_level(level) {
                 let constraints = tp.constraints(item.root_expr);
@@ -259,33 +263,14 @@ impl Driver {
                 constraints.set_to(Type::Void);
             }
             tp.debug_output(&self.hir, &self.src_map, level as usize);
-
-            // Evaluate meta-dependees to build namespaces for expressions
-            if meta_dependee_i < meta_dependees.len() && meta_dependees[meta_dependee_i].level == level {
-                for dep in &meta_dependees[meta_dependee_i].meta_dependees {
-                    let mut mock = MockTypeProvider::new(tp);
-                    if mock.constraints(dep.dependee).can_unify_to(&Type::Mod.into()).is_ok() {
-                        self.run_pass_1(&dep.items, None, level+1, &[], &mut mock);
-                        mock.constraints_mut(dep.dependee).set_to(&Type::Mod);
-                        self.run_pass_2(&dep.items, None, &mut mock);
-                        let module = self.eval_expr(dep.dependee, &mock);
-                        match module {
-                            Const::Mod(scope) => self.tir.expr_namespaces.entry(dep.dependee).or_default()
-                                .push(ExprNamespace::Mod(scope)),
-                            _ => panic!("Unexpected const kind, expected module!"),
-                        }
-                    }
-                }
-                meta_dependee_i += 1;
-            }
         }
     }
 
-    fn run_pass_2(&mut self, unit: &UnitItems, unit_num: Option<usize>, tp: &mut impl TypeProvider) {
+    fn run_pass_2(&mut self, unit: &UnitItems, unit_kind: UnitKind, tp: &mut impl TypeProvider) {
         if tp.debug() {
             println!(
                 "===============TYPECHECKING {}: PASS 2===============",
-                unit_string(unit_num)
+                unit_string(unit_kind)
             );
         }
         for level in (0..unit.num_levels()).rev() {
@@ -498,23 +483,37 @@ impl Driver {
         tp.debug_output(&self.hir, &self.src_map, 0);
     }
 
-    pub fn type_check(&mut self, units: &[Unit], dbg: bool) -> RealTypeProvider {
+    pub fn type_check(&mut self, units: &Units, dbg: bool) -> RealTypeProvider {
         // Assign the type of the void expression to be void.
         let mut tp = RealTypeProvider::new(dbg, &self.hir, &self.tir);
         *tp.constraints_mut(self.hir.void_expr) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
         *tp.ty_mut(self.hir.void_expr) = Type::Void;
 
-        for (num, unit) in units.iter().enumerate() {
+        for (num, unit) in units.units.iter().enumerate() {
             // Pass 1: propagate info down from leaves to roots
-            self.run_pass_1(&unit.items, Some(num), 0, &unit.meta_dependees, &mut tp);
+            self.run_pass_1(&unit.items, UnitKind::Normal(num), 0, &mut tp);
             
             // Pass 2: propagate info up from roots to leaves
-            self.run_pass_2(&unit.items, Some(num), &mut tp);
+            self.run_pass_2(&unit.items, UnitKind::Normal(num), &mut tp);
 
             for i in 0..unit.eval_dependees.len() {
                 let expr = unit.eval_dependees[i];
                 let val = self.eval_expr(expr, &tp);
                 tp.insert_eval_result(expr, val);
+            }
+        }
+
+        for (num, unit) in units.mock_units.iter().enumerate() {
+            let mut mock_tp = MockTypeProvider::new(&mut tp);
+            self.run_pass_1(&unit.items, UnitKind::Mock(num), 0, &mut mock_tp);
+            if mock_tp.constraints(unit.main_expr).can_unify_to(&Type::Mod.into()).is_ok() {
+                self.run_pass_2(&unit.items, UnitKind::Mock(num), &mut mock_tp);
+                let module = self.eval_expr(unit.main_expr, &mock_tp);
+                match module {
+                    Const::Mod(scope) => self.tir.expr_namespaces.entry(unit.main_expr).or_default()
+                        .push(ExprNamespace::Mod(scope)),
+                    _ => panic!("Unexpected const kind, expected module!"),
+                }
             }
         }
 
