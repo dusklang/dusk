@@ -23,8 +23,12 @@ pub struct Graph {
     t2_dependees: IdxVec<ItemId, Vec<ItemId>>,
     t3_dependees: IdxVec<ItemId, Vec<ItemId>>,
     t4_dependees: IdxVec<ItemId, Vec<ItemId>>,
-    meta_dependees: HashMap<ItemId, Vec<ItemId>>,
-    global_meta_dependees: HashSet<ItemId>,
+
+    /// Set of all meta-dependees that are not yet ready to be added to a normal unit
+    meta_dependees: HashSet<ItemId>,
+    /// Map from all meta-dependees to their dependers. Used to notify TIR generator that it can
+    /// safely add dependencies 
+    meta_dependers: HashMap<ItemId, Vec<ItemId>>,
 
     // Used exclusively for finding connected components
     dependers: IdxVec<ItemId, Vec<ItemId>>,
@@ -138,8 +142,8 @@ impl Graph {
     ///       be paired with a type 1-4 dependency. But maybe there are exceptions I haven't
     ///       thought about.
     pub fn add_meta_dep(&mut self, a: ItemId, b: ItemId) {
-        self.meta_dependees.entry(a).or_default().push(b);
-        self.global_meta_dependees.insert(b);
+        self.meta_dependers.entry(b).or_default().push(a);
+        self.meta_dependees.insert(b);
     }
 
     fn find_subcomponent(&mut self, item: ItemId, state: &mut ComponentState) {
@@ -221,7 +225,7 @@ impl Graph {
     fn update_meta_deps(&mut self) {
         for &comp in &self.outstanding_components {
             let has_meta_dep = self.components[comp].items.iter()
-                .any(|item| self.global_meta_dependees.contains(item));
+                .any(|item| self.meta_dependees.contains(item));
             self.components[comp].has_meta_dep = has_meta_dep;
         }
     }
@@ -271,7 +275,7 @@ impl Graph {
             let mut max_level = 0;
             let items = &self.components[comp].items;
             for &item in items {
-                let level = self.find_level(item, &mut levels, |item| self.global_meta_dependees.contains(&item));
+                let level = self.find_level(item, &mut levels, |item| self.meta_dependees.contains(&item));
                 max_level = max(max_level, level);
             }
     
@@ -279,7 +283,7 @@ impl Graph {
             meta_deps.resize_with(max_level as usize + 1, Default::default);
     
             for &item in items {
-                if !self.global_meta_dependees.contains(&item) { continue; }
+                if !self.meta_dependees.contains(&item) { continue; }
                 // Invert the level so that lower levels can be popped off the end of the array
                 let level = max_level - levels[&item];
                 meta_deps[level as usize].push(item);
@@ -480,7 +484,7 @@ impl Graph {
     }
 
     fn remove_meta_dep_status(&mut self, item: ItemId) {
-        let was_removed = self.global_meta_dependees.remove(&item);
+        let was_removed = self.meta_dependees.remove(&item);
         // Short-circuit the recursive chain
         if !was_removed { return; }
         for i in 0..self.dependees[item].len() {
