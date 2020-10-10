@@ -265,28 +265,30 @@ impl Graph {
         }
     }
 
-    fn stage_component(&mut self, comp: CompId) {
+    fn stage_components(&mut self, comps: impl Iterator<Item=CompId>) {
         let mut levels: HashMap<ItemId, u32> = HashMap::new();
-        let mut max_level = 0;
-        let items = &self.components[comp].items;
-        for &item in items {
-            let level = self.find_level(item, &mut levels, |item| self.global_meta_dependees.contains(&item));
-            max_level = max(max_level, level);
+        for comp in comps {
+            let mut max_level = 0;
+            let items = &self.components[comp].items;
+            for &item in items {
+                let level = self.find_level(item, &mut levels, |item| self.global_meta_dependees.contains(&item));
+                max_level = max(max_level, level);
+            }
+    
+            let mut meta_deps = Vec::<Vec<ItemId>>::new();
+            meta_deps.resize_with(max_level as usize + 1, Default::default);
+    
+            for &item in items {
+                if !self.global_meta_dependees.contains(&item) { continue; }
+                // Invert the level so that lower levels can be popped off the end of the array
+                let level = max_level - levels[&item];
+                meta_deps[level as usize].push(item);
+            }
+    
+            let state = CompStageState { meta_deps };
+            let old_val = self.staged_components.insert(comp, state);
+            assert!(old_val.is_none());
         }
-
-        let mut meta_deps = Vec::<Vec<ItemId>>::new();
-        meta_deps.resize_with(max_level as usize + 1, Default::default);
-
-        for &item in items {
-            if !self.global_meta_dependees.contains(&item) { continue; }
-            // Invert the level so that lower levels can be popped off the end of the array
-            let level = max_level - levels[&item];
-            meta_deps[level as usize].push(item);
-        }
-
-        let state = CompStageState { meta_deps };
-        let old_val = self.staged_components.insert(comp, state);
-        assert!(old_val.is_none());
     }
 
     pub fn solve(&mut self) -> Levels {
@@ -373,14 +375,13 @@ impl Graph {
             self.remove_comps_with_outstanding_deps(&mut comps_to_stage, false);
 
             // Add excluded components back to `outstanding_components`.
-            for &comp in meta_dep_components.difference(&comps_to_stage).chain(&excluded_components) {
-                self.outstanding_components.insert(comp);
-            }
+            let all_excluded = meta_dep_components
+                .difference(&comps_to_stage)
+                .chain(&excluded_components);
+            self.outstanding_components.extend(all_excluded);
 
-            for comp in comps_to_stage {
-                self.stage_component(comp);
-            }
-            
+            self.stage_components(comps_to_stage.into_iter());
+
             println!("Staged components: {:#?}", self.staged_components);
         }
 
