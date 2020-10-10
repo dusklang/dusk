@@ -291,7 +291,7 @@ impl Driver {
             let ty = self.hir.explicit_tys[decl].expect("explicit return statements are not allowed in assigned functions (yet?)");
 
             let item = self.hir.decl_to_items[decl];
-            let unit_id = sp.levels.item_to_units[item];
+            let unit_id = sp.levels.item_to_units[&item];
             let level = sp.levels.item_to_levels[&item];
             let unit = &mut sp.units[unit_id as usize];
             unit.items.ret_groups.insert(
@@ -599,7 +599,7 @@ impl Driver {
             for &item in &scope.items {
                 match item {
                     hir::ScopeItem::Stmt(expr) => {
-                        let unit = sp.levels.item_to_units[ei!(expr)];
+                        let unit = sp.levels.item_to_units[&ei!(expr)];
                         let unit = &mut sp.units[unit as usize];
                         unit.items.stmts.push(Stmt { root_expr: expr });
                     },

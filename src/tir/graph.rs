@@ -391,14 +391,13 @@ impl Graph {
             self.find_level(ItemId::new(i), &mut item_to_levels, |_| true);
         }
 
-        let mut item_to_units = IdxVec::<ItemId, u32>::new();
-        item_to_units.resize_with(self.dependees.len(), || u32::MAX);
+        let mut item_to_units = HashMap::<ItemId, u32>::new();
 
         for (i, unit) in units.iter().enumerate() {
             for &comp in &unit.components {
                 let components = &self.components[comp];
                 for &item in &components.items {
-                    item_to_units[item] = i as u32;
+                    item_to_units.insert(item, i as u32);
                 }
             }
         }
@@ -501,7 +500,7 @@ pub struct Unit {
 #[derive(Default, Debug)]
 pub struct Levels {
     pub item_to_levels: HashMap<ItemId, u32>,
-    pub item_to_units: IdxVec<ItemId, u32>,
+    pub item_to_units: HashMap<ItemId, u32>,
     pub units: Vec<Unit>,
     pub mock_units: Vec<MockUnit>,
 }
