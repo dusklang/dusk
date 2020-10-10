@@ -405,69 +405,93 @@ impl Graph {
 
         let components = &self.components;
 
+        let mut mock_units = Vec::new();
+        'mock_staged_comps: for &comp_id in self.staged_components.keys() {
+            // Check dependencies of the component before adding it to a mock unit. This is necessary because:
+            //   - Meta-dependers can add dependencies to themselves after a meta-dependee is mocked
+            //     (in fact, that's the whole point of all this)
+            //   - Meta-dependers can be in the same component as their meta-dependee
+            //   - Within a component, a second meta-dependee might exist that depends on the meta-depender (indeed,
+            //     the meta-depender itself might also be a meta-dependee). Therefore, we need to typecheck the
+            //     meta-depender's dependencies before we can mock it
+            let comp = &self.components[comp_id];
+            for (dep, &relation) in &comp.deps {
+                if !relation.contains(ComponentRelation::AFTER) && !self.included_components.contains(dep) {
+                    continue 'mock_staged_comps;
+                }
+            }
+            
+            let meta_deps = self.staged_components[&comp_id].meta_deps.pop().unwrap();
+            for dep in meta_deps {
+                let mut item_to_levels: HashMap<ItemId, u32> = HashMap::new();
+
+                // Note: This will end up finding the levels of all items in the mock unit, because
+                // `dep` is the root of the tree, and there's only one component (therefore, all
+                // dependencies will be found)
+                let item_level = self.find_level(dep, &mut item_to_levels, |_| true);
+
+                let mut deps = HashSet::new();
+                self.get_deps(dep, &mut deps);
+
+                let mock_unit = MockUnit {
+                    item: dep,
+                    item_level,
+                    item_to_levels,
+
+                    // TODO: Remove this conversion; just make a Vec from the get-go (but first,
+                    //       find out if safe)
+                    deps: deps.into_iter().collect(),
+                };
+                mock_units.push(mock_unit);
+            }
+
+            if self.staged_components[&comp_id].meta_deps.is_empty() {
+                self.staged_components.remove(&comp_id);
+
+                // Re-register the component for being added to a unit
+                self.outstanding_components.insert(comp_id);
+
+                // Update state to reflect the fact that the component no longer has meta-dependees
+                for &item in &comp.items {
+                    self.remove_meta_dep_status(item);
+                }
+            }
+        }
+
         Levels {
             item_to_levels: item_to_levels.clone(),
             item_to_units,
             units: units.into_iter()
                 .map(|unit| {
-                    let mut meta_deps = HashMap::<u32, Vec<MetaDependee>>::new();
                     let items = unit.components.iter()
-                        .flat_map(|&comp| components[comp].items.iter().map(|&item| item))
+                        .flat_map(|&comp| components[comp].items.iter().copied())
                         .collect();
-                    for &item in &items {
-                        if self.global_meta_dependees.contains(&item) {
-                            let mut deps = HashSet::new();
-                            self.get_deps(item, &mut deps, &unit.components);
-                            meta_deps.entry(item_to_levels[&item])
-                                .or_default()
-                                .push(MetaDependee { item, deps: deps.into_iter().collect() });
-                        }
-                    }
-                    let mut meta_dependees = meta_deps.into_iter()
-                        .map(|(level, meta_dependees)| LevelMetaDependees { level, meta_dependees })
-                        .collect::<Vec<_>>();
-                    meta_dependees.sort_by_key(|level| level.level);
-                    Unit { 
-                        items,
-                        meta_dependees,
-                    }
+                    Unit { items }
                 }).collect::<Vec<Unit>>(),
+            mock_units,
         }
     }
 
-    fn get_deps(&self, item: ItemId, out: &mut HashSet<ItemId>, components: &HashSet<CompId>) {
+    fn get_deps(&self, item: ItemId, out: &mut HashSet<ItemId>) {
         for &dependee in &self.dependees[item] {
             out.insert(dependee);
-            self.get_deps(dependee, out, components);
-        }
-        for &dependee in &self.t3_dependees[item] {
-            if out.contains(&dependee) { continue; }
-            let comp = self.item_to_components[dependee];
-            // If the dependee is in the same unit as the depender:
-            if components.contains(&comp) {
-                out.insert(dependee);
-                self.get_deps(dependee, out, components);
-            }
+            self.get_deps(dependee, out);
         }
     }
-}
 
-#[derive(Debug)]
-pub struct MetaDependee {
-    pub item: ItemId,
-    pub deps: Vec<ItemId>,
-}
-
-#[derive(Default, Debug)]
-pub struct LevelMetaDependees {
-    pub level: u32,
-    pub meta_dependees: Vec<MetaDependee>,
+    fn remove_meta_dep_status(&mut self, item: ItemId) {
+        let was_removed = self.global_meta_dependees.remove(&item);
+        // Short-circuit the recursive chain
+        if !was_removed { return; }
+        for &dependee in &self.dependees[item] {
+            self.remove_meta_dep_status(item);
+        }
+    }
 }
 
 #[derive(Default, Debug)]
 pub struct Unit {
     pub items: Vec<ItemId>,
-    pub meta_dependees: Vec<LevelMetaDependees>,
 }
 
 #[derive(Default, Debug)]
@@ -475,6 +499,22 @@ pub struct Levels {
     pub item_to_levels: HashMap<ItemId, u32>,
     pub item_to_units: IdxVec<ItemId, u32>,
     pub units: Vec<Unit>,
+    pub mock_units: Vec<MockUnit>,
+}
+
+#[derive(Debug)]
+pub struct MockUnit {
+    /// Main item of the mock unit; the meta-dependee
+    pub item: ItemId,
+    /// Level of the main item
+    pub item_level: u32,
+
+    /// The levels of each item within this mock unit.
+    pub item_to_levels: HashMap<ItemId, u32>,
+
+    /// A collection of every item in this mock unit
+    pub deps: Vec<ItemId>,
+
 }
 
 impl ItemId {
