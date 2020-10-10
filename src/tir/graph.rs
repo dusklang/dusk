@@ -381,8 +381,6 @@ impl Graph {
             self.outstanding_components.extend(all_excluded);
 
             self.stage_components(comps_to_stage.into_iter());
-
-            println!("Staged components: {:#?}", self.staged_components);
         }
 
         let mut item_to_levels = HashMap::<ItemId, u32>::new();
