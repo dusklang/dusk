@@ -40,9 +40,6 @@ pub struct Graph {
     /// been added to a regular unit in their entirety
     staged_components: HashMap<CompId, CompStageState>,
 
-    /// Components who have been staged, and are ready to be added to the next unit
-    ready_staged_components: Vec<CompId>,
-
     /// Components that have been added to a unit
     included_components: HashSet<CompId>,
 }
@@ -295,17 +292,6 @@ impl Graph {
     pub fn solve(&mut self) -> Levels {
         self.update_meta_deps();
 
-        let mut units = Vec::<InternalUnit>::new();
-
-        // Add the ready staged components to the first unit (draining them from `ready_staged_components`)
-        let mut first_unit = InternalUnit::default();
-        let comps = self.ready_staged_components.drain(0..self.ready_staged_components.len());
-        for comp in comps {
-            first_unit.components.insert(comp);
-            self.included_components.insert(comp);
-        }
-        units.push(first_unit);
-
         // Get the outstanding components with meta-dependees in them
         let mut meta_dep_components = HashSet::<CompId>::new();
         for &id in &self.outstanding_components {
@@ -343,6 +329,7 @@ impl Graph {
         // Temporarily remove all excluded components. Those that don't get staged will be added back after finding the units
         self.outstanding_components.retain(|comp| !meta_dep_components.contains(comp) && !excluded_components.contains(comp));
 
+        let mut units = Vec::<InternalUnit>::new();
         while !self.outstanding_components.is_empty() {
             // Get all components that have no type 4 dependencies on outstanding components
             let mut cur_unit_comps = HashSet::<CompId>::new();
@@ -352,7 +339,7 @@ impl Graph {
             // (and not other outstanding components)
             self.remove_comps_with_outstanding_deps(&mut cur_unit_comps, true);
 
-            let cur_unit = units.last_mut().unwrap();
+            let mut cur_unit = InternalUnit::default();
             cur_unit.components.extend(cur_unit_comps.iter());
             for &comp in &cur_unit.components {
                 // Add intra-unit type 2 dependencies as type 1 dependencies, because they are equivalent after resolving units
@@ -372,10 +359,7 @@ impl Graph {
                 self.included_components.insert(comp);
                 self.outstanding_components.remove(&comp);
             }
-
-            if !self.outstanding_components.is_empty() {
-                units.push(InternalUnit::default());
-            }
+            units.push(cur_unit);
         }
 
         // Stage viable components
