@@ -63,6 +63,7 @@ pub struct Decl {
 
 struct Subprogram {
     units: Vec<Unit>,
+    mock_units: Vec<MockUnit>,
     levels: Levels,
 }
 
@@ -126,8 +127,18 @@ pub struct Unit {
 
     /// The expressions in this unit that later units have eval dependencies on
     pub eval_dependees: Vec<ExprId>,
+}
 
-    pub meta_dependees: Vec<LevelMetaDependees>,
+#[derive(Debug)]
+pub struct MockUnit {
+    pub main_expr: ExprId,
+    pub items: UnitItems,
+}
+
+#[derive(Debug, Default)]
+pub struct Units {
+    pub units: Vec<Unit>,
+    pub mock_units: Vec<MockUnit>,
 }
 
 /// The namespace "inside" an expression,
@@ -537,7 +548,7 @@ impl Driver {
         }
     }
 
-    pub fn build_more_tir(&mut self, output: Option<TirGraphOutput>) -> Vec<Unit> {
+    pub fn build_more_tir(&mut self, output: Option<TirGraphOutput>) -> Units {
         ei_injector!(self, ei);
 
         // Solve for the unit and level of each item
@@ -548,8 +559,8 @@ impl Driver {
             self.print_graph(output, &levels).unwrap();
         }
 
-        let mut sp = Subprogram { units: Vec::new(), levels };
-        sp.units.resize_with(sp.levels.units.len(), || Unit::default());
+        let mut sp = Subprogram { units: Vec::new(), mock_units: Vec::new(), levels };
+        sp.units.resize_with(sp.levels.units.len(), Default::default);
 
         // Finally, convert HIR items to TIR and add them to the correct spot
         for unit_id in 0..sp.levels.units.len() {
@@ -567,43 +578,33 @@ impl Driver {
                     }
                 }
             }
-
-            for level_dep in &sp.levels.units[unit_id].meta_dependees {
-                let mut meta_dependees = Vec::new();
-                for dep in &level_dep.meta_dependees {
-                    let expr = match self.hir.items[dep.item] {
-                        hir::Item::Expr(id) => id,
-                        hir::Item::Decl(_) => panic!("Can't have metadependency on a declaration!"),
-                    };
-                    let mut items = UnitItems::default();
-                    let level = sp.levels.item_to_levels[&dep.item];
-                    self.build_tir_expr(&mut items, level, expr);
-                    for &item_id in &dep.deps {
-                        let level = sp.levels.item_to_levels[&item_id];
-                        match self.hir.items[item_id] {
-                            hir::Item::Decl(id) => {
-                                self.build_tir_decl(&mut items, level, id);
-                            }
-                            hir::Item::Expr(id) => {
-                                self.build_tir_expr(&mut items, level, id);
-                            }
-                        }
+        }
+        for mock_id in 0..sp.levels.mock_units.len() {
+            let mock_unit = &sp.levels.mock_units[mock_id];
+            let main_expr = match self.hir.items[mock_unit.item] {
+                hir::Item::Expr(id) => id,
+                hir::Item::Decl(_) => panic!("Can't have metadependency on a declaration!"),
+            };
+            let mut items = UnitItems::default();
+            self.build_tir_expr(&mut items, mock_unit.item_level, main_expr);
+            for &item_id in &mock_unit.deps {
+                let level = sp.levels.item_to_levels[&item_id];
+                match self.hir.items[item_id] {
+                    hir::Item::Decl(id) => {
+                        self.build_tir_decl(&mut items, level, id);
                     }
-                    items.unify_sizes();
-                    meta_dependees.push(
-                        MetaDependee {
-                            dependee: expr,
-                            items,
-                        }
-                    );
+                    hir::Item::Expr(id) => {
+                        self.build_tir_expr(&mut items, level, id);
+                    }
                 }
-                sp.units[unit_id].meta_dependees.push(
-                    LevelMetaDependees {
-                        level: level_dep.level,
-                        meta_dependees,
-                    }
-                )
             }
+            items.unify_sizes();
+            sp.mock_units.push(
+                MockUnit {
+                    main_expr,
+                    items,
+                },
+            );
         }
         self.flush_staged_ret_groups(&mut sp);
         for scope in &self.hir.imper_scopes {
@@ -623,6 +624,6 @@ impl Driver {
             unit.items.unify_sizes();
         }
 
-        sp.units
+        Units { units: sp.units, mock_units: sp.mock_units }
     }
 }
