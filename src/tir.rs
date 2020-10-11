@@ -136,7 +136,7 @@ pub enum ExprNamespace {
     Mod(ModScopeId)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Builder {
     pub decls: IdxVec<DeclId, Decl>,
     pub expr_namespaces: HashMap<ExprId, Vec<ExprNamespace>>,
@@ -144,18 +144,6 @@ pub struct Builder {
     depended_on: IdxVec<ExprId, bool>,
 
     staged_ret_groups: HashMap<DeclId, SmallVec<[ExprId; 1]>>,
-}
-
-impl Builder {
-    pub fn new() -> Self {
-        Self {
-            decls: IdxVec::new(),
-            expr_namespaces: HashMap::new(),
-            graph: Graph::default(),
-            depended_on: IdxVec::new(),
-            staged_ret_groups: HashMap::new(),
-        }
-    }
 }
 
 macro_rules! ei_injector {
@@ -247,12 +235,8 @@ impl Driver {
 
     fn add_types_2_to_4_deps_to_member_ref(&mut self, id: ItemId, decl_ref_id: DeclRefId) {
         add_eval_dep_injector!(self, add_eval_dep);
-        ei_injector!(self, ei);
         di_injector!(self, di);
         let decl_ref = &self.hir.decl_refs[decl_ref_id];
-        if let hir::Namespace::MemberRef { base_expr } = decl_ref.namespace {
-            self.tir.graph.add_meta_dep(id, ei!(base_expr));
-        }
         let overloads = self.find_overloads(decl_ref);
         for overload in overloads {
             match self.hir.decls[overload] {
@@ -409,7 +393,6 @@ impl Driver {
         self.initialize_graph();
         ei_injector!(self, ei);
         di_injector!(self, di);
-        add_eval_dep_injector!(self, add_eval_dep);
         // Add type 1 dependencies to the graph
         for i in 0..self.hir.decls.len() {
             let decl_id = DeclId::new(i);
@@ -473,71 +456,80 @@ impl Driver {
         // TODO: do something better than an array of bools :(
         self.tir.depended_on.resize_with(self.hir.exprs.len(), || false);
 
-        // Add types 2-4 dependencies to graph
-        for i in 0..self.hir.decls.len() {
-            let decl_id = DeclId::new(i);
-            let id = di!(decl_id);
-            match self.hir.decls[decl_id] {
-                hir::Decl::Parameter { .. } | hir::Decl::Static(_) | hir::Decl::Const(_) | hir::Decl::Stored { .. } => {},
-                hir::Decl::Intrinsic { ref param_tys, .. } => {
-                    for &ty in param_tys {
-                        add_eval_dep!(id, ty);
-                    }
-                },
-                hir::Decl::Computed { scope, ref param_tys, .. } => {
-                    for &ty in param_tys {
-                        add_eval_dep!(id, ty);
-                    }
-                    self.add_type3_scope_dep(id, scope);
-                    // NOTE: the Some case is handled below this match expression
-                    if self.hir.explicit_tys[decl_id].is_none() {
-                        add_eval_dep!(id, self.hir.void_ty);
-                    }
-                },
-            }
-
-            // NOTE: The computed decl case in the above match expression depends on this!
-            if let Some(ty) = self.hir.explicit_tys[decl_id] {
-                add_eval_dep!(id, ty);
-            }
-        }
-        for i in 0..self.hir.exprs.len() {
-            let expr_id = ExprId::new(i);
-            let id = ei!(expr_id);
-            match self.hir.exprs[expr_id] {
-                hir::Expr::Void | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
-                    | hir::Expr::CharLit { .. } | hir::Expr::ConstTy(_) | hir::Expr::AddrOf { .. } | hir::Expr::Deref(_)
-                    | hir::Expr::Pointer { .. } | hir::Expr::Set { .. } | hir::Expr::Mod { .. } |  hir::Expr::Import { .. } => {},
-                hir::Expr::Cast { ty, .. } => {
-                    add_eval_dep!(id, ty);
-                },
-                hir::Expr::Ret { decl, .. } => {
-                    let ty = decl
-                        .and_then(|decl| self.hir.explicit_tys[decl])
-                        .unwrap_or(self.hir.void_ty);
-                    add_eval_dep!(id, ty);
-                }
-                hir::Expr::DeclRef { id: decl_ref_id, .. } => {
-                    self.add_types_2_to_4_deps_to_member_ref(id, decl_ref_id);
-                },
-                hir::Expr::Do { scope } => {
-                    self.add_type3_scope_dep(id, scope);
-                },
-                hir::Expr::If { then_scope, else_scope, .. } => {
-                    self.add_type3_scope_dep(id, then_scope);
-                    if let Some(else_scope) = else_scope {
-                        self.add_type3_scope_dep(id, else_scope);
-                    }
-                }
-                hir::Expr::While { scope, .. } => {
-                    self.add_type3_scope_dep(id, scope);
-                }
+        // Add meta-dependees to graph
+        for decl_ref in &self.hir.decl_refs {
+            if let hir::Namespace::MemberRef { base_expr } = decl_ref.namespace {
+                self.tir.graph.add_meta_dep(ei!(decl_ref.expr), ei!(base_expr));
             }
         }
     }
 
     pub fn build_more_tir(&mut self, output: Option<TirGraphOutput>) -> Units {
+        add_eval_dep_injector!(self, add_eval_dep);
         ei_injector!(self, ei);
+
+        let items_that_need_dependencies = self.tir.graph.get_items_that_need_dependencies();
+        
+        for id in items_that_need_dependencies {
+            match self.hir.items[id] {
+                hir::Item::Decl(decl_id) => {
+                    match self.hir.decls[decl_id] {
+                        hir::Decl::Parameter { .. } | hir::Decl::Static(_) | hir::Decl::Const(_) | hir::Decl::Stored { .. } => {},
+                        hir::Decl::Intrinsic { ref param_tys, .. } => {
+                            for &ty in param_tys {
+                                add_eval_dep!(id, ty);
+                            }
+                        },
+                        hir::Decl::Computed { scope, ref param_tys, .. } => {
+                            for &ty in param_tys {
+                                add_eval_dep!(id, ty);
+                            }
+                            self.add_type3_scope_dep(id, scope);
+                            // NOTE: the Some case is handled below this match expression
+                            if self.hir.explicit_tys[decl_id].is_none() {
+                                add_eval_dep!(id, self.hir.void_ty);
+                            }
+                        },
+                    }
+        
+                    // NOTE: The computed decl case in the above match expression depends on this!
+                    if let Some(ty) = self.hir.explicit_tys[decl_id] {
+                        add_eval_dep!(id, ty);
+                    }
+                }
+                hir::Item::Expr(expr_id) => {
+                    match self.hir.exprs[expr_id] {
+                        hir::Expr::Void | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
+                            | hir::Expr::CharLit { .. } | hir::Expr::ConstTy(_) | hir::Expr::AddrOf { .. } | hir::Expr::Deref(_)
+                            | hir::Expr::Pointer { .. } | hir::Expr::Set { .. } | hir::Expr::Mod { .. } |  hir::Expr::Import { .. } => {},
+                        hir::Expr::Cast { ty, .. } => {
+                            add_eval_dep!(id, ty);
+                        },
+                        hir::Expr::Ret { decl, .. } => {
+                            let ty = decl
+                                .and_then(|decl| self.hir.explicit_tys[decl])
+                                .unwrap_or(self.hir.void_ty);
+                            add_eval_dep!(id, ty);
+                        }
+                        hir::Expr::DeclRef { id: decl_ref_id, .. } => {
+                            self.add_types_2_to_4_deps_to_member_ref(id, decl_ref_id);
+                        },
+                        hir::Expr::Do { scope } => {
+                            self.add_type3_scope_dep(id, scope);
+                        },
+                        hir::Expr::If { then_scope, else_scope, .. } => {
+                            self.add_type3_scope_dep(id, then_scope);
+                            if let Some(else_scope) = else_scope {
+                                self.add_type3_scope_dep(id, else_scope);
+                            }
+                        }
+                        hir::Expr::While { scope, .. } => {
+                            self.add_type3_scope_dep(id, scope);
+                        }
+                    }
+                }
+            }
+        }
 
         // Solve for the unit and level of each item
         let levels = self.tir.graph.solve();
