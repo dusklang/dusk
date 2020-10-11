@@ -5,7 +5,7 @@ use std::ffi::{CStr, CString};
 use std::mem;
 use std::slice;
 
-use arrayvec::ArrayVec;
+use smallvec::SmallVec;
 use paste::paste;
 use num_bigint::{BigInt, Sign};
 
@@ -24,7 +24,7 @@ pub enum InternalValue {
 #[derive(Debug)]
 pub enum Value {
     /// An inline value
-    Inline(ArrayVec<[u8; 64 / 8]>),
+    Inline(SmallVec<[u8; 64 / 8]>),
     /// A *pointer* to a piece of memory
     Dynamic(Box<[u8]>),
     Internal { val: InternalValue, indirection: u8 },
@@ -81,14 +81,14 @@ impl Value {
         match self {
             Value::Inline(_) => {
                 let ptr = self.as_raw_ptr();
-                let mut buf = ArrayVec::new();
+                let mut buf = SmallVec::new();
                 for i in 0..size {
                     buf.push(unsafe { *ptr.add(i) });
                 }
                 Value::Inline(buf)
             },
             Value::Dynamic(val) => {
-                let mut buf = ArrayVec::new();
+                let mut buf = SmallVec::new();
                 for &byte in &**val {
                     buf.push(byte);
                 }
@@ -163,9 +163,7 @@ impl Value {
     }
 
     fn from_bytes(bytes: &[u8]) -> Value {
-        let mut storage = ArrayVec::new();
-        // TODO: there's an nonsense error message if I try to call `ArrayVec::from_iterator` or `ArrayVec::extend` with `bytes`. 
-        // But this loop works, because we don't live in a world where things make sense.
+        let mut storage = SmallVec::new();
         for &byte in bytes {
             storage.push(byte);
         }
