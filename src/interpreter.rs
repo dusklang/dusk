@@ -42,6 +42,27 @@ impl Clone for Value {
     }
 }
 
+macro_rules! int_conversions {
+    ($($ty_name:ty),+) => {
+        impl Value {
+            paste! {
+                $(
+                    #[allow(dead_code)]
+                    fn [<as_ $ty_name>](&self) -> $ty_name {
+                        $ty_name::from_le_bytes(self.as_bytes().try_into().unwrap())
+                    }
+
+                    #[allow(dead_code)]
+                    fn [<from_ $ty_name>](val: $ty_name) -> Value {
+                        Value::from_bytes(val.to_le_bytes().as_ref())
+                    }
+                )+
+            }
+        }
+    }
+}
+int_conversions!(u8, u16, u32, u64, usize, i8, i16, i32, i64, isize);
+
 impl Value {
     fn as_bytes(&self) -> &[u8] {
         match self {
@@ -93,38 +114,6 @@ impl Value {
 
     fn as_raw_ptr(&self) -> *mut u8 {
         unsafe { mem::transmute(usize::from_le_bytes(self.as_bytes().try_into().unwrap())) }
-    }
-
-    fn as_u8(&self) -> u8 {
-        u8::from_le_bytes(self.as_bytes().try_into().unwrap())
-    }
-
-    fn as_u16(&self) -> u16 {
-        u16::from_le_bytes(self.as_bytes().try_into().unwrap())
-    }
-
-    fn as_u32(&self) -> u32 {
-        u32::from_le_bytes(self.as_bytes().try_into().unwrap())
-    }
-
-    fn as_u64(&self) -> u64 {
-        u64::from_le_bytes(self.as_bytes().try_into().unwrap())
-    }
-
-    fn as_i8(&self) -> i8 {
-        i8::from_le_bytes(self.as_bytes().try_into().unwrap())
-    }
-
-    fn as_i16(&self) -> i16 {
-        i16::from_le_bytes(self.as_bytes().try_into().unwrap())
-    }
-
-    fn as_i32(&self) -> i32 {
-        i32::from_le_bytes(self.as_bytes().try_into().unwrap())
-    }
-
-    fn as_i64(&self) -> i64 {
-        i64::from_le_bytes(self.as_bytes().try_into().unwrap())
     }
 
     fn as_f64(&self) -> f64 {
@@ -249,42 +238,6 @@ impl Value {
             Type::Mod => Const::Mod(self.as_mod()),
             _ => panic!("Can't output value of type `{:?}` as constant", ty),
         }
-    }
-
-    fn from_u8(val: u8) -> Value {
-        Value::from_bytes(val.to_le_bytes().as_ref())
-    }
-
-    fn from_u16(val: u16) -> Value {
-        Value::from_bytes(val.to_le_bytes().as_ref())
-    }
-
-    fn from_u32(val: u32) -> Value {
-        Value::from_bytes(val.to_le_bytes().as_ref())
-    }
-
-    fn from_u64(val: u64) -> Value {
-        Value::from_bytes(val.to_le_bytes().as_ref())
-    }
-
-    fn from_usize(val: usize) -> Value {
-        Value::from_bytes(val.to_le_bytes().as_ref())
-    }
-
-    fn from_i8(val: i8) -> Value {
-        Value::from_bytes(val.to_le_bytes().as_ref())
-    }
-
-    fn from_i16(val: i16) -> Value {
-        Value::from_bytes(val.to_le_bytes().as_ref())
-    }
-
-    fn from_i32(val: i32) -> Value {
-        Value::from_bytes(val.to_le_bytes().as_ref())
-    }
-
-    fn from_i64(val: i64) -> Value {
-        Value::from_bytes(val.to_le_bytes().as_ref())
     }
 
     fn from_f32(val: f32) -> Value {
