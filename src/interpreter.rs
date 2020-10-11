@@ -9,7 +9,6 @@ use arrayvec::ArrayVec;
 use paste::paste;
 use num_bigint::{BigInt, Sign};
 
-use crate::arch::Arch;
 use crate::builder::{Intrinsic, ModScopeId};
 use crate::driver::Driver;
 use crate::index_vec::{IdxVec, Idx};
@@ -174,16 +173,21 @@ impl Value {
     }
 
     fn from_big_int(big_int: BigInt, width: IntWidth, is_signed: bool, mir: &mir::Builder) -> Value {
-        // We assume in the match below that pointer-sized ints are 64 bits
-        assert_eq!(mir.arch.pointer_size(), 64);
         let size = match width {
             IntWidth::W8 => 1,
             IntWidth::W16 => 2,
             IntWidth::W32 => 4,
-            IntWidth::W64 | IntWidth::Pointer => 8,
+            IntWidth::W64 => 8,
+            IntWidth::Pointer => mir.arch.pointer_size() / 8,
         };
         let (mut bytes, extension) = if is_signed {
-            (big_int.to_signed_bytes_le(), 0xFF)
+            (
+                big_int.to_signed_bytes_le(),
+                match big_int.sign() {
+                    Sign::Plus | Sign::NoSign => 0x00,
+                    Sign::Minus => 0xFF,
+                }
+            )
         } else {
             let (sign, bytes) = big_int.to_bytes_le();
             assert!(!matches!(sign, Sign::Minus), "Can't put negative value in an unsigned int");
@@ -201,22 +205,7 @@ impl Value {
     fn from_const(konst: &Const, mir: &mir::Builder) -> Value {
         match *konst {
             Const::Int { lit, ref ty } => match ty {
-                Type::Int { width, is_signed } => {
-                    // We assume in the match below that pointer-sized ints are 64 bits
-                    assert_eq!(mir.arch.pointer_size(), 64);
-                    use IntWidth::*;
-                    match (width, is_signed) {
-                        (W8, false) => Value::from_u8(lit.try_into().unwrap()),
-                        (W16, false) => Value::from_u16(lit.try_into().unwrap()),
-                        (W32, false) => Value::from_u32(lit.try_into().unwrap()),
-                        (W64, false) | (Pointer, false) => Value::from_u64(lit.try_into().unwrap()),
-
-                        (W8, true) => Value::from_i8(lit.try_into().unwrap()),
-                        (W16, true) => Value::from_i16(lit.try_into().unwrap()),
-                        (W32, true) => Value::from_i32(lit.try_into().unwrap()),
-                        (W64, true) | (Pointer, true) => Value::from_i64(lit.try_into().unwrap()),
-                    }
-                },
+                &Type::Int { width, is_signed } => Value::from_big_int(BigInt::from(lit), width, is_signed, mir),
                 _ => panic!("unexpected int constant type {:?}", ty),
             },
             Const::Float { lit, ref ty } => match ty.size(mir.arch) {
@@ -234,21 +223,16 @@ impl Value {
         }
     }
 
-    pub fn to_const(&self, arch: Arch, ty: Type, strings: &mut IdxVec<StrId, CString>) -> Const {
+    pub fn to_const(&self, ty: Type, strings: &mut IdxVec<StrId, CString>) -> Const {
         match ty {
-            Type::Int { width, is_signed } => {
-                use IntWidth::*;
-                assert_eq!(arch.pointer_size(), 64);
-                let lit = match (width, is_signed) {
-                    (W8, true) => self.as_i8() as i64 as u64,
-                    (W16, true) => self.as_i16() as i64 as u64,
-                    (W32, true) => self.as_i32() as i64 as u64,
-                    (W64, true) | (Pointer, true) => self.as_i64() as u64,
-
-                    (W8, false) => self.as_u8() as u64,
-                    (W16, false) => self.as_u16() as u64,
-                    (W32, false) => self.as_u32() as u64,
-                    (W64, false) | (Pointer, false) => self.as_u64(),
+            Type::Int { is_signed, .. } => {
+                let big_int = self.as_big_int(is_signed);
+                let lit = if is_signed {
+                    let int: i64 = big_int.try_into().unwrap();
+                    int as u64
+                } else {
+                    let int: u64 = big_int.try_into().unwrap();
+                    int
                 };
                 Const::Int { lit, ty }
             },
@@ -469,7 +453,6 @@ impl Driver {
             },
             &Instr::Intrinsic { ref arguments, intr, .. } => {
                 match intr {
-                    // TODO: Reduce code duplication
                     Intrinsic::Mult => bin_op!(self, arguments, frame, func_ref, convert, Int | Float, {*}),
                     Intrinsic::Div => bin_op!(self, arguments, frame, func_ref, convert, Int | Float, {/}),
                     Intrinsic::Mod => bin_op!(self, arguments, frame, func_ref, convert, Int | Float, {%}),
@@ -593,7 +576,7 @@ impl Driver {
                 let val = &frame.results[val];
                 match (src_ty, dest_ty) {
                     (
-                        &Type::Int { width: src_width, is_signed: src_is_signed },
+                        &Type::Int { is_signed: src_is_signed, .. },
                         &Type::Int { width: dest_width, is_signed: dest_is_signed }
                     ) => Value::from_big_int(val.as_big_int(src_is_signed), dest_width, dest_is_signed, &self.mir),
                     (_, _) => panic!("Invalid operand types to sign extension")
@@ -604,7 +587,7 @@ impl Driver {
                 let val = &frame.results[val];
                 match (src_ty, dest_ty) {
                     (
-                        &Type::Int { width: src_width, is_signed: src_is_signed },
+                        &Type::Int { is_signed: src_is_signed, .. },
                         &Type::Int { width: dest_width, is_signed: dest_is_signed }
                     ) => Value::from_big_int(val.as_big_int(src_is_signed), dest_width, dest_is_signed, &self.mir),
                     (_, _) => panic!("Invalid operand types to zero extension")
@@ -624,31 +607,25 @@ impl Driver {
             &Instr::FloatToInt(instr, ref dest_ty) => {
                 let val = &frame.results[instr];
                 let src_size = self.mir.type_of(instr, &func_ref).size(self.mir.arch);
+
                 match dest_ty {
-                    Type::Int { width, is_signed } => {
-                        match (src_size * 8, width.bit_width(self.mir.arch), is_signed) {
-                            (32, 8, true) => Value::from_i8(val.as_f32() as _),
-                            (32, 16, true) => Value::from_i16(val.as_f32() as _),
-                            (32, 32, true) => Value::from_i32(val.as_f32() as _),
-                            (32, 64, true) => Value::from_i64(val.as_f32() as _),
-
-                            (32, 8, false) => Value::from_u8(val.as_f32() as _),
-                            (32, 16, false) => Value::from_u16(val.as_f32() as _),
-                            (32, 32, false) => Value::from_u32(val.as_f32() as _),
-                            (32, 64, false) => Value::from_u64(val.as_f32() as _),
-
-                            (64, 8, true) => Value::from_i8(val.as_f64() as _),
-                            (64, 16, true) => Value::from_i16(val.as_f64() as _),
-                            (64, 32, true) => Value::from_i32(val.as_f64() as _),
-                            (64, 64, true) => Value::from_i64(val.as_f64() as _),
-
-                            (64, 8, false) => Value::from_u8(val.as_f64() as _),
-                            (64, 16, false) => Value::from_u16(val.as_f64() as _),
-                            (64, 32, false) => Value::from_u32(val.as_f64() as _),
-                            (64, 64, false) => Value::from_u64(val.as_f64() as _),
-
-                            (_, _, _) => panic!("Invalid float to int operand sizes"),
-                        }
+                    &Type::Int { width, is_signed } => {
+                        let big_int = if is_signed {
+                            let int = match src_size * 8 {
+                                32 => val.as_f32() as i64,
+                                64 => val.as_f64() as i64,
+                                _ => panic!("Invalid float size"),
+                            };
+                            BigInt::from(int)
+                        } else {
+                            let int = match src_size * 8 {
+                                32 => val.as_f32() as u64,
+                                64 => val.as_f64() as u64,
+                                _ => panic!("Invalid float size"),
+                            };
+                            BigInt::from(int)
+                        };
+                        Value::from_big_int(big_int, width, is_signed, &self.mir)
                     },
                     _ => panic!("Invalid destination type in float to int cast: {:?}", dest_ty),
                 }
@@ -658,29 +635,22 @@ impl Driver {
                 let src_ty = &self.mir.type_of(instr, &func_ref);
                 let dest_size = dest_ty.size(self.mir.arch);
                 match src_ty {
-                    Type::Int { width, is_signed } => {
-                        match (width.bit_width(self.mir.arch), is_signed, dest_size * 8) {
-                            (8, true, 32) => Value::from_f32(val.as_i8() as _),
-                            (16, true, 32) => Value::from_f32(val.as_i16() as _),
-                            (32, true, 32) => Value::from_f32(val.as_i32() as _),
-                            (64, true, 32) => Value::from_f32(val.as_i64() as _),
-
-                            (8, false, 32) => Value::from_f32(val.as_u8() as _),
-                            (16, false, 32) => Value::from_f32(val.as_u16() as _),
-                            (32, false, 32) => Value::from_f32(val.as_u32() as _),
-                            (64, false, 32) => Value::from_f32(val.as_u64() as _),
-
-                            (8, true, 64) => Value::from_f64(val.as_i8() as _),
-                            (16, true, 64) => Value::from_f64(val.as_i16() as _),
-                            (32, true, 64) => Value::from_f64(val.as_i32() as _),
-                            (64, true, 64) => Value::from_f64(val.as_i64() as _),
-
-                            (8, false, 64) => Value::from_f64(val.as_u8() as _),
-                            (16, false, 64) => Value::from_f64(val.as_u16() as _),
-                            (32, false, 64) => Value::from_f64(val.as_u32() as _),
-                            (64, false, 64) => Value::from_f64(val.as_u64() as _),
-
-                            (_, _, _) => panic!("Invalid int to float operand sizes"),
+                    &Type::Int { is_signed, .. } => {
+                        let big_int = val.as_big_int(is_signed);
+                        if is_signed {
+                            let int: i64 = big_int.try_into().unwrap();
+                            match dest_size * 8 {
+                                32 => Value::from_f32(int as _),
+                                64 => Value::from_f64(int as _),
+                                _ => panic!("Invalid destination size in int to float cast"),
+                            }
+                        } else {
+                            let int: u64 = big_int.try_into().unwrap();
+                            match dest_size * 8 {
+                                32 => Value::from_f32(int as _),
+                                64 => Value::from_f64(int as _),
+                                _ => panic!("Invalid destination size in int to float cast"),
+                            }
                         }
                     },
                     _ => panic!("Invalid source type in int to float cast: {:?}", src_ty),
