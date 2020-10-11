@@ -23,7 +23,18 @@ pub struct Graph {
     t2_dependees: IdxVec<ItemId, Vec<ItemId>>,
     t3_dependees: IdxVec<ItemId, Vec<ItemId>>,
     t4_dependees: IdxVec<ItemId, Vec<ItemId>>,
-    meta_dependees: HashSet<ItemId>,
+
+    /// Set of all meta-dependees that are not yet ready to be added to a normal unit
+    global_meta_dependees: HashSet<ItemId>,
+
+    /// Map from all meta-dependers to their dependees that are not yet ready to be added to a normal unit
+    meta_dependees: HashMap<ItemId, HashSet<ItemId>>,
+
+    /// Map from all meta-dependees to their dependers
+    meta_dependers: HashMap<ItemId, Vec<ItemId>>,
+
+    /// Set of all items to which type 2-4 dependencies have been added
+    dependencies_added: HashSet<ItemId>,
 
     // Used exclusively for finding connected components
     dependers: IdxVec<ItemId, Vec<ItemId>>,
@@ -31,6 +42,27 @@ pub struct Graph {
     item_to_components: IdxVec<ItemId, CompId>,
 
     components: IdxVec<CompId, Component>,
+
+    /// Components that have not yet been added to a unit, or a mock unit
+    outstanding_components: HashSet<CompId>,
+
+    /// Components whose items have been added to one or more mock units, but who have not yet
+    /// been added to a regular unit in their entirety
+    staged_components: HashMap<CompId, CompStageState>,
+
+    /// Components that have been added to a unit
+    included_components: HashSet<CompId>,
+}
+
+#[derive(Debug)]
+struct CompStageState {
+    /// Each element of this Vec is a Vec of meta-dependees that can form independent mock units with no dependencies on each other.
+    /// Each call to `solve()` pops another Vec off the end of the outer Vec, and adds them as mock units to the next set. When the
+    /// outer Vec is emptied, it means this component can be added to the next Unit proper.
+    ///
+    /// Example: consider the component below. The correct initial value of `meta_deps` would be [[std.str], [other_file, std, fs]]:
+    ///     other_file.foo(std.str.concat("Hello, ", "world!"), fs.read("HAASDASKJFD.txt"))
+    meta_deps: Vec<Vec<ItemId>>,
 }
 
 bitflags! {
@@ -61,6 +93,8 @@ struct Component {
     items: Vec<ItemId>,
 
     deps: HashMap<CompId, ComponentRelation>,
+
+    has_meta_dep: bool,
 }
 
 struct ComponentState {
@@ -108,8 +142,15 @@ impl Graph {
     }
 
     /// in order to know the type 2-4 dependencies of a, we need to know all possible members of b
-    pub fn add_meta_dep(&mut self, _a: ItemId, b: ItemId) {
-        self.meta_dependees.insert(b);
+    ///
+    /// NOTE: An item meta-depending on another does not imply anything about their relative units
+    ///       or levels. For this reason, I'm pretty sure that a meta-dependency should always
+    ///       be paired with a type 1-4 dependency. But maybe there are exceptions I haven't
+    ///       thought about.
+    pub fn add_meta_dep(&mut self, a: ItemId, b: ItemId) {
+        self.meta_dependees.entry(a).or_default().insert(b);
+        self.meta_dependers.entry(b).or_default().push(a);
+        self.global_meta_dependees.insert(b);
     }
 
     fn find_subcomponent(&mut self, item: ItemId, state: &mut ComponentState) {
@@ -147,19 +188,26 @@ impl Graph {
         *self.components[dependee].deps.entry(comp).or_default() &= backward_mask;
     }
 
-    fn find_level(&self, item: ItemId, levels: &mut IdxVec<ItemId, u32>) -> u32 {
-        if levels[item] != u32::MAX { return levels[item]; }
+    // The whole purpose of this method existing as opposed to just having `find_level` is so we can call `find_level` with an ordinary closure (not a reference), then
+    // pass that same closure on recursively without moving it.
+    fn find_level_recursive(&self, item: ItemId, levels: &mut HashMap<ItemId, u32>, filter: &mut impl FnMut(ItemId) -> bool) -> u32 {
+        if let Some(&level) = levels.get(&item) { return level; }
 
         let mut max_level = 0;
         let mut offset = 0;
         for &dep in &self.dependees[item] {
-            let level = self.find_level(dep, levels);
+            let level = self.find_level_recursive(dep, levels, filter);
             max_level = max(max_level, level);
             offset = 1;
         }
+        if !filter(item) { offset = 0; }
         let level = max_level + offset;
-        levels[item] = level;
+        levels.insert(item, level);
         level
+    }
+
+    fn find_level(&self, item: ItemId, levels: &mut HashMap<ItemId, u32>, mut filter: impl Clone + Fn(ItemId) -> bool) -> u32 {
+        self.find_level_recursive(item, levels, &mut filter)
     }
 
     // Find the weak components of the graph
@@ -174,54 +222,151 @@ impl Graph {
         for i in 0..self.dependees.len() {
             self.find_component(ItemId::new(i), &mut state);
         }
-    }
 
-    pub fn solve(&mut self) -> Levels {
-        // The outstanding components are the ones excluded last time
-        let mut outstanding_components = HashSet::<CompId>::from_iter(
+        self.outstanding_components = HashSet::<CompId>::from_iter(
             (0..self.components.len())
                 .map(|i| CompId::new(i))
         );
-        let mut included_components = HashSet::<CompId>::new();
-        
-        let mut units = Vec::<InternalUnit>::new();
-        while !outstanding_components.is_empty() {
-            // Get all components that have no type 4 dependencies on outstanding components
-            let mut cur_unit_comps = HashSet::<CompId>::new();
-            for &comp_id in &outstanding_components {
-                let mut should_add = true;
-                for (&dependee, &relation) in &self.components[comp_id].deps {
-                    if relation == ComponentRelation::BEFORE && !included_components.contains(&dependee) {
-                        should_add = false;
-                    }
-                }
-                if should_add {
-                    cur_unit_comps.insert(comp_id);
+    }
+
+    pub fn has_outstanding_components(&mut self) -> bool { !self.outstanding_components.is_empty() }
+
+    fn update_meta_deps(&mut self) {
+        for &comp in &self.outstanding_components {
+            let has_meta_dep = self.components[comp].items.iter()
+                .any(|item| self.global_meta_dependees.contains(item));
+            self.components[comp].has_meta_dep = has_meta_dep;
+        }
+    }
+
+    fn find_comps_without_outstanding_type_4_deps(&self, comps: &HashSet<CompId>, output: &mut HashSet<CompId>) {
+        'comps: for &comp_id in comps {
+            for (&dependee, &relation) in &self.components[comp_id].deps {
+                if relation == ComponentRelation::BEFORE && !self.included_components.contains(&dependee) {
+                    // Found a type 4 dependency, so we wont add this component. Continue to the next component.
+                    continue 'comps;
                 }
             }
-            
-            // Whittle down the components to only those that have type 2 or 3 dependencies on each other, or included components
-            // (and not other outstanding components)
-            loop {
-                // Yay borrow checker
-                let cur_unit_copy = cur_unit_comps.clone();
-                cur_unit_comps.retain(|&comp| {
-                    let mut should_retain = true;
-                    for (&dependee, &relation) in &self.components[comp].deps {
-                        if
-                            relation == ComponentRelation::TYPE_2_3_FORWARD &&
-                            !cur_unit_copy.contains(&dependee) &&
-                            !included_components.contains(&dependee)
-                        {
-                            should_retain = false;
+            output.insert(comp_id);
+        }
+    }
+
+    fn remove_comps_with_outstanding_deps(&self, comps: &mut HashSet<CompId>, should_check_current_unit: bool) {
+        loop {
+            // Yay borrow checker
+            let comps_copy = comps.clone();
+            comps.retain(|&comp| {
+                for (&dependee, &relation) in &self.components[comp].deps {
+                    let in_current_unit = if should_check_current_unit {
+                        false
+                    } else {
+                        comps_copy.contains(&dependee)
+                    };
+                    if
+                        relation == ComponentRelation::TYPE_2_3_FORWARD &&
+                        !in_current_unit &&
+                        !self.included_components.contains(&dependee)
+                    {
+                        return false;
+                    }
+                }
+                true
+            });
+
+            // If we didn't remove anything this iteration, we're done
+            if comps_copy.len() == comps.len() { break; }
+        }
+    }
+
+    fn stage_components(&mut self, comps: impl Iterator<Item=CompId>) {
+        let mut levels: HashMap<ItemId, u32> = HashMap::new();
+        for comp in comps {
+            let mut max_level = 0;
+            let items = &self.components[comp].items;
+            for &item in items {
+                let level = self.find_level(item, &mut levels, |item| self.global_meta_dependees.contains(&item));
+                max_level = max(max_level, level);
+            }
+    
+            let mut meta_deps = Vec::<Vec<ItemId>>::new();
+            meta_deps.resize_with(max_level as usize + 1, Default::default);
+    
+            for &item in items {
+                if !self.global_meta_dependees.contains(&item) { continue; }
+                // Invert the level so that lower levels can be popped off the end of the array
+                let level = max_level - levels[&item];
+                meta_deps[level as usize].push(item);
+            }
+    
+            let state = CompStageState { meta_deps };
+            let old_val = self.staged_components.insert(comp, state);
+            assert!(old_val.is_none());
+        }
+    }
+
+    pub fn get_items_that_need_dependencies(&mut self) -> Vec<ItemId> {
+        let items = self.outstanding_components.iter()
+            .flat_map(|&comp| &self.components[comp].items)
+            .copied()
+            .filter(|item| !self.dependencies_added.contains(item))
+            .filter(|item| !self.meta_dependees.contains_key(item))
+            .collect();
+
+        self.dependencies_added.extend(&items);
+
+        items
+    }
+
+    pub fn solve(&mut self) -> Levels {
+        self.update_meta_deps();
+
+        // Get the outstanding components with meta-dependees in them
+        let mut meta_dep_components = HashSet::<CompId>::new();
+        for &id in &self.outstanding_components {
+            if self.components[id].has_meta_dep {
+                meta_dep_components.insert(id);
+            }
+        }
+
+        // Get the components that depend (either directly or indirectly) on components with meta-dependees in them 
+        let excluded_components = {
+            let mut excluded_components = HashSet::new();
+            let mut potentially_excluded_components: HashSet<CompId> = self.outstanding_components
+                .difference(&meta_dep_components)
+                .copied()
+                .filter(|comp| !self.staged_components.contains_key(comp))
+                .collect();
+            let mut added_to_excluded_set = true;
+            while added_to_excluded_set {
+                added_to_excluded_set = false;
+                potentially_excluded_components.retain(|&comp_id| {
+                    let comp = &self.components[comp_id];
+                    for (dep, &relation) in &comp.deps {
+                        if !relation.contains(ComponentRelation::AFTER) && (meta_dep_components.contains(dep) || self.staged_components.contains_key(dep) || excluded_components.contains(dep)) {
+                            excluded_components.insert(comp_id);
+                            added_to_excluded_set = true;
+                            return false;
                         }
                     }
-                    should_retain
+                    true
                 });
-
-                // If we didn't remove anything this iteration, we're done
-                if cur_unit_copy.len() == cur_unit_comps.len() { break; }
             }
+
+            excluded_components
+        };
+
+        // Temporarily remove all excluded components. Those that don't get staged will be added back after finding the units
+        self.outstanding_components.retain(|comp| !meta_dep_components.contains(comp) && !excluded_components.contains(comp));
+
+        let mut units = Vec::<InternalUnit>::new();
+        while !self.outstanding_components.is_empty() {
+            // Get all components that have no type 4 dependencies on outstanding components
+            let mut cur_unit_comps = HashSet::<CompId>::new();
+            self.find_comps_without_outstanding_type_4_deps(&self.outstanding_components, &mut cur_unit_comps);
+
+            // Whittle down the components to only those that have type 2 or 3 dependencies on each other, or included components
+            // (and not other outstanding components)
+            self.remove_comps_with_outstanding_deps(&mut cur_unit_comps, true);
 
             let mut cur_unit = InternalUnit::default();
             cur_unit.components.extend(cur_unit_comps.iter());
@@ -240,110 +385,180 @@ impl Graph {
                         }
                     }
                 }
-                included_components.insert(comp);
-                outstanding_components.remove(&comp);
+                self.included_components.insert(comp);
+                self.outstanding_components.remove(&comp);
             }
             units.push(cur_unit);
         }
 
-        let mut item_to_levels = IdxVec::<ItemId, u32>::new();
-        item_to_levels.resize_with(self.dependees.len(), || u32::MAX);
+        // Stage viable components
+        {
+            // Get all meta-dep components that have no type 4 dependencies on outstanding components
+            let mut comps_to_stage = HashSet::<CompId>::new();
+            self.find_comps_without_outstanding_type_4_deps(&meta_dep_components, &mut comps_to_stage);
 
-        for i in 0..self.dependees.len() {
-            self.find_level(ItemId::new(i), &mut item_to_levels);
+            // Whittle down the components to only those that have type 2 or 3 dependencies on included components
+            // (and not other outstanding components, or each other)
+            self.remove_comps_with_outstanding_deps(&mut comps_to_stage, false);
+
+            // Add excluded components back to `outstanding_components`.
+            let all_excluded = meta_dep_components
+                .difference(&comps_to_stage)
+                .chain(&excluded_components);
+            self.outstanding_components.extend(all_excluded);
+
+            self.stage_components(comps_to_stage.into_iter());
         }
 
-        let mut item_to_units = IdxVec::<ItemId, u32>::new();
-        item_to_units.resize_with(self.dependees.len(), || u32::MAX);
+        let mut item_to_levels = HashMap::<ItemId, u32>::new();
+
+        for i in 0..self.dependees.len() {
+            self.find_level(ItemId::new(i), &mut item_to_levels, |_| true);
+        }
+
+        let mut item_to_units = HashMap::<ItemId, u32>::new();
 
         for (i, unit) in units.iter().enumerate() {
             for &comp in &unit.components {
                 let components = &self.components[comp];
                 for &item in &components.items {
-                    item_to_units[item] = i as u32;
+                    item_to_units.insert(item, i as u32);
+                }
+            }
+        }
+
+        let mut mock_units = Vec::new();
+        // TODO: Borrow checker :(
+        let staged_comps_keys: Vec<_> = self.staged_components.keys().copied().collect();
+        'mock_staged_comps: for comp_id in staged_comps_keys {
+            // Check dependencies of the component before adding it to a mock unit. This is necessary because:
+            //   - Meta-dependers can add dependencies to themselves after a meta-dependee is mocked
+            //     (in fact, that's the whole point of all this)
+            //   - Meta-dependers can be in the same component as their meta-dependee
+            //   - Within a component, a second meta-dependee might exist that depends on the meta-depender (indeed,
+            //     the meta-depender itself might also be a meta-dependee). Therefore, we need to typecheck the
+            //     meta-depender's dependencies before we can mock it
+            let comp = &self.components[comp_id];
+            for (dep, &relation) in &comp.deps {
+                if !relation.contains(ComponentRelation::AFTER) && !self.included_components.contains(dep) {
+                    continue 'mock_staged_comps;
+                }
+            }
+            
+            let meta_deps = self.staged_components.get_mut(&comp_id).unwrap().meta_deps.pop().unwrap();
+            for dep in meta_deps {
+                let mut item_to_levels: HashMap<ItemId, u32> = HashMap::new();
+
+                // Note: This will end up finding the levels of all items in the mock unit, because
+                // `dep` is the root of the tree, and there's only one component (therefore, all
+                // dependencies will be found)
+                let item_level = self.find_level(dep, &mut item_to_levels, |_| true);
+
+                let mut deps = HashSet::new();
+                self.get_deps(dep, &mut deps);
+
+                let mock_unit = MockUnit {
+                    item: dep,
+                    item_level,
+                    item_to_levels,
+
+                    // TODO: Remove this conversion; just make a Vec from the get-go (but first,
+                    //       find out if safe)
+                    deps: deps.into_iter().collect(),
+                };
+                mock_units.push(mock_unit);
+            }
+
+            if self.staged_components[&comp_id].meta_deps.is_empty() {
+                self.staged_components.remove(&comp_id);
+
+                // Re-register the component for being added to a unit
+                self.outstanding_components.insert(comp_id);
+
+                // Update state to reflect the fact that the component no longer has meta-dependees
+                for i in 0..comp.items.len() {
+                    let comp = &self.components[comp_id];
+                    let item = comp.items[i];
+                    self.remove_meta_dep_status(item);
                 }
             }
         }
 
         let components = &self.components;
-
         Levels {
             item_to_levels: item_to_levels.clone(),
             item_to_units,
             units: units.into_iter()
                 .map(|unit| {
-                    let mut meta_deps = HashMap::<u32, Vec<MetaDependee>>::new();
                     let items = unit.components.iter()
-                        .flat_map(|&comp| components[comp].items.iter().map(|&item| item))
+                        .flat_map(|&comp| components[comp].items.iter().copied())
                         .collect();
-                    for &item in &items {
-                        if self.meta_dependees.contains(&item) {
-                            let mut deps = HashSet::new();
-                            self.get_deps(item, &mut deps, &unit.components);
-                            meta_deps.entry(item_to_levels[item])
-                                .or_default()
-                                .push(MetaDependee { item, deps: deps.into_iter().collect() });
-                        }
-                    }
-                    let mut meta_dependees = meta_deps.into_iter()
-                        .map(|(level, meta_dependees)| LevelMetaDependees { level, meta_dependees })
-                        .collect::<Vec<_>>();
-                    meta_dependees.sort_by_key(|level| level.level);
-                    Unit { 
-                        items,
-                        meta_dependees,
-                    }
+                    Unit { items }
                 }).collect::<Vec<Unit>>(),
+            mock_units,
         }
     }
 
-    fn get_deps(&self, item: ItemId, out: &mut HashSet<ItemId>, components: &HashSet<CompId>) {
+    fn get_deps(&self, item: ItemId, out: &mut HashSet<ItemId>) {
         for &dependee in &self.dependees[item] {
             out.insert(dependee);
-            self.get_deps(dependee, out, components);
-        }
-        for &dependee in &self.t3_dependees[item] {
-            if out.contains(&dependee) { continue; }
-            let comp = self.item_to_components[dependee];
-            // If the dependee is in the same unit as the depender:
-            if components.contains(&comp) {
-                out.insert(dependee);
-                self.get_deps(dependee, out, components);
-            }
+            self.get_deps(dependee, out);
         }
     }
-}
 
-#[derive(Debug)]
-pub struct MetaDependee {
-    pub item: ItemId,
-    pub deps: Vec<ItemId>,
-}
+    fn remove_meta_dep_status(&mut self, item: ItemId) {
+        let was_removed = self.global_meta_dependees.remove(&item);
+        // Short-circuit the recursive chain
+        if !was_removed { return; }
 
-#[derive(Default, Debug)]
-pub struct LevelMetaDependees {
-    pub level: u32,
-    pub meta_dependees: Vec<MetaDependee>,
+        for depender in &self.meta_dependers[&item] {
+            let dependees = self.meta_dependees.get_mut(depender).unwrap();
+            dependees.remove(&item);
+            if dependees.is_empty() {
+                self.meta_dependees.remove(depender);
+            }
+        }
+
+        for i in 0..self.dependees[item].len() {
+            let item = self.dependees[item][i];
+            self.remove_meta_dep_status(item);
+        }
+    }
 }
 
 #[derive(Default, Debug)]
 pub struct Unit {
     pub items: Vec<ItemId>,
-    pub meta_dependees: Vec<LevelMetaDependees>,
 }
 
 #[derive(Default, Debug)]
 pub struct Levels {
-    pub item_to_levels: IdxVec<ItemId, u32>,
-    pub item_to_units: IdxVec<ItemId, u32>,
+    pub item_to_levels: HashMap<ItemId, u32>,
+    pub item_to_units: HashMap<ItemId, u32>,
     pub units: Vec<Unit>,
+    pub mock_units: Vec<MockUnit>,
+}
+
+#[derive(Debug)]
+pub struct MockUnit {
+    /// Main item of the mock unit; the meta-dependee
+    pub item: ItemId,
+    /// Level of the main item
+    pub item_level: u32,
+
+    /// The levels of each item within this mock unit.
+    pub item_to_levels: HashMap<ItemId, u32>,
+
+    /// A collection of every item in this mock unit
+    pub deps: Vec<ItemId>,
+
 }
 
 impl ItemId {
     fn write_node_name(self, w: &mut impl Write, hir: &hir::Builder) -> IoResult<()> {
         match hir.items[self] {
-            hir::Item::Expr(id) => write!(w, "expr{}", id.idx())?,
-            hir::Item::Decl(id) => write!(w, "decl{}", id.idx())?,
+            hir::Item::Expr(id) => write!(w, "item{}expr{}", self.idx(), id.idx())?,
+            hir::Item::Decl(id) => write!(w, "item{}decl{}", self.idx(), id.idx())?,
         }
         Ok(())
     }
@@ -490,7 +705,7 @@ impl Driver {
                 let item_to_levels = &levels.item_to_levels;
                 let max_level = levels.units.iter()
                     .flat_map(|unit| &unit.items)
-                    .map(|&item| item_to_levels[item])
+                    .map(|&item| item_to_levels[&item])
                     .max()
                     .unwrap_or(0);
 
@@ -518,7 +733,7 @@ impl Driver {
                     for &item in &unit.items {
                         if self.should_exclude_item_from_output(item) { continue; }
 
-                        let level = levels.item_to_levels[item];
+                        let level = levels.item_to_levels[&item];
                         self.write_item(&mut w, item)?;
                         self.write_deps(&mut w, item, graph, false)?;
 

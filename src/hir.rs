@@ -78,6 +78,7 @@ pub struct DeclRef {
     pub namespace: Namespace,
     pub num_arguments: usize,
     pub has_parens: bool,
+    pub expr: ExprId,
 }
 
 #[derive(Debug)]
@@ -503,15 +504,19 @@ impl Builder {
             Some(base_expr) => Namespace::MemberRef { base_expr },
             None => self.cur_namespace(),
         };
+        let expr = ExprId::new(self.exprs.len());
         let id = self.decl_refs.push(
             DeclRef {
                 name,
                 namespace,
                 num_arguments: arguments.len(),
                 has_parens,
+                expr,
             }
         );
-        self.push(Expr::DeclRef { arguments, id }, range)
+        let expr_1 = self.push(Expr::DeclRef { arguments, id }, range);
+        debug_assert_eq!(expr, expr_1);
+        expr
     }
     pub fn get_range(&self, id: ExprId) -> SourceRange { self.source_ranges[self.expr_to_items[id]].clone() }
     pub fn set_range(&mut self, id: ExprId, range: SourceRange) { self.source_ranges[self.expr_to_items[id]] = range; }

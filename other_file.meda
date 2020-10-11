@@ -1,5 +1,11 @@
+std :: import("std.meda")
+HelloWorld :: import("HelloWorld.meda")
+
 fn do_something_cool() {
-    hello_world :: import("HelloWorld.meda")
-    print("Doint somethin cool!\n")
-    import("std.meda").print_num(256 + 34)
+    print("\nDoint somethin cool!\n")
+    print("256 + 34 = ")
+    std.print_num(256 + 34)
+    print("\nHelloWorld.FIZZ_BUZZ_ITERATIONS = ")
+    std.print_num(HelloWorld.FIZZ_BUZZ_ITERATIONS)
+    print("\nFinished with doint the cool thing!\n\n")
 }

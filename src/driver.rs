@@ -32,7 +32,7 @@ impl Driver {
             toks: IdxVec::new(),
             interner: DefaultStringInterner::new(),
             hir: hir::Builder::new(),
-            tir: tir::Builder::new(),
+            tir: tir::Builder::default(),
             errors: Vec::new(),
             mir: mir::Builder::new(arch),
             interp: Interpreter::new(),
