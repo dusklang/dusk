@@ -7,6 +7,7 @@ use std::slice;
 
 use arrayvec::ArrayVec;
 use paste::paste;
+use num_bigint::{BigInt, Sign};
 
 use crate::arch::Arch;
 use crate::builder::{Intrinsic, ModScopeId};
@@ -112,6 +113,14 @@ impl Value {
         }
     }
 
+    fn as_big_int(&self, signed: bool) -> BigInt {
+        if signed {
+            BigInt::from_signed_bytes_le(self.as_bytes())
+        } else {
+            BigInt::from_bytes_le(Sign::Plus, self.as_bytes())
+        }
+    }
+
     fn as_raw_ptr(&self) -> *mut u8 {
         unsafe { mem::transmute(usize::from_le_bytes(self.as_bytes().try_into().unwrap())) }
     }
@@ -162,6 +171,31 @@ impl Value {
             storage.push(byte);
         }
         Value::Inline(storage)
+    }
+
+    fn from_big_int(big_int: BigInt, width: IntWidth, is_signed: bool, mir: &mir::Builder) -> Value {
+        // We assume in the match below that pointer-sized ints are 64 bits
+        assert_eq!(mir.arch.pointer_size(), 64);
+        let size = match width {
+            IntWidth::W8 => 1,
+            IntWidth::W16 => 2,
+            IntWidth::W32 => 4,
+            IntWidth::W64 | IntWidth::Pointer => 8,
+        };
+        let (mut bytes, extension) = if is_signed {
+            (big_int.to_signed_bytes_le(), 0xFF)
+        } else {
+            let (sign, bytes) = big_int.to_bytes_le();
+            assert!(!matches!(sign, Sign::Minus), "Can't put negative value in an unsigned int");
+            (bytes, 0x00)
+        };
+
+        assert!(bytes.len() <= size, "Integer is too big");
+        while bytes.len() < size {
+            bytes.push(extension);
+        }
+
+        Value::from_bytes(&bytes)
     }
 
     fn from_const(konst: &Const, mir: &mir::Builder) -> Value {
@@ -457,15 +491,7 @@ impl Driver {
                         let arg = &frame.results[arg];
                         match ty {
                             Type::Int { width, is_signed } => {
-                                // We assume in the match below that pointer-sized ints are 64 bits
-                                assert_eq!(self.mir.arch.pointer_size(), 64);
-                                assert!(is_signed);
-                                match width {
-                                    IntWidth::W8 => Value::from_i8(-arg.as_i8()),
-                                    IntWidth::W16 => Value::from_i16(-arg.as_i16()),
-                                    IntWidth::W32 => Value::from_i32(-arg.as_i32()),
-                                    IntWidth::W64 | IntWidth::Pointer => Value::from_i64(-arg.as_i64()),
-                                }
+                                Value::from_big_int(-arg.as_big_int(is_signed), width, is_signed, &self.mir)
                             },
                             Type::Float(width) => match width {
                                 FloatWidth::W32 => Value::from_f32(-arg.as_f32()),
@@ -567,29 +593,9 @@ impl Driver {
                 let val = &frame.results[val];
                 match (src_ty, dest_ty) {
                     (
-                        Type::Int { width: src_width, is_signed: src_is_signed },
-                        Type::Int { width: dest_width, is_signed: dest_is_signed }
-                    ) => {
-                        assert!(dest_is_signed);
-                        match (src_width.bit_width(self.mir.arch), src_is_signed, dest_width.bit_width(self.mir.arch)) {
-                            (s, _, d) if s == d => panic!("Can't sign-extend to the same size"),
-                            (8, true, 16) => Value::from_i16(val.as_i8().try_into().unwrap()),
-                            (8, true, 32) => Value::from_i32(val.as_i8().try_into().unwrap()),
-                            (8, true, 64) => Value::from_i64(val.as_i8().try_into().unwrap()),
-                            (16, true, 32) => Value::from_i32(val.as_i16().try_into().unwrap()),
-                            (16, true, 64) => Value::from_i64(val.as_i16().try_into().unwrap()),
-                            (32, true, 64) => Value::from_i64(val.as_i32().try_into().unwrap()),
-
-                            (8, false, 16) => Value::from_i16(val.as_u8().try_into().unwrap()),
-                            (8, false, 32) => Value::from_i32(val.as_u8().try_into().unwrap()),
-                            (8, false, 64) => Value::from_i64(val.as_u8().try_into().unwrap()),
-                            (16, false, 32) => Value::from_i32(val.as_u16().try_into().unwrap()),
-                            (16, false, 64) => Value::from_i64(val.as_u16().try_into().unwrap()),
-                            (32, false, 64) => Value::from_i64(val.as_u32().try_into().unwrap()),
-
-                            (_, _, _) => panic!("Invalid int types in sign extend"),
-                        }
-                    },
+                        &Type::Int { width: src_width, is_signed: src_is_signed },
+                        &Type::Int { width: dest_width, is_signed: dest_is_signed }
+                    ) => Value::from_big_int(val.as_big_int(src_is_signed), dest_width, dest_is_signed, &self.mir),
                     (_, _) => panic!("Invalid operand types to sign extension")
                 }
             },
@@ -598,29 +604,9 @@ impl Driver {
                 let val = &frame.results[val];
                 match (src_ty, dest_ty) {
                     (
-                        Type::Int { width: src_width, is_signed: src_is_signed },
-                        Type::Int { width: dest_width, is_signed: dest_is_signed }
-                    ) => {
-                        assert!(!dest_is_signed);
-                        match (src_width.bit_width(self.mir.arch), src_is_signed, dest_width.bit_width(self.mir.arch)) {
-                            (s, _, d) if s == d => panic!("Can't zero-extend to the same size"),
-                            (8, true, 16) => Value::from_u16(val.as_i8().try_into().unwrap()),
-                            (8, true, 32) => Value::from_u32(val.as_i8().try_into().unwrap()),
-                            (8, true, 64) => Value::from_u64(val.as_i8().try_into().unwrap()),
-                            (16, true, 32) => Value::from_u32(val.as_i16().try_into().unwrap()),
-                            (16, true, 64) => Value::from_u64(val.as_i16().try_into().unwrap()),
-                            (32, true, 64) => Value::from_u64(val.as_i32().try_into().unwrap()),
-
-                            (8, false, 16) => Value::from_u16(val.as_u8().try_into().unwrap()),
-                            (8, false, 32) => Value::from_u32(val.as_u8().try_into().unwrap()),
-                            (8, false, 64) => Value::from_u64(val.as_u8().try_into().unwrap()),
-                            (16, false, 32) => Value::from_u32(val.as_u16().try_into().unwrap()),
-                            (16, false, 64) => Value::from_u64(val.as_u16().try_into().unwrap()),
-                            (32, false, 64) => Value::from_u64(val.as_u32().try_into().unwrap()),
-
-                            (_, _, _) => panic!("Invalid int types in zero extend"),
-                        }
-                    },
+                        &Type::Int { width: src_width, is_signed: src_is_signed },
+                        &Type::Int { width: dest_width, is_signed: dest_is_signed }
+                    ) => Value::from_big_int(val.as_big_int(src_is_signed), dest_width, dest_is_signed, &self.mir),
                     (_, _) => panic!("Invalid operand types to zero extension")
                 }
             },
