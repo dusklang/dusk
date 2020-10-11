@@ -334,6 +334,7 @@ impl Graph {
             let mut potentially_excluded_components: HashSet<CompId> = self.outstanding_components
                 .difference(&meta_dep_components)
                 .copied()
+                .filter(|comp| !self.staged_components.contains_key(comp))
                 .collect();
             let mut added_to_excluded_set = true;
             while added_to_excluded_set {
@@ -341,7 +342,7 @@ impl Graph {
                 potentially_excluded_components.retain(|&comp_id| {
                     let comp = &self.components[comp_id];
                     for (dep, &relation) in &comp.deps {
-                        if !relation.contains(ComponentRelation::AFTER) && (meta_dep_components.contains(dep) || excluded_components.contains(dep)) {
+                        if !relation.contains(ComponentRelation::AFTER) && (meta_dep_components.contains(dep) || self.staged_components.contains_key(dep) || excluded_components.contains(dep)) {
                             excluded_components.insert(comp_id);
                             added_to_excluded_set = true;
                             return false;

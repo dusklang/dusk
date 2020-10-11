@@ -1,4 +1,4 @@
-/*std :: import("std.meda")
+std :: import("std.meda")
 str :: std.str
 
 fn fib(n: i32): i32 {
@@ -214,14 +214,4 @@ fn compute_a_number(): os_dependent_type() {
     sixteen_bit_number: u16 = 256
 
     sixteen_bit_number as os_dependent_type()
-}*/
-
-fn main() {
-    import("other_file.meda").do_something_cool()
-}
-
-other_type_alias :: import("other_file.meda").some_mod.type_alias
-
-fn comment(): other_type_alias {
-    3
 }

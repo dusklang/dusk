@@ -592,8 +592,9 @@ impl Driver {
         for scope in &self.hir.imper_scopes {
             for &item in &scope.items {
                 match item {
-                    hir::ScopeItem::Stmt(expr) => {
-                        let unit = sp.levels.item_to_units[&ei!(expr)];
+                    // TODO: This is a horrible hack! Instead of looping through all imperative scopes, I should somehow
+                    // associate statements with their unit
+                    hir::ScopeItem::Stmt(expr) => if let Some(&unit) = sp.levels.item_to_units.get(&ei!(expr)) {
                         let unit = &mut sp.units[unit as usize];
                         unit.items.stmts.push(Stmt { root_expr: expr });
                     },
