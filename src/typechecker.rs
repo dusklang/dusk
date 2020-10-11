@@ -483,28 +483,31 @@ impl Driver {
         tp.debug_output(&self.hir, &self.src_map, 0);
     }
 
-    pub fn type_check(&mut self, units: &Units, dbg: bool) -> RealTypeProvider {
+    pub fn get_real_type_provider(&self, dbg: bool) -> RealTypeProvider {
         // Assign the type of the void expression to be void.
         let mut tp = RealTypeProvider::new(dbg, &self.hir, &self.tir);
         *tp.constraints_mut(self.hir.void_expr) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
         *tp.ty_mut(self.hir.void_expr) = Type::Void;
+        tp
+    }
 
+    pub fn type_check(&mut self, units: &Units, tp: &mut RealTypeProvider) {
         for (num, unit) in units.units.iter().enumerate() {
             // Pass 1: propagate info down from leaves to roots
-            self.run_pass_1(&unit.items, UnitKind::Normal(num), 0, &mut tp);
+            self.run_pass_1(&unit.items, UnitKind::Normal(num), 0, tp);
             
             // Pass 2: propagate info up from roots to leaves
-            self.run_pass_2(&unit.items, UnitKind::Normal(num), &mut tp);
+            self.run_pass_2(&unit.items, UnitKind::Normal(num), tp);
 
             for i in 0..unit.eval_dependees.len() {
                 let expr = unit.eval_dependees[i];
-                let val = self.eval_expr(expr, &tp);
+                let val = self.eval_expr(expr, &*tp);
                 tp.insert_eval_result(expr, val);
             }
         }
 
         for (num, unit) in units.mock_units.iter().enumerate() {
-            let mut mock_tp = MockTypeProvider::new(&mut tp);
+            let mut mock_tp = MockTypeProvider::new(tp);
             self.run_pass_1(&unit.items, UnitKind::Mock(num), 0, &mut mock_tp);
             if mock_tp.constraints(unit.main_expr).can_unify_to(&Type::Mod.into()).is_ok() {
                 self.run_pass_2(&unit.items, UnitKind::Mock(num), &mut mock_tp);
@@ -516,7 +519,5 @@ impl Driver {
                 }
             }
         }
-
-        tp
     }
 }

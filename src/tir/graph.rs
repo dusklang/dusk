@@ -229,6 +229,8 @@ impl Graph {
         );
     }
 
+    pub fn has_outstanding_components(&mut self) -> bool { !self.outstanding_components.is_empty() }
+
     fn update_meta_deps(&mut self) {
         for &comp in &self.outstanding_components {
             let has_meta_dep = self.components[comp].items.iter()

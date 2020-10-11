@@ -464,7 +464,9 @@ impl Driver {
         }
     }
 
-    pub fn build_more_tir(&mut self, output: Option<TirGraphOutput>) -> Units {
+    pub fn build_more_tir(&mut self, output: Option<TirGraphOutput>) -> Option<Units> {
+        if !self.tir.graph.has_outstanding_components() { return None; }
+
         add_eval_dep_injector!(self, add_eval_dep);
         ei_injector!(self, ei);
 
@@ -604,6 +606,8 @@ impl Driver {
             unit.items.unify_sizes();
         }
 
-        Units { units: sp.units, mock_units: sp.mock_units }
+        Some(
+            Units { units: sp.units, mock_units: sp.mock_units }
+        )
     }
 }

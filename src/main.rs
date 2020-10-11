@@ -27,7 +27,7 @@ use mir::{FunctionRef, FuncId};
 use driver::Driver;
 use source_info::SourceMap;
 
-#[derive(Clap, Debug)]
+#[derive(Clap, Debug, Copy, Clone)]
 pub enum TirGraphOutput {
     Items,
     Components,
@@ -90,10 +90,13 @@ fn main() {
 
     begin_phase!(Tir);
     driver.initialize_tir();
-    let units = driver.build_more_tir(opt.tir_output);
+
 
     begin_phase!(Typecheck);
-    let tp = driver.type_check(&units, opt.output_tc_diff);
+    let mut tp = driver.get_real_type_provider(opt.output_tc_diff);
+    while let Some(units) = driver.build_more_tir(opt.tir_output) {
+        driver.type_check(&units, &mut tp);
+    }
 
     driver.flush_errors();
     if driver.check_for_failure() { return; }
