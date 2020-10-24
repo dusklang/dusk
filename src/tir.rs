@@ -39,6 +39,8 @@ pub struct DeclRef { pub args: SmallVec<[ExprId; 2]>, pub decl_ref_id: DeclRefId
 pub struct If { pub condition: ExprId, pub then_expr: ExprId, pub else_expr: ExprId }
 #[derive(Debug)]
 pub struct While { pub condition: ExprId }
+#[derive(Debug)]
+pub struct Struct { pub field_tys: SmallVec<[ExprId; 2]>, }
 
 #[derive(Debug)]
 pub struct Expr<T> {
@@ -89,6 +91,7 @@ pub struct UnitItems {
     pub derefs: DepVec<Expr<Dereference>>,
     pub pointers: DepVec<Expr<Pointer>>,
     pub ifs: DepVec<Expr<If>>,
+    pub structs: DepVec<Expr<Struct>>,
 }
 
 impl UnitItems {
@@ -335,14 +338,17 @@ impl Driver {
             &hir::Expr::While { condition, .. } => insert_expr!(whiles, While { condition }),
             hir::Expr::Mod { .. } => insert_item!(modules, id),
             hir::Expr::Import { .. } => insert_item!(imports, id),
-            unhandled => panic!("Unhandled expression {:?}", unhandled),
+            &hir::Expr::Struct(struct_id) => {
+                let field_tys = self.hir.structs[struct_id].fields.iter().map(|&id| self.hir.field_decls[id].ty).collect();
+                insert_expr!(structs, Struct { field_tys })
+            }
         }
     }
 
     fn build_tir_decl(&mut self, unit: &mut UnitItems, level: u32, id: DeclId) {
         match self.hir.decls[id] {
-            // TODO: Add a parameter TIR item for (at least) checking that the type of the param is valid
-            hir::Decl::Parameter { .. } => {},
+            // TODO: Add parameter and field TIR items for (at least) checking that the type of the param is valid
+            hir::Decl::Parameter { .. } | hir::Decl::Field(_) => {},
             hir::Decl::Intrinsic { .. } => {},
             hir::Decl::Static(root_expr) | hir::Decl::Const(root_expr) | hir::Decl::Stored { root_expr, .. } => {
                 let explicit_ty = self.hir.explicit_tys[id];
@@ -356,7 +362,6 @@ impl Driver {
                     unit.assigned_decls.insert(level, AssignedDecl { explicit_ty: None, root_expr: terminal_expr, decl_id: id });
                 }
             },
-            ref unhandled => panic!("Unhandled declaration {:?}", unhandled),
         }
     }
 
@@ -388,7 +393,10 @@ impl Driver {
                     is_mut,
                     SmallVec::new(),
                 ),
-                ref unhandled => panic!("Unhandled declaration {:?}", unhandled),
+                hir::Decl::Field(_) => (
+                    true,
+                    SmallVec::new()
+                ),
             };
             self.tir.decls.push(Decl { param_tys, is_mut });
         }
@@ -401,13 +409,12 @@ impl Driver {
             let decl_id = DeclId::new(i);
             let id = di!(decl_id);
             match self.hir.decls[decl_id] {
-                hir::Decl::Parameter { .. } | hir::Decl::Intrinsic { .. } => {},
+                hir::Decl::Parameter { .. } | hir::Decl::Intrinsic { .. } | hir::Decl::Field(_) => {},
                 hir::Decl::Static(expr) | hir::Decl::Const(expr) | hir::Decl::Stored { root_expr: expr, .. } => self.tir.graph.add_type1_dep(id, ei!(expr)),
                 hir::Decl::Computed { scope, .. } => {
                     let terminal_expr = self.hir.imper_scopes[scope].terminal_expr;
                     self.tir.graph.add_type1_dep(id, ei!(terminal_expr));
                 },
-                ref unhandled => panic!("Unhandled declaration {:?}", unhandled),
             }
         }
         for i in 0..self.hir.exprs.len() {
@@ -451,7 +458,12 @@ impl Driver {
                     let terminal_expr = self.hir.imper_scopes[scope].terminal_expr;
                     self.tir.graph.add_type1_dep(id, ei!(terminal_expr));
                 },
-                ref unhandled => panic!("Unhandled expression {:?}", unhandled),
+                hir::Expr::Struct(struct_id) => {
+                    for &field in &self.hir.structs[struct_id].fields {
+                        let field = &self.hir.field_decls[field];
+                        self.tir.graph.add_type1_dep(id, ei!(field.ty));
+                    }
+                },
             }
         }
 
@@ -481,7 +493,7 @@ impl Driver {
             match self.hir.items[id] {
                 hir::Item::Decl(decl_id) => {
                     match self.hir.decls[decl_id] {
-                        hir::Decl::Parameter { .. } | hir::Decl::Static(_) | hir::Decl::Const(_) | hir::Decl::Stored { .. } => {},
+                        hir::Decl::Parameter { .. } | hir::Decl::Static(_) | hir::Decl::Const(_) | hir::Decl::Stored { .. } | hir::Decl::Field(_) => {},
                         hir::Decl::Intrinsic { ref param_tys, .. } => {
                             for &ty in param_tys {
                                 add_eval_dep!(id, ty);
@@ -497,7 +509,6 @@ impl Driver {
                                 add_eval_dep!(id, self.hir.void_ty);
                             }
                         },
-                        ref unhandled => panic!("Unhandled declaration {:?}", unhandled),
                     }
         
                     // NOTE: The computed decl case in the above match expression depends on this!
@@ -509,7 +520,8 @@ impl Driver {
                     match self.hir.exprs[expr_id] {
                         hir::Expr::Void | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
                             | hir::Expr::CharLit { .. } | hir::Expr::ConstTy(_) | hir::Expr::AddrOf { .. } | hir::Expr::Deref(_)
-                            | hir::Expr::Pointer { .. } | hir::Expr::Set { .. } | hir::Expr::Mod { .. } |  hir::Expr::Import { .. } => {},
+                            | hir::Expr::Pointer { .. } | hir::Expr::Set { .. } | hir::Expr::Mod { .. } |  hir::Expr::Import { .. }
+                            | hir::Expr::Struct(_) => {},
                         hir::Expr::Cast { ty, .. } => {
                             add_eval_dep!(id, ty);
                         },
@@ -534,7 +546,6 @@ impl Driver {
                         hir::Expr::While { scope, .. } => {
                             self.add_type3_scope_dep(id, scope);
                         },
-                        ref unhandled => panic!("Unhandled expression {:?}", unhandled),
                     }
                 }
             }

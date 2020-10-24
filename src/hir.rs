@@ -148,13 +148,13 @@ pub enum Decl {
 
 #[derive(Debug)]
 pub struct FieldDecl {
-    name: Sym,
-    ty: ExprId,
+    pub name: Sym,
+    pub ty: ExprId,
 }
 
 #[derive(Debug)]
 pub struct Struct {
-    fields: Vec<FieldDeclId>,
+    pub fields: Vec<FieldDeclId>,
 }
 
 #[derive(Debug)]
