@@ -565,7 +565,8 @@ impl Driver {
                         assert_eq!(self.cur(p).kind, &TokenKind::Colon);
                         self.next(p);
                         let (ty, range) = self.parse_type(p);
-                        fields.push(self.hir.field_decl(name, ty, range));
+                        let index = fields.len();
+                        fields.push(self.hir.field_decl(name, ty, index, range));
                     } else {
                         panic!("Unexpected token {:?}, expected field name", self.cur(p).kind);
                     }

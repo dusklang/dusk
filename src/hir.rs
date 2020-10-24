@@ -150,10 +150,12 @@ pub enum Decl {
 pub struct FieldDecl {
     pub name: Sym,
     pub ty: ExprId,
+    pub index: usize,
 }
 
 #[derive(Debug)]
 pub struct Struct {
+    // TODO: store FieldDecl inline instead
     pub fields: Vec<FieldDeclId>,
 }
 
@@ -438,8 +440,8 @@ impl Builder {
             panic!("tried to end imperative scope, but the top scope in the stack is not an imperative scope");
         }
     }
-    pub fn field_decl(&mut self, name: Sym, ty: ExprId, range: SourceRange) -> FieldDeclId {
-        let field = self.field_decls.push(FieldDecl { name, ty });
+    pub fn field_decl(&mut self, name: Sym, ty: ExprId, index: usize, range: SourceRange) -> FieldDeclId {
+        let field = self.field_decls.push(FieldDecl { name, ty, index });
         self.decl(Decl::Field(field), name, Some(ty), range);
         field
     }

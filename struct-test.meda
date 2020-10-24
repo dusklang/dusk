@@ -3,3 +3,7 @@ Foo :: struct {
     b: u64
     c: u8*
 }
+
+fn take_foo(foo: Foo) {
+    
+}

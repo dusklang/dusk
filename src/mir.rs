@@ -13,7 +13,7 @@ use crate::typechecker as tc;
 use tc::type_provider::TypeProvider;
 use tc::CastMethod;
 use crate::index_vec::{Idx, IdxVec};
-use crate::builder::{DeclId, ExprId, ModScopeId, DeclRefId, ImperScopeId, Intrinsic};
+use crate::builder::{DeclId, ExprId, ModScopeId, DeclRefId, ImperScopeId, StructId, Intrinsic};
 use crate::hir::{self, Expr, ScopeItem, StoredDeclId};
 
 newtype_index!(InstrId pub);
@@ -65,6 +65,7 @@ pub enum Instr {
     Store { location: InstrId, value: InstrId },
     AddressOfStatic(StaticId),
     Pointer { op: InstrId, is_mut: bool },
+    Struct { fields: SmallVec<[InstrId; 2]>, id: StructId },
     Ret(InstrId),
     Br(BasicBlockId),
     CondBr { condition: InstrId, true_bb: BasicBlockId, false_bb: BasicBlockId },
@@ -80,6 +81,7 @@ enum Decl {
     Intrinsic(Intrinsic, Type),
     Static(StaticId),
     Const(Const),
+    Field { index: usize },
 }
 
 #[derive(Debug, Default)]
@@ -199,6 +201,10 @@ pub enum FunctionRef {
     Ref(Function),
 }
 
+pub struct Struct {
+    field_tys: SmallVec<[Type; 2]>,
+}
+
 pub struct Builder {
     decls: HashMap<DeclId, Decl>,
     static_inits: IdxVec<StaticId, ExprId>,
@@ -206,6 +212,7 @@ pub struct Builder {
     pub strings: IdxVec<StrId, CString>,
     pub functions: IdxVec<FuncId, Function>,
     pub statics: IdxVec<StaticId, Const>,
+    pub structs: HashMap<StructId, Struct>,
 }
 
 impl Builder {
@@ -217,6 +224,7 @@ impl Builder {
             strings: IdxVec::new(),
             functions: IdxVec::new(),
             statics: IdxVec::new(),
+            structs: HashMap::new(),
         }
     }
 }
@@ -233,7 +241,7 @@ impl Builder {
         let func = self.function_by_ref(func_ref);
         match &func.code[instr] {
             Instr::Void | Instr::Store { .. } => Type::Void,
-            Instr::Pointer { .. } => Type::Ty,
+            Instr::Pointer { .. } | Instr::Struct { .. } => Type::Ty,
             Instr::Const(konst) => konst.ty(),
             Instr::Alloca(ty) => ty.clone().mut_ptr(),
             Instr::LogicalNot(_) => Type::Bool,
@@ -320,7 +328,12 @@ impl Driver {
                 self.mir.decls.insert(id, decl.clone());
                 decl
             },
-            ref unhandled => panic!("Unhandled declaration {:?}", unhandled),
+            hir::Decl::Field(field_id) => {
+                let index = self.hir.field_decls[field_id].index;
+                let decl = Decl::Field { index };
+                self.mir.decls.insert(id, decl.clone());
+                decl
+            },
         }
     }
 
@@ -863,6 +876,23 @@ impl Driver {
                 );
                 b.code.push(Instr::Pointer { op, is_mut })
             },
+            Expr::Struct(id) => {
+                assert_eq!(ctx.indirection, 0);
+                let mut fields = SmallVec::new();
+                for i in 0..self.hir.structs[id].fields.len() {
+                    let field = self.hir.structs[id].fields[i];
+                    let field_ty = self.hir.field_decls[field].ty;
+                    fields.push(
+                        self.build_expr(
+                            b,
+                            field_ty,
+                            Context::new(0, DataDest::Read, ControlDest::Continue),
+                            tp,
+                        )
+                    );
+                }
+                b.code.push(Instr::Struct { fields, id })
+            },
             Expr::Deref(operand) => return self.build_expr(
                 b,
                 operand,
@@ -941,7 +971,6 @@ impl Driver {
                     tp,
                 );
             },
-            ref unhandled => panic!("Unhandled expression {:?}", unhandled),
         };
         
         self.handle_context(b, instr, expr, ty, ctx, should_allow_set, tp)
