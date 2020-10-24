@@ -208,6 +208,28 @@ impl Driver {
                 }
                 tp.constraints_mut(item.id).set_to(Type::Ty);
             }
+            for item in unit.structs.get_level(level) {
+                for &field_ty in &item.field_tys {
+                    if let Some(err) = tp.constraints(field_ty).can_unify_to(&Type::Ty.into()).err() {
+                        let mut error = Error::new("Expected field type");
+                        let range = self.hir.get_range(field_ty);
+                        match err {
+                            UnificationError::InvalidChoice(choices)
+                                => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                            UnificationError::Trait(not_implemented)
+                                => error.add_secondary_range(
+                                    range,
+                                    format!(
+                                        "note: couldn't unify because expression requires implementations of {:?}",
+                                        not_implemented.names(),
+                                    ),
+                                ),
+                        }
+                        self.errors.push(error);
+                    }
+                }
+                tp.constraints_mut(item.id).set_to(Type::Ty);
+            }
             for item in unit.ifs.get_level(level) {
                 if let Some(err) = tp.constraints(item.condition).can_unify_to(&Type::Bool.into()).err() {
                     let mut error = Error::new("Expected boolean condition in if expression");
@@ -446,6 +468,16 @@ impl Driver {
                 // Don't bother checking if it's a type, because we already did that in pass 1
                 tp.constraints_mut(item.expr).set_to(expr_ty);
                 let ty = tp.constraints(item.id).solve().expect("Ambiguous type for pointer expression");
+                debug_assert_eq!(ty.ty, Type::Ty);
+                *tp.ty_mut(item.id) = Type::Ty;
+            }
+            for item in unit.structs.get_level(level) {
+                for &field_ty in &item.field_tys {
+                    let field_type = tp.constraints(field_ty).solve().map(|ty| ty.ty).unwrap_or(Type::Error);
+                    // Don't bother checking if it's a type, because we already did that in pass 1
+                    tp.constraints_mut(field_ty).set_to(field_type);
+                }
+                let ty = tp.constraints(item.id).solve().expect("Ambiguous type for struct expression");
                 debug_assert_eq!(ty.ty, Type::Ty);
                 *tp.ty_mut(item.id) = Type::Ty;
             }

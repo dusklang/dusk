@@ -107,7 +107,7 @@ impl UnitItems {
             &mut self.assigned_decls, &mut self.assignments, &mut self.decl_refs, 
             &mut self.addr_ofs, &mut self.derefs, &mut self.pointers, &mut self.ifs,
             &mut self.dos, &mut self.ret_groups, &mut self.casts, &mut self.whiles,
-            &mut self.explicit_rets, &mut self.modules, &mut self.imports,
+            &mut self.explicit_rets, &mut self.modules, &mut self.imports, &mut self.structs,
         ]);
     }
 }
