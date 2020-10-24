@@ -7,7 +7,7 @@ use string_interner::Sym;
 
 use crate::driver::Driver;
 use crate::index_vec::{Idx, IdxVec, IdxCounter};
-use crate::builder::{BinOp, UnOp, ItemId, ExprId, DeclId, ImperScopeId, ModScopeId, DeclRefId, CastId, Intrinsic};
+use crate::builder::{BinOp, UnOp, ItemId, ExprId, DeclId, ImperScopeId, ModScopeId, DeclRefId, CastId, StructId, FieldDeclId, Intrinsic};
 use crate::source_info::{SourceRange, SourceFileId};
 use crate::ty::Type;
 
@@ -36,6 +36,7 @@ pub enum Expr {
     Ret { expr: ExprId, decl: Option<DeclId> },
     Mod { id: ModScopeId },
     Import { file: SourceFileId },
+    Struct(StructId),
 }
 
 /// A declaration in local (imperative) scope
@@ -142,6 +143,18 @@ pub enum Decl {
     Intrinsic { intr: Intrinsic, param_tys: SmallVec<[ExprId; 2]>, function_like: bool },
     Static(ExprId),
     Const(ExprId),
+    Field(FieldDeclId),
+}
+
+#[derive(Debug)]
+pub struct FieldDecl {
+    name: Sym,
+    ty: ExprId,
+}
+
+#[derive(Debug)]
+pub struct Struct {
+    fields: Vec<FieldDeclId>,
 }
 
 #[derive(Debug)]
@@ -163,6 +176,8 @@ pub struct Builder {
     pub void_ty: ExprId,
     pub source_ranges: IdxVec<ItemId, SourceRange>,
     pub cast_counter: IdxCounter<CastId>,
+    pub structs: IdxVec<StructId, Struct>,
+    pub field_decls: IdxVec<FieldDeclId, FieldDecl>,
 
     comp_decl_stack: Vec<CompDeclState>,
     scope_stack: Vec<ScopeState>,
@@ -188,6 +203,8 @@ impl Builder {
             void_ty: ExprId::new(1),
             source_ranges: IdxVec::new(),
             cast_counter: IdxCounter::new(),
+            structs: IdxVec::new(),
+            field_decls: IdxVec::new(),
             comp_decl_stack: Vec::new(),
             scope_stack: Vec::new(),
         };
@@ -420,6 +437,14 @@ impl Builder {
         } else {
             panic!("tried to end imperative scope, but the top scope in the stack is not an imperative scope");
         }
+    }
+    pub fn field_decl(&mut self, name: Sym, ty: ExprId, range: SourceRange) -> DeclId {
+        let field = self.field_decls.push(FieldDecl { name, ty });
+        self.decl(Decl::Field(field), name, Some(ty), range)
+    }
+    pub fn strukt(&mut self, fields: Vec<FieldDeclId>, range: SourceRange) -> ExprId {
+        let strukt = self.structs.push(Struct { fields });
+        self.push(Expr::Struct(strukt), range)
     }
     pub fn begin_module(&mut self) -> ExprId {
         let parent = self.cur_namespace();

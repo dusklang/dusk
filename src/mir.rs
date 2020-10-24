@@ -320,6 +320,7 @@ impl Driver {
                 self.mir.decls.insert(id, decl.clone());
                 decl
             },
+            ref unhandled => panic!("Unhandled declaration {:?}", unhandled),
         }
     }
 
@@ -939,7 +940,8 @@ impl Driver {
                     Context::new(0, DataDest::Ret, ctx.control),
                     tp,
                 );
-            }
+            },
+            ref unhandled => panic!("Unhandled expression {:?}", unhandled),
         };
         
         self.handle_context(b, instr, expr, ty, ctx, should_allow_set, tp)

@@ -11,6 +11,8 @@ newtype_index!(DeclId pub);
 newtype_index!(ImperScopeId pub);
 newtype_index!(ModScopeId pub);
 newtype_index!(CastId pub);
+newtype_index!(StructId pub);
+newtype_index!(FieldDeclId pub);
 
 #[derive(Clone, Copy, Debug)]
 pub enum BinOp {

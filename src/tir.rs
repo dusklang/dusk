@@ -335,19 +335,20 @@ impl Driver {
             &hir::Expr::While { condition, .. } => insert_expr!(whiles, While { condition }),
             hir::Expr::Mod { .. } => insert_item!(modules, id),
             hir::Expr::Import { .. } => insert_item!(imports, id),
+            unhandled => panic!("Unhandled expression {:?}", unhandled),
         }
     }
 
     fn build_tir_decl(&mut self, unit: &mut UnitItems, level: u32, id: DeclId) {
-        match &self.hir.decls[id] {
+        match self.hir.decls[id] {
             // TODO: Add a parameter TIR item for (at least) checking that the type of the param is valid
             hir::Decl::Parameter { .. } => {},
             hir::Decl::Intrinsic { .. } => {},
-            &hir::Decl::Static(root_expr) | &hir::Decl::Const(root_expr) | &hir::Decl::Stored { root_expr, .. } => {
+            hir::Decl::Static(root_expr) | hir::Decl::Const(root_expr) | hir::Decl::Stored { root_expr, .. } => {
                 let explicit_ty = self.hir.explicit_tys[id];
                 unit.assigned_decls.insert(level, AssignedDecl { explicit_ty, root_expr, decl_id: id });
             },
-            &hir::Decl::Computed { scope, .. } => {
+            hir::Decl::Computed { scope, .. } => {
                 let terminal_expr = self.hir.imper_scopes[scope].terminal_expr;
                 if let Some(_) = self.hir.explicit_tys[id] {
                     self.tir.staged_ret_groups.entry(id).or_default().push(terminal_expr);
@@ -355,6 +356,7 @@ impl Driver {
                     unit.assigned_decls.insert(level, AssignedDecl { explicit_ty: None, root_expr: terminal_expr, decl_id: id });
                 }
             },
+            ref unhandled => panic!("Unhandled declaration {:?}", unhandled),
         }
     }
 
@@ -386,6 +388,7 @@ impl Driver {
                     is_mut,
                     SmallVec::new(),
                 ),
+                ref unhandled => panic!("Unhandled declaration {:?}", unhandled),
             };
             self.tir.decls.push(Decl { param_tys, is_mut });
         }
@@ -404,6 +407,7 @@ impl Driver {
                     let terminal_expr = self.hir.imper_scopes[scope].terminal_expr;
                     self.tir.graph.add_type1_dep(id, ei!(terminal_expr));
                 },
+                ref unhandled => panic!("Unhandled declaration {:?}", unhandled),
             }
         }
         for i in 0..self.hir.exprs.len() {
@@ -447,6 +451,7 @@ impl Driver {
                     let terminal_expr = self.hir.imper_scopes[scope].terminal_expr;
                     self.tir.graph.add_type1_dep(id, ei!(terminal_expr));
                 },
+                ref unhandled => panic!("Unhandled expression {:?}", unhandled),
             }
         }
 
@@ -492,6 +497,7 @@ impl Driver {
                                 add_eval_dep!(id, self.hir.void_ty);
                             }
                         },
+                        ref unhandled => panic!("Unhandled declaration {:?}", unhandled),
                     }
         
                     // NOTE: The computed decl case in the above match expression depends on this!
@@ -527,7 +533,8 @@ impl Driver {
                         }
                         hir::Expr::While { scope, .. } => {
                             self.add_type3_scope_dep(id, scope);
-                        }
+                        },
+                        ref unhandled => panic!("Unhandled expression {:?}", unhandled),
                     }
                 }
             }
