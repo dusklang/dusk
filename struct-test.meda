@@ -1,0 +1,5 @@
+Foo :: struct {
+    a: i32
+    b: u64
+    c: u8*
+}

@@ -336,6 +336,7 @@ impl Driver {
             },
             TokenKind::Module => Ok(self.parse_module(p)),
             TokenKind::Import => Ok(self.parse_import(p)),
+            TokenKind::Struct => Ok(self.parse_struct(p)),
             TokenKind::If => Ok(self.parse_if(p)),
             TokenKind::While => {
                 let while_range = self.cur(p).range;
@@ -538,6 +539,40 @@ impl Driver {
         };
         self.hir.end_module(module, source_info::concat(mod_range, close_curly_range));
         module
+    }
+
+    fn parse_struct(&mut self, p: &mut Parser) -> ExprId {
+        let Token { kind, range: struct_range } = self.cur(p);
+        assert_eq!(kind, &TokenKind::Struct);
+        self.next(p);
+
+        assert_eq!(self.cur(p).kind, &TokenKind::OpenCurly);
+        self.next(p);
+
+        let mut fields = Vec::new();
+        let close_curly_range = loop {
+            match self.cur(p).kind {
+                TokenKind::Eof => panic!("Unexpected eof while parsing struct expression"),
+                TokenKind::CloseCurly => {
+                    let close_curly_range = self.cur(p).range;
+                    self.next(p);
+                    break close_curly_range;
+                },
+                TokenKind::Comma => { self.next(p); },
+                _ => {
+                    if let &TokenKind::Ident(name) = self.cur(p).kind {
+                        self.next(p);
+                        assert_eq!(self.cur(p).kind, &TokenKind::Colon);
+                        self.next(p);
+                        let (ty, range) = self.parse_type(p);
+                        fields.push(self.hir.field_decl(name, ty, range));
+                    } else {
+                        panic!("Unexpected token {:?}, expected field name", self.cur(p).kind);
+                    }
+                }
+            }
+        };
+        self.hir.strukt(fields, source_info::concat(struct_range, close_curly_range))
     }
 
     // Parses an open curly brace, then a list of nodes, then a closing curly brace.

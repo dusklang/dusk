@@ -438,9 +438,10 @@ impl Builder {
             panic!("tried to end imperative scope, but the top scope in the stack is not an imperative scope");
         }
     }
-    pub fn field_decl(&mut self, name: Sym, ty: ExprId, range: SourceRange) -> DeclId {
+    pub fn field_decl(&mut self, name: Sym, ty: ExprId, range: SourceRange) -> FieldDeclId {
         let field = self.field_decls.push(FieldDecl { name, ty });
-        self.decl(Decl::Field(field), name, Some(ty), range)
+        self.decl(Decl::Field(field), name, Some(ty), range);
+        field
     }
     pub fn strukt(&mut self, fields: Vec<FieldDeclId>, range: SourceRange) -> ExprId {
         let strukt = self.structs.push(Struct { fields });
