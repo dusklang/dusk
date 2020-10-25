@@ -708,7 +708,18 @@ impl Driver {
                 let branch = if condition { true_bb } else { false_bb };
                 frame.pc = func.basic_blocks[branch];
                 return None
-            }
+            },
+            &Instr::DirectFieldAccess { val, index } => {
+                let bytes = frame.results[val].as_bytes();
+                let strukt = match self.mir.type_of(val, func_ref) {
+                    Type::Struct(strukt) => strukt,
+                    _ => panic!("Can't directly get field of non-struct"),
+                };
+                let ty = self.mir.type_of(frame.pc, func_ref);
+                let size = self.mir.size_of(&ty);
+                let offset = self.mir.structs[&strukt].layout.field_offsets[index];
+                Value::from_bytes(&bytes[offset..(offset + size)])
+            },
             Instr::Parameter(_) => panic!("Invalid parameter instruction in the middle of a function!"),
         };
 

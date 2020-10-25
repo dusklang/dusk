@@ -5,7 +5,8 @@ Foo :: struct {
 }
 
 fn extract_a_from_foo(foo: Foo): i32 {
-    foo.a
+    foo_copy := foo
+    foo_copy.a
 }
 
 fn main() {

@@ -66,6 +66,7 @@ pub enum Instr {
     AddressOfStatic(StaticId),
     Pointer { op: InstrId, is_mut: bool },
     Struct { fields: SmallVec<[InstrId; 2]>, id: StructId },
+    DirectFieldAccess { val: InstrId, index: usize },
     Ret(InstrId),
     Br(BasicBlockId),
     CondBr { condition: InstrId, true_bb: BasicBlockId, false_bb: BasicBlockId },
@@ -266,6 +267,13 @@ impl Builder {
             &Instr::AddressOfStatic(statik) => self.statics[statik].ty().mut_ptr(),
             Instr::Ret(_) | Instr::Br(_) | Instr::CondBr { .. } => Type::Never,
             Instr::Parameter(ty) => ty.clone(),
+            &Instr::DirectFieldAccess { val, index } => {
+                let base_ty = self.type_of(val, func_ref);
+                match base_ty {
+                    Type::Struct(strukt) => self.structs[&strukt].field_tys[index].clone(),
+                    _ => panic!("Cannot directly access field of non-struct type {:?}!", base_ty),
+                }
+            }
         }
     }
 
@@ -561,6 +569,7 @@ impl Driver {
                             }
                             writeln!(f, "}}")?;
                         },
+                        &Instr::DirectFieldAccess { val, index } => writeln!(f, "%{} = %{}.field{}", i, val.idx(), index)?,
                         Instr::Parameter(_) => panic!("unexpected parameter!"),
                         Instr::Void => panic!("unexpected void!"),
                     };
@@ -680,8 +689,15 @@ impl Driver {
         self.build_expr(b, self.hir.imper_scopes[scope].terminal_expr, ctx, tp)
     }
 
-    fn get(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId, tp: &impl TypeProvider) -> InstrId {
-        let id = tp.selected_overload(id).expect("No overload found!");
+    fn get_base(&self, id: DeclRefId) -> ExprId {
+        match self.hir.decl_refs[id].namespace {
+            hir::Namespace::MemberRef { base_expr } => base_expr,
+            _ => panic!("Expected member ref expression"),
+        }
+    }
+
+    fn get(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[InstrId; 2]>, decl_ref_id: DeclRefId, tp: &impl TypeProvider) -> InstrId {
+        let id = tp.selected_overload(decl_ref_id).expect("No overload found!");
         match self.get_decl(id, tp) {
             Decl::Computed { get } => b.code.push(Instr::Call { arguments, func: get }),
             Decl::Stored(id) => {
@@ -698,7 +714,11 @@ impl Driver {
                 let location = b.code.push(Instr::AddressOfStatic(statik));
                 b.code.push(Instr::Load(location))
             },
-            Decl::Field { .. } => panic!("Unhandled struct field!"),
+            Decl::Field { index } => {
+                let base = self.get_base(decl_ref_id);
+                let base = self.build_expr(b, base, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                b.code.push(Instr::DirectFieldAccess { val: base, index })
+            },
         }
     }
 
