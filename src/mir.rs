@@ -8,7 +8,7 @@ use string_interner::Sym;
 
 use crate::arch::Arch;
 use crate::driver::Driver;
-use crate::ty::Type;
+use crate::ty::{Type, FloatWidth};
 use crate::typechecker as tc;
 use tc::type_provider::TypeProvider;
 use tc::CastMethod;
@@ -202,7 +202,15 @@ pub enum FunctionRef {
 }
 
 pub struct Struct {
-    field_tys: SmallVec<[Type; 2]>,
+    pub field_tys: SmallVec<[Type; 2]>,
+    pub layout: StructLayout,
+}
+
+pub struct StructLayout {
+    pub field_offsets: SmallVec<[usize; 2]>,
+    pub alignment: usize,
+    pub size: usize,
+    pub stride: usize,
 }
 
 pub struct Builder {
@@ -213,6 +221,7 @@ pub struct Builder {
     pub functions: IdxVec<FuncId, Function>,
     pub statics: IdxVec<StaticId, Const>,
     pub structs: HashMap<StructId, Struct>,
+    pub struct_layouts: HashMap<StructId, StructLayout>,
 }
 
 impl Builder {
@@ -225,6 +234,7 @@ impl Builder {
             functions: IdxVec::new(),
             statics: IdxVec::new(),
             structs: HashMap::new(),
+            struct_layouts: HashMap::new(),
         }
     }
 }
@@ -259,6 +269,84 @@ impl Builder {
             Instr::Ret(_) | Instr::Br(_) | Instr::CondBr { .. } => Type::Never,
             Instr::Parameter(ty) => ty.clone(),
         }
+    }
+
+    /// Size of an instance of a type in bytes
+    pub fn size_of(&self, ty: &Type) -> usize {
+        let arch = self.arch;
+        match ty {
+            Type::Error | Type::Void | Type::Never | Type::Ty | Type::Mod => 0,
+            Type::Int { width, .. } => {
+                let bit_width = width.bit_width(arch);
+                assert_eq!(bit_width % 8, 0, "Unexpected bit width: not a multiple of eight!");
+                bit_width / 8
+            },
+            Type::Float(width) => match width {
+                FloatWidth::W32 => 32 / 8,
+                FloatWidth::W64 => 64 / 8,
+            },
+            Type::Pointer(_) => {
+                let bit_width = arch.pointer_size();
+                assert_eq!(bit_width % 8, 0, "Unexpected bit width: not a multiple of eight!");
+                bit_width / 8
+            },
+            Type::Bool => 1,
+            &Type::Struct(id) => self.structs[&id].layout.size,
+        }
+    }
+
+    /// Stride of an instance of a type in bytes
+    pub fn stride_of(&self, ty: &Type) -> usize {
+        match *ty {
+            Type::Struct(id) => self.structs[&id].layout.stride,
+            // Otherwise, stride == size
+            _ => self.size_of(ty),
+        }
+    }
+
+    /// Minimum alignment of an instance of a type in bytes
+    pub fn align_of(&self, ty: &Type) -> usize {
+        match *ty {
+            Type::Struct(id) => self.structs[&id].layout.alignment,
+            // Otherwise, alignment == size
+            _ => self.size_of(ty),
+        }
+    }
+
+    /// Compute the layout (field offsets, alignment, size, and stride) for a struct
+    pub fn layout_struct(&self, field_tys: &[Type]) -> StructLayout {
+        // Get max alignment of all the fields.
+        let alignment = field_tys.iter()
+            .map(|ty| self.align_of(ty))
+            .max()
+            .unwrap_or(0);
+
+        fn next_multiple_of(n: usize, fac: usize) -> usize {
+            match fac {
+                0 => n,
+                _ => {
+                    let fac_minus_1 = fac - 1;
+                    (n + fac_minus_1) - ((n + fac_minus_1) % fac)
+                }
+            }
+        }
+        let mut field_offsets = SmallVec::new();
+        if !field_tys.is_empty() { field_offsets.push(0); }
+        let mut last_size = 0;
+        for i in 1..field_tys.len() {
+            let prev_field_end = field_offsets[i - 1] + last_size;
+            field_offsets.push(
+                next_multiple_of(
+                    prev_field_end,
+                    self.align_of(&field_tys[i])
+                )
+            );
+            last_size = self.size_of(&field_tys[i]);
+        }
+        let size = field_offsets.last().copied().unwrap_or(0) + last_size;
+        let stride = next_multiple_of(size, alignment);
+
+        StructLayout { field_offsets, alignment, size, stride }
     }
 }
 

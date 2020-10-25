@@ -4,6 +4,7 @@ use arrayvec::ArrayVec;
 use bitflags::bitflags;
 
 use crate::arch::Arch;
+use crate::builder::StructId;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum IntWidth {
@@ -68,6 +69,7 @@ pub enum Type {
     Float(FloatWidth),
     // TODO: Eliminate this separate heap allocation by interning all types into an IdxVec
     Pointer(Box<QualType>),
+    Struct(StructId),
     Bool,
     Void,
     Mod,
@@ -96,28 +98,6 @@ impl Type {
             Ok(())
         } else {
             Err(not_implemented)
-        }
-    }
-
-    /// Size of an instance of the type in bytes
-    pub fn size(&self, arch: Arch) -> usize {
-        match self {
-            Type::Error | Type::Void | Type::Never | Type::Ty | Type::Mod => 0,
-            Type::Int { width, .. } => {
-                let bit_width = width.bit_width(arch);
-                assert_eq!(bit_width % 8, 0, "Unexpected bit width: not a multiple of eight!");
-                bit_width / 8
-            },
-            Type::Float(width) => match width {
-                FloatWidth::W32 => 32 / 8,
-                FloatWidth::W64 => 64 / 8,
-            },
-            Type::Pointer(_) => {
-                let bit_width = arch.pointer_size();
-                assert_eq!(bit_width % 8, 0, "Unexpected bit width: not a multiple of eight!");
-                bit_width / 8
-            },
-            Type::Bool => 1,
         }
     }
 

@@ -206,7 +206,7 @@ impl Value {
                 &Type::Int { width, is_signed } => Value::from_big_int(BigInt::from(lit), width, is_signed, mir),
                 _ => panic!("unexpected int constant type {:?}", ty),
             },
-            Const::Float { lit, ref ty } => match ty.size(mir.arch) {
+            Const::Float { lit, ref ty } => match mir.size_of(ty) {
                 4 => Value::from_f32(lit as f32),
                 8 => Value::from_f64(lit.try_into().unwrap()),
                 _ => panic!("Unrecognized float constant size"),
@@ -434,7 +434,7 @@ impl Driver {
             Instr::Const(konst) => Value::from_const(konst, &self.mir),
             Instr::Alloca(ty) => {
                 let mut storage = Vec::new();
-                storage.resize(ty.size(self.mir.arch), 0);
+                storage.resize(self.mir.size_of(ty), 0);
                 Value::Dynamic(storage.into_boxed_slice())
             },
             &Instr::LogicalNot(val) => {
@@ -567,7 +567,8 @@ impl Driver {
             &Instr::Reinterpret(instr, _) => frame.results[instr].clone(),
             &Instr::Truncate(instr, ref ty) => {
                 let bytes = frame.results[instr].as_bytes();
-                Value::from_bytes(&bytes[0..ty.size(self.mir.arch)])
+                let new_size = self.mir.size_of(ty);
+                Value::from_bytes(&bytes[0..new_size])
             },
             &Instr::SignExtend(val, ref dest_ty) => {
                 let src_ty = &self.mir.type_of(val, &func_ref);
@@ -593,7 +594,7 @@ impl Driver {
             },
             &Instr::FloatCast(instr, ref ty) => {
                 let val = &frame.results[instr];
-                match (val.as_bytes().len(), ty.size(self.mir.arch)) {
+                match (val.as_bytes().len(), self.mir.size_of(ty)) {
                     (x, y) if x == y => val.clone(),
                     (4, 8) => Value::from_f64(val.as_f32() as f64),
                     (8, 4) => Value::from_f32(val.as_f64() as f32),
@@ -604,7 +605,8 @@ impl Driver {
             },
             &Instr::FloatToInt(instr, ref dest_ty) => {
                 let val = &frame.results[instr];
-                let src_size = self.mir.type_of(instr, &func_ref).size(self.mir.arch);
+                let src_ty = self.mir.type_of(instr, &func_ref);
+                let src_size = self.mir.size_of(&src_ty);
 
                 match dest_ty {
                     &Type::Int { width, is_signed } => {
@@ -631,7 +633,7 @@ impl Driver {
             &Instr::IntToFloat(instr, ref dest_ty) => {
                 let val = &frame.results[instr];
                 let src_ty = &self.mir.type_of(instr, &func_ref);
-                let dest_size = dest_ty.size(self.mir.arch);
+                let dest_size = self.mir.size_of(dest_ty);
                 match src_ty {
                     &Type::Int { is_signed, .. } => {
                         let big_int = val.as_big_int(is_signed);
@@ -655,7 +657,8 @@ impl Driver {
                 }
             }
             &Instr::Load(location) => {
-                let size = self.mir.type_of(frame.pc, &func_ref).size(self.mir.arch);
+                let ty = self.mir.type_of(frame.pc, &func_ref);
+                let size = self.mir.size_of(&ty);
                 frame.results[location].load(size)
             },
             &Instr::Store { location, value } => {
