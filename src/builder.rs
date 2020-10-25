@@ -89,6 +89,9 @@ pub enum Intrinsic {
     Print,
     Malloc,
     Free,
+    SizeOf,
+    StrideOf,
+    AlignOf,
 
     // Named types
     I8,
@@ -155,6 +158,9 @@ impl Intrinsic {
             Ty => "type",
             Module => "module",
             PrintType => "print_type",
+            AlignOf => "align_of",
+            SizeOf => "size_of",
+            StrideOf => "stride_of",
         }
     }
 }

@@ -9,11 +9,42 @@ fn extract_a_from_foo(foo: Foo): i32 {
     foo_copy.a
 }
 
+fn make_foo(a: i32, b: u64, c: u8*): Foo {
+    foo_ptr :: malloc(size_of(Foo)) as Foo *mut
+    offset :: foo_ptr as usize
+
+    a_ptr :: ((offset + 0) as i32 *mut)
+    *a_ptr = a
+
+    b_ptr :: ((offset + 8) as u64 *mut)
+    *b_ptr = b
+
+    c_ptr :: ((offset + 16) as u8* *mut)
+    *c_ptr = c
+
+    foo :: *foo_ptr
+    free(foo_ptr as void *mut)
+
+    foo
+}
+
+std :: import("std.meda")
+
 fn main() {
     internal_struct :: struct {
         foo: Foo
         bar: struct { a: bool, b: u32 }
         baz: i32
     }
+
+    foo :: make_foo(24, 782, "Hello, world!")
+    print("foo = Foo { a: ")
+    std.print_num(foo.a)
+    print(", b: ")
+    std.print_num(foo.b as i32)
+    print(", c: \"")
+    print(foo.c)
+    print("\" }\n")
+
     print_type(internal_struct)
 }

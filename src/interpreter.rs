@@ -560,7 +560,22 @@ impl Driver {
                         assert_eq!(arguments.len(), 1);
                         print!("{:?}", frame.results[arguments[0]].as_ty());
                         Value::Nothing
-                    }
+                    },
+                    Intrinsic::AlignOf => {
+                        assert_eq!(arguments.len(), 1);
+                        let ty = frame.results[arguments[0]].as_ty();
+                        Value::from_usize(self.mir.align_of(ty))
+                    },
+                    Intrinsic::StrideOf => {
+                        assert_eq!(arguments.len(), 1);
+                        let ty = frame.results[arguments[0]].as_ty();
+                        Value::from_usize(self.mir.stride_of(ty))
+                    },
+                    Intrinsic::SizeOf => {
+                        assert_eq!(arguments.len(), 1);
+                        let ty = frame.results[arguments[0]].as_ty();
+                        Value::from_usize(self.mir.size_of(ty))
+                    },
                     _ => panic!("Call to unimplemented intrinsic {:?}", intr),
                 }
             },

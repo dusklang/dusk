@@ -90,6 +90,10 @@ impl Driver {
         self.add_intrinsic(Print, smallvec![uu8], self.hir.void_ty, true);
         self.add_intrinsic(PrintType, smallvec![type_type], self.hir.void_ty, true);
 
+        self.add_intrinsic(AlignOf, smallvec![type_type], uusize, true);
+        self.add_intrinsic(SizeOf, smallvec![type_type], uusize, true);
+        self.add_intrinsic(StrideOf, smallvec![type_type], uusize, true);
+
         macro_rules! types {
             ($($ty:ident),+) => {
                 $(self.add_intrinsic($ty, SmallVec::new(), type_type, false);)+
