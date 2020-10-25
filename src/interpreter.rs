@@ -678,6 +678,23 @@ impl Driver {
             &Instr::Pointer { op, is_mut } => {
                 Value::from_ty(frame.results[op].as_ty().clone().ptr_with_mut(is_mut))
             },
+            &Instr::Struct { ref fields, id } => {
+                if !self.mir.structs.contains_key(&id) {
+                    let mut field_tys = SmallVec::new();
+                    for &field in fields {
+                        field_tys.push(frame.results[field].as_ty().clone());
+                    }
+                    let layout = self.mir.layout_struct(&field_tys);
+                    self.mir.structs.insert(
+                        id,
+                        mir::Struct {
+                            field_tys,
+                            layout,
+                        }
+                    );
+                }
+                Value::from_ty(Type::Struct(id))
+            },
             &Instr::Ret(instr) => {
                 let val = mem::replace(&mut frame.results[instr], Value::Nothing);
                 return Some(val)

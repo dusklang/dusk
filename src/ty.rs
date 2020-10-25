@@ -5,6 +5,7 @@ use bitflags::bitflags;
 
 use crate::arch::Arch;
 use crate::builder::StructId;
+use crate::index_vec::Idx;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum IntWidth {
@@ -246,6 +247,8 @@ impl fmt::Debug for Type {
                     write!(f, "*")
                 }
             },
+            // TODO: print out fields (issue #76)
+            &Type::Struct(id) => write!(f, "struct{}", id.idx()),
         }
     }
 }

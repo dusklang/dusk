@@ -5,5 +5,20 @@ Foo :: struct {
 }
 
 fn take_foo(foo: Foo) {
-    
+    internal_struct :: struct {
+        foo: Foo
+        bar: struct { a: bool, b: u32 }
+        baz: i32
+    }
+    foo_copy := foo
+    foo_ptr := &foo_copy
+}
+
+fn main() {
+    internal_struct :: struct {
+        foo: Foo
+        bar: struct { a: bool, b: u32 }
+        baz: i32
+    }
+    print_type(internal_struct)
 }

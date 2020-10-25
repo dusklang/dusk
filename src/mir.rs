@@ -221,7 +221,6 @@ pub struct Builder {
     pub functions: IdxVec<FuncId, Function>,
     pub statics: IdxVec<StaticId, Const>,
     pub structs: HashMap<StructId, Struct>,
-    pub struct_layouts: HashMap<StructId, StructLayout>,
 }
 
 impl Builder {
@@ -234,7 +233,6 @@ impl Builder {
             functions: IdxVec::new(),
             statics: IdxVec::new(),
             structs: HashMap::new(),
-            struct_layouts: HashMap::new(),
         }
     }
 }
@@ -552,6 +550,17 @@ impl Driver {
                         &Instr::FloatCast(val, ref ty) => writeln!(f, "%{} = floatcast %{} as {:?}", i, val.idx(), ty)?,
                         &Instr::IntToFloat(val, ref ty) => writeln!(f, "%{} = inttofloat %{} as {:?}", i, val.idx(), ty)?,
                         &Instr::FloatToInt(val, ref ty) => writeln!(f, "%{} = floattoint %{} as {:?}", i, val.idx(), ty)?,
+                        Instr::Struct { fields, .. } => {
+                            write!(f, "%{} = struct {{ ", i)?;
+                            for i in 0..fields.len() {
+                                write!(f, "%{}", fields[i].idx())?;
+                                if i < (fields.len() - 1) {
+                                    write!(f, ",")?;
+                                }
+                                write!(f, " ")?;
+                            }
+                            writeln!(f, "}}")?;
+                        },
                         Instr::Parameter(_) => panic!("unexpected parameter!"),
                         Instr::Void => panic!("unexpected void!"),
                     };
@@ -689,6 +698,7 @@ impl Driver {
                 let location = b.code.push(Instr::AddressOfStatic(statik));
                 b.code.push(Instr::Load(location))
             },
+            Decl::Field { .. } => panic!("Unhandled struct field!"),
         }
     }
 
@@ -706,7 +716,8 @@ impl Driver {
             Decl::Static(statik) => {
                 let location = b.code.push(Instr::AddressOfStatic(statik));
                 b.code.push(Instr::Store { location, value })
-            }
+            },
+            Decl::Field { .. } => panic!("Unhandled struct field!"),
         }
     }
 
@@ -721,6 +732,7 @@ impl Driver {
             Decl::LocalConst { .. } | Decl::Const(_) => panic!("can't modify a constant!"),
             Decl::Intrinsic(_, _) => panic!("can't modify an intrinsic! (yet?)"),
             Decl::Static(statik) => b.code.push(Instr::AddressOfStatic(statik)),
+            Decl::Field { .. } => panic!("Unhandled struct field!"),
         }
     }
 
