@@ -576,6 +576,26 @@ impl Driver {
                         let ty = frame.results[arguments[0]].as_ty();
                         Value::from_usize(self.mir.size_of(ty))
                     },
+                    Intrinsic::OffsetOf => {
+                        assert_eq!(arguments.len(), 2);
+                        let ty = frame.results[arguments[0]].as_ty();
+                        let field_name = unsafe { CStr::from_ptr(frame.results[arguments[1]].as_raw_ptr() as *const _) };
+                        let field_name = self.interner.get_or_intern(field_name.to_str().unwrap());
+                        let mut offset = None;
+                        match *ty {
+                            Type::Struct(strukt) => {
+                                for (index, &field) in self.hir.structs[strukt].fields.iter().enumerate() {
+                                    if field_name == self.hir.field_decls[field].name {
+                                        offset = Some(self.mir.structs[&strukt].layout.field_offsets[index]);
+                                        break;
+                                    }
+                                }
+                            }
+                            _ => panic!("Can't get field offset on a non-struct type"),
+                        }
+                        let offset = offset.expect("No such field name in call to offset_of");
+                        Value::from_usize(offset)
+                    },
                     _ => panic!("Call to unimplemented intrinsic {:?}", intr),
                 }
             },

@@ -93,6 +93,7 @@ impl Driver {
         self.add_intrinsic(AlignOf, smallvec![type_type], uusize, true);
         self.add_intrinsic(SizeOf, smallvec![type_type], uusize, true);
         self.add_intrinsic(StrideOf, smallvec![type_type], uusize, true);
+        self.add_intrinsic(OffsetOf, smallvec![type_type, u8_ptr], uusize, true);
 
         macro_rules! types {
             ($($ty:ident),+) => {

@@ -92,6 +92,7 @@ pub enum Intrinsic {
     SizeOf,
     StrideOf,
     AlignOf,
+    OffsetOf,
 
     // Named types
     I8,
@@ -161,6 +162,7 @@ impl Intrinsic {
             AlignOf => "align_of",
             SizeOf => "size_of",
             StrideOf => "stride_of",
+            OffsetOf => "offset_of",
         }
     }
 }
