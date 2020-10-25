@@ -264,7 +264,6 @@ impl Driver {
             let mut terminated = false;
             while l.has_chars() && !self.is_newline(l) {
                 let char_to_insert = if in_escape_mode {
-                    in_escape_mode = false;
                     if let Some(character) = l.special_escape_characters.get(self.cur_tok(l)) {
                         character
                     } else {
@@ -288,7 +287,7 @@ impl Driver {
                         self.advance(l);
                         in_escape_mode = true;
                     },
-                    "\"" => {
+                    "\"" if !in_escape_mode => {
                         self.advance(l);
                         terminated = true;
                         break;
@@ -296,6 +295,7 @@ impl Driver {
                     char_to_insert => {
                         lit += char_to_insert;
                         self.advance(l);
+                        in_escape_mode = false;
                     }
                 }
             }
