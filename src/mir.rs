@@ -337,8 +337,11 @@ impl Builder {
             }
         }
         let mut field_offsets = SmallVec::new();
-        if !field_tys.is_empty() { field_offsets.push(0); }
         let mut last_size = 0;
+        if !field_tys.is_empty() {
+            field_offsets.push(0);
+            last_size = self.size_of(&field_tys[0]);
+        }
         for i in 1..field_tys.len() {
             let prev_field_end = field_offsets[i - 1] + last_size;
             field_offsets.push(
