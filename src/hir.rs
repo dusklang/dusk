@@ -148,6 +148,7 @@ pub enum Decl {
 
 #[derive(Debug)]
 pub struct FieldDecl {
+    pub decl: DeclId,
     pub name: Sym,
     pub ty: ExprId,
     pub index: usize,
@@ -441,8 +442,10 @@ impl Builder {
         }
     }
     pub fn field_decl(&mut self, name: Sym, ty: ExprId, index: usize, range: SourceRange) -> FieldDeclId {
-        let field = self.field_decls.push(FieldDecl { name, ty, index });
-        self.decl(Decl::Field(field), name, Some(ty), range);
+        let decl = DeclId::new(self.decls.len());
+        let field = self.field_decls.push(FieldDecl { decl, name, ty, index });
+        let decl2 = self.decl(Decl::Field(field), name, Some(ty), range);
+        debug_assert_eq!(decl, decl2);
         field
     }
     pub fn strukt(&mut self, fields: Vec<FieldDeclId>, range: SourceRange) -> ExprId {

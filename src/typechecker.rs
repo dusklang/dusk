@@ -541,14 +541,24 @@ impl Driver {
         for (num, unit) in units.mock_units.iter().enumerate() {
             let mut mock_tp = MockTypeProvider::new(tp);
             self.run_pass_1(&unit.items, UnitKind::Mock(num), 0, &mut mock_tp);
-            if mock_tp.constraints(unit.main_expr).can_unify_to(&Type::Mod.into()).is_ok() {
-                self.run_pass_2(&unit.items, UnitKind::Mock(num), &mut mock_tp);
-                let module = self.eval_expr(unit.main_expr, &mock_tp);
-                match module {
-                    Const::Mod(scope) => self.tir.expr_namespaces.entry(unit.main_expr).or_default()
-                        .push(ExprNamespace::Mod(scope)),
-                    _ => panic!("Unexpected const kind, expected module!"),
-                }
+            let one_of = mock_tp.constraints(unit.main_expr)
+                .one_of().iter()
+                .map(|ty| ty.ty.clone())
+                .collect::<Vec<_>>();
+            for ty in one_of {
+                let ns = match ty {
+                    Type::Mod => {
+                        self.run_pass_2(&unit.items, UnitKind::Mock(num), &mut mock_tp);
+                        let module = self.eval_expr(unit.main_expr, &mock_tp);
+                        match module {
+                            Const::Mod(scope) => ExprNamespace::Mod(scope),
+                            _ => panic!("Unexpected const kind, expected module!"),
+                        }
+                    },
+                    Type::Struct(strukt) => ExprNamespace::Struct(strukt),
+                    _ => continue,
+                };
+                self.tir.expr_namespaces.entry(unit.main_expr).or_default().push(ns);
             }
         }
     }

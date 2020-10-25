@@ -136,7 +136,8 @@ pub struct Units {
 /// i.e. what are all the declarations that you might be able to access as members of an expression
 #[derive(Debug)]
 pub enum ExprNamespace {
-    Mod(ModScopeId)
+    Mod(ModScopeId),
+    Struct(StructId),
 }
 
 #[derive(Debug, Default)]
@@ -185,6 +186,15 @@ impl Driver {
             );
         }
     }
+    fn find_overloads_in_struct(&self, decl_ref: &hir::DeclRef, strukt: StructId, overloads: &mut HashSet<DeclId>) {
+        for &field in &self.hir.structs[strukt].fields {
+            let field = &self.hir.field_decls[field];
+            if field.name == decl_ref.name {
+                overloads.insert(field.decl);
+                return;
+            }
+        }
+    }
     // Returns the overloads for a declref, if they are known (they won't be if it's a member ref)
     pub fn find_overloads(&self, decl_ref: &hir::DeclRef) -> Vec<DeclId> {
         let mut overloads = HashSet::new();
@@ -222,6 +232,7 @@ impl Driver {
                         for ns in expr_namespaces {
                             match *ns {
                                 ExprNamespace::Mod(scope) => self.find_overloads_in_mod(decl_ref, scope, &mut overloads),
+                                ExprNamespace::Struct(id) => self.find_overloads_in_struct(decl_ref, id, &mut overloads),
                             }
                         }
                     }

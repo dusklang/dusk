@@ -4,14 +4,8 @@ Foo :: struct {
     c: u8*
 }
 
-fn take_foo(foo: Foo) {
-    internal_struct :: struct {
-        foo: Foo
-        bar: struct { a: bool, b: u32 }
-        baz: i32
-    }
-    foo_copy := foo
-    foo_ptr := &foo_copy
+fn extract_a_from_foo(foo: Foo): i32 {
+    foo.a
 }
 
 fn main() {

@@ -28,6 +28,14 @@ impl ConstraintList {
         Self { trait_impls, one_of, preferred_type }
     }
 
+    pub fn one_of(&self) -> &[QualType] {
+        if let Some(one_of) = &self.one_of {
+            one_of
+        } else {
+            &[]
+        }
+    }
+
     pub fn solve(&self) -> Result<QualType, SolveError> {
         if let Some(one_of) = &self.one_of {
             if one_of.len() == 1 {
