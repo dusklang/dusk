@@ -352,6 +352,9 @@ impl Driver {
             &hir::Expr::Struct(struct_id) => {
                 let field_tys = self.hir.structs[struct_id].fields.iter().map(|&id| self.hir.field_decls[id].ty).collect();
                 insert_expr!(structs, Struct { field_tys })
+            },
+            hir::Expr::StructLit { .. } => {
+                unimplemented!()
             }
         }
     }
@@ -475,6 +478,11 @@ impl Driver {
                         self.tir.graph.add_type1_dep(id, ei!(field.ty));
                     }
                 },
+                hir::Expr::StructLit { ref fields, .. } => {
+                    for field in fields {
+                        self.tir.graph.add_type1_dep(id, ei!(field.expr));
+                    }
+                },
             }
         }
 
@@ -534,6 +542,9 @@ impl Driver {
                             | hir::Expr::Pointer { .. } | hir::Expr::Set { .. } | hir::Expr::Mod { .. } |  hir::Expr::Import { .. }
                             | hir::Expr::Struct(_) => {},
                         hir::Expr::Cast { ty, .. } => {
+                            add_eval_dep!(id, ty);
+                        },
+                        hir::Expr::StructLit { ty, .. } => {
                             add_eval_dep!(id, ty);
                         },
                         hir::Expr::Ret { decl, .. } => {

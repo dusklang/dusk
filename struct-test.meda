@@ -1,20 +1,14 @@
+D :: struct {
+    e: f32
+    f: f64
+}
+
 Foo :: struct {
     a: i32
     b: u64
     c: u8*
-    d: struct {
-        e: f32
-        f: f64
-    }
+    d: D
     g: u8
-}
-
-fn make_foo(): Foo {
-    foo_ptr :: malloc(size_of(Foo)) as Foo *mut
-    foo :: *foo_ptr
-    free(foo_ptr as void *mut)
-
-    foo
 }
 
 std :: import("std.meda")
@@ -40,13 +34,17 @@ fn main() {
         baz: i32
     }
 
-    foo := make_foo()
-    foo.a = 24
-    foo.b = 782
-    foo.c = "Hello, world!"
-    // Issue #82
-    foo.d.e = 13.5 as f32
-    foo.d.f = 12.2 as f64
+    foo := Foo {
+        a: 24
+        b: 782
+        c: "Hello, world!"
+        d: D {
+            e: 13.5 as f32
+            f: 12.2 as f64
+        }
+        g: 32
+    }
+    foo.c = std.concat(foo.c, "\n")
 
     print_foo(foo)
 

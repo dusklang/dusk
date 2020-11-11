@@ -8,6 +8,7 @@ use crate::builder::{ExprId, ImperScopeId, BinOp, UnOp, OpPlacement, Intrinsic};
 use crate::ty::Type;
 use crate::error::Error;
 use crate::source_info::{self, SourceRange, SourceFileId};
+use crate::hir::FieldAssignment;
 
 struct Parser {
     file: SourceFileId,
@@ -213,9 +214,41 @@ impl Driver {
         Some((op, range))
     }
 
-    fn try_parse_term(&mut self, p: &mut Parser) -> Result<ExprId, TokenKind> {
-        let mut term = self.try_parse_non_cast_term(p)?;
+    fn try_parse_term(&mut self, p: &mut Parser, parse_struct_lits: bool) -> Result<ExprId, TokenKind> {
+        let mut term = self.try_parse_restricted_term(p)?;
         let mut range = self.hir.get_range(term);
+        if parse_struct_lits {
+            if let TokenKind::OpenCurly = self.cur(p).kind {
+                self.next(p);
+                let mut fields = Vec::new();
+                let close_curly_range = loop {
+                    match self.cur(p).kind {
+                        TokenKind::Eof => panic!("Unexpected eof while parsing struct literal"),
+                        TokenKind::CloseCurly => {
+                            let close_curly_range = self.cur(p).range;
+                            self.next(p);
+                            break close_curly_range;
+                        },
+                        TokenKind::Comma => { self.next(p); },
+                        _ => {
+                            if let &TokenKind::Ident(name) = self.cur(p).kind {
+                                self.next(p);
+                                assert_eq!(self.cur(p).kind, &TokenKind::Colon);
+                                self.next(p);
+                                let expr = self.parse_expr(p);
+                                fields.push(
+                                    FieldAssignment { name, expr }
+                                );
+                            } else {
+                                panic!("Unexpected token {:?}, expected field name", self.cur(p).kind);
+                            }
+                        }
+                    }
+                };
+                let lit_range = source_info::concat(range, close_curly_range);
+                term = self.hir.struct_lit(term, fields, lit_range);
+            }
+        }
         while let TokenKind::As = self.cur(p).kind {
             self.next(p);
             let (ty, ty_range) = self.parse_type(p);
@@ -286,9 +319,10 @@ impl Driver {
         )
     }
 
-    fn try_parse_non_cast_term(&mut self, p: &mut Parser) -> Result<ExprId, TokenKind> {
+    /// A restricted term doesn't include cast or struct literal expressions
+    fn try_parse_restricted_term(&mut self, p: &mut Parser) -> Result<ExprId, TokenKind> {
         if let Some((op, op_range)) = self.parse_prefix_operator(p) {
-            let term = self.try_parse_non_cast_term(p)
+            let term = self.try_parse_restricted_term(p)
                 .unwrap_or_else(|tok| panic!("Expected expression after unary operator, found {:?}", tok));
             let term_range = self.hir.get_range(term);
             return Ok(self.un_op(op, term, source_info::concat(op_range, term_range)));
@@ -346,14 +380,14 @@ impl Driver {
             TokenKind::While => {
                 let while_range = self.cur(p).range;
                 self.next(p);
-                let condition = self.parse_expr(p);
+                let condition = self.parse_non_struct_lit_expr(p);
                 let (scope, scope_range) = self.parse_scope(p);
                 Ok(self.hir.while_expr(condition, scope, source_info::concat(while_range, scope_range)))
             },
             TokenKind::Return => {
                 let ret_range = self.cur(p).range;
                 self.next(p);
-                let ret_expr = self.try_parse_expr(p).unwrap_or_else(|_| self.hir.void_expr);
+                let ret_expr = self.try_parse_expr(p, true).unwrap_or_else(|_| self.hir.void_expr);
                 let expr_range = self.hir.get_range(ret_expr);
                 Ok(self.hir.ret(ret_expr, source_info::concat(ret_range, expr_range)))
             },
@@ -391,11 +425,11 @@ impl Driver {
         })
     }
 
-    fn try_parse_expr(&mut self, p: &mut Parser) -> Result<ExprId, TokenKind> {
+    fn try_parse_expr(&mut self, p: &mut Parser, parse_struct_lits: bool) -> Result<ExprId, TokenKind> {
         const INLINE: usize = 5;
         let mut expr_stack = SmallVec::<[ExprId; INLINE]>::new();
         let mut op_stack = SmallVec::<[BinOp; INLINE]>::new();
-        expr_stack.push(self.try_parse_term(p)?);
+        expr_stack.push(self.try_parse_term(p, parse_struct_lits)?);
 
         // It's kind of silly that this is a macro, but I'm not aware of any other
         // way to do it without upsetting the borrow checker?
@@ -421,15 +455,20 @@ impl Driver {
                 pop_stacks!();
             }
             op_stack.push(op);
-            expr_stack.push(self.try_parse_term(p)?);
+            expr_stack.push(self.try_parse_term(p, parse_struct_lits)?);
         }
         while !op_stack.is_empty() { pop_stacks!(); }
 
         Ok(expr_stack.pop().unwrap())
     }
 
+    fn parse_non_struct_lit_expr(&mut self, p: &mut Parser) -> ExprId {
+        self.try_parse_expr(p, false)
+            .unwrap_or_else(|tok| panic!("UNHANDLED TERM: {:#?}", tok))
+    }
     fn parse_expr(&mut self, p: &mut Parser) -> ExprId {
-        self.try_parse_expr(p).unwrap_or_else(|tok| panic!("UNHANDLED TERM: {:#?}", tok))
+        self.try_parse_expr(p, true)
+            .unwrap_or_else(|tok| panic!("UNHANDLED TERM: {:#?}", tok))
     }
 
     fn parse_if(&mut self, p: &mut Parser) -> ExprId {
@@ -437,7 +476,7 @@ impl Driver {
         let if_range = if_range;
         assert_eq!(kind, &TokenKind::If);
         self.next(p);
-        let condition = self.parse_expr(p);
+        let condition = self.parse_non_struct_lit_expr(p);
         let (then_scope, then_range) = self.parse_scope(p);
         let mut range = source_info::concat(if_range, then_range);
         let else_scope = if let TokenKind::Else = self.cur(p).kind {
@@ -690,7 +729,7 @@ impl Driver {
         //     For example: `foo: SomeType = ...` <- the parser would think you were assigning `...` to `SomeType` and
         //     taking the `void` result of that assignment as the type of variable declaration `foo`
         // TODO: add statements as a slight superset of expressions which includes assignments.
-        let ty = self.try_parse_non_cast_term(p).unwrap();
+        let ty = self.try_parse_restricted_term(p).unwrap();
         let end_range = self.cur(p).range;
         let range = source_info::concat(begin_range, end_range);
 

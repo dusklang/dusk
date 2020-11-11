@@ -37,6 +37,16 @@ pub enum Expr {
     Mod { id: ModScopeId },
     Import { file: SourceFileId },
     Struct(StructId),
+    StructLit {
+        ty: ExprId,
+        fields: Vec<FieldAssignment>,
+    },
+}
+
+#[derive(Debug)]
+pub struct FieldAssignment {
+    pub name: Sym,
+    pub expr: ExprId,
 }
 
 /// A declaration in local (imperative) scope
@@ -451,6 +461,9 @@ impl Builder {
     pub fn strukt(&mut self, fields: Vec<FieldDeclId>, range: SourceRange) -> ExprId {
         let strukt = self.structs.push(Struct { fields });
         self.push(Expr::Struct(strukt), range)
+    }
+    pub fn struct_lit(&mut self, ty: ExprId, fields: Vec<FieldAssignment>, range: SourceRange) -> ExprId {
+        self.push(Expr::StructLit { ty, fields }, range)
     }
     pub fn begin_module(&mut self) -> ExprId {
         let parent = self.cur_namespace();

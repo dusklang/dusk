@@ -1064,6 +1064,9 @@ impl Driver {
                 }
                 b.code.push(Instr::Struct { fields, id }).direct()
             },
+            Expr::StructLit { .. } => {
+                unimplemented!()
+            },
             Expr::Deref(operand) => return self.build_expr(
                 b,
                 operand,
