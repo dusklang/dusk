@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 use crate::driver::Driver;
-use crate::builder::{ExprId, DeclId};
+use crate::builder::{ExprId, DeclId, ItemId};
 use crate::index_vec::{Idx, IdxVec};
 
 newtype_index!(SourceFileId pub);
@@ -99,14 +99,18 @@ impl Driver {
     }
 
     #[allow(dead_code)]
+    pub fn print_item(&self, item: ItemId) {
+        self.print_range(self.hir.source_ranges[item].clone());
+    }
+
+    #[allow(dead_code)]
     pub fn print_expr(&self, id: ExprId) {
-        self.print_range(self.hir.get_range(id));
+        self.print_item(self.hir.expr_to_items[id]);
     }
 
     #[allow(dead_code)]
     pub fn print_decl(&self, id: DeclId) {
-        let item = self.hir.decl_to_items[id];
-        self.print_range(self.hir.source_ranges[item].clone());
+        self.print_item(self.hir.decl_to_items[id]);
     }
 }
 
