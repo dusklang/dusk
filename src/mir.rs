@@ -1037,7 +1037,7 @@ impl Driver {
                 operand,
                 Context::new(ctx.indirection + 1, ctx.data, ctx.control),
                 tp,
-            ).get_address(),
+            ),
             Expr::Pointer { expr, is_mut } => {
                 let op = self.build_expr(
                     b,

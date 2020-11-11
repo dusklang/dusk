@@ -6,6 +6,7 @@ Foo :: struct {
         e: f32
         f: f64
     }
+    g: u8
 }
 
 fn make_foo(): Foo {
@@ -44,8 +45,8 @@ fn main() {
     foo.b = 782
     foo.c = "Hello, world!"
     // Issue #82
-    foo.d.e = 6.5 as f32
-    foo.d.f = 12
+    foo.d.e = 13.5 as f32
+    foo.d.f = 12.2 as f64
 
     print_foo(foo)
 
