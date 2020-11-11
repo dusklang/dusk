@@ -109,12 +109,12 @@ impl Function {
 }
 
 /// What to do with a value
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 enum DataDest {
     /// This value needs to be returned from the current function
     Ret,
     /// A particular value needs to be assigned to this value
-    Receive { value: InstrId, expr: ExprId },
+    Receive { value: InstrId },
     /// This value needs to be assigned to a particular expression
     Set { dest: ExprId },
     /// This value needs to be written to a particular memory location
@@ -148,11 +148,10 @@ impl Value {
         }
     }
 
-    fn follow_ptr(self) -> Value {
+    fn adjusted(self, indirection: i8) -> Value {
         Value {
             instr: self.instr,
-            // See comment above in get_address() to see why we're adding here
-            indirection: self.indirection + 1
+            indirection: self.indirection - indirection,
         }
     }
 }
@@ -171,36 +170,34 @@ impl InstrId {
             indirection: 1,
         }
     }
-
-    fn subdirect(self) -> Value {
-        Value {
-            instr: self,
-            indirection: -1,
-        }
-    }
 }
 
 /// Where to go after the current value is computed (whether implicitly or explicitly, such as via a `break` in a loop)
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 enum ControlDest {
     Continue,
     Unreachable,
     Block(BasicBlockId),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 struct Context {
+    /// Relative to a Value indirection of 0, a:
+    ///   - positive indirection means I need to move the value further away from me
+    ///   - negative indirection means I need to get closer to the value
+    indirection: i8,
     data: DataDest,
     control: ControlDest,
 }
 
 impl Context {
-    fn new(data: DataDest, control: ControlDest) -> Context {
-        Context { data, control }
+    fn new(indirection: i8, data: DataDest, control: ControlDest) -> Context {
+        Context { indirection, data, control }
     }
 
     fn redirect(&self, read: Option<InstrId>, kontinue: Option<BasicBlockId>) -> Context {
         Context::new(
+            self.indirection,
             match (&self.data, read) {
                 (DataDest::Read, Some(location)) => DataDest::Store { location },
                 (x, _) => x.clone(),
@@ -212,7 +209,6 @@ impl Context {
         )
     }
 }
-
 
 impl Driver {
     fn expr_to_const(&mut self, expr: ExprId, ty: Type) -> Const {
@@ -710,7 +706,7 @@ impl Driver {
             basic_blocks,
             stored_decl_locs: IdxVec::new(),
         };
-        let ctx = Context::new(DataDest::Ret, ControlDest::Unreachable);
+        let ctx = Context::new(0, DataDest::Ret, ControlDest::Unreachable);
         match body {
             FunctionBody::Expr(expr) => self.build_expr(&mut b, expr, ctx, tp),
             FunctionBody::Scope(scope) => self.build_scope(&mut b, scope, ctx, tp),
@@ -726,14 +722,14 @@ impl Driver {
     fn build_scope_item(&mut self, b: &mut FunctionBuilder, item: ScopeItem, tp: &impl TypeProvider) {
         match item {
             ScopeItem::Stmt(expr) => {
-                self.build_expr(b, expr, Context::new(DataDest::Void, ControlDest::Continue), tp);
+                self.build_expr(b, expr, Context::new(0, DataDest::Void, ControlDest::Continue), tp);
             },
             ScopeItem::StoredDecl { id, root_expr, .. } => {
                 let ty = tp.ty(root_expr).clone();
                 let location = b.code.push(Instr::Alloca(ty));
                 assert_eq!(b.stored_decl_locs.len(), id.idx());
                 b.stored_decl_locs.push(location);
-                self.build_expr(b, root_expr, Context::new(DataDest::Store { location }, ControlDest::Continue), tp);
+                self.build_expr(b, root_expr, Context::new(0, DataDest::Store { location }, ControlDest::Continue), tp);
             },
             // No need to give local computed decls special treatment at the MIR level
             ScopeItem::ComputedDecl(_) => {},
@@ -773,10 +769,12 @@ impl Driver {
             },
             Decl::Field { index } => {
                 let base = self.get_base(decl_ref_id);
-                let base = self.build_expr(b, base, Context::new(DataDest::Read, ControlDest::Continue), tp);
+                let base = self.build_expr(b, base, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
                 if base.indirection > 0 {
-                    let _base_ptr = self.handle_indirection(b, base, 1);
-                    panic!("Unhandled indirect struct field access");
+                    // TODO: handle indirect struct field access
+                    //let base_ptr = self.handle_indirection(b, base.get_address());
+                    let base = self.handle_indirection(b, base);
+                    b.code.push(Instr::DirectFieldAccess { val: base, index }).direct()
                 } else {
                     debug_assert_eq!(base.indirection, 0, "tried to dereference a struct?!");
                     b.code.push(Instr::DirectFieldAccess { val: base.instr, index }).direct()   
@@ -810,16 +808,16 @@ impl Driver {
             Decl::Computed { .. } => panic!("modify accessors not yet implemented!"),
             Decl::Stored(id) => {
                 assert!(arguments.is_empty());
-                b.stored_decl_locs[id].direct()
+                b.stored_decl_locs[id].indirect()
             },
             Decl::LocalConst { .. } | Decl::Const(_) => panic!("can't modify a constant!"),
             Decl::Intrinsic(_, _) => panic!("can't modify an intrinsic! (yet?)"),
-            Decl::Static(statik) => b.code.push(Instr::AddressOfStatic(statik)).direct(),
+            Decl::Static(statik) => b.code.push(Instr::AddressOfStatic(statik)).indirect(),
             Decl::Field { .. } => panic!("Unhandled struct field!"),
         }
     }
 
-    fn build_expr(&mut self, b: &mut FunctionBuilder, expr: ExprId, mut ctx: Context, tp: &impl TypeProvider) -> Value {
+    fn build_expr(&mut self, b: &mut FunctionBuilder, expr: ExprId, ctx: Context, tp: &impl TypeProvider) -> Value {
         // HACK!!!!
         let mut should_allow_set = false;
 
@@ -835,14 +833,9 @@ impl Driver {
                 self.build_expr(
                     b,
                     rhs,
-                    Context::new(DataDest::Set { dest: lhs }, ctx.control.clone()),
+                    Context::new(ctx.indirection, DataDest::Set { dest: lhs }, ctx.control),
                     tp,
-                );
-                // Because we override the data destination above, we need to handle it ourselves
-                return match ctx.data {
-                    DataDest::Ret => b.code.push(Instr::Ret(b.void_instr)).direct(),
-                    _ => b.void_instr.direct(),
-                };
+                )
             },
             // This isn't really a loop! It's just a control flow hack to get around the fact
             // that you can't chain `if let`s in Rust.
@@ -866,7 +859,7 @@ impl Driver {
                                 self.build_expr(
                                     b,
                                     lhs,
-                                    Context::new(DataDest::Branch(left_true_bb, false_bb), ControlDest::Continue),
+                                    Context::new(0, DataDest::Branch(left_true_bb, false_bb), ControlDest::Continue),
                                     tp,
                                 );
 
@@ -874,7 +867,7 @@ impl Driver {
                                 return self.build_expr(
                                     b,
                                     rhs,
-                                    Context::new(DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
+                                    Context::new(0, DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
                                     tp,
                                 );
                             } else {
@@ -883,7 +876,7 @@ impl Driver {
                                 self.build_expr(
                                     b,
                                     lhs,
-                                    Context::new(DataDest::Branch(left_true_bb, left_false_bb), ControlDest::Continue),
+                                    Context::new(0, DataDest::Branch(left_true_bb, left_false_bb), ControlDest::Continue),
                                     tp,
                                 );
 
@@ -894,7 +887,7 @@ impl Driver {
 
                                 b.begin_bb(left_false_bb);
                                 let false_val = b.code.push(Instr::Const(Const::Bool(false))).direct();
-                                self.handle_context(b, false_val, 0, expr, branch_ctx, false, tp);
+                                self.handle_context(b, false_val, branch_ctx, false, tp);
 
                                 b.begin_bb(after_bb);
                                 if let Some(location) = location {
@@ -912,7 +905,7 @@ impl Driver {
                                 self.build_expr(
                                     b,
                                     lhs,
-                                    Context::new(DataDest::Branch(true_bb, left_false_bb), ControlDest::Continue),
+                                    Context::new(0, DataDest::Branch(true_bb, left_false_bb), ControlDest::Continue),
                                     tp,
                                 );
 
@@ -920,7 +913,7 @@ impl Driver {
                                 return self.build_expr(
                                     b,
                                     rhs,
-                                    Context::new(DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
+                                    Context::new(0, DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
                                     tp
                                 );
                             } else {
@@ -934,14 +927,14 @@ impl Driver {
                                 self.build_expr(
                                     b,
                                     lhs,
-                                    Context::new(DataDest::Branch(left_true_bb, left_false_bb), ControlDest::Continue),
+                                    Context::new(0, DataDest::Branch(left_true_bb, left_false_bb), ControlDest::Continue),
                                     tp,
                                 );
 
                                 b.begin_bb(left_true_bb);
                                 let true_val = b.code.push(Instr::Const(Const::Bool(true))).direct();
                                 let branch_ctx = ctx.redirect(location, Some(after_bb));
-                                self.handle_context(b, true_val, 0, expr, branch_ctx.clone(), false, tp);
+                                self.handle_context(b, true_val, branch_ctx.clone(), false, tp);
 
                                 b.begin_bb(left_false_bb);
                                 self.build_expr(b, rhs, branch_ctx, tp);
@@ -958,9 +951,9 @@ impl Driver {
                             assert_eq!(arguments.len(), 1);
                             let operand = arguments[0];
                             if let DataDest::Branch(true_bb, false_bb) = ctx.data {
-                                return self.build_expr(b, operand, Context::new(DataDest::Branch(false_bb, true_bb), ctx.control), tp)
+                                return self.build_expr(b, operand, Context::new(0, DataDest::Branch(false_bb, true_bb), ctx.control), tp)
                             } else {
-                                let operand = self.build_expr(b, operand, Context::new(DataDest::Read, ControlDest::Continue), tp);
+                                let operand = self.build_expr(b, operand, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
                                 b.code.push(Instr::LogicalNot(operand.instr)).direct()
                             }
                         },
@@ -972,26 +965,19 @@ impl Driver {
                 should_allow_set = true;
                 // TODO: Don't clone arguments
                 let arguments = arguments.clone().iter().map(|&argument| {
-                    let val = self.build_expr(b, argument, Context::new(DataDest::Read, ControlDest::Continue), tp);
-                    self.handle_indirection(b, val, 0)
+                    let val = self.build_expr(b, argument, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                    self.handle_indirection(b, val)
                 }).collect();
 
-                break match ctx.data {
-                    DataDest::Receive { value, .. } => {
-                        let location = self.modify(b, arguments, id, tp);
-                        let location = self.handle_indirection(b, location, -1);
-                        b.code.push(Instr::Store { location, value }).direct()
-                    },
-                    _ => self.get(b, arguments, id, tp),
-                }
+                break self.get(b, arguments, id, tp);
             },
             Expr::Cast { expr, ty: dest_ty, cast_id } => {
                 let dest_ty = tp.get_evaluated_type(dest_ty).clone();
                 match tp.cast_method(cast_id) {
                     CastMethod::Noop => return self.build_expr(b, expr, ctx, tp),
                     CastMethod::Reinterpret => {
-                        let value = self.build_expr(b, expr, Context::new(DataDest::Read, ControlDest::Continue), tp);
-                        let value = self.handle_indirection(b, value, 0);
+                        let value = self.build_expr(b, expr, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                        let value = self.handle_indirection(b, value);
                         b.code.push(Instr::Reinterpret(value, dest_ty)).direct()
                     },
                     CastMethod::Int => {
@@ -1001,8 +987,8 @@ impl Driver {
                             _ => panic!("Internal compiler error: found invalid cast types while generating MIR")
                         };
                         let (src_bit_width, dest_bit_width) = (src_width.bit_width(self.mir.arch), dest_width.bit_width(self.mir.arch));
-                        let value = self.build_expr(b, expr, Context::new(DataDest::Read, ControlDest::Continue), tp);
-                        let value = self.handle_indirection(b, value, 0);
+                        let value = self.build_expr(b, expr, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                        let value = self.handle_indirection(b, value);
 
                         if src_bit_width == dest_bit_width {
                             // TODO: Bounds checking
@@ -1023,18 +1009,18 @@ impl Driver {
                         }.direct()
                     },
                     CastMethod::Float => {
-                        let value = self.build_expr(b, expr, Context::new(DataDest::Read, ControlDest::Continue), tp);
-                        let value = self.handle_indirection(b, value, 0);
+                        let value = self.build_expr(b, expr, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                        let value = self.handle_indirection(b, value);
                         b.code.push(Instr::FloatCast(value, dest_ty)).direct()
                     },
                     CastMethod::FloatToInt => {
-                        let value = self.build_expr(b, expr, Context::new(DataDest::Read, ControlDest::Continue), tp);
-                        let value = self.handle_indirection(b, value, 0);
+                        let value = self.build_expr(b, expr, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                        let value = self.handle_indirection(b, value);
                         b.code.push(Instr::FloatToInt(value, dest_ty)).direct()
                     },
                     CastMethod::IntToFloat => {
-                        let value = self.build_expr(b, expr, Context::new(DataDest::Read, ControlDest::Continue), tp);
-                        let value = self.handle_indirection(b, value, 0);
+                        let value = self.build_expr(b, expr, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                        let value = self.handle_indirection(b, value);
                         b.code.push(Instr::IntToFloat(value, dest_ty)).direct()
                     },
                 }
@@ -1042,17 +1028,17 @@ impl Driver {
             Expr::AddrOf { expr: operand, .. } => return self.build_expr(
                 b,
                 operand,
-                Context::new(ctx.data, ctx.control),
+                Context::new(ctx.indirection + 1, ctx.data, ctx.control),
                 tp,
             ).get_address(),
             Expr::Pointer { expr, is_mut } => {
                 let op = self.build_expr(
                     b,
                     expr,
-                    Context::new(DataDest::Read, ControlDest::Continue),
+                    Context::new(0, DataDest::Read, ControlDest::Continue),
                     tp,
                 );
-                let op = self.handle_indirection(b, op, 0);
+                let op = self.handle_indirection(b, op);
                 b.code.push(Instr::Pointer { op, is_mut }).direct()
             },
             Expr::Struct(id) => {
@@ -1063,10 +1049,10 @@ impl Driver {
                     let field = self.build_expr(
                         b,
                         field_ty,
-                        Context::new(DataDest::Read, ControlDest::Continue),
+                        Context::new(0, DataDest::Read, ControlDest::Continue),
                         tp,
                     );
-                    let field = self.handle_indirection(b, field, 0);
+                    let field = self.handle_indirection(b, field);
                     fields.push(field);
                 }
                 b.code.push(Instr::Struct { fields, id }).direct()
@@ -1074,9 +1060,9 @@ impl Driver {
             Expr::Deref(operand) => return self.build_expr(
                 b,
                 operand,
-                Context::new(ctx.data, ctx.control),
+                Context::new(ctx.indirection - 1, ctx.data, ctx.control),
                 tp,
-            ).follow_ptr(),
+            ),
             Expr::Do { scope } => return self.build_scope(b, scope, ctx, tp),
             Expr::If { condition, then_scope, else_scope } => {
                 let true_bb = b.new_bb();
@@ -1097,7 +1083,7 @@ impl Driver {
                 self.build_expr(
                     b,
                     condition,
-                    Context::new(DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
+                    Context::new(0, DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
                     tp,
                 );
                 b.begin_bb(true_bb);
@@ -1112,7 +1098,7 @@ impl Driver {
                 if let Some(location) = result_location {
                     return b.code.push(Instr::Load(location)).direct()
                 } else if else_scope.is_some() {
-                    return self.handle_control(b, b.void_instr, ctx.control).direct()
+                    return self.handle_control(b, b.void_instr.direct(), ctx.control)
                 } else {
                     b.void_instr.direct()
                 }
@@ -1127,10 +1113,10 @@ impl Driver {
 
                 b.code.push(Instr::Br(test_bb));
                 b.begin_bb(test_bb);
-                self.build_expr(b, condition, Context::new(DataDest::Branch(loop_bb, post_bb), ControlDest::Continue), tp);
+                self.build_expr(b, condition, Context::new(0, DataDest::Branch(loop_bb, post_bb), ControlDest::Continue), tp);
 
                 b.begin_bb(loop_bb);
-                let val = self.build_scope(b, scope, Context::new(DataDest::Void, ControlDest::Block(test_bb)), tp);
+                let val = self.build_scope(b, scope, Context::new(0, DataDest::Void, ControlDest::Block(test_bb)), tp);
 
                 match ctx.control {
                     ControlDest::Continue | ControlDest::Unreachable => {
@@ -1144,24 +1130,24 @@ impl Driver {
                 return self.build_expr(
                     b,
                     expr,
-                    Context::new(DataDest::Ret, ctx.control),
+                    Context::new(0, DataDest::Ret, ctx.control),
                     tp,
                 );
             },
         };
 
-        self.handle_context(b, val, 0, expr, ctx, should_allow_set, tp).direct()
+        self.handle_context(b, val, ctx, should_allow_set, tp)
     }
 
-    fn handle_indirection(&mut self, b: &mut FunctionBuilder, mut val: Value, target: i8) -> InstrId {
-        if val.indirection > target {
-            while val.indirection > target {
+    fn handle_indirection(&mut self, b: &mut FunctionBuilder, mut val: Value) -> InstrId {
+        if val.indirection > 0 {
+            while val.indirection > 0 {
                 val.instr = b.code.push(Instr::Load(val.instr));
                 val.indirection -= 1;
             }
-        } else if val.indirection < target {
+        } else if val.indirection < 0 {
             let mut ty = b.type_of(&self.mir, val.instr);
-            while val.indirection < target {
+            while val.indirection < 0 {
                 let location = b.code.push(Instr::Alloca(ty.clone()));
                 b.code.push(Instr::Store { location, value: val.instr });
                 val.instr = location;
@@ -1173,38 +1159,47 @@ impl Driver {
         val.instr
     }
 
-    fn handle_control(&mut self, b: &mut FunctionBuilder, instr: InstrId, control: ControlDest) -> InstrId {
+    fn handle_control(&mut self, b: &mut FunctionBuilder, val: Value, control: ControlDest) -> Value {
         match control {
-            ControlDest::Block(block) => b.code.push(Instr::Br(block)),
-            ControlDest::Continue => instr,
-            ControlDest::Unreachable => b.void_instr,
+            ControlDest::Block(block) => b.code.push(Instr::Br(block)).direct(),
+            ControlDest::Continue => val,
+            ControlDest::Unreachable => b.void_instr.direct(),
         }
     }
 
-    fn handle_context(&mut self, b: &mut FunctionBuilder, val: Value, target: i8, expr: ExprId, ctx: Context, should_allow_set: bool, tp: &impl TypeProvider) -> InstrId {
-        let instr = self.handle_indirection(b, val, target);
+    fn handle_context(&mut self, b: &mut FunctionBuilder, mut val: Value, ctx: Context, should_allow_set: bool, tp: &impl TypeProvider) -> Value {
+        val = val.adjusted(ctx.indirection);
         match ctx.data {
-            DataDest::Read => return instr,
-            DataDest::Ret => return b.code.push(Instr::Ret(instr)),
-            DataDest::Branch(true_bb, false_bb)
-                => return b.code.push(Instr::CondBr { condition: instr, true_bb, false_bb }),
-            DataDest::Receive { .. } => {
+            DataDest::Read => return val,
+            DataDest::Ret => {
+                let instr = self.handle_indirection(b, val);
+                return b.code.push(Instr::Ret(instr)).direct()
+            },
+            DataDest::Branch(true_bb, false_bb) => {
+                let instr = self.handle_indirection(b, val);
+                return b.code.push(Instr::CondBr { condition: instr, true_bb, false_bb }).direct()
+            },
+            DataDest::Receive { value } => {
                 assert!(should_allow_set, "can't set constant expression!");
+                let location = self.handle_indirection(b, val.get_address());
+                b.code.push(Instr::Store { location, value });
             },
             DataDest::Store { location } => {
+                let instr = self.handle_indirection(b, val);
                 b.code.push(Instr::Store { location, value: instr });
             },
             DataDest::Set { dest } => {
+                let instr = self.handle_indirection(b, val);
                 return self.build_expr(
                     b,
                     dest,
-                    Context::new(DataDest::Receive { value: instr, expr }, ctx.control.clone()),
+                    Context::new(0, DataDest::Receive { value: instr }, ctx.control.clone()),
                     tp,
-                ).instr;
+                )
             }
             DataDest::Void => {},
         }
 
-        self.handle_control(b, instr, ctx.control)
+        self.handle_control(b, val, ctx.control)
     }
 }
