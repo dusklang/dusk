@@ -43,9 +43,10 @@ fn main() {
     foo.a = 24
     foo.b = 782
     foo.c = "Hello, world!"
-    // For some reason these type annotations are necessary right now
+    // Issue #82
     foo.d.e = 6.5 as f32
-    foo.d.f = 12 as f64
+    foo.d.f = 12
+
     print_foo(foo)
 
     print_type(internal_struct)

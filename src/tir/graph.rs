@@ -198,7 +198,10 @@ impl Graph {
         for &dep in &self.dependees[item] {
             let level = self.find_level_recursive(dep, levels, filter);
             max_level = max(max_level, level);
-            offset = 1;
+            // TODO: Call filter at most once for each element
+            if filter(dep) {
+                offset = 1;
+            }
         }
         if !filter(item) { offset = 0; }
         let level = max_level + offset;
@@ -444,7 +447,7 @@ impl Graph {
                     continue 'mock_staged_comps;
                 }
             }
-            
+
             let meta_deps = self.staged_components.get_mut(&comp_id).unwrap().meta_deps.pop().unwrap();
             for dep in meta_deps {
                 let mut item_to_levels: HashMap<ItemId, u32> = HashMap::new();
