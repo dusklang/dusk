@@ -2,26 +2,14 @@ Foo :: struct {
     a: i32
     b: u64
     c: u8*
+    d: struct {
+        e: f32
+        f: f64
+    }
 }
 
-fn extract_a_from_foo(foo: Foo): i32 {
-    foo_copy := foo
-    foo_copy.a
-}
-
-fn make_foo(a: i32, b: u64, c: u8*): Foo {
+fn make_foo(): Foo {
     foo_ptr :: malloc(size_of(Foo)) as Foo *mut
-    offset :: foo_ptr as usize
-
-    a_ptr :: ((offset + offset_of(Foo, "a")) as i32 *mut)
-    *a_ptr = a
-
-    b_ptr :: ((offset + offset_of(Foo, "b")) as u64 *mut)
-    *b_ptr = b
-
-    c_ptr :: ((offset + offset_of(Foo, "c")) as u8* *mut)
-    *c_ptr = c
-
     foo :: *foo_ptr
     free(foo_ptr as void *mut)
 
@@ -30,6 +18,20 @@ fn make_foo(a: i32, b: u64, c: u8*): Foo {
 
 std :: import("std.meda")
 
+fn print_foo(foo: Foo) {
+    print("foo = Foo { a: ")
+    std.print_num(foo.a)
+    print(", b: ")
+    std.print_num(foo.b as i32)
+    print(", c: \"")
+    print(foo.c)
+    print("\", d: { e: ")
+    std.print_num(foo.d.e as i32)
+    print(", f: ")
+    std.print_num(foo.d.f as i32)
+    print(" } }\n")
+}
+
 fn main() {
     internal_struct :: struct {
         foo: Foo
@@ -37,14 +39,14 @@ fn main() {
         baz: i32
     }
 
-    foo :: make_foo(24, 782, "Hello, world!")
-    print("foo = Foo { a: ")
-    std.print_num(foo.a)
-    print(", b: ")
-    std.print_num(foo.b as i32)
-    print(", c: \"")
-    print(foo.c)
-    print("\" }\n")
+    foo := make_foo()
+    foo.a = 24
+    foo.b = 782
+    foo.c = "Hello, world!"
+    // For some reason these type annotations are necessary right now
+    foo.d.e = 6.5 as f32
+    foo.d.f = 12 as f64
+    print_foo(foo)
 
     print_type(internal_struct)
 }

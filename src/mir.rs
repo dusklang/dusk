@@ -67,6 +67,7 @@ pub enum Instr {
     Pointer { op: InstrId, is_mut: bool },
     Struct { fields: SmallVec<[InstrId; 2]>, id: StructId },
     DirectFieldAccess { val: InstrId, index: usize },
+    IndirectFieldAccess { val: InstrId, index: usize },
     Ret(InstrId),
     Br(BasicBlockId),
     CondBr { condition: InstrId, true_bb: BasicBlockId, false_bb: BasicBlockId },
@@ -306,6 +307,13 @@ fn type_of(b: &Builder, instr: InstrId, code: &IdxVec<InstrId, Instr>) -> Type {
             let base_ty = type_of(b, val, code);
             match base_ty {
                 Type::Struct(strukt) => b.structs[&strukt].field_tys[index].clone(),
+                _ => panic!("Cannot directly access field of non-struct type {:?}!", base_ty),
+            }
+        },
+        &Instr::IndirectFieldAccess { val, index } => {
+            let base_ty = type_of(b, val, code).deref().unwrap();
+            match base_ty.ty {
+                Type::Struct(strukt) => b.structs[&strukt].field_tys[index].clone().ptr_with_mut(base_ty.is_mut),
                 _ => panic!("Cannot directly access field of non-struct type {:?}!", base_ty),
             }
         }
@@ -621,6 +629,7 @@ impl Driver {
                             writeln!(f, "}}")?;
                         },
                         &Instr::DirectFieldAccess { val, index } => writeln!(f, "%{} = %{}.field{}", i, val.idx(), index)?,
+                        &Instr::IndirectFieldAccess { val, index } => writeln!(f, "%{} = &(*%{}).field{}", i, val.idx(), index)?,
                         Instr::Parameter(_) => panic!("unexpected parameter!"),
                         Instr::Void => panic!("unexpected void!"),
                     };
@@ -771,10 +780,8 @@ impl Driver {
                 let base = self.get_base(decl_ref_id);
                 let base = self.build_expr(b, base, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
                 if base.indirection > 0 {
-                    // TODO: handle indirect struct field access
-                    //let base_ptr = self.handle_indirection(b, base.get_address());
-                    let base = self.handle_indirection(b, base);
-                    b.code.push(Instr::DirectFieldAccess { val: base, index }).direct()
+                    let base_ptr = self.handle_indirection(b, base.get_address());
+                    b.code.push(Instr::IndirectFieldAccess { val: base_ptr, index }).indirect()
                 } else {
                     debug_assert_eq!(base.indirection, 0, "tried to dereference a struct?!");
                     b.code.push(Instr::DirectFieldAccess { val: base.instr, index }).direct()   

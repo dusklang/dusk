@@ -147,6 +147,14 @@ impl Type {
         )
     }
 
+    pub fn deref(self) -> Option<QualType> {
+        if let Type::Pointer(pointee) = self {
+            Some(*pointee)
+        } else {
+            None
+        }
+    }
+
     pub const fn u8() -> Self {
         Type::Int { width: IntWidth::W8, is_signed: false }
     }

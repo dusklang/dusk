@@ -755,6 +755,16 @@ impl Driver {
                 let offset = self.mir.structs[&strukt].layout.field_offsets[index];
                 Value::from_bytes(&bytes[offset..(offset + size)])
             },
+            &Instr::IndirectFieldAccess { val, index } => {
+                let addr = frame.results[val].as_usize();
+                let base_ty = self.mir.type_of(val, func_ref).deref().unwrap().ty;
+                let strukt = match base_ty {
+                    Type::Struct(strukt) => strukt,
+                    _ => panic!("Can't directly get field of non-struct"),
+                };
+                let offset = self.mir.structs[&strukt].layout.field_offsets[index];
+                Value::from_usize(addr + offset)
+            },
             Instr::Parameter(_) => panic!("Invalid parameter instruction in the middle of a function!"),
         };
 
