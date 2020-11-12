@@ -42,7 +42,7 @@ impl Driver {
 
     pub fn eval_expr(&mut self, expr: ExprId, tp: &impl TypeProvider) -> Const {
         let func = self.build_standalone_expr(expr, tp);
-        self.call(FunctionRef::Ref(func), Vec::new())
-            .to_const(tp.ty(expr).clone(), &mut self.mir.strings)
+        let val = self.call(FunctionRef::Ref(func), Vec::new());
+        self.value_to_const(val, tp.ty(expr).clone(), tp)
     }
 }

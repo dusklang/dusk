@@ -27,6 +27,19 @@ fn print_foo(foo: Foo) {
     print(" } }\n")
 }
 
+fahah := Foo {
+    a: 24
+    b: 782
+    c: "This is a constant struct!\n"
+    d: D {
+        e: 13.5
+        f: 12.2
+    }
+    g: 32
+}
+
+fn take_float(a: f32) {}
+
 fn main() {
     internal_struct :: struct {
         foo: Foo
@@ -34,20 +47,30 @@ fn main() {
         baz: i32
     }
 
+    take_float(3.2)
+
     foo := Foo {
         a: 24
         b: 782
         c: "Hello, world!"
         d: D {
-            e: 13.5 as f32
-            f: 12.2 as f64
+            e: 13.5
+            f: 12.2
         }
         g: 32
     }
 
+    fah :: &mut fahah
+    print((*fah).c)
+
     foo.c = "Hello!"
 
     print_foo(foo)
+
+    print(fahah.c)
+    print("\n")
+
+    print_foo(fahah)
 
     print_type(internal_struct)
 }

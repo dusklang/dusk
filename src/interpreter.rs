@@ -9,11 +9,12 @@ use smallvec::SmallVec;
 use paste::paste;
 use num_bigint::{BigInt, Sign};
 
-use crate::builder::{Intrinsic, ModScopeId};
+use crate::builder::{Intrinsic, ModScopeId, StructId};
 use crate::driver::Driver;
 use crate::index_vec::{IdxVec, Idx};
-use crate::mir::{self, Const, Function, FunctionRef, Instr, InstrId, StaticId, StrId};
+use crate::mir::{self, Const, Function, FunctionRef, Instr, InstrId, StaticId};
 use crate::ty::{Type, IntWidth, FloatWidth};
+use crate::typechecker::type_provider::TypeProvider;
 
 #[derive(Debug, Clone)]
 pub enum InternalValue {
@@ -62,6 +63,20 @@ macro_rules! int_conversions {
     }
 }
 int_conversions!(u8, u16, u32, u64, usize, i8, i16, i32, i64, isize);
+
+fn struct_lit(mir: &mir::Builder, id: StructId, fields: impl Iterator<Item=Value>) -> Value {
+    let strukt = &mir.structs[&id];
+    let mut buf = SmallVec::new();
+    buf.resize(strukt.layout.size, 0);
+    for (i, field) in fields.enumerate() {
+        let offset = strukt.layout.field_offsets[i];
+        let ty = &strukt.field_tys[i];
+        let size = mir.size_of(ty);
+        let val = field.as_bytes();
+        buf[offset..(offset + size)].copy_from_slice(val);
+    }
+    Value::Inline(buf)
+}
 
 impl Value {
     fn as_bytes(&self) -> &[u8] {
@@ -218,41 +233,10 @@ impl Value {
             },
             Const::Ty(ref ty) => Value::from_ty(ty.clone()),
             Const::Mod(id) => Value::from_mod(id),
-        }
-    }
-
-    pub fn to_const(&self, ty: Type, strings: &mut IdxVec<StrId, CString>) -> Const {
-        match ty {
-            Type::Int { is_signed, .. } => {
-                let big_int = self.as_big_int(is_signed);
-                let lit = if is_signed {
-                    let int: i64 = big_int.try_into().unwrap();
-                    int as u64
-                } else {
-                    let int: u64 = big_int.try_into().unwrap();
-                    int
-                };
-                Const::Int { lit, ty }
-            },
-            Type::Float(width) => {
-                let lit = match width {
-                    FloatWidth::W32 => self.as_f32() as f64,
-                    FloatWidth::W64 => self.as_f64(),
-                };
-                Const::Float { lit, ty }
-            },
-            Type::Bool => Const::Bool(self.as_bool()),
-            Type::Pointer(ref pointee) => {
-                assert!(!pointee.is_mut);
-                assert!(pointee.ty == Type::i8() || pointee.ty == Type::u8());
-                println!("Warning: about to blindly copy a pointer into the global strings!");
-                let string = unsafe { CString::from(CStr::from_ptr(self.as_raw_ptr() as *const _)) };
-                let id = strings.push(string);
-                Const::Str { id, ty }
-            },
-            Type::Ty => Const::Ty(self.as_ty().clone()),
-            Type::Mod => Const::Mod(self.as_mod()),
-            _ => panic!("Can't output value of type `{:?}` as constant", ty),
+            Const::StructLit { ref fields, id } => {
+                let fields = fields.iter().map(|val| Value::from_const(val, mir));
+                struct_lit(mir, id, fields)
+            }
         }
     }
 
@@ -389,6 +373,56 @@ macro_rules! bin_op {
 }
 
 impl Driver {
+    pub fn value_to_const(&mut self, val: Value, ty: Type, tp: &impl TypeProvider) -> Const {
+        match ty {
+            Type::Int { is_signed, .. } => {
+                let big_int = val.as_big_int(is_signed);
+                let lit = if is_signed {
+                    let int: i64 = big_int.try_into().unwrap();
+                    int as u64
+                } else {
+                    let int: u64 = big_int.try_into().unwrap();
+                    int
+                };
+                Const::Int { lit, ty }
+            },
+            Type::Float(width) => {
+                let lit = match width {
+                    FloatWidth::W32 => val.as_f32() as f64,
+                    FloatWidth::W64 => val.as_f64(),
+                };
+                Const::Float { lit, ty }
+            },
+            Type::Bool => Const::Bool(val.as_bool()),
+            Type::Pointer(ref pointee) => {
+                assert!(!pointee.is_mut);
+                assert!(pointee.ty == Type::i8() || pointee.ty == Type::u8());
+                println!("Warning: about to blindly copy a pointer into the global strings!");
+                let string = unsafe { CString::from(CStr::from_ptr(val.as_raw_ptr() as *const _)) };
+                let id = self.mir.strings.push(string);
+                Const::Str { id, ty }
+            },
+            Type::Ty => Const::Ty(val.as_ty().clone()),
+            Type::Mod => Const::Mod(val.as_mod()),
+            Type::Struct(id) => {
+                // Yay borrow checker
+                let strukt = self.mir.structs[&id].clone();
+                let buf = val.as_bytes();
+                let mut fields = Vec::new();
+                for i in 0..strukt.field_tys.len() {
+                    let offset = strukt.layout.field_offsets[i];
+                    let ty = strukt.field_tys[i].clone();
+                    let size = self.mir.size_of(&ty);
+                    let val = Value::from_bytes(&buf[offset..(offset+size)]);
+                    let konst = self.value_to_const(val, ty.clone(), tp);
+                    fields.push(konst);
+                }
+                Const::StructLit { fields, id }
+            }
+            _ => panic!("Can't output value of type `{:?}` as constant", ty),
+        }
+    }
+
     fn new_stack_frame(&self, func: &Function, arguments: Vec<Value>) -> StackFrame {
         let mut results = IdxVec::new();
         results.resize_with(func.code.len(), || Value::Nothing);
@@ -731,18 +765,13 @@ impl Driver {
                 Value::from_ty(Type::Struct(id))
             },
             &Instr::StructLit { ref fields, id } => {
-                let layout = &self.mir.structs[&id].layout;
-                debug_assert_eq!(fields.len(), layout.field_offsets.len());
-                let mut buf = SmallVec::new();
-                buf.resize(layout.size, 0);
-                for i in 0..fields.len() {
-                    let offset = layout.field_offsets[i];
-                    let ty = self.mir.type_of(fields[i], func_ref);
-                    let size = self.mir.size_of(&ty);
-                    let val = frame.results[fields[i]].as_bytes();
-                    buf[offset..(offset + size)].copy_from_slice(val);
-                }
-                Value::Inline(buf)
+                let mir = &self.mir;
+                struct_lit(
+                    mir,
+                    id,
+                    fields.iter()
+                        .map(|&instr| frame.results[instr].clone())
+                )
             },
             &Instr::Ret(instr) => {
                 let val = mem::replace(&mut frame.results[instr], Value::Nothing);
@@ -764,9 +793,10 @@ impl Driver {
                     Type::Struct(strukt) => strukt,
                     _ => panic!("Can't directly get field of non-struct"),
                 };
-                let ty = self.mir.type_of(frame.pc, func_ref);
+                let strukt = &self.mir.structs[&strukt];
+                let ty = strukt.field_tys[index].clone();
                 let size = self.mir.size_of(&ty);
-                let offset = self.mir.structs[&strukt].layout.field_offsets[index];
+                let offset = strukt.layout.field_offsets[index];
                 Value::from_bytes(&bytes[offset..(offset + size)])
             },
             &Instr::IndirectFieldAccess { val, index } => {

@@ -31,6 +31,7 @@ pub enum Const {
     Bool(bool),
     Ty(Type),
     Mod(ModScopeId),
+    StructLit { fields: Vec<Const>, id: StructId },
 }
 
 impl Const {
@@ -42,6 +43,7 @@ impl Const {
             Const::Bool(_) => Type::Bool,
             Const::Ty(_) => Type::Ty,
             Const::Mod(_) => Type::Mod,
+            &Const::StructLit { id, .. } => Type::Struct(id),
         }
     }
 }
@@ -248,11 +250,13 @@ pub enum FunctionRef {
     Ref(Function),
 }
 
+#[derive(Clone)]
 pub struct Struct {
     pub field_tys: SmallVec<[Type; 2]>,
     pub layout: StructLayout,
 }
 
+#[derive(Clone)]
 pub struct StructLayout {
     pub field_offsets: SmallVec<[usize; 2]>,
     pub alignment: usize,
@@ -493,14 +497,31 @@ impl Driver {
     }
 
     #[allow(dead_code)]
-    fn fmt_const(&self, f: &mut fmt::Formatter, konst: &Const) -> fmt::Result {
+    fn fmt_const(&self, f: &mut fmt::Formatter, konst: &Const, newline: bool) -> fmt::Result {
         match *konst {
-            Const::Bool(val) => writeln!(f, "{}", val),
-            Const::Float { lit, ref ty } => writeln!(f, "{} as {:?}", lit, ty),
-            Const::Int { lit, ref ty } => writeln!(f, "{} as {:?}", lit, ty),
-            Const::Str { id, ref ty } => writeln!(f, "%str{} ({:?}) as {:?}", id.idx(), self.mir.strings[id], ty),
-            Const::Ty(ref ty) => writeln!(f, "`{:?}`", ty),
-            Const::Mod(id) => writeln!(f, "%mod{}", id.idx()),
+            Const::Bool(val) => write!(f, "{}", val)?,
+            Const::Float { lit, ref ty } => write!(f, "{} as {:?}", lit, ty)?,
+            Const::Int { lit, ref ty } => write!(f, "{} as {:?}", lit, ty)?,
+            Const::Str { id, ref ty } => write!(f, "%str{} ({:?}) as {:?}", id.idx(), self.mir.strings[id], ty)?,
+            Const::Ty(ref ty) => write!(f, "`{:?}`", ty)?,
+            Const::Mod(id) => write!(f, "%mod{}", id.idx())?,
+            Const::StructLit { ref fields, id } => {
+                write!(f, "const literal struct{} {{ ", id.idx())?;
+                for i in 0..fields.len() {
+                    self.fmt_const(f, &fields[i], false)?;
+                    if i < (fields.len() - 1) {
+                        write!(f, ",")?;
+                    }
+                    write!(f, " ")?;
+                }
+                write!(f, "}}")?;
+            }
+        }
+
+        if newline {
+            writeln!(f)
+        } else {
+            Ok(())
         }
     }
 
@@ -521,7 +542,7 @@ impl Driver {
         if !self.mir.statics.raw.is_empty() {
             for (i, statik) in self.mir.statics.iter().enumerate() {
                 write!(f, "%static{} = ", i)?;
-                self.fmt_const(f, statik)?;
+                self.fmt_const(f, statik, true)?;
             }
             writeln!(f)?;
         }
@@ -593,7 +614,7 @@ impl Driver {
                         },
                         Instr::Const(konst) => {
                             write!(f, "%{} = ", i)?;
-                            self.fmt_const(f, konst)?;
+                            self.fmt_const(f, konst, true)?;
                         },
                         Instr::Intrinsic { arguments, intr, .. } => {
                             write!(f, "%{} = intrinsic `{}`", i, intr.name())?;

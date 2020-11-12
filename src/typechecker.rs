@@ -667,7 +667,7 @@ impl Driver {
 
             for i in 0..unit.eval_dependees.len() {
                 let expr = unit.eval_dependees[i];
-                let val = self.eval_expr(expr, &*tp);
+                let val = self.eval_expr(expr, tp);
                 tp.insert_eval_result(expr, val);
             }
         }
@@ -683,7 +683,7 @@ impl Driver {
                 let ns = match ty {
                     Type::Mod => {
                         self.run_pass_2(&unit.items, UnitKind::Mock(num), &mut mock_tp);
-                        let module = self.eval_expr(unit.main_expr, &mock_tp);
+                        let module = self.eval_expr(unit.main_expr, &mut mock_tp);
                         match module {
                             Const::Mod(scope) => ExprNamespace::Mod(scope),
                             _ => panic!("Unexpected const kind, expected module!"),
