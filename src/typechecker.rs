@@ -611,6 +611,24 @@ impl Driver {
                 *tp.ty_mut(item.id) = ty.ty.clone();
                 tp.constraints_mut(item.terminal_expr).set_to(ty);
             }
+            for item in unit.struct_lits.get_level(level) {
+                let ty = tp.constraints(item.id).solve().unwrap();
+                *tp.ty_mut(item.id) = ty.ty.clone();
+
+                // Yay borrow checker:
+                if let Some(lit) = tp.struct_lit(item.struct_lit_id).clone() {
+                    let fields = &self.hir.structs[lit.strukt].fields;
+                    debug_assert_eq!(lit.fields.len(), fields.len());
+
+                    for i in 0..fields.len() {
+                        let field = fields[i];
+                        let field = self.hir.field_decls[field].decl;
+                        let field_ty = tp.fetch_decl_type(&self.hir, field).ty.clone();
+
+                        tp.constraints_mut(lit.fields[i]).set_to(field_ty);
+                    }
+                }
+            }
             if level > 0 {
                 tp.debug_output(&self.hir, &self.src_map, level as usize);
             }

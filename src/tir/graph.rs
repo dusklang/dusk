@@ -300,7 +300,7 @@ impl Graph {
                 let level = max_level - levels[&item];
                 meta_deps[level as usize].push(item);
             }
-    
+
             let state = CompStageState { meta_deps };
             let old_val = self.staged_components.insert(comp, state);
             assert!(old_val.is_none());
