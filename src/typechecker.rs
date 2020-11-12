@@ -27,8 +27,8 @@ pub enum CastMethod {
 
 #[derive(Clone, Debug)]
 pub struct StructLit {
-    strukt: StructId,
-    fields: Vec<ExprId>,
+    pub strukt: StructId,
+    pub fields: Vec<ExprId>,
 }
 
 fn unit_string(unit_kind: UnitKind) -> String {

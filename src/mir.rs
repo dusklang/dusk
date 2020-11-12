@@ -66,6 +66,7 @@ pub enum Instr {
     AddressOfStatic(StaticId),
     Pointer { op: InstrId, is_mut: bool },
     Struct { fields: SmallVec<[InstrId; 2]>, id: StructId },
+    StructLit { fields: SmallVec<[InstrId; 2]>, id: StructId },
     DirectFieldAccess { val: InstrId, index: usize },
     IndirectFieldAccess { val: InstrId, index: usize },
     Ret(InstrId),
@@ -287,6 +288,7 @@ fn type_of(b: &Builder, instr: InstrId, code: &IdxVec<InstrId, Instr>) -> Type {
     match &code[instr] {
         Instr::Void | Instr::Store { .. } => Type::Void,
         Instr::Pointer { .. } | Instr::Struct { .. } => Type::Ty,
+        &Instr::StructLit { id, .. } => Type::Struct(id),
         Instr::Const(konst) => konst.ty(),
         Instr::Alloca(ty) => ty.clone().mut_ptr(),
         Instr::LogicalNot(_) => Type::Bool,
@@ -617,8 +619,19 @@ impl Driver {
                         &Instr::FloatCast(val, ref ty) => writeln!(f, "%{} = floatcast %{} as {:?}", i, val.idx(), ty)?,
                         &Instr::IntToFloat(val, ref ty) => writeln!(f, "%{} = inttofloat %{} as {:?}", i, val.idx(), ty)?,
                         &Instr::FloatToInt(val, ref ty) => writeln!(f, "%{} = floattoint %{} as {:?}", i, val.idx(), ty)?,
-                        Instr::Struct { fields, .. } => {
-                            write!(f, "%{} = struct {{ ", i)?;
+                        &Instr::Struct { ref fields, id } => {
+                            write!(f, "%{} = define struct{} {{ ", i, id.idx())?;
+                            for i in 0..fields.len() {
+                                write!(f, "%{}", fields[i].idx())?;
+                                if i < (fields.len() - 1) {
+                                    write!(f, ",")?;
+                                }
+                                write!(f, " ")?;
+                            }
+                            writeln!(f, "}}")?;
+                        },
+                        &Instr::StructLit { ref fields, id } => {
+                            write!(f, "%{} = literal struct{} {{ ", i, id.idx())?;
                             for i in 0..fields.len() {
                                 write!(f, "%{}", fields[i].idx())?;
                                 if i < (fields.len() - 1) {
@@ -1064,8 +1077,20 @@ impl Driver {
                 }
                 b.code.push(Instr::Struct { fields, id }).direct()
             },
-            Expr::StructLit { .. } => {
-                unimplemented!()
+            Expr::StructLit { id, .. } => {
+                let lit = tp.struct_lit(id).as_ref().unwrap();
+                let mut fields = SmallVec::new();
+                for &field in &lit.fields {
+                    let field = self.build_expr(
+                        b,
+                        field,
+                        Context::new(0, DataDest::Read, ControlDest::Continue),
+                        tp,
+                    );
+                    let field = self.handle_indirection(b, field);
+                    fields.push(field);
+                }
+                b.code.push(Instr::StructLit { fields, id: lit.strukt }).direct()
             },
             Expr::Deref(operand) => return self.build_expr(
                 b,

@@ -730,6 +730,20 @@ impl Driver {
                 }
                 Value::from_ty(Type::Struct(id))
             },
+            &Instr::StructLit { ref fields, id } => {
+                let layout = &self.mir.structs[&id].layout;
+                debug_assert_eq!(fields.len(), layout.field_offsets.len());
+                let mut buf = SmallVec::new();
+                buf.resize(layout.size, 0);
+                for i in 0..fields.len() {
+                    let offset = layout.field_offsets[i];
+                    let ty = self.mir.type_of(fields[i], func_ref);
+                    let size = self.mir.size_of(&ty);
+                    let val = frame.results[fields[i]].as_bytes();
+                    buf[offset..(offset + size)].copy_from_slice(val);
+                }
+                Value::Inline(buf)
+            },
             &Instr::Ret(instr) => {
                 let val = mem::replace(&mut frame.results[instr], Value::Nothing);
                 return Some(val)
