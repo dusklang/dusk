@@ -7,8 +7,9 @@ use constraints::{ConstraintList, UnificationError};
 use type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 
 use crate::driver::Driver;
+use crate::index_vec::Idx;
 use crate::error::Error;
-use crate::builder::{ExprId, DeclId};
+use crate::builder::{ExprId, DeclId, StructId};
 use crate::ty::{BuiltinTraits, Type, QualType, IntWidth};
 use crate::mir::Const;
 use crate::hir;
@@ -22,6 +23,12 @@ pub enum CastMethod {
     Float,
     FloatToInt,
     IntToFloat,
+}
+
+#[derive(Clone, Debug)]
+pub struct StructLit {
+    strukt: StructId,
+    fields: Vec<ExprId>,
 }
 
 fn unit_string(unit_kind: UnitKind) -> String {
@@ -229,6 +236,115 @@ impl Driver {
                     }
                 }
                 tp.constraints_mut(item.id).set_to(Type::Ty);
+            }
+            for item in unit.struct_lits.get_level(level) {
+                let ty = if let Some(err) = tp.constraints(item.ty).can_unify_to(&Type::Ty.into()).err() {
+                    let mut error = Error::new("Expected struct type");
+                    let range = self.hir.get_range(item.ty);
+                    match err {
+                        UnificationError::InvalidChoice(choices)
+                            => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                        UnificationError::Trait(not_implemented)
+                            => error.add_secondary_range(
+                                range,
+                                format!(
+                                    "note: couldn't unify because expression requires implementations of {:?}",
+                                    not_implemented.names(),
+                                ),
+                            ),
+                    }
+                    self.errors.push(error);
+                    Type::Error
+                } else {
+                    let ty = tp.get_evaluated_type(item.ty).clone();
+                    match ty {
+                        Type::Struct(id) => {
+                            let struct_fields = &self.hir.structs[id].fields;
+                            let mut matches = Vec::new();
+                            matches.resize(struct_fields.len(), ExprId::new(usize::MAX));
+
+                            let mut successful = true;
+
+                            // Find matches for each field in the literal
+                            'lit_fields: for lit_field in &item.fields {
+                                for (i, &struct_field) in struct_fields.iter().enumerate() {
+                                    let struct_field = &self.hir.field_decls[struct_field];
+                                    if struct_field.name == lit_field.name {
+                                        matches[i] = lit_field.expr;
+                                        continue 'lit_fields;
+                                    }
+                                }
+
+                                // We can assume there is no match for this field at this point; if we had found one, we
+                                // would've already continued to the next field.
+                                successful = false;
+                                
+                                // TODO: Use range of the field identifier, which we don't have fine-grained access to yet
+                                let range = self.hir.get_range(item.id);
+                                self.errors.push(
+                                    Error::new(format!("Unknown field {} in struct literal", self.interner.resolve(lit_field.name).unwrap()))
+                                        .adding_primary_range(range, "")
+                                );
+
+                            }
+
+                            let lit_range = self.hir.get_range(item.id);
+                            // Make sure each field in the struct has a match in the literal
+                            for (i, &maatch) in matches.iter().enumerate() {
+                                let field = struct_fields[i];
+                                let field = &self.hir.field_decls[field];
+                                let field_ty = tp.get_evaluated_type(field.ty).clone();
+                                if maatch == ExprId::new(usize::MAX) {
+                                    successful = false;
+
+                                    let field_item = self.hir.decl_to_items[field.decl];
+                                    let field_range = self.hir.source_ranges[field_item];
+
+                                    self.errors.push(
+                                        Error::new(format!("Field {} not included in struct literal", self.interner.resolve(field.name).unwrap()))
+                                            .adding_primary_range(lit_range, "")
+                                            .adding_secondary_range(field_range, "field declared here")
+                                    );
+                                } else if let Some(err) = tp.constraints(maatch).can_unify_to(&field_ty.into()).err() {
+                                    successful = false;
+                                    let range = self.hir.get_range(maatch);
+                                    let mut error = Error::new("Invalid struct field type")
+                                        .adding_primary_range(range, "");
+                                    match err {
+                                        UnificationError::InvalidChoice(choices)
+                                            => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                                        UnificationError::Trait(not_implemented)
+                                            => error.add_secondary_range(
+                                                range,
+                                                format!(
+                                                    "note: couldn't unify because expression requires implementations of {:?}",
+                                                    not_implemented.names(),
+                                                ),
+                                            ),
+                                    }
+                                    self.errors.push(error);
+                                }
+                            }
+
+                            if successful {
+                                *tp.struct_lit_mut(item.struct_lit_id) = Some(
+                                    StructLit { strukt: id, fields: matches }
+                                );
+                            }
+                        },
+                        ref other => {
+                            let range = self.hir.get_range(item.ty);
+                            self.errors.push(
+                                Error::new(format!("Expected struct type in literal, found {:?}", *other))
+                                    .adding_primary_range(range, "")
+                            );
+                        },
+                    }
+                    
+                    ty
+                };
+
+                tp.constraints_mut(item.id).set_to(ty);
             }
             for item in unit.ifs.get_level(level) {
                 if let Some(err) = tp.constraints(item.condition).can_unify_to(&Type::Bool.into()).err() {

@@ -6,7 +6,7 @@ use smallvec::SmallVec;
 use crate::driver::Driver;
 use crate::builder::*;
 use crate::dep_vec::{self, DepVec, AnyDepVec};
-use crate::hir::{self, Namespace};
+use crate::hir::{self, Namespace, FieldAssignment};
 use crate::index_vec::{Idx, IdxVec};
 use crate::TirGraphOutput;
 
@@ -41,6 +41,8 @@ pub struct If { pub condition: ExprId, pub then_expr: ExprId, pub else_expr: Exp
 pub struct While { pub condition: ExprId }
 #[derive(Debug)]
 pub struct Struct { pub field_tys: SmallVec<[ExprId; 2]>, }
+#[derive(Debug)]
+pub struct StructLit { pub ty: ExprId, pub fields: Vec<FieldAssignment>, pub struct_lit_id: StructLitId, }
 
 #[derive(Debug)]
 pub struct Expr<T> {
@@ -92,6 +94,7 @@ pub struct UnitItems {
     pub pointers: DepVec<Expr<Pointer>>,
     pub ifs: DepVec<Expr<If>>,
     pub structs: DepVec<Expr<Struct>>,
+    pub struct_lits: DepVec<Expr<StructLit>>,
 }
 
 impl UnitItems {
@@ -108,6 +111,7 @@ impl UnitItems {
             &mut self.addr_ofs, &mut self.derefs, &mut self.pointers, &mut self.ifs,
             &mut self.dos, &mut self.ret_groups, &mut self.casts, &mut self.whiles,
             &mut self.explicit_rets, &mut self.modules, &mut self.imports, &mut self.structs,
+            &mut self.struct_lits,
         ]);
     }
 }
@@ -353,8 +357,8 @@ impl Driver {
                 let field_tys = self.hir.structs[struct_id].fields.iter().map(|&id| self.hir.field_decls[id].ty).collect();
                 insert_expr!(structs, Struct { field_tys })
             },
-            hir::Expr::StructLit { .. } => {
-                unimplemented!()
+            &hir::Expr::StructLit { ty, ref fields, id } => {
+                insert_expr!(struct_lits, StructLit { ty, fields: fields.clone(), struct_lit_id: id })
             }
         }
     }

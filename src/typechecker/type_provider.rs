@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use crate::builder::{ExprId, DeclId, DeclRefId, CastId};
+use crate::builder::{ExprId, DeclId, DeclRefId, StructLitId, CastId};
 use crate::ty::{Type, QualType};
-use super::{CastMethod, constraints::ConstraintList};
+use super::{CastMethod, StructLit, constraints::ConstraintList};
 use crate::{hir, tir};
 use crate::mir::Const;
 use crate::index_vec::{IdxVec, Idx};
@@ -24,6 +24,9 @@ pub trait TypeProvider: private::Sealed {
 
     fn selected_overload(&self, decl_ref: DeclRefId) -> Option<DeclId>;
     fn selected_overload_mut(&mut self, decl_ref: DeclRefId) -> &mut Option<DeclId>;
+
+    fn struct_lit(&self, struct_lit: StructLitId) -> &Option<StructLit>;
+    fn struct_lit_mut(&mut self, struct_lit: StructLitId) -> &mut Option<StructLit>;
 
     fn cast_method(&self, cast: CastId) -> CastMethod;
     fn cast_method_mut(&mut self, cast: CastId) -> &mut CastMethod;
@@ -60,6 +63,8 @@ pub struct RealTypeProvider {
     overloads: IdxVec<DeclRefId, Vec<DeclId>>,
     /// The selected overload for each decl ref
     selected_overloads: IdxVec<DeclRefId, Option<DeclId>>,
+    /// Each struct literal matched to a structure
+    struct_lits: IdxVec<StructLitId, Option<StructLit>>,
     /// The cast method for each cast expression
     cast_methods: IdxVec<CastId, CastMethod>,
     /// The constraints on each expression's type
@@ -82,6 +87,7 @@ impl RealTypeProvider {
             types: IdxVec::new(),
             overloads: IdxVec::new(),
             selected_overloads: IdxVec::new(),
+            struct_lits: IdxVec::new(),
             cast_methods: IdxVec::new(),
             constraints: IdxVec::new(),
             constraints_copy: IdxVec::new(),
@@ -100,6 +106,7 @@ impl RealTypeProvider {
             tp.constraints_copy.resize_with(hir.exprs.len(), Default::default);
         }
         tp.selected_overloads.resize_with(hir.decl_refs.len(), || None);
+        tp.struct_lits.resize_with(hir.struct_lits.len(), || None);
         tp.preferred_overloads.resize_with(hir.decl_refs.len(), || None);
         tp.cast_methods.resize_with(hir.cast_counter.len(), || CastMethod::Noop);
         
@@ -186,6 +193,13 @@ impl TypeProvider for RealTypeProvider {
         &mut self.selected_overloads[decl_ref]
     }
 
+    fn struct_lit(&self, struct_lit: StructLitId) -> &Option<StructLit> {
+        &self.struct_lits[struct_lit]
+    }
+    fn struct_lit_mut(&mut self, struct_lit: StructLitId) -> &mut Option<StructLit> {
+        &mut self.struct_lits[struct_lit]
+    }
+
     fn cast_method(&self, cast: CastId) -> CastMethod {
         self.cast_methods[cast]
     }
@@ -237,6 +251,8 @@ pub struct MockTypeProvider<'base> {
     overloads: HashMap<DeclRefId, Vec<DeclId>>,
     /// The selected overload for each decl ref
     selected_overloads: HashMap<DeclRefId, Option<DeclId>>,
+    /// Each struct literal matched to a structure
+    struct_lits: HashMap<StructLitId, Option<StructLit>>,
     /// The cast method for each cast expression
     cast_methods: HashMap<CastId, CastMethod>,
     /// The constraints on each expression's type
@@ -296,6 +312,7 @@ impl<'base> MockTypeProvider<'base> {
             types: HashMap::new(),
             overloads: HashMap::new(),
             selected_overloads: HashMap::new(),
+            struct_lits: HashMap::new(),
             cast_methods: HashMap::new(),
             constraints: HashMap::new(),
             constraints_copy: HashMap::new(),
@@ -349,6 +366,7 @@ impl<'base> TypeProvider for MockTypeProvider<'base> {
 
     forward_mock!(overloads, overloads, overloads_mut, DeclRefId, Vec<DeclId>);
     forward_mock!(selected_overloads, selected_overload, selected_overload_mut, DeclRefId, Option<DeclId>, deref: deref);
+    forward_mock!(struct_lits, struct_lit, struct_lit_mut, StructLitId, Option<StructLit>);
     forward_mock!(cast_methods, cast_method, cast_method_mut, CastId, CastMethod, deref: deref);
     forward_mock!(types, ty, ty_mut, ExprId, Type);
     forward_mock!(constraints, constraints, constraints_mut, ExprId, ConstraintList);

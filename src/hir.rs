@@ -7,7 +7,7 @@ use string_interner::Sym;
 
 use crate::driver::Driver;
 use crate::index_vec::{Idx, IdxVec, IdxCounter};
-use crate::builder::{BinOp, UnOp, ItemId, ExprId, DeclId, ImperScopeId, ModScopeId, DeclRefId, CastId, StructId, FieldDeclId, Intrinsic};
+use crate::builder::{BinOp, UnOp, ItemId, ExprId, DeclId, ImperScopeId, ModScopeId, DeclRefId, StructLitId, CastId, StructId, FieldDeclId, Intrinsic};
 use crate::source_info::{SourceRange, SourceFileId};
 use crate::ty::Type;
 
@@ -40,10 +40,11 @@ pub enum Expr {
     StructLit {
         ty: ExprId,
         fields: Vec<FieldAssignment>,
+        id: StructLitId,
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct FieldAssignment {
     pub name: Sym,
     pub expr: ExprId,
@@ -191,6 +192,7 @@ pub struct Builder {
     pub cast_counter: IdxCounter<CastId>,
     pub structs: IdxVec<StructId, Struct>,
     pub field_decls: IdxVec<FieldDeclId, FieldDecl>,
+    pub struct_lits: IdxCounter<StructLitId>,
 
     comp_decl_stack: Vec<CompDeclState>,
     scope_stack: Vec<ScopeState>,
@@ -217,6 +219,7 @@ impl Builder {
             source_ranges: IdxVec::new(),
             cast_counter: IdxCounter::new(),
             structs: IdxVec::new(),
+            struct_lits: IdxCounter::new(),
             field_decls: IdxVec::new(),
             comp_decl_stack: Vec::new(),
             scope_stack: Vec::new(),
@@ -463,7 +466,8 @@ impl Builder {
         self.push(Expr::Struct(strukt), range)
     }
     pub fn struct_lit(&mut self, ty: ExprId, fields: Vec<FieldAssignment>, range: SourceRange) -> ExprId {
-        self.push(Expr::StructLit { ty, fields }, range)
+        let id = self.struct_lits.next();
+        self.push(Expr::StructLit { ty, fields, id }, range)
     }
     pub fn begin_module(&mut self) -> ExprId {
         let parent = self.cur_namespace();
