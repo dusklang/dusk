@@ -49,6 +49,9 @@ fn main() {
 
     take_float(3.2)
 
+    var := "hello"
+    var = "bye"
+
     foo := Foo {
         a: 24
         b: 782
@@ -60,8 +63,10 @@ fn main() {
         g: 32
     }
 
-    fah :: &mut fahah
+    fah :: &mut (fahah)
+    (*fah).c = "ASHDFJALKSJDHASKLDHJ\n"
     print((*fah).c)
+
 
     foo.c = "Hello!"
 

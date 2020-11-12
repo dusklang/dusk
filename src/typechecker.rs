@@ -154,7 +154,14 @@ impl Driver {
                 for i in 0..overloads.len() {
                     let overload = overloads[i];
                     let ty = tp.fetch_decl_type(&self.hir, overload).ty.clone();
-                    let is_mut = self.tir.decls[overload].is_mut;
+                    let mut is_mut = self.tir.decls[overload].is_mut;
+                    if let hir::Namespace::MemberRef { base_expr } = self.hir.decl_refs[decl_ref_id].namespace {
+                        let constraints = tp.constraints(base_expr);
+                        // TODO: Robustness! Base_expr could be an overload set with these types, but also include struct types
+                        if constraints.can_unify_to(&Type::Ty.into()).is_err() && constraints.can_unify_to(&Type::Mod.into()).is_err() {
+                            is_mut = is_mut && constraints.solve().unwrap().is_mut;
+                        }
+                    }
                     one_of.push(QualType { ty, is_mut });
                 }
                 let mut pref = None;
