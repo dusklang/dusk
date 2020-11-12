@@ -1,0 +1,8 @@
+Foo :: struct { a: i32 }
+
+fn main() {
+    foo :: Foo { a: 45 }
+
+    // Shouldn't work; it's supposed to be an i32
+    foo.a = "Hello world!"
+}

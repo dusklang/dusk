@@ -208,9 +208,10 @@ impl ConstraintList {
 
         if !self.is_never() && !other.is_never() {
             let lhs = self.one_of.as_mut().expect("can't assign to expression without a one-of constraint");
+            lhs.retain(|lty| lty.ty.implements_traits(trait_impls).is_ok());
             if other.one_of.is_some() {
                 lhs.retain(|lty|
-                    lty.ty.implements_traits(trait_impls).is_ok() && other.one_of_exists(|rty| rty.ty.trivially_convertible_to(&lty.ty))
+                    other.one_of_exists(|rty| rty.ty.trivially_convertible_to(&lty.ty))
                 );
                 let rhs = other.one_of.as_mut().unwrap();
                 rhs.retain(|rty|
