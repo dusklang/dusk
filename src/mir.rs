@@ -770,8 +770,7 @@ impl Driver {
             ScopeItem::StoredDecl { id, root_expr, .. } => {
                 let ty = tp.ty(root_expr).clone();
                 let location = b.code.push(Instr::Alloca(ty));
-                assert_eq!(b.stored_decl_locs.len(), id.idx());
-                b.stored_decl_locs.push(location);
+                b.stored_decl_locs.push_at(id, location);
                 self.build_expr(b, root_expr, Context::new(0, DataDest::Store { location }, ControlDest::Continue), tp);
             },
             // No need to give local computed decls special treatment at the MIR level

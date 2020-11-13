@@ -55,7 +55,7 @@ impl Driver {
             map
         };
 
-        let file = SourceFileId::new(self.toks.len());
+        let file = self.toks.next_id();
         let f = &self.src_map.files[file];
         let file_offset = self.src_map.get_begin_offset(file);
 
@@ -86,8 +86,7 @@ impl Driver {
         }
         self.set_pos(&mut l, 0);
 
-        let toks_file = self.toks.push(TokenVec::new());
-        debug_assert_eq!(toks_file, file);
+        self.toks.push_at(file, TokenVec::new());
         loop {
             let (tok, range) = self.l_next(&mut l);
             let should_break = tok == TokenKind::Eof;

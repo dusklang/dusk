@@ -24,8 +24,7 @@ impl Driver {
 
     fn parse_single_file(&mut self) {
         let file = self.lex();
-        let hir_file = self.hir.start_new_file();
-        debug_assert_eq!(file, hir_file);
+        self.hir.start_new_file(file);
         let mut p = Parser { file, cur: 0 };
 
         // TODO: Don't duplicate intrinsics in every file!

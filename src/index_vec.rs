@@ -100,6 +100,13 @@ impl<I: Idx, T> IdxVec<I, T> {
             (&mut section_a[0], &mut section_b[b.idx()])
         }
     }
+    pub fn next_id(&self) -> I {
+        I::new(self.raw.len())
+    }
+    pub fn push_at(&mut self, id: I, value: T) {
+        debug_assert_eq!(self.next_id(), id);
+        self.push(value);
+    }
 }
 
 impl<I: Idx, T> IntoIterator for IdxVec<I, T> {

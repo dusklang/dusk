@@ -229,7 +229,7 @@ impl Builder {
         b
     }
 
-    pub fn start_new_file(&mut self) -> SourceFileId {
+    pub fn start_new_file(&mut self, file: SourceFileId) {
         let global_scope = self.mod_scopes.push(ModScope::default());
         let global_namespace = self.mod_ns.push(
             ModScopeNs {
@@ -238,7 +238,7 @@ impl Builder {
             }
         );
         self.scope_stack = vec![ScopeState::Mod { id: global_scope, namespace: global_namespace }];
-        self.global_scopes.push(global_scope)
+        self.global_scopes.push_at(file, global_scope);
     }
 
     pub fn import(&mut self, file: SourceFileId, range: SourceRange) -> ExprId {
@@ -246,15 +246,12 @@ impl Builder {
     }
 
     fn push(&mut self, expr: Expr, range: SourceRange) -> ExprId {
-        let expr_id1 = self.exprs.push(expr);
-        let item_id1 = self.items.push(Item::Expr(expr_id1));
-        let expr_id2 = self.expr_to_items.push(item_id1);
-        let item_id2 = self.source_ranges.push(range);
+        let expr_id = self.exprs.push(expr);
+        let item_id = self.items.push(Item::Expr(expr_id));
+        self.expr_to_items.push_at(expr_id, item_id);
+        self.source_ranges.push_at(item_id, range);
 
-        debug_assert_eq!(expr_id1, expr_id2);
-        debug_assert_eq!(item_id1, item_id2);
-
-        expr_id1
+        expr_id
     }
 
     fn flush_stmt_buffer(&mut self) {
@@ -273,20 +270,16 @@ impl Builder {
     }
 
     fn decl(&mut self, decl: Decl, name: Sym, explicit_ty: Option<ExprId>, range: SourceRange) -> DeclId {
-        let decl_id1 = self.decls.push(decl);
-        let decl_id2 = self.explicit_tys.push(explicit_ty);
-        let decl_id3 = self.names.push(name);
-        debug_assert_eq!(decl_id1, decl_id2);
-        debug_assert_eq!(decl_id2, decl_id3);
+        let decl_id = self.decls.push(decl);
+        self.explicit_tys.push_at(decl_id, explicit_ty);
+        self.names.push_at(decl_id, name);
 
-        let item_id1 = self.items.push(Item::Decl(decl_id1));
-        let decl_id4 = self.decl_to_items.push(item_id1);
-        debug_assert_eq!(decl_id3, decl_id4);
+        let item_id = self.items.push(Item::Decl(decl_id));
+        self.decl_to_items.push_at(decl_id, item_id);
 
-        let item_id2 = self.source_ranges.push(range);
-        debug_assert_eq!(item_id1, item_id2);
+        self.source_ranges.push_at(item_id, range);
 
-        decl_id1
+        decl_id
     }
 
     pub fn int_lit(&mut self, lit: u64, range: SourceRange) -> ExprId {
@@ -455,10 +448,9 @@ impl Builder {
         }
     }
     pub fn field_decl(&mut self, name: Sym, ty: ExprId, index: usize, range: SourceRange) -> FieldDeclId {
-        let decl = DeclId::new(self.decls.len());
-        let field = self.field_decls.push(FieldDecl { decl, name, ty, index });
-        let decl2 = self.decl(Decl::Field(field), name, Some(ty), range);
-        debug_assert_eq!(decl, decl2);
+        let field = self.field_decls.next_id();
+        let decl = self.decl(Decl::Field(field), name, Some(ty), range);
+        self.field_decls.push_at(field, FieldDecl { decl, name, ty, index });
         field
     }
     pub fn strukt(&mut self, fields: Vec<FieldDeclId>, range: SourceRange) -> ExprId {
@@ -552,18 +544,19 @@ impl Builder {
             Some(base_expr) => Namespace::MemberRef { base_expr },
             None => self.cur_namespace(),
         };
-        let expr = ExprId::new(self.exprs.len());
-        let id = self.decl_refs.push(
+        let id = self.decl_refs.next_id();
+        let num_arguments = arguments.len();
+        let expr = self.push(Expr::DeclRef { arguments, id }, range);
+        self.decl_refs.push_at(
+            id,
             DeclRef {
                 name,
                 namespace,
-                num_arguments: arguments.len(),
+                num_arguments,
                 has_parens,
                 expr,
             }
         );
-        let expr_1 = self.push(Expr::DeclRef { arguments, id }, range);
-        debug_assert_eq!(expr, expr_1);
         expr
     }
     pub fn get_range(&self, id: ExprId) -> SourceRange { self.source_ranges[self.expr_to_items[id]].clone() }
