@@ -66,7 +66,7 @@ impl Driver {
             }
         }
         lit_pass_1(tp, &unit.int_lits, BuiltinTraits::INT, Type::i32());
-        lit_pass_1(tp, &unit.dec_lits, BuiltinTraits::DEC, Type::i32());
+        lit_pass_1(tp, &unit.dec_lits, BuiltinTraits::DEC, Type::f64());
         lit_pass_1(tp, &unit.str_lits, BuiltinTraits::STR, Type::u8().ptr());
         lit_pass_1(tp, &unit.char_lits, BuiltinTraits::CHAR, Type::u8().ptr());
         for &item in &unit.const_tys {
@@ -75,7 +75,6 @@ impl Driver {
         }
         for level in start_level..unit.num_levels() {
             for item in unit.assigned_decls.get_level(level) {
-                self.print_decl(item.decl_id);
                 let constraints = tp.constraints(item.root_expr);
                 let ty = if let &Some(explicit_ty) = &item.explicit_ty {
                     let explicit_ty = tp.get_evaluated_type(explicit_ty).clone();

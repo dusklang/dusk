@@ -230,6 +230,19 @@ impl ConstraintList {
                 };
                 if self.can_unify_to(&preferred_type).is_ok() {
                     self.preferred_type = Some(preferred_type);
+                } else {
+                    other.preferred_type = None;
+                    if other.one_of.is_none() {
+                        let rhs_one_of = self.one_of.as_ref().map(|one_of| one_of.iter().filter_map(|ty| {
+                            let ty = ty.ty.clone().into();
+                            if other.can_unify_to(&ty).is_ok() {
+                                Some(ty)
+                            } else {
+                                None
+                            }
+                        }).collect());
+                        other.one_of = rhs_one_of;
+                    }
                 }
             }
             if let Some(preferred_type) = &self.preferred_type {
@@ -238,6 +251,8 @@ impl ConstraintList {
                 let preferred_type = QualType::from(preferred_type.ty.clone());
                 if other.can_unify_to(&preferred_type).is_ok() {
                     other.preferred_type = Some(preferred_type);
+                } else {
+                    self.preferred_type = None;
                 }
             }
         }

@@ -1,0 +1,11 @@
+Foo :: struct {
+    a: f32
+}
+
+fn main() {
+    foo := Foo { a: 3 }
+    foo.a = 2
+
+    foo := 2.4
+    foo = 3
+}
