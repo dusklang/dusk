@@ -208,7 +208,11 @@ impl SourceMap {
             print!("{}", line_no_as_string);
             print_whitespace(max_line_number_digits - line_no_as_string.len());
             let file = &self.files[file];
-            print!(" | {}", file.substring_from_line(line));
+            let substr = file.substring_from_line(line);
+            print!(" | {}", substr);
+            if !substr.ends_with("\n") {
+                println!();
+            }
         };
         // Pick an impossible file ID so it will be unequal to the file in the 0th group.
         let mut prev_file = SourceFileId::new(usize::MAX);

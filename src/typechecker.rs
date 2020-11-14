@@ -75,6 +75,7 @@ impl Driver {
         }
         for level in start_level..unit.num_levels() {
             for item in unit.assigned_decls.get_level(level) {
+                self.print_decl(item.decl_id);
                 let constraints = tp.constraints(item.root_expr);
                 let ty = if let &Some(explicit_ty) = &item.explicit_ty {
                     let explicit_ty = tp.get_evaluated_type(explicit_ty).clone();
