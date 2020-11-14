@@ -729,6 +729,7 @@ impl FunctionBuilder {
 
 impl Driver {
     fn build_function(&mut self, name: Option<Sym>, ret_ty: Type, body: FunctionBody, params: Range<DeclId>, tp: &impl TypeProvider) -> Function {
+        debug_assert_ne!(ret_ty, Type::Error, "can't build MIR function with Error return type");
         let mut code = IdxVec::new();
         let void_instr = code.push(Instr::Void);
         for param in params.start.idx()..params.end.idx() {
