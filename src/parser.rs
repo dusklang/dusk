@@ -723,14 +723,12 @@ impl Driver {
     }
 
     fn parse_type(&mut self, p: &mut Parser) -> (ExprId, SourceRange) {
-        let begin_range = self.cur(p).range;
         // This is a term and not an expression because assignments are valid expressions.
         //     For example: `foo: SomeType = ...` <- the parser would think you were assigning `...` to `SomeType` and
         //     taking the `void` result of that assignment as the type of variable declaration `foo`
         // TODO: add statements as a slight superset of expressions which includes assignments.
         let ty = self.try_parse_restricted_term(p).unwrap();
-        let end_range = self.cur(p).range;
-        let range = source_info::concat(begin_range, end_range);
+        let range = self.hir.get_range(ty);
 
         (ty, range)
     }
