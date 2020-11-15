@@ -9,7 +9,6 @@ use crate::driver::Driver;
 use crate::token::{TokenKind, TokenVec};
 use crate::error::Error;
 use crate::source_info::{SourceRange, SourceFile, SourceFileId};
-use crate::index_vec::Idx;
 
 struct Lexer {
     /// Byte offset of the current file in the global source map
