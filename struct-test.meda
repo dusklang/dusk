@@ -65,12 +65,13 @@ fn main() {
 
     foo.d.e = 12.2
 
+
     fah :: &mut (fahah)
     (*fah).c = "ASHDFJALKSJDHASKLDHJ\n"
     print((*fah).c)
 
 
-    foo.c = "Hello!"
+    foo.c = std.str.concat(foo.c, "\n")
 
     print_foo(foo)
 
