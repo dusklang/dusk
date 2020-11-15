@@ -1,0 +1,13 @@
+Foo :: struct {
+    a: i32
+}
+
+fn main() {
+    foo := Foo {
+        a: 34
+    }
+    offset :: &foo as usize
+    saved :: ((offset + offset_of(Foo, "a")) as i32 *mut as i32 *mut)
+    *saved = 67
+    *((offset + offset_of(Foo, "a")) as i32 *mut as i32 *mut) = 67
+}

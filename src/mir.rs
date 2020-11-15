@@ -859,9 +859,6 @@ impl Driver {
     }
 
     fn build_expr(&mut self, b: &mut FunctionBuilder, expr: ExprId, ctx: Context, tp: &impl TypeProvider) -> Value {
-        // HACK!!!!
-        let mut should_allow_set = false;
-
         let ty = tp.ty(expr).clone();
 
         let val = match self.hir.exprs[expr] {
@@ -928,7 +925,7 @@ impl Driver {
 
                                 b.begin_bb(left_false_bb);
                                 let false_val = b.code.push(Instr::Const(Const::Bool(false))).direct();
-                                self.handle_context(b, false_val, branch_ctx, false, tp);
+                                self.handle_context(b, false_val, branch_ctx, tp);
 
                                 b.begin_bb(after_bb);
                                 if let Some(location) = location {
@@ -975,7 +972,7 @@ impl Driver {
                                 b.begin_bb(left_true_bb);
                                 let true_val = b.code.push(Instr::Const(Const::Bool(true))).direct();
                                 let branch_ctx = ctx.redirect(location, Some(after_bb));
-                                self.handle_context(b, true_val, branch_ctx.clone(), false, tp);
+                                self.handle_context(b, true_val, branch_ctx.clone(), tp);
 
                                 b.begin_bb(left_false_bb);
                                 self.build_expr(b, rhs, branch_ctx, tp);
@@ -1003,7 +1000,6 @@ impl Driver {
                 }
 
                 // Otherwise, just handle the general case
-                should_allow_set = true;
                 // TODO: Don't clone arguments
                 let arguments = arguments.clone().iter().map(|&argument| {
                     let val = self.build_expr(b, argument, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
@@ -1192,7 +1188,7 @@ impl Driver {
             },
         };
 
-        self.handle_context(b, val, ctx, should_allow_set, tp)
+        self.handle_context(b, val, ctx, tp)
     }
 
     fn handle_indirection(&mut self, b: &mut FunctionBuilder, mut val: Value) -> InstrId {
@@ -1223,7 +1219,7 @@ impl Driver {
         }
     }
 
-    fn handle_context(&mut self, b: &mut FunctionBuilder, mut val: Value, ctx: Context, should_allow_set: bool, tp: &impl TypeProvider) -> Value {
+    fn handle_context(&mut self, b: &mut FunctionBuilder, mut val: Value, ctx: Context, tp: &impl TypeProvider) -> Value {
         val = val.adjusted(ctx.indirection);
         match ctx.data {
             DataDest::Read => return val,
@@ -1236,7 +1232,6 @@ impl Driver {
                 return b.code.push(Instr::CondBr { condition: instr, true_bb, false_bb }).direct()
             },
             DataDest::Receive { value } => {
-                assert!(should_allow_set, "can't set constant expression!");
                 let location = self.handle_indirection(b, val.get_address());
                 b.code.push(Instr::Store { location, value });
             },
