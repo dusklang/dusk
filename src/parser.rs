@@ -603,12 +603,13 @@ impl Driver {
                 },
                 TokenKind::Comma => { self.next(p); },
                 _ => {
-                    if let &TokenKind::Ident(name) = self.cur(p).kind {
+                    if let Token { kind: &TokenKind::Ident(name), range: ident_range } = self.cur(p) {
                         self.next(p);
                         assert_eq!(self.cur(p).kind, &TokenKind::Colon);
                         self.next(p);
-                        let (ty, range) = self.parse_type(p);
+                        let (ty, ty_range) = self.parse_type(p);
                         let index = fields.len();
+                        let range = source_info::concat(ident_range, ty_range);
                         fields.push(self.hir.field_decl(name, ty, index, range));
                     } else {
                         panic!("Unexpected token {:?}, expected field name", self.cur(p).kind);
