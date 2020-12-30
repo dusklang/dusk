@@ -2,18 +2,19 @@ use std::ops::{Deref, DerefMut};
 use std::collections::{HashMap, HashSet};
 
 use smallvec::SmallVec;
+use index_vec::define_index_type;
+
+use mire::hir::{self, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId};
 
 use crate::driver::Driver;
-use crate::builder::*;
 use crate::dep_vec::{self, DepVec, AnyDepVec};
-use crate::hir::{self, Namespace, FieldAssignment};
-use crate::index_vec::{Idx, IdxVec};
+use crate::index_vec::IdxVec;
 use crate::TirGraphOutput;
 
 mod graph;
 use graph::{Graph, Levels};
 
-newtype_index!(TreeId pub);
+define_index_type!(pub struct TreeId = u32;);
 
 #[derive(Debug)]
 pub struct RetGroup { pub ty: ExprId, pub exprs: SmallVec<[ExprId; 1]> }

@@ -1,14 +1,16 @@
 use smallvec::{SmallVec, smallvec};
 
-use string_interner::Sym;
+use string_interner::DefaultSymbol as Sym;
+
+use mire::hir::{ExprId, ImperScopeId, Intrinsic, FieldAssignment};
+use mire::ty::Type;
+use mire::source_info::SourceFileId;
 
 use crate::driver::Driver;
 use crate::token::{TokenKind, Token};
-use crate::builder::{ExprId, ImperScopeId, BinOp, UnOp, OpPlacement, Intrinsic};
-use crate::ty::Type;
+use crate::builder::{BinOp, UnOp, OpPlacement};
 use crate::error::Error;
-use crate::source_info::{self, SourceRange, SourceFileId};
-use crate::hir::FieldAssignment;
+use crate::source_info::{self, SourceRange};
 
 struct Parser {
     file: SourceFileId,

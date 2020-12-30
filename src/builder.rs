@@ -2,19 +2,6 @@
 
 use bitflags::bitflags;
 
-use crate::index_vec::Idx;
-
-newtype_index!(ItemId pub);
-newtype_index!(ExprId pub);
-newtype_index!(DeclRefId pub);
-newtype_index!(DeclId pub);
-newtype_index!(ImperScopeId pub);
-newtype_index!(ModScopeId pub);
-newtype_index!(CastId pub);
-newtype_index!(StructId pub);
-newtype_index!(FieldDeclId pub);
-newtype_index!(StructLitId pub);
-
 #[derive(Clone, Copy, Debug)]
 pub enum BinOp {
     Mult, Div, Mod,
@@ -62,108 +49,6 @@ impl UnOp {
             UnOp::Not | UnOp::AddrOfMut => OpPlacement::PREFIX,
             UnOp::Pointer => OpPlacement::PREFIX | OpPlacement::INFIX | OpPlacement::POSTFIX,
             UnOp::PointerMut => OpPlacement::POSTFIX,
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum Intrinsic {
-    Mult,
-    Div,
-    Mod,
-    Add,
-    Sub,
-    Less,
-    LessOrEq,
-    Greater,
-    GreaterOrEq,
-    Eq,
-    NotEq,
-    BitwiseAnd,
-    BitwiseOr,
-    LogicalAnd,
-    LogicalOr,
-    LogicalNot,
-    Neg,
-    Pos,
-    Panic,
-    Print,
-    Malloc,
-    Free,
-    SizeOf,
-    StrideOf,
-    AlignOf,
-    OffsetOf,
-
-    // Named types
-    I8,
-    I16,
-    I32,
-    I64,
-    Isize,
-    U8,
-    U16,
-    U32,
-    U64,
-    Usize,
-    F32,
-    F64,
-    Never,
-    Bool,
-    Void,
-    Ty,
-    Module,
-    PrintType,
-}
-
-impl Intrinsic {
-    pub fn name(&self) -> &str {
-        use Intrinsic::*;
-        match self {
-            Mult => "*",
-            Div => "/",
-            Mod => "%",
-            Add => "+",
-            Sub => "-",
-            Less => "<",
-            LessOrEq => "<=",
-            Greater => ">",
-            GreaterOrEq => ">=",
-            Eq => "==",
-            NotEq => "!=",
-            BitwiseAnd => "&",
-            BitwiseOr => "|",
-            LogicalAnd => "&&",
-            LogicalOr => "||",
-            LogicalNot => "!",
-            Neg => "-",
-            Pos => "+",
-            Panic => "panic",
-            Print => "print",
-            Malloc => "malloc",
-            Free => "free",
-            I8 => "i8",
-            I16 => "i16",
-            I32 => "i32",
-            I64 => "i64",
-            Isize => "isize",
-            U8 => "u8",
-            U16 => "u16",
-            U32 => "u32",
-            U64 => "u64",
-            Usize => "usize",
-            F32 => "f32",
-            F64 => "f64",
-            Never => "never",
-            Bool => "bool",
-            Void => "void",
-            Ty => "type",
-            Module => "module",
-            PrintType => "print_type",
-            AlignOf => "align_of",
-            SizeOf => "size_of",
-            StrideOf => "stride_of",
-            OffsetOf => "offset_of",
         }
     }
 }

@@ -1,6 +1,6 @@
 use std::ffi::CString;
 
-use string_interner::Sym;
+use string_interner::DefaultSymbol as Sym;
 
 use crate::source_info::SourceRange;
 

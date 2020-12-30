@@ -1,6 +1,8 @@
 use smallvec::{SmallVec, smallvec};
 
-use crate::ty::{Type, QualType, BuiltinTraits};
+use mire::ty::{Type, QualType};
+
+use crate::ty::{BuiltinTraits, ImplementsTraits};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ConstraintList {

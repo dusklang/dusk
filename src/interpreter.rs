@@ -9,11 +9,13 @@ use smallvec::SmallVec;
 use paste::paste;
 use num_bigint::{BigInt, Sign};
 
-use crate::builder::{Intrinsic, ModScopeId, StructId};
+use mire::hir::{Intrinsic, ModScopeId, StructId};
+use mire::mir::{Const, Instr, InstrId, StaticId};
+use mire::ty::{Type, IntWidth, FloatWidth};
+
 use crate::driver::Driver;
-use crate::index_vec::{IdxVec, Idx};
-use crate::mir::{self, Const, Function, FunctionRef, Instr, InstrId, StaticId};
-use crate::ty::{Type, IntWidth, FloatWidth};
+use crate::index_vec::IdxVec;
+use crate::mir::{self, Function, FunctionRef};
 use crate::typechecker::type_provider::TypeProvider;
 
 #[derive(Debug, Clone)]
@@ -814,7 +816,7 @@ impl Driver {
 
         let (_, frame) = self.interp.stack.last_mut().unwrap();
         frame.results[frame.pc] = val;
-        frame.pc.advance();
+        frame.pc += 1;
         None
     }
 }

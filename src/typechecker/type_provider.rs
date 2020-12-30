@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 
-use crate::builder::{ExprId, DeclId, DeclRefId, StructLitId, CastId};
-use crate::ty::{Type, QualType};
+use mire::hir::{ExprId, DeclId, DeclRefId, StructLitId, CastId};
+use mire::mir::Const;
+use mire::ty::{Type, QualType};
+
 use super::{CastMethod, StructLit, constraints::ConstraintList};
 use crate::{hir, tir};
-use crate::mir::Const;
-use crate::index_vec::{IdxVec, Idx};
+use crate::index_vec::IdxVec;
 use crate::source_info::{SourceMap, CommentatedSourceRange};
 
 mod private {

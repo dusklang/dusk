@@ -1,97 +1,17 @@
 use std::ffi::CString;
 use std::ops::Range;
-use std::collections::HashMap;
 
 use smallvec::{SmallVec, smallvec};
-use string_interner::Sym;
+use string_interner::DefaultSymbol as Sym;
+use mire::hir::*;
+use mire::index_counter::IndexCounter;
+use mire::ty::Type;
+use mire::source_info::SourceFileId;
 
 use crate::driver::Driver;
-use crate::index_vec::{Idx, IdxVec, IdxCounter};
-use crate::builder::{BinOp, UnOp, ItemId, ExprId, DeclId, ImperScopeId, ModScopeId, DeclRefId, StructLitId, CastId, StructId, FieldDeclId, Intrinsic};
-use crate::source_info::{SourceRange, SourceFileId};
-use crate::ty::Type;
-
-newtype_index!(StoredDeclId pub);
-newtype_index!(ImperScopeNsId pub);
-newtype_index!(ModScopeNsId pub);
-
-#[derive(Debug)]
-pub enum Expr {
-    Void,
-    IntLit { lit: u64 },
-    DecLit { lit: f64 },
-    StrLit { lit: CString },
-    CharLit { lit: i8 },
-    ConstTy(Type),
-    DeclRef { arguments: SmallVec<[ExprId; 2]>, id: DeclRefId },
-    AddrOf { expr: ExprId, is_mut: bool },
-    /// Transforms type into pointer type
-    Pointer { expr: ExprId, is_mut: bool },
-    Deref(ExprId),
-    Set { lhs: ExprId, rhs: ExprId },
-    Do { scope: ImperScopeId },
-    If { condition: ExprId, then_scope: ImperScopeId, else_scope: Option<ImperScopeId> },
-    While { condition: ExprId, scope: ImperScopeId },
-    Cast { expr: ExprId, ty: ExprId, cast_id: CastId },
-    Ret { expr: ExprId, decl: Option<DeclId> },
-    Mod { id: ModScopeId },
-    Import { file: SourceFileId },
-    Struct(StructId),
-    StructLit {
-        ty: ExprId,
-        fields: Vec<FieldAssignment>,
-        id: StructLitId,
-    },
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct FieldAssignment {
-    pub name: Sym,
-    pub expr: ExprId,
-}
-
-/// A declaration in local (imperative) scope
-#[derive(Debug)]
-pub struct ImperScopedDecl {
-    pub name: Sym,
-    pub num_params: usize,
-    pub id: DeclId,
-}
-
-/// A declaration in module scope
-#[derive(Debug)]
-pub struct ModScopedDecl {
-    pub num_params: usize,
-    pub id: DeclId,
-}
-
-#[derive(Debug)]
-pub struct ImperScopeNs {
-    pub decls: Vec<ImperScopedDecl>,
-    pub parent: Option<Namespace>,
-}
-
-#[derive(Debug)]
-pub struct ModScopeNs {
-    pub scope: ModScopeId,
-    pub parent: Option<Namespace>,
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum Namespace {
-    Imper { scope: ImperScopeNsId, end_offset: usize },
-    Mod(ModScopeNsId),
-    MemberRef { base_expr: ExprId, },
-}
-
-#[derive(Debug)]
-pub struct DeclRef {
-    pub name: Sym,
-    pub namespace: Namespace,
-    pub num_arguments: usize,
-    pub has_parens: bool,
-    pub expr: ExprId,
-}
+use crate::index_vec::IdxVec;
+use crate::builder::{BinOp, UnOp};
+use crate::source_info::SourceRange;
 
 #[derive(Debug)]
 enum ScopeState {
@@ -112,63 +32,7 @@ struct CompDeclState {
     params: Range<DeclId>,
     id: DeclId,
     imper_scope_stack: u32,
-    stored_decl_counter: IdxCounter<StoredDeclId>,
-}
-
-#[derive(Copy, Clone, Debug)]
-pub enum Item {
-    Expr(ExprId),
-    Decl(DeclId),
-}
-
-#[derive(Copy, Clone, Debug)]
-pub enum ScopeItem {
-    Stmt(ExprId),
-    StoredDecl { decl_id: DeclId, id: StoredDeclId, root_expr: ExprId },
-    ComputedDecl(DeclId),
-}
-
-#[derive(Debug)]
-pub struct ImperScope {
-    pub items: Vec<ScopeItem>,
-    pub terminal_expr: ExprId,
-}
-
-#[derive(Debug, Default)]
-pub struct ModScope {
-    pub decl_groups: HashMap<Sym, Vec<ModScopedDecl>>,
-}
-
-#[derive(Debug)]
-pub enum Decl {
-    Computed {
-        param_tys: SmallVec<[ExprId; 2]>,
-        params: Range<DeclId>,
-        scope: ImperScopeId,
-    },
-    Stored { id: StoredDeclId, is_mut: bool, root_expr: ExprId, },
-    Parameter {
-        /// Parameter index within the function
-        index: usize,
-    },
-    Intrinsic { intr: Intrinsic, param_tys: SmallVec<[ExprId; 2]>, function_like: bool },
-    Static(ExprId),
-    Const(ExprId),
-    Field(FieldDeclId),
-}
-
-#[derive(Debug)]
-pub struct FieldDecl {
-    pub decl: DeclId,
-    pub name: Sym,
-    pub ty: ExprId,
-    pub index: usize,
-}
-
-#[derive(Debug)]
-pub struct Struct {
-    // TODO: store FieldDecl inline instead
-    pub fields: Vec<FieldDeclId>,
+    stored_decl_counter: IndexCounter<StoredDeclId>,
 }
 
 #[derive(Debug)]
@@ -189,10 +53,10 @@ pub struct Builder {
     pub void_expr: ExprId,
     pub void_ty: ExprId,
     pub source_ranges: IdxVec<ItemId, SourceRange>,
-    pub cast_counter: IdxCounter<CastId>,
+    pub cast_counter: IndexCounter<CastId>,
     pub structs: IdxVec<StructId, Struct>,
     pub field_decls: IdxVec<FieldDeclId, FieldDecl>,
-    pub struct_lits: IdxCounter<StructLitId>,
+    pub struct_lits: IndexCounter<StructLitId>,
 
     comp_decl_stack: Vec<CompDeclState>,
     scope_stack: Vec<ScopeState>,
@@ -217,9 +81,9 @@ impl Builder {
             void_expr: ExprId::new(0),
             void_ty: ExprId::new(1),
             source_ranges: IdxVec::new(),
-            cast_counter: IdxCounter::new(),
+            cast_counter: IndexCounter::new(),
             structs: IdxVec::new(),
-            struct_lits: IdxCounter::new(),
+            struct_lits: IndexCounter::new(),
             field_decls: IdxVec::new(),
             comp_decl_stack: Vec::new(),
             scope_stack: Vec::new(),
@@ -407,7 +271,7 @@ impl Builder {
 
         if is_first_scope {
             let name = self.names[comp_decl.id];
-            let num_params = comp_decl.params.end.idx() - comp_decl.params.start.idx();
+            let num_params = comp_decl.params.end.index() - comp_decl.params.start.index();
             let id = comp_decl.id;
 
             let params = comp_decl.params.clone();
@@ -422,7 +286,7 @@ impl Builder {
             );
 
             // Add parameters to decl scope
-            for i in params.start.idx()..params.end.idx() {
+            for i in params.start.index()..params.end.index() {
                 let id = DeclId::new(i);
                 self.imper_scoped_decl(
                     ImperScopedDecl {
@@ -518,7 +382,7 @@ impl Builder {
                 params,
                 id,
                 imper_scope_stack: 0,
-                stored_decl_counter: IdxCounter::new(),
+                stored_decl_counter: IndexCounter::new(),
             }
         );
     }

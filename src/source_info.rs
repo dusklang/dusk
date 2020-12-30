@@ -7,11 +7,11 @@ use std::io;
 use std::collections::HashMap;
 use std::ops::Range;
 
-use crate::driver::Driver;
-use crate::builder::{ExprId, DeclId, ItemId};
-use crate::index_vec::{Idx, IdxVec};
+use mire::hir::{ExprId, DeclId, ItemId};
+use mire::source_info::SourceFileId;
 
-newtype_index!(SourceFileId pub);
+use crate::driver::Driver;
+use crate::index_vec::IdxVec;
 
 pub struct SourceMap {
     pub files: IdxVec<SourceFileId, SourceFile>,
@@ -124,7 +124,7 @@ impl SourceMap {
     }
 
     pub fn get_begin_offset(&self, file: SourceFileId) -> usize {
-        self.file_ends[file.idx()]
+        self.file_ends[file.index()]
     }
 
     pub fn add_file(&mut self, path: impl Into<PathBuf>) -> io::Result<SourceFileId> {

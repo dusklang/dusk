@@ -6,13 +6,13 @@ pub mod type_provider;
 use constraints::{ConstraintList, UnificationError};
 use type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 
+use mire::hir::{self, ExprId, DeclId, StructId};
+use mire::mir::Const;
+use mire::ty::{Type, QualType, IntWidth};
+
 use crate::driver::Driver;
-use crate::index_vec::Idx;
 use crate::error::Error;
-use crate::builder::{ExprId, DeclId, StructId};
-use crate::ty::{BuiltinTraits, Type, QualType, IntWidth};
-use crate::mir::Const;
-use crate::hir;
+use crate::ty::BuiltinTraits;
 use crate::tir::{Units, UnitItems, ExprNamespace};
 
 #[derive(Copy, Clone, Debug)]

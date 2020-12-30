@@ -9,13 +9,14 @@ use std::cmp::max;
 
 use bitflags::bitflags;
 
-use crate::builder::ItemId;
-use crate::index_vec::{Idx, IdxVec};
+use index_vec::define_index_type;
+use mire::hir::{self, ItemId, VOID_EXPR_ITEM};
+
+use crate::index_vec::IdxVec;
 use crate::driver::Driver;
-use crate::hir;
 use crate::TirGraphOutput;
 
-newtype_index!(CompId);
+define_index_type!(struct CompId = u32;);
 
 #[derive(Debug, Default)]
 pub struct Graph {
@@ -113,8 +114,8 @@ struct InternalUnit {
 impl Graph {
     /// a and b must be in the *same* unit, and a must have a higher level than b
     pub fn add_type1_dep(&mut self, a: ItemId, b: ItemId) {
-        // TODO: remove this HACK to prevent type 1 dependencies on the void expression
-        if b.idx() == 0 { return; }
+        // TODO: maybe remove this hack to prevent type 1 dependencies on the void expression
+        if b == VOID_EXPR_ITEM { return; }
         
         self.dependees[a].push(b);
         self.dependers[b].push(a);
@@ -308,7 +309,7 @@ impl Graph {
     }
 
     pub fn get_items_that_need_dependencies(&mut self) -> Vec<ItemId> {
-        let items = self.outstanding_components.iter()
+        let items: Vec<ItemId> = self.outstanding_components.iter()
             .flat_map(|&comp| &self.components[comp].items)
             .copied()
             .filter(|item| !self.dependencies_added.contains(item))
@@ -557,24 +558,6 @@ pub struct MockUnit {
 
 }
 
-impl ItemId {
-    fn write_node_name(self, w: &mut impl Write, hir: &hir::Builder) -> IoResult<()> {
-        match hir.items[self] {
-            hir::Item::Expr(id) => write!(w, "item{}expr{}", self.idx(), id.idx())?,
-            hir::Item::Decl(id) => write!(w, "item{}decl{}", self.idx(), id.idx())?,
-        }
-        Ok(())
-    }
-
-    fn write_debug(self, w: &mut impl Write, hir: &hir::Builder) -> IoResult<()> {
-        match hir.items[self] {
-            hir::Item::Expr(id) => write!(w, "{:?}", hir.exprs[id])?,
-            hir::Item::Decl(id) => write!(w, "{:?}", hir.decls[id])?,
-        }
-        Ok(())
-    }
-}
-
 impl Driver {
     pub fn initialize_graph(&mut self) {
         let mut deps = [
@@ -591,11 +574,27 @@ impl Driver {
         self.tir.graph.item_to_components.resize_with(self.hir.items.len(), || CompId::new(usize::MAX));
     }
 
+    fn write_node_name(&self, item: ItemId, w: &mut impl Write) -> IoResult<()> {
+        match self.hir.items[item] {
+            hir::Item::Expr(id) => write!(w, "item{}expr{}", item.index(), id.index())?,
+            hir::Item::Decl(id) => write!(w, "item{}decl{}", item.index(), id.index())?,
+        }
+        Ok(())
+    }
+
+    fn write_debug(&self, item: ItemId, w: &mut impl Write) -> IoResult<()> {
+        match self.hir.items[item] {
+            hir::Item::Expr(id) => write!(w, "{:?}", self.hir.exprs[id])?,
+            hir::Item::Decl(id) => write!(w, "{:?}", self.hir.decls[id])?,
+        }
+        Ok(())
+    }
+
     fn write_dep<W: Write>(&self, w: &mut W, a: ItemId, b: ItemId, write_attribs: impl FnOnce(&mut W) -> IoResult<()>) -> IoResult<()> {
         write!(w, "    ")?;
-        a.write_node_name(w, &self.hir)?;
+        self.write_node_name(a, w)?;
         write!(w, " -> ")?;
-        b.write_node_name(w, &self.hir)?;
+        self.write_node_name(b, w)?;
         write_attribs(w)?;
         writeln!(w, ";")?;
         Ok(())
@@ -620,7 +619,7 @@ impl Driver {
     fn write_item(&self, w: &mut impl Write, item: ItemId) -> IoResult<()> {
         let range = self.hir.source_ranges[item].clone();
         write!(w, "    ")?;
-        item.write_node_name(w, &self.hir)?;
+        self.write_node_name(item, w)?;
         if range.start != range.end {
             writeln!(
                 w,
@@ -634,7 +633,7 @@ impl Driver {
             )?;
         } else {
             write!(w, " [label=\"")?;
-            item.write_debug(w, &self.hir)?;
+            self.write_debug(item, w)?;
             writeln!(w, "\"];")?;
         }
         Ok(())
@@ -743,12 +742,12 @@ impl Driver {
                         // Constrain items to be in the correct level
                         if level < max_level {
                             write!(w, "        ")?;
-                            item.write_node_name(&mut w, &self.hir)?;
+                            self.write_node_name(item, &mut w)?;
                             writeln!(w, " -> level{} [style=invis];", level + 1)?;
                         }
                         if level > 0 {
                             write!(w, "        level{} -> ", level - 1)?;
-                            item.write_node_name(&mut w, &self.hir)?;
+                            self.write_node_name(item, &mut w)?;
                             writeln!(w, " [style=invis];")?;
                         }
                     }

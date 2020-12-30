@@ -1,6 +1,10 @@
 use clap::Clap;
 use std::path::PathBuf;
 
+use mire::ty::Type;
+use mire::mir::FuncId;
+use mire::arch::Arch;
+
 mod dep_vec;
 #[macro_use]
 mod index_vec;
@@ -14,16 +18,12 @@ mod tir;
 mod hir;
 mod mir;
 mod ty;
-mod arch;
 mod driver;
 mod typechecker;
 mod interpreter;
 
-use arch::Arch;
 use interpreter::InterpMode;
-use index_vec::Idx;
-use ty::Type;
-use mir::{FunctionRef, FuncId};
+use mir::FunctionRef;
 use driver::Driver;
 use source_info::SourceMap;
 

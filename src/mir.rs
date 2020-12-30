@@ -4,79 +4,19 @@ use std::fmt;
 use std::ops::Range;
 
 use smallvec::SmallVec;
-use string_interner::Sym;
+use string_interner::DefaultSymbol as Sym;
 
-use crate::arch::Arch;
+use mire::arch::Arch;
+use mire::hir::{self, DeclId, ExprId, DeclRefId, ImperScopeId, StructId, Intrinsic, Expr, ScopeItem, StoredDeclId};
+use mire::mir::{InstrId, FuncId, StrId, StaticId, Const, Instr};
+use mire::BlockId;
+use mire::ty::{Type, FloatWidth};
+
 use crate::driver::Driver;
-use crate::ty::{Type, FloatWidth};
 use crate::typechecker as tc;
 use tc::type_provider::TypeProvider;
 use tc::CastMethod;
-use crate::index_vec::{Idx, IdxVec};
-use crate::builder::{DeclId, ExprId, ModScopeId, DeclRefId, ImperScopeId, StructId, Intrinsic};
-use crate::hir::{self, Expr, ScopeItem, StoredDeclId};
-
-newtype_index!(InstrId pub);
-newtype_index!(BasicBlockId pub);
-newtype_index!(TerminationId pub);
-newtype_index!(FuncId pub);
-newtype_index!(StrId pub);
-newtype_index!(StaticId pub);
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum Const {
-    Int { lit: u64, ty: Type },
-    Float { lit: f64, ty: Type },
-    Str { id: StrId, ty: Type },
-    Bool(bool),
-    Ty(Type),
-    Mod(ModScopeId),
-    StructLit { fields: Vec<Const>, id: StructId },
-}
-
-impl Const {
-    pub fn ty(&self) -> Type {
-        match self {
-            Const::Int { ty, .. } => ty.clone(),
-            Const::Float { ty, .. } => ty.clone(),
-            Const::Str { ty, .. } => ty.clone(),
-            Const::Bool(_) => Type::Bool,
-            Const::Ty(_) => Type::Ty,
-            Const::Mod(_) => Type::Mod,
-            &Const::StructLit { id, .. } => Type::Struct(id),
-        }
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub enum Instr {
-    Void,
-    Const(Const),
-    Alloca(Type),
-    LogicalNot(InstrId),
-    Call { arguments: SmallVec<[InstrId; 2]>, func: FuncId },
-    Intrinsic { arguments: SmallVec<[InstrId; 2]>, ty: Type, intr: Intrinsic },
-    Reinterpret(InstrId, Type),
-    Truncate(InstrId, Type),
-    SignExtend(InstrId, Type),
-    ZeroExtend(InstrId, Type),
-    FloatCast(InstrId, Type),
-    FloatToInt(InstrId, Type),
-    IntToFloat(InstrId, Type),
-    Load(InstrId),
-    Store { location: InstrId, value: InstrId },
-    AddressOfStatic(StaticId),
-    Pointer { op: InstrId, is_mut: bool },
-    Struct { fields: SmallVec<[InstrId; 2]>, id: StructId },
-    StructLit { fields: SmallVec<[InstrId; 2]>, id: StructId },
-    DirectFieldAccess { val: InstrId, index: usize },
-    IndirectFieldAccess { val: InstrId, index: usize },
-    Ret(InstrId),
-    Br(BasicBlockId),
-    CondBr { condition: InstrId, true_bb: BasicBlockId, false_bb: BasicBlockId },
-    /// Only valid at the beginning of a function, right after the void instruction
-    Parameter(Type),
-}
+use crate::index_vec::IdxVec;
 
 #[derive(Clone, Debug)]
 enum Decl {
@@ -94,7 +34,7 @@ pub struct Function {
     pub name: Option<Sym>,
     pub ret_ty: Type,
     pub code: IdxVec<InstrId, Instr>,
-    pub basic_blocks: IdxVec<BasicBlockId, InstrId>,
+    pub basic_blocks: IdxVec<BlockId, InstrId>,
 }
 
 impl Function {
@@ -128,7 +68,7 @@ enum DataDest {
     /// This value will never be used
     Void,
     /// If this value is true, branch to the first basic block, otherwise branch to the second
-    Branch(BasicBlockId, BasicBlockId),
+    Branch(BlockId, BlockId),
 }
 
 #[derive(Copy, Clone)]
@@ -160,7 +100,12 @@ impl Value {
     }
 }
 
-impl InstrId {
+trait Indirection {
+    fn direct(self) -> Value;
+    fn indirect(self) -> Value;
+}
+
+impl Indirection for InstrId {
     fn direct(self) -> Value {
         Value {
             instr: self,
@@ -181,7 +126,7 @@ impl InstrId {
 enum ControlDest {
     Continue,
     Unreachable,
-    Block(BasicBlockId),
+    Block(BlockId),
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -199,7 +144,7 @@ impl Context {
         Context { indirection, data, control }
     }
 
-    fn redirect(&self, read: Option<InstrId>, kontinue: Option<BasicBlockId>) -> Context {
+    fn redirect(&self, read: Option<InstrId>, kontinue: Option<BlockId>) -> Context {
         Context::new(
             self.indirection,
             match (&self.data, read) {
@@ -502,11 +447,11 @@ impl Driver {
             Const::Bool(val) => write!(f, "{}", val)?,
             Const::Float { lit, ref ty } => write!(f, "{} as {:?}", lit, ty)?,
             Const::Int { lit, ref ty } => write!(f, "{} as {:?}", lit, ty)?,
-            Const::Str { id, ref ty } => write!(f, "%str{} ({:?}) as {:?}", id.idx(), self.mir.strings[id], ty)?,
+            Const::Str { id, ref ty } => write!(f, "%str{} ({:?}) as {:?}", id.index(), self.mir.strings[id], ty)?,
             Const::Ty(ref ty) => write!(f, "`{:?}`", ty)?,
-            Const::Mod(id) => write!(f, "%mod{}", id.idx())?,
+            Const::Mod(id) => write!(f, "%mod{}", id.index())?,
             Const::StructLit { ref fields, id } => {
-                write!(f, "const literal struct{} {{ ", id.idx())?;
+                write!(f, "const literal struct{} {{ ", id.index())?;
                 for i in 0..fields.len() {
                     self.fmt_const(f, &fields[i], false)?;
                     if i < (fields.len() - 1) {
@@ -565,21 +510,21 @@ impl Driver {
             }
             writeln!(f, "): {:?} {{", func.ret_ty)?;
             struct BB {
-                id: BasicBlockId,
+                id: BlockId,
                 instr: InstrId,
             }
             let mut basic_blocks: Vec<BB> = func.basic_blocks.iter().enumerate()
-                .map(|(id, &instr)| BB { id: BasicBlockId::new(id), instr })
+                .map(|(id, &instr)| BB { id: BlockId::new(id), instr })
                 .collect();
-            basic_blocks.sort_by_key(|bb| bb.instr.idx());
+            basic_blocks.sort_by_key(|bb| bb.instr.index());
             for i in 0..basic_blocks.len() {
-                let lower_bound = basic_blocks[i].instr.idx();
+                let lower_bound = basic_blocks[i].instr.index();
                 let upper_bound = if i + 1 < basic_blocks.len() {
-                    basic_blocks[i + 1].instr.idx()
+                    basic_blocks[i + 1].instr.index()
                 } else {
                     func.code.len()
                 };
-                writeln!(f, "%bb{}:", basic_blocks[i].id.idx())?;
+                writeln!(f, "%bb{}:", basic_blocks[i].id.index())?;
                 if lower_bound == upper_bound { continue }
                 
                 for i in lower_bound..upper_bound {
@@ -595,7 +540,7 @@ impl Driver {
                                 } else {
                                     write!(f, ", ")?;
                                 }
-                                write!(f, "%{}", arg.idx())?;
+                                write!(f, "%{}", arg.index())?;
                             }
                             if !first {
                                 write!(f, ")")?;
@@ -605,9 +550,9 @@ impl Driver {
                     }
                     match instr {
                         Instr::Alloca(ty) => writeln!(f, "%{} = alloca {:?}", i, ty)?,
-                        Instr::Br(block) => writeln!(f, "br %bb{}", block.idx())?,
+                        Instr::Br(block) => writeln!(f, "br %bb{}", block.index())?,
                         &Instr::CondBr { condition, true_bb, false_bb }
-                            => writeln!(f, "condbr %{}, %bb{}, %bb{}", condition.idx(), true_bb.idx(), false_bb.idx())?,
+                            => writeln!(f, "condbr %{}, %bb{}, %bb{}", condition.index(), true_bb.index(), false_bb.index())?,
                         &Instr::Call { ref arguments, func: callee } => {
                             write!(f, "%{} = call `{}`", i, self.fn_name(self.mir.functions[callee].name))?;
                             write_args!(arguments)?
@@ -621,29 +566,29 @@ impl Driver {
                             write_args!(arguments)?
                         },
                         &Instr::Pointer { op, is_mut } => {
-                            write!(f, "%{} = %{} *", i, op.idx())?;
+                            write!(f, "%{} = %{} *", i, op.index())?;
                             if is_mut {
                                 writeln!(f, "mut")?
                             } else {
                                 writeln!(f)?
                             }
                         }
-                        Instr::Load(location) => writeln!(f, "%{} = load %{}", i, location.idx())?,
-                        Instr::LogicalNot(op) => writeln!(f, "%{} = not %{}", i, op.idx())?,
-                        Instr::Ret(val) => writeln!(f,  "return %{}", val.idx())?,
-                        Instr::Store { location, value } => writeln!(f, "store %{} in %{}", value.idx(), location.idx())?,
-                        Instr::AddressOfStatic(statik) => writeln!(f, "%{} = address of %static{}", i, statik.idx())?,
-                        &Instr::Reinterpret(val, ref ty) => writeln!(f, "%{} = reinterpret %{} as {:?}", i, val.idx(), ty)?,
-                        &Instr::SignExtend(val, ref ty) => writeln!(f, "%{} = sign-extend %{} as {:?}", i, val.idx(), ty)?,
-                        &Instr::ZeroExtend(val, ref ty) => writeln!(f, "%{} = zero-extend %{} as {:?}", i, val.idx(), ty)?,
-                        &Instr::Truncate(val, ref ty) => writeln!(f, "%{} = truncate %{} as {:?}", i, val.idx(), ty)?,
-                        &Instr::FloatCast(val, ref ty) => writeln!(f, "%{} = floatcast %{} as {:?}", i, val.idx(), ty)?,
-                        &Instr::IntToFloat(val, ref ty) => writeln!(f, "%{} = inttofloat %{} as {:?}", i, val.idx(), ty)?,
-                        &Instr::FloatToInt(val, ref ty) => writeln!(f, "%{} = floattoint %{} as {:?}", i, val.idx(), ty)?,
+                        Instr::Load(location) => writeln!(f, "%{} = load %{}", i, location.index())?,
+                        Instr::LogicalNot(op) => writeln!(f, "%{} = not %{}", i, op.index())?,
+                        Instr::Ret(val) => writeln!(f,  "return %{}", val.index())?,
+                        Instr::Store { location, value } => writeln!(f, "store %{} in %{}", value.index(), location.index())?,
+                        Instr::AddressOfStatic(statik) => writeln!(f, "%{} = address of %static{}", i, statik.index())?,
+                        &Instr::Reinterpret(val, ref ty) => writeln!(f, "%{} = reinterpret %{} as {:?}", i, val.index(), ty)?,
+                        &Instr::SignExtend(val, ref ty) => writeln!(f, "%{} = sign-extend %{} as {:?}", i, val.index(), ty)?,
+                        &Instr::ZeroExtend(val, ref ty) => writeln!(f, "%{} = zero-extend %{} as {:?}", i, val.index(), ty)?,
+                        &Instr::Truncate(val, ref ty) => writeln!(f, "%{} = truncate %{} as {:?}", i, val.index(), ty)?,
+                        &Instr::FloatCast(val, ref ty) => writeln!(f, "%{} = floatcast %{} as {:?}", i, val.index(), ty)?,
+                        &Instr::IntToFloat(val, ref ty) => writeln!(f, "%{} = inttofloat %{} as {:?}", i, val.index(), ty)?,
+                        &Instr::FloatToInt(val, ref ty) => writeln!(f, "%{} = floattoint %{} as {:?}", i, val.index(), ty)?,
                         &Instr::Struct { ref fields, id } => {
-                            write!(f, "%{} = define struct{} {{ ", i, id.idx())?;
+                            write!(f, "%{} = define struct{} {{ ", i, id.index())?;
                             for i in 0..fields.len() {
-                                write!(f, "%{}", fields[i].idx())?;
+                                write!(f, "%{}", fields[i].index())?;
                                 if i < (fields.len() - 1) {
                                     write!(f, ",")?;
                                 }
@@ -652,9 +597,9 @@ impl Driver {
                             writeln!(f, "}}")?;
                         },
                         &Instr::StructLit { ref fields, id } => {
-                            write!(f, "%{} = literal struct{} {{ ", i, id.idx())?;
+                            write!(f, "%{} = literal struct{} {{ ", i, id.index())?;
                             for i in 0..fields.len() {
-                                write!(f, "%{}", fields[i].idx())?;
+                                write!(f, "%{}", fields[i].index())?;
                                 if i < (fields.len() - 1) {
                                     write!(f, ",")?;
                                 }
@@ -662,8 +607,8 @@ impl Driver {
                             }
                             writeln!(f, "}}")?;
                         },
-                        &Instr::DirectFieldAccess { val, index } => writeln!(f, "%{} = %{}.field{}", i, val.idx(), index)?,
-                        &Instr::IndirectFieldAccess { val, index } => writeln!(f, "%{} = &(*%{}).field{}", i, val.idx(), index)?,
+                        &Instr::DirectFieldAccess { val, index } => writeln!(f, "%{} = %{}.field{}", i, val.index(), index)?,
+                        &Instr::IndirectFieldAccess { val, index } => writeln!(f, "%{} = &(*%{}).field{}", i, val.index(), index)?,
                         Instr::Parameter(_) => panic!("unexpected parameter!"),
                         Instr::Void => panic!("unexpected void!"),
                     };
@@ -698,16 +643,16 @@ struct FunctionBuilder {
     ret_ty: Type,
     void_instr: InstrId,
     code: IdxVec<InstrId, Instr>,
-    basic_blocks: IdxVec<BasicBlockId, InstrId>,
+    basic_blocks: IdxVec<BlockId, InstrId>,
     stored_decl_locs: IdxVec<StoredDeclId, InstrId>,
 }
 
 impl FunctionBuilder {
-    fn new_bb(&mut self) -> BasicBlockId {
+    fn new_bb(&mut self) -> BlockId {
         self.basic_blocks.push(InstrId::new(0))
     }
 
-    fn begin_bb(&mut self, bb: BasicBlockId) {
+    fn begin_bb(&mut self, bb: BlockId) {
         let last_instr = self.code.raw.last().unwrap();
         assert!(
             match last_instr {
@@ -717,7 +662,7 @@ impl FunctionBuilder {
             "expected terminal instruction before moving on to next block, found {:?}",
             last_instr,
         );
-        assert_eq!(self.basic_blocks[bb].idx(), 0);
+        assert_eq!(self.basic_blocks[bb].index(), 0);
 
         self.basic_blocks[bb] = InstrId::new(self.code.len())
     }
@@ -732,7 +677,7 @@ impl Driver {
         debug_assert_ne!(ret_ty, Type::Error, "can't build MIR function with Error return type");
         let mut code = IdxVec::new();
         let void_instr = code.push(Instr::Void);
-        for param in params.start.idx()..params.end.idx() {
+        for param in params.start.index()..params.end.index() {
             let param = DeclId::new(param);
             if let hir::Decl::Parameter { .. } = self.hir.decls[param] {
                 code.push(Instr::Parameter(self.decl_type(param, tp).clone()));

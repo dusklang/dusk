@@ -5,10 +5,12 @@ use std::ops::Range;
 
 use unicode_segmentation::GraphemeCursor;
 
+use mire::source_info::SourceFileId;
+
 use crate::driver::Driver;
 use crate::token::{TokenKind, TokenVec};
 use crate::error::Error;
-use crate::source_info::{SourceRange, SourceFile, SourceFileId};
+use crate::source_info::{SourceRange, SourceFile};
 
 struct Lexer {
     /// Byte offset of the current file in the global source map
