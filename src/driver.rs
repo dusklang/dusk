@@ -4,6 +4,7 @@ use mire::hir::ExprId;
 use mire::mir::Const;
 use mire::arch::Arch;
 use mire::source_info::SourceFileId;
+use mire::Code;
 
 use crate::source_info::SourceMap;
 use crate::token::TokenVec;
@@ -16,6 +17,7 @@ use crate::typechecker::type_provider::TypeProvider;
 use crate::index_vec::*;
 
 pub struct Driver {
+    pub arch: Arch,
     pub src_map: SourceMap,
     pub toks: IndexVec<SourceFileId, TokenVec>,
     pub interner: StringInterner,
@@ -23,6 +25,7 @@ pub struct Driver {
     pub tir: tir::Builder,
     pub errors: Vec<Error>,
     pub mir: mir::Builder,
+    pub code: Code,
     pub interp: Interpreter,
     /// Total number of errors that have been flushed
     pub flushed_errors: u32,
@@ -31,13 +34,15 @@ pub struct Driver {
 impl Driver {
     pub fn new(src_map: SourceMap, arch: Arch) -> Self {
         Self {
+            arch,
             src_map,
             toks: IndexVec::new(),
             interner: StringInterner::new(),
             hir: hir::Builder::new(),
             tir: tir::Builder::default(),
             errors: Vec::new(),
-            mir: mir::Builder::new(arch),
+            mir: mir::Builder::new(),
+            code: Code::default(),
             interp: Interpreter::new(),
             flushed_errors: 0,
         }

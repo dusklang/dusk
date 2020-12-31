@@ -6,10 +6,9 @@ use std::ops::Range;
 use smallvec::SmallVec;
 use string_interner::DefaultSymbol as Sym;
 
-use mire::arch::Arch;
-use mire::hir::{self, DeclId, ExprId, DeclRefId, ImperScopeId, StructId, Intrinsic, Expr, ScopeItem, StoredDeclId};
-use mire::mir::{InstrId, FuncId, StrId, StaticId, Const, Instr};
-use mire::BlockId;
+use mire::hir::{self, DeclId, ExprId, DeclRefId, ImperScopeId, Intrinsic, Expr, ScopeItem, StoredDeclId};
+use mire::mir::{InstrId, FuncId, StaticId, Const, Instr, Function, MirCode};
+use mire::{Block, BlockId, Op, OpId};
 use mire::ty::{Type, FloatWidth};
 
 use crate::driver::Driver;
@@ -27,29 +26,6 @@ enum Decl {
     Static(StaticId),
     Const(Const),
     Field { index: usize },
-}
-
-#[derive(Debug, Default)]
-pub struct Function {
-    pub name: Option<Sym>,
-    pub ret_ty: Type,
-    pub code: IndexVec<InstrId, Instr>,
-    pub basic_blocks: IndexVec<BlockId, InstrId>,
-}
-
-impl Function {
-    pub fn num_parameters(&self) -> usize {
-        let raw_code = &self.code.raw;
-        assert_eq!(raw_code[0], Instr::Void);
-        let mut num_parameters = 0;
-        for i in 1..raw_code.len() {
-            match &raw_code[i] {
-                Instr::Parameter(_) => num_parameters += 1,
-                _ => break,
-            }
-        }
-        num_parameters
-    }
 }
 
 /// What to do with a value
@@ -171,13 +147,13 @@ impl Driver {
             },
             Expr::DecLit { lit } => Const::Float { lit, ty },
             Expr::StrLit { ref lit } => {
-                let id = self.mir.strings.push(lit.clone());
+                let id = self.code.mir_code.strings.push(lit.clone());
                 Const::Str { id, ty }
             },
             Expr::CharLit { lit } => match ty {
                 Type::Int { .. } => Const::Int { lit: lit as u64, ty },
                 Type::Pointer(_) => {
-                    let id = self.mir.strings.push(CString::new([lit as u8].as_ref()).unwrap());
+                    let id = self.code.mir_code.strings.push(CString::new([lit as u8].as_ref()).unwrap());
                     Const::Str { id, ty }
                 },
                 _ => panic!("unexpected type for character")
@@ -212,28 +188,18 @@ pub struct StructLayout {
 pub struct Builder {
     decls: HashMap<DeclId, Decl>,
     static_inits: IndexVec<StaticId, ExprId>,
-    pub arch: Arch,
-    pub strings: IndexVec<StrId, CString>,
-    pub functions: IndexVec<FuncId, Function>,
-    pub statics: IndexVec<StaticId, Const>,
-    pub structs: HashMap<StructId, Struct>,
 }
 
 impl Builder {
-    pub fn new(arch: Arch) -> Self {
+    pub fn new() -> Self {
         Self {
             decls: HashMap::new(),
             static_inits: IndexVec::new(),
-            arch,
-            strings: IndexVec::new(),
-            functions: IndexVec::new(),
-            statics: IndexVec::new(),
-            structs: HashMap::new(),
         }
     }
 }
 
-fn type_of(b: &Builder, instr: InstrId, code: &IndexVec<InstrId, Instr>) -> Type {
+fn type_of(b: &MirCode, instr: InstrId, code: &IndexVec<InstrId, Instr>) -> Type {
     match &code[instr] {
         Instr::Void | Instr::Store { .. } => Type::Void,
         Instr::Pointer { .. } | Instr::Struct { .. } => Type::Ty,
@@ -271,19 +237,14 @@ fn type_of(b: &Builder, instr: InstrId, code: &IndexVec<InstrId, Instr>) -> Type
     }
 }
 
-impl Builder {
-    pub fn function_by_ref<'b>(&'b self, func_ref: &'b FunctionRef) -> &'b Function {
-        match func_ref {
-            &FunctionRef::Id(id) => &self.functions[id],
-            FunctionRef::Ref(func) => func,
-        }
+pub fn function_by_ref<'a>(code: &'a MirCode, func_ref: &'a FunctionRef) -> &'a Function {
+    match func_ref {
+        &FunctionRef::Id(id) => &code.functions[id],
+        FunctionRef::Ref(func) => func,
     }
+}
 
-    pub fn type_of(&self, instr: InstrId, func_ref: &FunctionRef) -> Type {
-        let func = self.function_by_ref(func_ref);
-        type_of(self, instr, &func.code)
-    }
-
+impl Driver {
     /// Size of an instance of a type in bytes
     pub fn size_of(&self, ty: &Type) -> usize {
         let arch = self.arch;
@@ -304,14 +265,14 @@ impl Builder {
                 bit_width / 8
             },
             Type::Bool => 1,
-            &Type::Struct(id) => self.structs[&id].layout.size,
+            &Type::Struct(id) => self.code.mir_code.structs[&id].layout.size,
         }
     }
 
     /// Stride of an instance of a type in bytes
     pub fn stride_of(&self, ty: &Type) -> usize {
         match *ty {
-            Type::Struct(id) => self.structs[&id].layout.stride,
+            Type::Struct(id) => self.code.mir_code.structs[&id].layout.stride,
             // Otherwise, stride == size
             _ => self.size_of(ty),
         }
@@ -320,7 +281,7 @@ impl Builder {
     /// Minimum alignment of an instance of a type in bytes
     pub fn align_of(&self, ty: &Type) -> usize {
         match *ty {
-            Type::Struct(id) => self.structs[&id].layout.alignment,
+            Type::Struct(id) => self.code.mir_code.structs[&id].layout.alignment,
             // Otherwise, alignment == size
             _ => self.size_of(ty),
         }
@@ -364,9 +325,7 @@ impl Builder {
 
         StructLayout { field_offsets, alignment, size, stride }
     }
-}
 
-impl Driver {
     pub fn build_mir(&mut self, tp: &impl TypeProvider) {
         for i in 0..self.hir.decls.len() {
             self.get_decl(DeclId::new(i), tp);
@@ -376,7 +335,7 @@ impl Driver {
             let id = StaticId::new(i);
             let init = self.mir.static_inits[id];
             let konst = self.eval_expr(init, tp);
-            self.mir.statics.push(konst);
+            self.code.mir_code.statics.push(konst);
         }
     }
 
@@ -389,7 +348,7 @@ impl Driver {
         match self.hir.decls[id] {
             hir::Decl::Computed { ref params, scope, .. } => {
                 // Add placeholder function to reserve ID ahead of time
-                let get = self.mir.functions.push(Function::default());
+                let get = self.code.mir_code.functions.push(Function::default());
                 let decl = Decl::Computed { get };
                 self.mir.decls.insert(id, decl.clone());
                 let params = params.clone();
@@ -400,7 +359,7 @@ impl Driver {
                     params.clone(),
                     tp
                 );
-                self.mir.functions[get] = func;
+                self.code.mir_code.functions[get] = func;
                 decl
             },
             hir::Decl::Stored { id: index, .. } => {
@@ -447,7 +406,7 @@ impl Driver {
             Const::Bool(val) => write!(f, "{}", val)?,
             Const::Float { lit, ref ty } => write!(f, "{} as {:?}", lit, ty)?,
             Const::Int { lit, ref ty } => write!(f, "{} as {:?}", lit, ty)?,
-            Const::Str { id, ref ty } => write!(f, "%str{} ({:?}) as {:?}", id.index(), self.mir.strings[id], ty)?,
+            Const::Str { id, ref ty } => write!(f, "%str{} ({:?}) as {:?}", id.index(), self.code.mir_code.strings[id], ty)?,
             Const::Ty(ref ty) => write!(f, "`{:?}`", ty)?,
             Const::Mod(id) => write!(f, "%mod{}", id.index())?,
             Const::StructLit { ref fields, id } => {
@@ -484,51 +443,40 @@ impl Driver {
     }
 
     fn display_mir_impl(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if !self.mir.statics.raw.is_empty() {
-            for (i, statik) in self.mir.statics.iter().enumerate() {
+        if !self.code.mir_code.statics.raw.is_empty() {
+            for (i, statik) in self.code.mir_code.statics.iter().enumerate() {
                 write!(f, "%static{} = ", i)?;
                 self.fmt_const(f, statik, true)?;
             }
             writeln!(f)?;
         }
 
-        for (i, func) in self.mir.functions.iter().enumerate() {
+        for (i, func) in self.code.mir_code.functions.iter().enumerate() {
             write!(f, "fn {}(", self.fn_name(func.name))?;
-            assert_eq!(&func.code.raw[0], &Instr::Void);
+            let entry_block = &self.code.blocks[func.blocks[0]];
+            let void_instr = self.code.get_mir_instr(entry_block, OpId::new(0)).unwrap();
+            assert_eq!(void_instr, &Instr::Void);
             let mut first = true;
-            for i in 1..func.code.len() {
-                if let Instr::Parameter(ty) = &func.code.raw[i] {
+            for i in entry_block.ops.indices().skip(1) {
+                if let Instr::Parameter(ty) = self.code.get_mir_instr(entry_block, i).unwrap() {
                     if first {
                         first = false;
                     } else {
                         write!(f, ", ")?;
                     }
-                    write!(f, "%{}: {:?}", i, ty)?;
+                    write!(f, "%{}: {:?}", i.index(), ty)?;
                 } else {
                     break;
                 }
             }
             writeln!(f, "): {:?} {{", func.ret_ty)?;
-            struct BB {
-                id: BlockId,
-                instr: InstrId,
-            }
-            let mut basic_blocks: Vec<BB> = func.basic_blocks.iter().enumerate()
-                .map(|(id, &instr)| BB { id: BlockId::new(id), instr })
-                .collect();
-            basic_blocks.sort_by_key(|bb| bb.instr.index());
-            for i in 0..basic_blocks.len() {
-                let lower_bound = basic_blocks[i].instr.index();
-                let upper_bound = if i + 1 < basic_blocks.len() {
-                    basic_blocks[i + 1].instr.index()
-                } else {
-                    func.code.len()
-                };
-                writeln!(f, "%bb{}:", basic_blocks[i].id.index())?;
-                if lower_bound == upper_bound { continue }
+            for i in 0..func.blocks.len() {
+                writeln!(f, "%bb{}:", i)?;
+                let block = &self.code.blocks[func.blocks[i]];
                 
-                for i in lower_bound..upper_bound {
-                    let instr = &func.code.raw[i];
+                for &op in &block.ops {
+                    let instr_id = op.as_mir_instr().unwrap();
+                    let instr = &self.code.mir_code.instrs[instr_id];
                     write!(f, "    ")?;
                     macro_rules! write_args {
                         ($args:expr) => {{
@@ -554,7 +502,7 @@ impl Driver {
                         &Instr::CondBr { condition, true_bb, false_bb }
                             => writeln!(f, "condbr %{}, %bb{}, %bb{}", condition.index(), true_bb.index(), false_bb.index())?,
                         &Instr::Call { ref arguments, func: callee } => {
-                            write!(f, "%{} = call `{}`", i, self.fn_name(self.mir.functions[callee].name))?;
+                            write!(f, "%{} = call `{}`", i, self.fn_name(self.code.mir_code.functions[callee].name))?;
                             write_args!(arguments)?
                         },
                         Instr::Const(konst) => {
@@ -615,7 +563,7 @@ impl Driver {
                 }
             }
             write!(f, "}}")?;
-            if i + 1 < self.mir.functions.len() {
+            if i + 1 < self.code.mir_code.functions.len() {
                 writeln!(f, "\n")?;
             }
         }
@@ -638,22 +586,26 @@ enum FunctionBody {
     Expr(ExprId),
 }
 
+const VOID_INSTR: InstrId = InstrId::from_usize_unchecked(0);
+
 struct FunctionBuilder {
     name: Option<Sym>,
     ret_ty: Type,
-    void_instr: InstrId,
-    code: IndexVec<InstrId, Instr>,
-    basic_blocks: IndexVec<BlockId, InstrId>,
+    blocks: Vec<BlockId>,
     stored_decl_locs: IndexVec<StoredDeclId, InstrId>,
 }
 
-impl FunctionBuilder {
-    fn new_bb(&mut self) -> BlockId {
-        self.basic_blocks.push(InstrId::new(0))
+impl Driver {
+    fn start_bb(&mut self, b: &mut FunctionBuilder) -> BlockId {
+        let block = self.code.blocks.push(Block::default());
+        b.blocks.push(block);
+        block
     }
 
-    fn begin_bb(&mut self, bb: BlockId) {
-        let last_instr = self.code.raw.last().unwrap();
+    // TODO: Add a runtime check that I end every block
+    fn end_bb(&mut self, bb: BlockId) {
+        let block = &self.code.blocks[bb];
+        let last_instr = self.code.get_mir_instr(block, block.ops.last_idx()).unwrap();
         assert!(
             match last_instr {
                 Instr::Void | Instr::Parameter(_) | Instr::Br(_) | Instr::CondBr { .. } | Instr::Ret { .. } | Instr::Intrinsic { intr: Intrinsic::Panic, .. } => true,
@@ -662,37 +614,28 @@ impl FunctionBuilder {
             "expected terminal instruction before moving on to next block, found {:?}",
             last_instr,
         );
-        assert_eq!(self.basic_blocks[bb].index(), 0);
-
-        self.basic_blocks[bb] = InstrId::new(self.code.len())
     }
 
-    fn type_of(&self, b: &Builder, instr: InstrId) -> Type {
-        type_of(b, instr, &self.code)
+    fn type_of(&self, instr: InstrId) -> Type {
+        type_of(&self.code.mir_code, instr, &self.code.mir_code.instrs)
     }
-}
 
-impl Driver {
     fn build_function(&mut self, name: Option<Sym>, ret_ty: Type, body: FunctionBody, params: Range<DeclId>, tp: &impl TypeProvider) -> Function {
         debug_assert_ne!(ret_ty, Type::Error, "can't build MIR function with Error return type");
-        let mut code = IndexVec::new();
-        let void_instr = code.push(Instr::Void);
+
+        let mut entry = Block::default();
+        entry.ops.push(Op::MirInstr(VOID_INSTR));
         for param in params.start.index()..params.end.index() {
             let param = DeclId::new(param);
-            if let hir::Decl::Parameter { .. } = self.hir.decls[param] {
-                code.push(Instr::Parameter(self.decl_type(param, tp).clone()));
-            } else {
-                panic!("unexpected non-parameter as parameter decl");
-            }
+            assert!(matches!(self.hir.decls[param], hir::Decl::Parameter { .. }));
+            let instr = self.code.mir_code.instrs.push(Instr::Parameter(self.decl_type(param, tp).clone()));
+            let op = entry.ops.push(Op::MirInstr(instr));
         }
-        let mut basic_blocks = IndexVec::new();
-        basic_blocks.push(InstrId::new(code.len()));
+        let mut entry = self.code.blocks.push(entry);
         let mut b = FunctionBuilder {
             name,
             ret_ty,
-            void_instr,
-            code,
-            basic_blocks,
+            blocks: vec![entry],
             stored_decl_locs: IndexVec::new(),
         };
         let ctx = Context::new(0, DataDest::Ret, ControlDest::Unreachable);
@@ -703,8 +646,7 @@ impl Driver {
         Function {
             name: b.name,
             ret_ty: b.ret_ty,
-            code: b.code,
-            basic_blocks: b.basic_blocks,
+            blocks: b.blocks,
         }
     }
 

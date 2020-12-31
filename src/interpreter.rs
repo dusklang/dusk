@@ -10,7 +10,7 @@ use paste::paste;
 use num_bigint::{BigInt, Sign};
 
 use mire::hir::{Intrinsic, ModScopeId, StructId};
-use mire::mir::{Const, Instr, InstrId, StaticId};
+use mire::mir::{Const, Instr, InstrId, StaticId, MirCode};
 use mire::ty::{Type, IntWidth, FloatWidth};
 
 use crate::driver::Driver;
@@ -66,7 +66,7 @@ macro_rules! int_conversions {
 }
 int_conversions!(u8, u16, u32, u64, usize, i8, i16, i32, i64, isize);
 
-fn struct_lit(mir: &mir::Builder, id: StructId, fields: impl Iterator<Item=Value>) -> Value {
+fn struct_lit(mir: &MirCode, id: StructId, fields: impl Iterator<Item=Value>) -> Value {
     let strukt = &mir.structs[&id];
     let mut buf = SmallVec::new();
     buf.resize(strukt.layout.size, 0);
