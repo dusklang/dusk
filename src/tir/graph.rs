@@ -12,7 +12,7 @@ use bitflags::bitflags;
 use index_vec::define_index_type;
 use mire::hir::{self, ItemId, VOID_EXPR_ITEM};
 
-use crate::index_vec::IdxVec;
+use crate::index_vec::*;
 use crate::driver::Driver;
 use crate::TirGraphOutput;
 
@@ -20,10 +20,10 @@ define_index_type!(struct CompId = u32;);
 
 #[derive(Debug, Default)]
 pub struct Graph {
-    dependees: IdxVec<ItemId, Vec<ItemId>>,
-    t2_dependees: IdxVec<ItemId, Vec<ItemId>>,
-    t3_dependees: IdxVec<ItemId, Vec<ItemId>>,
-    t4_dependees: IdxVec<ItemId, Vec<ItemId>>,
+    dependees: IndexVec<ItemId, Vec<ItemId>>,
+    t2_dependees: IndexVec<ItemId, Vec<ItemId>>,
+    t3_dependees: IndexVec<ItemId, Vec<ItemId>>,
+    t4_dependees: IndexVec<ItemId, Vec<ItemId>>,
 
     /// Set of all meta-dependees that are not yet ready to be added to a normal unit
     global_meta_dependees: HashSet<ItemId>,
@@ -38,11 +38,11 @@ pub struct Graph {
     dependencies_added: HashSet<ItemId>,
 
     // Used exclusively for finding connected components
-    dependers: IdxVec<ItemId, Vec<ItemId>>,
+    dependers: IndexVec<ItemId, Vec<ItemId>>,
 
-    item_to_components: IdxVec<ItemId, CompId>,
+    item_to_components: IndexVec<ItemId, CompId>,
 
-    components: IdxVec<CompId, Component>,
+    components: IndexVec<CompId, Component>,
 
     /// Components that have not yet been added to a unit, or a mock unit
     outstanding_components: HashSet<CompId>,
@@ -100,7 +100,7 @@ struct Component {
 
 struct ComponentState {
     // TODO: Vec of bools == gross
-    visited: IdxVec<ItemId, bool>,
+    visited: IndexVec<ItemId, bool>,
     cur_component: Component,
 }
 
@@ -216,7 +216,7 @@ impl Graph {
 
     // Find the weak components of the graph
     pub fn split(&mut self) {
-        let mut visited = IdxVec::new();
+        let mut visited = IndexVec::new();
         visited.resize_with(self.dependees.len(), || false);
         let mut state = ComponentState {
             visited, cur_component: Component::default(),

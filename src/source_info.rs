@@ -11,10 +11,10 @@ use mire::hir::{ExprId, DeclId, ItemId};
 use mire::source_info::SourceFileId;
 
 use crate::driver::Driver;
-use crate::index_vec::IdxVec;
+use crate::index_vec::*;
 
 pub struct SourceMap {
-    pub files: IdxVec<SourceFileId, SourceFile>,
+    pub files: IndexVec<SourceFileId, SourceFile>,
     paths: HashMap<PathBuf, SourceFileId>,
 
     /// Contains vec![0, end(0), end(1), end(2)], etc.,
@@ -117,7 +117,7 @@ impl Driver {
 impl SourceMap {
     pub fn new() -> Self {
         SourceMap {
-            files: IdxVec::new(),
+            files: IndexVec::new(),
             paths: HashMap::new(),
             file_ends: vec![0],
         }

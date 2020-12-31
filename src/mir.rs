@@ -16,7 +16,7 @@ use crate::driver::Driver;
 use crate::typechecker as tc;
 use tc::type_provider::TypeProvider;
 use tc::CastMethod;
-use crate::index_vec::IdxVec;
+use crate::index_vec::*;
 
 #[derive(Clone, Debug)]
 enum Decl {
@@ -33,8 +33,8 @@ enum Decl {
 pub struct Function {
     pub name: Option<Sym>,
     pub ret_ty: Type,
-    pub code: IdxVec<InstrId, Instr>,
-    pub basic_blocks: IdxVec<BlockId, InstrId>,
+    pub code: IndexVec<InstrId, Instr>,
+    pub basic_blocks: IndexVec<BlockId, InstrId>,
 }
 
 impl Function {
@@ -211,11 +211,11 @@ pub struct StructLayout {
 
 pub struct Builder {
     decls: HashMap<DeclId, Decl>,
-    static_inits: IdxVec<StaticId, ExprId>,
+    static_inits: IndexVec<StaticId, ExprId>,
     pub arch: Arch,
-    pub strings: IdxVec<StrId, CString>,
-    pub functions: IdxVec<FuncId, Function>,
-    pub statics: IdxVec<StaticId, Const>,
+    pub strings: IndexVec<StrId, CString>,
+    pub functions: IndexVec<FuncId, Function>,
+    pub statics: IndexVec<StaticId, Const>,
     pub structs: HashMap<StructId, Struct>,
 }
 
@@ -223,17 +223,17 @@ impl Builder {
     pub fn new(arch: Arch) -> Self {
         Self {
             decls: HashMap::new(),
-            static_inits: IdxVec::new(),
+            static_inits: IndexVec::new(),
             arch,
-            strings: IdxVec::new(),
-            functions: IdxVec::new(),
-            statics: IdxVec::new(),
+            strings: IndexVec::new(),
+            functions: IndexVec::new(),
+            statics: IndexVec::new(),
             structs: HashMap::new(),
         }
     }
 }
 
-fn type_of(b: &Builder, instr: InstrId, code: &IdxVec<InstrId, Instr>) -> Type {
+fn type_of(b: &Builder, instr: InstrId, code: &IndexVec<InstrId, Instr>) -> Type {
     match &code[instr] {
         Instr::Void | Instr::Store { .. } => Type::Void,
         Instr::Pointer { .. } | Instr::Struct { .. } => Type::Ty,
@@ -642,9 +642,9 @@ struct FunctionBuilder {
     name: Option<Sym>,
     ret_ty: Type,
     void_instr: InstrId,
-    code: IdxVec<InstrId, Instr>,
-    basic_blocks: IdxVec<BlockId, InstrId>,
-    stored_decl_locs: IdxVec<StoredDeclId, InstrId>,
+    code: IndexVec<InstrId, Instr>,
+    basic_blocks: IndexVec<BlockId, InstrId>,
+    stored_decl_locs: IndexVec<StoredDeclId, InstrId>,
 }
 
 impl FunctionBuilder {
@@ -675,7 +675,7 @@ impl FunctionBuilder {
 impl Driver {
     fn build_function(&mut self, name: Option<Sym>, ret_ty: Type, body: FunctionBody, params: Range<DeclId>, tp: &impl TypeProvider) -> Function {
         debug_assert_ne!(ret_ty, Type::Error, "can't build MIR function with Error return type");
-        let mut code = IdxVec::new();
+        let mut code = IndexVec::new();
         let void_instr = code.push(Instr::Void);
         for param in params.start.index()..params.end.index() {
             let param = DeclId::new(param);
@@ -685,7 +685,7 @@ impl Driver {
                 panic!("unexpected non-parameter as parameter decl");
             }
         }
-        let mut basic_blocks = IdxVec::new();
+        let mut basic_blocks = IndexVec::new();
         basic_blocks.push(InstrId::new(code.len()));
         let mut b = FunctionBuilder {
             name,
@@ -693,7 +693,7 @@ impl Driver {
             void_instr,
             code,
             basic_blocks,
-            stored_decl_locs: IdxVec::new(),
+            stored_decl_locs: IndexVec::new(),
         };
         let ctx = Context::new(0, DataDest::Ret, ControlDest::Unreachable);
         match body {

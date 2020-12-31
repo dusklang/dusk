@@ -3,13 +3,14 @@ use std::ops::Range;
 
 use smallvec::{SmallVec, smallvec};
 use string_interner::DefaultSymbol as Sym;
+
 use mire::hir::*;
 use mire::index_counter::IndexCounter;
 use mire::ty::Type;
 use mire::source_info::SourceFileId;
 
 use crate::driver::Driver;
-use crate::index_vec::IdxVec;
+use crate::index_vec::*;
 use crate::builder::{BinOp, UnOp};
 use crate::source_info::SourceRange;
 
@@ -37,25 +38,25 @@ struct CompDeclState {
 
 #[derive(Debug)]
 pub struct Builder {
-    pub items: IdxVec<ItemId, Item>,
-    pub exprs: IdxVec<ExprId, Expr>,
-    pub decl_refs: IdxVec<DeclRefId, DeclRef>,
-    pub decls: IdxVec<DeclId, Decl>,
-    pub expr_to_items: IdxVec<ExprId, ItemId>,
-    pub decl_to_items: IdxVec<DeclId, ItemId>,
-    pub names: IdxVec<DeclId, Sym>,
-    pub explicit_tys: IdxVec<DeclId, Option<ExprId>>,
-    pub global_scopes: IdxVec<SourceFileId, ModScopeId>,
-    pub imper_scopes: IdxVec<ImperScopeId, ImperScope>,
-    pub mod_scopes: IdxVec<ModScopeId, ModScope>,
-    pub imper_ns: IdxVec<ImperScopeNsId, ImperScopeNs>,
-    pub mod_ns: IdxVec<ModScopeNsId, ModScopeNs>,
+    pub items: IndexVec<ItemId, Item>,
+    pub exprs: IndexVec<ExprId, Expr>,
+    pub decl_refs: IndexVec<DeclRefId, DeclRef>,
+    pub decls: IndexVec<DeclId, Decl>,
+    pub expr_to_items: IndexVec<ExprId, ItemId>,
+    pub decl_to_items: IndexVec<DeclId, ItemId>,
+    pub names: IndexVec<DeclId, Sym>,
+    pub explicit_tys: IndexVec<DeclId, Option<ExprId>>,
+    pub global_scopes: IndexVec<SourceFileId, ModScopeId>,
+    pub imper_scopes: IndexVec<ImperScopeId, ImperScope>,
+    pub mod_scopes: IndexVec<ModScopeId, ModScope>,
+    pub imper_ns: IndexVec<ImperScopeNsId, ImperScopeNs>,
+    pub mod_ns: IndexVec<ModScopeNsId, ModScopeNs>,
     pub void_expr: ExprId,
     pub void_ty: ExprId,
-    pub source_ranges: IdxVec<ItemId, SourceRange>,
+    pub source_ranges: IndexVec<ItemId, SourceRange>,
     pub cast_counter: IndexCounter<CastId>,
-    pub structs: IdxVec<StructId, Struct>,
-    pub field_decls: IdxVec<FieldDeclId, FieldDecl>,
+    pub structs: IndexVec<StructId, Struct>,
+    pub field_decls: IndexVec<FieldDeclId, FieldDecl>,
     pub struct_lits: IndexCounter<StructLitId>,
 
     comp_decl_stack: Vec<CompDeclState>,
@@ -65,26 +66,26 @@ pub struct Builder {
 impl Builder {
     pub fn new() -> Self {
         let mut b = Self {
-            items: IdxVec::new(),
-            exprs: IdxVec::new(),
-            decl_refs: IdxVec::new(),
-            decls: IdxVec::new(),
-            expr_to_items: IdxVec::new(),
-            decl_to_items: IdxVec::new(),
-            names: IdxVec::new(),
-            explicit_tys: IdxVec::new(),
-            global_scopes: IdxVec::new(),
-            imper_scopes: IdxVec::new(),
-            mod_scopes: IdxVec::new(),
-            imper_ns: IdxVec::new(),
-            mod_ns: IdxVec::new(),
+            items: IndexVec::new(),
+            exprs: IndexVec::new(),
+            decl_refs: IndexVec::new(),
+            decls: IndexVec::new(),
+            expr_to_items: IndexVec::new(),
+            decl_to_items: IndexVec::new(),
+            names: IndexVec::new(),
+            explicit_tys: IndexVec::new(),
+            global_scopes: IndexVec::new(),
+            imper_scopes: IndexVec::new(),
+            mod_scopes: IndexVec::new(),
+            imper_ns: IndexVec::new(),
+            mod_ns: IndexVec::new(),
             void_expr: ExprId::new(0),
             void_ty: ExprId::new(1),
-            source_ranges: IdxVec::new(),
+            source_ranges: IndexVec::new(),
             cast_counter: IndexCounter::new(),
-            structs: IdxVec::new(),
+            structs: IndexVec::new(),
             struct_lits: IndexCounter::new(),
-            field_decls: IdxVec::new(),
+            field_decls: IndexVec::new(),
             comp_decl_stack: Vec::new(),
             scope_stack: Vec::new(),
         };
@@ -312,7 +313,7 @@ impl Builder {
         }
     }
     pub fn field_decl(&mut self, name: Sym, ty: ExprId, index: usize, range: SourceRange) -> FieldDeclId {
-        let field = self.field_decls.next_id();
+        let field = self.field_decls.next_idx();
         let decl = self.decl(Decl::Field(field), name, Some(ty), range);
         self.field_decls.push_at(field, FieldDecl { decl, name, ty, index });
         field
@@ -408,7 +409,7 @@ impl Builder {
             Some(base_expr) => Namespace::MemberRef { base_expr },
             None => self.cur_namespace(),
         };
-        let id = self.decl_refs.next_id();
+        let id = self.decl_refs.next_idx();
         let num_arguments = arguments.len();
         let expr = self.push(Expr::DeclRef { arguments, id }, range);
         self.decl_refs.push_at(

@@ -13,11 +13,11 @@ use crate::error::Error;
 use crate::mir::{self, FunctionRef};
 use crate::interpreter::Interpreter;
 use crate::typechecker::type_provider::TypeProvider;
-use crate::index_vec::IdxVec;
+use crate::index_vec::*;
 
 pub struct Driver {
     pub src_map: SourceMap,
-    pub toks: IdxVec<SourceFileId, TokenVec>,
+    pub toks: IndexVec<SourceFileId, TokenVec>,
     pub interner: StringInterner,
     pub hir: hir::Builder,
     pub tir: tir::Builder,
@@ -32,7 +32,7 @@ impl Driver {
     pub fn new(src_map: SourceMap, arch: Arch) -> Self {
         Self {
             src_map,
-            toks: IdxVec::new(),
+            toks: IndexVec::new(),
             interner: StringInterner::new(),
             hir: hir::Builder::new(),
             tir: tir::Builder::default(),

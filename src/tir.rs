@@ -8,7 +8,7 @@ use mire::hir::{self, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, Str
 
 use crate::driver::Driver;
 use crate::dep_vec::{self, DepVec, AnyDepVec};
-use crate::index_vec::IdxVec;
+use crate::index_vec::*;
 use crate::TirGraphOutput;
 
 mod graph;
@@ -147,10 +147,10 @@ pub enum ExprNamespace {
 
 #[derive(Debug, Default)]
 pub struct Builder {
-    pub decls: IdxVec<DeclId, Decl>,
+    pub decls: IndexVec<DeclId, Decl>,
     pub expr_namespaces: HashMap<ExprId, Vec<ExprNamespace>>,
     graph: Graph,
-    depended_on: IdxVec<ExprId, bool>,
+    depended_on: IndexVec<ExprId, bool>,
 
     staged_ret_groups: HashMap<DeclId, SmallVec<[ExprId; 1]>>,
 }

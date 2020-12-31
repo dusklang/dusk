@@ -6,7 +6,7 @@ use mire::ty::{Type, QualType};
 
 use super::{CastMethod, StructLit, constraints::ConstraintList};
 use crate::{hir, tir};
-use crate::index_vec::IdxVec;
+use crate::index_vec::*;
 use crate::source_info::{SourceMap, CommentatedSourceRange};
 
 mod private {
@@ -59,23 +59,23 @@ pub trait TypeProvider: private::Sealed {
 
 pub struct RealTypeProvider {
     /// The type of each expression
-    types: IdxVec<ExprId, Type>,
+    types: IndexVec<ExprId, Type>,
     /// The list of overloads for each decl ref
-    overloads: IdxVec<DeclRefId, Vec<DeclId>>,
+    overloads: IndexVec<DeclRefId, Vec<DeclId>>,
     /// The selected overload for each decl ref
-    selected_overloads: IdxVec<DeclRefId, Option<DeclId>>,
+    selected_overloads: IndexVec<DeclRefId, Option<DeclId>>,
     /// Each struct literal matched to a structure
-    struct_lits: IdxVec<StructLitId, Option<StructLit>>,
+    struct_lits: IndexVec<StructLitId, Option<StructLit>>,
     /// The cast method for each cast expression
-    cast_methods: IdxVec<CastId, CastMethod>,
+    cast_methods: IndexVec<CastId, CastMethod>,
     /// The constraints on each expression's type
-    constraints: IdxVec<ExprId, ConstraintList>,
+    constraints: IndexVec<ExprId, ConstraintList>,
     /// A copy of the constraints, used for debugging the typechecker
-    constraints_copy: IdxVec<ExprId, ConstraintList>,
+    constraints_copy: IndexVec<ExprId, ConstraintList>,
     /// The preferred overload for each decl ref (currently only ever originates from literals)
-    preferred_overloads: IdxVec<DeclRefId, Option<DeclId>>,
+    preferred_overloads: IndexVec<DeclRefId, Option<DeclId>>,
 
-    decl_types: IdxVec<DeclId, QualType>,
+    decl_types: IndexVec<DeclId, QualType>,
 
     eval_results: HashMap<ExprId, Const>,
 
@@ -85,16 +85,16 @@ pub struct RealTypeProvider {
 impl RealTypeProvider {
     pub fn new(debug: bool, hir: &hir::Builder, tir: &tir::Builder) -> Self {
         let mut tp = RealTypeProvider {
-            types: IdxVec::new(),
-            overloads: IdxVec::new(),
-            selected_overloads: IdxVec::new(),
-            struct_lits: IdxVec::new(),
-            cast_methods: IdxVec::new(),
-            constraints: IdxVec::new(),
-            constraints_copy: IdxVec::new(),
-            preferred_overloads: IdxVec::new(),
+            types: IndexVec::new(),
+            overloads: IndexVec::new(),
+            selected_overloads: IndexVec::new(),
+            struct_lits: IndexVec::new(),
+            cast_methods: IndexVec::new(),
+            constraints: IndexVec::new(),
+            constraints_copy: IndexVec::new(),
+            preferred_overloads: IndexVec::new(),
             
-            decl_types: IdxVec::new(),
+            decl_types: IndexVec::new(),
             
             eval_results: HashMap::new(),
             

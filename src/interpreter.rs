@@ -14,7 +14,7 @@ use mire::mir::{Const, Instr, InstrId, StaticId};
 use mire::ty::{Type, IntWidth, FloatWidth};
 
 use crate::driver::Driver;
-use crate::index_vec::IdxVec;
+use crate::index_vec::*;
 use crate::mir::{self, Function, FunctionRef};
 use crate::typechecker::type_provider::TypeProvider;
 
@@ -269,7 +269,7 @@ impl Value {
 
 struct StackFrame {
     pc: InstrId,
-    results: IdxVec<InstrId, Value>,
+    results: IndexVec<InstrId, Value>,
 }
 
 #[derive(Copy, Clone)]
@@ -426,7 +426,7 @@ impl Driver {
     }
 
     fn new_stack_frame(&self, func: &Function, arguments: Vec<Value>) -> StackFrame {
-        let mut results = IdxVec::new();
+        let mut results = IndexVec::new();
         results.resize_with(func.code.len(), || Value::Nothing);
 
         let num_parameters = func.num_parameters();

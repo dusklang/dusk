@@ -11,6 +11,7 @@ use crate::driver::Driver;
 use crate::token::{TokenKind, TokenVec};
 use crate::error::Error;
 use crate::source_info::{SourceRange, SourceFile};
+use crate::index_vec::*;
 
 struct Lexer {
     /// Byte offset of the current file in the global source map
@@ -56,7 +57,7 @@ impl Driver {
             map
         };
 
-        let file = self.toks.next_id();
+        let file = self.toks.next_idx();
         let f = &self.src_map.files[file];
         let file_offset = self.src_map.get_begin_offset(file);
 
