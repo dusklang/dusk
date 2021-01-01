@@ -221,7 +221,7 @@ impl Graph {
         let mut state = ComponentState {
             visited, cur_component: Component::default(),
         };
-        self.item_to_components.resize_with(self.dependees.len(), || CompId::new(usize::MAX));
+        self.item_to_components.resize_with(self.dependees.len(), || CompId::new(u32::MAX as usize));
         assert!(self.components.is_empty());
         for i in 0..self.dependees.len() {
             self.find_component(ItemId::new(i), &mut state);
@@ -571,7 +571,7 @@ impl Driver {
             dep.resize_with(self.hir.items.len(), || Vec::new());
         }
 
-        self.tir.graph.item_to_components.resize_with(self.hir.items.len(), || CompId::new(usize::MAX));
+        self.tir.graph.item_to_components.resize_with(self.hir.items.len(), || CompId::new(u32::MAX as usize));
     }
 
     fn write_node_name(&self, item: ItemId, w: &mut impl Write) -> IoResult<()> {

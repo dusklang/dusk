@@ -110,10 +110,10 @@ fn main() {
 
     begin_phase!(Interp);
     let main_sym = driver.interner.get_or_intern("main");
-    let main = driver.mir.functions.iter()
+    let main = driver.code.mir_code.functions.iter()
         .position(|func| {
             match func.name {
-                Some(name) => name == main_sym && func.ret_ty == Type::Void && func.num_parameters() == 0,
+                Some(name) => name == main_sym && func.ret_ty == Type::Void && driver.code.num_parameters(func) == 0,
                 None => false,
             }
         })

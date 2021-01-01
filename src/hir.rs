@@ -349,7 +349,7 @@ impl Builder {
     }
     pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, explicit_ty: Option<ExprId>, proto_range: SourceRange) {
         // This is a placeholder value that gets replaced once the parameter declarations get allocated.
-        let id = self.decl(Decl::Const(ExprId::new(usize::MAX)), name, explicit_ty, proto_range);
+        let id = self.decl(Decl::Const(ExprId::new(u32::MAX as usize)), name, explicit_ty, proto_range);
         assert_eq!(param_names.len(), param_tys.len());
         self.decls.reserve(param_tys.len());
         let first_param = DeclId::new(self.decls.len());
@@ -366,7 +366,7 @@ impl Builder {
         self.decls[id] = Decl::Computed {
             param_tys,
             params: params.clone(),
-            scope: ImperScopeId::new(usize::MAX)
+            scope: ImperScopeId::new(u32::MAX as usize)
         };
         match self.scope_stack.last().unwrap() {
             ScopeState::Imper { .. } => {

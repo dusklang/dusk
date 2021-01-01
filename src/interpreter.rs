@@ -9,13 +9,14 @@ use smallvec::SmallVec;
 use paste::paste;
 use num_bigint::{BigInt, Sign};
 
+use mire::arch::Arch;
 use mire::hir::{Intrinsic, ModScopeId, StructId};
-use mire::mir::{Const, Instr, InstrId, StaticId, MirCode};
+use mire::mir::{Const, Instr, InstrId, StaticId, Function, Struct};
 use mire::ty::{Type, IntWidth, FloatWidth};
+use mire::{OpId, BlockId};
 
 use crate::driver::Driver;
-use crate::index_vec::*;
-use crate::mir::{self, Function, FunctionRef};
+use crate::mir::{FunctionRef, function_by_ref};
 use crate::typechecker::type_provider::TypeProvider;
 
 #[derive(Debug, Clone)]
@@ -66,18 +67,20 @@ macro_rules! int_conversions {
 }
 int_conversions!(u8, u16, u32, u64, usize, i8, i16, i32, i64, isize);
 
-fn struct_lit(mir: &MirCode, id: StructId, fields: impl Iterator<Item=Value>) -> Value {
-    let strukt = &mir.structs[&id];
-    let mut buf = SmallVec::new();
-    buf.resize(strukt.layout.size, 0);
-    for (i, field) in fields.enumerate() {
-        let offset = strukt.layout.field_offsets[i];
-        let ty = &strukt.field_tys[i];
-        let size = mir.size_of(ty);
-        let val = field.as_bytes();
-        buf[offset..(offset + size)].copy_from_slice(val);
+impl Driver {
+    fn struct_lit(&self, id: StructId, fields: impl Iterator<Item=Value>) -> Value {
+        let strukt = &self.code.mir_code.structs[&id];
+        let mut buf = SmallVec::new();
+        buf.resize(strukt.layout.size, 0);
+        for (i, field) in fields.enumerate() {
+            let offset = strukt.layout.field_offsets[i];
+            let ty = &strukt.field_tys[i];
+            let size = self.size_of(ty);
+            let val = field.as_bytes();
+            buf[offset..(offset + size)].copy_from_slice(val);
+        }
+        Value::Inline(buf)
     }
-    Value::Inline(buf)
 }
 
 impl Value {
@@ -187,13 +190,13 @@ impl Value {
         Value::Inline(storage)
     }
 
-    fn from_big_int(big_int: BigInt, width: IntWidth, is_signed: bool, mir: &mir::Builder) -> Value {
+    fn from_big_int(big_int: BigInt, width: IntWidth, is_signed: bool, arch: Arch) -> Value {
         let size = match width {
             IntWidth::W8 => 1,
             IntWidth::W16 => 2,
             IntWidth::W32 => 4,
             IntWidth::W64 => 8,
-            IntWidth::Pointer => mir.arch.pointer_size() / 8,
+            IntWidth::Pointer => arch.pointer_size() / 8,
         };
         let (mut bytes, extension) = if is_signed {
             (
@@ -217,27 +220,27 @@ impl Value {
         Value::from_bytes(&bytes)
     }
 
-    fn from_const(konst: &Const, mir: &mir::Builder) -> Value {
+    fn from_const(konst: &Const, driver: &Driver) -> Value {
         match *konst {
             Const::Int { lit, ref ty } => match ty {
-                &Type::Int { width, is_signed } => Value::from_big_int(BigInt::from(lit), width, is_signed, mir),
+                &Type::Int { width, is_signed } => Value::from_big_int(BigInt::from(lit), width, is_signed, driver.arch),
                 _ => panic!("unexpected int constant type {:?}", ty),
             },
-            Const::Float { lit, ref ty } => match mir.size_of(ty) {
+            Const::Float { lit, ref ty } => match driver.size_of(ty) {
                 4 => Value::from_f32(lit as f32),
                 8 => Value::from_f64(lit.try_into().unwrap()),
                 _ => panic!("Unrecognized float constant size"),
             },
             Const::Bool(val) => Value::from_bool(val),
             Const::Str { id, .. } => {
-                let ptr = mir.strings[id].as_ptr();
+                let ptr = driver.code.mir_code.strings[id].as_ptr();
                 Value::from_usize(unsafe { mem::transmute(ptr) })
             },
             Const::Ty(ref ty) => Value::from_ty(ty.clone()),
             Const::Mod(id) => Value::from_mod(id),
             Const::StructLit { ref fields, id } => {
-                let fields = fields.iter().map(|val| Value::from_const(val, mir));
-                struct_lit(mir, id, fields)
+                let fields = fields.iter().map(|val| Value::from_const(val, driver));
+                driver.struct_lit(id, fields)
             }
         }
     }
@@ -268,8 +271,16 @@ impl Value {
 }
 
 struct StackFrame {
-    pc: InstrId,
-    results: IndexVec<InstrId, Value>,
+    block: BlockId,
+    pc: OpId,
+    results: HashMap<InstrId, Value>,
+}
+
+impl StackFrame {
+    fn branch_to(&mut self, bb: BlockId) {
+        self.block = bb;
+        self.pc = OpId::new(0);
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -279,7 +290,7 @@ pub enum InterpMode {
 }
 
 pub struct Interpreter {
-    stack: Vec<(FunctionRef, StackFrame)>,
+    stack: Vec<StackFrame>,
     statics: HashMap<StaticId, Value>,
     allocations: HashMap<usize, alloc::Layout>,
     pub mode: InterpMode,
@@ -297,13 +308,13 @@ impl Interpreter {
 }
 
 macro_rules! bin_op {
-    ($salf:ident, $args:ident, $frame:ident, $func_ref:ident, $conv:ident, $first_ty:ident | $($ty:ident)|+, {$sign:tt}) => {{
-        bin_op!(@preamble $salf, $args, $frame, $func_ref, lhs, rhs, ty, final_val);
+    ($salf:ident, $args:ident, $conv:ident, $first_ty:ident | $($ty:ident)|+, {$sign:tt}) => {{
+        bin_op!(@preamble $salf, $args, lhs, rhs, ty, final_val);
         bin_op!(@kontinue $salf, ty, lhs, rhs, $conv, $first_ty | $($ty)|+, {$sign}, final_val);
         final_val.expect("Unexpected type for arguments")
     }};
-    ($salf:ident, $args:ident, $frame:ident, $func_ref:ident, $conv:ident, $ty:ident, {$sign:tt}) => {{
-        bin_op!(@preamble $salf, $args, $frame, $func_ref, lhs, rhs, ty, final_val);
+    ($salf:ident, $args:ident, $conv:ident, $ty:ident, {$sign:tt}) => {{
+        bin_op!(@preamble $salf, $args, lhs, rhs, ty, final_val);
         bin_op!(@kontinue $salf, ty, lhs, rhs, $conv, $ty, {$sign}, final_val);
         final_val.expect("Unexpected type for arguments")
     }};
@@ -314,7 +325,7 @@ macro_rules! bin_op {
     (@kontinue $salf:ident, $ty:ident, $lhs:ident, $rhs:ident, $conv:ident, SignedInt, {$sign:tt}, $final_val:ident) => {
         if let Type::Int { width, is_signed } = $ty {
             // We assume in the match below that pointer-sized ints are 64 bits
-            assert_eq!($salf.mir.arch.pointer_size(), 64);
+            assert_eq!($salf.arch.pointer_size(), 64);
             use IntWidth::*;
             match (width, is_signed) {
                 (W8, true) => bin_op!(@out $final_val, $conv, i8, $lhs, $rhs, {$sign}),
@@ -328,7 +339,7 @@ macro_rules! bin_op {
     (@kontinue $salf:ident, $ty:ident, $lhs:ident, $rhs:ident, $conv:ident, UnsignedInt, {$sign:tt}, $final_val:ident) => {
         if let Type::Int { width, is_signed } = $ty {
             // We assume in the match below that pointer-sized ints are 64 bits
-            assert_eq!($salf.mir.arch.pointer_size(), 64);
+            assert_eq!($salf.arch.pointer_size(), 64);
             use IntWidth::*;
             match (width, is_signed) {
                 (W8, false) => bin_op!(@out $final_val, $conv, u8, $lhs, $rhs, {$sign}),
@@ -355,12 +366,13 @@ macro_rules! bin_op {
     (@kontinue $salf:ident, $ty:ident, $lhs:ident, $rhs:ident, $conv:ident, Int, {$sign:tt}, $final_val:ident) => {
         bin_op!(@kontinue $salf, $ty, $lhs, $rhs, $conv, UnsignedInt | SignedInt, {$sign}, $final_val);
     };
-    (@preamble $salf:ident, $args:ident, $frame:ident, $func_ref:ident, $lhs:ident, $rhs:ident, $ty:ident, $final_val:ident) => {
+    (@preamble $salf:ident, $args:ident, $lhs:ident, $rhs:ident, $ty:ident, $final_val:ident) => {
+        let frame = $salf.interp.stack.last().unwrap();
         assert_eq!($args.len(), 2);
         let ($lhs, $rhs) = ($args[0], $args[1]);
-        let $ty = $salf.mir.type_of($lhs, &$func_ref);
-        assert_eq!($ty, $salf.mir.type_of($rhs, &$func_ref));
-        let ($lhs, $rhs) = (&$frame.results[$lhs], &$frame.results[$rhs]);
+        let $ty = $salf.type_of($lhs);
+        assert_eq!($ty, $salf.type_of($rhs));
+        let ($lhs, $rhs) = (&frame.results[&$lhs], &frame.results[&$rhs]);
         let mut $final_val = None;
     };
     (@out $final_val:ident, no_convert, $ty:ident, $lhs:ident, $rhs:ident, {$sign:tt}) => {
@@ -401,20 +413,20 @@ impl Driver {
                 assert!(pointee.ty == Type::i8() || pointee.ty == Type::u8());
                 println!("Warning: about to blindly copy a pointer into the global strings!");
                 let string = unsafe { CString::from(CStr::from_ptr(val.as_raw_ptr() as *const _)) };
-                let id = self.mir.strings.push(string);
+                let id = self.code.mir_code.strings.push(string);
                 Const::Str { id, ty }
             },
             Type::Ty => Const::Ty(val.as_ty().clone()),
             Type::Mod => Const::Mod(val.as_mod()),
             Type::Struct(id) => {
                 // Yay borrow checker
-                let strukt = self.mir.structs[&id].clone();
+                let strukt = self.code.mir_code.structs[&id].clone();
                 let buf = val.as_bytes();
                 let mut fields = Vec::new();
                 for i in 0..strukt.field_tys.len() {
                     let offset = strukt.layout.field_offsets[i];
                     let ty = strukt.field_tys[i].clone();
-                    let size = self.mir.size_of(&ty);
+                    let size = self.size_of(&ty);
                     let val = Value::from_bytes(&buf[offset..(offset+size)]);
                     let konst = self.value_to_const(val, ty.clone(), tp);
                     fields.push(konst);
@@ -426,10 +438,9 @@ impl Driver {
     }
 
     fn new_stack_frame(&self, func: &Function, arguments: Vec<Value>) -> StackFrame {
-        let mut results = IndexVec::new();
-        results.resize_with(func.code.len(), || Value::Nothing);
+        let mut results = HashMap::new();
 
-        let num_parameters = func.num_parameters();
+        let num_parameters = self.code.num_parameters(func);
         if num_parameters != arguments.len() {
             let interner = &self.interner;
             let func_name = func.name.map(|name| interner.resolve(name).unwrap()).unwrap_or("<anonymous func>");
@@ -440,19 +451,24 @@ impl Driver {
                 num_parameters
             );
         }
+        let start_block = func.blocks[0];
         for (i, arg) in arguments.into_iter().enumerate() {
-            results.raw[i + 1] = arg;
+            let op = OpId::new(i);
+            let param = self.code.blocks[start_block].ops[op].as_mir_instr().unwrap();
+            assert!(matches!(self.code.mir_code.instrs[param], Instr::Parameter(_)));
+            results.insert(param, arg);
         }
         StackFrame {
-            pc: InstrId::new(num_parameters + 1),
+            block: start_block,
+            pc: OpId::new(num_parameters),
             results,
         }
     }
 
     pub fn call(&mut self, func_ref: FunctionRef, arguments: Vec<Value>) -> Value {
-        let func = self.mir.function_by_ref(&func_ref);
+        let func = function_by_ref(&self.code.mir_code, &func_ref);
         let frame = self.new_stack_frame(func, arguments);
-        self.interp.stack.push((func_ref, frame));
+        self.interp.stack.push(frame);
         loop {
             if let Some(val) = self.execute_next() {
                 self.interp.stack.pop().unwrap();
@@ -463,52 +479,52 @@ impl Driver {
 
     /// Execute the next instruction. Iff the instruction is a return, this function returns its `Value`
     fn execute_next(&mut self) -> Option<Value> {
-        let (func_ref, frame) = self.interp.stack.last_mut().unwrap();
-        let func = self.mir.function_by_ref(func_ref);
-        let val = match &func.code[frame.pc] {
+        let frame = self.interp.stack.last_mut().unwrap();
+        let val = match self.code.get_mir_instr(frame.block, frame.pc).unwrap() {
             Instr::Void => Value::Nothing,
-            Instr::Const(konst) => Value::from_const(konst, &self.mir),
+            Instr::Const(konst) => Value::from_const(konst, &*self),
             Instr::Alloca(ty) => {
                 let mut storage = Vec::new();
-                storage.resize(self.mir.size_of(ty), 0);
+                storage.resize(self.size_of(ty), 0);
                 Value::Dynamic(storage.into_boxed_slice())
             },
             &Instr::LogicalNot(val) => {
-                let val = frame.results[val].as_bool();
+                let val = frame.results[&val].as_bool();
                 Value::from_bool(!val)
             },
             &Instr::Call { ref arguments, func } => {
                 let mut copied_args = Vec::new();
                 copied_args.reserve_exact(arguments.len());
                 for &arg in arguments {
-                    copied_args.push(frame.results[arg].clone());
+                    copied_args.push(frame.results[&arg].clone());
                 }
                 self.call(FunctionRef::Id(func), copied_args)
             },
             &Instr::Intrinsic { ref arguments, intr, .. } => {
                 match intr {
-                    Intrinsic::Mult => bin_op!(self, arguments, frame, func_ref, convert, Int | Float, {*}),
-                    Intrinsic::Div => bin_op!(self, arguments, frame, func_ref, convert, Int | Float, {/}),
-                    Intrinsic::Mod => bin_op!(self, arguments, frame, func_ref, convert, Int | Float, {%}),
-                    Intrinsic::Add => bin_op!(self, arguments, frame, func_ref, convert, Int | Float, {+}),
-                    Intrinsic::Sub => bin_op!(self, arguments, frame, func_ref, convert, Int | Float, {-}),
-                    Intrinsic::Less => bin_op!(self, arguments, frame, func_ref, bool_convert, Int | Float, {<}),
-                    Intrinsic::LessOrEq => bin_op!(self, arguments, frame, func_ref, bool_convert, Int | Float, {<=}),
-                    Intrinsic::Greater => bin_op!(self, arguments, frame, func_ref, bool_convert, Int | Float, {>}),
-                    Intrinsic::GreaterOrEq => bin_op!(self, arguments, frame, func_ref, bool_convert, Int | Float, {>=}),
-                    Intrinsic::Eq => bin_op!(self, arguments, frame, func_ref, bool_convert, Int | Float | Bool, {==}),
-                    Intrinsic::NotEq => bin_op!(self, arguments, frame, func_ref, bool_convert, Int | Float | Bool, {!=}),
-                    Intrinsic::BitwiseAnd => bin_op!(self, arguments, frame, func_ref, convert, Int, {&}),
-                    Intrinsic::BitwiseOr => bin_op!(self, arguments, frame, func_ref, convert, Int, {|}),
+                    Intrinsic::Mult => bin_op!(self, arguments, convert, Int | Float, {*}),
+                    Intrinsic::Div => bin_op!(self, arguments, convert, Int | Float, {/}),
+                    Intrinsic::Mod => bin_op!(self, arguments, convert, Int | Float, {%}),
+                    Intrinsic::Add => bin_op!(self, arguments, convert, Int | Float, {+}),
+                    Intrinsic::Sub => bin_op!(self, arguments, convert, Int | Float, {-}),
+                    Intrinsic::Less => bin_op!(self, arguments, bool_convert, Int | Float, {<}),
+                    Intrinsic::LessOrEq => bin_op!(self, arguments, bool_convert, Int | Float, {<=}),
+                    Intrinsic::Greater => bin_op!(self, arguments, bool_convert, Int | Float, {>}),
+                    Intrinsic::GreaterOrEq => bin_op!(self, arguments, bool_convert, Int | Float, {>=}),
+                    Intrinsic::Eq => bin_op!(self, arguments, bool_convert, Int | Float | Bool, {==}),
+                    Intrinsic::NotEq => bin_op!(self, arguments, bool_convert, Int | Float | Bool, {!=}),
+                    Intrinsic::BitwiseAnd => bin_op!(self, arguments, convert, Int, {&}),
+                    Intrinsic::BitwiseOr => bin_op!(self, arguments, convert, Int, {|}),
                     Intrinsic::LogicalNot => panic!("Unexpected logical not intrinsic, should've been replaced by instruction"),
                     Intrinsic::Neg => {
                         assert_eq!(arguments.len(), 1);
+                        let frame = self.interp.stack.last().unwrap();
                         let arg = arguments[0];
-                        let ty = self.mir.type_of(arg, &func_ref);
-                        let arg = &frame.results[arg];
+                        let ty =  self.type_of(arg);
+                        let arg = &frame.results[&arg];
                         match ty {
                             Type::Int { width, is_signed } => {
-                                Value::from_big_int(-arg.as_big_int(is_signed), width, is_signed, &self.mir)
+                                Value::from_big_int(-arg.as_big_int(is_signed), width, is_signed, self.arch)
                             },
                             Type::Float(width) => match width {
                                 FloatWidth::W32 => Value::from_f32(-arg.as_f32()),
@@ -519,13 +535,13 @@ impl Driver {
                     },
                     Intrinsic::Pos => {
                         assert_eq!(arguments.len(), 1);
-                        frame.results[arguments[0]].clone()
+                        frame.results[&arguments[0]].clone()
                     },
                     Intrinsic::Panic => {
                         assert!(arguments.len() <= 1);
                         let panic_msg = "Userspace panic";
                         if let Some(&msg) = arguments.first() {
-                            let mut ptr = frame.results[msg].as_raw_ptr();
+                            let mut ptr = frame.results[&msg].as_raw_ptr();
                             let mut msg = format!("{}: ", panic_msg);
                             unsafe {
                                 while *ptr != 0 {
@@ -539,10 +555,11 @@ impl Driver {
                         }
                     },
                     Intrinsic::Print => {
+                        let frame = self.interp.stack.last().unwrap();
                         assert_eq!(arguments.len(), 1);
                         let id = arguments[0];
-                        let val = &frame.results[id];
-                        let ty = self.mir.type_of(id, &func_ref);
+                        let val = &frame.results[&id];
+                        let ty = self.type_of(id);
                         match ty {
                             Type::Pointer(_) => unsafe {
                                 let mut ptr = val.as_raw_ptr();
@@ -558,8 +575,8 @@ impl Driver {
                     },
                     Intrinsic::Malloc => {
                         assert_eq!(arguments.len(), 1);
-                        assert_eq!(self.mir.arch.pointer_size(), 64);
-                        let size = frame.results[arguments[0]].as_u64() as usize;
+                        assert_eq!(self.arch.pointer_size(), 64);
+                        let size = frame.results[&arguments[0]].as_u64() as usize;
                         let layout = alloc::Layout::from_size_align(size, 8).unwrap();
                         let buf = unsafe { alloc::alloc(layout) };
                         let address: usize = unsafe { mem::transmute(buf) };
@@ -568,8 +585,8 @@ impl Driver {
                     }
                     Intrinsic::Free => {
                         assert_eq!(arguments.len(), 1);
-                        assert_eq!(self.mir.arch.pointer_size(), 64);
-                        let ptr = frame.results[arguments[0]].as_raw_ptr();
+                        assert_eq!(self.arch.pointer_size(), 64);
+                        let ptr = frame.results[&arguments[0]].as_raw_ptr();
                         let address: usize = unsafe { mem::transmute(ptr) };
                         let layout = self.interp.allocations.remove(&address).unwrap();
                         unsafe { alloc::dealloc(ptr, layout) };
@@ -593,36 +610,40 @@ impl Driver {
                     Intrinsic::Ty => Value::from_ty(Type::Ty),
                     Intrinsic::Module => Value::from_ty(Type::Mod),
                     Intrinsic::PrintType => {
+                        let frame = self.interp.stack.last().unwrap();
                         assert_eq!(arguments.len(), 1);
-                        print!("{:?}", frame.results[arguments[0]].as_ty());
+                        print!("{:?}", frame.results[&arguments[0]].as_ty());
                         Value::Nothing
                     },
                     Intrinsic::AlignOf => {
+                        let frame = self.interp.stack.last().unwrap();
                         assert_eq!(arguments.len(), 1);
-                        let ty = frame.results[arguments[0]].as_ty();
-                        Value::from_usize(self.mir.align_of(ty))
+                        let ty = frame.results[&arguments[0]].as_ty();
+                        Value::from_usize(self.align_of(ty))
                     },
                     Intrinsic::StrideOf => {
+                        let frame = self.interp.stack.last().unwrap();
                         assert_eq!(arguments.len(), 1);
-                        let ty = frame.results[arguments[0]].as_ty();
-                        Value::from_usize(self.mir.stride_of(ty))
+                        let ty = frame.results[&arguments[0]].as_ty();
+                        Value::from_usize(self.stride_of(ty))
                     },
                     Intrinsic::SizeOf => {
+                        let frame = self.interp.stack.last().unwrap();
                         assert_eq!(arguments.len(), 1);
-                        let ty = frame.results[arguments[0]].as_ty();
-                        Value::from_usize(self.mir.size_of(ty))
+                        let ty = frame.results[&arguments[0]].as_ty();
+                        Value::from_usize(self.size_of(ty))
                     },
                     Intrinsic::OffsetOf => {
                         assert_eq!(arguments.len(), 2);
-                        let ty = frame.results[arguments[0]].as_ty();
-                        let field_name = unsafe { CStr::from_ptr(frame.results[arguments[1]].as_raw_ptr() as *const _) };
+                        let ty = frame.results[&arguments[0]].as_ty();
+                        let field_name = unsafe { CStr::from_ptr(frame.results[&arguments[1]].as_raw_ptr() as *const _) };
                         let field_name = self.interner.get_or_intern(field_name.to_str().unwrap());
                         let mut offset = None;
                         match *ty {
                             Type::Struct(strukt) => {
                                 for (index, &field) in self.hir.structs[strukt].fields.iter().enumerate() {
                                     if field_name == self.hir.field_decls[field].name {
-                                        offset = Some(self.mir.structs[&strukt].layout.field_offsets[index]);
+                                        offset = Some(self.code.mir_code.structs[&strukt].layout.field_offsets[index]);
                                         break;
                                     }
                                 }
@@ -635,37 +656,41 @@ impl Driver {
                     _ => panic!("Call to unimplemented intrinsic {:?}", intr),
                 }
             },
-            &Instr::Reinterpret(instr, _) => frame.results[instr].clone(),
+            &Instr::Reinterpret(instr, _) => frame.results[&instr].clone(),
             &Instr::Truncate(instr, ref ty) => {
-                let bytes = frame.results[instr].as_bytes();
-                let new_size = self.mir.size_of(ty);
+                let frame = self.interp.stack.last().unwrap();
+                let bytes = frame.results[&instr].as_bytes();
+                let new_size = self.size_of(ty);
                 Value::from_bytes(&bytes[0..new_size])
             },
             &Instr::SignExtend(val, ref dest_ty) => {
-                let src_ty = &self.mir.type_of(val, &func_ref);
-                let val = &frame.results[val];
+                let frame = self.interp.stack.last().unwrap();
+                let src_ty = &self.type_of(val);
+                let val = &frame.results[&val];
                 match (src_ty, dest_ty) {
                     (
                         &Type::Int { is_signed: src_is_signed, .. },
                         &Type::Int { width: dest_width, is_signed: dest_is_signed }
-                    ) => Value::from_big_int(val.as_big_int(src_is_signed), dest_width, dest_is_signed, &self.mir),
+                    ) => Value::from_big_int(val.as_big_int(src_is_signed), dest_width, dest_is_signed, self.arch),
                     (_, _) => panic!("Invalid operand types to sign extension")
                 }
             },
             &Instr::ZeroExtend(val, ref dest_ty) => {
-                let src_ty = &self.mir.type_of(val, &func_ref);
-                let val = &frame.results[val];
+                let frame = self.interp.stack.last().unwrap();
+                let src_ty = &self.type_of(val);
+                let val = &frame.results[&val];
                 match (src_ty, dest_ty) {
                     (
                         &Type::Int { is_signed: src_is_signed, .. },
                         &Type::Int { width: dest_width, is_signed: dest_is_signed }
-                    ) => Value::from_big_int(val.as_big_int(src_is_signed), dest_width, dest_is_signed, &self.mir),
+                    ) => Value::from_big_int(val.as_big_int(src_is_signed), dest_width, dest_is_signed, self.arch),
                     (_, _) => panic!("Invalid operand types to zero extension")
                 }
             },
             &Instr::FloatCast(instr, ref ty) => {
-                let val = &frame.results[instr];
-                match (val.as_bytes().len(), self.mir.size_of(ty)) {
+                let frame = self.interp.stack.last().unwrap();
+                let val = &frame.results[&instr];
+                match (val.as_bytes().len(), self.size_of(ty)) {
                     (x, y) if x == y => val.clone(),
                     (4, 8) => Value::from_f64(val.as_f32() as f64),
                     (8, 4) => Value::from_f32(val.as_f64() as f32),
@@ -675,9 +700,10 @@ impl Driver {
                 }
             },
             &Instr::FloatToInt(instr, ref dest_ty) => {
-                let val = &frame.results[instr];
-                let src_ty = self.mir.type_of(instr, &func_ref);
-                let src_size = self.mir.size_of(&src_ty);
+                let frame = self.interp.stack.last().unwrap();
+                let val = &frame.results[&instr];
+                let src_ty = self.type_of(instr);
+                let src_size = self.size_of(&src_ty);
 
                 match dest_ty {
                     &Type::Int { width, is_signed } => {
@@ -696,15 +722,16 @@ impl Driver {
                             };
                             BigInt::from(int)
                         };
-                        Value::from_big_int(big_int, width, is_signed, &self.mir)
+                        Value::from_big_int(big_int, width, is_signed, self.arch)
                     },
                     _ => panic!("Invalid destination type in float to int cast: {:?}", dest_ty),
                 }
             }
             &Instr::IntToFloat(instr, ref dest_ty) => {
-                let val = &frame.results[instr];
-                let src_ty = &self.mir.type_of(instr, &func_ref);
-                let dest_size = self.mir.size_of(dest_ty);
+                let frame = self.interp.stack.last().unwrap();
+                let val = &frame.results[&instr];
+                let src_ty = &self.type_of(instr);
+                let dest_size = self.size_of(dest_ty);
                 match src_ty {
                     &Type::Int { is_signed, .. } => {
                         let big_int = val.as_big_int(is_signed);
@@ -728,37 +755,40 @@ impl Driver {
                 }
             }
             &Instr::Load(location) => {
-                let ty = self.mir.type_of(frame.pc, &func_ref);
-                let size = self.mir.size_of(&ty);
-                frame.results[location].load(size)
+                let instr = self.code.blocks[frame.block].ops[frame.pc].as_mir_instr().unwrap();
+                let ty = self.type_of(instr);
+                let size = self.size_of(&ty);
+                let frame = self.interp.stack.last_mut().unwrap();
+                frame.results[&location].load(size)
             },
             &Instr::Store { location, value } => {
-                let val = frame.results[value].clone();
-                frame.results[location].store(val);
+                let val = frame.results[&value].clone();
+                let result = frame.results.entry(location).or_insert(Value::Nothing);
+                result.store(val);
                 Value::Nothing
             },
             &Instr::AddressOfStatic(statik) => {
                 if let InterpMode::CompileTime = self.interp.mode {
                     panic!("Can't access static at compile time!");
                 }
-                let mir = &self.mir;
+                let static_value = Value::from_const(&self.code.mir_code.statics[statik], &*self);
                 let statik = self.interp.statics.entry(statik)
-                    .or_insert_with(|| Value::from_const(&mir.statics[statik], mir));
+                    .or_insert(static_value);
                 Value::from_usize(unsafe { mem::transmute(statik.as_bytes().as_ptr()) })
             },
             &Instr::Pointer { op, is_mut } => {
-                Value::from_ty(frame.results[op].as_ty().clone().ptr_with_mut(is_mut))
+                Value::from_ty(frame.results[&op].as_ty().clone().ptr_with_mut(is_mut))
             },
             &Instr::Struct { ref fields, id } => {
-                if !self.mir.structs.contains_key(&id) {
+                if !self.code.mir_code.structs.contains_key(&id) {
                     let mut field_tys = SmallVec::new();
                     for &field in fields {
-                        field_tys.push(frame.results[field].as_ty().clone());
+                        field_tys.push(frame.results[&field].as_ty().clone());
                     }
-                    let layout = self.mir.layout_struct(&field_tys);
-                    self.mir.structs.insert(
+                    let layout = self.layout_struct(&field_tys);
+                    self.code.mir_code.structs.insert(
                         id,
-                        mir::Struct {
+                        Struct {
                             field_tys,
                             layout,
                         }
@@ -767,55 +797,57 @@ impl Driver {
                 Value::from_ty(Type::Struct(id))
             },
             &Instr::StructLit { ref fields, id } => {
-                let mir = &self.mir;
-                struct_lit(
-                    mir,
+                let frame = self.interp.stack.last().unwrap();
+                self.struct_lit(
                     id,
                     fields.iter()
-                        .map(|&instr| frame.results[instr].clone())
+                        .map(|&instr| frame.results[&instr].clone())
                 )
             },
             &Instr::Ret(instr) => {
-                let val = mem::replace(&mut frame.results[instr], Value::Nothing);
+                let val = frame.results.entry(instr).or_insert_with(|| panic!());
+                let val = mem::replace(val, Value::Nothing);
                 return Some(val)
             },
             &Instr::Br(bb) => {
-                frame.pc = func.basic_blocks[bb];
+                frame.branch_to(bb);
                 return None
             },
             &Instr::CondBr { condition, true_bb, false_bb } => {
-                let condition = frame.results[condition].as_bool();
+                let condition = frame.results[&condition].as_bool();
                 let branch = if condition { true_bb } else { false_bb };
-                frame.pc = func.basic_blocks[branch];
+                frame.branch_to(branch);
                 return None
             },
             &Instr::DirectFieldAccess { val, index } => {
-                let bytes = frame.results[val].as_bytes();
-                let strukt = match self.mir.type_of(val, func_ref) {
+                let frame = self.interp.stack.last().unwrap();
+                let bytes = frame.results[&val].as_bytes();
+                let strukt = match self.type_of(val) {
                     Type::Struct(strukt) => strukt,
                     _ => panic!("Can't directly get field of non-struct"),
                 };
-                let strukt = &self.mir.structs[&strukt];
+                let strukt = &self.code.mir_code.structs[&strukt];
                 let ty = strukt.field_tys[index].clone();
-                let size = self.mir.size_of(&ty);
+                let size = self.size_of(&ty);
                 let offset = strukt.layout.field_offsets[index];
                 Value::from_bytes(&bytes[offset..(offset + size)])
             },
             &Instr::IndirectFieldAccess { val, index } => {
-                let addr = frame.results[val].as_usize();
-                let base_ty = self.mir.type_of(val, func_ref).deref().unwrap().ty;
+                let addr = frame.results[&val].as_usize();
+                let base_ty = self.type_of(val).deref().unwrap().ty;
                 let strukt = match base_ty {
                     Type::Struct(strukt) => strukt,
                     _ => panic!("Can't directly get field of non-struct"),
                 };
-                let offset = self.mir.structs[&strukt].layout.field_offsets[index];
+                let offset = self.code.mir_code.structs[&strukt].layout.field_offsets[index];
                 Value::from_usize(addr + offset)
             },
             Instr::Parameter(_) => panic!("Invalid parameter instruction in the middle of a function!"),
         };
 
-        let (_, frame) = self.interp.stack.last_mut().unwrap();
-        frame.results[frame.pc] = val;
+        let frame = self.interp.stack.last_mut().unwrap();
+        let instr = self.code.blocks[frame.block].ops[frame.pc].as_mir_instr().unwrap();
+        frame.results.insert(instr, val);
         frame.pc += 1;
         None
     }

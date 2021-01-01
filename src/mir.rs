@@ -7,7 +7,7 @@ use smallvec::SmallVec;
 use string_interner::DefaultSymbol as Sym;
 
 use mire::hir::{self, DeclId, ExprId, DeclRefId, ImperScopeId, Intrinsic, Expr, ScopeItem, StoredDeclId};
-use mire::mir::{InstrId, FuncId, StaticId, Const, Instr, Function, MirCode};
+use mire::mir::{InstrId, FuncId, StaticId, Const, Instr, Function, MirCode, StructLayout};
 use mire::{Block, BlockId, Op};
 use mire::ty::{Type, FloatWidth};
 
@@ -169,20 +169,6 @@ impl Driver {
 pub enum FunctionRef {
     Id(FuncId),
     Ref(Function),
-}
-
-#[derive(Clone)]
-pub struct Struct {
-    pub field_tys: SmallVec<[Type; 2]>,
-    pub layout: StructLayout,
-}
-
-#[derive(Clone)]
-pub struct StructLayout {
-    pub field_offsets: SmallVec<[usize; 2]>,
-    pub alignment: usize,
-    pub size: usize,
-    pub stride: usize,
 }
 
 pub struct Builder {
@@ -617,7 +603,7 @@ impl Driver {
         );
     }
 
-    fn type_of(&self, instr: InstrId) -> Type {
+    pub fn type_of(&self, instr: InstrId) -> Type {
         type_of(&self.code.mir_code, instr, &self.code.mir_code.instrs)
     }
 
@@ -629,9 +615,9 @@ impl Driver {
             let param = DeclId::new(param);
             assert!(matches!(self.hir.decls[param], hir::Decl::Parameter { .. }));
             let instr = self.code.mir_code.instrs.push(Instr::Parameter(self.decl_type(param, tp).clone()));
-            let op = entry.ops.push(Op::MirInstr(instr));
+            entry.ops.push(Op::MirInstr(instr));
         }
-        let mut entry = self.code.blocks.push(entry);
+        let entry = self.code.blocks.push(entry);
         let mut b = FunctionBuilder {
             name,
             ret_ty,

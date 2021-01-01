@@ -268,7 +268,7 @@ impl Driver {
                         Type::Struct(id) => {
                             let struct_fields = &self.hir.structs[id].fields;
                             let mut matches = Vec::new();
-                            matches.resize(struct_fields.len(), ExprId::new(usize::MAX));
+                            matches.resize(struct_fields.len(), ExprId::new(u32::MAX as usize));
 
                             let mut successful = true;
 
@@ -301,7 +301,7 @@ impl Driver {
                                 let field = struct_fields[i];
                                 let field = &self.hir.field_decls[field];
                                 let field_ty = tp.get_evaluated_type(field.ty).clone();
-                                if maatch == ExprId::new(usize::MAX) {
+                                if maatch == ExprId::new(u32::MAX as usize) {
                                     successful = false;
 
                                     let field_item = self.hir.decl_to_items[field.decl];
