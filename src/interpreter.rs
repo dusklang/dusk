@@ -16,7 +16,7 @@ use mire::ty::{Type, IntWidth, FloatWidth};
 use mire::{OpId, BlockId};
 
 use crate::driver::Driver;
-use crate::mir::{FunctionRef, function_by_ref};
+use crate::mir::{FunctionRef, function_by_ref, VOID_INSTR};
 use crate::typechecker::type_provider::TypeProvider;
 
 #[derive(Debug, Clone)]
@@ -458,6 +458,7 @@ impl Driver {
             assert!(matches!(self.code.mir_code.instrs[param], Instr::Parameter(_)));
             results.insert(param, arg);
         }
+        results.insert(VOID_INSTR, Value::Nothing);
         StackFrame {
             block: start_block,
             pc: OpId::new(num_parameters),
