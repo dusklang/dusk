@@ -1,0 +1,8 @@
+fn add(a: usize, b: usize): usize {
+    a := a
+    a + b
+}
+
+fn main() {
+    return
+}

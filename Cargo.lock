@@ -74,6 +74,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "display_adapter"
+version = "0.1.0"
+dependencies = [
+ "display_adapter_attr",
+]
+
+[[package]]
+name = "display_adapter_attr"
+version = "0.1.0"
+dependencies = [
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -144,6 +159,7 @@ dependencies = [
  "arrayvec",
  "bitflags",
  "clap",
+ "display_adapter",
  "index_vec",
  "mire",
  "num-bigint",
@@ -159,6 +175,7 @@ dependencies = [
 name = "mire"
 version = "0.1.0"
 dependencies = [
+ "display_adapter",
  "index_vec",
  "smallvec",
  "string-interner",

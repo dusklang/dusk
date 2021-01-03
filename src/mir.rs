@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 use std::ffi::CString;
-use std::fmt;
 use std::ops::Range;
 
 use smallvec::SmallVec;
 use string_interner::DefaultSymbol as Sym;
+use display_adapter::display_adapter;
 
 use mire::hir::{self, DeclId, ExprId, DeclRefId, ImperScopeId, Intrinsic, Expr, ScopeItem, StoredDeclId};
 use mire::mir::{InstrId, FuncId, StaticId, Const, Instr, Function, MirCode, StructLayout};
-use mire::{Block, BlockId, Op};
+use mire::{Block, BlockId, Op, OpId};
 use mire::ty::{Type, FloatWidth};
 
 use crate::driver::Driver;
@@ -21,7 +21,7 @@ use crate::index_vec::*;
 enum Decl {
     Stored(StoredDeclId),
     Computed { get: FuncId },
-    LocalConst { value: InstrId },
+    Parameter { index: usize },
     Intrinsic(Intrinsic, Type),
     Static(StaticId),
     Const(Const),
@@ -354,7 +354,7 @@ impl Driver {
                 decl
             },
             hir::Decl::Parameter { index } => {
-                let decl = Decl::LocalConst { value: InstrId::new(index + 1) };
+                let decl = Decl::Parameter { index };
                 self.mir.decls.insert(id, decl.clone());
                 decl
             },
@@ -387,7 +387,8 @@ impl Driver {
     }
 
     #[allow(dead_code)]
-    fn fmt_const(&self, f: &mut fmt::Formatter, konst: &Const, newline: bool) -> fmt::Result {
+    #[display_adapter]
+    fn fmt_const(&self, f: &mut Formatter, konst: &Const) {
         match *konst {
             Const::Bool(val) => write!(f, "{}", val)?,
             Const::Float { lit, ref ty } => write!(f, "{} as {:?}", lit, ty)?,
@@ -398,7 +399,7 @@ impl Driver {
             Const::StructLit { ref fields, id } => {
                 write!(f, "const literal struct{} {{ ", id.index())?;
                 for i in 0..fields.len() {
-                    self.fmt_const(f, &fields[i], false)?;
+                    write!(f, "{}", self.fmt_const(&fields[i]))?;
                     if i < (fields.len() - 1) {
                         write!(f, ",")?;
                     }
@@ -408,11 +409,7 @@ impl Driver {
             }
         }
 
-        if newline {
-            writeln!(f)
-        } else {
-            Ok(())
-        }
+        Ok(())
     }
 
     #[allow(dead_code)]
@@ -423,16 +420,11 @@ impl Driver {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn display_mir<'a>(&'a self) -> impl fmt::Display + 'a {
-        MirDisplay(self)
-    }
-
-    fn display_mir_impl(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    #[display_adapter]
+    pub fn display_mir(&self, f: &mut Formatter) {
         if !self.code.mir_code.statics.raw.is_empty() {
             for (i, statik) in self.code.mir_code.statics.iter().enumerate() {
-                write!(f, "%static{} = ", i)?;
-                self.fmt_const(f, statik, true)?;
+                writeln!(f, "%static{} = {}", i, self.fmt_const(statik))?;
             }
             writeln!(f)?;
         }
@@ -490,8 +482,7 @@ impl Driver {
                             write_args!(arguments)?
                         },
                         Instr::Const(konst) => {
-                            write!(f, "%{} = ", i)?;
-                            self.fmt_const(f, konst, true)?;
+                            writeln!(f, "%{} = {}", i, self.fmt_const(konst))?;
                         },
                         Instr::Intrinsic { arguments, intr, .. } => {
                             write!(f, "%{} = intrinsic `{}`", i, intr.name())?;
@@ -555,22 +546,13 @@ impl Driver {
     }
 }
 
-#[must_use]
-struct MirDisplay<'a>(&'a Driver);
-
-impl fmt::Display for MirDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.0.display_mir_impl(f)
-    }
-}
-
 #[derive(Copy, Clone)]
 enum FunctionBody {
     Scope(ImperScopeId),
     Expr(ExprId),
 }
 
-const VOID_INSTR: InstrId = InstrId::from_usize_unchecked(0);
+pub const VOID_INSTR: InstrId = InstrId::from_usize_unchecked(0);
 
 struct FunctionBuilder {
     name: Option<Sym>,
@@ -591,6 +573,7 @@ impl Driver {
         b.current_block = block;
     }
     fn end_bb(&mut self, bb: BlockId) {
+        self.code.mir_code.end_block(bb);
         let block = &self.code.blocks[bb];
         let last_instr = self.code.get_mir_instr(block, block.ops.last_idx()).unwrap();
         assert!(
@@ -631,13 +614,24 @@ impl Driver {
             FunctionBody::Expr(expr) => self.build_expr(&mut b, expr, ctx, tp),
             FunctionBody::Scope(scope) => self.build_scope(&mut b, scope, ctx, tp),
         };
-        let function = Function {
+        let mut function = Function {
             name: b.name,
             ret_ty: b.ret_ty,
             blocks: b.blocks,
         };
+        self.optimize_function(&mut function);
         self.code.mir_code.check_all_blocks_ended(&function);
         function 
+    }
+
+    fn optimize_function(&self, func: &mut Function) {
+        // Get rid of empty blocks
+        // TODO: get rid of unreachable blocks instead. Otherwise we might accidentally remove an
+        // empty, reachable block and fail silently (at MIR generation time).
+        func.blocks.retain(|&block| {
+            let block = &self.code.blocks[block];
+            !block.ops.is_empty()
+        });
     }
 
     fn push_instr(&mut self, b: &mut FunctionBuilder, instr: Instr) -> InstrId {
@@ -687,7 +681,12 @@ impl Driver {
                 assert!(arguments.is_empty());
                 b.stored_decl_locs[id].indirect()
             },
-            Decl::LocalConst { value } => value.direct(),
+            Decl::Parameter { index } => {
+                let entry_block = b.blocks[0];
+                let op = OpId::new(index);
+                let value = self.code.blocks[entry_block].ops[op].as_mir_instr().unwrap();
+                value.direct()
+            },
             Decl::Intrinsic(intr, ref ty) => {
                 let ty = ty.clone();
                 self.push_instr(b, Instr::Intrinsic { arguments, ty, intr }).direct()
@@ -722,7 +721,7 @@ impl Driver {
                 let location = b.stored_decl_locs[id];
                 self.push_instr(b, Instr::Store { location, value })
             },
-            Decl::LocalConst { .. } | Decl::Const(_) => panic!("can't set a constant!"),
+            Decl::Parameter { .. } | Decl::Const(_) => panic!("can't set a constant!"),
             Decl::Intrinsic(_, _) => panic!("can't set an intrinsic! (yet?)"),
             Decl::Static(statik) => {
                 let location = self.push_instr(b, Instr::AddressOfStatic(statik));
@@ -740,7 +739,7 @@ impl Driver {
                 assert!(arguments.is_empty());
                 b.stored_decl_locs[id].indirect()
             },
-            Decl::LocalConst { .. } | Decl::Const(_) => panic!("can't modify a constant!"),
+            Decl::Parameter { .. } | Decl::Const(_) => panic!("can't modify a constant!"),
             Decl::Intrinsic(_, _) => panic!("can't modify an intrinsic! (yet?)"),
             Decl::Static(statik) => self.push_instr(b, Instr::AddressOfStatic(statik)).indirect(),
             Decl::Field { .. } => panic!("Unhandled struct field!"),
