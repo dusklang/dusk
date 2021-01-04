@@ -659,8 +659,8 @@ impl Driver {
     pub fn get_real_type_provider(&self, dbg: bool) -> RealTypeProvider {
         // Assign the type of the void expression to be void.
         let mut tp = RealTypeProvider::new(dbg, &self.hir, &self.tir);
-        *tp.constraints_mut(self.hir.void_expr) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
-        *tp.ty_mut(self.hir.void_expr) = Type::Void;
+        *tp.constraints_mut(hir::VOID_EXPR) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
+        *tp.ty_mut(hir::VOID_EXPR) = Type::Void;
         tp
     }
 

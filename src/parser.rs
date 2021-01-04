@@ -2,7 +2,7 @@ use smallvec::{SmallVec, smallvec};
 
 use string_interner::DefaultSymbol as Sym;
 
-use mire::hir::{ExprId, ImperScopeId, Intrinsic, FieldAssignment};
+use mire::hir::{self, ExprId, ImperScopeId, Intrinsic, FieldAssignment};
 use mire::ty::Type;
 use mire::source_info::SourceFileId;
 
@@ -86,11 +86,11 @@ impl Driver {
         self.add_intrinsic(Panic, smallvec![u8_ptr], never, true);
 
         self.add_intrinsic(Malloc, smallvec![uusize], void_mut_ptr, true);
-        self.add_intrinsic(Free, smallvec![void_mut_ptr], self.hir.void_ty, true);
+        self.add_intrinsic(Free, smallvec![void_mut_ptr], hir::VOID_TYPE, true);
 
-        self.add_intrinsic(Print, smallvec![u8_ptr], self.hir.void_ty, true);
-        self.add_intrinsic(Print, smallvec![uu8], self.hir.void_ty, true);
-        self.add_intrinsic(PrintType, smallvec![type_type], self.hir.void_ty, true);
+        self.add_intrinsic(Print, smallvec![u8_ptr], hir::VOID_TYPE, true);
+        self.add_intrinsic(Print, smallvec![uu8], hir::VOID_TYPE, true);
+        self.add_intrinsic(PrintType, smallvec![type_type], hir::VOID_TYPE, true);
 
         self.add_intrinsic(AlignOf, smallvec![type_type], uusize, true);
         self.add_intrinsic(SizeOf, smallvec![type_type], uusize, true);
@@ -388,7 +388,7 @@ impl Driver {
             TokenKind::Return => {
                 let ret_range = self.cur(p).range;
                 self.next(p);
-                let ret_expr = self.try_parse_expr(p, true).unwrap_or_else(|_| self.hir.void_expr);
+                let ret_expr = self.try_parse_expr(p, true).unwrap_or_else(|_| hir::VOID_EXPR);
                 let expr_range = self.hir.get_range(ret_expr);
                 Ok(self.hir.ret(ret_expr, source_info::concat(ret_range, expr_range)))
             },
@@ -704,7 +704,7 @@ impl Driver {
                 proto_range = source_info::concat(proto_range, range);
                 Some(ty)
             },
-            TokenKind::OpenCurly => Some(self.hir.void_ty),
+            TokenKind::OpenCurly => Some(hir::VOID_TYPE),
             TokenKind::Assign => None,
             tok => panic!("Invalid token {:?}", tok),
         };

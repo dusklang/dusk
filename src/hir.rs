@@ -51,8 +51,6 @@ pub struct Builder {
     pub mod_scopes: IndexVec<ModScopeId, ModScope>,
     pub imper_ns: IndexVec<ImperScopeNsId, ImperScopeNs>,
     pub mod_ns: IndexVec<ModScopeNsId, ModScopeNs>,
-    pub void_expr: ExprId,
-    pub void_ty: ExprId,
     pub source_ranges: IndexVec<ItemId, SourceRange>,
     pub cast_counter: IndexCounter<CastId>,
     pub structs: IndexVec<StructId, Struct>,
@@ -79,8 +77,6 @@ impl Builder {
             mod_scopes: IndexVec::new(),
             imper_ns: IndexVec::new(),
             mod_ns: IndexVec::new(),
-            void_expr: ExprId::new(0),
-            void_ty: ExprId::new(1),
             source_ranges: IndexVec::new(),
             cast_counter: IndexCounter::new(),
             structs: IndexVec::new(),
@@ -248,7 +244,7 @@ impl Builder {
         let id = self.imper_scopes.push(
             ImperScope {
                 items: Vec::new(),
-                terminal_expr: self.void_expr,
+                terminal_expr: VOID_EXPR,
             }
         );
         let namespace = self.imper_ns.push(

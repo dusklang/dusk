@@ -260,7 +260,7 @@ impl Driver {
         for overload in overloads {
             match self.hir.decls[overload] {
                 hir::Decl::Computed { ref param_tys, .. } => {
-                    let ty = self.hir.explicit_tys[overload].unwrap_or(self.hir.void_ty);
+                    let ty = self.hir.explicit_tys[overload].unwrap_or(hir::VOID_TYPE);
                     add_eval_dep!(id, ty);
                     for &ty in param_tys {
                         add_eval_dep!(id, ty);
@@ -347,7 +347,7 @@ impl Driver {
                 let else_expr = if let Some(else_scope) = else_scope {
                     self.hir.imper_scopes[else_scope].terminal_expr
                 } else {
-                    self.hir.void_expr
+                    hir::VOID_EXPR
                 };
                 insert_expr!(ifs, If { condition, then_expr, else_expr });
             },
@@ -467,7 +467,7 @@ impl Driver {
                     let else_expr = if let Some(else_scope) = else_scope {
                         self.hir.imper_scopes[else_scope].terminal_expr
                     } else {
-                        self.hir.void_expr
+                        hir::VOID_EXPR
                     };
                     self.tir.graph.add_type1_dep(id, ei!(then_expr));
                     self.tir.graph.add_type1_dep(id, ei!(else_expr));
@@ -530,7 +530,7 @@ impl Driver {
                             self.add_type3_scope_dep(id, scope);
                             // NOTE: the Some case is handled below this match expression
                             if self.hir.explicit_tys[decl_id].is_none() {
-                                add_eval_dep!(id, self.hir.void_ty);
+                                add_eval_dep!(id, hir::VOID_TYPE);
                             }
                         },
                     }
@@ -555,7 +555,7 @@ impl Driver {
                         hir::Expr::Ret { decl, .. } => {
                             let ty = decl
                                 .and_then(|decl| self.hir.explicit_tys[decl])
-                                .unwrap_or(self.hir.void_ty);
+                                .unwrap_or(hir::VOID_TYPE);
                             add_eval_dep!(id, ty);
                         }
                         hir::Expr::DeclRef { id: decl_ref_id, .. } => {
