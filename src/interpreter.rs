@@ -4,14 +4,17 @@ use std::convert::TryInto;
 use std::ffi::{CStr, CString};
 use std::mem;
 use std::slice;
+use std::fmt::Write;
 
+use indenter::indented;
 use smallvec::SmallVec;
 use paste::paste;
 use num_bigint::{BigInt, Sign};
+use display_adapter::display_adapter;
 
 use mire::arch::Arch;
 use mire::hir::{Intrinsic, ModScopeId, StructId};
-use mire::mir::{Const, Instr, InstrId, StaticId, Function, Struct};
+use mire::mir::{Const, Instr, InstrId, StaticId, Struct};
 use mire::ty::{Type, IntWidth, FloatWidth};
 use mire::{OpId, BlockId};
 
@@ -271,6 +274,7 @@ impl Value {
 }
 
 struct StackFrame {
+    func_ref: FunctionRef,
     block: BlockId,
     pc: OpId,
     results: HashMap<InstrId, Value>,
@@ -437,7 +441,9 @@ impl Driver {
         }
     }
 
-    fn new_stack_frame(&self, func: &Function, arguments: Vec<Value>) -> StackFrame {
+    fn new_stack_frame(&self, func_ref: FunctionRef, arguments: Vec<Value>) -> StackFrame {
+        let func = function_by_ref(&self.code.mir_code, &func_ref);
+
         let mut results = HashMap::new();
 
         let num_parameters = self.code.num_parameters(func);
@@ -460,15 +466,24 @@ impl Driver {
         }
         results.insert(VOID_INSTR, Value::Nothing);
         StackFrame {
+            func_ref,
             block: start_block,
             pc: OpId::new(num_parameters),
             results,
         }
     }
 
+    #[display_adapter]
+    pub fn stack_trace(&self, f: &mut Formatter) {
+        for (i, frame) in self.interp.stack.iter().rev().enumerate() {
+            let func = function_by_ref(&self.code.mir_code, &frame.func_ref);
+            writeln!(f, "{}: {}", i, self.fn_name(func.name))?;
+        }
+        Ok(())
+    }
+
     pub fn call(&mut self, func_ref: FunctionRef, arguments: Vec<Value>) -> Value {
-        let func = function_by_ref(&self.code.mir_code, &func_ref);
-        let frame = self.new_stack_frame(func, arguments);
+        let frame = self.new_stack_frame(func_ref, arguments);
         self.interp.stack.push(frame);
         loop {
             if let Some(val) = self.execute_next() {
@@ -476,6 +491,25 @@ impl Driver {
                 return val;
             }
         }
+    }
+
+    #[display_adapter]
+    fn panic_message(&self, msg: Option<InstrId>, f: &mut Formatter) {
+        let frame = self.interp.stack.last().unwrap();
+        let msg = msg.map(|msg| frame.results[&msg].as_raw_ptr());
+        write!(f, "Userspace panic")?;
+        if let Some(mut msg) = msg {
+            write!(f, ": ")?;
+            unsafe {
+                while *msg != 0 {
+                    write!(f, "{}", *msg as char)?;
+                    msg = msg.offset(1);
+                }
+            }
+        }
+        writeln!(f, "\nStack trace:")?;
+        writeln!(indented(f), "{}", self.stack_trace())?;
+        Ok(())
     }
 
     /// Execute the next instruction. Iff the instruction is a return, this function returns its `Value`
@@ -540,20 +574,7 @@ impl Driver {
                     },
                     Intrinsic::Panic => {
                         assert!(arguments.len() <= 1);
-                        let panic_msg = "Userspace panic";
-                        if let Some(&msg) = arguments.first() {
-                            let mut ptr = frame.results[&msg].as_raw_ptr();
-                            let mut msg = format!("{}: ", panic_msg);
-                            unsafe {
-                                while *ptr != 0 {
-                                    msg.push(*ptr as char);
-                                    ptr = ptr.offset(1);
-                                }
-                            }
-                            panic!(msg)
-                        } else {
-                            panic!(panic_msg)
-                        }
+                        panic!("{}", self.panic_message(arguments.first().copied()));
                     },
                     Intrinsic::Print => {
                         let frame = self.interp.stack.last().unwrap();

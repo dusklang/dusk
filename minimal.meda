@@ -1,8 +1,14 @@
+fn do_something() {
+    panic()
+}
+
 fn add(a: usize, b: usize): usize {
     a := a
+    do_something()
     a + b
 }
 
 fn main() {
-    return
+    var := add(1, 2)
+    panic()
 }

@@ -125,6 +125,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "indenter"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4d5eb2e114fec2b7fe0fadc22888ad2658789bb7acac4dbee9cf8389f971ec8"
+
+[[package]]
 name = "index_vec"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -160,6 +166,7 @@ dependencies = [
  "bitflags",
  "clap",
  "display_adapter",
+ "indenter",
  "index_vec",
  "mire",
  "num-bigint",

@@ -412,8 +412,7 @@ impl Driver {
         Ok(())
     }
 
-    #[allow(dead_code)]
-    fn fn_name(&self, name: Option<Sym>) -> &str {
+    pub fn fn_name(&self, name: Option<Sym>) -> &str {
         match name {
             Some(name) => self.interner.resolve(name).unwrap(),
             None => "{anonymous}",
