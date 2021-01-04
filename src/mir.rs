@@ -1141,7 +1141,7 @@ impl Driver {
                 return self.build_expr(
                     b,
                     dest,
-                    Context::new(0, DataDest::Receive { value: instr }, ctx.control.clone()),
+                    Context::new(0, DataDest::Receive { value: instr }, ctx.control),
                     tp,
                 );
             }
