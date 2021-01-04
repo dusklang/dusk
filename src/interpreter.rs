@@ -827,7 +827,7 @@ impl Driver {
                 )
             },
             &Instr::Ret(instr) => {
-                let val = frame.results.entry(instr).or_insert_with(|| panic!());
+                let val = frame.results.entry(instr).or_insert_with(|| panic!("tried to return instr {}, which has no value", instr.index()));
                 let val = mem::replace(val, Value::Nothing);
                 return Some(val)
             },

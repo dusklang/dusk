@@ -1057,14 +1057,15 @@ impl Driver {
                 self.build_expr(b, condition, Context::new(0, DataDest::Branch(loop_bb, post_bb), ControlDest::Continue), tp);
 
                 self.start_bb(b, loop_bb);
-                let val = self.build_scope(b, scope, Context::new(0, DataDest::Void, ControlDest::Block(test_bb)), tp);
+                self.build_scope(b, scope, Context::new(0, DataDest::Void, ControlDest::Block(test_bb)), tp);
 
                 match ctx.control {
                     ControlDest::Continue | ControlDest::Unreachable => {
                         self.start_bb(b, post_bb);
-                        val
+                        VOID_INSTR.direct()
                     },
-                    ControlDest::Block(_) => return val,
+                    // Already handled this above
+                    ControlDest::Block(_) => return VOID_INSTR.direct(),
                 }
             },
             Expr::Ret { expr, .. } => {
@@ -1124,7 +1125,7 @@ impl Driver {
             },
             DataDest::Branch(true_bb, false_bb) => {
                 let instr = self.handle_indirection(b, val);
-                let val =self.push_instr(b, Instr::CondBr { condition: instr, true_bb, false_bb }).direct();
+                let val = self.push_instr(b, Instr::CondBr { condition: instr, true_bb, false_bb }).direct();
                 self.end_current_bb(b);
                 return val;
             },
