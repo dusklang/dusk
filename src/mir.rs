@@ -757,14 +757,12 @@ impl Driver {
                 let konst = self.expr_to_const(expr, ty.clone());
                 self.push_instr(b, Instr::Const(konst)).direct()
             },
-            Expr::Set { lhs, rhs } => {
-                self.build_expr(
-                    b,
-                    rhs,
-                    Context::new(ctx.indirection, DataDest::Set { dest: lhs }, ctx.control),
-                    tp,
-                )
-            },
+            Expr::Set { lhs, rhs } => return self.build_expr(
+                b,
+                rhs,
+                Context::new(ctx.indirection, DataDest::Set { dest: lhs }, ctx.control),
+                tp,
+            ),
             // This isn't really a loop! It's just a control flow hack to get around the fact
             // that you can't chain `if let`s in Rust.
             Expr::DeclRef { ref arguments, id } => loop {
