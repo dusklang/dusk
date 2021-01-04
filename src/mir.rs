@@ -568,11 +568,14 @@ impl Driver {
         block
     }
     fn start_bb(&mut self, b: &mut FunctionBuilder, block: BlockId) {
-        self.code.mir_code.start_block(block);
+        self.code.mir_code.start_block(block).unwrap();
         b.current_block = block;
     }
-    fn end_bb(&mut self, bb: BlockId) {
-        self.code.mir_code.end_block(bb);
+    fn end_current_bb(&mut self, b: &FunctionBuilder) {
+        let bb = b.current_block;
+        if self.code.mir_code.end_block(bb).is_err() {
+            panic!("Failed to end block {} in function {}:\n{}", bb.index(), self.fn_name(b.name), self.code.display_block(bb));
+        }
         let block = &self.code.blocks[bb];
         let last_instr = self.code.get_mir_instr(block, block.ops.last_idx()).unwrap();
         assert!(
@@ -1051,7 +1054,7 @@ impl Driver {
                 };
 
                 self.push_instr(b, Instr::Br(test_bb));
-                self.end_bb(b.current_block);
+                self.end_current_bb(b);
                 self.start_bb(b, test_bb);
                 self.build_expr(b, condition, Context::new(0, DataDest::Branch(loop_bb, post_bb), ControlDest::Continue), tp);
 
@@ -1103,7 +1106,7 @@ impl Driver {
         match control {
             ControlDest::Block(block) => {
                 let val = self.push_instr(b, Instr::Br(block)).direct();
-                self.end_bb(b.current_block);
+                self.end_current_bb(b);
                 val
             },
             ControlDest::Continue => val,
@@ -1118,13 +1121,13 @@ impl Driver {
             DataDest::Ret => {
                 let instr = self.handle_indirection(b, val);
                 let val = self.push_instr(b, Instr::Ret(instr)).direct();
-                self.end_bb(b.current_block);
+                self.end_current_bb(b);
                 return val;
             },
             DataDest::Branch(true_bb, false_bb) => {
                 let instr = self.handle_indirection(b, val);
                 let val =self.push_instr(b, Instr::CondBr { condition: instr, true_bb, false_bb }).direct();
-                self.end_bb(b.current_block);
+                self.end_current_bb(b);
                 return val;
             },
             DataDest::Receive { value } => {
