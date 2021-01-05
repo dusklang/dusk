@@ -9,20 +9,21 @@ use std::cmp::max;
 
 use bitflags::bitflags;
 
-use crate::builder::ItemId;
-use crate::index_vec::{Idx, IdxVec};
+use index_vec::define_index_type;
+use mire::hir::{self, ItemId, VOID_EXPR_ITEM};
+
+use crate::index_vec::*;
 use crate::driver::Driver;
-use crate::hir;
 use crate::TirGraphOutput;
 
-newtype_index!(CompId);
+define_index_type!(struct CompId = u32;);
 
 #[derive(Debug, Default)]
 pub struct Graph {
-    dependees: IdxVec<ItemId, Vec<ItemId>>,
-    t2_dependees: IdxVec<ItemId, Vec<ItemId>>,
-    t3_dependees: IdxVec<ItemId, Vec<ItemId>>,
-    t4_dependees: IdxVec<ItemId, Vec<ItemId>>,
+    dependees: IndexVec<ItemId, Vec<ItemId>>,
+    t2_dependees: IndexVec<ItemId, Vec<ItemId>>,
+    t3_dependees: IndexVec<ItemId, Vec<ItemId>>,
+    t4_dependees: IndexVec<ItemId, Vec<ItemId>>,
 
     /// Set of all meta-dependees that are not yet ready to be added to a normal unit
     global_meta_dependees: HashSet<ItemId>,
@@ -37,11 +38,11 @@ pub struct Graph {
     dependencies_added: HashSet<ItemId>,
 
     // Used exclusively for finding connected components
-    dependers: IdxVec<ItemId, Vec<ItemId>>,
+    dependers: IndexVec<ItemId, Vec<ItemId>>,
 
-    item_to_components: IdxVec<ItemId, CompId>,
+    item_to_components: IndexVec<ItemId, CompId>,
 
-    components: IdxVec<CompId, Component>,
+    components: IndexVec<CompId, Component>,
 
     /// Components that have not yet been added to a unit, or a mock unit
     outstanding_components: HashSet<CompId>,
@@ -99,7 +100,7 @@ struct Component {
 
 struct ComponentState {
     // TODO: Vec of bools == gross
-    visited: IdxVec<ItemId, bool>,
+    visited: IndexVec<ItemId, bool>,
     cur_component: Component,
 }
 
@@ -113,8 +114,8 @@ struct InternalUnit {
 impl Graph {
     /// a and b must be in the *same* unit, and a must have a higher level than b
     pub fn add_type1_dep(&mut self, a: ItemId, b: ItemId) {
-        // TODO: remove this HACK to prevent type 1 dependencies on the void expression
-        if b.idx() == 0 { return; }
+        // TODO: maybe remove this hack to prevent type 1 dependencies on the void expression
+        if b == VOID_EXPR_ITEM { return; }
         
         self.dependees[a].push(b);
         self.dependers[b].push(a);
@@ -215,12 +216,12 @@ impl Graph {
 
     // Find the weak components of the graph
     pub fn split(&mut self) {
-        let mut visited = IdxVec::new();
+        let mut visited = IndexVec::new();
         visited.resize_with(self.dependees.len(), || false);
         let mut state = ComponentState {
             visited, cur_component: Component::default(),
         };
-        self.item_to_components.resize_with(self.dependees.len(), || CompId::new(usize::MAX));
+        self.item_to_components.resize_with(self.dependees.len(), || CompId::new(u32::MAX as usize));
         assert!(self.components.is_empty());
         for i in 0..self.dependees.len() {
             self.find_component(ItemId::new(i), &mut state);
@@ -308,7 +309,7 @@ impl Graph {
     }
 
     pub fn get_items_that_need_dependencies(&mut self) -> Vec<ItemId> {
-        let items = self.outstanding_components.iter()
+        let items: Vec<ItemId> = self.outstanding_components.iter()
             .flat_map(|&comp| &self.components[comp].items)
             .copied()
             .filter(|item| !self.dependencies_added.contains(item))
@@ -557,24 +558,6 @@ pub struct MockUnit {
 
 }
 
-impl ItemId {
-    fn write_node_name(self, w: &mut impl Write, hir: &hir::Builder) -> IoResult<()> {
-        match hir.items[self] {
-            hir::Item::Expr(id) => write!(w, "item{}expr{}", self.idx(), id.idx())?,
-            hir::Item::Decl(id) => write!(w, "item{}decl{}", self.idx(), id.idx())?,
-        }
-        Ok(())
-    }
-
-    fn write_debug(self, w: &mut impl Write, hir: &hir::Builder) -> IoResult<()> {
-        match hir.items[self] {
-            hir::Item::Expr(id) => write!(w, "{:?}", hir.exprs[id])?,
-            hir::Item::Decl(id) => write!(w, "{:?}", hir.decls[id])?,
-        }
-        Ok(())
-    }
-}
-
 impl Driver {
     pub fn initialize_graph(&mut self) {
         let mut deps = [
@@ -585,17 +568,33 @@ impl Driver {
             &mut self.tir.graph.dependers
         ];
         for dep in &mut deps {
-            dep.resize_with(self.hir.items.len(), || Vec::new());
+            dep.resize_with(self.code.hir_code.items.len(), || Vec::new());
         }
 
-        self.tir.graph.item_to_components.resize_with(self.hir.items.len(), || CompId::new(usize::MAX));
+        self.tir.graph.item_to_components.resize_with(self.code.hir_code.items.len(), || CompId::new(u32::MAX as usize));
+    }
+
+    fn write_node_name(&self, item: ItemId, w: &mut impl Write) -> IoResult<()> {
+        match self.code.hir_code.items[item] {
+            hir::Item::Expr(id) => write!(w, "item{}expr{}", item.index(), id.index())?,
+            hir::Item::Decl(id) => write!(w, "item{}decl{}", item.index(), id.index())?,
+        }
+        Ok(())
+    }
+
+    fn write_debug(&self, item: ItemId, w: &mut impl Write) -> IoResult<()> {
+        match self.code.hir_code.items[item] {
+            hir::Item::Expr(id) => write!(w, "{:?}", self.code.hir_code.exprs[id])?,
+            hir::Item::Decl(id) => write!(w, "{:?}", self.code.hir_code.decls[id])?,
+        }
+        Ok(())
     }
 
     fn write_dep<W: Write>(&self, w: &mut W, a: ItemId, b: ItemId, write_attribs: impl FnOnce(&mut W) -> IoResult<()>) -> IoResult<()> {
         write!(w, "    ")?;
-        a.write_node_name(w, &self.hir)?;
+        self.write_node_name(a, w)?;
         write!(w, " -> ")?;
-        b.write_node_name(w, &self.hir)?;
+        self.write_node_name(b, w)?;
         write_attribs(w)?;
         writeln!(w, ";")?;
         Ok(())
@@ -618,9 +617,9 @@ impl Driver {
     }
 
     fn write_item(&self, w: &mut impl Write, item: ItemId) -> IoResult<()> {
-        let range = self.hir.source_ranges[item].clone();
+        let range = self.code.hir_code.source_ranges[item].clone();
         write!(w, "    ")?;
-        item.write_node_name(w, &self.hir)?;
+        self.write_node_name(item, w)?;
         if range.start != range.end {
             writeln!(
                 w,
@@ -634,7 +633,7 @@ impl Driver {
             )?;
         } else {
             write!(w, " [label=\"")?;
-            item.write_debug(w, &self.hir)?;
+            self.write_debug(item, w)?;
             writeln!(w, "\"];")?;
         }
         Ok(())
@@ -665,11 +664,11 @@ impl Driver {
     }
 
     fn should_exclude_item_from_output(&self, item: ItemId) -> bool {
-        let decl = match self.hir.items[item] {
+        let decl = match self.code.hir_code.items[item] {
             hir::Item::Decl(decl) => decl,
             hir::Item::Expr(_) => return false,
         };
-        let is_intrinsic = matches!(self.hir.decls[decl], hir::Decl::Intrinsic { .. });
+        let is_intrinsic = matches!(self.code.hir_code.decls[decl], hir::Decl::Intrinsic { .. });
         let is_not_depended_on = self.tir.graph.dependers[item].is_empty();
         is_intrinsic && is_not_depended_on
     }
@@ -743,12 +742,12 @@ impl Driver {
                         // Constrain items to be in the correct level
                         if level < max_level {
                             write!(w, "        ")?;
-                            item.write_node_name(&mut w, &self.hir)?;
+                            self.write_node_name(item, &mut w)?;
                             writeln!(w, " -> level{} [style=invis];", level + 1)?;
                         }
                         if level > 0 {
                             write!(w, "        level{} -> ", level - 1)?;
-                            item.write_node_name(&mut w, &self.hir)?;
+                            self.write_node_name(item, &mut w)?;
                             writeln!(w, " [style=invis];")?;
                         }
                     }

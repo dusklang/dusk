@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::cmp::{min, max};
+use std::cmp::max;
 use std::str;
 use std::path::PathBuf;
 use std::fs;
@@ -7,14 +7,14 @@ use std::io;
 use std::collections::HashMap;
 use std::ops::Range;
 
-use crate::driver::Driver;
-use crate::builder::{ExprId, DeclId, ItemId};
-use crate::index_vec::{Idx, IdxVec};
+use mire::hir::{ExprId, DeclId, ItemId};
+use mire::source_info::{SourceRange, SourceFileId};
 
-newtype_index!(SourceFileId pub);
+use crate::driver::Driver;
+use crate::index_vec::*;
 
 pub struct SourceMap {
-    pub files: IdxVec<SourceFileId, SourceFile>,
+    pub files: IndexVec<SourceFileId, SourceFile>,
     paths: HashMap<PathBuf, SourceFileId>,
 
     /// Contains vec![0, end(0), end(1), end(2)], etc.,
@@ -22,37 +22,6 @@ pub struct SourceMap {
     ///
     /// Used to search for the right file for SourceRanges
     file_ends: Vec<usize>,
-}
-
-#[derive(Copy, Clone, Debug)]
-pub struct SourceRange {
-    pub start: usize,
-    pub end: usize,
-}
-
-impl Default for SourceRange {
-    fn default() -> Self {
-        SourceRange {
-            start: usize::MAX,
-            end: usize::MAX,
-        }
-    }
-}
-
-impl SourceRange {
-    pub fn from_single_char(index: usize) -> SourceRange {
-        SourceRange {
-            start: index,
-            end: index+1
-        }
-    }
-}
-
-pub fn concat(a: SourceRange, b: SourceRange) -> SourceRange {
-    SourceRange {
-        start: min(a.start, b.start),
-        end:   max(a.end, b.end),
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -100,31 +69,31 @@ impl Driver {
 
     #[allow(dead_code)]
     pub fn print_item(&self, item: ItemId) {
-        self.print_range(self.hir.source_ranges[item].clone());
+        self.print_range(self.code.hir_code.source_ranges[item].clone());
     }
 
     #[allow(dead_code)]
     pub fn print_expr(&self, id: ExprId) {
-        self.print_item(self.hir.expr_to_items[id]);
+        self.print_item(self.code.hir_code.expr_to_items[id]);
     }
 
     #[allow(dead_code)]
     pub fn print_decl(&self, id: DeclId) {
-        self.print_item(self.hir.decl_to_items[id]);
+        self.print_item(self.code.hir_code.decl_to_items[id]);
     }
 }
 
 impl SourceMap {
     pub fn new() -> Self {
         SourceMap {
-            files: IdxVec::new(),
+            files: IndexVec::new(),
             paths: HashMap::new(),
             file_ends: vec![0],
         }
     }
 
     pub fn get_begin_offset(&self, file: SourceFileId) -> usize {
-        self.file_ends[file.idx()]
+        self.file_ends[file.index()]
     }
 
     pub fn add_file(&mut self, path: impl Into<PathBuf>) -> io::Result<SourceFileId> {
@@ -215,7 +184,7 @@ impl SourceMap {
             }
         };
         // Pick an impossible file ID so it will be unequal to the file in the 0th group.
-        let mut prev_file = SourceFileId::new(usize::MAX);
+        let mut prev_file = SourceFileId::new(u32::MAX as usize);
         for (i, range) in ranges.iter().enumerate() {
             let group = &line_range_groups[i];
             if group.file != prev_file {

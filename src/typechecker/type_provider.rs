@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 
-use crate::builder::{ExprId, DeclId, DeclRefId, StructLitId, CastId};
-use crate::ty::{Type, QualType};
+use mire::hir::{ExprId, DeclId, DeclRefId, StructLitId, CastId};
+use mire::mir::Const;
+use mire::ty::{Type, QualType};
+
 use super::{CastMethod, StructLit, constraints::ConstraintList};
-use crate::{hir, tir};
-use crate::mir::Const;
-use crate::index_vec::{IdxVec, Idx};
-use crate::source_info::{SourceMap, CommentatedSourceRange};
+use crate::index_vec::*;
+use crate::source_info::CommentatedSourceRange;
+use crate::driver::Driver;
 
 mod private {
     pub trait Sealed {}
@@ -14,7 +15,7 @@ mod private {
 
 pub trait TypeProvider: private::Sealed {
     fn debug(&self) -> bool;
-    fn debug_output(&mut self, hir: &hir::Builder, map: &SourceMap, level: usize);
+    fn debug_output(&mut self, d: &Driver, level: usize);
 
     fn ty(&self, expr: ExprId) -> &Type;
     fn ty_mut(&mut self, expr: ExprId) -> &mut Type;
@@ -42,7 +43,7 @@ pub trait TypeProvider: private::Sealed {
     /// Doesn't get the type *of* `id`, gets the type that `id` as an expression *is*
     fn get_evaluated_type(&self, id: ExprId) -> &Type;
 
-    fn fetch_decl_type(&mut self, hir: &hir::Builder, id: DeclId) -> &QualType;
+    fn fetch_decl_type(&mut self, d: &Driver, id: DeclId) -> &QualType;
     fn decl_type_mut(&mut self, decl: DeclId) -> &mut QualType;
 
     #[doc(hidden)]
@@ -58,23 +59,23 @@ pub trait TypeProvider: private::Sealed {
 
 pub struct RealTypeProvider {
     /// The type of each expression
-    types: IdxVec<ExprId, Type>,
+    types: IndexVec<ExprId, Type>,
     /// The list of overloads for each decl ref
-    overloads: IdxVec<DeclRefId, Vec<DeclId>>,
+    overloads: IndexVec<DeclRefId, Vec<DeclId>>,
     /// The selected overload for each decl ref
-    selected_overloads: IdxVec<DeclRefId, Option<DeclId>>,
+    selected_overloads: IndexVec<DeclRefId, Option<DeclId>>,
     /// Each struct literal matched to a structure
-    struct_lits: IdxVec<StructLitId, Option<StructLit>>,
+    struct_lits: IndexVec<StructLitId, Option<StructLit>>,
     /// The cast method for each cast expression
-    cast_methods: IdxVec<CastId, CastMethod>,
+    cast_methods: IndexVec<CastId, CastMethod>,
     /// The constraints on each expression's type
-    constraints: IdxVec<ExprId, ConstraintList>,
+    constraints: IndexVec<ExprId, ConstraintList>,
     /// A copy of the constraints, used for debugging the typechecker
-    constraints_copy: IdxVec<ExprId, ConstraintList>,
+    constraints_copy: IndexVec<ExprId, ConstraintList>,
     /// The preferred overload for each decl ref (currently only ever originates from literals)
-    preferred_overloads: IdxVec<DeclRefId, Option<DeclId>>,
+    preferred_overloads: IndexVec<DeclRefId, Option<DeclId>>,
 
-    decl_types: IdxVec<DeclId, QualType>,
+    decl_types: IndexVec<DeclId, QualType>,
 
     eval_results: HashMap<ExprId, Const>,
 
@@ -82,37 +83,37 @@ pub struct RealTypeProvider {
 }
 
 impl RealTypeProvider {
-    pub fn new(debug: bool, hir: &hir::Builder, tir: &tir::Builder) -> Self {
+    pub fn new(debug: bool, d: &Driver) -> Self {
         let mut tp = RealTypeProvider {
-            types: IdxVec::new(),
-            overloads: IdxVec::new(),
-            selected_overloads: IdxVec::new(),
-            struct_lits: IdxVec::new(),
-            cast_methods: IdxVec::new(),
-            constraints: IdxVec::new(),
-            constraints_copy: IdxVec::new(),
-            preferred_overloads: IdxVec::new(),
+            types: IndexVec::new(),
+            overloads: IndexVec::new(),
+            selected_overloads: IndexVec::new(),
+            struct_lits: IndexVec::new(),
+            cast_methods: IndexVec::new(),
+            constraints: IndexVec::new(),
+            constraints_copy: IndexVec::new(),
+            preferred_overloads: IndexVec::new(),
             
-            decl_types: IdxVec::new(),
+            decl_types: IndexVec::new(),
             
             eval_results: HashMap::new(),
             
             debug,
         };
-        tp.overloads.resize_with(hir.decl_refs.len(), Default::default);
-        tp.types.resize_with(hir.exprs.len(), Default::default);
-        tp.constraints.resize_with(hir.exprs.len(), Default::default);
+        tp.overloads.resize_with(d.code.hir_code.decl_refs.len(), Default::default);
+        tp.types.resize_with(d.code.hir_code.exprs.len(), Default::default);
+        tp.constraints.resize_with(d.code.hir_code.exprs.len(), Default::default);
         if debug {
-            tp.constraints_copy.resize_with(hir.exprs.len(), Default::default);
+            tp.constraints_copy.resize_with(d.code.hir_code.exprs.len(), Default::default);
         }
-        tp.selected_overloads.resize_with(hir.decl_refs.len(), || None);
-        tp.struct_lits.resize_with(hir.struct_lits.len(), || None);
-        tp.preferred_overloads.resize_with(hir.decl_refs.len(), || None);
-        tp.cast_methods.resize_with(hir.cast_counter.len(), || CastMethod::Noop);
+        tp.selected_overloads.resize_with(d.code.hir_code.decl_refs.len(), || None);
+        tp.struct_lits.resize_with(d.code.hir_code.struct_lits.len(), || None);
+        tp.preferred_overloads.resize_with(d.code.hir_code.decl_refs.len(), || None);
+        tp.cast_methods.resize_with(d.code.hir_code.cast_counter.len(), || CastMethod::Noop);
         
-        for i in 0..tir.decls.len() {
+        for i in 0..d.tir.decls.len() {
             let id = DeclId::new(i);
-            let is_mut = tir.decls[id].is_mut;
+            let is_mut = d.tir.decls[id].is_mut;
             tp.decl_types.push(QualType { ty: Type::Error, is_mut });
         }
         
@@ -120,14 +121,16 @@ impl RealTypeProvider {
     }
 }
 
-fn print_debug_diff_and_set_old_constraints(id: ExprId, old_constraints: &mut ConstraintList, new_constraints: &ConstraintList, hir: &hir::Builder, map: &SourceMap) {
-    if new_constraints != old_constraints {
-        map.print_commentated_source_ranges(&mut [
-            CommentatedSourceRange::new(hir.get_range(id), "", '-')
-        ]);
-        old_constraints.print_diff(new_constraints);
-        *old_constraints = new_constraints.clone();
-        println!("============================================================================================\n")
+impl Driver {
+    fn print_debug_diff_and_set_old_constraints(&self, id: ExprId, old_constraints: &mut ConstraintList, new_constraints: &ConstraintList) {
+        if new_constraints != old_constraints {
+            self.src_map.print_commentated_source_ranges(&mut [
+                CommentatedSourceRange::new(self.get_range(id), "", '-')
+            ]);
+            old_constraints.print_diff(new_constraints);
+            *old_constraints = new_constraints.clone();
+            println!("============================================================================================\n")
+        }
     }
 }
 
@@ -136,13 +139,13 @@ impl private::Sealed for RealTypeProvider {}
 impl TypeProvider for RealTypeProvider {
     fn debug(&self) -> bool { self.debug }
 
-    fn debug_output(&mut self, hir: &hir::Builder, map: &SourceMap, level: usize) {
+    fn debug_output(&mut self, d: &Driver, level: usize) {
         if !self.debug { return; }
         println!("LEVEL {}", level);
         assert_eq!(self.constraints.len(), self.constraints_copy.len());
         for i in 0..self.constraints.len() {
             let id = ExprId::new(i);
-            print_debug_diff_and_set_old_constraints(id, &mut self.constraints_copy[id], &self.constraints[id], hir, map);
+            d.print_debug_diff_and_set_old_constraints(id, &mut self.constraints_copy[id], &self.constraints[id]);
         }
     }
 
@@ -156,9 +159,9 @@ impl TypeProvider for RealTypeProvider {
         }
     }
 
-    fn fetch_decl_type(&mut self, hir: &hir::Builder, id: DeclId) -> &QualType {
+    fn fetch_decl_type(&mut self, d: &Driver, id: DeclId) -> &QualType {
         if let Type::Error = self.decl_types[id].ty {
-            if let Some(expr) = hir.explicit_tys[id] {
+            if let Some(expr) = d.code.hir_code.explicit_tys[id] {
                 let ty = self.get_evaluated_type(expr).clone();
                 self.decl_types[id].ty = ty;
             }
@@ -328,14 +331,14 @@ impl private::Sealed for MockTypeProvider<'_> {}
 impl<'base> TypeProvider for MockTypeProvider<'base> {
     fn debug(&self) -> bool { self.base.debug() }
 
-    fn debug_output(&mut self, hir: &hir::Builder, map: &SourceMap, level: usize) {
+    fn debug_output(&mut self, d: &Driver, level: usize) {
         if !self.debug() { return; }
         println!("LEVEL {}", level);
         let base = self.base;
         for (&id, new_constraints) in &self.constraints {
             let old_constraints = self.constraints_copy.entry(id)
                 .or_insert_with(|| base.constraints(id).clone());
-            print_debug_diff_and_set_old_constraints(id, old_constraints, new_constraints, hir, map);
+            d.print_debug_diff_and_set_old_constraints(id, old_constraints, new_constraints);
         }
     }
 
@@ -349,9 +352,9 @@ impl<'base> TypeProvider for MockTypeProvider<'base> {
         }
     }
 
-    fn fetch_decl_type(&mut self, hir: &hir::Builder, id: DeclId) -> &QualType {
+    fn fetch_decl_type(&mut self, d: &Driver, id: DeclId) -> &QualType {
         if let Type::Error = self.fw_decl_types(id).ty {
-            if let Some(expr) = hir.explicit_tys[id] {
+            if let Some(expr) = d.code.hir_code.explicit_tys[id] {
                 let ty = self.get_evaluated_type(expr).clone();
                 self.fw_decl_types_mut(id).ty = ty;
             }

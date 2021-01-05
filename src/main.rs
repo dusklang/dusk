@@ -1,6 +1,10 @@
 use clap::Clap;
 use std::path::PathBuf;
 
+use mire::ty::Type;
+use mire::mir::FuncId;
+use mire::arch::Arch;
+
 mod dep_vec;
 #[macro_use]
 mod index_vec;
@@ -14,16 +18,12 @@ mod tir;
 mod hir;
 mod mir;
 mod ty;
-mod arch;
 mod driver;
 mod typechecker;
 mod interpreter;
 
-use arch::Arch;
 use interpreter::InterpMode;
-use index_vec::Idx;
-use ty::Type;
-use mir::{FunctionRef, FuncId};
+use mir::FunctionRef;
 use driver::Driver;
 use source_info::SourceMap;
 
@@ -74,6 +74,7 @@ fn main() {
     let mut src_map = SourceMap::new();
     src_map.add_file(opt.input).unwrap();
     let mut driver = Driver::new(src_map, Arch::X86_64);
+    driver.initialize_hir();
 
     macro_rules! begin_phase {
         ($phase:ident) => {{
@@ -110,10 +111,10 @@ fn main() {
 
     begin_phase!(Interp);
     let main_sym = driver.interner.get_or_intern("main");
-    let main = driver.mir.functions.iter()
+    let main = driver.code.mir_code.functions.iter()
         .position(|func| {
             match func.name {
-                Some(name) => name == main_sym && func.ret_ty == Type::Void && func.num_parameters() == 0,
+                Some(name) => name == main_sym && func.ret_ty == Type::Void && driver.code.num_parameters(func) == 0,
                 None => false,
             }
         })

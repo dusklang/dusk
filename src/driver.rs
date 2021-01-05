@@ -1,25 +1,31 @@
-use string_interner::DefaultStringInterner;
+use string_interner::StringInterner;
 
-use crate::source_info::{SourceMap, SourceFileId};
-use crate::builder::ExprId;
+use mire::hir::ExprId;
+use mire::mir::Const;
+use mire::arch::Arch;
+use mire::source_info::SourceFileId;
+use mire::Code;
+
+use crate::source_info::SourceMap;
 use crate::token::TokenVec;
-use crate::arch::Arch;
 use crate::hir;
 use crate::tir;
 use crate::error::Error;
-use crate::mir::{self, FunctionRef, Const};
+use crate::mir::{self, FunctionRef};
 use crate::interpreter::Interpreter;
 use crate::typechecker::type_provider::TypeProvider;
-use crate::index_vec::IdxVec;
+use crate::index_vec::*;
 
 pub struct Driver {
+    pub arch: Arch,
     pub src_map: SourceMap,
-    pub toks: IdxVec<SourceFileId, TokenVec>,
-    pub interner: DefaultStringInterner,
+    pub toks: IndexVec<SourceFileId, TokenVec>,
+    pub interner: StringInterner,
     pub hir: hir::Builder,
     pub tir: tir::Builder,
     pub errors: Vec<Error>,
     pub mir: mir::Builder,
+    pub code: Code,
     pub interp: Interpreter,
     /// Total number of errors that have been flushed
     pub flushed_errors: u32,
@@ -27,17 +33,21 @@ pub struct Driver {
 
 impl Driver {
     pub fn new(src_map: SourceMap, arch: Arch) -> Self {
-        Self {
+        let mut d = Self {
+            arch,
             src_map,
-            toks: IdxVec::new(),
-            interner: DefaultStringInterner::new(),
-            hir: hir::Builder::new(),
+            toks: IndexVec::new(),
+            interner: StringInterner::new(),
+            hir: hir::Builder::default(),
             tir: tir::Builder::default(),
             errors: Vec::new(),
-            mir: mir::Builder::new(arch),
+            mir: mir::Builder::new(),
+            code: Code::default(),
             interp: Interpreter::new(),
             flushed_errors: 0,
-        }
+        };
+        d.initialize_hir();
+        d
     }
 
     pub fn eval_expr(&mut self, expr: ExprId, tp: &impl TypeProvider) -> Const {
