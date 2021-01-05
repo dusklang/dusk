@@ -5,9 +5,10 @@ use mire::mir::Const;
 use mire::ty::{Type, QualType};
 
 use super::{CastMethod, StructLit, constraints::ConstraintList};
-use crate::{hir, tir};
+use crate::hir;
 use crate::index_vec::*;
-use crate::source_info::{SourceMap, CommentatedSourceRange};
+use crate::source_info::CommentatedSourceRange;
+use crate::driver::Driver;
 
 mod private {
     pub trait Sealed {}
@@ -15,7 +16,7 @@ mod private {
 
 pub trait TypeProvider: private::Sealed {
     fn debug(&self) -> bool;
-    fn debug_output(&mut self, hir: &hir::Builder, map: &SourceMap, level: usize);
+    fn debug_output(&mut self, d: &Driver, level: usize);
 
     fn ty(&self, expr: ExprId) -> &Type;
     fn ty_mut(&mut self, expr: ExprId) -> &mut Type;
@@ -83,7 +84,7 @@ pub struct RealTypeProvider {
 }
 
 impl RealTypeProvider {
-    pub fn new(debug: bool, hir: &hir::Builder, tir: &tir::Builder) -> Self {
+    pub fn new(debug: bool, d: &Driver) -> Self {
         let mut tp = RealTypeProvider {
             types: IndexVec::new(),
             overloads: IndexVec::new(),
@@ -100,20 +101,20 @@ impl RealTypeProvider {
             
             debug,
         };
-        tp.overloads.resize_with(hir.decl_refs.len(), Default::default);
-        tp.types.resize_with(hir.exprs.len(), Default::default);
-        tp.constraints.resize_with(hir.exprs.len(), Default::default);
+        tp.overloads.resize_with(d.hir.decl_refs.len(), Default::default);
+        tp.types.resize_with(d.hir.exprs.len(), Default::default);
+        tp.constraints.resize_with(d.hir.exprs.len(), Default::default);
         if debug {
-            tp.constraints_copy.resize_with(hir.exprs.len(), Default::default);
+            tp.constraints_copy.resize_with(d.hir.exprs.len(), Default::default);
         }
-        tp.selected_overloads.resize_with(hir.decl_refs.len(), || None);
-        tp.struct_lits.resize_with(hir.struct_lits.len(), || None);
-        tp.preferred_overloads.resize_with(hir.decl_refs.len(), || None);
-        tp.cast_methods.resize_with(hir.cast_counter.len(), || CastMethod::Noop);
+        tp.selected_overloads.resize_with(d.hir.decl_refs.len(), || None);
+        tp.struct_lits.resize_with(d.hir.struct_lits.len(), || None);
+        tp.preferred_overloads.resize_with(d.hir.decl_refs.len(), || None);
+        tp.cast_methods.resize_with(d.hir.cast_counter.len(), || CastMethod::Noop);
         
-        for i in 0..tir.decls.len() {
+        for i in 0..d.tir.decls.len() {
             let id = DeclId::new(i);
-            let is_mut = tir.decls[id].is_mut;
+            let is_mut = d.tir.decls[id].is_mut;
             tp.decl_types.push(QualType { ty: Type::Error, is_mut });
         }
         
@@ -121,14 +122,16 @@ impl RealTypeProvider {
     }
 }
 
-fn print_debug_diff_and_set_old_constraints(id: ExprId, old_constraints: &mut ConstraintList, new_constraints: &ConstraintList, hir: &hir::Builder, map: &SourceMap) {
-    if new_constraints != old_constraints {
-        map.print_commentated_source_ranges(&mut [
-            CommentatedSourceRange::new(hir.get_range(id), "", '-')
-        ]);
-        old_constraints.print_diff(new_constraints);
-        *old_constraints = new_constraints.clone();
-        println!("============================================================================================\n")
+impl Driver {
+    fn print_debug_diff_and_set_old_constraints(&self, id: ExprId, old_constraints: &mut ConstraintList, new_constraints: &ConstraintList) {
+        if new_constraints != old_constraints {
+            self.src_map.print_commentated_source_ranges(&mut [
+                CommentatedSourceRange::new(self.get_range(id), "", '-')
+            ]);
+            old_constraints.print_diff(new_constraints);
+            *old_constraints = new_constraints.clone();
+            println!("============================================================================================\n")
+        }
     }
 }
 
@@ -137,13 +140,13 @@ impl private::Sealed for RealTypeProvider {}
 impl TypeProvider for RealTypeProvider {
     fn debug(&self) -> bool { self.debug }
 
-    fn debug_output(&mut self, hir: &hir::Builder, map: &SourceMap, level: usize) {
+    fn debug_output(&mut self, d: &Driver, level: usize) {
         if !self.debug { return; }
         println!("LEVEL {}", level);
         assert_eq!(self.constraints.len(), self.constraints_copy.len());
         for i in 0..self.constraints.len() {
             let id = ExprId::new(i);
-            print_debug_diff_and_set_old_constraints(id, &mut self.constraints_copy[id], &self.constraints[id], hir, map);
+            d.print_debug_diff_and_set_old_constraints(id, &mut self.constraints_copy[id], &self.constraints[id]);
         }
     }
 
@@ -329,14 +332,14 @@ impl private::Sealed for MockTypeProvider<'_> {}
 impl<'base> TypeProvider for MockTypeProvider<'base> {
     fn debug(&self) -> bool { self.base.debug() }
 
-    fn debug_output(&mut self, hir: &hir::Builder, map: &SourceMap, level: usize) {
+    fn debug_output(&mut self, d: &Driver, level: usize) {
         if !self.debug() { return; }
         println!("LEVEL {}", level);
         let base = self.base;
         for (&id, new_constraints) in &self.constraints {
             let old_constraints = self.constraints_copy.entry(id)
                 .or_insert_with(|| base.constraints(id).clone());
-            print_debug_diff_and_set_old_constraints(id, old_constraints, new_constraints, hir, map);
+            d.print_debug_diff_and_set_old_constraints(id, old_constraints, new_constraints);
         }
     }
 

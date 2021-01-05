@@ -26,7 +26,7 @@ impl Driver {
 
     fn parse_single_file(&mut self) {
         let file = self.lex();
-        self.hir.start_new_file(file);
+        self.start_new_file(file);
         let mut p = Parser { file, cur: 0 };
 
         // TODO: Don't duplicate intrinsics in every file!
@@ -217,7 +217,7 @@ impl Driver {
 
     fn try_parse_term(&mut self, p: &mut Parser, parse_struct_lits: bool) -> Result<ExprId, TokenKind> {
         let mut term = self.try_parse_restricted_term(p)?;
-        let mut range = self.hir.get_range(term);
+        let mut range = self.get_range(term);
         if parse_struct_lits {
             if let TokenKind::OpenCurly = self.cur(p).kind {
                 self.next(p);
@@ -247,14 +247,14 @@ impl Driver {
                     }
                 };
                 let lit_range = source_info::concat(range, close_curly_range);
-                term = self.hir.struct_lit(term, fields, lit_range);
+                term = self.struct_lit(term, fields, lit_range);
             }
         }
         while let TokenKind::As = self.cur(p).kind {
             self.next(p);
             let (ty, ty_range) = self.parse_type(p);
             range = source_info::concat(range, ty_range);
-            term = self.hir.cast(term, ty, range);
+            term = self.cast(term, ty, range);
         }
         Ok(term)
     }
@@ -275,13 +275,13 @@ impl Driver {
         assert!(matches!(paren, TokenKind::RightParen));
         self.next(p);
 
-        self.hir.import(file, source_info::concat(import_range, paren_range))
+        self.import(file, source_info::concat(import_range, paren_range))
     }
 
     fn parse_decl_ref(&mut self, p: &mut Parser, base_expr: Option<ExprId>, name: Sym) -> ExprId {
         let name_range = self.cur(p).range;
         let begin_range = if let Some(base_expr) = base_expr {
-            self.hir.get_range(base_expr)
+            self.get_range(base_expr)
         } else {
             name_range
         };
@@ -308,7 +308,7 @@ impl Driver {
                 }
             }
         }
-        self.hir.decl_ref(
+        self.decl_ref(
             base_expr,
             name,
             args,
@@ -325,7 +325,7 @@ impl Driver {
         if let Some((op, op_range)) = self.parse_prefix_operator(p) {
             let term = self.try_parse_restricted_term(p)
                 .unwrap_or_else(|tok| panic!("Expected expression after unary operator, found {:?}", tok));
-            let term_range = self.hir.get_range(term);
+            let term_range = self.get_range(term);
             return Ok(self.un_op(op, term, source_info::concat(op_range, term_range)));
         }
 
@@ -342,28 +342,28 @@ impl Driver {
                     );
                 }
                 let close_paren_range = self.cur(p).range;
-                self.hir.set_range(expr, source_info::concat(open_paren_range, close_paren_range));
+                self.set_range(expr, source_info::concat(open_paren_range, close_paren_range));
                 self.next(p);
                 Ok(expr)
             },
             &TokenKind::IntLit(val) => {
-                let lit = self.hir.int_lit(val, self.cur(p).range);
+                let lit = self.int_lit(val, self.cur(p).range);
                 self.next(p);
                 Ok(lit)
             },
             &TokenKind::DecLit(val) => {
-                let lit = self.hir.dec_lit(val, self.cur(p).range);
+                let lit = self.dec_lit(val, self.cur(p).range);
                 self.next(p);
                 Ok(lit)
             },
             TokenKind::StrLit(val) => {
                 let val = val.clone();
-                let lit = self.hir.str_lit(val, self.cur(p).range);
+                let lit = self.str_lit(val, self.cur(p).range);
                 self.next(p);
                 Ok(lit)
             },
             &TokenKind::CharLit(val) => {
-                let lit = self.hir.char_lit(val, self.cur(p).range);
+                let lit = self.char_lit(val, self.cur(p).range);
                 self.next(p);
                 Ok(lit)
             },
@@ -372,7 +372,7 @@ impl Driver {
                 let do_range = self.cur(p).range;
                 self.next(p);
                 let (scope, scope_range) = self.parse_scope(p);
-                Ok(self.hir.do_expr(scope, source_info::concat(do_range, scope_range)))
+                Ok(self.do_expr(scope, source_info::concat(do_range, scope_range)))
             },
             TokenKind::Module => Ok(self.parse_module(p)),
             TokenKind::Import => Ok(self.parse_import(p)),
@@ -383,14 +383,14 @@ impl Driver {
                 self.next(p);
                 let condition = self.parse_non_struct_lit_expr(p);
                 let (scope, scope_range) = self.parse_scope(p);
-                Ok(self.hir.while_expr(condition, scope, source_info::concat(while_range, scope_range)))
+                Ok(self.while_expr(condition, scope, source_info::concat(while_range, scope_range)))
             },
             TokenKind::Return => {
                 let ret_range = self.cur(p).range;
                 self.next(p);
                 let ret_expr = self.try_parse_expr(p, true).unwrap_or_else(|_| hir::VOID_EXPR);
-                let expr_range = self.hir.get_range(ret_expr);
-                Ok(self.hir.ret(ret_expr, source_info::concat(ret_range, expr_range)))
+                let expr_range = self.get_range(ret_expr);
+                Ok(self.ret(ret_expr, source_info::concat(ret_range, expr_range)))
             },
             x => Err(x.clone()),
         }.map(|mut expr| {
@@ -398,7 +398,7 @@ impl Driver {
             loop {
                 let mut modified = false;
                 while let Some((op, mut range)) = self.parse_postfix_operator(p) {
-                    range = source_info::concat(range, self.hir.get_range(expr));
+                    range = source_info::concat(range, self.get_range(expr));
                     expr = self.un_op(op, expr, range);
 
                     modified = true;
@@ -440,8 +440,8 @@ impl Driver {
                 let lhs = expr_stack.pop().unwrap();
                 let next_op = op_stack.pop().unwrap();
                 let range = source_info::concat(
-                    self.hir.get_range(lhs),
-                    self.hir.get_range(rhs),
+                    self.get_range(lhs),
+                    self.get_range(rhs),
                 );
                 expr_stack.push(self.bin_op(next_op, lhs, rhs, range));
             }
@@ -483,12 +483,12 @@ impl Driver {
         let else_scope = if let TokenKind::Else = self.cur(p).kind {
             match self.next(p).kind {
                 TokenKind::If => {
-                    let scope = self.hir.begin_imper_scope();
+                    let scope = self.begin_imper_scope();
                     let if_expr = self.parse_if(p);
-                    let if_range = self.hir.get_range(if_expr);
+                    let if_range = self.get_range(if_expr);
                     range = source_info::concat(range, if_range);
-                    self.hir.stmt(if_expr);
-                    self.hir.end_imper_scope(true);
+                    self.stmt(if_expr);
+                    self.end_imper_scope(true);
                     Some(scope)
                 },
                 TokenKind::OpenCurly => {
@@ -501,7 +501,7 @@ impl Driver {
         } else {
             None
         };
-        self.hir.if_expr(condition, then_scope, else_scope, range)
+        self.if_expr(condition, then_scope, else_scope, range)
     }
 
     /// Parses any node. Iff the node is an expression, returns its ExprId.
@@ -551,8 +551,8 @@ impl Driver {
         }
 
         let root = self.parse_expr(p);
-        let root_range = self.hir.get_range(root);
-        self.hir.stored_decl(name, explicit_ty, is_mut, root, source_info::concat(name_range, root_range));
+        let root_range = self.get_range(root);
+        self.stored_decl(name, explicit_ty, is_mut, root, source_info::concat(name_range, root_range));
     }
 
     fn parse_module(&mut self, p: &mut Parser) -> ExprId {
@@ -561,7 +561,7 @@ impl Driver {
         assert_eq!(kind, &TokenKind::Module);
         self.next(p);
 
-        let module = self.hir.begin_module();
+        let module = self.begin_module();
         assert_eq!(self.cur(p).kind, &TokenKind::OpenCurly);
         self.next(p);
         let close_curly_range = loop {
@@ -576,13 +576,13 @@ impl Driver {
                     if let Some(expr) = self.parse_node(p) {
                         self.errors.push(
                             Error::new("expressions are not allowed in the top-level of a module")
-                                .adding_primary_range(self.hir.get_range(expr), "delet this")
+                                .adding_primary_range(self.get_range(expr), "delet this")
                         );
                     }
                 }
             }
         };
-        self.hir.end_module(module, source_info::concat(mod_range, close_curly_range));
+        self.end_module(module, source_info::concat(mod_range, close_curly_range));
         module
     }
 
@@ -612,19 +612,19 @@ impl Driver {
                         let (ty, ty_range) = self.parse_type(p);
                         let index = fields.len();
                         let range = source_info::concat(ident_range, ty_range);
-                        fields.push(self.hir.field_decl(name, ty, index, range));
+                        fields.push(self.field_decl(name, ty, index, range));
                     } else {
                         panic!("Unexpected token {:?}, expected field name", self.cur(p).kind);
                     }
                 }
             }
         };
-        self.hir.strukt(fields, source_info::concat(struct_range, close_curly_range))
+        self.strukt(fields, source_info::concat(struct_range, close_curly_range))
     }
 
     // Parses an open curly brace, then a list of nodes, then a closing curly brace.
     fn parse_scope(&mut self, p: &mut Parser) -> (ImperScopeId, SourceRange) {
-        let scope = self.hir.begin_imper_scope();
+        let scope = self.begin_imper_scope();
         let mut last_was_expr = false;
         let Token { kind, range: open_curly_range } = self.cur(p);
         let open_curly_range = open_curly_range;
@@ -644,14 +644,14 @@ impl Driver {
                     // If the node was a standalone expression, make it a statement
                     if let Some(expr) = node {
                         last_was_expr = true;
-                        self.hir.stmt(expr);
+                        self.stmt(expr);
                     } else {
                         last_was_expr = false;
                     }
                 }
             }
         };
-        self.hir.end_imper_scope(last_was_expr);
+        self.end_imper_scope(last_was_expr);
         (scope, source_info::concat(open_curly_range, close_curly_range))
     }
 
@@ -708,21 +708,21 @@ impl Driver {
             TokenKind::Assign => None,
             tok => panic!("Invalid token {:?}", tok),
         };
-        self.hir.begin_computed_decl(name, param_names, param_tys, param_ranges, ty, proto_range);
+        self.begin_computed_decl(name, param_names, param_tys, param_ranges, ty, proto_range);
         match self.cur(p).kind {
             TokenKind::OpenCurly => {
                 self.parse_scope(p);
             },
             TokenKind::Assign => {
                 self.next(p);
-                self.hir.begin_imper_scope();
+                self.begin_imper_scope();
                 let assigned_expr = self.parse_expr(p);
-                self.hir.stmt(assigned_expr);
-                self.hir.end_imper_scope(true);
+                self.stmt(assigned_expr);
+                self.end_imper_scope(true);
             },
             tok => panic!("Invalid token {:?}", tok),
         }
-        self.hir.end_computed_decl();
+        self.end_computed_decl();
     }
 
     fn parse_type(&mut self, p: &mut Parser) -> (ExprId, SourceRange) {
@@ -731,7 +731,7 @@ impl Driver {
         //     taking the `void` result of that assignment as the type of variable declaration `foo`
         // TODO: add statements as a slight superset of expressions which includes assignments.
         let ty = self.try_parse_restricted_term(p).unwrap();
-        let range = self.hir.get_range(ty);
+        let range = self.get_range(ty);
 
         (ty, range)
     }

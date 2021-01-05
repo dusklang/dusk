@@ -71,7 +71,7 @@ macro_rules! int_conversions {
 int_conversions!(u8, u16, u32, u64, usize, i8, i16, i32, i64, isize);
 
 impl Driver {
-    fn struct_lit(&self, id: StructId, fields: impl Iterator<Item=Value>) -> Value {
+    fn eval_struct_lit(&self, id: StructId, fields: impl Iterator<Item=Value>) -> Value {
         let strukt = &self.code.mir_code.structs[&id];
         let mut buf = SmallVec::new();
         buf.resize(strukt.layout.size, 0);
@@ -243,7 +243,7 @@ impl Value {
             Const::Mod(id) => Value::from_mod(id),
             Const::StructLit { ref fields, id } => {
                 let fields = fields.iter().map(|val| Value::from_const(val, driver));
-                driver.struct_lit(id, fields)
+                driver.eval_struct_lit(id, fields)
             }
         }
     }
@@ -820,7 +820,7 @@ impl Driver {
             },
             &Instr::StructLit { ref fields, id } => {
                 let frame = self.interp.stack.last().unwrap();
-                self.struct_lit(
+                self.eval_struct_lit(
                     id,
                     fields.iter()
                         .map(|&instr| frame.results[&instr].clone())

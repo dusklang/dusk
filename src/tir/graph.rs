@@ -568,14 +568,14 @@ impl Driver {
             &mut self.tir.graph.dependers
         ];
         for dep in &mut deps {
-            dep.resize_with(self.hir.items.len(), || Vec::new());
+            dep.resize_with(self.code.hir_code.items.len(), || Vec::new());
         }
 
-        self.tir.graph.item_to_components.resize_with(self.hir.items.len(), || CompId::new(u32::MAX as usize));
+        self.tir.graph.item_to_components.resize_with(self.code.hir_code.items.len(), || CompId::new(u32::MAX as usize));
     }
 
     fn write_node_name(&self, item: ItemId, w: &mut impl Write) -> IoResult<()> {
-        match self.hir.items[item] {
+        match self.code.hir_code.items[item] {
             hir::Item::Expr(id) => write!(w, "item{}expr{}", item.index(), id.index())?,
             hir::Item::Decl(id) => write!(w, "item{}decl{}", item.index(), id.index())?,
         }
@@ -583,7 +583,7 @@ impl Driver {
     }
 
     fn write_debug(&self, item: ItemId, w: &mut impl Write) -> IoResult<()> {
-        match self.hir.items[item] {
+        match self.code.hir_code.items[item] {
             hir::Item::Expr(id) => write!(w, "{:?}", self.hir.exprs[id])?,
             hir::Item::Decl(id) => write!(w, "{:?}", self.hir.decls[id])?,
         }
@@ -664,7 +664,7 @@ impl Driver {
     }
 
     fn should_exclude_item_from_output(&self, item: ItemId) -> bool {
-        let decl = match self.hir.items[item] {
+        let decl = match self.code.hir_code.items[item] {
             hir::Item::Decl(decl) => decl,
             hir::Item::Expr(_) => return false,
         };

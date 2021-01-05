@@ -79,7 +79,7 @@ impl Driver {
                 let ty = if let &Some(explicit_ty) = &item.explicit_ty {
                     let explicit_ty = tp.get_evaluated_type(explicit_ty).clone();
                     if let Some(err) = constraints.can_unify_to(&explicit_ty.clone().into()).err() {
-                        let range = self.hir.get_range(item.root_expr);
+                        let range = self.get_range(item.root_expr);
                         let mut error = Error::new(format!("Couldn't unify expression to assigned decl type `{:?}`", explicit_ty))
                             .adding_primary_range(range, "expression here");
                         match err {
@@ -205,7 +205,7 @@ impl Driver {
             for item in unit.pointers.get_level(level) {
                 if let Some(err) = tp.constraints(item.expr).can_unify_to(&Type::Ty.into()).err() {
                     let mut error = Error::new("Expected type operand to pointer operator");
-                    let range = self.hir.get_range(item.expr);
+                    let range = self.get_range(item.expr);
                     match err {
                         UnificationError::InvalidChoice(choices)
                             => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
@@ -226,7 +226,7 @@ impl Driver {
                 for &field_ty in &item.field_tys {
                     if let Some(err) = tp.constraints(field_ty).can_unify_to(&Type::Ty.into()).err() {
                         let mut error = Error::new("Expected field type");
-                        let range = self.hir.get_range(field_ty);
+                        let range = self.get_range(field_ty);
                         match err {
                             UnificationError::InvalidChoice(choices)
                                 => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
@@ -247,7 +247,7 @@ impl Driver {
             for item in unit.struct_lits.get_level(level) {
                 let ty = if let Some(err) = tp.constraints(item.ty).can_unify_to(&Type::Ty.into()).err() {
                     let mut error = Error::new("Expected struct type");
-                    let range = self.hir.get_range(item.ty);
+                    let range = self.get_range(item.ty);
                     match err {
                         UnificationError::InvalidChoice(choices)
                             => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
@@ -287,7 +287,7 @@ impl Driver {
                                 successful = false;
                                 
                                 // TODO: Use range of the field identifier, which we don't have fine-grained access to yet
-                                let range = self.hir.get_range(item.id);
+                                let range = self.get_range(item.id);
                                 self.errors.push(
                                     Error::new(format!("Unknown field {} in struct literal", self.interner.resolve(lit_field.name).unwrap()))
                                         .adding_primary_range(range, "")
@@ -295,7 +295,7 @@ impl Driver {
 
                             }
 
-                            let lit_range = self.hir.get_range(item.id);
+                            let lit_range = self.get_range(item.id);
                             // Make sure each field in the struct has a match in the literal
                             for (i, &maatch) in matches.iter().enumerate() {
                                 let field = struct_fields[i];
@@ -314,7 +314,7 @@ impl Driver {
                                     );
                                 } else if let Some(err) = tp.constraints(maatch).can_unify_to(&field_ty.into()).err() {
                                     successful = false;
-                                    let range = self.hir.get_range(maatch);
+                                    let range = self.get_range(maatch);
                                     let mut error = Error::new("Invalid struct field type")
                                         .adding_primary_range(range, "");
                                     match err {
@@ -340,7 +340,7 @@ impl Driver {
                             }
                         },
                         ref other => {
-                            let range = self.hir.get_range(item.ty);
+                            let range = self.get_range(item.ty);
                             self.errors.push(
                                 Error::new(format!("Expected struct type in literal, found {:?}", *other))
                                     .adding_primary_range(range, "")
@@ -356,7 +356,7 @@ impl Driver {
             for item in unit.ifs.get_level(level) {
                 if let Some(err) = tp.constraints(item.condition).can_unify_to(&Type::Bool.into()).err() {
                     let mut error = Error::new("Expected boolean condition in if expression");
-                    let range = self.hir.get_range(item.condition);
+                    let range = self.get_range(item.condition);
                     match err {
                         UnificationError::InvalidChoice(choices)
                             => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
@@ -377,8 +377,8 @@ impl Driver {
                     // TODO: handle void expressions, which don't have appropriate source location info.
                     self.errors.push(
                         Error::new("Failed to unify branches of if expression")
-                            .adding_primary_range(self.hir.get_range(item.then_expr), "first terminal expression here")
-                            .adding_primary_range(self.hir.get_range(item.else_expr), "second terminal expression here")
+                            .adding_primary_range(self.get_range(item.then_expr), "first terminal expression here")
+                            .adding_primary_range(self.get_range(item.else_expr), "second terminal expression here")
                     );
                 }
                 *tp.constraints_mut(item.id) = constraints;
@@ -390,7 +390,7 @@ impl Driver {
                 let constraints = tp.constraints_mut(item.root_expr);
                 if let Some(err) = constraints.can_unify_to(&Type::Void.into()).err() {
                     let mut error = Error::new("statements must return void");
-                    let range = self.hir.get_range(item.root_expr);
+                    let range = self.get_range(item.root_expr);
                     match err {
                         UnificationError::InvalidChoice(choices)
                         => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
@@ -407,7 +407,7 @@ impl Driver {
                 }
                 constraints.set_to(Type::Void);
             }
-            tp.debug_output(&self.hir, &self.src_map, level as usize);
+            tp.debug_output(self, level as usize);
         }
     }
 
@@ -430,7 +430,7 @@ impl Driver {
                 let ty = tp.get_evaluated_type(item.ty).clone();
                 for &expr in &item.exprs {
                     if let Some(err) = tp.constraints(expr).can_unify_to(&QualType::from(&ty)).err() {
-                        let range = self.hir.get_range(expr);
+                        let range = self.get_range(expr);
                         let mut error = Error::new(format!("can't unify expression to return type {:?}", ty))
                             .adding_primary_range(range, "expression here");
                         match err {
@@ -502,7 +502,7 @@ impl Driver {
                         *tp.cast_method_mut(item.cast_id) = method;
                     },
                     Err(_) => {
-                        self.errors.push(Error::new("Invalid cast!").adding_primary_range(self.hir.get_range(item.id), "cast here"));
+                        self.errors.push(Error::new("Invalid cast!").adding_primary_range(self.get_range(item.id), "cast here"));
                         constraints.set_to(Type::Error);
                         *tp.cast_method_mut(item.cast_id) = CastMethod::Noop;
                     }
@@ -538,12 +538,12 @@ impl Driver {
                     if has_parens && !overload_is_function {
                         self.errors.push(
                             Error::new("reference to non-function must not have parentheses")
-                                .adding_primary_range(self.hir.get_range(item.id), "")
+                                .adding_primary_range(self.get_range(item.id), "")
                         );
                     } else if !has_parens && overload_is_function {
                         self.errors.push(
                             Error::new("function call must have parentheses")
-                                .adding_primary_range(self.hir.get_range(item.id), "")
+                                .adding_primary_range(self.get_range(item.id), "")
                         );
                     }
                     let decl = &decls[overload];
@@ -555,7 +555,7 @@ impl Driver {
                 } else {
                     self.errors.push(
                         Error::new("no matching overload for declaration")
-                            .adding_primary_range(self.hir.get_range(item.id), "expression here")
+                            .adding_primary_range(self.get_range(item.id), "expression here")
                     );
                     for &arg in &item.args {
                         tp.constraints_mut(arg).set_to(Type::Error);
@@ -637,7 +637,7 @@ impl Driver {
                 }
             }
             if level > 0 {
-                tp.debug_output(&self.hir, &self.src_map, level as usize);
+                tp.debug_output(self, level as usize);
             }
         }
         fn lit_pass_2(
@@ -653,12 +653,12 @@ impl Driver {
         lit_pass_2(tp, &unit.dec_lits, "decimal");
         lit_pass_2(tp, &unit.str_lits, "string");
         lit_pass_2(tp, &unit.char_lits, "character");
-        tp.debug_output(&self.hir, &self.src_map, 0);
+        tp.debug_output(self, 0);
     }
 
     pub fn get_real_type_provider(&self, dbg: bool) -> RealTypeProvider {
         // Assign the type of the void expression to be void.
-        let mut tp = RealTypeProvider::new(dbg, &self.hir, &self.tir);
+        let mut tp = RealTypeProvider::new(dbg, self);
         *tp.constraints_mut(hir::VOID_EXPR) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
         *tp.ty_mut(hir::VOID_EXPR) = Type::Void;
         tp

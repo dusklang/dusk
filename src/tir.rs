@@ -514,7 +514,7 @@ impl Driver {
         let items_that_need_dependencies = self.tir.graph.get_items_that_need_dependencies();
         
         for id in items_that_need_dependencies {
-            match self.hir.items[id] {
+            match self.code.hir_code.items[id] {
                 hir::Item::Decl(decl_id) => {
                     match self.hir.decls[decl_id] {
                         hir::Decl::Parameter { .. } | hir::Decl::Static(_) | hir::Decl::Const(_) | hir::Decl::Stored { .. } | hir::Decl::Field(_) => {},
@@ -595,7 +595,7 @@ impl Driver {
             for i in 0..sp.levels.units[unit_id].items.len() {
                 let item_id = sp.levels.units[unit_id].items[i];
                 let level = sp.levels.item_to_levels[&item_id];
-                match self.hir.items[item_id] {
+                match self.code.hir_code.items[item_id] {
                     hir::Item::Decl(id) => {
                         self.build_tir_decl(&mut unit.items, level, id);
                     }
@@ -608,7 +608,7 @@ impl Driver {
         }
         for mock_id in 0..sp.levels.mock_units.len() {
             let mock_unit = &sp.levels.mock_units[mock_id];
-            let main_expr = match self.hir.items[mock_unit.item] {
+            let main_expr = match self.code.hir_code.items[mock_unit.item] {
                 hir::Item::Expr(id) => id,
                 hir::Item::Decl(_) => panic!("Can't have metadependency on a declaration!"),
             };
@@ -616,7 +616,7 @@ impl Driver {
             self.build_tir_expr(&mut items, mock_unit.item_level, main_expr);
             for &item_id in &mock_unit.deps {
                 let level = sp.levels.item_to_levels[&item_id];
-                match self.hir.items[item_id] {
+                match self.code.hir_code.items[item_id] {
                     hir::Item::Decl(id) => {
                         self.build_tir_decl(&mut items, level, id);
                     }

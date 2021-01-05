@@ -74,6 +74,7 @@ fn main() {
     let mut src_map = SourceMap::new();
     src_map.add_file(opt.input).unwrap();
     let mut driver = Driver::new(src_map, Arch::X86_64);
+    driver.initialize_hir();
 
     macro_rules! begin_phase {
         ($phase:ident) => {{
