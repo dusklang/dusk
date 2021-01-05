@@ -584,8 +584,8 @@ impl Driver {
 
     fn write_debug(&self, item: ItemId, w: &mut impl Write) -> IoResult<()> {
         match self.code.hir_code.items[item] {
-            hir::Item::Expr(id) => write!(w, "{:?}", self.hir.exprs[id])?,
-            hir::Item::Decl(id) => write!(w, "{:?}", self.hir.decls[id])?,
+            hir::Item::Expr(id) => write!(w, "{:?}", self.code.hir_code.exprs[id])?,
+            hir::Item::Decl(id) => write!(w, "{:?}", self.code.hir_code.decls[id])?,
         }
         Ok(())
     }
@@ -617,7 +617,7 @@ impl Driver {
     }
 
     fn write_item(&self, w: &mut impl Write, item: ItemId) -> IoResult<()> {
-        let range = self.hir.source_ranges[item].clone();
+        let range = self.code.hir_code.source_ranges[item].clone();
         write!(w, "    ")?;
         self.write_node_name(item, w)?;
         if range.start != range.end {
@@ -668,7 +668,7 @@ impl Driver {
             hir::Item::Decl(decl) => decl,
             hir::Item::Expr(_) => return false,
         };
-        let is_intrinsic = matches!(self.hir.decls[decl], hir::Decl::Intrinsic { .. });
+        let is_intrinsic = matches!(self.code.hir_code.decls[decl], hir::Decl::Intrinsic { .. });
         let is_not_depended_on = self.tir.graph.dependers[item].is_empty();
         is_intrinsic && is_not_depended_on
     }

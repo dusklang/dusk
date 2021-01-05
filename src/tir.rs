@@ -158,14 +158,14 @@ pub struct Builder {
 macro_rules! ei_injector {
     ($self:expr, $name:ident) => { 
         macro_rules! $name {
-            ($a: expr) => { $self.hir.expr_to_items[$a] }
+            ($a: expr) => { $self.code.hir_code.expr_to_items[$a] }
         }
     }
 }
 macro_rules! di_injector {
     ($self:expr, $name:ident) => { 
         macro_rules! $name {
-            ($a: expr) => { $self.hir.decl_to_items[$a] }
+            ($a: expr) => { $self.code.hir_code.decl_to_items[$a] }
         }
     }
 }
@@ -183,7 +183,7 @@ macro_rules! add_eval_dep_injector {
 
 impl Driver {
     fn find_overloads_in_mod(&self, decl_ref: &hir::DeclRef, scope: ModScopeId, overloads: &mut HashSet<DeclId>) {
-        if let Some(group) = self.hir.mod_scopes[scope].decl_groups.get(&decl_ref.name) {
+        if let Some(group) = self.code.hir_code.mod_scopes[scope].decl_groups.get(&decl_ref.name) {
             overloads.extend(
                 group.iter()
                     .filter(|decl| decl.num_params == decl_ref.num_arguments)
@@ -192,8 +192,8 @@ impl Driver {
         }
     }
     fn find_overloads_in_struct(&self, decl_ref: &hir::DeclRef, strukt: StructId, overloads: &mut HashSet<DeclId>) {
-        for &field in &self.hir.structs[strukt].fields {
-            let field = &self.hir.field_decls[field];
+        for &field in &self.code.hir_code.structs[strukt].fields {
+            let field = &self.code.hir_code.field_decls[field];
             if field.name == decl_ref.name {
                 overloads.insert(field.decl);
                 return;
@@ -211,7 +211,7 @@ impl Driver {
             namespace = match ns {
                 Namespace::Imper { scope, end_offset } => {
                     if !started_at_mod_scope {
-                        let namespace = &self.hir.imper_ns[scope];
+                        let namespace = &self.code.hir_code.imper_ns[scope];
                         let result = namespace.decls[0..end_offset].iter()
                             .rev()
                             .find(|&decl| decl.name == decl_ref.name && decl.num_params == decl_ref.num_arguments);
@@ -221,14 +221,14 @@ impl Driver {
                         }
                     }
 
-                    self.hir.imper_ns[scope].parent
+                    self.code.hir_code.imper_ns[scope].parent
                 },
                 Namespace::Mod(scope_ns) => {
-                    let scope = self.hir.mod_ns[scope_ns].scope;
+                    let scope = self.code.hir_code.mod_ns[scope_ns].scope;
                     self.find_overloads_in_mod(decl_ref, scope, &mut overloads);
 
                     if root_namespace { started_at_mod_scope = true; }
-                    self.hir.mod_ns[scope_ns].parent
+                    self.code.hir_code.mod_ns[scope_ns].parent
                 },
                 Namespace::MemberRef { base_expr } => {
                     assert!(root_namespace, "member refs currently must be at the root of a namespace hierarchy");
@@ -255,12 +255,12 @@ impl Driver {
     fn add_types_2_to_4_deps_to_member_ref(&mut self, id: ItemId, decl_ref_id: DeclRefId) {
         add_eval_dep_injector!(self, add_eval_dep);
         di_injector!(self, di);
-        let decl_ref = &self.hir.decl_refs[decl_ref_id];
+        let decl_ref = &self.code.hir_code.decl_refs[decl_ref_id];
         let overloads = self.find_overloads(decl_ref);
         for overload in overloads {
-            match self.hir.decls[overload] {
+            match self.code.hir_code.decls[overload] {
                 hir::Decl::Computed { ref param_tys, .. } => {
-                    let ty = self.hir.explicit_tys[overload].unwrap_or(hir::VOID_TYPE);
+                    let ty = self.code.hir_code.explicit_tys[overload].unwrap_or(hir::VOID_TYPE);
                     add_eval_dep!(id, ty);
                     for &ty in param_tys {
                         add_eval_dep!(id, ty);
@@ -276,11 +276,11 @@ impl Driver {
     /// we will need to bring back the original idea of meta-dependencies:
     /// https://github.com/zachrwolfe/meda/issues/58
     fn add_type3_scope_dep(&mut self, a: ItemId, b: ImperScopeId) {
-        let scope = &self.hir.imper_scopes[b];
+        let scope = &self.code.hir_code.imper_scopes[b];
         for &item in &scope.items {
             match item {
-                hir::ScopeItem::Stmt(expr) => self.tir.graph.add_type3_dep(a, self.hir.expr_to_items[expr]),
-                hir::ScopeItem::StoredDecl { decl_id, .. } => self.tir.graph.add_type3_dep(a, self.hir.decl_to_items[decl_id]),
+                hir::ScopeItem::Stmt(expr) => self.tir.graph.add_type3_dep(a, self.code.hir_code.expr_to_items[expr]),
+                hir::ScopeItem::StoredDecl { decl_id, .. } => self.tir.graph.add_type3_dep(a, self.code.hir_code.decl_to_items[decl_id]),
                 hir::ScopeItem::ComputedDecl(_) => {},
             }
         }
@@ -289,11 +289,11 @@ impl Driver {
     fn flush_staged_ret_groups(&mut self, sp: &mut Subprogram) {
         let staged_ret_groups = std::mem::replace(&mut self.tir.staged_ret_groups, HashMap::new());
         for (decl, exprs) in staged_ret_groups {
-            assert!(matches!(self.hir.decls[decl], hir::Decl::Computed { .. }));
+            assert!(matches!(self.code.hir_code.decls[decl], hir::Decl::Computed { .. }));
 
-            let ty = self.hir.explicit_tys[decl].expect("explicit return statements are not allowed in assigned functions (yet?)");
+            let ty = self.code.hir_code.explicit_tys[decl].expect("explicit return statements are not allowed in assigned functions (yet?)");
 
-            let item = self.hir.decl_to_items[decl];
+            let item = self.code.hir_code.decl_to_items[decl];
             let unit_id = sp.levels.item_to_units[&item];
             let level = sp.levels.item_to_levels[&item];
             let unit = &mut sp.units[unit_id as usize];
@@ -323,7 +323,7 @@ impl Driver {
                 unit.$vec.push($item);
             }}
         }
-        match &self.hir.exprs[id] {
+        match &self.code.hir_code.exprs[id] {
             hir::Expr::Void => {},
             hir::Expr::IntLit { .. } => flat_insert_item!(int_lits, id),
             hir::Expr::DecLit { .. } => flat_insert_item!(dec_lits, id),
@@ -341,11 +341,11 @@ impl Driver {
             }
             &hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => insert_expr!(decl_refs, DeclRef { args: arguments.clone(), decl_ref_id }),
             &hir::Expr::Set { lhs, rhs } => insert_expr!(assignments, Assignment { lhs, rhs }),
-            &hir::Expr::Do { scope } => insert_expr!(dos, Do { terminal_expr: self.hir.imper_scopes[scope].terminal_expr }),
+            &hir::Expr::Do { scope } => insert_expr!(dos, Do { terminal_expr: self.code.hir_code.imper_scopes[scope].terminal_expr }),
             &hir::Expr::If { condition, then_scope, else_scope } => {
-                let then_expr = self.hir.imper_scopes[then_scope].terminal_expr;
+                let then_expr = self.code.hir_code.imper_scopes[then_scope].terminal_expr;
                 let else_expr = if let Some(else_scope) = else_scope {
-                    self.hir.imper_scopes[else_scope].terminal_expr
+                    self.code.hir_code.imper_scopes[else_scope].terminal_expr
                 } else {
                     hir::VOID_EXPR
                 };
@@ -355,7 +355,7 @@ impl Driver {
             hir::Expr::Mod { .. } => insert_item!(modules, id),
             hir::Expr::Import { .. } => insert_item!(imports, id),
             &hir::Expr::Struct(struct_id) => {
-                let field_tys = self.hir.structs[struct_id].fields.iter().map(|&id| self.hir.field_decls[id].ty).collect();
+                let field_tys = self.code.hir_code.structs[struct_id].fields.iter().map(|&id| self.code.hir_code.field_decls[id].ty).collect();
                 insert_expr!(structs, Struct { field_tys })
             },
             &hir::Expr::StructLit { ty, ref fields, id } => {
@@ -365,17 +365,17 @@ impl Driver {
     }
 
     fn build_tir_decl(&mut self, unit: &mut UnitItems, level: u32, id: DeclId) {
-        match self.hir.decls[id] {
+        match self.code.hir_code.decls[id] {
             // TODO: Add parameter and field TIR items for (at least) checking that the type of the param is valid
             hir::Decl::Parameter { .. } | hir::Decl::Field(_) => {},
             hir::Decl::Intrinsic { .. } => {},
             hir::Decl::Static(root_expr) | hir::Decl::Const(root_expr) | hir::Decl::Stored { root_expr, .. } => {
-                let explicit_ty = self.hir.explicit_tys[id];
+                let explicit_ty = self.code.hir_code.explicit_tys[id];
                 unit.assigned_decls.insert(level, AssignedDecl { explicit_ty, root_expr, decl_id: id });
             },
             hir::Decl::Computed { scope, .. } => {
-                let terminal_expr = self.hir.imper_scopes[scope].terminal_expr;
-                if let Some(_) = self.hir.explicit_tys[id] {
+                let terminal_expr = self.code.hir_code.imper_scopes[scope].terminal_expr;
+                if let Some(_) = self.code.hir_code.explicit_tys[id] {
                     self.tir.staged_ret_groups.entry(id).or_default().push(terminal_expr);
                 } else {
                     unit.assigned_decls.insert(level, AssignedDecl { explicit_ty: None, root_expr: terminal_expr, decl_id: id });
@@ -386,7 +386,7 @@ impl Driver {
 
     pub fn initialize_tir(&mut self) {
         // Populate `decls`
-        for decl in &self.hir.decls {
+        for decl in &self.code.hir_code.decls {
             let (is_mut, param_tys) = match *decl {
                 hir::Decl::Computed { ref param_tys, .. } => (
                     false,
@@ -424,28 +424,28 @@ impl Driver {
         ei_injector!(self, ei);
         di_injector!(self, di);
         // Add type 1 dependencies to the graph
-        for i in 0..self.hir.decls.len() {
+        for i in 0..self.code.hir_code.decls.len() {
             let decl_id = DeclId::new(i);
             let id = di!(decl_id);
-            match self.hir.decls[decl_id] {
+            match self.code.hir_code.decls[decl_id] {
                 hir::Decl::Parameter { .. } | hir::Decl::Intrinsic { .. } | hir::Decl::Field(_) => {},
                 hir::Decl::Static(expr) | hir::Decl::Const(expr) | hir::Decl::Stored { root_expr: expr, .. } => self.tir.graph.add_type1_dep(id, ei!(expr)),
                 hir::Decl::Computed { scope, .. } => {
-                    let terminal_expr = self.hir.imper_scopes[scope].terminal_expr;
+                    let terminal_expr = self.code.hir_code.imper_scopes[scope].terminal_expr;
                     self.tir.graph.add_type1_dep(id, ei!(terminal_expr));
                 },
             }
         }
-        for i in 0..self.hir.exprs.len() {
+        for i in 0..self.code.hir_code.exprs.len() {
             let expr_id = ExprId::new(i);
             let id = ei!(expr_id);
-            match self.hir.exprs[expr_id] {
+            match self.code.hir_code.exprs[expr_id] {
                 hir::Expr::Void | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
                     | hir::Expr::CharLit { .. } | hir::Expr::ConstTy(_) | hir::Expr::Mod { .. } | hir::Expr::Import { .. } => {},
                 hir::Expr::AddrOf { expr, .. } | hir::Expr::Deref(expr) | hir::Expr::Pointer { expr, .. }
                     | hir::Expr::Cast { expr, .. } | hir::Expr::Ret { expr, .. } => self.tir.graph.add_type1_dep(id, ei!(expr)),
                 hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => {
-                    let decl_ref = &self.hir.decl_refs[decl_ref_id];
+                    let decl_ref = &self.code.hir_code.decl_refs[decl_ref_id];
                     if let hir::Namespace::MemberRef { base_expr } = decl_ref.namespace {
                         self.tir.graph.add_type1_dep(id, ei!(base_expr));
                     }
@@ -458,14 +458,14 @@ impl Driver {
                     self.tir.graph.add_type1_dep(id, ei!(rhs));
                 },
                 hir::Expr::Do { scope } => {
-                    let terminal_expr = self.hir.imper_scopes[scope].terminal_expr;
+                    let terminal_expr = self.code.hir_code.imper_scopes[scope].terminal_expr;
                     self.tir.graph.add_type1_dep(id, ei!(terminal_expr));
                 },
                 hir::Expr::If { condition, then_scope, else_scope } => {
                     self.tir.graph.add_type1_dep(id, ei!(condition));
-                    let then_expr = self.hir.imper_scopes[then_scope].terminal_expr;
+                    let then_expr = self.code.hir_code.imper_scopes[then_scope].terminal_expr;
                     let else_expr = if let Some(else_scope) = else_scope {
-                        self.hir.imper_scopes[else_scope].terminal_expr
+                        self.code.hir_code.imper_scopes[else_scope].terminal_expr
                     } else {
                         hir::VOID_EXPR
                     };
@@ -474,12 +474,12 @@ impl Driver {
                 }
                 hir::Expr::While { condition, scope } => {
                     self.tir.graph.add_type1_dep(id, ei!(condition));
-                    let terminal_expr = self.hir.imper_scopes[scope].terminal_expr;
+                    let terminal_expr = self.code.hir_code.imper_scopes[scope].terminal_expr;
                     self.tir.graph.add_type1_dep(id, ei!(terminal_expr));
                 },
                 hir::Expr::Struct(struct_id) => {
-                    for &field in &self.hir.structs[struct_id].fields {
-                        let field = &self.hir.field_decls[field];
+                    for &field in &self.code.hir_code.structs[struct_id].fields {
+                        let field = &self.code.hir_code.field_decls[field];
                         self.tir.graph.add_type1_dep(id, ei!(field.ty));
                     }
                 },
@@ -495,10 +495,10 @@ impl Driver {
         self.tir.graph.split();
 
         // TODO: do something better than an array of bools :(
-        self.tir.depended_on.resize_with(self.hir.exprs.len(), || false);
+        self.tir.depended_on.resize_with(self.code.hir_code.exprs.len(), || false);
 
         // Add meta-dependees to graph
-        for decl_ref in &self.hir.decl_refs {
+        for decl_ref in &self.code.hir_code.decl_refs {
             if let hir::Namespace::MemberRef { base_expr } = decl_ref.namespace {
                 self.tir.graph.add_meta_dep(ei!(decl_ref.expr), ei!(base_expr));
             }
@@ -516,7 +516,7 @@ impl Driver {
         for id in items_that_need_dependencies {
             match self.code.hir_code.items[id] {
                 hir::Item::Decl(decl_id) => {
-                    match self.hir.decls[decl_id] {
+                    match self.code.hir_code.decls[decl_id] {
                         hir::Decl::Parameter { .. } | hir::Decl::Static(_) | hir::Decl::Const(_) | hir::Decl::Stored { .. } | hir::Decl::Field(_) => {},
                         hir::Decl::Intrinsic { ref param_tys, .. } => {
                             for &ty in param_tys {
@@ -529,19 +529,19 @@ impl Driver {
                             }
                             self.add_type3_scope_dep(id, scope);
                             // NOTE: the Some case is handled below this match expression
-                            if self.hir.explicit_tys[decl_id].is_none() {
+                            if self.code.hir_code.explicit_tys[decl_id].is_none() {
                                 add_eval_dep!(id, hir::VOID_TYPE);
                             }
                         },
                     }
         
                     // NOTE: The computed decl case in the above match expression depends on this!
-                    if let Some(ty) = self.hir.explicit_tys[decl_id] {
+                    if let Some(ty) = self.code.hir_code.explicit_tys[decl_id] {
                         add_eval_dep!(id, ty);
                     }
                 }
                 hir::Item::Expr(expr_id) => {
-                    match self.hir.exprs[expr_id] {
+                    match self.code.hir_code.exprs[expr_id] {
                         hir::Expr::Void | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
                             | hir::Expr::CharLit { .. } | hir::Expr::ConstTy(_) | hir::Expr::AddrOf { .. } | hir::Expr::Deref(_)
                             | hir::Expr::Pointer { .. } | hir::Expr::Set { .. } | hir::Expr::Mod { .. } |  hir::Expr::Import { .. }
@@ -554,7 +554,7 @@ impl Driver {
                         },
                         hir::Expr::Ret { decl, .. } => {
                             let ty = decl
-                                .and_then(|decl| self.hir.explicit_tys[decl])
+                                .and_then(|decl| self.code.hir_code.explicit_tys[decl])
                                 .unwrap_or(hir::VOID_TYPE);
                             add_eval_dep!(id, ty);
                         }
@@ -634,7 +634,7 @@ impl Driver {
             );
         }
         self.flush_staged_ret_groups(&mut sp);
-        for scope in &self.hir.imper_scopes {
+        for scope in &self.code.hir_code.imper_scopes {
             for &item in &scope.items {
                 match item {
                     // TODO: This is a horrible hack! Instead of looping through all imperative scopes, I should somehow

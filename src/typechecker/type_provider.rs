@@ -5,7 +5,6 @@ use mire::mir::Const;
 use mire::ty::{Type, QualType};
 
 use super::{CastMethod, StructLit, constraints::ConstraintList};
-use crate::hir;
 use crate::index_vec::*;
 use crate::source_info::CommentatedSourceRange;
 use crate::driver::Driver;
@@ -44,7 +43,7 @@ pub trait TypeProvider: private::Sealed {
     /// Doesn't get the type *of* `id`, gets the type that `id` as an expression *is*
     fn get_evaluated_type(&self, id: ExprId) -> &Type;
 
-    fn fetch_decl_type(&mut self, hir: &hir::Builder, id: DeclId) -> &QualType;
+    fn fetch_decl_type(&mut self, d: &Driver, id: DeclId) -> &QualType;
     fn decl_type_mut(&mut self, decl: DeclId) -> &mut QualType;
 
     #[doc(hidden)]
@@ -101,16 +100,16 @@ impl RealTypeProvider {
             
             debug,
         };
-        tp.overloads.resize_with(d.hir.decl_refs.len(), Default::default);
-        tp.types.resize_with(d.hir.exprs.len(), Default::default);
-        tp.constraints.resize_with(d.hir.exprs.len(), Default::default);
+        tp.overloads.resize_with(d.code.hir_code.decl_refs.len(), Default::default);
+        tp.types.resize_with(d.code.hir_code.exprs.len(), Default::default);
+        tp.constraints.resize_with(d.code.hir_code.exprs.len(), Default::default);
         if debug {
-            tp.constraints_copy.resize_with(d.hir.exprs.len(), Default::default);
+            tp.constraints_copy.resize_with(d.code.hir_code.exprs.len(), Default::default);
         }
-        tp.selected_overloads.resize_with(d.hir.decl_refs.len(), || None);
-        tp.struct_lits.resize_with(d.hir.struct_lits.len(), || None);
-        tp.preferred_overloads.resize_with(d.hir.decl_refs.len(), || None);
-        tp.cast_methods.resize_with(d.hir.cast_counter.len(), || CastMethod::Noop);
+        tp.selected_overloads.resize_with(d.code.hir_code.decl_refs.len(), || None);
+        tp.struct_lits.resize_with(d.code.hir_code.struct_lits.len(), || None);
+        tp.preferred_overloads.resize_with(d.code.hir_code.decl_refs.len(), || None);
+        tp.cast_methods.resize_with(d.code.hir_code.cast_counter.len(), || CastMethod::Noop);
         
         for i in 0..d.tir.decls.len() {
             let id = DeclId::new(i);
@@ -160,9 +159,9 @@ impl TypeProvider for RealTypeProvider {
         }
     }
 
-    fn fetch_decl_type(&mut self, hir: &hir::Builder, id: DeclId) -> &QualType {
+    fn fetch_decl_type(&mut self, d: &Driver, id: DeclId) -> &QualType {
         if let Type::Error = self.decl_types[id].ty {
-            if let Some(expr) = hir.explicit_tys[id] {
+            if let Some(expr) = d.code.hir_code.explicit_tys[id] {
                 let ty = self.get_evaluated_type(expr).clone();
                 self.decl_types[id].ty = ty;
             }
@@ -353,9 +352,9 @@ impl<'base> TypeProvider for MockTypeProvider<'base> {
         }
     }
 
-    fn fetch_decl_type(&mut self, hir: &hir::Builder, id: DeclId) -> &QualType {
+    fn fetch_decl_type(&mut self, d: &Driver, id: DeclId) -> &QualType {
         if let Type::Error = self.fw_decl_types(id).ty {
-            if let Some(expr) = hir.explicit_tys[id] {
+            if let Some(expr) = d.code.hir_code.explicit_tys[id] {
                 let ty = self.get_evaluated_type(expr).clone();
                 self.fw_decl_types_mut(id).ty = ty;
             }

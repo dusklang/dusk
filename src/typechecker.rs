@@ -45,7 +45,7 @@ enum UnitKind {
 
 impl Driver {
     pub fn decl_type<'a>(&'a self, id: DeclId, tp: &'a impl TypeProvider) -> &Type {
-        self.hir.explicit_tys[id].map(|ty| tp.get_evaluated_type(ty)).unwrap_or(&tp.fw_decl_types(id).ty)
+        self.code.hir_code.explicit_tys[id].map(|ty| tp.get_evaluated_type(ty)).unwrap_or(&tp.fw_decl_types(id).ty)
     }
 
     fn run_pass_1(&mut self, unit: &UnitItems, unit_kind: UnitKind, start_level: u32, tp: &mut impl TypeProvider) {
@@ -137,7 +137,7 @@ impl Driver {
                 // These borrows are only here because the borrow checker is dumb
                 let decls = &self.tir.decls;
                 let tc = &*tp;
-                let mut overloads = self.find_overloads(&self.hir.decl_refs[decl_ref_id]);
+                let mut overloads = self.find_overloads(&self.code.hir_code.decl_refs[decl_ref_id]);
                 // Rule out overloads that don't match the arguments
                 overloads.retain(|&overload| {
                     assert_eq!(decls[overload].param_tys.len(), args.len());
@@ -153,9 +153,9 @@ impl Driver {
                 one_of.reserve(overloads.len());
                 for i in 0..overloads.len() {
                     let overload = overloads[i];
-                    let ty = tp.fetch_decl_type(&self.hir, overload).ty.clone();
+                    let ty = tp.fetch_decl_type(self, overload).ty.clone();
                     let mut is_mut = self.tir.decls[overload].is_mut;
-                    if let hir::Namespace::MemberRef { base_expr } = self.hir.decl_refs[decl_ref_id].namespace {
+                    if let hir::Namespace::MemberRef { base_expr } = self.code.hir_code.decl_refs[decl_ref_id].namespace {
                         let constraints = tp.constraints(base_expr);
                         // TODO: Robustness! Base_expr could be an overload set with these types, but also include struct types
                         if constraints.can_unify_to(&Type::Ty.into()).is_err() && constraints.can_unify_to(&Type::Mod.into()).is_err() {
@@ -170,7 +170,7 @@ impl Driver {
                         for &overload in &overloads {
                             let decl = &self.tir.decls[overload];
                             if ty.ty.trivially_convertible_to(tp.get_evaluated_type(decl.param_tys[i])) {
-                                let ty = tp.fetch_decl_type(&self.hir, overload).clone();
+                                let ty = tp.fetch_decl_type(self, overload).clone();
                                 pref = Some(ty);
                                 *tp.preferred_overload_mut(decl_ref_id) = Some(overload);
                                 break 'find_preference;
@@ -266,7 +266,7 @@ impl Driver {
                     let ty = tp.get_evaluated_type(item.ty).clone();
                     match ty {
                         Type::Struct(id) => {
-                            let struct_fields = &self.hir.structs[id].fields;
+                            let struct_fields = &self.code.hir_code.structs[id].fields;
                             let mut matches = Vec::new();
                             matches.resize(struct_fields.len(), ExprId::new(u32::MAX as usize));
 
@@ -275,7 +275,7 @@ impl Driver {
                             // Find matches for each field in the literal
                             'lit_fields: for lit_field in &item.fields {
                                 for (i, &struct_field) in struct_fields.iter().enumerate() {
-                                    let struct_field = &self.hir.field_decls[struct_field];
+                                    let struct_field = &self.code.hir_code.field_decls[struct_field];
                                     if struct_field.name == lit_field.name {
                                         matches[i] = lit_field.expr;
                                         continue 'lit_fields;
@@ -299,13 +299,13 @@ impl Driver {
                             // Make sure each field in the struct has a match in the literal
                             for (i, &maatch) in matches.iter().enumerate() {
                                 let field = struct_fields[i];
-                                let field = &self.hir.field_decls[field];
+                                let field = &self.code.hir_code.field_decls[field];
                                 let field_ty = tp.get_evaluated_type(field.ty).clone();
                                 if maatch == ExprId::new(u32::MAX as usize) {
                                     successful = false;
 
-                                    let field_item = self.hir.decl_to_items[field.decl];
-                                    let field_range = self.hir.source_ranges[field_item];
+                                    let field_item = self.code.hir_code.decl_to_items[field.decl];
+                                    let field_range = self.code.hir_code.source_ranges[field_item];
 
                                     self.errors.push(
                                         Error::new(format!("Field {} not included in struct literal", self.interner.resolve(field.name).unwrap()))
@@ -423,7 +423,7 @@ impl Driver {
                 let item = unit.assigned_decls.at(level, i);
                 let decl_id = item.decl_id;
                 let root_expr = item.root_expr;
-                let ty = tp.fetch_decl_type(&self.hir, decl_id).ty.clone();
+                let ty = tp.fetch_decl_type(self, decl_id).ty.clone();
                 tp.constraints_mut(root_expr).set_to(ty);
             }
             for item in unit.ret_groups.get_level(level) {
@@ -519,9 +519,8 @@ impl Driver {
                 // P.S. These borrows are only here because the borrow checker is dumb
                 let decls = &self.tir.decls;
                 let mut overloads = tp.overloads(item.decl_ref_id).clone();
-                let hir = &self.hir;
                 overloads.retain(|&overload| {
-                    tp.fetch_decl_type(hir, overload).trivially_convertible_to(&ty)
+                    tp.fetch_decl_type(self, overload).trivially_convertible_to(&ty)
                 });
                 let pref = tp.preferred_overload(item.decl_ref_id);
 
@@ -529,12 +528,12 @@ impl Driver {
                     let overload = pref
                         .filter(|overload| overloads.contains(overload))
                         .unwrap_or_else(|| overloads[0]);
-                    let overload_is_function = match self.hir.decls[overload] {
+                    let overload_is_function = match self.code.hir_code.decls[overload] {
                         hir::Decl::Computed { .. } => true,
                         hir::Decl::Intrinsic { function_like, .. } => function_like,
                         _ => false,
                     };
-                    let has_parens = self.hir.decl_refs[item.decl_ref_id].has_parens;
+                    let has_parens = self.code.hir_code.decl_refs[item.decl_ref_id].has_parens;
                     if has_parens && !overload_is_function {
                         self.errors.push(
                             Error::new("reference to non-function must not have parentheses")
@@ -624,13 +623,13 @@ impl Driver {
 
                 // Yay borrow checker:
                 if let Some(lit) = tp.struct_lit(item.struct_lit_id).clone() {
-                    let fields = &self.hir.structs[lit.strukt].fields;
+                    let fields = &self.code.hir_code.structs[lit.strukt].fields;
                     debug_assert_eq!(lit.fields.len(), fields.len());
 
                     for i in 0..fields.len() {
                         let field = fields[i];
-                        let field = self.hir.field_decls[field].decl;
-                        let field_ty = tp.fetch_decl_type(&self.hir, field).ty.clone();
+                        let field = self.code.hir_code.field_decls[field].decl;
+                        let field_ty = tp.fetch_decl_type(self, field).ty.clone();
 
                         tp.constraints_mut(lit.fields[i]).set_to(field_ty);
                     }

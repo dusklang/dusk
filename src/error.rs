@@ -1,8 +1,10 @@
 use std::borrow::Cow;
 use std::mem;
 
+use mire::source_info::SourceRange;
+
 use crate::driver::Driver;
-use crate::source_info::{SourceRange, CommentatedSourceRange};
+use crate::source_info::CommentatedSourceRange;
 
 pub struct Error {
     message: Cow<'static, str>,

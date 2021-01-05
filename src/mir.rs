@@ -137,7 +137,7 @@ impl Context {
 
 impl Driver {
     fn expr_to_const(&mut self, expr: ExprId, ty: Type) -> Const {
-        match self.hir.exprs[expr] {
+        match self.code.hir_code.exprs[expr] {
             Expr::IntLit { lit } => {
                 match ty {
                     Type::Int { .. } => Const::Int { lit, ty },
@@ -160,7 +160,7 @@ impl Driver {
             },
             Expr::ConstTy(ref ty) => Const::Ty(ty.clone()),
             Expr::Mod { id } => Const::Mod(id),
-            Expr::Import { file } => Const::Mod(self.hir.global_scopes[file]),
+            Expr::Import { file } => Const::Mod(self.code.hir_code.global_scopes[file]),
             _ => panic!("Cannot convert expression to constant: {:#?}", expr),
         }
     }
@@ -313,7 +313,7 @@ impl Driver {
     }
 
     pub fn build_mir(&mut self, tp: &impl TypeProvider) {
-        for i in 0..self.hir.decls.len() {
+        for i in 0..self.code.hir_code.decls.len() {
             self.get_decl(DeclId::new(i), tp);
         }
 
@@ -331,7 +331,7 @@ impl Driver {
 
     fn get_decl(&mut self, id: DeclId, tp: &impl TypeProvider) -> Decl {
         if let Some(decl) = self.mir.decls.get(&id) { return decl.clone(); }
-        match self.hir.decls[id] {
+        match self.code.hir_code.decls[id] {
             hir::Decl::Computed { ref params, scope, .. } => {
                 // Add placeholder function to reserve ID ahead of time
                 let get = self.code.mir_code.functions.push(Function::default());
@@ -339,7 +339,7 @@ impl Driver {
                 self.mir.decls.insert(id, decl.clone());
                 let params = params.clone();
                 let func = self.build_function(
-                    Some(self.hir.names[id]),
+                    Some(self.code.hir_code.names[id]),
                     self.decl_type(id, tp).clone(),
                     FunctionBody::Scope(scope),
                     params.clone(),
@@ -378,7 +378,7 @@ impl Driver {
                 decl
             },
             hir::Decl::Field(field_id) => {
-                let index = self.hir.field_decls[field_id].index;
+                let index = self.code.hir_code.field_decls[field_id].index;
                 let decl = Decl::Field { index };
                 self.mir.decls.insert(id, decl.clone());
                 decl
@@ -598,7 +598,7 @@ impl Driver {
         let mut entry = Block::default();
         for param in params.start.index()..params.end.index() {
             let param = DeclId::new(param);
-            assert!(matches!(self.hir.decls[param], hir::Decl::Parameter { .. }));
+            assert!(matches!(self.code.hir_code.decls[param], hir::Decl::Parameter { .. }));
             let instr = self.code.mir_code.instrs.push(Instr::Parameter(self.decl_type(param, tp).clone()));
             entry.ops.push(Op::MirInstr(instr));
         }
@@ -661,15 +661,15 @@ impl Driver {
     }
 
     fn build_scope(&mut self, b: &mut FunctionBuilder, scope: ImperScopeId, ctx: Context, tp: &impl TypeProvider) -> Value {
-        for i in 0..self.hir.imper_scopes[scope].items.len() {
-            let item = self.hir.imper_scopes[scope].items[i];
+        for i in 0..self.code.hir_code.imper_scopes[scope].items.len() {
+            let item = self.code.hir_code.imper_scopes[scope].items[i];
             self.build_scope_item(b, item, tp);
         }
-        self.build_expr(b, self.hir.imper_scopes[scope].terminal_expr, ctx, tp)
+        self.build_expr(b, self.code.hir_code.imper_scopes[scope].terminal_expr, ctx, tp)
     }
 
     fn get_base(&self, id: DeclRefId) -> ExprId {
-        match self.hir.decl_refs[id].namespace {
+        match self.code.hir_code.decl_refs[id].namespace {
             hir::Namespace::MemberRef { base_expr } => base_expr,
             _ => panic!("Expected member ref expression"),
         }
@@ -751,7 +751,7 @@ impl Driver {
     fn build_expr(&mut self, b: &mut FunctionBuilder, expr: ExprId, ctx: Context, tp: &impl TypeProvider) -> Value {
         let ty = tp.ty(expr).clone();
 
-        let val = match self.hir.exprs[expr] {
+        let val = match self.code.hir_code.exprs[expr] {
             Expr::Void => VOID_INSTR.direct(),
             Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::StrLit { .. } | Expr::CharLit { .. } | Expr::ConstTy(_) | Expr::Mod { .. } | Expr::Import { .. } => {
                 let konst = self.expr_to_const(expr, ty.clone());
@@ -769,7 +769,7 @@ impl Driver {
                 let decl_id = tp.selected_overload(id).unwrap();
 
                 // Check if the declaration is an intrinsic
-                if let hir::Decl::Intrinsic { intr, .. } = self.hir.decls[decl_id] {
+                if let hir::Decl::Intrinsic { intr, .. } = self.code.hir_code.decls[decl_id] {
                     // Check if we need to special case the intrinsic
                     match intr {
                         Intrinsic::LogicalAnd => break {
@@ -968,9 +968,9 @@ impl Driver {
             },
             Expr::Struct(id) => {
                 let mut fields = SmallVec::new();
-                for i in 0..self.hir.structs[id].fields.len() {
-                    let field = self.hir.structs[id].fields[i];
-                    let field_ty = self.hir.field_decls[field].ty;
+                for i in 0..self.code.hir_code.structs[id].fields.len() {
+                    let field = self.code.hir_code.structs[id].fields[i];
+                    let field_ty = self.code.hir_code.field_decls[field].ty;
                     let field = self.build_expr(
                         b,
                         field_ty,

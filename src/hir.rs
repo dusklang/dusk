@@ -7,12 +7,11 @@ use string_interner::DefaultSymbol as Sym;
 use mire::hir::*;
 use mire::index_counter::IndexCounter;
 use mire::ty::Type;
-use mire::source_info::SourceFileId;
+use mire::source_info::{SourceFileId, SourceRange};
 
 use crate::driver::Driver;
 use crate::index_vec::*;
 use crate::builder::{BinOp, UnOp};
-use crate::source_info::SourceRange;
 
 #[derive(Debug)]
 enum ScopeState {
@@ -38,39 +37,22 @@ struct CompDeclState {
 
 #[derive(Debug, Default)]
 pub struct Builder {
-    pub exprs: IndexVec<ExprId, Expr>,
-    pub decl_refs: IndexVec<DeclRefId, DeclRef>,
-    pub decls: IndexVec<DeclId, Decl>,
-    pub expr_to_items: IndexVec<ExprId, ItemId>,
-    pub decl_to_items: IndexVec<DeclId, ItemId>,
-    pub names: IndexVec<DeclId, Sym>,
-    pub explicit_tys: IndexVec<DeclId, Option<ExprId>>,
-    pub global_scopes: IndexVec<SourceFileId, ModScopeId>,
-    pub imper_scopes: IndexVec<ImperScopeId, ImperScope>,
-    pub mod_scopes: IndexVec<ModScopeId, ModScope>,
-    pub imper_ns: IndexVec<ImperScopeNsId, ImperScopeNs>,
-    pub mod_ns: IndexVec<ModScopeNsId, ModScopeNs>,
-    pub source_ranges: IndexVec<ItemId, SourceRange>,
-    pub cast_counter: IndexCounter<CastId>,
-    pub structs: IndexVec<StructId, Struct>,
-    pub field_decls: IndexVec<FieldDeclId, FieldDecl>,
-    pub struct_lits: IndexCounter<StructLitId>,
-
     comp_decl_stack: Vec<CompDeclState>,
     scope_stack: Vec<ScopeState>,
 }
 
 impl Driver {
     pub fn initialize_hir(&mut self) {
+        //self.code.hir_code.imper_ns;
         self.push_expr(Expr::Void, SourceRange::default());
         self.push_expr(Expr::ConstTy(Type::Void), SourceRange::default());
     }
 
     fn push_expr(&mut self, expr: Expr, range: SourceRange) -> ExprId {
-        let expr_id = self.hir.exprs.push(expr);
+        let expr_id = self.code.hir_code.exprs.push(expr);
         let item_id = self.code.hir_code.items.push(Item::Expr(expr_id));
-        self.hir.expr_to_items.push_at(expr_id, item_id);
-        self.hir.source_ranges.push_at(item_id, range);
+        self.code.hir_code.expr_to_items.push_at(expr_id, item_id);
+        self.code.hir_code.source_ranges.push_at(item_id, range);
 
         expr_id
     }
@@ -80,14 +62,14 @@ impl Driver {
     }
 
     fn decl(&mut self, decl: Decl, name: Sym, explicit_ty: Option<ExprId>, range: SourceRange) -> DeclId {
-        let decl_id = self.hir.decls.push(decl);
-        self.hir.explicit_tys.push_at(decl_id, explicit_ty);
-        self.hir.names.push_at(decl_id, name);
+        let decl_id = self.code.hir_code.decls.push(decl);
+        self.code.hir_code.explicit_tys.push_at(decl_id, explicit_ty);
+        self.code.hir_code.names.push_at(decl_id, name);
 
         let item_id = self.code.hir_code.items.push(Item::Decl(decl_id));
-        self.hir.decl_to_items.push_at(decl_id, item_id);
+        self.code.hir_code.decl_to_items.push_at(decl_id, item_id);
 
-        self.hir.source_ranges.push_at(item_id, range);
+        self.code.hir_code.source_ranges.push_at(item_id, range);
 
         decl_id
     }
@@ -105,7 +87,7 @@ impl Driver {
         self.push_expr(Expr::CharLit { lit }, range)
     }
     pub fn cast(&mut self, expr: ExprId, ty: ExprId, range: SourceRange) -> ExprId {
-        let cast_id = self.hir.cast_counter.next();
+        let cast_id = self.code.hir_code.cast_counter.next();
         self.push_expr(Expr::Cast { expr, ty, cast_id }, range)
     }
     pub fn stored_decl(&mut self, name: Sym, explicit_ty: Option<ExprId>, is_mut: bool, root_expr: ExprId, range: SourceRange) {
@@ -163,23 +145,23 @@ impl Driver {
         self.push_expr(Expr::Do { scope }, range)
     }
     pub fn field_decl(&mut self, name: Sym, ty: ExprId, index: usize, range: SourceRange) -> FieldDeclId {
-        let field = self.hir.field_decls.next_idx();
+        let field = self.code.hir_code.field_decls.next_idx();
         let decl = self.decl(Decl::Field(field), name, Some(ty), range);
-        self.hir.field_decls.push_at(field, FieldDecl { decl, name, ty, index });
+        self.code.hir_code.field_decls.push_at(field, FieldDecl { decl, name, ty, index });
         field
     }
     pub fn strukt(&mut self, fields: Vec<FieldDeclId>, range: SourceRange) -> ExprId {
-        let strukt = self.hir.structs.push(Struct { fields });
+        let strukt = self.code.hir_code.structs.push(Struct { fields });
         self.push_expr(Expr::Struct(strukt), range)
     }
     pub fn struct_lit(&mut self, ty: ExprId, fields: Vec<FieldAssignment>, range: SourceRange) -> ExprId {
-        let id = self.hir.struct_lits.next();
+        let id = self.code.hir_code.struct_lits.next();
         self.push_expr(Expr::StructLit { ty, fields, id }, range)
     }
     pub fn begin_module(&mut self) -> ExprId {
         let parent = self.cur_namespace();
-        let id = self.hir.mod_scopes.push(ModScope::default());
-        let namespace = self.hir.mod_ns.push(
+        let id = self.code.hir_code.mod_scopes.push(ModScope::default());
+        let namespace = self.code.hir_code.mod_ns.push(
             ModScopeNs {
                 scope: id, parent: Some(parent)
             }
@@ -191,8 +173,8 @@ impl Driver {
         // This is a placeholder value that gets replaced once the parameter declarations get allocated.
         let id = self.decl(Decl::Const(ExprId::new(u32::MAX as usize)), name, explicit_ty, proto_range);
         assert_eq!(param_names.len(), param_tys.len());
-        self.hir.decls.reserve(param_tys.len());
-        let first_param = DeclId::new(self.hir.decls.len());
+        self.code.hir_code.decls.reserve(param_tys.len());
+        let first_param = DeclId::new(self.code.hir_code.decls.len());
         param_tys.iter()
             .enumerate()
             .zip(&param_names)
@@ -200,10 +182,10 @@ impl Driver {
             .for_each(|(((index, ty), &name), &range)| {
                 self.decl(Decl::Parameter { index }, name, Some(ty.clone()), range);
             });
-        let last_param = DeclId::new(self.hir.decls.len());
+        let last_param = DeclId::new(self.code.hir_code.decls.len());
         let params = first_param..last_param;
         // `end_computed_decl` will attach the real scope to this decl; we don't have it yet
-        self.hir.decls[id] = Decl::Computed {
+        self.code.hir_code.decls[id] = Decl::Computed {
             param_tys,
             params: params.clone(),
             scope: ImperScopeId::new(u32::MAX as usize)
@@ -232,10 +214,10 @@ impl Driver {
             Some(base_expr) => Namespace::MemberRef { base_expr },
             None => self.cur_namespace(),
         };
-        let id = self.hir.decl_refs.next_idx();
+        let id = self.code.hir_code.decl_refs.next_idx();
         let num_arguments = arguments.len();
         let expr = self.push_expr(Expr::DeclRef { arguments, id }, range);
-        self.hir.decl_refs.push_at(
+        self.code.hir_code.decl_refs.push_at(
             id,
             DeclRef {
                 name,
@@ -283,21 +265,21 @@ impl Driver {
         }
     }
     pub fn start_new_file(&mut self, file: SourceFileId) {
-        let global_scope = self.hir.mod_scopes.push(ModScope::default());
-        let global_namespace = self.hir.mod_ns.push(
+        let global_scope = self.code.hir_code.mod_scopes.push(ModScope::default());
+        let global_namespace = self.code.hir_code.mod_ns.push(
             ModScopeNs {
                 scope: global_scope,
                 parent: None
             }
         );
         self.hir.scope_stack = vec![ScopeState::Mod { id: global_scope, namespace: global_namespace }];
-        self.hir.global_scopes.push_at(file, global_scope);
+        self.code.hir_code.global_scopes.push_at(file, global_scope);
     }
 
     fn flush_stmt_buffer(&mut self) {
         if let Some(ScopeState::Imper { id, stmt_buffer, .. }) = self.hir.scope_stack.last_mut() {
             if let Some(stmt) = *stmt_buffer {
-                self.hir.imper_scopes[*id].items.push(ScopeItem::Stmt(stmt));
+                self.code.hir_code.imper_scopes[*id].items.push(ScopeItem::Stmt(stmt));
                 *stmt_buffer = None;
             }
         }
@@ -305,13 +287,13 @@ impl Driver {
 
     fn scope_item(&mut self, item: ScopeItem) {
         if let &ScopeState::Imper { id, .. } = self.hir.scope_stack.last().unwrap() {
-            self.hir.imper_scopes[id].items.push(item);
+            self.code.hir_code.imper_scopes[id].items.push(item);
         }
     }
 
     fn imper_scoped_decl(&mut self, decl: ImperScopedDecl) {
         if let Some(&ScopeState::Imper { namespace, .. }) = self.hir.scope_stack.last() {
-            self.hir.imper_ns[namespace].decls.push(decl);
+            self.code.hir_code.imper_ns[namespace].decls.push(decl);
         } else {
             panic!("tried to add imperative-scoped declaration in a non-imperative scope");
         }
@@ -319,7 +301,7 @@ impl Driver {
 
     fn mod_scoped_decl(&mut self, name: Sym, decl: ModScopedDecl) {
         if let Some(&ScopeState::Mod { id, .. }) = self.hir.scope_stack.last() {
-            self.hir.mod_scopes[id].decl_groups.entry(name).or_default().push(decl);
+            self.code.hir_code.mod_scopes[id].decl_groups.entry(name).or_default().push(decl);
         } else {
             panic!("tried to add module-scoped declaration in a non-module scope");
         }
@@ -336,13 +318,13 @@ impl Driver {
 
         let comp_decl = self.hir.comp_decl_stack.last_mut().unwrap();
         assert!(comp_decl.imper_scope_stack > 0 || comp_decl.has_scope.is_none(), "Can't add multiple top-level scopes to a computed decl");
-        let id = self.hir.imper_scopes.push(
+        let id = self.code.hir_code.imper_scopes.push(
             ImperScope {
                 items: Vec::new(),
                 terminal_expr: VOID_EXPR,
             }
         );
-        let namespace = self.hir.imper_ns.push(
+        let namespace = self.code.hir_code.imper_ns.push(
             ImperScopeNs {
                 decls: Vec::new(),
                 parent: Some(parent),
@@ -362,7 +344,7 @@ impl Driver {
         );
 
         if is_first_scope {
-            let name = self.hir.names[comp_decl.id];
+            let name = self.code.hir_code.names[comp_decl.id];
             let num_params = comp_decl.params.end.index() - comp_decl.params.start.index();
             let id = comp_decl.id;
 
@@ -382,7 +364,7 @@ impl Driver {
                 let id = DeclId::new(i);
                 self.imper_scoped_decl(
                     ImperScopedDecl {
-                        name: self.hir.names[id],
+                        name: self.code.hir_code.names[id],
                         num_params: 0,
                         id,
                     }
@@ -396,7 +378,7 @@ impl Driver {
         if let Some(&ScopeState::Imper { id, stmt_buffer, .. }) = self.hir.scope_stack.last() {
             if has_terminal_expr {
                 let terminal_expr = stmt_buffer.expect("must pass terminal expression via Builder::stmt()");
-                self.hir.imper_scopes[id].terminal_expr = terminal_expr;
+                self.code.hir_code.imper_scopes[id].terminal_expr = terminal_expr;
             }
             self.hir.scope_stack.pop().unwrap();
         } else {
@@ -404,10 +386,10 @@ impl Driver {
         }
     }
     pub fn end_module(&mut self, mod_expr: ExprId, range: SourceRange) {
-        debug_assert!(matches!(self.hir.exprs[mod_expr], Expr::Mod { .. }));
+        debug_assert!(matches!(self.code.hir_code.exprs[mod_expr], Expr::Mod { .. }));
 
         if let Some(ScopeState::Mod { .. }) = self.hir.scope_stack.last() {
-            self.hir.source_ranges[self.hir.expr_to_items[mod_expr]] = range;
+            self.code.hir_code.source_ranges[self.code.hir_code.expr_to_items[mod_expr]] = range;
             self.hir.scope_stack.pop().unwrap();
         } else {
             panic!("tried to end the module, but the top scope in the stack is not a module scope");
@@ -415,7 +397,7 @@ impl Driver {
     }
     pub fn end_computed_decl(&mut self) {
         let decl_state = self.hir.comp_decl_stack.pop().unwrap();
-        if let Decl::Computed { ref mut scope, .. } = self.hir.decls[decl_state.id] {
+        if let Decl::Computed { ref mut scope, .. } = self.code.hir_code.decls[decl_state.id] {
             *scope = decl_state.has_scope.unwrap();
         } else {
             panic!("Unexpected decl kind when ending computed decl!");
@@ -424,12 +406,12 @@ impl Driver {
     fn cur_namespace(&self) -> Namespace {
         match *self.hir.scope_stack.last().unwrap() {
             ScopeState::Imper { namespace, .. } => {
-                let end_offset = self.hir.imper_ns[namespace].decls.len();
+                let end_offset = self.code.hir_code.imper_ns[namespace].decls.len();
                 Namespace::Imper { scope: namespace, end_offset }
             },
             ScopeState::Mod { namespace, .. } => Namespace::Mod(namespace),
         }
     }
-    pub fn get_range(&self, id: ExprId) -> SourceRange { self.hir.source_ranges[self.hir.expr_to_items[id]].clone() }
-    pub fn set_range(&mut self, id: ExprId, range: SourceRange) { self.hir.source_ranges[self.hir.expr_to_items[id]] = range; }
+    pub fn get_range(&self, id: ExprId) -> SourceRange { self.code.hir_code.source_ranges[self.code.hir_code.expr_to_items[id]].clone() }
+    pub fn set_range(&mut self, id: ExprId, range: SourceRange) { self.code.hir_code.source_ranges[self.code.hir_code.expr_to_items[id]] = range; }
 }

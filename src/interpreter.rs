@@ -663,8 +663,8 @@ impl Driver {
                         let mut offset = None;
                         match *ty {
                             Type::Struct(strukt) => {
-                                for (index, &field) in self.hir.structs[strukt].fields.iter().enumerate() {
-                                    if field_name == self.hir.field_decls[field].name {
+                                for (index, &field) in self.code.hir_code.structs[strukt].fields.iter().enumerate() {
+                                    if field_name == self.code.hir_code.field_decls[field].name {
                                         offset = Some(self.code.mir_code.structs[&strukt].layout.field_offsets[index]);
                                         break;
                                     }

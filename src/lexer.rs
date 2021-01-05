@@ -5,12 +5,12 @@ use std::ops::Range;
 
 use unicode_segmentation::GraphemeCursor;
 
-use mire::source_info::SourceFileId;
+use mire::source_info::{SourceRange, SourceFileId};
 
 use crate::driver::Driver;
 use crate::token::{TokenKind, TokenVec};
 use crate::error::Error;
-use crate::source_info::{SourceRange, SourceFile};
+use crate::source_info::SourceFile;
 use crate::index_vec::*;
 
 struct Lexer {

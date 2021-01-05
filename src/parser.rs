@@ -4,13 +4,12 @@ use string_interner::DefaultSymbol as Sym;
 
 use mire::hir::{self, ExprId, ImperScopeId, Intrinsic, FieldAssignment};
 use mire::ty::Type;
-use mire::source_info::SourceFileId;
+use mire::source_info::{self, SourceFileId, SourceRange};
 
 use crate::driver::Driver;
 use crate::token::{TokenKind, Token};
 use crate::builder::{BinOp, UnOp, OpPlacement};
 use crate::error::Error;
-use crate::source_info::{self, SourceRange};
 
 struct Parser {
     file: SourceFileId,
@@ -19,7 +18,7 @@ struct Parser {
 
 impl Driver {
     pub fn parse(&mut self) {
-        while self.hir.global_scopes.len() < self.src_map.files.len() {
+        while self.code.hir_code.global_scopes.len() < self.src_map.files.len() {
             self.parse_single_file();
         }
     }
