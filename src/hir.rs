@@ -281,7 +281,8 @@ impl Driver {
         if let Some(ScopeState::Imper { id, stmt_buffer, .. }) = self.hir.scope_stack.last_mut() {
             if let Some(stmt) = *stmt_buffer {
                 let block = self.code.hir_code.imper_scopes[*id].block;
-                self.code.blocks[block].ops.push(Op::HirItem(Item::Expr(stmt)));
+                let op = self.code.ops.push(Op::HirItem(Item::Expr(stmt)));
+                self.code.blocks[block].ops.push(op);
                 *stmt_buffer = None;
             }
         }
@@ -290,7 +291,8 @@ impl Driver {
     fn scope_item(&mut self, item: Item) {
         if let &ScopeState::Imper { id, .. } = self.hir.scope_stack.last().unwrap() {
             let block = self.code.hir_code.imper_scopes[id].block;
-            self.code.blocks[block].ops.push(Op::HirItem(item));
+            let op = self.code.ops.push(Op::HirItem(item));
+            self.code.blocks[block].ops.push(op);
         }
     }
 

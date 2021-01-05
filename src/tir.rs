@@ -278,6 +278,7 @@ impl Driver {
     fn add_type3_scope_dep(&mut self, a: ItemId, b: ImperScopeId) {
         let block = self.code.hir_code.imper_scopes[b].block;
         for &op in &self.code.blocks[block].ops {
+            let op = &self.code.ops[op];
             let item = op.as_hir_item().unwrap();
             match item {
                 Item::Expr(expr) => self.tir.graph.add_type3_dep(a, self.code.hir_code.expr_to_items[expr]),
@@ -640,6 +641,7 @@ impl Driver {
         self.flush_staged_ret_groups(&mut sp);
         for scope in &self.code.hir_code.imper_scopes {
             for &op in &self.code.blocks[scope.block].ops {
+                let op = &self.code.ops[op];
                 let item = op.as_hir_item().unwrap();
                 match item {
                     // TODO: This is a horrible hack! Instead of looping through all imperative scopes, I should somehow

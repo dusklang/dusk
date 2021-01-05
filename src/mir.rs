@@ -8,7 +8,7 @@ use display_adapter::display_adapter;
 
 use mire::hir::{self, DeclId, ExprId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, Item};
 use mire::mir::{InstrId, FuncId, StaticId, Const, Instr, Function, MirCode, StructLayout};
-use mire::{Block, BlockId, Op, OpId};
+use mire::{Block, BlockId, Op};
 use mire::ty::{Type, FloatWidth};
 
 use crate::driver::Driver;
@@ -432,14 +432,15 @@ impl Driver {
             write!(f, "fn {}(", self.fn_name(func.name))?;
             let entry_block = &self.code.blocks[func.blocks[0]];
             let mut first = true;
-            for i in entry_block.ops.indices() {
-                if let Instr::Parameter(ty) = self.code.get_mir_instr(entry_block, i).unwrap() {
+            for &op in &entry_block.ops {
+                let instr = self.code.ops[op].as_mir_instr().unwrap();
+                if let Instr::Parameter(ty) = &self.code.mir_code.instrs[instr] {
                     if first {
                         first = false;
                     } else {
                         write!(f, ", ")?;
                     }
-                    write!(f, "%{}: {:?}", i.index(), ty)?;
+                    write!(f, "%{}: {:?}", instr.index(), ty)?;
                 } else {
                     break;
                 }
@@ -450,7 +451,7 @@ impl Driver {
                 let block = &self.code.blocks[func.blocks[i]];
                 
                 for &op in &block.ops {
-                    let instr_id = op.as_mir_instr().unwrap();
+                    let instr_id = self.code.ops[op].as_mir_instr().unwrap();
                     let instr = &self.code.mir_code.instrs[instr_id];
                     write!(f, "    ")?;
                     macro_rules! write_args {
@@ -577,7 +578,7 @@ impl Driver {
             panic!("Failed to end block {} in function {}:\n{}", bb.index(), self.fn_name(b.name), self.code.display_block(bb));
         }
         let block = &self.code.blocks[bb];
-        let last_instr = self.code.get_mir_instr(block, block.ops.last_idx()).unwrap();
+        let last_instr = self.code.get_mir_instr(block.ops.last().copied().unwrap()).unwrap();
         assert!(
             match last_instr {
                 Instr::Br(_) | Instr::CondBr { .. } | Instr::Ret { .. } | Instr::Intrinsic { intr: Intrinsic::Panic, .. } => true,
@@ -600,7 +601,8 @@ impl Driver {
             let param = DeclId::new(param);
             assert!(matches!(self.code.hir_code.decls[param], hir::Decl::Parameter { .. }));
             let instr = self.code.mir_code.instrs.push(Instr::Parameter(self.decl_type(param, tp).clone()));
-            entry.ops.push(Op::MirInstr(instr));
+            let op = self.code.ops.push(Op::MirInstr(instr));
+            entry.ops.push(op);
         }
         let entry = self.code.blocks.push(entry);
         let mut b = FunctionBuilder {
@@ -639,7 +641,8 @@ impl Driver {
     fn push_instr(&mut self, b: &mut FunctionBuilder, instr: Instr) -> InstrId {
         let instr = self.code.mir_code.instrs.push(instr);
         let block = &mut self.code.blocks[b.current_block];
-        block.ops.push(Op::MirInstr(instr));
+        let op = self.code.ops.push(Op::MirInstr(instr));
+        block.ops.push(op);
 
         instr
     }
@@ -665,7 +668,8 @@ impl Driver {
     fn build_scope(&mut self, b: &mut FunctionBuilder, scope: ImperScopeId, ctx: Context, tp: &impl TypeProvider) -> Value {
         let block = self.code.hir_code.imper_scopes[scope].block;
         for i in 0..self.code.blocks[block].ops.len() {
-            let item = self.code.blocks[block].ops[i].as_hir_item().unwrap();
+            let op = self.code.blocks[block].ops[i];
+            let item = self.code.ops[op].as_hir_item().unwrap();
             self.build_scope_item(b, item, tp);
         }
         self.build_expr(b, self.code.hir_code.imper_scopes[scope].terminal_expr, ctx, tp)
@@ -688,8 +692,8 @@ impl Driver {
             },
             Decl::Parameter { index } => {
                 let entry_block = b.blocks[0];
-                let op = OpId::new(index);
-                let value = self.code.blocks[entry_block].ops[op].as_mir_instr().unwrap();
+                let op = self.code.blocks[entry_block].ops[index];
+                let value = self.code.ops[op].as_mir_instr().unwrap();
                 value.direct()
             },
             Decl::Intrinsic(intr, ref ty) => {

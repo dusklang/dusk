@@ -16,7 +16,7 @@ use mire::arch::Arch;
 use mire::hir::{Intrinsic, ModScopeId, StructId};
 use mire::mir::{Const, Instr, InstrId, StaticId, Struct};
 use mire::ty::{Type, IntWidth, FloatWidth};
-use mire::{OpId, BlockId};
+use mire::BlockId;
 
 use crate::driver::Driver;
 use crate::mir::{FunctionRef, function_by_ref, VOID_INSTR};
@@ -276,14 +276,14 @@ impl Value {
 struct StackFrame {
     func_ref: FunctionRef,
     block: BlockId,
-    pc: OpId,
+    pc: usize,
     results: HashMap<InstrId, Value>,
 }
 
 impl StackFrame {
     fn branch_to(&mut self, bb: BlockId) {
         self.block = bb;
-        self.pc = OpId::new(0);
+        self.pc = 0;
     }
 }
 
@@ -459,8 +459,8 @@ impl Driver {
         }
         let start_block = func.blocks[0];
         for (i, arg) in arguments.into_iter().enumerate() {
-            let op = OpId::new(i);
-            let param = self.code.blocks[start_block].ops[op].as_mir_instr().unwrap();
+            let op = self.code.blocks[start_block].ops[i];
+            let param = self.code.ops[op].as_mir_instr().unwrap();
             assert!(matches!(self.code.mir_code.instrs[param], Instr::Parameter(_)));
             results.insert(param, arg);
         }
@@ -468,7 +468,7 @@ impl Driver {
         StackFrame {
             func_ref,
             block: start_block,
-            pc: OpId::new(num_parameters),
+            pc: num_parameters,
             results,
         }
     }
@@ -515,7 +515,8 @@ impl Driver {
     /// Execute the next instruction. Iff the instruction is a return, this function returns its `Value`
     fn execute_next(&mut self) -> Option<Value> {
         let frame = self.interp.stack.last_mut().unwrap();
-        let val = match self.code.get_mir_instr(frame.block, frame.pc).unwrap() {
+        let next_op = self.code.blocks[frame.block].ops[frame.pc];
+        let val = match self.code.get_mir_instr(next_op).unwrap() {
             Instr::Void => Value::Nothing,
             Instr::Const(konst) => Value::from_const(konst, &*self),
             Instr::Alloca(ty) => {
@@ -777,7 +778,8 @@ impl Driver {
                 }
             }
             &Instr::Load(location) => {
-                let instr = self.code.blocks[frame.block].ops[frame.pc].as_mir_instr().unwrap();
+                let op = self.code.blocks[frame.block].ops[frame.pc];
+                let instr = self.code.ops[op].as_mir_instr().unwrap();
                 let ty = self.type_of(instr);
                 let size = self.size_of(&ty);
                 let frame = self.interp.stack.last_mut().unwrap();
@@ -868,7 +870,8 @@ impl Driver {
         };
 
         let frame = self.interp.stack.last_mut().unwrap();
-        let instr = self.code.blocks[frame.block].ops[frame.pc].as_mir_instr().unwrap();
+        let op = self.code.blocks[frame.block].ops[frame.pc];
+        let instr = self.code.ops[op].as_mir_instr().unwrap();
         frame.results.insert(instr, val);
         frame.pc += 1;
         None
