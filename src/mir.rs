@@ -7,9 +7,9 @@ use string_interner::DefaultSymbol as Sym;
 use display_adapter::display_adapter;
 
 use mire::hir::{self, DeclId, ExprId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, Item};
-use mire::mir::{InstrId, FuncId, StaticId, Const, Instr, Function, MirCode, StructLayout};
-use mire::{Block, BlockId, Op};
-use mire::ty::{Type, FloatWidth};
+use mire::mir::{FuncId, StaticId, Const, Instr, Function, MirCode, StructLayout, VOID_INSTR};
+use mire::{Block, BlockId, Op, OpId};
+use mire::ty::{Type, FloatWidth};   
 
 use crate::driver::Driver;
 use crate::typechecker as tc;
@@ -34,11 +34,11 @@ enum DataDest {
     /// This value needs to be returned from the current function
     Ret,
     /// A particular value needs to be assigned to this value
-    Receive { value: InstrId },
+    Receive { value: OpId },
     /// This value needs to be assigned to a particular expression
     Set { dest: ExprId },
     /// This value needs to be written to a particular memory location
-    Store { location: InstrId },
+    Store { location: OpId },
     /// This value just needs to be read
     Read,
     /// This value will never be used
@@ -49,7 +49,7 @@ enum DataDest {
 
 #[derive(Copy, Clone)]
 struct Value {
-    instr: InstrId,
+    instr: OpId,
     /// The number of pointer hops the value is away from instr.
     ///     Positive values => number of layers of indirection
     ///     Negative values => number of times the pointer has been dereferenced
@@ -81,7 +81,7 @@ trait Indirection {
     fn indirect(self) -> Value;
 }
 
-impl Indirection for InstrId {
+impl Indirection for OpId {
     fn direct(self) -> Value {
         Value {
             instr: self,
@@ -120,7 +120,7 @@ impl Context {
         Context { indirection, data, control }
     }
 
-    fn redirect(&self, read: Option<InstrId>, kontinue: Option<BlockId>) -> Context {
+    fn redirect(&self, read: Option<OpId>, kontinue: Option<BlockId>) -> Context {
         Context::new(
             self.indirection,
             match (&self.data, read) {
@@ -185,8 +185,8 @@ impl Builder {
     }
 }
 
-fn type_of(b: &MirCode, instr: InstrId, code: &IndexVec<InstrId, Instr>) -> Type {
-    match &code[instr] {
+fn type_of(b: &MirCode, instr: OpId, code: &IndexVec<OpId, Op>) -> Type {
+    match code[instr].as_mir_instr().unwrap() {
         Instr::Void | Instr::Store { .. } => Type::Void,
         Instr::Pointer { .. } | Instr::Struct { .. } => Type::Ty,
         &Instr::StructLit { id, .. } => Type::Struct(id),
@@ -434,13 +434,13 @@ impl Driver {
             let mut first = true;
             for &op in &entry_block.ops {
                 let instr = self.code.ops[op].as_mir_instr().unwrap();
-                if let Instr::Parameter(ty) = &self.code.mir_code.instrs[instr] {
+                if let Instr::Parameter(ty) = instr {
                     if first {
                         first = false;
                     } else {
                         write!(f, ", ")?;
                     }
-                    write!(f, "%{}: {:?}", instr.index(), ty)?;
+                    write!(f, "%{}: {:?}", op.index(), ty)?;
                 } else {
                     break;
                 }
@@ -451,8 +451,7 @@ impl Driver {
                 let block = &self.code.blocks[func.blocks[i]];
                 
                 for &op in &block.ops {
-                    let instr_id = self.code.ops[op].as_mir_instr().unwrap();
-                    let instr = &self.code.mir_code.instrs[instr_id];
+                    let instr = self.code.ops[op].as_mir_instr().unwrap();
                     write!(f, "    ")?;
                     macro_rules! write_args {
                         ($args:expr) => {{
@@ -552,14 +551,12 @@ enum FunctionBody {
     Expr(ExprId),
 }
 
-pub const VOID_INSTR: InstrId = InstrId::from_usize_unchecked(0);
-
 struct FunctionBuilder {
     name: Option<Sym>,
     ret_ty: Type,
     blocks: Vec<BlockId>,
     current_block: BlockId,
-    stored_decl_locs: IndexVec<StoredDeclId, InstrId>,
+    stored_decl_locs: IndexVec<StoredDeclId, OpId>,
 }
 
 impl Driver {
@@ -578,7 +575,7 @@ impl Driver {
             panic!("Failed to end block {} in function {}:\n{}", bb.index(), self.fn_name(b.name), self.code.display_block(bb));
         }
         let block = &self.code.blocks[bb];
-        let last_instr = self.code.get_mir_instr(block.ops.last().copied().unwrap()).unwrap();
+        let last_instr = self.code.ops[block.ops.last().copied().unwrap()].as_mir_instr().unwrap();
         assert!(
             match last_instr {
                 Instr::Br(_) | Instr::CondBr { .. } | Instr::Ret { .. } | Instr::Intrinsic { intr: Intrinsic::Panic, .. } => true,
@@ -589,8 +586,8 @@ impl Driver {
         );
     }
 
-    pub fn type_of(&self, instr: InstrId) -> Type {
-        type_of(&self.code.mir_code, instr, &self.code.mir_code.instrs)
+    pub fn type_of(&self, instr: OpId) -> Type {
+        type_of(&self.code.mir_code, instr, &self.code.ops)
     }
 
     fn build_function(&mut self, name: Option<Sym>, ret_ty: Type, body: FunctionBody, params: Range<DeclId>, tp: &impl TypeProvider) -> Function {
@@ -600,7 +597,7 @@ impl Driver {
         for param in params.start.index()..params.end.index() {
             let param = DeclId::new(param);
             assert!(matches!(self.code.hir_code.decls[param], hir::Decl::Parameter { .. }));
-            let instr = self.code.mir_code.instrs.push(Instr::Parameter(self.decl_type(param, tp).clone()));
+            let instr = Instr::Parameter(self.decl_type(param, tp).clone());
             let op = self.code.ops.push(Op::MirInstr(instr));
             entry.ops.push(op);
         }
@@ -638,13 +635,12 @@ impl Driver {
         });
     }
 
-    fn push_instr(&mut self, b: &mut FunctionBuilder, instr: Instr) -> InstrId {
-        let instr = self.code.mir_code.instrs.push(instr);
+    fn push_instr(&mut self, b: &mut FunctionBuilder, instr: Instr) -> OpId {
         let block = &mut self.code.blocks[b.current_block];
         let op = self.code.ops.push(Op::MirInstr(instr));
         block.ops.push(op);
 
-        instr
+        op
     }
 
     fn build_scope_item(&mut self, b: &mut FunctionBuilder, item: Item, tp: &impl TypeProvider) {
@@ -682,7 +678,7 @@ impl Driver {
         }
     }
 
-    fn get(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[InstrId; 2]>, decl_ref_id: DeclRefId, tp: &impl TypeProvider) -> Value {
+    fn get(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[OpId; 2]>, decl_ref_id: DeclRefId, tp: &impl TypeProvider) -> Value {
         let id = tp.selected_overload(decl_ref_id).expect("No overload found!");
         match self.get_decl(id, tp) {
             Decl::Computed { get } => self.push_instr(b, Instr::Call { arguments, func: get }).direct(),
@@ -692,8 +688,7 @@ impl Driver {
             },
             Decl::Parameter { index } => {
                 let entry_block = b.blocks[0];
-                let op = self.code.blocks[entry_block].ops[index];
-                let value = self.code.ops[op].as_mir_instr().unwrap();
+                let value = self.code.blocks[entry_block].ops[index];
                 value.direct()
             },
             Decl::Intrinsic(intr, ref ty) => {
@@ -721,7 +716,7 @@ impl Driver {
         }
     }
 
-    fn set(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId, value: InstrId, tp: &impl TypeProvider) -> InstrId {
+    fn set(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[OpId; 2]>, id: DeclRefId, value: OpId, tp: &impl TypeProvider) -> OpId {
         let id = tp.selected_overload(id).expect("No overload found!");
         match self.get_decl(id, tp) {
             Decl::Computed { .. } => panic!("setters not yet implemented!"),
@@ -740,7 +735,7 @@ impl Driver {
         }
     }
 
-    fn modify(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[InstrId; 2]>, id: DeclRefId, tp: &impl TypeProvider) -> Value {
+    fn modify(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[OpId; 2]>, id: DeclRefId, tp: &impl TypeProvider) -> Value {
         let id = tp.selected_overload(id).expect("No overload found!");
         match self.get_decl(id, tp) {
             Decl::Computed { .. } => panic!("modify accessors not yet implemented!"),
@@ -1088,7 +1083,7 @@ impl Driver {
         self.handle_context(b, val, ctx, tp)
     }
 
-    fn handle_indirection(&mut self, b: &mut FunctionBuilder, mut val: Value) -> InstrId {
+    fn handle_indirection(&mut self, b: &mut FunctionBuilder, mut val: Value) -> OpId {
         if val.indirection > 0 {
             while val.indirection > 0 {
                 val.instr = self.push_instr(b, Instr::Load(val.instr));

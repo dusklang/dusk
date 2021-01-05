@@ -14,12 +14,12 @@ use display_adapter::display_adapter;
 
 use mire::arch::Arch;
 use mire::hir::{Intrinsic, ModScopeId, StructId};
-use mire::mir::{Const, Instr, InstrId, StaticId, Struct};
+use mire::mir::{Const, Instr, StaticId, Struct, VOID_INSTR};
 use mire::ty::{Type, IntWidth, FloatWidth};
-use mire::BlockId;
+use mire::{OpId, BlockId};
 
 use crate::driver::Driver;
-use crate::mir::{FunctionRef, function_by_ref, VOID_INSTR};
+use crate::mir::{FunctionRef, function_by_ref};
 use crate::typechecker::type_provider::TypeProvider;
 
 #[derive(Debug, Clone)]
@@ -277,7 +277,7 @@ struct StackFrame {
     func_ref: FunctionRef,
     block: BlockId,
     pc: usize,
-    results: HashMap<InstrId, Value>,
+    results: HashMap<OpId, Value>,
 }
 
 impl StackFrame {
@@ -461,8 +461,8 @@ impl Driver {
         for (i, arg) in arguments.into_iter().enumerate() {
             let op = self.code.blocks[start_block].ops[i];
             let param = self.code.ops[op].as_mir_instr().unwrap();
-            assert!(matches!(self.code.mir_code.instrs[param], Instr::Parameter(_)));
-            results.insert(param, arg);
+            assert!(matches!(param, Instr::Parameter(_)));
+            results.insert(op, arg);
         }
         results.insert(VOID_INSTR, Value::Nothing);
         StackFrame {
@@ -494,7 +494,7 @@ impl Driver {
     }
 
     #[display_adapter]
-    fn panic_message(&self, msg: Option<InstrId>, f: &mut Formatter) {
+    fn panic_message(&self, msg: Option<OpId>, f: &mut Formatter) {
         let frame = self.interp.stack.last().unwrap();
         let msg = msg.map(|msg| frame.results[&msg].as_raw_ptr());
         write!(f, "Userspace panic")?;
@@ -516,7 +516,7 @@ impl Driver {
     fn execute_next(&mut self) -> Option<Value> {
         let frame = self.interp.stack.last_mut().unwrap();
         let next_op = self.code.blocks[frame.block].ops[frame.pc];
-        let val = match self.code.get_mir_instr(next_op).unwrap() {
+        let val = match self.code.ops[next_op].as_mir_instr().unwrap() {
             Instr::Void => Value::Nothing,
             Instr::Const(konst) => Value::from_const(konst, &*self),
             Instr::Alloca(ty) => {
@@ -779,8 +779,7 @@ impl Driver {
             }
             &Instr::Load(location) => {
                 let op = self.code.blocks[frame.block].ops[frame.pc];
-                let instr = self.code.ops[op].as_mir_instr().unwrap();
-                let ty = self.type_of(instr);
+                let ty = self.type_of(op);
                 let size = self.size_of(&ty);
                 let frame = self.interp.stack.last_mut().unwrap();
                 frame.results[&location].load(size)
@@ -871,8 +870,7 @@ impl Driver {
 
         let frame = self.interp.stack.last_mut().unwrap();
         let op = self.code.blocks[frame.block].ops[frame.pc];
-        let instr = self.code.ops[op].as_mir_instr().unwrap();
-        frame.results.insert(instr, val);
+        frame.results.insert(op, val);
         frame.pc += 1;
         None
     }
