@@ -4,6 +4,7 @@ use std::ops::Range;
 use smallvec::{SmallVec, smallvec};
 use string_interner::DefaultSymbol as Sym;
 
+use mire::{Op, Block};
 use mire::hir::*;
 use mire::index_counter::IndexCounter;
 use mire::ty::Type;
@@ -98,7 +99,7 @@ impl Driver {
                 let id = decl.stored_decl_counter.next();
 
                 let decl_id = self.decl(Decl::Stored { id, is_mut, root_expr }, name, explicit_ty, range);
-                self.scope_item(ScopeItem::StoredDecl { decl_id, id, root_expr });
+                self.scope_item(Item::Decl(decl_id));
                 self.imper_scoped_decl(
                     ImperScopedDecl {
                         name,
@@ -193,7 +194,7 @@ impl Driver {
         match self.hir.scope_stack.last().unwrap() {
             ScopeState::Imper { .. } => {
                 self.flush_stmt_buffer();
-                self.scope_item(ScopeItem::ComputedDecl(id));
+                self.scope_item(Item::Decl(id));
             },
             &ScopeState::Mod { .. } => {
                 self.mod_scoped_decl(name, ModScopedDecl { num_params: param_names.len(), id });
@@ -279,15 +280,17 @@ impl Driver {
     fn flush_stmt_buffer(&mut self) {
         if let Some(ScopeState::Imper { id, stmt_buffer, .. }) = self.hir.scope_stack.last_mut() {
             if let Some(stmt) = *stmt_buffer {
-                self.code.hir_code.imper_scopes[*id].items.push(ScopeItem::Stmt(stmt));
+                let block = self.code.hir_code.imper_scopes[*id].block;
+                self.code.blocks[block].ops.push(Op::HirItem(Item::Expr(stmt)));
                 *stmt_buffer = None;
             }
         }
     }
 
-    fn scope_item(&mut self, item: ScopeItem) {
+    fn scope_item(&mut self, item: Item) {
         if let &ScopeState::Imper { id, .. } = self.hir.scope_stack.last().unwrap() {
-            self.code.hir_code.imper_scopes[id].items.push(item);
+            let block = self.code.hir_code.imper_scopes[id].block;
+            self.code.blocks[block].ops.push(Op::HirItem(item));
         }
     }
 
@@ -318,9 +321,10 @@ impl Driver {
 
         let comp_decl = self.hir.comp_decl_stack.last_mut().unwrap();
         assert!(comp_decl.imper_scope_stack > 0 || comp_decl.has_scope.is_none(), "Can't add multiple top-level scopes to a computed decl");
+        let block = self.code.blocks.push(Block::default());
         let id = self.code.hir_code.imper_scopes.push(
             ImperScope {
-                items: Vec::new(),
+                block,
                 terminal_expr: VOID_EXPR,
             }
         );

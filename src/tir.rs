@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use smallvec::SmallVec;
 use index_vec::define_index_type;
 
-use mire::hir::{self, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId};
+use mire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId};
 
 use crate::driver::Driver;
 use crate::dep_vec::{self, DepVec, AnyDepVec};
@@ -274,14 +274,18 @@ impl Driver {
 
     /// IMPORTANT NOTE: When/if we stop adding type3 deps to all items in a function's scope,
     /// we will need to bring back the original idea of meta-dependencies:
-    /// https://github.com/zachrwolfe/meda/issues/58
+    /// https://github.com/meda-lang/meda/issues/58
     fn add_type3_scope_dep(&mut self, a: ItemId, b: ImperScopeId) {
-        let scope = &self.code.hir_code.imper_scopes[b];
-        for &item in &scope.items {
+        let block = self.code.hir_code.imper_scopes[b].block;
+        for &op in &self.code.blocks[block].ops {
+            let item = op.as_hir_item().unwrap();
             match item {
-                hir::ScopeItem::Stmt(expr) => self.tir.graph.add_type3_dep(a, self.code.hir_code.expr_to_items[expr]),
-                hir::ScopeItem::StoredDecl { decl_id, .. } => self.tir.graph.add_type3_dep(a, self.code.hir_code.decl_to_items[decl_id]),
-                hir::ScopeItem::ComputedDecl(_) => {},
+                Item::Expr(expr) => self.tir.graph.add_type3_dep(a, self.code.hir_code.expr_to_items[expr]),
+                Item::Decl(decl) => match self.code.hir_code.decls[decl] {
+                    hir::Decl::Stored { .. } => self.tir.graph.add_type3_dep(a, self.code.hir_code.decl_to_items[decl]),
+                    hir::Decl::Computed { .. } => {},
+                    _ => panic!("Invalid scope item"),
+                },
             }
         }
     }
@@ -635,15 +639,16 @@ impl Driver {
         }
         self.flush_staged_ret_groups(&mut sp);
         for scope in &self.code.hir_code.imper_scopes {
-            for &item in &scope.items {
+            for &op in &self.code.blocks[scope.block].ops {
+                let item = op.as_hir_item().unwrap();
                 match item {
                     // TODO: This is a horrible hack! Instead of looping through all imperative scopes, I should somehow
                     // associate statements with their unit
-                    hir::ScopeItem::Stmt(expr) => if let Some(&unit) = sp.levels.item_to_units.get(&ei!(expr)) {
+                    Item::Expr(expr) => if let Some(&unit) = sp.levels.item_to_units.get(&ei!(expr)) {
                         let unit = &mut sp.units[unit as usize];
                         unit.items.stmts.push(Stmt { root_expr: expr });
                     },
-                    hir::ScopeItem::ComputedDecl(_) | hir::ScopeItem::StoredDecl { .. } => {},
+                    Item::Decl(decl) => assert!(matches!(self.code.hir_code.decls[decl], hir::Decl::Stored { .. } | hir::Decl::Computed { .. }), "Invalid scope item"),
                 }
             }
         }

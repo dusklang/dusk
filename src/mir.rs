@@ -6,7 +6,7 @@ use smallvec::SmallVec;
 use string_interner::DefaultSymbol as Sym;
 use display_adapter::display_adapter;
 
-use mire::hir::{self, DeclId, ExprId, DeclRefId, ImperScopeId, Intrinsic, Expr, ScopeItem, StoredDeclId};
+use mire::hir::{self, DeclId, ExprId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, Item};
 use mire::mir::{InstrId, FuncId, StaticId, Const, Instr, Function, MirCode, StructLayout};
 use mire::{Block, BlockId, Op, OpId};
 use mire::ty::{Type, FloatWidth};
@@ -644,25 +644,28 @@ impl Driver {
         instr
     }
 
-    fn build_scope_item(&mut self, b: &mut FunctionBuilder, item: ScopeItem, tp: &impl TypeProvider) {
+    fn build_scope_item(&mut self, b: &mut FunctionBuilder, item: Item, tp: &impl TypeProvider) {
         match item {
-            ScopeItem::Stmt(expr) => {
+            Item::Expr(expr) => {
                 self.build_expr(b, expr, Context::new(0, DataDest::Void, ControlDest::Continue), tp);
             },
-            ScopeItem::StoredDecl { id, root_expr, .. } => {
-                let ty = tp.ty(root_expr).clone();
-                let location = self.push_instr(b, Instr::Alloca(ty));
-                b.stored_decl_locs.push_at(id, location);
-                self.build_expr(b, root_expr, Context::new(0, DataDest::Store { location }, ControlDest::Continue), tp);
+            Item::Decl(decl) => match self.code.hir_code.decls[decl] {
+                hir::Decl::Stored { id, root_expr, .. } => {
+                    let ty = tp.ty(root_expr).clone();
+                    let location = self.push_instr(b, Instr::Alloca(ty));
+                    b.stored_decl_locs.push_at(id, location);
+                    self.build_expr(b, root_expr, Context::new(0, DataDest::Store { location }, ControlDest::Continue), tp);
+                },
+                hir::Decl::Computed { .. } => {},
+                _ => panic!("Invalid scope item"),
             },
-            // No need to give local computed decls special treatment at the MIR level
-            ScopeItem::ComputedDecl(_) => {},
         }
     }
 
     fn build_scope(&mut self, b: &mut FunctionBuilder, scope: ImperScopeId, ctx: Context, tp: &impl TypeProvider) -> Value {
-        for i in 0..self.code.hir_code.imper_scopes[scope].items.len() {
-            let item = self.code.hir_code.imper_scopes[scope].items[i];
+        let block = self.code.hir_code.imper_scopes[scope].block;
+        for i in 0..self.code.blocks[block].ops.len() {
+            let item = self.code.blocks[block].ops[i].as_hir_item().unwrap();
             self.build_scope_item(b, item, tp);
         }
         self.build_expr(b, self.code.hir_code.imper_scopes[scope].terminal_expr, ctx, tp)
