@@ -42,6 +42,7 @@ enum StopPhase {
     Tir,
     Typecheck,
     Mir,
+    Refine,
     Interp,
 }
 
@@ -109,6 +110,9 @@ fn main() {
     if opt.output_mir {
         println!("{}", driver.display_mir());
     }
+
+    begin_phase!(Refine);
+    driver.refine();
 
     begin_phase!(Interp);
     let main_sym = driver.interner.get_or_intern("main");
