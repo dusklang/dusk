@@ -21,6 +21,7 @@ mod ty;
 mod driver;
 mod typechecker;
 mod interpreter;
+mod refine;
 
 use interpreter::InterpMode;
 use mir::FunctionRef;

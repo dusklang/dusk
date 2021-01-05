@@ -14,6 +14,7 @@ use crate::error::Error;
 use crate::mir::{self, FunctionRef};
 use crate::interpreter::Interpreter;
 use crate::typechecker::type_provider::TypeProvider;
+use crate::refine::Refine;
 use crate::index_vec::*;
 
 pub struct Driver {
@@ -25,6 +26,7 @@ pub struct Driver {
     pub tir: tir::Builder,
     pub errors: Vec<Error>,
     pub mir: mir::Builder,
+    pub refine: Refine,
     pub code: Code,
     pub interp: Interpreter,
     /// Total number of errors that have been flushed
@@ -42,6 +44,7 @@ impl Driver {
             tir: tir::Builder::default(),
             errors: Vec::new(),
             mir: mir::Builder::new(),
+            refine: Refine::default(),
             code: Code::default(),
             interp: Interpreter::new(),
             flushed_errors: 0,
