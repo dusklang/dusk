@@ -135,7 +135,7 @@ impl Value {
         }
     }
 
-    fn as_big_int(&self, signed: bool) -> BigInt {
+    pub fn as_big_int(&self, signed: bool) -> BigInt {
         if signed {
             BigInt::from_signed_bytes_le(self.as_bytes())
         } else {
@@ -223,7 +223,7 @@ impl Value {
         Value::from_bytes(&bytes)
     }
 
-    fn from_const(konst: &Const, driver: &Driver) -> Value {
+    pub fn from_const(konst: &Const, driver: &Driver) -> Value {
         match *konst {
             Const::Int { lit, ref ty } => match ty {
                 &Type::Int { width, is_signed } => Value::from_big_int(BigInt::from(lit), width, is_signed, driver.arch),

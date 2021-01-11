@@ -1,10 +1,13 @@
 use std::collections::{HashSet, HashMap};
 
-use mire::{BlockId, OpId};
+use rsmt2::prelude::*;
+
+use mire::BlockId;
 use mire::mir::{Const, Function, Instr};
-use mire::ty::Type;
+use mire::ty::{Type, IntWidth};
 use mire::hir::Intrinsic;
 
+use crate::interpreter::Value;
 use crate::mir::{FunctionRef, function_by_ref};
 use crate::driver::Driver;
 
@@ -12,83 +15,27 @@ use crate::driver::Driver;
 pub struct Refine {
 }
 
-#[derive(Clone, PartialEq, Debug)]
-enum ConstraintValue {
-    Instr(OpId),
-    Constant(Const),
-    Diff { lhs: Box<ConstraintValue>, rhs: Box<ConstraintValue> },
-}
+#[derive(Default)]
+struct NameGen(usize);
 
-impl ConstraintValue {
-    fn make_substitutions(&mut self, substitutions: &HashMap<OpId, ConstraintValue>) {
-        match self {
-            ConstraintValue::Constant(_) => {},
-            &mut ConstraintValue::Instr(op) => {
-                if let Some(val) = substitutions.get(&op) {
-                    *self = val.clone();
-                }
-            },
-            ConstraintValue::Diff { lhs, rhs } => {
-                lhs.make_substitutions(substitutions);
-                rhs.make_substitutions(substitutions);
-            }
-        }
-    }
+impl Iterator for NameGen {
+    type Item = String;
+    fn next(&mut self) -> Option<String> {
+        let mut val = self.0;
+        let mut out = String::new();
+        loop {
+            let base = 26;
+            let cur_digit = val % base;
+            val /= base;
+            let chr = ('a' as u8 + cur_digit as u8) as char;
+            out.push(chr);
 
-    fn as_const(&self) -> Option<Const> {
-        match self {
-            ConstraintValue::Instr(_) => None,
-            ConstraintValue::Constant(konst) => Some(konst.clone()),
-            ConstraintValue::Diff { lhs, rhs } => {
-                lhs.as_const().zip(rhs.as_const())
-                    .into_iter()
-                    .filter_map(|(lhs, rhs)| {
-                        if let (Const::Int { lit: lhs, ty: lhs_ty }, Const::Int { lit: rhs, ty: rhs_ty }) = (lhs, rhs) {
-                            assert_eq!(lhs_ty, rhs_ty, "types must be equal");
-                            Some(Const::Int { lit: lhs - rhs, ty: lhs_ty })
-                        } else {
-                            None
-                        }
-                    }).next()
-            }
-        }
-    }
-}
-
-#[derive(Debug)]
-enum Constraint {
-    Equal { lhs: ConstraintValue, rhs: ConstraintValue, },
-    Lte { lhs: ConstraintValue, rhs: ConstraintValue, },
-}
-
-impl Constraint {
-    fn make_substitutions(&mut self, substitutions: &HashMap<OpId, ConstraintValue>) {
-        match self {
-            Constraint::Equal { lhs, rhs } | Constraint::Lte { lhs, rhs } => {
-                lhs.make_substitutions(substitutions);
-                rhs.make_substitutions(substitutions);
-            }
-        }
-    }
-
-    fn verify(&self) -> bool {
-        match self {
-            Constraint::Equal { lhs, rhs } => {
-                if let (Some(lhs), Some(rhs)) = (lhs.as_const(), rhs.as_const()) {
-                    return lhs == rhs;
-                }
-            },
-            Constraint::Lte { lhs, rhs } => {
-                if let (Some(lhs), Some(rhs)) = (lhs.as_const(), rhs.as_const()) {
-                    if let (Const::Int { lit: lhs, ty: lhs_ty }, Const::Int { lit: rhs, ty: rhs_ty }) = (lhs, rhs) {
-                        assert_eq!(lhs_ty, rhs_ty, "types must be equal");
-                        return lhs <= rhs;
-                    }
-                }
-            }
+            if val == 0 { break; }
         }
 
-        true
+        self.0 += 1;
+
+        Some(out)
     }
 }
 
@@ -127,27 +74,18 @@ impl Driver {
         }
     }
 
-    fn simplify_and_validate_constraints(&self, substitutions: &mut HashMap<OpId, ConstraintValue>, constraints: &mut Vec<Constraint>) {
-        constraints.retain(|constraint| {
-            match constraint {
-                Constraint::Equal { lhs, rhs } => {
-                    // TODO: Opposite way
-                    if let &ConstraintValue::Instr(instr) = lhs {
-                        substitutions.insert(instr, rhs.clone());
-                        return false;
-                    }
-                }
-                _ => {},
-            }
-            true
-        });
+    fn get_int_range(&self, width: IntWidth, is_signed: bool) -> (String, String) {
+        assert!(self.arch.pointer_size() == 64);
+        match (is_signed, width) {
+            (false, IntWidth::W8)  => (u8::MIN.to_string(),  u8::MAX.to_string()),
+            (false, IntWidth::W16) => (u16::MIN.to_string(), u16::MAX.to_string()),
+            (false, IntWidth::W32) => (u32::MIN.to_string(), u32::MAX.to_string()),
+            (false, IntWidth::W64) | (false, IntWidth::Pointer) => (u64::MIN.to_string(), u64::MAX.to_string()),
 
-        for constraint in constraints.iter_mut() {
-            constraint.make_substitutions(&substitutions);
-        }
-
-        for constraint in constraints.iter() {
-            assert!(constraint.verify(), "Constraint failed:\n{:#?}", constraint);
+            (true, IntWidth::W8)  => (i8::MIN.to_string(),  i8::MAX.to_string()),
+            (true, IntWidth::W16) => (i16::MIN.to_string(), i16::MAX.to_string()),
+            (true, IntWidth::W32) => (i32::MIN.to_string(), i32::MAX.to_string()),
+            (true, IntWidth::W64) | (true, IntWidth::Pointer) => (i64::MIN.to_string(), i64::MAX.to_string()),
         }
     }
 
@@ -156,31 +94,93 @@ impl Driver {
         self.check_no_loops(func);
         assert_eq!(func.blocks.len(), 1, "Function has more than one block, which isn't yet supported");
 
-        let mut constraints = Vec::new();
-        let mut substitutions = HashMap::new();
-
         let block = func.blocks[0];
         let block = &self.code.blocks[block];
-        for &op in &block.ops {
+
+        let parser = ();
+
+        let conf = SmtConf::default_z3();
+        let mut solver = conf.spawn(parser).unwrap();
+
+        let is_sat = solver.check_sat().unwrap();
+        assert!(is_sat);
+
+
+        let mut names = HashMap::new();
+        let mut name_gen = NameGen::default();
+        for &op in block.ops.iter() {
             let instr = self.code.ops[op].as_mir_instr().unwrap();
             match instr {
-                Instr::Const(konst) => constraints.push(Constraint::Equal { lhs: ConstraintValue::Instr(op), rhs: ConstraintValue::Constant(konst.clone()) }),
-                Instr::Intrinsic { arguments, intr, ty } => {
-                    if matches!(intr, Intrinsic::Add) && ty == &Type::i32() && arguments.len() == 2 {
-                        constraints.push(
-                            Constraint::Lte {
-                                lhs: ConstraintValue::Instr(arguments[0]),
-                                rhs: ConstraintValue::Diff {
-                                    lhs: Box::new(ConstraintValue::Constant(Const::Int { lit: i32::MAX as u64, ty: Type::i32() })),
-                                    rhs: Box::new(ConstraintValue::Instr(arguments[1])),
-                                }
+                Instr::Const(konst) => {
+                    match konst {
+                        Const::Int { ty, .. } => {
+                            match ty {
+                                &Type::Int { is_signed, .. } => {
+                                    let name = names.entry(op).or_insert(name_gen.next().unwrap());
+                                    // TODO: this is kind of silly, but it was the path of least resistance.
+                                    let val = Value::from_const(konst, self).as_big_int(is_signed);
+                                    solver.define_const(name, "Int", &val.to_string()).unwrap();
+                                },
+                                unhandled => panic!("Literal with unhandled type {:?}", unhandled),
                             }
-                        )
+                        },
+                        _ => {},
                     }
                 },
-                _ => {}
+                Instr::Intrinsic { arguments, ty, intr } => {
+                    match intr {
+                        Intrinsic::Add => {
+                            assert_eq!(arguments.len(), 2);
+                            match ty {
+                                &Type::Int { width, is_signed } => {
+                                    let (lo, hi) = self.get_int_range(width, is_signed);
+                                    let (a, b) = (&names[&arguments[0]], &names[&arguments[1]]);
+                                    let add_expr = format!("(+ {} {})", a, b);
+                                    let name = names.entry(op).or_insert(name_gen.next().unwrap());
+                                    solver.define_const(name, "Int", &add_expr).unwrap();
+                                    solver.assert(&format!("(>= {} {})", name, lo)).unwrap();
+                                    solver.assert(&format!("(<= {} {})", name, hi)).unwrap();
+                                },
+                                _ => panic!("unhandled type"),
+                            }
+                        },
+                        Intrinsic::Sub => {
+                            assert_eq!(arguments.len(), 2);
+                            match ty {
+                                &Type::Int { width, is_signed } => {
+                                    let (lo, hi) = self.get_int_range(width, is_signed);
+                                    let (a, b) = (&names[&arguments[0]], &names[&arguments[1]]);
+                                    let sub_expr = format!("(- {} {})", a, b);
+                                    let name = names.entry(op).or_insert(name_gen.next().unwrap());
+                                    solver.define_const(name, "Int", &sub_expr).unwrap();
+                                    solver.assert(&format!("(>= {} {})", name, lo)).unwrap();
+                                    solver.assert(&format!("(<= {} {})", name, hi)).unwrap();
+                                },
+                                _ => panic!("unhandled type"),
+                            }
+                        },
+                        Intrinsic::Neg => {
+                            assert_eq!(arguments.len(), 1);
+                            match ty {
+                                &Type::Int { width, is_signed } => {
+                                    let (lo, hi) = self.get_int_range(width, is_signed);
+                                    let a = &names[&arguments[0]];
+                                    let neg_expr = format!("(- {})", a);
+                                    let name = names.entry(op).or_insert(name_gen.next().unwrap());
+                                    solver.define_const(name, "Int", &neg_expr).unwrap();
+                                    solver.assert(&format!("(>= {} {})", name, lo)).unwrap();
+                                    solver.assert(&format!("(<= {} {})", name, hi)).unwrap();
+                                },
+                                _ => panic!("unhandled type"),
+                            }
+                        }
+                        _ => {},
+                    }
+                },
+                _ => {},
             }
-            self.simplify_and_validate_constraints(&mut substitutions, &mut constraints);
         }
+
+        assert!(solver.check_sat().unwrap(), "SAT failed! :(");
     }
 }

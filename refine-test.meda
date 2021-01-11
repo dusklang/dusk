@@ -1,5 +1,6 @@
 I32_MAX :: 2147483647
 
 fn main() {
-    var := I32_MAX + 1
+    // Replace that last 5 with a 4, and it won't fail
+    var := I32_MAX - 4 + 4 + (-4) + 5
 }
