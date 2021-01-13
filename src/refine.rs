@@ -291,10 +291,8 @@ impl Driver {
 
         let block_id = func.blocks[0];
 
-        let parser = ();
-
         let conf = SmtConf::default_z3();
-        let mut solver = conf.spawn(parser).unwrap();
+        let mut solver = conf.spawn(()).unwrap();
 
         let is_sat = solver.check_sat().unwrap();
         assert!(is_sat);
@@ -305,6 +303,27 @@ impl Driver {
             let op = block.ops[i];
             let instr = self.code.ops[op].as_mir_instr().unwrap();
             match instr {
+                Instr::Parameter(ty) => {
+                    match ty {
+                        &Type::Int { width, is_signed } => {
+                            let (lo, hi) = self.get_int_range(width, is_signed);
+                            let name = self.start_constraints(op);
+                            solver.declare_const(name, "Int").unwrap();
+
+                            // TODO: these should be derived from ConstraintValues instead
+                            let min_name = format!("{}MIN", name);
+                            let max_name = format!("{}MAX", name);
+                            solver.declare_const(&min_name, "Int").unwrap();
+                            solver.declare_const(&max_name, "Int").unwrap();
+
+                            self.add_constraint(&mut solver, Constraint::Lte(lo.into(), min_name.clone().into()));
+                            self.add_constraint(&mut solver, Constraint::Lte(min_name.into(), op.into()));
+                            self.add_constraint(&mut solver, Constraint::Lte(op.into(), max_name.clone().into()));
+                            self.add_constraint(&mut solver, Constraint::Lte(max_name.into(), hi.into()));
+                        },
+                        _ => {},
+                    }
+                },
                 Instr::Const(konst) => {
                     match konst {
                         Const::Int { ty, .. } => {
