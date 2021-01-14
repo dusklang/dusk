@@ -1,5 +1,11 @@
 I32_MAX :: 2147483647
 
+//@pre(a + 2 <= I32_MAX)
+//@pos(retVal == a + 2)
+fn add(a: i32): i32 {
+    a + 2
+}
+
 fn main() {
     // Replace that last 5 with a 4, and it won't fail
     var := I32_MAX - 4 + 4 + (-4) + 5
