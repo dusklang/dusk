@@ -3,6 +3,7 @@ use std::ops::{Add, Sub, Neg};
 use std::iter::Iterator;
 
 use rsmt2::prelude::*;
+use rsmt2::parse::{IdentParser, ModelParser};
 use display_adapter::display_adapter;
 
 use mire::{BlockId, OpId};
@@ -13,6 +14,26 @@ use mire::hir::Intrinsic;
 use crate::interpreter::Value;
 use crate::mir::{FunctionRef, function_by_ref};
 use crate::driver::Driver;
+
+// TODO: Switch to another smt crate, or write my own.
+// ugh why do I have to do this
+#[derive(Clone, Copy)]
+struct Parser;
+
+impl<'a> IdentParser<String, String, & 'a str> for Parser {
+    fn parse_ident(self, input: & 'a str) -> SmtRes<String> {
+        Ok(input.into())
+    }
+    fn parse_type(self, input: & 'a str) -> SmtRes<String> {
+        Ok(input.into())
+    }
+}
+
+impl<'a> ModelParser<String, String, String, & 'a str> for Parser {
+    fn parse_value(self, input: & 'a str, ident: & String, params: &[(String, String)], typ: &String) -> SmtRes<String> {
+        Ok(input.into())
+    }
+}
 
 #[derive(Default)]
 pub struct Refine {
@@ -269,7 +290,7 @@ impl Driver {
     }
 
     /// Returns the constraint in S-expression form
-    fn add_constraint(&mut self, solver: &mut Solver<()>, constraint: Constraint) {
+    fn add_constraint(&mut self, solver: &mut Solver<Parser>, constraint: Constraint) {
         for op in constraint.get_involved_ops() {
             let constraints = self.refine.constraints.get_mut(&op).unwrap();
             constraints.constraints.push(constraint.clone());
@@ -292,10 +313,7 @@ impl Driver {
         let block_id = func.blocks[0];
 
         let conf = SmtConf::default_z3();
-        let mut solver = conf.spawn(()).unwrap();
-
-        let is_sat = solver.check_sat().unwrap();
-        assert!(is_sat);
+        let mut solver = conf.spawn(Parser).unwrap();
 
         let block = &self.code.blocks[block_id];
         for i in 0..block.ops.len() {
@@ -387,14 +405,13 @@ impl Driver {
                                 },
                                 _ => panic!("unhandled type"),
                             }
-                        }
+                        },
                         _ => {},
                     }
                 },
                 _ => {},
             }
         }
-
         assert!(solver.check_sat().unwrap(), "SAT failed! :(");
     }
 }
