@@ -217,7 +217,6 @@ dependencies = [
  "num-bigint",
  "paste",
  "rsmt2",
- "serde",
  "smallvec",
  "string-interner",
  "unicode-segmentation 1.3.0",
