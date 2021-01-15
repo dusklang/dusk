@@ -45,8 +45,8 @@ pub struct Builder {
     comp_decl_stack: Vec<CompDeclState>,
     scope_stack: Vec<ScopeState>,
 
-    pub precondition: Sym,
-    pub postcondition: Sym,
+    pub precondition_sym: Sym,
+    pub postcondition_sym: Sym,
 }
 
 impl Default for Builder {
@@ -56,8 +56,8 @@ impl Default for Builder {
             scope_stack: Default::default(),
 
             // Note: gets initialized in Driver::initialize_hir() below
-            precondition: Sym::try_from_usize((u32::MAX - 1) as usize).unwrap(),
-            postcondition: Sym::try_from_usize((u32::MAX - 1) as usize).unwrap(),
+            precondition_sym: Sym::try_from_usize((u32::MAX - 1) as usize).unwrap(),
+            postcondition_sym: Sym::try_from_usize((u32::MAX - 1) as usize).unwrap(),
         }
     }
 }
@@ -75,8 +75,8 @@ impl Driver {
         let return_value_sym = self.interner.get_or_intern_static("return_value");
         self.decl(Decl::ReturnValue, return_value_sym, None, SourceRange::default());
 
-        self.hir.precondition = self.interner.get_or_intern_static("precondition");
-        self.hir.postcondition = self.interner.get_or_intern_static("postcondition");
+        self.hir.precondition_sym = self.interner.get_or_intern_static("precondition");
+        self.hir.postcondition_sym = self.interner.get_or_intern_static("postcondition");
     }
 
     fn push_expr(&mut self, expr: Expr, range: SourceRange) -> ExprId {

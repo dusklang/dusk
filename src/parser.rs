@@ -514,9 +514,9 @@ impl Driver {
             &TokenKind::Ident(sym) => sym,
             _ => panic!("Unexpected token when parsing attribute"),
         };
-        let pre_or_post = if attr == self.hir.precondition {
+        let pre_or_post = if attr == self.hir.precondition_sym {
             PreOrPost::Pre
-        } else if attr == self.hir.postcondition {
+        } else if attr == self.hir.postcondition_sym {
             PreOrPost::Post
         } else {
             panic!("Unrecognized attribute");
