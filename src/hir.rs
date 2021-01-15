@@ -91,7 +91,7 @@ impl Driver {
         let cast_id = self.code.hir_code.cast_counter.next();
         self.push_expr(Expr::Cast { expr, ty, cast_id }, range)
     }
-    pub fn stored_decl(&mut self, name: Sym, explicit_ty: Option<ExprId>, is_mut: bool, root_expr: ExprId, range: SourceRange) {
+    pub fn stored_decl(&mut self, name: Sym, explicit_ty: Option<ExprId>, is_mut: bool, root_expr: ExprId, range: SourceRange) -> DeclId {
         self.flush_stmt_buffer();
         match self.hir.scope_stack.last().unwrap() {
             ScopeState::Imper { .. } => {
@@ -107,6 +107,7 @@ impl Driver {
                         id: decl_id,
                     }
                 );
+                decl_id
             }
             ScopeState::Mod { .. } => {
                 let decl_id = self.decl(
@@ -126,6 +127,7 @@ impl Driver {
                         id: decl_id
                     }
                 );
+                decl_id
             },
         }
     }
@@ -170,7 +172,7 @@ impl Driver {
         self.hir.scope_stack.push(ScopeState::Mod { id, namespace });
         self.push_expr(Expr::Mod { id }, SourceRange::default())
     }
-    pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, explicit_ty: Option<ExprId>, proto_range: SourceRange) {
+    pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, explicit_ty: Option<ExprId>, proto_range: SourceRange) -> DeclId {
         // This is a placeholder value that gets replaced once the parameter declarations get allocated.
         let id = self.decl(Decl::Const(ExprId::new(u32::MAX as usize)), name, explicit_ty, proto_range);
         assert_eq!(param_names.len(), param_tys.len());
@@ -209,6 +211,8 @@ impl Driver {
                 stored_decl_counter: IndexCounter::new(),
             }
         );
+
+        id
     }
     pub fn decl_ref(&mut self, base_expr: Option<ExprId>, name: Sym, arguments: SmallVec<[ExprId; 2]>, has_parens: bool, range: SourceRange) -> ExprId {
         let namespace = match base_expr {
