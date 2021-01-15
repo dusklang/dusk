@@ -71,6 +71,10 @@ impl Driver {
     pub fn initialize_hir(&mut self) {
         self.push_expr(Expr::Void, SourceRange::default());
         self.push_expr(Expr::ConstTy(Type::Void), SourceRange::default());
+
+        let return_value_sym = self.interner.get_or_intern_static("return_value");
+        self.decl(Decl::ReturnValue, return_value_sym, None, SourceRange::default());
+
         self.hir.precondition = self.interner.get_or_intern_static("precondition");
         self.hir.postcondition = self.interner.get_or_intern_static("postcondition");
     }
