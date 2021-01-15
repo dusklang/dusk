@@ -2,7 +2,7 @@ use std::ffi::CString;
 use std::ops::Range;
 
 use smallvec::{SmallVec, smallvec};
-use string_interner::DefaultSymbol as Sym;
+use string_interner::{DefaultSymbol as Sym, Symbol};
 
 use mire::{Op, Block};
 use mire::hir::*;
@@ -40,10 +40,26 @@ struct CompDeclState {
     stored_decl_counter: IndexCounter<StoredDeclId>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Builder {
     comp_decl_stack: Vec<CompDeclState>,
     scope_stack: Vec<ScopeState>,
+
+    pub precondition: Sym,
+    pub postcondition: Sym,
+}
+
+impl Default for Builder {
+    fn default() -> Self {
+        Builder {
+            comp_decl_stack: Default::default(),
+            scope_stack: Default::default(),
+
+            // Note: gets initialized in Driver::initialize_hir() below
+            precondition: Sym::try_from_usize((u32::MAX - 1) as usize).unwrap(),
+            postcondition: Sym::try_from_usize((u32::MAX - 1) as usize).unwrap(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -53,9 +69,10 @@ pub enum PreOrPost {
 
 impl Driver {
     pub fn initialize_hir(&mut self) {
-        //self.code.hir_code.imper_ns;
         self.push_expr(Expr::Void, SourceRange::default());
         self.push_expr(Expr::ConstTy(Type::Void), SourceRange::default());
+        self.hir.precondition = self.interner.get_or_intern_static("precondition");
+        self.hir.postcondition = self.interner.get_or_intern_static("postcondition");
     }
 
     fn push_expr(&mut self, expr: Expr, range: SourceRange) -> ExprId {
