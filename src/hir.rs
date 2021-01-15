@@ -24,7 +24,11 @@ enum ScopeState {
     Mod {
         id: ModScopeId,
         namespace: ModScopeNsId,
-    }
+    },
+    Condition {
+        ns: ConditionNsId,
+        pre_or_post: PreOrPost,
+    },
 }
 
 #[derive(Debug)]
@@ -40,6 +44,11 @@ struct CompDeclState {
 pub struct Builder {
     comp_decl_stack: Vec<CompDeclState>,
     scope_stack: Vec<ScopeState>,
+}
+
+#[derive(Debug)]
+pub enum PreOrPost {
+    Pre, Post,
 }
 
 impl Driver {
@@ -129,6 +138,7 @@ impl Driver {
                 );
                 decl_id
             },
+            ScopeState::Condition { .. } => panic!("Stored decl unsupported in an attribute"),
         }
     }
     pub fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
@@ -160,6 +170,29 @@ impl Driver {
     pub fn struct_lit(&mut self, ty: ExprId, fields: Vec<FieldAssignment>, range: SourceRange) -> ExprId {
         let id = self.code.hir_code.struct_lits.next();
         self.push_expr(Expr::StructLit { ty, fields, id }, range)
+    }
+    pub fn begin_condition_namespace(&mut self) -> ConditionNsId {
+        let parent = self.cur_namespace();
+        let ns = self.code.hir_code.condition_ns.push(ConditionNs { func: DeclId::from_raw(u32::MAX), parent: Some(parent) });
+        self.hir.scope_stack.push(ScopeState::Condition { ns, pre_or_post: PreOrPost::Pre });
+
+        ns
+    }
+    pub fn set_pre_or_post(&mut self, desired_ns: ConditionNsId, desired_pre_or_post: PreOrPost) {
+        if let Some(ScopeState::Condition { ns, pre_or_post }) = self.hir.scope_stack.last_mut() {
+            assert_eq!(&*ns, &desired_ns, "tried to set pre_or_post, but the current condition scope doesn't match");
+            *pre_or_post = desired_pre_or_post;
+        } else {
+            panic!("tried to set pre_or_post, but the top of the scope stack is not a condition namespace");
+        }
+    }
+    pub fn end_condition_namespace(&mut self, desired_ns: ConditionNsId) {
+        if let Some(&ScopeState::Condition { ns, .. }) = self.hir.scope_stack.last() {
+            assert_eq!(ns, desired_ns, "tried to end condition namespace, but the current condition scope doesn't match");
+            self.hir.scope_stack.pop();
+        } else {
+            panic!("Tried to end condition namespace, but the top of the scope stack is not a condition namespace");
+        }
     }
     pub fn begin_module(&mut self) -> ExprId {
         let parent = self.cur_namespace();
@@ -200,7 +233,8 @@ impl Driver {
             },
             &ScopeState::Mod { .. } => {
                 self.mod_scoped_decl(name, ModScopedDecl { num_params: param_names.len(), id });
-            }
+            },
+            ScopeState::Condition { .. } => panic!("Computed decls are not supported in condition attributes"),
         }
         self.hir.comp_decl_stack.push(
             CompDeclState {
@@ -420,6 +454,8 @@ impl Driver {
                 Namespace::Imper { scope: namespace, end_offset }
             },
             ScopeState::Mod { namespace, .. } => Namespace::Mod(namespace),
+            ScopeState::Condition { ns, pre_or_post: PreOrPost::Pre } => Namespace::Precondition(ns),
+            ScopeState::Condition { ns, pre_or_post: PreOrPost::Post } => Namespace::Postcondition(ns),
         }
     }
     pub fn get_range(&self, id: ExprId) -> SourceRange { self.code.hir_code.source_ranges[self.code.hir_code.expr_to_items[id]].clone() }
