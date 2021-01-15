@@ -115,7 +115,7 @@ fn main() {
     driver.refine();
 
     begin_phase!(Interp);
-    let main_sym = driver.interner.get_or_intern("main");
+    let main_sym = driver.interner.get_or_intern_static("main");
     let main = driver.code.mir_code.functions.iter()
         .position(|func| {
             match func.name {
