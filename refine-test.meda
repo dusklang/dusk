@@ -1,7 +1,7 @@
 I32_MAX :: 2147483647
 
 @precondition(a + 2 <= I32_MAX)
-@postcondition(retVal == a + 2)
+@postcondition(return_value == a + 2)
 fn add(a: i32): i32 {
     a + 2
 }
