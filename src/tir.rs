@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use smallvec::SmallVec;
 use index_vec::define_index_type;
 
-use mire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId};
+use mire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId, RETURN_VALUE_DECL};
 
 use crate::driver::Driver;
 use crate::dep_vec::{self, DepVec, AnyDepVec};
@@ -266,6 +266,7 @@ impl Driver {
                 Namespace::Postcondition(ns_id) => {
                     let condition_ns = &self.code.hir_code.condition_ns[ns_id];
                     self.find_overloads_in_function_parameters(decl_ref, condition_ns.func, &mut overloads);
+                    overloads.insert(RETURN_VALUE_DECL);
                     // TODO: Handle magic value `return_value`
                     condition_ns.parent
                 },
