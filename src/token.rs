@@ -43,6 +43,7 @@ pub enum TokenKind {
     Dot,
     OpenCurly,
     CloseCurly,
+    AtSign,
 
     // Operators
     AddAssign,
@@ -109,22 +110,20 @@ impl TokenVec {
 impl TokenKind {
     pub fn is_insignificant(&self) -> bool {
         use TokenKind::*;
-        match self {
-            Whitespace | SingleLineComment | MultiLineComment | Newline => true,
-            _ => false,
-        }
+        matches!(self, Whitespace | SingleLineComment | MultiLineComment | Newline)
     }
 
     pub fn is_significant(&self) -> bool { !self.is_insignificant() }
 
     pub fn could_begin_expression(&self) -> bool {
         use TokenKind::*;
-        match self {
-            Eof | Whitespace | Newline | SingleLineComment | MultiLineComment | Fn | Else | As | Mut | Colon | Comma | RightParen | Dot | OpenCurly | CloseCurly |
-            AddAssign | SubAssign | MultAssign | DivAssign | ModAssign | BitwiseOrAssign | BitwiseAndAssign | Div | Mod | Equal | NotEqual | LTE | LT | GTE | GT |
-            LogicalOr | LogicalAnd | Assign | Pipe
-              => false,
-            _ => true,
-        }
+        !matches!(
+            self,
+            Eof | Whitespace | Newline | SingleLineComment | MultiLineComment | Fn | Else | As |
+            Mut | Colon | Comma | RightParen | Dot | OpenCurly | CloseCurly | AddAssign |
+            SubAssign | MultAssign | DivAssign | ModAssign | BitwiseOrAssign | BitwiseAndAssign |
+            Div | Mod | Equal | NotEqual | LTE | LT | GTE | GT | LogicalOr | LogicalAnd | Assign |
+            Pipe | AtSign
+        )
     }
 }
