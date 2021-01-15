@@ -21,16 +21,16 @@ use crate::driver::Driver;
 struct Parser;
 
 impl<'a> IdentParser<String, String, & 'a str> for Parser {
-    fn parse_ident(self, input: & 'a str) -> SmtRes<String> {
+    fn parse_ident(self, input: &'a str) -> SmtRes<String> {
         Ok(input.into())
     }
-    fn parse_type(self, input: & 'a str) -> SmtRes<String> {
+    fn parse_type(self, input: &'a str) -> SmtRes<String> {
         Ok(input.into())
     }
 }
 
 impl<'a> ModelParser<String, String, String, & 'a str> for Parser {
-    fn parse_value(self, input: & 'a str, ident: & String, params: &[(String, String)], typ: &String) -> SmtRes<String> {
+    fn parse_value(self, input: &'a str, _ident: &String, _params: &[(String, String)], _typ: &String) -> SmtRes<String> {
         Ok(input.into())
     }
 }
