@@ -313,7 +313,8 @@ impl Driver {
     }
 
     pub fn build_mir(&mut self, tp: &impl TypeProvider) {
-        for i in 0..self.code.hir_code.decls.len() {
+        // Start at 1 to avoid RETURN_VALUE_DECL, which we can't and shouldn't generate code for
+        for i in 1..self.code.hir_code.decls.len() {
             self.get_decl(DeclId::new(i), tp);
         }
 
