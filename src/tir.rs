@@ -293,6 +293,16 @@ impl Driver {
                     }
                     self.tir.graph.add_type3_dep(id, di!(overload));
                 },
+                hir::Decl::ReturnValue => {
+                    let decl_ref = &self.code.hir_code.decl_refs[decl_ref_id];
+                    match decl_ref.namespace {
+                        Namespace::Postcondition(condition_ns_id) => {
+                            let func = self.code.hir_code.condition_ns[condition_ns_id].func;
+                            self.tir.graph.add_type3_dep(id, di!(func));
+                        },
+                        _ => panic!("invalid namespace for `return_value`"),
+                    }
+                },
                 _ => self.tir.graph.add_type2_dep(id, di!(overload)),
             }
         }
