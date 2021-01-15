@@ -2,11 +2,12 @@ use smallvec::{SmallVec, smallvec};
 
 use string_interner::DefaultSymbol as Sym;
 
-use mire::hir::{self, ExprId, DeclId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment};
+use mire::hir::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment};
 use mire::ty::Type;
 use mire::source_info::{self, SourceFileId, SourceRange};
 
 use crate::driver::Driver;
+use crate::hir::PreOrPost;
 use crate::token::{TokenKind, Token};
 use crate::builder::{BinOp, UnOp, OpPlacement};
 use crate::error::Error;
@@ -503,7 +504,7 @@ impl Driver {
         self.if_expr(condition, then_scope, else_scope, range)
     }
 
-    fn parse_attribute(&mut self, p: &mut Parser) -> Attribute {
+    fn parse_attribute(&mut self, p: &mut Parser, condition_ns: ConditionNsId) -> Attribute {
         let Token { kind, range: at_range } = self.cur(p);
         let at_range = at_range;
         assert_eq!(kind, &TokenKind::AtSign);
@@ -513,6 +514,14 @@ impl Driver {
             &TokenKind::Ident(sym) => sym,
             _ => panic!("Unexpected token when parsing attribute"),
         };
+        let pre_or_post = if attr == self.hir.precondition {
+            PreOrPost::Pre
+        } else if attr == self.hir.postcondition {
+            PreOrPost::Post
+        } else {
+            panic!("Unrecognized attribute");
+        };
+        self.set_pre_or_post(condition_ns, pre_or_post);
         let (arg, final_tok_range) = match self.next(p).kind {
             TokenKind::LeftParen => {
                 self.next(p);
@@ -548,16 +557,19 @@ impl Driver {
             },
             TokenKind::AtSign => {
                 let mut attributes = Vec::new();
+                let condition_ns = self.begin_condition_namespace();
                 let decl = loop {
-                    let attr = self.parse_attribute(p);
+                    let attr = self.parse_attribute(p, condition_ns);
                     attributes.push(attr);
                     if self.cur(p).kind != &TokenKind::AtSign {
+                        self.end_condition_namespace(condition_ns);
                         match self.parse_node(p) {
                             Item::Decl(decl) => break decl,
                             Item::Expr(_) => panic!("Attributes on expressions are unsupported!"),
                         }
                     }
                 };
+                self.code.hir_code.condition_ns[condition_ns].func = decl;
                 self.code.hir_code.decl_attributes.entry(decl).or_default()
                     .extend(attributes);
                 Item::Decl(decl)
