@@ -408,8 +408,7 @@ impl Driver {
     fn build_tir_decl(&mut self, unit: &mut UnitItems, level: u32, id: DeclId) {
         match self.code.hir_code.decls[id] {
             // TODO: Add parameter and field TIR items for (at least) checking that the type of the param is valid
-            hir::Decl::Parameter { .. } | hir::Decl::Field(_) => {},
-            hir::Decl::Intrinsic { .. } => {},
+            hir::Decl::Parameter { .. } | hir::Decl::Field(_) | hir::Decl::ReturnValue | hir::Decl::Intrinsic { .. } => {},
             hir::Decl::Static(root_expr) | hir::Decl::Const(root_expr) | hir::Decl::Stored { root_expr, .. } => {
                 let explicit_ty = self.code.hir_code.explicit_tys[id];
                 unit.assigned_decls.insert(level, AssignedDecl { explicit_ty, root_expr, decl_id: id });
@@ -457,6 +456,10 @@ impl Driver {
                     true,
                     SmallVec::new()
                 ),
+                hir::Decl::ReturnValue => (
+                    false,
+                    SmallVec::new(),
+                ),
             };
             self.tir.decls.push(Decl { param_tys, is_mut });
         }
@@ -469,7 +472,7 @@ impl Driver {
             let decl_id = DeclId::new(i);
             let id = di!(decl_id);
             match self.code.hir_code.decls[decl_id] {
-                hir::Decl::Parameter { .. } | hir::Decl::Intrinsic { .. } | hir::Decl::Field(_) => {},
+                hir::Decl::Parameter { .. } | hir::Decl::Intrinsic { .. } | hir::Decl::Field(_) | hir::Decl::ReturnValue => {},
                 hir::Decl::Static(expr) | hir::Decl::Const(expr) | hir::Decl::Stored { root_expr: expr, .. } => self.tir.graph.add_type1_dep(id, ei!(expr)),
                 hir::Decl::Computed { scope, .. } => {
                     let terminal_expr = self.code.hir_code.imper_scopes[scope].terminal_expr;
@@ -558,7 +561,7 @@ impl Driver {
             match self.code.hir_code.items[id] {
                 hir::Item::Decl(decl_id) => {
                     match self.code.hir_code.decls[decl_id] {
-                        hir::Decl::Parameter { .. } | hir::Decl::Static(_) | hir::Decl::Const(_) | hir::Decl::Stored { .. } | hir::Decl::Field(_) => {},
+                        hir::Decl::Parameter { .. } | hir::Decl::Static(_) | hir::Decl::Const(_) | hir::Decl::Stored { .. } | hir::Decl::Field(_) | hir::Decl::ReturnValue => {},
                         hir::Decl::Intrinsic { ref param_tys, .. } => {
                             for &ty in param_tys {
                                 add_eval_dep!(id, ty);

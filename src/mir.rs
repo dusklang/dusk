@@ -383,6 +383,7 @@ impl Driver {
                 self.mir.decls.insert(id, decl.clone());
                 decl
             },
+            hir::Decl::ReturnValue => panic!("Can't get_decl() the return_value decl"),
         }
     }
 
