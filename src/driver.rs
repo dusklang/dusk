@@ -35,7 +35,7 @@ pub struct Driver {
 
 impl Driver {
     pub fn new(src_map: SourceMap, arch: Arch) -> Self {
-        let mut d = Self {
+        Self {
             arch,
             src_map,
             toks: IndexVec::new(),
@@ -48,9 +48,7 @@ impl Driver {
             code: Code::default(),
             interp: Interpreter::new(),
             flushed_errors: 0,
-        };
-        d.initialize_hir();
-        d
+        }
     }
 
     pub fn eval_expr(&mut self, expr: ExprId, tp: &impl TypeProvider) -> Const {
