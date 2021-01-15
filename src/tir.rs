@@ -200,7 +200,21 @@ impl Driver {
             }
         }
     }
-    // Returns the overloads for a declref, if they are known (they won't be if it's a member ref)
+    fn find_overloads_in_function_parameters(&self, decl_ref: &hir::DeclRef, func: DeclId, overloads: &mut HashSet<DeclId>) {
+        match &self.code.hir_code.decls[func] {
+            hir::Decl::Computed { params, .. } => {
+                for i in params.start.index()..params.end.index() {
+                    let decl = DeclId::new(i);
+                    let param_name = self.code.hir_code.names[decl];
+                    if decl_ref.name == param_name {
+                        overloads.insert(decl);
+                    }
+                }
+            },
+            _ => panic!("Can only have preconditions on computed decls"),
+        }
+    }
+    // Returns the overloads for a declref, if they are known (they won't be if it's an unresolved member ref)
     pub fn find_overloads(&self, decl_ref: &hir::DeclRef) -> Vec<DeclId> {
         let mut overloads = HashSet::new();
 
@@ -243,6 +257,17 @@ impl Driver {
                     }
 
                     break;
+                },
+                Namespace::Precondition(ns_id) => {
+                    let condition_ns = &self.code.hir_code.condition_ns[ns_id];
+                    self.find_overloads_in_function_parameters(decl_ref, condition_ns.func, &mut overloads);
+                    condition_ns.parent
+                },
+                Namespace::Postcondition(ns_id) => {
+                    let condition_ns = &self.code.hir_code.condition_ns[ns_id];
+                    self.find_overloads_in_function_parameters(decl_ref, condition_ns.func, &mut overloads);
+                    // TODO: Handle magic value `return_value`
+                    condition_ns.parent
                 },
             };
 
