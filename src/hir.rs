@@ -47,6 +47,7 @@ pub struct Builder {
 
     pub precondition_sym: Sym,
     pub postcondition_sym: Sym,
+    pub return_value_sym: Sym,
 }
 
 impl Default for Builder {
@@ -58,6 +59,7 @@ impl Default for Builder {
             // Note: gets initialized in Driver::initialize_hir() below
             precondition_sym: Sym::try_from_usize((u32::MAX - 1) as usize).unwrap(),
             postcondition_sym: Sym::try_from_usize((u32::MAX - 1) as usize).unwrap(),
+            return_value_sym: Sym::try_from_usize((u32::MAX - 1) as usize).unwrap(),
         }
     }
 }
@@ -77,6 +79,7 @@ impl Driver {
 
         self.hir.precondition_sym = self.interner.get_or_intern_static("precondition");
         self.hir.postcondition_sym = self.interner.get_or_intern_static("postcondition");
+        self.hir.return_value_sym = return_value_sym;
     }
 
     fn push_expr(&mut self, expr: Expr, range: SourceRange) -> ExprId {
