@@ -112,7 +112,7 @@ fn main() {
     }
 
     begin_phase!(Refine);
-    driver.refine();
+    driver.refine(&tp);
 
     begin_phase!(Interp);
     let main_sym = driver.interner.get_or_intern_static("main");

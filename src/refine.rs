@@ -9,8 +9,9 @@ use display_adapter::display_adapter;
 use mire::{BlockId, OpId};
 use mire::mir::{Const, Function, Instr};
 use mire::ty::{Type, IntWidth};
-use mire::hir::Intrinsic;
+use mire::hir::{Intrinsic, Expr, Decl, ExprId};
 
+use crate::typechecker::type_provider::TypeProvider;
 use crate::interpreter::Value;
 use crate::mir::{FunctionRef, function_by_ref};
 use crate::driver::Driver;
@@ -65,42 +66,48 @@ impl Iterator for NameGen {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum ConstraintValue {
     Str(String),
     Op(OpId),
     Add(Box<ConstraintValue>, Box<ConstraintValue>),
     Sub(Box<ConstraintValue>, Box<ConstraintValue>),
     Neg(Box<ConstraintValue>),
+    Parameter { index: usize, },
+    ReturnValue,
 }
 
 impl ConstraintValue {
-    fn replace(&self, key: OpId, value: OpId) -> Self {
-        match self {
-            ConstraintValue::Str(str) => ConstraintValue::Str(str.clone()),
-            &ConstraintValue::Op(op) => ConstraintValue::Op(op),
-            ConstraintValue::Add(l, r) => ConstraintValue::Add(
-                Box::new(l.replace(key, value)),
-                Box::new(r.replace(key, value)),
-            ),
-            ConstraintValue::Sub(l, r) => ConstraintValue::Sub(
-                Box::new(l.replace(key, value)),
-                Box::new(r.replace(key, value)),
-            ),
-            ConstraintValue::Neg(val) => ConstraintValue::Neg(Box::new(val.replace(key, value)))
+    fn replace(&self, key: &ConstraintValue, value: OpId) -> Self {
+        if self == key {
+            ConstraintValue::Op(value)
+        } else {
+            match self {
+                ConstraintValue::Str(_) | ConstraintValue::Op(_) | ConstraintValue::Parameter { .. } | ConstraintValue::ReturnValue => self.clone(),
+                ConstraintValue::Add(l, r) => ConstraintValue::Add(
+                    Box::new(l.replace(key, value)),
+                    Box::new(r.replace(key, value)),
+                ),
+                ConstraintValue::Sub(l, r) => ConstraintValue::Sub(
+                    Box::new(l.replace(key, value)),
+                    Box::new(r.replace(key, value)),
+                ),
+                ConstraintValue::Neg(val) => ConstraintValue::Neg(Box::new(val.replace(key, value))),
+            }
         }
     }
 
     fn get_involved_ops(&self) -> Vec<OpId> {
         match self {
             &ConstraintValue::Op(op) => vec![op],
-            ConstraintValue::Str(_) => vec![],
+            ConstraintValue::Str(_) | ConstraintValue::ReturnValue => vec![],
             ConstraintValue::Add(l, r) | ConstraintValue::Sub(l, r) => {
                 l.get_involved_ops().into_iter()
                     .chain(r.get_involved_ops().into_iter())
                     .collect()
             },
             ConstraintValue::Neg(val) => val.get_involved_ops(),
+            ConstraintValue::Parameter { .. } => panic!("can't get involved ops of a parameter, which is supposed to be substituted for an Op"),
         }
     }
 }
@@ -171,7 +178,7 @@ impl Neg for &ConstraintValue {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum Constraint {
     Gte(ConstraintValue, ConstraintValue),
     Lte(ConstraintValue, ConstraintValue),
@@ -179,7 +186,7 @@ enum Constraint {
 }
 
 impl Constraint {
-    fn replace(&self, key: OpId, value: OpId) -> Self {
+    fn replace(&self, key: &ConstraintValue, value: OpId) -> Self {
         match self {
             Constraint::Gte(l, r) => Constraint::Gte(l.replace(key, value), r.replace(key, value)),
             Constraint::Lte(l, r) => Constraint::Lte(l.replace(key, value), r.replace(key, value)),
@@ -215,6 +222,79 @@ impl OpConstraints {
 }
 
 impl Driver {
+    fn expr_to_constraint_val(&self, expr: ExprId, tp: &impl TypeProvider) -> ConstraintValue {
+        let expr = &self.code.hir_code.exprs[expr];
+        match expr {
+            &Expr::IntLit { lit } => ConstraintValue::Str(lit.to_string()),
+            &Expr::DeclRef { ref arguments, id } => {
+                let overload = tp.selected_overload(id).unwrap();
+                match self.code.hir_code.decls[overload] {
+                    Decl::Const(expr) => self.expr_to_constraint_val(expr, tp),
+                    Decl::Parameter { index } => ConstraintValue::Parameter { index },
+                    Decl::ReturnValue => ConstraintValue::ReturnValue,
+                    Decl::Intrinsic { intr, .. } => {
+                        match intr {
+                            Intrinsic::Add => {
+                                assert_eq!(arguments.len(), 2);
+                                ConstraintValue::Add(
+                                    Box::new(self.expr_to_constraint_val(arguments[0], tp)),
+                                    Box::new(self.expr_to_constraint_val(arguments[1], tp)),
+                                )
+                            },
+                            Intrinsic::Sub => {
+                                assert_eq!(arguments.len(), 2);
+                                ConstraintValue::Sub(
+                                    Box::new(self.expr_to_constraint_val(arguments[0], tp)),
+                                    Box::new(self.expr_to_constraint_val(arguments[1], tp)),
+                                )
+                            },
+                            Intrinsic::Neg => {
+                                assert_eq!(arguments.len(), 1);
+                                ConstraintValue::Neg(
+                                    Box::new(self.expr_to_constraint_val(arguments[0], tp)),
+                                )
+                            },
+                            _ => panic!("Unsupported intrinsic call in condition attribute"),
+                        }
+                    },
+                    _ => panic!("Unsupported decl in condition attribute"),
+                }
+            },
+            _ => panic!("Unsupported expression kind in condition attribute"),
+        }
+    }
+
+    fn expr_to_constraint(&self, expr: ExprId, tp: &impl TypeProvider) -> Constraint {
+        let expr = &self.code.hir_code.exprs[expr];
+        match expr {
+            &Expr::DeclRef { ref arguments, id } => {
+                let overload = tp.selected_overload(id).unwrap();
+                match self.code.hir_code.decls[overload] {
+                    Decl::Intrinsic { intr, .. } => {
+                        assert_eq!(arguments.len(), 2);
+                        match intr {
+                            Intrinsic::LessOrEq => Constraint::Lte(
+                                self.expr_to_constraint_val(arguments[0], tp),
+                                self.expr_to_constraint_val(arguments[1], tp),
+                            ),
+                            Intrinsic::GreaterOrEq => Constraint::Gte(
+                                self.expr_to_constraint_val(arguments[0], tp),
+                                self.expr_to_constraint_val(arguments[1], tp),
+                            ),
+                            Intrinsic::Eq => Constraint::Eq(
+                                self.expr_to_constraint_val(arguments[0], tp),
+                                self.expr_to_constraint_val(arguments[1], tp),
+                            ),
+                            _ => panic!("Unsupported intrinsic call in condition attribute"),
+                        }
+                    },
+                    _ => panic!("Unsupported decl in condition attribute"),
+                }
+            },
+            _ => panic!("Unsupported expression kind in condition attribute"),
+        }
+    }
+
     fn find_leaves(&self, func: &Function, leaves: &mut HashSet<BlockId>) -> bool {
         let mut found_any = false;
         for &block_id in &func.blocks {
@@ -243,9 +323,9 @@ impl Driver {
         }
     }
 
-    pub fn refine(&mut self) {
+    pub fn refine(&mut self, tp: &impl TypeProvider) {
         for func_id in self.code.mir_code.functions.indices() {
-            self.refine_func(&FunctionRef::Id(func_id));
+            self.refine_func(&FunctionRef::Id(func_id), tp);
         }
     }
 
@@ -280,6 +360,8 @@ impl Driver {
             ConstraintValue::Add(l, r) => write!(f, "{}", self.display_bin_expr("+", l, r))?,
             ConstraintValue::Sub(l, r) => write!(f, "{}", self.display_bin_expr("-", l, r))?,
             ConstraintValue::Neg(val) => write!(f, "(- {})", self.display_constraint_value(val))?,
+            ConstraintValue::ReturnValue => write!(f, "return_value")?,
+            ConstraintValue::Parameter { .. } => panic!("Can't print parameter, which must be replaced with an Op"),
         }
         Ok(())
     }
@@ -305,17 +387,38 @@ impl Driver {
         solver.assert(&str).unwrap();
     }
 
-    pub fn refine_func(&mut self, func_ref: &FunctionRef) {
+    pub fn refine_func(&mut self, func_ref: &FunctionRef, tp: &impl TypeProvider) {
         let func = function_by_ref(&self.code.mir_code, &func_ref);
         self.check_no_loops(func);
         assert_eq!(func.blocks.len(), 1, "Function has more than one block, which isn't yet supported");
 
+        let mut constraints = HashSet::new();
         let block_id = func.blocks[0];
+        let block = &self.code.blocks[block_id];
+        let num_params = self.code.num_parameters(func);
+        if let Some(decl) = func.decl {
+            if let Some(attributes) = self.code.hir_code.decl_attributes.get(&decl) {
+                for attr in attributes {
+                    let arg = attr.arg.expect("missing attribute argument");
+                    if attr.attr == self.hir.precondition_sym {
+                        let mut constraint = self.expr_to_constraint(arg, tp);
+                        // TODO: efficiency
+                        for index in 0..num_params {
+                            constraint = constraint.replace(&ConstraintValue::Parameter { index }, block.ops[index]);
+                        }
+                        constraints.insert(constraint);
+                    } else if attr.attr == self.hir.postcondition_sym {
+                        // TODO: post conditions
+                    } else {
+                        panic!("Unrecognized attribute");
+                    }
+                }
+            }
+        }
 
         let conf = SmtConf::default_z3();
         let mut solver = conf.spawn(Parser).unwrap();
 
-        let block = &self.code.blocks[block_id];
         for i in 0..block.ops.len() {
             let block = &self.code.blocks[block_id];
             let op = block.ops[i];
