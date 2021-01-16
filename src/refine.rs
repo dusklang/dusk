@@ -194,11 +194,12 @@ impl Constraint {
         }
     }
 
-    fn get_involved_ops(&self) -> impl Iterator<Item=OpId> {
+    fn get_involved_ops(&self) -> HashSet<OpId> {
         match self {
             Constraint::Gte(l, r) | Constraint::Lte(l, r) | Constraint::Eq(l, r) => {
                 l.get_involved_ops().into_iter()
                     .chain(r.get_involved_ops())
+                    .collect()
             }
         }
     }
@@ -345,11 +346,9 @@ impl Driver {
     }
 
     /// Returns the generated name
-    fn start_constraints(&mut self, op: OpId) -> &str {
+    fn start_constraints(&mut self, op: OpId) {
         let name = self.refine.name_gen.next().unwrap();
-        &self.refine.constraints.entry(op)
-            .or_insert(OpConstraints::new(name))
-            .name
+        self.refine.constraints.entry(op).or_insert(OpConstraints::new(name));
     }
 
     #[display_adapter]
@@ -371,20 +370,61 @@ impl Driver {
         write!(f, "({} {} {})", constraint, self.display_constraint_value(l), self.display_constraint_value(r))
     }
 
-    /// Returns the constraint in S-expression form
-    fn add_constraint(&mut self, solver: &mut Solver<Parser>, constraint: Constraint) {
-        for op in constraint.get_involved_ops() {
-            let constraints = self.refine.constraints.get_mut(&op).unwrap();
-            constraints.constraints.push(constraint.clone());
+    #[display_adapter]
+    fn display_constraint(&self, constraint: &Constraint, f: &mut Formatter) {
+        match constraint {
+            Constraint::Gte(l, r) => write!(f, "{}", self.display_bin_expr(">=", &l, &r)),
+            Constraint::Lte(l, r) => write!(f, "{}", self.display_bin_expr("<=", &l, &r)),
+            Constraint::Eq(l, r) => write!(f, "{}", self.display_bin_expr("=", &l, &r)),
         }
+    }
 
-        let str = match constraint {
-            Constraint::Gte(l, r) => self.display_bin_expr(">=", &l, &r).to_string(),
-            Constraint::Lte(l, r) => self.display_bin_expr("<=", &l, &r).to_string(),
-            Constraint::Eq(l, r) => self.display_bin_expr("=", &l, &r).to_string(),
-        };
+    #[display_adapter]
+    fn display_precondition_check(&self, preconditions: &[Constraint], variables: &HashSet<OpId>, constraints: &HashSet<Constraint>, w: &mut Formatter) {
+        write!(w, "(forall (")?;
+        for &var in variables {
+            write!(w, "({} Int) ", self.refine.constraints[&var].name)?;
+        }
+        write!(w, ") (=> (and ")?;
+        for constraint in constraints {
+            write!(w, "{} ", self.display_constraint(constraint))?;
+        }
+        write!(w, ") (and ")?;
+        for constraint in preconditions {
+            write!(w, "{} ", self.display_constraint(constraint))?;
+        }
+        write!(w, ")))")?;
+        Ok(())
+    }
 
-        solver.assert(&str).unwrap();
+    fn check_preconditions(&self, solver: &mut Solver<Parser>, preconditions: Vec<Constraint>, constraints: &mut HashSet<Constraint>) {
+        let mut variables = HashSet::new();
+        let mut relevant_constraints = HashSet::new();
+        for precondition in &preconditions {
+            variables.extend(precondition.get_involved_ops());
+        }
+        loop {
+            let mut added_anything = false;
+            // TODO: this is probably crazy slow
+            for constraint in &*constraints {
+                let involved = constraint.get_involved_ops();
+                for var in &variables {
+                    if involved.contains(var) {
+                        for var in involved {
+                            added_anything |= variables.insert(var);
+                        }
+                        relevant_constraints.insert(constraint.clone());
+                        break;
+                    }
+                }
+            }
+
+            if !added_anything { break; }
+        }
+        let condition = self.display_precondition_check(&preconditions, &variables, &relevant_constraints).to_string();
+        solver.assert(&condition).unwrap();
+
+        constraints.extend(preconditions);
     }
 
     pub fn refine_func(&mut self, func_ref: &FunctionRef, tp: &impl TypeProvider) {
@@ -428,19 +468,9 @@ impl Driver {
                     match ty {
                         &Type::Int { width, is_signed } => {
                             let (lo, hi) = self.get_int_range(width, is_signed);
-                            let name = self.start_constraints(op);
-                            solver.declare_const(name, "Int").unwrap();
-
-                            // TODO: these should be derived from ConstraintValues instead
-                            let min_name = format!("{}MIN", name);
-                            let max_name = format!("{}MAX", name);
-                            solver.declare_const(&min_name, "Int").unwrap();
-                            solver.declare_const(&max_name, "Int").unwrap();
-
-                            self.add_constraint(&mut solver, Constraint::Lte(lo.into(), min_name.clone().into()));
-                            self.add_constraint(&mut solver, Constraint::Lte(min_name.into(), op.into()));
-                            self.add_constraint(&mut solver, Constraint::Lte(op.into(), max_name.clone().into()));
-                            self.add_constraint(&mut solver, Constraint::Lte(max_name.into(), hi.into()));
+                            self.start_constraints(op);
+                            constraints.insert(Constraint::Lte(lo.into(), op.into()));
+                            constraints.insert(Constraint::Lte(op.into(), hi.into()));
                         },
                         _ => {},
                     }
@@ -450,11 +480,10 @@ impl Driver {
                         Const::Int { ty, .. } => {
                             match ty {
                                 &Type::Int { is_signed, .. } => {
-                                    let val = Value::from_const(konst, self).as_big_int(is_signed);
-                                    let name = self.start_constraints(op);
                                     // TODO: this is kind of silly, but it was the path of least resistance.
-                                    solver.declare_const(name, "Int").unwrap();
-                                    self.add_constraint(&mut solver, Constraint::Eq(op.into(), val.to_string().into()));
+                                    let val = Value::from_const(konst, self).as_big_int(is_signed);
+                                    self.start_constraints(op);
+                                    constraints.insert(Constraint::Eq(op.into(), val.to_string().into()));
                                 },
                                 unhandled => panic!("Literal with unhandled type {:?}", unhandled),
                             }
@@ -470,11 +499,17 @@ impl Driver {
                                 &Type::Int { width, is_signed } => {
                                     let (lo, hi) = self.get_int_range(width, is_signed);
                                     let (a, b) = (arguments[0], arguments[1]);
-                                    let name = self.start_constraints(op);
-                                    solver.declare_const(name, "Int").unwrap();
-                                    self.add_constraint(&mut solver, Constraint::Eq(op.into(), ConstraintValue::from(a) + ConstraintValue::from(b)));
-                                    self.add_constraint(&mut solver, Constraint::Gte(op.into(), lo.into()));
-                                    self.add_constraint(&mut solver, Constraint::Lte(op.into(), hi.into()));
+                                    self.start_constraints(op);
+                                    let sum = ConstraintValue::from(a) + ConstraintValue::from(b);
+                                    self.check_preconditions(
+                                        &mut solver,
+                                        vec![
+                                            Constraint::Lte(lo.into(), sum.clone()),
+                                            Constraint::Lte(sum.clone(), hi.into()),
+                                        ],
+                                        &mut constraints,
+                                    );
+                                    constraints.insert(Constraint::Eq(op.into(), sum));
                                 },
                                 _ => panic!("unhandled type"),
                             }
@@ -485,11 +520,17 @@ impl Driver {
                                 &Type::Int { width, is_signed } => {
                                     let (lo, hi) = self.get_int_range(width, is_signed);
                                     let (a, b) = (arguments[0], arguments[1]);
-                                    let name = self.start_constraints(op);
-                                    solver.declare_const(name, "Int").unwrap();
-                                    self.add_constraint(&mut solver, Constraint::Eq(op.into(), ConstraintValue::from(a) - ConstraintValue::from(b)));
-                                    self.add_constraint(&mut solver, Constraint::Gte(op.into(), lo.into()));
-                                    self.add_constraint(&mut solver, Constraint::Lte(op.into(), hi.into()));
+                                    self.start_constraints(op);
+                                    let diff = ConstraintValue::from(a) - ConstraintValue::from(b);
+                                    self.check_preconditions(
+                                        &mut solver,
+                                        vec![
+                                            Constraint::Lte(lo.into(), diff.clone()),
+                                            Constraint::Lte(diff.clone(), hi.into()),
+                                        ],
+                                        &mut constraints,
+                                    );
+                                    constraints.insert(Constraint::Eq(op.into(), diff));
                                 },
                                 _ => panic!("unhandled type"),
                             }
@@ -500,11 +541,18 @@ impl Driver {
                                 &Type::Int { width, is_signed } => {
                                     let (lo, hi) = self.get_int_range(width, is_signed);
                                     let a = arguments[0];
-                                    let name = self.start_constraints(op);
-                                    solver.declare_const(name, "Int").unwrap();
-                                    self.add_constraint(&mut solver, Constraint::Eq(op.into(), -ConstraintValue::from(a)));
-                                    self.add_constraint(&mut solver, Constraint::Gte(op.into(), lo.into()));
-                                    self.add_constraint(&mut solver, Constraint::Lte(op.into(), hi.into()));
+                                    self.start_constraints(op);
+                                    let neg = -ConstraintValue::from(a);
+                                    self.check_preconditions(
+                                        &mut solver,
+                                        vec![
+                                            Constraint::Lte(lo.into(), neg.clone()),
+                                            Constraint::Lte(neg.clone(), hi.into()),
+                                        ],
+                                        &mut constraints,
+                                    );
+
+                                    constraints.insert(Constraint::Eq(op.into(), neg));
                                 },
                                 _ => panic!("unhandled type"),
                             }
