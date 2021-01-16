@@ -342,7 +342,7 @@ impl Driver {
                 let func = self.build_function(
                     Some(self.code.hir_code.names[id]),
                     self.decl_type(id, tp).clone(),
-                    FunctionBody::Scope(scope),
+                    FunctionBody::Scope { scope, decl: id },
                     params.clone(),
                     tp
                 );
@@ -549,7 +549,7 @@ impl Driver {
 
 #[derive(Copy, Clone)]
 enum FunctionBody {
-    Scope(ImperScopeId),
+    Scope { scope: ImperScopeId, decl: DeclId },
     Expr(ExprId),
 }
 
@@ -613,14 +613,21 @@ impl Driver {
         };
         self.start_bb(&mut b, entry);
         let ctx = Context::new(0, DataDest::Ret, ControlDest::Unreachable);
-        match body {
-            FunctionBody::Expr(expr) => self.build_expr(&mut b, expr, ctx, tp),
-            FunctionBody::Scope(scope) => self.build_scope(&mut b, scope, ctx, tp),
+        let decl = match body {
+            FunctionBody::Expr(expr) => {
+                self.build_expr(&mut b, expr, ctx, tp);
+                None
+            },
+            FunctionBody::Scope { scope, decl } => {
+                self.build_scope(&mut b, scope, ctx, tp);
+                Some(decl)
+            },
         };
         let mut function = Function {
             name: b.name,
             ret_ty: b.ret_ty,
             blocks: b.blocks,
+            decl,
         };
         self.optimize_function(&mut function);
         self.code.mir_code.check_all_blocks_ended(&function);
