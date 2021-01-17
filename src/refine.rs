@@ -7,7 +7,7 @@ use rsmt2::parse::{IdentParser, ModelParser};
 use display_adapter::display_adapter;
 
 use mire::{BlockId, OpId};
-use mire::mir::{Const, Function, Instr};
+use mire::mir::{Const, Function, FuncId, Instr};
 use mire::ty::{Type, IntWidth};
 use mire::hir::{Intrinsic, Expr, Decl, ExprId};
 
@@ -35,10 +35,15 @@ impl<'a> ModelParser<String, String, String, & 'a str> for Parser {
         Ok(input.into())
     }
 }
+struct Conditions {
+    preconditions: HashSet<Constraint>,
+    postconditions: HashSet<Constraint>,
+}
 
 #[derive(Default)]
 pub struct Refine {
     constraints: HashMap<OpId, OpConstraints>,
+    conditions: HashMap<FuncId, Conditions>,
     name_gen: NameGen,
 }
 
@@ -428,11 +433,15 @@ impl Driver {
     }
 
     pub fn refine_func(&mut self, func_ref: &FunctionRef, tp: &impl TypeProvider) {
+        if let FunctionRef::Id(id) = func_ref {
+            if self.refine.conditions.get(id).is_some() { return; }
+        }
+
         let func = function_by_ref(&self.code.mir_code, &func_ref);
         self.check_no_loops(func);
         assert_eq!(func.blocks.len(), 1, "Function has more than one block, which isn't yet supported");
 
-        let mut constraints = HashSet::new();
+        let mut preconditions = HashSet::new();
         let mut postconditions = HashSet::new();
         let block_id = func.blocks[0];
         let block = &self.code.blocks[block_id];
@@ -441,13 +450,9 @@ impl Driver {
             if let Some(attributes) = self.code.hir_code.decl_attributes.get(&decl) {
                 for attr in attributes {
                     let arg = attr.arg.expect("missing attribute argument");
-                    let mut constraint = self.expr_to_constraint(arg, tp);
-                    // TODO: efficiency
-                    for index in 0..num_params {
-                        constraint = constraint.replace(&ConstraintValue::Parameter { index }, block.ops[index]);
-                    }
+                    let constraint = self.expr_to_constraint(arg, tp);
                     if attr.attr == self.hir.precondition_sym {
-                        constraints.insert(constraint);
+                        preconditions.insert(constraint);
                     } else if attr.attr == self.hir.postcondition_sym {
                         postconditions.insert(constraint);
                     } else {
@@ -456,6 +461,24 @@ impl Driver {
                 }
             }
         }
+
+        if let &FunctionRef::Id(id) = func_ref {
+            self.refine.conditions.insert(
+                id,
+                Conditions {
+                    preconditions: preconditions.clone(),
+                    postconditions: postconditions.clone(),
+                }
+            );
+        }
+        let replace_parameters = |mut constraint: Constraint| {
+            for index in 0..num_params {
+                constraint = constraint.replace(&ConstraintValue::Parameter { index }, block.ops[index]);
+            }
+            constraint
+        };
+        let mut constraints: HashSet<Constraint> = preconditions.into_iter().map(replace_parameters).collect();
+        let postconditions: HashSet<Constraint> = postconditions.into_iter().map(replace_parameters).collect();
 
         let conf = SmtConf::default_z3();
         let mut solver = conf.spawn(Parser).unwrap();
