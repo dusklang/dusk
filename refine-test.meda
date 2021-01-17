@@ -1,6 +1,5 @@
 I32_MAX :: 2147483647
 
-// Replace the last 2 with a 1, and it will fail
 @precondition(a <= I32_MAX - 2)
 @postcondition(return_value == a + 2)
 fn add(a: i32): i32 {
@@ -8,6 +7,6 @@ fn add(a: i32): i32 {
 }
 
 fn main() {
-    // Replace that last 4 with a 5, and it will fail
+    // Replace that last 4 with anything larger (such as 5), and it will fail
     var := I32_MAX - 4 + 4 + (-4) + 4
 }

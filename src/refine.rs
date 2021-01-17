@@ -380,7 +380,7 @@ impl Driver {
     }
 
     #[display_adapter]
-    fn display_precondition_check(&self, preconditions: &[Constraint], variables: &HashSet<OpId>, constraints: &HashSet<Constraint>, w: &mut Formatter) {
+    fn display_condition_check(&self, preconditions: &[Constraint], variables: &HashSet<OpId>, constraints: &HashSet<Constraint>, w: &mut Formatter) {
         write!(w, "(forall (")?;
         for &var in variables {
             write!(w, "({} Int) ", self.refine.constraints[&var].name)?;
@@ -397,10 +397,12 @@ impl Driver {
         Ok(())
     }
 
-    fn check_preconditions(&self, solver: &mut Solver<Parser>, preconditions: Vec<Constraint>, constraints: &mut HashSet<Constraint>) {
+    fn check_conditions(&self, solver: &mut Solver<Parser>, conditions: Vec<Constraint>, constraints: &mut HashSet<Constraint>) {
+        if conditions.is_empty() { return; }
+
         let mut variables = HashSet::new();
         let mut relevant_constraints = HashSet::new();
-        for precondition in &preconditions {
+        for precondition in &conditions {
             variables.extend(precondition.get_involved_ops());
         }
         loop {
@@ -421,10 +423,8 @@ impl Driver {
 
             if !added_anything { break; }
         }
-        let condition = self.display_precondition_check(&preconditions, &variables, &relevant_constraints).to_string();
+        let condition = self.display_condition_check(&conditions, &variables, &relevant_constraints).to_string();
         solver.assert(&condition).unwrap();
-
-        constraints.extend(preconditions);
     }
 
     pub fn refine_func(&mut self, func_ref: &FunctionRef, tp: &impl TypeProvider) {
@@ -433,6 +433,7 @@ impl Driver {
         assert_eq!(func.blocks.len(), 1, "Function has more than one block, which isn't yet supported");
 
         let mut constraints = HashSet::new();
+        let mut postconditions = HashSet::new();
         let block_id = func.blocks[0];
         let block = &self.code.blocks[block_id];
         let num_params = self.code.num_parameters(func);
@@ -440,15 +441,15 @@ impl Driver {
             if let Some(attributes) = self.code.hir_code.decl_attributes.get(&decl) {
                 for attr in attributes {
                     let arg = attr.arg.expect("missing attribute argument");
+                    let mut constraint = self.expr_to_constraint(arg, tp);
+                    // TODO: efficiency
+                    for index in 0..num_params {
+                        constraint = constraint.replace(&ConstraintValue::Parameter { index }, block.ops[index]);
+                    }
                     if attr.attr == self.hir.precondition_sym {
-                        let mut constraint = self.expr_to_constraint(arg, tp);
-                        // TODO: efficiency
-                        for index in 0..num_params {
-                            constraint = constraint.replace(&ConstraintValue::Parameter { index }, block.ops[index]);
-                        }
                         constraints.insert(constraint);
                     } else if attr.attr == self.hir.postcondition_sym {
-                        // TODO: post conditions
+                        postconditions.insert(constraint);
                     } else {
                         panic!("Unrecognized attribute");
                     }
@@ -501,7 +502,7 @@ impl Driver {
                                     let (a, b) = (arguments[0], arguments[1]);
                                     self.start_constraints(op);
                                     let sum = ConstraintValue::from(a) + ConstraintValue::from(b);
-                                    self.check_preconditions(
+                                    self.check_conditions(
                                         &mut solver,
                                         vec![
                                             Constraint::Lte(lo.into(), sum.clone()),
@@ -522,7 +523,7 @@ impl Driver {
                                     let (a, b) = (arguments[0], arguments[1]);
                                     self.start_constraints(op);
                                     let diff = ConstraintValue::from(a) - ConstraintValue::from(b);
-                                    self.check_preconditions(
+                                    self.check_conditions(
                                         &mut solver,
                                         vec![
                                             Constraint::Lte(lo.into(), diff.clone()),
@@ -543,7 +544,7 @@ impl Driver {
                                     let a = arguments[0];
                                     self.start_constraints(op);
                                     let neg = -ConstraintValue::from(a);
-                                    self.check_preconditions(
+                                    self.check_conditions(
                                         &mut solver,
                                         vec![
                                             Constraint::Lte(lo.into(), neg.clone()),
@@ -559,6 +560,14 @@ impl Driver {
                         },
                         _ => {},
                     }
+                },
+                &Instr::Ret(val) => {
+                    let postconditions = postconditions.iter()
+                        .map(|condition| condition.replace(&ConstraintValue::ReturnValue, val))
+                        .collect();
+                    self.check_conditions(
+                        &mut solver, postconditions, &mut constraints
+                    );
                 },
                 _ => {},
             }
