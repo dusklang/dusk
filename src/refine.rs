@@ -36,8 +36,8 @@ impl<'a> ModelParser<String, String, String, & 'a str> for Parser {
     }
 }
 struct Conditions {
-    preconditions: HashSet<Constraint>,
-    postconditions: HashSet<Constraint>,
+    preconditions: Vec<Constraint>,
+    postconditions: Vec<Constraint>,
 }
 
 #[derive(Default)]
@@ -441,8 +441,8 @@ impl Driver {
         self.check_no_loops(func);
         assert_eq!(func.blocks.len(), 1, "Function has more than one block, which isn't yet supported");
 
-        let mut preconditions = HashSet::new();
-        let mut postconditions = HashSet::new();
+        let mut preconditions = Vec::new();
+        let mut postconditions = Vec::new();
         let block_id = func.blocks[0];
         let block = &self.code.blocks[block_id];
         let num_params = self.code.num_parameters(func);
@@ -452,9 +452,9 @@ impl Driver {
                     let arg = attr.arg.expect("missing attribute argument");
                     let constraint = self.expr_to_constraint(arg, tp);
                     if attr.attr == self.hir.precondition_sym {
-                        preconditions.insert(constraint);
+                        preconditions.push(constraint);
                     } else if attr.attr == self.hir.postcondition_sym {
-                        postconditions.insert(constraint);
+                        postconditions.push(constraint);
                     } else {
                         panic!("Unrecognized attribute");
                     }
@@ -588,9 +588,29 @@ impl Driver {
                     let postconditions = postconditions.iter()
                         .map(|condition| condition.replace(&ConstraintValue::ReturnValue, val))
                         .collect();
-                    self.check_conditions(
-                        &mut solver, postconditions, &mut constraints
-                    );
+                    self.check_conditions(&mut solver, postconditions, &mut constraints);
+                },
+                &Instr::Call { ref arguments, func } => {
+                    // Borrow checker, argh...
+                    let arguments = arguments.clone();
+
+                    self.refine_func(&FunctionRef::Id(func), tp);
+                    self.start_constraints(op);
+
+                    let conditions = self.refine.conditions.get(&func).unwrap();
+                    let replace_params = |mut condition: Constraint| {
+                        for (i, &arg) in arguments.iter().enumerate() {
+                            condition = condition.replace(&ConstraintValue::Parameter { index: i }, arg);
+                        }
+                        condition
+                    };
+                    let preconditions: Vec<Constraint> = conditions.preconditions.iter().cloned().map(replace_params).collect();
+                    self.check_conditions(&mut solver, preconditions, &mut constraints);
+                    let postconditions = conditions.postconditions.iter().cloned().map(replace_params);
+                    for mut condition in postconditions {
+                        condition = condition.replace(&ConstraintValue::ReturnValue, op);
+                        constraints.insert(condition);
+                    }
                 },
                 _ => {},
             }
