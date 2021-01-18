@@ -205,9 +205,9 @@ impl Neg for &ConstraintValue {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum ConstraintValueOrigin {
     Pointer {
-        /// Pointer to the start of the allocation
-        start: ConstraintValue,
-        /// Integer offset from the start of the allocation
+        /// Pointer to the base of the allocation
+        base: ConstraintValue,
+        /// Integer offset from the base of the allocation
         offset: ConstraintValue,
         /// Integer length of the allocation in bytes
         len: ConstraintValue,
@@ -215,10 +215,15 @@ enum ConstraintValueOrigin {
 }
 
 impl ConstraintValueOrigin {
+    /// Creates a pointer origin with offset of 0
+    fn new_pointer(base: impl Into<ConstraintValue>, len: impl Into<ConstraintValue>) -> Self {
+        ConstraintValueOrigin::Pointer { base: base.into(), offset: String::from("0").into(), len: len.into() }
+    }
+
     fn replace(&self, key: &ConstraintValue, value: OpId) -> Self {
         match self {
-            ConstraintValueOrigin::Pointer { start, offset, len } => ConstraintValueOrigin::Pointer {
-                start: start.replace(key, value),
+            ConstraintValueOrigin::Pointer { base, offset, len } => ConstraintValueOrigin::Pointer {
+                base: base.replace(key, value),
                 offset: offset.replace(key, value),
                 len: len.replace(key, value),
             }
@@ -227,8 +232,8 @@ impl ConstraintValueOrigin {
 
     fn get_involved_ops(&self) -> Vec<OpId> {
         match self {
-            ConstraintValueOrigin::Pointer { start, offset, len } => {
-                [start, offset, len]
+            ConstraintValueOrigin::Pointer { base, offset, len } => {
+                [base, offset, len]
                     .iter()
                     .map(|val| val.get_involved_ops())
                     .flatten()
@@ -581,7 +586,7 @@ impl Driver {
                             let len = self.code.mir_code.strings[id].as_bytes_with_nul().len().to_string();
                             self.start_constraints(op);
                             constraints.insert(
-                                Constraint::OriginatesFrom(op.into(), ConstraintValueOrigin::Pointer { start: op.into(), offset: String::from("0").into(), len: len.into() })
+                                Constraint::OriginatesFrom(op.into(), ConstraintValueOrigin::new_pointer(op, len))
                             );
                         }
                         _ => {},
@@ -658,7 +663,10 @@ impl Driver {
                             let len = arguments[0];
                             self.start_constraints(op);
                             constraints.insert(
-                                Constraint::OriginatesFrom(op.into(), ConstraintValueOrigin::Pointer { start: op.into(), offset: String::from("0").into(), len: len.into() })
+                                Constraint::OriginatesFrom(
+                                    op.into(),
+                                    ConstraintValueOrigin::new_pointer(op, len)
+                                )
                             );
                         }
                         _ => {},
@@ -720,7 +728,7 @@ impl Driver {
                     let len = self.size_of(ty).to_string();
                     self.start_constraints(op);
                     constraints.insert(
-                        Constraint::OriginatesFrom(op.into(), ConstraintValueOrigin::Pointer { start: op.into(), offset: String::from("0").into(), len: len.into() })
+                        Constraint::OriginatesFrom(op.into(), ConstraintValueOrigin::new_pointer(op, len))
                     );
                 }
                 &Instr::AddressOfStatic(statik) => {
@@ -731,7 +739,10 @@ impl Driver {
                     let len = self.size_of(&ty).to_string();
                     self.start_constraints(op);
                     constraints.insert(
-                        Constraint::OriginatesFrom(op.into(), ConstraintValueOrigin::Pointer { start: op.into(), offset: String::from("0").into(), len: len.into() })
+                        Constraint::OriginatesFrom(
+                            op.into(),
+                            ConstraintValueOrigin::new_pointer(op, len)
+                        )
                     );
                 },
                 _ => {},
