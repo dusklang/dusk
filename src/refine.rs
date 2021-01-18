@@ -203,10 +203,47 @@ impl Neg for &ConstraintValue {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum ConstraintValueOrigin {
+    Pointer {
+        /// Pointer to the start of the allocation
+        start: ConstraintValue,
+        /// Integer offset from the start of the allocation
+        offset: ConstraintValue,
+        /// Integer length of the allocation in bytes
+        len: ConstraintValue,
+    },
+}
+
+impl ConstraintValueOrigin {
+    fn replace(&self, key: &ConstraintValue, value: OpId) -> Self {
+        match self {
+            ConstraintValueOrigin::Pointer { start, offset, len } => ConstraintValueOrigin::Pointer {
+                start: start.replace(key, value),
+                offset: offset.replace(key, value),
+                len: len.replace(key, value),
+            }
+        }
+    }
+
+    fn get_involved_ops(&self) -> Vec<OpId> {
+        match self {
+            ConstraintValueOrigin::Pointer { start, offset, len } => {
+                [start, offset, len]
+                    .iter()
+                    .map(|val| val.get_involved_ops())
+                    .flatten()
+                    .collect()
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum Constraint {
     Gte(ConstraintValue, ConstraintValue),
     Lte(ConstraintValue, ConstraintValue),
     Eq(ConstraintValue, ConstraintValue),
+    OriginatesFrom(ConstraintValue, ConstraintValueOrigin),
 }
 
 impl Constraint {
@@ -215,14 +252,22 @@ impl Constraint {
             Constraint::Gte(l, r) => Constraint::Gte(l.replace(key, value), r.replace(key, value)),
             Constraint::Lte(l, r) => Constraint::Lte(l.replace(key, value), r.replace(key, value)),
             Constraint::Eq(l, r) => Constraint::Eq(l.replace(key, value), r.replace(key, value)),
+            Constraint::OriginatesFrom(val, origin) => Constraint::OriginatesFrom(val.replace(key, value), origin.replace(key, value)),
         }
     }
 
     fn get_involved_ops(&self) -> HashSet<OpId> {
         match self {
             Constraint::Gte(l, r) | Constraint::Lte(l, r) | Constraint::Eq(l, r) => {
-                l.get_involved_ops().into_iter()
-                    .chain(r.get_involved_ops())
+                [l, r].iter().map(|val| val.get_involved_ops())
+                    .flatten()
+                    .collect()
+            },
+            Constraint::OriginatesFrom(val, origin) => {
+                [val.get_involved_ops(), origin.get_involved_ops()]
+                    .iter()
+                    .flatten()
+                    .copied()
                     .collect()
             }
         }
@@ -400,6 +445,7 @@ impl Driver {
             Constraint::Gte(l, r) => write!(f, "{}", self.display_bin_expr(">=", &l, &r)),
             Constraint::Lte(l, r) => write!(f, "{}", self.display_bin_expr("<=", &l, &r)),
             Constraint::Eq(l, r) => write!(f, "{}", self.display_bin_expr("=", &l, &r)),
+            Constraint::OriginatesFrom(_, _) => Ok(()),
         }
     }
 
@@ -531,6 +577,13 @@ impl Driver {
                                 unhandled => panic!("Literal with unhandled type {:?}", unhandled),
                             }
                         },
+                        &Const::Str { id, .. } => {
+                            let len = self.code.mir_code.strings[id].as_bytes_with_nul().len().to_string();
+                            self.start_constraints(op);
+                            constraints.insert(
+                                Constraint::OriginatesFrom(op.into(), ConstraintValueOrigin::Pointer { start: op.into(), offset: String::from("0").into(), len: len.into() })
+                            );
+                        }
                         _ => {},
                     }
                 },
@@ -600,6 +653,14 @@ impl Driver {
                                 _ => panic!("unhandled type"),
                             }
                         },
+                        Intrinsic::Malloc => {
+                            assert_eq!(arguments.len(), 1);
+                            let len = arguments[0];
+                            self.start_constraints(op);
+                            constraints.insert(
+                                Constraint::OriginatesFrom(op.into(), ConstraintValueOrigin::Pointer { start: op.into(), offset: String::from("0").into(), len: len.into() })
+                            );
+                        }
                         _ => {},
                     }
                 },
@@ -655,9 +716,23 @@ impl Driver {
                         }
                     }
                 },
-                &Instr::AddressOfStatic(_) => {
+                Instr::Alloca(ty) => {
+                    let len = self.size_of(ty).to_string();
+                    self.start_constraints(op);
+                    constraints.insert(
+                        Constraint::OriginatesFrom(op.into(), ConstraintValueOrigin::Pointer { start: op.into(), offset: String::from("0").into(), len: len.into() })
+                    );
+                }
+                &Instr::AddressOfStatic(statik) => {
                     // Static variables are not uninitialized, but we can't be sure what their values are
                     self.refine.pointer_typestate.entry(op).or_default().last_pointee = Pointee::Unknown;
+
+                    let ty = self.code.mir_code.statics[statik].ty();
+                    let len = self.size_of(&ty).to_string();
+                    self.start_constraints(op);
+                    constraints.insert(
+                        Constraint::OriginatesFrom(op.into(), ConstraintValueOrigin::Pointer { start: op.into(), offset: String::from("0").into(), len: len.into() })
+                    );
                 },
                 _ => {},
             }
