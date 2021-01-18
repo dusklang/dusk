@@ -50,19 +50,19 @@ enum StopPhase {
 #[clap(name = "meda")]
 struct Opt {
     /// Output per-level typechecking diffs
-    #[clap(short="d", long)]
+    #[clap(short='d', long)]
     output_tc_diff: bool,
 
     /// The mode for displaying the TIR graph
-    #[clap(arg_enum, short="g", long, case_insensitive = true)]
+    #[clap(arg_enum, short='g', long, case_insensitive = true)]
     tir_output: Option<TirGraphOutput>,
 
     /// Output MIR in textual format
-    #[clap(short="m", long)]
+    #[clap(short='m', long)]
     output_mir: bool,
 
     /// The phase to stop the compiler at
-    #[clap(arg_enum, short="s", long, default_value="interp", case_insensitive = true)]
+    #[clap(arg_enum, short='s', long, default_value="interp", case_insensitive = true)]
     stop_phase: StopPhase,
 
     /// Input file
