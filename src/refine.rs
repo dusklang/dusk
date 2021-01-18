@@ -716,13 +716,35 @@ impl Driver {
                     }
                 },
                 &Instr::Store { location, value } => {
-                    self.refine.pointer_typestate.entry(location).or_default().last_pointee = Pointee::Known(value);
+                    let origin = self.origin_of(&location.into(), &constraints).expect("can't load from pointer of unknown origin");
+                    match origin {
+                        ConstraintValueOrigin::Pointer { base, offset, .. } => {
+                            assert!(offset == &ConstraintValue::from("0".to_string()), "can't store into a non-zero offset in an allocation");
+
+                            if let &ConstraintValue::Op(location) = base {
+                                self.refine.pointer_typestate.entry(location).or_default().last_pointee = Pointee::Known(value);
+                            } else {
+                                panic!("Can't store into pointer that originated from anything but an OpId");
+                            }
+                        }
+                    };
                 },
                 &Instr::Load(location) => {
-                    let pointee = self.refine.pointer_typestate
-                        .get(&location)
-                        .map(|ts| ts.last_pointee)
-                        .unwrap_or_default();
+                    let origin = self.origin_of(&location.into(), &constraints).expect("can't load from pointer of unknown origin");
+                    let pointee = match origin {
+                        ConstraintValueOrigin::Pointer { base, offset, .. } => {
+                            assert!(offset == &ConstraintValue::from("0".to_string()), "can't load from a non-zero offset in an allocation");
+
+                            if let &ConstraintValue::Op(location) = base {
+                                self.refine.pointer_typestate
+                                    .get(&location)
+                                    .map(|ts| ts.last_pointee)
+                                    .unwrap_or_default()
+                            } else {
+                                Pointee::None
+                            }
+                        }
+                    };
                     match pointee {
                         Pointee::None => panic!("can't read from uninitialized memory!"),
                         Pointee::Unknown => {},

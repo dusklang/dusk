@@ -21,6 +21,8 @@ fn add(a: i32, b: i32): i32 {
 fn main() {
     var := add(I32_MAX - 4, 4) + add_four(-4)
     buf := malloc(4) as i32 *mut
+    *buf = 12
+    var := I32_MAX - 12 + *buf
     reinterpreted_buf := buf as usize as i32 *mut
     return
 }
