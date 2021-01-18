@@ -472,7 +472,7 @@ impl Driver {
         Ok(())
     }
 
-    fn check_conditions(&self, solver: &mut Solver<Parser>, conditions: Vec<Constraint>, constraints: &mut HashSet<Constraint>) {
+    fn check_conditions(&self, solver: &mut Solver<Parser>, conditions: Vec<Constraint>, constraints: &HashSet<Constraint>) {
         if conditions.is_empty() { return; }
 
         let mut variables = HashSet::new();
@@ -500,6 +500,21 @@ impl Driver {
         }
         let condition = self.display_condition_check(&conditions, &variables, &relevant_constraints).to_string();
         solver.assert(&condition).unwrap();
+    }
+
+    fn origin_of<'a, 'b>(&'a self, val: &'a ConstraintValue, constraints: &'b HashSet<Constraint>) -> Option<&'b ConstraintValueOrigin> {
+        let mut matching = constraints.iter().filter_map(|constraint| {
+            match constraint {
+                Constraint::OriginatesFrom(op_val, origin) if op_val == val => Some(origin),
+                _ => None,
+            }
+        });
+        if let Some(origin) = matching.next() {
+            assert!(matching.next().is_none(), "can't have multiple OriginatesFrom constraints on the same operation");
+            Some(origin)
+        } else {
+            None
+        }
     }
 
     pub fn refine_func(&mut self, func_ref: &FunctionRef, tp: &impl TypeProvider) {
@@ -608,7 +623,7 @@ impl Driver {
                                             Constraint::Lte(lo.into(), sum.clone()),
                                             Constraint::Lte(sum.clone(), hi.into()),
                                         ],
-                                        &mut constraints,
+                                        &constraints,
                                     );
                                     constraints.insert(Constraint::Eq(op.into(), sum));
                                 },
@@ -629,7 +644,7 @@ impl Driver {
                                             Constraint::Lte(lo.into(), diff.clone()),
                                             Constraint::Lte(diff.clone(), hi.into()),
                                         ],
-                                        &mut constraints,
+                                        &constraints,
                                     );
                                     constraints.insert(Constraint::Eq(op.into(), diff));
                                 },
@@ -650,7 +665,7 @@ impl Driver {
                                             Constraint::Lte(lo.into(), neg.clone()),
                                             Constraint::Lte(neg.clone(), hi.into()),
                                         ],
-                                        &mut constraints,
+                                        &constraints,
                                     );
 
                                     constraints.insert(Constraint::Eq(op.into(), neg));
@@ -676,7 +691,7 @@ impl Driver {
                     let postconditions = postconditions.iter()
                         .map(|condition| condition.replace(&ConstraintValue::ReturnValue, val))
                         .collect();
-                    self.check_conditions(&mut solver, postconditions, &mut constraints);
+                    self.check_conditions(&mut solver, postconditions, &constraints);
                 },
                 &Instr::Call { ref arguments, func } => {
                     // Borrow checker, argh...
@@ -693,7 +708,7 @@ impl Driver {
                         condition
                     };
                     let preconditions: Vec<Constraint> = conditions.preconditions.iter().cloned().map(replace_params).collect();
-                    self.check_conditions(&mut solver, preconditions, &mut constraints);
+                    self.check_conditions(&mut solver, preconditions, &constraints);
                     let postconditions = conditions.postconditions.iter().cloned().map(replace_params);
                     for mut condition in postconditions {
                         condition = condition.replace(&ConstraintValue::ReturnValue, op);
@@ -744,6 +759,65 @@ impl Driver {
                             ConstraintValueOrigin::new_pointer(op, len)
                         )
                     );
+                },
+                &Instr::Reinterpret(val, ref dest_ty) => {
+                    let src_ty = self.type_of(val);
+                    match (&src_ty, dest_ty) {
+                        (Type::Pointer(_), &Type::Int { width, is_signed }) => {
+                            assert_eq!((width, is_signed), (IntWidth::Pointer, false), "Unexpected pointer-to-int cast");
+                            if let Some(origin) = self.origin_of(&val.into(), &constraints) {
+                                let origin = origin.clone();
+                                self.start_constraints(op);
+                                constraints.insert(Constraint::OriginatesFrom(op.into(), origin));
+                            }
+                        },
+                        (&Type::Int { width, is_signed }, Type::Pointer(ptr)) => {
+                            assert_eq!((width, is_signed), (IntWidth::Pointer, false), "Unexpected int-to-pointer cast");
+                            let origin = self.origin_of(&val.into(), &constraints)
+                                .expect("Can't cast an integer type of unknown origin to a pointer")
+                                .clone();
+                            let ptr_ty = ptr.ty.clone();
+                            self.start_constraints(op);
+                            match origin.clone() {
+                                ConstraintValueOrigin::Pointer { offset, len, .. } => {
+                                    let size = self.size_of(&ptr_ty).to_string();
+                                    let zero = ConstraintValue::from("0".to_string());
+                                    self.check_conditions(
+                                        &mut solver,
+                                        vec![
+                                            Constraint::Lte(offset.clone() + ConstraintValue::from(size), len),
+                                            Constraint::Lte(zero, offset),
+                                        ],
+                                        &constraints
+                                    );
+                                }
+                            }
+                            constraints.insert(Constraint::OriginatesFrom(op.into(), origin));
+                        },
+                        (Type::Pointer(_), Type::Pointer(dest)) => {
+                            let origin = self.origin_of(&val.into(), &constraints)
+                                .expect("Can't cast an pointer type of unknown origin to another pointer")
+                                .clone();
+                            let dest = dest.ty.clone();
+                            self.start_constraints(op);
+                            match origin.clone() {
+                                ConstraintValueOrigin::Pointer { offset, len, .. } => {
+                                    let size = self.size_of(&dest).to_string();
+                                    let zero = ConstraintValue::from("0".to_string());
+                                    self.check_conditions(
+                                        &mut solver,
+                                        vec![
+                                            Constraint::Lte(offset.clone() + ConstraintValue::from(size), len),
+                                            Constraint::Lte(zero, offset),
+                                        ],
+                                        &constraints
+                                    );
+                                }
+                            }
+                            constraints.insert(Constraint::OriginatesFrom(op.into(), origin));
+                        },
+                        (_, _) => panic!("Unsupported reinterpret cast"),
+                    }
                 },
                 _ => {},
             }
