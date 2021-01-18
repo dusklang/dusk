@@ -4,6 +4,7 @@ use std::iter::Iterator;
 
 use rsmt2::prelude::*;
 use rsmt2::parse::{IdentParser, ModelParser};
+use arrayvec::ArrayVec;
 use display_adapter::display_adapter;
 
 use mire::{BlockId, OpId};
@@ -35,9 +36,26 @@ impl<'a> ModelParser<String, String, String, & 'a str> for Parser {
         Ok(input.into())
     }
 }
+
 struct Conditions {
     preconditions: Vec<Constraint>,
     postconditions: Vec<Constraint>,
+}
+
+#[derive(Copy, Clone)]
+enum Pointee {
+    None,
+    Unknown,
+    Known(OpId),
+}
+
+impl Default for Pointee {
+    fn default() -> Self { Pointee::None }
+}
+
+#[derive(Default)]
+struct PointerTypestate {
+    last_pointee: Pointee,
 }
 
 #[derive(Default)]
@@ -45,6 +63,7 @@ pub struct Refine {
     constraints: HashMap<OpId, OpConstraints>,
     conditions: HashMap<FuncId, Conditions>,
     name_gen: NameGen,
+    pointer_typestate: HashMap<OpId, PointerTypestate>,
 }
 
 #[derive(Default)]
@@ -611,6 +630,34 @@ impl Driver {
                         condition = condition.replace(&ConstraintValue::ReturnValue, op);
                         constraints.insert(condition);
                     }
+                },
+                &Instr::Store { location, value } => {
+                    self.refine.pointer_typestate.entry(location).or_default().last_pointee = Pointee::Known(value);
+                },
+                &Instr::Load(location) => {
+                    let pointee = self.refine.pointer_typestate
+                        .get(&location)
+                        .map(|ts| ts.last_pointee)
+                        .unwrap_or_default();
+                    match pointee {
+                        Pointee::None => panic!("can't read from uninitialized memory!"),
+                        Pointee::Unknown => {},
+                        Pointee::Known(pointee) => {
+                            self.start_constraints(op);
+                            constraints = constraints.into_iter().flat_map(|constraint| {
+                                let mut res: ArrayVec<[Constraint; 2]> = ArrayVec::new();
+                                if constraint.get_involved_ops().contains(&pointee) {
+                                    res.push(constraint.replace(&ConstraintValue::Op(pointee), op));
+                                }
+                                res.push(constraint);
+                                res
+                            }).collect();
+                        }
+                    }
+                },
+                &Instr::AddressOfStatic(_) => {
+                    // Static variables are not uninitialized, but we can't be sure what their values are
+                    self.refine.pointer_typestate.entry(op).or_default().last_pointee = Pointee::Unknown;
                 },
                 _ => {},
             }
