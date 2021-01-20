@@ -6,6 +6,7 @@ use rsmt2::prelude::*;
 use rsmt2::parse::{IdentParser, ModelParser};
 use arrayvec::ArrayVec;
 use display_adapter::display_adapter;
+use string_interner::DefaultSymbol as Sym;
 
 use mire::{BlockId, OpId};
 use mire::mir::{Const, Function, FuncId, Instr};
@@ -456,15 +457,20 @@ impl Driver {
 
     #[display_adapter]
     fn display_condition_check(&self, condition: &Constraint, constraints: &HashSet<Constraint>, w: &mut Formatter) {
-        write!(w, "(not (=> (and ")?;
-        for constraint in constraints {
-            write!(w, "{} ", self.display_constraint(constraint))?;
+        write!(w, "(not ")?;
+        if constraints.is_empty() {
+            write!(w, "{}", self.display_constraint(condition))?;
+        } else {
+            write!(w, "(=> (and ")?;
+            for constraint in constraints {
+                write!(w, "{} ", self.display_constraint(constraint))?;
+            }
+            write!(w, ") {})", self.display_constraint(condition))?;
         }
-        write!(w, ") {}))", self.display_constraint(condition))?;
-        Ok(())
+        write!(w, ")")
     }
 
-    fn check_conditions(&self, solver: &mut Solver<Parser>, conditions: Vec<Constraint>, constraints: &HashSet<Constraint>) -> Result<(), Vec<(String, Vec<(String, String)>, String, String)>> {
+    fn check_conditions(&self, solver: &mut Solver<Parser>, func_name: Option<Sym>, conditions: Vec<Constraint>, constraints: &HashSet<Constraint>) -> Result<(), Vec<(String, Vec<(String, String)>, String, String)>> {
         for condition in conditions {
             let mut variables = HashSet::new();
             let mut relevant_constraints = HashSet::new();
@@ -494,9 +500,11 @@ impl Driver {
             }
             solver.assert(&condition_str).unwrap();
             let val = if solver.check_sat().unwrap() {
-                println!("Refinement checker failed on conditions {}", self.display_constraint(&condition));
+                println!("Refinement checker failed on condition {}", self.display_constraint(&condition));
+                println!("    in function {}", self.fn_name(func_name));
                 let mut model = solver.get_model().unwrap();
-                // Limit the model to just the variables that show up in the current condition
+
+                // Limit the returned model to just the variables that show up in the current condition
                 model.retain(|assignment| 
                     condition.get_involved_ops().iter()
                     .map(|op| &self.refine.constraints.get(op).unwrap().name)
@@ -582,7 +590,6 @@ impl Driver {
         let conf = SmtConf::default_z3();
         let mut solver = conf.spawn(Parser).unwrap();
         solver.set_option(":produce-proofs", "true").unwrap();
-        let mut assertions = String::new();
 
         for i in 0..block.ops.len() {
             let block = &self.code.blocks[block_id];
@@ -635,6 +642,7 @@ impl Driver {
                                     let sum = ConstraintValue::from(a) + ConstraintValue::from(b);
                                     self.check_conditions(
                                         &mut solver,
+                                        func_name,
                                         vec![
                                             Constraint::Lte(lo.into(), sum.clone()),
                                             Constraint::Lte(sum.clone(), hi.into()),
@@ -656,6 +664,7 @@ impl Driver {
                                     let diff = ConstraintValue::from(a) - ConstraintValue::from(b);
                                     self.check_conditions(
                                         &mut solver,
+                                        func_name,
                                         vec![
                                             Constraint::Lte(lo.into(), diff.clone()),
                                             Constraint::Lte(diff.clone(), hi.into()),
@@ -677,6 +686,7 @@ impl Driver {
                                     let neg = -ConstraintValue::from(a);
                                     self.check_conditions(
                                         &mut solver,
+                                        func_name,
                                         vec![
                                             Constraint::Lte(lo.into(), neg.clone()),
                                             Constraint::Lte(neg.clone(), hi.into()),
@@ -707,7 +717,7 @@ impl Driver {
                     let postconditions = postconditions.iter()
                         .map(|condition| condition.replace(&ConstraintValue::ReturnValue, val))
                         .collect();
-                    self.check_conditions(&mut solver, postconditions, &constraints).unwrap();
+                    self.check_conditions(&mut solver, func_name, postconditions, &constraints).unwrap();
                 },
                 &Instr::Call { ref arguments, func } => {
                     // Borrow checker, argh...
@@ -724,7 +734,7 @@ impl Driver {
                         condition
                     };
                     let preconditions: Vec<Constraint> = conditions.preconditions.iter().cloned().map(replace_params).collect();
-                    self.check_conditions(&mut solver, preconditions, &constraints).unwrap();
+                    self.check_conditions(&mut solver, func_name, preconditions, &constraints).unwrap();
                     let postconditions = conditions.postconditions.iter().cloned().map(replace_params);
                     for mut condition in postconditions {
                         condition = condition.replace(&ConstraintValue::ReturnValue, op);
@@ -822,6 +832,7 @@ impl Driver {
                                     let zero = ConstraintValue::from("0".to_string());
                                     self.check_conditions(
                                         &mut solver,
+                                        func_name,
                                         vec![
                                             Constraint::Lte(offset.clone() + ConstraintValue::from(size), len),
                                             Constraint::Lte(zero, offset),
@@ -844,6 +855,7 @@ impl Driver {
                                     let zero = ConstraintValue::from("0".to_string());
                                     self.check_conditions(
                                         &mut solver,
+                                        func_name,
                                         vec![
                                             Constraint::Lte(offset.clone() + ConstraintValue::from(size), len),
                                             Constraint::Lte(zero, offset),
