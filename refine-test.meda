@@ -7,7 +7,7 @@ I32_MAX :: 2147483647
 @postcondition(return_value == a + 4)
 fn add_four(a: i32): i32 {
     four := 756
-    four = 4
+    four = 5
     a + four
 }
 

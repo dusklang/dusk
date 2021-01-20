@@ -567,6 +567,7 @@ impl Driver {
 
         let conf = SmtConf::default_z3();
         let mut solver = conf.spawn(Parser).unwrap();
+        solver.set_option(":produce-proofs", "true").unwrap();
 
         for i in 0..block.ops.len() {
             let block = &self.code.blocks[block_id];
@@ -844,6 +845,12 @@ impl Driver {
                 _ => {},
             }
         }
-        assert!(solver.check_sat().unwrap(), "SAT failed! :(");
+        if solver.check_sat().unwrap() {
+            println!("SAT passed");
+        } else {
+            println!("SAT failed :(");
+            println!("PROOF: {}", solver.get_proof().unwrap());
+            panic!();
+        }
     }
 }
