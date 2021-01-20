@@ -357,7 +357,6 @@ dependencies = [
 [[package]]
 name = "rsmt2"
 version = "0.11.0"
-source = "git+https://github.com/zachwolfe/rsmt2.git#b16d8ada7e7b403a95f6cb547fcf6b328e236e4a"
 dependencies = [
  "error-chain",
 ]
@@ -370,9 +369,9 @@ checksum = "6e3bad0ee36814ca07d7968269dd4b7ec89ec2da10c4bb613928d3077083c232"
 
 [[package]]
 name = "serde"
-version = "1.0.119"
+version = "1.0.120"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9bdd36f49e35b61d49efd8aa7fc068fd295961fd2286d0b2ee9a4c7a14e99cc3"
+checksum = "166b2349061381baf54a58e4b13c89369feb0ef2eaa57198899e2312aac30aab"
 
 [[package]]
 name = "smallvec"
