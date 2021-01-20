@@ -420,9 +420,8 @@ impl Driver {
     }
 
     /// Returns the generated name
-    fn start_constraints(&mut self, solver: &mut Solver<Parser>, op: OpId) {
+    fn start_constraints(&mut self, op: OpId) {
         let name = self.refine.name_gen.next().unwrap();
-        solver.declare_const(&name, "Int").unwrap();
         self.refine.constraints.entry(op).or_insert(OpConstraints::new(name));
     }
 
@@ -456,47 +455,64 @@ impl Driver {
     }
 
     #[display_adapter]
-    fn display_condition_check(&self, conditions: &[Constraint], constraints: &HashSet<Constraint>, w: &mut Formatter) {
-        write!(w, "(=> (and ")?;
+    fn display_condition_check(&self, condition: &Constraint, constraints: &HashSet<Constraint>, w: &mut Formatter) {
+        write!(w, "(not (=> (and ")?;
         for constraint in constraints {
             write!(w, "{} ", self.display_constraint(constraint))?;
         }
-        write!(w, ") (and ")?;
-        for constraint in conditions {
-            write!(w, "{} ", self.display_constraint(constraint))?;
-        }
-        write!(w, "))")?;
+        write!(w, ") {}))", self.display_constraint(condition))?;
         Ok(())
     }
 
-    fn check_conditions(&self, assertions: &mut String, conditions: Vec<Constraint>, constraints: &HashSet<Constraint>) {
-        if conditions.is_empty() { return; }
-
-        let mut variables = HashSet::new();
-        let mut relevant_constraints = HashSet::new();
-        for precondition in &conditions {
-            variables.extend(precondition.get_involved_ops());
-        }
-        loop {
-            let mut added_anything = false;
-            // TODO: this is probably crazy slow
-            for constraint in &*constraints {
-                let involved = constraint.get_involved_ops();
-                for var in &variables {
-                    if involved.contains(var) {
-                        for var in involved {
-                            added_anything |= variables.insert(var);
+    fn check_conditions(&self, solver: &mut Solver<Parser>, conditions: Vec<Constraint>, constraints: &HashSet<Constraint>) -> Result<(), Vec<(String, Vec<(String, String)>, String, String)>> {
+        for condition in conditions {
+            let mut variables = HashSet::new();
+            let mut relevant_constraints = HashSet::new();
+            variables.extend(condition.get_involved_ops());
+            loop {
+                let mut added_anything = false;
+                // TODO: this is probably crazy slow
+                for constraint in &*constraints {
+                    let involved = constraint.get_involved_ops();
+                    for var in &variables {
+                        if involved.contains(var) {
+                            for var in involved {
+                                added_anything |= variables.insert(var);
+                            }
+                            relevant_constraints.insert(constraint.clone());
+                            break;
                         }
-                        relevant_constraints.insert(constraint.clone());
-                        break;
                     }
                 }
+    
+                if !added_anything { break; }
             }
-
-            if !added_anything { break; }
+            solver.push(1).unwrap();
+            let condition_str: String = format!("\n    {}", self.display_condition_check(&condition, &relevant_constraints));
+            for var in &variables {
+                solver.declare_const(&self.refine.constraints.get(var).unwrap().name, "Int").unwrap();
+            }
+            solver.assert(&condition_str).unwrap();
+            let val = if solver.check_sat().unwrap() {
+                println!("Refinement checker failed on conditions {}", self.display_constraint(&condition));
+                let mut model = solver.get_model().unwrap();
+                // Limit the model to just the variables that show up in the current condition
+                model.retain(|assignment| 
+                    condition.get_involved_ops().iter()
+                    .map(|op| &self.refine.constraints.get(op).unwrap().name)
+                    .collect::<Vec<_>>()
+                    .contains(&&assignment.0)
+                );
+                Err(model)
+            } else {
+                Ok(())
+            };
+            solver.pop(1).unwrap();
+    
+            val?;
         }
-        let condition: String = format!("\n    {}", self.display_condition_check(&conditions, &relevant_constraints));
-        assertions.push_str(&condition);
+
+        Ok(())
     }
 
     fn origin_of<'a, 'b>(&'a self, val: &'a ConstraintValue, constraints: &'b HashSet<Constraint>) -> Option<&'b ConstraintValueOrigin> {
@@ -577,7 +593,7 @@ impl Driver {
                     match ty {
                         &Type::Int { width, is_signed } => {
                             let (lo, hi) = self.get_int_range(width, is_signed);
-                            self.start_constraints(&mut solver, op);
+                            self.start_constraints(op);
                             constraints.insert(Constraint::Lte(lo.into(), op.into()));
                             constraints.insert(Constraint::Lte(op.into(), hi.into()));
                         },
@@ -591,7 +607,7 @@ impl Driver {
                                 &Type::Int { is_signed, .. } => {
                                     // TODO: this is kind of silly, but it was the path of least resistance.
                                     let val = Value::from_const(konst, self).as_big_int(is_signed);
-                                    self.start_constraints(&mut solver, op);
+                                    self.start_constraints(op);
                                     constraints.insert(Constraint::Eq(op.into(), val.to_string().into()));
                                 },
                                 unhandled => panic!("Literal with unhandled type {:?}", unhandled),
@@ -599,7 +615,7 @@ impl Driver {
                         },
                         &Const::Str { id, .. } => {
                             let len = self.code.mir_code.strings[id].as_bytes_with_nul().len().to_string();
-                            self.start_constraints(&mut solver, op);
+                            self.start_constraints(op);
                             constraints.insert(
                                 Constraint::OriginatesFrom(op.into(), ConstraintValueOrigin::new_pointer(op, len))
                             );
@@ -615,16 +631,16 @@ impl Driver {
                                 &Type::Int { width, is_signed } => {
                                     let (lo, hi) = self.get_int_range(width, is_signed);
                                     let (a, b) = (arguments[0], arguments[1]);
-                                    self.start_constraints(&mut solver, op);
+                                    self.start_constraints(op);
                                     let sum = ConstraintValue::from(a) + ConstraintValue::from(b);
                                     self.check_conditions(
-                                        &mut assertions,
+                                        &mut solver,
                                         vec![
                                             Constraint::Lte(lo.into(), sum.clone()),
                                             Constraint::Lte(sum.clone(), hi.into()),
                                         ],
                                         &constraints,
-                                    );
+                                    ).unwrap();
                                     constraints.insert(Constraint::Eq(op.into(), sum));
                                 },
                                 _ => panic!("unhandled type"),
@@ -636,16 +652,16 @@ impl Driver {
                                 &Type::Int { width, is_signed } => {
                                     let (lo, hi) = self.get_int_range(width, is_signed);
                                     let (a, b) = (arguments[0], arguments[1]);
-                                    self.start_constraints(&mut solver, op);
+                                    self.start_constraints(op);
                                     let diff = ConstraintValue::from(a) - ConstraintValue::from(b);
                                     self.check_conditions(
-                                        &mut assertions,
+                                        &mut solver,
                                         vec![
                                             Constraint::Lte(lo.into(), diff.clone()),
                                             Constraint::Lte(diff.clone(), hi.into()),
                                         ],
                                         &constraints,
-                                    );
+                                    ).unwrap();
                                     constraints.insert(Constraint::Eq(op.into(), diff));
                                 },
                                 _ => panic!("unhandled type"),
@@ -657,16 +673,16 @@ impl Driver {
                                 &Type::Int { width, is_signed } => {
                                     let (lo, hi) = self.get_int_range(width, is_signed);
                                     let a = arguments[0];
-                                    self.start_constraints(&mut solver, op);
+                                    self.start_constraints(op);
                                     let neg = -ConstraintValue::from(a);
                                     self.check_conditions(
-                                        &mut assertions,
+                                        &mut solver,
                                         vec![
                                             Constraint::Lte(lo.into(), neg.clone()),
                                             Constraint::Lte(neg.clone(), hi.into()),
                                         ],
                                         &constraints,
-                                    );
+                                    ).unwrap();
 
                                     constraints.insert(Constraint::Eq(op.into(), neg));
                                 },
@@ -676,7 +692,7 @@ impl Driver {
                         Intrinsic::Malloc => {
                             assert_eq!(arguments.len(), 1);
                             let len = arguments[0];
-                            self.start_constraints(&mut solver, op);
+                            self.start_constraints(op);
                             constraints.insert(
                                 Constraint::OriginatesFrom(
                                     op.into(),
@@ -691,14 +707,14 @@ impl Driver {
                     let postconditions = postconditions.iter()
                         .map(|condition| condition.replace(&ConstraintValue::ReturnValue, val))
                         .collect();
-                    self.check_conditions(&mut assertions, postconditions, &constraints);
+                    self.check_conditions(&mut solver, postconditions, &constraints).unwrap();
                 },
                 &Instr::Call { ref arguments, func } => {
                     // Borrow checker, argh...
                     let arguments = arguments.clone();
 
                     self.refine_func(&FunctionRef::Id(func), tp);
-                    self.start_constraints(&mut solver, op);
+                    self.start_constraints(op);
 
                     let conditions = self.refine.conditions.get(&func).unwrap();
                     let replace_params = |mut condition: Constraint| {
@@ -708,7 +724,7 @@ impl Driver {
                         condition
                     };
                     let preconditions: Vec<Constraint> = conditions.preconditions.iter().cloned().map(replace_params).collect();
-                    self.check_conditions(&mut assertions, preconditions, &constraints);
+                    self.check_conditions(&mut solver, preconditions, &constraints).unwrap();
                     let postconditions = conditions.postconditions.iter().cloned().map(replace_params);
                     for mut condition in postconditions {
                         condition = condition.replace(&ConstraintValue::ReturnValue, op);
@@ -749,7 +765,7 @@ impl Driver {
                         Pointee::None => panic!("can't read from uninitialized memory!"),
                         Pointee::Unknown => {},
                         Pointee::Known(pointee) => {
-                            self.start_constraints(&mut solver, op);
+                            self.start_constraints(op);
                             constraints = constraints.into_iter().flat_map(|constraint| {
                                 let mut res: ArrayVec<[Constraint; 2]> = ArrayVec::new();
                                 if constraint.get_involved_ops().contains(&pointee) {
@@ -763,7 +779,7 @@ impl Driver {
                 },
                 Instr::Alloca(ty) => {
                     let len = self.size_of(ty).to_string();
-                    self.start_constraints(&mut solver, op);
+                    self.start_constraints(op);
                     constraints.insert(
                         Constraint::OriginatesFrom(op.into(), ConstraintValueOrigin::new_pointer(op, len))
                     );
@@ -774,7 +790,7 @@ impl Driver {
 
                     let ty = self.code.mir_code.statics[statik].ty();
                     let len = self.size_of(&ty).to_string();
-                    self.start_constraints(&mut solver, op);
+                    self.start_constraints(op);
                     constraints.insert(
                         Constraint::OriginatesFrom(
                             op.into(),
@@ -789,7 +805,7 @@ impl Driver {
                             assert_eq!((width, is_signed), (IntWidth::Pointer, false), "Unexpected pointer-to-int cast");
                             if let Some(origin) = self.origin_of(&val.into(), &constraints) {
                                 let origin = origin.clone();
-                                self.start_constraints(&mut solver, op);
+                                self.start_constraints(op);
                                 constraints.insert(Constraint::OriginatesFrom(op.into(), origin));
                             }
                         },
@@ -799,19 +815,19 @@ impl Driver {
                                 .expect("Can't cast an integer type of unknown origin to a pointer")
                                 .clone();
                             let ptr_ty = ptr.ty.clone();
-                            self.start_constraints(&mut solver, op);
+                            self.start_constraints(op);
                             match origin.clone() {
                                 ConstraintValueOrigin::Pointer { offset, len, .. } => {
                                     let size = self.size_of(&ptr_ty).to_string();
                                     let zero = ConstraintValue::from("0".to_string());
                                     self.check_conditions(
-                                        &mut assertions,
+                                        &mut solver,
                                         vec![
                                             Constraint::Lte(offset.clone() + ConstraintValue::from(size), len),
                                             Constraint::Lte(zero, offset),
                                         ],
                                         &constraints
-                                    );
+                                    ).unwrap();
                                 }
                             }
                             constraints.insert(Constraint::OriginatesFrom(op.into(), origin));
@@ -821,19 +837,19 @@ impl Driver {
                                 .expect("Can't cast an pointer type of unknown origin to another pointer")
                                 .clone();
                             let dest = dest.ty.clone();
-                            self.start_constraints(&mut solver, op);
+                            self.start_constraints(op);
                             match origin.clone() {
                                 ConstraintValueOrigin::Pointer { offset, len, .. } => {
                                     let size = self.size_of(&dest).to_string();
                                     let zero = ConstraintValue::from("0".to_string());
                                     self.check_conditions(
-                                        &mut assertions,
+                                        &mut solver,
                                         vec![
                                             Constraint::Lte(offset.clone() + ConstraintValue::from(size), len),
                                             Constraint::Lte(zero, offset),
                                         ],
                                         &constraints
-                                    );
+                                    ).unwrap();
                                 }
                             }
                             constraints.insert(Constraint::OriginatesFrom(op.into(), origin));
@@ -843,16 +859,6 @@ impl Driver {
                 },
                 _ => {},
             }
-        }
-        if assertions.is_empty() {
-            assertions.push_str("true");
-        }
-        solver.assert(&format!("(not (and {}))", assertions)).unwrap();
-        if solver.check_sat().unwrap() {
-            println!("Refinement checker failed on function {}", self.fn_name(func_name));
-            let model = solver.get_model().unwrap();
-            println!("model: {:?}", model);
-            panic!();
         }
     }
 }
