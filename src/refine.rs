@@ -650,6 +650,33 @@ impl Driver {
                                         &constraints,
                                     ).unwrap();
                                     constraints.insert(Constraint::Eq(op.into(), sum));
+                                    if let Some(origin) = self.origin_of(&a.into(), &constraints) {
+                                        match origin {
+                                            ConstraintValueOrigin::Pointer { base, offset, len } => {
+                                                let sum = offset.clone() + ConstraintValue::from(b);
+                                                if self.check_conditions(
+                                                    &mut solver,
+                                                    func_name,
+                                                    vec![
+                                                        Constraint::Lte(sum.clone(), len.clone())
+                                                    ],
+                                                    &constraints,
+                                                ).is_ok() {
+                                                    let (base, len) = (base.clone(), len.clone());
+                                                    constraints.insert(
+                                                        Constraint::OriginatesFrom(
+                                                            op.into(),
+                                                            ConstraintValueOrigin::Pointer {
+                                                                base,
+                                                                offset: sum,
+                                                                len: len.clone()
+                                                            }
+                                                        )
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
                                 },
                                 _ => panic!("unhandled type"),
                             }
