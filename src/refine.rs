@@ -538,6 +538,41 @@ impl Driver {
         }
     }
 
+    fn set_unknown_pointee(&mut self, pointer: OpId, _len: usize) {
+        self.refine.pointer_typestate.entry(pointer).or_default().last_pointee = Pointee::Unknown;
+    }
+
+    fn add_pointer_write(&mut self, base: ConstraintValue, offset: ConstraintValue, value: OpId) {
+        assert!(offset == ConstraintValue::from("0".to_string()), "can't store into a non-zero offset in an allocation");
+
+        if let ConstraintValue::Op(location) = base {
+            self.refine.pointer_typestate.entry(location).or_default().last_pointee = Pointee::Known(value);
+        } else {
+            panic!("Can't write to pointer that originated from something other than an OpId");
+        }
+    }
+
+    fn get_pointee(&self, base: ConstraintValue, offset: ConstraintValue, expected_len: usize) -> Pointee {
+        assert!(offset == ConstraintValue::from("0".to_string()), "can't load from a non-zero offset in an allocation");
+
+        if let ConstraintValue::Op(location) = base {
+            self.refine.pointer_typestate
+                .get(&location)
+                .map(|ts| {
+                    if let Pointee::Known(op) = ts.last_pointee {
+                        let ty = self.type_of(op);
+                        let len = self.size_of(&ty);
+                        assert_eq!(len, expected_len, "expected different length when getting pointee");
+                    }
+
+                    ts.last_pointee
+                })
+                .unwrap_or_default()
+        } else {
+            Pointee::None
+        }
+    }
+
     pub fn refine_func(&mut self, func_ref: &FunctionRef, tp: &impl TypeProvider) {
         if let FunctionRef::Id(id) = func_ref {
             if self.refine.conditions.get(id).is_some() { return; }
@@ -772,13 +807,8 @@ impl Driver {
                     let origin = self.origin_of(&location.into(), &constraints).expect("can't load from pointer of unknown origin");
                     match origin {
                         ConstraintValueOrigin::Pointer { base, offset, .. } => {
-                            assert!(offset == &ConstraintValue::from("0".to_string()), "can't store into a non-zero offset in an allocation");
-
-                            if let &ConstraintValue::Op(location) = base {
-                                self.refine.pointer_typestate.entry(location).or_default().last_pointee = Pointee::Known(value);
-                            } else {
-                                panic!("Can't store into pointer that originated from anything but an OpId");
-                            }
+                            let (base, offset) = (base.clone(), offset.clone());
+                            self.add_pointer_write(base, offset, value);
                         }
                     };
                 },
@@ -786,16 +816,10 @@ impl Driver {
                     let origin = self.origin_of(&location.into(), &constraints).expect("can't load from pointer of unknown origin");
                     let pointee = match origin {
                         ConstraintValueOrigin::Pointer { base, offset, .. } => {
-                            assert!(offset == &ConstraintValue::from("0".to_string()), "can't load from a non-zero offset in an allocation");
-
-                            if let &ConstraintValue::Op(location) = base {
-                                self.refine.pointer_typestate
-                                    .get(&location)
-                                    .map(|ts| ts.last_pointee)
-                                    .unwrap_or_default()
-                            } else {
-                                Pointee::None
-                            }
+                            let (base, offset) = (base.clone(), offset.clone());
+                            let pointee_ty = self.type_of(location).deref().unwrap().ty;
+                            let expected_len = self.size_of(&pointee_ty);
+                            self.get_pointee(base, offset, expected_len)
                         }
                     };
                     match pointee {
@@ -822,16 +846,17 @@ impl Driver {
                     );
                 }
                 &Instr::AddressOfStatic(statik) => {
-                    // Static variables are not uninitialized, but we can't be sure what their values are
-                    self.refine.pointer_typestate.entry(op).or_default().last_pointee = Pointee::Unknown;
-
                     let ty = self.code.mir_code.statics[statik].ty();
-                    let len = self.size_of(&ty).to_string();
+                    let len = self.size_of(&ty);
+
+                    // Static variables are not uninitialized, but we can't be sure what their values are
+                    self.set_unknown_pointee(op, len);
+
                     self.start_constraints(op);
                     constraints.insert(
                         Constraint::OriginatesFrom(
                             op.into(),
-                            ConstraintValueOrigin::new_pointer(op, len)
+                            ConstraintValueOrigin::new_pointer(op, len.to_string())
                         )
                     );
                 },
