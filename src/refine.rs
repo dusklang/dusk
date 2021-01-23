@@ -843,6 +843,18 @@ impl Driver {
                             if let Some(origin) = self.origin_of(&val.into(), &constraints) {
                                 let origin = origin.clone();
                                 self.start_constraints(op);
+                                match &origin {
+                                    ConstraintValueOrigin::Pointer { offset, len, .. } => {
+                                        let (lo, hi) = self.get_int_range(width, is_signed);
+                                        constraints.insert(Constraint::Lte(lo.into(), op.into()));
+                                        constraints.insert(
+                                            Constraint::Lte(
+                                                op.into(),
+                                                ConstraintValue::from(hi) - len.clone() + offset.clone(),
+                                            )
+                                        );
+                                    }
+                                }
                                 constraints.insert(Constraint::OriginatesFrom(op.into(), origin));
                             }
                         },
