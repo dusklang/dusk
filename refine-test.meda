@@ -23,12 +23,10 @@ fn main() {
     buf := malloc(100) as i32 *mut
 
     buf_addr :: buf as usize
-    buf = (buf_addr + 1) as i32 *mut
-    *buf = 12
-    *((buf_addr + 5) as i32 *mut) = 100
+    *((buf_addr + 5 - 4) as i32 *mut) = 12
     *((buf_addr + 10) as i32 *mut) = 100
     *((buf_addr + 96) as i32 *mut) = 100
-    var := I32_MAX - 12 + *buf
+    var := I32_MAX - 12 + *((buf_addr + 1) as i32*)
     reinterpreted_buf := buf as usize as i32 *mut
     return
 }
