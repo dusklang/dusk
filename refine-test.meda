@@ -18,6 +18,8 @@ fn add(a: i32, b: i32): i32 {
     a + b
 }
 
+my_static := 2
+
 fn main() {
     var := add(I32_MAX - 4, 4) + add_four(-4)
     buf := malloc(100) as i32 *mut

@@ -452,8 +452,8 @@ impl Driver {
                 writeln!(f, "%bb{}:", i)?;
                 let block = &self.code.blocks[func.blocks[i]];
                 
-                for &op in &block.ops {
-                    let instr = self.code.ops[op].as_mir_instr().unwrap();
+                for &op_id in &block.ops {
+                    let instr = self.code.ops[op_id].as_mir_instr().unwrap();
                     write!(f, "    ")?;
                     macro_rules! write_args {
                         ($args:expr) => {{
@@ -474,43 +474,43 @@ impl Driver {
                         }}
                     }
                     match instr {
-                        Instr::Alloca(ty) => writeln!(f, "%{} = alloca {:?}", i, ty)?,
+                        Instr::Alloca(ty) => writeln!(f, "%{} = alloca {:?}", op_id.index(), ty)?,
                         Instr::Br(block) => writeln!(f, "br %bb{}", block.index())?,
                         &Instr::CondBr { condition, true_bb, false_bb }
                             => writeln!(f, "condbr %{}, %bb{}, %bb{}", condition.index(), true_bb.index(), false_bb.index())?,
                         &Instr::Call { ref arguments, func: callee } => {
-                            write!(f, "%{} = call `{}`", i, self.fn_name(self.code.mir_code.functions[callee].name))?;
+                            write!(f, "%{} = call `{}`", op_id.index(), self.fn_name(self.code.mir_code.functions[callee].name))?;
                             write_args!(arguments)?
                         },
                         Instr::Const(konst) => {
-                            writeln!(f, "%{} = {}", i, self.fmt_const(konst))?;
+                            writeln!(f, "%{} = {}", op_id.index(), self.fmt_const(konst))?;
                         },
                         Instr::Intrinsic { arguments, intr, .. } => {
-                            write!(f, "%{} = intrinsic `{}`", i, intr.name())?;
+                            write!(f, "%{} = intrinsic `{}`", op_id.index(), intr.name())?;
                             write_args!(arguments)?
                         },
                         &Instr::Pointer { op, is_mut } => {
-                            write!(f, "%{} = %{} *", i, op.index())?;
+                            write!(f, "%{} = %{} *", op_id.index(), op.index())?;
                             if is_mut {
                                 writeln!(f, "mut")?
                             } else {
                                 writeln!(f)?
                             }
                         }
-                        Instr::Load(location) => writeln!(f, "%{} = load %{}", i, location.index())?,
-                        Instr::LogicalNot(op) => writeln!(f, "%{} = not %{}", i, op.index())?,
+                        Instr::Load(location) => writeln!(f, "%{} = load %{}", op_id.index(), location.index())?,
+                        Instr::LogicalNot(op) => writeln!(f, "%{} = not %{}", op_id.index(), op.index())?,
                         Instr::Ret(val) => writeln!(f,  "return %{}", val.index())?,
                         Instr::Store { location, value } => writeln!(f, "store %{} in %{}", value.index(), location.index())?,
-                        Instr::AddressOfStatic(statik) => writeln!(f, "%{} = address of %static{}", i, statik.index())?,
-                        &Instr::Reinterpret(val, ref ty) => writeln!(f, "%{} = reinterpret %{} as {:?}", i, val.index(), ty)?,
-                        &Instr::SignExtend(val, ref ty) => writeln!(f, "%{} = sign-extend %{} as {:?}", i, val.index(), ty)?,
-                        &Instr::ZeroExtend(val, ref ty) => writeln!(f, "%{} = zero-extend %{} as {:?}", i, val.index(), ty)?,
-                        &Instr::Truncate(val, ref ty) => writeln!(f, "%{} = truncate %{} as {:?}", i, val.index(), ty)?,
-                        &Instr::FloatCast(val, ref ty) => writeln!(f, "%{} = floatcast %{} as {:?}", i, val.index(), ty)?,
-                        &Instr::IntToFloat(val, ref ty) => writeln!(f, "%{} = inttofloat %{} as {:?}", i, val.index(), ty)?,
-                        &Instr::FloatToInt(val, ref ty) => writeln!(f, "%{} = floattoint %{} as {:?}", i, val.index(), ty)?,
+                        Instr::AddressOfStatic(statik) => writeln!(f, "%{} = address of %static{}", op_id.index(), statik.index())?,
+                        &Instr::Reinterpret(val, ref ty) => writeln!(f, "%{} = reinterpret %{} as {:?}", op_id.index(), val.index(), ty)?,
+                        &Instr::SignExtend(val, ref ty) => writeln!(f, "%{} = sign-extend %{} as {:?}", op_id.index(), val.index(), ty)?,
+                        &Instr::ZeroExtend(val, ref ty) => writeln!(f, "%{} = zero-extend %{} as {:?}", op_id.index(), val.index(), ty)?,
+                        &Instr::Truncate(val, ref ty) => writeln!(f, "%{} = truncate %{} as {:?}", op_id.index(), val.index(), ty)?,
+                        &Instr::FloatCast(val, ref ty) => writeln!(f, "%{} = floatcast %{} as {:?}", op_id.index(), val.index(), ty)?,
+                        &Instr::IntToFloat(val, ref ty) => writeln!(f, "%{} = inttofloat %{} as {:?}", op_id.index(), val.index(), ty)?,
+                        &Instr::FloatToInt(val, ref ty) => writeln!(f, "%{} = floattoint %{} as {:?}", op_id.index(), val.index(), ty)?,
                         &Instr::Struct { ref fields, id } => {
-                            write!(f, "%{} = define struct{} {{ ", i, id.index())?;
+                            write!(f, "%{} = define struct{} {{ ", op_id.index(), id.index())?;
                             for i in 0..fields.len() {
                                 write!(f, "%{}", fields[i].index())?;
                                 if i < (fields.len() - 1) {
@@ -521,7 +521,7 @@ impl Driver {
                             writeln!(f, "}}")?;
                         },
                         &Instr::StructLit { ref fields, id } => {
-                            write!(f, "%{} = literal struct{} {{ ", i, id.index())?;
+                            write!(f, "%{} = literal struct{} {{ ", op_id.index(), id.index())?;
                             for i in 0..fields.len() {
                                 write!(f, "%{}", fields[i].index())?;
                                 if i < (fields.len() - 1) {
@@ -531,9 +531,9 @@ impl Driver {
                             }
                             writeln!(f, "}}")?;
                         },
-                        &Instr::DirectFieldAccess { val, index } => writeln!(f, "%{} = %{}.field{}", i, val.index(), index)?,
-                        &Instr::IndirectFieldAccess { val, index } => writeln!(f, "%{} = &(*%{}).field{}", i, val.index(), index)?,
-                        Instr::Parameter(_) => panic!("unexpected parameter!"),
+                        &Instr::DirectFieldAccess { val, index } => writeln!(f, "%{} = %{}.field{}", op_id.index(), val.index(), index)?,
+                        &Instr::IndirectFieldAccess { val, index } => writeln!(f, "%{} = &(*%{}).field{}", op_id.index(), val.index(), index)?,
+                        Instr::Parameter(_) => {},
                         Instr::Void => panic!("unexpected void!"),
                     };
                 }
