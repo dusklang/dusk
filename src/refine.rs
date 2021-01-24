@@ -633,6 +633,33 @@ impl Driver {
         }
     }
 
+    fn propagate_ptr_origin_through_add(&self, solver: &mut Solver<Parser>, func_name: Option<Sym>, constraints: &mut HashSet<Constraint>, ptr_origin: ConstraintValueOrigin, scalar: ConstraintValue, op: OpId) {
+        match ptr_origin {
+            ConstraintValueOrigin::Pointer { base, offset, len } => {
+                let sum = offset + scalar;
+                if self.check_conditions(
+                    solver,
+                    func_name,
+                    vec![
+                        Constraint::Lte(sum.clone(), len.clone())
+                    ],
+                    &constraints,
+                ).is_ok() {
+                    constraints.insert(
+                        Constraint::OriginatesFrom(
+                            op.into(),
+                            ConstraintValueOrigin::Pointer {
+                                base,
+                                offset: sum,
+                                len: len.clone()
+                            }
+                        )
+                    );
+                }
+            }
+        }
+    }
+
     pub fn refine_func(&mut self, func_ref: &FunctionRef, tp: &impl TypeProvider) {
         if let FunctionRef::Id(id) = func_ref {
             if self.refine.conditions.get(id).is_some() { return; }
@@ -745,31 +772,16 @@ impl Driver {
                                         &constraints,
                                     ).unwrap();
                                     constraints.insert(Constraint::Eq(op.into(), sum));
-                                    if let Some(origin) = self.origin_of(&a.into(), &constraints) {
-                                        match origin {
-                                            ConstraintValueOrigin::Pointer { base, offset, len } => {
-                                                let sum = offset.clone() + ConstraintValue::from(b);
-                                                if self.check_conditions(
-                                                    &mut solver,
-                                                    func_name,
-                                                    vec![
-                                                        Constraint::Lte(sum.clone(), len.clone())
-                                                    ],
-                                                    &constraints,
-                                                ).is_ok() {
-                                                    let (base, len) = (base.clone(), len.clone());
-                                                    constraints.insert(
-                                                        Constraint::OriginatesFrom(
-                                                            op.into(),
-                                                            ConstraintValueOrigin::Pointer {
-                                                                base,
-                                                                offset: sum,
-                                                                len: len.clone()
-                                                            }
-                                                        )
-                                                    );
-                                                }
-                                            }
+                                    let a_origin = self.origin_of(&a.into(), &constraints).cloned();
+                                    let b_origin = self.origin_of(&b.into(), &constraints).cloned();
+                                    let a_origin_ptr = matches!(a_origin, Some(ConstraintValueOrigin::Pointer { .. }));
+                                    let b_origin_ptr = matches!(b_origin, Some(ConstraintValueOrigin::Pointer { .. }));
+                                    if a_origin_ptr ^ b_origin_ptr {
+                                        assert!(!is_signed);
+                                        if a_origin_ptr {
+                                            self.propagate_ptr_origin_through_add(&mut solver, func_name, &mut constraints, a_origin.unwrap(), b.into(), op);
+                                        } else {
+                                            self.propagate_ptr_origin_through_add(&mut solver, func_name, &mut constraints, b_origin.unwrap(), a.into(), op);
                                         }
                                     }
                                 },
@@ -797,6 +809,7 @@ impl Driver {
                                     if let Some(origin) = self.origin_of(&a.into(), &constraints) {
                                         match origin {
                                             ConstraintValueOrigin::Pointer { base, offset, len } => {
+                                                assert!(!is_signed);
                                                 let diff = offset.clone() - ConstraintValue::from(b);
                                                 if self.check_conditions(
                                                     &mut solver,
