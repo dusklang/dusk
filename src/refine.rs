@@ -45,18 +45,19 @@ struct Conditions {
 
 #[derive(Copy, Clone)]
 enum Pointee {
-    None,
     Unknown,
     Known(OpId),
 }
 
-impl Default for Pointee {
-    fn default() -> Self { Pointee::None }
+struct PointeeRegion {
+    pointee: Pointee,
+    offset: ConstraintValue,
+    len: ConstraintValue,
 }
 
 #[derive(Default)]
 struct PointerTypestate {
-    last_pointee: Pointee,
+    regions: Vec<PointeeRegion>,
 }
 
 #[derive(Default)]
@@ -538,38 +539,97 @@ impl Driver {
         }
     }
 
-    fn set_unknown_pointee(&mut self, pointer: OpId, _len: usize) {
-        self.refine.pointer_typestate.entry(pointer).or_default().last_pointee = Pointee::Unknown;
+    /// NOTE: clears typestate regions for the entire allocation
+    fn set_unknown_pointee(&mut self, pointer: OpId, len: usize) {
+        let ts = self.refine.pointer_typestate.entry(pointer).or_default();
+        ts.regions.clear();
+        ts.regions.push(
+            PointeeRegion {
+                pointee: Pointee::Unknown,
+                offset: "0".to_string().into(),
+                len: len.to_string().into(),
+            }
+        );
     }
 
-    fn add_pointer_write(&mut self, base: ConstraintValue, offset: ConstraintValue, value: OpId) {
-        assert!(offset == ConstraintValue::from("0".to_string()), "can't store into a non-zero offset in an allocation");
-
+    fn add_pointer_write(&mut self, solver: &mut Solver<Parser>, func_name: Option<Sym>, constraints: &HashSet<Constraint>, base: ConstraintValue, offset: ConstraintValue, value: OpId) {
         if let ConstraintValue::Op(location) = base {
-            self.refine.pointer_typestate.entry(location).or_default().last_pointee = Pointee::Known(value);
+            let ty = self.type_of(value);
+            let len = ConstraintValue::from(self.size_of(&ty).to_string());
+            let mut regions = std::mem::replace(
+                &mut self.refine.pointer_typestate.entry(location).or_default().regions,
+                Vec::new(),
+            );
+            let end = offset.clone() + len.clone();
+            let one = ConstraintValue::from("1".to_string());
+            regions.retain(|region| {
+                let region_end = region.offset.clone() + region.len.clone();
+
+                let left_side_in_range = self.check_conditions(
+                    solver,
+                    func_name,
+                    vec![
+                        Constraint::Lte(offset.clone(), region.offset.clone()),
+                        // TODO: add a Constraint::Lt variant to avoid this nonsense
+                        Constraint::Lte(region.offset.clone() + one.clone(), end.clone())
+                    ],
+                    constraints
+                ).is_ok();
+                let right_side_in_range = self.check_conditions(
+                    solver,
+                    func_name,
+                    vec![
+                        // TODO: add a Constraint::Lt variant to avoid this nonsense
+                        Constraint::Lte(offset.clone(), region_end.clone() - one.clone()),
+                        Constraint::Lte(region_end, end.clone()),
+                    ],
+                    constraints
+                ).is_ok();
+
+                if left_side_in_range ^ right_side_in_range {
+                    panic!("can't write to partially-aliased section of pointer");
+                }
+
+                !(left_side_in_range && right_side_in_range)
+            });
+            regions.push(
+                PointeeRegion {
+                    pointee: Pointee::Known(value),
+                    offset,
+                    len,
+                }
+            );
+            self.refine.pointer_typestate.get_mut(&location).unwrap().regions = regions;
         } else {
             panic!("Can't write to pointer that originated from something other than an OpId");
         }
     }
 
-    fn get_pointee(&self, base: ConstraintValue, offset: ConstraintValue, expected_len: usize) -> Pointee {
-        assert!(offset == ConstraintValue::from("0".to_string()), "can't load from a non-zero offset in an allocation");
-
+    fn get_pointee(&self, solver: &mut Solver<Parser>, func_name: Option<Sym>, constraints: &HashSet<Constraint>, base: ConstraintValue, offset: ConstraintValue, expected_len: usize) -> Option<Pointee> {
         if let ConstraintValue::Op(location) = base {
             self.refine.pointer_typestate
                 .get(&location)
                 .map(|ts| {
-                    if let Pointee::Known(op) = ts.last_pointee {
-                        let ty = self.type_of(op);
-                        let len = self.size_of(&ty);
-                        assert_eq!(len, expected_len, "expected different length when getting pointee");
-                    }
+                    for region in &ts.regions {
+                        let matches = self.check_conditions(
+                            solver,
+                            func_name,
+                            vec![
+                                Constraint::Eq(offset.clone(), region.offset.clone()),
+                                Constraint::Eq(region.len.clone(), expected_len.to_string().into()),
+                            ],
+                            constraints
+                        ).is_ok();
 
-                    ts.last_pointee
+                        if matches {
+                            return Some(region.pointee);
+                        }
+                    }
+                    None
                 })
                 .unwrap_or_default()
         } else {
-            Pointee::None
+            None
         }
     }
 
@@ -808,7 +868,7 @@ impl Driver {
                     match origin {
                         ConstraintValueOrigin::Pointer { base, offset, .. } => {
                             let (base, offset) = (base.clone(), offset.clone());
-                            self.add_pointer_write(base, offset, value);
+                            self.add_pointer_write(&mut solver, func_name, &constraints, base, offset, value);
                         }
                     };
                 },
@@ -819,13 +879,13 @@ impl Driver {
                             let (base, offset) = (base.clone(), offset.clone());
                             let pointee_ty = self.type_of(location).deref().unwrap().ty;
                             let expected_len = self.size_of(&pointee_ty);
-                            self.get_pointee(base, offset, expected_len)
+                            self.get_pointee(&mut solver, func_name, &constraints, base, offset, expected_len)
                         }
                     };
                     match pointee {
-                        Pointee::None => panic!("can't read from uninitialized memory!"),
-                        Pointee::Unknown => {},
-                        Pointee::Known(pointee) => {
+                        None => panic!("can't read from uninitialized memory!"),
+                        Some(Pointee::Unknown) => {},
+                        Some(Pointee::Known(pointee)) => {
                             self.start_constraints(op);
                             constraints = constraints.into_iter().flat_map(|constraint| {
                                 let mut res: ArrayVec<[Constraint; 2]> = ArrayVec::new();

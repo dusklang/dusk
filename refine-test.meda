@@ -22,7 +22,12 @@ fn main() {
     var := add(I32_MAX - 4, 4) + add_four(-4)
     buf := malloc(100) as i32 *mut
 
-    buf = ((buf as usize) + 1) as i32 *mut
+    buf_addr :: buf as usize
+    buf = (buf_addr + 1) as i32 *mut
+    *buf = 12
+    *((buf_addr + 5) as i32 *mut) = 100
+    *((buf_addr + 10) as i32 *mut) = 100
+    *((buf_addr + 96) as i32 *mut) = 100
     var := I32_MAX - 12 + *buf
     reinterpreted_buf := buf as usize as i32 *mut
     return
