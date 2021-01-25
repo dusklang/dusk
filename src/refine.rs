@@ -101,6 +101,7 @@ enum ConstraintValue {
     Neg(Box<ConstraintValue>),
     Parameter { index: usize, },
     ReturnValue,
+    FieldAccess { base: Box<ConstraintValue>, field_index: usize },
 }
 
 impl ConstraintValue {
@@ -119,6 +120,7 @@ impl ConstraintValue {
                     Box::new(r.replace(key, value)),
                 ),
                 ConstraintValue::Neg(val) => ConstraintValue::Neg(Box::new(val.replace(key, value))),
+                &ConstraintValue::FieldAccess { ref base, field_index } => ConstraintValue::FieldAccess { base: Box::new(base.replace(key, value)), field_index },
             }
         }
     }
@@ -134,6 +136,7 @@ impl ConstraintValue {
             },
             ConstraintValue::Neg(val) => val.get_involved_ops(),
             ConstraintValue::Parameter { .. } => panic!("can't get involved ops of a parameter, which is supposed to be substituted for an Op"),
+            ConstraintValue::FieldAccess { base , .. } => base.get_involved_ops(),
         }
     }
 }
@@ -437,6 +440,7 @@ impl Driver {
             ConstraintValue::Neg(val) => write!(f, "(- {})", self.display_constraint_value(val))?,
             ConstraintValue::ReturnValue => write!(f, "return_value")?,
             ConstraintValue::Parameter { .. } => panic!("Can't print parameter, which must be replaced with an Op"),
+            ConstraintValue::FieldAccess { .. } => panic!("Can't print field access, which must be replaced with an Op"),
         }
         Ok(())
     }
