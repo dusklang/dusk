@@ -1037,6 +1037,19 @@ impl Driver {
                         (_, _) => panic!("Unsupported reinterpret cast"),
                     }
                 },
+                Instr::StructLit { fields, .. } => {
+                    for (field_index, &field) in fields.iter().enumerate() {
+                        constraints.insert(
+                            Constraint::Eq(
+                                field.into(),
+                                ConstraintValue::FieldAccess {
+                                    base: Box::new(op.into()),
+                                    field_index,
+                                }
+                            )
+                        );
+                    }
+                },
                 _ => {},
             }
         }

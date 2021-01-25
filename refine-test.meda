@@ -20,6 +20,11 @@ fn add(a: i32, b: i32): i32 {
 
 my_static := 2
 
+MyStruct :: struct {
+    a: i32
+    b: i32
+}
+
 fn main() {
     var := add(I32_MAX - 4, 4) + add_four(-4)
     buf := malloc(100) as i32 *mut
@@ -30,5 +35,8 @@ fn main() {
     *((buf_addr + 96) as i32 *mut) = 100
     var := I32_MAX - 12 + *((buf_addr + 1) as i32*)
     reinterpreted_buf := buf as usize as i32 *mut
+
+    strukt :: MyStruct { a: 12, b: 13 }
+
     return
 }
