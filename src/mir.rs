@@ -451,8 +451,16 @@ impl Driver {
             for i in 0..func.blocks.len() {
                 writeln!(f, "%bb{}:", i)?;
                 let block = &self.code.blocks[func.blocks[i]];
+                let mut start = 0;
+                for (i, &op) in block.ops.iter().enumerate() {
+                    let instr = self.code.ops[op].as_mir_instr().unwrap();
+                    if !matches!(instr, Instr::Parameter(_)) {
+                        start = i;
+                        break;
+                    }
+                }
                 
-                for &op_id in &block.ops {
+                for &op_id in &block.ops[start..] {
                     let instr = self.code.ops[op_id].as_mir_instr().unwrap();
                     write!(f, "    ")?;
                     macro_rules! write_args {
