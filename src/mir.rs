@@ -449,7 +449,8 @@ impl Driver {
             }
             writeln!(f, "): {:?} {{", func.ret_ty)?;
             for i in 0..func.blocks.len() {
-                writeln!(f, "%bb{}:", i)?;
+                let block_id = func.blocks[i];
+                writeln!(f, "%bb{}:", block_id.index())?;
                 let block = &self.code.blocks[func.blocks[i]];
                 let mut start = 0;
                 for (i, &op) in block.ops.iter().enumerate() {
