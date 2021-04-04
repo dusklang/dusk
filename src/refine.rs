@@ -710,7 +710,6 @@ impl Driver {
             let op = block.ops[i];
             let constraints = self.constrain_op(op);
             self.check_constraints(&mut rs, constraints.requirements.clone()).unwrap();
-            rs.constraints.extend(constraints.requirements);
             rs.constraints.extend(constraints.guarantees);
         }
     }
