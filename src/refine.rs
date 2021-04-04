@@ -37,6 +37,7 @@ impl<'a> ModelParser<String, String, String, & 'a str> for Parser {
     }
 }
 
+#[derive(Default, Debug)]
 struct Constraints {
     requirements: Vec<Constraint>,
     guarantees: Vec<Constraint>,
@@ -439,20 +440,21 @@ impl Driver {
         write!(w, ")")
     }
 
+    fn assign_name_if_none(&mut self, op: OpId) {
+        let name_gen = &mut self.refine.name_gen;
+        self.refine.names.entry(op).or_insert_with(|| name_gen.next().unwrap());
+    }
+
     fn check_constraints(&mut self, rs: &mut RefineSession, constraints: Vec<Constraint>) -> Result<(), Vec<(String, Vec<(String, String)>, String, String)>> {
         for condition in constraints {
             let mut variables = HashSet::new();
-            let mut relevant_constraints = HashSet::new();
             variables.extend(condition.get_involved_ops());
 
+            let mut relevant_constraints = HashSet::new();
+
             // Assign names to variables that don't have them
-            let mut keys = HashSet::new();
-            keys.extend(self.refine.names.keys());
-            let keys: Vec<OpId> = variables.difference(&keys).copied().collect();
-            for key in keys {
-                let name = self.refine.name_gen.next().unwrap();
-                let prior_value = self.refine.names.insert(key, name);
-                assert!(prior_value.is_none());
+            for op in variables.iter().copied() {
+                self.assign_name_if_none(op);
             }
 
             loop {
@@ -618,6 +620,18 @@ impl Driver {
         Constraints { requirements, guarantees}
     }
 
+    #[allow(dead_code)]
+    fn constrain_block(&self, block_id: BlockId) -> Constraints {
+        let mut constraints = Constraints::default();
+        let block = &self.code.blocks[block_id];
+        for op in block.ops.iter().copied() {
+            let op_constraints = self.constrain_op(op);
+            constraints.requirements.extend(op_constraints.requirements);
+            constraints.guarantees.extend(op_constraints.guarantees);
+        }
+        constraints
+    }
+
     pub fn refine_func(&mut self, func_ref: &FunctionRef, tp: &impl TypeProvider) {
         if let FunctionRef::Id(id) = func_ref {
             if self.refine.constraints.get(id).is_some() { return; }
@@ -672,6 +686,25 @@ impl Driver {
             constraints: requirements.into_iter().map(replace_parameters).collect(),
         };
 
+        println!("FUNCTION: {}", self.fn_name(func_name));
+        let block_constraints = self.constrain_block(block_id);
+        println!("Requirements:");
+        for constraint in block_constraints.requirements {
+            for op in constraint.get_involved_ops() {
+                self.assign_name_if_none(op);
+            }
+            println!("    {}", self.display_constraint(&constraint));
+        }
+        println!("\nGuarantees:");
+        for constraint in block_constraints.guarantees {
+            for op in constraint.get_involved_ops() {
+                self.assign_name_if_none(op);
+            }
+            println!("    {}", self.display_constraint(&constraint));
+        }
+        println!("\n");
+
+        let block = &self.code.blocks[block_id];
         for i in 0..block.ops.len() {
             let block = &self.code.blocks[block_id];
             let op = block.ops[i];
