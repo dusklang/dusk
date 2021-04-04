@@ -924,7 +924,7 @@ impl Driver {
                         Some(Pointee::Known(pointee)) => {
                             self.start_constraints(op);
                             rs.constraints = rs.constraints.into_iter().flat_map(|constraint| {
-                                let mut res: ArrayVec<[Constraint; 2]> = ArrayVec::new();
+                                let mut res = ArrayVec::<Constraint, 2>::new();
                                 if constraint.get_involved_ops().contains(&pointee) {
                                     res.push(constraint.replace(&ConstraintValue::Op(pointee), op));
                                 }

@@ -16,8 +16,8 @@ bitflags! {
 }
 
 impl BuiltinTraits {
-    pub fn names(self) -> ArrayVec<[&'static str; 4]> {
-        let mut names = ArrayVec::<[&'static str; 4]>::new();
+    pub fn names(self) -> ArrayVec<&'static str, 4> {
+        let mut names = ArrayVec::new();
         if self.contains(BuiltinTraits::INT) {
             names.push("ExpressibleByIntegerLiteral");
         }
