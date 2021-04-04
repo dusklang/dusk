@@ -12,7 +12,7 @@ lto = true
 unicode-segmentation = { git = "https://github.com/unicode-rs/unicode-segmentation" }
 string-interner = "0.12.1"
 bitflags = "1.2.1"
-smallvec = "1.5.1"
+smallvec = { version = "1.6.1", features = ["const_generics"] }
 arrayvec = "0.7.0"
 webbrowser = "0.5.2"
 clap = "3.0.0-beta.1"
