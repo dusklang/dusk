@@ -211,7 +211,7 @@ impl Driver {
                     }
                 }
             },
-            _ => panic!("Can only have preconditions on computed decls"),
+            _ => panic!("Can only have requirements clause on computed decls"),
         }
     }
     // Returns the overloads for a declref, if they are known (they won't be if it's an unresolved member ref)
@@ -258,12 +258,12 @@ impl Driver {
 
                     break;
                 },
-                Namespace::Precondition(ns_id) => {
+                Namespace::Requirement(ns_id) => {
                     let condition_ns = &self.code.hir_code.condition_ns[ns_id];
                     self.find_overloads_in_function_parameters(decl_ref, condition_ns.func, &mut overloads);
                     condition_ns.parent
                 },
-                Namespace::Postcondition(ns_id) => {
+                Namespace::Guarantee(ns_id) => {
                     let condition_ns = &self.code.hir_code.condition_ns[ns_id];
                     self.find_overloads_in_function_parameters(decl_ref, condition_ns.func, &mut overloads);
                     if decl_ref.name == self.hir.return_value_sym && overloads.is_empty() {
@@ -297,7 +297,7 @@ impl Driver {
                 hir::Decl::ReturnValue => {
                     let decl_ref = &self.code.hir_code.decl_refs[decl_ref_id];
                     match decl_ref.namespace {
-                        Namespace::Postcondition(condition_ns_id) => {
+                        Namespace::Guarantee(condition_ns_id) => {
                             let func = self.code.hir_code.condition_ns[condition_ns_id].func;
                             self.tir.graph.add_type3_dep(id, di!(func));
                         },

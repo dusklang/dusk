@@ -172,7 +172,7 @@ impl TypeProvider for RealTypeProvider {
             if let Some(decl_ref) = decl_ref {
                 let decl_ref = &d.code.hir_code.decl_refs[decl_ref];
                 match decl_ref.namespace {
-                    Namespace::Postcondition(ns) if decl_ref.name == d.hir.return_value_sym => {
+                    Namespace::Guarantee(ns) if decl_ref.name == d.hir.return_value_sym => {
                         let func = d.code.hir_code.condition_ns[ns].func;
                         return self.fetch_decl_type(d, func, None);
                     }
@@ -379,7 +379,7 @@ impl<'base> TypeProvider for MockTypeProvider<'base> {
             if let Some(decl_ref) = decl_ref {
                 let decl_ref = &d.code.hir_code.decl_refs[decl_ref];
                 match decl_ref.namespace {
-                    Namespace::Postcondition(ns) if decl_ref.name == d.hir.return_value_sym => {
+                    Namespace::Guarantee(ns) if decl_ref.name == d.hir.return_value_sym => {
                         let func = d.code.hir_code.condition_ns[ns].func;
                         return self.fetch_decl_type(d, func, None);
                     }

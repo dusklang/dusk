@@ -3,17 +3,17 @@
 I32_MIN :: -2147483647 - 1
 I32_MAX :: 2147483647
 
-@precondition(a <= I32_MAX - 4)
-@postcondition(return_value == a + 4)
+@requires(a <= I32_MAX - 4)
+@guarantees(return_value == a + 4)
 fn add_four(a: i32): i32 {
     four := 756
     four = 4
     a + four
 }
 
-@precondition(a + b <= I32_MAX)
-@precondition(a + b >= I32_MIN)
-@postcondition(return_value == a + b)
+@requires(a + b <= I32_MAX)
+@requires(a + b >= I32_MIN)
+@guarantees(return_value == a + b)
 fn add(a: i32, b: i32): i32 {
     a + b
 }

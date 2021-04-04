@@ -39,8 +39,8 @@ impl<'a> ModelParser<String, String, String, & 'a str> for Parser {
 }
 
 struct Conditions {
-    preconditions: Vec<Constraint>,
-    postconditions: Vec<Constraint>,
+    requirements: Vec<Constraint>,
+    guarantees: Vec<Constraint>,
 }
 
 #[derive(Copy, Clone)]
@@ -673,8 +673,8 @@ impl Driver {
         self.check_no_loops(func);
         assert_eq!(func.blocks.len(), 1, "Function has more than one block, which isn't yet supported");
 
-        let mut preconditions = Vec::new();
-        let mut postconditions = Vec::new();
+        let mut requirements = Vec::new();
+        let mut guarantees = Vec::new();
         let block_id = func.blocks[0];
         let block = &self.code.blocks[block_id];
         let num_params = self.code.num_parameters(func);
@@ -683,10 +683,10 @@ impl Driver {
                 for attr in attributes {
                     let arg = attr.arg.expect("missing attribute argument");
                     let constraint = self.expr_to_constraint(arg, tp);
-                    if attr.attr == self.hir.precondition_sym {
-                        preconditions.push(constraint);
-                    } else if attr.attr == self.hir.postcondition_sym {
-                        postconditions.push(constraint);
+                    if attr.attr == self.hir.requires_sym {
+                        requirements.push(constraint);
+                    } else if attr.attr == self.hir.guarantees_sym {
+                        guarantees.push(constraint);
                     } else {
                         panic!("Unrecognized attribute");
                     }
@@ -698,8 +698,8 @@ impl Driver {
             self.refine.conditions.insert(
                 id,
                 Conditions {
-                    preconditions: preconditions.clone(),
-                    postconditions: postconditions.clone(),
+                    requirements: requirements.clone(),
+                    guarantees: guarantees.clone(),
                 }
             );
         }
@@ -709,12 +709,12 @@ impl Driver {
             }
             constraint
         };
-        let postconditions: HashSet<Constraint> = postconditions.into_iter().map(replace_parameters).collect();
+        let guarantees: HashSet<Constraint> = guarantees.into_iter().map(replace_parameters).collect();
         let conf = SmtConf::default_z3();
         let mut rs = RefineSession {
             solver: conf.spawn(Parser).unwrap(),
             func_name,
-            constraints: preconditions.into_iter().map(replace_parameters).collect(),
+            constraints: requirements.into_iter().map(replace_parameters).collect(),
         };
 
         for i in 0..block.ops.len() {
@@ -872,10 +872,10 @@ impl Driver {
                     }
                 },
                 &Instr::Ret(val) => {
-                    let postconditions = postconditions.iter()
+                    let guarantees = guarantees.iter()
                         .map(|condition| condition.replace(&ConstraintValue::ReturnValue, val))
                         .collect();
-                    self.check_conditions(&mut rs, postconditions).unwrap();
+                    self.check_conditions(&mut rs, guarantees).unwrap();
                 },
                 &Instr::Call { ref arguments, func } => {
                     // Borrow checker, argh...
@@ -891,10 +891,10 @@ impl Driver {
                         }
                         condition
                     };
-                    let preconditions: Vec<Constraint> = conditions.preconditions.iter().cloned().map(replace_params).collect();
-                    self.check_conditions(&mut rs, preconditions).unwrap();
-                    let postconditions = conditions.postconditions.iter().cloned().map(replace_params);
-                    for mut condition in postconditions {
+                    let requirements: Vec<Constraint> = conditions.requirements.iter().cloned().map(replace_params).collect();
+                    self.check_conditions(&mut rs, requirements).unwrap();
+                    let guarantees = conditions.guarantees.iter().cloned().map(replace_params);
+                    for mut condition in guarantees {
                         condition = condition.replace(&ConstraintValue::ReturnValue, op);
                         rs.constraints.insert(condition);
                     }

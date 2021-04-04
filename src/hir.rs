@@ -27,7 +27,7 @@ enum ScopeState {
     },
     Condition {
         ns: ConditionNsId,
-        pre_or_post: PreOrPost,
+        condition_kind: ConditionKind,
     },
 }
 
@@ -45,8 +45,8 @@ pub struct Builder {
     comp_decl_stack: Vec<CompDeclState>,
     scope_stack: Vec<ScopeState>,
 
-    pub precondition_sym: Sym,
-    pub postcondition_sym: Sym,
+    pub requires_sym: Sym,
+    pub guarantees_sym: Sym,
     pub return_value_sym: Sym,
 }
 
@@ -57,16 +57,16 @@ impl Default for Builder {
             scope_stack: Default::default(),
 
             // Note: gets initialized in Driver::initialize_hir() below
-            precondition_sym: Sym::try_from_usize((u32::MAX - 1) as usize).unwrap(),
-            postcondition_sym: Sym::try_from_usize((u32::MAX - 1) as usize).unwrap(),
+            requires_sym: Sym::try_from_usize((u32::MAX - 1) as usize).unwrap(),
+            guarantees_sym: Sym::try_from_usize((u32::MAX - 1) as usize).unwrap(),
             return_value_sym: Sym::try_from_usize((u32::MAX - 1) as usize).unwrap(),
         }
     }
 }
 
 #[derive(Debug)]
-pub enum PreOrPost {
-    Pre, Post,
+pub enum ConditionKind {
+    Requirement, Guarantee,
 }
 
 impl Driver {
@@ -77,8 +77,8 @@ impl Driver {
         let return_value_sym = self.interner.get_or_intern_static("return_value");
         self.decl(Decl::ReturnValue, return_value_sym, None, SourceRange::default());
 
-        self.hir.precondition_sym = self.interner.get_or_intern_static("precondition");
-        self.hir.postcondition_sym = self.interner.get_or_intern_static("postcondition");
+        self.hir.requires_sym = self.interner.get_or_intern_static("requires");
+        self.hir.guarantees_sym = self.interner.get_or_intern_static("guarantees");
         self.hir.return_value_sym = return_value_sym;
     }
 
@@ -198,16 +198,18 @@ impl Driver {
     pub fn begin_condition_namespace(&mut self) -> ConditionNsId {
         let parent = self.cur_namespace();
         let ns = self.code.hir_code.condition_ns.push(ConditionNs { func: DeclId::from_raw(u32::MAX), parent: Some(parent) });
-        self.hir.scope_stack.push(ScopeState::Condition { ns, pre_or_post: PreOrPost::Pre });
+        // This condition kind is just a placeholder which will be reset by each attribute. It is done this way so I can share a single
+        // condition namespace across all condition attributes on a single function.
+        self.hir.scope_stack.push(ScopeState::Condition { ns, condition_kind: ConditionKind::Requirement });
 
         ns
     }
-    pub fn set_pre_or_post(&mut self, desired_ns: ConditionNsId, desired_pre_or_post: PreOrPost) {
-        if let Some(ScopeState::Condition { ns, pre_or_post }) = self.hir.scope_stack.last_mut() {
-            assert_eq!(&*ns, &desired_ns, "tried to set pre_or_post, but the current condition scope doesn't match");
-            *pre_or_post = desired_pre_or_post;
+    pub fn set_condition_kind(&mut self, desired_ns: ConditionNsId, desired_condition_kind: ConditionKind) {
+        if let Some(ScopeState::Condition { ns, condition_kind }) = self.hir.scope_stack.last_mut() {
+            assert_eq!(&*ns, &desired_ns, "tried to set condition_kind, but the current condition scope doesn't match");
+            *condition_kind = desired_condition_kind;
         } else {
-            panic!("tried to set pre_or_post, but the top of the scope stack is not a condition namespace");
+            panic!("tried to set condition_kind, but the top of the scope stack is not a condition namespace");
         }
     }
     pub fn end_condition_namespace(&mut self, desired_ns: ConditionNsId) {
@@ -478,8 +480,8 @@ impl Driver {
                 Namespace::Imper { scope: namespace, end_offset }
             },
             ScopeState::Mod { namespace, .. } => Namespace::Mod(namespace),
-            ScopeState::Condition { ns, pre_or_post: PreOrPost::Pre } => Namespace::Precondition(ns),
-            ScopeState::Condition { ns, pre_or_post: PreOrPost::Post } => Namespace::Postcondition(ns),
+            ScopeState::Condition { ns, condition_kind: ConditionKind::Requirement } => Namespace::Requirement(ns),
+            ScopeState::Condition { ns, condition_kind: ConditionKind::Guarantee } => Namespace::Guarantee(ns),
         }
     }
     pub fn get_range(&self, id: ExprId) -> SourceRange { self.code.hir_code.source_ranges[self.code.hir_code.expr_to_items[id]].clone() }

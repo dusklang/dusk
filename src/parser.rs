@@ -7,7 +7,7 @@ use mire::ty::Type;
 use mire::source_info::{self, SourceFileId, SourceRange};
 
 use crate::driver::Driver;
-use crate::hir::PreOrPost;
+use crate::hir::ConditionKind;
 use crate::token::{TokenKind, Token};
 use crate::builder::{BinOp, UnOp, OpPlacement};
 use crate::error::Error;
@@ -514,14 +514,14 @@ impl Driver {
             &TokenKind::Ident(sym) => sym,
             _ => panic!("Unexpected token when parsing attribute"),
         };
-        let pre_or_post = if attr == self.hir.precondition_sym {
-            PreOrPost::Pre
-        } else if attr == self.hir.postcondition_sym {
-            PreOrPost::Post
+        let condition_kind = if attr == self.hir.requires_sym {
+            ConditionKind::Requirement
+        } else if attr == self.hir.guarantees_sym {
+            ConditionKind::Guarantee
         } else {
             panic!("Unrecognized attribute");
         };
-        self.set_pre_or_post(condition_ns, pre_or_post);
+        self.set_condition_kind(condition_ns, condition_kind);
         let (arg, final_tok_range) = match self.next(p).kind {
             TokenKind::LeftParen => {
                 self.next(p);
@@ -557,6 +557,9 @@ impl Driver {
             },
             TokenKind::AtSign => {
                 let mut attributes = Vec::new();
+
+                // TODO: when non-condition attributes are added, I should create this lazily the
+                // first time I encounter a condition attribute.
                 let condition_ns = self.begin_condition_namespace();
                 let decl = loop {
                     let attr = self.parse_attribute(p, condition_ns);
