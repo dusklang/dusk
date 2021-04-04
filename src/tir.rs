@@ -353,12 +353,12 @@ impl Driver {
                     level, $item,
                 );
             }}
-        };
+        }
         macro_rules! insert_expr {
             ($depvec:ident, $expr:expr) => {{
                 insert_item!($depvec, Expr { id, data: $expr, });
             }}
-        };
+        }
         macro_rules! flat_insert_item {
             ($vec:ident, $item:expr) => {{
                 assert_eq!(level, 0);

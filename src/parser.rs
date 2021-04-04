@@ -496,7 +496,7 @@ impl Driver {
                     range = source_info::concat(range, else_range);
                     Some(else_scope)
                 },
-                _ => panic!("Expected '{' or 'if' after 'else'"),
+                _ => panic!("{}", "Expected '{' or 'if' after 'else'"),
             }
         } else {
             None
