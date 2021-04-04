@@ -1,4 +1,4 @@
-// Since 2147483648 doesn't fit in i32, you can't write -2147483648. I should probably change this.
+// Since 2147483648 doesn't fit in i32, you can't write -2147483648. https://github.com/meda-lang/meda/issues/101
 // Until then:
 I32_MIN :: -2147483647 - 1
 I32_MAX :: 2147483647
