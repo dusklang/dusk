@@ -4,7 +4,6 @@ use std::iter::Iterator;
 
 use rsmt2::prelude::*;
 use rsmt2::parse::{IdentParser, ModelParser};
-use arrayvec::ArrayVec;
 use display_adapter::display_adapter;
 use string_interner::DefaultSymbol as Sym;
 
@@ -38,34 +37,16 @@ impl<'a> ModelParser<String, String, String, & 'a str> for Parser {
     }
 }
 
-struct Conditions {
+struct Constraints {
     requirements: Vec<Constraint>,
     guarantees: Vec<Constraint>,
 }
 
-#[derive(Copy, Clone)]
-enum Pointee {
-    Unknown,
-    Known(OpId),
-}
-
-struct PointeeRegion {
-    pointee: Pointee,
-    offset: ConstraintValue,
-    len: ConstraintValue,
-}
-
-#[derive(Default)]
-struct PointerTypestate {
-    regions: Vec<PointeeRegion>,
-}
-
 #[derive(Default)]
 pub struct Refine {
-    constraints: HashMap<OpId, OpConstraints>,
-    conditions: HashMap<FuncId, Conditions>,
+    names: HashMap<OpId, String>,
+    constraints: HashMap<FuncId, Constraints>,
     name_gen: NameGen,
-    pointer_typestate: HashMap<OpId, PointerTypestate>,
 }
 
 #[derive(Default)]
@@ -101,7 +82,7 @@ enum ConstraintValue {
     Neg(Box<ConstraintValue>),
     Parameter { index: usize, },
     ReturnValue,
-    FieldAccess { base: Box<ConstraintValue>, field_index: usize },
+    //FieldAccess { base: Box<ConstraintValue>, field_index: usize },
 }
 
 impl ConstraintValue {
@@ -120,7 +101,7 @@ impl ConstraintValue {
                     Box::new(r.replace(key, value)),
                 ),
                 ConstraintValue::Neg(val) => ConstraintValue::Neg(Box::new(val.replace(key, value))),
-                &ConstraintValue::FieldAccess { ref base, field_index } => ConstraintValue::FieldAccess { base: Box::new(base.replace(key, value)), field_index },
+                //&ConstraintValue::FieldAccess { ref base, field_index } => ConstraintValue::FieldAccess { base: Box::new(base.replace(key, value)), field_index },
             }
         }
     }
@@ -136,7 +117,7 @@ impl ConstraintValue {
             },
             ConstraintValue::Neg(val) => val.get_involved_ops(),
             ConstraintValue::Parameter { .. } => panic!("can't get involved ops of a parameter, which is supposed to be substituted for an Op"),
-            ConstraintValue::FieldAccess { base , .. } => base.get_involved_ops(),
+            //ConstraintValue::FieldAccess { base , .. } => base.get_involved_ops(),
         }
     }
 }
@@ -284,23 +265,6 @@ impl Constraint {
     }
 }
 
-#[derive(Debug)]
-struct OpConstraints {
-    // Name given to this op in the SMT solver
-    name: String,
-    /// All constraints involving this op
-    constraints: Vec<Constraint>,
-}
-
-impl OpConstraints {
-    fn new(name: String) -> Self {
-        OpConstraints {
-            name,
-            constraints: Vec::new(),
-        }
-    }
-}
-
 struct RefineSession {
     solver: Solver<Parser>,
     constraints: HashSet<Constraint>,
@@ -430,23 +394,17 @@ impl Driver {
         }
     }
 
-    /// Returns the generated name
-    fn start_constraints(&mut self, op: OpId) {
-        let name = self.refine.name_gen.next().unwrap();
-        self.refine.constraints.entry(op).or_insert(OpConstraints::new(name));
-    }
-
     #[display_adapter]
     fn display_constraint_value(&self, val: &ConstraintValue, f: &mut Formatter) {
         match val {
-            ConstraintValue::Op(op) => write!(f, "{}", self.refine.constraints.get(op).unwrap().name)?,
+            ConstraintValue::Op(op) => write!(f, "{}", self.refine.names.get(op).unwrap())?,
             ConstraintValue::Str(str) => write!(f, "{}", str)?,
             ConstraintValue::Add(l, r) => write!(f, "{}", self.display_bin_expr("+", l, r))?,
             ConstraintValue::Sub(l, r) => write!(f, "{}", self.display_bin_expr("-", l, r))?,
             ConstraintValue::Neg(val) => write!(f, "(- {})", self.display_constraint_value(val))?,
             ConstraintValue::ReturnValue => write!(f, "return_value")?,
             ConstraintValue::Parameter { .. } => panic!("Can't print parameter, which must be replaced with an Op"),
-            ConstraintValue::FieldAccess { .. } => panic!("Can't print field access, which must be replaced with an Op"),
+            //ConstraintValue::FieldAccess { .. } => panic!("Can't print field access, which must be replaced with an Op"),
         }
         Ok(())
     }
@@ -481,11 +439,22 @@ impl Driver {
         write!(w, ")")
     }
 
-    fn check_conditions(&self, rs: &mut RefineSession, conditions: Vec<Constraint>) -> Result<(), Vec<(String, Vec<(String, String)>, String, String)>> {
-        for condition in conditions {
+    fn check_constraints(&mut self, rs: &mut RefineSession, constraints: Vec<Constraint>) -> Result<(), Vec<(String, Vec<(String, String)>, String, String)>> {
+        for condition in constraints {
             let mut variables = HashSet::new();
             let mut relevant_constraints = HashSet::new();
             variables.extend(condition.get_involved_ops());
+
+            // Assign names to variables that don't have them
+            let mut keys = HashSet::new();
+            keys.extend(self.refine.names.keys());
+            let keys: Vec<OpId> = variables.difference(&keys).copied().collect();
+            for key in keys {
+                let name = self.refine.name_gen.next().unwrap();
+                let prior_value = self.refine.names.insert(key, name);
+                assert!(prior_value.is_none());
+            }
+
             loop {
                 let mut added_anything = false;
                 // TODO: this is probably crazy slow
@@ -507,7 +476,7 @@ impl Driver {
             rs.solver.push(1).unwrap();
             let condition_str: String = format!("\n    {}", self.display_condition_check(&condition, &relevant_constraints));
             for var in &variables {
-                rs.solver.declare_const(&self.refine.constraints.get(var).unwrap().name, "Int").unwrap();
+                rs.solver.declare_const(self.refine.names.get(var).unwrap(), "Int").unwrap();
             }
             rs.solver.assert(&condition_str).unwrap();
             let val = if rs.solver.check_sat().unwrap() {
@@ -518,9 +487,9 @@ impl Driver {
                 // Limit the returned model to just the variables that show up in the current condition
                 model.retain(|assignment| 
                     condition.get_involved_ops().iter()
-                    .map(|op| &self.refine.constraints.get(op).unwrap().name)
-                    .collect::<Vec<_>>()
-                    .contains(&&assignment.0)
+                        .map(|op| self.refine.names.get(op).unwrap())
+                        .collect::<Vec<_>>()
+                        .contains(&&assignment.0)
                 );
                 Err(model)
             } else {
@@ -534,138 +503,124 @@ impl Driver {
         Ok(())
     }
 
-    fn origin_of<'a, 'b>(&'a self, rs: &'b RefineSession, val: impl Into<ConstraintValue>) -> Option<&'b ConstraintValueOrigin> {
-        let val = val.into();
-        let mut matching = rs.constraints.iter().filter_map(|constraint| {
-            match constraint {
-                Constraint::OriginatesFrom(op_val, origin) if op_val == &val => Some(origin),
-                _ => None,
-            }
-        });
-        if let Some(origin) = matching.next() {
-            assert!(matching.next().is_none(), "can't have multiple OriginatesFrom constraints on the same operation");
-            Some(origin)
-        } else {
-            None
-        }
-    }
-
-    /// NOTE: clears typestate regions for the entire allocation
-    fn set_unknown_pointee(&mut self, pointer: OpId, len: usize) {
-        let ts = self.refine.pointer_typestate.entry(pointer).or_default();
-        ts.regions.clear();
-        ts.regions.push(
-            PointeeRegion {
-                pointee: Pointee::Unknown,
-                offset: "0".to_string().into(),
-                len: len.to_string().into(),
-            }
-        );
-    }
-
-    fn add_pointer_write(&mut self, rs: &mut RefineSession, base: ConstraintValue, offset: ConstraintValue, value: OpId) {
-        if let ConstraintValue::Op(location) = base {
-            let ty = self.type_of(value);
-            let len = ConstraintValue::from(self.size_of(&ty).to_string());
-            let mut regions = std::mem::replace(
-                &mut self.refine.pointer_typestate.entry(location).or_default().regions,
-                Vec::new(),
-            );
-            let end = offset.clone() + len.clone();
-            let one = ConstraintValue::from("1".to_string());
-            regions.retain(|region| {
-                let region_end = region.offset.clone() + region.len.clone();
-
-                let left_side_in_range = self.check_conditions(
-                    rs,
-                    vec![
-                        Constraint::Lte(offset.clone(), region.offset.clone()),
-                        // TODO: add a Constraint::Lt variant to avoid this nonsense
-                        Constraint::Lte(region.offset.clone() + one.clone(), end.clone())
-                    ],
-                ).is_ok();
-                let right_side_in_range = self.check_conditions(
-                    rs,
-                    vec![
-                        // TODO: add a Constraint::Lt variant to avoid this nonsense
-                        Constraint::Lte(offset.clone(), region_end.clone() - one.clone()),
-                        Constraint::Lte(region_end, end.clone()),
-                    ],
-                ).is_ok();
-
-                if left_side_in_range ^ right_side_in_range {
-                    panic!("can't write to partially-aliased section of pointer");
+    fn constrain_op(&self, op: OpId) -> Constraints {
+        let instr = self.code.ops[op].as_mir_instr().unwrap();
+        let mut requirements = Vec::<Constraint>::new();
+        let mut guarantees = Vec::<Constraint>::new();
+        match instr {
+            Instr::Parameter(ty) => {
+                match ty {
+                    &Type::Int { width, is_signed } => {
+                        let (lo, hi) = self.get_int_range(width, is_signed);
+                        guarantees.push(Constraint::Lte(lo.into(), op.into()));
+                        guarantees.push(Constraint::Lte(op.into(), hi.into()));
+                    },
+                    _ => {},
                 }
-
-                !(left_side_in_range && right_side_in_range)
-            });
-            regions.push(
-                PointeeRegion {
-                    pointee: Pointee::Known(value),
-                    offset,
-                    len,
-                }
-            );
-            self.refine.pointer_typestate.get_mut(&location).unwrap().regions = regions;
-        } else {
-            panic!("Can't write to pointer that originated from something other than an OpId");
-        }
-    }
-
-    fn get_pointee(&self, rs: &mut RefineSession, base: ConstraintValue, offset: ConstraintValue, expected_len: usize) -> Option<Pointee> {
-        if let ConstraintValue::Op(location) = base {
-            self.refine.pointer_typestate
-                .get(&location)
-                .map(|ts| {
-                    for region in &ts.regions {
-                        let matches = self.check_conditions(
-                            rs,
-                            vec![
-                                Constraint::Eq(offset.clone(), region.offset.clone()),
-                                Constraint::Eq(region.len.clone(), expected_len.to_string().into()),
-                            ],
-                        ).is_ok();
-
-                        if matches {
-                            return Some(region.pointee);
+            },
+            Instr::Const(konst) => {
+                match konst {
+                    Const::Int { ty, .. } => {
+                        match ty {
+                            &Type::Int { is_signed, .. } => {
+                                // TODO: this is kind of silly, but it was the path of least resistance.
+                                let val = Value::from_const(konst, self).as_big_int(is_signed);
+                                guarantees.push(Constraint::Eq(op.into(), val.to_string().into()));
+                            },
+                            unhandled => panic!("Literal with unhandled type {:?}", unhandled),
                         }
+                    },
+                    &Const::Str { id, .. } => {
+                        let len = self.code.mir_code.strings[id].as_bytes_with_nul().len().to_string();
+                        guarantees.push(
+                            Constraint::OriginatesFrom(op.into(), ConstraintValueOrigin::new_pointer(op, len))
+                        );
                     }
-                    None
-                })
-                .unwrap_or_default()
-        } else {
-            None
-        }
-    }
-
-    fn propagate_ptr_origin_through_add(&self, rs: &mut RefineSession, ptr_origin: ConstraintValueOrigin, scalar: ConstraintValue, op: OpId) {
-        match ptr_origin {
-            ConstraintValueOrigin::Pointer { base, offset, len } => {
-                let sum = offset + scalar;
-                if self.check_conditions(
-                    rs,
-                    vec![
-                        Constraint::Lte(sum.clone(), len.clone())
-                    ],
-                ).is_ok() {
-                    rs.constraints.insert(
-                        Constraint::OriginatesFrom(
-                            op.into(),
-                            ConstraintValueOrigin::Pointer {
-                                base,
-                                offset: sum,
-                                len: len.clone()
-                            }
-                        )
-                    );
+                    _ => {},
                 }
+            },
+            Instr::Intrinsic { arguments, ty, intr } => {
+                match intr {
+                    Intrinsic::Add => {
+                        assert_eq!(arguments.len(), 2);
+                        match ty {
+                            &Type::Int { width, is_signed } => {
+                                let (lo, hi) = self.get_int_range(width, is_signed);
+                                let (a, b) = (arguments[0], arguments[1]);
+                                let sum = ConstraintValue::from(a) + ConstraintValue::from(b);
+                                requirements.push(Constraint::Lte(lo.into(), sum.clone()));
+                                requirements.push(Constraint::Lte(sum.clone(), hi.into()));
+                                guarantees.push(Constraint::Eq(op.into(), sum));
+                            },
+                            _ => panic!("unhandled type"),
+                        }
+                    },
+                    Intrinsic::Sub => {
+                        assert_eq!(arguments.len(), 2);
+                        match ty {
+                            &Type::Int { width, is_signed } => {
+                                let (lo, hi) = self.get_int_range(width, is_signed);
+                                let (a, b) = (arguments[0], arguments[1]);
+                                let diff = ConstraintValue::from(a) - ConstraintValue::from(b);
+                                requirements.push(Constraint::Lte(lo.into(), diff.clone()));
+                                requirements.push(Constraint::Lte(diff.clone(), hi.into()));
+                                guarantees.push(Constraint::Eq(op.into(), diff));
+                            },
+                            _ => panic!("unhandled type"),
+                        }
+                    },
+                    Intrinsic::Neg => {
+                        assert_eq!(arguments.len(), 1);
+                        match ty {
+                            &Type::Int { width, is_signed } => {
+                                let (lo, hi) = self.get_int_range(width, is_signed);
+                                let a = arguments[0];
+                                let neg = -ConstraintValue::from(a);
+                                requirements.push(Constraint::Lte(lo.into(), neg.clone()));
+                                requirements.push(Constraint::Lte(neg.clone(), hi.into()));
+                                guarantees.push(Constraint::Eq(op.into(), neg));
+                            },
+                            _ => panic!("unhandled type"),
+                        }
+                    },
+                    Intrinsic::Malloc => {
+                        assert_eq!(arguments.len(), 1);
+                        let len = arguments[0];
+                        guarantees.push(
+                            Constraint::OriginatesFrom(
+                                op.into(),
+                                ConstraintValueOrigin::new_pointer(op, len)
+                            )
+                        );
+                    }
+                    _ => {},
+                }
+            },
+            Instr::Alloca(ty) => {
+                let len = self.size_of(ty).to_string();
+                guarantees.push(
+                    Constraint::OriginatesFrom(op.into(), ConstraintValueOrigin::new_pointer(op, len))
+                );
             }
+            &Instr::AddressOfStatic(statik) => {
+                let ty = self.code.mir_code.statics[statik].ty();
+                let len = self.size_of(&ty);
+
+                guarantees.push(
+                    Constraint::OriginatesFrom(
+                        op.into(),
+                        ConstraintValueOrigin::new_pointer(op, len.to_string())
+                    )
+                );
+            },
+            _ => {},
         }
+        Constraints { requirements, guarantees}
     }
 
     pub fn refine_func(&mut self, func_ref: &FunctionRef, tp: &impl TypeProvider) {
         if let FunctionRef::Id(id) = func_ref {
-            if self.refine.conditions.get(id).is_some() { return; }
+            if self.refine.constraints.get(id).is_some() { return; }
         }
 
         let func = function_by_ref(&self.code.mir_code, &func_ref);
@@ -695,9 +650,9 @@ impl Driver {
         }
 
         if let &FunctionRef::Id(id) = func_ref {
-            self.refine.conditions.insert(
+            self.refine.constraints.insert(
                 id,
-                Conditions {
+                Constraints {
                     requirements: requirements.clone(),
                     guarantees: guarantees.clone(),
                 }
@@ -709,7 +664,7 @@ impl Driver {
             }
             constraint
         };
-        let guarantees: HashSet<Constraint> = guarantees.into_iter().map(replace_parameters).collect();
+        //let guarantees: HashSet<Constraint> = guarantees.into_iter().map(replace_parameters).collect();
         let conf = SmtConf::default_z3();
         let mut rs = RefineSession {
             solver: conf.spawn(Parser).unwrap(),
@@ -720,326 +675,10 @@ impl Driver {
         for i in 0..block.ops.len() {
             let block = &self.code.blocks[block_id];
             let op = block.ops[i];
-            let instr = self.code.ops[op].as_mir_instr().unwrap();
-            match instr {
-                Instr::Parameter(ty) => {
-                    match ty {
-                        &Type::Int { width, is_signed } => {
-                            let (lo, hi) = self.get_int_range(width, is_signed);
-                            self.start_constraints(op);
-                            rs.constraints.insert(Constraint::Lte(lo.into(), op.into()));
-                            rs.constraints.insert(Constraint::Lte(op.into(), hi.into()));
-                        },
-                        _ => {},
-                    }
-                },
-                Instr::Const(konst) => {
-                    match konst {
-                        Const::Int { ty, .. } => {
-                            match ty {
-                                &Type::Int { is_signed, .. } => {
-                                    // TODO: this is kind of silly, but it was the path of least resistance.
-                                    let val = Value::from_const(konst, self).as_big_int(is_signed);
-                                    self.start_constraints(op);
-                                    rs.constraints.insert(Constraint::Eq(op.into(), val.to_string().into()));
-                                },
-                                unhandled => panic!("Literal with unhandled type {:?}", unhandled),
-                            }
-                        },
-                        &Const::Str { id, .. } => {
-                            let len = self.code.mir_code.strings[id].as_bytes_with_nul().len().to_string();
-                            self.start_constraints(op);
-                            rs.constraints.insert(
-                                Constraint::OriginatesFrom(op.into(), ConstraintValueOrigin::new_pointer(op, len))
-                            );
-                        }
-                        _ => {},
-                    }
-                },
-                Instr::Intrinsic { arguments, ty, intr } => {
-                    match intr {
-                        Intrinsic::Add => {
-                            assert_eq!(arguments.len(), 2);
-                            match ty {
-                                &Type::Int { width, is_signed } => {
-                                    let (lo, hi) = self.get_int_range(width, is_signed);
-                                    let (a, b) = (arguments[0], arguments[1]);
-                                    self.start_constraints(op);
-                                    let sum = ConstraintValue::from(a) + ConstraintValue::from(b);
-                                    self.check_conditions(
-                                        &mut rs,
-                                        vec![
-                                            Constraint::Lte(lo.into(), sum.clone()),
-                                            Constraint::Lte(sum.clone(), hi.into()),
-                                        ],
-                                    ).unwrap();
-                                    rs.constraints.insert(Constraint::Eq(op.into(), sum));
-                                    let a_origin = self.origin_of(&rs, a).cloned();
-                                    let b_origin = self.origin_of(&rs, b).cloned();
-                                    let a_origin_ptr = matches!(a_origin, Some(ConstraintValueOrigin::Pointer { .. }));
-                                    let b_origin_ptr = matches!(b_origin, Some(ConstraintValueOrigin::Pointer { .. }));
-                                    if a_origin_ptr ^ b_origin_ptr {
-                                        assert!(!is_signed);
-                                        if a_origin_ptr {
-                                            self.propagate_ptr_origin_through_add(&mut rs, a_origin.unwrap(), b.into(), op);
-                                        } else {
-                                            self.propagate_ptr_origin_through_add(&mut rs, b_origin.unwrap(), a.into(), op);
-                                        }
-                                    }
-                                },
-                                _ => panic!("unhandled type"),
-                            }
-                        },
-                        Intrinsic::Sub => {
-                            assert_eq!(arguments.len(), 2);
-                            match ty {
-                                &Type::Int { width, is_signed } => {
-                                    let (lo, hi) = self.get_int_range(width, is_signed);
-                                    let (a, b) = (arguments[0], arguments[1]);
-                                    self.start_constraints(op);
-                                    let diff = ConstraintValue::from(a) - ConstraintValue::from(b);
-                                    self.check_conditions(
-                                        &mut rs,
-                                        vec![
-                                            Constraint::Lte(lo.into(), diff.clone()),
-                                            Constraint::Lte(diff.clone(), hi.into()),
-                                        ],
-                                    ).unwrap();
-                                    rs.constraints.insert(Constraint::Eq(op.into(), diff));
-                                    if let Some(origin) = self.origin_of(&rs, a) {
-                                        match origin {
-                                            ConstraintValueOrigin::Pointer { base, offset, len } => {
-                                                assert!(!is_signed);
-                                                let diff = offset.clone() - ConstraintValue::from(b);
-                                                let (base, len) = (base.clone(), len.clone());
-                                                if self.check_conditions(
-                                                    &mut rs,
-                                                    vec![
-                                                        Constraint::Lte("0".to_string().into(), diff.clone()),
-                                                    ],
-                                                ).is_ok() {
-                                                    rs.constraints.insert(
-                                                        Constraint::OriginatesFrom(
-                                                            op.into(),
-                                                            ConstraintValueOrigin::Pointer {
-                                                                base,
-                                                                offset: diff,
-                                                                len: len.clone()
-                                                            }
-                                                        )
-                                                    );
-                                                }
-                                            }
-                                        }
-                                    }
-                                },
-                                _ => panic!("unhandled type"),
-                            }
-                        },
-                        Intrinsic::Neg => {
-                            assert_eq!(arguments.len(), 1);
-                            match ty {
-                                &Type::Int { width, is_signed } => {
-                                    let (lo, hi) = self.get_int_range(width, is_signed);
-                                    let a = arguments[0];
-                                    self.start_constraints(op);
-                                    let neg = -ConstraintValue::from(a);
-                                    self.check_conditions(
-                                        &mut rs,
-                                        vec![
-                                            Constraint::Lte(lo.into(), neg.clone()),
-                                            Constraint::Lte(neg.clone(), hi.into()),
-                                        ],
-                                    ).unwrap();
-
-                                    rs.constraints.insert(Constraint::Eq(op.into(), neg));
-                                },
-                                _ => panic!("unhandled type"),
-                            }
-                        },
-                        Intrinsic::Malloc => {
-                            assert_eq!(arguments.len(), 1);
-                            let len = arguments[0];
-                            self.start_constraints(op);
-                            rs.constraints.insert(
-                                Constraint::OriginatesFrom(
-                                    op.into(),
-                                    ConstraintValueOrigin::new_pointer(op, len)
-                                )
-                            );
-                        }
-                        _ => {},
-                    }
-                },
-                &Instr::Ret(val) => {
-                    let guarantees = guarantees.iter()
-                        .map(|condition| condition.replace(&ConstraintValue::ReturnValue, val))
-                        .collect();
-                    self.check_conditions(&mut rs, guarantees).unwrap();
-                },
-                &Instr::Call { ref arguments, func } => {
-                    // Borrow checker, argh...
-                    let arguments = arguments.clone();
-
-                    self.refine_func(&FunctionRef::Id(func), tp);
-                    self.start_constraints(op);
-
-                    let conditions = self.refine.conditions.get(&func).unwrap();
-                    let replace_params = |mut condition: Constraint| {
-                        for (i, &arg) in arguments.iter().enumerate() {
-                            condition = condition.replace(&ConstraintValue::Parameter { index: i }, arg);
-                        }
-                        condition
-                    };
-                    let requirements: Vec<Constraint> = conditions.requirements.iter().cloned().map(replace_params).collect();
-                    self.check_conditions(&mut rs, requirements).unwrap();
-                    let guarantees = conditions.guarantees.iter().cloned().map(replace_params);
-                    for mut condition in guarantees {
-                        condition = condition.replace(&ConstraintValue::ReturnValue, op);
-                        rs.constraints.insert(condition);
-                    }
-                },
-                &Instr::Store { location, value } => {
-                    let origin = self.origin_of(&rs, location).expect("can't load from pointer of unknown origin");
-                    match origin {
-                        ConstraintValueOrigin::Pointer { base, offset, .. } => {
-                            let (base, offset) = (base.clone(), offset.clone());
-                            self.add_pointer_write(&mut rs, base, offset, value);
-                        }
-                    };
-                },
-                &Instr::Load(location) => {
-                    let origin = self.origin_of(&rs, location).expect("can't load from pointer of unknown origin");
-                    let pointee = match origin {
-                        ConstraintValueOrigin::Pointer { base, offset, .. } => {
-                            let (base, offset) = (base.clone(), offset.clone());
-                            let pointee_ty = self.type_of(location).deref().unwrap().ty;
-                            let expected_len = self.size_of(&pointee_ty);
-                            self.get_pointee(&mut rs, base, offset, expected_len)
-                        }
-                    };
-                    match pointee {
-                        None => panic!("can't read from uninitialized memory!"),
-                        Some(Pointee::Unknown) => {},
-                        Some(Pointee::Known(pointee)) => {
-                            self.start_constraints(op);
-                            rs.constraints = rs.constraints.into_iter().flat_map(|constraint| {
-                                let mut res = ArrayVec::<Constraint, 2>::new();
-                                if constraint.get_involved_ops().contains(&pointee) {
-                                    res.push(constraint.replace(&ConstraintValue::Op(pointee), op));
-                                }
-                                res.push(constraint);
-                                res
-                            }).collect();
-                        }
-                    }
-                },
-                Instr::Alloca(ty) => {
-                    let len = self.size_of(ty).to_string();
-                    self.start_constraints(op);
-                    rs.constraints.insert(
-                        Constraint::OriginatesFrom(op.into(), ConstraintValueOrigin::new_pointer(op, len))
-                    );
-                }
-                &Instr::AddressOfStatic(statik) => {
-                    let ty = self.code.mir_code.statics[statik].ty();
-                    let len = self.size_of(&ty);
-
-                    // Static variables are not uninitialized, but we can't be sure what their values are
-                    self.set_unknown_pointee(op, len);
-
-                    self.start_constraints(op);
-                    rs.constraints.insert(
-                        Constraint::OriginatesFrom(
-                            op.into(),
-                            ConstraintValueOrigin::new_pointer(op, len.to_string())
-                        )
-                    );
-                },
-                &Instr::Reinterpret(val, ref dest_ty) => {
-                    let src_ty = self.type_of(val);
-                    match (&src_ty, dest_ty) {
-                        (Type::Pointer(_), &Type::Int { width, is_signed }) => {
-                            assert_eq!((width, is_signed), (IntWidth::Pointer, false), "Unexpected pointer-to-int cast");
-                            if let Some(origin) = self.origin_of(&rs, val) {
-                                let origin = origin.clone();
-                                self.start_constraints(op);
-                                match &origin {
-                                    ConstraintValueOrigin::Pointer { offset, len, .. } => {
-                                        let (lo, hi) = self.get_int_range(width, is_signed);
-                                        rs.constraints.insert(Constraint::Lte(lo.into(), op.into()));
-                                        rs.constraints.insert(
-                                            Constraint::Lte(
-                                                op.into(),
-                                                ConstraintValue::from(hi) - len.clone() + offset.clone(),
-                                            )
-                                        );
-                                    }
-                                }
-                                rs.constraints.insert(Constraint::OriginatesFrom(op.into(), origin));
-                            }
-                        },
-                        (&Type::Int { width, is_signed }, Type::Pointer(ptr)) => {
-                            assert_eq!((width, is_signed), (IntWidth::Pointer, false), "Unexpected int-to-pointer cast");
-                            let origin = self.origin_of(&rs, val)
-                                .expect("Can't cast an integer type of unknown origin to a pointer")
-                                .clone();
-                            let ptr_ty = ptr.ty.clone();
-                            self.start_constraints(op);
-                            match origin.clone() {
-                                ConstraintValueOrigin::Pointer { offset, len, .. } => {
-                                    let size = self.size_of(&ptr_ty).to_string();
-                                    let zero = ConstraintValue::from("0".to_string());
-                                    self.check_conditions(
-                                        &mut rs,
-                                        vec![
-                                            Constraint::Lte(offset.clone() + ConstraintValue::from(size), len),
-                                            Constraint::Lte(zero, offset),
-                                        ],
-                                    ).unwrap();
-                                }
-                            }
-                            rs.constraints.insert(Constraint::OriginatesFrom(op.into(), origin));
-                        },
-                        (Type::Pointer(_), Type::Pointer(dest)) => {
-                            let origin = self.origin_of(&rs, val)
-                                .expect("Can't cast an pointer type of unknown origin to another pointer")
-                                .clone();
-                            let dest = dest.ty.clone();
-                            self.start_constraints(op);
-                            match origin.clone() {
-                                ConstraintValueOrigin::Pointer { offset, len, .. } => {
-                                    let size = self.size_of(&dest).to_string();
-                                    let zero = ConstraintValue::from("0".to_string());
-                                    self.check_conditions(
-                                        &mut rs,
-                                        vec![
-                                            Constraint::Lte(offset.clone() + ConstraintValue::from(size), len),
-                                            Constraint::Lte(zero, offset),
-                                        ],
-                                    ).unwrap();
-                                }
-                            }
-                            rs.constraints.insert(Constraint::OriginatesFrom(op.into(), origin));
-                        },
-                        (_, _) => panic!("Unsupported reinterpret cast"),
-                    }
-                },
-                Instr::StructLit { fields, .. } => {
-                    for (field_index, &field) in fields.iter().enumerate() {
-                        rs.constraints.insert(
-                            Constraint::Eq(
-                                field.into(),
-                                ConstraintValue::FieldAccess {
-                                    base: Box::new(op.into()),
-                                    field_index,
-                                }
-                            )
-                        );
-                    }
-                },
-                _ => {},
-            }
+            let constraints = self.constrain_op(op);
+            self.check_constraints(&mut rs, constraints.requirements.clone()).unwrap();
+            rs.constraints.extend(constraints.requirements);
+            rs.constraints.extend(constraints.guarantees);
         }
     }
 }

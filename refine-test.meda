@@ -3,40 +3,9 @@
 I32_MIN :: -2147483647 - 1
 I32_MAX :: 2147483647
 
-@requires(a <= I32_MAX - 4)
-@guarantees(return_value == a + 4)
-fn add_four(a: i32): i32 {
-    four := 756
-    four = 4
-    a + four
-}
-
-@requires(a + b <= I32_MAX)
-@requires(a + b >= I32_MIN)
-@guarantees(return_value == a + b)
-fn add(a: i32, b: i32): i32 {
-    a + b
-}
-
-my_static := 2
-
-MyStruct :: struct {
-    a: i32
-    b: i32
-}
-
 fn main() {
-    var := add(I32_MAX - 4, 4) + add_four(-4)
-    buf := malloc(100) as i32 *mut
-
-    buf_addr :: buf as usize
-    *((5 + buf_addr - 4) as i32 *mut) = 12
-    *((buf_addr + 10) as i32 *mut) = 100
-    *((buf_addr + 96) as i32 *mut) = 100
-    var := I32_MAX - 12 + *((buf_addr + 1) as i32*)
-    reinterpreted_buf := buf as usize as i32 *mut
-
-    strukt :: MyStruct { a: 12, b: 13 }
+    // Change the second 12 to 13, or the first 12 to 11
+    var := I32_MAX - 12  + 12
 
     return
 }
