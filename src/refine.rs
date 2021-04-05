@@ -41,6 +41,7 @@ impl<'a> ModelParser<String, String, String, & 'a str> for Parser {
 struct Constraints {
     requirements: Vec<Constraint>,
     guarantees: Vec<Constraint>,
+    ret_val: Option<OpId>,
 }
 
 #[derive(Default)]
@@ -83,7 +84,6 @@ enum ConstraintValue {
     Neg(Box<ConstraintValue>),
     Parameter { index: usize, },
     ReturnValue,
-    //FieldAccess { base: Box<ConstraintValue>, field_index: usize },
 }
 
 impl ConstraintValue {
@@ -102,7 +102,6 @@ impl ConstraintValue {
                     Box::new(r.replace(key, value)),
                 ),
                 ConstraintValue::Neg(val) => ConstraintValue::Neg(Box::new(val.replace(key, value))),
-                //&ConstraintValue::FieldAccess { ref base, field_index } => ConstraintValue::FieldAccess { base: Box::new(base.replace(key, value)), field_index },
             }
         }
     }
@@ -118,7 +117,6 @@ impl ConstraintValue {
             },
             ConstraintValue::Neg(val) => val.get_involved_ops(),
             ConstraintValue::Parameter { .. } => panic!("can't get involved ops of a parameter, which is supposed to be substituted for an Op"),
-            //ConstraintValue::FieldAccess { base , .. } => base.get_involved_ops(),
         }
     }
 }
@@ -235,7 +233,6 @@ enum Constraint {
     Gte(ConstraintValue, ConstraintValue),
     Lte(ConstraintValue, ConstraintValue),
     Eq(ConstraintValue, ConstraintValue),
-    OriginatesFrom(ConstraintValue, ConstraintValueOrigin),
 }
 
 impl Constraint {
@@ -244,7 +241,6 @@ impl Constraint {
             Constraint::Gte(l, r) => Constraint::Gte(l.replace(key, value.clone()), r.replace(key, value.clone())),
             Constraint::Lte(l, r) => Constraint::Lte(l.replace(key, value.clone()), r.replace(key, value.clone())),
             Constraint::Eq(l, r) => Constraint::Eq(l.replace(key, value.clone()), r.replace(key, value.clone())),
-            Constraint::OriginatesFrom(val, origin) => Constraint::OriginatesFrom(val.replace(key, value.clone()), origin.replace(key, value)),
         }
     }
 
@@ -255,13 +251,6 @@ impl Constraint {
                     .flatten()
                     .collect()
             },
-            Constraint::OriginatesFrom(val, origin) => {
-                [val.get_involved_ops(), origin.get_involved_ops()]
-                    .iter()
-                    .flatten()
-                    .copied()
-                    .collect()
-            }
         }
     }
 }
@@ -405,7 +394,6 @@ impl Driver {
             ConstraintValue::Neg(val) => write!(f, "(- {})", self.display_constraint_value(val))?,
             ConstraintValue::ReturnValue => write!(f, "return_value")?,
             ConstraintValue::Parameter { .. } => panic!("Can't print parameter, which must be replaced with an Op"),
-            //ConstraintValue::FieldAccess { .. } => panic!("Can't print field access, which must be replaced with an Op"),
         }
         Ok(())
     }
@@ -421,7 +409,6 @@ impl Driver {
             Constraint::Gte(l, r) => write!(f, "{}", self.display_bin_expr(">=", &l, &r)),
             Constraint::Lte(l, r) => write!(f, "{}", self.display_bin_expr("<=", &l, &r)),
             Constraint::Eq(l, r) => write!(f, "{}", self.display_bin_expr("=", &l, &r)),
-            Constraint::OriginatesFrom(_, _) => Ok(()),
         }
     }
 
@@ -509,6 +496,7 @@ impl Driver {
         let instr = self.code.ops[op].as_mir_instr().unwrap();
         let mut requirements = Vec::<Constraint>::new();
         let mut guarantees = Vec::<Constraint>::new();
+        let mut ret_val = None;
         match instr {
             Instr::Parameter(ty) => {
                 match ty {
@@ -532,12 +520,6 @@ impl Driver {
                             unhandled => panic!("Literal with unhandled type {:?}", unhandled),
                         }
                     },
-                    &Const::Str { id, .. } => {
-                        let len = self.code.mir_code.strings[id].as_bytes_with_nul().len().to_string();
-                        guarantees.push(
-                            Constraint::OriginatesFrom(op.into(), ConstraintValueOrigin::new_pointer(op, len))
-                        );
-                    }
                     _ => {},
                 }
             },
@@ -585,42 +567,15 @@ impl Driver {
                             _ => panic!("unhandled type"),
                         }
                     },
-                    Intrinsic::Malloc => {
-                        assert_eq!(arguments.len(), 1);
-                        let len = arguments[0];
-                        guarantees.push(
-                            Constraint::OriginatesFrom(
-                                op.into(),
-                                ConstraintValueOrigin::new_pointer(op, len)
-                            )
-                        );
-                    }
                     _ => {},
                 }
             },
-            Instr::Alloca(ty) => {
-                let len = self.size_of(ty).to_string();
-                guarantees.push(
-                    Constraint::OriginatesFrom(op.into(), ConstraintValueOrigin::new_pointer(op, len))
-                );
-            }
-            &Instr::AddressOfStatic(statik) => {
-                let ty = self.code.mir_code.statics[statik].ty();
-                let len = self.size_of(&ty);
-
-                guarantees.push(
-                    Constraint::OriginatesFrom(
-                        op.into(),
-                        ConstraintValueOrigin::new_pointer(op, len.to_string())
-                    )
-                );
-            },
+            &Instr::Ret(val) => ret_val = Some(val),
             _ => {},
         }
-        Constraints { requirements, guarantees}
+        Constraints { requirements, guarantees, ret_val }
     }
 
-    #[allow(dead_code)]
     fn constrain_block(&self, block_id: BlockId) -> Constraints {
         let mut constraints = Constraints::default();
         let block = &self.code.blocks[block_id];
@@ -628,8 +583,42 @@ impl Driver {
             let op_constraints = self.constrain_op(op);
             constraints.requirements.extend(op_constraints.requirements);
             constraints.guarantees.extend(op_constraints.guarantees);
+
+            assert!(constraints.ret_val.is_none());
+            constraints.ret_val = op_constraints.ret_val;
         }
         constraints
+    }
+
+    fn infer_constraints(&self, src: &[Constraint], block_constraints: &Constraints, dont_replace: &HashSet<OpId>) -> Vec<Constraint> {
+        src.iter()
+            .map(|constraint| {
+                // TODO: what if invalid guarantees from later on in the function mess with us?
+                let mut constraint = constraint.clone();
+                loop {
+                    let involved_ops = constraint.get_involved_ops();
+                    let mut replaced = false;
+                    // Find a substitute value for all non-parameter, non-constant values
+                    for op in involved_ops.difference(dont_replace).copied() {
+                        replaced = true;
+                        let mut sub = None;
+                        for guarantee in &block_constraints.guarantees {
+                            if let &Constraint::Eq(ConstraintValue::Op(a), ref b) = guarantee {
+                                if a == op {
+                                    sub = Some(b.clone());
+                                    break;
+                                }
+                            }
+                        }
+                        constraint = constraint.replace(&op.into(), sub.expect("Failed to find equality guarantee" ));
+                    }
+                    if !replaced {
+                        break;
+                    }
+                }
+                constraint
+            })
+            .collect()
     }
 
     pub fn refine_func(&mut self, func_ref: &FunctionRef, tp: &impl TypeProvider) {
@@ -669,6 +658,7 @@ impl Driver {
                 Constraints {
                     requirements: requirements.clone(),
                     guarantees: guarantees.clone(),
+                    ..Default::default()
                 }
             );
         }
@@ -688,43 +678,24 @@ impl Driver {
 
         // Get the parameter range
         let block = &self.code.blocks[block_id];
-        let mut parameters: HashSet<OpId> = HashSet::new();
-        parameters.extend(&block.ops[0..num_params]);
+        let mut dont_replace: HashSet<OpId> = HashSet::new();
+        dont_replace.extend(&block.ops[0..num_params]);
 
         let block_constraints = self.constrain_block(block_id);
-        let requirements: Vec<_> = block_constraints.requirements.iter()
-            .map(|requirement| {
-                // TODO: what if invalid guarantees from later on in the function mess with us?
-                let mut requirement = requirement.clone();
-                loop {
-                    let involved_ops = requirement.get_involved_ops();
-                    let mut non_parameters = false;
-                    // Find a substitute value for all non-parameter, non-constant values
-                    for op in involved_ops.difference(&parameters).copied() {
-                        non_parameters = true;
-                        let mut sub = None;
-                        for guarantee in &block_constraints.guarantees {
-                            if let &Constraint::Eq(ConstraintValue::Op(a), ref b) = guarantee {
-                                if a == op {
-                                    sub = Some(b.clone());
-                                    break;
-                                }
-                            }
-                        }
-                        requirement = requirement.replace(&op.into(), sub.expect("Failed to find equality guarantee"));
-                    }
-                    if !non_parameters {
-                        break;
-                    }
-                }
-                requirement
-            })
-            .collect();
+        let requirements = self.infer_constraints(
+            &block_constraints.requirements,
+            &block_constraints,
+            &dont_replace,
+        );
+        dont_replace.insert(block_constraints.ret_val.unwrap());
+        let guarantees = self.infer_constraints(
+            &block_constraints.guarantees,
+            &block_constraints,
+            &dont_replace,
+        );
 
         println!("FUNCTION: {}", self.fn_name(func_name));
         println!("Requirements:");
-
-
         for constraint in requirements {
             for op in constraint.get_involved_ops() {
                 self.assign_name_if_none(op);
@@ -732,7 +703,7 @@ impl Driver {
             println!("    {}", self.display_constraint(&constraint));
         }
         println!("\nGuarantees:");
-        for constraint in block_constraints.guarantees {
+        for constraint in guarantees {
             for op in constraint.get_involved_ops() {
                 self.assign_name_if_none(op);
             }
