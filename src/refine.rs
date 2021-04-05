@@ -87,18 +87,18 @@ enum ConstraintValue {
 }
 
 impl ConstraintValue {
-    fn replace(&self, key: &ConstraintValue, value: OpId) -> Self {
+    fn replace(&self, key: &ConstraintValue, value: impl Into<ConstraintValue> + Clone) -> Self {
         if self == key {
-            ConstraintValue::Op(value)
+            value.into()
         } else {
             match self {
                 ConstraintValue::Str(_) | ConstraintValue::Op(_) | ConstraintValue::Parameter { .. } | ConstraintValue::ReturnValue => self.clone(),
                 ConstraintValue::Add(l, r) => ConstraintValue::Add(
-                    Box::new(l.replace(key, value)),
+                    Box::new(l.replace(key, value.clone())),
                     Box::new(r.replace(key, value)),
                 ),
                 ConstraintValue::Sub(l, r) => ConstraintValue::Sub(
-                    Box::new(l.replace(key, value)),
+                    Box::new(l.replace(key, value.clone())),
                     Box::new(r.replace(key, value)),
                 ),
                 ConstraintValue::Neg(val) => ConstraintValue::Neg(Box::new(val.replace(key, value))),
@@ -207,11 +207,11 @@ impl ConstraintValueOrigin {
         ConstraintValueOrigin::Pointer { base: base.into(), offset: String::from("0").into(), len: len.into() }
     }
 
-    fn replace(&self, key: &ConstraintValue, value: OpId) -> Self {
+    fn replace(&self, key: &ConstraintValue, value: impl Into<ConstraintValue> + Clone) -> Self {
         match self {
             ConstraintValueOrigin::Pointer { base, offset, len } => ConstraintValueOrigin::Pointer {
-                base: base.replace(key, value),
-                offset: offset.replace(key, value),
+                base: base.replace(key, value.clone()),
+                offset: offset.replace(key, value.clone()),
                 len: len.replace(key, value),
             }
         }
@@ -239,12 +239,12 @@ enum Constraint {
 }
 
 impl Constraint {
-    fn replace(&self, key: &ConstraintValue, value: OpId) -> Self {
+    fn replace(&self, key: &ConstraintValue, value: impl Into<ConstraintValue> + Clone) -> Self {
         match self {
-            Constraint::Gte(l, r) => Constraint::Gte(l.replace(key, value), r.replace(key, value)),
-            Constraint::Lte(l, r) => Constraint::Lte(l.replace(key, value), r.replace(key, value)),
-            Constraint::Eq(l, r) => Constraint::Eq(l.replace(key, value), r.replace(key, value)),
-            Constraint::OriginatesFrom(val, origin) => Constraint::OriginatesFrom(val.replace(key, value), origin.replace(key, value)),
+            Constraint::Gte(l, r) => Constraint::Gte(l.replace(key, value.clone()), r.replace(key, value.clone())),
+            Constraint::Lte(l, r) => Constraint::Lte(l.replace(key, value.clone()), r.replace(key, value.clone())),
+            Constraint::Eq(l, r) => Constraint::Eq(l.replace(key, value.clone()), r.replace(key, value.clone())),
+            Constraint::OriginatesFrom(val, origin) => Constraint::OriginatesFrom(val.replace(key, value.clone()), origin.replace(key, value)),
         }
     }
 
@@ -686,10 +686,46 @@ impl Driver {
             constraints: requirements.into_iter().map(replace_parameters).collect(),
         };
 
-        println!("FUNCTION: {}", self.fn_name(func_name));
+        // Get the parameter range
+        let block = &self.code.blocks[block_id];
+        let mut parameters: HashSet<OpId> = HashSet::new();
+        parameters.extend(&block.ops[0..num_params]);
+
         let block_constraints = self.constrain_block(block_id);
+        let requirements: Vec<_> = block_constraints.requirements.iter()
+            .map(|requirement| {
+                // TODO: what if invalid guarantees from later on in the function mess with us?
+                let mut requirement = requirement.clone();
+                loop {
+                    let involved_ops = requirement.get_involved_ops();
+                    let mut non_parameters = false;
+                    // Find a substitute value for all non-parameter, non-constant values
+                    for op in involved_ops.difference(&parameters).copied() {
+                        non_parameters = true;
+                        let mut sub = None;
+                        for guarantee in &block_constraints.guarantees {
+                            if let &Constraint::Eq(ConstraintValue::Op(a), ref b) = guarantee {
+                                if a == op {
+                                    sub = Some(b.clone());
+                                    break;
+                                }
+                            }
+                        }
+                        requirement = requirement.replace(&op.into(), sub.expect("Failed to find equality guarantee"));
+                    }
+                    if !non_parameters {
+                        break;
+                    }
+                }
+                requirement
+            })
+            .collect();
+
+        println!("FUNCTION: {}", self.fn_name(func_name));
         println!("Requirements:");
-        for constraint in block_constraints.requirements {
+
+
+        for constraint in requirements {
             for op in constraint.get_involved_ops() {
                 self.assign_name_if_none(op);
             }
@@ -704,13 +740,13 @@ impl Driver {
         }
         println!("\n");
 
-        let block = &self.code.blocks[block_id];
-        for i in 0..block.ops.len() {
-            let block = &self.code.blocks[block_id];
-            let op = block.ops[i];
-            let constraints = self.constrain_op(op);
-            self.check_constraints(&mut rs, constraints.requirements.clone()).unwrap();
-            rs.constraints.extend(constraints.guarantees);
-        }
+        // let block = &self.code.blocks[block_id];
+        // for i in 0..block.ops.len() {
+        //     let block = &self.code.blocks[block_id];
+        //     let op = block.ops[i];
+        //     let constraints = self.constrain_op(op);
+        //     self.check_constraints(&mut rs, constraints.requirements.clone()).unwrap();
+        //     rs.constraints.extend(constraints.guarantees);
+        // }
     }
 }
