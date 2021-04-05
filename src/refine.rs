@@ -631,8 +631,8 @@ impl Driver {
         self.check_no_loops(func);
         assert_eq!(func.blocks.len(), 1, "Function has more than one block, which isn't yet supported");
 
-        let mut requirements = Vec::new();
-        let mut guarantees = Vec::new();
+        let mut explicit_requirements = Vec::new();
+        let mut explicit_guarantees = Vec::new();
         let block_id = func.blocks[0];
         let block = &self.code.blocks[block_id];
         let num_params = self.code.num_parameters(func);
@@ -642,15 +642,91 @@ impl Driver {
                     let arg = attr.arg.expect("missing attribute argument");
                     let constraint = self.expr_to_constraint(arg, tp);
                     if attr.attr == self.hir.requires_sym {
-                        requirements.push(constraint);
+                        explicit_requirements.push(constraint);
                     } else if attr.attr == self.hir.guarantees_sym {
-                        guarantees.push(constraint);
+                        explicit_guarantees.push(constraint);
                     } else {
                         panic!("Unrecognized attribute");
                     }
                 }
             }
         }
+
+        let replace_parameters = |mut constraint: Constraint| {
+            for index in 0..num_params {
+                constraint = constraint.replace(&ConstraintValue::Parameter { index }, block.ops[index]);
+            }
+            constraint
+        };
+        let explicit_requirements: HashSet<_> = explicit_requirements.into_iter().map(replace_parameters).collect();
+        let explicit_guarantees: HashSet<_> = explicit_guarantees.into_iter().map(replace_parameters).collect();
+        let conf = SmtConf::default_z3();
+
+        // Get the parameter range
+        let block = &self.code.blocks[block_id];
+        let mut dont_replace: HashSet<OpId> = HashSet::new();
+        dont_replace.extend(&block.ops[0..num_params]);
+
+        let block_constraints = self.constrain_block(block_id);
+        let mut requirements = self.infer_constraints(
+            &block_constraints.requirements,
+            &block_constraints,
+            &dont_replace,
+        );
+        dont_replace.insert(block_constraints.ret_val.unwrap());
+        let mut guarantees = self.infer_constraints(
+            &block_constraints.guarantees,
+            &block_constraints,
+            &dont_replace,
+        );
+
+        requirements.extend(explicit_requirements);
+        guarantees.extend(explicit_guarantees);
+
+        println!("FUNCTION: {}", self.fn_name(func_name));
+        println!("Requirements:");
+        for constraint in &requirements {
+            for op in constraint.get_involved_ops() {
+                self.assign_name_if_none(op);
+            }
+            println!("    {}", self.display_constraint(&constraint));
+        }
+        println!("\nGuarantees:");
+        for constraint in &guarantees {
+            for op in constraint.get_involved_ops() {
+                self.assign_name_if_none(op);
+            }
+            println!("    {}", self.display_constraint(&constraint));
+        }
+        println!("\n");
+
+        let mut hash_constraints = HashSet::new();
+        hash_constraints.extend(requirements.iter().cloned());
+        let mut rs = RefineSession {
+            solver: conf.spawn(Parser).unwrap(),
+            func_name,
+            constraints: hash_constraints,
+        };
+
+        let block = &self.code.blocks[block_id];
+        for i in 0..block.ops.len() {
+            let block = &self.code.blocks[block_id];
+            let op = block.ops[i];
+            let constraints = self.constrain_op(op);
+            self.check_constraints(&mut rs, constraints.requirements.clone()).unwrap();
+            rs.constraints.extend(constraints.guarantees);
+        }
+
+        let block = &self.code.blocks[block_id];
+        let replace_parameters = |mut constraint: Constraint| {
+            for index in 0..num_params {
+                constraint = constraint.replace(&block.ops[index].into(), ConstraintValue::Parameter { index });
+            }
+            constraint = constraint.replace(&block_constraints.ret_val.unwrap().into(), ConstraintValue::ReturnValue);
+            constraint
+        };
+        let requirements: Vec<_> = requirements.into_iter().map(replace_parameters).collect();
+        let guarantees: Vec<_> = guarantees.into_iter().map(replace_parameters).collect();
 
         if let &FunctionRef::Id(id) = func_ref {
             self.refine.constraints.insert(
@@ -662,62 +738,5 @@ impl Driver {
                 }
             );
         }
-        let replace_parameters = |mut constraint: Constraint| {
-            for index in 0..num_params {
-                constraint = constraint.replace(&ConstraintValue::Parameter { index }, block.ops[index]);
-            }
-            constraint
-        };
-        //let guarantees: HashSet<Constraint> = guarantees.into_iter().map(replace_parameters).collect();
-        let conf = SmtConf::default_z3();
-        let mut rs = RefineSession {
-            solver: conf.spawn(Parser).unwrap(),
-            func_name,
-            constraints: requirements.into_iter().map(replace_parameters).collect(),
-        };
-
-        // Get the parameter range
-        let block = &self.code.blocks[block_id];
-        let mut dont_replace: HashSet<OpId> = HashSet::new();
-        dont_replace.extend(&block.ops[0..num_params]);
-
-        let block_constraints = self.constrain_block(block_id);
-        let requirements = self.infer_constraints(
-            &block_constraints.requirements,
-            &block_constraints,
-            &dont_replace,
-        );
-        dont_replace.insert(block_constraints.ret_val.unwrap());
-        let guarantees = self.infer_constraints(
-            &block_constraints.guarantees,
-            &block_constraints,
-            &dont_replace,
-        );
-
-        println!("FUNCTION: {}", self.fn_name(func_name));
-        println!("Requirements:");
-        for constraint in requirements {
-            for op in constraint.get_involved_ops() {
-                self.assign_name_if_none(op);
-            }
-            println!("    {}", self.display_constraint(&constraint));
-        }
-        println!("\nGuarantees:");
-        for constraint in guarantees {
-            for op in constraint.get_involved_ops() {
-                self.assign_name_if_none(op);
-            }
-            println!("    {}", self.display_constraint(&constraint));
-        }
-        println!("\n");
-
-        // let block = &self.code.blocks[block_id];
-        // for i in 0..block.ops.len() {
-        //     let block = &self.code.blocks[block_id];
-        //     let op = block.ops[i];
-        //     let constraints = self.constrain_op(op);
-        //     self.check_constraints(&mut rs, constraints.requirements.clone()).unwrap();
-        //     rs.constraints.extend(constraints.guarantees);
-        // }
     }
 }
