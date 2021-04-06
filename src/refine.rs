@@ -273,7 +273,7 @@ impl ConstraintValue {
                     .collect()
             },
             ConstraintValue::Neg(val) => val.get_involved_ops(),
-            ConstraintValue::Parameter { .. } => panic!("can't get involved ops of a parameter, which is supposed to be substituted for an Op"),
+            ConstraintValue::Parameter { .. } => vec![],
         }
     }
 }
@@ -595,7 +595,7 @@ impl Driver {
             ConstraintValue::Sub(l, r) => write!(f, "{}", self.display_bin_expr("-", l, r))?,
             ConstraintValue::Neg(val) => write!(f, "(- {})", self.display_constraint_value(val))?,
             ConstraintValue::ReturnValue => write!(f, "return_value")?,
-            ConstraintValue::Parameter { .. } => panic!("Can't print parameter, which must be replaced with an Op"),
+            &ConstraintValue::Parameter { index } => write!(f, "param{}", index)?,
         }
         Ok(())
     }
@@ -907,23 +907,6 @@ impl Driver {
         };
         constraints.simplify();
 
-        println!("FUNCTION: {}", self.fn_name(func_name));
-        println!("Requirements:");
-        for constraint in &constraints.requirements {
-            for op in constraint.get_involved_ops() {
-                self.assign_name_if_none(op);
-            }
-            println!("    {}", self.display_constraint(&constraint));
-        }
-        println!("\nGuarantees:");
-        for constraint in &constraints.guarantees {
-            for op in constraint.get_involved_ops() {
-                self.assign_name_if_none(op);
-            }
-            println!("    {}", self.display_constraint(&constraint));
-        }
-        println!("\n");
-
         let mut hash_constraints = HashSet::new();
         hash_constraints.extend(constraints.requirements.iter().cloned());
         let mut rs = RefineSession {
@@ -951,6 +934,23 @@ impl Driver {
         };
         let requirements: Vec<_> = constraints.requirements.into_iter().map(replace_parameters).collect();
         let guarantees: Vec<_> = constraints.guarantees.into_iter().map(replace_parameters).collect();
+
+        println!("FUNCTION: {}", self.fn_name(func_name));
+        println!("Requirements:");
+        for constraint in &requirements {
+            for op in constraint.get_involved_ops() {
+                self.assign_name_if_none(op);
+            }
+            println!("    {}", self.display_constraint(&constraint));
+        }
+        println!("\nGuarantees:");
+        for constraint in &guarantees {
+            for op in constraint.get_involved_ops() {
+                self.assign_name_if_none(op);
+            }
+            println!("    {}", self.display_constraint(&constraint));
+        }
+        println!("\n");
 
         if let &FunctionRef::Id(id) = func_ref {
             self.refine.constraints.insert(
