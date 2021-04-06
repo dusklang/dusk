@@ -403,7 +403,19 @@ impl Constraint {
                     (ConstraintValue::Str(l), ConstraintValue::Str(r)) => {
                         let val = BigInt::from_str(l).unwrap() >= BigInt::from_str(r).unwrap();
                         *self = Constraint::Const(val);
-                    }
+                    },
+                    (ConstraintValue::Str(l), r) => if let Some((val, fac, offset)) = r.fac_and_offset() {
+                        let constant = BigInt::from_str(l).unwrap() - offset;
+                        let mut val = val.clone();
+                        if fac == BigInt::from(-1) { val = -val.clone(); }
+                        *self = Constraint::Gte(constant.to_string().into(), val);
+                    },
+                    (l, ConstraintValue::Str(r)) => if let Some((val, fac, offset)) = l.fac_and_offset() {
+                        let constant = BigInt::from_str(r).unwrap() - offset;
+                        let mut val = val.clone();
+                        if fac == BigInt::from(-1) { val = -val.clone(); }
+                        *self = Constraint::Gte(constant.to_string().into(), val);
+                    },
                     _ => {},
                 }
             },
@@ -414,7 +426,19 @@ impl Constraint {
                     (ConstraintValue::Str(l), ConstraintValue::Str(r)) => {
                         let val = BigInt::from_str(l).unwrap() <= BigInt::from_str(r).unwrap();
                         *self = Constraint::Const(val);
-                    }
+                    },
+                    (ConstraintValue::Str(l), r) => if let Some((val, fac, offset)) = r.fac_and_offset() {
+                        let constant = BigInt::from_str(l).unwrap() - offset;
+                        let mut val = val.clone();
+                        if fac == BigInt::from(-1) { val = -val.clone(); }
+                        *self = Constraint::Lte(constant.to_string().into(), val);
+                    },
+                    (l, ConstraintValue::Str(r)) => if let Some((val, fac, offset)) = l.fac_and_offset() {
+                        let constant = BigInt::from_str(r).unwrap() - offset;
+                        let mut val = val.clone();
+                        if fac == BigInt::from(-1) { val = -val.clone(); }
+                        *self = Constraint::Lte(constant.to_string().into(), val);
+                    },
                     _ => {},
                 }
             },
@@ -426,7 +450,19 @@ impl Constraint {
                         let val = BigInt::from_str(l).unwrap() == BigInt::from_str(r).unwrap();
                         *self = Constraint::Const(val);
                     },
-                    (l, r) => if l == r {
+                    (ConstraintValue::Str(l), r) => if let Some((val, fac, offset)) = r.fac_and_offset() {
+                        let constant = BigInt::from_str(l).unwrap() - offset;
+                        let mut val = val.clone();
+                        if fac == BigInt::from(-1) { val = -val.clone(); }
+                        *self = Constraint::Eq(constant.to_string().into(), val);
+                    },
+                    (l, ConstraintValue::Str(r)) => if let Some((val, fac, offset)) = l.fac_and_offset() {
+                        let constant = BigInt::from_str(r).unwrap() - offset;
+                        let mut val = val.clone();
+                        if fac == BigInt::from(-1) { val = -val.clone(); }
+                        *self = Constraint::Eq(constant.to_string().into(), val);
+                    },
+                    (l, r) if l == r => {
                         *self = Constraint::Const(true);
                     }
                     _ => {},
@@ -907,6 +943,23 @@ impl Driver {
         };
         constraints.simplify();
 
+        println!("FUNCTION: {}", self.fn_name(func_name));
+        println!("Requirements:");
+        for constraint in &constraints.requirements {
+            for op in constraint.get_involved_ops() {
+                self.assign_name_if_none(op);
+            }
+            println!("    {}", self.display_constraint(&constraint));
+        }
+        println!("\nGuarantees:");
+        for constraint in &constraints.guarantees {
+            for op in constraint.get_involved_ops() {
+                self.assign_name_if_none(op);
+            }
+            println!("    {}", self.display_constraint(&constraint));
+        }
+        println!("\n");
+
         let mut hash_constraints = HashSet::new();
         hash_constraints.extend(constraints.requirements.iter().cloned());
         let mut rs = RefineSession {
@@ -919,7 +972,8 @@ impl Driver {
         for i in 0..block.ops.len() {
             let block = &self.code.blocks[block_id];
             let op = block.ops[i];
-            let constraints = self.constrain_op(op, tp);
+            let mut constraints = self.constrain_op(op, tp);
+            constraints.simplify();
             self.check_constraints(&mut rs, constraints.requirements.clone()).unwrap();
             rs.constraints.extend(constraints.guarantees);
         }
@@ -934,23 +988,6 @@ impl Driver {
         };
         let requirements: Vec<_> = constraints.requirements.into_iter().map(replace_parameters).collect();
         let guarantees: Vec<_> = constraints.guarantees.into_iter().map(replace_parameters).collect();
-
-        println!("FUNCTION: {}", self.fn_name(func_name));
-        println!("Requirements:");
-        for constraint in &requirements {
-            for op in constraint.get_involved_ops() {
-                self.assign_name_if_none(op);
-            }
-            println!("    {}", self.display_constraint(&constraint));
-        }
-        println!("\nGuarantees:");
-        for constraint in &guarantees {
-            for op in constraint.get_involved_ops() {
-                self.assign_name_if_none(op);
-            }
-            println!("    {}", self.display_constraint(&constraint));
-        }
-        println!("\n");
 
         if let &FunctionRef::Id(id) = func_ref {
             self.refine.constraints.insert(

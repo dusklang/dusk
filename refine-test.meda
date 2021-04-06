@@ -4,7 +4,7 @@ I32_MIN :: -2147483647 - 1
 I32_MAX :: 2147483647
 
 fn add_four(a: i32): i32 {
-    4 - 4 + a + 2 + 2
+    a + 4
 }
 
 // fn add_four_clamping(a: i32): i32 {
