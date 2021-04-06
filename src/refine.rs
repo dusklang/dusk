@@ -181,12 +181,53 @@ impl ConstraintValue {
             ConstraintValue::Sub(l, r) => {
                 l.simplify();
                 r.simplify();
-                match (&**l, &**r) {
-                    (ConstraintValue::Str(l), ConstraintValue::Str(r)) => {
-                        let val = BigInt::from_str(l).unwrap() - BigInt::from_str(r).unwrap();
-                        *self = ConstraintValue::Str(val.to_string());
-                    }
-                    _ => {},
+                match l.fac_and_offset().zip(r.fac_and_offset()) {
+                    Some(((l, l_fac, l_offset), (r, mut r_fac, r_offset))) => {
+                        let offset = l_offset - r_offset;
+                        r_fac *= -1;
+
+                        // Same as addition from here on
+                        match (l, r) {
+                            (ConstraintValue::Str(l), ConstraintValue::Str(r)) => {
+                                let val = l_fac * BigInt::from_str(l).unwrap() + r_fac * BigInt::from_str(r).unwrap() + offset;
+                                *self = ConstraintValue::Str(val.to_string());
+                            },
+                            (ConstraintValue::Str(l), r) => {
+                                let constant = l_fac * BigInt::from_str(l).unwrap() + offset;
+                                if r_fac == BigInt::from(-1) {
+                                    if &constant == &BigInt::from(0) {
+                                        *self = -r.clone();
+                                    } else {
+                                        *self = ConstraintValue::from(constant.to_string()) - r.clone();
+                                    }
+                                } else {
+                                    if &constant == &BigInt::from(0) {
+                                        *self = r.clone();
+                                    } else {
+                                        *self = ConstraintValue::from(constant.to_string()) + r.clone();
+                                    }
+                                }
+                            },
+                            (l, ConstraintValue::Str(r)) => {
+                                let constant = r_fac * BigInt::from_str(r).unwrap() + offset;
+                                if l_fac == BigInt::from(-1) {
+                                    if &constant == &BigInt::from(0) {
+                                        *self = -l.clone();
+                                    } else {
+                                        *self = ConstraintValue::from(constant.to_string()) - l.clone();
+                                    }
+                                } else {
+                                    if &constant == &BigInt::from(0) {
+                                        *self = l.clone();
+                                    } else {
+                                        *self = ConstraintValue::from(constant.to_string()) + l.clone();
+                                    }
+                                }
+                            },
+                            _ => {},
+                        }
+                    },
+                    None => {},
                 }
             },
             ConstraintValue::Neg(a) => {
