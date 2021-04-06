@@ -54,6 +54,8 @@ impl Constraints {
         for guarantee in &mut self.guarantees {
             guarantee.simplify();
         }
+        self.requirements.retain(|requirement| !matches!(requirement, Constraint::Const(_)));
+        self.guarantees.retain(|guarantee| !matches!(guarantee, Constraint::Const(_)));
     }
 }
 
@@ -780,34 +782,34 @@ impl Driver {
         dont_replace.extend(&block.ops[0..num_params]);
 
         let block_constraints = self.constrain_block(block_id, tp);
-        let mut requirements = self.infer_constraints(
+        let requirements = self.infer_constraints(
             &block_constraints.requirements,
             &block_constraints,
             &dont_replace,
         );
         dont_replace.insert(block_constraints.ret_val.unwrap());
-        let mut guarantees = self.infer_constraints(
+        let guarantees = self.infer_constraints(
             &block_constraints.guarantees,
             &block_constraints,
             &dont_replace,
         );
-
-        requirements.extend(explicit_requirements);
-        guarantees.extend(explicit_guarantees);
-
-        requirements.iter_mut().for_each(|requirement| requirement.simplify());
-        guarantees.iter_mut().for_each(|guarantee| guarantee.simplify());
+        let mut constraints = Constraints {
+            requirements,
+            guarantees,
+            ..Default::default()
+        };
+        constraints.simplify();
 
         println!("FUNCTION: {}", self.fn_name(func_name));
         println!("Requirements:");
-        for constraint in &requirements {
+        for constraint in &constraints.requirements {
             for op in constraint.get_involved_ops() {
                 self.assign_name_if_none(op);
             }
             println!("    {}", self.display_constraint(&constraint));
         }
         println!("\nGuarantees:");
-        for constraint in &guarantees {
+        for constraint in &constraints.guarantees {
             for op in constraint.get_involved_ops() {
                 self.assign_name_if_none(op);
             }
@@ -816,7 +818,7 @@ impl Driver {
         println!("\n");
 
         let mut hash_constraints = HashSet::new();
-        hash_constraints.extend(requirements.iter().cloned());
+        hash_constraints.extend(constraints.requirements.iter().cloned());
         let mut rs = RefineSession {
             solver: conf.spawn(Parser).unwrap(),
             func_name,
@@ -840,8 +842,8 @@ impl Driver {
             constraint = constraint.replace(&block_constraints.ret_val.unwrap().into(), ConstraintValue::ReturnValue);
             constraint
         };
-        let requirements: Vec<_> = requirements.into_iter().map(replace_parameters).collect();
-        let guarantees: Vec<_> = guarantees.into_iter().map(replace_parameters).collect();
+        let requirements: Vec<_> = constraints.requirements.into_iter().map(replace_parameters).collect();
+        let guarantees: Vec<_> = constraints.guarantees.into_iter().map(replace_parameters).collect();
 
         if let &FunctionRef::Id(id) = func_ref {
             self.refine.constraints.insert(
