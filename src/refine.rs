@@ -492,7 +492,7 @@ impl Driver {
         Ok(())
     }
 
-    fn constrain_op(&self, op: OpId) -> Constraints {
+    fn constrain_op(&mut self, op: OpId, tp: &impl TypeProvider) -> Constraints {
         let instr = self.code.ops[op].as_mir_instr().unwrap();
         let mut requirements = Vec::<Constraint>::new();
         let mut guarantees = Vec::<Constraint>::new();
@@ -571,16 +571,34 @@ impl Driver {
                 }
             },
             &Instr::Ret(val) => ret_val = Some(val),
+            &Instr::Call { ref arguments, func } => {
+                // Thanks borrow checker. :(
+                let arguments = arguments.clone();
+                self.refine_func(&FunctionRef::Id(func), tp);
+                let constraints = self.refine.constraints.get(&func).unwrap();
+                let substitute_special_values = |constraint: &Constraint| {
+                    let mut constraint = constraint.clone();
+                    for i in 0..arguments.len() {
+                        constraint = constraint.replace(&ConstraintValue::Parameter { index: i }, arguments[i]);
+                    }
+                    constraint.replace(&ConstraintValue::ReturnValue, op)
+                };
+                requirements = constraints.requirements.iter().map(substitute_special_values).collect();
+                guarantees = constraints.guarantees.iter().map(substitute_special_values).collect();
+            },
             _ => {},
         }
         Constraints { requirements, guarantees, ret_val }
     }
 
-    fn constrain_block(&self, block_id: BlockId) -> Constraints {
+    fn constrain_block(&mut self, block_id: BlockId, tp: &impl TypeProvider) -> Constraints {
         let mut constraints = Constraints::default();
         let block = &self.code.blocks[block_id];
-        for op in block.ops.iter().copied() {
-            let op_constraints = self.constrain_op(op);
+        for i in 0..block.ops.len() {
+            let block = &self.code.blocks[block_id];
+            let op = block.ops[i];
+            
+            let op_constraints = self.constrain_op(op, tp);
             constraints.requirements.extend(op_constraints.requirements);
             constraints.guarantees.extend(op_constraints.guarantees);
 
@@ -667,7 +685,7 @@ impl Driver {
         let mut dont_replace: HashSet<OpId> = HashSet::new();
         dont_replace.extend(&block.ops[0..num_params]);
 
-        let block_constraints = self.constrain_block(block_id);
+        let block_constraints = self.constrain_block(block_id, tp);
         let mut requirements = self.infer_constraints(
             &block_constraints.requirements,
             &block_constraints,
@@ -712,7 +730,7 @@ impl Driver {
         for i in 0..block.ops.len() {
             let block = &self.code.blocks[block_id];
             let op = block.ops[i];
-            let constraints = self.constrain_op(op);
+            let constraints = self.constrain_op(op, tp);
             self.check_constraints(&mut rs, constraints.requirements.clone()).unwrap();
             rs.constraints.extend(constraints.guarantees);
         }
