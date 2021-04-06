@@ -1,11 +1,13 @@
 use std::collections::{HashSet, HashMap};
 use std::ops::{Add, Sub, Neg};
 use std::iter::Iterator;
+use std::str::FromStr;
 
 use rsmt2::prelude::*;
 use rsmt2::parse::{IdentParser, ModelParser};
 use display_adapter::display_adapter;
 use string_interner::DefaultSymbol as Sym;
+use num_bigint::BigInt;
 
 use mire::{BlockId, OpId};
 use mire::mir::{Const, Function, FuncId, Instr};
@@ -42,6 +44,17 @@ struct Constraints {
     requirements: Vec<Constraint>,
     guarantees: Vec<Constraint>,
     ret_val: Option<OpId>,
+}
+
+impl Constraints {
+    fn simplify(&mut self) {
+        for requirement in &mut self.requirements {
+            requirement.simplify();
+        }
+        for guarantee in &mut self.guarantees {
+            guarantee.simplify();
+        }
+    }
 }
 
 #[derive(Default)]
@@ -87,6 +100,44 @@ enum ConstraintValue {
 }
 
 impl ConstraintValue {
+    fn simplify(&mut self) {
+        match self {
+            ConstraintValue::Add(l, r) => {
+                l.simplify();
+                r.simplify();
+                match (&**l, &**r) {
+                    (ConstraintValue::Str(l), ConstraintValue::Str(r)) => {
+                        let val = BigInt::from_str(l).unwrap() + BigInt::from_str(r).unwrap();
+                        *self = ConstraintValue::Str(val.to_string());
+                    }
+                    _ => {},
+                }
+            },
+            ConstraintValue::Sub(l, r) => {
+                l.simplify();
+                r.simplify();
+                match (&**l, &**r) {
+                    (ConstraintValue::Str(l), ConstraintValue::Str(r)) => {
+                        let val = BigInt::from_str(l).unwrap() - BigInt::from_str(r).unwrap();
+                        *self = ConstraintValue::Str(val.to_string());
+                    }
+                    _ => {},
+                }
+            },
+            ConstraintValue::Neg(a) => {
+                a.simplify();
+                match &**a {
+                    ConstraintValue::Str(a) => {
+                        let val = -BigInt::from_str(a).unwrap();
+                        *self = ConstraintValue::Str(val.to_string());
+                    }
+                    _ => {},
+                }
+            },
+            ConstraintValue::Str(_) | ConstraintValue::Op(_) | ConstraintValue::Parameter { .. } | ConstraintValue::ReturnValue => {},
+        }
+    }
+
     fn replace(&self, key: &ConstraintValue, value: impl Into<ConstraintValue> + Clone) -> Self {
         if self == key {
             value.into()
@@ -233,14 +284,55 @@ enum Constraint {
     Gte(ConstraintValue, ConstraintValue),
     Lte(ConstraintValue, ConstraintValue),
     Eq(ConstraintValue, ConstraintValue),
+    Const(bool),
 }
 
 impl Constraint {
+    fn simplify(&mut self) {
+        match self {
+            Constraint::Gte(l, r) => {
+                l.simplify();
+                r.simplify();
+                match (&*l, &*r) {
+                    (ConstraintValue::Str(l), ConstraintValue::Str(r)) => {
+                        let val = BigInt::from_str(l).unwrap() >= BigInt::from_str(r).unwrap();
+                        *self = Constraint::Const(val);
+                    }
+                    _ => {},
+                }
+            },
+            Constraint::Lte(l, r) => {
+                l.simplify();
+                r.simplify();
+                match (&*l, &*r) {
+                    (ConstraintValue::Str(l), ConstraintValue::Str(r)) => {
+                        let val = BigInt::from_str(l).unwrap() <= BigInt::from_str(r).unwrap();
+                        *self = Constraint::Const(val);
+                    }
+                    _ => {},
+                }
+            },
+            Constraint::Eq(l, r) => {
+                l.simplify();
+                r.simplify();
+                match (&*l, &*r) {
+                    (ConstraintValue::Str(l), ConstraintValue::Str(r)) => {
+                        let val = BigInt::from_str(l).unwrap() == BigInt::from_str(r).unwrap();
+                        *self = Constraint::Const(val);
+                    }
+                    _ => {},
+                }
+            },
+            Constraint::Const(_) => {},
+        }
+    }
+
     fn replace(&self, key: &ConstraintValue, value: impl Into<ConstraintValue> + Clone) -> Self {
         match self {
             Constraint::Gte(l, r) => Constraint::Gte(l.replace(key, value.clone()), r.replace(key, value.clone())),
             Constraint::Lte(l, r) => Constraint::Lte(l.replace(key, value.clone()), r.replace(key, value.clone())),
             Constraint::Eq(l, r) => Constraint::Eq(l.replace(key, value.clone()), r.replace(key, value.clone())),
+            &Constraint::Const(val) => Constraint::Const(val),
         }
     }
 
@@ -251,6 +343,7 @@ impl Constraint {
                     .flatten()
                     .collect()
             },
+            Constraint::Const(_) => HashSet::new(),
         }
     }
 }
@@ -409,6 +502,7 @@ impl Driver {
             Constraint::Gte(l, r) => write!(f, "{}", self.display_bin_expr(">=", &l, &r)),
             Constraint::Lte(l, r) => write!(f, "{}", self.display_bin_expr("<=", &l, &r)),
             Constraint::Eq(l, r) => write!(f, "{}", self.display_bin_expr("=", &l, &r)),
+            &Constraint::Const(val) => write!(f, "{}", val),
         }
     }
 
@@ -700,6 +794,9 @@ impl Driver {
 
         requirements.extend(explicit_requirements);
         guarantees.extend(explicit_guarantees);
+
+        requirements.iter_mut().for_each(|requirement| requirement.simplify());
+        guarantees.iter_mut().for_each(|guarantee| guarantee.simplify());
 
         println!("FUNCTION: {}", self.fn_name(func_name));
         println!("Requirements:");

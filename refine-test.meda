@@ -15,7 +15,7 @@ fn main() {
     // Change the second 12 to 13, or the first 12 to 11
     var := I32_MAX - 12  + 12
 
-    var := add_four(I32_MAX - 3)
+    var := add_four(I32_MAX - 4)
 
     return
 }
