@@ -414,7 +414,7 @@ impl Constraint {
                         let constant = BigInt::from_str(r).unwrap() - offset;
                         let mut val = val.clone();
                         if fac == BigInt::from(-1) { val = -val.clone(); }
-                        *self = Constraint::Gte(constant.to_string().into(), val);
+                        *self = Constraint::Gte(val, constant.to_string().into());
                     },
                     _ => {},
                 }
@@ -437,7 +437,7 @@ impl Constraint {
                         let constant = BigInt::from_str(r).unwrap() - offset;
                         let mut val = val.clone();
                         if fac == BigInt::from(-1) { val = -val.clone(); }
-                        *self = Constraint::Lte(constant.to_string().into(), val);
+                        *self = Constraint::Lte(val, constant.to_string().into());
                     },
                     _ => {},
                 }
@@ -460,7 +460,7 @@ impl Constraint {
                         let constant = BigInt::from_str(r).unwrap() - offset;
                         let mut val = val.clone();
                         if fac == BigInt::from(-1) { val = -val.clone(); }
-                        *self = Constraint::Eq(constant.to_string().into(), val);
+                        *self = Constraint::Eq(val, constant.to_string().into());
                     },
                     (l, r) if l == r => {
                         *self = Constraint::Const(true);
