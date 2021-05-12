@@ -482,7 +482,6 @@ impl Constraint {
 
 struct RefineSession {
     solver: Solver<Parser>,
-    constraints: HashSet<Constraint>,
     func_name: Option<Sym>,
 }
 
@@ -512,12 +511,7 @@ impl Driver {
                 }
             }
 
-            // TODO: dear god this is an ugly hack. `check_constraints` uses the constraints in the RefineSession, so I replace them,
-            // then restore them after I'm done. I should switch to a more general `constraints_implied_by` method or something similar.
-            let existing_constraints = std::mem::replace(&mut rs.constraints, implicit_constraints);
-            let should_include = self.check_constraints(rs, vec![requirement.clone()]).is_err();
-            rs.constraints = existing_constraints;
-            should_include
+            self.check_constraints(rs, &implicit_constraints, vec![requirement.clone()]).is_err()
         });
 
         // Remove guarantees that are equal to the constraints implied by the types of values.
@@ -715,7 +709,7 @@ impl Driver {
         self.refine.names.entry(op).or_insert_with(|| name_gen.next().unwrap());
     }
 
-    fn check_constraints(&mut self, rs: &mut RefineSession, constraints: Vec<Constraint>) -> Result<(), Vec<(String, Vec<(String, String)>, String, String)>> {
+    fn check_constraints(&mut self, rs: &mut RefineSession, axioms: &HashSet<Constraint>, constraints: Vec<Constraint>) -> Result<(), Vec<(String, Vec<(String, String)>, String, String)>> {
         for condition in constraints {
             let mut variables = HashSet::new();
             variables.extend(condition.get_involved_ops());
@@ -730,7 +724,7 @@ impl Driver {
             loop {
                 let mut added_anything = false;
                 // TODO: this is probably crazy slow
-                for constraint in &rs.constraints {
+                for constraint in axioms {
                     let involved = constraint.get_involved_ops();
                     for var in &variables {
                         if involved.contains(var) {
@@ -985,12 +979,11 @@ impl Driver {
             guarantees,
             ..Default::default()
         };
-        let mut hash_constraints = HashSet::new();
-        hash_constraints.extend(constraints.requirements.iter().cloned());
+        let mut active_constraints = HashSet::new();
+        active_constraints.extend(constraints.requirements.iter().cloned());
         let mut rs = RefineSession {
             solver: conf.spawn(Parser).unwrap(),
             func_name,
-            constraints: hash_constraints,
         };
 
         self.simplify_constraints(&mut rs, &mut constraints);
@@ -1018,8 +1011,8 @@ impl Driver {
             let op = block.ops[i];
             let mut constraints = self.constrain_op(op, tp);
             self.simplify_constraints(&mut rs, &mut constraints);
-            self.check_constraints(&mut rs, constraints.requirements.clone()).unwrap();
-            rs.constraints.extend(constraints.guarantees);
+            self.check_constraints(&mut rs, &active_constraints, constraints.requirements.clone()).unwrap();
+            active_constraints.extend(constraints.guarantees);
         }
 
         let block = &self.code.blocks[block_id];
