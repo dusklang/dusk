@@ -708,8 +708,16 @@ impl Driver {
         let name_gen = &mut self.refine.name_gen;
         self.refine.names.entry(op).or_insert_with(|| name_gen.next().unwrap());
     }
+}
 
-    fn check_constraints(&mut self, rs: &mut RefineSession, axioms: &HashSet<Constraint>, constraints: Vec<Constraint>) -> Result<(), Vec<(String, Vec<(String, String)>, String, String)>> {
+#[derive(Debug)]
+struct ConstraintCheckError {
+    model: Vec<(String, Vec<(String, String)>, String, String)>,
+    failed_constraint: Constraint,
+}
+
+impl Driver {
+    fn check_constraints(&mut self, rs: &mut RefineSession, axioms: &HashSet<Constraint>, constraints: Vec<Constraint>) -> Result<(), ConstraintCheckError> {
         for condition in constraints {
             let mut variables = HashSet::new();
             variables.extend(condition.get_involved_ops());
@@ -746,8 +754,6 @@ impl Driver {
             }
             rs.solver.assert(&condition_str).unwrap();
             let val = if rs.solver.check_sat().unwrap() {
-                println!("Refinement checker failed on condition {}", self.display_constraint(&condition));
-                println!("    in function {}", self.fn_name(rs.func_name));
                 let mut model = rs.solver.get_model().unwrap();
 
                 // Limit the returned model to just the variables that show up in the current condition
@@ -757,7 +763,10 @@ impl Driver {
                         .collect::<Vec<_>>()
                         .contains(&&assignment.0)
                 );
-                Err(model)
+                Err(ConstraintCheckError {
+                    model,
+                    failed_constraint: condition,
+                })
             } else {
                 Ok(())
             };
@@ -1011,7 +1020,12 @@ impl Driver {
             let op = block.ops[i];
             let mut constraints = self.constrain_op(op, tp);
             self.simplify_constraints(&mut rs, &mut constraints);
-            self.check_constraints(&mut rs, &active_constraints, constraints.requirements.clone()).unwrap();
+            if let Err(error) = self.check_constraints(&mut rs, &active_constraints, constraints.requirements.clone()) {
+                println!("Refinement checker failed on condition {}", self.display_constraint(&error.failed_constraint));
+                println!("    in function {}", self.fn_name(rs.func_name));
+                println!("    model: {:?}", error.model);
+                std::process::exit(1);
+            }
             active_constraints.extend(constraints.guarantees);
         }
 
