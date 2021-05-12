@@ -11,11 +11,23 @@ fn add_four(a: i32): i32 {
 //     if a < I32_MAX - 4 { a + 4 } else { a }
 // }
 
+fn add_two_numbers(a: i32, b: i32): i32 {
+    a + b
+}
+
+fn add_two_numbers_plus_four(a: i32, b: i32): i32 {
+    add_four(add_two_numbers(a, b))
+}
+
+fn add_two_numbers_plus_eight(a: i32, b: i32): i32 {
+    add_four(add_four(add_two_numbers(a, b)))
+}
+
 fn main() {
     // Change the second 12 to 13, or the first 12 to 11
     var := I32_MAX - 12  + 12
 
-    var := add_four(I32_MAX - 4)
+    var := add_two_numbers(add_four(I32_MAX - 4), -12)
 
     return
 }

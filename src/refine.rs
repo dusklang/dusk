@@ -486,6 +486,19 @@ struct RefineSession {
 }
 
 impl Driver {
+    fn remove_constraints_implied_by_others(&mut self, rs: &mut RefineSession, constraints: &mut Vec<Constraint>) {
+        // Remove requirements that are implied by the group of all other requirements
+        let mut requirements_set: HashSet<Constraint> = constraints.iter().cloned().collect();
+        constraints.retain(|requirement| {
+            requirements_set.remove(requirement);
+
+            let should_include = self.check_constraints(rs, &requirements_set, vec![requirement.clone()]).is_err();
+
+            requirements_set.insert(requirement.clone());
+            should_include
+        });
+    }
+
     fn simplify_constraints(&mut self, rs: &mut RefineSession, constraints: &mut Constraints) {
         for requirement in &mut constraints.requirements {
             requirement.simplify();
@@ -514,6 +527,7 @@ impl Driver {
             self.check_constraints(rs, &implicit_constraints, vec![requirement.clone()]).is_err()
         });
 
+        
         // Remove guarantees that are equal to the constraints implied by the types of values.
         // Note that we must be more conservative for guarantees than requirements for now,
         // because I'm not sure what the rules are yet for when, e.g., parameters can have
@@ -533,9 +547,12 @@ impl Driver {
                     _ => panic!("unhandled type"),
                 }
             }
-
+            
             !implicit_constraints.contains(guarantee)
         });
+
+        self.remove_constraints_implied_by_others(rs, &mut constraints.requirements);
+        self.remove_constraints_implied_by_others(rs, &mut constraints.guarantees);
     }
 
     fn expr_to_constraint_val(&self, expr: ExprId, tp: &impl TypeProvider) -> ConstraintValue {
