@@ -46,19 +46,6 @@ struct Constraints {
     ret_val: Option<OpId>,
 }
 
-impl Constraints {
-    fn simplify(&mut self) {
-        for requirement in &mut self.requirements {
-            requirement.simplify();
-        }
-        for guarantee in &mut self.guarantees {
-            guarantee.simplify();
-        }
-        self.requirements.retain(|requirement| !matches!(requirement, Constraint::Const(_)));
-        self.guarantees.retain(|guarantee| !matches!(guarantee, Constraint::Const(_)));
-    }
-}
-
 #[derive(Default)]
 pub struct Refine {
     names: HashMap<OpId, String>,
@@ -500,6 +487,63 @@ struct RefineSession {
 }
 
 impl Driver {
+    fn simplify_constraints(&mut self, rs: &mut RefineSession, constraints: &mut Constraints) {
+        for requirement in &mut constraints.requirements {
+            requirement.simplify();
+        }
+        for guarantee in &mut constraints.guarantees {
+            guarantee.simplify();
+        }
+        constraints.requirements.retain(|requirement| !matches!(requirement, Constraint::Const(_)));
+        constraints.guarantees.retain(|guarantee| !matches!(guarantee, Constraint::Const(_)));
+
+        // Remove requirements that are implied by the types of values
+        constraints.requirements.retain(|requirement| {
+            let mut implicit_constraints = HashSet::new();
+            for op in requirement.get_involved_ops() {
+                let ty = self.type_of(op);
+                match ty {
+                    Type::Int { width, is_signed } => {
+                        let (lo, hi) = self.get_int_range(width, is_signed);
+                        implicit_constraints.insert(Constraint::Lte(lo.into(), op.into()));
+                        implicit_constraints.insert(Constraint::Lte(op.into(), hi.into()));
+                    },
+                    _ => panic!("unhandled type"),
+                }
+            }
+
+            // TODO: dear god this is an ugly hack. `check_constraints` uses the constraints in the RefineSession, so I replace them,
+            // then restore them after I'm done. I should switch to a more general `constraints_implied_by` method or something similar.
+            let existing_constraints = std::mem::replace(&mut rs.constraints, implicit_constraints);
+            let should_include = self.check_constraints(rs, vec![requirement.clone()]).is_err();
+            rs.constraints = existing_constraints;
+            should_include
+        });
+
+        // Remove guarantees that are equal to the constraints implied by the types of values.
+        // Note that we must be more conservative for guarantees than requirements for now,
+        // because I'm not sure what the rules are yet for when, e.g., parameters can have
+        // guarantees placed on them.
+        //
+        // Regardless, clearly something like "i32 param <= i32_max" is redundant.
+        constraints.guarantees.retain(|guarantee| {
+            let mut implicit_constraints = HashSet::new();
+            for op in guarantee.get_involved_ops() {
+                let ty = self.type_of(op);
+                match ty {
+                    Type::Int { width, is_signed } => {
+                        let (lo, hi) = self.get_int_range(width, is_signed);
+                        implicit_constraints.insert(Constraint::Lte(lo.into(), op.into()));
+                        implicit_constraints.insert(Constraint::Lte(op.into(), hi.into()));
+                    },
+                    _ => panic!("unhandled type"),
+                }
+            }
+
+            !implicit_constraints.contains(guarantee)
+        });
+    }
+
     fn expr_to_constraint_val(&self, expr: ExprId, tp: &impl TypeProvider) -> ConstraintValue {
         let expr = &self.code.hir_code.exprs[expr];
         match expr {
@@ -941,7 +985,15 @@ impl Driver {
             guarantees,
             ..Default::default()
         };
-        constraints.simplify();
+        let mut hash_constraints = HashSet::new();
+        hash_constraints.extend(constraints.requirements.iter().cloned());
+        let mut rs = RefineSession {
+            solver: conf.spawn(Parser).unwrap(),
+            func_name,
+            constraints: hash_constraints,
+        };
+
+        self.simplify_constraints(&mut rs, &mut constraints);
 
         println!("FUNCTION: {}", self.fn_name(func_name));
         println!("Requirements:");
@@ -960,20 +1012,12 @@ impl Driver {
         }
         println!("\n");
 
-        let mut hash_constraints = HashSet::new();
-        hash_constraints.extend(constraints.requirements.iter().cloned());
-        let mut rs = RefineSession {
-            solver: conf.spawn(Parser).unwrap(),
-            func_name,
-            constraints: hash_constraints,
-        };
-
         let block = &self.code.blocks[block_id];
         for i in 0..block.ops.len() {
             let block = &self.code.blocks[block_id];
             let op = block.ops[i];
             let mut constraints = self.constrain_op(op, tp);
-            constraints.simplify();
+            self.simplify_constraints(&mut rs, &mut constraints);
             self.check_constraints(&mut rs, constraints.requirements.clone()).unwrap();
             rs.constraints.extend(constraints.guarantees);
         }
