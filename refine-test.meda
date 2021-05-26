@@ -3,8 +3,15 @@
 I32_MIN :: -2147483647 - 1
 I32_MAX :: 2147483647
 
+@requires(a <= I32_MAX - 4)
+@guarantees(return_value == a + 4)
 fn add_four(a: i32): i32 {
     a + 4
+}
+
+@guarantees(return_value == 12)
+fn return_twelve(): i32 {
+    12
 }
 
 // fn add_four_clamping(a: i32): i32 {

@@ -795,7 +795,7 @@ impl Driver {
         Ok(())
     }
 
-    fn constrain_op(&mut self, op: OpId, tp: &impl TypeProvider) -> Constraints {
+    fn constrain_op(&mut self, op: OpId, tp: &impl TypeProvider, explicit_guarantees: &HashSet<Constraint>) -> Constraints {
         let instr = self.code.ops[op].as_mir_instr().unwrap();
         let mut requirements = Vec::<Constraint>::new();
         let mut guarantees = Vec::<Constraint>::new();
@@ -873,7 +873,13 @@ impl Driver {
                     _ => {},
                 }
             },
-            &Instr::Ret(val) => ret_val = Some(val),
+            &Instr::Ret(val) => {
+                requirements.extend(
+                    // TODO: filter to only those guarantees that include the return value?
+                    explicit_guarantees.iter().map(|req| req.replace(&ConstraintValue::ReturnValue, val))
+                );
+                ret_val = Some(val)
+            },
             &Instr::Call { ref arguments, func } => {
                 // Thanks borrow checker. :(
                 let arguments = arguments.clone();
@@ -894,14 +900,14 @@ impl Driver {
         Constraints { requirements, guarantees, ret_val }
     }
 
-    fn constrain_block(&mut self, block_id: BlockId, tp: &impl TypeProvider) -> Constraints {
+    fn constrain_block(&mut self, block_id: BlockId, tp: &impl TypeProvider, explicit_guarantees: &HashSet<Constraint>) -> Constraints {
         let mut constraints = Constraints::default();
         let block = &self.code.blocks[block_id];
         for i in 0..block.ops.len() {
             let block = &self.code.blocks[block_id];
             let op = block.ops[i];
             
-            let op_constraints = self.constrain_op(op, tp);
+            let op_constraints = self.constrain_op(op, tp, explicit_guarantees);
             constraints.requirements.extend(op_constraints.requirements);
             constraints.guarantees.extend(op_constraints.guarantees);
 
@@ -988,7 +994,7 @@ impl Driver {
         let mut dont_replace: HashSet<OpId> = HashSet::new();
         dont_replace.extend(&block.ops[0..num_params]);
 
-        let block_constraints = self.constrain_block(block_id, tp);
+        let block_constraints = self.constrain_block(block_id, tp, &explicit_guarantees);
         let requirements = self.infer_constraints(
             &block_constraints.requirements,
             &block_constraints,
@@ -1035,7 +1041,7 @@ impl Driver {
         for i in 0..block.ops.len() {
             let block = &self.code.blocks[block_id];
             let op = block.ops[i];
-            let mut constraints = self.constrain_op(op, tp);
+            let mut constraints = self.constrain_op(op, tp, &&explicit_guarantees);
             self.simplify_constraints(&mut rs, &mut constraints);
             if let Err(error) = self.check_constraints(&mut rs, &active_constraints, constraints.requirements.clone()) {
                 println!("Refinement checker failed on condition {}", self.display_constraint(&error.failed_constraint));
