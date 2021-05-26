@@ -499,15 +499,16 @@ impl Driver {
         });
     }
 
+    fn simplify_constraint_set(&mut self, constraints: &mut Vec<Constraint>) {
+        for constraint in &mut *constraints {
+            constraint.simplify();
+        }
+        constraints.retain(|constraint| !matches!(constraint, Constraint::Const(_)));
+    }
+
     fn simplify_constraints(&mut self, rs: &mut RefineSession, constraints: &mut Constraints) {
-        for requirement in &mut constraints.requirements {
-            requirement.simplify();
-        }
-        for guarantee in &mut constraints.guarantees {
-            guarantee.simplify();
-        }
-        constraints.requirements.retain(|requirement| !matches!(requirement, Constraint::Const(_)));
-        constraints.guarantees.retain(|guarantee| !matches!(guarantee, Constraint::Const(_)));
+        self.simplify_constraint_set(&mut constraints.requirements);
+        self.simplify_constraint_set(&mut constraints.guarantees);
 
         // Remove requirements that are implied by the types of values
         constraints.requirements.retain(|requirement| {
@@ -1011,6 +1012,7 @@ impl Driver {
             guarantees,
             ..Default::default()
         };
+        //constraints.requirements.extend(explicit_requirements);
         let mut active_constraints = HashSet::new();
         active_constraints.extend(constraints.requirements.iter().cloned());
         let mut rs = RefineSession {
@@ -1041,8 +1043,15 @@ impl Driver {
         for i in 0..block.ops.len() {
             let block = &self.code.blocks[block_id];
             let op = block.ops[i];
-            let mut constraints = self.constrain_op(op, tp, &&explicit_guarantees);
+            let mut constraints = self.constrain_op(op, tp, &explicit_guarantees);
             self.simplify_constraints(&mut rs, &mut constraints);
+
+            // TODO: speed. this is really, really stupid!
+            let mut active_constraints_vec = Vec::new();
+            active_constraints_vec.extend(active_constraints.iter().cloned());
+            self.simplify_constraint_set(&mut active_constraints_vec);
+            active_constraints = active_constraints_vec.into_iter().collect();
+
             if let Err(error) = self.check_constraints(&mut rs, &active_constraints, constraints.requirements.clone()) {
                 println!("Refinement checker failed on condition {}", self.display_constraint(&error.failed_constraint));
                 println!("    in function {}", self.fn_name(rs.func_name));
