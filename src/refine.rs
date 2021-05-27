@@ -48,33 +48,7 @@ struct Constraints {
 
 #[derive(Default)]
 pub struct Refine {
-    names: HashMap<OpId, String>,
     constraints: HashMap<FuncId, Constraints>,
-    name_gen: NameGen,
-}
-
-#[derive(Default)]
-struct NameGen(usize);
-
-impl Iterator for NameGen {
-    type Item = String;
-    fn next(&mut self) -> Option<String> {
-        let mut val = self.0;
-        let mut out = String::new();
-        loop {
-            let base = 26;
-            let cur_digit = val % base;
-            val /= base;
-            let chr = ('a' as u8 + cur_digit as u8) as char;
-            out.push(chr);
-
-            if val == 0 { break; }
-        }
-
-        self.0 += 1;
-
-        Some(out)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -681,7 +655,7 @@ impl Driver {
     #[display_adapter]
     fn display_constraint_value(&self, val: &ConstraintValue, f: &mut Formatter) {
         match val {
-            ConstraintValue::Op(op) => write!(f, "{}", self.refine.names.get(op).unwrap())?,
+            &ConstraintValue::Op(op) => write!(f, "{}", self.display_instr_name(op))?,
             ConstraintValue::Str(str) => write!(f, "{}", str)?,
             ConstraintValue::Add(l, r) => write!(f, "{}", self.display_bin_expr("+", l, r))?,
             ConstraintValue::Sub(l, r) => write!(f, "{}", self.display_bin_expr("-", l, r))?,
@@ -721,11 +695,6 @@ impl Driver {
         }
         write!(w, ")")
     }
-
-    fn assign_name_if_none(&mut self, op: OpId) {
-        let name_gen = &mut self.refine.name_gen;
-        self.refine.names.entry(op).or_insert_with(|| name_gen.next().unwrap());
-    }
 }
 
 #[derive(Debug)]
@@ -741,11 +710,6 @@ impl Driver {
             variables.extend(condition.get_involved_ops());
 
             let mut relevant_constraints = HashSet::new();
-
-            // Assign names to variables that don't have them
-            for op in variables.iter().copied() {
-                self.assign_name_if_none(op);
-            }
 
             loop {
                 let mut added_anything = false;
@@ -767,8 +731,8 @@ impl Driver {
             }
             rs.solver.push(1).unwrap();
             let condition_str: String = format!("\n    {}", self.display_condition_check(&condition, &relevant_constraints));
-            for var in &variables {
-                rs.solver.declare_const(self.refine.names.get(var).unwrap(), "Int").unwrap();
+            for &var in &variables {
+                rs.solver.declare_const(&format!("{}", self.display_instr_name(var)), "Int").unwrap();
             }
             rs.solver.assert(&condition_str).unwrap();
             let val = if rs.solver.check_sat().unwrap() {
@@ -777,7 +741,7 @@ impl Driver {
                 // Limit the returned model to just the variables that show up in the current condition
                 model.retain(|assignment| 
                     condition.get_involved_ops().iter()
-                        .map(|op| self.refine.names.get(op).unwrap())
+                        .map(|&op| format!("{}", self.display_instr_name(op)))
                         .collect::<Vec<_>>()
                         .contains(&&assignment.0)
                 );
@@ -1025,16 +989,10 @@ impl Driver {
         println!("FUNCTION: {}", self.fn_name(func_name));
         println!("Requirements:");
         for constraint in &constraints.requirements {
-            for op in constraint.get_involved_ops() {
-                self.assign_name_if_none(op);
-            }
             println!("    {}", self.display_constraint(&constraint));
         }
         println!("\nGuarantees:");
         for constraint in &constraints.guarantees {
-            for op in constraint.get_involved_ops() {
-                self.assign_name_if_none(op);
-            }
             println!("    {}", self.display_constraint(&constraint));
         }
         println!("\n");
