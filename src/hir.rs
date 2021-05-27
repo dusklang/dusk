@@ -13,6 +13,7 @@ use mire::source_info::{SourceFileId, SourceRange};
 use crate::driver::Driver;
 use crate::index_vec::*;
 use crate::builder::{BinOp, UnOp};
+use crate::source_info::ToSourceRange;
 
 #[derive(Debug)]
 enum ScopeState {
@@ -484,6 +485,18 @@ impl Driver {
             ScopeState::Condition { ns, condition_kind: ConditionKind::Guarantee } => Namespace::Guarantee(ns),
         }
     }
-    pub fn get_range(&self, id: ExprId) -> SourceRange { self.code.hir_code.source_ranges[self.code.hir_code.expr_to_items[id]].clone() }
+    pub fn get_range(&self, item: impl Into<ToSourceRange>) -> SourceRange {
+        match item.into() {
+            ToSourceRange::Item(item) => {
+                let item = match item {
+                    Item::Expr(expr) => self.code.hir_code.expr_to_items[expr],
+                    Item::Decl(decl) => self.code.hir_code.decl_to_items[decl],
+                };
+                self.code.hir_code.source_ranges[item]
+            }
+            ToSourceRange::Op(op) => self.code.mir_code.source_ranges.get(&op).unwrap().clone(),
+            ToSourceRange::SourceRange(range) => range,
+        }
+    }
     pub fn set_range(&mut self, id: ExprId, range: SourceRange) { self.code.hir_code.source_ranges[self.code.hir_code.expr_to_items[id]] = range; }
 }
