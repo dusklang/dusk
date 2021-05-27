@@ -232,9 +232,10 @@ impl Driver {
         self.hir.scope_stack.push(ScopeState::Mod { id, namespace });
         self.push_expr(Expr::Mod { id }, SourceRange::default())
     }
-    pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, explicit_ty: Option<ExprId>, proto_range: SourceRange) -> DeclId {
+    pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, generic_param_names: SmallVec<[Sym; 1]>, generic_params: Range<GenericParamId>, generic_param_ranges: SmallVec<[SourceRange; 1]>, explicit_ty: Option<ExprId>, proto_range: SourceRange) -> DeclId {
         // This is a placeholder value that gets replaced once the parameter declarations get allocated.
         let id = self.decl(Decl::Const(ExprId::new(u32::MAX as usize)), name, explicit_ty, proto_range);
+
         assert_eq!(param_names.len(), param_tys.len());
         self.code.hir_code.decls.reserve(param_tys.len());
         let first_param = DeclId::new(self.code.hir_code.decls.len());
@@ -247,11 +248,25 @@ impl Driver {
             });
         let last_param = DeclId::new(self.code.hir_code.decls.len());
         let params = first_param..last_param;
+
+        assert_eq!(generic_param_names.len(), generic_params.end - generic_params.start);
+        assert_eq!(generic_param_names.len(), generic_param_ranges.len());
+        self.code.hir_code.decls.reserve(generic_param_names.len());
+        let first_generic_param = DeclId::new(self.code.hir_code.decls.len());
+        for id in generic_params.start.index()..generic_params.end.index() {
+            let param = GenericParamId::new(id);
+            let i = id - generic_params.start.index();
+            self.decl(Decl::GenericParam(param), generic_param_names[i], Some(VOID_TYPE), generic_param_ranges[i]);
+        }
+        let last_generic_param = DeclId::new(self.code.hir_code.decls.len());
+        let generic_params = first_generic_param..last_generic_param;
+
         // `end_computed_decl` will attach the real scope to this decl; we don't have it yet
         self.code.hir_code.decls[id] = Decl::Computed {
             param_tys,
             params: params.clone(),
-            scope: ImperScopeId::new(u32::MAX as usize)
+            scope: ImperScopeId::new(u32::MAX as usize),
+            generic_params,
         };
         match self.hir.scope_stack.last().unwrap() {
             ScopeState::Imper { .. } => {

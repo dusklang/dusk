@@ -2,7 +2,7 @@ use smallvec::{SmallVec, smallvec};
 
 use string_interner::DefaultSymbol as Sym;
 
-use mire::hir::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment};
+use mire::hir::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment, GenericParamId};
 use mire::ty::Type;
 use mire::source_info::{self, SourceFileId, SourceRange};
 
@@ -767,7 +767,7 @@ impl Driver {
             TokenKind::Assign => None,
             tok => panic!("Invalid token {:?}", tok),
         };
-        let decl_id = self.begin_computed_decl(name, param_names, param_tys, param_ranges, ty, proto_range);
+        let decl_id = self.begin_computed_decl(name, param_names, param_tys, param_ranges, SmallVec::new(), GenericParamId::new(0)..GenericParamId::new(0), SmallVec::new(), ty, proto_range);
         match self.cur(p).kind {
             TokenKind::OpenCurly => {
                 self.parse_scope(p);

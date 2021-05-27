@@ -2,18 +2,16 @@ use std::collections::HashMap;
 use std::ffi::CString;
 use std::ops::Range;
 
-use index_vec::IdxSliceIndex;
 use smallvec::SmallVec;
 use string_interner::DefaultSymbol as Sym;
 use display_adapter::display_adapter;
 
-use mire::hir::{self, DeclId, ExprId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, Item};
+use mire::hir::{self, DeclId, ExprId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, GenericParamId, Item};
 use mire::mir::{FuncId, StaticId, Const, Instr, Function, MirCode, StructLayout, InstrNamespace, VOID_INSTR};
 use mire::{Block, BlockId, Op, OpId};
 use mire::ty::{Type, FloatWidth};
 
 use crate::driver::Driver;
-use crate::source_info;
 use crate::typechecker as tc;
 use tc::type_provider::TypeProvider;
 use tc::CastMethod;
@@ -29,6 +27,7 @@ enum Decl {
     Static(StaticId),
     Const(Const),
     Field { index: usize },
+    GenericParam(GenericParamId),
 }
 
 /// What to do with a value
@@ -198,7 +197,7 @@ impl Builder {
 fn type_of(b: &MirCode, instr: OpId, code: &IndexVec<OpId, Op>) -> Type {
     match code[instr].as_mir_instr().unwrap() {
         Instr::Void | Instr::Store { .. } => Type::Void,
-        Instr::Pointer { .. } | Instr::Struct { .. } => Type::Ty,
+        Instr::Pointer { .. } | Instr::Struct { .. } | Instr::GenericParam(_) => Type::Ty,
         &Instr::StructLit { id, .. } => Type::Struct(id),
         Instr::Const(konst) => konst.ty(),
         Instr::Alloca(ty) => ty.clone().mut_ptr(),
@@ -229,7 +228,7 @@ fn type_of(b: &MirCode, instr: OpId, code: &IndexVec<OpId, Op>) -> Type {
                 Type::Struct(strukt) => b.structs[&strukt].field_tys[index].clone().ptr_with_mut(base_ty.is_mut),
                 _ => panic!("Cannot directly access field of non-struct type {:?}!", base_ty),
             }
-        }
+        },
     }
 }
 
@@ -276,6 +275,7 @@ impl Driver {
             },
             Type::Bool => 1,
             &Type::Struct(id) => self.code.mir_code.structs[&id].layout.size,
+            Type::GenericParam(_) => panic!("can't get size of generic parameter without more context"),
         }
     }
 
@@ -417,6 +417,11 @@ impl Driver {
             hir::Decl::Field(field_id) => {
                 let index = self.code.hir_code.field_decls[field_id].index;
                 let decl = Decl::Field { index };
+                self.mir.decls.insert(id, decl.clone());
+                decl
+            },
+            hir::Decl::GenericParam(param) => {
+                let decl = Decl::GenericParam(param);
                 self.mir.decls.insert(id, decl.clone());
                 decl
             },
@@ -615,6 +620,9 @@ impl Driver {
                         },
                         &Instr::DirectFieldAccess { val, index } => writeln!(f, "%{} = %{}.field{}", self.display_instr_name(op_id), self.display_instr_name(val), index)?,
                         &Instr::IndirectFieldAccess { val, index } => writeln!(f, "%{} = &(*%{}).field{}", self.display_instr_name(op_id), self.display_instr_name(val), index)?,
+                        &Instr::GenericParam(param) => {
+                            writeln!(f, "{} = generic_param{}", self.display_instr_name(op_id), param.index())?
+                        },
                         Instr::Parameter(_) => {},
                         Instr::Void => panic!("unexpected void!"),
                     };
@@ -810,6 +818,9 @@ impl Driver {
                 let value = self.code.blocks[entry_block].ops[index];
                 value.direct()
             },
+            Decl::GenericParam(param) => {
+                self.push_instr(b, Instr::GenericParam(param), expr).direct()
+            },
             Decl::Intrinsic(intr, ref ty) => {
                 let ty = ty.clone();
                 self.push_instr(b, Instr::Intrinsic { arguments, ty, intr }, expr).direct()
@@ -846,7 +857,7 @@ impl Driver {
                 let location = b.stored_decl_locs[id];
                 self.push_instr(b, Instr::Store { location, value }, range)
             },
-            Decl::Parameter { .. } | Decl::Const(_) => panic!("can't set a constant!"),
+            Decl::Parameter { .. } | Decl::Const(_) | Decl::GenericParam(_) => panic!("can't set a constant!"),
             Decl::Intrinsic(_, _) => panic!("can't set an intrinsic! (yet?)"),
             Decl::Static(statik) => {
                 let location = self.push_instr(b, Instr::AddressOfStatic(statik), expr);
@@ -865,6 +876,7 @@ impl Driver {
                 assert!(arguments.is_empty());
                 b.stored_decl_locs[id].indirect()
             },
+            Decl::GenericParam(_) => panic!("can't modify a generic parameter!"),
             Decl::Parameter { .. } | Decl::Const(_) => panic!("can't modify a constant!"),
             Decl::Intrinsic(_, _) => panic!("can't modify an intrinsic! (yet?)"),
             Decl::Static(statik) => self.push_instr(b, Instr::AddressOfStatic(statik), expr).indirect(),

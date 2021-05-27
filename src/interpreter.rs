@@ -13,7 +13,7 @@ use num_bigint::{BigInt, Sign};
 use display_adapter::display_adapter;
 
 use mire::arch::Arch;
-use mire::hir::{Intrinsic, ModScopeId, StructId};
+use mire::hir::{Intrinsic, ModScopeId, StructId, GenericParamId};
 use mire::mir::{Const, Instr, StaticId, Struct, VOID_INSTR};
 use mire::ty::{Type, IntWidth, FloatWidth};
 use mire::{OpId, BlockId};
@@ -278,6 +278,7 @@ struct StackFrame {
     block: BlockId,
     pc: usize,
     results: HashMap<OpId, Value>,
+    generic_ctx: HashMap<GenericParamId, Type>,
 }
 
 impl StackFrame {
@@ -441,7 +442,7 @@ impl Driver {
         }
     }
 
-    fn new_stack_frame(&self, func_ref: FunctionRef, arguments: Vec<Value>) -> StackFrame {
+    fn new_stack_frame(&self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> StackFrame {
         let func = function_by_ref(&self.code.mir_code, &func_ref);
 
         let mut results = HashMap::new();
@@ -465,10 +466,13 @@ impl Driver {
             results.insert(op, arg);
         }
         results.insert(VOID_INSTR, Value::Nothing);
+
+        let generic_ctx = HashMap::new();
         StackFrame {
             func_ref,
             block: start_block,
             pc: num_parameters,
+            generic_ctx,
             results,
         }
     }
@@ -482,8 +486,8 @@ impl Driver {
         Ok(())
     }
 
-    pub fn call(&mut self, func_ref: FunctionRef, arguments: Vec<Value>) -> Value {
-        let frame = self.new_stack_frame(func_ref, arguments);
+    pub fn call(&mut self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> Value {
+        let frame = self.new_stack_frame(func_ref, arguments, generic_arguments);
         self.interp.stack.push(frame);
         loop {
             if let Some(val) = self.execute_next() {
@@ -534,7 +538,10 @@ impl Driver {
                 for &arg in arguments {
                     copied_args.push(frame.results[&arg].clone());
                 }
-                self.call(FunctionRef::Id(func), copied_args)
+                self.call(FunctionRef::Id(func), copied_args, Vec::new())
+            },
+            Instr::GenericParam(_) => {
+                unimplemented!();
             },
             &Instr::Intrinsic { ref arguments, intr, .. } => {
                 match intr {

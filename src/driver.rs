@@ -55,7 +55,7 @@ impl Driver {
         let func = self.build_standalone_expr(expr, tp);
         let function_ref = FunctionRef::Ref(func);
         self.refine_func(&function_ref, tp);
-        let val = self.call(function_ref, Vec::new());
+        let val = self.call(function_ref, Vec::new(), Vec::new());
         self.value_to_const(val, tp.ty(expr).clone(), tp)
     }
 }
