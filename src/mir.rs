@@ -2,12 +2,13 @@ use std::collections::HashMap;
 use std::ffi::CString;
 use std::ops::Range;
 
+use index_vec::IdxSliceIndex;
 use smallvec::SmallVec;
 use string_interner::DefaultSymbol as Sym;
 use display_adapter::display_adapter;
 
 use mire::hir::{self, DeclId, ExprId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, Item};
-use mire::mir::{FuncId, StaticId, Const, Instr, Function, MirCode, StructLayout, VOID_INSTR};
+use mire::mir::{FuncId, StaticId, Const, Instr, Function, MirCode, StructLayout, InstrNamespace, VOID_INSTR};
 use mire::{Block, BlockId, Op, OpId};
 use mire::ty::{Type, FloatWidth};
 
@@ -173,16 +174,22 @@ pub enum FunctionRef {
     Ref(Function),
 }
 
+#[derive(Clone)]
+struct Static {
+    name: String,
+    assignment: ExprId,
+}
+
 pub struct Builder {
     decls: HashMap<DeclId, Decl>,
-    static_inits: IndexVec<StaticId, ExprId>,
+    statics: IndexVec<StaticId, Static>,
 }
 
 impl Builder {
     pub fn new() -> Self {
         Self {
             decls: HashMap::new(),
-            static_inits: IndexVec::new(),
+            statics: IndexVec::new(),
         }
     }
 }
@@ -205,7 +212,7 @@ fn type_of(b: &MirCode, instr: OpId, code: &IndexVec<OpId, Op>) -> Type {
             Type::Pointer(pointee) => pointee.ty,
             _ => Type::Error,
         },
-        &Instr::AddressOfStatic(statik) => b.statics[statik].ty().mut_ptr(),
+        &Instr::AddressOfStatic(statik) => b.statics[statik].val.ty().mut_ptr(),
         Instr::Ret(_) | Instr::Br(_) | Instr::CondBr { .. } => Type::Never,
         Instr::Parameter(ty) => ty.clone(),
         &Instr::DirectFieldAccess { val, index } => {
@@ -320,11 +327,17 @@ impl Driver {
             self.get_decl(DeclId::new(i), tp);
         }
 
-        for i in 0..self.mir.static_inits.len() {
+        for i in 0..self.mir.statics.len() {
             let id = StaticId::new(i);
-            let init = self.mir.static_inits[id];
-            let konst = self.eval_expr(init, tp);
-            self.code.mir_code.statics.push(konst);
+            let statik = self.mir.statics[id].clone();
+            let konst = self.eval_expr(statik.assignment, tp);
+            self.code.mir_code.statics.push_at(
+                id,
+                mire::mir::Static {
+                    name: statik.name,
+                    val: konst.clone(),
+                }
+            );
         }
     }
 
@@ -367,9 +380,15 @@ impl Driver {
                 decl
             },
             hir::Decl::Static(expr) => {
-                let decl = Decl::Static(StaticId::new(self.mir.static_inits.len()));
+                let name = format!("{}", self.display_item(id));
+                let decl = Decl::Static(StaticId::new(self.mir.statics.len()));
                 self.mir.decls.insert(id, decl.clone());
-                self.mir.static_inits.push(expr);
+                self.mir.statics.push(
+                    Static {
+                        name,
+                        assignment: expr,
+                    }
+                );
                 decl
             },
             hir::Decl::Const(root_expr) => {
@@ -430,10 +449,16 @@ impl Driver {
     }
 
     #[display_adapter]
+    pub fn display_instr_name(&self, item: OpId, f: &mut Formatter) {
+        write!(f, "{}", self.code.mir_code.instr_names.get(&item).cloned()
+            .unwrap_or_else(|| format!("{}", item.index())))
+    }
+
+    #[display_adapter]
     pub fn display_mir(&self, f: &mut Formatter) {
         if !self.code.mir_code.statics.raw.is_empty() {
-            for (i, statik) in self.code.mir_code.statics.iter().enumerate() {
-                writeln!(f, "%static{} = {}", i, self.fmt_const(statik))?;
+            for statik in &self.code.mir_code.statics {
+                writeln!(f, "%{} = {}", statik.name, self.fmt_const(&statik.val))?;
             }
             writeln!(f)?;
         }
@@ -450,7 +475,7 @@ impl Driver {
                     } else {
                         write!(f, ", ")?;
                     }
-                    write!(f, r#"%{}/"{}": {:?}"#, op.index(), self.display_item(op), ty)?;
+                    write!(f, r#"%{}: {:?}"#, self.display_instr_name(op), ty)?;
                 } else {
                     break;
                 }
@@ -518,7 +543,7 @@ impl Driver {
                         Instr::LogicalNot(op) => writeln!(f, "%{} = not %{}", op_id.index(), op.index())?,
                         Instr::Ret(val) => writeln!(f,  "return %{}", val.index())?,
                         Instr::Store { location, value } => writeln!(f, "store %{} in %{}", value.index(), location.index())?,
-                        Instr::AddressOfStatic(statik) => writeln!(f, "%{} = address of %static{}", op_id.index(), statik.index())?,
+                        &Instr::AddressOfStatic(statik) => writeln!(f, "%{} = address of static %{}", op_id.index(), self.code.mir_code.statics[statik].name)?,
                         &Instr::Reinterpret(val, ref ty) => writeln!(f, "%{} = reinterpret %{} as {:?}", op_id.index(), val.index(), ty)?,
                         &Instr::SignExtend(val, ref ty) => writeln!(f, "%{} = sign-extend %{} as {:?}", op_id.index(), val.index(), ty)?,
                         &Instr::ZeroExtend(val, ref ty) => writeln!(f, "%{} = zero-extend %{} as {:?}", op_id.index(), val.index(), ty)?,
@@ -576,6 +601,7 @@ struct FunctionBuilder {
     blocks: Vec<BlockId>,
     current_block: BlockId,
     stored_decl_locs: IndexVec<StoredDeclId, OpId>,
+    instr_namespace: InstrNamespace,
 }
 
 impl Driver {
@@ -613,6 +639,7 @@ impl Driver {
         debug_assert_ne!(ret_ty, Type::Error, "can't build MIR function with Error return type");
 
         let mut entry = Block::default();
+        let mut instr_namespace = InstrNamespace::default();
         for param in params.start.index()..params.end.index() {
             let param = DeclId::new(param);
             assert!(matches!(self.code.hir_code.decls[param], hir::Decl::Parameter { .. }));
@@ -620,7 +647,9 @@ impl Driver {
             let op = self.code.ops.push(Op::MirInstr(instr));
             let item = self.code.hir_code.decl_to_items[param];
             let range = self.code.hir_code.source_ranges[item].clone();
+            let name = instr_namespace.insert(format!("{}", self.display_item(range)));
             self.code.mir_code.source_ranges.insert(op, range);
+            self.code.mir_code.instr_names.insert(op, name);
             entry.ops.push(op);
         }
         let entry = self.code.blocks.push(entry);
@@ -630,6 +659,7 @@ impl Driver {
             blocks: vec![entry],
             current_block: entry,
             stored_decl_locs: IndexVec::new(),
+            instr_namespace: InstrNamespace::default(),
         };
         self.start_bb(&mut b, entry);
         let ctx = Context::new(0, DataDest::Ret, ControlDest::Unreachable);
@@ -647,6 +677,7 @@ impl Driver {
             name: b.name,
             ret_ty: b.ret_ty,
             blocks: b.blocks,
+            instr_namespace: b.instr_namespace,
             decl,
         };
         self.optimize_function(&mut function);

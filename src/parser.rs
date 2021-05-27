@@ -612,8 +612,8 @@ impl Driver {
         }
 
         let root = self.parse_expr(p);
-        let root_range = self.get_range(root);
-        self.stored_decl(name, explicit_ty, is_mut, root, source_info::concat(name_range, root_range))
+        let _root_range = self.get_range(root);
+        self.stored_decl(name, explicit_ty, is_mut, root, name_range)
     }
 
     fn parse_module(&mut self, p: &mut Parser) -> ExprId {

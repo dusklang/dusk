@@ -794,7 +794,7 @@ impl Driver {
                 if let InterpMode::CompileTime = self.interp.mode {
                     panic!("Can't access static at compile time!");
                 }
-                let static_value = Value::from_const(&self.code.mir_code.statics[statik], &*self);
+                let static_value = Value::from_const(&self.code.mir_code.statics[statik].val, &*self);
                 let statik = self.interp.statics.entry(statik)
                     .or_insert(static_value);
                 Value::from_usize(unsafe { mem::transmute(statik.as_bytes().as_ptr()) })
