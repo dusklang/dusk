@@ -194,6 +194,7 @@ impl Builder {
     }
 }
 
+
 fn type_of(b: &MirCode, instr: OpId, code: &IndexVec<OpId, Op>) -> Type {
     match code[instr].as_mir_instr().unwrap() {
         Instr::Void | Instr::Store { .. } => Type::Void,
@@ -205,9 +206,9 @@ fn type_of(b: &MirCode, instr: OpId, code: &IndexVec<OpId, Op>) -> Type {
         &Instr::Call { func, .. } => b.functions[func].ret_ty.clone(),
         Instr::Intrinsic { ty, .. } => ty.clone(),
         Instr::Reinterpret(_, ty) | Instr::Truncate(_, ty) | Instr::SignExtend(_, ty)
-            | Instr::ZeroExtend(_, ty) | Instr::FloatCast(_, ty) | Instr::FloatToInt(_, ty)
-            | Instr::IntToFloat(_, ty)
-              => ty.clone(),
+        | Instr::ZeroExtend(_, ty) | Instr::FloatCast(_, ty) | Instr::FloatToInt(_, ty)
+        | Instr::IntToFloat(_, ty)
+        => ty.clone(),
         &Instr::Load(instr) => match type_of(b, instr, code) {
             Type::Pointer(pointee) => pointee.ty,
             _ => Type::Error,
@@ -237,6 +238,20 @@ pub fn function_by_ref<'a>(code: &'a MirCode, func_ref: &'a FunctionRef) -> &'a 
         &FunctionRef::Id(id) => &code.functions[id],
         FunctionRef::Ref(func) => func,
     }
+}
+
+const MAX_LITERAL_BASED_INSTRUCTION_NAME_LENGTH: usize = 15;
+/// Takes an arbitrary byte string and makes it suitable for inclusion in an instruction name
+fn identifierify(mut string: Vec<u8>) -> String {
+    for byte in string.iter_mut() {
+        if !byte.is_ascii_alphanumeric() {
+            *byte = '_' as u8;
+        }
+    }
+    string.truncate(MAX_LITERAL_BASED_INSTRUCTION_NAME_LENGTH);
+    // Safety: all bytes that are not alphanumeric ASCII characters will be replaced with
+    // underscores above.
+    unsafe { String::from_utf8_unchecked(string) }
 }
 
 impl Driver {
@@ -435,6 +450,31 @@ impl Driver {
         Ok(())
     }
 
+    #[display_adapter]
+    fn fmt_const_for_instr_name(&self, f: &mut Formatter, konst: &Const) {
+        match *konst {
+            Const::Bool(val) => write!(f, "const_{}", val)?,
+            Const::Float { lit, .. } => {
+                let name = lit.to_string()
+                    .replace("-", "negative_")
+                    .replace(".", "_dot_");
+                write!(f, "const_{}", name)?
+            },
+            Const::Int { lit, .. } => write!(f, "const_{}", lit)?,
+            Const::Str { id, .. } => write!(f, "string_{}", identifierify(self.code.mir_code.strings[id].clone().into_bytes()))?,
+            Const::Ty(ref ty) => write!(f, "type_{}", identifierify(format!("{:?}", ty).into_bytes()))?,
+
+            // TODO: heuristics for associating declaration names with modules and types
+            Const::Mod(id) => write!(f, "mod{}", id.index())?,
+
+            Const::StructLit { id, .. } => {
+                write!(f, "const_struct_literal_{}", id.index())?;
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn fn_name(&self, name: Option<Sym>) -> &str {
         match name {
             Some(name) => self.interner.resolve(name).unwrap(),
@@ -451,7 +491,7 @@ impl Driver {
     #[display_adapter]
     pub fn display_instr_name(&self, item: OpId, f: &mut Formatter) {
         write!(f, "{}", self.code.mir_code.instr_names.get(&item).cloned()
-            .unwrap_or_else(|| format!("{}", item.index())))
+            .unwrap_or_else(|| format!("instr{}", item.index())))
     }
 
     #[display_adapter]
@@ -475,7 +515,7 @@ impl Driver {
                     } else {
                         write!(f, ", ")?;
                     }
-                    write!(f, r#"%{}: {:?}"#, self.display_instr_name(op), ty)?;
+                    write!(f, "%{}: {:?}", self.display_instr_name(op), ty)?;
                 } else {
                     break;
                 }
@@ -500,14 +540,14 @@ impl Driver {
                     macro_rules! write_args {
                         ($args:expr) => {{
                             let mut first = true;
-                            for arg in $args {
+                            for &arg in $args {
                                 if first {
                                     write!(f, "(")?;
                                     first = false;
                                 } else {
                                     write!(f, ", ")?;
                                 }
-                                write!(f, "%{}", arg.index())?;
+                                write!(f, "%{}", self.display_instr_name(arg))?;
                             }
                             if !first {
                                 write!(f, ")")?;
@@ -516,45 +556,45 @@ impl Driver {
                         }}
                     }
                     match instr {
-                        Instr::Alloca(ty) => writeln!(f, "%{} = alloca {:?}", op_id.index(), ty)?,
+                        Instr::Alloca(ty) => writeln!(f, "%{} = alloca {:?}", self.display_instr_name(op_id), ty)?,
                         Instr::Br(block) => writeln!(f, "br %bb{}", block.index())?,
                         &Instr::CondBr { condition, true_bb, false_bb }
                             => writeln!(f, "condbr %{}, %bb{}, %bb{}", condition.index(), true_bb.index(), false_bb.index())?,
                         &Instr::Call { ref arguments, func: callee } => {
-                            write!(f, "%{} = call `{}`", op_id.index(), self.fn_name(self.code.mir_code.functions[callee].name))?;
+                            write!(f, "%{} = call `{}`", self.display_instr_name(op_id), self.fn_name(self.code.mir_code.functions[callee].name))?;
                             write_args!(arguments)?
                         },
                         Instr::Const(konst) => {
-                            writeln!(f, "%{} = {}", op_id.index(), self.fmt_const(konst))?;
+                            writeln!(f, "%{} = {}", self.display_instr_name(op_id), self.fmt_const(konst))?;
                         },
                         Instr::Intrinsic { arguments, intr, .. } => {
-                            write!(f, "%{} = intrinsic `{}`", op_id.index(), intr.name())?;
+                            write!(f, "%{} = intrinsic `{}`", self.display_instr_name(op_id), intr.name())?;
                             write_args!(arguments)?
                         },
                         &Instr::Pointer { op, is_mut } => {
-                            write!(f, "%{} = %{} *", op_id.index(), op.index())?;
+                            write!(f, "%{} = %{} *", self.display_instr_name(op_id), self.display_instr_name(op))?;
                             if is_mut {
                                 writeln!(f, "mut")?
                             } else {
                                 writeln!(f)?
                             }
                         }
-                        Instr::Load(location) => writeln!(f, "%{} = load %{}", op_id.index(), location.index())?,
-                        Instr::LogicalNot(op) => writeln!(f, "%{} = not %{}", op_id.index(), op.index())?,
-                        Instr::Ret(val) => writeln!(f,  "return %{}", val.index())?,
-                        Instr::Store { location, value } => writeln!(f, "store %{} in %{}", value.index(), location.index())?,
-                        &Instr::AddressOfStatic(statik) => writeln!(f, "%{} = address of static %{}", op_id.index(), self.code.mir_code.statics[statik].name)?,
-                        &Instr::Reinterpret(val, ref ty) => writeln!(f, "%{} = reinterpret %{} as {:?}", op_id.index(), val.index(), ty)?,
-                        &Instr::SignExtend(val, ref ty) => writeln!(f, "%{} = sign-extend %{} as {:?}", op_id.index(), val.index(), ty)?,
-                        &Instr::ZeroExtend(val, ref ty) => writeln!(f, "%{} = zero-extend %{} as {:?}", op_id.index(), val.index(), ty)?,
-                        &Instr::Truncate(val, ref ty) => writeln!(f, "%{} = truncate %{} as {:?}", op_id.index(), val.index(), ty)?,
-                        &Instr::FloatCast(val, ref ty) => writeln!(f, "%{} = floatcast %{} as {:?}", op_id.index(), val.index(), ty)?,
-                        &Instr::IntToFloat(val, ref ty) => writeln!(f, "%{} = inttofloat %{} as {:?}", op_id.index(), val.index(), ty)?,
-                        &Instr::FloatToInt(val, ref ty) => writeln!(f, "%{} = floattoint %{} as {:?}", op_id.index(), val.index(), ty)?,
+                        &Instr::Load(location) => writeln!(f, "%{} = load %{}", self.display_instr_name(op_id), self.display_instr_name(location))?,
+                        &Instr::LogicalNot(op) => writeln!(f, "%{} = not %{}", self.display_instr_name(op_id), self.display_instr_name(op))?,
+                        &Instr::Ret(val) => writeln!(f,  "return %{}", self.display_instr_name(val))?,
+                        &Instr::Store { location, value } => writeln!(f, "store %{} in %{}", self.display_instr_name(value), self.display_instr_name(location))?,
+                        &Instr::AddressOfStatic(statik) => writeln!(f, "%{} = address of static %{}", self.display_instr_name(op_id), self.code.mir_code.statics[statik].name)?,
+                        &Instr::Reinterpret(val, ref ty) => writeln!(f, "%{} = reinterpret %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
+                        &Instr::SignExtend(val, ref ty) => writeln!(f, "%{} = sign-extend %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
+                        &Instr::ZeroExtend(val, ref ty) => writeln!(f, "%{} = zero-extend %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
+                        &Instr::Truncate(val, ref ty) => writeln!(f, "%{} = truncate %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
+                        &Instr::FloatCast(val, ref ty) => writeln!(f, "%{} = floatcast %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
+                        &Instr::IntToFloat(val, ref ty) => writeln!(f, "%{} = inttofloat %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
+                        &Instr::FloatToInt(val, ref ty) => writeln!(f, "%{} = floattoint %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
                         &Instr::Struct { ref fields, id } => {
-                            write!(f, "%{} = define struct{} {{ ", op_id.index(), id.index())?;
+                            write!(f, "%{} = define struct{} {{ ", self.display_instr_name(op_id), id.index())?;
                             for i in 0..fields.len() {
-                                write!(f, "%{}", fields[i].index())?;
+                                write!(f, "%{}", self.display_instr_name(fields[i]))?;
                                 if i < (fields.len() - 1) {
                                     write!(f, ",")?;
                                 }
@@ -563,9 +603,9 @@ impl Driver {
                             writeln!(f, "}}")?;
                         },
                         &Instr::StructLit { ref fields, id } => {
-                            write!(f, "%{} = literal struct{} {{ ", op_id.index(), id.index())?;
+                            write!(f, "%{} = literal struct{} {{ ", self.display_instr_name(op_id), id.index())?;
                             for i in 0..fields.len() {
-                                write!(f, "%{}", fields[i].index())?;
+                                write!(f, "%{}", self.display_instr_name(fields[i]))?;
                                 if i < (fields.len() - 1) {
                                     write!(f, ",")?;
                                 }
@@ -573,8 +613,8 @@ impl Driver {
                             }
                             writeln!(f, "}}")?;
                         },
-                        &Instr::DirectFieldAccess { val, index } => writeln!(f, "%{} = %{}.field{}", op_id.index(), val.index(), index)?,
-                        &Instr::IndirectFieldAccess { val, index } => writeln!(f, "%{} = &(*%{}).field{}", op_id.index(), val.index(), index)?,
+                        &Instr::DirectFieldAccess { val, index } => writeln!(f, "%{} = %{}.field{}", self.display_instr_name(op_id), self.display_instr_name(val), index)?,
+                        &Instr::IndirectFieldAccess { val, index } => writeln!(f, "%{} = &(*%{}).field{}", self.display_instr_name(op_id), self.display_instr_name(val), index)?,
                         Instr::Parameter(_) => {},
                         Instr::Void => panic!("unexpected void!"),
                     };
@@ -706,6 +746,19 @@ impl Driver {
         op
     }
 
+    fn push_instr_with_name(&mut self, b: &mut FunctionBuilder, instr: Instr, item: impl Into<ToSourceRange>, name: impl Into<String>) -> OpId {
+        let op = self.code.ops.push(Op::MirInstr(instr));
+        let source_range = self.get_range(item);
+        self.code.mir_code.source_ranges.insert(op, source_range);
+        let name = b.instr_namespace.insert(name.into());
+        self.code.mir_code.instr_names.insert(op, name);
+
+        let block = &mut self.code.blocks[b.current_block];
+        block.ops.push(op);
+
+        op
+    }
+
     fn build_scope_item(&mut self, b: &mut FunctionBuilder, item: Item, tp: &impl TypeProvider) {
         match item {
             Item::Expr(expr) => {
@@ -714,7 +767,8 @@ impl Driver {
             Item::Decl(decl) => match self.code.hir_code.decls[decl] {
                 hir::Decl::Stored { id, root_expr, .. } => {
                     let ty = tp.ty(root_expr).clone();
-                    let location = self.push_instr(b, Instr::Alloca(ty), decl);
+                    let name = format!("{}", self.display_item(decl));
+                    let location = self.push_instr_with_name(b, Instr::Alloca(ty), decl, name);
                     b.stored_decl_locs.push_at(id, location);
                     self.build_expr(b, root_expr, Context::new(0, DataDest::Store { location }, ControlDest::Continue), tp);
                 },
@@ -744,6 +798,7 @@ impl Driver {
     fn get(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[OpId; 2]>, decl_ref_id: DeclRefId, tp: &impl TypeProvider) -> Value {
         let id = tp.selected_overload(decl_ref_id).expect("No overload found!");
         let expr = self.code.hir_code.decl_refs[decl_ref_id].expr;
+        let name = format!("{}", self.display_item(id));
         match self.get_decl(id, tp) {
             Decl::Computed { get } => self.push_instr(b, Instr::Call { arguments, func: get }, expr).direct(),
             Decl::Stored(id) => {
@@ -761,10 +816,10 @@ impl Driver {
             },
             Decl::Const(ref konst) => {
                 let konst = konst.clone();
-                self.push_instr(b, Instr::Const(konst.clone()), expr).direct()
+                self.push_instr_with_name(b, Instr::Const(konst.clone()), expr, name).direct()
             },
             Decl::Static(statik) => {
-                self.push_instr(b, Instr::AddressOfStatic(statik), expr).indirect()
+                self.push_instr_with_name(b, Instr::AddressOfStatic(statik), expr, format!("static_{}", name)).indirect()
             },
             Decl::Field { index } => {
                 let base = self.get_base(decl_ref_id);
@@ -824,7 +879,8 @@ impl Driver {
             Expr::Void => VOID_INSTR.direct(),
             Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::StrLit { .. } | Expr::CharLit { .. } | Expr::ConstTy(_) | Expr::Mod { .. } | Expr::Import { .. } => {
                 let konst = self.expr_to_const(expr, ty.clone());
-                self.push_instr(b, Instr::Const(konst), expr).direct()
+                let name = format!("{}", self.fmt_const_for_instr_name(&konst));
+                self.push_instr_with_name(b, Instr::Const(konst), expr, name).direct()
             },
             Expr::Set { lhs, rhs } => return self.build_expr(
                 b,
@@ -881,7 +937,9 @@ impl Driver {
                                 self.build_expr(b, rhs, branch_ctx.clone(), tp);
 
                                 self.start_bb(b, left_false_bb);
-                                let false_val = self.push_instr(b, Instr::Const(Const::Bool(false)), expr).direct();
+                                let false_const = Const::Bool(false);
+                                let name = format!("{}", self.fmt_const_for_instr_name(&false_const));
+                                let false_val = self.push_instr_with_name(b, Instr::Const(false_const), expr, name).direct();
                                 self.handle_context(b, false_val, branch_ctx, tp);
 
                                 self.start_bb(b, after_bb);
@@ -927,7 +985,9 @@ impl Driver {
                                 );
 
                                 self.start_bb(b, left_true_bb);
-                                let true_val = self.push_instr(b, Instr::Const(Const::Bool(true)), expr).direct();
+                                let true_const = Const::Bool(true);
+                                let name = format!("{}", self.fmt_const_for_instr_name(&true_const));
+                                let true_val = self.push_instr_with_name(b, Instr::Const(true_const), expr, name).direct();
                                 let branch_ctx = ctx.redirect(location, Some(after_bb));
                                 self.handle_context(b, true_val, branch_ctx.clone(), tp);
 
