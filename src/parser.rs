@@ -732,12 +732,11 @@ impl Driver {
         if let TokenKind::LeftParen = self.next(p).kind {
             self.next(p);
             while let TokenKind::Ident(name) = *self.cur(p).kind {
-                let mut param_range = self.cur(p).range;
+                let param_range = self.cur(p).range;
                 param_names.push(name);
                 assert_eq!(self.next(p).kind, &TokenKind::Colon);
                 self.next(p);
-                let (ty, ty_range) = self.parse_type(p);
-                param_range = source_info::concat(param_range, ty_range);
+                let (ty, _ty_range) = self.parse_type(p);
                 param_ranges.push(param_range);
                 param_tys.push(ty);
                 while let TokenKind::Comma = self.cur(p).kind {

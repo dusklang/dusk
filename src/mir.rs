@@ -424,6 +424,12 @@ impl Driver {
     }
 
     #[display_adapter]
+    pub fn display_item(&'a self, item: impl Into<ToSourceRange> + Copy + 'a, f: &mut Formatter) {
+        let range = self.get_range(item);
+        write!(f, "{}", self.src_map.substring_from_range(range))
+    }
+
+    #[display_adapter]
     pub fn display_mir(&self, f: &mut Formatter) {
         if !self.code.mir_code.statics.raw.is_empty() {
             for (i, statik) in self.code.mir_code.statics.iter().enumerate() {
@@ -444,7 +450,7 @@ impl Driver {
                     } else {
                         write!(f, ", ")?;
                     }
-                    write!(f, "%{}: {:?}", op.index(), ty)?;
+                    write!(f, r#"%{}/"{}": {:?}"#, op.index(), self.display_item(op), ty)?;
                 } else {
                     break;
                 }
