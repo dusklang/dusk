@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use smallvec::SmallVec;
 use index_vec::define_index_type;
 
-use mire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId};
+use mire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId, RETURN_VALUE_DECL};
 
 use crate::driver::Driver;
 use crate::dep_vec::{self, DepVec, AnyDepVec};
@@ -200,7 +200,21 @@ impl Driver {
             }
         }
     }
-    // Returns the overloads for a declref, if they are known (they won't be if it's a member ref)
+    fn find_overloads_in_function_parameters(&self, decl_ref: &hir::DeclRef, func: DeclId, overloads: &mut HashSet<DeclId>) {
+        match &self.code.hir_code.decls[func] {
+            hir::Decl::Computed { params, .. } => {
+                for i in params.start.index()..params.end.index() {
+                    let decl = DeclId::new(i);
+                    let param_name = self.code.hir_code.names[decl];
+                    if decl_ref.name == param_name {
+                        overloads.insert(decl);
+                    }
+                }
+            },
+            _ => panic!("Can only have requirements clause on computed decls"),
+        }
+    }
+    // Returns the overloads for a declref, if they are known (they won't be if it's an unresolved member ref)
     pub fn find_overloads(&self, decl_ref: &hir::DeclRef) -> Vec<DeclId> {
         let mut overloads = HashSet::new();
 
@@ -244,6 +258,19 @@ impl Driver {
 
                     break;
                 },
+                Namespace::Requirement(ns_id) => {
+                    let condition_ns = &self.code.hir_code.condition_ns[ns_id];
+                    self.find_overloads_in_function_parameters(decl_ref, condition_ns.func, &mut overloads);
+                    condition_ns.parent
+                },
+                Namespace::Guarantee(ns_id) => {
+                    let condition_ns = &self.code.hir_code.condition_ns[ns_id];
+                    self.find_overloads_in_function_parameters(decl_ref, condition_ns.func, &mut overloads);
+                    if decl_ref.name == self.hir.return_value_sym && overloads.is_empty() {
+                        overloads.insert(RETURN_VALUE_DECL);
+                    }
+                    condition_ns.parent
+                },
             };
 
             root_namespace = false;
@@ -266,6 +293,16 @@ impl Driver {
                         add_eval_dep!(id, ty);
                     }
                     self.tir.graph.add_type3_dep(id, di!(overload));
+                },
+                hir::Decl::ReturnValue => {
+                    let decl_ref = &self.code.hir_code.decl_refs[decl_ref_id];
+                    match decl_ref.namespace {
+                        Namespace::Guarantee(condition_ns_id) => {
+                            let func = self.code.hir_code.condition_ns[condition_ns_id].func;
+                            self.tir.graph.add_type3_dep(id, di!(func));
+                        },
+                        _ => panic!("invalid namespace for `return_value`"),
+                    }
                 },
                 _ => self.tir.graph.add_type2_dep(id, di!(overload)),
             }
@@ -316,12 +353,12 @@ impl Driver {
                     level, $item,
                 );
             }}
-        };
+        }
         macro_rules! insert_expr {
             ($depvec:ident, $expr:expr) => {{
                 insert_item!($depvec, Expr { id, data: $expr, });
             }}
-        };
+        }
         macro_rules! flat_insert_item {
             ($vec:ident, $item:expr) => {{
                 assert_eq!(level, 0);
@@ -372,8 +409,7 @@ impl Driver {
     fn build_tir_decl(&mut self, unit: &mut UnitItems, level: u32, id: DeclId) {
         match self.code.hir_code.decls[id] {
             // TODO: Add parameter and field TIR items for (at least) checking that the type of the param is valid
-            hir::Decl::Parameter { .. } | hir::Decl::Field(_) => {},
-            hir::Decl::Intrinsic { .. } => {},
+            hir::Decl::Parameter { .. } | hir::Decl::Field(_) | hir::Decl::ReturnValue | hir::Decl::Intrinsic { .. } => {},
             hir::Decl::Static(root_expr) | hir::Decl::Const(root_expr) | hir::Decl::Stored { root_expr, .. } => {
                 let explicit_ty = self.code.hir_code.explicit_tys[id];
                 unit.assigned_decls.insert(level, AssignedDecl { explicit_ty, root_expr, decl_id: id });
@@ -421,6 +457,10 @@ impl Driver {
                     true,
                     SmallVec::new()
                 ),
+                hir::Decl::ReturnValue => (
+                    false,
+                    SmallVec::new(),
+                ),
             };
             self.tir.decls.push(Decl { param_tys, is_mut });
         }
@@ -433,7 +473,7 @@ impl Driver {
             let decl_id = DeclId::new(i);
             let id = di!(decl_id);
             match self.code.hir_code.decls[decl_id] {
-                hir::Decl::Parameter { .. } | hir::Decl::Intrinsic { .. } | hir::Decl::Field(_) => {},
+                hir::Decl::Parameter { .. } | hir::Decl::Intrinsic { .. } | hir::Decl::Field(_) | hir::Decl::ReturnValue => {},
                 hir::Decl::Static(expr) | hir::Decl::Const(expr) | hir::Decl::Stored { root_expr: expr, .. } => self.tir.graph.add_type1_dep(id, ei!(expr)),
                 hir::Decl::Computed { scope, .. } => {
                     let terminal_expr = self.code.hir_code.imper_scopes[scope].terminal_expr;
@@ -522,7 +562,7 @@ impl Driver {
             match self.code.hir_code.items[id] {
                 hir::Item::Decl(decl_id) => {
                     match self.code.hir_code.decls[decl_id] {
-                        hir::Decl::Parameter { .. } | hir::Decl::Static(_) | hir::Decl::Const(_) | hir::Decl::Stored { .. } | hir::Decl::Field(_) => {},
+                        hir::Decl::Parameter { .. } | hir::Decl::Static(_) | hir::Decl::Const(_) | hir::Decl::Stored { .. } | hir::Decl::Field(_) | hir::Decl::ReturnValue => {},
                         hir::Decl::Intrinsic { ref param_tys, .. } => {
                             for &ty in param_tys {
                                 add_eval_dep!(id, ty);

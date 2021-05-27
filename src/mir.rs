@@ -2,20 +2,23 @@ use std::collections::HashMap;
 use std::ffi::CString;
 use std::ops::Range;
 
+use index_vec::IdxSliceIndex;
 use smallvec::SmallVec;
 use string_interner::DefaultSymbol as Sym;
 use display_adapter::display_adapter;
 
 use mire::hir::{self, DeclId, ExprId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, Item};
-use mire::mir::{FuncId, StaticId, Const, Instr, Function, MirCode, StructLayout, VOID_INSTR};
+use mire::mir::{FuncId, StaticId, Const, Instr, Function, MirCode, StructLayout, InstrNamespace, VOID_INSTR};
 use mire::{Block, BlockId, Op, OpId};
-use mire::ty::{Type, FloatWidth};   
+use mire::ty::{Type, FloatWidth};
 
 use crate::driver::Driver;
+use crate::source_info;
 use crate::typechecker as tc;
 use tc::type_provider::TypeProvider;
 use tc::CastMethod;
 use crate::index_vec::*;
+use crate::source_info::ToSourceRange;
 
 #[derive(Clone, Debug)]
 enum Decl {
@@ -171,16 +174,22 @@ pub enum FunctionRef {
     Ref(Function),
 }
 
+#[derive(Clone)]
+struct Static {
+    name: String,
+    assignment: ExprId,
+}
+
 pub struct Builder {
     decls: HashMap<DeclId, Decl>,
-    static_inits: IndexVec<StaticId, ExprId>,
+    statics: IndexVec<StaticId, Static>,
 }
 
 impl Builder {
     pub fn new() -> Self {
         Self {
             decls: HashMap::new(),
-            static_inits: IndexVec::new(),
+            statics: IndexVec::new(),
         }
     }
 }
@@ -203,7 +212,7 @@ fn type_of(b: &MirCode, instr: OpId, code: &IndexVec<OpId, Op>) -> Type {
             Type::Pointer(pointee) => pointee.ty,
             _ => Type::Error,
         },
-        &Instr::AddressOfStatic(statik) => b.statics[statik].ty().mut_ptr(),
+        &Instr::AddressOfStatic(statik) => b.statics[statik].val.ty().mut_ptr(),
         Instr::Ret(_) | Instr::Br(_) | Instr::CondBr { .. } => Type::Never,
         Instr::Parameter(ty) => ty.clone(),
         &Instr::DirectFieldAccess { val, index } => {
@@ -313,15 +322,22 @@ impl Driver {
     }
 
     pub fn build_mir(&mut self, tp: &impl TypeProvider) {
-        for i in 0..self.code.hir_code.decls.len() {
+        // Start at 1 to avoid RETURN_VALUE_DECL, which we can't and shouldn't generate code for
+        for i in 1..self.code.hir_code.decls.len() {
             self.get_decl(DeclId::new(i), tp);
         }
 
-        for i in 0..self.mir.static_inits.len() {
+        for i in 0..self.mir.statics.len() {
             let id = StaticId::new(i);
-            let init = self.mir.static_inits[id];
-            let konst = self.eval_expr(init, tp);
-            self.code.mir_code.statics.push(konst);
+            let statik = self.mir.statics[id].clone();
+            let konst = self.eval_expr(statik.assignment, tp);
+            self.code.mir_code.statics.push_at(
+                id,
+                mire::mir::Static {
+                    name: statik.name,
+                    val: konst.clone(),
+                }
+            );
         }
     }
 
@@ -341,7 +357,7 @@ impl Driver {
                 let func = self.build_function(
                     Some(self.code.hir_code.names[id]),
                     self.decl_type(id, tp).clone(),
-                    FunctionBody::Scope(scope),
+                    FunctionBody::Scope { scope, decl: id },
                     params.clone(),
                     tp
                 );
@@ -364,9 +380,15 @@ impl Driver {
                 decl
             },
             hir::Decl::Static(expr) => {
-                let decl = Decl::Static(StaticId::new(self.mir.static_inits.len()));
+                let name = format!("{}", self.display_item(id));
+                let decl = Decl::Static(StaticId::new(self.mir.statics.len()));
                 self.mir.decls.insert(id, decl.clone());
-                self.mir.static_inits.push(expr);
+                self.mir.statics.push(
+                    Static {
+                        name,
+                        assignment: expr,
+                    }
+                );
                 decl
             },
             hir::Decl::Const(root_expr) => {
@@ -383,6 +405,7 @@ impl Driver {
                 self.mir.decls.insert(id, decl.clone());
                 decl
             },
+            hir::Decl::ReturnValue => panic!("Can't get_decl() the return_value decl"),
         }
     }
 
@@ -420,10 +443,22 @@ impl Driver {
     }
 
     #[display_adapter]
+    pub fn display_item(&'a self, item: impl Into<ToSourceRange> + Copy + 'a, f: &mut Formatter) {
+        let range = self.get_range(item);
+        write!(f, "{}", self.src_map.substring_from_range(range))
+    }
+
+    #[display_adapter]
+    pub fn display_instr_name(&self, item: OpId, f: &mut Formatter) {
+        write!(f, "{}", self.code.mir_code.instr_names.get(&item).cloned()
+            .unwrap_or_else(|| format!("{}", item.index())))
+    }
+
+    #[display_adapter]
     pub fn display_mir(&self, f: &mut Formatter) {
         if !self.code.mir_code.statics.raw.is_empty() {
-            for (i, statik) in self.code.mir_code.statics.iter().enumerate() {
-                writeln!(f, "%static{} = {}", i, self.fmt_const(statik))?;
+            for statik in &self.code.mir_code.statics {
+                writeln!(f, "%{} = {}", statik.name, self.fmt_const(&statik.val))?;
             }
             writeln!(f)?;
         }
@@ -440,18 +475,27 @@ impl Driver {
                     } else {
                         write!(f, ", ")?;
                     }
-                    write!(f, "%{}: {:?}", op.index(), ty)?;
+                    write!(f, r#"%{}: {:?}"#, self.display_instr_name(op), ty)?;
                 } else {
                     break;
                 }
             }
             writeln!(f, "): {:?} {{", func.ret_ty)?;
             for i in 0..func.blocks.len() {
-                writeln!(f, "%bb{}:", i)?;
+                let block_id = func.blocks[i];
+                writeln!(f, "%bb{}:", block_id.index())?;
                 let block = &self.code.blocks[func.blocks[i]];
-                
-                for &op in &block.ops {
+                let mut start = 0;
+                for (i, &op) in block.ops.iter().enumerate() {
                     let instr = self.code.ops[op].as_mir_instr().unwrap();
+                    if !matches!(instr, Instr::Parameter(_)) {
+                        start = i;
+                        break;
+                    }
+                }
+                
+                for &op_id in &block.ops[start..] {
+                    let instr = self.code.ops[op_id].as_mir_instr().unwrap();
                     write!(f, "    ")?;
                     macro_rules! write_args {
                         ($args:expr) => {{
@@ -472,43 +516,43 @@ impl Driver {
                         }}
                     }
                     match instr {
-                        Instr::Alloca(ty) => writeln!(f, "%{} = alloca {:?}", i, ty)?,
+                        Instr::Alloca(ty) => writeln!(f, "%{} = alloca {:?}", op_id.index(), ty)?,
                         Instr::Br(block) => writeln!(f, "br %bb{}", block.index())?,
                         &Instr::CondBr { condition, true_bb, false_bb }
                             => writeln!(f, "condbr %{}, %bb{}, %bb{}", condition.index(), true_bb.index(), false_bb.index())?,
                         &Instr::Call { ref arguments, func: callee } => {
-                            write!(f, "%{} = call `{}`", i, self.fn_name(self.code.mir_code.functions[callee].name))?;
+                            write!(f, "%{} = call `{}`", op_id.index(), self.fn_name(self.code.mir_code.functions[callee].name))?;
                             write_args!(arguments)?
                         },
                         Instr::Const(konst) => {
-                            writeln!(f, "%{} = {}", i, self.fmt_const(konst))?;
+                            writeln!(f, "%{} = {}", op_id.index(), self.fmt_const(konst))?;
                         },
                         Instr::Intrinsic { arguments, intr, .. } => {
-                            write!(f, "%{} = intrinsic `{}`", i, intr.name())?;
+                            write!(f, "%{} = intrinsic `{}`", op_id.index(), intr.name())?;
                             write_args!(arguments)?
                         },
                         &Instr::Pointer { op, is_mut } => {
-                            write!(f, "%{} = %{} *", i, op.index())?;
+                            write!(f, "%{} = %{} *", op_id.index(), op.index())?;
                             if is_mut {
                                 writeln!(f, "mut")?
                             } else {
                                 writeln!(f)?
                             }
                         }
-                        Instr::Load(location) => writeln!(f, "%{} = load %{}", i, location.index())?,
-                        Instr::LogicalNot(op) => writeln!(f, "%{} = not %{}", i, op.index())?,
+                        Instr::Load(location) => writeln!(f, "%{} = load %{}", op_id.index(), location.index())?,
+                        Instr::LogicalNot(op) => writeln!(f, "%{} = not %{}", op_id.index(), op.index())?,
                         Instr::Ret(val) => writeln!(f,  "return %{}", val.index())?,
                         Instr::Store { location, value } => writeln!(f, "store %{} in %{}", value.index(), location.index())?,
-                        Instr::AddressOfStatic(statik) => writeln!(f, "%{} = address of %static{}", i, statik.index())?,
-                        &Instr::Reinterpret(val, ref ty) => writeln!(f, "%{} = reinterpret %{} as {:?}", i, val.index(), ty)?,
-                        &Instr::SignExtend(val, ref ty) => writeln!(f, "%{} = sign-extend %{} as {:?}", i, val.index(), ty)?,
-                        &Instr::ZeroExtend(val, ref ty) => writeln!(f, "%{} = zero-extend %{} as {:?}", i, val.index(), ty)?,
-                        &Instr::Truncate(val, ref ty) => writeln!(f, "%{} = truncate %{} as {:?}", i, val.index(), ty)?,
-                        &Instr::FloatCast(val, ref ty) => writeln!(f, "%{} = floatcast %{} as {:?}", i, val.index(), ty)?,
-                        &Instr::IntToFloat(val, ref ty) => writeln!(f, "%{} = inttofloat %{} as {:?}", i, val.index(), ty)?,
-                        &Instr::FloatToInt(val, ref ty) => writeln!(f, "%{} = floattoint %{} as {:?}", i, val.index(), ty)?,
+                        &Instr::AddressOfStatic(statik) => writeln!(f, "%{} = address of static %{}", op_id.index(), self.code.mir_code.statics[statik].name)?,
+                        &Instr::Reinterpret(val, ref ty) => writeln!(f, "%{} = reinterpret %{} as {:?}", op_id.index(), val.index(), ty)?,
+                        &Instr::SignExtend(val, ref ty) => writeln!(f, "%{} = sign-extend %{} as {:?}", op_id.index(), val.index(), ty)?,
+                        &Instr::ZeroExtend(val, ref ty) => writeln!(f, "%{} = zero-extend %{} as {:?}", op_id.index(), val.index(), ty)?,
+                        &Instr::Truncate(val, ref ty) => writeln!(f, "%{} = truncate %{} as {:?}", op_id.index(), val.index(), ty)?,
+                        &Instr::FloatCast(val, ref ty) => writeln!(f, "%{} = floatcast %{} as {:?}", op_id.index(), val.index(), ty)?,
+                        &Instr::IntToFloat(val, ref ty) => writeln!(f, "%{} = inttofloat %{} as {:?}", op_id.index(), val.index(), ty)?,
+                        &Instr::FloatToInt(val, ref ty) => writeln!(f, "%{} = floattoint %{} as {:?}", op_id.index(), val.index(), ty)?,
                         &Instr::Struct { ref fields, id } => {
-                            write!(f, "%{} = define struct{} {{ ", i, id.index())?;
+                            write!(f, "%{} = define struct{} {{ ", op_id.index(), id.index())?;
                             for i in 0..fields.len() {
                                 write!(f, "%{}", fields[i].index())?;
                                 if i < (fields.len() - 1) {
@@ -519,7 +563,7 @@ impl Driver {
                             writeln!(f, "}}")?;
                         },
                         &Instr::StructLit { ref fields, id } => {
-                            write!(f, "%{} = literal struct{} {{ ", i, id.index())?;
+                            write!(f, "%{} = literal struct{} {{ ", op_id.index(), id.index())?;
                             for i in 0..fields.len() {
                                 write!(f, "%{}", fields[i].index())?;
                                 if i < (fields.len() - 1) {
@@ -529,9 +573,9 @@ impl Driver {
                             }
                             writeln!(f, "}}")?;
                         },
-                        &Instr::DirectFieldAccess { val, index } => writeln!(f, "%{} = %{}.field{}", i, val.index(), index)?,
-                        &Instr::IndirectFieldAccess { val, index } => writeln!(f, "%{} = &(*%{}).field{}", i, val.index(), index)?,
-                        Instr::Parameter(_) => panic!("unexpected parameter!"),
+                        &Instr::DirectFieldAccess { val, index } => writeln!(f, "%{} = %{}.field{}", op_id.index(), val.index(), index)?,
+                        &Instr::IndirectFieldAccess { val, index } => writeln!(f, "%{} = &(*%{}).field{}", op_id.index(), val.index(), index)?,
+                        Instr::Parameter(_) => {},
                         Instr::Void => panic!("unexpected void!"),
                     };
                 }
@@ -547,7 +591,7 @@ impl Driver {
 
 #[derive(Copy, Clone)]
 enum FunctionBody {
-    Scope(ImperScopeId),
+    Scope { scope: ImperScopeId, decl: DeclId },
     Expr(ExprId),
 }
 
@@ -557,6 +601,7 @@ struct FunctionBuilder {
     blocks: Vec<BlockId>,
     current_block: BlockId,
     stored_decl_locs: IndexVec<StoredDeclId, OpId>,
+    instr_namespace: InstrNamespace,
 }
 
 impl Driver {
@@ -594,11 +639,17 @@ impl Driver {
         debug_assert_ne!(ret_ty, Type::Error, "can't build MIR function with Error return type");
 
         let mut entry = Block::default();
+        let mut instr_namespace = InstrNamespace::default();
         for param in params.start.index()..params.end.index() {
             let param = DeclId::new(param);
             assert!(matches!(self.code.hir_code.decls[param], hir::Decl::Parameter { .. }));
             let instr = Instr::Parameter(self.decl_type(param, tp).clone());
             let op = self.code.ops.push(Op::MirInstr(instr));
+            let item = self.code.hir_code.decl_to_items[param];
+            let range = self.code.hir_code.source_ranges[item].clone();
+            let name = instr_namespace.insert(format!("{}", self.display_item(range)));
+            self.code.mir_code.source_ranges.insert(op, range);
+            self.code.mir_code.instr_names.insert(op, name);
             entry.ops.push(op);
         }
         let entry = self.code.blocks.push(entry);
@@ -608,17 +659,26 @@ impl Driver {
             blocks: vec![entry],
             current_block: entry,
             stored_decl_locs: IndexVec::new(),
+            instr_namespace: InstrNamespace::default(),
         };
         self.start_bb(&mut b, entry);
         let ctx = Context::new(0, DataDest::Ret, ControlDest::Unreachable);
-        match body {
-            FunctionBody::Expr(expr) => self.build_expr(&mut b, expr, ctx, tp),
-            FunctionBody::Scope(scope) => self.build_scope(&mut b, scope, ctx, tp),
+        let decl = match body {
+            FunctionBody::Expr(expr) => {
+                self.build_expr(&mut b, expr, ctx, tp);
+                None
+            },
+            FunctionBody::Scope { scope, decl } => {
+                self.build_scope(&mut b, scope, ctx, tp);
+                Some(decl)
+            },
         };
         let mut function = Function {
             name: b.name,
             ret_ty: b.ret_ty,
             blocks: b.blocks,
+            instr_namespace: b.instr_namespace,
+            decl,
         };
         self.optimize_function(&mut function);
         self.code.mir_code.check_all_blocks_ended(&function);
@@ -635,9 +695,12 @@ impl Driver {
         });
     }
 
-    fn push_instr(&mut self, b: &mut FunctionBuilder, instr: Instr) -> OpId {
-        let block = &mut self.code.blocks[b.current_block];
+    fn push_instr(&mut self, b: &mut FunctionBuilder, instr: Instr, item: impl Into<ToSourceRange>) -> OpId {
         let op = self.code.ops.push(Op::MirInstr(instr));
+        let source_range = self.get_range(item);
+        self.code.mir_code.source_ranges.insert(op, source_range);
+
+        let block = &mut self.code.blocks[b.current_block];
         block.ops.push(op);
 
         op
@@ -651,7 +714,7 @@ impl Driver {
             Item::Decl(decl) => match self.code.hir_code.decls[decl] {
                 hir::Decl::Stored { id, root_expr, .. } => {
                     let ty = tp.ty(root_expr).clone();
-                    let location = self.push_instr(b, Instr::Alloca(ty));
+                    let location = self.push_instr(b, Instr::Alloca(ty), decl);
                     b.stored_decl_locs.push_at(id, location);
                     self.build_expr(b, root_expr, Context::new(0, DataDest::Store { location }, ControlDest::Continue), tp);
                 },
@@ -680,8 +743,9 @@ impl Driver {
 
     fn get(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[OpId; 2]>, decl_ref_id: DeclRefId, tp: &impl TypeProvider) -> Value {
         let id = tp.selected_overload(decl_ref_id).expect("No overload found!");
+        let expr = self.code.hir_code.decl_refs[decl_ref_id].expr;
         match self.get_decl(id, tp) {
-            Decl::Computed { get } => self.push_instr(b, Instr::Call { arguments, func: get }).direct(),
+            Decl::Computed { get } => self.push_instr(b, Instr::Call { arguments, func: get }, expr).direct(),
             Decl::Stored(id) => {
                 assert!(arguments.is_empty());
                 b.stored_decl_locs[id].indirect()
@@ -693,49 +757,52 @@ impl Driver {
             },
             Decl::Intrinsic(intr, ref ty) => {
                 let ty = ty.clone();
-                self.push_instr(b, Instr::Intrinsic { arguments, ty, intr }).direct()
+                self.push_instr(b, Instr::Intrinsic { arguments, ty, intr }, expr).direct()
             },
             Decl::Const(ref konst) => {
                 let konst = konst.clone();
-                self.push_instr(b, Instr::Const(konst.clone())).direct()
+                self.push_instr(b, Instr::Const(konst.clone()), expr).direct()
             },
             Decl::Static(statik) => {
-                self.push_instr(b, Instr::AddressOfStatic(statik)).indirect()
+                self.push_instr(b, Instr::AddressOfStatic(statik), expr).indirect()
             },
             Decl::Field { index } => {
                 let base = self.get_base(decl_ref_id);
                 let base = self.build_expr(b, base, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
                 if base.indirection > 0 {
                     let base_ptr = self.handle_indirection(b, base.get_address());
-                    self.push_instr(b, Instr::IndirectFieldAccess { val: base_ptr, index }).indirect()
+                    self.push_instr(b, Instr::IndirectFieldAccess { val: base_ptr, index }, expr).indirect()
                 } else {
                     debug_assert_eq!(base.indirection, 0, "tried to dereference a struct?!");
-                    self.push_instr(b, Instr::DirectFieldAccess { val: base.instr, index }).direct()   
+                    self.push_instr(b, Instr::DirectFieldAccess { val: base.instr, index }, expr).direct()   
                 }
             },
         }
     }
 
     fn set(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[OpId; 2]>, id: DeclRefId, value: OpId, tp: &impl TypeProvider) -> OpId {
+        let expr = self.code.hir_code.decl_refs[id].expr;
         let id = tp.selected_overload(id).expect("No overload found!");
+        let range = self.get_range(expr) + self.get_range(value);
         match self.get_decl(id, tp) {
             Decl::Computed { .. } => panic!("setters not yet implemented!"),
             Decl::Stored(id) => {
                 assert!(arguments.is_empty());
                 let location = b.stored_decl_locs[id];
-                self.push_instr(b, Instr::Store { location, value })
+                self.push_instr(b, Instr::Store { location, value }, range)
             },
             Decl::Parameter { .. } | Decl::Const(_) => panic!("can't set a constant!"),
             Decl::Intrinsic(_, _) => panic!("can't set an intrinsic! (yet?)"),
             Decl::Static(statik) => {
-                let location = self.push_instr(b, Instr::AddressOfStatic(statik));
-                self.push_instr(b, Instr::Store { location, value })
+                let location = self.push_instr(b, Instr::AddressOfStatic(statik), expr);
+                self.push_instr(b, Instr::Store { location, value }, range)
             },
             Decl::Field { .. } => panic!("Unhandled struct field!"),
         }
     }
 
     fn modify(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[OpId; 2]>, id: DeclRefId, tp: &impl TypeProvider) -> Value {
+        let expr = self.code.hir_code.decl_refs[id].expr;
         let id = tp.selected_overload(id).expect("No overload found!");
         match self.get_decl(id, tp) {
             Decl::Computed { .. } => panic!("modify accessors not yet implemented!"),
@@ -745,7 +812,7 @@ impl Driver {
             },
             Decl::Parameter { .. } | Decl::Const(_) => panic!("can't modify a constant!"),
             Decl::Intrinsic(_, _) => panic!("can't modify an intrinsic! (yet?)"),
-            Decl::Static(statik) => self.push_instr(b, Instr::AddressOfStatic(statik)).indirect(),
+            Decl::Static(statik) => self.push_instr(b, Instr::AddressOfStatic(statik), expr).indirect(),
             Decl::Field { .. } => panic!("Unhandled struct field!"),
         }
     }
@@ -757,7 +824,7 @@ impl Driver {
             Expr::Void => VOID_INSTR.direct(),
             Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::StrLit { .. } | Expr::CharLit { .. } | Expr::ConstTy(_) | Expr::Mod { .. } | Expr::Import { .. } => {
                 let konst = self.expr_to_const(expr, ty.clone());
-                self.push_instr(b, Instr::Const(konst)).direct()
+                self.push_instr(b, Instr::Const(konst), expr).direct()
             },
             Expr::Set { lhs, rhs } => return self.build_expr(
                 b,
@@ -779,7 +846,7 @@ impl Driver {
                             let (lhs, rhs) = (arguments[0], arguments[1]);
                             let left_true_bb = self.create_bb(b);
                             let location = if let DataDest::Read = ctx.data {
-                                Some(self.push_instr(b, Instr::Alloca(ty.clone())))
+                                Some(self.push_instr(b, Instr::Alloca(ty.clone()), expr))
                             } else {
                                 None
                             };
@@ -814,12 +881,12 @@ impl Driver {
                                 self.build_expr(b, rhs, branch_ctx.clone(), tp);
 
                                 self.start_bb(b, left_false_bb);
-                                let false_val = self.push_instr(b, Instr::Const(Const::Bool(false))).direct();
+                                let false_val = self.push_instr(b, Instr::Const(Const::Bool(false)), expr).direct();
                                 self.handle_context(b, false_val, branch_ctx, tp);
 
                                 self.start_bb(b, after_bb);
                                 if let Some(location) = location {
-                                    self.push_instr(b, Instr::Load(location)).direct()
+                                    self.push_instr(b, Instr::Load(location), expr).direct()
                                 } else {
                                     return VOID_INSTR.direct()
                                 }
@@ -848,7 +915,7 @@ impl Driver {
                                 let left_true_bb = self.create_bb(b);
                                 let after_bb = self.create_bb(b);
                                 let location = if let DataDest::Read = ctx.data {
-                                    Some(self.push_instr(b, Instr::Alloca(ty.clone())))
+                                    Some(self.push_instr(b, Instr::Alloca(ty.clone()), expr))
                                 } else {
                                     None
                                 };
@@ -860,7 +927,7 @@ impl Driver {
                                 );
 
                                 self.start_bb(b, left_true_bb);
-                                let true_val = self.push_instr(b, Instr::Const(Const::Bool(true))).direct();
+                                let true_val = self.push_instr(b, Instr::Const(Const::Bool(true)), expr).direct();
                                 let branch_ctx = ctx.redirect(location, Some(after_bb));
                                 self.handle_context(b, true_val, branch_ctx.clone(), tp);
 
@@ -869,7 +936,7 @@ impl Driver {
 
                                 self.start_bb(b, after_bb);
                                 if let Some(location) = location {
-                                    self.push_instr(b, Instr::Load(location)).direct()
+                                    self.push_instr(b, Instr::Load(location), expr).direct()
                                 } else {
                                     return VOID_INSTR.direct()
                                 }
@@ -882,7 +949,7 @@ impl Driver {
                                 return self.build_expr(b, operand, Context::new(0, DataDest::Branch(false_bb, true_bb), ctx.control), tp)
                             } else {
                                 let operand = self.build_expr(b, operand, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
-                                self.push_instr(b, Instr::LogicalNot(operand.instr)).direct()
+                                self.push_instr(b, Instr::LogicalNot(operand.instr), expr).direct()
                             }
                         },
                         _ => {},
@@ -898,57 +965,57 @@ impl Driver {
 
                 break self.get(b, arguments, id, tp);
             },
-            Expr::Cast { expr, ty: dest_ty, cast_id } => {
+            Expr::Cast { expr: operand, ty: dest_ty, cast_id } => {
                 let dest_ty = tp.get_evaluated_type(dest_ty).clone();
                 match tp.cast_method(cast_id) {
-                    CastMethod::Noop => return self.build_expr(b, expr, ctx, tp),
+                    CastMethod::Noop => return self.build_expr(b, operand, ctx, tp),
                     CastMethod::Reinterpret => {
-                        let value = self.build_expr(b, expr, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                        let value = self.build_expr(b, operand, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
                         let value = self.handle_indirection(b, value);
-                        self.push_instr(b, Instr::Reinterpret(value, dest_ty)).direct()
+                        self.push_instr(b, Instr::Reinterpret(value, dest_ty), expr).direct()
                     },
                     CastMethod::Int => {
-                        let (src_width, _src_is_signed, dest_width, dest_is_signed) = match (tp.ty(expr), &dest_ty) {
+                        let (src_width, _src_is_signed, dest_width, dest_is_signed) = match (tp.ty(operand), &dest_ty) {
                             (&Type::Int { width: ref src_width, is_signed: src_is_signed }, &Type::Int { width: ref dest_width, is_signed: dest_is_signed })
                                 => (src_width.clone(), src_is_signed, dest_width.clone(), dest_is_signed),
                             _ => panic!("Internal compiler error: found invalid cast types while generating MIR")
                         };
                         let (src_bit_width, dest_bit_width) = (src_width.bit_width(self.arch), dest_width.bit_width(self.arch));
-                        let value = self.build_expr(b, expr, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                        let value = self.build_expr(b, operand, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
                         let value = self.handle_indirection(b, value);
 
                         if src_bit_width == dest_bit_width {
                             // TODO: Bounds checking
-                            self.push_instr(b, Instr::Reinterpret(value, dest_ty))
+                            self.push_instr(b, Instr::Reinterpret(value, dest_ty), expr)
                         } else if src_bit_width < dest_bit_width {
                             if dest_is_signed {
                                 // TODO: Bounds checking
-                                self.push_instr(b, Instr::SignExtend(value, dest_ty))
+                                self.push_instr(b, Instr::SignExtend(value, dest_ty), expr)
                             } else {
                                 // TODO: Bounds checking
-                                self.push_instr(b, Instr::ZeroExtend(value, dest_ty))
+                                self.push_instr(b, Instr::ZeroExtend(value, dest_ty), expr)
                             }
                         } else if src_bit_width > dest_bit_width {
                             // TODO: Bounds checking
-                            self.push_instr(b, Instr::Truncate(value, dest_ty))
+                            self.push_instr(b, Instr::Truncate(value, dest_ty), expr)
                         } else {
                             unreachable!()
                         }.direct()
                     },
                     CastMethod::Float => {
-                        let value = self.build_expr(b, expr, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                        let value = self.build_expr(b, operand, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
                         let value = self.handle_indirection(b, value);
-                        self.push_instr(b, Instr::FloatCast(value, dest_ty)).direct()
+                        self.push_instr(b, Instr::FloatCast(value, dest_ty), expr).direct()
                     },
                     CastMethod::FloatToInt => {
-                        let value = self.build_expr(b, expr, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                        let value = self.build_expr(b, operand, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
                         let value = self.handle_indirection(b, value);
-                        self.push_instr(b, Instr::FloatToInt(value, dest_ty)).direct()
+                        self.push_instr(b, Instr::FloatToInt(value, dest_ty), expr).direct()
                     },
                     CastMethod::IntToFloat => {
-                        let value = self.build_expr(b, expr, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                        let value = self.build_expr(b, operand, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
                         let value = self.handle_indirection(b, value);
-                        self.push_instr(b, Instr::IntToFloat(value, dest_ty)).direct()
+                        self.push_instr(b, Instr::IntToFloat(value, dest_ty), expr).direct()
                     },
                 }
             },
@@ -958,15 +1025,15 @@ impl Driver {
                 Context::new(ctx.indirection + 1, ctx.data, ctx.control),
                 tp,
             ),
-            Expr::Pointer { expr, is_mut } => {
+            Expr::Pointer { expr: operand, is_mut } => {
                 let op = self.build_expr(
                     b,
-                    expr,
+                    operand,
                     Context::new(0, DataDest::Read, ControlDest::Continue),
                     tp,
                 );
                 let op = self.handle_indirection(b, op);
-                self.push_instr(b, Instr::Pointer { op, is_mut }).direct()
+                self.push_instr(b, Instr::Pointer { op, is_mut }, expr).direct()
             },
             Expr::Struct(id) => {
                 let mut fields = SmallVec::new();
@@ -982,7 +1049,7 @@ impl Driver {
                     let field = self.handle_indirection(b, field);
                     fields.push(field);
                 }
-                self.push_instr(b, Instr::Struct { fields, id }).direct()
+                self.push_instr(b, Instr::Struct { fields, id }, expr).direct()
             },
             Expr::StructLit { id, .. } => {
                 let lit = tp.struct_lit(id).as_ref().unwrap();
@@ -997,7 +1064,7 @@ impl Driver {
                     let field = self.handle_indirection(b, field);
                     fields.push(field);
                 }
-                self.push_instr(b, Instr::StructLit { fields, id: lit.strukt }).direct()
+                self.push_instr(b, Instr::StructLit { fields, id: lit.strukt }, expr).direct()
             },
             Expr::Deref(operand) => return self.build_expr(
                 b,
@@ -1018,7 +1085,7 @@ impl Driver {
                 let result_location = match (&ctx.data, else_scope) {
                     (DataDest::Read, Some(_)) => Some(
                         // TODO: this will be the wrong type if indirection != 0
-                        self.push_instr(b, Instr::Alloca(ty.clone()))
+                        self.push_instr(b, Instr::Alloca(ty.clone()), expr)
                     ),
                     _ => None,
                 };
@@ -1038,7 +1105,7 @@ impl Driver {
 
                 self.start_bb(b, post_bb);
                 if let Some(location) = result_location {
-                    return self.push_instr(b, Instr::Load(location)).direct()
+                    return self.push_instr(b, Instr::Load(location), expr).direct()
                 } else if else_scope.is_some() {
                     return self.handle_control(b, VOID_INSTR.direct(), ctx.control)
                 } else {
@@ -1053,7 +1120,7 @@ impl Driver {
                     ControlDest::Block(block) => block,
                 };
 
-                self.push_instr(b, Instr::Br(test_bb));
+                self.push_instr(b, Instr::Br(test_bb), expr);
                 self.end_current_bb(b);
                 self.start_bb(b, test_bb);
                 self.build_expr(b, condition, Context::new(0, DataDest::Branch(loop_bb, post_bb), ControlDest::Continue), tp);
@@ -1086,14 +1153,14 @@ impl Driver {
     fn handle_indirection(&mut self, b: &mut FunctionBuilder, mut val: Value) -> OpId {
         if val.indirection > 0 {
             while val.indirection > 0 {
-                val.instr = self.push_instr(b, Instr::Load(val.instr));
+                val.instr = self.push_instr(b, Instr::Load(val.instr), val.instr);
                 val.indirection -= 1;
             }
         } else if val.indirection < 0 {
             let mut ty = self.type_of(val.instr);
             while val.indirection < 0 {
-                let location = self.push_instr(b, Instr::Alloca(ty.clone()));
-                self.push_instr(b, Instr::Store { location, value: val.instr });
+                let location = self.push_instr(b, Instr::Alloca(ty.clone()), val.instr);
+                self.push_instr(b, Instr::Store { location, value: val.instr }, val.instr);
                 val.instr = location;
                 val.indirection += 1;
                 // Mutability doesn't matter for now
@@ -1106,7 +1173,7 @@ impl Driver {
     fn handle_control(&mut self, b: &mut FunctionBuilder, val: Value, control: ControlDest) -> Value {
         match control {
             ControlDest::Block(block) => {
-                let val = self.push_instr(b, Instr::Br(block)).direct();
+                let val = self.push_instr(b, Instr::Br(block), val.instr).direct();
                 self.end_current_bb(b);
                 val
             },
@@ -1121,23 +1188,25 @@ impl Driver {
             DataDest::Read => return val,
             DataDest::Ret => {
                 let instr = self.handle_indirection(b, val);
-                let val = self.push_instr(b, Instr::Ret(instr)).direct();
+                let val = self.push_instr(b, Instr::Ret(instr), instr).direct();
                 self.end_current_bb(b);
                 return val;
             },
             DataDest::Branch(true_bb, false_bb) => {
                 let instr = self.handle_indirection(b, val);
-                let val = self.push_instr(b, Instr::CondBr { condition: instr, true_bb, false_bb }).direct();
+                let val = self.push_instr(b, Instr::CondBr { condition: instr, true_bb, false_bb }, instr).direct();
                 self.end_current_bb(b);
                 return val;
             },
             DataDest::Receive { value } => {
                 let location = self.handle_indirection(b, val.get_address());
-                self.push_instr(b, Instr::Store { location, value });
+                let range = self.get_range(location) + self.get_range(value);
+                self.push_instr(b, Instr::Store { location, value }, range);
             },
             DataDest::Store { location } => {
                 let instr = self.handle_indirection(b, val);
-                self.push_instr(b, Instr::Store { location, value: instr });
+                let range = self.get_range(location) + self.get_range(instr);
+                self.push_instr(b, Instr::Store { location, value: instr }, range);
             },
             DataDest::Set { dest } => {
                 let instr = self.handle_indirection(b, val);

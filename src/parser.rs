@@ -2,11 +2,12 @@ use smallvec::{SmallVec, smallvec};
 
 use string_interner::DefaultSymbol as Sym;
 
-use mire::hir::{self, ExprId, ImperScopeId, Intrinsic, FieldAssignment};
+use mire::hir::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment};
 use mire::ty::Type;
 use mire::source_info::{self, SourceFileId, SourceRange};
 
 use crate::driver::Driver;
+use crate::hir::ConditionKind;
 use crate::token::{TokenKind, Token};
 use crate::builder::{BinOp, UnOp, OpPlacement};
 use crate::error::Error;
@@ -495,7 +496,7 @@ impl Driver {
                     range = source_info::concat(range, else_range);
                     Some(else_scope)
                 },
-                _ => panic!("Expected '{' or 'if' after 'else'"),
+                _ => panic!("{}", "Expected '{' or 'if' after 'else'"),
             }
         } else {
             None
@@ -503,26 +504,87 @@ impl Driver {
         self.if_expr(condition, then_scope, else_scope, range)
     }
 
+    fn parse_attribute(&mut self, p: &mut Parser, condition_ns: ConditionNsId) -> Attribute {
+        let Token { kind, range: at_range } = self.cur(p);
+        let at_range = at_range;
+        assert_eq!(kind, &TokenKind::AtSign);
+
+        let Token { kind, range: ident_range } = self.next(p);
+        let attr = match kind {
+            &TokenKind::Ident(sym) => sym,
+            _ => panic!("Unexpected token when parsing attribute"),
+        };
+        let condition_kind = if attr == self.hir.requires_sym {
+            ConditionKind::Requirement
+        } else if attr == self.hir.guarantees_sym {
+            ConditionKind::Guarantee
+        } else {
+            panic!("Unrecognized attribute");
+        };
+        self.set_condition_kind(condition_ns, condition_kind);
+        let (arg, final_tok_range) = match self.next(p).kind {
+            TokenKind::LeftParen => {
+                self.next(p);
+                let arg = self.parse_expr(p);
+                let Token { kind, range } = self.cur(p);
+                assert_eq!(kind, &TokenKind::RightParen);
+                self.next(p);
+
+                (Some(arg), range)
+            },
+            _ => (None, ident_range),
+        };
+        let range = source_info::concat(at_range, final_tok_range);
+
+        Attribute { attr, arg, range }
+    }
+
     /// Parses any node. Iff the node is an expression, returns its ExprId.
-    fn parse_node(&mut self, p: &mut Parser) -> Option<ExprId> {
+    fn parse_node(&mut self, p: &mut Parser) -> Item {
         match self.cur(p).kind {
             &TokenKind::Ident(name) => {
                 if let TokenKind::Colon = self.peek_next(p).kind {
-                    self.parse_decl(name, p);
-                    None
+                    let decl = self.parse_decl(name, p);
+                    Item::Decl(decl)
                 } else {
-                    Some(self.parse_expr(p))
+                    let expr = self.parse_expr(p);
+                    Item::Expr(expr)
                 }
             },
             TokenKind::Fn => {
-                self.parse_comp_decl(p);
-                None
-            }
-            _ => Some(self.parse_expr(p))
+                let decl = self.parse_comp_decl(p);
+                Item::Decl(decl)
+            },
+            TokenKind::AtSign => {
+                let mut attributes = Vec::new();
+
+                // TODO: when non-condition attributes are added, I should create this lazily the
+                // first time I encounter a condition attribute.
+                let condition_ns = self.begin_condition_namespace();
+                let decl = loop {
+                    let attr = self.parse_attribute(p, condition_ns);
+                    attributes.push(attr);
+                    if self.cur(p).kind != &TokenKind::AtSign {
+                        self.end_condition_namespace(condition_ns);
+                        match self.parse_node(p) {
+                            Item::Decl(decl) => break decl,
+                            Item::Expr(_) => panic!("Attributes on expressions are unsupported!"),
+                        }
+                    }
+                };
+                self.code.hir_code.condition_ns[condition_ns].func = decl;
+                self.code.hir_code.decl_attributes.entry(decl).or_default()
+                    .extend(attributes);
+                Item::Decl(decl)
+            },
+            _ => {
+                let expr = self.parse_expr(p);
+                Item::Expr(expr)
+            },
         }
     }
 
-    fn parse_decl(&mut self, name: Sym, p: &mut Parser) {
+    fn parse_decl(&mut self, name: Sym, p: &mut Parser) -> DeclId {
         let name_range = self.cur(p).range;
         // Skip to colon, get range.
         let colon_range = self.next(p).range;
@@ -550,8 +612,8 @@ impl Driver {
         }
 
         let root = self.parse_expr(p);
-        let root_range = self.get_range(root);
-        self.stored_decl(name, explicit_ty, is_mut, root, source_info::concat(name_range, root_range));
+        let _root_range = self.get_range(root);
+        self.stored_decl(name, explicit_ty, is_mut, root, name_range)
     }
 
     fn parse_module(&mut self, p: &mut Parser) -> ExprId {
@@ -572,7 +634,7 @@ impl Driver {
                     break close_curly_range;
                 },
                 _ => {
-                    if let Some(expr) = self.parse_node(p) {
+                    if let Item::Expr(expr) = self.parse_node(p) {
                         self.errors.push(
                             Error::new("expressions are not allowed in the top-level of a module")
                                 .adding_primary_range(self.get_range(expr), "delet this")
@@ -641,7 +703,7 @@ impl Driver {
                     let node = self.parse_node(p);
 
                     // If the node was a standalone expression, make it a statement
-                    if let Some(expr) = node {
+                    if let Item::Expr(expr) = node {
                         last_was_expr = true;
                         self.stmt(expr);
                     } else {
@@ -654,7 +716,7 @@ impl Driver {
         (scope, source_info::concat(open_curly_range, close_curly_range))
     }
 
-    fn parse_comp_decl(&mut self, p: &mut Parser) {
+    fn parse_comp_decl(&mut self, p: &mut Parser) -> DeclId {
         assert_eq!(self.cur(p).kind, &TokenKind::Fn);
         let mut proto_range = self.cur(p).range;
         let name = if let TokenKind::Ident(name) = *self.next(p).kind {
@@ -670,12 +732,11 @@ impl Driver {
         if let TokenKind::LeftParen = self.next(p).kind {
             self.next(p);
             while let TokenKind::Ident(name) = *self.cur(p).kind {
-                let mut param_range = self.cur(p).range;
+                let param_range = self.cur(p).range;
                 param_names.push(name);
                 assert_eq!(self.next(p).kind, &TokenKind::Colon);
                 self.next(p);
-                let (ty, ty_range) = self.parse_type(p);
-                param_range = source_info::concat(param_range, ty_range);
+                let (ty, _ty_range) = self.parse_type(p);
                 param_ranges.push(param_range);
                 param_tys.push(ty);
                 while let TokenKind::Comma = self.cur(p).kind {
@@ -686,7 +747,6 @@ impl Driver {
             proto_range = source_info::concat(proto_range, self.cur(p).range);
             self.next(p);
         } else {
-            //let 
             self.errors.push(
                 Error::new("function declaration must have parentheses")
                     .adding_primary_range(name_range, "")
@@ -707,7 +767,7 @@ impl Driver {
             TokenKind::Assign => None,
             tok => panic!("Invalid token {:?}", tok),
         };
-        self.begin_computed_decl(name, param_names, param_tys, param_ranges, ty, proto_range);
+        let decl_id = self.begin_computed_decl(name, param_names, param_tys, param_ranges, ty, proto_range);
         match self.cur(p).kind {
             TokenKind::OpenCurly => {
                 self.parse_scope(p);
@@ -722,6 +782,8 @@ impl Driver {
             tok => panic!("Invalid token {:?}", tok),
         }
         self.end_computed_decl();
+
+        decl_id
     }
 
     fn parse_type(&mut self, p: &mut Parser) -> (ExprId, SourceRange) {

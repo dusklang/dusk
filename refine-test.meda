@@ -1,0 +1,40 @@
+// Since 2147483648 doesn't fit in i32, you can't write -2147483648. https://github.com/meda-lang/meda/issues/101
+// Until then:
+I32_MIN :: -2147483647 - 1
+I32_MAX :: 2147483647
+
+@requires(a <= I32_MAX - 4)
+@guarantees(return_value == a + 4)
+fn add_four(a: i32): i32 {
+    a + 4
+}
+
+@guarantees(return_value == 12)
+fn return_twelve(): i32 {
+    12
+}
+
+// fn add_four_clamping(a: i32): i32 {
+//     if a < I32_MAX - 4 { a + 4 } else { a }
+// }
+
+fn add_two_numbers(a: i32, b: i32): i32 {
+    a + b
+}
+
+fn add_two_numbers_plus_four(a: i32, b: i32): i32 {
+    add_four(add_two_numbers(a, b))
+}
+
+fn add_two_numbers_plus_eight(a: i32, b: i32): i32 {
+    add_four(add_four(add_two_numbers(a, b)))
+}
+
+fn main() {
+    // Change the second 12 to 13, or the first 12 to 11
+    var := I32_MAX - 12  + 12
+
+    var := add_two_numbers(add_four(I32_MAX - 4), -12)
+
+    return
+}

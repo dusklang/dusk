@@ -7,7 +7,8 @@ use std::io;
 use std::collections::HashMap;
 use std::ops::Range;
 
-use mire::hir::{ExprId, DeclId, ItemId};
+use mire::hir::{ExprId, DeclId, ItemId, Item};
+use mire::OpId;
 use mire::source_info::{SourceRange, SourceFileId};
 
 use crate::driver::Driver;
@@ -279,5 +280,41 @@ impl SourceFile {
             );
         }
         result
+    }
+}
+
+pub enum ToSourceRange {
+    Item(Item),
+    Op(OpId),
+    SourceRange(SourceRange),
+}
+
+impl From<Item> for ToSourceRange {
+    fn from(item: Item) -> Self {
+        ToSourceRange::Item(item)
+    }
+}
+
+impl From<ExprId> for ToSourceRange {
+    fn from(item: ExprId) -> Self {
+        Item::Expr(item).into()
+    }
+}
+
+impl From<DeclId> for ToSourceRange {
+    fn from(item: DeclId) -> Self {
+        Item::Decl(item).into()
+    }
+}
+
+impl From<OpId> for ToSourceRange {
+    fn from(item: OpId) -> Self {
+        ToSourceRange::Op(item)
+    }
+}
+
+impl From<SourceRange> for ToSourceRange {
+    fn from(range: SourceRange) -> Self {
+        ToSourceRange::SourceRange(range)
     }
 }

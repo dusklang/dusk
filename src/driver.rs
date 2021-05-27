@@ -14,6 +14,7 @@ use crate::error::Error;
 use crate::mir::{self, FunctionRef};
 use crate::interpreter::Interpreter;
 use crate::typechecker::type_provider::TypeProvider;
+use crate::refine::Refine;
 use crate::index_vec::*;
 
 pub struct Driver {
@@ -25,6 +26,7 @@ pub struct Driver {
     pub tir: tir::Builder,
     pub errors: Vec<Error>,
     pub mir: mir::Builder,
+    pub refine: Refine,
     pub code: Code,
     pub interp: Interpreter,
     /// Total number of errors that have been flushed
@@ -33,7 +35,7 @@ pub struct Driver {
 
 impl Driver {
     pub fn new(src_map: SourceMap, arch: Arch) -> Self {
-        let mut d = Self {
+        Self {
             arch,
             src_map,
             toks: IndexVec::new(),
@@ -42,17 +44,18 @@ impl Driver {
             tir: tir::Builder::default(),
             errors: Vec::new(),
             mir: mir::Builder::new(),
+            refine: Refine::default(),
             code: Code::default(),
             interp: Interpreter::new(),
             flushed_errors: 0,
-        };
-        d.initialize_hir();
-        d
+        }
     }
 
     pub fn eval_expr(&mut self, expr: ExprId, tp: &impl TypeProvider) -> Const {
         let func = self.build_standalone_expr(expr, tp);
-        let val = self.call(FunctionRef::Ref(func), Vec::new());
+        let function_ref = FunctionRef::Ref(func);
+        self.refine_func(&function_ref, tp);
+        let val = self.call(function_ref, Vec::new());
         self.value_to_const(val, tp.ty(expr).clone(), tp)
     }
 }

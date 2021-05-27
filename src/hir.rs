@@ -2,7 +2,7 @@ use std::ffi::CString;
 use std::ops::Range;
 
 use smallvec::{SmallVec, smallvec};
-use string_interner::DefaultSymbol as Sym;
+use string_interner::{DefaultSymbol as Sym, Symbol};
 
 use mire::{Op, Block};
 use mire::hir::*;
@@ -13,6 +13,7 @@ use mire::source_info::{SourceFileId, SourceRange};
 use crate::driver::Driver;
 use crate::index_vec::*;
 use crate::builder::{BinOp, UnOp};
+use crate::source_info::ToSourceRange;
 
 #[derive(Debug)]
 enum ScopeState {
@@ -24,7 +25,11 @@ enum ScopeState {
     Mod {
         id: ModScopeId,
         namespace: ModScopeNsId,
-    }
+    },
+    Condition {
+        ns: ConditionNsId,
+        condition_kind: ConditionKind,
+    },
 }
 
 #[derive(Debug)]
@@ -36,17 +41,46 @@ struct CompDeclState {
     stored_decl_counter: IndexCounter<StoredDeclId>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Builder {
     comp_decl_stack: Vec<CompDeclState>,
     scope_stack: Vec<ScopeState>,
+
+    pub requires_sym: Sym,
+    pub guarantees_sym: Sym,
+    pub return_value_sym: Sym,
+}
+
+impl Default for Builder {
+    fn default() -> Self {
+        Builder {
+            comp_decl_stack: Default::default(),
+            scope_stack: Default::default(),
+
+            // Note: gets initialized in Driver::initialize_hir() below
+            requires_sym: Sym::try_from_usize((u32::MAX - 1) as usize).unwrap(),
+            guarantees_sym: Sym::try_from_usize((u32::MAX - 1) as usize).unwrap(),
+            return_value_sym: Sym::try_from_usize((u32::MAX - 1) as usize).unwrap(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum ConditionKind {
+    Requirement, Guarantee,
 }
 
 impl Driver {
     pub fn initialize_hir(&mut self) {
-        //self.code.hir_code.imper_ns;
         self.push_expr(Expr::Void, SourceRange::default());
         self.push_expr(Expr::ConstTy(Type::Void), SourceRange::default());
+
+        let return_value_sym = self.interner.get_or_intern_static("return_value");
+        self.decl(Decl::ReturnValue, return_value_sym, None, SourceRange::default());
+
+        self.hir.requires_sym = self.interner.get_or_intern_static("requires");
+        self.hir.guarantees_sym = self.interner.get_or_intern_static("guarantees");
+        self.hir.return_value_sym = return_value_sym;
     }
 
     fn push_expr(&mut self, expr: Expr, range: SourceRange) -> ExprId {
@@ -91,7 +125,7 @@ impl Driver {
         let cast_id = self.code.hir_code.cast_counter.next();
         self.push_expr(Expr::Cast { expr, ty, cast_id }, range)
     }
-    pub fn stored_decl(&mut self, name: Sym, explicit_ty: Option<ExprId>, is_mut: bool, root_expr: ExprId, range: SourceRange) {
+    pub fn stored_decl(&mut self, name: Sym, explicit_ty: Option<ExprId>, is_mut: bool, root_expr: ExprId, range: SourceRange) -> DeclId {
         self.flush_stmt_buffer();
         match self.hir.scope_stack.last().unwrap() {
             ScopeState::Imper { .. } => {
@@ -107,6 +141,7 @@ impl Driver {
                         id: decl_id,
                     }
                 );
+                decl_id
             }
             ScopeState::Mod { .. } => {
                 let decl_id = self.decl(
@@ -126,7 +161,9 @@ impl Driver {
                         id: decl_id
                     }
                 );
+                decl_id
             },
+            ScopeState::Condition { .. } => panic!("Stored decl unsupported in an attribute"),
         }
     }
     pub fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
@@ -159,6 +196,31 @@ impl Driver {
         let id = self.code.hir_code.struct_lits.next();
         self.push_expr(Expr::StructLit { ty, fields, id }, range)
     }
+    pub fn begin_condition_namespace(&mut self) -> ConditionNsId {
+        let parent = self.cur_namespace();
+        let ns = self.code.hir_code.condition_ns.push(ConditionNs { func: DeclId::from_raw(u32::MAX), parent: Some(parent) });
+        // This condition kind is just a placeholder which will be reset by each attribute. It is done this way so I can share a single
+        // condition namespace across all condition attributes on a single function.
+        self.hir.scope_stack.push(ScopeState::Condition { ns, condition_kind: ConditionKind::Requirement });
+
+        ns
+    }
+    pub fn set_condition_kind(&mut self, desired_ns: ConditionNsId, desired_condition_kind: ConditionKind) {
+        if let Some(ScopeState::Condition { ns, condition_kind }) = self.hir.scope_stack.last_mut() {
+            assert_eq!(&*ns, &desired_ns, "tried to set condition_kind, but the current condition scope doesn't match");
+            *condition_kind = desired_condition_kind;
+        } else {
+            panic!("tried to set condition_kind, but the top of the scope stack is not a condition namespace");
+        }
+    }
+    pub fn end_condition_namespace(&mut self, desired_ns: ConditionNsId) {
+        if let Some(&ScopeState::Condition { ns, .. }) = self.hir.scope_stack.last() {
+            assert_eq!(ns, desired_ns, "tried to end condition namespace, but the current condition scope doesn't match");
+            self.hir.scope_stack.pop();
+        } else {
+            panic!("Tried to end condition namespace, but the top of the scope stack is not a condition namespace");
+        }
+    }
     pub fn begin_module(&mut self) -> ExprId {
         let parent = self.cur_namespace();
         let id = self.code.hir_code.mod_scopes.push(ModScope::default());
@@ -170,7 +232,7 @@ impl Driver {
         self.hir.scope_stack.push(ScopeState::Mod { id, namespace });
         self.push_expr(Expr::Mod { id }, SourceRange::default())
     }
-    pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, explicit_ty: Option<ExprId>, proto_range: SourceRange) {
+    pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, explicit_ty: Option<ExprId>, proto_range: SourceRange) -> DeclId {
         // This is a placeholder value that gets replaced once the parameter declarations get allocated.
         let id = self.decl(Decl::Const(ExprId::new(u32::MAX as usize)), name, explicit_ty, proto_range);
         assert_eq!(param_names.len(), param_tys.len());
@@ -198,7 +260,8 @@ impl Driver {
             },
             &ScopeState::Mod { .. } => {
                 self.mod_scoped_decl(name, ModScopedDecl { num_params: param_names.len(), id });
-            }
+            },
+            ScopeState::Condition { .. } => panic!("Computed decls are not supported in condition attributes"),
         }
         self.hir.comp_decl_stack.push(
             CompDeclState {
@@ -209,6 +272,8 @@ impl Driver {
                 stored_decl_counter: IndexCounter::new(),
             }
         );
+
+        id
     }
     pub fn decl_ref(&mut self, base_expr: Option<ExprId>, name: Sym, arguments: SmallVec<[ExprId; 2]>, has_parens: bool, range: SourceRange) -> ExprId {
         let namespace = match base_expr {
@@ -416,8 +481,22 @@ impl Driver {
                 Namespace::Imper { scope: namespace, end_offset }
             },
             ScopeState::Mod { namespace, .. } => Namespace::Mod(namespace),
+            ScopeState::Condition { ns, condition_kind: ConditionKind::Requirement } => Namespace::Requirement(ns),
+            ScopeState::Condition { ns, condition_kind: ConditionKind::Guarantee } => Namespace::Guarantee(ns),
         }
     }
-    pub fn get_range(&self, id: ExprId) -> SourceRange { self.code.hir_code.source_ranges[self.code.hir_code.expr_to_items[id]].clone() }
+    pub fn get_range(&self, item: impl Into<ToSourceRange>) -> SourceRange {
+        match item.into() {
+            ToSourceRange::Item(item) => {
+                let item = match item {
+                    Item::Expr(expr) => self.code.hir_code.expr_to_items[expr],
+                    Item::Decl(decl) => self.code.hir_code.decl_to_items[decl],
+                };
+                self.code.hir_code.source_ranges[item]
+            }
+            ToSourceRange::Op(op) => self.code.mir_code.source_ranges.get(&op).unwrap().clone(),
+            ToSourceRange::SourceRange(range) => range,
+        }
+    }
     pub fn set_range(&mut self, id: ExprId, range: SourceRange) { self.code.hir_code.source_ranges[self.code.hir_code.expr_to_items[id]] = range; }
 }

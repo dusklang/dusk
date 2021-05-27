@@ -153,7 +153,7 @@ impl Driver {
                 one_of.reserve(overloads.len());
                 for i in 0..overloads.len() {
                     let overload = overloads[i];
-                    let ty = tp.fetch_decl_type(self, overload).ty.clone();
+                    let ty = tp.fetch_decl_type(self, overload, Some(decl_ref_id)).ty.clone();
                     let mut is_mut = self.tir.decls[overload].is_mut;
                     if let hir::Namespace::MemberRef { base_expr } = self.code.hir_code.decl_refs[decl_ref_id].namespace {
                         let constraints = tp.constraints(base_expr);
@@ -170,7 +170,7 @@ impl Driver {
                         for &overload in &overloads {
                             let decl = &self.tir.decls[overload];
                             if ty.ty.trivially_convertible_to(tp.get_evaluated_type(decl.param_tys[i])) {
-                                let ty = tp.fetch_decl_type(self, overload).clone();
+                                let ty = tp.fetch_decl_type(self, overload, None).clone();
                                 pref = Some(ty);
                                 *tp.preferred_overload_mut(decl_ref_id) = Some(overload);
                                 break 'find_preference;
@@ -423,7 +423,7 @@ impl Driver {
                 let item = unit.assigned_decls.at(level, i);
                 let decl_id = item.decl_id;
                 let root_expr = item.root_expr;
-                let ty = tp.fetch_decl_type(self, decl_id).ty.clone();
+                let ty = tp.fetch_decl_type(self, decl_id, None).ty.clone();
                 tp.constraints_mut(root_expr).set_to(ty);
             }
             for item in unit.ret_groups.get_level(level) {
@@ -520,7 +520,7 @@ impl Driver {
                 let decls = &self.tir.decls;
                 let mut overloads = tp.overloads(item.decl_ref_id).clone();
                 overloads.retain(|&overload| {
-                    tp.fetch_decl_type(self, overload).trivially_convertible_to(&ty)
+                    tp.fetch_decl_type(self, overload, Some(item.decl_ref_id)).trivially_convertible_to(&ty)
                 });
                 let pref = tp.preferred_overload(item.decl_ref_id);
 
@@ -629,7 +629,7 @@ impl Driver {
                     for i in 0..fields.len() {
                         let field = fields[i];
                         let field = self.code.hir_code.field_decls[field].decl;
-                        let field_ty = tp.fetch_decl_type(self, field).ty.clone();
+                        let field_ty = tp.fetch_decl_type(self, field, None).ty.clone();
 
                         tp.constraints_mut(lit.fields[i]).set_to(field_ty);
                     }

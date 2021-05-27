@@ -21,6 +21,7 @@ mod ty;
 mod driver;
 mod typechecker;
 mod interpreter;
+mod refine;
 
 use interpreter::InterpMode;
 use mir::FunctionRef;
@@ -41,6 +42,7 @@ enum StopPhase {
     Tir,
     Typecheck,
     Mir,
+    Refine,
     Interp,
 }
 
@@ -48,19 +50,19 @@ enum StopPhase {
 #[clap(name = "meda")]
 struct Opt {
     /// Output per-level typechecking diffs
-    #[clap(short="d", long)]
+    #[clap(short='d', long)]
     output_tc_diff: bool,
 
     /// The mode for displaying the TIR graph
-    #[clap(arg_enum, short="g", long, case_insensitive = true)]
+    #[clap(arg_enum, short='g', long, case_insensitive = true)]
     tir_output: Option<TirGraphOutput>,
 
     /// Output MIR in textual format
-    #[clap(short="m", long)]
+    #[clap(short='m', long)]
     output_mir: bool,
 
     /// The phase to stop the compiler at
-    #[clap(arg_enum, short="s", long, default_value="interp", case_insensitive = true)]
+    #[clap(arg_enum, short='s', long, default_value="interp", case_insensitive = true)]
     stop_phase: StopPhase,
 
     /// Input file
@@ -109,8 +111,11 @@ fn main() {
         println!("{}", driver.display_mir());
     }
 
+    begin_phase!(Refine);
+    driver.refine(&tp);
+
     begin_phase!(Interp);
-    let main_sym = driver.interner.get_or_intern("main");
+    let main_sym = driver.interner.get_or_intern_static("main");
     let main = driver.code.mir_code.functions.iter()
         .position(|func| {
             match func.name {

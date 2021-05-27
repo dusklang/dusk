@@ -436,6 +436,7 @@ impl Driver {
                 Assign              b"="
                 Ampersand           b"&"
                 Pipe                b"|"
+                AtSign              b"@"
             )
         }
     }
