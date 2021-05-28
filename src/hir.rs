@@ -45,6 +45,7 @@ struct CompDeclState {
 pub struct Builder {
     comp_decl_stack: Vec<CompDeclState>,
     scope_stack: Vec<ScopeState>,
+    pub generic_params: IndexCounter<GenericParamId>,
 
     pub requires_sym: Sym,
     pub guarantees_sym: Sym,
@@ -56,6 +57,7 @@ impl Default for Builder {
         Builder {
             comp_decl_stack: Default::default(),
             scope_stack: Default::default(),
+            generic_params: IndexCounter::new(),
 
             // Note: gets initialized in Driver::initialize_hir() below
             requires_sym: Sym::try_from_usize((u32::MAX - 1) as usize).unwrap(),

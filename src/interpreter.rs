@@ -467,7 +467,12 @@ impl Driver {
         }
         results.insert(VOID_INSTR, Value::Nothing);
 
-        let generic_ctx = HashMap::new();
+        let mut generic_ctx = HashMap::new();
+        assert_eq!(func.generic_params.len(), generic_arguments.len());
+        for (&generic_param, generic_argument) in func.generic_params.iter().zip(generic_arguments) {
+            generic_ctx.insert(generic_param, generic_argument);
+        }
+
         StackFrame {
             func_ref,
             block: start_block,

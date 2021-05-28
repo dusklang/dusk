@@ -43,6 +43,8 @@ pub enum TokenKind {
     Dot,
     OpenCurly,
     CloseCurly,
+    OpenSquareBracket,
+    CloseSquareBracket,
     AtSign,
 
     // Operators
@@ -123,7 +125,7 @@ impl TokenKind {
             Mut | Colon | Comma | RightParen | Dot | OpenCurly | CloseCurly | AddAssign |
             SubAssign | MultAssign | DivAssign | ModAssign | BitwiseOrAssign | BitwiseAndAssign |
             Div | Mod | Equal | NotEqual | LTE | LT | GTE | GT | LogicalOr | LogicalAnd | Assign |
-            Pipe | AtSign
+            Pipe | AtSign | OpenSquareBracket | CloseSquareBracket
         )
     }
 }

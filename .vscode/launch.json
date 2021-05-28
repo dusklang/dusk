@@ -20,7 +20,7 @@
                 }
             },
             "args": [
-                "refine-test.meda"
+                "generics.meda"
             ],
             "cwd": "${workspaceFolder}"
         },

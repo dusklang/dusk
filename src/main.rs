@@ -61,6 +61,10 @@ struct Opt {
     #[clap(short='m', long)]
     output_mir: bool,
 
+    /// Run the refinement checker
+    #[clap(short='r', long)]
+    run_refiner: bool,
+
     /// The phase to stop the compiler at
     #[clap(arg_enum, short='s', long, default_value="interp", case_insensitive = true)]
     stop_phase: StopPhase,
@@ -75,7 +79,7 @@ fn main() {
 
     let mut src_map = SourceMap::new();
     src_map.add_file(opt.input).unwrap();
-    let mut driver = Driver::new(src_map, Arch::X86_64);
+    let mut driver = Driver::new(src_map, Arch::X86_64, opt.run_refiner);
     driver.initialize_hir();
 
     macro_rules! begin_phase {
@@ -112,7 +116,9 @@ fn main() {
     }
 
     begin_phase!(Refine);
-    driver.refine(&tp);
+    if opt.run_refiner {
+        driver.refine(&tp);
+    }
 
     begin_phase!(Interp);
     let main_sym = driver.interner.get_or_intern_static("main");

@@ -726,10 +726,43 @@ impl Driver {
         };
         let name_range = self.cur(p).range;
         proto_range = source_info::concat(proto_range, name_range);
+
+        let mut generic_param_names = SmallVec::new();
+        let mut generic_params = GenericParamId::new(0)..GenericParamId::new(0);
+        let mut generic_param_ranges = SmallVec::new();
+        if let TokenKind::OpenSquareBracket = self.next(p).kind {
+            let open_square_bracket_range = self.cur(p).range;
+            self.next(p);
+            if matches!(self.cur(p).kind, TokenKind::Ident(_)) {
+                generic_params.start = self.hir.generic_params.peek_next();
+                while let TokenKind::Ident(name) = *self.cur(p).kind {
+                    // Claim a GenericParamId for yourself, then set the `end` value to be one past the end
+                    let generic_param = self.hir.generic_params.next();
+                    generic_params.end = generic_param + 1;
+
+                    let param_range = self.cur(p).range;
+                    generic_param_names.push(name);
+                    self.next(p);
+                    generic_param_ranges.push(param_range);
+                    while let TokenKind::Comma = self.cur(p).kind {
+                        self.next(p);
+                    }
+                }
+            } else {
+                self.errors.push(
+                    Error::new("expected at least one parameter in generic parameter list")
+                        .adding_primary_range(open_square_bracket_range, "list starts here")
+                );
+            }
+            assert_eq!(self.cur(p).kind, &TokenKind::CloseSquareBracket);
+            proto_range = source_info::concat(proto_range, self.cur(p).range);
+            self.next(p);
+        }
+
         let mut param_names = SmallVec::new();
         let mut param_tys = SmallVec::new();
         let mut param_ranges = SmallVec::new();
-        if let TokenKind::LeftParen = self.next(p).kind {
+        if let TokenKind::LeftParen = self.cur(p).kind {
             self.next(p);
             while let TokenKind::Ident(name) = *self.cur(p).kind {
                 let param_range = self.cur(p).range;
@@ -767,7 +800,7 @@ impl Driver {
             TokenKind::Assign => None,
             tok => panic!("Invalid token {:?}", tok),
         };
-        let decl_id = self.begin_computed_decl(name, param_names, param_tys, param_ranges, SmallVec::new(), GenericParamId::new(0)..GenericParamId::new(0), SmallVec::new(), ty, proto_range);
+        let decl_id = self.begin_computed_decl(name, param_names, param_tys, param_ranges, generic_param_names, generic_params, generic_param_ranges, ty, proto_range);
         match self.cur(p).kind {
             TokenKind::OpenCurly => {
                 self.parse_scope(p);

@@ -31,10 +31,11 @@ pub struct Driver {
     pub interp: Interpreter,
     /// Total number of errors that have been flushed
     pub flushed_errors: u32,
+    pub run_refiner: bool,
 }
 
 impl Driver {
-    pub fn new(src_map: SourceMap, arch: Arch) -> Self {
+    pub fn new(src_map: SourceMap, arch: Arch, run_refiner: bool) -> Self {
         Self {
             arch,
             src_map,
@@ -48,13 +49,16 @@ impl Driver {
             code: Code::default(),
             interp: Interpreter::new(),
             flushed_errors: 0,
+            run_refiner,
         }
     }
 
     pub fn eval_expr(&mut self, expr: ExprId, tp: &impl TypeProvider) -> Const {
         let func = self.build_standalone_expr(expr, tp);
         let function_ref = FunctionRef::Ref(func);
-        self.refine_func(&function_ref, tp);
+        if self.run_refiner {
+            self.refine_func(&function_ref, tp);
+        }
         let val = self.call(function_ref, Vec::new(), Vec::new());
         self.value_to_const(val, tp.ty(expr).clone(), tp)
     }

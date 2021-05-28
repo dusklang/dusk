@@ -411,6 +411,8 @@ impl Driver {
                 Dot                 b"."
                 OpenCurly           b"{"
                 CloseCurly          b"}"
+                OpenSquareBracket   b"["
+                CloseSquareBracket  b"]"
 
                 AddAssign           b"+="
                 SubAssign           b"-="

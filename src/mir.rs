@@ -244,7 +244,7 @@ const MAX_LITERAL_BASED_INSTRUCTION_NAME_LENGTH: usize = 15;
 fn identifierify(mut string: Vec<u8>) -> String {
     for byte in string.iter_mut() {
         if !byte.is_ascii_alphanumeric() {
-            *byte = '_' as u8;
+            *byte = b'_';
         }
     }
     string.truncate(MAX_LITERAL_BASED_INSTRUCTION_NAME_LENGTH);
@@ -357,23 +357,38 @@ impl Driver {
     }
 
     pub fn build_standalone_expr(&mut self, expr: ExprId, tp: &impl TypeProvider) -> Function {
-        self.build_function(None, tp.ty(expr).clone(), FunctionBody::Expr(expr), DeclId::new(0)..DeclId::new(0), tp)
+        self.build_function(None, tp.ty(expr).clone(), FunctionBody::Expr(expr), DeclId::new(0)..DeclId::new(0), Vec::new(), tp)
     }
 
     fn get_decl(&mut self, id: DeclId, tp: &impl TypeProvider) -> Decl {
         if let Some(decl) = self.mir.decls.get(&id) { return decl.clone(); }
         match self.code.hir_code.decls[id] {
-            hir::Decl::Computed { ref params, scope, .. } => {
+            hir::Decl::Computed { ref params, scope, generic_params: ref generic_params_range, .. } => {
                 // Add placeholder function to reserve ID ahead of time
                 let get = self.code.mir_code.functions.push(Function::default());
                 let decl = Decl::Computed { get };
                 self.mir.decls.insert(id, decl.clone());
+
+                // Convert DeclIds to GenericParamIds
+                // TODO: don't require this?
+                let mut generic_params = Vec::new();
+                generic_params.reserve(generic_params_range.end.index() - generic_params_range.start.index());
+                for i in generic_params_range.start.index()..generic_params_range.end.index() {
+                    let id = DeclId::new(i);
+                    let generic_param = match self.code.hir_code.decls[id] {
+                        hir::Decl::GenericParam(param) => param,
+                        _ => panic!("unexpected decl type, expected generic parameter"),
+                    };
+                    generic_params.push(generic_param);
+                }
+
                 let params = params.clone();
                 let func = self.build_function(
                     Some(self.code.hir_code.names[id]),
                     self.decl_type(id, tp).clone(),
                     FunctionBody::Scope { scope, decl: id },
-                    params.clone(),
+                    params,
+                    generic_params,
                     tp
                 );
                 self.code.mir_code.functions[get] = func;
@@ -683,7 +698,7 @@ impl Driver {
         type_of(&self.code.mir_code, instr, &self.code.ops)
     }
 
-    fn build_function(&mut self, name: Option<Sym>, ret_ty: Type, body: FunctionBody, params: Range<DeclId>, tp: &impl TypeProvider) -> Function {
+    fn build_function(&mut self, name: Option<Sym>, ret_ty: Type, body: FunctionBody, params: Range<DeclId>, generic_params: Vec<GenericParamId>, tp: &impl TypeProvider) -> Function {
         debug_assert_ne!(ret_ty, Type::Error, "can't build MIR function with Error return type");
 
         let mut entry = Block::default();
@@ -727,6 +742,7 @@ impl Driver {
             blocks: b.blocks,
             instr_namespace: b.instr_namespace,
             decl,
+            generic_params,
         };
         self.optimize_function(&mut function);
         self.code.mir_code.check_all_blocks_ended(&function);

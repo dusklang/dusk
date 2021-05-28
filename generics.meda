@@ -1,0 +1,7 @@
+fn generic_function[T]() {
+
+}
+
+fn main() {
+
+}
