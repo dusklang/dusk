@@ -1,7 +1,8 @@
-fn generic_function[T]() {
-
+fn memset[T](dest: T *mut, src: T, count: usize) {
+    // ...
 }
 
 fn main() {
-
+    buffer :: malloc(24) as u8 *mut
+    //memset[u8](buffer, 34, 24)
 }

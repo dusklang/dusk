@@ -26,6 +26,7 @@ enum ScopeState {
         id: ModScopeId,
         namespace: ModScopeNsId,
     },
+    CompDeclParams(CompDeclParamsNsId),
     Condition {
         ns: ConditionNsId,
         condition_kind: ConditionKind,
@@ -36,6 +37,7 @@ enum ScopeState {
 struct CompDeclState {
     has_scope: Option<ImperScopeId>,
     params: Range<DeclId>,
+    generic_params: Range<DeclId>,
     id: DeclId,
     imper_scope_stack: u32,
     stored_decl_counter: IndexCounter<StoredDeclId>,
@@ -76,6 +78,8 @@ impl Driver {
     pub fn initialize_hir(&mut self) {
         self.push_expr(Expr::Void, SourceRange::default());
         self.push_expr(Expr::ConstTy(Type::Void), SourceRange::default());
+        self.push_expr(Expr::ConstTy(Type::Ty), SourceRange::default());
+        assert_eq!(self.code.hir_code.exprs.len(), 3);
 
         let return_value_sym = self.interner.get_or_intern_static("return_value");
         self.decl(Decl::ReturnValue, return_value_sym, None, SourceRange::default());
@@ -165,7 +169,7 @@ impl Driver {
                 );
                 decl_id
             },
-            ScopeState::Condition { .. } => panic!("Stored decl unsupported in an attribute"),
+            ScopeState::Condition { .. } | ScopeState::CompDeclParams(_) => panic!("Stored decl unsupported in this position"),
         }
     }
     pub fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
@@ -223,6 +227,21 @@ impl Driver {
             panic!("Tried to end condition namespace, but the top of the scope stack is not a condition namespace");
         }
     }
+    pub fn begin_comp_decl_params_namespace(&mut self) -> CompDeclParamsNsId {
+        let parent = self.cur_namespace();
+        let ns = self.code.hir_code.comp_decl_params_ns.push(CompDeclParamsNs { func: DeclId::from_raw(u32::MAX), parent: Some(parent) });
+        self.hir.scope_stack.push(ScopeState::CompDeclParams(ns));
+
+        ns
+    }
+    pub fn end_comp_decl_params_namespace(&mut self, desired_ns: CompDeclParamsNsId) {
+        if let Some(&ScopeState::CompDeclParams(ns)) = self.hir.scope_stack.last() {
+            assert_eq!(ns, desired_ns, "tried to end computed decl params namespace, but the current condition scope doesn't match");
+            self.hir.scope_stack.pop();
+        } else {
+            panic!("Tried to end computed decl params namespace, but the top of the scope stack is not a computed decl params namespace");
+        }
+    }
     pub fn begin_module(&mut self) -> ExprId {
         let parent = self.cur_namespace();
         let id = self.code.hir_code.mod_scopes.push(ModScope::default());
@@ -268,7 +287,7 @@ impl Driver {
             param_tys,
             params: params.clone(),
             scope: ImperScopeId::new(u32::MAX as usize),
-            generic_params,
+            generic_params: generic_params.clone(),
         };
         match self.hir.scope_stack.last().unwrap() {
             ScopeState::Imper { .. } => {
@@ -278,12 +297,13 @@ impl Driver {
             &ScopeState::Mod { .. } => {
                 self.mod_scoped_decl(name, ModScopedDecl { num_params: param_names.len(), id });
             },
-            ScopeState::Condition { .. } => panic!("Computed decls are not supported in condition attributes"),
+            ScopeState::Condition { .. } | ScopeState::CompDeclParams(_) => panic!("Computed decls are not supported in this position"),
         }
         self.hir.comp_decl_stack.push(
             CompDeclState {
                 has_scope: None,
                 params,
+                generic_params,
                 id,
                 imper_scope_stack: 0,
                 stored_decl_counter: IndexCounter::new(),
@@ -437,6 +457,7 @@ impl Driver {
             let id = comp_decl.id;
 
             let params = comp_decl.params.clone();
+            let generic_params = comp_decl.generic_params.clone();
 
             // Add the current comp decl to the decl scope, to enable recursion
             self.imper_scoped_decl(
@@ -449,6 +470,18 @@ impl Driver {
 
             // Add parameters to decl scope
             for i in params.start.index()..params.end.index() {
+                let id = DeclId::new(i);
+                self.imper_scoped_decl(
+                    ImperScopedDecl {
+                        name: self.code.hir_code.names[id],
+                        num_params: 0,
+                        id,
+                    }
+                );
+            }
+
+            // Add generic parameters to decl scope
+            for i in generic_params.start.index()..generic_params.end.index() {
                 let id = DeclId::new(i);
                 self.imper_scoped_decl(
                     ImperScopedDecl {
@@ -498,6 +531,7 @@ impl Driver {
                 Namespace::Imper { scope: namespace, end_offset }
             },
             ScopeState::Mod { namespace, .. } => Namespace::Mod(namespace),
+            ScopeState::CompDeclParams(ns) => Namespace::CompDeclParams(ns),
             ScopeState::Condition { ns, condition_kind: ConditionKind::Requirement } => Namespace::Requirement(ns),
             ScopeState::Condition { ns, condition_kind: ConditionKind::Guarantee } => Namespace::Guarantee(ns),
         }

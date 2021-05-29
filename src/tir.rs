@@ -79,6 +79,7 @@ pub struct UnitItems {
     pub str_lits: Vec<ExprId>,
     pub char_lits: Vec<ExprId>,
     pub const_tys: Vec<ExprId>,
+    pub generic_params: Vec<DeclId>,
     pub stmts: Vec<Stmt>,
     pub explicit_rets: DepVec<ExprId>,
     pub ret_groups: DepVec<RetGroup>,
@@ -258,6 +259,21 @@ impl Driver {
 
                     break;
                 },
+                Namespace::CompDeclParams(ns_id) => {
+                    let comp_decl_params_ns = &self.code.hir_code.comp_decl_params_ns[ns_id];
+                    if let hir::Decl::Computed { generic_params, .. } = &self.code.hir_code.decls[comp_decl_params_ns.func] {
+                        for i in generic_params.start.index()..generic_params.end.index() {
+                            let decl = DeclId::new(i);
+                            let param_name = self.code.hir_code.names[decl];
+                            if decl_ref.name == param_name {
+                                overloads.insert(decl);
+                            }
+                        }
+                    } else {
+                        panic!("expected computed decl");
+                    };
+                    comp_decl_params_ns.parent
+                },
                 Namespace::Requirement(ns_id) => {
                     let condition_ns = &self.code.hir_code.condition_ns[ns_id];
                     self.find_overloads_in_function_parameters(decl_ref, condition_ns.func, &mut overloads);
@@ -409,7 +425,11 @@ impl Driver {
     fn build_tir_decl(&mut self, unit: &mut UnitItems, level: u32, id: DeclId) {
         match self.code.hir_code.decls[id] {
             // TODO: Add parameter and field TIR items for (at least) checking that the type of the param is valid
-            hir::Decl::Parameter { .. } | hir::Decl::Field(_) | hir::Decl::ReturnValue | hir::Decl::Intrinsic { .. } | hir::Decl::GenericParam(_) => {},
+            hir::Decl::Parameter { .. } | hir::Decl::Field(_) | hir::Decl::ReturnValue | hir::Decl::Intrinsic { .. } => {},
+            hir::Decl::GenericParam(_) => {
+                assert_eq!(level, 0);
+                unit.generic_params.push(id);
+            },
             hir::Decl::Static(root_expr) | hir::Decl::Const(root_expr) | hir::Decl::Stored { root_expr, .. } => {
                 let explicit_ty = self.code.hir_code.explicit_tys[id];
                 unit.assigned_decls.insert(level, AssignedDecl { explicit_ty, root_expr, decl_id: id });
@@ -566,7 +586,10 @@ impl Driver {
             match self.code.hir_code.items[id] {
                 hir::Item::Decl(decl_id) => {
                     match self.code.hir_code.decls[decl_id] {
-                        hir::Decl::Parameter { .. } | hir::Decl::Static(_) | hir::Decl::Const(_) | hir::Decl::Stored { .. } | hir::Decl::Field(_) | hir::Decl::ReturnValue | hir::Decl::GenericParam(_) => {},
+                        hir::Decl::Parameter { .. } | hir::Decl::Static(_) | hir::Decl::Const(_) | hir::Decl::Stored { .. } | hir::Decl::Field(_) | hir::Decl::ReturnValue => {},
+                        hir::Decl::GenericParam(_) => {
+                            add_eval_dep!(id, hir::TYPE_TYPE);
+                        },
                         hir::Decl::Intrinsic { ref param_tys, .. } => {
                             for &ty in param_tys {
                                 add_eval_dep!(id, ty);

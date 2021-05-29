@@ -73,6 +73,9 @@ impl Driver {
             *tp.constraints_mut(item) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Ty.into()]), None);
             *tp.ty_mut(item) = Type::Ty;
         }
+        for &param in &unit.generic_params {
+            *tp.decl_type_mut(param) = Type::Ty.into();
+        }
         for level in start_level..unit.num_levels() {
             for item in unit.assigned_decls.get_level(level) {
                 let constraints = tp.constraints(item.root_expr);
@@ -670,6 +673,8 @@ impl Driver {
             
             // Pass 2: propagate info up from roots to leaves
             self.run_pass_2(&unit.items, UnitKind::Normal(num), tp);
+
+            self.flush_errors();
 
             for i in 0..unit.eval_dependees.len() {
                 let expr = unit.eval_dependees[i];

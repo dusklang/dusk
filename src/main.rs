@@ -103,6 +103,7 @@ fn main() {
     let mut tp = driver.get_real_type_provider(opt.output_tc_diff);
     while let Some(units) = driver.build_more_tir(opt.tir_output) {
         driver.type_check(&units, &mut tp);
+        driver.flush_errors();
     }
 
     driver.flush_errors();

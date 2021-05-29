@@ -545,8 +545,8 @@ impl Driver {
                 }
                 self.call(FunctionRef::Id(func), copied_args, Vec::new())
             },
-            Instr::GenericParam(_) => {
-                unimplemented!();
+            &Instr::GenericParam(id) => {
+                Value::from_ty(Type::GenericParam(id))
             },
             &Instr::Intrinsic { ref arguments, intr, .. } => {
                 match intr {

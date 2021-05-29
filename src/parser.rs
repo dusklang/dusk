@@ -762,7 +762,8 @@ impl Driver {
         let mut param_names = SmallVec::new();
         let mut param_tys = SmallVec::new();
         let mut param_ranges = SmallVec::new();
-        if let TokenKind::LeftParen = self.cur(p).kind {
+        let params_ns = if let TokenKind::LeftParen = self.cur(p).kind {
+            let ns = self.begin_comp_decl_params_namespace();
             self.next(p);
             while let TokenKind::Ident(name) = *self.cur(p).kind {
                 let param_range = self.cur(p).range;
@@ -779,6 +780,9 @@ impl Driver {
             assert_eq!(self.cur(p).kind, &TokenKind::RightParen);
             proto_range = source_info::concat(proto_range, self.cur(p).range);
             self.next(p);
+            self.end_comp_decl_params_namespace(ns);
+
+            Some(ns)
         } else {
             self.errors.push(
                 Error::new("function declaration must have parentheses")
@@ -788,7 +792,8 @@ impl Driver {
                         "add '()' here"
                     )
             );
-        }
+            None
+        };
         let ty = match self.cur(p).kind {
             TokenKind::Colon => {
                 self.next(p);
@@ -801,6 +806,9 @@ impl Driver {
             tok => panic!("Invalid token {:?}", tok),
         };
         let decl_id = self.begin_computed_decl(name, param_names, param_tys, param_ranges, generic_param_names, generic_params, generic_param_ranges, ty, proto_range);
+        if let Some(ns) = params_ns {
+            self.code.hir_code.comp_decl_params_ns[ns].func = decl_id;
+        }
         match self.cur(p).kind {
             TokenKind::OpenCurly => {
                 self.parse_scope(p);
