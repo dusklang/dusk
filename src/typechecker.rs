@@ -3,7 +3,7 @@ use smallvec::{SmallVec, smallvec};
 mod constraints;
 pub mod type_provider;
 
-use constraints::{ConstraintList, UnificationError};
+use constraints::*;
 use type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 
 use mire::hir::{self, ExprId, DeclId, StructId};
@@ -81,7 +81,7 @@ impl Driver {
                 let constraints = tp.constraints(item.root_expr);
                 let ty = if let &Some(explicit_ty) = &item.explicit_ty {
                     let explicit_ty = tp.get_evaluated_type(explicit_ty).clone();
-                    if let Some(err) = constraints.can_unify_to(&explicit_ty.clone().into()).err() {
+                    if let Some(err) = can_unify_to(&constraints, &explicit_ty.clone().into()).err() {
                         let range = self.get_range(item.root_expr);
                         let mut error = Error::new(format!("Couldn't unify expression to assigned decl type `{:?}`", explicit_ty))
                             .adding_primary_range(range, "expression here");
@@ -139,18 +139,35 @@ impl Driver {
                 // Filter overloads that don't match the constraints of the parameters.
                 // These borrows are only here because the borrow checker is dumb
                 let decls = &self.tir.decls;
-                let tc = &*tp;
+                let tp_immutable = &*tp;
                 let mut overloads = self.find_overloads(&self.code.hir_code.decl_refs[decl_ref_id]);
+                let mut generic_args = Vec::new();
                 // Rule out overloads that don't match the arguments
                 overloads.retain(|&overload| {
                     assert_eq!(decls[overload].param_tys.len(), args.len());
-                    let arg_constraints = args.iter().map(|&arg| tc.constraints(arg));
-                    let param_tys = decls[overload].param_tys.iter().map(|&expr| tc.get_evaluated_type(expr));
+                    let arg_constraints = args.iter().map(|&arg| tp_immutable.constraints(arg));
+                    let param_tys = decls[overload].param_tys.iter().map(|&expr| tp_immutable.get_evaluated_type(expr));
+                    let mut generic_arg_constraints: Vec<_> = decls[overload].generic_params.iter()
+                        .map(|_| ConstraintList::new(BuiltinTraits::empty(), None, None))
+                        .collect();
                     for (constraints, ty) in arg_constraints.zip(param_tys) {
-                        if constraints.can_unify_to(&ty.into()).is_err() { return false; }
+                        match can_unify_to_in_generic_context(&constraints, &ty.into(), &decls[overload].generic_params) {
+                            Ok(constraints) => {
+                                debug_assert_eq!(generic_arg_constraints.len(), constraints.len());
+                                for (og, new) in generic_arg_constraints.iter_mut().zip(constraints) {
+                                    *og = og.intersect_with(&new);
+                                }
+                            },
+                            Err(_) => return false,
+                        }
                     }
+
+                    generic_args.push(generic_arg_constraints);
+
                     true
                 });
+
+                dbg!(generic_args);
 
                 let mut one_of = SmallVec::new();
                 one_of.reserve(overloads.len());
@@ -161,7 +178,7 @@ impl Driver {
                     if let hir::Namespace::MemberRef { base_expr } = self.code.hir_code.decl_refs[decl_ref_id].namespace {
                         let constraints = tp.constraints(base_expr);
                         // TODO: Robustness! Base_expr could be an overload set with these types, but also include struct types
-                        if constraints.can_unify_to(&Type::Ty.into()).is_err() && constraints.can_unify_to(&Type::Mod.into()).is_err() {
+                        if can_unify_to(&constraints, &Type::Ty.into()).is_err() && can_unify_to(&constraints, &Type::Mod.into()).is_err() {
                             is_mut = is_mut && constraints.solve().unwrap().is_mut;
                         }
                     }
@@ -206,7 +223,7 @@ impl Driver {
                 *tp.constraints_mut(item.id) = constraints;
             }
             for item in unit.pointers.get_level(level) {
-                if let Some(err) = tp.constraints(item.expr).can_unify_to(&Type::Ty.into()).err() {
+                if let Some(err) = can_unify_to(tp.constraints(item.expr), &Type::Ty.into()).err() {
                     let mut error = Error::new("Expected type operand to pointer operator");
                     let range = self.get_range(item.expr);
                     match err {
@@ -227,7 +244,7 @@ impl Driver {
             }
             for item in unit.structs.get_level(level) {
                 for &field_ty in &item.field_tys {
-                    if let Some(err) = tp.constraints(field_ty).can_unify_to(&Type::Ty.into()).err() {
+                    if let Some(err) = can_unify_to(tp.constraints(field_ty), &Type::Ty.into()).err() {
                         let mut error = Error::new("Expected field type");
                         let range = self.get_range(field_ty);
                         match err {
@@ -248,7 +265,7 @@ impl Driver {
                 tp.constraints_mut(item.id).set_to(Type::Ty);
             }
             for item in unit.struct_lits.get_level(level) {
-                let ty = if let Some(err) = tp.constraints(item.ty).can_unify_to(&Type::Ty.into()).err() {
+                let ty = if let Some(err) = can_unify_to(tp.constraints(item.ty), &Type::Ty.into()).err() {
                     let mut error = Error::new("Expected struct type");
                     let range = self.get_range(item.ty);
                     match err {
@@ -315,7 +332,7 @@ impl Driver {
                                             .adding_primary_range(lit_range, "")
                                             .adding_secondary_range(field_range, "field declared here")
                                     );
-                                } else if let Some(err) = tp.constraints(maatch).can_unify_to(&field_ty.into()).err() {
+                                } else if let Some(err) = can_unify_to(tp.constraints(maatch), &field_ty.into()).err() {
                                     successful = false;
                                     let range = self.get_range(maatch);
                                     let mut error = Error::new("Invalid struct field type")
@@ -357,7 +374,7 @@ impl Driver {
                 tp.constraints_mut(item.id).set_to(ty);
             }
             for item in unit.ifs.get_level(level) {
-                if let Some(err) = tp.constraints(item.condition).can_unify_to(&Type::Bool.into()).err() {
+                if let Some(err) = can_unify_to(tp.constraints(item.condition), &Type::Bool.into()).err() {
                     let mut error = Error::new("Expected boolean condition in if expression");
                     let range = self.get_range(item.condition);
                     match err {
@@ -391,7 +408,7 @@ impl Driver {
             }
             for item in &unit.stmts {
                 let constraints = tp.constraints_mut(item.root_expr);
-                if let Some(err) = constraints.can_unify_to(&Type::Void.into()).err() {
+                if let Some(err) = can_unify_to(&constraints, &Type::Void.into()).err() {
                     let mut error = Error::new("statements must return void");
                     let range = self.get_range(item.root_expr);
                     match err {
@@ -432,7 +449,7 @@ impl Driver {
             for item in unit.ret_groups.get_level(level) {
                 let ty = tp.get_evaluated_type(item.ty).clone();
                 for &expr in &item.exprs {
-                    if let Some(err) = tp.constraints(expr).can_unify_to(&QualType::from(&ty)).err() {
+                    if let Some(err) = can_unify_to(tp.constraints(expr), &QualType::from(&ty)).err() {
                         let range = self.get_range(expr);
                         let mut error = Error::new(format!("can't unify expression to return type {:?}", ty))
                             .adding_primary_range(range, "expression here");
@@ -456,7 +473,7 @@ impl Driver {
                 }
             }
             for item in unit.whiles.get_level(level) {
-                if tp.constraints(item.condition).can_unify_to(&Type::Bool.into()).is_ok() {
+                if can_unify_to(tp.constraints(item.condition), &Type::Bool.into()).is_ok() {
                     tp.constraints_mut(item.condition).set_to(Type::Bool);
                 } else {
                     panic!("Expected boolean condition in while expression");
@@ -465,7 +482,7 @@ impl Driver {
             for item in unit.casts.get_level(level) {
                 let ty = tp.get_evaluated_type(item.ty).clone();
                 let constraints = tp.constraints_mut(item.expr);
-                let ty_and_method: Result<(Type, CastMethod), Vec<&QualType>> = if constraints.can_unify_to(&QualType::from(&ty)).is_ok() {
+                let ty_and_method: Result<(Type, CastMethod), Vec<&QualType>> = if can_unify_to(&constraints, &QualType::from(&ty)).is_ok() {
                     Ok((ty, CastMethod::Noop))
                 } else if let Type::Pointer(dest_pointee_ty) = ty {
                     let dest_pointee_ty = dest_pointee_ty.as_ref();

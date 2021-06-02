@@ -1,8 +1,9 @@
 use smallvec::{SmallVec, smallvec};
 
-use mire::ty::{Type, QualType};
+use mire::ty::{Type, QualType, IntWidth};
+use mire::hir::GenericParamId;
 
-use crate::ty::{BuiltinTraits, ImplementsTraits};
+use crate::ty::BuiltinTraits;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ConstraintList {
@@ -48,7 +49,7 @@ impl ConstraintList {
         }
         
         match self.preferred_type {
-            Some(ref pref) => if self.can_unify_to(pref).is_ok() {
+            Some(ref pref) => if can_unify_to(self, pref).is_ok() {
                 Ok(pref.clone())
             } else if let Some(one_of) = &self.one_of {
                 if one_of.is_empty() {
@@ -119,27 +120,149 @@ impl ConstraintList {
                 && one_of.first().unwrap().ty == Type::Never,
         }
     }
+}
 
-    pub fn can_unify_to(&self, ty: &QualType) -> Result<(), UnificationError> {
+fn generic_constraints_mut<'a>(constraints: &'a mut [ConstraintList], generic_params: &[GenericParamId], id: GenericParamId) -> Option<&'a mut ConstraintList> {
+    if let Some(index) = generic_params.iter().enumerate().find(|(_, &oid)| oid == id).map(|(i, _)| i) {
+        Some(&mut constraints[index])
+    } else {
+        None
+    }
+}
+
+fn implements_traits(ty: &Type, traits: BuiltinTraits) -> Result<(), BuiltinTraits> {
+    let mut not_implemented = BuiltinTraits::empty();
+    fn expressible_by_str_lit(ty: &Type) -> bool {
+        if let Type::Pointer(pointee) = ty {
+            matches!(pointee.ty, Type::Int { width: IntWidth::W8, .. }) && !pointee.is_mut
+        } else {
+            false
+        }
+    }
+    let mut check_implements = |trayt: BuiltinTraits, check: fn(&Type) -> bool| {
+        if traits.contains(trayt) && !check(ty) {
+            not_implemented |= trayt;
+        }
+    };
+    check_implements(BuiltinTraits::INT, |ty| matches!(ty, Type::Int { .. } | Type::Float(_)));
+    check_implements(BuiltinTraits::DEC, |ty| matches!(ty, Type::Float(_)));
+    check_implements(BuiltinTraits::CHAR, |ty| {
+        matches!(ty, Type::Int { width: IntWidth::W8, .. }) || expressible_by_str_lit(ty)
+    });
+    check_implements(BuiltinTraits::STR, expressible_by_str_lit);
+
+    if not_implemented.is_empty() {
+        Ok(())
+    } else {
+        Err(not_implemented)
+    }
+}
+
+fn implements_traits_in_generic_context(ty: &Type, traits: BuiltinTraits, generic_params: &[GenericParamId]) -> Result<SmallVec<[ConstraintList; 1]>, BuiltinTraits> {
+    let mut constraints: SmallVec<_> = generic_params.iter().map(|_| ConstraintList::new(BuiltinTraits::empty(), None, None)).collect();
+
+    let mut not_implemented = BuiltinTraits::empty();
+    fn expressible_by_str_lit(ty: &Type) -> bool {
+        if let Type::Pointer(pointee) = ty {
+            matches!(pointee.ty, Type::Int { width: IntWidth::W8, .. }) && !pointee.is_mut
+        } else {
+            false
+        }
+    }
+    let mut check_implements = |trayt: BuiltinTraits, check: fn(&Type) -> bool| {
+        if traits.contains(trayt) && !check(ty) {
+            not_implemented |= trayt;
+        }
+    };
+    check_implements(BuiltinTraits::INT, |ty| matches!(ty, Type::Int { .. } | Type::Float(_)));
+    check_implements(BuiltinTraits::DEC, |ty| matches!(ty, Type::Float(_)));
+    check_implements(BuiltinTraits::CHAR, |ty| {
+        matches!(ty, Type::Int { width: IntWidth::W8, .. }) || expressible_by_str_lit(ty)
+    });
+    check_implements(BuiltinTraits::STR, expressible_by_str_lit);
+
+    match ty {
+        &Type::GenericParam(id) => {
+            let constraints = generic_constraints_mut(&mut constraints, generic_params, id).unwrap();
+            constraints.trait_impls = not_implemented;
+            not_implemented = BuiltinTraits::empty();
+        },
+        Type::Pointer(pointee) if !pointee.is_mut => if let &Type::GenericParam(id) = ty {
+            let constraints = generic_constraints_mut(&mut constraints, generic_params, id).unwrap();
+            if not_implemented.contains(BuiltinTraits::STR) {
+                constraints.one_of = Some(smallvec![Type::u8().into(), Type::i8().into()]);
+                constraints.preferred_type = Some(Type::u8().into());
+                not_implemented ^= BuiltinTraits::STR;
+            }
+        },
+        _ => {},
+    }
+
+    if not_implemented.is_empty() {
+        Ok(constraints)
+    } else {
+        Err(not_implemented)
+    }
+}
+
+// NOTE: can_unify_to and can_unify_to_in_generic_context have duplicated logic!
+pub fn can_unify_to<'a>(constraints: &'a ConstraintList, ty: &QualType) -> Result<(), UnificationError<'a>> {
+    // Never is the "bottom type", so it unifies to anything.
+    if constraints.one_of_exists(|ty| ty.ty == Type::Never) { return Ok(()); }
+
+    use UnificationError::*;
+    if let Some(not_implemented) = implements_traits(&ty.ty, constraints.trait_impls).err() {
+        return Err(Trait(not_implemented));
+    }
+    if let Some(one_of) = &constraints.one_of {
+        for oty in one_of {
+            if oty.trivially_convertible_to(ty) {
+                return Ok(());
+            }
+        }
+        return Err(InvalidChoice(one_of));
+    }
+
+    Ok(())
+}
+
+pub fn can_unify_to_in_generic_context<'a>(constraints: &'a ConstraintList, ty: &QualType, generic_params: &[GenericParamId]) -> Result<SmallVec<[ConstraintList; 1]>, UnificationError<'a>> {
+    let mut generic_arg_constraints = SmallVec::new();
+    generic_arg_constraints.resize_with(generic_params.len(), || ConstraintList::new(BuiltinTraits::empty(), None, None));
+
+    // If ty is a generic parameter type, then just directly have that parameter inherit `constraints`
+    if let Type::GenericParam(id) = ty.ty {
+        let param_constraints = generic_constraints_mut(&mut generic_arg_constraints, generic_params, id)
+            .expect("generic parameter not in list! not sure how to handle this yet");
+        *param_constraints = constraints.clone();
+        Ok(generic_arg_constraints)
+    } else {
         // Never is the "bottom type", so it unifies to anything.
-        if self.one_of_exists(|ty| ty.ty == Type::Never) { return Ok(()); }
+        if constraints.one_of_exists(|ty| ty.ty == Type::Never) { return Ok(generic_arg_constraints); }
 
         use UnificationError::*;
-        if let Some(not_implemented) = ty.ty.implements_traits(self.trait_impls).err() {
-            return Err(Trait(not_implemented));
+        match implements_traits_in_generic_context(&ty.ty, constraints.trait_impls, generic_params) {
+            Ok(constraints) => {
+                for (og_constraints, new_constraints) in generic_arg_constraints.iter_mut().zip(constraints) {
+                    *og_constraints = og_constraints.intersect_with(&new_constraints);
+                }
+            },
+            Err(not_implemented) => return Err(Trait(not_implemented)),
         }
-        if let Some(one_of) = &self.one_of {
+        if let Some(one_of) = &constraints.one_of {
             for oty in one_of {
                 if oty.trivially_convertible_to(ty) {
-                    return Ok(());
+                    return Ok(generic_arg_constraints);
                 }
             }
             return Err(InvalidChoice(one_of));
         }
-
-        Ok(())
+    
+        Ok(generic_arg_constraints)
     }
+}
 
+impl ConstraintList {
     pub fn set_to(&mut self, ty: impl Into<QualType>) {
         // If we're never, we should stay never.
         if !self.is_never() {
@@ -162,10 +285,10 @@ impl ConstraintList {
             (Some(lhs), Some(rhs)) => {
                 let mut one_of = SmallVec::new();
                 for lty in lhs {
-                    if lty.ty.implements_traits(trait_impls).is_err() { continue; }
+                    if implements_traits(&lty.ty, trait_impls).is_err() { continue; }
 
                     for rty in rhs {
-                        if rty.ty.implements_traits(trait_impls).is_err() { continue; }
+                        if implements_traits(&rty.ty, trait_impls).is_err() { continue; }
 
                         // TODO: would it be ok to break from this loop after finding a match here?
                         if lty.trivially_convertible_to(rty) {
@@ -186,8 +309,8 @@ impl ConstraintList {
             for (a, b) in &[(self, other), (other, self)] {
                 if let Some(preferred_type) = &a.preferred_type {
                     // I don't actually know if it's possible for an expression to not be able to unify to its preferred type?
-                    assert!(a.can_unify_to(preferred_type).is_ok());
-                    if b.can_unify_to(preferred_type).is_ok() {
+                    assert!(can_unify_to(a, preferred_type).is_ok());
+                    if can_unify_to(b, preferred_type).is_ok() {
                         pref = Some(preferred_type.clone());
                     }
                 }
@@ -210,14 +333,14 @@ impl ConstraintList {
 
         if !self.is_never() && !other.is_never() {
             let lhs = self.one_of.as_mut().expect("can't assign to expression without a one-of constraint");
-            lhs.retain(|lty| lty.ty.implements_traits(trait_impls).is_ok());
+            lhs.retain(|lty| implements_traits(&lty.ty, trait_impls).is_ok());
             if other.one_of.is_some() {
                 lhs.retain(|lty|
                     other.one_of_exists(|rty| rty.ty.trivially_convertible_to(&lty.ty))
                 );
                 let rhs = other.one_of.as_mut().unwrap();
                 rhs.retain(|rty|
-                    rty.ty.implements_traits(trait_impls).is_ok() && self.one_of_exists(|lty| rty.ty.trivially_convertible_to(&lty.ty))
+                    implements_traits(&rty.ty, trait_impls).is_ok() && self.one_of_exists(|lty| rty.ty.trivially_convertible_to(&lty.ty))
                 );
             }
         }
@@ -225,19 +348,19 @@ impl ConstraintList {
         if self.preferred_type.as_ref().map(|ty| &ty.ty) != other.preferred_type.as_ref().map(|ty| &ty.ty) {
             if let Some(preferred_type) = &other.preferred_type {
                 // I don't actually know if it's possible for an expression to not be able to unify to its preferred type?
-                assert!(other.can_unify_to(preferred_type).is_ok());
+                assert!(can_unify_to(other, preferred_type).is_ok());
                 let preferred_type = QualType {
                     ty: preferred_type.ty.clone(),
                     is_mut: true,
                 };
-                if self.can_unify_to(&preferred_type).is_ok() {
+                if can_unify_to(self, &preferred_type).is_ok() {
                     self.preferred_type = Some(preferred_type);
                 } else {
                     other.preferred_type = None;
                     if other.one_of.is_none() {
                         let rhs_one_of = self.one_of.as_ref().map(|one_of| one_of.iter().filter_map(|ty| {
                             let ty = ty.ty.clone().into();
-                            if other.can_unify_to(&ty).is_ok() {
+                            if can_unify_to(other, &ty).is_ok() {
                                 Some(ty)
                             } else {
                                 None
@@ -249,9 +372,9 @@ impl ConstraintList {
             }
             if let Some(preferred_type) = &self.preferred_type {
                 // I don't actually know if it's possible for an expression to not be able to unify to its preferred type?
-                assert!(self.can_unify_to(preferred_type).is_ok());
+                assert!(can_unify_to(self, preferred_type).is_ok());
                 let preferred_type = QualType::from(preferred_type.ty.clone());
-                if other.can_unify_to(&preferred_type).is_ok() {
+                if can_unify_to(other, &preferred_type).is_ok() {
                     other.preferred_type = Some(preferred_type);
                 } else {
                     self.preferred_type = None;

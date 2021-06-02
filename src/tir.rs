@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use smallvec::SmallVec;
 use index_vec::define_index_type;
 
-use mire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId, RETURN_VALUE_DECL};
+use mire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId, GenericParamId, RETURN_VALUE_DECL};
 
 use crate::driver::Driver;
 use crate::dep_vec::{self, DepVec, AnyDepVec};
@@ -63,6 +63,7 @@ impl<T> DerefMut for Expr<T> {
 #[derive(Debug)]
 pub struct Decl {
     pub param_tys: SmallVec<[ExprId; 2]>,
+    pub generic_params: SmallVec<[GenericParamId; 1]>,
     pub is_mut: bool,
 }
 
@@ -448,11 +449,20 @@ impl Driver {
     pub fn initialize_tir(&mut self) {
         // Populate `decls`
         for decl in &self.code.hir_code.decls {
+            let mut generic_params = SmallVec::new();
             let (is_mut, param_tys) = match *decl {
-                hir::Decl::Computed { ref param_tys, .. } => (
-                    false,
-                    param_tys.clone(),
-                ),
+                hir::Decl::Computed { ref param_tys, generic_params: ref og_generic_params, .. } => {
+                    for i in og_generic_params.start.index()..og_generic_params.end.index() {
+                        let decl = DeclId::new(i);
+                        let generic_param_id = match self.code.hir_code.decls[decl] {
+                            hir::Decl::GenericParam(id) => id,
+                            _ => panic!("COMPILER BUG: expected generic parameter"),
+                        };
+                        generic_params.push(generic_param_id);
+                    }
+
+                    (false, param_tys.clone())
+                },
                 hir::Decl::Const(_) => (
                     false,
                     SmallVec::new(),
@@ -486,7 +496,7 @@ impl Driver {
                     SmallVec::new(),
                 ),
             };
-            self.tir.decls.push(Decl { param_tys, is_mut });
+            self.tir.decls.push(Decl { param_tys, is_mut, generic_params });
         }
 
         self.initialize_graph();
