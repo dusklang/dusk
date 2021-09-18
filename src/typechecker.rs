@@ -13,7 +13,7 @@ use mire::ty::{Type, QualType, IntWidth};
 use crate::driver::Driver;
 use crate::error::Error;
 use crate::ty::BuiltinTraits;
-use crate::tir::{Units, UnitItems, ExprNamespace};
+use crate::tir::{Units, UnitItems, ExprNamespace, self};
 
 #[derive(Copy, Clone, Debug)]
 pub enum CastMethod {
@@ -42,6 +42,404 @@ enum UnitKind {
     Normal(usize),
     Mock(usize),
 }
+
+impl tir::AssignedDecl {
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+        let constraints = tp.constraints(self.root_expr);
+        let ty = if let &Some(explicit_ty) = &self.explicit_ty {
+            let explicit_ty = tp.get_evaluated_type(explicit_ty).clone();
+            if let Some(err) = can_unify_to(&constraints, &explicit_ty.clone().into()).err() {
+                let range = driver.get_range(self.root_expr);
+                let mut error = Error::new(format!("Couldn't unify expression to assigned decl type `{:?}`", explicit_ty))
+                    .adding_primary_range(range, "expression here");
+                match err {
+                    UnificationError::InvalidChoice(choices)
+                        => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                    UnificationError::Trait(not_implemented)
+                        => error.add_secondary_range(
+                            range,
+                            format!(
+                                "note: couldn't unify because expression requires implementations of {:?}",
+                                not_implemented.names(),
+                            ),
+                        ),
+                }
+                driver.errors.push(error);
+            }
+            explicit_ty
+        } else {
+            constraints.solve().expect("Ambiguous type for assigned declaration").ty
+        };
+        tp.decl_type_mut(self.decl_id).ty = ty;
+    }
+}
+
+impl tir::Expr<tir::Assignment> {
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+        tp.constraints_mut(self.id).set_to(Type::Void);
+        *tp.ty_mut(self.id) = Type::Void;
+    }
+}
+
+impl tir::Expr<tir::Cast> {
+    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
+        let ty = tp.get_evaluated_type(self.ty).clone();
+        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![ty.clone().into()]), None);
+        *tp.ty_mut(self.id) = ty;
+    }
+}
+
+impl tir::Expr<tir::While> {
+    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
+        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
+        *tp.ty_mut(self.id) = Type::Void;
+    }
+}
+
+impl tir::Expr<tir::ExplicitRet> {
+    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
+        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Never.into()]), None);
+        *tp.ty_mut(self.id) = Type::Never;
+    }
+}
+
+impl tir::Expr<tir::Module> {
+    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
+        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Mod.into()]), None);
+        *tp.ty_mut(self.id) = Type::Mod;
+    }
+}
+
+impl tir::Expr<tir::Import> {
+    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
+        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Mod.into()]), None);
+        *tp.ty_mut(self.id) = Type::Mod;
+    }
+}
+
+impl tir::Expr<tir::DeclRef> {
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+        let id = self.id;
+        let args = self.args.clone();
+        let decl_ref_id = self.decl_ref_id;
+
+        // Filter overloads that don't match the constraints of the parameters.
+        // These borrows are only here because the borrow checker is dumb
+        let decls = &driver.tir.decls;
+        let tp_immutable = &*tp;
+        let mut overloads = driver.find_overloads(&driver.code.hir_code.decl_refs[decl_ref_id]);
+        let mut generic_args = Vec::new();
+        // Rule out overloads that don't match the arguments
+        overloads.retain(|&overload| {
+            assert_eq!(decls[overload].param_tys.len(), args.len());
+            let arg_constraints = args.iter().map(|&arg| tp_immutable.constraints(arg));
+            let param_tys = decls[overload].param_tys.iter().map(|&expr| tp_immutable.get_evaluated_type(expr));
+            let mut generic_arg_constraints: Vec<_> = decls[overload].generic_params.iter()
+                .map(|_| ConstraintList::new(BuiltinTraits::empty(), None, None))
+                .collect();
+            for (constraints, ty) in arg_constraints.zip(param_tys) {
+                match can_unify_to_in_generic_context(&constraints, &ty.into(), &decls[overload].generic_params) {
+                    Ok(constraints) => {
+                        debug_assert_eq!(generic_arg_constraints.len(), constraints.len());
+                        for (og, new) in generic_arg_constraints.iter_mut().zip(constraints) {
+                            *og = og.intersect_with(&new);
+                        }
+                    },
+                    Err(_) => return false,
+                }
+            }
+
+            generic_args.push(generic_arg_constraints);
+
+            true
+        });
+
+        dbg!(generic_args);
+
+        let mut one_of = SmallVec::new();
+        one_of.reserve(overloads.len());
+        for i in 0..overloads.len() {
+            let overload = overloads[i];
+            let ty = tp.fetch_decl_type(driver, overload, Some(decl_ref_id)).ty.clone();
+            let mut is_mut = driver.tir.decls[overload].is_mut;
+            if let hir::Namespace::MemberRef { base_expr } = driver.code.hir_code.decl_refs[decl_ref_id].namespace {
+                let constraints = tp.constraints(base_expr);
+                // TODO: Robustness! Base_expr could be an overload set with these types, but also include struct types
+                if can_unify_to(&constraints, &Type::Ty.into()).is_err() && can_unify_to(&constraints, &Type::Mod.into()).is_err() {
+                    is_mut = is_mut && constraints.solve().unwrap().is_mut;
+                }
+            }
+            one_of.push(QualType { ty, is_mut });
+        }
+        let mut pref = None;
+        'find_preference: for (i, &arg) in args.iter().enumerate() {
+            if let Some(ty) = tp.constraints(arg).preferred_type() {
+                for &overload in &overloads {
+                    let decl = &driver.tir.decls[overload];
+                    if ty.ty.trivially_convertible_to(tp.get_evaluated_type(decl.param_tys[i])) {
+                        let ty = tp.fetch_decl_type(driver, overload, None).clone();
+                        pref = Some(ty);
+                        *tp.preferred_overload_mut(decl_ref_id) = Some(overload);
+                        break 'find_preference;
+                    }
+                }
+            }
+        }
+        *tp.constraints_mut(id) = ConstraintList::new(BuiltinTraits::empty(), Some(one_of), pref);
+        *tp.overloads_mut(decl_ref_id) = overloads;
+    }
+}
+
+impl tir::Expr<tir::AddrOf> {
+    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
+        let constraints = tp.constraints(self.expr).filter_map(|ty| {
+            if self.is_mut && !ty.is_mut { return None; }
+            Some(
+                QualType::from(
+                    ty.ty.clone().ptr_with_mut(self.is_mut)
+                )
+            )
+        });
+        *tp.constraints_mut(self.id) = constraints;
+    }
+}
+
+impl tir::Expr<tir::Dereference> {
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+        let constraints = tp.constraints(self.expr).filter_map(|ty| {
+            if let Type::Pointer(pointee) = &ty.ty {
+                Some(pointee.as_ref().clone())
+            } else {
+                None
+            }
+        });
+        *tp.constraints_mut(self.id) = constraints;
+    }
+}
+
+impl tir::Expr<tir::Pointer> {
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+        if let Some(err) = can_unify_to(tp.constraints(self.expr), &Type::Ty.into()).err() {
+            let mut error = Error::new("Expected type operand to pointer operator");
+            let range = driver.get_range(self.expr);
+            match err {
+                UnificationError::InvalidChoice(choices)
+                    => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                UnificationError::Trait(not_implemented)
+                    => error.add_secondary_range(
+                        range,
+                        format!(
+                            "note: couldn't unify because expression requires implementations of {:?}",
+                            not_implemented.names(),
+                        ),
+                    ),
+            }
+            driver.errors.push(error);
+        }
+        tp.constraints_mut(self.id).set_to(Type::Ty);
+    }
+}
+
+impl tir::Expr<tir::Struct> {
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+        for &field_ty in &self.field_tys {
+            if let Some(err) = can_unify_to(tp.constraints(field_ty), &Type::Ty.into()).err() {
+                let mut error = Error::new("Expected field type");
+                let range = driver.get_range(field_ty);
+                match err {
+                    UnificationError::InvalidChoice(choices)
+                        => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                    UnificationError::Trait(not_implemented)
+                        => error.add_secondary_range(
+                            range,
+                            format!(
+                                "note: couldn't unify because expression requires implementations of {:?}",
+                                not_implemented.names(),
+                            ),
+                        ),
+                }
+                driver.errors.push(error);
+            }
+        }
+        tp.constraints_mut(self.id).set_to(Type::Ty);
+    }
+}
+
+impl tir::Expr<tir::StructLit> {
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+        let ty = if let Some(err) = can_unify_to(tp.constraints(self.ty), &Type::Ty.into()).err() {
+            let mut error = Error::new("Expected struct type");
+            let range = driver.get_range(self.ty);
+            match err {
+                UnificationError::InvalidChoice(choices)
+                    => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                UnificationError::Trait(not_implemented)
+                    => error.add_secondary_range(
+                        range,
+                        format!(
+                            "note: couldn't unify because expression requires implementations of {:?}",
+                            not_implemented.names(),
+                        ),
+                    ),
+            }
+            driver.errors.push(error);
+            Type::Error
+        } else {
+            let ty = tp.get_evaluated_type(self.ty).clone();
+            match ty {
+                Type::Struct(id) => {
+                    let struct_fields = &driver.code.hir_code.structs[id].fields;
+                    let mut matches = Vec::new();
+                    matches.resize(struct_fields.len(), ExprId::new(u32::MAX as usize));
+
+                    let mut successful = true;
+
+                    // Find matches for each field in the literal
+                    'lit_fields: for lit_field in &self.fields {
+                        for (i, &struct_field) in struct_fields.iter().enumerate() {
+                            let struct_field = &driver.code.hir_code.field_decls[struct_field];
+                            if struct_field.name == lit_field.name {
+                                matches[i] = lit_field.expr;
+                                continue 'lit_fields;
+                            }
+                        }
+
+                        // We can assume there is no match for this field at this point; if we had found one, we
+                        // would've already continued to the next field.
+                        successful = false;
+                        
+                        // TODO: Use range of the field identifier, which we don't have fine-grained access to yet
+                        let range = driver.get_range(self.id);
+                        driver.errors.push(
+                            Error::new(format!("Unknown field {} in struct literal", driver.interner.resolve(lit_field.name).unwrap()))
+                                .adding_primary_range(range, "")
+                        );
+
+                    }
+
+                    let lit_range = driver.get_range(self.id);
+                    // Make sure each field in the struct has a match in the literal
+                    for (i, &maatch) in matches.iter().enumerate() {
+                        let field = struct_fields[i];
+                        let field = &driver.code.hir_code.field_decls[field];
+                        let field_ty = tp.get_evaluated_type(field.ty).clone();
+                        if maatch == ExprId::new(u32::MAX as usize) {
+                            successful = false;
+
+                            let field_item = driver.code.hir_code.decl_to_items[field.decl];
+                            let field_range = driver.code.hir_code.source_ranges[field_item];
+
+                            driver.errors.push(
+                                Error::new(format!("Field {} not included in struct literal", driver.interner.resolve(field.name).unwrap()))
+                                    .adding_primary_range(lit_range, "")
+                                    .adding_secondary_range(field_range, "field declared here")
+                            );
+                        } else if let Some(err) = can_unify_to(tp.constraints(maatch), &field_ty.into()).err() {
+                            successful = false;
+                            let range = driver.get_range(maatch);
+                            let mut error = Error::new("Invalid struct field type")
+                                .adding_primary_range(range, "");
+                            match err {
+                                UnificationError::InvalidChoice(choices)
+                                    => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                                UnificationError::Trait(not_implemented)
+                                    => error.add_secondary_range(
+                                        range,
+                                        format!(
+                                            "note: couldn't unify because expression requires implementations of {:?}",
+                                            not_implemented.names(),
+                                        ),
+                                    ),
+                            }
+                            driver.errors.push(error);
+                        }
+                    }
+
+                    if successful {
+                        *tp.struct_lit_mut(self.struct_lit_id) = Some(
+                            StructLit { strukt: id, fields: matches }
+                        );
+                    }
+                },
+                ref other => {
+                    let range = driver.get_range(self.ty);
+                    driver.errors.push(
+                        Error::new(format!("Expected struct type in literal, found {:?}", *other))
+                            .adding_primary_range(range, "")
+                    );
+                },
+            }
+            
+            ty
+        };
+
+        tp.constraints_mut(self.id).set_to(ty);
+    }
+}
+
+impl tir::Expr<tir::If> {
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+        if let Some(err) = can_unify_to(tp.constraints(self.condition), &Type::Bool.into()).err() {
+            let mut error = Error::new("Expected boolean condition in if expression");
+            let range = driver.get_range(self.condition);
+            match err {
+                UnificationError::InvalidChoice(choices)
+                    => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                UnificationError::Trait(not_implemented)
+                    => error.add_secondary_range(
+                        range,
+                        format!(
+                            "note: couldn't unify because expression requires implementations of {:?}",
+                            not_implemented.names(),
+                        ),
+                    ),
+            }
+            driver.errors.push(error);
+        }
+        let constraints = tp.constraints(self.then_expr).intersect_with(tp.constraints(self.else_expr));
+
+        if constraints.solve().is_err() {
+            // TODO: handle void expressions, which don't have appropriate source location info.
+            driver.errors.push(
+                Error::new("Failed to unify branches of if expression")
+                    .adding_primary_range(driver.get_range(self.then_expr), "first terminal expression here")
+                    .adding_primary_range(driver.get_range(self.else_expr), "second terminal expression here")
+            );
+        }
+        *tp.constraints_mut(self.id) = constraints;
+    }
+}
+
+impl tir::Expr<tir::Do> {
+    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
+        *tp.constraints_mut(self.id) = tp.constraints(self.terminal_expr).clone();
+    }
+}
+
+impl tir::Stmt {
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+        let constraints = tp.constraints_mut(self.root_expr);
+        if let Some(err) = can_unify_to(&constraints, &Type::Void.into()).err() {
+            let mut error = Error::new("statements must return void");
+            let range = driver.get_range(self.root_expr);
+            match err {
+                UnificationError::InvalidChoice(choices)
+                => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                UnificationError::Trait(not_implemented)
+                => error.add_secondary_range(
+                    range,
+                    format!(
+                        "note: couldn't unify because expression requires implementations of {:?}",
+                        not_implemented.names(),
+                    ),
+                ),
+            }
+            driver.errors.push(error);
+        }
+        constraints.set_to(Type::Void);
+    }
+}
+
 
 impl Driver {
     pub fn decl_type<'a>(&'a self, id: DeclId, tp: &'a impl TypeProvider) -> &Type {
@@ -78,356 +476,56 @@ impl Driver {
         }
         for level in start_level..unit.num_levels() {
             for item in unit.assigned_decls.get_level(level) {
-                let constraints = tp.constraints(item.root_expr);
-                let ty = if let &Some(explicit_ty) = &item.explicit_ty {
-                    let explicit_ty = tp.get_evaluated_type(explicit_ty).clone();
-                    if let Some(err) = can_unify_to(&constraints, &explicit_ty.clone().into()).err() {
-                        let range = self.get_range(item.root_expr);
-                        let mut error = Error::new(format!("Couldn't unify expression to assigned decl type `{:?}`", explicit_ty))
-                            .adding_primary_range(range, "expression here");
-                        match err {
-                            UnificationError::InvalidChoice(choices)
-                                => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
-                            UnificationError::Trait(not_implemented)
-                                => error.add_secondary_range(
-                                    range,
-                                    format!(
-                                        "note: couldn't unify because expression requires implementations of {:?}",
-                                        not_implemented.names(),
-                                    ),
-                                ),
-                        }
-                        self.errors.push(error);
-                    }
-                    explicit_ty
-                } else {
-                    constraints.solve().expect("Ambiguous type for assigned declaration").ty
-                };
-                tp.decl_type_mut(item.decl_id).ty = ty;
+                item.run_pass_1(self, tp);
             }
             for item in unit.assignments.get_level(level) {
-                tp.constraints_mut(item.id).set_to(Type::Void);
-                *tp.ty_mut(item.id) = Type::Void;
+                item.run_pass_1(self, tp);
             }
             for item in unit.casts.get_level(level) {
-                let ty = tp.get_evaluated_type(item.ty).clone();
-                *tp.constraints_mut(item.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![ty.clone().into()]), None);
-                *tp.ty_mut(item.id) = ty;
+                item.run_pass_1(self, tp);
             }
             for item in unit.whiles.get_level(level) {
-                *tp.constraints_mut(item.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
-                *tp.ty_mut(item.id) = Type::Void;
+                item.run_pass_1(self, tp);
             }
-            for &item in unit.explicit_rets.get_level(level) {
-                *tp.constraints_mut(item) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Never.into()]), None);
-                *tp.ty_mut(item) = Type::Never;
+            for item in unit.explicit_rets.get_level(level) {
+                item.run_pass_1(self, tp);
             }
-            for &item in unit.modules.get_level(level) {
-                *tp.constraints_mut(item) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Mod.into()]), None);
-                *tp.ty_mut(item) = Type::Mod;
+            for item in unit.modules.get_level(level) {
+                item.run_pass_1(self, tp);
             }
-            for &item in unit.imports.get_level(level) {
-                *tp.constraints_mut(item) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Mod.into()]), None);
-                *tp.ty_mut(item) = Type::Mod;
+            for item in unit.imports.get_level(level) {
+                item.run_pass_1(self, tp);
             }
-            for i in 0..unit.decl_refs.level_len(level) {
-                let item = unit.decl_refs.at(level, i);
-                let id = item.id;
-                let args = item.args.clone();
-                let decl_ref_id = item.decl_ref_id;
-
-                // Filter overloads that don't match the constraints of the parameters.
-                // These borrows are only here because the borrow checker is dumb
-                let decls = &self.tir.decls;
-                let tp_immutable = &*tp;
-                let mut overloads = self.find_overloads(&self.code.hir_code.decl_refs[decl_ref_id]);
-                let mut generic_args = Vec::new();
-                // Rule out overloads that don't match the arguments
-                overloads.retain(|&overload| {
-                    assert_eq!(decls[overload].param_tys.len(), args.len());
-                    let arg_constraints = args.iter().map(|&arg| tp_immutable.constraints(arg));
-                    let param_tys = decls[overload].param_tys.iter().map(|&expr| tp_immutable.get_evaluated_type(expr));
-                    let mut generic_arg_constraints: Vec<_> = decls[overload].generic_params.iter()
-                        .map(|_| ConstraintList::new(BuiltinTraits::empty(), None, None))
-                        .collect();
-                    for (constraints, ty) in arg_constraints.zip(param_tys) {
-                        match can_unify_to_in_generic_context(&constraints, &ty.into(), &decls[overload].generic_params) {
-                            Ok(constraints) => {
-                                debug_assert_eq!(generic_arg_constraints.len(), constraints.len());
-                                for (og, new) in generic_arg_constraints.iter_mut().zip(constraints) {
-                                    *og = og.intersect_with(&new);
-                                }
-                            },
-                            Err(_) => return false,
-                        }
-                    }
-
-                    generic_args.push(generic_arg_constraints);
-
-                    true
-                });
-
-                dbg!(generic_args);
-
-                let mut one_of = SmallVec::new();
-                one_of.reserve(overloads.len());
-                for i in 0..overloads.len() {
-                    let overload = overloads[i];
-                    let ty = tp.fetch_decl_type(self, overload, Some(decl_ref_id)).ty.clone();
-                    let mut is_mut = self.tir.decls[overload].is_mut;
-                    if let hir::Namespace::MemberRef { base_expr } = self.code.hir_code.decl_refs[decl_ref_id].namespace {
-                        let constraints = tp.constraints(base_expr);
-                        // TODO: Robustness! Base_expr could be an overload set with these types, but also include struct types
-                        if can_unify_to(&constraints, &Type::Ty.into()).is_err() && can_unify_to(&constraints, &Type::Mod.into()).is_err() {
-                            is_mut = is_mut && constraints.solve().unwrap().is_mut;
-                        }
-                    }
-                    one_of.push(QualType { ty, is_mut });
-                }
-                let mut pref = None;
-                'find_preference: for (i, &arg) in args.iter().enumerate() {
-                    if let Some(ty) = tp.constraints(arg).preferred_type() {
-                        for &overload in &overloads {
-                            let decl = &self.tir.decls[overload];
-                            if ty.ty.trivially_convertible_to(tp.get_evaluated_type(decl.param_tys[i])) {
-                                let ty = tp.fetch_decl_type(self, overload, None).clone();
-                                pref = Some(ty);
-                                *tp.preferred_overload_mut(decl_ref_id) = Some(overload);
-                                break 'find_preference;
-                            }
-                        }
-                    }
-                }
-                *tp.constraints_mut(id) = ConstraintList::new(BuiltinTraits::empty(), Some(one_of), pref);
-                *tp.overloads_mut(decl_ref_id) = overloads;
+            for item in unit.decl_refs.get_level(level) {
+                item.run_pass_1(self, tp);
             }
             for item in unit.addr_ofs.get_level(level) {
-                let constraints = tp.constraints(item.expr).filter_map(|ty| {
-                    if item.is_mut && !ty.is_mut { return None; }
-                    Some(
-                        QualType::from(
-                            ty.ty.clone().ptr_with_mut(item.is_mut)
-                        )
-                    )
-                });
-                *tp.constraints_mut(item.id) = constraints;
+                item.run_pass_1(self, tp);
             }
             for item in unit.derefs.get_level(level) {
-                let constraints = tp.constraints(item.expr).filter_map(|ty| {
-                    if let Type::Pointer(pointee) = &ty.ty {
-                        Some(pointee.as_ref().clone())
-                    } else {
-                        None
-                    }
-                });
-                *tp.constraints_mut(item.id) = constraints;
+                item.run_pass_1(self, tp);
             }
             for item in unit.pointers.get_level(level) {
-                if let Some(err) = can_unify_to(tp.constraints(item.expr), &Type::Ty.into()).err() {
-                    let mut error = Error::new("Expected type operand to pointer operator");
-                    let range = self.get_range(item.expr);
-                    match err {
-                        UnificationError::InvalidChoice(choices)
-                            => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
-                        UnificationError::Trait(not_implemented)
-                            => error.add_secondary_range(
-                                range,
-                                format!(
-                                    "note: couldn't unify because expression requires implementations of {:?}",
-                                    not_implemented.names(),
-                                ),
-                            ),
-                    }
-                    self.errors.push(error);
-                }
-                tp.constraints_mut(item.id).set_to(Type::Ty);
+                item.run_pass_1(self, tp);
             }
             for item in unit.structs.get_level(level) {
-                for &field_ty in &item.field_tys {
-                    if let Some(err) = can_unify_to(tp.constraints(field_ty), &Type::Ty.into()).err() {
-                        let mut error = Error::new("Expected field type");
-                        let range = self.get_range(field_ty);
-                        match err {
-                            UnificationError::InvalidChoice(choices)
-                                => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
-                            UnificationError::Trait(not_implemented)
-                                => error.add_secondary_range(
-                                    range,
-                                    format!(
-                                        "note: couldn't unify because expression requires implementations of {:?}",
-                                        not_implemented.names(),
-                                    ),
-                                ),
-                        }
-                        self.errors.push(error);
-                    }
-                }
-                tp.constraints_mut(item.id).set_to(Type::Ty);
+                item.run_pass_1(self, tp);
             }
             for item in unit.struct_lits.get_level(level) {
-                let ty = if let Some(err) = can_unify_to(tp.constraints(item.ty), &Type::Ty.into()).err() {
-                    let mut error = Error::new("Expected struct type");
-                    let range = self.get_range(item.ty);
-                    match err {
-                        UnificationError::InvalidChoice(choices)
-                            => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
-                        UnificationError::Trait(not_implemented)
-                            => error.add_secondary_range(
-                                range,
-                                format!(
-                                    "note: couldn't unify because expression requires implementations of {:?}",
-                                    not_implemented.names(),
-                                ),
-                            ),
-                    }
-                    self.errors.push(error);
-                    Type::Error
-                } else {
-                    let ty = tp.get_evaluated_type(item.ty).clone();
-                    match ty {
-                        Type::Struct(id) => {
-                            let struct_fields = &self.code.hir_code.structs[id].fields;
-                            let mut matches = Vec::new();
-                            matches.resize(struct_fields.len(), ExprId::new(u32::MAX as usize));
-
-                            let mut successful = true;
-
-                            // Find matches for each field in the literal
-                            'lit_fields: for lit_field in &item.fields {
-                                for (i, &struct_field) in struct_fields.iter().enumerate() {
-                                    let struct_field = &self.code.hir_code.field_decls[struct_field];
-                                    if struct_field.name == lit_field.name {
-                                        matches[i] = lit_field.expr;
-                                        continue 'lit_fields;
-                                    }
-                                }
-
-                                // We can assume there is no match for this field at this point; if we had found one, we
-                                // would've already continued to the next field.
-                                successful = false;
-                                
-                                // TODO: Use range of the field identifier, which we don't have fine-grained access to yet
-                                let range = self.get_range(item.id);
-                                self.errors.push(
-                                    Error::new(format!("Unknown field {} in struct literal", self.interner.resolve(lit_field.name).unwrap()))
-                                        .adding_primary_range(range, "")
-                                );
-
-                            }
-
-                            let lit_range = self.get_range(item.id);
-                            // Make sure each field in the struct has a match in the literal
-                            for (i, &maatch) in matches.iter().enumerate() {
-                                let field = struct_fields[i];
-                                let field = &self.code.hir_code.field_decls[field];
-                                let field_ty = tp.get_evaluated_type(field.ty).clone();
-                                if maatch == ExprId::new(u32::MAX as usize) {
-                                    successful = false;
-
-                                    let field_item = self.code.hir_code.decl_to_items[field.decl];
-                                    let field_range = self.code.hir_code.source_ranges[field_item];
-
-                                    self.errors.push(
-                                        Error::new(format!("Field {} not included in struct literal", self.interner.resolve(field.name).unwrap()))
-                                            .adding_primary_range(lit_range, "")
-                                            .adding_secondary_range(field_range, "field declared here")
-                                    );
-                                } else if let Some(err) = can_unify_to(tp.constraints(maatch), &field_ty.into()).err() {
-                                    successful = false;
-                                    let range = self.get_range(maatch);
-                                    let mut error = Error::new("Invalid struct field type")
-                                        .adding_primary_range(range, "");
-                                    match err {
-                                        UnificationError::InvalidChoice(choices)
-                                            => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
-                                        UnificationError::Trait(not_implemented)
-                                            => error.add_secondary_range(
-                                                range,
-                                                format!(
-                                                    "note: couldn't unify because expression requires implementations of {:?}",
-                                                    not_implemented.names(),
-                                                ),
-                                            ),
-                                    }
-                                    self.errors.push(error);
-                                }
-                            }
-
-                            if successful {
-                                *tp.struct_lit_mut(item.struct_lit_id) = Some(
-                                    StructLit { strukt: id, fields: matches }
-                                );
-                            }
-                        },
-                        ref other => {
-                            let range = self.get_range(item.ty);
-                            self.errors.push(
-                                Error::new(format!("Expected struct type in literal, found {:?}", *other))
-                                    .adding_primary_range(range, "")
-                            );
-                        },
-                    }
-                    
-                    ty
-                };
-
-                tp.constraints_mut(item.id).set_to(ty);
+                item.run_pass_1(self, tp);
             }
             for item in unit.ifs.get_level(level) {
-                if let Some(err) = can_unify_to(tp.constraints(item.condition), &Type::Bool.into()).err() {
-                    let mut error = Error::new("Expected boolean condition in if expression");
-                    let range = self.get_range(item.condition);
-                    match err {
-                        UnificationError::InvalidChoice(choices)
-                            => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
-                        UnificationError::Trait(not_implemented)
-                            => error.add_secondary_range(
-                                range,
-                                format!(
-                                    "note: couldn't unify because expression requires implementations of {:?}",
-                                    not_implemented.names(),
-                                ),
-                            ),
-                    }
-                    self.errors.push(error);
-                }
-                let constraints = tp.constraints(item.then_expr).intersect_with(tp.constraints(item.else_expr));
-
-                if constraints.solve().is_err() {
-                    // TODO: handle void expressions, which don't have appropriate source location info.
-                    self.errors.push(
-                        Error::new("Failed to unify branches of if expression")
-                            .adding_primary_range(self.get_range(item.then_expr), "first terminal expression here")
-                            .adding_primary_range(self.get_range(item.else_expr), "second terminal expression here")
-                    );
-                }
-                *tp.constraints_mut(item.id) = constraints;
+                item.run_pass_1(self, tp);
             }
             for item in unit.dos.get_level(level) {
-                *tp.constraints_mut(item.id) = tp.constraints(item.terminal_expr).clone();
-            }
-            for item in &unit.stmts {
-                let constraints = tp.constraints_mut(item.root_expr);
-                if let Some(err) = can_unify_to(&constraints, &Type::Void.into()).err() {
-                    let mut error = Error::new("statements must return void");
-                    let range = self.get_range(item.root_expr);
-                    match err {
-                        UnificationError::InvalidChoice(choices)
-                        => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
-                        UnificationError::Trait(not_implemented)
-                        => error.add_secondary_range(
-                            range,
-                            format!(
-                                "note: couldn't unify because expression requires implementations of {:?}",
-                                not_implemented.names(),
-                            ),
-                        ),
-                    }
-                    self.errors.push(error);
-                }
-                constraints.set_to(Type::Void);
+                item.run_pass_1(self, tp);
             }
             tp.debug_output(self, level as usize);
+        }
+
+        // Must be here, because checks that statements all can unify to void
+        for item in &unit.stmts {
+            item.run_pass_1(self, tp);
         }
     }
 

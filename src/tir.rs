@@ -44,6 +44,12 @@ pub struct While { pub condition: ExprId }
 pub struct Struct { pub field_tys: SmallVec<[ExprId; 2]>, }
 #[derive(Debug)]
 pub struct StructLit { pub ty: ExprId, pub fields: Vec<FieldAssignment>, pub struct_lit_id: StructLitId, }
+#[derive(Debug)]
+pub struct ExplicitRet;
+#[derive(Debug)]
+pub struct Module;
+#[derive(Debug)]
+pub struct Import;
 
 #[derive(Debug)]
 pub struct Expr<T> {
@@ -82,12 +88,12 @@ pub struct UnitItems {
     pub const_tys: Vec<ExprId>,
     pub generic_params: Vec<DeclId>,
     pub stmts: Vec<Stmt>,
-    pub explicit_rets: DepVec<ExprId>,
+    pub explicit_rets: DepVec<Expr<ExplicitRet>>,
     pub ret_groups: DepVec<RetGroup>,
     pub casts: DepVec<Expr<Cast>>,
     pub whiles: DepVec<Expr<While>>,
-    pub modules: DepVec<ExprId>,
-    pub imports: DepVec<ExprId>,
+    pub modules: DepVec<Expr<Module>>,
+    pub imports: DepVec<Expr<Import>>,
     pub dos: DepVec<Expr<Do>>,
     pub assigned_decls: DepVec<AssignedDecl>,
     pub assignments: DepVec<Expr<Assignment>>,
@@ -396,7 +402,7 @@ impl Driver {
             &hir::Expr::Ret { expr, decl } => {
                 let decl = decl.expect("returning outside of a computed decl is invalid!");
                 self.tir.staged_ret_groups.entry(decl).or_default().push(expr);
-                insert_item!(explicit_rets, id);
+                insert_expr!(explicit_rets, ExplicitRet)
             }
             &hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => insert_expr!(decl_refs, DeclRef { args: arguments.clone(), decl_ref_id }),
             &hir::Expr::Set { lhs, rhs } => insert_expr!(assignments, Assignment { lhs, rhs }),
@@ -411,8 +417,8 @@ impl Driver {
                 insert_expr!(ifs, If { condition, then_expr, else_expr });
             },
             &hir::Expr::While { condition, .. } => insert_expr!(whiles, While { condition }),
-            hir::Expr::Mod { .. } => insert_item!(modules, id),
-            hir::Expr::Import { .. } => insert_item!(imports, id),
+            hir::Expr::Mod { .. } => insert_expr!(modules, Module),
+            hir::Expr::Import { .. } => insert_expr!(imports, Import),
             &hir::Expr::Struct(struct_id) => {
                 let field_tys = self.code.hir_code.structs[struct_id].fields.iter().map(|&id| self.code.hir_code.field_decls[id].ty).collect();
                 insert_expr!(structs, Struct { field_tys })
