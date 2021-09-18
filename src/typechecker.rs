@@ -43,6 +43,59 @@ enum UnitKind {
     Mock(usize),
 }
 
+impl tir::Expr<tir::IntLit> {
+    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
+        *tp.constraints_mut(self.id) = ConstraintList::new(
+            BuiltinTraits::INT, 
+            None,
+            Some(Type::i32().into())
+        );
+    }
+}
+
+impl tir::Expr<tir::DecLit> {
+    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
+        *tp.constraints_mut(self.id) = ConstraintList::new(
+            BuiltinTraits::DEC, 
+            None,
+            Some(Type::f64().into())
+        );
+    }
+}
+
+impl tir::Expr<tir::StrLit> {
+    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
+        *tp.constraints_mut(self.id) = ConstraintList::new(
+            BuiltinTraits::STR, 
+            None,
+            Some(Type::u8().ptr().into())
+        );
+    }
+}
+
+impl tir::Expr<tir::CharLit> {
+    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
+        *tp.constraints_mut(self.id) = ConstraintList::new(
+            BuiltinTraits::CHAR, 
+            None,
+            Some(Type::u8().ptr().into())
+        );
+    }
+}
+
+impl tir::Expr<tir::ConstTy> {
+    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
+        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Ty.into()]), None);
+        *tp.ty_mut(self.id) = Type::Ty;
+    }
+}
+
+impl tir::GenericParam {
+    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
+        *tp.decl_type_mut(self.id) = Type::Ty.into();
+    }
+}
+
 impl tir::AssignedDecl {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         let constraints = tp.constraints(self.root_expr);
@@ -75,7 +128,7 @@ impl tir::AssignedDecl {
 }
 
 impl tir::Expr<tir::Assignment> {
-    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
         tp.constraints_mut(self.id).set_to(Type::Void);
         *tp.ty_mut(self.id) = Type::Void;
     }
@@ -440,7 +493,6 @@ impl tir::Stmt {
     }
 }
 
-
 impl Driver {
     pub fn decl_type<'a>(&'a self, id: DeclId, tp: &'a impl TypeProvider) -> &Type {
         self.code.hir_code.explicit_tys[id].map(|ty| tp.get_evaluated_type(ty)).unwrap_or(&tp.fw_decl_types(id).ty)
@@ -454,79 +506,37 @@ impl Driver {
                 unit_string(unit_kind),
             );
         }
-        fn lit_pass_1(tp: &mut impl TypeProvider, lits: &[ExprId], trait_impls: BuiltinTraits, pref: Type) {
-            for &item in lits {
-                *tp.constraints_mut(item) = ConstraintList::new(
-                    trait_impls, 
-                    None,
-                    Some(pref.clone().into())
-                );
+
+        macro_rules! run_pass_1_flat {
+            ($($name:ident$(,)*)+) => {
+                $(
+                    for item in &unit.$name {
+                        item.run_pass_1(self, tp);
+                    }
+                )+
             }
         }
-        lit_pass_1(tp, &unit.int_lits, BuiltinTraits::INT, Type::i32());
-        lit_pass_1(tp, &unit.dec_lits, BuiltinTraits::DEC, Type::f64());
-        lit_pass_1(tp, &unit.str_lits, BuiltinTraits::STR, Type::u8().ptr());
-        lit_pass_1(tp, &unit.char_lits, BuiltinTraits::CHAR, Type::u8().ptr());
-        for &item in &unit.const_tys {
-            *tp.constraints_mut(item) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Ty.into()]), None);
-            *tp.ty_mut(item) = Type::Ty;
-        }
-        for &param in &unit.generic_params {
-            *tp.decl_type_mut(param) = Type::Ty.into();
-        }
+        run_pass_1_flat!(int_lits, dec_lits, str_lits, char_lits, const_tys, generic_params);
+
         for level in start_level..unit.num_levels() {
-            for item in unit.assigned_decls.get_level(level) {
-                item.run_pass_1(self, tp);
+            macro_rules! run_pass_1 {
+                ($($name:ident$(,)*)+) => {
+                    $(
+                        for item in unit.$name.get_level(level) {
+                            item.run_pass_1(self, tp);
+                        }
+                    )+
+                }
             }
-            for item in unit.assignments.get_level(level) {
-                item.run_pass_1(self, tp);
-            }
-            for item in unit.casts.get_level(level) {
-                item.run_pass_1(self, tp);
-            }
-            for item in unit.whiles.get_level(level) {
-                item.run_pass_1(self, tp);
-            }
-            for item in unit.explicit_rets.get_level(level) {
-                item.run_pass_1(self, tp);
-            }
-            for item in unit.modules.get_level(level) {
-                item.run_pass_1(self, tp);
-            }
-            for item in unit.imports.get_level(level) {
-                item.run_pass_1(self, tp);
-            }
-            for item in unit.decl_refs.get_level(level) {
-                item.run_pass_1(self, tp);
-            }
-            for item in unit.addr_ofs.get_level(level) {
-                item.run_pass_1(self, tp);
-            }
-            for item in unit.derefs.get_level(level) {
-                item.run_pass_1(self, tp);
-            }
-            for item in unit.pointers.get_level(level) {
-                item.run_pass_1(self, tp);
-            }
-            for item in unit.structs.get_level(level) {
-                item.run_pass_1(self, tp);
-            }
-            for item in unit.struct_lits.get_level(level) {
-                item.run_pass_1(self, tp);
-            }
-            for item in unit.ifs.get_level(level) {
-                item.run_pass_1(self, tp);
-            }
-            for item in unit.dos.get_level(level) {
-                item.run_pass_1(self, tp);
-            }
+            run_pass_1!(
+                assigned_decls, assignments, casts, whiles, explicit_rets, modules, imports,
+                decl_refs, addr_ofs, derefs, pointers, structs, struct_lits, ifs, dos,
+            );
             tp.debug_output(self, level as usize);
         }
 
-        // Must be here, because checks that statements all can unify to void
-        for item in &unit.stmts {
-            item.run_pass_1(self, tp);
-        }
+        // This code must be here, because it checks that all statements can unify to void
+        run_pass_1_flat!(stmts);
     }
 
     fn run_pass_2(&mut self, unit: &UnitItems, unit_kind: UnitKind, tp: &mut impl TypeProvider) {
@@ -757,13 +767,13 @@ impl Driver {
                 tp.debug_output(self, level as usize);
             }
         }
-        fn lit_pass_2(
+        fn lit_pass_2<T>(
             tp: &mut impl TypeProvider,
-            lits: &[ExprId],
+            lits: &[tir::Expr<T>],
             lit_ty: &str
         ) {
-            for &item in lits {
-                *tp.ty_mut(item) = tp.constraints(item).solve().expect(format!("Ambiguous type for {} literal", lit_ty).as_ref()).ty;
+            for item in lits {
+                *tp.ty_mut(item.id) = tp.constraints(item.id).solve().expect(format!("Ambiguous type for {} literal", lit_ty).as_ref()).ty;
             }
         }
         lit_pass_2(tp, &unit.int_lits, "integer");

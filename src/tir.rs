@@ -50,6 +50,18 @@ pub struct ExplicitRet;
 pub struct Module;
 #[derive(Debug)]
 pub struct Import;
+#[derive(Debug)]
+pub struct IntLit;
+#[derive(Debug)]
+pub struct DecLit;
+#[derive(Debug)]
+pub struct StrLit;
+#[derive(Debug)]
+pub struct CharLit;
+#[derive(Debug)]
+pub struct ConstTy;
+#[derive(Debug)]
+pub struct GenericParam { pub id: DeclId }
 
 #[derive(Debug)]
 pub struct Expr<T> {
@@ -81,12 +93,12 @@ struct Subprogram {
 
 #[derive(Default, Debug)]
 pub struct UnitItems {
-    pub int_lits: Vec<ExprId>,
-    pub dec_lits: Vec<ExprId>,
-    pub str_lits: Vec<ExprId>,
-    pub char_lits: Vec<ExprId>,
-    pub const_tys: Vec<ExprId>,
-    pub generic_params: Vec<DeclId>,
+    pub int_lits: Vec<Expr<IntLit>>,
+    pub dec_lits: Vec<Expr<DecLit>>,
+    pub str_lits: Vec<Expr<StrLit>>,
+    pub char_lits: Vec<Expr<CharLit>>,
+    pub const_tys: Vec<Expr<ConstTy>>,
+    pub generic_params: Vec<GenericParam>,
     pub stmts: Vec<Stmt>,
     pub explicit_rets: DepVec<Expr<ExplicitRet>>,
     pub ret_groups: DepVec<RetGroup>,
@@ -388,13 +400,18 @@ impl Driver {
                 unit.$vec.push($item);
             }}
         }
+        macro_rules! flat_insert_expr {
+            ($vec:ident, $expr:expr) => {{
+                flat_insert_item!($vec, Expr { id, data: $expr, });
+            }}
+        }
         match &self.code.hir_code.exprs[id] {
             hir::Expr::Void => {},
-            hir::Expr::IntLit { .. } => flat_insert_item!(int_lits, id),
-            hir::Expr::DecLit { .. } => flat_insert_item!(dec_lits, id),
-            hir::Expr::StrLit { .. } => flat_insert_item!(str_lits, id),
-            hir::Expr::CharLit { .. } => flat_insert_item!(char_lits, id),
-            hir::Expr::ConstTy(_) => flat_insert_item!(const_tys, id),
+            hir::Expr::IntLit { .. } => flat_insert_expr!(int_lits, IntLit),
+            hir::Expr::DecLit { .. } => flat_insert_expr!(dec_lits, DecLit),
+            hir::Expr::StrLit { .. } => flat_insert_expr!(str_lits, StrLit),
+            hir::Expr::CharLit { .. } => flat_insert_expr!(char_lits, CharLit),
+            hir::Expr::ConstTy(_) => flat_insert_expr!(const_tys, ConstTy),
             &hir::Expr::AddrOf { expr, is_mut } => insert_expr!(addr_ofs, AddrOf { expr, is_mut }),
             &hir::Expr::Deref(expr) => insert_expr!(derefs, Dereference { expr }),
             &hir::Expr::Pointer { expr, .. } => insert_expr!(pointers, Pointer { expr }),
@@ -435,7 +452,7 @@ impl Driver {
             hir::Decl::Parameter { .. } | hir::Decl::Field(_) | hir::Decl::ReturnValue | hir::Decl::Intrinsic { .. } => {},
             hir::Decl::GenericParam(_) => {
                 assert_eq!(level, 0);
-                unit.generic_params.push(id);
+                unit.generic_params.push(GenericParam { id });
             },
             hir::Decl::Static(root_expr) | hir::Decl::Const(root_expr) | hir::Decl::Stored { root_expr, .. } => {
                 let explicit_ty = self.code.hir_code.explicit_tys[id];
