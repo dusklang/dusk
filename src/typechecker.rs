@@ -162,7 +162,7 @@ impl tir::Expr<tir::Assignment> {
         *tp.ty_mut(self.id) = Type::Void;
     }
 
-    fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+    fn run_pass_2(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
         let (lhs, rhs) = tp.multi_constraints_mut(self.lhs, self.rhs);
         lhs.lopsided_intersect_with(rhs);
     }
@@ -232,7 +232,7 @@ impl tir::Expr<tir::While> {
         *tp.ty_mut(self.id) = Type::Void;
     }
 
-    fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+    fn run_pass_2(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
         if can_unify_to(tp.constraints(self.condition), &Type::Bool.into()).is_ok() {
             tp.constraints_mut(self.condition).set_to(Type::Bool);
         } else {
@@ -247,7 +247,7 @@ impl tir::Expr<tir::ExplicitRet> {
         *tp.ty_mut(self.id) = Type::Never;
     }
 
-    fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+    fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut impl TypeProvider) {
     }
 }
 
@@ -257,7 +257,7 @@ impl tir::Expr<tir::Module> {
         *tp.ty_mut(self.id) = Type::Mod;
     }
 
-    fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+    fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut impl TypeProvider) {
     }
 }
 
@@ -267,7 +267,7 @@ impl tir::Expr<tir::Import> {
         *tp.ty_mut(self.id) = Type::Mod;
     }
 
-    fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+    fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut impl TypeProvider) {
     }
 }
 
@@ -410,7 +410,7 @@ impl tir::Expr<tir::AddrOf> {
         *tp.constraints_mut(self.id) = constraints;
     }
 
-    fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+    fn run_pass_2(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
         let pointer_ty = tp.constraints(self.id).solve()
             .map(|ty| ty.ty)
             .unwrap_or(Type::Error);
@@ -425,7 +425,7 @@ impl tir::Expr<tir::AddrOf> {
 }
 
 impl tir::Expr<tir::Dereference> {
-    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
         let constraints = tp.constraints(self.expr).filter_map(|ty| {
             if let Type::Pointer(pointee) = &ty.ty {
                 Some(pointee.as_ref().clone())
@@ -436,7 +436,7 @@ impl tir::Expr<tir::Dereference> {
         *tp.constraints_mut(self.id) = constraints;
     }
 
-    fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+    fn run_pass_2(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
         let mut ty = tp.constraints(self.id).solve().unwrap_or(Type::Error.into());
         *tp.ty_mut(self.id) = ty.ty.clone();
 
@@ -469,7 +469,7 @@ impl tir::Expr<tir::Pointer> {
         tp.constraints_mut(self.id).set_to(Type::Ty);
     }
 
-    fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+    fn run_pass_2(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
         let expr_ty = tp.constraints(self.expr).solve().map(|ty| ty.ty).unwrap_or(Type::Error);
         // Don't bother checking if it's a type, because we already did that in pass 1
         tp.constraints_mut(self.expr).set_to(expr_ty);
@@ -503,7 +503,7 @@ impl tir::Expr<tir::Struct> {
         tp.constraints_mut(self.id).set_to(Type::Ty);
     }
 
-    fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+    fn run_pass_2(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
         for &field_ty in &self.field_tys {
             let field_type = tp.constraints(field_ty).solve().map(|ty| ty.ty).unwrap_or(Type::Error);
             // Don't bother checking if it's a type, because we already did that in pass 1
@@ -678,7 +678,7 @@ impl tir::Expr<tir::If> {
         *tp.constraints_mut(self.id) = constraints;
     }
 
-    fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+    fn run_pass_2(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
         let condition_ty = tp.constraints(self.condition).solve().map(|ty| ty.ty).unwrap_or(Type::Error);
         // Don't bother checking if bool, because we already did that in pass 1
         tp.constraints_mut(self.condition).set_to(condition_ty);
@@ -694,7 +694,7 @@ impl tir::Expr<tir::Do> {
         *tp.constraints_mut(self.id) = tp.constraints(self.terminal_expr).clone();
     }
 
-    fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+    fn run_pass_2(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
         let ty = tp.constraints(self.id).solve().expect("Ambiguous type for do expression");
         *tp.ty_mut(self.id) = ty.ty.clone();
         tp.constraints_mut(self.terminal_expr).set_to(ty);
@@ -724,12 +724,12 @@ impl tir::Stmt {
         constraints.set_to(Type::Void);
     }
 
-    fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+    fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut impl TypeProvider) {
     }
 }
 
 impl tir::RetGroup {
-    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {}
+    fn run_pass_1(&self, _driver: &mut Driver, _tp: &mut impl TypeProvider) {}
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         let ty = tp.get_evaluated_type(self.ty).clone();
@@ -840,7 +840,7 @@ impl Driver {
                 )+
             }
         }
-        run_pass_2_flat!(int_lits, dec_lits, str_lits, char_lits, const_tys, generic_params);
+        run_pass_2_flat!(int_lits, dec_lits, str_lits, char_lits, const_tys, generic_params, stmts);
         tp.debug_output(self, 0);
     }
 
