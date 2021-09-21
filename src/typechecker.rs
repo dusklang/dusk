@@ -300,10 +300,6 @@ impl tir::Expr<tir::DeclRef> {
                     generic_constraints[i] = generic_constraints[i].intersect_with(&constraints);
                 }
             }
-            if !generic_constraints.is_empty() {
-                driver.print_decl(overload_decl);
-                dbg!(&generic_constraints);
-            }
             let overload = Overload { decl: overload_decl, generic_param_constraints: generic_constraints };
             overloads.push(overload);
         }
@@ -368,7 +364,7 @@ impl tir::Expr<tir::DeclRef> {
         let pref = tp.preferred_overload(self.decl_ref_id);
 
         let overload = if !overloads.is_empty() {
-            let overload = pref.as_ref().cloned()
+            let mut overload = pref.as_ref().cloned()
                 .filter(|overload| overloads.iter().find(|&other| other.decl == overload.decl).is_some())
                 .unwrap_or_else(|| overloads[0].clone());
             let overload_is_function = match driver.code.hir_code.decls[overload.decl] {
@@ -393,6 +389,19 @@ impl tir::Expr<tir::DeclRef> {
                 let ty = tp.get_evaluated_type(decl.param_tys[i]).clone();
                 tp.constraints_mut(arg).set_to(ty);
             }
+            let ret_ty = tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id)).ty.clone();
+            let mut ret_ty_constraints = ConstraintList::default();
+            ret_ty_constraints.set_to(ret_ty.clone());
+            let mut generic_args = Vec::new();
+            for (i, &generic_param) in decl.generic_params.iter().enumerate() {
+                let implied_constraints = ret_ty_constraints.get_implied_generic_constraints(generic_param, &ret_ty);
+                overload.generic_param_constraints[i] = overload.generic_param_constraints[i].intersect_with(&implied_constraints);
+                let generic_arg = overload.generic_param_constraints[i].solve().unwrap().ty;
+                generic_args.push(generic_arg);
+            }
+            if !generic_args.is_empty() {
+                dbg!(generic_args);
+            }
             Some(overload)
         } else {
             driver.errors.push(
@@ -404,6 +413,7 @@ impl tir::Expr<tir::DeclRef> {
             }
             None
         };
+
         *tp.overloads_mut(self.decl_ref_id) = overloads;
         *tp.selected_overload_mut(self.decl_ref_id) = overload.map(|overload| overload.decl);
     }
