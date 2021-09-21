@@ -282,6 +282,24 @@ impl tir::Expr<tir::DeclRef> {
         let decls = &driver.tir.decls;
         let tp_immutable = &*tp;
         let mut overloads = driver.find_overloads(&driver.code.hir_code.decl_refs[decl_ref_id]);
+
+        for &overload in &overloads {
+            let decl = &decls[overload];
+            let mut generic_constraints: Vec<_> = decl.generic_params.iter().map(|_| ConstraintList::default()).collect();
+            for (&param_ty, &arg) in decl.param_tys.iter().zip(&args) {
+                let param_ty = tp_immutable.get_evaluated_type(param_ty);
+                let arg_constraints = tp_immutable.constraints(arg);
+                for (i, &generic_param) in decl.generic_params.iter().enumerate() {
+                    let constraints = arg_constraints.get_implied_generic_constraints(generic_param, param_ty);
+                    generic_constraints[i] = generic_constraints[i].intersect_with(&constraints);
+                }
+            }
+            if !generic_constraints.is_empty() {
+                driver.print_decl(overload);
+                dbg!(generic_constraints);
+            }
+        }
+
         let mut generic_args = Vec::new();
         // Rule out overloads that don't match the arguments
         overloads.retain(|&overload| {
@@ -308,7 +326,7 @@ impl tir::Expr<tir::DeclRef> {
             true
         });
 
-        dbg!(generic_args);
+        // dbg!(generic_args);
 
         let mut one_of = SmallVec::new();
         one_of.reserve(overloads.len());

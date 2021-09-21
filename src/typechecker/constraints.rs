@@ -383,6 +383,65 @@ impl ConstraintList {
         }
         assert!(self.one_of.as_ref().unwrap().is_empty() || self.one_of_exists(|ty| ty.is_mut), "can't assign to immutable expression");
     }
+}
+
+fn match_generic_type(generic_param: GenericParamId, actual_ty: &Type, assumed_ty: &Type) -> Option<Type> {
+    match (actual_ty, assumed_ty) {
+        (actual_ty, &Type::GenericParam(param)) if param == generic_param => {
+            Some(actual_ty.clone())
+        },
+        (Type::Pointer(actual_pointee), Type::Pointer(assumed_pointee)) => {
+            if !actual_pointee.is_mut && assumed_pointee.is_mut {
+                None
+            } else {
+                match_generic_type(generic_param, &actual_pointee.ty, &assumed_pointee.ty)
+            }
+        },
+        _ => {
+            None
+        }
+    }
+}
+
+fn contains_generic_param(ty: &Type, generic_param: GenericParamId) -> bool {
+    match ty {
+        &Type::GenericParam(param) if param == generic_param => true,
+        Type::Pointer(pointee) => contains_generic_param(&pointee.ty, generic_param),
+        _ => false,
+    }
+}
+
+impl ConstraintList {
+    /// Gets the constraints on `generic_param` implied if we are assumed to be of type `assumed_ty`
+    pub fn get_implied_generic_constraints(&self, generic_param: GenericParamId, assumed_ty: &Type) -> ConstraintList {
+        let mut constraints = ConstraintList::default();
+
+        if !contains_generic_param(assumed_ty, generic_param) {
+            return constraints;
+        }
+
+        if let Some(one_of) = &self.one_of {
+            let mut generic_one_of = SmallVec::<[QualType; 1]>::new();
+            for ty in one_of {
+                if let Some(gen_match) = match_generic_type(generic_param, &ty.ty, assumed_ty) {
+                    generic_one_of.push(gen_match.into());
+                }
+            }
+            constraints.one_of = Some(generic_one_of);
+        }
+
+        if implements_traits(assumed_ty, self.trait_impls).is_err() {
+            constraints.one_of = Some(SmallVec::new());
+        }
+
+        if let Some(preferred_ty) = &self.preferred_type {
+            if let Some(gen_match) = match_generic_type(generic_param, &preferred_ty.ty, assumed_ty) {
+                constraints.preferred_type = Some(gen_match.into());
+            }
+        }
+
+        constraints
+    }
 
     pub fn print_diff(&self, other: &ConstraintList) {
         if self.trait_impls != other.trait_impls {
