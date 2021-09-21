@@ -812,8 +812,10 @@ impl Driver {
                 }
             }
             &Instr::Load(location) => {
+                let frame = self.interp.stack.last().unwrap();
                 let op = self.code.blocks[frame.block].ops[frame.pc];
                 let ty = self.type_of(op);
+                let ty = frame.canonicalize_type(&ty);
                 let size = self.size_of(&ty);
                 let frame = self.interp.stack.last_mut().unwrap();
                 frame.results[&location].load(size)

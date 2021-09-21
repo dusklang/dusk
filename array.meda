@@ -1,0 +1,79 @@
+T :: usize
+
+Array :: struct {
+    data: T *mut
+    capacity: usize
+    length: usize
+}
+
+fn new(): Array {
+    Array {
+        data: 0 as usize as T *mut
+        capacity: 0
+        length: 0
+    }
+}
+
+INITIAL_CAPACITY :: 10 as usize
+
+fn append(self: Array *mut, element: T) {
+    if (*self).length >= (*self).capacity {
+        if (*self).capacity == 0 {
+            (*self).capacity = INITIAL_CAPACITY
+
+            // TODO: there is a MIR bug that necessitates this being here
+            nothing := 0
+        } else {
+            (*self).capacity = (*self).capacity * 2
+
+            // TODO: there is a MIR bug that necessitates this being here
+            nothing := 0
+        }
+        new_buffer :: malloc((*self).capacity * size_of(T)) as T *mut
+        std.memcpy(new_buffer, (*self).data, (*self).length)
+        if (*self).capacity != INITIAL_CAPACITY {
+            free((*self).data as void *mut)
+        }
+        (*self).data = new_buffer
+
+        // TODO: there is a MIR bug that necessitates this being here
+        nothing := 0
+    }
+
+    addr :: ((*self).data as usize + (*self).length * size_of(T)) as T *mut
+    (*addr = element)
+    (*self).length = (*self).length + 1
+
+    // TODO: there is a MIR bug that necessitates this being here
+    nothing := 0
+}
+
+std :: import("std.meda")
+
+fn index(self: Array*, index: usize): T {
+    std.assert(index < (*self).length)
+
+    addr :: ((*self).data as usize + index * size_of(T)) as T*
+    *addr
+}
+
+fn main() {
+    array := new()
+    append(&mut array, 24)
+    append(&mut array, 4)
+    append(&mut array, 2)
+    i := 0 as usize
+    while i < 8 {
+        append(&mut array, i % 5)
+        i = i + 1
+    }
+
+    i := 0 as usize
+    while i < array.length {
+        value :: index(&array, i)
+        std.print_num(value as i32)
+        print("\n")
+        i = i + 1
+    }
+    
+}
