@@ -4,7 +4,7 @@ use mire::hir::{ExprId, DeclId, DeclRefId, StructLitId, CastId, Namespace};
 use mire::mir::Const;
 use mire::ty::{Type, QualType};
 
-use super::{CastMethod, StructLit, constraints::ConstraintList};
+use super::{CastMethod, StructLit, constraints::ConstraintList, Overload};
 use crate::index_vec::*;
 use crate::source_info::CommentatedSourceRange;
 use crate::driver::Driver;
@@ -20,8 +20,8 @@ pub trait TypeProvider: private::Sealed {
     fn ty(&self, expr: ExprId) -> &Type;
     fn ty_mut(&mut self, expr: ExprId) -> &mut Type;
 
-    fn overloads(&self, decl_ref: DeclRefId) -> &Vec<DeclId>;
-    fn overloads_mut(&mut self, decl_ref: DeclRefId) -> &mut Vec<DeclId>;
+    fn overloads(&self, decl_ref: DeclRefId) -> &Vec<Overload>;
+    fn overloads_mut(&mut self, decl_ref: DeclRefId) -> &mut Vec<Overload>;
 
     fn selected_overload(&self, decl_ref: DeclRefId) -> Option<DeclId>;
     fn selected_overload_mut(&mut self, decl_ref: DeclRefId) -> &mut Option<DeclId>;
@@ -36,8 +36,8 @@ pub trait TypeProvider: private::Sealed {
     fn constraints_mut(&mut self, expr: ExprId) -> &mut ConstraintList;
     fn multi_constraints_mut(&mut self, a: ExprId, b: ExprId) -> (&mut ConstraintList, &mut ConstraintList);
 
-    fn preferred_overload(&self, decl_ref: DeclRefId) -> Option<DeclId>;
-    fn preferred_overload_mut(&mut self, decl_ref: DeclRefId) -> &mut Option<DeclId>;
+    fn preferred_overload(&self, decl_ref: DeclRefId) -> &Option<Overload>;
+    fn preferred_overload_mut(&mut self, decl_ref: DeclRefId) -> &mut Option<Overload>;
 
     fn insert_eval_result(&mut self, expr: ExprId, result: Const);
     /// Doesn't get the type *of* `id`, gets the type that `id` as an expression *is*
@@ -61,7 +61,7 @@ pub struct RealTypeProvider {
     /// The type of each expression
     types: IndexVec<ExprId, Type>,
     /// The list of overloads for each decl ref
-    overloads: IndexVec<DeclRefId, Vec<DeclId>>,
+    overloads: IndexVec<DeclRefId, Vec<Overload>>,
     /// The selected overload for each decl ref
     selected_overloads: IndexVec<DeclRefId, Option<DeclId>>,
     /// Each struct literal matched to a structure
@@ -73,7 +73,7 @@ pub struct RealTypeProvider {
     /// A copy of the constraints, used for debugging the typechecker
     constraints_copy: IndexVec<ExprId, ConstraintList>,
     /// The preferred overload for each decl ref (currently only ever originates from literals)
-    preferred_overloads: IndexVec<DeclRefId, Option<DeclId>>,
+    preferred_overloads: IndexVec<DeclRefId, Option<Overload>>,
 
     decl_types: IndexVec<DeclId, QualType>,
 
@@ -198,10 +198,10 @@ impl TypeProvider for RealTypeProvider {
         &mut self.types[expr]
     }
 
-    fn overloads(&self, decl_ref: DeclRefId) -> &Vec<DeclId> {
+    fn overloads(&self, decl_ref: DeclRefId) -> &Vec<Overload> {
         &self.overloads[decl_ref]
     }
-    fn overloads_mut(&mut self, decl_ref: DeclRefId) -> &mut Vec<DeclId> {
+    fn overloads_mut(&mut self, decl_ref: DeclRefId) -> &mut Vec<Overload> {
         &mut self.overloads[decl_ref]
     }
 
@@ -236,10 +236,10 @@ impl TypeProvider for RealTypeProvider {
         self.constraints.index_mut(a, b)
     }
 
-    fn preferred_overload(&self, decl_ref: DeclRefId) -> Option<DeclId> {
-        self.preferred_overloads[decl_ref]
+    fn preferred_overload(&self, decl_ref: DeclRefId) -> &Option<Overload> {
+        &self.preferred_overloads[decl_ref]
     }
-    fn preferred_overload_mut(&mut self, decl_ref: DeclRefId) -> &mut Option<DeclId> {
+    fn preferred_overload_mut(&mut self, decl_ref: DeclRefId) -> &mut Option<Overload> {
         &mut self.preferred_overloads[decl_ref]
     }
 
@@ -267,7 +267,7 @@ pub struct MockTypeProvider<'base> {
     /// The type of each expression
     types: HashMap<ExprId, Type>,
     /// The list of overloads for each decl ref
-    overloads: HashMap<DeclRefId, Vec<DeclId>>,
+    overloads: HashMap<DeclRefId, Vec<Overload>>,
     /// The selected overload for each decl ref
     selected_overloads: HashMap<DeclRefId, Option<DeclId>>,
     /// Each struct literal matched to a structure
@@ -279,7 +279,7 @@ pub struct MockTypeProvider<'base> {
     /// A copy of the constraints, used for debugging the typechecker
     constraints_copy: HashMap<ExprId, ConstraintList>,
     /// The preferred overload for each decl ref (currently only ever originates from literals)
-    preferred_overloads: HashMap<DeclRefId, Option<DeclId>>,
+    preferred_overloads: HashMap<DeclRefId, Option<Overload>>,
 
     decl_types: HashMap<DeclId, QualType>,
 
@@ -397,13 +397,13 @@ impl<'base> TypeProvider for MockTypeProvider<'base> {
         self.fw_decl_types_mut(decl)
     }
 
-    forward_mock!(overloads, overloads, overloads_mut, DeclRefId, Vec<DeclId>);
+    forward_mock!(overloads, overloads, overloads_mut, DeclRefId, Vec<Overload>);
     forward_mock!(selected_overloads, selected_overload, selected_overload_mut, DeclRefId, Option<DeclId>, deref: deref);
     forward_mock!(struct_lits, struct_lit, struct_lit_mut, StructLitId, Option<StructLit>);
     forward_mock!(cast_methods, cast_method, cast_method_mut, CastId, CastMethod, deref: deref);
     forward_mock!(types, ty, ty_mut, ExprId, Type);
     forward_mock!(constraints, constraints, constraints_mut, ExprId, ConstraintList);
-    forward_mock!(preferred_overloads, preferred_overload, preferred_overload_mut, DeclRefId, Option<DeclId>, deref: deref);
+    forward_mock!(preferred_overloads, preferred_overload, preferred_overload_mut, DeclRefId, Option<Overload>);
     forward_mock!(decl_types, fw_decl_types, fw_decl_types_mut, DeclId, QualType);
     forward_mock!(eval_results, fw_eval_results, fw_eval_results_mut, ExprId, Const);
 

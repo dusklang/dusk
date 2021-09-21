@@ -207,8 +207,24 @@ fn implements_traits_in_generic_context(ty: &Type, traits: BuiltinTraits, generi
 
 // NOTE: can_unify_to and can_unify_to_in_generic_context have duplicated logic!
 pub fn can_unify_to<'a>(constraints: &'a ConstraintList, ty: &QualType) -> Result<(), UnificationError<'a>> {
+    can_unify_to_in_generic_context(constraints, ty, &[])
+}
+
+fn contains_any_of_generic_params(ty: &Type, generic_params: &[GenericParamId]) -> bool {
+    match ty {
+        Type::GenericParam(id) => generic_params.contains(id),
+        Type::Pointer(pointee) => contains_any_of_generic_params(&pointee.ty, generic_params),
+        _ => false,
+    }
+}
+
+pub fn can_unify_to_in_generic_context<'a>(constraints: &'a ConstraintList, ty: &QualType, generic_params: &[GenericParamId]) -> Result<(), UnificationError<'a>> {
     // Never is the "bottom type", so it unifies to anything.
     if constraints.one_of_exists(|ty| ty.ty == Type::Never) { return Ok(()); }
+
+    if contains_any_of_generic_params(&ty.ty, generic_params) {
+        return Ok(());
+    }
 
     use UnificationError::*;
     if let Some(not_implemented) = implements_traits(&ty.ty, constraints.trait_impls).err() {
@@ -224,42 +240,6 @@ pub fn can_unify_to<'a>(constraints: &'a ConstraintList, ty: &QualType) -> Resul
     }
 
     Ok(())
-}
-
-pub fn can_unify_to_in_generic_context<'a>(constraints: &'a ConstraintList, ty: &QualType, generic_params: &[GenericParamId]) -> Result<SmallVec<[ConstraintList; 1]>, UnificationError<'a>> {
-    let mut generic_arg_constraints = SmallVec::new();
-    generic_arg_constraints.resize_with(generic_params.len(), || ConstraintList::new(BuiltinTraits::empty(), None, None));
-
-    // If ty is a generic parameter type, then just directly have that parameter inherit `constraints`
-    if let Type::GenericParam(id) = ty.ty {
-        let param_constraints = generic_constraints_mut(&mut generic_arg_constraints, generic_params, id)
-            .expect("generic parameter not in list! not sure how to handle this yet");
-        *param_constraints = constraints.clone();
-        Ok(generic_arg_constraints)
-    } else {
-        // Never is the "bottom type", so it unifies to anything.
-        if constraints.one_of_exists(|ty| ty.ty == Type::Never) { return Ok(generic_arg_constraints); }
-
-        use UnificationError::*;
-        match implements_traits_in_generic_context(&ty.ty, constraints.trait_impls, generic_params) {
-            Ok(constraints) => {
-                for (og_constraints, new_constraints) in generic_arg_constraints.iter_mut().zip(constraints) {
-                    *og_constraints = og_constraints.intersect_with(&new_constraints);
-                }
-            },
-            Err(not_implemented) => return Err(Trait(not_implemented)),
-        }
-        if let Some(one_of) = &constraints.one_of {
-            for oty in one_of {
-                if oty.trivially_convertible_to(ty) {
-                    return Ok(generic_arg_constraints);
-                }
-            }
-            return Err(InvalidChoice(one_of));
-        }
-    
-        Ok(generic_arg_constraints)
-    }
 }
 
 impl ConstraintList {
