@@ -297,7 +297,7 @@ impl tir::Expr<tir::DeclRef> {
                 let arg_constraints = tp_immutable.constraints(arg);
                 for (i, &generic_param) in decl.generic_params.iter().enumerate() {
                     let constraints = arg_constraints.get_implied_generic_constraints(generic_param, param_ty);
-                    generic_constraints[i] = generic_constraints[i].intersect_with(&constraints);
+                    generic_constraints[i] = generic_constraints[i].intersect_with_in_generic_context(&constraints, &decl.generic_params);
                 }
             }
             let overload = Overload { decl: overload_decl, generic_param_constraints: generic_constraints };
@@ -398,6 +398,9 @@ impl tir::Expr<tir::DeclRef> {
                 overload.generic_param_constraints[i] = overload.generic_param_constraints[i].intersect_with(&implied_constraints);
                 let generic_arg = overload.generic_param_constraints[i].solve().unwrap().ty;
                 generic_args.push(generic_arg);
+            }
+            for &arg in &self.args {
+                tp.constraints_mut(arg).substitute_generic_args(&decl.generic_params, &generic_args);
             }
             (Some(overload), Some(generic_args))
         } else {

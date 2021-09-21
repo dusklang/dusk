@@ -251,6 +251,10 @@ impl ConstraintList {
     }
 
     pub fn intersect_with(&self, other: &ConstraintList) -> ConstraintList {
+        self.intersect_with_in_generic_context(other, &[])
+    }
+
+    pub fn intersect_with_in_generic_context(&self, other: &ConstraintList, generic_params: &[GenericParamId]) -> ConstraintList {
         if self.is_never() {
             return other.clone();
         } else if other.is_never() {
@@ -265,10 +269,10 @@ impl ConstraintList {
             (Some(lhs), Some(rhs)) => {
                 let mut one_of = SmallVec::new();
                 for lty in lhs {
-                    if implements_traits(&lty.ty, trait_impls).is_err() { continue; }
+                    if implements_traits_in_generic_context(&lty.ty, trait_impls, generic_params).is_err() { continue; }
 
                     for rty in rhs {
-                        if implements_traits(&rty.ty, trait_impls).is_err() { continue; }
+                        if implements_traits_in_generic_context(&rty.ty, trait_impls, generic_params).is_err() { continue; }
 
                         // TODO: would it be ok to break from this loop after finding a match here?
                         if lty.trivially_convertible_to(rty) {
@@ -289,8 +293,8 @@ impl ConstraintList {
             for (a, b) in &[(self, other), (other, self)] {
                 if let Some(preferred_type) = &a.preferred_type {
                     // I don't actually know if it's possible for an expression to not be able to unify to its preferred type?
-                    assert!(can_unify_to(a, preferred_type).is_ok());
-                    if can_unify_to(b, preferred_type).is_ok() {
+                    // assert!(can_unify_to(a, preferred_type).is_ok());
+                    if can_unify_to_in_generic_context(b, preferred_type, generic_params).is_ok() {
                         pref = Some(preferred_type.clone());
                     }
                 }
@@ -391,6 +395,25 @@ fn contains_generic_param(ty: &Type, generic_param: GenericParamId) -> bool {
     }
 }
 
+fn substitute_generic_args(ty: &mut QualType, generic_params: &[GenericParamId], generic_args: &[Type]) {
+    match &mut ty.ty {
+        Type::GenericParam(generic_param) => {
+            let mut replacement = None;
+            for (param, arg) in generic_params.iter().zip(generic_args) {
+                if generic_param == param {
+                    replacement = Some(arg.clone());
+                    break;
+                }
+            }
+            if let Some(replacement) = replacement {
+                ty.ty = replacement;
+            }
+        },
+        Type::Pointer(pointee) => substitute_generic_args(&mut *pointee, generic_params, generic_args),
+        _ => {},
+    }
+}
+
 impl ConstraintList {
     /// Gets the constraints on `generic_param` implied if we are assumed to be of type `assumed_ty`
     pub fn get_implied_generic_constraints(&self, generic_param: GenericParamId, assumed_ty: &Type) -> ConstraintList {
@@ -410,8 +433,10 @@ impl ConstraintList {
             constraints.one_of = Some(generic_one_of);
         }
 
-        if implements_traits(assumed_ty, self.trait_impls).is_err() {
-            constraints.one_of = Some(SmallVec::new());
+        if let &Type::GenericParam(param) = assumed_ty {
+            if param == generic_param {
+                constraints.trait_impls = self.trait_impls;
+            }
         }
 
         if let Some(preferred_ty) = &self.preferred_type {
@@ -421,6 +446,19 @@ impl ConstraintList {
         }
 
         constraints
+    }
+
+    pub fn substitute_generic_args(&mut self, generic_params: &[GenericParamId], generic_args: &[Type]) {
+        assert_eq!(generic_params.len(), generic_args.len());
+        if let Some(one_of) = &mut self.one_of {
+            for ty in one_of {
+                substitute_generic_args(ty, generic_params, generic_args);
+            }
+        }
+
+        if let Some(preferred_ty) = &mut self.preferred_type {
+            substitute_generic_args(preferred_ty, generic_params, generic_args);
+        }
     }
 
     pub fn print_diff(&self, other: &ConstraintList) {
