@@ -1,5 +1,7 @@
 T :: usize
 
+INITIAL_CAPACITY :: 10 as usize
+
 Array :: struct {
     data: T *mut
     capacity: usize
@@ -13,8 +15,6 @@ fn new(): Array {
         length: 0
     }
 }
-
-INITIAL_CAPACITY :: 10 as usize
 
 fn append(self: Array *mut, element: T) {
     if (*self).length >= (*self).capacity {

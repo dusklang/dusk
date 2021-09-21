@@ -241,7 +241,7 @@ impl Driver {
         let mut started_at_mod_scope = false;
         let mut root_namespace = true;
         let mut namespace = Some(decl_ref.namespace);
-        while let Some(ns) = namespace {
+        'find_overloads: while let Some(ns) = namespace {
             namespace = match ns {
                 Namespace::Imper { scope, end_offset } => {
                     if !started_at_mod_scope {
@@ -286,6 +286,7 @@ impl Driver {
                             let param_name = self.code.hir_code.names[decl];
                             if decl_ref.name == param_name {
                                 overloads.insert(decl);
+                                break 'find_overloads;
                             }
                         }
                     } else {
