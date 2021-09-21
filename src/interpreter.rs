@@ -15,7 +15,7 @@ use display_adapter::display_adapter;
 use mire::arch::Arch;
 use mire::hir::{Intrinsic, ModScopeId, StructId, GenericParamId};
 use mire::mir::{Const, Instr, StaticId, Struct, VOID_INSTR};
-use mire::ty::{Type, IntWidth, FloatWidth};
+use mire::ty::{Type, QualType, IntWidth, FloatWidth};
 use mire::{OpId, BlockId};
 
 use crate::driver::Driver;
@@ -286,6 +286,23 @@ impl StackFrame {
         self.block = bb;
         self.pc = 0;
     }
+
+    fn canonicalize_type(&self, ty: &Type) -> Type {
+        match ty {
+            &Type::GenericParam(id) => {
+                if let Some(result) = self.generic_ctx.get(&id) {
+                    result.clone()
+                } else {
+                    ty.clone()
+                }
+            },
+            Type::Pointer(pointee) =>
+                Type::Pointer(
+                    Box::new(QualType { ty: self.canonicalize_type(&pointee.ty), is_mut: pointee.is_mut })
+                ),
+            ty => ty.clone(),
+        }
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -537,13 +554,13 @@ impl Driver {
                 let val = frame.results[&val].as_bool();
                 Value::from_bool(!val)
             },
-            &Instr::Call { ref arguments, func } => {
+            &Instr::Call { ref arguments, ref generic_arguments, func } => {
                 let mut copied_args = Vec::new();
                 copied_args.reserve_exact(arguments.len());
                 for &arg in arguments {
                     copied_args.push(frame.results[&arg].clone());
                 }
-                self.call(FunctionRef::Id(func), copied_args, Vec::new())
+                self.call(FunctionRef::Id(func), copied_args, generic_arguments.clone())
             },
             &Instr::GenericParam(id) => {
                 Value::from_ty(Type::GenericParam(id))
@@ -647,26 +664,31 @@ impl Driver {
                     Intrinsic::PrintType => {
                         let frame = self.interp.stack.last().unwrap();
                         assert_eq!(arguments.len(), 1);
-                        print!("{:?}", frame.results[&arguments[0]].as_ty());
+                        let ty = frame.results[&arguments[0]].as_ty();
+                        let ty = frame.canonicalize_type(ty);
+                        print!("{:?}", ty);
                         Value::Nothing
                     },
                     Intrinsic::AlignOf => {
                         let frame = self.interp.stack.last().unwrap();
                         assert_eq!(arguments.len(), 1);
                         let ty = frame.results[&arguments[0]].as_ty();
-                        Value::from_usize(self.align_of(ty))
+                        let ty = frame.canonicalize_type(ty);
+                        Value::from_usize(self.align_of(&ty))
                     },
                     Intrinsic::StrideOf => {
                         let frame = self.interp.stack.last().unwrap();
                         assert_eq!(arguments.len(), 1);
                         let ty = frame.results[&arguments[0]].as_ty();
-                        Value::from_usize(self.stride_of(ty))
+                        let ty = frame.canonicalize_type(ty);
+                        Value::from_usize(self.stride_of(&ty))
                     },
                     Intrinsic::SizeOf => {
                         let frame = self.interp.stack.last().unwrap();
                         assert_eq!(arguments.len(), 1);
                         let ty = frame.results[&arguments[0]].as_ty();
-                        Value::from_usize(self.size_of(ty))
+                        let ty = frame.canonicalize_type(ty);
+                        Value::from_usize(self.size_of(&ty))
                     },
                     Intrinsic::OffsetOf => {
                         assert_eq!(arguments.len(), 2);

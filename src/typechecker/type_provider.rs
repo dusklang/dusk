@@ -26,6 +26,9 @@ pub trait TypeProvider: private::Sealed {
     fn selected_overload(&self, decl_ref: DeclRefId) -> Option<DeclId>;
     fn selected_overload_mut(&mut self, decl_ref: DeclRefId) -> &mut Option<DeclId>;
 
+    fn generic_arguments(&self, decl_ref: DeclRefId) -> &Option<Vec<Type>>;
+    fn generic_arguments_mut(&mut self, decl_ref: DeclRefId) -> &mut Option<Vec<Type>>;
+
     fn struct_lit(&self, struct_lit: StructLitId) -> &Option<StructLit>;
     fn struct_lit_mut(&mut self, struct_lit: StructLitId) -> &mut Option<StructLit>;
 
@@ -64,6 +67,8 @@ pub struct RealTypeProvider {
     overloads: IndexVec<DeclRefId, Vec<Overload>>,
     /// The selected overload for each decl ref
     selected_overloads: IndexVec<DeclRefId, Option<DeclId>>,
+    /// The generic arguments for each decl ref
+    generic_arguments: IndexVec<DeclRefId, Option<Vec<Type>>>,
     /// Each struct literal matched to a structure
     struct_lits: IndexVec<StructLitId, Option<StructLit>>,
     /// The cast method for each cast expression
@@ -88,6 +93,7 @@ impl RealTypeProvider {
             types: IndexVec::new(),
             overloads: IndexVec::new(),
             selected_overloads: IndexVec::new(),
+            generic_arguments: IndexVec::new(),
             struct_lits: IndexVec::new(),
             cast_methods: IndexVec::new(),
             constraints: IndexVec::new(),
@@ -107,6 +113,7 @@ impl RealTypeProvider {
             tp.constraints_copy.resize_with(d.code.hir_code.exprs.len(), Default::default);
         }
         tp.selected_overloads.resize_with(d.code.hir_code.decl_refs.len(), || None);
+        tp.generic_arguments.resize_with(d.code.hir_code.decl_refs.len(), || None);
         tp.struct_lits.resize_with(d.code.hir_code.struct_lits.len(), || None);
         tp.preferred_overloads.resize_with(d.code.hir_code.decl_refs.len(), || None);
         tp.cast_methods.resize_with(d.code.hir_code.cast_counter.len(), || CastMethod::Noop);
@@ -212,6 +219,13 @@ impl TypeProvider for RealTypeProvider {
         &mut self.selected_overloads[decl_ref]
     }
 
+    fn generic_arguments(&self, decl_ref: DeclRefId) -> &Option<Vec<Type>> {
+        &self.generic_arguments[decl_ref]
+    }
+    fn generic_arguments_mut(&mut self, decl_ref: DeclRefId) -> &mut Option<Vec<Type>> {
+        &mut self.generic_arguments[decl_ref]
+    }
+
     fn struct_lit(&self, struct_lit: StructLitId) -> &Option<StructLit> {
         &self.struct_lits[struct_lit]
     }
@@ -270,6 +284,8 @@ pub struct MockTypeProvider<'base> {
     overloads: HashMap<DeclRefId, Vec<Overload>>,
     /// The selected overload for each decl ref
     selected_overloads: HashMap<DeclRefId, Option<DeclId>>,
+    /// The generic arguments for each decl ref
+    generic_arguments: HashMap<DeclRefId, Option<Vec<Type>>>,
     /// Each struct literal matched to a structure
     struct_lits: HashMap<StructLitId, Option<StructLit>>,
     /// The cast method for each cast expression
@@ -331,6 +347,7 @@ impl<'base> MockTypeProvider<'base> {
             types: HashMap::new(),
             overloads: HashMap::new(),
             selected_overloads: HashMap::new(),
+            generic_arguments: HashMap::new(),
             struct_lits: HashMap::new(),
             cast_methods: HashMap::new(),
             constraints: HashMap::new(),
@@ -399,6 +416,7 @@ impl<'base> TypeProvider for MockTypeProvider<'base> {
 
     forward_mock!(overloads, overloads, overloads_mut, DeclRefId, Vec<Overload>);
     forward_mock!(selected_overloads, selected_overload, selected_overload_mut, DeclRefId, Option<DeclId>, deref: deref);
+    forward_mock!(generic_arguments, generic_arguments, generic_arguments_mut, DeclRefId, Option<Vec<Type>>);
     forward_mock!(struct_lits, struct_lit, struct_lit_mut, StructLitId, Option<StructLit>);
     forward_mock!(cast_methods, cast_method, cast_method_mut, CastId, CastMethod, deref: deref);
     forward_mock!(types, ty, ty_mut, ExprId, Type);

@@ -580,7 +580,8 @@ impl Driver {
                         Instr::Br(block) => writeln!(f, "br %bb{}", block.index())?,
                         &Instr::CondBr { condition, true_bb, false_bb }
                             => writeln!(f, "condbr %{}, %bb{}, %bb{}", condition.index(), true_bb.index(), false_bb.index())?,
-                        &Instr::Call { ref arguments, func: callee } => {
+                        // TODO: print generic arguments
+                        &Instr::Call { ref arguments, func: callee, .. } => {
                             write!(f, "%{} = call `{}`", self.display_instr_name(op_id), self.fn_name(self.code.mir_code.functions[callee].name))?;
                             write_args!(arguments)?
                         },
@@ -821,10 +822,11 @@ impl Driver {
 
     fn get(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[OpId; 2]>, decl_ref_id: DeclRefId, tp: &impl TypeProvider) -> Value {
         let id = tp.selected_overload(decl_ref_id).expect("No overload found!");
+        let generic_arguments = tp.generic_arguments(decl_ref_id).as_ref().unwrap_or(&Vec::new()).clone();
         let expr = self.code.hir_code.decl_refs[decl_ref_id].expr;
         let name = format!("{}", self.display_item(id));
         match self.get_decl(id, tp) {
-            Decl::Computed { get } => self.push_instr(b, Instr::Call { arguments, func: get }, expr).direct(),
+            Decl::Computed { get } => self.push_instr(b, Instr::Call { arguments, generic_arguments, func: get }, expr).direct(),
             Decl::Stored(id) => {
                 assert!(arguments.is_empty());
                 b.stored_decl_locs[id].indirect()

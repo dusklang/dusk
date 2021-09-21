@@ -363,7 +363,7 @@ impl tir::Expr<tir::DeclRef> {
         });
         let pref = tp.preferred_overload(self.decl_ref_id);
 
-        let overload = if !overloads.is_empty() {
+        let (overload, generic_arguments) = if !overloads.is_empty() {
             let mut overload = pref.as_ref().cloned()
                 .filter(|overload| overloads.iter().find(|&other| other.decl == overload.decl).is_some())
                 .unwrap_or_else(|| overloads[0].clone());
@@ -399,10 +399,7 @@ impl tir::Expr<tir::DeclRef> {
                 let generic_arg = overload.generic_param_constraints[i].solve().unwrap().ty;
                 generic_args.push(generic_arg);
             }
-            if !generic_args.is_empty() {
-                dbg!(generic_args);
-            }
-            Some(overload)
+            (Some(overload), Some(generic_args))
         } else {
             driver.errors.push(
                 Error::new("no matching overload for declaration")
@@ -411,11 +408,12 @@ impl tir::Expr<tir::DeclRef> {
             for &arg in &self.args {
                 tp.constraints_mut(arg).set_to(Type::Error);
             }
-            None
+            (None, None)
         };
 
         *tp.overloads_mut(self.decl_ref_id) = overloads;
         *tp.selected_overload_mut(self.decl_ref_id) = overload.map(|overload| overload.decl);
+        *tp.generic_arguments_mut(self.decl_ref_id) = generic_arguments;
     }
 }
 

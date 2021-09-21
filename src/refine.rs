@@ -845,7 +845,7 @@ impl Driver {
                 );
                 ret_val = Some(val)
             },
-            &Instr::Call { ref arguments, func } => {
+            &Instr::Call { ref arguments, func, .. } => {
                 // Thanks borrow checker. :(
                 let arguments = arguments.clone();
                 self.refine_func(&FunctionRef::Id(func), tp);
