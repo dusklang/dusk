@@ -20,14 +20,8 @@ fn append(self: Array *mut, element: T) {
     if (*self).length >= (*self).capacity {
         if (*self).capacity == 0 {
             (*self).capacity = INITIAL_CAPACITY
-
-            // TODO: there is a MIR bug that necessitates this being here
-            nothing := 0
         } else {
             (*self).capacity = (*self).capacity * 2
-
-            // TODO: there is a MIR bug that necessitates this being here
-            nothing := 0
         }
         new_buffer :: malloc((*self).capacity * size_of(T)) as T *mut
         std.memcpy(new_buffer, (*self).data, (*self).length)
@@ -35,17 +29,11 @@ fn append(self: Array *mut, element: T) {
             free((*self).data as void *mut)
         }
         (*self).data = new_buffer
-
-        // TODO: there is a MIR bug that necessitates this being here
-        nothing := 0
     }
 
     addr :: ((*self).data as usize + (*self).length * size_of(T)) as T *mut
     (*addr = element)
     (*self).length = (*self).length + 1
-
-    // TODO: there is a MIR bug that necessitates this being here
-    nothing := 0
 }
 
 std :: import("std.meda")

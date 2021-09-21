@@ -105,6 +105,7 @@ enum ControlDest {
     Continue,
     Unreachable,
     Block(BlockId),
+    RetVoid,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -134,6 +135,15 @@ impl Context {
                 (x, _) => x.clone(),
             }
         )
+    }
+
+    fn new_data_dest(&self, data: DataDest) -> Context {
+        if let DataDest::Ret = self.data {
+            assert!(matches!(self.control, ControlDest::Unreachable));
+            Context::new(self.indirection, data, ControlDest::RetVoid)
+        } else {
+            Context::new(self.indirection, data, self.control)
+        }
     }
 }
 
@@ -912,12 +922,13 @@ impl Driver {
                 let name = format!("{}", self.fmt_const_for_instr_name(&konst));
                 self.push_instr_with_name(b, Instr::Const(konst), expr, name).direct()
             },
-            Expr::Set { lhs, rhs } => return self.build_expr(
+            Expr::Set { lhs, rhs } => {
+                return self.build_expr(
                 b,
                 rhs,
-                Context::new(ctx.indirection, DataDest::Set { dest: lhs }, ctx.control),
+                ctx.new_data_dest(DataDest::Set { dest: lhs }),
                 tp,
-            ),
+            )},
             // This isn't really a loop! It's just a control flow hack to get around the fact
             // that you can't chain `if let`s in Rust.
             Expr::DeclRef { ref arguments, id } => loop {
@@ -1206,7 +1217,7 @@ impl Driver {
                 let test_bb = self.create_bb(b);
                 let loop_bb = self.create_bb(b);
                 let post_bb = match ctx.control {
-                    ControlDest::Continue | ControlDest::Unreachable => self.create_bb(b),
+                    ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid => self.create_bb(b),
                     ControlDest::Block(block) => block,
                 };
 
@@ -1219,7 +1230,7 @@ impl Driver {
                 self.build_scope(b, scope, Context::new(0, DataDest::Void, ControlDest::Block(test_bb)), tp);
 
                 match ctx.control {
-                    ControlDest::Continue | ControlDest::Unreachable => {
+                    ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid => {
                         self.start_bb(b, post_bb);
                         VOID_INSTR.direct()
                     },
@@ -1268,6 +1279,11 @@ impl Driver {
                 val
             },
             ControlDest::Continue => val,
+            ControlDest::RetVoid => {
+                let val = self.push_instr(b, Instr::Ret(VOID_INSTR), val.instr).direct();
+                self.end_current_bb(b);
+                val
+            },
             ControlDest::Unreachable => VOID_INSTR.direct(),
         }
     }
