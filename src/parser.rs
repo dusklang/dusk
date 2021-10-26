@@ -559,6 +559,27 @@ enum AmbiguousGenericListKind {
     Arguments(Vec<ExprId>),
 }
 
+/// This exists because when we see the following tokens:
+/// ```meda
+///     ident[
+/// ```
+/// 
+/// There's no way to tell if it is the start of a generic constant, like this:
+/// ```meda
+///     Array[Element] :: struct { ... }
+/// ```
+/// 
+/// Or the start of a generic decl ref with explicit arguments, like this:
+/// ```meda
+///     Array[u8]
+/// ```
+/// 
+/// Through the process of parsing the generic list, we may come across tokens
+/// that make it clear it could only be one of the two possibilities, or we
+/// may not. So, there needs to be a way to store elements of the generic list
+/// without altering the HIR state until we know for sure what kind of list we're
+/// dealing with. Once we do, we need to convert the "ambiguous" elements into the
+/// proper format (either generic parameters or generic arguments).
 struct AmbiguousGenericList {
     kind: AmbiguousGenericListKind,
     /// Range from the opening square bracket to the closing one (or the last included token,
