@@ -119,7 +119,7 @@ impl Driver {
                             .adding_primary_range(self.cur(&p).range, "brace here")
                     );
                 },
-                _ => { self.parse_node(&mut p); }
+                _ => { self.parse_item(&mut p); }
             }
         }
     }
@@ -539,8 +539,8 @@ impl Driver {
         Attribute { attr, arg, range }
     }
 
-    /// Parses any node. Iff the node is an expression, returns its ExprId.
-    fn parse_node(&mut self, p: &mut Parser) -> Item {
+    /// Parses any item. Used at the top-level, in modules, and within computed declaration scopes.
+    fn parse_item(&mut self, p: &mut Parser) -> Item {
         match self.cur(p).kind {
             &TokenKind::Ident(name) => {
                 if let TokenKind::Colon = self.peek_next(p).kind {
@@ -566,7 +566,7 @@ impl Driver {
                     attributes.push(attr);
                     if self.cur(p).kind != &TokenKind::AtSign {
                         self.end_condition_namespace(condition_ns);
-                        match self.parse_node(p) {
+                        match self.parse_item(p) {
                             Item::Decl(decl) => break decl,
                             Item::Expr(_) => panic!("Attributes on expressions are unsupported!"),
                         }
@@ -634,7 +634,8 @@ impl Driver {
                     break close_curly_range;
                 },
                 _ => {
-                    if let Item::Expr(expr) = self.parse_node(p) {
+                    let item = self.parse_item(p);
+                    if let Item::Expr(expr) = item {
                         self.errors.push(
                             Error::new("expressions are not allowed in the top-level of a module")
                                 .adding_primary_range(self.get_range(expr), "delet this")
@@ -683,7 +684,7 @@ impl Driver {
         self.strukt(fields, source_info::concat(struct_range, close_curly_range))
     }
 
-    // Parses an open curly brace, then a list of nodes, then a closing curly brace.
+    // Parses an open curly brace, then a list of Items, then a closing curly brace.
     fn parse_scope(&mut self, p: &mut Parser) -> (ImperScopeId, SourceRange) {
         let scope = self.begin_imper_scope();
         let mut last_was_expr = false;
@@ -700,10 +701,10 @@ impl Driver {
                     break close_curly_range;
                 },
                 _ => {
-                    let node = self.parse_node(p);
+                    let item = self.parse_item(p);
 
-                    // If the node was a standalone expression, make it a statement
-                    if let Item::Expr(expr) = node {
+                    // If the item was a standalone expression, make it a statement
+                    if let Item::Expr(expr) = item {
                         last_was_expr = true;
                         self.stmt(expr);
                     } else {
@@ -717,6 +718,7 @@ impl Driver {
     }
 
     fn parse_comp_decl(&mut self, p: &mut Parser) -> DeclId {
+        // Parse fn {name}
         assert_eq!(self.cur(p).kind, &TokenKind::Fn);
         let mut proto_range = self.cur(p).range;
         let name = if let TokenKind::Ident(name) = *self.next(p).kind {
@@ -727,6 +729,7 @@ impl Driver {
         let name_range = self.cur(p).range;
         proto_range = source_info::concat(proto_range, name_range);
 
+        // Parse optional [T, U, V, ...]
         let mut generic_param_names = SmallVec::new();
         let mut generic_params = GenericParamId::new(0)..GenericParamId::new(0);
         let mut generic_param_ranges = SmallVec::new();
@@ -759,6 +762,7 @@ impl Driver {
             self.next(p);
         }
 
+        // Parse (param_name: param_ty, param2_name: param2_ty, ...)
         let mut param_names = SmallVec::new();
         let mut param_tys = SmallVec::new();
         let mut param_ranges = SmallVec::new();
@@ -794,6 +798,7 @@ impl Driver {
             );
             None
         };
+        // Parse ": ty", "= val" or "{"
         let ty = match self.cur(p).kind {
             TokenKind::Colon => {
                 self.next(p);
