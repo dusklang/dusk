@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use smallvec::{SmallVec, smallvec};
 
 use string_interner::DefaultSymbol as Sym;
@@ -539,10 +541,111 @@ impl Driver {
         Attribute { attr, arg, range }
     }
 
+}
+
+struct Ident {
+    symbol: Sym,
+    range: SourceRange,
+}
+
+enum AmbiguousGenericListKind {
+    Ambiguous(Vec<Ident>),
+    // TODO: switch to AOS (array of structures) for stuff like this
+    Params {
+        params: Range<GenericParamId>,
+        param_names: Vec<Sym>,
+        param_ranges: Vec<SourceRange>,
+    },
+    Arguments(Vec<ExprId>),
+}
+
+struct AmbiguousGenericList {
+    kind: AmbiguousGenericListKind,
+    /// Range from the opening square bracket to the closing one (or the last included token,
+    /// if there was a parse error) 
+    range: SourceRange,
+}
+
+impl Driver {
+    fn parse_ambiguous_generic_list(&mut self, p: &mut Parser) -> AmbiguousGenericList {
+        assert!(matches!(self.cur(p).kind, TokenKind::OpenSquareBracket));
+        let open_square_bracket_range = self.cur(p).range;
+        self.next(p);
+
+        let mut list = AmbiguousGenericList {
+            kind: AmbiguousGenericListKind::Ambiguous(Vec::new()),
+            range: open_square_bracket_range
+        };
+
+        loop {
+            match &mut list.kind {
+                AmbiguousGenericListKind::Ambiguous(idents) => {
+                    if let &TokenKind::Ident(symbol) = self.cur(p).kind {
+                        if matches!(self.peek_next(p).kind, TokenKind::Comma) || matches!(self.peek_next(p).kind, TokenKind::CloseSquareBracket) {
+                            // Still ambiguous; just an identifier
+                            let range = self.cur(p).range;
+                            idents.push(Ident { symbol, range  });
+                            list.range = source_info::concat(list.range, range);
+                            self.next(p);
+                        } else {
+                            // Assumption: we are now dealing with an argument. So, convert all the
+                            // previous arguments to expressions and then let the next iteration of
+                            // this loop handle it.
+                            let mut arguments = Vec::new();
+                            for ident in idents {
+                                let ty = self.decl_ref(None, ident.symbol, SmallVec::new(), false, ident.range);
+                                arguments.push(ty);
+                            }
+                            list.kind = AmbiguousGenericListKind::Arguments(arguments);
+                        }
+                    } else {
+                        todo!();
+                    }
+                },
+                AmbiguousGenericListKind::Params { param_names, params, param_ranges } => {
+                    while let TokenKind::Ident(name) = *self.cur(p).kind {
+                        // Claim a GenericParamId for yourself, then set the `end` value to be one past the end
+                        let generic_param = self.hir.generic_params.next();
+                        // Make sure nobody interrupts this loop and creates an unrelated generic param
+                        debug_assert_eq!(params.end, generic_param);
+                        params.end = generic_param + 1;
+        
+                        let param_range = self.cur(p).range;
+                        param_names.push(name);
+                        self.next(p);
+                        param_ranges.push(param_range);
+                        while let TokenKind::Comma = self.cur(p).kind {
+                            self.next(p);
+                        }
+                    }
+                    break;
+                },
+                AmbiguousGenericListKind::Arguments(args) => {
+                    todo!();
+                }
+            }
+        }
+
+        // self.errors.push(
+        //     Error::new("expected at least one parameter in generic parameter list")
+        //         .adding_primary_range(open_square_bracket_range, "list starts here")
+        // );
+
+        assert_eq!(self.cur(p).kind, &TokenKind::CloseSquareBracket);
+        list.range = source_info::concat(list.range, self.cur(p).range);
+        self.next(p);
+
+        list
+    }
+
     /// Parses any item. Used at the top-level, in modules, and within computed declaration scopes.
     fn parse_item(&mut self, p: &mut Parser) -> Item {
         match self.cur(p).kind {
             &TokenKind::Ident(name) => {
+                if let TokenKind::OpenSquareBracket = self.peek_next(p).kind {
+                    let list = self.parse_ambiguous_generic_list(p);
+                    todo!();
+                }
                 if let TokenKind::Colon = self.peek_next(p).kind {
                     let decl = self.parse_decl(name, p);
                     Item::Decl(decl)
@@ -741,6 +844,8 @@ impl Driver {
                 while let TokenKind::Ident(name) = *self.cur(p).kind {
                     // Claim a GenericParamId for yourself, then set the `end` value to be one past the end
                     let generic_param = self.hir.generic_params.next();
+                    // Make sure nobody interrupts this loop and creates an unrelated generic param
+                    debug_assert_eq!(generic_params.end, generic_param);
                     generic_params.end = generic_param + 1;
 
                     let param_range = self.cur(p).range;
@@ -832,15 +937,19 @@ impl Driver {
         decl_id
     }
 
-    fn parse_type(&mut self, p: &mut Parser) -> (ExprId, SourceRange) {
+    fn try_parse_type(&mut self, p: &mut Parser) -> Option<(ExprId, SourceRange)> {
         // This is a term and not an expression because assignments are valid expressions.
         //     For example: `foo: SomeType = ...` <- the parser would think you were assigning `...` to `SomeType` and
         //     taking the `void` result of that assignment as the type of variable declaration `foo`
         // TODO: add statements as a slight superset of expressions which includes assignments.
-        let ty = self.try_parse_restricted_term(p).unwrap();
-        let range = self.get_range(ty);
+        self.try_parse_restricted_term(p)
+            .ok()
+            .map(|ty| (ty, self.get_range(ty)))
+    }
 
-        (ty, range)
+    fn parse_type(&mut self, p: &mut Parser) -> (ExprId, SourceRange) {
+        // TODO: report errors
+        self.try_parse_type(p).unwrap()
     }
 
     fn cur(&self, p: &Parser) -> Token {
