@@ -3,7 +3,7 @@ MyGenericType[T] :: struct {
     //generic_member: T
 }
 
-//DeGenericized :: MyGenericType[u64]
+DeGenericized :: MyGenericType[u64]
 
 fn main() {
     print("Hello, generics!")

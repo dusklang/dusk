@@ -17,6 +17,7 @@ use crate::source_info::ToSourceRange;
 
 // TODO: switch to AOS here
 // TODO: move to mire, perhaps
+#[derive(Debug)]
 pub struct GenericParamList {
     pub names: SmallVec<[Sym; 1]>,
     pub ids: Range<GenericParamId>,

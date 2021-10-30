@@ -285,10 +285,29 @@ impl Driver {
         } else {
             name_range
         };
+        if let TokenKind::OpenSquareBracket = self.next(p).kind {
+            self.next(p);
+            let mut args = Vec::new();
+            loop {
+                // TODO: actually implement proper comma and newline handling like I've thought about
+                let Token { kind, range } = self.cur(p);
+                match kind {
+                    TokenKind::CloseSquareBracket => {
+                        self.next(p);
+                        break;
+                    }
+                    TokenKind::Comma => { self.next(p); }
+                    TokenKind::Eof => {
+                        panic!("Reached eof in middle of generic argument list");
+                    }
+                    _ => { args.push(self.parse_expr(p)); }
+                }
+            }
+        }
         let mut args = SmallVec::new();
         let mut end_range = name_range;
         let mut has_parens = false;
-        if let TokenKind::LeftParen = self.next(p).kind {
+        if let TokenKind::LeftParen = self.cur(p).kind {
             has_parens = true;
             self.next(p);
             loop {
