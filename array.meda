@@ -2,6 +2,8 @@ T :: usize
 
 INITIAL_CAPACITY :: 10 as usize
 
+std :: import("std.meda")
+
 Array :: struct {
     data: T *mut
     capacity: usize
@@ -35,8 +37,6 @@ fn append(self: Array *mut, element: T) {
     (*addr = element)
     (*self).length = (*self).length + 1
 }
-
-std :: import("std.meda")
 
 fn index(self: Array*, index: usize): T {
     std.assert(index < (*self).length)
