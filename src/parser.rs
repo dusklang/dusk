@@ -1,5 +1,3 @@
-use std::ops::Range;
-
 use smallvec::{SmallVec, smallvec};
 
 use string_interner::DefaultSymbol as Sym;
@@ -9,7 +7,7 @@ use mire::ty::Type;
 use mire::source_info::{self, SourceFileId, SourceRange};
 
 use crate::driver::Driver;
-use crate::hir::ConditionKind;
+use crate::hir::{ConditionKind, GenericParamList};
 use crate::token::{TokenKind, Token};
 use crate::builder::{BinOp, UnOp, OpPlacement};
 use crate::error::Error;
@@ -207,7 +205,7 @@ impl Driver {
         if placement.contains(OpPlacement::PREFIX) {
             debug_assert!(
                 placement.contains(OpPlacement::INFIX),
-                "Operators that can be prefix and postfix but not infix are not supported! See https://github.com/zachrwolfe/meda/issues/14"
+                "Operators that can be prefix and postfix but not infix are not supported. See https://github.com/zachrwolfe/meda/issues/14"
             );
             let rhs_whitespace = !self.peek_next_including_insignificant(p).kind.could_begin_expression();
             if lhs_whitespace || !rhs_whitespace { return None; }
@@ -543,19 +541,15 @@ impl Driver {
 
 }
 
+#[derive(Debug)]
 struct Ident {
     symbol: Sym,
     range: SourceRange,
 }
 
+#[derive(Debug)]
 enum AmbiguousGenericListKind {
     Ambiguous(Vec<Ident>),
-    // TODO: switch to AOS (array of structures) for stuff like this
-    Params {
-        params: Range<GenericParamId>,
-        param_names: Vec<Sym>,
-        param_ranges: Vec<SourceRange>,
-    },
     Arguments(Vec<ExprId>),
 }
 
@@ -580,6 +574,7 @@ enum AmbiguousGenericListKind {
 /// without altering the HIR state until we know for sure what kind of list we're
 /// dealing with. Once we do, we need to convert the "ambiguous" elements into the
 /// proper format (either generic parameters or generic arguments).
+#[derive(Debug)]
 struct AmbiguousGenericList {
     kind: AmbiguousGenericListKind,
     /// Range from the opening square bracket to the closing one (or the last included token,
@@ -588,6 +583,32 @@ struct AmbiguousGenericList {
 }
 
 impl Driver {
+    fn convert_ambiguous_generic_list_to_arguments(&mut self, idents: &Vec<Ident>) -> Vec<ExprId> {
+        let mut arguments = Vec::new();
+        for ident in idents {
+            let ty = self.decl_ref(None, ident.symbol, SmallVec::new(), false, ident.range);
+            arguments.push(ty);
+        }
+        arguments
+    }
+
+    fn convert_ambiguous_generic_list_to_params(&mut self, idents: &Vec<Ident>) -> GenericParamList {
+        let mut generic_params = GenericParamList::default();
+        generic_params.ids.start = self.hir.generic_params.peek_next();
+        for ident in idents {
+            // Claim a GenericParamId for yourself, then set the `end` value to be one past the end
+            let generic_param = self.hir.generic_params.next();
+            // Make sure nobody interrupts this loop and creates an unrelated generic param
+            debug_assert_eq!(generic_params.ids.end, generic_param);
+            generic_params.ids.end = generic_param + 1;
+
+            generic_params.names.push(ident.symbol);
+            generic_params.ranges.push(ident.range);
+        }
+
+        generic_params
+    }
+
     fn parse_ambiguous_generic_list(&mut self, p: &mut Parser) -> AmbiguousGenericList {
         assert!(matches!(self.cur(p).kind, TokenKind::OpenSquareBracket));
         let open_square_bracket_range = self.cur(p).range;
@@ -608,49 +629,37 @@ impl Driver {
                             idents.push(Ident { symbol, range  });
                             list.range = source_info::concat(list.range, range);
                             self.next(p);
-                        } else {
-                            // Assumption: we are now dealing with an argument. So, convert all the
-                            // previous arguments to expressions and then let the next iteration of
-                            // this loop handle it.
-                            let mut arguments = Vec::new();
-                            for ident in idents {
-                                let ty = self.decl_ref(None, ident.symbol, SmallVec::new(), false, ident.range);
-                                arguments.push(ty);
+                            while let TokenKind::Comma = self.cur(p).kind {
+                                list.range = source_info::concat(list.range, self.cur(p).range);
+                                self.next(p);
                             }
-                            list.kind = AmbiguousGenericListKind::Arguments(arguments);
+                            if let TokenKind::CloseSquareBracket = self.cur(p).kind {
+                                break;
+                            }
+                        } else {
+                            // Convert all previous items into expressions and let the next iteration loop handle the current item
+                            let args = self.convert_ambiguous_generic_list_to_arguments(idents);
+                            list.kind = AmbiguousGenericListKind::Arguments(args);
                         }
                     } else {
-                        todo!();
+                        // Convert all previous items into expressions and let the next iteration loop handle the current item
+                        let args = self.convert_ambiguous_generic_list_to_arguments(idents);
+                        list.kind = AmbiguousGenericListKind::Arguments(args);
                     }
-                },
-                AmbiguousGenericListKind::Params { param_names, params, param_ranges } => {
-                    while let TokenKind::Ident(name) = *self.cur(p).kind {
-                        // Claim a GenericParamId for yourself, then set the `end` value to be one past the end
-                        let generic_param = self.hir.generic_params.next();
-                        // Make sure nobody interrupts this loop and creates an unrelated generic param
-                        debug_assert_eq!(params.end, generic_param);
-                        params.end = generic_param + 1;
-        
-                        let param_range = self.cur(p).range;
-                        param_names.push(name);
-                        self.next(p);
-                        param_ranges.push(param_range);
-                        while let TokenKind::Comma = self.cur(p).kind {
-                            self.next(p);
-                        }
-                    }
-                    break;
                 },
                 AmbiguousGenericListKind::Arguments(args) => {
-                    todo!();
+                    let arg = self.parse_expr(p);
+                    args.push(arg);
+                    while let TokenKind::Comma = self.cur(p).kind {
+                        list.range = source_info::concat(list.range, self.cur(p).range);
+                        self.next(p);
+                    }
+                    if let TokenKind::CloseSquareBracket = self.cur(p).kind {
+                        break;
+                    }
                 }
             }
         }
-
-        // self.errors.push(
-        //     Error::new("expected at least one parameter in generic parameter list")
-        //         .adding_primary_range(open_square_bracket_range, "list starts here")
-        // );
 
         assert_eq!(self.cur(p).kind, &TokenKind::CloseSquareBracket);
         list.range = source_info::concat(list.range, self.cur(p).range);
@@ -663,12 +672,30 @@ impl Driver {
     fn parse_item(&mut self, p: &mut Parser) -> Item {
         match self.cur(p).kind {
             &TokenKind::Ident(name) => {
+                let name = Ident { symbol: name, range: self.cur(p).range };
                 if let TokenKind::OpenSquareBracket = self.peek_next(p).kind {
+                    self.next(p);
                     let list = self.parse_ambiguous_generic_list(p);
-                    todo!();
-                }
-                if let TokenKind::Colon = self.peek_next(p).kind {
-                    let decl = self.parse_decl(name, p);
+                    if let TokenKind::Colon = self.peek_next(p).kind {
+                        let params = match list.kind {
+                            AmbiguousGenericListKind::Ambiguous(idents) =>
+                                self.convert_ambiguous_generic_list_to_params(&idents),
+                            AmbiguousGenericListKind::Arguments(_args) => {
+                                self.errors.push(
+                                    Error::new("invalid syntax in generic parameter list")
+                                        .adding_primary_range(list.range, "expected comma-separated list of identifiers")
+                                );
+                                GenericParamList::default()
+                            }
+                        };
+                        let decl = self.parse_decl(name, params, p);
+                        Item::Decl(decl)
+                    } else {
+                        todo!("explicit generic arguments at the top-level scope are not yet supported");
+                    }
+                } else if let TokenKind::Colon = self.peek_next(p).kind {
+                    self.next(p);
+                    let decl = self.parse_decl(name, GenericParamList::default(), p);
                     Item::Decl(decl)
                 } else {
                     let expr = self.parse_expr(p);
@@ -708,10 +735,9 @@ impl Driver {
         }
     }
 
-    fn parse_decl(&mut self, name: Sym, p: &mut Parser) -> DeclId {
-        let name_range = self.cur(p).range;
-        // Skip to colon, get range.
-        let colon_range = self.next(p).range;
+    fn parse_decl(&mut self, name: Ident, generic_params: GenericParamList, p: &mut Parser) -> DeclId {
+        assert!(matches!(self.cur(p).kind, TokenKind::Colon));
+        let colon_range = self.cur(p).range;
         let mut found_separator = true;
         let explicit_ty = match self.next(p).kind {
             TokenKind::Ident(_) => Some(self.parse_type(p).0),
@@ -737,7 +763,7 @@ impl Driver {
 
         let root = self.parse_expr(p);
         let _root_range = self.get_range(root);
-        self.stored_decl(name, explicit_ty, is_mut, root, name_range)
+        self.stored_decl(name.symbol, generic_params, explicit_ty, is_mut, root, name.range)
     }
 
     fn parse_module(&mut self, p: &mut Parser) -> ExprId {

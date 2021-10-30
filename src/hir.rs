@@ -15,6 +15,24 @@ use crate::index_vec::*;
 use crate::builder::{BinOp, UnOp};
 use crate::source_info::ToSourceRange;
 
+// TODO: switch to AOS here
+// TODO: move to mire, perhaps
+pub struct GenericParamList {
+    pub names: SmallVec<[Sym; 1]>,
+    pub ids: Range<GenericParamId>,
+    pub ranges: SmallVec<[SourceRange; 1]>,
+}
+
+impl Default for GenericParamList {
+    fn default() -> Self {
+        Self {
+            names: SmallVec::new(),
+            ids: GenericParamId::new(0)..GenericParamId::new(0),
+            ranges: SmallVec::new(),
+        }
+    }
+}
+
 #[derive(Debug)]
 enum ScopeState {
     Imper {
@@ -131,7 +149,7 @@ impl Driver {
         let cast_id = self.code.hir_code.cast_counter.next();
         self.push_expr(Expr::Cast { expr, ty, cast_id }, range)
     }
-    pub fn stored_decl(&mut self, name: Sym, explicit_ty: Option<ExprId>, is_mut: bool, root_expr: ExprId, range: SourceRange) -> DeclId {
+    pub fn stored_decl(&mut self, name: Sym, generic_params: GenericParamList, explicit_ty: Option<ExprId>, is_mut: bool, root_expr: ExprId, range: SourceRange) -> DeclId {
         self.flush_stmt_buffer();
         match self.hir.scope_stack.last().unwrap() {
             ScopeState::Imper { .. } => {

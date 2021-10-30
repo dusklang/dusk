@@ -1,0 +1,10 @@
+MyGenericType[T] :: struct {
+    non_generic_member: u32
+    //generic_member: T
+}
+
+//DeGenericized :: MyGenericType[u64]
+
+fn main() {
+    print("Hello, generics!")
+}
