@@ -1,5 +1,5 @@
-std :: import("std.meda")
-HelloWorld :: import("HelloWorld.meda")
+std :: import("std.dusk")
+HelloWorld :: import("HelloWorld.dusk")
 
 fn do_something_cool() {
     print("\nDoint somethin cool!\n")

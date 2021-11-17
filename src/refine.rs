@@ -9,14 +9,14 @@ use display_adapter::display_adapter;
 use string_interner::DefaultSymbol as Sym;
 use num_bigint::BigInt;
 
-use mire::{BlockId, OpId};
-use mire::mir::{Const, Function, FuncId, Instr};
-use mire::ty::{Type, IntWidth};
-use mire::hir::{Intrinsic, Expr, Decl, ExprId};
+use dir::{BlockId, OpId};
+use dir::dil::{Const, Function, FuncId, Instr};
+use dir::ty::{Type, IntWidth};
+use dir::hir::{Intrinsic, Expr, Decl, ExprId};
 
 use crate::typechecker::type_provider::TypeProvider;
 use crate::interpreter::Value;
-use crate::mir::{FunctionRef, function_by_ref};
+use crate::dil::{FunctionRef, function_by_ref};
 use crate::driver::Driver;
 
 // TODO: Switch to another smt crate, or write my own.
@@ -610,7 +610,7 @@ impl Driver {
 
             let block = &self.code.blocks[block_id];
             let terminal = block.ops.last().copied().unwrap();
-            let terminal = self.code.ops[terminal].as_mir_instr().unwrap();
+            let terminal = self.code.ops[terminal].as_dil_instr().unwrap();
             let is_leaf = match terminal {
                 Instr::Br(block) => leaves.contains(block),
                 Instr::CondBr { true_bb, false_bb, .. } => leaves.contains(true_bb) && leaves.contains(false_bb),
@@ -632,7 +632,7 @@ impl Driver {
     }
 
     pub fn refine(&mut self, tp: &impl TypeProvider) {
-        for func_id in self.code.mir_code.functions.indices() {
+        for func_id in self.code.dil_code.functions.indices() {
             self.refine_func(&FunctionRef::Id(func_id), tp);
         }
     }
@@ -761,7 +761,7 @@ impl Driver {
     }
 
     fn constrain_op(&mut self, op: OpId, tp: &impl TypeProvider, explicit_guarantees: &HashSet<Constraint>) -> Constraints {
-        let instr = self.code.ops[op].as_mir_instr().unwrap();
+        let instr = self.code.ops[op].as_dil_instr().unwrap();
         let mut requirements = Vec::<Constraint>::new();
         let mut guarantees = Vec::<Constraint>::new();
         let mut ret_val = None;
@@ -918,7 +918,7 @@ impl Driver {
             if self.refine.constraints.get(id).is_some() { return; }
         }
 
-        let func = function_by_ref(&self.code.mir_code, &func_ref);
+        let func = function_by_ref(&self.code.dil_code, &func_ref);
         let func_name = func.name;
         self.check_no_loops(func);
         assert_eq!(func.blocks.len(), 1, "Function has more than one block, which isn't yet supported");

@@ -7,36 +7,36 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug executable 'meda'",
+            "name": "Debug executable 'dusk'",
             "cargo": {
                 "args": [
                     "build",
-                    "--bin=meda",
-                    "--package=meda"
+                    "--bin=dusk",
+                    "--package=dusk"
                 ],
                 "filter": {
-                    "name": "meda",
+                    "name": "dusk",
                     "kind": "bin"
                 }
             },
             "args": [
-                "generics.meda"
+                "generics.dusk"
             ],
             "cwd": "${workspaceFolder}"
         },
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests in executable 'meda'",
+            "name": "Debug unit tests in executable 'dusk'",
             "cargo": {
                 "args": [
                     "test",
                     "--no-run",
-                    "--bin=meda",
-                    "--package=meda"
+                    "--bin=dusk",
+                    "--package=dusk"
                 ],
                 "filter": {
-                    "name": "meda",
+                    "name": "dusk",
                     "kind": "bin"
                 }
             },

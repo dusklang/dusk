@@ -1,4 +1,4 @@
-std :: import("std.meda")
+std :: import("std.dusk")
 str :: std.str
 
 fn fib(n: i32): i32 {
@@ -138,7 +138,7 @@ fn main() {
 
     compute_a_module(1 + 1).print_the_switch()
 
-    import("other_file.meda").do_something_cool()
+    import("other_file.dusk").do_something_cool()
 
     fs.read_file("GGGGGGGGGGGGGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHHHHHHHHHHHHHHH.txt")
 

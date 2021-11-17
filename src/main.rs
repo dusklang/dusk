@@ -1,9 +1,9 @@
 use clap::Clap;
 use std::path::PathBuf;
 
-use mire::ty::Type;
-use mire::mir::FuncId;
-use mire::arch::Arch;
+use dir::ty::Type;
+use dir::dil::FuncId;
+use dir::arch::Arch;
 
 mod dep_vec;
 #[macro_use]
@@ -16,7 +16,7 @@ mod builder;
 mod parser;
 mod tir;
 mod hir;
-mod mir;
+mod dil;
 mod ty;
 mod driver;
 mod typechecker;
@@ -24,7 +24,7 @@ mod interpreter;
 mod refine;
 
 use interpreter::InterpMode;
-use mir::FunctionRef;
+use dil::FunctionRef;
 use driver::Driver;
 use source_info::SourceMap;
 
@@ -41,13 +41,13 @@ enum StopPhase {
     Parse,
     Tir,
     Typecheck,
-    Mir,
+    Dil,
     Refine,
     Interp,
 }
 
 #[derive(Clap, Debug)]
-#[clap(name = "meda")]
+#[clap(name = "dusk")]
 struct Opt {
     /// Output per-level typechecking diffs
     #[clap(short='d', long)]
@@ -57,9 +57,9 @@ struct Opt {
     #[clap(arg_enum, short='g', long, case_insensitive = true)]
     tir_output: Option<TirGraphOutput>,
 
-    /// Output MIR in textual format
+    /// Output DIL in textual format
     #[clap(short='m', long)]
-    output_mir: bool,
+    output_dil: bool,
 
     /// Run the refinement checker
     #[clap(short='r', long)]
@@ -109,11 +109,11 @@ fn main() {
     driver.flush_errors();
     if driver.check_for_failure() { return; }
 
-    begin_phase!(Mir);
-    driver.build_mir(&tp);
+    begin_phase!(Dil);
+    driver.build_dil(&tp);
     
-    if opt.output_mir {
-        println!("{}", driver.display_mir());
+    if opt.output_dil {
+        println!("{}", driver.display_dil());
     }
 
     begin_phase!(Refine);
@@ -123,7 +123,7 @@ fn main() {
 
     begin_phase!(Interp);
     let main_sym = driver.interner.get_or_intern_static("main");
-    let main = driver.code.mir_code.functions.iter()
+    let main = driver.code.dil_code.functions.iter()
         .position(|func| {
             match func.name {
                 Some(name) => name == main_sym && func.ret_ty == Type::Void && driver.code.num_parameters(func) == 0,

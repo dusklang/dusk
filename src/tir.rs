@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use smallvec::SmallVec;
 use index_vec::define_index_type;
 
-use mire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId, GenericParamId, RETURN_VALUE_DECL};
+use dir::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId, GenericParamId, RETURN_VALUE_DECL};
 
 use crate::driver::Driver;
 use crate::dep_vec::{self, DepVec, AnyDepVec};
@@ -347,7 +347,7 @@ impl Driver {
 
     /// IMPORTANT NOTE: When/if we stop adding type3 deps to all items in a function's scope,
     /// we will need to bring back the original idea of meta-dependencies:
-    /// https://github.com/meda-lang/meda/issues/58
+    /// https://github.com/dusk-lang/dusk/issues/58
     fn add_type3_scope_dep(&mut self, a: ItemId, b: ImperScopeId) {
         let block = self.code.hir_code.imper_scopes[b].block;
         for &op in &self.code.blocks[block].ops {

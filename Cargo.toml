@@ -1,5 +1,5 @@
 [package]
-name = "meda"
+name = "dusk"
 version = "0.1.0"
 authors = ["Zach <zachrwolfe@me.com>"]
 edition = "2018"
@@ -21,5 +21,5 @@ num-bigint = "0.3"
 index_vec = "0.1.2"
 indenter = "0.3.2"
 rsmt2 = "0.11.0"
-mire = { path = "../mire/" }
+dir = { path = "../dir/" }
 display_adapter = { path = "../display_adapter/display_adapter" }

@@ -7,9 +7,9 @@ use std::io;
 use std::collections::HashMap;
 use std::ops::Range;
 
-use mire::hir::{ExprId, DeclId, ItemId, Item};
-use mire::OpId;
-use mire::source_info::{SourceRange, SourceFileId};
+use dir::hir::{ExprId, DeclId, ItemId, Item};
+use dir::OpId;
+use dir::source_info::{SourceRange, SourceFileId};
 
 use crate::driver::Driver;
 use crate::index_vec::*;

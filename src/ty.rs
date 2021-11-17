@@ -1,7 +1,7 @@
 use arrayvec::ArrayVec;
 use bitflags::bitflags;
 
-use mire::ty::{Type, IntWidth};
+use dir::ty::{Type, IntWidth};
 
 bitflags! {
     #[derive(Default)]

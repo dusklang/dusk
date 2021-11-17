@@ -2,9 +2,9 @@ use smallvec::{SmallVec, smallvec};
 
 use string_interner::DefaultSymbol as Sym;
 
-use mire::hir::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment, GenericParamId};
-use mire::ty::Type;
-use mire::source_info::{self, SourceFileId, SourceRange};
+use dir::hir::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment, GenericParamId};
+use dir::ty::Type;
+use dir::source_info::{self, SourceFileId, SourceRange};
 
 use crate::driver::Driver;
 use crate::hir::{ConditionKind, GenericParamList};
@@ -205,7 +205,7 @@ impl Driver {
         if placement.contains(OpPlacement::PREFIX) {
             debug_assert!(
                 placement.contains(OpPlacement::INFIX),
-                "Operators that can be prefix and postfix but not infix are not supported. See https://github.com/zachrwolfe/meda/issues/14"
+                "Operators that can be prefix and postfix but not infix are not supported. See https://github.com/dusk-lang/dusk/issues/14"
             );
             let rhs_whitespace = !self.peek_next_including_insignificant(p).kind.could_begin_expression();
             if lhs_whitespace || !rhs_whitespace { return None; }
@@ -573,17 +573,17 @@ enum AmbiguousGenericListKind {
 }
 
 /// This exists because when we see the following tokens:
-/// ```meda
+/// ```dusk
 ///     ident[
 /// ```
 /// 
 /// There's no way to tell if it is the start of a generic constant, like this:
-/// ```meda
+/// ```dusk
 ///     Array[Element] :: struct { ... }
 /// ```
 /// 
 /// Or the start of a generic decl ref with explicit arguments, like this:
-/// ```meda
+/// ```dusk
 ///     Array[u8]
 /// ```
 /// 

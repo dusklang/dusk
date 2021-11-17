@@ -1,17 +1,17 @@
 use string_interner::StringInterner;
 
-use mire::hir::ExprId;
-use mire::mir::Const;
-use mire::arch::Arch;
-use mire::source_info::SourceFileId;
-use mire::Code;
+use dir::hir::ExprId;
+use dir::dil::Const;
+use dir::arch::Arch;
+use dir::source_info::SourceFileId;
+use dir::Code;
 
 use crate::source_info::SourceMap;
 use crate::token::TokenVec;
 use crate::hir;
 use crate::tir;
 use crate::error::Error;
-use crate::mir::{self, FunctionRef};
+use crate::dil::{self, FunctionRef};
 use crate::interpreter::Interpreter;
 use crate::typechecker::type_provider::TypeProvider;
 use crate::refine::Refine;
@@ -25,7 +25,7 @@ pub struct Driver {
     pub hir: hir::Builder,
     pub tir: tir::Builder,
     pub errors: Vec<Error>,
-    pub mir: mir::Builder,
+    pub dil: dil::Builder,
     pub refine: Refine,
     pub code: Code,
     pub interp: Interpreter,
@@ -44,7 +44,7 @@ impl Driver {
             hir: hir::Builder::default(),
             tir: tir::Builder::default(),
             errors: Vec::new(),
-            mir: mir::Builder::new(),
+            dil: dil::Builder::new(),
             refine: Refine::default(),
             code: Code::default(),
             interp: Interpreter::new(),

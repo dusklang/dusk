@@ -2,7 +2,7 @@ T :: usize
 
 INITIAL_CAPACITY :: 10 as usize
 
-std :: import("std.meda")
+std :: import("std.dusk")
 
 Array :: struct {
     data: T *mut

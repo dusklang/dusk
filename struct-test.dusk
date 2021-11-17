@@ -11,7 +11,7 @@ Foo :: struct {
     g: u8
 }
 
-std :: import("std.meda")
+std :: import("std.dusk")
 
 fn print_foo(foo: Foo) {
     print("foo = Foo { a: ")

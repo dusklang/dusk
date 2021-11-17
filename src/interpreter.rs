@@ -12,14 +12,14 @@ use paste::paste;
 use num_bigint::{BigInt, Sign};
 use display_adapter::display_adapter;
 
-use mire::arch::Arch;
-use mire::hir::{Intrinsic, ModScopeId, StructId, GenericParamId};
-use mire::mir::{Const, Instr, StaticId, Struct, VOID_INSTR};
-use mire::ty::{Type, QualType, IntWidth, FloatWidth};
-use mire::{OpId, BlockId};
+use dir::arch::Arch;
+use dir::hir::{Intrinsic, ModScopeId, StructId, GenericParamId};
+use dir::dil::{Const, Instr, StaticId, Struct, VOID_INSTR};
+use dir::ty::{Type, QualType, IntWidth, FloatWidth};
+use dir::{OpId, BlockId};
 
 use crate::driver::Driver;
-use crate::mir::{FunctionRef, function_by_ref};
+use crate::dil::{FunctionRef, function_by_ref};
 use crate::typechecker::type_provider::TypeProvider;
 
 #[derive(Debug, Clone)]
@@ -72,7 +72,7 @@ int_conversions!(u8, u16, u32, u64, usize, i8, i16, i32, i64, isize);
 
 impl Driver {
     fn eval_struct_lit(&self, id: StructId, fields: impl Iterator<Item=Value>) -> Value {
-        let strukt = &self.code.mir_code.structs[&id];
+        let strukt = &self.code.dil_code.structs[&id];
         let mut buf = SmallVec::new();
         buf.resize(strukt.layout.size, 0);
         for (i, field) in fields.enumerate() {
@@ -236,7 +236,7 @@ impl Value {
             },
             Const::Bool(val) => Value::from_bool(val),
             Const::Str { id, .. } => {
-                let ptr = driver.code.mir_code.strings[id].as_ptr();
+                let ptr = driver.code.dil_code.strings[id].as_ptr();
                 Value::from_usize(unsafe { mem::transmute(ptr) })
             },
             Const::Ty(ref ty) => Value::from_ty(ty.clone()),
@@ -435,14 +435,14 @@ impl Driver {
                 assert!(pointee.ty == Type::i8() || pointee.ty == Type::u8());
                 println!("Warning: about to blindly copy a pointer into the global strings!");
                 let string = unsafe { CString::from(CStr::from_ptr(val.as_raw_ptr() as *const _)) };
-                let id = self.code.mir_code.strings.push(string);
+                let id = self.code.dil_code.strings.push(string);
                 Const::Str { id, ty }
             },
             Type::Ty => Const::Ty(val.as_ty().clone()),
             Type::Mod => Const::Mod(val.as_mod()),
             Type::Struct(id) => {
                 // Yay borrow checker
-                let strukt = self.code.mir_code.structs[&id].clone();
+                let strukt = self.code.dil_code.structs[&id].clone();
                 let buf = val.as_bytes();
                 let mut fields = Vec::new();
                 for i in 0..strukt.field_tys.len() {
@@ -460,7 +460,7 @@ impl Driver {
     }
 
     fn new_stack_frame(&self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> StackFrame {
-        let func = function_by_ref(&self.code.mir_code, &func_ref);
+        let func = function_by_ref(&self.code.dil_code, &func_ref);
 
         let mut results = HashMap::new();
 
@@ -478,7 +478,7 @@ impl Driver {
         let start_block = func.blocks[0];
         for (i, arg) in arguments.into_iter().enumerate() {
             let op = self.code.blocks[start_block].ops[i];
-            let param = self.code.ops[op].as_mir_instr().unwrap();
+            let param = self.code.ops[op].as_dil_instr().unwrap();
             assert!(matches!(param, Instr::Parameter(_)));
             results.insert(op, arg);
         }
@@ -502,7 +502,7 @@ impl Driver {
     #[display_adapter]
     pub fn stack_trace(&self, f: &mut Formatter) {
         for (i, frame) in self.interp.stack.iter().rev().enumerate() {
-            let func = function_by_ref(&self.code.mir_code, &frame.func_ref);
+            let func = function_by_ref(&self.code.dil_code, &frame.func_ref);
             writeln!(f, "{}: {}", i, self.fn_name(func.name))?;
         }
         Ok(())
@@ -542,7 +542,7 @@ impl Driver {
     fn execute_next(&mut self) -> Option<Value> {
         let frame = self.interp.stack.last_mut().unwrap();
         let next_op = self.code.blocks[frame.block].ops[frame.pc];
-        let val = match self.code.ops[next_op].as_mir_instr().unwrap() {
+        let val = match self.code.ops[next_op].as_dil_instr().unwrap() {
             Instr::Void => Value::Nothing,
             Instr::Const(konst) => Value::from_const(konst, &*self),
             Instr::Alloca(ty) => {
@@ -700,7 +700,7 @@ impl Driver {
                             Type::Struct(strukt) => {
                                 for (index, &field) in self.code.hir_code.structs[strukt].fields.iter().enumerate() {
                                     if field_name == self.code.hir_code.field_decls[field].name {
-                                        offset = Some(self.code.mir_code.structs[&strukt].layout.field_offsets[index]);
+                                        offset = Some(self.code.dil_code.structs[&strukt].layout.field_offsets[index]);
                                         break;
                                     }
                                 }
@@ -830,7 +830,7 @@ impl Driver {
                 if let InterpMode::CompileTime = self.interp.mode {
                     panic!("Can't access static at compile time!");
                 }
-                let static_value = Value::from_const(&self.code.mir_code.statics[statik].val, &*self);
+                let static_value = Value::from_const(&self.code.dil_code.statics[statik].val, &*self);
                 let statik = self.interp.statics.entry(statik)
                     .or_insert(static_value);
                 Value::from_usize(unsafe { mem::transmute(statik.as_bytes().as_ptr()) })
@@ -839,13 +839,13 @@ impl Driver {
                 Value::from_ty(frame.results[&op].as_ty().clone().ptr_with_mut(is_mut))
             },
             &Instr::Struct { ref fields, id } => {
-                if !self.code.mir_code.structs.contains_key(&id) {
+                if !self.code.dil_code.structs.contains_key(&id) {
                     let mut field_tys = SmallVec::new();
                     for &field in fields {
                         field_tys.push(frame.results[&field].as_ty().clone());
                     }
                     let layout = self.layout_struct(&field_tys);
-                    self.code.mir_code.structs.insert(
+                    self.code.dil_code.structs.insert(
                         id,
                         Struct {
                             field_tys,
@@ -885,7 +885,7 @@ impl Driver {
                     Type::Struct(strukt) => strukt,
                     _ => panic!("Can't directly get field of non-struct"),
                 };
-                let strukt = &self.code.mir_code.structs[&strukt];
+                let strukt = &self.code.dil_code.structs[&strukt];
                 let ty = strukt.field_tys[index].clone();
                 let size = self.size_of(&ty);
                 let offset = strukt.layout.field_offsets[index];
@@ -898,7 +898,7 @@ impl Driver {
                     Type::Struct(strukt) => strukt,
                     _ => panic!("Can't directly get field of non-struct"),
                 };
-                let offset = self.code.mir_code.structs[&strukt].layout.field_offsets[index];
+                let offset = self.code.dil_code.structs[&strukt].layout.field_offsets[index];
                 Value::from_usize(addr + offset)
             },
             Instr::Parameter(_) => panic!("Invalid parameter instruction in the middle of a function!"),
