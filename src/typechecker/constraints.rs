@@ -1,7 +1,7 @@
 use smallvec::{SmallVec, smallvec};
 
-use dir::ty::{Type, QualType, IntWidth};
-use dir::hir::GenericParamId;
+use dire::ty::{Type, QualType, IntWidth};
+use dire::hir::GenericParamId;
 
 use crate::ty::BuiltinTraits;
 

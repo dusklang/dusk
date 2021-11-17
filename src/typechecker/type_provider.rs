@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use dir::hir::{ExprId, DeclId, DeclRefId, StructLitId, CastId, Namespace};
-use dir::dil::Const;
-use dir::ty::{Type, QualType};
+use dire::hir::{ExprId, DeclId, DeclRefId, StructLitId, CastId, Namespace};
+use dire::mir::Const;
+use dire::ty::{Type, QualType};
 
 use super::{CastMethod, StructLit, constraints::ConstraintList, Overload};
 use crate::index_vec::*;

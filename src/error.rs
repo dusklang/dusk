@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::mem;
 
-use dir::source_info::SourceRange;
+use dire::source_info::SourceRange;
 
 use crate::driver::Driver;
 use crate::source_info::CommentatedSourceRange;

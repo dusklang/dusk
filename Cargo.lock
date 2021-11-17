@@ -117,7 +117,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "dir"
+name = "dire"
 version = "0.1.0"
 dependencies = [
  "display_adapter",
@@ -148,7 +148,7 @@ dependencies = [
  "arrayvec",
  "bitflags",
  "clap",
- "dir",
+ "dire",
  "display_adapter",
  "indenter",
  "index_vec",

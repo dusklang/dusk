@@ -4,11 +4,11 @@ use std::ops::Range;
 use smallvec::{SmallVec, smallvec};
 use string_interner::{DefaultSymbol as Sym, Symbol};
 
-use dir::{Op, Block};
-use dir::hir::*;
-use dir::index_counter::IndexCounter;
-use dir::ty::Type;
-use dir::source_info::{SourceFileId, SourceRange};
+use dire::{Op, Block};
+use dire::hir::*;
+use dire::index_counter::IndexCounter;
+use dire::ty::Type;
+use dire::source_info::{SourceFileId, SourceRange};
 
 use crate::driver::Driver;
 use crate::index_vec::*;
@@ -16,7 +16,7 @@ use crate::builder::{BinOp, UnOp};
 use crate::source_info::ToSourceRange;
 
 // TODO: switch to AOS here
-// TODO: move to dir, perhaps
+// TODO: move to dire, perhaps
 #[derive(Debug)]
 pub struct GenericParamList {
     pub names: SmallVec<[Sym; 1]>,
@@ -564,7 +564,7 @@ impl Driver {
                 };
                 self.code.hir_code.source_ranges[item]
             }
-            ToSourceRange::Op(op) => self.code.dil_code.source_ranges.get(&op).unwrap().clone(),
+            ToSourceRange::Op(op) => self.code.mir_code.source_ranges.get(&op).unwrap().clone(),
             ToSourceRange::SourceRange(range) => range,
         }
     }

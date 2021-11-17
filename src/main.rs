@@ -1,9 +1,9 @@
 use clap::Clap;
 use std::path::PathBuf;
 
-use dir::ty::Type;
-use dir::dil::FuncId;
-use dir::arch::Arch;
+use dire::ty::Type;
+use dire::mir::FuncId;
+use dire::arch::Arch;
 
 mod dep_vec;
 #[macro_use]
@@ -16,7 +16,7 @@ mod builder;
 mod parser;
 mod tir;
 mod hir;
-mod dil;
+mod mir;
 mod ty;
 mod driver;
 mod typechecker;
@@ -24,7 +24,7 @@ mod interpreter;
 mod refine;
 
 use interpreter::InterpMode;
-use dil::FunctionRef;
+use mir::FunctionRef;
 use driver::Driver;
 use source_info::SourceMap;
 
@@ -41,7 +41,7 @@ enum StopPhase {
     Parse,
     Tir,
     Typecheck,
-    Dil,
+    Mir,
     Refine,
     Interp,
 }
@@ -57,9 +57,9 @@ struct Opt {
     #[clap(arg_enum, short='g', long, case_insensitive = true)]
     tir_output: Option<TirGraphOutput>,
 
-    /// Output DIL in textual format
+    /// Output MIR in textual format
     #[clap(short='m', long)]
-    output_dil: bool,
+    output_mir: bool,
 
     /// Run the refinement checker
     #[clap(short='r', long)]
@@ -109,11 +109,11 @@ fn main() {
     driver.flush_errors();
     if driver.check_for_failure() { return; }
 
-    begin_phase!(Dil);
-    driver.build_dil(&tp);
+    begin_phase!(Mir);
+    driver.build_mir(&tp);
     
-    if opt.output_dil {
-        println!("{}", driver.display_dil());
+    if opt.output_mir {
+        println!("{}", driver.display_mir());
     }
 
     begin_phase!(Refine);
@@ -123,7 +123,7 @@ fn main() {
 
     begin_phase!(Interp);
     let main_sym = driver.interner.get_or_intern_static("main");
-    let main = driver.code.dil_code.functions.iter()
+    let main = driver.code.mir_code.functions.iter()
         .position(|func| {
             match func.name {
                 Some(name) => name == main_sym && func.ret_ty == Type::Void && driver.code.num_parameters(func) == 0,

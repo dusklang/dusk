@@ -10,7 +10,7 @@ use std::cmp::max;
 use bitflags::bitflags;
 
 use index_vec::define_index_type;
-use dir::hir::{self, ItemId, VOID_EXPR_ITEM};
+use dire::hir::{self, ItemId, VOID_EXPR_ITEM};
 
 use crate::index_vec::*;
 use crate::driver::Driver;

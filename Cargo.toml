@@ -21,5 +21,5 @@ num-bigint = "0.3"
 index_vec = "0.1.2"
 indenter = "0.3.2"
 rsmt2 = "0.11.0"
-dir = { path = "../dir/" }
+dire = { path = "../dire/" }
 display_adapter = { path = "../display_adapter/display_adapter" }

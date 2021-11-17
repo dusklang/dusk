@@ -5,7 +5,7 @@ use std::ops::Range;
 
 use unicode_segmentation::GraphemeCursor;
 
-use dir::source_info::{SourceRange, SourceFileId};
+use dire::source_info::{SourceRange, SourceFileId};
 
 use crate::driver::Driver;
 use crate::token::{TokenKind, TokenVec};

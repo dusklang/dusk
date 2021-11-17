@@ -2,9 +2,9 @@ use smallvec::{SmallVec, smallvec};
 
 use string_interner::DefaultSymbol as Sym;
 
-use dir::hir::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment, GenericParamId};
-use dir::ty::Type;
-use dir::source_info::{self, SourceFileId, SourceRange};
+use dire::hir::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment, GenericParamId};
+use dire::ty::Type;
+use dire::source_info::{self, SourceFileId, SourceRange};
 
 use crate::driver::Driver;
 use crate::hir::{ConditionKind, GenericParamList};

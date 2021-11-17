@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use smallvec::SmallVec;
 use index_vec::define_index_type;
 
-use dir::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId, GenericParamId, RETURN_VALUE_DECL};
+use dire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId, GenericParamId, RETURN_VALUE_DECL};
 
 use crate::driver::Driver;
 use crate::dep_vec::{self, DepVec, AnyDepVec};

@@ -6,10 +6,10 @@ use smallvec::SmallVec;
 use string_interner::DefaultSymbol as Sym;
 use display_adapter::display_adapter;
 
-use dir::hir::{self, DeclId, ExprId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, GenericParamId, Item};
-use dir::dil::{FuncId, StaticId, Const, Instr, Function, DilCode, StructLayout, InstrNamespace, VOID_INSTR};
-use dir::{Block, BlockId, Op, OpId};
-use dir::ty::{Type, FloatWidth};
+use dire::hir::{self, DeclId, ExprId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, GenericParamId, Item};
+use dire::mir::{FuncId, StaticId, Const, Instr, Function, MirCode, StructLayout, InstrNamespace, VOID_INSTR};
+use dire::{Block, BlockId, Op, OpId};
+use dire::ty::{Type, FloatWidth};
 
 use crate::driver::Driver;
 use crate::typechecker as tc;
@@ -159,13 +159,13 @@ impl Driver {
             },
             Expr::DecLit { lit } => Const::Float { lit, ty },
             Expr::StrLit { ref lit } => {
-                let id = self.code.dil_code.strings.push(lit.clone());
+                let id = self.code.mir_code.strings.push(lit.clone());
                 Const::Str { id, ty }
             },
             Expr::CharLit { lit } => match ty {
                 Type::Int { .. } => Const::Int { lit: lit as u64, ty },
                 Type::Pointer(_) => {
-                    let id = self.code.dil_code.strings.push(CString::new([lit as u8].as_ref()).unwrap());
+                    let id = self.code.mir_code.strings.push(CString::new([lit as u8].as_ref()).unwrap());
                     Const::Str { id, ty }
                 },
                 _ => panic!("unexpected type for character")
@@ -204,8 +204,8 @@ impl Builder {
 }
 
 
-fn type_of(b: &DilCode, instr: OpId, code: &IndexVec<OpId, Op>) -> Type {
-    match code[instr].as_dil_instr().unwrap() {
+fn type_of(b: &MirCode, instr: OpId, code: &IndexVec<OpId, Op>) -> Type {
+    match code[instr].as_mir_instr().unwrap() {
         Instr::Void | Instr::Store { .. } => Type::Void,
         Instr::Pointer { .. } | Instr::Struct { .. } | Instr::GenericParam(_) => Type::Ty,
         &Instr::StructLit { id, .. } => Type::Struct(id),
@@ -242,7 +242,7 @@ fn type_of(b: &DilCode, instr: OpId, code: &IndexVec<OpId, Op>) -> Type {
     }
 }
 
-pub fn function_by_ref<'a>(code: &'a DilCode, func_ref: &'a FunctionRef) -> &'a Function {
+pub fn function_by_ref<'a>(code: &'a MirCode, func_ref: &'a FunctionRef) -> &'a Function {
     match func_ref {
         &FunctionRef::Id(id) => &code.functions[id],
         FunctionRef::Ref(func) => func,
@@ -284,7 +284,7 @@ impl Driver {
                 bit_width / 8
             },
             Type::Bool => 1,
-            &Type::Struct(id) => self.code.dil_code.structs[&id].layout.size,
+            &Type::Struct(id) => self.code.mir_code.structs[&id].layout.size,
             Type::GenericParam(_) => panic!("can't get size of generic parameter without more context"),
         }
     }
@@ -292,7 +292,7 @@ impl Driver {
     /// Stride of an instance of a type in bytes
     pub fn stride_of(&self, ty: &Type) -> usize {
         match *ty {
-            Type::Struct(id) => self.code.dil_code.structs[&id].layout.stride,
+            Type::Struct(id) => self.code.mir_code.structs[&id].layout.stride,
             // Otherwise, stride == size
             _ => self.size_of(ty),
         }
@@ -301,7 +301,7 @@ impl Driver {
     /// Minimum alignment of an instance of a type in bytes
     pub fn align_of(&self, ty: &Type) -> usize {
         match *ty {
-            Type::Struct(id) => self.code.dil_code.structs[&id].layout.alignment,
+            Type::Struct(id) => self.code.mir_code.structs[&id].layout.alignment,
             // Otherwise, alignment == size
             _ => self.size_of(ty),
         }
@@ -346,19 +346,19 @@ impl Driver {
         StructLayout { field_offsets, alignment, size, stride }
     }
 
-    pub fn build_dil(&mut self, tp: &impl TypeProvider) {
+    pub fn build_mir(&mut self, tp: &impl TypeProvider) {
         // Start at 1 to avoid RETURN_VALUE_DECL, which we can't and shouldn't generate code for
         for i in 1..self.code.hir_code.decls.len() {
             self.get_decl(DeclId::new(i), tp);
         }
 
-        for i in 0..self.dil.statics.len() {
+        for i in 0..self.mir.statics.len() {
             let id = StaticId::new(i);
-            let statik = self.dil.statics[id].clone();
+            let statik = self.mir.statics[id].clone();
             let konst = self.eval_expr(statik.assignment, tp);
-            self.code.dil_code.statics.push_at(
+            self.code.mir_code.statics.push_at(
                 id,
-                dir::dil::Static {
+                dire::mir::Static {
                     name: statik.name,
                     val: konst.clone(),
                 }
@@ -371,13 +371,13 @@ impl Driver {
     }
 
     fn get_decl(&mut self, id: DeclId, tp: &impl TypeProvider) -> Decl {
-        if let Some(decl) = self.dil.decls.get(&id) { return decl.clone(); }
+        if let Some(decl) = self.mir.decls.get(&id) { return decl.clone(); }
         match self.code.hir_code.decls[id] {
             hir::Decl::Computed { ref params, scope, generic_params: ref generic_params_range, .. } => {
                 // Add placeholder function to reserve ID ahead of time
-                let get = self.code.dil_code.functions.push(Function::default());
+                let get = self.code.mir_code.functions.push(Function::default());
                 let decl = Decl::Computed { get };
-                self.dil.decls.insert(id, decl.clone());
+                self.mir.decls.insert(id, decl.clone());
 
                 // Convert DeclIds to GenericParamIds
                 // TODO: don't require this?
@@ -401,29 +401,29 @@ impl Driver {
                     generic_params,
                     tp
                 );
-                self.code.dil_code.functions[get] = func;
+                self.code.mir_code.functions[get] = func;
                 decl
             },
             hir::Decl::Stored { id: index, .. } => {
                 let decl = Decl::Stored(index);
-                self.dil.decls.insert(id, decl.clone());
+                self.mir.decls.insert(id, decl.clone());
                 decl
             },
             hir::Decl::Parameter { index } => {
                 let decl = Decl::Parameter { index };
-                self.dil.decls.insert(id, decl.clone());
+                self.mir.decls.insert(id, decl.clone());
                 decl
             },
             hir::Decl::Intrinsic { intr, .. } => {
                 let decl = Decl::Intrinsic(intr, self.decl_type(id, tp).clone());
-                self.dil.decls.insert(id, decl.clone());
+                self.mir.decls.insert(id, decl.clone());
                 decl
             },
             hir::Decl::Static(expr) => {
                 let name = format!("{}", self.display_item(id));
-                let decl = Decl::Static(StaticId::new(self.dil.statics.len()));
-                self.dil.decls.insert(id, decl.clone());
-                self.dil.statics.push(
+                let decl = Decl::Static(StaticId::new(self.mir.statics.len()));
+                self.mir.decls.insert(id, decl.clone());
+                self.mir.statics.push(
                     Static {
                         name,
                         assignment: expr,
@@ -436,18 +436,18 @@ impl Driver {
 
                 // TODO: Deal with cycles!
                 let decl = Decl::Const(konst);
-                self.dil.decls.insert(id, decl.clone());
+                self.mir.decls.insert(id, decl.clone());
                 decl
             },
             hir::Decl::Field(field_id) => {
                 let index = self.code.hir_code.field_decls[field_id].index;
                 let decl = Decl::Field { index };
-                self.dil.decls.insert(id, decl.clone());
+                self.mir.decls.insert(id, decl.clone());
                 decl
             },
             hir::Decl::GenericParam(param) => {
                 let decl = Decl::GenericParam(param);
-                self.dil.decls.insert(id, decl.clone());
+                self.mir.decls.insert(id, decl.clone());
                 decl
             },
             hir::Decl::ReturnValue => panic!("Can't get_decl() the return_value decl"),
@@ -461,7 +461,7 @@ impl Driver {
             Const::Bool(val) => write!(f, "{}", val)?,
             Const::Float { lit, ref ty } => write!(f, "{} as {:?}", lit, ty)?,
             Const::Int { lit, ref ty } => write!(f, "{} as {:?}", lit, ty)?,
-            Const::Str { id, ref ty } => write!(f, "%str{} ({:?}) as {:?}", id.index(), self.code.dil_code.strings[id], ty)?,
+            Const::Str { id, ref ty } => write!(f, "%str{} ({:?}) as {:?}", id.index(), self.code.mir_code.strings[id], ty)?,
             Const::Ty(ref ty) => write!(f, "`{:?}`", ty)?,
             Const::Mod(id) => write!(f, "%mod{}", id.index())?,
             Const::StructLit { ref fields, id } => {
@@ -491,7 +491,7 @@ impl Driver {
                 write!(f, "const_{}", name)?
             },
             Const::Int { lit, .. } => write!(f, "const_{}", lit)?,
-            Const::Str { id, .. } => write!(f, "string_{}", identifierify(self.code.dil_code.strings[id].clone().into_bytes()))?,
+            Const::Str { id, .. } => write!(f, "string_{}", identifierify(self.code.mir_code.strings[id].clone().into_bytes()))?,
             Const::Ty(ref ty) => write!(f, "type_{}", identifierify(format!("{:?}", ty).into_bytes()))?,
 
             // TODO: heuristics for associating declaration names with modules and types
@@ -520,25 +520,25 @@ impl Driver {
 
     #[display_adapter]
     pub fn display_instr_name(&self, item: OpId, f: &mut Formatter) {
-        write!(f, "{}", self.code.dil_code.instr_names.get(&item).cloned()
+        write!(f, "{}", self.code.mir_code.instr_names.get(&item).cloned()
             .unwrap_or_else(|| format!("instr{}", item.index())))
     }
 
     #[display_adapter]
-    pub fn display_dil(&self, f: &mut Formatter) {
-        if !self.code.dil_code.statics.raw.is_empty() {
-            for statik in &self.code.dil_code.statics {
+    pub fn display_mir(&self, f: &mut Formatter) {
+        if !self.code.mir_code.statics.raw.is_empty() {
+            for statik in &self.code.mir_code.statics {
                 writeln!(f, "%{} = {}", statik.name, self.fmt_const(&statik.val))?;
             }
             writeln!(f)?;
         }
 
-        for (i, func) in self.code.dil_code.functions.iter().enumerate() {
+        for (i, func) in self.code.mir_code.functions.iter().enumerate() {
             write!(f, "fn {}(", self.fn_name(func.name))?;
             let entry_block = &self.code.blocks[func.blocks[0]];
             let mut first = true;
             for &op in &entry_block.ops {
-                let instr = self.code.ops[op].as_dil_instr().unwrap();
+                let instr = self.code.ops[op].as_mir_instr().unwrap();
                 if let Instr::Parameter(ty) = instr {
                     if first {
                         first = false;
@@ -557,7 +557,7 @@ impl Driver {
                 let block = &self.code.blocks[func.blocks[i]];
                 let mut start = 0;
                 for (i, &op) in block.ops.iter().enumerate() {
-                    let instr = self.code.ops[op].as_dil_instr().unwrap();
+                    let instr = self.code.ops[op].as_mir_instr().unwrap();
                     if !matches!(instr, Instr::Parameter(_)) {
                         start = i;
                         break;
@@ -565,7 +565,7 @@ impl Driver {
                 }
                 
                 for &op_id in &block.ops[start..] {
-                    let instr = self.code.ops[op_id].as_dil_instr().unwrap();
+                    let instr = self.code.ops[op_id].as_mir_instr().unwrap();
                     write!(f, "    ")?;
                     macro_rules! write_args {
                         ($args:expr) => {{
@@ -592,7 +592,7 @@ impl Driver {
                             => writeln!(f, "condbr %{}, %bb{}, %bb{}", condition.index(), true_bb.index(), false_bb.index())?,
                         // TODO: print generic arguments
                         &Instr::Call { ref arguments, func: callee, .. } => {
-                            write!(f, "%{} = call `{}`", self.display_instr_name(op_id), self.fn_name(self.code.dil_code.functions[callee].name))?;
+                            write!(f, "%{} = call `{}`", self.display_instr_name(op_id), self.fn_name(self.code.mir_code.functions[callee].name))?;
                             write_args!(arguments)?
                         },
                         Instr::Const(konst) => {
@@ -614,7 +614,7 @@ impl Driver {
                         &Instr::LogicalNot(op) => writeln!(f, "%{} = not %{}", self.display_instr_name(op_id), self.display_instr_name(op))?,
                         &Instr::Ret(val) => writeln!(f,  "return %{}", self.display_instr_name(val))?,
                         &Instr::Store { location, value } => writeln!(f, "store %{} in %{}", self.display_instr_name(value), self.display_instr_name(location))?,
-                        &Instr::AddressOfStatic(statik) => writeln!(f, "%{} = address of static %{}", self.display_instr_name(op_id), self.code.dil_code.statics[statik].name)?,
+                        &Instr::AddressOfStatic(statik) => writeln!(f, "%{} = address of static %{}", self.display_instr_name(op_id), self.code.mir_code.statics[statik].name)?,
                         &Instr::Reinterpret(val, ref ty) => writeln!(f, "%{} = reinterpret %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
                         &Instr::SignExtend(val, ref ty) => writeln!(f, "%{} = sign-extend %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
                         &Instr::ZeroExtend(val, ref ty) => writeln!(f, "%{} = zero-extend %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
@@ -655,7 +655,7 @@ impl Driver {
                 }
             }
             write!(f, "}}")?;
-            if i + 1 < self.code.dil_code.functions.len() {
+            if i + 1 < self.code.mir_code.functions.len() {
                 writeln!(f, "\n")?;
             }
         }
@@ -685,16 +685,16 @@ impl Driver {
         block
     }
     fn start_bb(&mut self, b: &mut FunctionBuilder, block: BlockId) {
-        self.code.dil_code.start_block(block).unwrap();
+        self.code.mir_code.start_block(block).unwrap();
         b.current_block = block;
     }
     fn end_current_bb(&mut self, b: &FunctionBuilder) {
         let bb = b.current_block;
-        if self.code.dil_code.end_block(bb).is_err() {
+        if self.code.mir_code.end_block(bb).is_err() {
             panic!("Failed to end block {} in function {}:\n{}", bb.index(), self.fn_name(b.name), self.code.display_block(bb));
         }
         let block = &self.code.blocks[bb];
-        let last_instr = self.code.ops[block.ops.last().copied().unwrap()].as_dil_instr().unwrap();
+        let last_instr = self.code.ops[block.ops.last().copied().unwrap()].as_mir_instr().unwrap();
         assert!(
             match last_instr {
                 Instr::Br(_) | Instr::CondBr { .. } | Instr::Ret { .. } | Instr::Intrinsic { intr: Intrinsic::Panic, .. } => true,
@@ -706,11 +706,11 @@ impl Driver {
     }
 
     pub fn type_of(&self, instr: OpId) -> Type {
-        type_of(&self.code.dil_code, instr, &self.code.ops)
+        type_of(&self.code.mir_code, instr, &self.code.ops)
     }
 
     fn build_function(&mut self, name: Option<Sym>, ret_ty: Type, body: FunctionBody, params: Range<DeclId>, generic_params: Vec<GenericParamId>, tp: &impl TypeProvider) -> Function {
-        debug_assert_ne!(ret_ty, Type::Error, "can't build DIL function with Error return type");
+        debug_assert_ne!(ret_ty, Type::Error, "can't build MIR function with Error return type");
 
         let mut entry = Block::default();
         let mut instr_namespace = InstrNamespace::default();
@@ -718,12 +718,12 @@ impl Driver {
             let param = DeclId::new(param);
             assert!(matches!(self.code.hir_code.decls[param], hir::Decl::Parameter { .. }));
             let instr = Instr::Parameter(self.decl_type(param, tp).clone());
-            let op = self.code.ops.push(Op::DilInstr(instr));
+            let op = self.code.ops.push(Op::MirInstr(instr));
             let item = self.code.hir_code.decl_to_items[param];
             let range = self.code.hir_code.source_ranges[item].clone();
             let name = instr_namespace.insert(format!("{}", self.display_item(range)));
-            self.code.dil_code.source_ranges.insert(op, range);
-            self.code.dil_code.instr_names.insert(op, name);
+            self.code.mir_code.source_ranges.insert(op, range);
+            self.code.mir_code.instr_names.insert(op, name);
             entry.ops.push(op);
         }
         let entry = self.code.blocks.push(entry);
@@ -756,14 +756,14 @@ impl Driver {
             generic_params,
         };
         self.optimize_function(&mut function);
-        self.code.dil_code.check_all_blocks_ended(&function);
+        self.code.mir_code.check_all_blocks_ended(&function);
         function 
     }
 
     fn optimize_function(&self, func: &mut Function) {
         // Get rid of empty blocks
         // TODO: get rid of unreachable blocks instead. Otherwise we might accidentally remove an
-        // empty, reachable block and fail silently (at DIL generation time).
+        // empty, reachable block and fail silently (at MIR generation time).
         func.blocks.retain(|&block| {
             let block = &self.code.blocks[block];
             !block.ops.is_empty()
@@ -771,9 +771,9 @@ impl Driver {
     }
 
     fn push_instr(&mut self, b: &mut FunctionBuilder, instr: Instr, item: impl Into<ToSourceRange>) -> OpId {
-        let op = self.code.ops.push(Op::DilInstr(instr));
+        let op = self.code.ops.push(Op::MirInstr(instr));
         let source_range = self.get_range(item);
-        self.code.dil_code.source_ranges.insert(op, source_range);
+        self.code.mir_code.source_ranges.insert(op, source_range);
 
         let block = &mut self.code.blocks[b.current_block];
         block.ops.push(op);
@@ -782,11 +782,11 @@ impl Driver {
     }
 
     fn push_instr_with_name(&mut self, b: &mut FunctionBuilder, instr: Instr, item: impl Into<ToSourceRange>, name: impl Into<String>) -> OpId {
-        let op = self.code.ops.push(Op::DilInstr(instr));
+        let op = self.code.ops.push(Op::MirInstr(instr));
         let source_range = self.get_range(item);
-        self.code.dil_code.source_ranges.insert(op, source_range);
+        self.code.mir_code.source_ranges.insert(op, source_range);
         let name = b.instr_namespace.insert(name.into());
-        self.code.dil_code.instr_names.insert(op, name);
+        self.code.mir_code.instr_names.insert(op, name);
 
         let block = &mut self.code.blocks[b.current_block];
         block.ops.push(op);
@@ -1079,7 +1079,7 @@ impl Driver {
                         let (src_width, _src_is_signed, dest_width, dest_is_signed) = match (tp.ty(operand), &dest_ty) {
                             (&Type::Int { width: ref src_width, is_signed: src_is_signed }, &Type::Int { width: ref dest_width, is_signed: dest_is_signed })
                                 => (src_width.clone(), src_is_signed, dest_width.clone(), dest_is_signed),
-                            _ => panic!("Internal compiler error: found invalid cast types while generating DIL")
+                            _ => panic!("Internal compiler error: found invalid cast types while generating MIR")
                         };
                         let (src_bit_width, dest_bit_width) = (src_width.bit_width(self.arch), dest_width.bit_width(self.arch));
                         let value = self.build_expr(b, operand, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
