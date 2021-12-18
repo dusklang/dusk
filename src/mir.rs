@@ -27,6 +27,7 @@ enum Decl {
     Static(StaticId),
     Const(Const),
     Field { index: usize },
+    Variant { index: usize },
     GenericParam(GenericParamId),
 }
 
@@ -172,6 +173,7 @@ impl Driver {
             },
             Expr::ConstTy(ref ty) => Const::Ty(ty.clone()),
             Expr::Mod { id } => Const::Mod(id),
+            Expr::Enum(id) => Const::Enum(id),
             Expr::Import { file } => Const::Mod(self.code.hir_code.global_scopes[file]),
             _ => panic!("Cannot convert expression to constant: {:#?}", expr),
         }
@@ -263,6 +265,16 @@ fn identifierify(mut string: Vec<u8>) -> String {
     unsafe { String::from_utf8_unchecked(string) }
 }
 
+fn next_multiple_of(n: usize, fac: usize) -> usize {
+    match fac {
+        0 => n,
+        _ => {
+            let fac_minus_1 = fac - 1;
+            (n + fac_minus_1) - ((n + fac_minus_1) % fac)
+        }
+    }
+}
+
 impl Driver {
     /// Size of an instance of a type in bytes
     pub fn size_of(&self, ty: &Type) -> usize {
@@ -285,6 +297,13 @@ impl Driver {
             },
             Type::Bool => 1,
             &Type::Struct(id) => self.code.mir_code.structs[&id].layout.size,
+            &Type::Enum(id) => {
+                let num_variants = self.code.hir_code.enums[id].variants.len();
+                let bits = (num_variants as f64).log2().ceil() as usize;
+                let size = bits / 8;
+                assert!(size <= 8, "too many enum variants");
+                size
+            },
             Type::GenericParam(_) => panic!("can't get size of generic parameter without more context"),
         }
     }
@@ -293,6 +312,13 @@ impl Driver {
     pub fn stride_of(&self, ty: &Type) -> usize {
         match *ty {
             Type::Struct(id) => self.code.mir_code.structs[&id].layout.stride,
+            Type::Enum(_) => {
+                let size = self.size_of(ty);
+                match size {
+                    0..=2 => size,
+                    _ => next_multiple_of(size, 4),
+                }
+            },
             // Otherwise, stride == size
             _ => self.size_of(ty),
         }
@@ -302,6 +328,7 @@ impl Driver {
     pub fn align_of(&self, ty: &Type) -> usize {
         match *ty {
             Type::Struct(id) => self.code.mir_code.structs[&id].layout.alignment,
+            Type::Enum(_) => self.stride_of(ty),
             // Otherwise, alignment == size
             _ => self.size_of(ty),
         }
@@ -315,15 +342,6 @@ impl Driver {
             .max()
             .unwrap_or(0);
 
-        fn next_multiple_of(n: usize, fac: usize) -> usize {
-            match fac {
-                0 => n,
-                _ => {
-                    let fac_minus_1 = fac - 1;
-                    (n + fac_minus_1) - ((n + fac_minus_1) % fac)
-                }
-            }
-        }
         let mut field_offsets = SmallVec::new();
         let mut last_size = 0;
         if !field_tys.is_empty() {
@@ -445,6 +463,12 @@ impl Driver {
                 self.mir.decls.insert(id, decl.clone());
                 decl
             },
+            hir::Decl::Variant(variant_id) => {
+                let index = self.code.hir_code.variant_decls[variant_id].index;
+                // TODO: add variant to decls
+
+                Decl::Variant { index }
+            },
             hir::Decl::GenericParam(param) => {
                 let decl = Decl::GenericParam(param);
                 self.mir.decls.insert(id, decl.clone());
@@ -464,6 +488,7 @@ impl Driver {
             Const::Str { id, ref ty } => write!(f, "%str{} ({:?}) as {:?}", id.index(), self.code.mir_code.strings[id], ty)?,
             Const::Ty(ref ty) => write!(f, "`{:?}`", ty)?,
             Const::Mod(id) => write!(f, "%mod{}", id.index())?,
+            Const::Enum(id) => write!(f, "%enum{}", id.index())?,
             Const::StructLit { ref fields, id } => {
                 write!(f, "const literal struct{} {{ ", id.index())?;
                 for i in 0..fields.len() {
@@ -474,7 +499,7 @@ impl Driver {
                     write!(f, " ")?;
                 }
                 write!(f, "}}")?;
-            }
+            },
         }
 
         Ok(())
@@ -496,6 +521,7 @@ impl Driver {
 
             // TODO: heuristics for associating declaration names with modules and types
             Const::Mod(id) => write!(f, "mod{}", id.index())?,
+            Const::Enum(id) => write!(f, "enum{}", id.index())?,
 
             Const::StructLit { id, .. } => {
                 write!(f, "const_struct_literal_{}", id.index())?;
@@ -871,6 +897,9 @@ impl Driver {
                     self.push_instr(b, Instr::DirectFieldAccess { val: base.instr, index }, expr).direct()   
                 }
             },
+            Decl::Variant { index } => {
+                todo!();
+            }
         }
     }
 
@@ -892,6 +921,7 @@ impl Driver {
                 self.push_instr(b, Instr::Store { location, value }, range)
             },
             Decl::Field { .. } => panic!("Unhandled struct field!"),
+            Decl::Variant { .. } => panic!("Can't modify an enum variant"),
         }
     }
 
@@ -909,6 +939,7 @@ impl Driver {
             Decl::Intrinsic(_, _) => panic!("can't modify an intrinsic! (yet?)"),
             Decl::Static(statik) => self.push_instr(b, Instr::AddressOfStatic(statik), expr).indirect(),
             Decl::Field { .. } => panic!("Unhandled struct field!"),
+            Decl::Variant { .. } => panic!("Can't modify an enum variant"),
         }
     }
 
@@ -917,7 +948,7 @@ impl Driver {
 
         let val = match self.code.hir_code.exprs[expr] {
             Expr::Void => VOID_INSTR.direct(),
-            Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::StrLit { .. } | Expr::CharLit { .. } | Expr::ConstTy(_) | Expr::Mod { .. } | Expr::Import { .. } => {
+            Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::StrLit { .. } | Expr::CharLit { .. } | Expr::ConstTy(_) | Expr::Mod { .. } | Expr::Import { .. } | Expr::Enum(_) => {
                 let konst = self.expr_to_const(expr, ty.clone());
                 let name = format!("{}", self.fmt_const_for_instr_name(&konst));
                 self.push_instr_with_name(b, Instr::Const(konst), expr, name).direct()

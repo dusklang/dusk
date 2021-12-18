@@ -877,7 +877,8 @@ impl Driver {
                 _ => {
                     if let Token { kind: &TokenKind::Ident(name), range: ident_range } = self.cur(p) {
                         self.next(p);
-                        variants.push(self.variant_decl(name, enuum, ident_range));
+                        let index = variants.len();
+                        variants.push(self.variant_decl(name, enuum, index, ident_range));
                     } else {
                         panic!("Unexpected token {:?}, expected variant name", self.cur(p).kind);
                     }

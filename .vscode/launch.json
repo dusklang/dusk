@@ -20,7 +20,7 @@
                 }
             },
             "args": [
-                "generics.dusk"
+                "enums.dusk"
             ],
             "cwd": "${workspaceFolder}"
         },

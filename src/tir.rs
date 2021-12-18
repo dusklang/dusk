@@ -45,6 +45,8 @@ pub struct Struct { pub field_tys: SmallVec<[ExprId; 2]>, }
 #[derive(Debug)]
 pub struct StructLit { pub ty: ExprId, pub fields: Vec<FieldAssignment>, pub struct_lit_id: StructLitId, }
 #[derive(Debug)]
+pub struct Enum;
+#[derive(Debug)]
 pub struct ExplicitRet;
 #[derive(Debug)]
 pub struct Module;
@@ -116,6 +118,7 @@ pub struct UnitItems {
     pub ifs: DepVec<Expr<If>>,
     pub structs: DepVec<Expr<Struct>>,
     pub struct_lits: DepVec<Expr<StructLit>>,
+    pub enums: DepVec<Expr<Enum>>,
 }
 
 impl UnitItems {
@@ -132,7 +135,7 @@ impl UnitItems {
             &mut self.addr_ofs, &mut self.derefs, &mut self.pointers, &mut self.ifs,
             &mut self.dos, &mut self.ret_groups, &mut self.casts, &mut self.whiles,
             &mut self.explicit_rets, &mut self.modules, &mut self.imports, &mut self.structs,
-            &mut self.struct_lits,
+            &mut self.struct_lits, &mut self.enums,
         ]);
     }
 }
@@ -441,6 +444,7 @@ impl Driver {
                 let field_tys = self.code.hir_code.structs[struct_id].fields.iter().map(|&id| self.code.hir_code.field_decls[id].ty).collect();
                 insert_expr!(structs, Struct { field_tys })
             },
+            &hir::Expr::Enum(_) => insert_expr!(enums, Enum),
             &hir::Expr::StructLit { ty, ref fields, id } => {
                 insert_expr!(struct_lits, StructLit { ty, fields: fields.clone(), struct_lit_id: id })
             }
@@ -450,7 +454,7 @@ impl Driver {
     fn build_tir_decl(&mut self, unit: &mut UnitItems, level: u32, id: DeclId) {
         match self.code.hir_code.decls[id] {
             // TODO: Add parameter and field TIR items for (at least) checking that the type of the param is valid
-            hir::Decl::Parameter { .. } | hir::Decl::Field(_) | hir::Decl::ReturnValue | hir::Decl::Intrinsic { .. } => {},
+            hir::Decl::Parameter { .. } | hir::Decl::Field(_) | hir::Decl::Variant(_) | hir::Decl::ReturnValue | hir::Decl::Intrinsic { .. } => {},
             hir::Decl::GenericParam(_) => {
                 assert_eq!(level, 0);
                 unit.generic_params.push(GenericParam { id });
@@ -487,17 +491,13 @@ impl Driver {
 
                     (false, param_tys.clone())
                 },
-                hir::Decl::Const(_) => (
+                hir::Decl::Const(_) | hir::Decl::Variant(_) | hir::Decl::Parameter { .. } | hir::Decl::ReturnValue | hir::Decl::GenericParam(_) => (
                     false,
                     SmallVec::new(),
                 ),
                 hir::Decl::Intrinsic { ref param_tys, .. } => (
                     false,
                     param_tys.clone(),
-                ),
-                hir::Decl::Parameter { .. } => (
-                    false,
-                    SmallVec::new(),
                 ),
                 hir::Decl::Static(_) => (
                     true,
@@ -511,14 +511,6 @@ impl Driver {
                     true,
                     SmallVec::new()
                 ),
-                hir::Decl::ReturnValue => (
-                    false,
-                    SmallVec::new(),
-                ),
-                hir::Decl::GenericParam(_) => (
-                    false,
-                    SmallVec::new(),
-                ),
             };
             self.tir.decls.push(Decl { param_tys, is_mut, generic_params });
         }
@@ -531,7 +523,7 @@ impl Driver {
             let decl_id = DeclId::new(i);
             let id = di!(decl_id);
             match self.code.hir_code.decls[decl_id] {
-                hir::Decl::Parameter { .. } | hir::Decl::Intrinsic { .. } | hir::Decl::Field(_) | hir::Decl::ReturnValue | hir::Decl::GenericParam(_) => {},
+                hir::Decl::Parameter { .. } | hir::Decl::Intrinsic { .. } | hir::Decl::Field(_) | hir::Decl::ReturnValue | hir::Decl::GenericParam(_) | hir::Decl::Variant(_) => {},
                 hir::Decl::Static(expr) | hir::Decl::Const(expr) | hir::Decl::Stored { root_expr: expr, .. } => self.tir.graph.add_type1_dep(id, ei!(expr)),
                 hir::Decl::Computed { scope, .. } => {
                     let terminal_expr = self.code.hir_code.imper_scopes[scope].terminal_expr;
@@ -544,7 +536,7 @@ impl Driver {
             let id = ei!(expr_id);
             match self.code.hir_code.exprs[expr_id] {
                 hir::Expr::Void | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
-                    | hir::Expr::CharLit { .. } | hir::Expr::ConstTy(_) | hir::Expr::Mod { .. } | hir::Expr::Import { .. } => {},
+                    | hir::Expr::CharLit { .. } | hir::Expr::ConstTy(_) | hir::Expr::Mod { .. } | hir::Expr::Enum(_) | hir::Expr::Import { .. } => {},
                 hir::Expr::AddrOf { expr, .. } | hir::Expr::Deref(expr) | hir::Expr::Pointer { expr, .. }
                     | hir::Expr::Cast { expr, .. } | hir::Expr::Ret { expr, .. } => self.tir.graph.add_type1_dep(id, ei!(expr)),
                 hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => {
@@ -620,7 +612,7 @@ impl Driver {
             match self.code.hir_code.items[id] {
                 hir::Item::Decl(decl_id) => {
                     match self.code.hir_code.decls[decl_id] {
-                        hir::Decl::Parameter { .. } | hir::Decl::Static(_) | hir::Decl::Const(_) | hir::Decl::Stored { .. } | hir::Decl::Field(_) | hir::Decl::ReturnValue => {},
+                        hir::Decl::Parameter { .. } | hir::Decl::Static(_) | hir::Decl::Const(_) | hir::Decl::Stored { .. } | hir::Decl::Field(_) | hir::Decl::Variant(_) | hir::Decl::ReturnValue => {},
                         hir::Decl::GenericParam(_) => {
                             add_eval_dep!(id, hir::TYPE_TYPE);
                         },
@@ -651,7 +643,7 @@ impl Driver {
                         hir::Expr::Void | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
                             | hir::Expr::CharLit { .. } | hir::Expr::ConstTy(_) | hir::Expr::AddrOf { .. } | hir::Expr::Deref(_)
                             | hir::Expr::Pointer { .. } | hir::Expr::Set { .. } | hir::Expr::Mod { .. } |  hir::Expr::Import { .. }
-                            | hir::Expr::Struct(_) => {},
+                            | hir::Expr::Struct(_) | hir::Expr::Enum(_) => {},
                         hir::Expr::Cast { ty, .. } => {
                             add_eval_dep!(id, ty);
                         },

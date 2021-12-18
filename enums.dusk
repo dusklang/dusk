@@ -3,5 +3,5 @@ MyEnum :: enum {
 }
 
 fn main() {
-
+    my_enum :: MyEnum
 }

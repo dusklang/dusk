@@ -213,10 +213,10 @@ impl Driver {
         self.code.hir_code.field_decls.push_at(field, FieldDecl { decl, name, ty, index });
         field
     }
-    pub fn variant_decl(&mut self, name: Sym, enuum: ExprId, range: SourceRange) -> VariantDeclId {
+    pub fn variant_decl(&mut self, name: Sym, enuum: ExprId, index: usize, range: SourceRange) -> VariantDeclId {
         let variant = self.code.hir_code.variant_decls.next_idx();
         let decl = self.decl(Decl::Variant(variant), name, Some(enuum), range);
-        self.code.hir_code.variant_decls.push_at(variant, VariantDecl { decl, name, enuum });
+        self.code.hir_code.variant_decls.push_at(variant, VariantDecl { decl, name, enuum, index });
         variant
     }
     pub fn strukt(&mut self, fields: Vec<FieldDeclId>, range: SourceRange) -> ExprId {

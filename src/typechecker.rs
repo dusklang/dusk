@@ -267,6 +267,16 @@ impl tir::Expr<tir::Module> {
     }
 }
 
+impl tir::Expr<tir::Enum> {
+    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
+        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Ty.into()]), None);
+        *tp.ty_mut(self.id) = Type::Ty;
+    }
+
+    fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut impl TypeProvider) {
+    }
+}
+
 impl tir::Expr<tir::Import> {
     fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
         *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Mod.into()]), None);
@@ -820,6 +830,7 @@ impl Driver {
             run_pass_1!(
                 assigned_decls, assignments, casts, whiles, explicit_rets, modules, imports,
                 decl_refs, addr_ofs, derefs, pointers, structs, struct_lits, ifs, dos, ret_groups,
+                enums,
             );
             tp.debug_output(self, level as usize);
         }
@@ -848,6 +859,7 @@ impl Driver {
             run_pass_2!(
                 assigned_decls, assignments, casts, whiles, explicit_rets, modules, imports,
                 decl_refs, addr_ofs, derefs, pointers, structs, struct_lits, ifs, dos, ret_groups,
+                enums,
             );
 
             if level > 0 {

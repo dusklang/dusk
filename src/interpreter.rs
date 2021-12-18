@@ -13,7 +13,7 @@ use num_bigint::{BigInt, Sign};
 use display_adapter::display_adapter;
 
 use dire::arch::Arch;
-use dire::hir::{Intrinsic, ModScopeId, StructId, GenericParamId};
+use dire::hir::{Intrinsic, ModScopeId, StructId, EnumId, GenericParamId};
 use dire::mir::{Const, Instr, StaticId, Struct, VOID_INSTR};
 use dire::ty::{Type, QualType, IntWidth, FloatWidth};
 use dire::{OpId, BlockId};
@@ -26,6 +26,7 @@ use crate::typechecker::type_provider::TypeProvider;
 pub enum InternalValue {
     Ty(Type),
     Mod(ModScopeId),
+    Enum(EnumId),
 }
 
 #[derive(Debug)]
@@ -171,9 +172,10 @@ impl Value {
         }
     }
 
-    fn as_ty(&self) -> &Type {
+    fn as_ty(&self) -> Type {
         match self.as_internal() {
-            InternalValue::Ty(ty) => ty,
+            InternalValue::Ty(ty) => ty.clone(),
+            &InternalValue::Enum(id) => Type::Enum(id),
             _ => panic!("Can't get non-type as type"),
         }
     }
@@ -241,6 +243,7 @@ impl Value {
             },
             Const::Ty(ref ty) => Value::from_ty(ty.clone()),
             Const::Mod(id) => Value::from_mod(id),
+            Const::Enum(id) => Value::from_enum(id),
             Const::StructLit { ref fields, id } => {
                 let fields = fields.iter().map(|val| Value::from_const(val, driver));
                 driver.eval_struct_lit(id, fields)
@@ -270,6 +273,10 @@ impl Value {
 
     fn from_mod(id: ModScopeId) -> Value {
         Self::from_internal(InternalValue::Mod(id))
+    }
+
+    fn from_enum(id: EnumId) -> Value {
+        Self::from_internal(InternalValue::Enum(id))
     }
 }
 
@@ -665,7 +672,7 @@ impl Driver {
                         let frame = self.interp.stack.last().unwrap();
                         assert_eq!(arguments.len(), 1);
                         let ty = frame.results[&arguments[0]].as_ty();
-                        let ty = frame.canonicalize_type(ty);
+                        let ty = frame.canonicalize_type(&ty);
                         print!("{:?}", ty);
                         Value::Nothing
                     },
@@ -673,21 +680,21 @@ impl Driver {
                         let frame = self.interp.stack.last().unwrap();
                         assert_eq!(arguments.len(), 1);
                         let ty = frame.results[&arguments[0]].as_ty();
-                        let ty = frame.canonicalize_type(ty);
+                        let ty = frame.canonicalize_type(&ty);
                         Value::from_usize(self.align_of(&ty))
                     },
                     Intrinsic::StrideOf => {
                         let frame = self.interp.stack.last().unwrap();
                         assert_eq!(arguments.len(), 1);
                         let ty = frame.results[&arguments[0]].as_ty();
-                        let ty = frame.canonicalize_type(ty);
+                        let ty = frame.canonicalize_type(&ty);
                         Value::from_usize(self.stride_of(&ty))
                     },
                     Intrinsic::SizeOf => {
                         let frame = self.interp.stack.last().unwrap();
                         assert_eq!(arguments.len(), 1);
                         let ty = frame.results[&arguments[0]].as_ty();
-                        let ty = frame.canonicalize_type(ty);
+                        let ty = frame.canonicalize_type(&ty);
                         Value::from_usize(self.size_of(&ty))
                     },
                     Intrinsic::OffsetOf => {
@@ -696,7 +703,7 @@ impl Driver {
                         let field_name = unsafe { CStr::from_ptr(frame.results[&arguments[1]].as_raw_ptr() as *const _) };
                         let field_name = self.interner.get_or_intern(field_name.to_str().unwrap());
                         let mut offset = None;
-                        match *ty {
+                        match ty {
                             Type::Struct(strukt) => {
                                 for (index, &field) in self.code.hir_code.structs[strukt].fields.iter().enumerate() {
                                     if field_name == self.code.hir_code.field_decls[field].name {
