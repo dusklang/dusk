@@ -1,0 +1,7 @@
+MyEnum :: enum {
+    a, b, c
+}
+
+fn main() {
+
+}

@@ -396,6 +396,7 @@ impl Driver {
             TokenKind::Module => Ok(self.parse_module(p)),
             TokenKind::Import => Ok(self.parse_import(p)),
             TokenKind::Struct => Ok(self.parse_struct(p)),
+            TokenKind::Enum => Ok(self.parse_enum(p)),
             TokenKind::If => Ok(self.parse_if(p)),
             TokenKind::While => {
                 let while_range = self.cur(p).range;
@@ -851,6 +852,41 @@ impl Driver {
             }
         };
         self.strukt(fields, source_info::concat(struct_range, close_curly_range))
+    }
+
+    fn parse_enum(&mut self, p: &mut Parser) -> ExprId {
+        let Token { kind, range: enum_range } = self.cur(p);
+        assert_eq!(kind, &TokenKind::Enum);
+        self.next(p);
+
+        assert_eq!(self.cur(p).kind, &TokenKind::OpenCurly);
+        self.next(p);
+
+        let enuum = self.code.hir_code.exprs.next_idx();
+
+        let mut variants = Vec::new();
+        let close_curly_range = loop {
+            match self.cur(p).kind {
+                TokenKind::Eof => panic!("Unexpected eof while parsing struct expression"),
+                TokenKind::CloseCurly => {
+                    let close_curly_range = self.cur(p).range;
+                    self.next(p);
+                    break close_curly_range;
+                },
+                TokenKind::Comma => { self.next(p); },
+                _ => {
+                    if let Token { kind: &TokenKind::Ident(name), range: ident_range } = self.cur(p) {
+                        self.next(p);
+                        variants.push(self.variant_decl(name, enuum, ident_range));
+                    } else {
+                        panic!("Unexpected token {:?}, expected variant name", self.cur(p).kind);
+                    }
+                }
+            }
+        };
+        let real_enum = self.enuum(variants, source_info::concat(enum_range, close_curly_range));
+        assert_eq!(enuum, real_enum);
+        enuum
     }
 
     // Parses an open curly brace, then a list of Items, then a closing curly brace.

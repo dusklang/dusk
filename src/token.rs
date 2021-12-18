@@ -30,6 +30,7 @@ pub enum TokenKind {
     While,
     As,
     Struct,
+    Enum,
     Do,
     Mut,
     Module,

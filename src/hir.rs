@@ -213,9 +213,19 @@ impl Driver {
         self.code.hir_code.field_decls.push_at(field, FieldDecl { decl, name, ty, index });
         field
     }
+    pub fn variant_decl(&mut self, name: Sym, enuum: ExprId, range: SourceRange) -> VariantDeclId {
+        let variant = self.code.hir_code.variant_decls.next_idx();
+        let decl = self.decl(Decl::Variant(variant), name, Some(enuum), range);
+        self.code.hir_code.variant_decls.push_at(variant, VariantDecl { decl, name, enuum });
+        variant
+    }
     pub fn strukt(&mut self, fields: Vec<FieldDeclId>, range: SourceRange) -> ExprId {
         let strukt = self.code.hir_code.structs.push(Struct { fields });
         self.push_expr(Expr::Struct(strukt), range)
+    }
+    pub fn enuum(&mut self, variants: Vec<VariantDeclId>, range: SourceRange) -> ExprId {
+        let enuum = self.code.hir_code.enums.push(Enum { variants });
+        self.push_expr(Expr::Enum(enuum), range)
     }
     pub fn struct_lit(&mut self, ty: ExprId, fields: Vec<FieldAssignment>, range: SourceRange) -> ExprId {
         let id = self.code.hir_code.struct_lits.next();

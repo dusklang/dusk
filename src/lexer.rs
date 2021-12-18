@@ -347,6 +347,7 @@ impl Driver {
                 "while" => While,
                 "as" => As,
                 "struct" => Struct,
+                "enum" => Enum,
                 "do" => Do,
                 "mut" => Mut,
                 "mod" => Module,
