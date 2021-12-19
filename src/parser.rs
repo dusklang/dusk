@@ -366,6 +366,16 @@ impl Driver {
                 self.next(p);
                 Ok(expr)
             },
+            TokenKind::DebugMark => {
+                self.next(p);
+                assert!(matches!(self.cur(p).kind, TokenKind::LeftParen));
+                self.next(p);
+                let expr = self.parse_expr(p);
+                self.debug_mark_expr(expr);
+                assert!(matches!(self.cur(p).kind, TokenKind::RightParen));
+                self.next(p);
+                Ok(expr)
+            },
             &TokenKind::IntLit(val) => {
                 let lit = self.int_lit(val, self.cur(p).range);
                 self.next(p);

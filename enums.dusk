@@ -9,11 +9,13 @@ fn main() {
 }
 
 fn take_enum(e: MyEnum) {
-    if my_enum == MyEnum.b {
+    if _debug_mark(my_enum == MyEnum.b) {
         print("enum is b!\n")
-    } else if my_enum != MyEnum.c {
+    }
+    
+    /*else if my_enum != MyEnum.c {
         print("enum is a!\n")
     } else {
         print("enum is c!\n")
-    }
+    }*/
 }

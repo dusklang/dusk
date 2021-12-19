@@ -352,6 +352,7 @@ impl Driver {
                 "mut" => Mut,
                 "mod" => Module,
                 "import" => Import,
+                "_debug_mark" => DebugMark,
                 _ => {
                     let ident = self.interner.get_or_intern(ident);
                     Ident(ident)

@@ -1,5 +1,6 @@
 use std::ffi::CString;
 use std::ops::Range;
+use std::collections::HashSet;
 
 use smallvec::{SmallVec, smallvec};
 use string_interner::{DefaultSymbol as Sym, Symbol};
@@ -66,6 +67,7 @@ struct CompDeclState {
 pub struct Builder {
     comp_decl_stack: Vec<CompDeclState>,
     scope_stack: Vec<ScopeState>,
+    debug_marked_exprs: HashSet<ExprId>,
     pub generic_params: IndexCounter<GenericParamId>,
 
     pub requires_sym: Sym,
@@ -78,6 +80,8 @@ impl Default for Builder {
         Builder {
             comp_decl_stack: Default::default(),
             scope_stack: Default::default(),
+            debug_marked_exprs: Default::default(),
+
             generic_params: IndexCounter::new(),
 
             // Note: gets initialized in Driver::initialize_hir() below
@@ -106,6 +110,15 @@ impl Driver {
         self.hir.requires_sym = self.interner.get_or_intern_static("requires");
         self.hir.guarantees_sym = self.interner.get_or_intern_static("guarantees");
         self.hir.return_value_sym = return_value_sym;
+    }
+
+    pub fn debug_mark_expr(&mut self, expr: ExprId) {
+        self.hir.debug_marked_exprs.insert(expr);
+    }
+
+    #[allow(unused)]
+    pub fn expr_is_debug_marked(&self, expr: ExprId) -> bool {
+        self.hir.debug_marked_exprs.contains(&expr)
     }
 
     fn push_expr(&mut self, expr: Expr, range: SourceRange) -> ExprId {
