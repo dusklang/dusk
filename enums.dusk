@@ -2,20 +2,34 @@ MyEnum :: enum {
     a, b, c
 }
 
-fn main() {
-    my_enum :: MyEnum.b
-    take_enum(my_enum)
-    take_enum(MyEnum.c)
+MyStruct :: struct {
+    a: u64
+    b: MyEnum
 }
 
-fn take_enum(e: MyEnum) {
-    if _debug_mark(my_enum == MyEnum.b) {
-        print("enum is b!\n")
+fn main() {
+    my_enum :: MyEnum.b
+    print_enum(my_enum)
+    print_enum(MyEnum.c)
+
+    val :: MyStruct {
+        a: 43
+        b: MyEnum.a
     }
-    
-    /*else if my_enum != MyEnum.c {
+    print_enum(val.b)
+
+    // Expected output:
+    // enum is b!
+    // enum is c!
+    // enum is a!
+}
+
+fn print_enum(e: MyEnum) {
+    if e == MyEnum.b {
+        print("enum is b!\n")
+    } else if e != MyEnum.c {
         print("enum is a!\n")
     } else {
         print("enum is c!\n")
-    }*/
+    }
 }

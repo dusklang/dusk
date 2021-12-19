@@ -300,6 +300,7 @@ impl Driver {
             &Type::Enum(id) => {
                 let num_variants = self.code.hir_code.enums[id].variants.len();
                 let bits = (num_variants as f64).log2().ceil() as usize;
+                let bits = next_multiple_of(bits, 8);
                 let size = bits / 8;
                 assert!(size <= 8, "too many enum variants");
                 size

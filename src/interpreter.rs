@@ -597,8 +597,36 @@ impl Driver {
                     Intrinsic::LessOrEq => bin_op!(self, arguments, bool_convert, Int | Float, {<=}),
                     Intrinsic::Greater => bin_op!(self, arguments, bool_convert, Int | Float, {>}),
                     Intrinsic::GreaterOrEq => bin_op!(self, arguments, bool_convert, Int | Float, {>=}),
-                    Intrinsic::Eq => bin_op!(self, arguments, bool_convert, Int | Float | Bool, {==}),
-                    Intrinsic::NotEq => bin_op!(self, arguments, bool_convert, Int | Float | Bool, {!=}),
+                    Intrinsic::Eq => {
+                        let ty = self.type_of(arguments[0]);
+                        match ty {
+                            Type::Enum(_) => {
+                                assert_eq!(arguments.len(), 2);
+                                let frame = self.interp.stack.last().unwrap();
+                                let a = &frame.results[&arguments[0]];
+                                let b = &frame.results[&arguments[1]];
+                                let a = a.as_big_int(false);
+                                let b = b.as_big_int(false);
+                                Value::from_bool(a == b)
+                            }
+                            _ => bin_op!(self, arguments, bool_convert, Int | Float | Bool, {==}),
+                        }
+                    },
+                    Intrinsic::NotEq => {
+                        let ty = self.type_of(arguments[0]);
+                        match ty {
+                            Type::Enum(_) => {
+                                assert_eq!(arguments.len(), 2);
+                                let frame = self.interp.stack.last().unwrap();
+                                let a = &frame.results[&arguments[0]];
+                                let b = &frame.results[&arguments[1]];
+                                let a = a.as_big_int(false);
+                                let b = b.as_big_int(false);
+                                Value::from_bool(a != b)
+                            }
+                            _ => bin_op!(self, arguments, bool_convert, Int | Float | Bool, {!=}),
+                        }
+                    },
                     Intrinsic::BitwiseAnd => bin_op!(self, arguments, convert, Int, {&}),
                     Intrinsic::BitwiseOr => bin_op!(self, arguments, convert, Int, {|}),
                     Intrinsic::LogicalNot => panic!("Unexpected logical not intrinsic, should've been replaced by instruction"),
