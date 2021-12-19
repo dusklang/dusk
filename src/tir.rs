@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use smallvec::SmallVec;
 use index_vec::define_index_type;
 
-use dire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId, GenericParamId, RETURN_VALUE_DECL};
+use dire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, EnumId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId, GenericParamId, RETURN_VALUE_DECL};
 
 use crate::driver::Driver;
 use crate::dep_vec::{self, DepVec, AnyDepVec};
@@ -166,6 +166,7 @@ pub struct Units {
 pub enum ExprNamespace {
     Mod(ModScopeId),
     Struct(StructId),
+    Enum(EnumId),
 }
 
 #[derive(Debug, Default)]
@@ -223,6 +224,15 @@ impl Driver {
             }
         }
     }
+    fn find_overloads_in_enum(&self, decl_ref: &hir::DeclRef, id: EnumId, overloads: &mut HashSet<DeclId>) {
+        for &variant in &self.code.hir_code.enums[id].variants {
+            let variant = &self.code.hir_code.variant_decls[variant];
+            if variant.name == decl_ref.name {
+                overloads.insert(variant.decl);
+                return;
+            }
+        }
+    }
     fn find_overloads_in_function_parameters(&self, decl_ref: &hir::DeclRef, func: DeclId, overloads: &mut HashSet<DeclId>) {
         match &self.code.hir_code.decls[func] {
             hir::Decl::Computed { params, .. } => {
@@ -275,6 +285,7 @@ impl Driver {
                             match *ns {
                                 ExprNamespace::Mod(scope) => self.find_overloads_in_mod(decl_ref, scope, &mut overloads),
                                 ExprNamespace::Struct(id) => self.find_overloads_in_struct(decl_ref, id, &mut overloads),
+                                ExprNamespace::Enum(id) => self.find_overloads_in_enum(decl_ref, id, &mut overloads),
                             }
                         }
                     }
@@ -454,7 +465,7 @@ impl Driver {
     fn build_tir_decl(&mut self, unit: &mut UnitItems, level: u32, id: DeclId) {
         match self.code.hir_code.decls[id] {
             // TODO: Add parameter and field TIR items for (at least) checking that the type of the param is valid
-            hir::Decl::Parameter { .. } | hir::Decl::Field(_) | hir::Decl::Variant(_) | hir::Decl::ReturnValue | hir::Decl::Intrinsic { .. } => {},
+            hir::Decl::Parameter { .. } | hir::Decl::Field(_) | hir::Decl::Variant { .. } | hir::Decl::ReturnValue | hir::Decl::Intrinsic { .. } => {},
             hir::Decl::GenericParam(_) => {
                 assert_eq!(level, 0);
                 unit.generic_params.push(GenericParam { id });
@@ -491,7 +502,7 @@ impl Driver {
 
                     (false, param_tys.clone())
                 },
-                hir::Decl::Const(_) | hir::Decl::Variant(_) | hir::Decl::Parameter { .. } | hir::Decl::ReturnValue | hir::Decl::GenericParam(_) => (
+                hir::Decl::Const(_) | hir::Decl::Variant { .. } | hir::Decl::Parameter { .. } | hir::Decl::ReturnValue | hir::Decl::GenericParam(_) => (
                     false,
                     SmallVec::new(),
                 ),
@@ -523,7 +534,7 @@ impl Driver {
             let decl_id = DeclId::new(i);
             let id = di!(decl_id);
             match self.code.hir_code.decls[decl_id] {
-                hir::Decl::Parameter { .. } | hir::Decl::Intrinsic { .. } | hir::Decl::Field(_) | hir::Decl::ReturnValue | hir::Decl::GenericParam(_) | hir::Decl::Variant(_) => {},
+                hir::Decl::Parameter { .. } | hir::Decl::Intrinsic { .. } | hir::Decl::Field(_) | hir::Decl::ReturnValue | hir::Decl::GenericParam(_) | hir::Decl::Variant { .. } => {},
                 hir::Decl::Static(expr) | hir::Decl::Const(expr) | hir::Decl::Stored { root_expr: expr, .. } => self.tir.graph.add_type1_dep(id, ei!(expr)),
                 hir::Decl::Computed { scope, .. } => {
                     let terminal_expr = self.code.hir_code.imper_scopes[scope].terminal_expr;
@@ -612,7 +623,7 @@ impl Driver {
             match self.code.hir_code.items[id] {
                 hir::Item::Decl(decl_id) => {
                     match self.code.hir_code.decls[decl_id] {
-                        hir::Decl::Parameter { .. } | hir::Decl::Static(_) | hir::Decl::Const(_) | hir::Decl::Stored { .. } | hir::Decl::Field(_) | hir::Decl::Variant(_) | hir::Decl::ReturnValue => {},
+                        hir::Decl::Parameter { .. } | hir::Decl::Static(_) | hir::Decl::Const(_) | hir::Decl::Stored { .. } | hir::Decl::Field(_) | hir::Decl::Variant { .. } | hir::Decl::ReturnValue => {},
                         hir::Decl::GenericParam(_) => {
                             add_eval_dep!(id, hir::TYPE_TYPE);
                         },

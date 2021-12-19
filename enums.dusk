@@ -3,5 +3,10 @@ MyEnum :: enum {
 }
 
 fn main() {
-    my_enum :: MyEnum
+    my_enum :: MyEnum.b
+    take_enum(my_enum)
+    take_enum(MyEnum.c)
+}
+
+fn take_enum(e: MyEnum) {
 }

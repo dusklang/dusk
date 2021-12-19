@@ -6,7 +6,7 @@ use smallvec::SmallVec;
 use string_interner::DefaultSymbol as Sym;
 use display_adapter::display_adapter;
 
-use dire::hir::{self, DeclId, ExprId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, GenericParamId, Item};
+use dire::hir::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, GenericParamId, Item};
 use dire::mir::{FuncId, StaticId, Const, Instr, Function, MirCode, StructLayout, InstrNamespace, VOID_INSTR};
 use dire::{Block, BlockId, Op, OpId};
 use dire::ty::{Type, FloatWidth};
@@ -27,7 +27,7 @@ enum Decl {
     Static(StaticId),
     Const(Const),
     Field { index: usize },
-    Variant { index: usize },
+    Variant { enuum: EnumId, index: usize },
     GenericParam(GenericParamId),
 }
 
@@ -463,11 +463,9 @@ impl Driver {
                 self.mir.decls.insert(id, decl.clone());
                 decl
             },
-            hir::Decl::Variant(variant_id) => {
+            hir::Decl::Variant { enuum, variant_id } => {
                 let index = self.code.hir_code.variant_decls[variant_id].index;
-                // TODO: add variant to decls
-
-                Decl::Variant { index }
+                Decl::Variant { enuum, index }
             },
             hir::Decl::GenericParam(param) => {
                 let decl = Decl::GenericParam(param);
@@ -476,6 +474,15 @@ impl Driver {
             },
             hir::Decl::ReturnValue => panic!("Can't get_decl() the return_value decl"),
         }
+    }
+
+    #[allow(dead_code)]
+    #[display_adapter]
+    fn fmt_variant_name(&self, f: &mut Formatter, enuum: EnumId, index: usize) {
+        let variant = self.code.hir_code.enums[enuum].variants[index];
+        let variant = &self.code.hir_code.variant_decls[variant];
+        let name = self.interner.resolve(variant.name).unwrap();
+        write!(f, "{}", name)
     }
 
     #[allow(dead_code)]
@@ -489,6 +496,7 @@ impl Driver {
             Const::Ty(ref ty) => write!(f, "`{:?}`", ty)?,
             Const::Mod(id) => write!(f, "%mod{}", id.index())?,
             Const::Enum(id) => write!(f, "%enum{}", id.index())?,
+            Const::BasicVariant { enuum, index } => write!(f, "%enum{}.{}", enuum.index(), self.fmt_variant_name(enuum, index))?,
             Const::StructLit { ref fields, id } => {
                 write!(f, "const literal struct{} {{ ", id.index())?;
                 for i in 0..fields.len() {
@@ -522,6 +530,7 @@ impl Driver {
             // TODO: heuristics for associating declaration names with modules and types
             Const::Mod(id) => write!(f, "mod{}", id.index())?,
             Const::Enum(id) => write!(f, "enum{}", id.index())?,
+            Const::BasicVariant { enuum, index } => write!(f, "enum{}_variant_{}", enuum.index(), self.fmt_variant_name(enuum, index))?,
 
             Const::StructLit { id, .. } => {
                 write!(f, "const_struct_literal_{}", id.index())?;
@@ -897,8 +906,8 @@ impl Driver {
                     self.push_instr(b, Instr::DirectFieldAccess { val: base.instr, index }, expr).direct()   
                 }
             },
-            Decl::Variant { index } => {
-                todo!();
+            Decl::Variant { enuum, index } => {
+                self.push_instr_with_name(b, Instr::Const(Const::BasicVariant { enuum, index }), expr, name).direct()
             }
         }
     }

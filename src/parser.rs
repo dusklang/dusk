@@ -862,7 +862,7 @@ impl Driver {
         assert_eq!(self.cur(p).kind, &TokenKind::OpenCurly);
         self.next(p);
 
-        let enuum = self.code.hir_code.exprs.next_idx();
+        let (expr, enuum) = self.reserve_enum();
 
         let mut variants = Vec::new();
         let close_curly_range = loop {
@@ -878,16 +878,15 @@ impl Driver {
                     if let Token { kind: &TokenKind::Ident(name), range: ident_range } = self.cur(p) {
                         self.next(p);
                         let index = variants.len();
-                        variants.push(self.variant_decl(name, enuum, index, ident_range));
+                        variants.push(self.variant_decl(name, expr, enuum, index, ident_range));
                     } else {
                         panic!("Unexpected token {:?}, expected variant name", self.cur(p).kind);
                     }
                 }
             }
         };
-        let real_enum = self.enuum(variants, source_info::concat(enum_range, close_curly_range));
-        assert_eq!(enuum, real_enum);
-        enuum
+        self.finish_enum(variants, source_info::concat(enum_range, close_curly_range), expr, enuum);
+        expr
     }
 
     // Parses an open curly brace, then a list of Items, then a closing curly brace.

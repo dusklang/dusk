@@ -244,6 +244,7 @@ impl Value {
             Const::Ty(ref ty) => Value::from_ty(ty.clone()),
             Const::Mod(id) => Value::from_mod(id),
             Const::Enum(id) => Value::from_enum(id),
+            Const::BasicVariant { enuum, index } => Value::from_variant(driver, enuum, index),
             Const::StructLit { ref fields, id } => {
                 let fields = fields.iter().map(|val| Value::from_const(val, driver));
                 driver.eval_struct_lit(id, fields)
@@ -261,6 +262,19 @@ impl Value {
 
     fn from_bool(val: bool) -> Value {
         Value::from_u8(unsafe { mem::transmute(val) })
+    }
+
+    fn from_variant(d: &Driver, enuum: EnumId, index: usize) -> Value {
+        let ty = Type::Enum(enuum);
+        let size = d.size_of(&ty);
+        match size {
+            0 => Value::Nothing,
+            1 => Value::from_u8(index as u8),
+            2 => Value::from_u16(index as u16),
+            4 => Value::from_u32(index as u32),
+            8 => Value::from_u64(index as u64),
+            _ => panic!("Unexpected enum size when constructing variant in interpreter"),
+        }
     }
 
     fn from_internal(val: InternalValue) -> Value {

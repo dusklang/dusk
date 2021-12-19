@@ -922,6 +922,16 @@ impl Driver {
                         }
                     },
                     Type::Struct(strukt) => ExprNamespace::Struct(strukt),
+                    Type::Ty => {
+                        self.run_pass_2(&unit.items, UnitKind::Mock(num), &mut mock_tp);
+                        let ty = self.eval_expr(unit.main_expr, &mut mock_tp);
+
+                        match ty {
+                            // TODO: investigate whether Const::Enum should even exist? This seems dumb...
+                            Const::Enum(id) | Const::Ty(Type::Enum(id)) => ExprNamespace::Enum(id),
+                            _ => panic!("Unexpected const kind, expected enum!"),
+                        }
+                    },
                     _ => continue,
                 };
                 self.tir.expr_namespaces.entry(unit.main_expr).or_default().push(ns);
