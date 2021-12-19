@@ -29,8 +29,9 @@ impl Driver {
         self.start_new_file(file);
         let mut p = Parser { file, cur: 0 };
 
-        // TODO: Don't duplicate intrinsics in every file!
         // Add intrinsics
+        // TODO: Don't duplicate intrinsics in every file.
+        // TODO: Add intrinsics literally anywhere but in the parser.
 
         // Integers, floats and bool
         let values: Vec<_> = [
@@ -886,6 +887,11 @@ impl Driver {
             }
         };
         self.finish_enum(variants, source_info::concat(enum_range, close_curly_range), expr, enuum);
+
+        // Add intrinsics for comparison of enums
+        let boool = self.add_const_ty(Type::Bool);
+        self.add_intrinsic(Intrinsic::Eq, smallvec![expr, expr], boool, false);
+        self.add_intrinsic(Intrinsic::NotEq, smallvec![expr, expr], boool, false);
         expr
     }
 

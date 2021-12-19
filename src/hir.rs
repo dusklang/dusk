@@ -35,7 +35,7 @@ impl Default for GenericParamList {
 }
 
 #[derive(Debug)]
-enum ScopeState {
+pub enum ScopeState {
     Imper {
         id: ImperScopeId,
         namespace: ImperScopeNsId,
@@ -170,7 +170,7 @@ impl Driver {
             }
             ScopeState::Mod { .. } => {
                 let decl_id = self.decl(
-                        if is_mut {
+                    if is_mut {
                         Decl::Static(root_expr)
                     } else {
                         Decl::Const(root_expr)
@@ -367,6 +367,7 @@ impl Driver {
         );
         expr
     }
+    // TODO: intern constant type expressions
     pub fn add_const_ty(&mut self, ty: Type) -> ExprId {
         self.push_expr(Expr::ConstTy(ty), SourceRange::default())
     }
