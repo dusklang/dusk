@@ -235,8 +235,7 @@ impl Driver {
                         _ => {
                             if let &TokenKind::Ident(name) = self.cur(p).kind {
                                 self.next(p);
-                                assert_eq!(self.cur(p).kind, &TokenKind::Colon);
-                                self.next(p);
+                                self.eat_tok(p, TokenKind::Colon);
                                 let expr = self.parse_expr(p);
                                 fields.push(
                                     FieldAssignment { name, expr }
@@ -261,10 +260,10 @@ impl Driver {
     }
 
     fn parse_import(&mut self, p: &mut Parser) -> ExprId {
-        let import_range = self.cur(p).range;
-        let paren = self.next(p).kind;
-        assert!(matches!(paren, TokenKind::LeftParen));
-        let path = self.next(p).kind;
+        let import_range = self.eat_tok(p, TokenKind::Import);
+        self.eat_tok(p, TokenKind::LeftParen);
+
+        let path = self.cur(p).kind;
         let file = if let TokenKind::StrLit(path) = path {
             let path = path.to_str().unwrap().to_string();
             self.src_map.add_file(path).unwrap()
@@ -272,9 +271,8 @@ impl Driver {
             panic!("unexpected token");
         };
 
-        let Token { kind: paren, range: paren_range } = self.next(p);
-        assert!(matches!(paren, TokenKind::RightParen));
         self.next(p);
+        let paren_range = self.eat_tok(p, TokenKind::RightParen);
 
         self.import(file, source_info::concat(import_range, paren_range))
     }
@@ -368,12 +366,10 @@ impl Driver {
             },
             TokenKind::DebugMark => {
                 self.next(p);
-                assert!(matches!(self.cur(p).kind, TokenKind::LeftParen));
-                self.next(p);
+                self.eat_tok(p, TokenKind::LeftParen);
                 let expr = self.parse_expr(p);
                 self.debug_mark_expr(expr);
-                assert!(matches!(self.cur(p).kind, TokenKind::RightParen));
-                self.next(p);
+                self.eat_tok(p, TokenKind::RightParen);
                 Ok(expr)
             },
             &TokenKind::IntLit(val) => {
@@ -504,10 +500,7 @@ impl Driver {
     }
 
     fn parse_if(&mut self, p: &mut Parser) -> ExprId {
-        let Token { kind, range: if_range } = self.cur(p);
-        let if_range = if_range;
-        assert_eq!(kind, &TokenKind::If);
-        self.next(p);
+        let if_range = self.eat_tok(p, TokenKind::If);
         let condition = self.parse_non_struct_lit_expr(p);
         let (then_scope, then_range) = self.parse_scope(p);
         let mut range = source_info::concat(if_range, then_range);
@@ -536,11 +529,9 @@ impl Driver {
     }
 
     fn parse_attribute(&mut self, p: &mut Parser, condition_ns: ConditionNsId) -> Attribute {
-        let Token { kind, range: at_range } = self.cur(p);
-        let at_range = at_range;
-        assert_eq!(kind, &TokenKind::AtSign);
+        let at_range = self.eat_tok(p, TokenKind::AtSign);
 
-        let Token { kind, range: ident_range } = self.next(p);
+        let Token { kind, range: ident_range } = self.cur(p);
         let attr = match kind {
             &TokenKind::Ident(sym) => sym,
             _ => panic!("Unexpected token when parsing attribute"),
@@ -557,11 +548,9 @@ impl Driver {
             TokenKind::LeftParen => {
                 self.next(p);
                 let arg = self.parse_expr(p);
-                let Token { kind, range } = self.cur(p);
-                assert_eq!(kind, &TokenKind::RightParen);
-                self.next(p);
+                let paren_range = self.eat_tok(p, TokenKind::RightParen);
 
-                (Some(arg), range)
+                (Some(arg), paren_range)
             },
             _ => (None, ident_range),
         };
@@ -570,6 +559,12 @@ impl Driver {
         Attribute { attr, arg, range }
     }
 
+    fn eat_tok(&mut self, p: &mut Parser, kind: TokenKind) -> SourceRange {
+        let Token { kind: cur_kind, range } = self.cur(p);
+        assert_eq!(cur_kind, &kind, "unexpected token {:?}, expected {:?}", cur_kind, &kind);
+        self.next(p);
+        range
+    }
 }
 
 #[derive(Debug)]
@@ -641,10 +636,7 @@ impl Driver {
     }
 
     fn parse_ambiguous_generic_list(&mut self, p: &mut Parser) -> AmbiguousGenericList {
-        assert!(matches!(self.cur(p).kind, TokenKind::OpenSquareBracket));
-        let open_square_bracket_range = self.cur(p).range;
-        self.next(p);
-
+        let open_square_bracket_range = self.eat_tok(p, TokenKind::OpenSquareBracket);
         let mut list = AmbiguousGenericList {
             kind: AmbiguousGenericListKind::Ambiguous(Vec::new()),
             range: open_square_bracket_range
@@ -692,9 +684,8 @@ impl Driver {
             }
         }
 
-        assert_eq!(self.cur(p).kind, &TokenKind::CloseSquareBracket);
-        list.range = source_info::concat(list.range, self.cur(p).range);
-        self.next(p);
+        let bracket_range = self.eat_tok(p, TokenKind::CloseSquareBracket);
+        list.range = source_info::concat(list.range, bracket_range);
 
         list
     }
@@ -767,10 +758,9 @@ impl Driver {
     }
 
     fn parse_decl(&mut self, name: Ident, generic_params: GenericParamList, p: &mut Parser) -> DeclId {
-        assert!(matches!(self.cur(p).kind, TokenKind::Colon));
-        let colon_range = self.cur(p).range;
+        let colon_range = self.eat_tok(p, TokenKind::Colon);
         let mut found_separator = true;
-        let explicit_ty = match self.next(p).kind {
+        let explicit_ty = match self.cur(p).kind {
             TokenKind::Ident(_) => Some(self.parse_type(p).0),
             _ => None,
         };
@@ -798,14 +788,10 @@ impl Driver {
     }
 
     fn parse_module(&mut self, p: &mut Parser) -> ExprId {
-        let Token { kind, range: mod_range } = self.cur(p);
-        let mod_range = mod_range;
-        assert_eq!(kind, &TokenKind::Module);
-        self.next(p);
+        let mod_range = self.eat_tok(p, TokenKind::Module);
 
         let module = self.begin_module();
-        assert_eq!(self.cur(p).kind, &TokenKind::OpenCurly);
-        self.next(p);
+        self.eat_tok(p, TokenKind::OpenCurly);
         let close_curly_range = loop {
             match self.cur(p).kind {
                 TokenKind::Eof => panic!("Unexpected eof while parsing scope"),
@@ -830,12 +816,8 @@ impl Driver {
     }
 
     fn parse_struct(&mut self, p: &mut Parser) -> ExprId {
-        let Token { kind, range: struct_range } = self.cur(p);
-        assert_eq!(kind, &TokenKind::Struct);
-        self.next(p);
-
-        assert_eq!(self.cur(p).kind, &TokenKind::OpenCurly);
-        self.next(p);
+        let struct_range = self.eat_tok(p, TokenKind::Struct);
+        self.eat_tok(p, TokenKind::OpenCurly);
 
         let mut fields = Vec::new();
         let close_curly_range = loop {
@@ -850,8 +832,7 @@ impl Driver {
                 _ => {
                     if let Token { kind: &TokenKind::Ident(name), range: ident_range } = self.cur(p) {
                         self.next(p);
-                        assert_eq!(self.cur(p).kind, &TokenKind::Colon);
-                        self.next(p);
+                        self.eat_tok(p, TokenKind::Colon);
                         let (ty, ty_range) = self.parse_type(p);
                         let index = fields.len();
                         let range = source_info::concat(ident_range, ty_range);
@@ -866,12 +847,8 @@ impl Driver {
     }
 
     fn parse_enum(&mut self, p: &mut Parser) -> ExprId {
-        let Token { kind, range: enum_range } = self.cur(p);
-        assert_eq!(kind, &TokenKind::Enum);
-        self.next(p);
-
-        assert_eq!(self.cur(p).kind, &TokenKind::OpenCurly);
-        self.next(p);
+        let enum_range = self.eat_tok(p, TokenKind::Enum);
+        self.eat_tok(p, TokenKind::OpenCurly);
 
         let (expr, enuum) = self.reserve_enum();
 
@@ -909,10 +886,7 @@ impl Driver {
     fn parse_scope(&mut self, p: &mut Parser) -> (ImperScopeId, SourceRange) {
         let scope = self.begin_imper_scope();
         let mut last_was_expr = false;
-        let Token { kind, range: open_curly_range } = self.cur(p);
-        let open_curly_range = open_curly_range;
-        assert_eq!(kind, &TokenKind::OpenCurly);
-        self.next(p);
+        let open_curly_range = self.eat_tok(p, TokenKind::OpenCurly);
         let close_curly_range = loop {
             match self.cur(p).kind {
                 TokenKind::Eof => panic!("Unexpected eof while parsing scope"),
@@ -940,9 +914,8 @@ impl Driver {
 
     fn parse_comp_decl(&mut self, p: &mut Parser) -> DeclId {
         // Parse fn {name}
-        assert_eq!(self.cur(p).kind, &TokenKind::Fn);
-        let mut proto_range = self.cur(p).range;
-        let name = if let TokenKind::Ident(name) = *self.next(p).kind {
+        let mut proto_range = self.eat_tok(p, TokenKind::Fn);
+        let name = if let TokenKind::Ident(name) = *self.cur(p).kind {
             name
         } else {
             panic!("expected function name after 'fn'")
@@ -980,9 +953,8 @@ impl Driver {
                         .adding_primary_range(open_square_bracket_range, "list starts here")
                 );
             }
-            assert_eq!(self.cur(p).kind, &TokenKind::CloseSquareBracket);
-            proto_range = source_info::concat(proto_range, self.cur(p).range);
-            self.next(p);
+            let bracket_range = self.eat_tok(p, TokenKind::CloseSquareBracket);
+            proto_range = source_info::concat(proto_range, bracket_range);
         }
 
         // Parse (param_name: param_ty, param2_name: param2_ty, ...)
@@ -995,8 +967,8 @@ impl Driver {
             while let TokenKind::Ident(name) = *self.cur(p).kind {
                 let param_range = self.cur(p).range;
                 param_names.push(name);
-                assert_eq!(self.next(p).kind, &TokenKind::Colon);
                 self.next(p);
+                self.eat_tok(p, TokenKind::Colon);
                 let (ty, _ty_range) = self.parse_type(p);
                 param_ranges.push(param_range);
                 param_tys.push(ty);
@@ -1004,9 +976,8 @@ impl Driver {
                     self.next(p);
                 }
             }
-            assert_eq!(self.cur(p).kind, &TokenKind::RightParen);
-            proto_range = source_info::concat(proto_range, self.cur(p).range);
-            self.next(p);
+            let paren_range = self.eat_tok(p, TokenKind::RightParen);
+            proto_range = source_info::concat(proto_range, paren_range);
             self.end_comp_decl_params_namespace(ns);
 
             Some(ns)
