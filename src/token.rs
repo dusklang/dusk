@@ -28,6 +28,7 @@ pub enum TokenKind {
     If,
     Else,
     While,
+    Switch,
     As,
     Struct,
     Enum,

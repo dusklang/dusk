@@ -345,6 +345,7 @@ impl Driver {
                 "if" => If,
                 "else" => Else,
                 "while" => While,
+                "switch" => Switch,
                 "as" => As,
                 "struct" => Struct,
                 "enum" => Enum,

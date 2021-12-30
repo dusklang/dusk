@@ -18,6 +18,10 @@ fn main() {
     }
     print_enum(val.b)
 
+    fuck :: do {
+        12
+    }
+
     // Expected output:
     // enum is b!
     // enum is c!
@@ -31,5 +35,16 @@ fn print_enum(e: MyEnum) {
         print("enum is a!\n")
     } else {
         print("enum is c!\n")
+    }
+}
+
+fn print_enum_the_right_way(e: MyEnum) {
+    switch e {
+        .a: print("enum is a!\n"),
+        .b: {
+            msg :: "enum is b!\n"
+            print(msg)
+        }
+        .c: print("enum is c!\n"),
     }
 }

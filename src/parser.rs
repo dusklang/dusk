@@ -5,6 +5,7 @@ use string_interner::DefaultSymbol as Sym;
 use dire::hir::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment, GenericParamId};
 use dire::ty::Type;
 use dire::source_info::{self, SourceFileId, SourceRange};
+use dire::hir::VOID_EXPR;
 
 use crate::driver::Driver;
 use crate::hir::{ConditionKind, GenericParamList};
@@ -395,8 +396,7 @@ impl Driver {
             },
             &TokenKind::Ident(name) => Ok(self.parse_decl_ref(p, None, name)),
             TokenKind::Do => {
-                let do_range = self.cur(p).range;
-                self.next(p);
+                let do_range = self.eat_tok(p, TokenKind::Do);
                 let (scope, scope_range) = self.parse_scope(p);
                 Ok(self.do_expr(scope, source_info::concat(do_range, scope_range)))
             },
@@ -412,6 +412,7 @@ impl Driver {
                 let (scope, scope_range) = self.parse_scope(p);
                 Ok(self.while_expr(condition, scope, source_info::concat(while_range, scope_range)))
             },
+            TokenKind::Switch => Ok(self.parse_switch(p)),
             TokenKind::Return => {
                 let ret_range = self.cur(p).range;
                 self.next(p);
@@ -528,6 +529,41 @@ impl Driver {
         self.if_expr(condition, then_scope, else_scope, range)
     }
 
+    fn parse_switch(&mut self, p: &mut Parser) -> ExprId {
+        let switch_range = self.eat_tok(p, TokenKind::Switch);
+        let scrutinee = self.parse_non_struct_lit_expr(p);
+        self.eat_tok(p, TokenKind::OpenCurly);
+        let close_curly_range = loop {
+            match self.cur(p).kind {
+                TokenKind::Eof => panic!("Unexpected eof while parsing switch body"),
+                TokenKind::CloseCurly => {
+                    let close_curly_range = self.cur(p).range;
+                    self.next(p);
+                    break close_curly_range;
+                },
+                _ => {
+                    let pattern = self.parse_pattern(p);
+                    self.eat_tok(p, TokenKind::Colon);
+                    match self.cur(p).kind {
+                        TokenKind::OpenCurly => {
+                            let (scope, scope_range) = self.parse_scope(p);
+                        },
+                        _ => {
+                            let case_expr = self.parse_expr(p);
+                        }
+                    }
+                    while self.cur(p).kind == &TokenKind::Comma {
+                        self.next(p);
+                    }
+                }
+            }
+        };
+
+
+        // NOTE: temporary!
+        VOID_EXPR
+    }
+
     fn parse_attribute(&mut self, p: &mut Parser, condition_ns: ConditionNsId) -> Attribute {
         let at_range = self.eat_tok(p, TokenKind::AtSign);
 
@@ -559,11 +595,28 @@ impl Driver {
         Attribute { attr, arg, range }
     }
 
+    fn parse_pattern(&mut self, p: &mut Parser) -> Pattern {
+        let dot_range = self.eat_tok(p, TokenKind::Dot);
+        let name = self.eat_ident(p);
+        let range = source_info::concat(dot_range, name.range);
+        Pattern::ContextualMember { name, range }
+    }
+
     fn eat_tok(&mut self, p: &mut Parser, kind: TokenKind) -> SourceRange {
         let Token { kind: cur_kind, range } = self.cur(p);
         assert_eq!(cur_kind, &kind, "unexpected token {:?}, expected {:?}", cur_kind, &kind);
         self.next(p);
         range
+    }
+
+    fn eat_ident(&mut self, p: &mut Parser) -> Ident {
+        let Token { kind, range } = self.cur(p);
+        if let &TokenKind::Ident(symbol) = kind {
+            self.next(p);
+            Ident { symbol, range }
+        } else {
+            panic!("unexpected token {:?}, expected identifier")
+        }
     }
 }
 
@@ -571,6 +624,14 @@ impl Driver {
 struct Ident {
     symbol: Sym,
     range: SourceRange,
+}
+
+#[derive(Debug)]
+enum Pattern {
+    ContextualMember {
+        name: Ident,
+        range: SourceRange,
+    }
 }
 
 #[derive(Debug)]

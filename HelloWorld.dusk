@@ -60,26 +60,26 @@ fn take_a_type(T: type) {
     print("\n")
 }
 
-fn compute_a_module(switch: u32): module {
-    if switch == 0 {
+fn compute_a_module(switch_val: u32): module {
+    if switch_val == 0 {
         mod {
             fn print_the_switch() {
                 print("The switch is 0!\n")
             }
         }
-    } else if switch == 1 {
+    } else if switch_val == 1 {
         mod {
             fn print_the_switch() {
                 print("The switch is 1!\n")
             }
         }
-    } else if switch == 2 {
+    } else if switch_val == 2 {
         mod {
             fn print_the_switch() {
                 print("The switch is 2!\n")
             }
         }
-    } else if switch == 3 {
+    } else if switch_val == 3 {
         mod {
             fn print_the_switch() {
                 print("The switch is 3!\n")
