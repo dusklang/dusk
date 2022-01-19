@@ -163,7 +163,7 @@ impl Driver {
         let cast_id = self.code.hir_code.cast_counter.next();
         self.push_expr(Expr::Cast { expr, ty, cast_id }, range)
     }
-    pub fn stored_decl(&mut self, name: Sym, generic_params: GenericParamList, explicit_ty: Option<ExprId>, is_mut: bool, root_expr: ExprId, range: SourceRange) -> DeclId {
+    pub fn stored_decl(&mut self, name: Sym, _generic_params: GenericParamList, explicit_ty: Option<ExprId>, is_mut: bool, root_expr: ExprId, range: SourceRange) -> DeclId {
         self.flush_stmt_buffer();
         match self.hir.scope_stack.last().unwrap() {
             ScopeState::Imper { .. } => {
@@ -216,6 +216,9 @@ impl Driver {
     }
     pub fn while_expr(&mut self, condition: ExprId, scope: ImperScopeId, range: SourceRange) -> ExprId {
         self.push_expr(Expr::While { condition, scope }, range)
+    }
+    pub fn switch_expr(&mut self, scrutinee: ExprId, cases: Vec<SwitchCase>, range: SourceRange) -> ExprId {
+        self.push_expr(Expr::Switch { scrutinee, cases }, range)
     }
     pub fn do_expr(&mut self, scope: ImperScopeId, range: SourceRange) -> ExprId {
         self.push_expr(Expr::Do { scope }, range)

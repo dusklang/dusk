@@ -950,7 +950,7 @@ impl Driver {
             }
             constraint
         };
-        let explicit_requirements: HashSet<_> = explicit_requirements.into_iter().map(replace_parameters).collect();
+        let _explicit_requirements: HashSet<_> = explicit_requirements.into_iter().map(replace_parameters).collect();
         let explicit_guarantees: HashSet<_> = explicit_guarantees.into_iter().map(replace_parameters).collect();
         let conf = SmtConf::default_z3();
 
@@ -976,7 +976,6 @@ impl Driver {
             guarantees,
             ..Default::default()
         };
-        //constraints.requirements.extend(explicit_requirements);
         let mut active_constraints = HashSet::new();
         active_constraints.extend(constraints.requirements.iter().cloned());
         let mut rs = RefineSession {

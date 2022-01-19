@@ -1279,6 +1279,9 @@ impl Driver {
                     ControlDest::Block(_) => return VOID_INSTR.direct(),
                 }
             },
+            Expr::Switch { .. } => {
+                todo!();
+            },
             Expr::Ret { expr, .. } => {
                 return self.build_expr(
                     b,

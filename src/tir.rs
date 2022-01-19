@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use smallvec::SmallVec;
 use index_vec::define_index_type;
 
-use dire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, EnumId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId, GenericParamId, RETURN_VALUE_DECL};
+use dire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, EnumId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId, GenericParamId, Pattern, RETURN_VALUE_DECL};
 
 use crate::driver::Driver;
 use crate::dep_vec::{self, DepVec, AnyDepVec};
@@ -15,6 +15,14 @@ mod graph;
 use graph::{Graph, Levels};
 
 define_index_type!(pub struct TreeId = u32;);
+
+#[derive(Debug)]
+pub struct SwitchCase {
+    // TODO: might want a different, typechecker-specific data structure for patterns here at some point
+    pub pattern: Pattern,
+    pub terminal_expr: ExprId,
+}
+
 
 #[derive(Debug)]
 pub struct RetGroup { pub ty: ExprId, pub exprs: SmallVec<[ExprId; 1]> }
@@ -40,6 +48,8 @@ pub struct DeclRef { pub args: SmallVec<[ExprId; 2]>, pub decl_ref_id: DeclRefId
 pub struct If { pub condition: ExprId, pub then_expr: ExprId, pub else_expr: ExprId }
 #[derive(Debug)]
 pub struct While { pub condition: ExprId }
+#[derive(Debug)]
+pub struct Switch { pub scrutinee: ExprId, pub cases: Vec<SwitchCase> }
 #[derive(Debug)]
 pub struct Struct { pub field_tys: SmallVec<[ExprId; 2]>, }
 #[derive(Debug)]
@@ -116,6 +126,7 @@ pub struct UnitItems {
     pub derefs: DepVec<Expr<Dereference>>,
     pub pointers: DepVec<Expr<Pointer>>,
     pub ifs: DepVec<Expr<If>>,
+    pub switches: DepVec<Expr<Switch>>,
     pub structs: DepVec<Expr<Struct>>,
     pub struct_lits: DepVec<Expr<StructLit>>,
     pub enums: DepVec<Expr<Enum>>,
@@ -135,7 +146,7 @@ impl UnitItems {
             &mut self.addr_ofs, &mut self.derefs, &mut self.pointers, &mut self.ifs,
             &mut self.dos, &mut self.ret_groups, &mut self.casts, &mut self.whiles,
             &mut self.explicit_rets, &mut self.modules, &mut self.imports, &mut self.structs,
-            &mut self.struct_lits, &mut self.enums,
+            &mut self.struct_lits, &mut self.switches, &mut self.enums,
         ]);
     }
 }
@@ -449,6 +460,17 @@ impl Driver {
                 insert_expr!(ifs, If { condition, then_expr, else_expr });
             },
             &hir::Expr::While { condition, .. } => insert_expr!(whiles, While { condition }),
+            &hir::Expr::Switch { scrutinee, ref cases, } => {
+                let mut tir_cases = Vec::with_capacity(cases.len());
+                for case in cases {
+                    let case = SwitchCase {
+                        pattern: case.pattern.clone(),
+                        terminal_expr: self.code.hir_code.imper_scopes[case.scope].terminal_expr,
+                    };
+                    tir_cases.push(case);
+                }
+                insert_expr!(switches, Switch { scrutinee, cases: tir_cases })
+            },
             hir::Expr::Mod { .. } => insert_expr!(modules, Module),
             hir::Expr::Import { .. } => insert_expr!(imports, Import),
             &hir::Expr::Struct(struct_id) => {
@@ -577,7 +599,14 @@ impl Driver {
                     };
                     self.tir.graph.add_type1_dep(id, ei!(then_expr));
                     self.tir.graph.add_type1_dep(id, ei!(else_expr));
-                }
+                },
+                hir::Expr::Switch { scrutinee, ref cases } => {
+                    self.tir.graph.add_type1_dep(id, ei!(scrutinee));
+                    for case in cases.clone() {
+                        let terminal = self.code.hir_code.imper_scopes[case.scope].terminal_expr;
+                        self.tir.graph.add_type1_dep(id, ei!(terminal));
+                    }
+                },
                 hir::Expr::While { condition, scope } => {
                     self.tir.graph.add_type1_dep(id, ei!(condition));
                     let terminal_expr = self.code.hir_code.imper_scopes[scope].terminal_expr;
@@ -672,6 +701,11 @@ impl Driver {
                         },
                         hir::Expr::Do { scope } => {
                             self.add_type3_scope_dep(id, scope);
+                        },
+                        hir::Expr::Switch { ref cases, .. } => {
+                            for case in cases.clone() {
+                                self.add_type3_scope_dep(id, case.scope);
+                            }
                         },
                         hir::Expr::If { then_scope, else_scope, .. } => {
                             self.add_type3_scope_dep(id, then_scope);

@@ -2,7 +2,7 @@ use smallvec::{SmallVec, smallvec};
 
 use string_interner::DefaultSymbol as Sym;
 
-use dire::hir::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment, GenericParamId};
+use dire::hir::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment, GenericParamId, Ident, Pattern, SwitchCase};
 use dire::ty::Type;
 use dire::source_info::{self, SourceFileId, SourceRange};
 use dire::hir::VOID_EXPR;
@@ -290,7 +290,7 @@ impl Driver {
             let mut args = Vec::new();
             loop {
                 // TODO: actually implement proper comma and newline handling like I've thought about
-                let Token { kind, range } = self.cur(p);
+                let kind = self.cur(p).kind;
                 match kind {
                     TokenKind::CloseSquareBracket => {
                         self.next(p);
@@ -533,6 +533,7 @@ impl Driver {
         let switch_range = self.eat_tok(p, TokenKind::Switch);
         let scrutinee = self.parse_non_struct_lit_expr(p);
         self.eat_tok(p, TokenKind::OpenCurly);
+        let mut cases = Vec::new();
         let close_curly_range = loop {
             match self.cur(p).kind {
                 TokenKind::Eof => panic!("Unexpected eof while parsing switch body"),
@@ -544,14 +545,23 @@ impl Driver {
                 _ => {
                     let pattern = self.parse_pattern(p);
                     self.eat_tok(p, TokenKind::Colon);
-                    match self.cur(p).kind {
-                        TokenKind::OpenCurly => {
-                            let (scope, scope_range) = self.parse_scope(p);
-                        },
+                    let (scope, scope_range) = match self.cur(p).kind {
+                        TokenKind::OpenCurly => self.parse_scope(p),
                         _ => {
+                            let scope = self.begin_imper_scope();
                             let case_expr = self.parse_expr(p);
+                            self.stmt(case_expr);
+                            self.end_imper_scope(true);
+                            let scope_range = self.get_range(case_expr);
+                            (scope, scope_range)
                         }
-                    }
+                    };
+                    let switch_case = SwitchCase {
+                        pattern,
+                        scope,
+                        scope_range,
+                    };
+                    cases.push(switch_case);
                     while self.cur(p).kind == &TokenKind::Comma {
                         self.next(p);
                     }
@@ -559,9 +569,8 @@ impl Driver {
             }
         };
 
-
-        // NOTE: temporary!
-        VOID_EXPR
+        let range = source_info::concat(switch_range, close_curly_range);
+        self.switch_expr(scrutinee, cases, range)
     }
 
     fn parse_attribute(&mut self, p: &mut Parser, condition_ns: ConditionNsId) -> Attribute {
@@ -617,20 +626,6 @@ impl Driver {
         } else {
             panic!("unexpected token {:?}, expected identifier")
         }
-    }
-}
-
-#[derive(Debug)]
-struct Ident {
-    symbol: Sym,
-    range: SourceRange,
-}
-
-#[derive(Debug)]
-enum Pattern {
-    ContextualMember {
-        name: Ident,
-        range: SourceRange,
     }
 }
 

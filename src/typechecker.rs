@@ -247,6 +247,55 @@ impl tir::Expr<tir::While> {
     }
 }
 
+impl tir::Expr<tir::Switch> {
+    fn run_pass_1(&self, _driver: &mut Driver, _tp: &mut impl TypeProvider) {
+        todo!();
+
+        // // TODO: implement. This is the if implementation, which I can likely take many cues from
+        // if let Some(err) = can_unify_to(tp.constraints(self.condition), &Type::Bool.into()).err() {
+        //     let mut error = Error::new("Expected boolean condition in if expression");
+        //     let range = driver.get_range(self.condition);
+        //     match err {
+        //         UnificationError::InvalidChoice(choices)
+        //             => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+        //         UnificationError::Trait(not_implemented)
+        //             => error.add_secondary_range(
+        //                 range,
+        //                 format!(
+        //                     "note: couldn't unify because expression requires implementations of {:?}",
+        //                     not_implemented.names(),
+        //                 ),
+        //             ),
+        //     }
+        //     driver.errors.push(error);
+        // }
+        // let constraints = tp.constraints(self.then_expr).intersect_with(tp.constraints(self.else_expr));
+
+        // if constraints.solve().is_err() {
+        //     // TODO: handle void expressions, which don't have appropriate source location info.
+        //     driver.errors.push(
+        //         Error::new("Failed to unify branches of if expression")
+        //             .adding_primary_range(driver.get_range(self.then_expr), "first terminal expression here")
+        //             .adding_primary_range(driver.get_range(self.else_expr), "second terminal expression here")
+        //     );
+        // }
+        // *tp.constraints_mut(self.id) = constraints;
+    }
+
+    fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut impl TypeProvider) {
+        todo!();
+
+        // // TODO: implement. This is the if implementation, which I can likely take many cues from
+        // let condition_ty = tp.constraints(self.condition).solve().map(|ty| ty.ty).unwrap_or(Type::Error);
+        // // Don't bother checking if bool, because we already did that in pass 1
+        // tp.constraints_mut(self.condition).set_to(condition_ty);
+        // let ty = tp.constraints(self.id).solve().expect("ambiguous type for if expression");
+        // *tp.ty_mut(self.id) = ty.ty.clone();
+        // tp.constraints_mut(self.then_expr).set_to(ty.clone());
+        // tp.constraints_mut(self.else_expr).set_to(ty);
+    }
+}
+
 impl tir::Expr<tir::ExplicitRet> {
     fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
         *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Never.into()]), None);
@@ -830,7 +879,7 @@ impl Driver {
             run_pass_1!(
                 assigned_decls, assignments, casts, whiles, explicit_rets, modules, imports,
                 decl_refs, addr_ofs, derefs, pointers, structs, struct_lits, ifs, dos, ret_groups,
-                enums,
+                switches, enums,
             );
             tp.debug_output(self, level as usize);
         }
@@ -859,7 +908,7 @@ impl Driver {
             run_pass_2!(
                 assigned_decls, assignments, casts, whiles, explicit_rets, modules, imports,
                 decl_refs, addr_ofs, derefs, pointers, structs, struct_lits, ifs, dos, ret_groups,
-                enums,
+                switches, enums,
             );
 
             if level > 0 {

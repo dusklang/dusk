@@ -1,8 +1,6 @@
 use arrayvec::ArrayVec;
 use bitflags::bitflags;
 
-use dire::ty::{Type, IntWidth};
-
 bitflags! {
     #[derive(Default)]
     pub struct BuiltinTraits: u8 {

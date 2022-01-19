@@ -422,10 +422,10 @@ macro_rules! bin_op {
         paste!($final_val = Some($lhs.[<as_ $ty>]() $sign $rhs.[<as_ $ty>]()));
     };
     (@out $final_val:ident, convert, $ty:ident, $lhs:ident, $rhs:ident, {$sign:tt}) => {
-        paste!($final_val = Some(Value::[<from_ $ty>]($lhs.[<as_ $ty>]() $sign $rhs.[<as_ $ty>]())));
+        paste!($final_val = Some(Value::[<from_ $ty>]($lhs.[<as_ $ty>]() $sign $rhs.[<as_ $ty>]())))
     };
     (@out $final_val:ident, bool_convert, $ty:ident, $lhs:ident, $rhs:ident, {$sign:tt}) => {
-        paste!($final_val = Some(Value::from_bool($lhs.[<as_ $ty>]() $sign $rhs.[<as_ $ty>]())));
+        paste!($final_val = Some(Value::from_bool($lhs.[<as_ $ty>]() $sign $rhs.[<as_ $ty>]())))
     };
 }
 
@@ -581,7 +581,8 @@ impl Driver {
                 for &arg in arguments {
                     copied_args.push(frame.results[&arg].clone());
                 }
-                self.call(FunctionRef::Id(func), copied_args, generic_arguments.clone())
+                let generic_arguments = generic_arguments.clone();
+                self.call(FunctionRef::Id(func), copied_args, generic_arguments)
             },
             &Instr::GenericParam(id) => {
                 Value::from_ty(Type::GenericParam(id))
