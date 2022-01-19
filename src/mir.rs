@@ -913,6 +913,7 @@ impl Driver {
         }
     }
 
+    #[allow(unused)]
     fn set(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[OpId; 2]>, id: DeclRefId, value: OpId, tp: &impl TypeProvider) -> OpId {
         let expr = self.code.hir_code.decl_refs[id].expr;
         let id = tp.selected_overload(id).expect("No overload found!");
@@ -935,6 +936,7 @@ impl Driver {
         }
     }
 
+    #[allow(unused)]
     fn modify(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[OpId; 2]>, id: DeclRefId, tp: &impl TypeProvider) -> Value {
         let expr = self.code.hir_code.decl_refs[id].expr;
         let id = tp.selected_overload(id).expect("No overload found!");

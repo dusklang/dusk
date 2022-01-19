@@ -5,7 +5,6 @@ use string_interner::DefaultSymbol as Sym;
 use dire::hir::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment, GenericParamId, Ident, Pattern, SwitchCase};
 use dire::ty::Type;
 use dire::source_info::{self, SourceFileId, SourceRange};
-use dire::hir::VOID_EXPR;
 
 use crate::driver::Driver;
 use crate::hir::{ConditionKind, GenericParamList};
@@ -624,7 +623,7 @@ impl Driver {
             self.next(p);
             Ident { symbol, range }
         } else {
-            panic!("unexpected token {:?}, expected identifier")
+            panic!("unexpected token {:?}, expected identifier", kind)
         }
     }
 }

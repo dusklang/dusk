@@ -1,3 +1,6 @@
+// TODO: remove this when I get back to the refinement checker
+#![allow(unused)]
+
 use std::collections::{HashSet, HashMap};
 use std::ops::{Add, Sub, Neg};
 use std::iter::Iterator;
@@ -18,6 +21,7 @@ use crate::typechecker::type_provider::TypeProvider;
 use crate::interpreter::Value;
 use crate::mir::{FunctionRef, function_by_ref};
 use crate::driver::Driver;
+
 
 // TODO: Switch to another smt crate, or write my own.
 // ugh why do I have to do this

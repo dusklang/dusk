@@ -107,8 +107,6 @@ struct ComponentState {
 #[derive(Debug, Default)]
 struct InternalUnit {
     components: HashSet<CompId>,
-
-    deps: HashMap<ItemId, ItemId>,
 }
 
 impl Graph {
