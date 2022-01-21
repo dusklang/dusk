@@ -229,11 +229,9 @@ impl Driver {
         self.code.hir_code.field_decls.push_at(field, FieldDecl { decl, name, ty, index });
         field
     }
-    pub fn variant_decl(&mut self, name: Sym, enuum: ExprId, enum_id: EnumId, index: usize, range: SourceRange) -> VariantDeclId {
-        let variant_id = self.code.hir_code.variant_decls.next_idx();
-        let decl = self.decl(Decl::Variant { enuum: enum_id, variant_id }, name, Some(enuum), range);
-        self.code.hir_code.variant_decls.push_at(variant_id, VariantDecl { decl, name, enuum, index });
-        variant_id
+    pub fn variant_decl(&mut self, name: Sym, enuum: ExprId, enum_id: EnumId, index: usize, range: SourceRange) -> VariantDecl {
+        let decl = self.decl(Decl::Variant { enuum: enum_id, index }, name, Some(enuum), range);
+        VariantDecl { decl, name, enuum }
     }
     pub fn strukt(&mut self, fields: Vec<FieldDeclId>, range: SourceRange) -> ExprId {
         let strukt = self.code.hir_code.structs.push(Struct { fields });
@@ -244,7 +242,7 @@ impl Driver {
         let expr = self.push_expr(Expr::Enum(enuum), Default::default());
         (expr, enuum)
     }
-    pub fn finish_enum(&mut self, variants: Vec<VariantDeclId>, range: SourceRange, expr: ExprId, enuum: EnumId) {
+    pub fn finish_enum(&mut self, variants: Vec<VariantDecl>, range: SourceRange, expr: ExprId, enuum: EnumId) {
         self.code.hir_code.enums[enuum] = Enum { variants };
         let item = self.code.hir_code.expr_to_items[expr];
         self.code.hir_code.source_ranges[item] = range;

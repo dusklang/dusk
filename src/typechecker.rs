@@ -261,8 +261,7 @@ impl tir::Expr<tir::Switch> {
                     match case.pattern {
                         Pattern::ContextualMember { name, range } => {
                             let variant_name_str = driver.interner.resolve(name.symbol).unwrap();
-                            for &variant in variants {
-                                let variant = &driver.code.hir_code.variant_decls[variant];
+                            for variant in variants {
                                 if variant.name == name.symbol {
                                     if let Some(&prior_match) = variants_matched.get(&name.symbol) {
                                         let err = Error::new(format!("Variant `{}` already covered in switch expression", variant_name_str))
@@ -290,8 +289,7 @@ impl tir::Expr<tir::Switch> {
                 // unmatched variants. AKA, the switch expression is non-exhaustive.
                 if variants_matched.len() < variants.len() {
                     let mut unmatched_variants = Vec::new();
-                    for &variant in variants {
-                        let variant = &driver.code.hir_code.variant_decls[variant];
+                    for variant in variants {
                         if variants_matched.get(&variant.name).is_none() {
                             unmatched_variants.push(variant.name);
                         }

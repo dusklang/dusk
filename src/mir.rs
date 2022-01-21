@@ -464,8 +464,7 @@ impl Driver {
                 self.mir.decls.insert(id, decl.clone());
                 decl
             },
-            hir::Decl::Variant { enuum, variant_id } => {
-                let index = self.code.hir_code.variant_decls[variant_id].index;
+            hir::Decl::Variant { enuum, index } => {
                 Decl::Variant { enuum, index }
             },
             hir::Decl::GenericParam(param) => {
@@ -480,8 +479,7 @@ impl Driver {
     #[allow(dead_code)]
     #[display_adapter]
     fn fmt_variant_name(&self, f: &mut Formatter, enuum: EnumId, index: usize) {
-        let variant = self.code.hir_code.enums[enuum].variants[index];
-        let variant = &self.code.hir_code.variant_decls[variant];
+        let variant = &self.code.hir_code.enums[enuum].variants[index];
         let name = self.interner.resolve(variant.name).unwrap();
         write!(f, "{}", name)
     }

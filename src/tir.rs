@@ -236,8 +236,7 @@ impl Driver {
         }
     }
     fn find_overloads_in_enum(&self, decl_ref: &hir::DeclRef, id: EnumId, overloads: &mut HashSet<DeclId>) {
-        for &variant in &self.code.hir_code.enums[id].variants {
-            let variant = &self.code.hir_code.variant_decls[variant];
+        for variant in &self.code.hir_code.enums[id].variants {
             if variant.name == decl_ref.name {
                 overloads.insert(variant.decl);
                 return;
