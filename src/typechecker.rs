@@ -342,17 +342,14 @@ impl tir::Expr<tir::Switch> {
         *tp.constraints_mut(self.id) = constraints;
     }
 
-    fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut impl TypeProvider) {
-        todo!();
-
-        // // TODO: implement. This is the if implementation, which I can likely take many cues from
-        // let condition_ty = tp.constraints(self.condition).solve().map(|ty| ty.ty).unwrap_or(Type::Error);
-        // // Don't bother checking if bool, because we already did that in pass 1
-        // tp.constraints_mut(self.condition).set_to(condition_ty);
-        // let ty = tp.constraints(self.id).solve().expect("ambiguous type for if expression");
-        // *tp.ty_mut(self.id) = ty.ty.clone();
-        // tp.constraints_mut(self.then_expr).set_to(ty.clone());
-        // tp.constraints_mut(self.else_expr).set_to(ty);
+    fn run_pass_2(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
+        let scrutinee_ty = tp.constraints(self.scrutinee).solve().map(|ty| ty.ty).unwrap_or(Type::Error);
+        tp.constraints_mut(self.scrutinee).set_to(scrutinee_ty);
+        let ty = tp.constraints(self.id).solve().expect("ambiguous type for switch expression");
+        *tp.ty_mut(self.id) = ty.ty.clone();
+        for case in &self.cases {
+            tp.constraints_mut(case.terminal_expr).set_to(ty.clone());
+        }
     }
 }
 
