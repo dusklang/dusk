@@ -683,8 +683,7 @@ impl tir::Expr<tir::StructLit> {
 
                     // Find matches for each field in the literal
                     'lit_fields: for lit_field in &self.fields {
-                        for (i, &struct_field) in struct_fields.iter().enumerate() {
-                            let struct_field = &driver.code.hir_code.field_decls[struct_field];
+                        for (i, struct_field) in struct_fields.iter().enumerate() {
                             if struct_field.name == lit_field.name {
                                 matches[i] = lit_field.expr;
                                 continue 'lit_fields;
@@ -707,8 +706,7 @@ impl tir::Expr<tir::StructLit> {
                     let lit_range = driver.get_range(self.id);
                     // Make sure each field in the struct has a match in the literal
                     for (i, &maatch) in matches.iter().enumerate() {
-                        let field = struct_fields[i];
-                        let field = &driver.code.hir_code.field_decls[field];
+                        let field = &struct_fields[i];
                         let field_ty = tp.get_evaluated_type(field.ty).clone();
                         if maatch == ExprId::new(u32::MAX as usize) {
                             successful = false;
@@ -773,8 +771,8 @@ impl tir::Expr<tir::StructLit> {
             debug_assert_eq!(lit.fields.len(), fields.len());
 
             for i in 0..fields.len() {
-                let field = fields[i];
-                let field = driver.code.hir_code.field_decls[field].decl;
+                let field = &fields[i];
+                let field = field.decl;
                 let field_ty = tp.fetch_decl_type(driver, field, None).ty.clone();
 
                 tp.constraints_mut(lit.fields[i]).set_to(field_ty);

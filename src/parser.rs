@@ -875,6 +875,7 @@ impl Driver {
         self.eat_tok(p, TokenKind::OpenCurly);
 
         let mut fields = Vec::new();
+        let (expr, strukt) = self.reserve_struct();
         let close_curly_range = loop {
             match self.cur(p).kind {
                 TokenKind::Eof => panic!("Unexpected eof while parsing struct expression"),
@@ -891,14 +892,16 @@ impl Driver {
                         let (ty, ty_range) = self.parse_type(p);
                         let index = fields.len();
                         let range = source_info::concat(ident_range, ty_range);
-                        fields.push(self.field_decl(name, ty, index, range));
+                        fields.push(self.field_decl(name, strukt, ty, index, range));
                     } else {
                         panic!("Unexpected token {:?}, expected field name", self.cur(p).kind);
                     }
                 }
             }
         };
-        self.strukt(fields, source_info::concat(struct_range, close_curly_range))
+        self.finish_struct(fields, source_info::concat(struct_range, close_curly_range), expr, strukt);
+
+        expr
     }
 
     fn parse_enum(&mut self, p: &mut Parser) -> ExprId {

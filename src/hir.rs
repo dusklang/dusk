@@ -223,19 +223,23 @@ impl Driver {
     pub fn do_expr(&mut self, scope: ImperScopeId, range: SourceRange) -> ExprId {
         self.push_expr(Expr::Do { scope }, range)
     }
-    pub fn field_decl(&mut self, name: Sym, ty: ExprId, index: usize, range: SourceRange) -> FieldDeclId {
-        let field = self.code.hir_code.field_decls.next_idx();
-        let decl = self.decl(Decl::Field(field), name, Some(ty), range);
-        self.code.hir_code.field_decls.push_at(field, FieldDecl { decl, name, ty, index });
-        field
+    pub fn field_decl(&mut self, name: Sym, strukt: StructId, ty: ExprId, index: usize, range: SourceRange) -> FieldDecl {
+        let decl = self.decl(Decl::Field { strukt, index }, name, Some(ty), range);
+        FieldDecl { decl, name, ty }
     }
     pub fn variant_decl(&mut self, name: Sym, enuum: ExprId, enum_id: EnumId, index: usize, range: SourceRange) -> VariantDecl {
         let decl = self.decl(Decl::Variant { enuum: enum_id, index }, name, Some(enuum), range);
         VariantDecl { decl, name, enuum }
     }
-    pub fn strukt(&mut self, fields: Vec<FieldDeclId>, range: SourceRange) -> ExprId {
-        let strukt = self.code.hir_code.structs.push(Struct { fields });
-        self.push_expr(Expr::Struct(strukt), range)
+    pub fn reserve_struct(&mut self) -> (ExprId, StructId) {
+        let strukt = self.code.hir_code.structs.push(Struct { fields: Vec::new() });
+        let expr = self.push_expr(Expr::Struct(strukt), Default::default());
+        (expr, strukt)
+    }
+    pub fn finish_struct(&mut self, fields: Vec<FieldDecl>, range: SourceRange, expr: ExprId, strukt: StructId) {
+        self.code.hir_code.structs[strukt] = Struct { fields };
+        let item = self.code.hir_code.expr_to_items[expr];
+        self.code.hir_code.source_ranges[item] = range;
     }
     pub fn reserve_enum(&mut self) -> (ExprId, EnumId) {
         let enuum = self.code.hir_code.enums.push(Enum { variants: Vec::new() });

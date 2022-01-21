@@ -458,8 +458,7 @@ impl Driver {
                 self.mir.decls.insert(id, decl.clone());
                 decl
             },
-            hir::Decl::Field(field_id) => {
-                let index = self.code.hir_code.field_decls[field_id].index;
+            hir::Decl::Field { index, .. } => {
                 let decl = Decl::Field { index };
                 self.mir.decls.insert(id, decl.clone());
                 decl
@@ -1180,8 +1179,8 @@ impl Driver {
             Expr::Struct(id) => {
                 let mut fields = SmallVec::new();
                 for i in 0..self.code.hir_code.structs[id].fields.len() {
-                    let field = self.code.hir_code.structs[id].fields[i];
-                    let field_ty = self.code.hir_code.field_decls[field].ty;
+                    let field = &self.code.hir_code.structs[id].fields[i];
+                    let field_ty = field.ty;
                     let field = self.build_expr(
                         b,
                         field_ty,
