@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use smallvec::{SmallVec, smallvec};
 
 mod constraints;
@@ -6,7 +7,7 @@ pub mod type_provider;
 use constraints::*;
 use type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 
-use dire::hir::{self, ExprId, DeclId, StructId};
+use dire::hir::{self, ExprId, DeclId, StructId, Pattern};
 use dire::mir::Const;
 use dire::ty::{Type, QualType, IntWidth};
 
@@ -248,38 +249,97 @@ impl tir::Expr<tir::While> {
 }
 
 impl tir::Expr<tir::Switch> {
-    fn run_pass_1(&self, _driver: &mut Driver, _tp: &mut impl TypeProvider) {
-        todo!();
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+        let scrutinee_ty = tp.constraints(self.scrutinee).solve().expect("Ambiguous type for scrutinee in switch expression").ty;
+        match scrutinee_ty {
+            Type::Enum(id) => {
+                // Make sure each switch case matches a variant name in the scrutinized enum, and
+                // that each variant in the enum is matched exactly once.
+                let mut variants_matched = HashMap::new();
+                let variants = &driver.code.hir_code.enums[id].variants;
+                for case in &self.cases {
+                    match case.pattern {
+                        Pattern::ContextualMember { name, range } => {
+                            let variant_name_str = driver.interner.resolve(name.symbol).unwrap();
+                            for &variant in variants {
+                                let variant = &driver.code.hir_code.variant_decls[variant];
+                                if variant.name == name.symbol {
+                                    if let Some(&prior_match) = variants_matched.get(&name.symbol) {
+                                        let err = Error::new(format!("Variant `{}` already covered in switch expression", variant_name_str))
+                                        .adding_secondary_range(prior_match, "first case here")
+                                        .adding_primary_range(range, "redundant case here");
+                                        driver.errors.push(err);
+                                    } else {
+                                        variants_matched.insert(name.symbol, range);
+                                    }
+                                    break;
+                                }
+                            }
+                            if variants_matched.get(&name.symbol).is_none() {
+                                let err = Error::new(format!("Variant `{}` does not exist in enum {:?}", variant_name_str, scrutinee_ty))
+                                    .adding_primary_range(range, "referred to by pattern here");
+                                driver.errors.push(err);
+                            }
+                        }
+                    }
+                }
+                // If there are more matches than variants, then the sky is falling.
+                debug_assert!(variants_matched.len() <= variants.len());
 
-        // // TODO: implement. This is the if implementation, which I can likely take many cues from
-        // if let Some(err) = can_unify_to(tp.constraints(self.condition), &Type::Bool.into()).err() {
-        //     let mut error = Error::new("Expected boolean condition in if expression");
-        //     let range = driver.get_range(self.condition);
-        //     match err {
-        //         UnificationError::InvalidChoice(choices)
-        //             => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
-        //         UnificationError::Trait(not_implemented)
-        //             => error.add_secondary_range(
-        //                 range,
-        //                 format!(
-        //                     "note: couldn't unify because expression requires implementations of {:?}",
-        //                     not_implemented.names(),
-        //                 ),
-        //             ),
-        //     }
-        //     driver.errors.push(error);
-        // }
-        // let constraints = tp.constraints(self.then_expr).intersect_with(tp.constraints(self.else_expr));
+                // There are more variants than there are matched variants? Then there are
+                // unmatched variants. AKA, the switch expression is non-exhaustive.
+                if variants_matched.len() < variants.len() {
+                    let mut unmatched_variants = Vec::new();
+                    for &variant in variants {
+                        let variant = &driver.code.hir_code.variant_decls[variant];
+                        if variants_matched.get(&variant.name).is_none() {
+                            unmatched_variants.push(variant.name);
+                        }
+                    }
 
-        // if constraints.solve().is_err() {
-        //     // TODO: handle void expressions, which don't have appropriate source location info.
-        //     driver.errors.push(
-        //         Error::new("Failed to unify branches of if expression")
-        //             .adding_primary_range(driver.get_range(self.then_expr), "first terminal expression here")
-        //             .adding_primary_range(driver.get_range(self.else_expr), "second terminal expression here")
-        //     );
-        // }
-        // *tp.constraints_mut(self.id) = constraints;
+                    // TODO: using the write!() macro here, or something, would be nicer.
+                    let mut err_msg = String::new();
+                    if unmatched_variants.len() == 1 {
+                        err_msg.push_str(&format!("Variant `{}` is ", driver.interner.resolve(unmatched_variants[0]).unwrap()));
+                    } else {
+                        err_msg.push_str("Variants ");
+                        for (i, &variant) in unmatched_variants[0..(unmatched_variants.len() - 1)].iter().enumerate() {
+                            if i != 0 {
+                                err_msg.push_str(", ");
+                            }
+                            err_msg.push_str(&format!("`{}`", driver.interner.resolve(variant).unwrap()));
+                        }
+                        err_msg.push_str(&format!(" and `{}` are ", driver.interner.resolve(unmatched_variants.last().copied().unwrap()).unwrap()));
+                    }
+                    err_msg.push_str("unhandled in switch expression. switch expressions must be exhaustive.");
+
+                    let err = Error::new(err_msg)
+                        .adding_primary_range(driver.get_range(self.id), "");
+                    driver.errors.push(err);
+                }
+            },
+            _ => todo!("Only enums are supported in switch expression scrutinee position"),
+        }
+
+        driver.flush_errors();
+
+        let constraints = if self.cases.is_empty() {
+            ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None)
+        } else {
+            let mut constraints = tp.constraints(self.cases[0].terminal_expr).clone();
+            for case in &self.cases[1..self.cases.len()] {
+                constraints = constraints.intersect_with(tp.constraints(case.terminal_expr));
+            }
+            constraints
+        };
+        if constraints.solve().is_err() {
+            // TODO: better error message
+            driver.errors.push(
+                Error::new("Failed to unify cases of switch expression")
+                    .adding_primary_range(driver.get_range(self.id), "")
+            );
+        }
+        *tp.constraints_mut(self.id) = constraints;
     }
 
     fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut impl TypeProvider) {
