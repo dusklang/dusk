@@ -14,6 +14,8 @@ use crate::TirGraphOutput;
 mod graph;
 use graph::{Graph, Levels};
 
+use dusk_proc_macros::*;
+
 define_index_type!(pub struct TreeId = u32;);
 
 #[derive(Debug)]
@@ -190,26 +192,11 @@ pub struct Builder {
     staged_ret_groups: HashMap<DeclId, SmallVec<[ExprId; 1]>>,
 }
 
-macro_rules! ei_injector {
-    ($self:expr, $name:ident) => { 
-        macro_rules! $name {
-            ($a: expr) => { $self.code.hir_code.expr_to_items[$a] }
-        }
-    }
-}
-macro_rules! di_injector {
-    ($self:expr, $name:ident) => { 
-        macro_rules! $name {
-            ($a: expr) => { $self.code.hir_code.decl_to_items[$a] }
-        }
-    }
-}
 macro_rules! add_eval_dep_injector {
     ($self:expr, $name: ident) => {
         macro_rules! $name {
             ($a:expr, $b:expr) => {{
-                ei_injector!($self, ei_inner);
-                $self.tir.graph.add_type4_dep($a, ei_inner!($b));
+                $self.tir.graph.add_type4_dep($a, ef!($self, $b.item));
                 $self.tir.depended_on[$b] = true;
             }}
         }
@@ -243,7 +230,7 @@ impl Driver {
         }
     }
     fn find_overloads_in_function_parameters(&self, decl_ref: &hir::DeclRef, func: DeclId, overloads: &mut HashSet<DeclId>) {
-        match &self.code.hir_code.decls[func] {
+        match &df!(func.hir) {
             hir::Decl::Computed { params, .. } => {
                 for i in params.start.index()..params.end.index() {
                     let decl = DeclId::new(i);
@@ -303,7 +290,7 @@ impl Driver {
                 },
                 Namespace::CompDeclParams(ns_id) => {
                     let comp_decl_params_ns = &self.code.hir_code.comp_decl_params_ns[ns_id];
-                    if let hir::Decl::Computed { generic_params, .. } = &self.code.hir_code.decls[comp_decl_params_ns.func] {
+                    if let hir::Decl::Computed { generic_params, .. } = &df!(comp_decl_params_ns.func.hir) {
                         for i in generic_params.start.index()..generic_params.end.index() {
                             let decl = DeclId::new(i);
                             let param_name = self.code.hir_code.names[decl];
@@ -340,30 +327,30 @@ impl Driver {
 
     fn add_types_2_to_4_deps_to_member_ref(&mut self, id: ItemId, decl_ref_id: DeclRefId) {
         add_eval_dep_injector!(self, add_eval_dep);
-        di_injector!(self, di);
+
         let decl_ref = &self.code.hir_code.decl_refs[decl_ref_id];
         let overloads = self.find_overloads(decl_ref);
         for overload in overloads {
-            match self.code.hir_code.decls[overload] {
+            match df!(overload.hir) {
                 hir::Decl::Computed { ref param_tys, .. } => {
                     let ty = self.code.hir_code.explicit_tys[overload].unwrap_or(hir::VOID_TYPE);
                     add_eval_dep!(id, ty);
                     for &ty in param_tys {
                         add_eval_dep!(id, ty);
                     }
-                    self.tir.graph.add_type3_dep(id, di!(overload));
+                    self.tir.graph.add_type3_dep(id, df!(overload.item));
                 },
                 hir::Decl::ReturnValue => {
                     let decl_ref = &self.code.hir_code.decl_refs[decl_ref_id];
                     match decl_ref.namespace {
                         Namespace::Guarantee(condition_ns_id) => {
                             let func = self.code.hir_code.condition_ns[condition_ns_id].func;
-                            self.tir.graph.add_type3_dep(id, di!(func));
+                            self.tir.graph.add_type3_dep(id, df!(func.item));
                         },
                         _ => panic!("invalid namespace for `return_value`"),
                     }
                 },
-                _ => self.tir.graph.add_type2_dep(id, di!(overload)),
+                _ => self.tir.graph.add_type2_dep(id, df!(overload.item)),
             }
         }
     }
@@ -378,7 +365,7 @@ impl Driver {
             let item = op.as_hir_item().unwrap();
             match item {
                 Item::Expr(expr) => self.tir.graph.add_type3_dep(a, self.code.hir_code.expr_to_items[expr]),
-                Item::Decl(decl) => match self.code.hir_code.decls[decl] {
+                Item::Decl(decl) => match df!(decl.hir) {
                     hir::Decl::Stored { .. } => self.tir.graph.add_type3_dep(a, self.code.hir_code.decl_to_items[decl]),
                     hir::Decl::Computed { .. } => {},
                     _ => panic!("Invalid scope item"),
@@ -390,7 +377,7 @@ impl Driver {
     fn flush_staged_ret_groups(&mut self, sp: &mut Subprogram) {
         let staged_ret_groups = std::mem::replace(&mut self.tir.staged_ret_groups, HashMap::new());
         for (decl, exprs) in staged_ret_groups {
-            assert!(matches!(self.code.hir_code.decls[decl], hir::Decl::Computed { .. }));
+            assert!(matches!(df!(decl.hir), hir::Decl::Computed { .. }));
 
             let ty = self.code.hir_code.explicit_tys[decl].expect("explicit return statements are not allowed in assigned functions (yet?)");
 
@@ -429,7 +416,7 @@ impl Driver {
                 flat_insert_item!($vec, Expr { id, data: $expr, });
             }}
         }
-        match &self.code.hir_code.exprs[id] {
+        match &ef!(id.hir) {
             hir::Expr::Void => {},
             hir::Expr::IntLit { .. } => flat_insert_expr!(int_lits, IntLit),
             hir::Expr::DecLit { .. } => flat_insert_expr!(dec_lits, DecLit),
@@ -483,7 +470,7 @@ impl Driver {
     }
 
     fn build_tir_decl(&mut self, unit: &mut UnitItems, level: u32, id: DeclId) {
-        match self.code.hir_code.decls[id] {
+        match df!(id.hir) {
             // TODO: Add parameter and field TIR items for (at least) checking that the type of the param is valid
             hir::Decl::Parameter { .. } | hir::Decl::Field { .. } | hir::Decl::Variant { .. } | hir::Decl::ReturnValue | hir::Decl::Intrinsic { .. } => {},
             hir::Decl::GenericParam(_) => {
@@ -513,7 +500,7 @@ impl Driver {
                 hir::Decl::Computed { ref param_tys, generic_params: ref og_generic_params, .. } => {
                     for i in og_generic_params.start.index()..og_generic_params.end.index() {
                         let decl = DeclId::new(i);
-                        let generic_param_id = match self.code.hir_code.decls[decl] {
+                        let generic_param_id = match df!(decl.hir) {
                             hir::Decl::GenericParam(id) => id,
                             _ => panic!("COMPILER BUG: expected generic parameter"),
                         };
@@ -547,77 +534,75 @@ impl Driver {
         }
 
         self.initialize_graph();
-        ei_injector!(self, ei);
-        di_injector!(self, di);
         // Add type 1 dependencies to the graph
         for i in 0..self.code.hir_code.decls.len() {
             let decl_id = DeclId::new(i);
-            let id = di!(decl_id);
-            match self.code.hir_code.decls[decl_id] {
+            let id = df!(decl_id.item);
+            match df!(decl_id.hir) {
                 hir::Decl::Parameter { .. } | hir::Decl::Intrinsic { .. } | hir::Decl::Field { .. } | hir::Decl::ReturnValue | hir::Decl::GenericParam(_) | hir::Decl::Variant { .. } => {},
-                hir::Decl::Static(expr) | hir::Decl::Const(expr) | hir::Decl::Stored { root_expr: expr, .. } => self.tir.graph.add_type1_dep(id, ei!(expr)),
+                hir::Decl::Static(expr) | hir::Decl::Const(expr) | hir::Decl::Stored { root_expr: expr, .. } => self.tir.graph.add_type1_dep(id, ef!(expr.item)),
                 hir::Decl::Computed { scope, .. } => {
                     let terminal_expr = self.code.hir_code.imper_scopes[scope].terminal_expr;
-                    self.tir.graph.add_type1_dep(id, ei!(terminal_expr));
+                    self.tir.graph.add_type1_dep(id, ef!(terminal_expr.item));
                 },
             }
         }
         for i in 0..self.code.hir_code.exprs.len() {
             let expr_id = ExprId::new(i);
-            let id = ei!(expr_id);
-            match self.code.hir_code.exprs[expr_id] {
+            let id = ef!(expr_id.item);
+            match ef!(expr_id.hir) {
                 hir::Expr::Void | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
                     | hir::Expr::CharLit { .. } | hir::Expr::ConstTy(_) | hir::Expr::Mod { .. } | hir::Expr::Enum(_) | hir::Expr::Import { .. } => {},
                 hir::Expr::AddrOf { expr, .. } | hir::Expr::Deref(expr) | hir::Expr::Pointer { expr, .. }
-                    | hir::Expr::Cast { expr, .. } | hir::Expr::Ret { expr, .. } => self.tir.graph.add_type1_dep(id, ei!(expr)),
+                    | hir::Expr::Cast { expr, .. } | hir::Expr::Ret { expr, .. } => self.tir.graph.add_type1_dep(id, ef!(expr.item)),
                 hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => {
                     let decl_ref = &self.code.hir_code.decl_refs[decl_ref_id];
                     if let hir::Namespace::MemberRef { base_expr } = decl_ref.namespace {
-                        self.tir.graph.add_type1_dep(id, ei!(base_expr));
+                        self.tir.graph.add_type1_dep(id, ef!(base_expr.item));
                     }
                     for &arg in arguments {
-                        self.tir.graph.add_type1_dep(id, ei!(arg));
+                        self.tir.graph.add_type1_dep(id, ef!(arg.item));
                     }
                 },
                 hir::Expr::Set { lhs, rhs } => {
-                    self.tir.graph.add_type1_dep(id, ei!(lhs));
-                    self.tir.graph.add_type1_dep(id, ei!(rhs));
+                    self.tir.graph.add_type1_dep(id, ef!(lhs.item));
+                    self.tir.graph.add_type1_dep(id, ef!(rhs.item));
                 },
                 hir::Expr::Do { scope } => {
                     let terminal_expr = self.code.hir_code.imper_scopes[scope].terminal_expr;
-                    self.tir.graph.add_type1_dep(id, ei!(terminal_expr));
+                    self.tir.graph.add_type1_dep(id, ef!(terminal_expr.item));
                 },
                 hir::Expr::If { condition, then_scope, else_scope } => {
-                    self.tir.graph.add_type1_dep(id, ei!(condition));
+                    self.tir.graph.add_type1_dep(id, ef!(condition.item));
                     let then_expr = self.code.hir_code.imper_scopes[then_scope].terminal_expr;
                     let else_expr = if let Some(else_scope) = else_scope {
                         self.code.hir_code.imper_scopes[else_scope].terminal_expr
                     } else {
                         hir::VOID_EXPR
                     };
-                    self.tir.graph.add_type1_dep(id, ei!(then_expr));
-                    self.tir.graph.add_type1_dep(id, ei!(else_expr));
+                    self.tir.graph.add_type1_dep(id, ef!(then_expr.item));
+                    self.tir.graph.add_type1_dep(id, ef!(else_expr.item));
                 },
                 hir::Expr::Switch { scrutinee, ref cases } => {
-                    self.tir.graph.add_type1_dep(id, ei!(scrutinee));
+                    self.tir.graph.add_type1_dep(id, ef!(scrutinee.item));
                     for case in cases.clone() {
                         let terminal = self.code.hir_code.imper_scopes[case.scope].terminal_expr;
-                        self.tir.graph.add_type1_dep(id, ei!(terminal));
+                        self.tir.graph.add_type1_dep(id, ef!(terminal.item));
                     }
                 },
                 hir::Expr::While { condition, scope } => {
-                    self.tir.graph.add_type1_dep(id, ei!(condition));
+                    self.tir.graph.add_type1_dep(id, ef!(condition.item));
                     let terminal_expr = self.code.hir_code.imper_scopes[scope].terminal_expr;
-                    self.tir.graph.add_type1_dep(id, ei!(terminal_expr));
+                    self.tir.graph.add_type1_dep(id, ef!(terminal_expr.item));
                 },
                 hir::Expr::Struct(struct_id) => {
                     for field in &self.code.hir_code.structs[struct_id].fields {
-                        self.tir.graph.add_type1_dep(id, ei!(field.ty));
+                        self.tir.graph.add_type1_dep(id, ef!(field.ty.item));
                     }
                 },
                 hir::Expr::StructLit { ref fields, .. } => {
                     for field in fields {
-                        self.tir.graph.add_type1_dep(id, ei!(field.expr));
+                        self.tir.graph.add_type1_dep(id, ef!(field.expr.item));
                     }
                 },
             }
@@ -632,7 +617,7 @@ impl Driver {
         // Add meta-dependees to graph
         for decl_ref in &self.code.hir_code.decl_refs {
             if let hir::Namespace::MemberRef { base_expr } = decl_ref.namespace {
-                self.tir.graph.add_meta_dep(ei!(decl_ref.expr), ei!(base_expr));
+                self.tir.graph.add_meta_dep(ef!(decl_ref.expr.item), ef!(base_expr.item));
             }
         }
     }
@@ -641,14 +626,13 @@ impl Driver {
         if !self.tir.graph.has_outstanding_components() { return None; }
 
         add_eval_dep_injector!(self, add_eval_dep);
-        ei_injector!(self, ei);
 
         let items_that_need_dependencies = self.tir.graph.get_items_that_need_dependencies();
         
         for id in items_that_need_dependencies {
             match self.code.hir_code.items[id] {
                 hir::Item::Decl(decl_id) => {
-                    match self.code.hir_code.decls[decl_id] {
+                    match df!(decl_id.hir) {
                         hir::Decl::Parameter { .. } | hir::Decl::Static(_) | hir::Decl::Const(_) | hir::Decl::Stored { .. } | hir::Decl::Field { .. } | hir::Decl::Variant { .. } | hir::Decl::ReturnValue => {},
                         hir::Decl::GenericParam(_) => {
                             add_eval_dep!(id, hir::TYPE_TYPE);
@@ -676,7 +660,7 @@ impl Driver {
                     }
                 }
                 hir::Item::Expr(expr_id) => {
-                    match self.code.hir_code.exprs[expr_id] {
+                    match ef!(expr_id.hir) {
                         hir::Expr::Void | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
                             | hir::Expr::CharLit { .. } | hir::Expr::ConstTy(_) | hir::Expr::AddrOf { .. } | hir::Expr::Deref(_)
                             | hir::Expr::Pointer { .. } | hir::Expr::Set { .. } | hir::Expr::Mod { .. } |  hir::Expr::Import { .. }
@@ -781,11 +765,11 @@ impl Driver {
                 match item {
                     // TODO: This is a horrible hack! Instead of looping through all imperative scopes, I should somehow
                     // associate statements with their unit
-                    Item::Expr(expr) => if let Some(&unit) = sp.levels.item_to_units.get(&ei!(expr)) {
+                    Item::Expr(expr) => if let Some(&unit) = sp.levels.item_to_units.get(&ef!(expr.item)) {
                         let unit = &mut sp.units[unit as usize];
                         unit.items.stmts.push(Stmt { root_expr: expr });
                     },
-                    Item::Decl(decl) => assert!(matches!(self.code.hir_code.decls[decl], hir::Decl::Stored { .. } | hir::Decl::Computed { .. }), "Invalid scope item"),
+                    Item::Decl(decl) => assert!(matches!(df!(decl.hir), hir::Decl::Stored { .. } | hir::Decl::Computed { .. }), "Invalid scope item"),
                 }
             }
         }

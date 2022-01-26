@@ -16,6 +16,8 @@ use crate::index_vec::*;
 use crate::driver::Driver;
 use crate::TirGraphOutput;
 
+use dusk_proc_macros::*;
+
 define_index_type!(struct CompId = u32;);
 
 #[derive(Debug, Default)]
@@ -582,8 +584,8 @@ impl Driver {
 
     fn write_debug(&self, item: ItemId, w: &mut impl Write) -> IoResult<()> {
         match self.code.hir_code.items[item] {
-            hir::Item::Expr(id) => write!(w, "{:?}", self.code.hir_code.exprs[id])?,
-            hir::Item::Decl(id) => write!(w, "{:?}", self.code.hir_code.decls[id])?,
+            hir::Item::Expr(id) => write!(w, "{:?}", ef!(id.hir))?,
+            hir::Item::Decl(id) => write!(w, "{:?}", df!(id.hir))?,
         }
         Ok(())
     }
@@ -666,7 +668,7 @@ impl Driver {
             hir::Item::Decl(decl) => decl,
             hir::Item::Expr(_) => return false,
         };
-        let is_intrinsic = matches!(self.code.hir_code.decls[decl], hir::Decl::Intrinsic { .. });
+        let is_intrinsic = matches!(df!(decl.hir), hir::Decl::Intrinsic { .. });
         let is_not_depended_on = self.tir.graph.dependers[item].is_empty();
         is_intrinsic && is_not_depended_on
     }

@@ -18,6 +18,8 @@ use tc::CastMethod;
 use crate::index_vec::*;
 use crate::source_info::ToSourceRange;
 
+use dusk_proc_macros::*;
+
 #[derive(Clone, Debug)]
 enum Decl {
     Stored(StoredDeclId),
@@ -150,7 +152,7 @@ impl Context {
 
 impl Driver {
     fn expr_to_const(&mut self, expr: ExprId, ty: Type) -> Const {
-        match self.code.hir_code.exprs[expr] {
+        match ef!(expr.hir) {
             Expr::IntLit { lit } => {
                 match ty {
                     Type::Int { .. } => Const::Int { lit, ty },
@@ -391,7 +393,7 @@ impl Driver {
 
     fn get_decl(&mut self, id: DeclId, tp: &impl TypeProvider) -> Decl {
         if let Some(decl) = self.mir.decls.get(&id) { return decl.clone(); }
-        match self.code.hir_code.decls[id] {
+        match df!(id.hir) {
             hir::Decl::Computed { ref params, scope, generic_params: ref generic_params_range, .. } => {
                 // Add placeholder function to reserve ID ahead of time
                 let get = self.code.mir_code.functions.push(Function::default());
@@ -404,7 +406,7 @@ impl Driver {
                 generic_params.reserve(generic_params_range.end.index() - generic_params_range.start.index());
                 for i in generic_params_range.start.index()..generic_params_range.end.index() {
                     let id = DeclId::new(i);
-                    let generic_param = match self.code.hir_code.decls[id] {
+                    let generic_param = match df!(id.hir) {
                         hir::Decl::GenericParam(param) => param,
                         _ => panic!("unexpected decl type, expected generic parameter"),
                     };
@@ -749,11 +751,10 @@ impl Driver {
         let mut instr_namespace = InstrNamespace::default();
         for param in params.start.index()..params.end.index() {
             let param = DeclId::new(param);
-            assert!(matches!(self.code.hir_code.decls[param], hir::Decl::Parameter { .. }));
+            assert!(matches!(df!(param.hir), hir::Decl::Parameter { .. }));
             let instr = Instr::Parameter(self.decl_type(param, tp).clone());
             let op = self.code.ops.push(Op::MirInstr(instr));
-            let item = self.code.hir_code.decl_to_items[param];
-            let range = self.code.hir_code.source_ranges[item].clone();
+            let range = df!(param.range);
             let name = instr_namespace.insert(format!("{}", self.display_item(range)));
             self.code.mir_code.source_ranges.insert(op, range);
             self.code.mir_code.instr_names.insert(op, name);
@@ -832,7 +833,7 @@ impl Driver {
             Item::Expr(expr) => {
                 self.build_expr(b, expr, Context::new(0, DataDest::Void, ControlDest::Continue), tp);
             },
-            Item::Decl(decl) => match self.code.hir_code.decls[decl] {
+            Item::Decl(decl) => match df!(decl.hir) {
                 hir::Decl::Stored { id, root_expr, .. } => {
                     let ty = tp.ty(root_expr).clone();
                     let name = format!("{}", self.display_item(decl));
@@ -955,7 +956,7 @@ impl Driver {
     fn build_expr(&mut self, b: &mut FunctionBuilder, expr: ExprId, ctx: Context, tp: &impl TypeProvider) -> Value {
         let ty = tp.ty(expr).clone();
 
-        let val = match self.code.hir_code.exprs[expr] {
+        let val = match ef!(expr.hir) {
             Expr::Void => VOID_INSTR.direct(),
             Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::StrLit { .. } | Expr::CharLit { .. } | Expr::ConstTy(_) | Expr::Mod { .. } | Expr::Import { .. } | Expr::Enum(_) => {
                 let konst = self.expr_to_const(expr, ty.clone());
@@ -975,7 +976,7 @@ impl Driver {
                 let decl_id = tp.selected_overload(id).unwrap();
 
                 // Check if the declaration is an intrinsic
-                if let hir::Decl::Intrinsic { intr, .. } = self.code.hir_code.decls[decl_id] {
+                if let hir::Decl::Intrinsic { intr, .. } = df!(decl_id.hir) {
                     // Check if we need to special case the intrinsic
                     match intr {
                         Intrinsic::LogicalAnd => break {

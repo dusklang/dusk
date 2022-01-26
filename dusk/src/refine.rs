@@ -22,6 +22,7 @@ use crate::interpreter::Value;
 use crate::mir::{FunctionRef, function_by_ref};
 use crate::driver::Driver;
 
+use dusk_proc_macros::*;
 
 // TODO: Switch to another smt crate, or write my own.
 // ugh why do I have to do this
@@ -535,12 +536,11 @@ impl Driver {
     }
 
     fn expr_to_constraint_val(&self, expr: ExprId, tp: &impl TypeProvider) -> ConstraintValue {
-        let expr = &self.code.hir_code.exprs[expr];
-        match expr {
+        match &ef!(expr.hir) {
             &Expr::IntLit { lit } => ConstraintValue::Str(lit.to_string()),
             &Expr::DeclRef { ref arguments, id } => {
                 let overload = tp.selected_overload(id).unwrap();
-                match self.code.hir_code.decls[overload] {
+                match df!(overload.hir) {
                     Decl::Const(expr) => self.expr_to_constraint_val(expr, tp),
                     Decl::Parameter { index } => ConstraintValue::Parameter { index },
                     Decl::ReturnValue => ConstraintValue::ReturnValue,
@@ -577,11 +577,10 @@ impl Driver {
     }
 
     fn expr_to_constraint(&self, expr: ExprId, tp: &impl TypeProvider) -> Constraint {
-        let expr = &self.code.hir_code.exprs[expr];
-        match expr {
+        match &ef!(expr.hir) {
             &Expr::DeclRef { ref arguments, id } => {
                 let overload = tp.selected_overload(id).unwrap();
-                match self.code.hir_code.decls[overload] {
+                match df!(overload.hir) {
                     Decl::Intrinsic { intr, .. } => {
                         assert_eq!(arguments.len(), 2);
                         match intr {

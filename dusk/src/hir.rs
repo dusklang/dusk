@@ -16,6 +16,8 @@ use crate::index_vec::*;
 use crate::builder::{BinOp, UnOp};
 use crate::source_info::ToSourceRange;
 
+use dusk_proc_macros::*;
+
 // TODO: switch to AOS here
 // TODO: move to dire, perhaps
 #[derive(Debug)]
@@ -96,6 +98,7 @@ impl Default for Builder {
 pub enum ConditionKind {
     Requirement, Guarantee,
 }
+
 
 impl Driver {
     pub fn initialize_hir(&mut self) {
@@ -238,8 +241,7 @@ impl Driver {
     }
     pub fn finish_struct(&mut self, fields: Vec<FieldDecl>, range: SourceRange, expr: ExprId, strukt: StructId) {
         self.code.hir_code.structs[strukt] = Struct { fields };
-        let item = self.code.hir_code.expr_to_items[expr];
-        self.code.hir_code.source_ranges[item] = range;
+        ef!(expr.range) = range;
     }
     pub fn reserve_enum(&mut self) -> (ExprId, EnumId) {
         let enuum = self.code.hir_code.enums.push(Enum { variants: Vec::new() });
@@ -248,8 +250,7 @@ impl Driver {
     }
     pub fn finish_enum(&mut self, variants: Vec<VariantDecl>, range: SourceRange, expr: ExprId, enuum: EnumId) {
         self.code.hir_code.enums[enuum] = Enum { variants };
-        let item = self.code.hir_code.expr_to_items[expr];
-        self.code.hir_code.source_ranges[item] = range;
+        ef!(expr.range) = range;
     }
     pub fn struct_lit(&mut self, ty: ExprId, fields: Vec<FieldAssignment>, range: SourceRange) -> ExprId {
         let id = self.code.hir_code.struct_lits.next();
@@ -336,7 +337,7 @@ impl Driver {
         let generic_params = first_generic_param..last_generic_param;
 
         // `end_computed_decl` will attach the real scope to this decl; we don't have it yet
-        self.code.hir_code.decls[id] = Decl::Computed {
+        df!(id.hir) = Decl::Computed {
             param_tys,
             params: params.clone(),
             scope: ImperScopeId::new(u32::MAX as usize),
@@ -561,10 +562,10 @@ impl Driver {
         }
     }
     pub fn end_module(&mut self, mod_expr: ExprId, range: SourceRange) {
-        debug_assert!(matches!(self.code.hir_code.exprs[mod_expr], Expr::Mod { .. }));
+        debug_assert!(matches!(ef!(mod_expr.hir), Expr::Mod { .. }));
 
         if let Some(ScopeState::Mod { .. }) = self.hir.scope_stack.last() {
-            self.code.hir_code.source_ranges[self.code.hir_code.expr_to_items[mod_expr]] = range;
+            ef!(mod_expr.range) = range;
             self.hir.scope_stack.pop().unwrap();
         } else {
             panic!("tried to end the module, but the top scope in the stack is not a module scope");
@@ -572,7 +573,7 @@ impl Driver {
     }
     pub fn end_computed_decl(&mut self) {
         let decl_state = self.hir.comp_decl_stack.pop().unwrap();
-        if let Decl::Computed { ref mut scope, .. } = self.code.hir_code.decls[decl_state.id] {
+        if let Decl::Computed { ref mut scope, .. } = df!(decl_state.id.hir) {
             *scope = decl_state.has_scope.unwrap();
         } else {
             panic!("Unexpected decl kind when ending computed decl!");
@@ -592,16 +593,12 @@ impl Driver {
     }
     pub fn get_range(&self, item: impl Into<ToSourceRange>) -> SourceRange {
         match item.into() {
-            ToSourceRange::Item(item) => {
-                let item = match item {
-                    Item::Expr(expr) => self.code.hir_code.expr_to_items[expr],
-                    Item::Decl(decl) => self.code.hir_code.decl_to_items[decl],
-                };
-                self.code.hir_code.source_ranges[item]
+            ToSourceRange::Item(item) => match item {
+                Item::Expr(expr) => ef!(expr.range),
+                Item::Decl(decl) => df!(decl.range),
             }
             ToSourceRange::Op(op) => self.code.mir_code.source_ranges.get(&op).unwrap().clone(),
             ToSourceRange::SourceRange(range) => range,
         }
     }
-    pub fn set_range(&mut self, id: ExprId, range: SourceRange) { self.code.hir_code.source_ranges[self.code.hir_code.expr_to_items[id]] = range; }
 }

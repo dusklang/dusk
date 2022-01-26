@@ -1,4 +1,4 @@
-use clap::Clap;
+use clap::{Parser, ArgEnum};
 use std::path::PathBuf;
 
 use dire::ty::Type;
@@ -28,7 +28,7 @@ use mir::FunctionRef;
 use driver::Driver;
 use source_info::SourceMap;
 
-#[derive(Clap, Debug, Copy, Clone)]
+#[derive(ArgEnum, Debug, Copy, Clone)]
 pub enum TirGraphOutput {
     Items,
     Components,
@@ -36,7 +36,7 @@ pub enum TirGraphOutput {
 }
 
 #[repr(u8)]
-#[derive(Clap, Copy, Clone, Debug)]
+#[derive(ArgEnum, Copy, Clone, Debug)]
 enum StopPhase {
     Parse,
     Tir,
@@ -46,7 +46,7 @@ enum StopPhase {
     Interp,
 }
 
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 #[clap(name = "dusk")]
 struct Opt {
     /// Output per-level typechecking diffs
@@ -54,7 +54,7 @@ struct Opt {
     output_tc_diff: bool,
 
     /// The mode for displaying the TIR graph
-    #[clap(arg_enum, short='g', long, case_insensitive = true)]
+    #[clap(arg_enum, short='g', long, ignore_case = true)]
     tir_output: Option<TirGraphOutput>,
 
     /// Output MIR in textual format
@@ -66,7 +66,7 @@ struct Opt {
     run_refiner: bool,
 
     /// The phase to stop the compiler at
-    #[clap(arg_enum, short='s', long, default_value="interp", case_insensitive = true)]
+    #[clap(arg_enum, short='s', long, default_value="interp", ignore_case = true)]
     stop_phase: StopPhase,
 
     /// Input file

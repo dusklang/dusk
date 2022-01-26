@@ -14,6 +14,8 @@ use dire::source_info::{SourceRange, SourceFileId};
 use crate::driver::Driver;
 use crate::index_vec::*;
 
+use dusk_proc_macros::*;
+
 pub struct SourceMap {
     pub files: IndexVec<SourceFileId, SourceFile>,
     paths: HashMap<PathBuf, SourceFileId>,
@@ -70,12 +72,12 @@ impl Driver {
 
     #[allow(dead_code)]
     pub fn print_item(&self, item: ItemId) {
-        self.print_range(self.code.hir_code.source_ranges[item].clone());
+        self.print_range(self.code.hir_code.source_ranges[item]);
     }
 
     #[allow(dead_code)]
     pub fn print_expr(&self, id: ExprId) {
-        self.print_item(self.code.hir_code.expr_to_items[id]);
+        self.print_item(ef!(id.item));
     }
 
     #[allow(dead_code)]

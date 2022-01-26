@@ -16,6 +16,8 @@ use crate::error::Error;
 use crate::ty::BuiltinTraits;
 use crate::tir::{Units, UnitItems, ExprNamespace, self};
 
+use dusk_proc_macros::*;
+
 #[derive(Copy, Clone, Debug)]
 pub enum CastMethod {
     Noop,
@@ -481,7 +483,7 @@ impl tir::Expr<tir::DeclRef> {
             let mut overload = pref.as_ref().cloned()
                 .filter(|overload| overloads.iter().find(|&other| other.decl == overload.decl).is_some())
                 .unwrap_or_else(|| overloads[0].clone());
-            let overload_is_function = match driver.code.hir_code.decls[overload.decl] {
+            let overload_is_function = match df!(driver, overload.decl.hir) {
                 hir::Decl::Computed { .. } => true,
                 hir::Decl::Intrinsic { function_like, .. } => function_like,
                 _ => false,
@@ -711,8 +713,7 @@ impl tir::Expr<tir::StructLit> {
                         if maatch == ExprId::new(u32::MAX as usize) {
                             successful = false;
 
-                            let field_item = driver.code.hir_code.decl_to_items[field.decl];
-                            let field_range = driver.code.hir_code.source_ranges[field_item];
+                            let field_range = df!(driver, field.decl.range);
 
                             driver.errors.push(
                                 Error::new(format!("Field {} not included in struct literal", driver.interner.resolve(field.name).unwrap()))

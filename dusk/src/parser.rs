@@ -12,6 +12,8 @@ use crate::token::{TokenKind, Token};
 use crate::builder::{BinOp, UnOp, OpPlacement};
 use crate::error::Error;
 
+use dusk_proc_macros::*;
+
 struct Parser {
     file: SourceFileId,
     cur: usize,
@@ -360,7 +362,7 @@ impl Driver {
                     );
                 }
                 let close_paren_range = self.cur(p).range;
-                self.set_range(expr, source_info::concat(open_paren_range, close_paren_range));
+                ef!(expr.range) = source_info::concat(open_paren_range, close_paren_range);
                 self.next(p);
                 Ok(expr)
             },

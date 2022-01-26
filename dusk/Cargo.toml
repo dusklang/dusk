@@ -1,0 +1,26 @@
+[package]
+name = "dusk"
+version = "0.1.0"
+authors = ["Zach <zachrwolfe@me.com>"]
+edition = "2018"
+
+[profile.release]
+debug = true
+lto = true
+
+[dependencies]
+unicode-segmentation = { git = "https://github.com/unicode-rs/unicode-segmentation" }
+string-interner = "0.12.1"
+bitflags = "1.2.1"
+smallvec = { version = "1.6.1", features = ["const_generics"] }
+arrayvec = "0.7.0"
+webbrowser = "0.5.2"
+clap = { version = "3.0", features = ["derive"] }
+paste = "1.0.0"
+num-bigint = "0.3"
+index_vec = "0.1.2"
+indenter = "0.3.2"
+rsmt2 = "0.11.0"
+dire = { path = "../../dire/" }
+display_adapter = { path = "../../display_adapter/display_adapter" }
+dusk-proc-macros = { path = "../dusk-proc-macros" }
