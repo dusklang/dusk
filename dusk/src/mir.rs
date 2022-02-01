@@ -227,7 +227,7 @@ fn type_of(b: &MirCode, instr: OpId, code: &IndexVec<OpId, Op>) -> Type {
             _ => Type::Error,
         },
         &Instr::AddressOfStatic(statik) => b.statics[statik].val.ty().mut_ptr(),
-        Instr::Ret(_) | Instr::Br(_) | Instr::CondBr { .. } => Type::Never,
+        Instr::Ret(_) | Instr::Br(_) | Instr::CondBr { .. } | Instr::SwitchBr { .. } => Type::Never,
         Instr::Parameter(ty) => ty.clone(),
         &Instr::DirectFieldAccess { val, index } => {
             let base_ty = type_of(b, val, code);
@@ -625,6 +625,13 @@ impl Driver {
                         Instr::Br(block) => writeln!(f, "br %bb{}", block.index())?,
                         &Instr::CondBr { condition, true_bb, false_bb }
                             => writeln!(f, "condbr %{}, %bb{}, %bb{}", condition.index(), true_bb.index(), false_bb.index())?,
+                        &Instr::SwitchBr { scrutinee, ref cases, catch_all_bb } => {
+                            write!(f, "switchbr %{} : ", scrutinee.index())?;
+                            for case in cases {
+                                write!(f, "case {} => %bb{}, ", self.fmt_const(&case.value), case.bb.index())?;
+                            }
+                            writeln!(f, "else => %bb{}", catch_all_bb.index())?;
+                        }
                         // TODO: print generic arguments
                         &Instr::Call { ref arguments, func: callee, .. } => {
                             write!(f, "%{} = call `{}`", self.display_instr_name(op_id), self.fn_name(self.code.mir_code.functions[callee].name))?;

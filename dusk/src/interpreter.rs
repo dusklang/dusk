@@ -928,6 +928,9 @@ impl Driver {
                 frame.branch_to(branch);
                 return None
             },
+            &Instr::SwitchBr { scrutinee: _scrutinee, cases: ref _cases, catch_all_bb: _catch_all_bb } => {
+                todo!();
+            },
             &Instr::DirectFieldAccess { val, index } => {
                 let frame = self.interp.stack.last().unwrap();
                 let bytes = frame.results[&val].as_bytes();
