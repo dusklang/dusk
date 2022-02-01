@@ -164,6 +164,9 @@ dependencies = [
 [[package]]
 name = "dusk-proc-macros"
 version = "0.1.0"
+dependencies = [
+ "syn",
+]
 
 [[package]]
 name = "error-chain"

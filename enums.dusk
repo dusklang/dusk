@@ -47,4 +47,20 @@ fn print_enum_the_right_way(e: MyEnum) {
         }
         .c: print("enum is c!\n"),
     }
+
+    print("this is the end, yo\n")
+
+    hello := switch e {
+        .a: "Hello, a!",
+        .b: "Hello, b!",
+        .c: "Hello, c!",
+    }
+}
+
+fn more_tests(e: MyEnum): u8* {
+    switch e {
+        .a: switch e { .a: "Hello, a!", .b: "Hello, b!", .c: "Hello, c!" },
+        .b: "Hello, b!",
+        .c: "Hello, c!",
+    }
 }

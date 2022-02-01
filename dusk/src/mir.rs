@@ -7,9 +7,10 @@ use string_interner::DefaultSymbol as Sym;
 use display_adapter::display_adapter;
 
 use dire::hir::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, GenericParamId, Item};
-use dire::mir::{FuncId, StaticId, Const, Instr, Function, MirCode, StructLayout, InstrNamespace, VOID_INSTR};
+use dire::mir::{FuncId, StaticId, Const, Instr, Function, MirCode, StructLayout, InstrNamespace, SwitchCase, VOID_INSTR};
 use dire::{Block, BlockId, Op, OpId};
 use dire::ty::{Type, FloatWidth};
+use dire::source_info::SourceRange;
 
 use crate::driver::Driver;
 use crate::typechecker as tc;
@@ -626,7 +627,7 @@ impl Driver {
                         &Instr::CondBr { condition, true_bb, false_bb }
                             => writeln!(f, "condbr %{}, %bb{}, %bb{}", condition.index(), true_bb.index(), false_bb.index())?,
                         &Instr::SwitchBr { scrutinee, ref cases, catch_all_bb } => {
-                            write!(f, "switchbr %{} : ", scrutinee.index())?;
+                            write!(f, "switchbr %{} : ", self.display_instr_name(scrutinee))?;
                             for case in cases {
                                 write!(f, "case {} => %bb{}, ", self.fmt_const(&case.value), case.bb.index())?;
                             }
@@ -739,7 +740,7 @@ impl Driver {
         let last_instr = self.code.ops[block.ops.last().copied().unwrap()].as_mir_instr().unwrap();
         assert!(
             match last_instr {
-                Instr::Br(_) | Instr::CondBr { .. } | Instr::Ret { .. } | Instr::Intrinsic { intr: Intrinsic::Panic, .. } => true,
+                Instr::Br(_) | Instr::CondBr { .. } | Instr::SwitchBr { .. } | Instr::Ret { .. } | Instr::Intrinsic { intr: Intrinsic::Panic, .. } => true,
                 _ => false,
             },
             "expected terminal instruction before moving on to next block, found {:?}",
@@ -1261,6 +1262,70 @@ impl Driver {
                     VOID_INSTR.direct()
                 }
             },
+            Expr::Switch { scrutinee, ref cases } => {
+                let cases = cases.clone();
+                let scrutinee_val = self.build_expr(b, scrutinee, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                let scrutinee_val = self.handle_indirection(b, scrutinee_val);
+                let result_location = match &ctx.data {
+                    DataDest::Read => Some(
+                        // TODO: this will be the wrong type if indirection != 0
+                        self.push_instr(b, Instr::Alloca(ty.clone()), expr)
+                    ),
+                    _ => None,
+                };
+                let begin_bb = b.current_block;
+                let post_bb = self.create_bb(b);
+                let scope_ctx = ctx.redirect(result_location, Some(post_bb));
+                let mut mir_cases = Vec::new();
+                let (enum_id, variants) = match tp.ty(scrutinee) {
+                    &Type::Enum(id) => {
+                        (id, self.code.hir_code.enums[id].variants.clone())
+                    },
+                    _ => todo!(),
+                };
+                for case in cases {
+                    let case_bb = self.create_bb(b);
+                    self.start_bb(b, case_bb);
+                    self.build_scope(b, case.scope, scope_ctx, tp);
+
+                    self.start_bb(b, begin_bb);
+                    match case.pattern {
+                        hir::Pattern::ContextualMember { name, .. } => {
+                            let mut index = None;
+                            for (i, variant) in variants.iter().enumerate() {
+                                if variant.name == name.symbol {
+                                    index = Some(i);
+                                    break;
+                                }
+                            }
+                            let index = index.expect("Unrecognized variant in switch case. Typechecker should have caught this.");
+                            mir_cases.push(
+                                SwitchCase {
+                                    value: Const::BasicVariant { enuum: enum_id, index },
+                                    bb: case_bb,
+                                }
+                            );
+                        }
+                    }
+                }
+
+                let catch_all_bb = self.create_bb(b);
+                self.start_bb(b, catch_all_bb);
+                // TODO: add unreachable instruction I guess?
+                self.push_instr(b, Instr::Intrinsic { arguments: SmallVec::new(), ty: Type::Never, intr: Intrinsic::Panic }, SourceRange::default());
+                self.end_current_bb(b);
+                
+                self.start_bb(b, begin_bb);
+                self.push_instr(b, Instr::SwitchBr { scrutinee: scrutinee_val, cases: mir_cases, catch_all_bb }, expr);
+                self.end_current_bb(b);
+
+                self.start_bb(b, post_bb);
+                if let Some(location) = result_location {
+                    return self.push_instr(b, Instr::Load(location), expr).direct()
+                } else {
+                    return self.handle_control(b, VOID_INSTR.direct(), ctx.control)
+                }
+            },
             Expr::While { condition, scope } => {
                 let test_bb = self.create_bb(b);
                 let loop_bb = self.create_bb(b);
@@ -1285,9 +1350,6 @@ impl Driver {
                     // Already handled this above
                     ControlDest::Block(_) => return VOID_INSTR.direct(),
                 }
-            },
-            Expr::Switch { .. } => {
-                todo!();
             },
             Expr::Ret { expr, .. } => {
                 return self.build_expr(
