@@ -1372,7 +1372,7 @@ impl Driver {
                                 }
                             );
                         },
-                        hir::Pattern::NamedCatchAll(_) => {
+                        hir::Pattern::NamedCatchAll(_) | hir::Pattern::AnonymousCatchAll(_) => {
                             catch_all_bb = Some(case_bb);
                         },
                     }

@@ -617,7 +617,12 @@ impl Driver {
             },
             &TokenKind::Ident(name) => {
                 self.next(p);
-                Pattern::NamedCatchAll(Ident { symbol: name, range: initial_range })
+                if name == self.hir.underscore_sym {
+                    Pattern::AnonymousCatchAll(initial_range)
+                } else {
+                    let name = Ident { symbol: name, range: initial_range };
+                    Pattern::NamedCatchAll(name)
+                }
             },
             _ => panic!("unexpected token"),
         }

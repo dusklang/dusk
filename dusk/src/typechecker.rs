@@ -7,7 +7,7 @@ pub mod type_provider;
 use constraints::*;
 use type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 
-use dire::hir::{self, ExprId, DeclId, StructId, Pattern};
+use dire::hir::{self, ExprId, DeclId, StructId, Pattern, Ident};
 use dire::mir::Const;
 use dire::ty::{Type, QualType, IntWidth};
 use dire::source_info::SourceRange;
@@ -408,15 +408,15 @@ impl tir::Expr<tir::Switch> {
                                 driver.errors.push(err);
                             }
                         },
-                        Pattern::NamedCatchAll(name) => {
+                        Pattern::NamedCatchAll(Ident { range, .. }) | Pattern::AnonymousCatchAll(range) => {
                             if exhaustion.is_total(driver, &scrutinee_ty, tp) {
                                 let err = Error::new(format!("Switch case unreachable"))
-                                    .adding_primary_range(name.range, "all possible values already handled before this point");
+                                    .adding_primary_range(range, "all possible values already handled before this point");
                                 driver.errors.push(err);
                             } else {
-                                exhaustion.make_total(driver, &scrutinee_ty, name.range, tp);
+                                exhaustion.make_total(driver, &scrutinee_ty, range, tp);
                             }
-                        }
+                        },
                     }
                 }
                 // If there are more matches than variants, then the sky is falling.

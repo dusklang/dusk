@@ -75,6 +75,7 @@ pub struct Builder {
     pub requires_sym: Sym,
     pub guarantees_sym: Sym,
     pub return_value_sym: Sym,
+    pub underscore_sym: Sym,
 }
 
 impl Default for Builder {
@@ -90,6 +91,7 @@ impl Default for Builder {
             requires_sym: Sym::try_from_usize((u32::MAX - 1) as usize).unwrap(),
             guarantees_sym: Sym::try_from_usize((u32::MAX - 1) as usize).unwrap(),
             return_value_sym: Sym::try_from_usize((u32::MAX - 1) as usize).unwrap(),
+            underscore_sym: Sym::try_from_usize((u32::MAX - 1) as usize).unwrap(),
         }
     }
 }
@@ -113,6 +115,7 @@ impl Driver {
         self.hir.requires_sym = self.interner.get_or_intern_static("requires");
         self.hir.guarantees_sym = self.interner.get_or_intern_static("guarantees");
         self.hir.return_value_sym = return_value_sym;
+        self.hir.underscore_sym = self.interner.get_or_intern_static("_");
     }
 
     pub fn debug_mark_expr(&mut self, expr: ExprId) {
