@@ -16,11 +16,7 @@ fn main() {
         a: 43
         b: MyEnum.a
     }
-    print_enum(val.b)
-
-    fuck :: do {
-        12
-    }
+    print_enum_the_right_way(val.b)
 
     // Expected output:
     // enum is b!
@@ -47,6 +43,17 @@ fn print_enum_the_right_way(e: MyEnum) {
         }
         .c: print("enum is c!\n"),
     }
+}
+
+fn more_tests(e: MyEnum): u8* {
+    switch e {
+        .a: print("enum is a!\n"),
+        .b: {
+            msg :: "enum is b!\n"
+            print(msg)
+        }
+        .c: print("enum is c!\n"),
+    }
 
     print("this is the end, yo\n")
 
@@ -55,9 +62,9 @@ fn print_enum_the_right_way(e: MyEnum) {
         .b: "Hello, b!",
         .c: "Hello, c!",
     }
-}
+    print(hello)
+    print("\n")
 
-fn more_tests(e: MyEnum): u8* {
     switch e {
         .a: switch e { .a: "Hello, a!", .b: "Hello, b!", .c: "Hello, c!" },
         .b: "Hello, b!",

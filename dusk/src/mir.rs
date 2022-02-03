@@ -303,14 +303,7 @@ impl Driver {
             },
             Type::Bool => 1,
             &Type::Struct(id) => self.code.mir_code.structs[&id].layout.size,
-            &Type::Enum(id) => {
-                let num_variants = self.code.hir_code.enums[id].variants.len();
-                let bits = (num_variants as f64).log2().ceil() as usize;
-                let bits = next_multiple_of(bits, 8);
-                let size = bits / 8;
-                assert!(size <= 8, "too many enum variants");
-                size
-            },
+            &Type::Enum(_id) => 4,
             Type::GenericParam(_) => panic!("can't get size of generic parameter without more context"),
         }
     }

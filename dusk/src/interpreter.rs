@@ -87,6 +87,10 @@ impl Driver {
     }
 }
 
+struct Enum {
+    discriminant: u32,
+}
+
 impl Value {
     fn as_bytes(&self) -> &[u8] {
         match self {
@@ -160,6 +164,12 @@ impl Value {
         let bytes = self.as_bytes();
         assert!(bytes.len() == 1);
         unsafe { mem::transmute(bytes[0]) }
+    }
+
+    fn as_enum(&self) -> Enum {
+        Enum {
+            discriminant: self.as_u32()
+        }
     }
 
     fn as_internal(&self) -> &InternalValue {
@@ -264,17 +274,8 @@ impl Value {
         Value::from_u8(unsafe { mem::transmute(val) })
     }
 
-    fn from_variant(d: &Driver, enuum: EnumId, index: usize) -> Value {
-        let ty = Type::Enum(enuum);
-        let size = d.size_of(&ty);
-        match size {
-            0 => Value::Nothing,
-            1 => Value::from_u8(index as u8),
-            2 => Value::from_u16(index as u16),
-            4 => Value::from_u32(index as u32),
-            8 => Value::from_u64(index as u64),
-            _ => panic!("Unexpected enum size when constructing variant in interpreter"),
-        }
+    fn from_variant(_d: &Driver, _enuum: EnumId, index: usize) -> Value {
+        Value::from_u32(index as u32)
     }
 
     fn from_internal(val: InternalValue) -> Value {
@@ -928,11 +929,23 @@ impl Driver {
                 frame.branch_to(branch);
                 return None
             },
-            &Instr::SwitchBr { scrutinee: _scrutinee, cases: ref _cases, catch_all_bb: _catch_all_bb } => {
-                todo!();
+            &Instr::SwitchBr { scrutinee, ref cases, catch_all_bb } => {
+                let scrutinee = frame.results[&scrutinee].as_u32();
+                for case in cases {
+                    let val = Value::from_const(&case.value, self).as_u32();
+                    let frame = self.interp.stack.last_mut().unwrap();
+                    if val == scrutinee {
+                        frame.branch_to(case.bb);
+                        return None
+                    }
+                }
+                let frame = self.interp.stack.last_mut().unwrap();
+                frame.branch_to(catch_all_bb);
+                return None
             },
-            &Instr::DiscriminantAccess { val: _val } => {
-                todo!();
+            &Instr::DiscriminantAccess { val } => {
+                let enuum = frame.results[&val].as_enum();
+                Value::from_u32(enuum.discriminant)
             },
             &Instr::DirectFieldAccess { val, index } => {
                 let frame = self.interp.stack.last().unwrap();
