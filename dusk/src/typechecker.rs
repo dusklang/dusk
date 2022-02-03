@@ -374,12 +374,39 @@ impl tir::Expr<tir::Module> {
 }
 
 impl tir::Expr<tir::Enum> {
-    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Ty.into()]), None);
         *tp.ty_mut(self.id) = Type::Ty;
+        for &payload_ty in &self.variant_payload_tys {
+            if let Some(err) = can_unify_to(tp.constraints(payload_ty), &Type::Ty.into()).err() {
+                let mut error = Error::new("Expected variant payload type");
+                let range = driver.get_range(payload_ty);
+                match err {
+                    UnificationError::InvalidChoice(choices)
+                        => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                    UnificationError::Trait(not_implemented)
+                        => error.add_secondary_range(
+                            range,
+                            format!(
+                                "note: couldn't unify because expression requires implementations of {:?}",
+                                not_implemented.names(),
+                            ),
+                        ),
+                }
+                driver.errors.push(error);
+            }
+        }
+        tp.constraints_mut(self.id).set_to(Type::Ty);
     }
 
-    fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut impl TypeProvider) {
+    fn run_pass_2(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
+        for &variant_ty in &self.variant_payload_tys {
+            let field_type = tp.constraints(variant_ty).solve().map(|ty| ty.ty).unwrap_or(Type::Error);
+            // Don't bother checking if it's a type, because we already did that in pass 1
+            tp.constraints_mut(variant_ty).set_to(field_type);
+        }
+        let ty = tp.constraints(self.id).solve().expect("Ambiguous type for enum expression");
+        debug_assert_eq!(ty.ty, Type::Ty);
     }
 }
 

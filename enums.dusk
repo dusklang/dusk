@@ -74,7 +74,7 @@ fn more_tests(e: MyEnum): u8* {
 
 MyAdt :: enum {
     a(i32)
-    b(u64)
+    b(12)
     c {
         a: u32
         b: u8*

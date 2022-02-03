@@ -57,7 +57,7 @@ pub struct Struct { pub field_tys: SmallVec<[ExprId; 2]>, }
 #[derive(Debug)]
 pub struct StructLit { pub ty: ExprId, pub fields: Vec<FieldAssignment>, pub struct_lit_id: StructLitId, }
 #[derive(Debug)]
-pub struct Enum;
+pub struct Enum { pub variant_payload_tys: SmallVec<[ExprId; 2]> }
 #[derive(Debug)]
 pub struct ExplicitRet;
 #[derive(Debug)]
@@ -462,7 +462,15 @@ impl Driver {
                 let field_tys = self.code.hir_code.structs[struct_id].fields.iter().map(|field| field.ty).collect();
                 insert_expr!(structs, Struct { field_tys })
             },
-            &hir::Expr::Enum(_) => insert_expr!(enums, Enum),
+            &hir::Expr::Enum(enum_id) => {
+                let mut variant_payload_tys = SmallVec::new();
+                for variant in &self.code.hir_code.enums[enum_id].variants {
+                    if let Some(payload) = variant.payload_ty {
+                        variant_payload_tys.push(payload);
+                    }
+                }
+                insert_expr!(enums, Enum { variant_payload_tys })
+            },
             &hir::Expr::StructLit { ty, ref fields, id } => {
                 insert_expr!(struct_lits, StructLit { ty, fields: fields.clone(), struct_lit_id: id })
             }
@@ -552,7 +560,7 @@ impl Driver {
             let id = ef!(expr_id.item);
             match ef!(expr_id.hir) {
                 hir::Expr::Void | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
-                    | hir::Expr::CharLit { .. } | hir::Expr::ConstTy(_) | hir::Expr::Mod { .. } | hir::Expr::Enum(_) | hir::Expr::Import { .. } => {},
+                    | hir::Expr::CharLit { .. } | hir::Expr::ConstTy(_) | hir::Expr::Mod { .. } | hir::Expr::Import { .. } => {},
                 hir::Expr::AddrOf { expr, .. } | hir::Expr::Deref(expr) | hir::Expr::Pointer { expr, .. }
                     | hir::Expr::Cast { expr, .. } | hir::Expr::Ret { expr, .. } => self.tir.graph.add_type1_dep(id, ef!(expr.item)),
                 hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => {
@@ -598,6 +606,13 @@ impl Driver {
                 hir::Expr::Struct(struct_id) => {
                     for field in &self.code.hir_code.structs[struct_id].fields {
                         self.tir.graph.add_type1_dep(id, ef!(field.ty.item));
+                    }
+                },
+                hir::Expr::Enum(enum_id) => {
+                    for variant in &self.code.hir_code.enums[enum_id].variants {
+                        if let Some(payload_ty) = variant.payload_ty {
+                            self.tir.graph.add_type1_dep(id, ef!(payload_ty.item));
+                        }
                     }
                 },
                 hir::Expr::StructLit { ref fields, .. } => {
