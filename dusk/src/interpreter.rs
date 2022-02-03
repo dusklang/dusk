@@ -931,6 +931,9 @@ impl Driver {
             &Instr::SwitchBr { scrutinee: _scrutinee, cases: ref _cases, catch_all_bb: _catch_all_bb } => {
                 todo!();
             },
+            &Instr::DiscriminantAccess { val: _val } => {
+                todo!();
+            },
             &Instr::DirectFieldAccess { val, index } => {
                 let frame = self.interp.stack.last().unwrap();
                 let bytes = frame.results[&val].as_bytes();

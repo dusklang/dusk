@@ -208,6 +208,8 @@ impl Builder {
     }
 }
 
+// TODO: remove this as soon as discriminants can be other types, and deal with the fallout from that
+const TYPE_OF_DISCRIMINANTS: Type = Type::u32();
 
 fn type_of(b: &MirCode, instr: OpId, code: &IndexVec<OpId, Op>) -> Type {
     match code[instr].as_mir_instr().unwrap() {
@@ -244,6 +246,7 @@ fn type_of(b: &MirCode, instr: OpId, code: &IndexVec<OpId, Op>) -> Type {
                 _ => panic!("Cannot directly access field of non-struct type {:?}!", base_ty),
             }
         },
+        Instr::DiscriminantAccess { .. } => TYPE_OF_DISCRIMINANTS, // TODO: update this when discriminants can be other types
     }
 }
 
@@ -689,6 +692,7 @@ impl Driver {
                         },
                         &Instr::DirectFieldAccess { val, index } => writeln!(f, "%{} = %{}.field{}", self.display_instr_name(op_id), self.display_instr_name(val), index)?,
                         &Instr::IndirectFieldAccess { val, index } => writeln!(f, "%{} = &(*%{}).field{}", self.display_instr_name(op_id), self.display_instr_name(val), index)?,
+                        &Instr::DiscriminantAccess { val } => writeln!(f, "%{} = discriminant of %{}", self.display_instr_name(op_id), self.display_instr_name(val))?,
                         &Instr::GenericParam(param) => {
                             writeln!(f, "{} = generic_param{}", self.display_instr_name(op_id), param.index())?
                         },
@@ -1265,7 +1269,7 @@ impl Driver {
             Expr::Switch { scrutinee, ref cases } => {
                 let cases = cases.clone();
                 let scrutinee_val = self.build_expr(b, scrutinee, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
-                let scrutinee_val = self.handle_indirection(b, scrutinee_val);
+                let discriminant = self.get_discriminant(b, scrutinee_val);
                 let result_location = match &ctx.data {
                     DataDest::Read => Some(
                         // TODO: this will be the wrong type if indirection != 0
@@ -1299,9 +1303,10 @@ impl Driver {
                                 }
                             }
                             let index = index.expect("Unrecognized variant in switch case. Typechecker should have caught this.");
+                            let discriminant = self.get_const_discriminant(enum_id, index);
                             mir_cases.push(
                                 SwitchCase {
-                                    value: Const::BasicVariant { enuum: enum_id, index },
+                                    value: discriminant,
                                     bb: case_bb,
                                 }
                             );
@@ -1316,7 +1321,7 @@ impl Driver {
                 self.end_current_bb(b);
                 
                 self.start_bb(b, begin_bb);
-                self.push_instr(b, Instr::SwitchBr { scrutinee: scrutinee_val, cases: mir_cases, catch_all_bb }, expr);
+                self.push_instr(b, Instr::SwitchBr { scrutinee: discriminant, cases: mir_cases, catch_all_bb }, expr);
                 self.end_current_bb(b);
 
                 self.start_bb(b, post_bb);
@@ -1362,6 +1367,18 @@ impl Driver {
         };
 
         self.handle_context(b, val, ctx, tp)
+    }
+
+    fn get_const_discriminant(&self, _enum_id: EnumId, variant_index: usize) -> Const {
+        // TODO: other discriminant types and custom values
+        // Delete TYPE_OF_DISCRIMINANTS to deal with other cases
+        Const::Int { lit: variant_index as u64, ty: TYPE_OF_DISCRIMINANTS }
+    }
+
+    fn get_discriminant(&mut self, b: &mut FunctionBuilder, val: Value) -> OpId {
+        // TODO: handle indirect enum discriminant accesses, without loading the entire value.
+        let val = self.handle_indirection(b, val);
+        self.push_instr_with_name(b, Instr::DiscriminantAccess { val }, val, format!("{}.disc", self.display_instr_name(val)))
     }
 
     fn handle_indirection(&mut self, b: &mut FunctionBuilder, mut val: Value) -> OpId {

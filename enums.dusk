@@ -64,3 +64,23 @@ fn more_tests(e: MyEnum): u8* {
         .c: "Hello, c!",
     }
 }
+/*
+MyAdt :: enum {
+    a(i32)
+    b(u64)
+    c {
+        a: u32
+        b: u8*
+    }
+}
+
+fn foo(adt: MyAdt) {
+    switch adt {
+        .a(val): print_int(val),
+        .b(u64_val): print_u64(u64_val),
+        .c { a: a, b: b }: {
+            print_u32(a)
+            print(b)
+        }
+    }
+}*/
