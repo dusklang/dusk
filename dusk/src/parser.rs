@@ -872,9 +872,9 @@ impl Driver {
         module
     }
 
-    fn parse_struct(&mut self, p: &mut Parser) -> ExprId {
-        let struct_range = self.eat_tok(p, TokenKind::Struct);
-        self.eat_tok(p, TokenKind::OpenCurly);
+    // From open curly to close curly
+    fn parse_struct_body(&mut self, p: &mut Parser, additional_range: Option<SourceRange>) -> ExprId {
+        let open_curly_range = self.eat_tok(p, TokenKind::OpenCurly);
 
         let mut fields = Vec::new();
         let (expr, strukt) = self.reserve_struct();
@@ -901,9 +901,18 @@ impl Driver {
                 }
             }
         };
-        self.finish_struct(fields, source_info::concat(struct_range, close_curly_range), expr, strukt);
+        let mut range = source_info::concat(open_curly_range, close_curly_range);
+        if let Some(additional_range) = additional_range {
+            range = source_info::concat(range, additional_range);
+        }
+        self.finish_struct(fields, range, expr, strukt);
 
         expr
+    }
+
+    fn parse_struct(&mut self, p: &mut Parser) -> ExprId {
+        let struct_range = self.eat_tok(p, TokenKind::Struct);
+        self.parse_struct_body(p, Some(struct_range))
     }
 
     fn parse_enum(&mut self, p: &mut Parser) -> ExprId {
@@ -926,7 +935,19 @@ impl Driver {
                     if let Token { kind: &TokenKind::Ident(name), range: ident_range } = self.cur(p) {
                         self.next(p);
                         let index = variants.len();
-                        variants.push(self.variant_decl(name, expr, enuum, index, ident_range));
+                        let payload_ty = match self.cur(p).kind {
+                            TokenKind::LeftParen => {
+                                self.next(p);
+                                let (payload_ty, _) = self.parse_type(p);
+                                self.eat_tok(p, TokenKind::RightParen);
+                                Some(payload_ty)
+                            },
+                            TokenKind::OpenCurly => {
+                                Some(self.parse_struct_body(p, None))
+                            }
+                            _ => None,
+                        };
+                        variants.push(self.variant_decl(name, expr, enuum, index, payload_ty, ident_range));
                     } else {
                         panic!("Unexpected token {:?}, expected variant name", self.cur(p).kind);
                     }

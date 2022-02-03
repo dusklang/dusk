@@ -71,7 +71,7 @@ fn more_tests(e: MyEnum): u8* {
         .c: "Hello, c!",
     }
 }
-/*
+
 MyAdt :: enum {
     a(i32)
     b(u64)
@@ -80,7 +80,7 @@ MyAdt :: enum {
         b: u8*
     }
 }
-
+/*
 fn foo(adt: MyAdt) {
     switch adt {
         .a(val): print_int(val),
