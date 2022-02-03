@@ -231,7 +231,7 @@ impl Driver {
         FieldDecl { decl, name, ty }
     }
     pub fn variant_decl(&mut self, name: Sym, enuum: ExprId, enum_id: EnumId, index: usize, payload_ty: Option<ExprId>, range: SourceRange) -> VariantDecl {
-        let decl = self.decl(Decl::Variant { enuum: enum_id, index }, name, Some(enuum), range);
+        let decl = self.decl(Decl::Variant { enuum: enum_id, index, payload_ty }, name, Some(enuum), range);
         VariantDecl { decl, name, enuum, payload_ty }
     }
     pub fn reserve_struct(&mut self) -> (ExprId, StructId) {

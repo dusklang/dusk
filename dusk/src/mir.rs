@@ -6,8 +6,8 @@ use smallvec::SmallVec;
 use string_interner::DefaultSymbol as Sym;
 use display_adapter::display_adapter;
 
-use dire::hir::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, GenericParamId, Item};
-use dire::mir::{FuncId, StaticId, Const, Instr, Function, MirCode, StructLayout, InstrNamespace, SwitchCase, VOID_INSTR};
+use dire::hir::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, GenericParamId, Item, VOID_TYPE};
+use dire::mir::{FuncId, StaticId, Const, Instr, Function, MirCode, StructLayout, EnumLayout, InstrNamespace, SwitchCase, VOID_INSTR};
 use dire::{Block, BlockId, Op, OpId};
 use dire::ty::{Type, FloatWidth};
 use dire::source_info::SourceRange;
@@ -30,7 +30,7 @@ enum Decl {
     Static(StaticId),
     Const(Const),
     Field { index: usize },
-    Variant { enuum: EnumId, index: usize },
+    Variant { enuum: EnumId, index: usize, payload_ty: Option<Type> },
     GenericParam(GenericParamId),
 }
 
@@ -176,7 +176,6 @@ impl Driver {
             },
             Expr::ConstTy(ref ty) => Const::Ty(ty.clone()),
             Expr::Mod { id } => Const::Mod(id),
-            Expr::Enum(id) => Const::Enum(id),
             Expr::Import { file } => Const::Mod(self.code.hir_code.global_scopes[file]),
             _ => panic!("Cannot convert expression to constant: {:#?}", expr),
         }
@@ -214,7 +213,7 @@ const TYPE_OF_DISCRIMINANTS: Type = Type::u32();
 fn type_of(b: &MirCode, instr: OpId, code: &IndexVec<OpId, Op>) -> Type {
     match code[instr].as_mir_instr().unwrap() {
         Instr::Void | Instr::Store { .. } => Type::Void,
-        Instr::Pointer { .. } | Instr::Struct { .. } | Instr::GenericParam(_) => Type::Ty,
+        Instr::Pointer { .. } | Instr::Struct { .. } | Instr::GenericParam(_) | Instr::Enum { .. } => Type::Ty,
         &Instr::StructLit { id, .. } => Type::Struct(id),
         Instr::Const(konst) => konst.ty(),
         Instr::Alloca(ty) => ty.clone().mut_ptr(),
@@ -246,6 +245,7 @@ fn type_of(b: &MirCode, instr: OpId, code: &IndexVec<OpId, Op>) -> Type {
                 _ => panic!("Cannot directly access field of non-struct type {:?}!", base_ty),
             }
         },
+        &Instr::Variant { enuum, .. } => Type::Enum(enuum),
         Instr::DiscriminantAccess { .. } => TYPE_OF_DISCRIMINANTS, // TODO: update this when discriminants can be other types
     }
 }
@@ -364,6 +364,27 @@ impl Driver {
         StructLayout { field_offsets, alignment, size, stride }
     }
 
+    pub fn layout_enum(&self, variant_payload_tys: &[Type]) -> EnumLayout {
+        use std::cmp::max;
+        // Get max alignment of all the fields.
+        let alignment = variant_payload_tys.iter()
+            .map(|ty| self.align_of(ty))
+            .max()
+            .unwrap_or(0);
+        let alignment = max(alignment, 4);
+
+        let mut payload_offsets = SmallVec::new();
+        let mut size = 4;
+        for ty in variant_payload_tys {
+            let offset = next_multiple_of(4, self.align_of(ty));
+            payload_offsets.push(offset);
+            size = max(size, offset + self.size_of(ty));
+        }
+        let stride = next_multiple_of(size, alignment);
+
+        EnumLayout { payload_offsets, alignment, size, stride }
+    }
+
     pub fn build_mir(&mut self, tp: &impl TypeProvider) {
         // Start at 1 to avoid RETURN_VALUE_DECL, which we can't and shouldn't generate code for
         for i in 1..self.code.hir_code.decls.len() {
@@ -462,8 +483,9 @@ impl Driver {
                 self.mir.decls.insert(id, decl.clone());
                 decl
             },
-            hir::Decl::Variant { enuum, index } => {
-                Decl::Variant { enuum, index }
+            hir::Decl::Variant { enuum, index, payload_ty } => {
+                let payload_ty = payload_ty.map(|ty| tp.get_evaluated_type(ty).clone());
+                Decl::Variant { enuum, index, payload_ty }
             },
             hir::Decl::GenericParam(param) => {
                 let decl = Decl::GenericParam(param);
@@ -492,7 +514,6 @@ impl Driver {
             Const::Str { id, ref ty } => write!(f, "%str{} ({:?}) as {:?}", id.index(), self.code.mir_code.strings[id], ty)?,
             Const::Ty(ref ty) => write!(f, "`{:?}`", ty)?,
             Const::Mod(id) => write!(f, "%mod{}", id.index())?,
-            Const::Enum(id) => write!(f, "%enum{}", id.index())?,
             Const::BasicVariant { enuum, index } => write!(f, "%enum{}.{}", enuum.index(), self.fmt_variant_name(enuum, index))?,
             Const::StructLit { ref fields, id } => {
                 write!(f, "const literal struct{} {{ ", id.index())?;
@@ -526,7 +547,6 @@ impl Driver {
 
             // TODO: heuristics for associating declaration names with modules and types
             Const::Mod(id) => write!(f, "mod{}", id.index())?,
-            Const::Enum(id) => write!(f, "enum{}", id.index())?,
             Const::BasicVariant { enuum, index } => write!(f, "enum{}_variant_{}", enuum.index(), self.fmt_variant_name(enuum, index))?,
 
             Const::StructLit { id, .. } => {
@@ -682,6 +702,31 @@ impl Driver {
                                 write!(f, " ")?;
                             }
                             writeln!(f, "}}")?;
+                        },
+                        &Instr::Enum { ref variants, id } => {
+                            write!(f, "%{} = define enum{} {{", self.display_instr_name(op_id), id.index())?;
+
+                            for (i, variant) in self.code.hir_code.enums[id].variants.iter().enumerate() {
+                                write!(f, "{}", self.interner.resolve(variant.name).unwrap())?;
+                                if variant.payload_ty.is_some() {
+                                    write!(f, "(%{})", self.display_instr_name(variants[i]))?;
+                                }
+                                if i < (variants.len() - 1) {
+                                    write!(f, ",")?;
+                                }
+                                write!(f, " ")?;
+                            }
+
+                            writeln!(f, "}}")?;
+                        }
+                        &Instr::Variant { enuum, index, payload } => {
+                            let variant = &self.code.hir_code.enums[enuum].variants[index];
+                            let variant_name = variant.name;
+                            write!(f, "%{} = %enum{}.{}", self.display_instr_name(op_id), enuum.index(), self.interner.resolve(variant_name).unwrap())?;
+                            if variant.payload_ty.is_some() {
+                                write!(f, "(%{})", self.display_instr_name(payload))?
+                            }
+                            writeln!(f)?
                         },
                         &Instr::DirectFieldAccess { val, index } => writeln!(f, "%{} = %{}.field{}", self.display_instr_name(op_id), self.display_instr_name(val), index)?,
                         &Instr::IndirectFieldAccess { val, index } => writeln!(f, "%{} = &(*%{}).field{}", self.display_instr_name(op_id), self.display_instr_name(val), index)?,
@@ -910,8 +955,14 @@ impl Driver {
                     self.push_instr(b, Instr::DirectFieldAccess { val: base.instr, index }, expr).direct()   
                 }
             },
-            Decl::Variant { enuum, index } => {
-                self.push_instr_with_name(b, Instr::Const(Const::BasicVariant { enuum, index }), expr, name).direct()
+            Decl::Variant { enuum, index, payload_ty } => {
+                if payload_ty.is_some() {
+                    debug_assert_eq!(arguments.len(), 1);
+                    self.push_instr_with_name(b, Instr::Variant { enuum, index, payload: arguments[0] }, expr, name).direct()
+                } else {
+                    debug_assert!(arguments.is_empty());
+                    self.push_instr_with_name(b, Instr::Const(Const::BasicVariant { enuum, index }), expr, name).direct()
+                }
             }
         }
     }
@@ -963,7 +1014,7 @@ impl Driver {
 
         let val = match ef!(expr.hir) {
             Expr::Void => VOID_INSTR.direct(),
-            Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::StrLit { .. } | Expr::CharLit { .. } | Expr::ConstTy(_) | Expr::Mod { .. } | Expr::Import { .. } | Expr::Enum(_) => {
+            Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::StrLit { .. } | Expr::CharLit { .. } | Expr::ConstTy(_) | Expr::Mod { .. } | Expr::Import { .. } => {
                 let konst = self.expr_to_const(expr, ty.clone());
                 let name = format!("{}", self.fmt_const_for_instr_name(&konst));
                 self.push_instr_with_name(b, Instr::Const(konst), expr, name).direct()
@@ -1198,6 +1249,22 @@ impl Driver {
                 }
                 self.push_instr(b, Instr::Struct { fields, id }, expr).direct()
             },
+            Expr::Enum(id) => {
+                let mut variants = SmallVec::new();
+                for i in 0..self.code.hir_code.enums[id].variants.len() {
+                    let variant = &self.code.hir_code.enums[id].variants[i];
+                    let payload_ty = variant.payload_ty.unwrap_or(VOID_TYPE);
+                    let variant = self.build_expr(
+                        b,
+                        payload_ty,
+                        Context::new(0, DataDest::Read, ControlDest::Continue),
+                        tp,
+                    );
+                    let variant = self.handle_indirection(b, variant);
+                    variants.push(variant);
+                }
+                self.push_instr(b, Instr::Enum { variants, id }, expr).direct()
+            }
             Expr::StructLit { id, .. } => {
                 let lit = tp.struct_lit(id).as_ref().unwrap();
                 let mut fields = SmallVec::new();

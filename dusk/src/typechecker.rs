@@ -513,6 +513,7 @@ impl tir::Expr<tir::DeclRef> {
             let overload_is_function = match df!(driver, overload.decl.hir) {
                 hir::Decl::Computed { .. } => true,
                 hir::Decl::Intrinsic { function_like, .. } => function_like,
+                hir::Decl::Variant { payload_ty, .. } => payload_ty.is_some(),
                 _ => false,
             };
             let has_parens = driver.code.hir_code.decl_refs[self.decl_ref_id].has_parens;
@@ -1057,8 +1058,7 @@ impl Driver {
                         let ty = self.eval_expr(unit.main_expr, &mut mock_tp);
 
                         match ty {
-                            // TODO: investigate whether Const::Enum should even exist? This seems dumb...
-                            Const::Enum(id) | Const::Ty(Type::Enum(id)) => ExprNamespace::Enum(id),
+                            Const::Ty(Type::Enum(id)) => ExprNamespace::Enum(id),
                             _ => panic!("Unexpected const kind, expected enum!"),
                         }
                     },

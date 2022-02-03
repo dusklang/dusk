@@ -26,7 +26,6 @@ use crate::typechecker::type_provider::TypeProvider;
 pub enum InternalValue {
     Ty(Type),
     Mod(ModScopeId),
-    Enum(EnumId),
 }
 
 #[derive(Debug)]
@@ -185,7 +184,6 @@ impl Value {
     fn as_ty(&self) -> Type {
         match self.as_internal() {
             InternalValue::Ty(ty) => ty.clone(),
-            &InternalValue::Enum(id) => Type::Enum(id),
             _ => panic!("Can't get non-type as type"),
         }
     }
@@ -253,8 +251,7 @@ impl Value {
             },
             Const::Ty(ref ty) => Value::from_ty(ty.clone()),
             Const::Mod(id) => Value::from_mod(id),
-            Const::Enum(id) => Value::from_enum(id),
-            Const::BasicVariant { enuum, index } => Value::from_variant(driver, enuum, index),
+            Const::BasicVariant { enuum, index } => Value::from_variant(driver, enuum, index, Value::Nothing),
             Const::StructLit { ref fields, id } => {
                 let fields = fields.iter().map(|val| Value::from_const(val, driver));
                 driver.eval_struct_lit(id, fields)
@@ -274,8 +271,16 @@ impl Value {
         Value::from_u8(unsafe { mem::transmute(val) })
     }
 
-    fn from_variant(_d: &Driver, _enuum: EnumId, index: usize) -> Value {
-        Value::from_u32(index as u32)
+    fn from_variant(d: &Driver, enuum: EnumId, index: usize, payload: Value) -> Value {
+        let layout = &d.code.mir_code.enums[&enuum];
+        let payload_offset = layout.payload_offsets[index];
+        let mut bytes = Vec::new();
+        bytes.extend(Value::from_u32(index as u32).as_bytes());
+        while bytes.len() < payload_offset {
+            bytes.push(0);
+        }
+        bytes.extend(payload.as_bytes());
+        Value::from_bytes(&bytes)
     }
 
     fn from_internal(val: InternalValue) -> Value {
@@ -288,10 +293,6 @@ impl Value {
 
     fn from_mod(id: ModScopeId) -> Value {
         Self::from_internal(InternalValue::Mod(id))
-    }
-
-    fn from_enum(id: EnumId) -> Value {
-        Self::from_internal(InternalValue::Enum(id))
     }
 }
 
@@ -906,6 +907,20 @@ impl Driver {
                 }
                 Value::from_ty(Type::Struct(id))
             },
+            &Instr::Enum { ref variants, id } => {
+                if !self.code.mir_code.enums.contains_key(&id) {
+                    let mut variant_tys = Vec::new();
+                    for &variant in variants {
+                        variant_tys.push(frame.results[&variant].as_ty().clone());
+                    }
+                    let layout = self.layout_enum(&variant_tys);
+                    self.code.mir_code.enums.insert(
+                        id,
+                        layout,
+                    );
+                }
+                Value::from_ty(Type::Enum(id))
+            }
             &Instr::StructLit { ref fields, id } => {
                 let frame = self.interp.stack.last().unwrap();
                 self.eval_struct_lit(
@@ -942,6 +957,10 @@ impl Driver {
                 let frame = self.interp.stack.last_mut().unwrap();
                 frame.branch_to(catch_all_bb);
                 return None
+            },
+            &Instr::Variant { enuum, index, payload } => {
+                let payload = frame.results[&payload].clone();
+                Value::from_variant(self, enuum, index, payload)
             },
             &Instr::DiscriminantAccess { val } => {
                 let enuum = frame.results[&val].as_enum();

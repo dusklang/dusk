@@ -223,7 +223,8 @@ impl Driver {
     }
     fn find_overloads_in_enum(&self, decl_ref: &hir::DeclRef, id: EnumId, overloads: &mut HashSet<DeclId>) {
         for variant in &self.code.hir_code.enums[id].variants {
-            if variant.name == decl_ref.name {
+            let num_params = if variant.payload_ty.is_some() { 1 } else { 0 };
+            if variant.name == decl_ref.name && decl_ref.num_arguments == num_params {
                 overloads.insert(variant.decl);
                 return;
             }
@@ -349,6 +350,12 @@ impl Driver {
                         },
                         _ => panic!("invalid namespace for `return_value`"),
                     }
+                },
+                hir::Decl::Variant { payload_ty, .. } => {
+                    if let Some(payload_ty) = payload_ty {
+                        add_eval_dep!(id, payload_ty);
+                    }
+                    self.tir.graph.add_type3_dep(id, df!(overload.item));
                 },
                 _ => self.tir.graph.add_type2_dep(id, df!(overload.item)),
             }
@@ -517,7 +524,7 @@ impl Driver {
 
                     (false, param_tys.clone())
                 },
-                hir::Decl::Const(_) | hir::Decl::Variant { .. } | hir::Decl::Parameter { .. } | hir::Decl::ReturnValue | hir::Decl::GenericParam(_) => (
+                hir::Decl::Const(_) | hir::Decl::Parameter { .. } | hir::Decl::ReturnValue | hir::Decl::GenericParam(_) => (
                     false,
                     SmallVec::new(),
                 ),
@@ -536,6 +543,10 @@ impl Driver {
                 hir::Decl::Field { .. } => (
                     true,
                     SmallVec::new()
+                ),
+                hir::Decl::Variant { payload_ty, .. } => (
+                    false,
+                    payload_ty.iter().cloned().collect(),
                 ),
             };
             self.tir.decls.push(Decl { param_tys, is_mut, generic_params });
@@ -648,7 +659,7 @@ impl Driver {
             match self.code.hir_code.items[id] {
                 hir::Item::Decl(decl_id) => {
                     match df!(decl_id.hir) {
-                        hir::Decl::Parameter { .. } | hir::Decl::Static(_) | hir::Decl::Const(_) | hir::Decl::Stored { .. } | hir::Decl::Field { .. } | hir::Decl::Variant { .. } | hir::Decl::ReturnValue => {},
+                        hir::Decl::Parameter { .. } | hir::Decl::Static(_) | hir::Decl::Const(_) | hir::Decl::Stored { .. } | hir::Decl::Field { .. } | hir::Decl::ReturnValue => {},
                         hir::Decl::GenericParam(_) => {
                             add_eval_dep!(id, hir::TYPE_TYPE);
                         },
@@ -657,6 +668,11 @@ impl Driver {
                                 add_eval_dep!(id, ty);
                             }
                         },
+                        hir::Decl::Variant { payload_ty, .. } => {
+                            if let Some(payload_ty) = payload_ty {
+                                add_eval_dep!(id, payload_ty);
+                            }
+                        }
                         hir::Decl::Computed { scope, ref param_tys, .. } => {
                             for &ty in param_tys {
                                 add_eval_dep!(id, ty);
