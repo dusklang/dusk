@@ -1347,6 +1347,7 @@ impl Driver {
                     },
                     _ => todo!(),
                 };
+                let mut catch_all_bb = None;
                 for case in cases {
                     let case_bb = self.create_bb(b);
                     self.start_bb(b, case_bb);
@@ -1370,15 +1371,23 @@ impl Driver {
                                     bb: case_bb,
                                 }
                             );
-                        }
+                        },
+                        hir::Pattern::NamedCatchAll(_) => {
+                            catch_all_bb = Some(case_bb);
+                        },
                     }
                 }
 
-                let catch_all_bb = self.create_bb(b);
-                self.start_bb(b, catch_all_bb);
-                // TODO: add unreachable instruction I guess?
-                self.push_instr(b, Instr::Intrinsic { arguments: SmallVec::new(), ty: Type::Never, intr: Intrinsic::Panic }, SourceRange::default());
-                self.end_current_bb(b);
+                let catch_all_bb = if let Some(catch_all_bb) = catch_all_bb {
+                    catch_all_bb
+                } else {
+                    let catch_all_bb = self.create_bb(b);
+                    self.start_bb(b, catch_all_bb);
+                    // TODO: add unreachable instruction I guess?
+                    self.push_instr(b, Instr::Intrinsic { arguments: SmallVec::new(), ty: Type::Never, intr: Intrinsic::Panic }, SourceRange::default());
+                    self.end_current_bb(b);
+                    catch_all_bb
+                };
                 
                 self.start_bb(b, begin_bb);
                 self.push_instr(b, Instr::SwitchBr { scrutinee: discriminant, cases: mir_cases, catch_all_bb }, expr);

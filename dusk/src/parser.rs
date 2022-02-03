@@ -606,10 +606,22 @@ impl Driver {
     }
 
     fn parse_pattern(&mut self, p: &mut Parser) -> Pattern {
-        let dot_range = self.eat_tok(p, TokenKind::Dot);
-        let name = self.eat_ident(p);
-        let range = source_info::concat(dot_range, name.range);
-        Pattern::ContextualMember { name, range }
+        let initial_tok = self.cur(p);
+        let initial_range = initial_tok.range.clone();
+        match initial_tok.kind {
+            TokenKind::Dot => {
+                self.next(p);
+                let name = self.eat_ident(p);
+                let range = source_info::concat(initial_range, name.range);
+                Pattern::ContextualMember { name, range }
+            },
+            &TokenKind::Ident(name) => {
+                self.next(p);
+                Pattern::NamedCatchAll(Ident { symbol: name, range: initial_range })
+            },
+            _ => panic!("unexpected token"),
+        }
+        
     }
 
     fn eat_tok(&mut self, p: &mut Parser, kind: TokenKind) -> SourceRange {

@@ -279,6 +279,78 @@ enum Exhaustion {
     Total,
 }
 
+impl EnumExhaustion {
+    fn is_total(&self, driver: &Driver, scrutinee_ty: &Type, tp: &impl TypeProvider) -> bool {
+        let enum_id = match scrutinee_ty {
+            &Type::Enum(enum_id) => enum_id,
+            _ => panic!("expected enum"),
+        };
+
+        let variants = &driver.code.hir_code.enums[enum_id].variants;
+        if self.variants.len() < variants.len() {
+            false
+        } else {
+            // Return false early if you find something that proves non-total exhaustion.
+            // Otherwise, return true.
+            for i in 0..variants.len() {
+                let exhaustion = self.variants.get(&i).unwrap();
+                // No payload == total exhaustion. Otherwise:
+                if let Some(payload) = &exhaustion.payload {
+                    let ty = variants[i].payload_ty.unwrap();
+                    let ty = tp.get_evaluated_type(ty);
+                    if !payload.is_total(driver, ty, tp) {
+                        return false;
+                    }
+                }
+            }
+            true
+        }
+    }
+
+    fn make_total(&mut self, driver: &Driver, scrutinee_ty: &Type, catch_all_range: SourceRange, tp: &impl TypeProvider) {
+        let enum_id = match scrutinee_ty {
+            &Type::Enum(enum_id) => enum_id,
+            _ => panic!("expected enum"),
+        };
+        let variants = &driver.code.hir_code.enums[enum_id].variants;
+        for i in 0..variants.len() {
+            if let Some(exhaustion) = self.variants.get_mut(&i) {
+                if let ExhaustionReason::Explicit { more_than_one_coverage, .. } = &mut exhaustion.reason {
+                    *more_than_one_coverage = true;
+                }
+                if let Some(payload) = &mut exhaustion.payload {
+                    let ty = variants[i].payload_ty.unwrap();
+                    let ty = tp.get_evaluated_type(ty);
+                    payload.make_total(driver, ty, catch_all_range, tp);
+                }
+            } else {
+                let payload = if variants[i].payload_ty.is_some() {
+                    Some(Box::new(Exhaustion::Total))
+                } else {
+                    None
+                };
+                self.variants.insert(i, VariantExhaustion { reason: ExhaustionReason::CatchAll(catch_all_range), payload });
+            }
+        }
+    }
+}
+
+impl Exhaustion {
+    fn is_total(&self, driver: &Driver, scrutinee_ty: &Type, tp: &impl TypeProvider) -> bool {
+        match self {
+            Exhaustion::Enum(exhaustion) => exhaustion.is_total(driver, scrutinee_ty, tp),
+            Exhaustion::Total => true,
+        }
+    }
+
+    fn make_total(&mut self, driver: &Driver, scrutinee_ty: &Type, catch_all_range: SourceRange, tp: &impl TypeProvider) {
+        match self {
+            Exhaustion::Enum(exhaustion) => exhaustion.make_total(driver, scrutinee_ty, catch_all_range, tp),
+            Exhaustion::Total => {},
+        }
+    }
+}
+
 impl tir::Expr<tir::Switch> {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         let scrutinee_ty = tp.constraints(self.scrutinee).solve().expect("Ambiguous type for scrutinee in switch expression").ty;
@@ -334,6 +406,15 @@ impl tir::Expr<tir::Switch> {
                                 let err = Error::new(format!("Variant `{}` does not exist in enum {:?}", variant_name_str, scrutinee_ty))
                                     .adding_primary_range(range, "referred to by pattern here");
                                 driver.errors.push(err);
+                            }
+                        },
+                        Pattern::NamedCatchAll(name) => {
+                            if exhaustion.is_total(driver, &scrutinee_ty, tp) {
+                                let err = Error::new(format!("Switch case unreachable"))
+                                    .adding_primary_range(name.range, "all possible values already handled before this point");
+                                driver.errors.push(err);
+                            } else {
+                                exhaustion.make_total(driver, &scrutinee_ty, name.range, tp);
                             }
                         }
                     }

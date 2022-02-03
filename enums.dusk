@@ -26,6 +26,8 @@ fn main() {
 
 
     create_adt()
+
+    catch_all()
 }
 
 fn print_enum(e: MyEnum) {
@@ -86,12 +88,23 @@ MyAdt :: enum {
 }
 
 fn create_adt() {
+    /*
     adt :: MyAdt.a(12)
-    // this should be invalid
     switch adt {
         .a: {}
         .b: {}
         .c: {}
+    }*/
+}
+
+fn catch_all() {
+    e :: MyEnum.b
+    switch e {
+        .a: print("a case\n"),
+        //.b: print("b case\n"),
+        .c: print("c case\n"),
+        _: print("catch-all case\n"),
+        //_: print("second catch-all case\n")
     }
 }
 /*
