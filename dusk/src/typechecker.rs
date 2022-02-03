@@ -10,6 +10,7 @@ use type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 use dire::hir::{self, ExprId, DeclId, StructId, Pattern};
 use dire::mir::Const;
 use dire::ty::{Type, QualType, IntWidth};
+use dire::source_info::SourceRange;
 
 use crate::driver::Driver;
 use crate::error::Error;
@@ -250,6 +251,34 @@ impl tir::Expr<tir::While> {
     }
 }
 
+
+enum ExhaustionReason {
+    // Explicitly called out, e.g., '.a' for variant 'a'
+    Explicit {
+        // First pattern to explicitly call out the value/variant
+        first_coverage: SourceRange,
+        // Must be set to true if either another explicit pattern calls out the value/variant, or
+        // there is a catch-all case later
+        more_than_one_coverage: bool,
+    },
+    CatchAll(SourceRange),
+}
+
+struct VariantExhaustion {
+    reason: ExhaustionReason,
+    payload: Option<Box<Exhaustion>>,
+}
+
+#[derive(Default)]
+struct EnumExhaustion {
+    variants: HashMap<usize, VariantExhaustion>,
+}
+
+enum Exhaustion {
+    Enum(EnumExhaustion),
+    Total,
+}
+
 impl tir::Expr<tir::Switch> {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         let scrutinee_ty = tp.constraints(self.scrutinee).solve().expect("Ambiguous type for scrutinee in switch expression").ty;
@@ -257,26 +286,51 @@ impl tir::Expr<tir::Switch> {
             Type::Enum(id) => {
                 // Make sure each switch case matches a variant name in the scrutinized enum, and
                 // that each variant in the enum is matched exactly once.
-                let mut variants_matched = HashMap::new();
+                let mut exhaustion = EnumExhaustion::default();
                 let variants = &driver.code.hir_code.enums[id].variants;
                 for case in &self.cases {
                     match case.pattern {
                         Pattern::ContextualMember { name, range } => {
                             let variant_name_str = driver.interner.resolve(name.symbol).unwrap();
-                            for variant in variants {
-                                if variant.name == name.symbol {
-                                    if let Some(&prior_match) = variants_matched.get(&name.symbol) {
-                                        let err = Error::new(format!("Variant `{}` already covered in switch expression", variant_name_str))
-                                        .adding_secondary_range(prior_match, "first case here")
-                                        .adding_primary_range(range, "redundant case here");
-                                        driver.errors.push(err);
-                                    } else {
-                                        variants_matched.insert(name.symbol, range);
+                            let index = variants.iter().position(|variant| variant.name == name.symbol);
+                            if let Some(index) = index {
+                                if variants[index].payload_ty.is_some() {
+                                    // Trying to match variant with payload, without acknowledging
+                                    // the payload. For example, matching a value of type
+                                    // 'enum { a(u32) }' with the pattern '.a' rather than '.a(12)'
+                                    // or something.
+                                    let decl = variants[index].decl;
+                                    let err = Error::new(format!("Variant `{}` has a payload which goes ignored in pattern", variant_name_str))
+                                        .adding_primary_range(range, "pattern here")
+                                        .adding_secondary_range(df!(driver, decl.range), "variant here");
+                                    driver.errors.push(err);
+
+                                    // Even though the payload was ignored, still add record of attempt to match it. This will suppress unhandled variant errors.
+                                    if !exhaustion.variants.contains_key(&index) {
+                                        let payload = Box::new(Exhaustion::Total);
+                                        exhaustion.variants.insert(index, VariantExhaustion { reason: ExhaustionReason::Explicit { first_coverage: range, more_than_one_coverage: false }, payload: Some(payload) });
                                     }
-                                    break;
+                                } else if let Some(prior_match) = exhaustion.variants.get_mut(&index) {
+                                    // This variant has no payload, and has already been matched.
+                                    let mut err = Error::new(format!("Variant `{}` already covered in switch expression", variant_name_str))
+                                        .adding_primary_range(range, "redundant case here");
+                                    match prior_match.reason {
+                                        ExhaustionReason::Explicit { first_coverage, ref mut more_than_one_coverage } => {
+                                            let msg = if *more_than_one_coverage {
+                                                "first covered here"
+                                            } else {
+                                                "covered here"
+                                            };
+                                            err.add_primary_range(first_coverage, msg);
+                                            *more_than_one_coverage = true;
+                                        },
+                                        ExhaustionReason::CatchAll(range) => err.add_primary_range(range, "covered by catch-all pattern here"),
+                                    }
+                                    driver.errors.push(err);
+                                } else {
+                                    exhaustion.variants.insert(index, VariantExhaustion { reason: ExhaustionReason::Explicit { first_coverage: range, more_than_one_coverage: false }, payload: None });
                                 }
-                            }
-                            if variants_matched.get(&name.symbol).is_none() {
+                            } else {
                                 let err = Error::new(format!("Variant `{}` does not exist in enum {:?}", variant_name_str, scrutinee_ty))
                                     .adding_primary_range(range, "referred to by pattern here");
                                 driver.errors.push(err);
@@ -285,14 +339,14 @@ impl tir::Expr<tir::Switch> {
                     }
                 }
                 // If there are more matches than variants, then the sky is falling.
-                debug_assert!(variants_matched.len() <= variants.len());
+                debug_assert!(exhaustion.variants.len() <= variants.len());
 
                 // There are more variants than there are matched variants? Then there are
                 // unmatched variants. AKA, the switch expression is non-exhaustive.
-                if variants_matched.len() < variants.len() {
+                if exhaustion.variants.len() < variants.len() {
                     let mut unmatched_variants = Vec::new();
-                    for variant in variants {
-                        if variants_matched.get(&variant.name).is_none() {
+                    for (index, variant) in variants.iter().enumerate() {
+                        if exhaustion.variants.get(&index).is_none() {
                             unmatched_variants.push(variant.name);
                         }
                     }
