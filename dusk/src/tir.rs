@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use smallvec::SmallVec;
 use index_vec::define_index_type;
 
-use dire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, EnumId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId, GenericParamId, Pattern, RETURN_VALUE_DECL};
+use dire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, EnumId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, RETURN_VALUE_DECL};
 
 use crate::driver::Driver;
 use crate::dep_vec::{self, DepVec, AnyDepVec};
@@ -42,6 +42,8 @@ pub struct Stmt { pub root_expr: ExprId }
 pub struct Do { pub terminal_expr: ExprId }
 #[derive(Debug)]
 pub struct AssignedDecl { pub explicit_ty: Option<ExprId>, pub root_expr: ExprId, pub decl_id: DeclId }
+#[derive(Debug)]
+pub struct PatternBinding { pub binding_id: PatternBindingDeclId, pub scrutinee: ExprId, pub decl_id: DeclId }
 #[derive(Debug)]
 pub struct Assignment { pub lhs: ExprId, pub rhs: ExprId }
 #[derive(Debug)]
@@ -122,6 +124,7 @@ pub struct UnitItems {
     pub imports: DepVec<Expr<Import>>,
     pub dos: DepVec<Expr<Do>>,
     pub assigned_decls: DepVec<AssignedDecl>,
+    pub pattern_bindings: DepVec<PatternBinding>,
     pub assignments: DepVec<Expr<Assignment>>,
     pub decl_refs: DepVec<Expr<DeclRef>>,
     pub addr_ofs: DepVec<Expr<AddrOf>>,
@@ -148,7 +151,7 @@ impl UnitItems {
             &mut self.addr_ofs, &mut self.derefs, &mut self.pointers, &mut self.ifs,
             &mut self.dos, &mut self.ret_groups, &mut self.casts, &mut self.whiles,
             &mut self.explicit_rets, &mut self.modules, &mut self.imports, &mut self.structs,
-            &mut self.struct_lits, &mut self.switches, &mut self.enums,
+            &mut self.struct_lits, &mut self.switches, &mut self.enums, &mut self.pattern_bindings,
         ]);
     }
 }
@@ -496,6 +499,10 @@ impl Driver {
                 let explicit_ty = self.code.hir_code.explicit_tys[id];
                 unit.assigned_decls.insert(level, AssignedDecl { explicit_ty, root_expr, decl_id: id });
             },
+            hir::Decl::PatternBinding { id: binding_id, .. } => {
+                let scrutinee = self.code.hir_code.pattern_binding_decls[binding_id].scrutinee;
+                unit.pattern_bindings.insert(level, PatternBinding { binding_id, scrutinee, decl_id: id });
+            },
             hir::Decl::Computed { scope, .. } => {
                 let terminal_expr = self.code.hir_code.imper_scopes[scope].terminal_expr;
                 if let Some(_) = self.code.hir_code.explicit_tys[id] {
@@ -536,7 +543,7 @@ impl Driver {
                     true,
                     SmallVec::new(),
                 ),
-                hir::Decl::Stored { is_mut, .. } => (
+                hir::Decl::Stored { is_mut, .. } | hir::Decl::PatternBinding { is_mut, .. } => (
                     is_mut,
                     SmallVec::new(),
                 ),
@@ -559,6 +566,12 @@ impl Driver {
             let id = df!(decl_id.item);
             match df!(decl_id.hir) {
                 hir::Decl::Parameter { .. } | hir::Decl::Intrinsic { .. } | hir::Decl::Field { .. } | hir::Decl::ReturnValue | hir::Decl::GenericParam(_) | hir::Decl::Variant { .. } => {},
+                hir::Decl::PatternBinding { id: binding_id, .. } => {
+                    let scrutinee = self.code.hir_code.pattern_binding_decls[binding_id].scrutinee;
+
+                    // TODO: find out why this seems to cause an infinite loop if it's moved to build_more_tir() and changed to a type 2 dependency
+                    self.tir.graph.add_type1_dep(id, ef!(scrutinee.item));
+                },
                 hir::Decl::Static(expr) | hir::Decl::Const(expr) | hir::Decl::Stored { root_expr: expr, .. } => self.tir.graph.add_type1_dep(id, ef!(expr.item)),
                 hir::Decl::Computed { scope, .. } => {
                     let terminal_expr = self.code.hir_code.imper_scopes[scope].terminal_expr;
@@ -660,6 +673,10 @@ impl Driver {
                 hir::Item::Decl(decl_id) => {
                     match df!(decl_id.hir) {
                         hir::Decl::Parameter { .. } | hir::Decl::Static(_) | hir::Decl::Const(_) | hir::Decl::Stored { .. } | hir::Decl::Field { .. } | hir::Decl::ReturnValue => {},
+                        hir::Decl::PatternBinding { id: binding_id, .. } => {
+                            // let scrutinee = self.code.hir_code.pattern_binding_decls[binding_id].scrutinee;
+                            // self.tir.graph.add_type2_dep(id, ef!(scrutinee.item));
+                        },
                         hir::Decl::GenericParam(_) => {
                             add_eval_dep!(id, hir::TYPE_TYPE);
                         },

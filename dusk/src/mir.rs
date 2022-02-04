@@ -6,7 +6,7 @@ use smallvec::SmallVec;
 use string_interner::DefaultSymbol as Sym;
 use display_adapter::display_adapter;
 
-use dire::hir::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, GenericParamId, Item, VOID_TYPE};
+use dire::hir::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, GenericParamId, Item, PatternBindingDeclId, VOID_TYPE};
 use dire::mir::{FuncId, StaticId, Const, Instr, Function, MirCode, StructLayout, EnumLayout, InstrNamespace, SwitchCase, VOID_INSTR};
 use dire::{Block, BlockId, Op, OpId};
 use dire::ty::{Type, FloatWidth};
@@ -26,6 +26,7 @@ enum Decl {
     Stored(StoredDeclId),
     Computed { get: FuncId },
     Parameter { index: usize },
+    PatternBinding { id: PatternBindingDeclId },
     Intrinsic(Intrinsic, Type),
     Static(StaticId),
     Const(Const),
@@ -453,6 +454,11 @@ impl Driver {
                 self.mir.decls.insert(id, decl.clone());
                 decl
             },
+            hir::Decl::PatternBinding { id: index, .. } => {
+                let decl = Decl::PatternBinding { id: index };
+                self.mir.decls.insert(id, decl.clone());
+                decl
+            },
             hir::Decl::Intrinsic { intr, .. } => {
                 let decl = Decl::Intrinsic(intr, self.decl_type(id, tp).clone());
                 self.mir.decls.insert(id, decl.clone());
@@ -760,6 +766,7 @@ struct FunctionBuilder {
     blocks: Vec<BlockId>,
     current_block: BlockId,
     stored_decl_locs: IndexVec<StoredDeclId, OpId>,
+    pattern_binding_locs: HashMap<PatternBindingDeclId, OpId>,
     instr_namespace: InstrNamespace,
 }
 
@@ -817,6 +824,7 @@ impl Driver {
             blocks: vec![entry],
             current_block: entry,
             stored_decl_locs: IndexVec::new(),
+            pattern_binding_locs: HashMap::new(),
             instr_namespace: InstrNamespace::default(),
         };
         self.start_bb(&mut b, entry);
@@ -925,6 +933,10 @@ impl Driver {
                 assert!(arguments.is_empty());
                 b.stored_decl_locs[id].indirect()
             },
+            Decl::PatternBinding { id: binding_id } => {
+                assert!(arguments.is_empty());
+                b.pattern_binding_locs[&binding_id].indirect()
+            },
             Decl::Parameter { index } => {
                 let entry_block = b.blocks[0];
                 let value = self.code.blocks[entry_block].ops[index];
@@ -979,6 +991,11 @@ impl Driver {
                 let location = b.stored_decl_locs[id];
                 self.push_instr(b, Instr::Store { location, value }, range)
             },
+            Decl::PatternBinding { id: binding_id } => {
+                assert!(arguments.is_empty());
+                let location = b.pattern_binding_locs[&binding_id];
+                self.push_instr(b, Instr::Store { location, value }, range)
+            },
             Decl::Parameter { .. } | Decl::Const(_) | Decl::GenericParam(_) => panic!("can't set a constant!"),
             Decl::Intrinsic(_, _) => panic!("can't set an intrinsic! (yet?)"),
             Decl::Static(statik) => {
@@ -999,6 +1016,10 @@ impl Driver {
             Decl::Stored(id) => {
                 assert!(arguments.is_empty());
                 b.stored_decl_locs[id].indirect()
+            },
+            Decl::PatternBinding { id: binding_id } => {
+                assert!(arguments.is_empty());
+                b.pattern_binding_locs[&binding_id].indirect()
             },
             Decl::GenericParam(_) => panic!("can't modify a generic parameter!"),
             Decl::Parameter { .. } | Decl::Const(_) => panic!("can't modify a constant!"),

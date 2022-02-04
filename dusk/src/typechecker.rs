@@ -166,6 +166,42 @@ impl tir::AssignedDecl {
     }
 }
 
+impl tir::PatternBinding {
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+        let constraints = tp.constraints(self.scrutinee);
+        let scrutinee_ty = constraints.solve().expect("Ambiguous type for assigned declaration").ty;
+        let mut binding_ty = None;
+        let binding = &driver.code.hir_code.pattern_binding_decls[self.binding_id];
+        // Note: no need to worry about mutability matching because that can be handled in the parser
+        for path in &binding.paths {
+            let mut path_ty = scrutinee_ty.clone();
+            for step in &path.components {
+                match step {
+                    &hir::PatternBindingPathComponent::VariantPayload(index) => {
+                        match path_ty {
+                            Type::Enum(enuum) => {
+                                let payload_ty = driver.code.hir_code.enums[enuum].variants[index].payload_ty.unwrap();
+                                let payload_ty = tp.get_evaluated_type(payload_ty);
+                                path_ty = payload_ty.clone();
+                            },
+                            _ => panic!("expected enum"),
+                        }
+                    }
+                }
+            }
+            if let Some(binding_ty) = &binding_ty {
+                assert_eq!(binding_ty, &path_ty, "pattern binding contains paths of different types");
+            } else {
+                binding_ty = Some(path_ty);
+            }
+        }
+        tp.decl_type_mut(self.decl_id).ty = binding_ty.unwrap();
+    }
+
+    fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut impl TypeProvider) {
+    }
+}
+
 impl tir::Expr<tir::Assignment> {
     fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
         tp.constraints_mut(self.id).set_to(Type::Void);
@@ -1096,7 +1132,7 @@ impl Driver {
             run_pass_1!(
                 assigned_decls, assignments, casts, whiles, explicit_rets, modules, imports,
                 decl_refs, addr_ofs, derefs, pointers, structs, struct_lits, ifs, dos, ret_groups,
-                switches, enums,
+                switches, enums, pattern_bindings,
             );
             tp.debug_output(self, level as usize);
         }
@@ -1125,7 +1161,7 @@ impl Driver {
             run_pass_2!(
                 assigned_decls, assignments, casts, whiles, explicit_rets, modules, imports,
                 decl_refs, addr_ofs, derefs, pointers, structs, struct_lits, ifs, dos, ret_groups,
-                switches, enums,
+                switches, enums, pattern_bindings,
             );
 
             if level > 0 {

@@ -259,6 +259,23 @@ impl Driver {
         let id = self.code.hir_code.struct_lits.next();
         self.push_expr(Expr::StructLit { ty, fields, id }, range)
     }
+    pub fn get_pattern_bindings(&mut self, pattern: &Pattern, scrutinee: ExprId) -> Vec<ImperScopedDecl> {
+        let mut decls = Vec::new();
+        match pattern {
+            Pattern::ContextualMember { .. } | Pattern::AnonymousCatchAll(_) => {},
+            Pattern::NamedCatchAll(name) => {
+                let paths = vec![
+                    PatternBindingPath::identity()
+                ];
+                let binding_decl = PatternBindingDecl { paths, scrutinee };
+                let id = self.code.hir_code.pattern_binding_decls.push(binding_decl);
+                let decl = self.decl(Decl::PatternBinding { id, is_mut: false }, name.symbol, None, name.range);
+                let decl = ImperScopedDecl { name: name.symbol, num_params: 0, id: decl };
+                decls.push(decl);
+            },
+        }
+        decls
+    }
     pub fn begin_condition_namespace(&mut self) -> ConditionNsId {
         let parent = self.cur_namespace();
         let ns = self.code.hir_code.condition_ns.push(ConditionNs { func: DeclId::from_raw(u32::MAX), parent: Some(parent) });
@@ -456,7 +473,7 @@ impl Driver {
         }
     }
 
-    fn imper_scoped_decl(&mut self, decl: ImperScopedDecl) {
+    pub fn imper_scoped_decl(&mut self, decl: ImperScopedDecl) {
         if let Some(&ScopeState::Imper { namespace, .. }) = self.hir.scope_stack.last() {
             self.code.hir_code.imper_ns[namespace].decls.push(decl);
         } else {

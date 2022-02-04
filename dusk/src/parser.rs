@@ -2,7 +2,7 @@ use smallvec::{SmallVec, smallvec};
 
 use string_interner::DefaultSymbol as Sym;
 
-use dire::hir::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment, GenericParamId, Ident, Pattern, SwitchCase};
+use dire::hir::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment, GenericParamId, Ident, Pattern, SwitchCase, ImperScopedDecl};
 use dire::ty::Type;
 use dire::source_info::{self, SourceFileId, SourceRange};
 
@@ -398,7 +398,7 @@ impl Driver {
             &TokenKind::Ident(name) => Ok(self.parse_decl_ref(p, None, name)),
             TokenKind::Do => {
                 let do_range = self.eat_tok(p, TokenKind::Do);
-                let (scope, scope_range) = self.parse_scope(p);
+                let (scope, scope_range) = self.parse_scope(p, &[]);
                 Ok(self.do_expr(scope, source_info::concat(do_range, scope_range)))
             },
             TokenKind::Module => Ok(self.parse_module(p)),
@@ -410,7 +410,7 @@ impl Driver {
                 let while_range = self.cur(p).range;
                 self.next(p);
                 let condition = self.parse_non_struct_lit_expr(p);
-                let (scope, scope_range) = self.parse_scope(p);
+                let (scope, scope_range) = self.parse_scope(p, &[]);
                 Ok(self.while_expr(condition, scope, source_info::concat(while_range, scope_range)))
             },
             TokenKind::Switch => Ok(self.parse_switch(p)),
@@ -504,7 +504,7 @@ impl Driver {
     fn parse_if(&mut self, p: &mut Parser) -> ExprId {
         let if_range = self.eat_tok(p, TokenKind::If);
         let condition = self.parse_non_struct_lit_expr(p);
-        let (then_scope, then_range) = self.parse_scope(p);
+        let (then_scope, then_range) = self.parse_scope(p, &[]);
         let mut range = source_info::concat(if_range, then_range);
         let else_scope = if let TokenKind::Else = self.cur(p).kind {
             match self.next(p).kind {
@@ -518,7 +518,7 @@ impl Driver {
                     Some(scope)
                 },
                 TokenKind::OpenCurly => {
-                    let (else_scope, else_range) = self.parse_scope(p);
+                    let (else_scope, else_range) = self.parse_scope(p, &[]);
                     range = source_info::concat(range, else_range);
                     Some(else_scope)
                 },
@@ -545,9 +545,10 @@ impl Driver {
                 },
                 _ => {
                     let pattern = self.parse_pattern(p);
+                    let bindings = self.get_pattern_bindings(&pattern, scrutinee);
                     self.eat_tok(p, TokenKind::Colon);
                     let (scope, scope_range) = match self.cur(p).kind {
-                        TokenKind::OpenCurly => self.parse_scope(p),
+                        TokenKind::OpenCurly => self.parse_scope(p, &bindings),
                         _ => {
                             let scope = self.begin_imper_scope();
                             let case_expr = self.parse_expr(p);
@@ -981,8 +982,11 @@ impl Driver {
     }
 
     // Parses an open curly brace, then a list of Items, then a closing curly brace.
-    fn parse_scope(&mut self, p: &mut Parser) -> (ImperScopeId, SourceRange) {
+    fn parse_scope(&mut self, p: &mut Parser, additional_imper_decls: &[ImperScopedDecl]) -> (ImperScopeId, SourceRange) {
         let scope = self.begin_imper_scope();
+        for &decl in additional_imper_decls {
+            self.imper_scoped_decl(decl);
+        }
         let mut last_was_expr = false;
         let open_curly_range = self.eat_tok(p, TokenKind::OpenCurly);
         let close_curly_range = loop {
@@ -1108,7 +1112,7 @@ impl Driver {
         }
         match self.cur(p).kind {
             TokenKind::OpenCurly => {
-                self.parse_scope(p);
+                self.parse_scope(p, &[]);
             },
             TokenKind::Assign => {
                 self.next(p);
