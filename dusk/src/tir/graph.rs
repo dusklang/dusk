@@ -255,17 +255,13 @@ impl Graph {
         }
     }
 
-    fn remove_comps_with_outstanding_deps(&self, comps: &mut HashSet<CompId>, should_check_current_unit: bool) {
+    fn remove_comps_with_outstanding_deps(&self, comps: &mut HashSet<CompId>) {
         loop {
             // Yay borrow checker
             let comps_copy = comps.clone();
             comps.retain(|&comp| {
                 for (&dependee, &relation) in &self.components[comp].deps {
-                    let in_current_unit = if should_check_current_unit {
-                        false
-                    } else {
-                        comps_copy.contains(&dependee)
-                    };
+                    let in_current_unit = comps_copy.contains(&dependee);
                     if
                         relation == ComponentRelation::TYPE_2_3_FORWARD &&
                         !in_current_unit &&
@@ -367,11 +363,10 @@ impl Graph {
             // Get all components that have no type 4 dependencies on outstanding components
             let mut cur_unit_comps = HashSet::<CompId>::new();
             self.find_comps_without_outstanding_type_4_deps(&self.outstanding_components, &mut cur_unit_comps);
-
             // Whittle down the components to only those that have type 2 or 3 dependencies on each other, or included components
             // (and not other outstanding components)
-            self.remove_comps_with_outstanding_deps(&mut cur_unit_comps, true);
-
+            self.remove_comps_with_outstanding_deps(&mut cur_unit_comps);
+            assert!(!cur_unit_comps.is_empty(), "no viable components to add to TIR graph :( {:?}", units);
             let mut cur_unit = InternalUnit::default();
             cur_unit.components.extend(cur_unit_comps.iter());
             for &comp in &cur_unit.components {
@@ -403,7 +398,7 @@ impl Graph {
 
             // Whittle down the components to only those that have type 2 or 3 dependencies on included components
             // (and not other outstanding components, or each other)
-            self.remove_comps_with_outstanding_deps(&mut comps_to_stage, false);
+            self.remove_comps_with_outstanding_deps(&mut comps_to_stage);
 
             // Add excluded components back to `outstanding_components`.
             let all_excluded = meta_dep_components

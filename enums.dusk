@@ -104,7 +104,8 @@ fn catch_all() {
         //.b: print("b case\n"),
         .c: print("c case\n"),
         value: {
-            copy :: _debug_mark(value)
+            //copy :: value
+            print_enum_the_right_way(_debug_mark(value))
             print("catch-all case\n")
         },
         //_: print("second catch-all case\n")

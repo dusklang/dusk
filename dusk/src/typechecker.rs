@@ -195,7 +195,7 @@ impl tir::PatternBinding {
                 binding_ty = Some(path_ty);
             }
         }
-        tp.decl_type_mut(self.decl_id).ty = dbg!(binding_ty.unwrap());
+        tp.decl_type_mut(self.decl_id).ty = binding_ty.unwrap();
     }
 
     fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut impl TypeProvider) {
@@ -660,9 +660,6 @@ impl tir::Expr<tir::DeclRef> {
                     }
                 }
             }
-        }
-        if one_of.iter().position(|ty: &QualType| &ty.ty == &Type::Error).is_some() {
-            dbg!(&one_of);
         }
         *tp.constraints_mut(id) = ConstraintList::new(BuiltinTraits::empty(), Some(one_of), pref);
         *tp.overloads_mut(decl_ref_id) = overloads;
