@@ -259,11 +259,12 @@ impl Driver {
         let id = self.code.hir_code.struct_lits.next();
         self.push_expr(Expr::StructLit { ty, fields, id }, range)
     }
-    pub fn get_pattern_bindings(&mut self, pattern: &Pattern, scrutinee: ExprId) -> Vec<ImperScopedDecl> {
+    pub fn get_pattern_bindings(&mut self, pattern: &PatternKind, scrutinee: ExprId) -> (Vec<ImperScopedDecl>, Vec<PatternBindingDeclId>) {
         let mut decls = Vec::new();
+        let mut bindings = Vec::new();
         match pattern {
-            Pattern::ContextualMember { .. } | Pattern::AnonymousCatchAll(_) => {},
-            Pattern::NamedCatchAll(name) => {
+            PatternKind::ContextualMember { .. } | PatternKind::AnonymousCatchAll(_) => {},
+            PatternKind::NamedCatchAll(name) => {
                 let paths = vec![
                     PatternBindingPath::identity()
                 ];
@@ -272,9 +273,10 @@ impl Driver {
                 let decl = self.decl(Decl::PatternBinding { id, is_mut: false }, name.symbol, None, name.range);
                 let decl = ImperScopedDecl { name: name.symbol, num_params: 0, id: decl };
                 decls.push(decl);
+                bindings.push(id);
             },
         }
-        decls
+        (decls, bindings)
     }
     pub fn begin_condition_namespace(&mut self) -> ConditionNsId {
         let parent = self.cur_namespace();

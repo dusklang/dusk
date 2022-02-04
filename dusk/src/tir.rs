@@ -403,6 +403,9 @@ impl Driver {
     }
 
     fn build_tir_expr(&mut self, unit: &mut UnitItems, level: u32, id: ExprId) {
+        if self.expr_is_debug_marked(id) {
+            println!("adding declref to level {}", level);
+        }
         macro_rules! insert_item {
             ($depvec:ident, $item:expr) => {{
                 unit.$depvec.insert(
@@ -500,6 +503,7 @@ impl Driver {
                 unit.assigned_decls.insert(level, AssignedDecl { explicit_ty, root_expr, decl_id: id });
             },
             hir::Decl::PatternBinding { id: binding_id, .. } => {
+                println!("adding binding to level {}", level);
                 let scrutinee = self.code.hir_code.pattern_binding_decls[binding_id].scrutinee;
                 unit.pattern_bindings.insert(level, PatternBinding { binding_id, scrutinee, decl_id: id });
             },
@@ -672,11 +676,7 @@ impl Driver {
             match self.code.hir_code.items[id] {
                 hir::Item::Decl(decl_id) => {
                     match df!(decl_id.hir) {
-                        hir::Decl::Parameter { .. } | hir::Decl::Static(_) | hir::Decl::Const(_) | hir::Decl::Stored { .. } | hir::Decl::Field { .. } | hir::Decl::ReturnValue => {},
-                        hir::Decl::PatternBinding { id: binding_id, .. } => {
-                            // let scrutinee = self.code.hir_code.pattern_binding_decls[binding_id].scrutinee;
-                            // self.tir.graph.add_type2_dep(id, ef!(scrutinee.item));
-                        },
+                        hir::Decl::Parameter { .. } | hir::Decl::Static(_) | hir::Decl::Const(_) | hir::Decl::Stored { .. } | hir::Decl::Field { .. } | hir::Decl::ReturnValue | hir::Decl::PatternBinding { .. } => {},
                         hir::Decl::GenericParam(_) => {
                             add_eval_dep!(id, hir::TYPE_TYPE);
                         },
@@ -764,6 +764,7 @@ impl Driver {
         // Finally, convert HIR items to TIR and add them to the correct spot
         for unit_id in 0..sp.levels.units.len() {
             let unit = &mut sp.units[unit_id];
+            println!("UNIT ID {}", unit_id);
             for i in 0..sp.levels.units[unit_id].items.len() {
                 let item_id = sp.levels.units[unit_id].items[i];
                 let level = sp.levels.item_to_levels[&item_id];
@@ -785,6 +786,7 @@ impl Driver {
                 hir::Item::Decl(_) => panic!("Can't have metadependency on a declaration!"),
             };
             let mut items = UnitItems::default();
+            println!("MOCK UNIT ID {}", mock_id);
             self.build_tir_expr(&mut items, mock_unit.item_level, main_expr);
             for &item_id in &mock_unit.deps {
                 let level = sp.levels.item_to_levels[&item_id];

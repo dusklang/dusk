@@ -7,7 +7,7 @@ pub mod type_provider;
 use constraints::*;
 use type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 
-use dire::hir::{self, ExprId, DeclId, StructId, Pattern, Ident};
+use dire::hir::{self, ExprId, DeclId, StructId, PatternKind, Ident};
 use dire::mir::Const;
 use dire::ty::{Type, QualType, IntWidth};
 use dire::source_info::SourceRange;
@@ -195,7 +195,7 @@ impl tir::PatternBinding {
                 binding_ty = Some(path_ty);
             }
         }
-        tp.decl_type_mut(self.decl_id).ty = binding_ty.unwrap();
+        tp.decl_type_mut(self.decl_id).ty = dbg!(binding_ty.unwrap());
     }
 
     fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut impl TypeProvider) {
@@ -397,8 +397,8 @@ impl tir::Expr<tir::Switch> {
                 let mut exhaustion = EnumExhaustion::default();
                 let variants = &driver.code.hir_code.enums[id].variants;
                 for case in &self.cases {
-                    match case.pattern {
-                        Pattern::ContextualMember { name, range } => {
+                    match case.pattern.kind {
+                        PatternKind::ContextualMember { name, range } => {
                             let variant_name_str = driver.interner.resolve(name.symbol).unwrap();
                             let index = variants.iter().position(|variant| variant.name == name.symbol);
                             if let Some(index) = index {
@@ -444,7 +444,7 @@ impl tir::Expr<tir::Switch> {
                                 driver.errors.push(err);
                             }
                         },
-                        Pattern::NamedCatchAll(Ident { range, .. }) | Pattern::AnonymousCatchAll(range) => {
+                        PatternKind::NamedCatchAll(Ident { range, .. }) | PatternKind::AnonymousCatchAll(range) => {
                             if exhaustion.is_total(driver, &scrutinee_ty, tp) {
                                 let err = Error::new(format!("Switch case unreachable"))
                                     .adding_primary_range(range, "all possible values already handled before this point");
@@ -660,6 +660,9 @@ impl tir::Expr<tir::DeclRef> {
                     }
                 }
             }
+        }
+        if one_of.iter().position(|ty: &QualType| &ty.ty == &Type::Error).is_some() {
+            dbg!(&one_of);
         }
         *tp.constraints_mut(id) = ConstraintList::new(BuiltinTraits::empty(), Some(one_of), pref);
         *tp.overloads_mut(decl_ref_id) = overloads;

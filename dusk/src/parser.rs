@@ -2,7 +2,7 @@ use smallvec::{SmallVec, smallvec};
 
 use string_interner::DefaultSymbol as Sym;
 
-use dire::hir::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment, GenericParamId, Ident, Pattern, SwitchCase, ImperScopedDecl};
+use dire::hir::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment, GenericParamId, Ident, Pattern, PatternKind, SwitchCase, ImperScopedDecl};
 use dire::ty::Type;
 use dire::source_info::{self, SourceFileId, SourceRange};
 
@@ -544,8 +544,9 @@ impl Driver {
                     break close_curly_range;
                 },
                 _ => {
-                    let pattern = self.parse_pattern(p);
-                    let bindings = self.get_pattern_bindings(&pattern, scrutinee);
+                    let pattern_kind = self.parse_pattern(p);
+                    let (bindings, binding_ids) = self.get_pattern_bindings(&pattern_kind, scrutinee);
+                    let pattern = Pattern { kind: pattern_kind, bindings: binding_ids };
                     self.eat_tok(p, TokenKind::Colon);
                     let (scope, scope_range) = match self.cur(p).kind {
                         TokenKind::OpenCurly => self.parse_scope(p, &bindings),
@@ -606,7 +607,7 @@ impl Driver {
         Attribute { attr, arg, range }
     }
 
-    fn parse_pattern(&mut self, p: &mut Parser) -> Pattern {
+    fn parse_pattern(&mut self, p: &mut Parser) -> PatternKind {
         let initial_tok = self.cur(p);
         let initial_range = initial_tok.range.clone();
         match initial_tok.kind {
@@ -614,20 +615,19 @@ impl Driver {
                 self.next(p);
                 let name = self.eat_ident(p);
                 let range = source_info::concat(initial_range, name.range);
-                Pattern::ContextualMember { name, range }
+                PatternKind::ContextualMember { name, range }
             },
             &TokenKind::Ident(name) => {
                 self.next(p);
                 if name == self.hir.underscore_sym {
-                    Pattern::AnonymousCatchAll(initial_range)
+                    PatternKind::AnonymousCatchAll(initial_range)
                 } else {
                     let name = Ident { symbol: name, range: initial_range };
-                    Pattern::NamedCatchAll(name)
+                    PatternKind::NamedCatchAll(name)
                 }
             },
             _ => panic!("unexpected token"),
-        }
-        
+        }   
     }
 
     fn eat_tok(&mut self, p: &mut Parser, kind: TokenKind) -> SourceRange {

@@ -6,7 +6,7 @@ use smallvec::SmallVec;
 use string_interner::DefaultSymbol as Sym;
 use display_adapter::display_adapter;
 
-use dire::hir::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, GenericParamId, Item, PatternBindingDeclId, VOID_TYPE};
+use dire::hir::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, GenericParamId, Item, PatternBindingDeclId, PatternBindingPathComponent, VOID_TYPE};
 use dire::mir::{FuncId, StaticId, Const, Instr, Function, MirCode, StructLayout, EnumLayout, InstrNamespace, SwitchCase, VOID_INSTR};
 use dire::{Block, BlockId, Op, OpId};
 use dire::ty::{Type, FloatWidth};
@@ -766,7 +766,7 @@ struct FunctionBuilder {
     blocks: Vec<BlockId>,
     current_block: BlockId,
     stored_decl_locs: IndexVec<StoredDeclId, OpId>,
-    pattern_binding_locs: HashMap<PatternBindingDeclId, OpId>,
+    pattern_binding_locs: HashMap<PatternBindingDeclId, Value>,
     instr_namespace: InstrNamespace,
 }
 
@@ -870,6 +870,7 @@ impl Driver {
         let block = &mut self.code.blocks[b.current_block];
         block.ops.push(op);
 
+
         op
     }
 
@@ -935,7 +936,7 @@ impl Driver {
             },
             Decl::PatternBinding { id: binding_id } => {
                 assert!(arguments.is_empty());
-                b.pattern_binding_locs[&binding_id].indirect()
+                b.pattern_binding_locs[&binding_id]
             },
             Decl::Parameter { index } => {
                 let entry_block = b.blocks[0];
@@ -992,9 +993,10 @@ impl Driver {
                 self.push_instr(b, Instr::Store { location, value }, range)
             },
             Decl::PatternBinding { id: binding_id } => {
-                assert!(arguments.is_empty());
-                let location = b.pattern_binding_locs[&binding_id];
-                self.push_instr(b, Instr::Store { location, value }, range)
+                todo!();
+                // assert!(arguments.is_empty());
+                // let location = b.pattern_binding_locs[&binding_id];
+                // self.push_instr(b, Instr::Store { location, value }, range)
             },
             Decl::Parameter { .. } | Decl::Const(_) | Decl::GenericParam(_) => panic!("can't set a constant!"),
             Decl::Intrinsic(_, _) => panic!("can't set an intrinsic! (yet?)"),
@@ -1018,8 +1020,9 @@ impl Driver {
                 b.stored_decl_locs[id].indirect()
             },
             Decl::PatternBinding { id: binding_id } => {
-                assert!(arguments.is_empty());
-                b.pattern_binding_locs[&binding_id].indirect()
+                todo!()
+                // assert!(arguments.is_empty());
+                // b.pattern_binding_locs[&binding_id]
             },
             Decl::GenericParam(_) => panic!("can't modify a generic parameter!"),
             Decl::Parameter { .. } | Decl::Const(_) => panic!("can't modify a constant!"),
@@ -1372,11 +1375,30 @@ impl Driver {
                 for case in cases {
                     let case_bb = self.create_bb(b);
                     self.start_bb(b, case_bb);
+                    // Can only bind at most one binding at a time. The exception is when they alias. E.g., '.a(int_val) & enum_val' <- int_val and enum_val are two bindings that alias.
+                    // I will need some way of detecting aliases and allowing them, but at the same time splitting up the list of bindings when they don't alias, such as in disjuction patterns.
+                    assert!(case.pattern.bindings.len() <= 1);
+                    for &binding_id in &case.pattern.bindings {
+                        let binding = self.code.hir_code.pattern_binding_decls[binding_id].clone();
+                        // Can only ever bind one path to a particular binding at a time. Will need some way of splitting these up when I implement disjunction patterns
+                        assert_eq!(binding.paths.len(), 1);
+                        for path in &binding.paths {
+                            let val = self.handle_indirection(b, scrutinee_val);
+                            for step in &path.components {
+                                match step {
+                                    &PatternBindingPathComponent::VariantPayload(_index) => {
+                                        todo!();
+                                    }
+                                }
+                            }
+                            b.pattern_binding_locs.insert(binding_id, val.direct());
+                        }
+                    }
                     self.build_scope(b, case.scope, scope_ctx, tp);
 
                     self.start_bb(b, begin_bb);
-                    match case.pattern {
-                        hir::Pattern::ContextualMember { name, .. } => {
+                    match case.pattern.kind {
+                        hir::PatternKind::ContextualMember { name, .. } => {
                             let mut index = None;
                             for (i, variant) in variants.iter().enumerate() {
                                 if variant.name == name.symbol {
@@ -1393,7 +1415,7 @@ impl Driver {
                                 }
                             );
                         },
-                        hir::Pattern::NamedCatchAll(_) | hir::Pattern::AnonymousCatchAll(_) => {
+                        hir::PatternKind::NamedCatchAll(_) | hir::PatternKind::AnonymousCatchAll(_) => {
                             catch_all_bb = Some(case_bb);
                         },
                     }
