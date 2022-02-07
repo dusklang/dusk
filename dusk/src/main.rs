@@ -132,7 +132,7 @@ fn main() {
         })
         .expect("Couldn't find main function with no parameters and a return type of void!");
 
-    println!("Running the user's program in the interpreter:\n");
+    println!("Running main in the interpreter:\n");
     driver.interp.mode = InterpMode::RunTime;
     driver.call(FunctionRef::Id(FuncId::new(main)), Vec::new(), Vec::new());
 }
