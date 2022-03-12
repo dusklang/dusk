@@ -1,0 +1,71 @@
+{
+    "scopeName": "source.dusk",
+    "patterns": [
+        {
+            "include": "#item"
+        }
+    ],
+    "name": "Dusk",
+    "fileTypes": [
+        "dusk"
+    ],
+    "repository": {
+        "item": {
+            "patterns": [
+                {
+                    "include": "#keyword"
+                },
+                {
+                    "include": "#block"
+                }
+            ]
+        },
+        "block": {
+            "begin": "\\{",
+            "end": "\\}",
+            "beginCaptures": {
+                "0": {
+                    "name": "punctuation.brace.open"
+                }
+            },
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.brace.close"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#item"
+                }
+            ]
+        },
+        "keyword": {
+            "match": "fn|return|true|false|if|else|while|switch|as|struct|enum|do|mut|module|import|_debug_mark",
+            "name": "keyword"
+        },
+        "identifier": {
+            "match": "[a-zA-Z]+[0-9]*",
+            "name": "identififer"
+        },
+        "paren-expression": {
+            "begin": "\\(",
+            "end": "\\)",
+            "beginCaptures": {
+                "0": {
+                    "name": "punctuation.paren.open"
+                }
+            },
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.paren.close"
+                }
+            },
+            "name": "expression.group",
+            "patterns": [
+                {
+                    "include": "#expression"
+                }
+            ]
+        }
+    }
+}

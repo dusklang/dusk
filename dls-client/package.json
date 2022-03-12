@@ -29,7 +29,15 @@
                 ],
                 "extensions": [
                     ".dusk"
-                ]
+                ],
+                "configuration": "./language-configuration.json"
+            }
+        ],
+        "grammars": [
+            {
+                "language": "dusk",
+                "scopeName": "source.dusk",
+                "path": "./syntaxes/dusk.tmLanguage.json"
             }
         ]
     },
