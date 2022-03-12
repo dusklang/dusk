@@ -1,0 +1,51 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build DLS client",
+            "type": "npm",
+            "script": "compile",
+            "group": "build",
+            "presentation": {
+                "panel": "dedicated",
+                "reveal": "never"
+            },
+            "path": "dls-client/",
+            "problemMatcher": {
+                "base": "$tsc",
+                "fileLocation": ["relative", "${workspaceFolder}/dls-client/"]
+            }
+        },
+        {
+            "label": "Build DLS client in the Background",
+            "type": "npm",
+            "script": "watch",
+            "isBackground": true,
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "panel": "dedicated",
+                "reveal": "never"
+            },
+            "path": "dls-client/",
+            "problemMatcher": {
+                "base": "$tsc-watch",
+                "fileLocation": ["relative", "${workspaceFolder}/dls-client/"]
+            }
+        },
+        {
+            "label": "Build DLS server",
+            "group": "build",
+            "type": "shell",
+            "command": "cargo build --package dls",
+            "problemMatcher": "$rustc"
+        },
+        {
+            "label": "Build DLS server and client",
+            "dependsOn": ["Build DLS server", "Build DLS client"],
+            "problemMatcher": "$rustc"
+        }
+    ]
+}

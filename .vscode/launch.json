@@ -7,7 +7,7 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug executable 'dusk'",
+            "name": "Debug compiler",
             "cargo": {
                 "args": [
                     "build",
@@ -27,7 +27,7 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests in executable 'dusk'",
+            "name": "Debug unit tests",
             "cargo": {
                 "args": [
                     "test",
@@ -42,6 +42,19 @@
             },
             "args": [],
             "cwd": "${workspaceFolder}"
-        }
+        },
+        {
+            "type": "extensionHost",
+            "request": "launch",
+            "name": "Launch DLS client",
+            "runtimeExecutable": "${execPath}",
+            "args": [
+                "--extensionDevelopmentPath=${workspaceRoot}/dls-client"
+            ],
+            "outFiles": [
+                "${workspaceRoot}/dls-client/out/**/*.js"
+            ],
+            "preLaunchTask": "Build DLS server and client"
+        },
     ]
 }
