@@ -4,36 +4,11 @@ use std::path::PathBuf;
 use dire::ty::Type;
 use dire::mir::FuncId;
 use dire::arch::Arch;
-
-mod dep_vec;
-#[macro_use]
-mod index_vec;
-mod lexer;
-mod token;
-mod source_info;
-mod error;
-mod builder;
-mod parser;
-mod tir;
-mod hir;
-mod mir;
-mod ty;
-mod driver;
-mod typechecker;
-mod interpreter;
-mod refine;
-
-use interpreter::InterpMode;
-use mir::FunctionRef;
-use driver::Driver;
-use source_info::SourceMap;
-
-#[derive(ArgEnum, Debug, Copy, Clone)]
-pub enum TirGraphOutput {
-    Items,
-    Components,
-    Units,
-}
+use libdusk::TirGraphOutput;
+use libdusk::driver::Driver;
+use libdusk::source_info::SourceMap;
+use libdusk::interpreter::InterpMode;
+use libdusk::mir::FunctionRef;
 
 #[repr(u8)]
 #[derive(ArgEnum, Copy, Clone, Debug)]

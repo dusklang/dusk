@@ -1,6 +1,6 @@
 [workspace]
-
 members = [
     "dusk",
+    "libdusk",
     "dusk-proc-macros",
 ]

@@ -1,12 +1,8 @@
 [package]
-name = "dusk"
+name = "libdusk"
 version = "0.1.0"
 authors = ["Zach <zachrwolfe@me.com>"]
 edition = "2018"
-
-[profile.release]
-debug = true
-lto = true
 
 [dependencies]
 unicode-segmentation = { git = "https://github.com/unicode-rs/unicode-segmentation" }
@@ -24,4 +20,3 @@ rsmt2 = "0.11.0"
 dire = { path = "../../dire/" }
 display_adapter = { path = "../../display_adapter/display_adapter" }
 dusk-proc-macros = { path = "../dusk-proc-macros" }
-libdusk = { path = "../libdusk" }
