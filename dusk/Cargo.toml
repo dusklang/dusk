@@ -3,10 +3,7 @@ name = "dusk"
 version = "0.1.0"
 authors = ["Zach <zachrwolfe@me.com>"]
 edition = "2018"
-
-[profile.release]
-debug = true
-lto = true
+default-run = "dusk"
 
 [dependencies]
 unicode-segmentation = { git = "https://github.com/unicode-rs/unicode-segmentation" }
