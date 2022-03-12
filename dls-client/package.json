@@ -23,8 +23,13 @@
         "languages": [
             {
                 "id": "dusk",
-                "aliases": ["Dusk", "dusk"],
-                "extensions": [".dusk"]
+                "aliases": [
+                    "Dusk",
+                    "dusk"
+                ],
+                "extensions": [
+                    ".dusk"
+                ]
             }
         ]
     },

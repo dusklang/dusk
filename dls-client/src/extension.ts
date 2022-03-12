@@ -1,6 +1,6 @@
 import * as path from 'path';
 import { ExtensionContext } from 'vscode';
-import { TransportKind, LanguageClient } from 'vscode-languageclient/node';
+import { LanguageClient } from 'vscode-languageclient/node';
 
 let client: LanguageClient;
 
@@ -12,12 +12,8 @@ export function activate(context: ExtensionContext) {
     );
 
     client = new LanguageClient(
-        'dls',
         'Dusk Language Server',
-        {
-            module: serverPath,
-            transport: TransportKind.stdio,
-        },
+        { command: serverPath },
         {
             documentSelector: [{ scheme: 'file', language: 'dusk'}],
         }
