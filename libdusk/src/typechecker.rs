@@ -1186,6 +1186,8 @@ impl Driver {
         let mut tp = RealTypeProvider::new(dbg, self);
         *tp.constraints_mut(hir::VOID_EXPR) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
         *tp.ty_mut(hir::VOID_EXPR) = Type::Void;
+        *tp.constraints_mut(hir::ERROR_EXPR) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Error.into()]), None);
+        *tp.ty_mut(hir::ERROR_EXPR) = Type::Error;
         tp
     }
 

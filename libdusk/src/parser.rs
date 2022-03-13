@@ -2,7 +2,7 @@ use smallvec::{SmallVec, smallvec};
 
 use string_interner::DefaultSymbol as Sym;
 
-use dire::hir::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment, GenericParamId, Ident, Pattern, PatternKind, SwitchCase, ImperScopedDecl};
+use dire::hir::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment, GenericParamId, Ident, Pattern, PatternKind, SwitchCase, ImperScopedDecl, ERROR_EXPR, ERROR_TYPE};
 use dire::ty::Type;
 use dire::source_info::{self, SourceFileId, SourceRange};
 
@@ -242,7 +242,7 @@ impl Driver {
                             if let &TokenKind::Ident(name) = self.cur(p).kind {
                                 self.next(p);
                                 self.eat_tok(p, TokenKind::Colon);
-                                let expr = self.parse_expr(p);
+                                let expr = self.parse_expr(p).unwrap_or(ERROR_TYPE);
                                 fields.push(
                                     FieldAssignment { name, expr }
                                 );
@@ -305,7 +305,11 @@ impl Driver {
                     TokenKind::Eof => {
                         panic!("Reached eof in middle of generic argument list");
                     }
-                    _ => { args.push(self.parse_expr(p)); }
+                    _ => {
+                        if let Ok(arg) = self.parse_expr(p) {
+                            args.push(arg);
+                        }
+                    }
                 }
             }
         }
@@ -328,7 +332,11 @@ impl Driver {
                     TokenKind::Eof => {
                         panic!("Reached eof in middle of decl ref");
                     }
-                    _ => { args.push(self.parse_expr(p)); }
+                    _ => {
+                        if let Ok(arg) = self.parse_expr(p) {
+                            args.push(arg);
+                        }
+                    }
                 }
             }
         }
@@ -357,7 +365,7 @@ impl Driver {
             TokenKind::LeftParen => {
                 let open_paren_range = self.cur(p).range;
                 self.next(p);
-                let expr = self.parse_expr(p);
+                let expr = self.parse_expr(p).unwrap_or(ERROR_EXPR);
                 if let TokenKind::RightParen = self.cur(p).kind {}
                 else {
                     self.errors.push(
@@ -373,8 +381,12 @@ impl Driver {
             TokenKind::DebugMark => {
                 self.next(p);
                 self.eat_tok(p, TokenKind::LeftParen);
-                let expr = self.parse_expr(p);
-                self.debug_mark_expr(expr);
+                let expr = if let Ok(expr) = self.parse_expr(p) {
+                    self.debug_mark_expr(expr);
+                    expr
+                } else {
+                    ERROR_EXPR
+                };
                 self.eat_tok(p, TokenKind::RightParen);
                 Ok(expr)
             },
@@ -509,9 +521,20 @@ impl Driver {
         self.try_parse_expr(p, false)
             .unwrap_or_else(|tok| panic!("UNHANDLED TERM: {:#?}", tok))
     }
-    fn parse_expr(&mut self, p: &mut Parser) -> ExprId {
-        self.try_parse_expr(p, true)
-            .unwrap_or_else(|tok| panic!("UNHANDLED TERM: {:#?}", tok))
+    // Difference between try_parse_expr and parse_expr:
+    // It is possible for try_parse_expr to return Err, even in a perfectly legal program.
+    // If parse_expr() return Err, it always signals an invalid program.
+    fn parse_expr(&mut self, p: &mut Parser) -> Result<ExprId, ()> {
+        match self.try_parse_expr(p, true) {
+            Ok(expr) => Ok(expr),
+            Err(_token) => {
+                self.errors.push(
+                    Error::new("unrecognized term")
+                        .adding_primary_range(self.cur(p).range, "term here")
+                );
+                Err(())
+            }
+        }
     }
 
     fn parse_if(&mut self, p: &mut Parser) -> ExprId {
@@ -565,7 +588,7 @@ impl Driver {
                         TokenKind::OpenCurly => self.parse_scope(p, &bindings),
                         _ => {
                             let scope = self.begin_imper_scope();
-                            let case_expr = self.parse_expr(p);
+                            let case_expr = self.parse_expr(p).unwrap_or(ERROR_EXPR);
                             self.stmt(case_expr);
                             self.end_imper_scope(true);
                             let scope_range = self.get_range(case_expr);
@@ -608,7 +631,7 @@ impl Driver {
         let (arg, final_tok_range) = match self.next(p).kind {
             TokenKind::LeftParen => {
                 self.next(p);
-                let arg = self.parse_expr(p);
+                let arg = self.parse_expr(p).unwrap_or(ERROR_EXPR);
                 let paren_range = self.eat_tok(p, TokenKind::RightParen);
 
                 (Some(arg), paren_range)
@@ -759,7 +782,7 @@ impl Driver {
                     }
                 },
                 AmbiguousGenericListKind::Arguments(args) => {
-                    let arg = self.parse_expr(p);
+                    let arg = self.parse_expr(p).unwrap_or(ERROR_EXPR);
                     args.push(arg);
                     while let TokenKind::Comma = self.cur(p).kind {
                         list.range = source_info::concat(list.range, self.cur(p).range);
@@ -808,7 +831,7 @@ impl Driver {
                     let decl = self.parse_decl(name, GenericParamList::default(), p);
                     Item::Decl(decl)
                 } else {
-                    let expr = self.parse_expr(p);
+                    let expr = self.parse_expr(p).unwrap_or(ERROR_EXPR);
                     Item::Expr(expr)
                 }
             },
@@ -839,7 +862,7 @@ impl Driver {
                 Item::Decl(decl)
             },
             _ => {
-                let expr = self.parse_expr(p);
+                let expr = self.parse_expr(p).unwrap_or(ERROR_EXPR);
                 Item::Expr(expr)
             },
         }
@@ -870,8 +893,7 @@ impl Driver {
             self.next(p);
         }
 
-        let root = self.parse_expr(p);
-        let _root_range = self.get_range(root);
+        let root = self.parse_expr(p).unwrap_or(ERROR_EXPR);
         self.stored_decl(name.symbol, generic_params, explicit_ty, is_mut, root, name.range)
     }
 
@@ -1130,7 +1152,7 @@ impl Driver {
             TokenKind::Assign => {
                 self.next(p);
                 self.begin_imper_scope();
-                let assigned_expr = self.parse_expr(p);
+                let assigned_expr = self.parse_expr(p).unwrap_or(ERROR_EXPR);
                 self.stmt(assigned_expr);
                 self.end_imper_scope(true);
             },

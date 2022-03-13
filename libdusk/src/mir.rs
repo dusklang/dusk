@@ -1037,7 +1037,7 @@ impl Driver {
         let ty = tp.ty(expr).clone();
 
         let val = match ef!(expr.hir) {
-            Expr::Void => VOID_INSTR.direct(),
+            Expr::Void | Expr::Error => VOID_INSTR.direct(),
             Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::StrLit { .. } | Expr::CharLit { .. } | Expr::ConstTy(_) | Expr::Mod { .. } | Expr::Import { .. } => {
                 let konst = self.expr_to_const(expr, ty.clone());
                 let name = format!("{}", self.fmt_const_for_instr_name(&konst));

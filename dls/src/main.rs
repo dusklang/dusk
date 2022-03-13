@@ -299,14 +299,17 @@ impl Backend {
             return;
         }
 
-        // driver.initialize_tir();
-        // self.flush_errors(&mut driver).await;
+        driver.initialize_tir();
+        self.flush_errors(&mut driver).await;
 
-        // let mut tp = driver.get_real_type_provider(false);
-        // while let Some(units) = driver.build_more_tir(None) {
-        //     driver.type_check(&units, &mut tp);
-        //     self.flush_errors(&mut driver).await;
-        // }
+        let mut tp = driver.get_real_type_provider(false);
+        while let Some(units) = driver.build_more_tir(None) {
+            self.client.log_message(MessageType::INFO, format!("????: {}", path)).await;
+            driver.type_check(&units, &mut tp);
+            self.client.log_message(MessageType::INFO, format!("!!!!: {}", path)).await;
+            self.flush_errors(&mut driver).await;
+        }
+        self.client.log_message(MessageType::INFO, format!("?!?!: {}", path)).await;
 
         // self.flush_errors(&mut driver).await;
         // if driver.has_failed() { return; }

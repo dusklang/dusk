@@ -105,9 +105,11 @@ pub enum ConditionKind {
 impl Driver {
     pub fn initialize_hir(&mut self) {
         self.push_expr(Expr::Void, SourceRange::default());
+        self.push_expr(Expr::Error, SourceRange::default());
         self.push_expr(Expr::ConstTy(Type::Void), SourceRange::default());
         self.push_expr(Expr::ConstTy(Type::Ty), SourceRange::default());
-        assert_eq!(self.code.hir_code.exprs.len(), 3);
+        self.push_expr(Expr::ConstTy(Type::Error), SourceRange::default());
+        assert_eq!(self.code.hir_code.exprs.len(), 5);
 
         let return_value_sym = self.interner.get_or_intern_static("return_value");
         self.decl(Decl::ReturnValue, return_value_sym, None, SourceRange::default());

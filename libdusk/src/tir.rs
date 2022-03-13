@@ -427,7 +427,7 @@ impl Driver {
             }}
         }
         match &ef!(id.hir) {
-            hir::Expr::Void => {},
+            hir::Expr::Void | hir::Expr::Error => {},
             hir::Expr::IntLit { .. } => flat_insert_expr!(int_lits, IntLit),
             hir::Expr::DecLit { .. } => flat_insert_expr!(dec_lits, DecLit),
             hir::Expr::StrLit { .. } => flat_insert_expr!(str_lits, StrLit),
@@ -583,7 +583,7 @@ impl Driver {
             let expr_id = ExprId::new(i);
             let id = ef!(expr_id.item);
             match ef!(expr_id.hir) {
-                hir::Expr::Void | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
+                hir::Expr::Void | hir::Expr::Error | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
                     | hir::Expr::CharLit { .. } | hir::Expr::ConstTy(_) | hir::Expr::Mod { .. } | hir::Expr::Import { .. } => {},
                 hir::Expr::AddrOf { expr, .. } | hir::Expr::Deref(expr) | hir::Expr::Pointer { expr, .. }
                     | hir::Expr::Cast { expr, .. } | hir::Expr::Ret { expr, .. } => self.tir.graph.add_type1_dep(id, ef!(expr.item)),
@@ -711,7 +711,7 @@ impl Driver {
                 }
                 hir::Item::Expr(expr_id) => {
                     match ef!(expr_id.hir) {
-                        hir::Expr::Void | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
+                        hir::Expr::Void | hir::Expr::Error | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
                             | hir::Expr::CharLit { .. } | hir::Expr::ConstTy(_) | hir::Expr::AddrOf { .. } | hir::Expr::Deref(_)
                             | hir::Expr::Pointer { .. } | hir::Expr::Set { .. } | hir::Expr::Mod { .. } |  hir::Expr::Import { .. }
                             | hir::Expr::Struct(_) | hir::Expr::Enum(_) => {},
