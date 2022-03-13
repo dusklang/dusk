@@ -47,7 +47,7 @@ impl Lexer {
 }
 
 impl Driver {
-    pub fn lex(&mut self) -> SourceFileId {
+    pub fn lex(&mut self) -> Result<SourceFileId, ()> {
         let special_escape_characters = {
             let mut map = HashMap::new();
             map.insert("n", "\n");
@@ -90,13 +90,17 @@ impl Driver {
 
         self.toks.push_at(file, TokenVec::new());
         loop {
-            let (tok, range) = self.l_next(&mut l);
+            let (tok, range) = if let Ok(next) = self.l_next(&mut l) {
+                next
+            } else {
+                return Err(());
+            };
             let should_break = tok == TokenKind::Eof;
             self.toks[file].push(tok, range);
             if should_break { break; }
         }
 
-        file
+        Ok(file)
     }
 
     fn file(&self, l: &Lexer) -> &SourceFile {
@@ -185,25 +189,25 @@ impl Driver {
         (kind, range)
     }
 
-    fn l_next(&mut self, l: &mut Lexer) -> (TokenKind, SourceRange) {
+    fn l_next(&mut self, l: &mut Lexer) -> Result<(TokenKind, SourceRange), ()> {
         if !l.has_chars() {
-            self.pack_tok(l, TokenKind::Eof)
+            Ok(self.pack_tok(l, TokenKind::Eof))
         } else if self.is_newline(l) {
             while l.has_chars() && self.is_newline(l) {
                 self.advance(l);
             }
-            self.pack_tok(l, TokenKind::Newline)
+            Ok(self.pack_tok(l, TokenKind::Newline))
         } else if self.is_whitespace(l) {
             while l.has_chars() && self.is_whitespace(l) {
                 self.advance(l);
             }
-            self.pack_tok(l, TokenKind::Whitespace)
+            Ok(self.pack_tok(l, TokenKind::Whitespace))
         } else if self.is_str(l, b"//") {
             unsafe { self.advance_by_ascii(l, 2); }
             while l.has_chars() && !self.is_newline(l) {
                 self.advance(l);
             }
-            self.pack_tok(l, TokenKind::SingleLineComment)
+            Ok(self.pack_tok(l, TokenKind::SingleLineComment))
         } else if self.is_str(l, b"/*") {
             let mut comment_begin = l.cur_loc();
             let mut levels = 1;
@@ -245,7 +249,7 @@ impl Driver {
                 }
                 self.errors.push(err);
             }
-            self.pack_tok(l, TokenKind::MultiLineComment)
+            Ok(self.pack_tok(l, TokenKind::MultiLineComment))
         } else if self.is_str(l, b"*/") {
             unsafe { self.advance_by_ascii(l, 2); }
             let range = l.make_src_range(l.tok_start_loc..l.cur_loc());
@@ -317,9 +321,9 @@ impl Driver {
                 );
             }
             if lit.len() == 1 {
-                self.pack_tok(l, TokenKind::CharLit(lit.as_bytes()[0] as i8))
+                Ok(self.pack_tok(l, TokenKind::CharLit(lit.as_bytes()[0] as i8)))
             } else {
-                self.pack_tok(l, TokenKind::StrLit(CString::new(lit).unwrap()))
+                Ok(self.pack_tok(l, TokenKind::StrLit(CString::new(lit).unwrap())))
             }
         } else if l.has_chars() && (self.is_letter(l) || self.is(l, b'_')) {
             let ident_start = l.cur_loc();
@@ -359,7 +363,7 @@ impl Driver {
                     Ident(ident)
                 },
             };
-            self.pack_tok(l, kind)
+            Ok(self.pack_tok(l, kind))
         } else if l.has_chars() && self.is_num(l) {
             let mut has_dot = false;
             let mut last_was_dot = None;
@@ -386,27 +390,36 @@ impl Driver {
             }
             let lit = &self.file(l).src[l.tok_start_loc..l.cur_loc()];
             if has_dot {
-                self.pack_tok(l, TokenKind::DecLit(lit.parse().unwrap()))
+                Ok(self.pack_tok(l, TokenKind::DecLit(lit.parse().unwrap())))
             } else {
-                self.pack_tok(l, TokenKind::IntLit(lit.parse().unwrap()))
+                Ok(self.pack_tok(l, TokenKind::IntLit(lit.parse().unwrap())))
             }
         } else {
-            macro_rules! match_tokens {
+            macro_rules! match_symbols {
                 ($($kind: ident $symbol: expr)+) => {
                     if false { unreachable!() }
                     $(
                         else if self.is_str(l, $symbol) {
                             // symbols are all ASCII, so it's safe to assume that number of grapheme clusters == number of bytes
                             unsafe { self.advance_by_ascii(l, $symbol.len()); }
-                            self.pack_tok(l, TokenKind::$kind)
+                            Ok(self.pack_tok(l, TokenKind::$kind))
                         }
                     )+
-                    else { 
-                        panic!("unrecognized token {}", self.cur_tok(l));
+                    else {
+                        let range = l.make_src_range(l.tok_start_loc..l.cur_loc());
+                        self.errors.push(
+                            Error::new(
+                                format!("unrecognized token {}", self.cur_tok(l))
+                            ).adding_primary_range(
+                                range,
+                                ""
+                            )
+                        );
+                        Err(())
                     }
                 }
             }
-            match_tokens!(
+            match_symbols!(
                 Colon               b":"
                 Comma               b","
                 LeftParen           b"("

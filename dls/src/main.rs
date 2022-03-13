@@ -292,8 +292,12 @@ impl Backend {
         let mut driver = Driver::new(src_map, Arch::X86_64, run_refiner);
         driver.initialize_hir();
 
-        driver.parse();
+        let fatal_parse_error = driver.parse().is_err();
         self.flush_errors(&mut driver).await;
+
+        if fatal_parse_error {
+            return;
+        }
 
         // driver.initialize_tir();
         // self.flush_errors(&mut driver).await;

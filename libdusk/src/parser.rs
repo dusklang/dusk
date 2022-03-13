@@ -20,14 +20,17 @@ struct Parser {
 }
 
 impl Driver {
-    pub fn parse(&mut self) {
+    pub fn parse(&mut self) -> Result<(), ()> {
         while self.code.hir_code.global_scopes.len() < self.src_map.files.len() {
-            self.parse_single_file();
+            // TODO: parse other files, even after a fatal parse error. Haven't done it yet because
+            // it will require a bit of refactoring.
+            self.parse_single_file()?;
         }
+        Ok(())
     }
 
-    fn parse_single_file(&mut self) {
-        let file = self.lex();
+    fn parse_single_file(&mut self) -> Result<(), ()> {
+        let file = self.lex()?;
         self.start_new_file(file);
         let mut p = Parser { file, cur: 0 };
 
@@ -125,6 +128,7 @@ impl Driver {
                 _ => { self.parse_item(&mut p); }
             }
         }
+        Ok(())
     }
 
     fn parse_binary_operator(&mut self, p: &mut Parser) -> Option<BinOp> {
