@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::cmp::max;
 use std::str;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::fs;
 use std::io;
 use std::collections::HashMap;
@@ -99,13 +99,13 @@ impl SourceMap {
         self.file_ends[file.index()]
     }
 
-    pub fn add_file(&mut self, path: impl Into<PathBuf>) -> io::Result<SourceFileId> {
+    fn add_file_impl(&mut self, path: impl Into<PathBuf>, src: impl FnOnce(&Path) -> io::Result<String>) -> io::Result<SourceFileId> {
         let path = fs::canonicalize(path.into())?;
         if let Some(&id) = self.paths.get(&path) {
             return Ok(id);
         }
 
-        let src = fs::read_to_string(&path)?;
+        let src = src(&path)?;
         let file_len = src.len();
         let id = self.files.push(
             SourceFile { src, lines: vec![0], path: path.clone() }
@@ -116,6 +116,14 @@ impl SourceMap {
         self.file_ends.push(end);
         debug_assert_eq!(self.file_ends.len(), self.files.len() + 1);
         Ok(id)
+    }
+
+    pub fn add_file(&mut self, path: impl Into<PathBuf>) -> io::Result<SourceFileId> {
+        self.add_file_impl(path, |path| fs::read_to_string(path))
+    }
+
+    pub fn add_file_with_src(&mut self, path: impl Into<PathBuf>, src: String) -> io::Result<SourceFileId> {
+        self.add_file_impl(path, |_| Ok(src))
     }
 
     fn lookup_file(&self, range: SourceRange) -> (SourceFileId, Range<usize>) {
