@@ -434,16 +434,25 @@ impl Driver {
                 }
                 while self.cur(p).kind == &TokenKind::Dot {
                     let dot_range = self.cur(p).range;
-                    let name = if let &TokenKind::Ident(name) = self.next(p).kind {
-                        name
-                    } else {
-                        self.errors.push(
-                            Error::new("expected identifier after '.'")
-                                .adding_primary_range(dot_range, "'.' here")
-                                .adding_secondary_range(self.cur(p).range, "note: found this instead")
-                        );
-                        self.next(p);
-                        return expr
+                    let name = match self.next(p).kind {
+                        &TokenKind::Ident(name) => name,
+                        TokenKind::CloseSquareBracket | TokenKind::CloseCurly | TokenKind::RightParen | TokenKind::Comma => {
+                            self.errors.push(
+                                Error::new("expected identifier after '.'")
+                                    .adding_primary_range(dot_range, "'.' here")
+                                    .adding_secondary_range(self.cur(p).range, "note: found this instead")
+                            );
+                            return expr
+                        },
+                        _ => {
+                            self.errors.push(
+                                Error::new("expected identifier after '.'")
+                                    .adding_primary_range(dot_range, "'.' here")
+                                    .adding_secondary_range(self.cur(p).range, "note: found this instead")
+                            );
+                            self.next(p);
+                            return expr
+                        }
                     };
                     expr = self.parse_decl_ref(p, Some(expr), name);
 

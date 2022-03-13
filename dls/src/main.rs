@@ -214,9 +214,9 @@ impl LanguageServer for Backend {
                         file.contents.lines.splice(begin..end, addition_lines[1..addition_lines.len() - 1].to_owned());
                     }
                 }
-                self.client.log_message(MessageType::LOG, format!("New contents: {:?}!", file.contents)).await;
             }
         }
+        self.client.log_message(MessageType::INFO, format!("New contents: {:?}!", file.contents)).await;
         file.version = text_document.version;
         self.analyze_file(&text_document.uri, file).await;
     }
@@ -275,7 +275,14 @@ impl LanguageServer for Backend {
 }
 
 impl Backend {
+    async fn flush_errors(&self, driver: &mut Driver) {
+        let errors = driver.get_latest_errors();
+        if !errors.is_empty() {
+            self.client.log_message(MessageType::INFO, format!("ERRORS: {:#?}", errors)).await;
+        }
+    }
     async fn analyze_file(&self, path: &Url, file: &OpenFile) {
+        self.client.log_message(MessageType::INFO, format!("ANALYZING FILE AT PATH: {}", path)).await;
         let mut src_map = SourceMap::new();
         let run_refiner = false;
         // TODO: non-file schemes, I guess?
@@ -286,27 +293,27 @@ impl Backend {
         driver.initialize_hir();
 
         driver.parse();
-        driver.flush_errors();
+        self.flush_errors(&mut driver).await;
 
-        driver.initialize_tir();
-        driver.flush_errors();
+        // driver.initialize_tir();
+        // self.flush_errors(&mut driver).await;
 
-        let mut tp = driver.get_real_type_provider(false);
-        while let Some(units) = driver.build_more_tir(None) {
-            driver.type_check(&units, &mut tp);
-            driver.flush_errors();
-        }
+        // let mut tp = driver.get_real_type_provider(false);
+        // while let Some(units) = driver.build_more_tir(None) {
+        //     driver.type_check(&units, &mut tp);
+        //     self.flush_errors(&mut driver).await;
+        // }
 
-        driver.flush_errors();
-        if driver.check_for_failure() { return; }
+        // self.flush_errors(&mut driver).await;
+        // if driver.has_failed() { return; }
 
-        driver.build_mir(&tp);
-        driver.flush_errors();
+        // driver.build_mir(&tp);
+        // self.flush_errors(&mut driver).await;
 
-        if run_refiner {
-            driver.refine(&tp);
-            driver.flush_errors();
-        }
+        // if run_refiner {
+        //     driver.refine(&tp);
+        //     self.flush_errors(&mut driver).await;
+        // }
     }
 }
 

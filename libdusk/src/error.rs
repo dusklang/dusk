@@ -6,6 +6,7 @@ use dire::source_info::SourceRange;
 use crate::driver::Driver;
 use crate::source_info::CommentatedSourceRange;
 
+#[derive(Debug)]
 pub struct Error {
     message: Cow<'static, str>,
     ranges: Vec<CommentatedSourceRange>,
@@ -40,17 +41,26 @@ impl Error {
 }
 
 impl Driver {
-    pub fn flush_errors(&mut self) {
+    pub fn get_latest_errors(&mut self) -> Vec<Error> {
         let errors = mem::replace(&mut self.errors, Vec::new());
         self.flushed_errors += errors.len() as u32;
+        errors
+    }
+
+    pub fn flush_errors(&mut self) {
+        let errors = self.get_latest_errors();
         for mut err in errors {
             println!("\u{001B}[31merror:\u{001B}[0m {}", &err.message);
             self.src_map.print_commentated_source_ranges(&mut err.ranges);
         }
     }
 
+    pub fn has_failed(&self) -> bool {
+        self.flushed_errors > 0
+    }
+
     pub fn check_for_failure(&self) -> bool {
-        if self.flushed_errors > 0 {
+        if self.has_failed() {
             print!("\n\u{001B}[31mcompilation failed due to previous ");
             if self.flushed_errors == 1 {
                 print!("error");

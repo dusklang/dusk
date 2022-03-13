@@ -46,6 +46,7 @@ pub struct SourceFile {
     pub path: PathBuf,
 }
 
+#[derive(Debug)]
 pub struct CommentatedSourceRange {
     pub range: SourceRange,
     pub message: Cow<'static, str>,
