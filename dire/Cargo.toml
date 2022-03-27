@@ -1,0 +1,13 @@
+[package]
+name = "dire"
+version = "0.1.0"
+authors = ["Zach Wolfe <zachrwolfe@me.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+index_vec = "0.1.2"
+smallvec = "1.5.1"
+string-interner = "0.12.1"
+display_adapter = { path = "../../display_adapter/display_adapter" }
