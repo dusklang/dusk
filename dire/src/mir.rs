@@ -68,6 +68,7 @@ pub enum Const {
     Mod(ModScopeId),
     BasicVariant { enuum: EnumId, index: usize },
     StructLit { fields: Vec<Const>, id: StructId },
+    Void,
 }
 
 impl Const {
@@ -81,6 +82,7 @@ impl Const {
             &Const::BasicVariant { enuum, .. } => Type::Enum(enuum),
             Const::Mod(_) => Type::Mod,
             &Const::StructLit { id, .. } => Type::Struct(id),
+            Const::Void => Type::Void,
         }
     }
 }

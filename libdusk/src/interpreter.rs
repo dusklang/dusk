@@ -250,6 +250,7 @@ impl Value {
                 Value::from_usize(unsafe { mem::transmute(ptr) })
             },
             Const::Ty(ref ty) => Value::from_ty(ty.clone()),
+            Const::Void => Value::Nothing,
             Const::Mod(id) => Value::from_mod(id),
             Const::BasicVariant { enuum, index } => Value::from_variant(driver, enuum, index, Value::Nothing),
             Const::StructLit { ref fields, id } => {
@@ -477,7 +478,8 @@ impl Driver {
                     fields.push(konst);
                 }
                 Const::StructLit { fields, id }
-            }
+            },
+            Type::Void => Const::Void,
             _ => panic!("Can't output value of type `{:?}` as constant", ty),
         }
     }

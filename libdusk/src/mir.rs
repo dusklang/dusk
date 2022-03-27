@@ -519,6 +519,7 @@ impl Driver {
             Const::Int { lit, ref ty } => write!(f, "{} as {:?}", lit, ty)?,
             Const::Str { id, ref ty } => write!(f, "%str{} ({:?}) as {:?}", id.index(), self.code.mir_code.strings[id], ty)?,
             Const::Ty(ref ty) => write!(f, "`{:?}`", ty)?,
+            Const::Void => write!(f, "void")?,
             Const::Mod(id) => write!(f, "%mod{}", id.index())?,
             Const::BasicVariant { enuum, index } => write!(f, "%enum{}.{}", enuum.index(), self.fmt_variant_name(enuum, index))?,
             Const::StructLit { ref fields, id } => {
@@ -550,6 +551,7 @@ impl Driver {
             Const::Int { lit, .. } => write!(f, "const_{}", lit)?,
             Const::Str { id, .. } => write!(f, "string_{}", identifierify(self.code.mir_code.strings[id].clone().into_bytes()))?,
             Const::Ty(ref ty) => write!(f, "type_{}", identifierify(format!("{:?}", ty).into_bytes()))?,
+            Const::Void => write!(f, "const_void")?,
 
             // TODO: heuristics for associating declaration names with modules and types
             Const::Mod(id) => write!(f, "mod{}", id.index())?,
