@@ -124,6 +124,7 @@ impl Driver {
                         Error::new("Extraneous closing brace '}'")
                             .adding_primary_range(self.cur(&p).range, "brace here")
                     );
+                    self.next(&mut p);
                 },
                 _ => { self.parse_item(&mut p); }
             }
