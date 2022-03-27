@@ -146,6 +146,23 @@ impl SourceMap {
         (SourceFileId::new(0), 0..0)
     }
 
+    /// For a source location, returns its file id, zero-based line number, and byte offset from the beginning of that line.
+    pub fn lookup_file_line_and_offset(&self, loc: usize) -> (SourceFileId, usize, usize) {
+        let (file_id, intrafile_range) = self.lookup_file(SourceRange { start: loc, end: loc });
+        let intrafile_loc = intrafile_range.start;
+        let file = &self.files[file_id];
+        let mut line = file.lines.len().saturating_sub(1);
+        for (i, line_start) in file.lines.iter().copied().enumerate() {
+            if line_start > intrafile_loc {
+                line = i.saturating_sub(1);
+                break;
+            }
+        }
+        let byte_offset = intrafile_loc - file.lines[line];
+
+        (file_id, line, byte_offset)
+    }
+
     pub fn substring_from_range(&self, range: SourceRange) -> &str {
         let (file, range) = self.lookup_file(range);
         &self.files[file].substring_from_range(range)

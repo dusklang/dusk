@@ -8,8 +8,8 @@ use crate::source_info::CommentatedSourceRange;
 
 #[derive(Debug)]
 pub struct Error {
-    message: Cow<'static, str>,
-    ranges: Vec<CommentatedSourceRange>,
+    pub message: Cow<'static, str>,
+    pub ranges: Vec<CommentatedSourceRange>,
 }
 
 impl Error {

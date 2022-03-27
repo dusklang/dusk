@@ -406,7 +406,7 @@ impl Driver {
                         }
                     )+
                     else {
-                        let range = l.make_src_range(l.tok_start_loc..l.cur_loc());
+                        let range = l.make_src_range(l.tok_start_loc..(l.cur_loc() + 1));
                         self.errors.push(
                             Error::new(
                                 format!("unrecognized token {}", self.cur_tok(l))
