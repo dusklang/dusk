@@ -492,8 +492,6 @@ impl tir::Expr<tir::Switch> {
             _ => todo!("Only enums are supported in switch expression scrutinee position"),
         }
 
-        driver.flush_errors();
-
         let constraints = if self.cases.is_empty() {
             ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None)
         } else {
@@ -1198,8 +1196,6 @@ impl Driver {
             
             // Pass 2: propagate info up from roots to leaves
             self.run_pass_2(&unit.items, UnitKind::Normal(num), tp);
-
-            self.flush_errors();
 
             for i in 0..unit.eval_dependees.len() {
                 let expr = unit.eval_dependees[i];

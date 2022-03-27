@@ -46,7 +46,7 @@
         {
             "type": "extensionHost",
             "request": "launch",
-            "name": "Launch DLS client",
+            "name": "Launch DLS",
             "runtimeExecutable": "${execPath}",
             "args": [
                 "--extensionDevelopmentPath=${workspaceRoot}/dls-client"
