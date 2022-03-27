@@ -532,6 +532,8 @@ impl Driver {
                     Error::new("unrecognized term")
                         .adding_primary_range(self.cur(p).range, "term here")
                 );
+                // try_parse_expr() does not advance on failure. So move to the next token in order to avoid an infinite loop
+                self.next(p);
                 Err(())
             }
         }

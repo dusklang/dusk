@@ -1,0 +1,5 @@
+fn whoa() {}
+
+fn foo() {
+    whoa(), whoa()
+}
