@@ -365,7 +365,7 @@ impl Driver {
             TokenKind::LeftParen => {
                 let open_paren_range = self.cur(p).range;
                 self.next(p);
-                let expr = self.parse_expr(p).unwrap_or(ERROR_EXPR);
+                let expr = self.parse_expr(p).unwrap_or_else(|err| err);
                 if let TokenKind::RightParen = self.cur(p).kind {}
                 else {
                     self.errors.push(
@@ -524,7 +524,7 @@ impl Driver {
     // Difference between try_parse_expr and parse_expr:
     // It is possible for try_parse_expr to return Err, even in a perfectly legal program.
     // If parse_expr() return Err, it always signals an invalid program.
-    fn parse_expr(&mut self, p: &mut Parser) -> Result<ExprId, ()> {
+    fn parse_expr(&mut self, p: &mut Parser) -> Result<ExprId, ExprId> {
         match self.try_parse_expr(p, true) {
             Ok(expr) => Ok(expr),
             Err(_token) => {
@@ -533,8 +533,9 @@ impl Driver {
                         .adding_primary_range(self.cur(p).range, "term here")
                 );
                 // try_parse_expr() does not advance on failure. So move to the next token in order to avoid an infinite loop
+                let range = self.cur(p).range;
                 self.next(p);
-                Err(())
+                Err(self.error_expr(range))
             }
         }
     }
@@ -590,7 +591,7 @@ impl Driver {
                         TokenKind::OpenCurly => self.parse_scope(p, &bindings),
                         _ => {
                             let scope = self.begin_imper_scope();
-                            let case_expr = self.parse_expr(p).unwrap_or(ERROR_EXPR);
+                            let case_expr = self.parse_expr(p).unwrap_or_else(|err| err);
                             self.stmt(case_expr);
                             self.end_imper_scope(true);
                             let scope_range = self.get_range(case_expr);
@@ -633,7 +634,7 @@ impl Driver {
         let (arg, final_tok_range) = match self.next(p).kind {
             TokenKind::LeftParen => {
                 self.next(p);
-                let arg = self.parse_expr(p).unwrap_or(ERROR_EXPR);
+                let arg = self.parse_expr(p).unwrap_or_else(|err| err);
                 let paren_range = self.eat_tok(p, TokenKind::RightParen);
 
                 (Some(arg), paren_range)
@@ -784,7 +785,7 @@ impl Driver {
                     }
                 },
                 AmbiguousGenericListKind::Arguments(args) => {
-                    let arg = self.parse_expr(p).unwrap_or(ERROR_EXPR);
+                    let arg = self.parse_expr(p).unwrap_or_else(|err| err);
                     args.push(arg);
                     while let TokenKind::Comma = self.cur(p).kind {
                         list.range = source_info::concat(list.range, self.cur(p).range);
@@ -833,7 +834,7 @@ impl Driver {
                     let decl = self.parse_decl(name, GenericParamList::default(), p);
                     Item::Decl(decl)
                 } else {
-                    let expr = self.parse_expr(p).unwrap_or(ERROR_EXPR);
+                    let expr = self.parse_expr(p).unwrap_or_else(|err| err);
                     Item::Expr(expr)
                 }
             },
@@ -864,7 +865,7 @@ impl Driver {
                 Item::Decl(decl)
             },
             _ => {
-                let expr = self.parse_expr(p).unwrap_or(ERROR_EXPR);
+                let expr = self.parse_expr(p).unwrap_or_else(|err| err);
                 Item::Expr(expr)
             },
         }
@@ -895,7 +896,7 @@ impl Driver {
             self.next(p);
         }
 
-        let root = self.parse_expr(p).unwrap_or(ERROR_EXPR);
+        let root = self.parse_expr(p).unwrap_or_else(|err| err);
         self.stored_decl(name.symbol, generic_params, explicit_ty, is_mut, root, name.range)
     }
 
@@ -1154,7 +1155,7 @@ impl Driver {
             TokenKind::Assign => {
                 self.next(p);
                 self.begin_imper_scope();
-                let assigned_expr = self.parse_expr(p).unwrap_or(ERROR_EXPR);
+                let assigned_expr = self.parse_expr(p).unwrap_or_else(|err| err);
                 self.stmt(assigned_expr);
                 self.end_imper_scope(true);
             },

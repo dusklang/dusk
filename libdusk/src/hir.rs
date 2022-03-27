@@ -261,6 +261,9 @@ impl Driver {
         let id = self.code.hir_code.struct_lits.next();
         self.push_expr(Expr::StructLit { ty, fields, id }, range)
     }
+    pub fn error_expr(&mut self, range: SourceRange) -> ExprId {
+        self.push_expr(Expr::Error, range)
+    }
     pub fn get_pattern_bindings(&mut self, pattern: &PatternKind, scrutinee: ExprId) -> (Vec<ImperScopedDecl>, Vec<PatternBindingDeclId>) {
         let mut decls = Vec::new();
         let mut bindings = Vec::new();

@@ -39,6 +39,8 @@ pub struct Pointer { pub expr: ExprId }
 #[derive(Debug)]
 pub struct Stmt { pub root_expr: ExprId }
 #[derive(Debug)]
+pub struct ErrorExpr;
+#[derive(Debug)]
 pub struct Do { pub terminal_expr: ExprId }
 #[derive(Debug)]
 pub struct AssignedDecl { pub explicit_ty: Option<ExprId>, pub root_expr: ExprId, pub decl_id: DeclId }
@@ -114,6 +116,7 @@ pub struct UnitItems {
     pub str_lits: Vec<Expr<StrLit>>,
     pub char_lits: Vec<Expr<CharLit>>,
     pub const_tys: Vec<Expr<ConstTy>>,
+    pub error_exprs: Vec<Expr<ErrorExpr>>,
     pub generic_params: Vec<GenericParam>,
     pub stmts: Vec<Stmt>,
     pub explicit_rets: DepVec<Expr<ExplicitRet>>,
@@ -427,7 +430,8 @@ impl Driver {
             }}
         }
         match &ef!(id.hir) {
-            hir::Expr::Void | hir::Expr::Error => {},
+            hir::Expr::Void => {},
+            hir::Expr::Error => flat_insert_expr!(error_exprs, ErrorExpr),
             hir::Expr::IntLit { .. } => flat_insert_expr!(int_lits, IntLit),
             hir::Expr::DecLit { .. } => flat_insert_expr!(dec_lits, DecLit),
             hir::Expr::StrLit { .. } => flat_insert_expr!(str_lits, StrLit),

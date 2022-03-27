@@ -119,6 +119,16 @@ impl tir::Expr<tir::ConstTy> {
     }
 }
 
+impl tir::Expr<tir::ErrorExpr> {
+    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
+        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Error.into()]), None);
+        *tp.ty_mut(self.id) = Type::Error;
+    }
+
+    fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut impl TypeProvider) {
+    }
+}
+
 impl tir::GenericParam {
     fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
         *tp.decl_type_mut(self.id) = Type::Ty.into();
@@ -1115,7 +1125,7 @@ impl Driver {
                 )+
             }
         }
-        run_pass_1_flat!(int_lits, dec_lits, str_lits, char_lits, const_tys, generic_params);
+        run_pass_1_flat!(int_lits, dec_lits, str_lits, char_lits, const_tys, generic_params, error_exprs);
 
         for level in start_level..unit.num_levels() {
             macro_rules! run_pass_1 {
@@ -1135,7 +1145,7 @@ impl Driver {
             tp.debug_output(self, level as usize);
         }
 
-        // This code must be here, because it checks that all statements gcan unify to void
+        // This code must be here, because it checks that all statements can unify to void
         run_pass_1_flat!(stmts);
     }
 
@@ -1175,7 +1185,7 @@ impl Driver {
                 )+
             }
         }
-        run_pass_2_flat!(int_lits, dec_lits, str_lits, char_lits, const_tys, generic_params, stmts);
+        run_pass_2_flat!(int_lits, dec_lits, str_lits, char_lits, const_tys, generic_params, stmts, error_exprs);
         tp.debug_output(self, 0);
     }
 
