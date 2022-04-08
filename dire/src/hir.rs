@@ -28,6 +28,7 @@ define_index_type!(pub struct ModScopeNsId = u32;);
 define_index_type!(pub struct ConditionNsId = u32;);
 define_index_type!(pub struct CompDeclParamsNsId = u32;);
 define_index_type!(pub struct GenericParamId = u32;);
+define_index_type!(pub struct ExternModId = u32;);
 
 #[derive(Debug, Clone, Copy)]
 pub struct FieldAssignment {
@@ -104,6 +105,32 @@ pub struct DeclRef {
     pub num_arguments: usize,
     pub has_parens: bool,
     pub expr: ExprId,
+}
+
+#[derive(Debug)]
+pub struct ExternMod {
+    pub library_path: CString,
+    pub imported_functions: Vec<ExternFunction>,
+}
+
+impl ExternMod {
+    pub fn new(library_path: CString) -> Self {
+        Self {
+            library_path,
+            imported_functions: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ExternFunction {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ExternFunctionRef {
+    pub extern_mod: ExternModId,
+    pub index: usize,
 }
 
 #[derive(Debug)]
@@ -198,6 +225,7 @@ pub enum Decl {
     },
     ComputedPrototype {
         param_tys: SmallVec<[ExprId; 2]>,
+        extern_func: Option<ExternFunctionRef>,
     },
     Stored { id: StoredDeclId, is_mut: bool, root_expr: ExprId, },
     PatternBinding { id: PatternBindingDeclId, is_mut: bool, },
@@ -411,5 +439,6 @@ pub struct HirCode {
     pub cast_counter: IndexCounter<CastId>,
     pub structs: IndexVec<StructId, Struct>,
     pub enums: IndexVec<EnumId, Enum>,
+    pub extern_mods: IndexVec<ExternModId, ExternMod>,
     pub struct_lits: IndexCounter<StructLitId>,
 }

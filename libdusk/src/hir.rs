@@ -47,6 +47,7 @@ pub enum ScopeState {
     Mod {
         id: ModScopeId,
         namespace: ModScopeNsId,
+        extern_mod: Option<ExternModId>,
     },
     CompDeclParams(CompDeclParamsNsId),
     Condition {
@@ -323,7 +324,7 @@ impl Driver {
             panic!("Tried to end computed decl params namespace, but the top of the scope stack is not a computed decl params namespace");
         }
     }
-    pub fn begin_module(&mut self) -> ExprId {
+    pub fn begin_module(&mut self, extern_mod: Option<ExternModId>) -> ExprId {
         let parent = self.cur_namespace();
         let id = self.code.hir_code.mod_scopes.push(ModScope::default());
         let namespace = self.code.hir_code.mod_ns.push(
@@ -331,7 +332,7 @@ impl Driver {
                 scope: id, parent: Some(parent)
             }
         );
-        self.hir.scope_stack.push(ScopeState::Mod { id, namespace });
+        self.hir.scope_stack.push(ScopeState::Mod { id, namespace, extern_mod });
         self.push_expr(Expr::Mod { id }, SourceRange::default())
     }
     pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, generic_param_names: SmallVec<[Sym; 1]>, generic_params: Range<GenericParamId>, generic_param_ranges: SmallVec<[SourceRange; 1]>, explicit_ty: Option<ExprId>, proto_range: SourceRange) -> DeclId {
@@ -396,7 +397,21 @@ impl Driver {
     pub fn comp_decl_prototype(&mut self, name: Sym, param_tys: SmallVec<[ExprId; 2]>, _param_ranges: SmallVec<[SourceRange; 2]>, explicit_ty: Option<ExprId>, range: SourceRange) -> DeclId {
         // This is a placeholder value that gets replaced once the parameter declarations get allocated.
         let num_params = param_tys.len();
-        let id = self.decl(Decl::ComputedPrototype { param_tys }, name, explicit_ty, range);
+        let extern_func = if let &ScopeState::Mod { extern_mod: Some(extern_mod), .. } = self.hir.scope_stack.last().unwrap() {
+            let funcs = &mut self.code.hir_code.extern_mods[extern_mod].imported_functions;
+            let index = funcs.len();
+            let name = self.interner.resolve(name).unwrap();
+            funcs.push(ExternFunction { name: name.to_string() });
+            Some(
+                ExternFunctionRef {
+                    extern_mod,
+                    index
+                }
+            )
+        } else {
+            None
+        };
+        let id = self.decl(Decl::ComputedPrototype { param_tys, extern_func }, name, explicit_ty, range);
         match self.hir.scope_stack.last().unwrap() {
             ScopeState::Imper { .. } => {
                 self.flush_stmt_buffer();
@@ -474,7 +489,7 @@ impl Driver {
                 parent: None
             }
         );
-        self.hir.scope_stack = vec![ScopeState::Mod { id: global_scope, namespace: global_namespace }];
+        self.hir.scope_stack = vec![ScopeState::Mod { id: global_scope, namespace: global_namespace, extern_mod: None }];
         self.code.hir_code.global_scopes.push_at(file, global_scope);
     }
 

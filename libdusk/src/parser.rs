@@ -2,7 +2,7 @@ use smallvec::{SmallVec, smallvec};
 
 use string_interner::DefaultSymbol as Sym;
 
-use dire::hir::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment, GenericParamId, Ident, Pattern, PatternKind, SwitchCase, ImperScopedDecl, ERROR_EXPR, ERROR_TYPE};
+use dire::hir::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment, GenericParamId, Ident, Pattern, PatternKind, SwitchCase, ImperScopedDecl, ExternMod, ERROR_EXPR, ERROR_TYPE};
 use dire::ty::Type;
 use dire::source_info::{self, SourceFileId, SourceRange};
 
@@ -906,7 +906,7 @@ impl Driver {
     fn parse_module(&mut self, p: &mut Parser) -> ExprId {
         let mod_range = self.eat_tok(p, TokenKind::Module);
 
-        let module = self.begin_module();
+        let module = self.begin_module(None);
         self.eat_tok(p, TokenKind::OpenCurly);
         let close_curly_range = loop {
             match self.cur(p).kind {
@@ -934,11 +934,18 @@ impl Driver {
     fn parse_extern_module(&mut self, p: &mut Parser) -> ExprId {
         let mod_range = self.eat_tok(p, TokenKind::ExternModule);
         self.eat_tok(p, TokenKind::LeftParen);
-        assert!(matches!(self.cur(p).kind, TokenKind::StrLit(_)), "expected string literal in extern module declaration");
+        // TODO: evaluate string expression instead of string literal
+        let library_path = if let TokenKind::StrLit(library_path) = self.cur(p).kind {
+            library_path.to_owned()
+        } else {
+            Default::default()
+        };
         self.next(p);
         self.eat_tok(p, TokenKind::RightParen);
 
-        let module = self.begin_module();
+        let extern_mod = self.code.hir_code.extern_mods.push(ExternMod::new(library_path));
+
+        let module = self.begin_module(Some(extern_mod));
         self.eat_tok(p, TokenKind::OpenCurly);
         let close_curly_range = loop {
             match self.cur(p).kind {

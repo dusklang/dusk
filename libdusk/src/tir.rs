@@ -538,7 +538,7 @@ impl Driver {
 
                     (false, param_tys.clone())
                 },
-                hir::Decl::ComputedPrototype { ref param_tys } => (
+                hir::Decl::ComputedPrototype { ref param_tys, .. } => (
                     false,
                     param_tys.clone()
                 ),
@@ -713,7 +713,7 @@ impl Driver {
                                 add_eval_dep!(id, hir::VOID_TYPE);
                             }
                         },
-                        hir::Decl::ComputedPrototype { ref param_tys } => {
+                        hir::Decl::ComputedPrototype { ref param_tys, .. } => {
                             for &ty in param_tys {
                                 add_eval_dep!(id, ty);
                             }

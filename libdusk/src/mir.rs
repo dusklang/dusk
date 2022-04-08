@@ -6,7 +6,7 @@ use smallvec::SmallVec;
 use string_interner::DefaultSymbol as Sym;
 use display_adapter::display_adapter;
 
-use dire::hir::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, GenericParamId, Item, PatternBindingDeclId, PatternBindingPathComponent, VOID_TYPE};
+use dire::hir::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, GenericParamId, Item, PatternBindingDeclId, ExternFunctionRef, PatternBindingPathComponent, VOID_TYPE};
 use dire::mir::{FuncId, StaticId, Const, Instr, Function, MirCode, StructLayout, EnumLayout, InstrNamespace, SwitchCase, VOID_INSTR};
 use dire::{Block, BlockId, Op, OpId};
 use dire::ty::{Type, FloatWidth};
@@ -18,6 +18,7 @@ use tc::type_provider::TypeProvider;
 use tc::CastMethod;
 use crate::index_vec::*;
 use crate::source_info::ToSourceRange;
+use crate::error::Error;
 
 use dusk_proc_macros::*;
 
@@ -25,6 +26,7 @@ use dusk_proc_macros::*;
 enum Decl {
     Stored(StoredDeclId),
     Computed { get: FuncId },
+    ExternFunction(ExternFunctionRef),
     Parameter { index: usize },
     PatternBinding { id: PatternBindingDeclId },
     Intrinsic(Intrinsic, Type),
@@ -33,6 +35,8 @@ enum Decl {
     Field { index: usize },
     Variant { enuum: EnumId, index: usize, payload_ty: Option<Type> },
     GenericParam(GenericParamId),
+
+    Invalid,
 }
 
 /// What to do with a value
@@ -444,7 +448,18 @@ impl Driver {
                 self.code.mir_code.functions[get] = func;
                 decl
             },
-            hir::Decl::ComputedPrototype { .. } => unimplemented!(),
+            hir::Decl::ComputedPrototype { extern_func, .. } => {
+                let decl = if let Some(extern_func) = extern_func {
+                    Decl::ExternFunction(extern_func)
+                } else {
+                    let err = Error::new("cannot declare prototype outside of extern module")
+                        .adding_primary_range(df!(id.range), "prototype here");
+                    self.errors.push(err);
+                    Decl::Invalid
+                };
+                self.mir.decls.insert(id, decl.clone());
+                decl
+            },
             hir::Decl::Stored { id: index, .. } => {
                 let decl = Decl::Stored(index);
                 self.mir.decls.insert(id, decl.clone());
@@ -933,6 +948,10 @@ impl Driver {
         let name = format!("{}", self.display_item(id));
         match self.get_decl(id, tp) {
             Decl::Computed { get } => self.push_instr(b, Instr::Call { arguments, generic_arguments, func: get }, expr).direct(),
+            Decl::ExternFunction(_func) => {
+                assert!(generic_arguments.is_empty());
+                todo!();
+            },
             Decl::Stored(id) => {
                 assert!(arguments.is_empty());
                 b.stored_decl_locs[id].indirect()
@@ -979,7 +998,8 @@ impl Driver {
                     debug_assert!(arguments.is_empty());
                     self.push_instr_with_name(b, Instr::Const(Const::BasicVariant { enuum, index }), expr, name).direct()
                 }
-            }
+            },
+            Decl::Invalid => panic!("INVALID DECL"),
         }
     }
 
@@ -1009,6 +1029,8 @@ impl Driver {
             },
             Decl::Field { .. } => panic!("Unhandled struct field!"),
             Decl::Variant { .. } => panic!("Can't modify an enum variant"),
+            Decl::ExternFunction(_) => panic!("Can't set an external function"),
+            Decl::Invalid => panic!("INVALID DECL"),
         }
     }
 
@@ -1033,6 +1055,8 @@ impl Driver {
             Decl::Static(statik) => self.push_instr(b, Instr::AddressOfStatic(statik), expr).indirect(),
             Decl::Field { .. } => panic!("Unhandled struct field!"),
             Decl::Variant { .. } => panic!("Can't modify an enum variant"),
+            Decl::ExternFunction(_) => panic!("Can't modify an external function"),
+            Decl::Invalid => panic!("INVALID DECL"),
         }
     }
 
