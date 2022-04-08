@@ -1241,6 +1241,7 @@ impl Driver {
                         let value = self.handle_indirection(b, value);
                         self.push_instr(b, Instr::IntToFloat(value, dest_ty), expr).direct()
                     },
+                    CastMethod::Invalid => panic!("FOUND INVALID CAST"),
                 }
             },
             Expr::AddrOf { expr: operand, .. } => return self.build_expr(

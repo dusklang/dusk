@@ -27,6 +27,7 @@ pub enum CastMethod {
     Float,
     FloatToInt,
     IntToFloat,
+    Invalid,
 }
 
 #[derive(Clone, Debug)]
@@ -238,7 +239,7 @@ impl tir::Expr<tir::Cast> {
             Ok((ty, CastMethod::Noop))
         } else if let Type::Pointer(dest_pointee_ty) = ty {
             let dest_pointee_ty = dest_pointee_ty.as_ref();
-            let src_ty = constraints.max_ranked_type(|ty| {
+            constraints.max_ranked_type(|ty| {
                 match ty.ty {
                     Type::Pointer(ref pointee)
                         if
@@ -251,8 +252,9 @@ impl tir::Expr<tir::Cast> {
                     Type::Int { width, .. } if width == IntWidth::Pointer => 1,
                     _ => 0,
                 }
-            }).expect("Invalid cast!").clone();
-            Ok((src_ty.ty.clone(), CastMethod::Reinterpret))
+            })
+                .map(|src_ty| (src_ty.ty.clone(), CastMethod::Reinterpret))
+                .map_err(|_| Vec::new())
         } else if let Type::Int { width, .. } = ty {
             constraints.max_ranked_type_with_assoc_data(|ty|
                 match ty.ty {
@@ -261,8 +263,9 @@ impl tir::Expr<tir::Cast> {
                     Type::Pointer(_) if width == IntWidth::Pointer => (1, CastMethod::Reinterpret),
                     _ => (0, CastMethod::Noop),
                 }
-            ).map(|(ty, method)| (ty.ty.clone(), method))
-            .map_err(|options| options.iter().map(|(ty, _)| ty.clone()).collect())
+            )
+                .map(|(ty, method)| (ty.ty.clone(), method))
+                .map_err(|options| options.iter().map(|(ty, _)| ty.clone()).collect())
         } else if let Type::Float { .. } = ty {
             constraints.max_ranked_type_with_assoc_data(|ty|
                 match ty.ty {
@@ -270,10 +273,11 @@ impl tir::Expr<tir::Cast> {
                     Type::Int { .. } => (1, CastMethod::IntToFloat),
                     _ => (0, CastMethod::Noop),
                 }
-            ).map(|(ty, method)| (ty.ty.clone(), method))
-            .map_err(|options| options.iter().map(|(ty, _)| ty.clone()).collect())
+            )
+                .map(|(ty, method)| (ty.ty.clone(), method))
+                .map_err(|options| options.iter().map(|(ty, _)| ty.clone()).collect())
         } else {
-            panic!("Invalid cast!")
+            Err(Vec::new())
         };
         match ty_and_method {
             Ok((ty, method)) => {
@@ -281,9 +285,9 @@ impl tir::Expr<tir::Cast> {
                 *tp.cast_method_mut(self.cast_id) = method;
             },
             Err(_) => {
-                driver.errors.push(Error::new("Invalid cast!").adding_primary_range(driver.get_range(self.id), "cast here"));
+                driver.errors.push(Error::new("Invalid cast").adding_primary_range(driver.get_range(self.id), "cast here"));
                 constraints.set_to(Type::Error);
-                *tp.cast_method_mut(self.cast_id) = CastMethod::Noop;
+                *tp.cast_method_mut(self.cast_id) = CastMethod::Invalid;
             }
         }
     }
