@@ -444,6 +444,7 @@ impl Driver {
                 self.code.mir_code.functions[get] = func;
                 decl
             },
+            hir::Decl::ComputedPrototype { .. } => unimplemented!(),
             hir::Decl::Stored { id: index, .. } => {
                 let decl = Decl::Stored(index);
                 self.mir.decls.insert(id, decl.clone());

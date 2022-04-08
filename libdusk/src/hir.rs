@@ -393,6 +393,23 @@ impl Driver {
 
         id
     }
+    pub fn comp_decl_prototype(&mut self, name: Sym, param_tys: SmallVec<[ExprId; 2]>, _param_ranges: SmallVec<[SourceRange; 2]>, explicit_ty: Option<ExprId>, range: SourceRange) -> DeclId {
+        // This is a placeholder value that gets replaced once the parameter declarations get allocated.
+        let num_params = param_tys.len();
+        let id = self.decl(Decl::ComputedPrototype { param_tys }, name, explicit_ty, range);
+        match self.hir.scope_stack.last().unwrap() {
+            ScopeState::Imper { .. } => {
+                self.flush_stmt_buffer();
+                self.scope_item(Item::Decl(id));
+            },
+            &ScopeState::Mod { .. } => {
+                self.mod_scoped_decl(name, ModScopedDecl { num_params, id });
+            },
+            ScopeState::Condition { .. } | ScopeState::CompDeclParams(_) => panic!("Computed decls are not supported in this position"),
+        }
+
+        id
+    }
     pub fn decl_ref(&mut self, base_expr: Option<ExprId>, name: Sym, arguments: SmallVec<[ExprId; 2]>, has_parens: bool, range: SourceRange) -> ExprId {
         let namespace = match base_expr {
             Some(base_expr) => Namespace::MemberRef { base_expr },

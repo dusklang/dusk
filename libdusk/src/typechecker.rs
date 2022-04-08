@@ -701,7 +701,7 @@ impl tir::Expr<tir::DeclRef> {
                 .filter(|overload| overloads.iter().find(|&other| other.decl == overload.decl).is_some())
                 .unwrap_or_else(|| overloads[0].clone());
             let overload_is_function = match df!(driver, overload.decl.hir) {
-                hir::Decl::Computed { .. } => true,
+                hir::Decl::Computed { .. } | hir::Decl::ComputedPrototype { .. } => true,
                 hir::Decl::Intrinsic { function_like, .. } => function_like,
                 hir::Decl::Variant { payload_ty, .. } => payload_ty.is_some(),
                 _ => false,

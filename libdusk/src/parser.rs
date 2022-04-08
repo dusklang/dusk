@@ -420,6 +420,7 @@ impl Driver {
                 Ok(self.do_expr(scope, source_info::concat(do_range, scope_range)))
             },
             TokenKind::Module => Ok(self.parse_module(p)),
+            TokenKind::ExternModule => Ok(self.parse_extern_module(p)),
             TokenKind::Import => Ok(self.parse_import(p)),
             TokenKind::Struct => Ok(self.parse_struct(p)),
             TokenKind::Enum => Ok(self.parse_enum(p)),
@@ -920,7 +921,39 @@ impl Driver {
                     if let Item::Expr(expr) = item {
                         self.errors.push(
                             Error::new("expressions are not allowed in the top-level of a module")
-                                .adding_primary_range(self.get_range(expr), "delet this")
+                                .adding_primary_range(self.get_range(expr), "delete this")
+                        );
+                    }
+                }
+            }
+        };
+        self.end_module(module, source_info::concat(mod_range, close_curly_range));
+        module
+    }
+
+    fn parse_extern_module(&mut self, p: &mut Parser) -> ExprId {
+        let mod_range = self.eat_tok(p, TokenKind::ExternModule);
+        self.eat_tok(p, TokenKind::LeftParen);
+        assert!(matches!(self.cur(p).kind, TokenKind::StrLit(_)), "expected string literal in extern module declaration");
+        self.next(p);
+        self.eat_tok(p, TokenKind::RightParen);
+
+        let module = self.begin_module();
+        self.eat_tok(p, TokenKind::OpenCurly);
+        let close_curly_range = loop {
+            match self.cur(p).kind {
+                TokenKind::Eof => panic!("Unexpected eof while parsing scope"),
+                TokenKind::CloseCurly => {
+                    let close_curly_range = self.cur(p).range;
+                    self.next(p);
+                    break close_curly_range;
+                },
+                _ => {
+                    let item = self.parse_item(p);
+                    if let Item::Expr(expr) = item {
+                        self.errors.push(
+                            Error::new("expressions are not allowed in the top-level of a module")
+                                .adding_primary_range(self.get_range(expr), "delete this")
                         );
                     }
                 }
@@ -1144,26 +1177,43 @@ impl Driver {
             },
             TokenKind::OpenCurly => Some(hir::VOID_TYPE),
             TokenKind::Assign => None,
-            tok => panic!("Invalid token {:?}", tok),
+            _ => {
+                assert_eq!(generic_param_names.len(), 0, "generic parameters on a function prototype are not allowed");
+                return self.comp_decl_prototype(name, param_tys, param_ranges, None, proto_range);
+            },
         };
-        let decl_id = self.begin_computed_decl(name, param_names, param_tys, param_ranges, generic_param_names, generic_params, generic_param_ranges, ty, proto_range);
-        if let Some(ns) = params_ns {
-            self.code.hir_code.comp_decl_params_ns[ns].func = decl_id;
-        }
-        match self.cur(p).kind {
+        let decl_id = match self.cur(p).kind {
             TokenKind::OpenCurly => {
+                let decl_id = self.begin_computed_decl(name, param_names, param_tys, param_ranges, generic_param_names, generic_params, generic_param_ranges, ty, proto_range);
+                if let Some(ns) = params_ns {
+                    self.code.hir_code.comp_decl_params_ns[ns].func = decl_id;
+                }
                 self.parse_scope(p, &[]);
+                self.end_computed_decl();
+                decl_id
             },
             TokenKind::Assign => {
+                let decl_id = self.begin_computed_decl(name, param_names, param_tys, param_ranges, generic_param_names, generic_params, generic_param_ranges, ty, proto_range);
+                if let Some(ns) = params_ns {
+                    self.code.hir_code.comp_decl_params_ns[ns].func = decl_id;
+                }
                 self.next(p);
                 self.begin_imper_scope();
                 let assigned_expr = self.parse_expr(p).unwrap_or_else(|err| err);
                 self.stmt(assigned_expr);
                 self.end_imper_scope(true);
+                self.end_computed_decl();
+                decl_id
             },
-            tok => panic!("Invalid token {:?}", tok),
-        }
-        self.end_computed_decl();
+            _ => {
+                assert_eq!(generic_param_names.len(), 0, "generic parameters on a function prototype are not allowed");
+                let decl_id = self.comp_decl_prototype(name, param_tys, param_ranges, ty, proto_range);
+                if let Some(ns) = params_ns {
+                    self.code.hir_code.comp_decl_params_ns[ns].func = decl_id;
+                }
+                decl_id
+            }
+        };
 
         decl_id
     }

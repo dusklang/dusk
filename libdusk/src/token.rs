@@ -35,6 +35,7 @@ pub enum TokenKind {
     Do,
     Mut,
     Module,
+    ExternModule,
     Import,
     DebugMark,
 

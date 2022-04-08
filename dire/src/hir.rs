@@ -196,6 +196,9 @@ pub enum Decl {
         scope: ImperScopeId,
         generic_params: Range<DeclId>,
     },
+    ComputedPrototype {
+        param_tys: SmallVec<[ExprId; 2]>,
+    },
     Stored { id: StoredDeclId, is_mut: bool, root_expr: ExprId, },
     PatternBinding { id: PatternBindingDeclId, is_mut: bool, },
     Parameter {

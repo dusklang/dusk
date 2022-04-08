@@ -298,7 +298,8 @@ impl Driver {
                 },
                 Namespace::CompDeclParams(ns_id) => {
                     let comp_decl_params_ns = &self.code.hir_code.comp_decl_params_ns[ns_id];
-                    if let hir::Decl::Computed { generic_params, .. } = &df!(comp_decl_params_ns.func.hir) {
+                    let decl = &df!(comp_decl_params_ns.func.hir);
+                    if let hir::Decl::Computed { generic_params, .. } = decl {
                         for i in generic_params.start.index()..generic_params.end.index() {
                             let decl = DeclId::new(i);
                             let param_name = self.code.hir_code.names[decl];
@@ -307,7 +308,7 @@ impl Driver {
                                 break 'find_overloads;
                             }
                         }
-                    } else {
+                    } else if !matches!(decl, hir::Decl::ComputedPrototype { .. }) {
                         panic!("expected computed decl");
                     };
                     comp_decl_params_ns.parent
@@ -496,7 +497,7 @@ impl Driver {
     fn build_tir_decl(&mut self, unit: &mut UnitItems, level: u32, id: DeclId) {
         match df!(id.hir) {
             // TODO: Add parameter and field TIR items for (at least) checking that the type of the param is valid
-            hir::Decl::Parameter { .. } | hir::Decl::Field { .. } | hir::Decl::Variant { .. } | hir::Decl::ReturnValue | hir::Decl::Intrinsic { .. } => {},
+            hir::Decl::Parameter { .. } | hir::Decl::Field { .. } | hir::Decl::Variant { .. } | hir::Decl::ReturnValue | hir::Decl::Intrinsic { .. } | hir::Decl::ComputedPrototype { .. } => {},
             hir::Decl::GenericParam(_) => {
                 assert_eq!(level, 0);
                 unit.generic_params.push(GenericParam { id });
@@ -537,6 +538,10 @@ impl Driver {
 
                     (false, param_tys.clone())
                 },
+                hir::Decl::ComputedPrototype { ref param_tys } => (
+                    false,
+                    param_tys.clone()
+                ),
                 hir::Decl::Const(_) | hir::Decl::Parameter { .. } | hir::Decl::ReturnValue | hir::Decl::GenericParam(_) => (
                     false,
                     SmallVec::new(),
@@ -571,7 +576,7 @@ impl Driver {
             let decl_id = DeclId::new(i);
             let id = df!(decl_id.item);
             match df!(decl_id.hir) {
-                hir::Decl::Parameter { .. } | hir::Decl::Intrinsic { .. } | hir::Decl::Field { .. } | hir::Decl::ReturnValue | hir::Decl::GenericParam(_) | hir::Decl::Variant { .. } => {},
+                hir::Decl::Parameter { .. } | hir::Decl::Intrinsic { .. } | hir::Decl::Field { .. } | hir::Decl::ReturnValue | hir::Decl::GenericParam(_) | hir::Decl::Variant { .. } | hir::Decl::ComputedPrototype { .. } => {},
                 hir::Decl::PatternBinding { id: binding_id, .. } => {
                     // let scrutinee = self.code.hir_code.pattern_binding_decls[binding_id].scrutinee;
 
@@ -703,6 +708,15 @@ impl Driver {
                                 add_eval_dep!(id, ty);
                             }
                             self.add_type3_scope_dep(id, scope);
+                            // NOTE: the Some case is handled below this match expression
+                            if self.code.hir_code.explicit_tys[decl_id].is_none() {
+                                add_eval_dep!(id, hir::VOID_TYPE);
+                            }
+                        },
+                        hir::Decl::ComputedPrototype { ref param_tys } => {
+                            for &ty in param_tys {
+                                add_eval_dep!(id, ty);
+                            }
                             // NOTE: the Some case is handled below this match expression
                             if self.code.hir_code.explicit_tys[decl_id].is_none() {
                                 add_eval_dep!(id, hir::VOID_TYPE);
