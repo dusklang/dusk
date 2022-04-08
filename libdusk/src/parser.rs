@@ -74,7 +74,7 @@ impl Driver {
         }
         for &intr in &[BitwiseAnd, BitwiseOr] {
             for ty in integers {
-                self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], boool, false);
+                self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], ty.clone(), false);
             }
         }
         for &intr in &[LogicalAnd, LogicalOr] {
