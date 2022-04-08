@@ -7,7 +7,7 @@ pub mod type_provider;
 use constraints::*;
 use type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 
-use dire::hir::{self, ExprId, DeclId, StructId, PatternKind, Ident};
+use dire::hir::{self, ExprId, DeclId, StructId, PatternKind, Ident, VOID_EXPR};
 use dire::mir::Const;
 use dire::ty::{Type, QualType, IntWidth};
 use dire::source_info::SourceRange;
@@ -1079,20 +1079,27 @@ impl tir::RetGroup {
         for &expr in &self.exprs {
             if let Some(err) = can_unify_to(tp.constraints(expr), &QualType::from(&ty)).err() {
                 let range = driver.get_range(expr);
-                let mut error = Error::new(format!("can't unify expression to return type {:?}", ty))
-                    .adding_primary_range(range, "expression here");
-                match err {
-                    UnificationError::InvalidChoice(choices)
-                        => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
-                    UnificationError::Trait(not_implemented)
-                        => error.add_secondary_range(
-                            range,
-                            format!(
-                                "note: couldn't unify because expression requires implementations of {:?}",
-                                not_implemented.names(),
+                let error = if expr == VOID_EXPR {
+                    Error::new(format!("expected return value of type `{:?}`, found nothing instead", ty))
+                        .adding_primary_range(self.decl_range, "declaration here")
+                } else {
+                    let mut error = Error::new(format!("can't unify expression to return type `{:?}`", ty))
+                        .adding_primary_range(self.decl_range, "declaration here")
+                        .adding_primary_range(range, "expression here");
+                    match err {
+                        UnificationError::InvalidChoice(choices)
+                            => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                        UnificationError::Trait(not_implemented)
+                            => error.add_secondary_range(
+                                range,
+                                format!(
+                                    "note: couldn't unify because expression requires implementations of {:?}",
+                                    not_implemented.names(),
+                                ),
                             ),
-                        ),
-                }
+                    }
+                    error
+                };
                 driver.errors.push(error);
             }
 

@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use smallvec::SmallVec;
 use index_vec::define_index_type;
 
+use dire::source_info::SourceRange;
 use dire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, EnumId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, RETURN_VALUE_DECL};
 
 use crate::driver::Driver;
@@ -27,7 +28,7 @@ pub struct SwitchCase {
 
 
 #[derive(Debug)]
-pub struct RetGroup { pub ty: ExprId, pub exprs: SmallVec<[ExprId; 1]> }
+pub struct RetGroup { pub ty: ExprId, pub exprs: SmallVec<[ExprId; 1]>, pub decl_range: SourceRange }
 #[derive(Debug)]
 pub struct Cast { pub expr: ExprId, pub ty: ExprId, pub cast_id: CastId }
 #[derive(Debug)]
@@ -398,9 +399,10 @@ impl Driver {
             let unit_id = sp.levels.item_to_units[&item];
             let level = sp.levels.item_to_levels[&item];
             let unit = &mut sp.units[unit_id as usize];
+            let decl_range = df!(decl.range);
             unit.items.ret_groups.insert(
                 level,
-                RetGroup { ty, exprs },
+                RetGroup { ty, exprs, decl_range },
             );
         }
     }
