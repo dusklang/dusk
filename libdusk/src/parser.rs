@@ -225,7 +225,7 @@ impl Driver {
 
     fn try_parse_term(&mut self, p: &mut Parser, parse_struct_lits: bool) -> Result<ExprId, TokenKind> {
         let mut term = self.try_parse_restricted_term(p)?;
-        let mut range = self.get_range(term);
+        let range = self.get_range(term);
         if parse_struct_lits {
             if let TokenKind::OpenCurly = self.cur(p).kind {
                 self.next(p);
@@ -258,10 +258,10 @@ impl Driver {
             }
         }
         while let TokenKind::As = self.cur(p).kind {
-            range = self.cur(p).range;
+            let as_range = self.cur(p).range;
             self.next(p);
             let (ty, ty_range) = self.parse_type(p);
-            range = source_info::concat(range, ty_range);
+            let range = source_info::concat(as_range, ty_range);
             term = self.cast(term, ty, range);
         }
         Ok(term)
