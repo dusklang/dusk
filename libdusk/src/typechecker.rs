@@ -238,13 +238,20 @@ impl tir::Expr<tir::Cast> {
             Ok((ty, CastMethod::Noop))
         } else if let Type::Pointer(dest_pointee_ty) = ty {
             let dest_pointee_ty = dest_pointee_ty.as_ref();
-            let src_ty = constraints.max_ranked_type(|ty|
+            let src_ty = constraints.max_ranked_type(|ty| {
                 match ty.ty {
-                    Type::Pointer(ref pointee) if pointee.is_mut || dest_pointee_ty.is_mut => 2,
+                    Type::Pointer(ref pointee)
+                        if
+                            // pure mut cast (either giving or taking away)
+                            pointee.ty.trivially_convertible_to(&dest_pointee_ty.ty) ||
+                            // src must be at least as mutable as dest, if not more
+                            pointee.is_mut == dest_pointee_ty.is_mut || pointee.is_mut
+                        // prefer to cast pointer -> pointer over int -> pointer, if possible
+                        => 2,
                     Type::Int { width, .. } if width == IntWidth::Pointer => 1,
                     _ => 0,
                 }
-            ).expect("Invalid cast!").clone();
+            }).expect("Invalid cast!").clone();
             Ok((src_ty.ty.clone(), CastMethod::Reinterpret))
         } else if let Type::Int { width, .. } = ty {
             constraints.max_ranked_type_with_assoc_data(|ty|
