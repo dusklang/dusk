@@ -258,6 +258,7 @@ impl Driver {
             }
         }
         while let TokenKind::As = self.cur(p).kind {
+            range = self.cur(p).range;
             self.next(p);
             let (ty, ty_range) = self.parse_type(p);
             range = source_info::concat(range, ty_range);
