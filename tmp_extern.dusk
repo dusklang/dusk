@@ -1,0 +1,34 @@
+HANDLE :: void *mut
+DWORD :: u32
+LPDWORD :: DWORD *mut
+STD_INPUT_HANDLE :: (-10) as i32 as DWORD
+STD_OUTPUT_HANDLE :: (-11) as i32 as DWORD
+STD_ERROR_HANDLE :: (-12) as i32 as DWORD
+BOOL :: i32
+TRUE :: 1
+FALSE :: 0
+
+// it is not currently possible to have constant pointers, which is why this is a function for now
+fn NULL(): void *mut { 0 as usize as void *mut }
+
+kernel32 :: extern_mod("kernel32.dll") {
+    fn GetStdHandle(nStdHandle: DWORD): HANDLE
+    fn WriteConsoleA(hConsoleOutput: HANDLE, lpBuffer: void*, nNumberOfCharsToWrite: DWORD, lpNumberOfCharsWritten: DWORD *mut, lpReserved: void *mut): BOOL
+}
+
+// Test before implementation of feature
+/*
+kernel32 :: mod {
+    fn GetStdHandle(nStdHandle: DWORD): HANDLE {
+        NULL() as HANDLE
+    }
+    fn WriteConsoleA(hConsoleOutput: HANDLE, lpBuffer: void*, nNumberOfCharsToWrite: DWORD, lpNumberOfCharsWritten: DWORD *mut, lpReserved: void *mut): BOOL {
+        TRUE
+    }
+}*/
+
+
+fn main() {
+    stdout :: kernel32.GetStdHandle(STD_OUTPUT_HANDLE)
+    yo :: kernel32.WriteConsoleA(stdout, "Hello from a native win32 call!\n" as u8* as void*, 32, NULL() as DWORD *mut, NULL())
+}
