@@ -224,6 +224,7 @@ fn type_of(b: &MirCode, instr: OpId, code: &IndexVec<OpId, Op>) -> Type {
         Instr::Alloca(ty) => ty.clone().mut_ptr(),
         Instr::LogicalNot(_) => Type::Bool,
         &Instr::Call { func, .. } => b.functions[func].ret_ty.clone(),
+        Instr::ExternCall { func, .. } => b.extern_mods[&func.extern_mod].imported_functions[func.index].return_ty.clone(),
         Instr::Intrinsic { ty, .. } => ty.clone(),
         Instr::Reinterpret(_, ty) | Instr::Truncate(_, ty) | Instr::SignExtend(_, ty)
         | Instr::ZeroExtend(_, ty) | Instr::FloatCast(_, ty) | Instr::FloatToInt(_, ty)
@@ -427,11 +428,11 @@ impl Driver {
                 .collect();
             let return_ty = tp.get_evaluated_type(func.return_ty).clone();
             imported_functions.push(
-                dbg!(ExternFunction {
+                ExternFunction {
                     name: func.name.clone(),
                     param_tys,
                     return_ty,
-                })
+                }
             );
         }
         self.code.mir_code.extern_mods.insert(
@@ -708,6 +709,12 @@ impl Driver {
                             write!(f, "%{} = call `{}`", self.display_instr_name(op_id), self.fn_name(self.code.mir_code.functions[callee].name))?;
                             write_args!(arguments)?
                         },
+                        &Instr::ExternCall { ref arguments, func: callee, .. } => {
+                            let extern_mod = &self.code.mir_code.extern_mods[&callee.extern_mod];
+                            let callee_func = &extern_mod.imported_functions[callee.index];
+                            write!(f, "%{} = externcall `{}` from {:?}", self.display_instr_name(op_id), callee_func.name, extern_mod.library_path)?;
+                            write_args!(arguments)?
+                        },
                         Instr::Const(konst) => {
                             writeln!(f, "%{} = {}", self.display_instr_name(op_id), self.fmt_const(konst))?;
                         },
@@ -978,9 +985,9 @@ impl Driver {
         let name = format!("{}", self.display_item(id));
         match self.get_decl(id, tp) {
             Decl::Computed { get } => self.push_instr(b, Instr::Call { arguments, generic_arguments, func: get }, expr).direct(),
-            Decl::ExternFunction(_func) => {
+            Decl::ExternFunction(func) => {
                 assert!(generic_arguments.is_empty());
-                todo!();
+                self.push_instr(b, Instr::ExternCall { arguments, func }, expr).direct()
             },
             Decl::Stored(id) => {
                 assert!(arguments.is_empty());

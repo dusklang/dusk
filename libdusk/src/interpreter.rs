@@ -13,7 +13,7 @@ use num_bigint::{BigInt, Sign};
 use display_adapter::display_adapter;
 
 use dire::arch::Arch;
-use dire::hir::{Intrinsic, ModScopeId, StructId, EnumId, GenericParamId};
+use dire::hir::{Intrinsic, ModScopeId, StructId, EnumId, GenericParamId, ExternFunctionRef};
 use dire::mir::{Const, Instr, StaticId, Struct, VOID_INSTR};
 use dire::ty::{Type, QualType, IntWidth, FloatWidth};
 use dire::{OpId, BlockId};
@@ -544,6 +544,17 @@ impl Driver {
         }
     }
 
+    pub fn extern_call(&mut self, func: ExternFunctionRef, mut args: Vec<Box<[u8]>>) -> Value {
+        let mut indirect_args: Vec<*mut u8> = args.iter_mut()
+            .map(|arg| arg.as_mut_ptr())
+            .collect();
+
+        dbg!(&args);
+        todo!();
+        
+        Value::Nothing
+    }
+
     #[display_adapter]
     fn panic_message(&self, msg: Option<OpId>, f: &mut Formatter) {
         let frame = self.interp.stack.last().unwrap();
@@ -587,6 +598,14 @@ impl Driver {
                 }
                 let generic_arguments = generic_arguments.clone();
                 self.call(FunctionRef::Id(func), copied_args, generic_arguments)
+            },
+            &Instr::ExternCall { ref arguments, func } => {
+                let mut copied_args = Vec::new();
+                copied_args.reserve_exact(arguments.len());
+                for &arg in arguments {
+                    copied_args.push(frame.results[&arg].as_bytes().to_owned().into_boxed_slice());
+                }
+                self.extern_call(func, copied_args)
             },
             &Instr::GenericParam(id) => {
                 Value::from_ty(Type::GenericParam(id))

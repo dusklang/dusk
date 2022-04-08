@@ -129,7 +129,7 @@ pub struct ExternFunction {
     pub return_ty: ExprId,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ExternFunctionRef {
     pub extern_mod: ExternModId,
     pub index: usize,

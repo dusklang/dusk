@@ -6,7 +6,7 @@ use smallvec::SmallVec;
 use string_interner::DefaultSymbol as Sym;
 use display_adapter::display_adapter;
 
-use crate::hir::{Intrinsic, DeclId, StructId, EnumId, ModScopeId, ExternModId, GenericParamId};
+use crate::hir::{Intrinsic, DeclId, StructId, EnumId, ModScopeId, ExternModId, ExternFunctionRef, GenericParamId};
 use crate::ty::Type;
 use crate::{Code, BlockId, OpId};
 use crate::source_info::SourceRange;
@@ -30,6 +30,7 @@ pub enum Instr {
     Alloca(Type),
     LogicalNot(OpId),
     Call { arguments: SmallVec<[OpId; 2]>, generic_arguments: Vec<Type>, func: FuncId },
+    ExternCall { arguments: SmallVec<[OpId; 2]>, func: ExternFunctionRef },
     Intrinsic { arguments: SmallVec<[OpId; 2]>, ty: Type, intr: Intrinsic },
     Reinterpret(OpId, Type),
     Truncate(OpId, Type),
