@@ -17,6 +17,7 @@ num-bigint = "0.3"
 index_vec = "0.1.2"
 indenter = "0.3.2"
 rsmt2 = "0.11.0"
+region = "3.0"
 display_adapter = { path = "../../display_adapter/display_adapter" }
 dire = { path = "../dire/" }
 dusk-proc-macros = { path = "../dusk-proc-macros" }

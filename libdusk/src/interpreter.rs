@@ -549,9 +549,21 @@ impl Driver {
             .map(|arg| arg.as_mut_ptr())
             .collect();
 
-        dbg!(&args);
-        todo!();
-        
+        let mut thunk_data = Vec::new();
+        let opcode = 0xB8u8;
+        let register = 0b000;
+        thunk_data.push(opcode | register);
+        thunk_data.extend(2907i32.to_le_bytes());
+        thunk_data.push(0xC3u8);
+        let mut thunk = region::alloc(thunk_data.len(), region::Protection::READ_WRITE_EXECUTE).unwrap();
+        unsafe {
+            let thunk_ptr = thunk.as_mut_ptr::<u8>();
+            thunk_ptr.copy_from(thunk_data.as_ptr(), thunk_data.len());
+            type TestThunk = fn() -> i32;
+            let thunk: TestThunk = std::mem::transmute(thunk_ptr);
+            println!("about to call the thunk");
+            println!("just called the thunk and got the value {}, baybee", thunk());
+        }
         Value::Nothing
     }
 
