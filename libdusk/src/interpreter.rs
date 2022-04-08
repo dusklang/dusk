@@ -546,8 +546,8 @@ impl Driver {
     
     pub fn extern_call(&mut self, func_ref: ExternFunctionRef, mut args: Vec<Box<[u8]>>) -> Value {
         let indirect_args: Vec<*mut u8> = args.iter_mut()
-        .map(|arg| arg.as_mut_ptr())
-        .collect();
+            .map(|arg| arg.as_mut_ptr())
+            .collect();
         
         let library = &self.code.mir_code.extern_mods[&func_ref.extern_mod];
         let func = &library.imported_functions[func_ref.index];
@@ -719,13 +719,14 @@ impl Driver {
             type TestThunk = fn(*const *mut u8, *mut u8);
             let thunk: TestThunk = std::mem::transmute(thunk_ptr);
             println!("about to call the thunk");
-            let mut return_value: *mut () = std::ptr::null_mut();
-            thunk(indirect_args.as_ptr(), std::mem::transmute(&mut return_value));
-            println!("just called the thunk and got the value {:?}, baybee", return_value);
+            let mut return_val_storage = SmallVec::new();
+            return_val_storage.resize(self.size_of(&func.return_ty), 0);
+            thunk(indirect_args.as_ptr(), return_val_storage.as_mut_ptr());
 
             kernel32::FreeLibrary(module);
+
+            Value::Inline(return_val_storage)
         }
-        Value::Nothing
     }
 
     #[display_adapter]
