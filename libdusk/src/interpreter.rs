@@ -543,12 +543,19 @@ impl Driver {
             }
         }
     }
-
+    
     pub fn extern_call(&mut self, func_ref: ExternFunctionRef, mut args: Vec<Box<[u8]>>) -> Value {
-        let mut indirect_args: Vec<*mut u8> = args.iter_mut()
-            .map(|arg| arg.as_mut_ptr())
-            .collect();
-
+        let indirect_args: Vec<*mut u8> = args.iter_mut()
+        .map(|arg| arg.as_mut_ptr())
+        .collect();
+        
+        let library = &self.code.mir_code.extern_mods[&func_ref.extern_mod];
+        let func = &library.imported_functions[func_ref.index];
+        let module = unsafe { kernel32::LoadLibraryA(library.library_path.as_ptr()) };
+        let func_name = CString::new(func.name.clone()).unwrap();
+        let func_ptr = unsafe { kernel32::GetProcAddress(module, func_name.as_ptr()) };
+        let func_address: u64 = unsafe { std::mem::transmute(func_ptr) };
+        
         let mut thunk_data: Vec<u8> = Vec::new();
         // mov QWORD PTR [rsp+16], rdx
         thunk_data.push(0x48);
@@ -574,7 +581,6 @@ impl Driver {
         thunk_data.push(0xEC);
         thunk_data.push(extension);
 
-        let func = &self.code.mir_code.extern_mods[&func_ref.extern_mod].imported_functions[func_ref.index];
         assert_eq!(args.len(), func.param_tys.len());
         for i in (0..args.len()).rev() {
             // mov rax, QWORD PTR [rsp+extension+8]   (get pointer to arguments)
@@ -622,7 +628,6 @@ impl Driver {
             }
         }
 
-        let func_address = 0u64;
 
         // movabs r10, func
         thunk_data.push(0x49);
@@ -672,6 +677,8 @@ impl Driver {
             let mut return_value: *mut () = std::ptr::null_mut();
             thunk(indirect_args.as_ptr(), std::mem::transmute(&mut return_value));
             println!("just called the thunk and got the value {:?}, baybee", return_value);
+
+            kernel32::FreeLibrary(module);
         }
         Value::Nothing
     }
