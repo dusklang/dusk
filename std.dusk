@@ -58,3 +58,25 @@ str :: mod {
         ret_val
     }
 }
+
+io :: mod {
+    windows :: import("windows.dusk")
+    fn print(msg: i8*) {
+        stdout :: windows.kernel32.GetStdHandle(windows.STD_OUTPUT_HANDLE)
+        if stdout == windows.INVALID_HANDLE_VALUE() { return }
+
+        total_printed := 0 as windows.DWORD
+        length :: str.len(msg as u8*) as windows.DWORD
+        while total_printed < length {
+            printed := 0 as windows.DWORD
+            succ :: windows.kernel32.WriteConsoleA(stdout, (msg as usize + total_printed) as void*, length - total_printed, &mut printed, windows.NULL())
+            if succ == 0 { return }
+
+            total_printed = total_printed + printed
+        }
+    }
+}
+
+fn main() {
+    io.print("hi, there!")
+}

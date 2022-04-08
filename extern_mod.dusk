@@ -1,54 +1,17 @@
-HANDLE :: void *mut
-DWORD :: u32
-STD_INPUT_HANDLE :: (-10) as i32 as DWORD
-STD_OUTPUT_HANDLE :: (-11) as i32 as DWORD
-STD_ERROR_HANDLE :: (-12) as i32 as DWORD
-BOOL :: i32
-TRUE :: 1
-FALSE :: 0
-
-GENERIC_READ :: 2147483648 as DWORD
-GENERIC_WRITE :: 1073741824 as DWORD
-
-CREATE_ALWAYS :: 2 as DWORD
-CREATE_NEW :: 1 as DWORD
-OPEN_ALWAYS :: 4 as DWORD
-OPEN_EXISTING :: 3 as DWORD
-TRUNCATE_EXISTING :: 5 as DWORD
-
-FILE_ATTRIBUTE_NORMAL :: 128 as DWORD
-
-// it is not currently possible to have constant pointers, which is why this is a function for now
-fn NULL(): void *mut { 0 as usize as void *mut }
-
-SECURITY_ATTRIBUTES :: struct {
-    nLength: DWORD
-    lpSecurityDescriptor: void *mut
-    bInheritHandle: BOOL
-}
-
-kernel32 :: extern_mod("kernel32.dll") {
-    fn GetStdHandle(nStdHandle: DWORD): HANDLE
-    fn WriteConsoleA(hConsoleOutput: HANDLE, lpBuffer: void*, nNumberOfCharsToWrite: DWORD, lpNumberOfCharsWritten: DWORD *mut, lpReserved: void *mut): BOOL
-    fn CreateFileA(lpFileName: i8*, dwDesiredAccess: DWORD, dwShareMode: DWORD, lpSecurityAttributes: SECURITY_ATTRIBUTES *mut, dwCreationDisposition: DWORD, dwFlagsAndAttributes: DWORD, hTemplateFile: HANDLE): HANDLE
-    fn CloseHandle(hObject: HANDLE): BOOL
-}
+windows :: import("windows.dusk")
 
 fn main() {
-    stdout :: kernel32.GetStdHandle(STD_OUTPUT_HANDLE)
-    succ :: kernel32.WriteConsoleA(stdout, "Hello from a native win32 call!\n" as u8* as void*, 32, NULL() as DWORD *mut, NULL())
+    stdout :: windows.kernel32.GetStdHandle(windows.STD_OUTPUT_HANDLE)
+    succ :: windows.kernel32.WriteConsoleA(stdout, "Hello from a native win32 call!\n" as u8* as void*, 32, windows.NULL() as windows.DWORD *mut, windows.NULL())
 
-    file_handle :: kernel32.CreateFileA(
+    file_handle :: windows.kernel32.CreateFileA(
         "i've escaped"
-        GENERIC_READ | GENERIC_WRITE
+        windows.GENERIC_READ | windows.GENERIC_WRITE
         0
-        NULL() as SECURITY_ATTRIBUTES *mut
-        CREATE_ALWAYS
-        FILE_ATTRIBUTE_NORMAL
-        NULL() as HANDLE
+        windows.NULL() as windows.SECURITY_ATTRIBUTES *mut
+        windows.CREATE_ALWAYS
+        windows.FILE_ATTRIBUTE_NORMAL
+        windows.NULL() as windows.HANDLE
     )
-    succ :: kernel32.CloseHandle(file_handle)
-    if succ != 0 {
-        print("successfully closed handle")
-    }
+    succ :: windows.kernel32.CloseHandle(file_handle)
 }

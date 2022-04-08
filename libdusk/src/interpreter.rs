@@ -551,7 +551,11 @@ impl Driver {
         
         let library = &self.code.mir_code.extern_mods[&func_ref.extern_mod];
         let func = &library.imported_functions[func_ref.index];
+        // TODO: cache library and proc addresses
         let module = unsafe { kernel32::LoadLibraryA(library.library_path.as_ptr()) };
+        if module.is_null() {
+            panic!("unable to load library {:?}", library.library_path);
+        }
         let func_name = CString::new(func.name.clone()).unwrap();
         let func_ptr = unsafe { kernel32::GetProcAddress(module, func_name.as_ptr()) };
         let func_address: u64 = unsafe { std::mem::transmute(func_ptr) };
