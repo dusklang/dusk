@@ -689,7 +689,6 @@ impl Driver {
                             if !first {
                                 write!(f, ")")?;
                             }
-                            writeln!(f)
                         }}
                     }
                     match instr {
@@ -707,20 +706,23 @@ impl Driver {
                         // TODO: print generic arguments
                         &Instr::Call { ref arguments, func: callee, .. } => {
                             write!(f, "%{} = call `{}`", self.display_instr_name(op_id), self.fn_name(self.code.mir_code.functions[callee].name))?;
-                            write_args!(arguments)?
+                            write_args!(arguments);
+                            writeln!(f)?
                         },
                         &Instr::ExternCall { ref arguments, func: callee, .. } => {
                             let extern_mod = &self.code.mir_code.extern_mods[&callee.extern_mod];
                             let callee_func = &extern_mod.imported_functions[callee.index];
-                            write!(f, "%{} = externcall `{}` from {:?}", self.display_instr_name(op_id), callee_func.name, extern_mod.library_path)?;
-                            write_args!(arguments)?
+                            write!(f, "%{} = externcall `{}`", self.display_instr_name(op_id), callee_func.name)?;
+                            write_args!(arguments);
+                            writeln!(f, " from {:?}", extern_mod.library_path)?
                         },
                         Instr::Const(konst) => {
                             writeln!(f, "%{} = {}", self.display_instr_name(op_id), self.fmt_const(konst))?;
                         },
                         Instr::Intrinsic { arguments, intr, .. } => {
                             write!(f, "%{} = intrinsic `{}`", self.display_instr_name(op_id), intr.name())?;
-                            write_args!(arguments)?
+                            write_args!(arguments);
+                            writeln!(f)?
                         },
                         &Instr::Pointer { op, is_mut } => {
                             write!(f, "%{} = %{} *", self.display_instr_name(op_id), self.display_instr_name(op))?;

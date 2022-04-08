@@ -621,7 +621,18 @@ impl Driver {
                             thunk_data.push(0x8B);
                             thunk_data.push(0x08);
                         },
-                        _ => todo!(),
+                        _ => {
+                            // mov eax, DWORD PTR [rax]       (read i'th argument as a 32-bit value)
+                            thunk_data.push(0x8B);
+                            thunk_data.push(0x00);
+
+                            // mov DWORD PTR[rsp + 32 + (i-4)*8], eax
+                            let offset = (32 + (i-4) * 8) as u8;
+                            thunk_data.push(0x89);
+                            thunk_data.push(0x44);
+                            thunk_data.push(0x24);
+                            thunk_data.push(offset);
+                        }
                     }
                 },
                 Type::Pointer(_) => {
@@ -656,7 +667,7 @@ impl Driver {
                             thunk_data.push(0x8B);
                             thunk_data.push(0x00);
 
-                            // mov QWORD PTR[rsp + 32 + (i-4)*8]
+                            // mov QWORD PTR[rsp + 32 + (i-4)*8], rax
                             let offset = (32 + (i-4) * 8) as u8;
                             thunk_data.push(0x48);
                             thunk_data.push(0x89);
@@ -718,7 +729,6 @@ impl Driver {
             thunk_ptr.copy_from(thunk_data.as_ptr(), thunk_data.len());
             type TestThunk = fn(*const *mut u8, *mut u8);
             let thunk: TestThunk = std::mem::transmute(thunk_ptr);
-            println!("about to call the thunk");
             let mut return_val_storage = SmallVec::new();
             return_val_storage.resize(self.size_of(&func.return_ty), 0);
             thunk(indirect_args.as_ptr(), return_val_storage.as_mut_ptr());
