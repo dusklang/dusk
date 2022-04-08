@@ -9,6 +9,7 @@ use libdusk::driver::Driver;
 use libdusk::source_info::SourceMap;
 use libdusk::interpreter::InterpMode;
 use libdusk::mir::FunctionRef;
+use libdusk::error::Error;
 
 #[repr(u8)]
 #[derive(ArgEnum, Copy, Clone, Debug)]
@@ -104,10 +105,14 @@ fn main() {
                 Some(name) => name == main_sym && func.ret_ty == Type::Void && driver.code.num_parameters(func) == 0,
                 None => false,
             }
-        })
-        .expect("Couldn't find main function with no parameters and a return type of void!");
-
-    println!("Running main in the interpreter:\n");
-    driver.interp.mode = InterpMode::RunTime;
-    driver.call(FunctionRef::Id(FuncId::new(main)), Vec::new(), Vec::new());
+        });
+    if let Some(main) = main {
+        println!("Running main in the interpreter:\n");
+        driver.interp.mode = InterpMode::RunTime;
+        driver.call(FunctionRef::Id(FuncId::new(main)), Vec::new(), Vec::new());
+    } else {
+        driver.errors.push(Error::new("Couldn't find main function with no parameters and a return type of `void`"));
+        driver.flush_errors();
+        driver.check_for_failure();
+    }
 }

@@ -5,7 +5,6 @@ mod dep_vec;
 mod index_vec;
 mod lexer;
 mod token;
-mod error;
 mod builder;
 mod parser;
 mod tir;
@@ -18,6 +17,7 @@ pub mod source_info;
 pub mod mir;
 pub mod driver;
 pub mod interpreter;
+pub mod error;
 
 #[derive(ArgEnum, Debug, Copy, Clone)]
 pub enum TirGraphOutput {
