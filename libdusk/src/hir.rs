@@ -401,7 +401,7 @@ impl Driver {
             let funcs = &mut self.code.hir_code.extern_mods[extern_mod].imported_functions;
             let index = funcs.len();
             let name = self.interner.resolve(name).unwrap();
-            funcs.push(ExternFunction { name: name.to_string() });
+            funcs.push(ExternFunction { name: name.to_string(), param_tys: param_tys.iter().cloned().collect(), return_ty: explicit_ty.unwrap_or(VOID_TYPE) });
             Some(
                 ExternFunctionRef {
                     extern_mod,

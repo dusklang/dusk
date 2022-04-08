@@ -6,7 +6,7 @@ use smallvec::SmallVec;
 use string_interner::DefaultSymbol as Sym;
 use display_adapter::display_adapter;
 
-use crate::hir::{Intrinsic, DeclId, StructId, EnumId, ModScopeId, GenericParamId};
+use crate::hir::{Intrinsic, DeclId, StructId, EnumId, ModScopeId, ExternModId, GenericParamId};
 use crate::ty::Type;
 use crate::{Code, BlockId, OpId};
 use crate::source_info::SourceRange;
@@ -171,10 +171,23 @@ pub struct Static {
     pub val: Const,
 }
 
+pub struct ExternMod {
+    pub library_path: CString,
+    pub imported_functions: Vec<ExternFunction>,
+}
+
+#[derive(Debug)]
+pub struct ExternFunction {
+    pub name: String,
+    pub param_tys: Vec<Type>,
+    pub return_ty: Type,
+}
+
 pub struct MirCode {
     pub strings: IndexVec<StrId, CString>,
     pub functions: IndexVec<FuncId, Function>,
     pub statics: IndexVec<StaticId, Static>,
+    pub extern_mods: HashMap<ExternModId, ExternMod>,
     pub structs: HashMap<StructId, Struct>,
     pub enums: HashMap<EnumId, EnumLayout>,
     pub source_ranges: HashMap<OpId, SourceRange>,
@@ -199,6 +212,7 @@ impl MirCode {
             strings: IndexVec::new(),
             functions: IndexVec::new(),
             statics: IndexVec::new(),
+            extern_mods: HashMap::new(),
             structs: HashMap::new(),
             enums: HashMap::new(),
             source_ranges: HashMap::new(),

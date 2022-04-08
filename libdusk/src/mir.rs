@@ -6,8 +6,8 @@ use smallvec::SmallVec;
 use string_interner::DefaultSymbol as Sym;
 use display_adapter::display_adapter;
 
-use dire::hir::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, GenericParamId, Item, PatternBindingDeclId, ExternFunctionRef, PatternBindingPathComponent, VOID_TYPE};
-use dire::mir::{FuncId, StaticId, Const, Instr, Function, MirCode, StructLayout, EnumLayout, InstrNamespace, SwitchCase, VOID_INSTR};
+use dire::hir::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, GenericParamId, Item, PatternBindingDeclId, ExternModId, ExternFunctionRef, PatternBindingPathComponent, VOID_TYPE};
+use dire::mir::{FuncId, StaticId, Const, Instr, Function, MirCode, StructLayout, EnumLayout, ExternMod, ExternFunction, InstrNamespace, SwitchCase, VOID_INSTR};
 use dire::{Block, BlockId, Op, OpId};
 use dire::ty::{Type, FloatWidth};
 use dire::source_info::SourceRange;
@@ -414,6 +414,35 @@ impl Driver {
         self.build_function(None, tp.ty(expr).clone(), FunctionBody::Expr(expr), DeclId::new(0)..DeclId::new(0), Vec::new(), tp)
     }
 
+    fn resolve_extern_mod(&mut self, id: ExternModId, tp: &impl TypeProvider) {
+        if self.code.mir_code.extern_mods.get(&id).is_some() { return; }
+
+        let extern_mod = &self.code.hir_code.extern_mods[id];
+        let library_path = extern_mod.library_path.clone();
+        let mut imported_functions = Vec::with_capacity(extern_mod.imported_functions.len());
+        for func in &extern_mod.imported_functions {
+            let param_tys = func.param_tys.iter()
+                .map(|&ty| tp.get_evaluated_type(ty))
+                .cloned()
+                .collect();
+            let return_ty = tp.get_evaluated_type(func.return_ty).clone();
+            imported_functions.push(
+                dbg!(ExternFunction {
+                    name: func.name.clone(),
+                    param_tys,
+                    return_ty,
+                })
+            );
+        }
+        self.code.mir_code.extern_mods.insert(
+            id,
+            ExternMod {
+                library_path,
+                imported_functions,
+            },
+        );
+    }
+
     fn get_decl(&mut self, id: DeclId, tp: &impl TypeProvider) -> Decl {
         if let Some(decl) = self.mir.decls.get(&id) { return decl.clone(); }
         match df!(id.hir) {
@@ -450,6 +479,7 @@ impl Driver {
             },
             hir::Decl::ComputedPrototype { extern_func, .. } => {
                 let decl = if let Some(extern_func) = extern_func {
+                    self.resolve_extern_mod(extern_func.extern_mod, tp);
                     Decl::ExternFunction(extern_func)
                 } else {
                     let err = Error::new("cannot declare prototype outside of extern module")

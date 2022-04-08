@@ -125,6 +125,8 @@ impl ExternMod {
 #[derive(Debug)]
 pub struct ExternFunction {
     pub name: String,
+    pub param_tys: Vec<ExprId>,
+    pub return_ty: ExprId,
 }
 
 #[derive(Debug, Clone, Copy)]
