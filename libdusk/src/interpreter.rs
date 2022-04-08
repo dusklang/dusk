@@ -544,25 +544,134 @@ impl Driver {
         }
     }
 
-    pub fn extern_call(&mut self, func: ExternFunctionRef, mut args: Vec<Box<[u8]>>) -> Value {
+    pub fn extern_call(&mut self, func_ref: ExternFunctionRef, mut args: Vec<Box<[u8]>>) -> Value {
         let mut indirect_args: Vec<*mut u8> = args.iter_mut()
             .map(|arg| arg.as_mut_ptr())
             .collect();
 
-        let mut thunk_data = Vec::new();
-        let opcode = 0xB8u8;
-        let register = 0b000;
-        thunk_data.push(opcode | register);
-        thunk_data.extend(2907i32.to_le_bytes());
-        thunk_data.push(0xC3u8);
+        let mut thunk_data: Vec<u8> = Vec::new();
+        // mov QWORD PTR [rsp+16], rdx
+        thunk_data.push(0x48);
+        thunk_data.push(0x89);
+        thunk_data.push(0x54);
+        thunk_data.push(0x24);
+        thunk_data.push(0x10);
+
+        // mov QWORD PTR [rsp+8], rcx
+        thunk_data.push(0x48);
+        thunk_data.push(0x89);
+        thunk_data.push(0x4C);
+        thunk_data.push(0x24);
+        thunk_data.push(0x08);
+
+        let mut extension: u8 = 40;
+        if args.len() > 4 {
+            extension += ((args.len() - 3) / 2 * 16) as u8;
+        }
+        // sub rsp, extension
+        thunk_data.push(0x48);
+        thunk_data.push(0x83);
+        thunk_data.push(0xEC);
+        thunk_data.push(extension);
+
+        let func = &self.code.mir_code.extern_mods[&func_ref.extern_mod].imported_functions[func_ref.index];
+        assert_eq!(args.len(), func.param_tys.len());
+        for i in (0..args.len()).rev() {
+            // mov rax, QWORD PTR [rsp+extension+8]   (get pointer to arguments)
+            thunk_data.push(0x48);
+            thunk_data.push(0x8B);
+            thunk_data.push(0x44);
+            thunk_data.push(0x24);
+            thunk_data.push(extension + 8);
+
+            // mov rax, QWORD PTR [rax+i]             (get pointer to i'th argument)
+            thunk_data.push(0x48);
+            thunk_data.push(0x8B);
+            thunk_data.push(0x40);
+            thunk_data.push(i as u8);
+
+            match func.param_tys[i] {
+                Type::Int { width: IntWidth::W32, .. } => {
+                    match i {
+                        0 => {
+                            // mov ecx, DWORD PTR [rax]       (read i'th argument as a 32-bit integer)
+                            thunk_data.push(0x8B);
+                            thunk_data.push(0x08);
+                        },
+                        1 => {
+                            // mov edx, DWORD PTR [rax]       (read i'th argument as a 32-bit integer)
+                            thunk_data.push(0x8B);
+                            thunk_data.push(0x10);
+                        },
+                        2 => {
+                            // mov r8d, DWORD PTR [rax]       (read i'th argument as a 32-bit integer)
+                            thunk_data.push(0x44);
+                            thunk_data.push(0x8B);
+                            thunk_data.push(0x00);
+                        },
+                        3 => {
+                            // mov r8d, DWORD PTR [rax]       (read i'th argument as a 32-bit integer)
+                            thunk_data.push(0x44);
+                            thunk_data.push(0x8B);
+                            thunk_data.push(0x08);
+                        },
+                        _ => todo!(),
+                    }
+                },
+                _ => todo!("parameter type {:?}", func.param_tys[i]),
+            }
+        }
+
+        let func_address = 0u64;
+
+        // movabs r10, func
+        thunk_data.push(0x49);
+        thunk_data.push(0xBA);
+        thunk_data.extend(func_address.to_le_bytes());
+
+        // call r10
+        thunk_data.push(0x41);
+        thunk_data.push(0xFF);
+        thunk_data.push(0xD2);
+
+        // mov rcx, QWORD PTR [rsp+extension+16]              (get pointer to return value)
+        thunk_data.push(0x48);
+        thunk_data.push(0x8B);
+        thunk_data.push(0x4C);
+        thunk_data.push(0x24);
+        thunk_data.push(extension + 16);
+
+
+        // TODO: large values require passing a pointer as the first parameter
+        match func.return_ty {
+            Type::Pointer(_) => {
+                // mov QWORD PTR [rcx], rax                           (copy return value to the passed in location)
+                thunk_data.push(0x48);
+                thunk_data.push(0x89);
+                thunk_data.push(0x01);
+            },
+            _ => todo!("return type {:?}", func.return_ty),
+        }
+
+        // add rsp, extension
+        thunk_data.push(0x48);
+        thunk_data.push(0x83);
+        thunk_data.push(0xC4);
+        thunk_data.push(extension);
+
+        // ret
+        thunk_data.push(0xC3);
+
         let mut thunk = region::alloc(thunk_data.len(), region::Protection::READ_WRITE_EXECUTE).unwrap();
         unsafe {
             let thunk_ptr = thunk.as_mut_ptr::<u8>();
             thunk_ptr.copy_from(thunk_data.as_ptr(), thunk_data.len());
-            type TestThunk = fn() -> i32;
+            type TestThunk = fn(*const *mut u8, *mut u8);
             let thunk: TestThunk = std::mem::transmute(thunk_ptr);
             println!("about to call the thunk");
-            println!("just called the thunk and got the value {}, baybee", thunk());
+            let mut return_value: *mut () = std::ptr::null_mut();
+            thunk(indirect_args.as_ptr(), std::mem::transmute(&mut return_value));
+            println!("just called the thunk and got the value {:?}, baybee", return_value);
         }
         Value::Nothing
     }
