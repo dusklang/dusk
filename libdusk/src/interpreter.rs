@@ -590,33 +590,33 @@ impl Driver {
             thunk_data.push(0x24);
             thunk_data.push(extension + 8);
 
-            // mov rax, QWORD PTR [rax+i]             (get pointer to i'th argument)
+            // mov rax, QWORD PTR [rax+i*8]             (get pointer to i'th argument)
             thunk_data.push(0x48);
             thunk_data.push(0x8B);
             thunk_data.push(0x40);
-            thunk_data.push(i as u8);
+            thunk_data.push((i * 8) as u8);
 
             match func.param_tys[i] {
                 Type::Int { width: IntWidth::W32, .. } => {
                     match i {
                         0 => {
-                            // mov ecx, DWORD PTR [rax]       (read i'th argument as a 32-bit integer)
+                            // mov ecx, DWORD PTR [rax]       (read i'th argument as a 32-bit value)
                             thunk_data.push(0x8B);
                             thunk_data.push(0x08);
                         },
                         1 => {
-                            // mov edx, DWORD PTR [rax]       (read i'th argument as a 32-bit integer)
+                            // mov edx, DWORD PTR [rax]       (read i'th argument as a 32-bit value)
                             thunk_data.push(0x8B);
                             thunk_data.push(0x10);
                         },
                         2 => {
-                            // mov r8d, DWORD PTR [rax]       (read i'th argument as a 32-bit integer)
+                            // mov r8d, DWORD PTR [rax]       (read i'th argument as a 32-bit value)
                             thunk_data.push(0x44);
                             thunk_data.push(0x8B);
                             thunk_data.push(0x00);
                         },
                         3 => {
-                            // mov r8d, DWORD PTR [rax]       (read i'th argument as a 32-bit integer)
+                            // mov r9d, DWORD PTR [rax]       (read i'th argument as a 32-bit value)
                             thunk_data.push(0x44);
                             thunk_data.push(0x8B);
                             thunk_data.push(0x08);
@@ -624,10 +624,51 @@ impl Driver {
                         _ => todo!(),
                     }
                 },
+                Type::Pointer(_) => {
+                    match i {
+                        0 => {
+                            // mov rcx, QWORD PTR [rax]       (read i'th argument as a 64-bit value)
+                            thunk_data.push(0x48);
+                            thunk_data.push(0x8B);
+                            thunk_data.push(0x08);
+                        },
+                        1 => {
+                            // mov rdx, QWORD PTR [rax]       (read i'th argument as a 64-bit value)
+                            thunk_data.push(0x48);
+                            thunk_data.push(0x8B);
+                            thunk_data.push(0x10);
+                        },
+                        2 => {
+                            // mov r8, QWORD PTR [rax]       (read i'th argument as a 64-bit value)
+                            thunk_data.push(0x4c);
+                            thunk_data.push(0x8B);
+                            thunk_data.push(0x00);
+                        },
+                        3 => {
+                            // mov r9, QWORD PTR [rax]       (read i'th argument as a 64-bit value)
+                            thunk_data.push(0x4c);
+                            thunk_data.push(0x8B);
+                            thunk_data.push(0x08);
+                        },
+                        _ => {
+                            // mov rax, QWORD PTR [rax]       (read i'th argument as a 64-bit value)
+                            thunk_data.push(0x48);
+                            thunk_data.push(0x8B);
+                            thunk_data.push(0x00);
+
+                            // mov QWORD PTR[rsp + 32 + (i-4)*8]
+                            let offset = (32 + (i-4) * 8) as u8;
+                            thunk_data.push(0x48);
+                            thunk_data.push(0x89);
+                            thunk_data.push(0x44);
+                            thunk_data.push(0x24);
+                            thunk_data.push(offset);
+                        },
+                    }
+                },
                 _ => todo!("parameter type {:?}", func.param_tys[i]),
             }
         }
-
 
         // movabs r10, func
         thunk_data.push(0x49);
@@ -646,9 +687,13 @@ impl Driver {
         thunk_data.push(0x24);
         thunk_data.push(extension + 16);
 
-
         // TODO: large values require passing a pointer as the first parameter
         match func.return_ty {
+            Type::Int { width: IntWidth::W32, .. } => {
+                // mov DWORD PTR [rcx], eax                           (copy return value to the passed in location)
+                thunk_data.push(0x89);
+                thunk_data.push(0x01);
+            },
             Type::Pointer(_) => {
                 // mov QWORD PTR [rcx], rax                           (copy return value to the passed in location)
                 thunk_data.push(0x48);

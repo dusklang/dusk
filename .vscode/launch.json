@@ -20,7 +20,7 @@
                 }
             },
             "args": [
-                "enums.dusk"
+                "extern_mod.dusk"
             ],
             "cwd": "${workspaceFolder}"
         },
