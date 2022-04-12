@@ -5,6 +5,7 @@ use std::ffi::{CStr, CString};
 use std::mem;
 use std::slice;
 use std::fmt::Write;
+use std::cell::{RefCell, RefMut};
 
 use indenter::indented;
 use smallvec::SmallVec;
@@ -297,7 +298,7 @@ impl Value {
     }
 }
 
-struct StackFrame {
+pub struct StackFrame {
     func_ref: FunctionRef,
     block: BlockId,
     pc: usize,
@@ -336,7 +337,6 @@ pub enum InterpMode {
 }
 
 pub struct Interpreter {
-    stack: Vec<StackFrame>,
     statics: HashMap<StaticId, Value>,
     allocations: HashMap<usize, alloc::Layout>,
     pub mode: InterpMode,
@@ -345,7 +345,6 @@ pub struct Interpreter {
 impl Interpreter {
     pub fn new() -> Self {
         Self {
-            stack: Vec::new(),
             statics: HashMap::new(),
             allocations: HashMap::new(),
             mode: InterpMode::CompileTime,
@@ -353,14 +352,18 @@ impl Interpreter {
     }
 }
 
+thread_local! {
+    static INTERP_STACK: RefCell<Vec<StackFrame>> = RefCell::new(Vec::new());
+}
+
 macro_rules! bin_op {
-    ($salf:ident, $args:ident, $conv:ident, $first_ty:ident | $($ty:ident)|+, {$sign:tt}) => {{
-        bin_op!(@preamble $salf, $args, lhs, rhs, ty, final_val);
+    ($salf:ident, $stack:ident, $args:ident, $conv:ident, $first_ty:ident | $($ty:ident)|+, {$sign:tt}) => {{
+        bin_op!(@preamble $salf, $stack, $args, lhs, rhs, ty, final_val);
         bin_op!(@kontinue $salf, ty, lhs, rhs, $conv, $first_ty | $($ty)|+, {$sign}, final_val);
         final_val.expect("Unexpected type for arguments")
     }};
-    ($salf:ident, $args:ident, $conv:ident, $ty:ident, {$sign:tt}) => {{
-        bin_op!(@preamble $salf, $args, lhs, rhs, ty, final_val);
+    ($salf:ident, $stack:ident, $args:ident, $conv:ident, $ty:ident, {$sign:tt}) => {{
+        bin_op!(@preamble $salf, $stack, $args, lhs, rhs, ty, final_val);
         bin_op!(@kontinue $salf, ty, lhs, rhs, $conv, $ty, {$sign}, final_val);
         final_val.expect("Unexpected type for arguments")
     }};
@@ -412,8 +415,8 @@ macro_rules! bin_op {
     (@kontinue $salf:ident, $ty:ident, $lhs:ident, $rhs:ident, $conv:ident, Int, {$sign:tt}, $final_val:ident) => {
         bin_op!(@kontinue $salf, $ty, $lhs, $rhs, $conv, UnsignedInt | SignedInt, {$sign}, $final_val);
     };
-    (@preamble $salf:ident, $args:ident, $lhs:ident, $rhs:ident, $ty:ident, $final_val:ident) => {
-        let frame = $salf.interp.stack.last().unwrap();
+    (@preamble $salf:ident, $stack:ident, $args:ident, $lhs:ident, $rhs:ident, $ty:ident, $final_val:ident) => {
+        let frame = $stack.last().unwrap();
         assert_eq!($args.len(), 2);
         let ($lhs, $rhs) = ($args[0], $args[1]);
         let $ty = $salf.type_of($lhs);
@@ -525,8 +528,8 @@ impl Driver {
     }
 
     #[display_adapter]
-    pub fn stack_trace(&self, f: &mut Formatter) {
-        for (i, frame) in self.interp.stack.iter().rev().enumerate() {
+    pub fn stack_trace(&self, stack: &[StackFrame], f: &mut Formatter) {
+        for (i, frame) in stack.iter().rev().enumerate() {
             let func = function_by_ref(&self.code.mir_code, &frame.func_ref);
             writeln!(f, "{}: {}", i, self.fn_name(func.name))?;
         }
@@ -535,13 +538,16 @@ impl Driver {
 
     pub fn call(&mut self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> Value {
         let frame = self.new_stack_frame(func_ref, arguments, generic_arguments);
-        self.interp.stack.push(frame);
-        loop {
-            if let Some(val) = self.execute_next() {
-                self.interp.stack.pop().unwrap();
-                return val;
+        INTERP_STACK.with(|stack| {
+            stack.borrow_mut().push(frame);
+            loop {
+                // TODO: I don't love the fact that I repeatedly borrow the RefCell here...
+                if let Some(val) = self.execute_next(stack) {
+                    stack.borrow_mut().pop().unwrap();
+                    return val;
+                }
             }
-        }
+        })
     }
     
     pub fn extern_call(&mut self, func_ref: ExternFunctionRef, mut args: Vec<Box<[u8]>>) -> Value {
@@ -744,8 +750,8 @@ impl Driver {
     }
 
     #[display_adapter]
-    fn panic_message(&self, msg: Option<OpId>, f: &mut Formatter) {
-        let frame = self.interp.stack.last().unwrap();
+    fn panic_message(&self, stack: &[StackFrame], msg: Option<OpId>, f: &mut Formatter) {
+        let frame = stack.last().unwrap();
         let msg = msg.map(|msg| frame.results[&msg].as_raw_ptr());
         write!(f, "Userspace panic")?;
         if let Some(mut msg) = msg {
@@ -758,450 +764,458 @@ impl Driver {
             }
         }
         writeln!(f, "\nStack trace:")?;
-        writeln!(indented(f), "{}", self.stack_trace())?;
+        writeln!(indented(f), "{}", self.stack_trace(stack))?;
         Ok(())
     }
 
     /// Execute the next instruction. Iff the instruction is a return, this function returns its `Value`
-    fn execute_next(&mut self) -> Option<Value> {
-        let frame = self.interp.stack.last_mut().unwrap();
-        let next_op = self.code.blocks[frame.block].ops[frame.pc];
-        let val = match self.code.ops[next_op].as_mir_instr().unwrap() {
-            Instr::Void => Value::Nothing,
-            Instr::Const(konst) => Value::from_const(konst, &*self),
-            Instr::Alloca(ty) => {
-                let mut storage = Vec::new();
-                storage.resize(self.size_of(ty), 0);
-                Value::Dynamic(storage.into_boxed_slice())
-            },
-            &Instr::LogicalNot(val) => {
-                let val = frame.results[&val].as_bool();
-                Value::from_bool(!val)
-            },
-            &Instr::Call { ref arguments, ref generic_arguments, func } => {
-                let mut copied_args = Vec::new();
-                copied_args.reserve_exact(arguments.len());
-                for &arg in arguments {
-                    copied_args.push(frame.results[&arg].clone());
-                }
-                let generic_arguments = generic_arguments.clone();
-                self.call(FunctionRef::Id(func), copied_args, generic_arguments)
-            },
-            &Instr::ExternCall { ref arguments, func } => {
-                let mut copied_args = Vec::new();
-                copied_args.reserve_exact(arguments.len());
-                for &arg in arguments {
-                    copied_args.push(frame.results[&arg].as_bytes().to_owned().into_boxed_slice());
-                }
-                self.extern_call(func, copied_args)
-            },
-            &Instr::GenericParam(id) => {
-                Value::from_ty(Type::GenericParam(id))
-            },
-            &Instr::Intrinsic { ref arguments, intr, .. } => {
-                match intr {
-                    Intrinsic::Mult => bin_op!(self, arguments, convert, Int | Float, {*}),
-                    Intrinsic::Div => bin_op!(self, arguments, convert, Int | Float, {/}),
-                    Intrinsic::Mod => bin_op!(self, arguments, convert, Int | Float, {%}),
-                    Intrinsic::Add => bin_op!(self, arguments, convert, Int | Float, {+}),
-                    Intrinsic::Sub => bin_op!(self, arguments, convert, Int | Float, {-}),
-                    Intrinsic::Less => bin_op!(self, arguments, bool_convert, Int | Float, {<}),
-                    Intrinsic::LessOrEq => bin_op!(self, arguments, bool_convert, Int | Float, {<=}),
-                    Intrinsic::Greater => bin_op!(self, arguments, bool_convert, Int | Float, {>}),
-                    Intrinsic::GreaterOrEq => bin_op!(self, arguments, bool_convert, Int | Float, {>=}),
-                    Intrinsic::Eq => {
-                        let ty = self.type_of(arguments[0]);
-                        match ty {
-                            Type::Enum(_) => {
-                                assert_eq!(arguments.len(), 2);
-                                let frame = self.interp.stack.last().unwrap();
-                                let a = &frame.results[&arguments[0]];
-                                let b = &frame.results[&arguments[1]];
-                                let a = a.as_big_int(false);
-                                let b = b.as_big_int(false);
-                                Value::from_bool(a == b)
-                            }
-                            _ => bin_op!(self, arguments, bool_convert, Int | Float | Bool, {==}),
-                        }
-                    },
-                    Intrinsic::NotEq => {
-                        let ty = self.type_of(arguments[0]);
-                        match ty {
-                            Type::Enum(_) => {
-                                assert_eq!(arguments.len(), 2);
-                                let frame = self.interp.stack.last().unwrap();
-                                let a = &frame.results[&arguments[0]];
-                                let b = &frame.results[&arguments[1]];
-                                let a = a.as_big_int(false);
-                                let b = b.as_big_int(false);
-                                Value::from_bool(a != b)
-                            }
-                            _ => bin_op!(self, arguments, bool_convert, Int | Float | Bool, {!=}),
-                        }
-                    },
-                    Intrinsic::BitwiseAnd => bin_op!(self, arguments, convert, Int, {&}),
-                    Intrinsic::BitwiseOr => bin_op!(self, arguments, convert, Int, {|}),
-                    Intrinsic::LogicalNot => panic!("Unexpected logical not intrinsic, should've been replaced by instruction"),
-                    Intrinsic::Neg => {
-                        assert_eq!(arguments.len(), 1);
-                        let frame = self.interp.stack.last().unwrap();
-                        let arg = arguments[0];
-                        let ty =  self.type_of(arg);
-                        let arg = &frame.results[&arg];
-                        match ty {
-                            Type::Int { width, is_signed } => {
-                                Value::from_big_int(-arg.as_big_int(is_signed), width, is_signed, self.arch)
-                            },
-                            Type::Float(width) => match width {
-                                FloatWidth::W32 => Value::from_f32(-arg.as_f32()),
-                                FloatWidth::W64 => Value::from_f64(-arg.as_f64()),
-                            },
-                            _ => panic!("Unexpected type for intrinsic arguments"),
-                        }
-                    },
-                    Intrinsic::Pos => {
-                        assert_eq!(arguments.len(), 1);
-                        frame.results[&arguments[0]].clone()
-                    },
-                    Intrinsic::Panic => {
-                        assert!(arguments.len() <= 1);
-                        panic!("{}", self.panic_message(arguments.first().copied()));
-                    },
-                    Intrinsic::Print => {
-                        let frame = self.interp.stack.last().unwrap();
-                        assert_eq!(arguments.len(), 1);
-                        let id = arguments[0];
-                        let val = &frame.results[&id];
-                        let ty = self.type_of(id);
-                        match ty {
-                            Type::Pointer(_) => unsafe {
-                                let mut ptr = val.as_raw_ptr();
-                                while *ptr != 0 {
-                                    print!("{}", *ptr as char);
-                                    ptr = ptr.offset(1);
-                                }
-                            },
-                            Type::Int { .. } => print!("{}", val.as_u8() as char),
-                            _ => panic!("Unexpected type passed to `print`: {:?}", ty),
-                        }
-                        Value::Nothing 
-                    },
-                    Intrinsic::Malloc => {
-                        assert_eq!(arguments.len(), 1);
-                        assert_eq!(self.arch.pointer_size(), 64);
-                        let size = frame.results[&arguments[0]].as_u64() as usize;
-                        let layout = alloc::Layout::from_size_align(size, 8).unwrap();
-                        let buf = unsafe { alloc::alloc(layout) };
-                        let address: usize = unsafe { mem::transmute(buf) };
-                        self.interp.allocations.insert(address, layout);
-                        Value::from_usize(address)
+    fn execute_next(&mut self, stack_cell: &RefCell<Vec<StackFrame>>) -> Option<Value> {
+        let val = {
+            let mut stack = stack_cell.borrow_mut();
+            let frame = stack.last_mut().unwrap();
+            let next_op = self.code.blocks[frame.block].ops[frame.pc];
+            match self.code.ops[next_op].as_mir_instr().unwrap() {
+                Instr::Void => Value::Nothing,
+                Instr::Const(konst) => Value::from_const(konst, &*self),
+                Instr::Alloca(ty) => {
+                    let mut storage = Vec::new();
+                    storage.resize(self.size_of(ty), 0);
+                    Value::Dynamic(storage.into_boxed_slice())
+                },
+                &Instr::LogicalNot(val) => {
+                    let val = frame.results[&val].as_bool();
+                    Value::from_bool(!val)
+                },
+                &Instr::Call { ref arguments, ref generic_arguments, func } => {
+                    let mut copied_args = Vec::new();
+                    copied_args.reserve_exact(arguments.len());
+                    for &arg in arguments {
+                        copied_args.push(frame.results[&arg].clone());
                     }
-                    Intrinsic::Free => {
-                        assert_eq!(arguments.len(), 1);
-                        assert_eq!(self.arch.pointer_size(), 64);
-                        let ptr = frame.results[&arguments[0]].as_raw_ptr();
-                        let address: usize = unsafe { mem::transmute(ptr) };
-                        let layout = self.interp.allocations.remove(&address).unwrap();
-                        unsafe { alloc::dealloc(ptr, layout) };
-                        Value::Nothing
-                    },
-                    Intrinsic::I8 => Value::from_ty(Type::i8()),
-                    Intrinsic::I16 => Value::from_ty(Type::i16()),
-                    Intrinsic::I32 => Value::from_ty(Type::i32()),
-                    Intrinsic::I64 => Value::from_ty(Type::i64()),
-                    Intrinsic::Isize => Value::from_ty(Type::isize()),
-                    Intrinsic::U8 => Value::from_ty(Type::u8()),
-                    Intrinsic::U16 => Value::from_ty(Type::u16()),
-                    Intrinsic::U32 => Value::from_ty(Type::u32()),
-                    Intrinsic::U64 => Value::from_ty(Type::u64()),
-                    Intrinsic::Usize => Value::from_ty(Type::usize()),
-                    Intrinsic::F32 => Value::from_ty(Type::f32()),
-                    Intrinsic::F64 => Value::from_ty(Type::f64()),
-                    Intrinsic::Never => Value::from_ty(Type::Never),
-                    Intrinsic::Bool => Value::from_ty(Type::Bool),
-                    Intrinsic::Void => Value::from_ty(Type::Void),
-                    Intrinsic::Ty => Value::from_ty(Type::Ty),
-                    Intrinsic::Module => Value::from_ty(Type::Mod),
-                    Intrinsic::PrintType => {
-                        let frame = self.interp.stack.last().unwrap();
-                        assert_eq!(arguments.len(), 1);
-                        let ty = frame.results[&arguments[0]].as_ty();
-                        let ty = frame.canonicalize_type(&ty);
-                        print!("{:?}", ty);
-                        Value::Nothing
-                    },
-                    Intrinsic::AlignOf => {
-                        let frame = self.interp.stack.last().unwrap();
-                        assert_eq!(arguments.len(), 1);
-                        let ty = frame.results[&arguments[0]].as_ty();
-                        let ty = frame.canonicalize_type(&ty);
-                        Value::from_usize(self.align_of(&ty))
-                    },
-                    Intrinsic::StrideOf => {
-                        let frame = self.interp.stack.last().unwrap();
-                        assert_eq!(arguments.len(), 1);
-                        let ty = frame.results[&arguments[0]].as_ty();
-                        let ty = frame.canonicalize_type(&ty);
-                        Value::from_usize(self.stride_of(&ty))
-                    },
-                    Intrinsic::SizeOf => {
-                        let frame = self.interp.stack.last().unwrap();
-                        assert_eq!(arguments.len(), 1);
-                        let ty = frame.results[&arguments[0]].as_ty();
-                        let ty = frame.canonicalize_type(&ty);
-                        Value::from_usize(self.size_of(&ty))
-                    },
-                    Intrinsic::OffsetOf => {
-                        assert_eq!(arguments.len(), 2);
-                        let ty = frame.results[&arguments[0]].as_ty();
-                        let field_name = unsafe { CStr::from_ptr(frame.results[&arguments[1]].as_raw_ptr() as *const _) };
-                        let field_name = self.interner.get_or_intern(field_name.to_str().unwrap());
-                        let mut offset = None;
-                        match ty {
-                            Type::Struct(strukt) => {
-                                for (index, field) in self.code.hir_code.structs[strukt].fields.iter().enumerate() {
-                                    if field_name == field.name {
-                                        offset = Some(self.code.mir_code.structs[&strukt].layout.field_offsets[index]);
-                                        break;
+                    let generic_arguments = generic_arguments.clone();
+                    // Stop immutably borrowing the stack, so it can be borrowed again in call()
+                    std::mem::drop(stack);
+                    self.call(FunctionRef::Id(func), copied_args, generic_arguments)
+                },
+                &Instr::ExternCall { ref arguments, func } => {
+                    let mut copied_args = Vec::new();
+                    copied_args.reserve_exact(arguments.len());
+                    for &arg in arguments {
+                        copied_args.push(frame.results[&arg].as_bytes().to_owned().into_boxed_slice());
+                    }
+                    // Stop immutably borrowing the stack, because there may come a time where extern functions can transparently call into the interpreter
+                    std::mem::drop(stack);
+                    self.extern_call(func, copied_args)
+                },
+                &Instr::GenericParam(id) => {
+                    Value::from_ty(Type::GenericParam(id))
+                },
+                &Instr::Intrinsic { ref arguments, intr, .. } => {
+                    match intr {
+                        Intrinsic::Mult => bin_op!(self, stack, arguments, convert, Int | Float, {*}),
+                        Intrinsic::Div => bin_op!(self, stack, arguments, convert, Int | Float, {/}),
+                        Intrinsic::Mod => bin_op!(self, stack, arguments, convert, Int | Float, {%}),
+                        Intrinsic::Add => bin_op!(self, stack, arguments, convert, Int | Float, {+}),
+                        Intrinsic::Sub => bin_op!(self, stack, arguments, convert, Int | Float, {-}),
+                        Intrinsic::Less => bin_op!(self, stack, arguments, bool_convert, Int | Float, {<}),
+                        Intrinsic::LessOrEq => bin_op!(self, stack, arguments, bool_convert, Int | Float, {<=}),
+                        Intrinsic::Greater => bin_op!(self, stack, arguments, bool_convert, Int | Float, {>}),
+                        Intrinsic::GreaterOrEq => bin_op!(self, stack, arguments, bool_convert, Int | Float, {>=}),
+                        Intrinsic::Eq => {
+                            let ty = self.type_of(arguments[0]);
+                            match ty {
+                                Type::Enum(_) => {
+                                    assert_eq!(arguments.len(), 2);
+                                    let frame = stack.last().unwrap();
+                                    let a = &frame.results[&arguments[0]];
+                                    let b = &frame.results[&arguments[1]];
+                                    let a = a.as_big_int(false);
+                                    let b = b.as_big_int(false);
+                                    Value::from_bool(a == b)
+                                }
+                                _ => bin_op!(self, stack, arguments, bool_convert, Int | Float | Bool, {==}),
+                            }
+                        },
+                        Intrinsic::NotEq => {
+                            let ty = self.type_of(arguments[0]);
+                            match ty {
+                                Type::Enum(_) => {
+                                    assert_eq!(arguments.len(), 2);
+                                    let frame = stack.last().unwrap();
+                                    let a = &frame.results[&arguments[0]];
+                                    let b = &frame.results[&arguments[1]];
+                                    let a = a.as_big_int(false);
+                                    let b = b.as_big_int(false);
+                                    Value::from_bool(a != b)
+                                }
+                                _ => bin_op!(self, stack, arguments, bool_convert, Int | Float | Bool, {!=}),
+                            }
+                        },
+                        Intrinsic::BitwiseAnd => bin_op!(self, stack, arguments, convert, Int, {&}),
+                        Intrinsic::BitwiseOr => bin_op!(self, stack, arguments, convert, Int, {|}),
+                        Intrinsic::LogicalNot => panic!("Unexpected logical not intrinsic, should've been replaced by instruction"),
+                        Intrinsic::Neg => {
+                            assert_eq!(arguments.len(), 1);
+                            let frame = stack.last().unwrap();
+                            let arg = arguments[0];
+                            let ty =  self.type_of(arg);
+                            let arg = &frame.results[&arg];
+                            match ty {
+                                Type::Int { width, is_signed } => {
+                                    Value::from_big_int(-arg.as_big_int(is_signed), width, is_signed, self.arch)
+                                },
+                                Type::Float(width) => match width {
+                                    FloatWidth::W32 => Value::from_f32(-arg.as_f32()),
+                                    FloatWidth::W64 => Value::from_f64(-arg.as_f64()),
+                                },
+                                _ => panic!("Unexpected type for intrinsic arguments"),
+                            }
+                        },
+                        Intrinsic::Pos => {
+                            assert_eq!(arguments.len(), 1);
+                            frame.results[&arguments[0]].clone()
+                        },
+                        Intrinsic::Panic => {
+                            assert!(arguments.len() <= 1);
+                            panic!("{}", self.panic_message(&mut stack, arguments.first().copied()));
+                        },
+                        Intrinsic::Print => {
+                            let frame = stack.last().unwrap();
+                            assert_eq!(arguments.len(), 1);
+                            let id = arguments[0];
+                            let val = &frame.results[&id];
+                            let ty = self.type_of(id);
+                            match ty {
+                                Type::Pointer(_) => unsafe {
+                                    let mut ptr = val.as_raw_ptr();
+                                    while *ptr != 0 {
+                                        print!("{}", *ptr as char);
+                                        ptr = ptr.offset(1);
+                                    }
+                                },
+                                Type::Int { .. } => print!("{}", val.as_u8() as char),
+                                _ => panic!("Unexpected type passed to `print`: {:?}", ty),
+                            }
+                            Value::Nothing 
+                        },
+                        Intrinsic::Malloc => {
+                            assert_eq!(arguments.len(), 1);
+                            assert_eq!(self.arch.pointer_size(), 64);
+                            let size = frame.results[&arguments[0]].as_u64() as usize;
+                            let layout = alloc::Layout::from_size_align(size, 8).unwrap();
+                            let buf = unsafe { alloc::alloc(layout) };
+                            let address: usize = unsafe { mem::transmute(buf) };
+                            self.interp.allocations.insert(address, layout);
+                            Value::from_usize(address)
+                        }
+                        Intrinsic::Free => {
+                            assert_eq!(arguments.len(), 1);
+                            assert_eq!(self.arch.pointer_size(), 64);
+                            let ptr = frame.results[&arguments[0]].as_raw_ptr();
+                            let address: usize = unsafe { mem::transmute(ptr) };
+                            let layout = self.interp.allocations.remove(&address).unwrap();
+                            unsafe { alloc::dealloc(ptr, layout) };
+                            Value::Nothing
+                        },
+                        Intrinsic::I8 => Value::from_ty(Type::i8()),
+                        Intrinsic::I16 => Value::from_ty(Type::i16()),
+                        Intrinsic::I32 => Value::from_ty(Type::i32()),
+                        Intrinsic::I64 => Value::from_ty(Type::i64()),
+                        Intrinsic::Isize => Value::from_ty(Type::isize()),
+                        Intrinsic::U8 => Value::from_ty(Type::u8()),
+                        Intrinsic::U16 => Value::from_ty(Type::u16()),
+                        Intrinsic::U32 => Value::from_ty(Type::u32()),
+                        Intrinsic::U64 => Value::from_ty(Type::u64()),
+                        Intrinsic::Usize => Value::from_ty(Type::usize()),
+                        Intrinsic::F32 => Value::from_ty(Type::f32()),
+                        Intrinsic::F64 => Value::from_ty(Type::f64()),
+                        Intrinsic::Never => Value::from_ty(Type::Never),
+                        Intrinsic::Bool => Value::from_ty(Type::Bool),
+                        Intrinsic::Void => Value::from_ty(Type::Void),
+                        Intrinsic::Ty => Value::from_ty(Type::Ty),
+                        Intrinsic::Module => Value::from_ty(Type::Mod),
+                        Intrinsic::PrintType => {
+                            let frame = stack.last().unwrap();
+                            assert_eq!(arguments.len(), 1);
+                            let ty = frame.results[&arguments[0]].as_ty();
+                            let ty = frame.canonicalize_type(&ty);
+                            print!("{:?}", ty);
+                            Value::Nothing
+                        },
+                        Intrinsic::AlignOf => {
+                            let frame = stack.last().unwrap();
+                            assert_eq!(arguments.len(), 1);
+                            let ty = frame.results[&arguments[0]].as_ty();
+                            let ty = frame.canonicalize_type(&ty);
+                            Value::from_usize(self.align_of(&ty))
+                        },
+                        Intrinsic::StrideOf => {
+                            let frame = stack.last().unwrap();
+                            assert_eq!(arguments.len(), 1);
+                            let ty = frame.results[&arguments[0]].as_ty();
+                            let ty = frame.canonicalize_type(&ty);
+                            Value::from_usize(self.stride_of(&ty))
+                        },
+                        Intrinsic::SizeOf => {
+                            let frame = stack.last().unwrap();
+                            assert_eq!(arguments.len(), 1);
+                            let ty = frame.results[&arguments[0]].as_ty();
+                            let ty = frame.canonicalize_type(&ty);
+                            Value::from_usize(self.size_of(&ty))
+                        },
+                        Intrinsic::OffsetOf => {
+                            assert_eq!(arguments.len(), 2);
+                            let ty = frame.results[&arguments[0]].as_ty();
+                            let field_name = unsafe { CStr::from_ptr(frame.results[&arguments[1]].as_raw_ptr() as *const _) };
+                            let field_name = self.interner.get_or_intern(field_name.to_str().unwrap());
+                            let mut offset = None;
+                            match ty {
+                                Type::Struct(strukt) => {
+                                    for (index, field) in self.code.hir_code.structs[strukt].fields.iter().enumerate() {
+                                        if field_name == field.name {
+                                            offset = Some(self.code.mir_code.structs[&strukt].layout.field_offsets[index]);
+                                            break;
+                                        }
                                     }
                                 }
+                                _ => panic!("Can't get field offset on a non-struct type"),
                             }
-                            _ => panic!("Can't get field offset on a non-struct type"),
-                        }
-                        let offset = offset.expect("No such field name in call to offset_of");
-                        Value::from_usize(offset)
-                    },
-                    _ => panic!("Call to unimplemented intrinsic {:?}", intr),
-                }
-            },
-            &Instr::Reinterpret(instr, _) => frame.results[&instr].clone(),
-            &Instr::Truncate(instr, ref ty) => {
-                let frame = self.interp.stack.last().unwrap();
-                let bytes = frame.results[&instr].as_bytes();
-                let new_size = self.size_of(ty);
-                Value::from_bytes(&bytes[0..new_size])
-            },
-            &Instr::SignExtend(val, ref dest_ty) => {
-                let frame = self.interp.stack.last().unwrap();
-                let src_ty = &self.type_of(val);
-                let val = &frame.results[&val];
-                match (src_ty, dest_ty) {
-                    (
-                        &Type::Int { is_signed: src_is_signed, .. },
-                        &Type::Int { width: dest_width, is_signed: dest_is_signed }
-                    ) => Value::from_big_int(val.as_big_int(src_is_signed), dest_width, dest_is_signed, self.arch),
-                    (_, _) => panic!("Invalid operand types to sign extension")
-                }
-            },
-            &Instr::ZeroExtend(val, ref dest_ty) => {
-                let frame = self.interp.stack.last().unwrap();
-                let src_ty = &self.type_of(val);
-                let val = &frame.results[&val];
-                match (src_ty, dest_ty) {
-                    (
-                        &Type::Int { is_signed: src_is_signed, .. },
-                        &Type::Int { width: dest_width, is_signed: dest_is_signed }
-                    ) => Value::from_big_int(val.as_big_int(src_is_signed), dest_width, dest_is_signed, self.arch),
-                    (_, _) => panic!("Invalid operand types to zero extension")
-                }
-            },
-            &Instr::FloatCast(instr, ref ty) => {
-                let frame = self.interp.stack.last().unwrap();
-                let val = &frame.results[&instr];
-                match (val.as_bytes().len(), self.size_of(ty)) {
-                    (x, y) if x == y => val.clone(),
-                    (4, 8) => Value::from_f64(val.as_f32() as f64),
-                    (8, 4) => Value::from_f32(val.as_f64() as f32),
-                    (4, _) | (8, _) => panic!("Unexpected destination float cast type size"),
-                    (_, 4) | (_, 8) => panic!("Unexpected source float cast type size"),
-                    (_, _) => panic!("Unexpected float cast type sizes"),
-                }
-            },
-            &Instr::FloatToInt(instr, ref dest_ty) => {
-                let frame = self.interp.stack.last().unwrap();
-                let val = &frame.results[&instr];
-                let src_ty = self.type_of(instr);
-                let src_size = self.size_of(&src_ty);
+                            let offset = offset.expect("No such field name in call to offset_of");
+                            Value::from_usize(offset)
+                        },
+                        _ => panic!("Call to unimplemented intrinsic {:?}", intr),
+                    }
+                },
+                &Instr::Reinterpret(instr, _) => frame.results[&instr].clone(),
+                &Instr::Truncate(instr, ref ty) => {
+                    let frame = stack.last().unwrap();
+                    let bytes = frame.results[&instr].as_bytes();
+                    let new_size = self.size_of(ty);
+                    Value::from_bytes(&bytes[0..new_size])
+                },
+                &Instr::SignExtend(val, ref dest_ty) => {
+                    let frame = stack.last().unwrap();
+                    let src_ty = &self.type_of(val);
+                    let val = &frame.results[&val];
+                    match (src_ty, dest_ty) {
+                        (
+                            &Type::Int { is_signed: src_is_signed, .. },
+                            &Type::Int { width: dest_width, is_signed: dest_is_signed }
+                        ) => Value::from_big_int(val.as_big_int(src_is_signed), dest_width, dest_is_signed, self.arch),
+                        (_, _) => panic!("Invalid operand types to sign extension")
+                    }
+                },
+                &Instr::ZeroExtend(val, ref dest_ty) => {
+                    let frame = stack.last().unwrap();
+                    let src_ty = &self.type_of(val);
+                    let val = &frame.results[&val];
+                    match (src_ty, dest_ty) {
+                        (
+                            &Type::Int { is_signed: src_is_signed, .. },
+                            &Type::Int { width: dest_width, is_signed: dest_is_signed }
+                        ) => Value::from_big_int(val.as_big_int(src_is_signed), dest_width, dest_is_signed, self.arch),
+                        (_, _) => panic!("Invalid operand types to zero extension")
+                    }
+                },
+                &Instr::FloatCast(instr, ref ty) => {
+                    let frame = stack.last().unwrap();
+                    let val = &frame.results[&instr];
+                    match (val.as_bytes().len(), self.size_of(ty)) {
+                        (x, y) if x == y => val.clone(),
+                        (4, 8) => Value::from_f64(val.as_f32() as f64),
+                        (8, 4) => Value::from_f32(val.as_f64() as f32),
+                        (4, _) | (8, _) => panic!("Unexpected destination float cast type size"),
+                        (_, 4) | (_, 8) => panic!("Unexpected source float cast type size"),
+                        (_, _) => panic!("Unexpected float cast type sizes"),
+                    }
+                },
+                &Instr::FloatToInt(instr, ref dest_ty) => {
+                    let frame = stack.last().unwrap();
+                    let val = &frame.results[&instr];
+                    let src_ty = self.type_of(instr);
+                    let src_size = self.size_of(&src_ty);
 
-                match dest_ty {
-                    &Type::Int { width, is_signed } => {
-                        let big_int = if is_signed {
-                            let int = match src_size * 8 {
-                                32 => val.as_f32() as i64,
-                                64 => val.as_f64() as i64,
-                                _ => panic!("Invalid float size"),
+                    match dest_ty {
+                        &Type::Int { width, is_signed } => {
+                            let big_int = if is_signed {
+                                let int = match src_size * 8 {
+                                    32 => val.as_f32() as i64,
+                                    64 => val.as_f64() as i64,
+                                    _ => panic!("Invalid float size"),
+                                };
+                                BigInt::from(int)
+                            } else {
+                                let int = match src_size * 8 {
+                                    32 => val.as_f32() as u64,
+                                    64 => val.as_f64() as u64,
+                                    _ => panic!("Invalid float size"),
+                                };
+                                BigInt::from(int)
                             };
-                            BigInt::from(int)
-                        } else {
-                            let int = match src_size * 8 {
-                                32 => val.as_f32() as u64,
-                                64 => val.as_f64() as u64,
-                                _ => panic!("Invalid float size"),
-                            };
-                            BigInt::from(int)
-                        };
-                        Value::from_big_int(big_int, width, is_signed, self.arch)
-                    },
-                    _ => panic!("Invalid destination type in float to int cast: {:?}", dest_ty),
-                }
-            }
-            &Instr::IntToFloat(instr, ref dest_ty) => {
-                let frame = self.interp.stack.last().unwrap();
-                let val = &frame.results[&instr];
-                let src_ty = &self.type_of(instr);
-                let dest_size = self.size_of(dest_ty);
-                match src_ty {
-                    &Type::Int { is_signed, .. } => {
-                        let big_int = val.as_big_int(is_signed);
-                        if is_signed {
-                            let int: i64 = big_int.try_into().unwrap();
-                            match dest_size * 8 {
-                                32 => Value::from_f32(int as _),
-                                64 => Value::from_f64(int as _),
-                                _ => panic!("Invalid destination size in int to float cast"),
-                            }
-                        } else {
-                            let int: u64 = big_int.try_into().unwrap();
-                            match dest_size * 8 {
-                                32 => Value::from_f32(int as _),
-                                64 => Value::from_f64(int as _),
-                                _ => panic!("Invalid destination size in int to float cast"),
-                            }
-                        }
-                    },
-                    _ => panic!("Invalid source type in int to float cast: {:?}", src_ty),
-                }
-            }
-            &Instr::Load(location) => {
-                let frame = self.interp.stack.last().unwrap();
-                let op = self.code.blocks[frame.block].ops[frame.pc];
-                let ty = self.type_of(op);
-                let ty = frame.canonicalize_type(&ty);
-                let size = self.size_of(&ty);
-                let frame = self.interp.stack.last_mut().unwrap();
-                frame.results[&location].load(size)
-            },
-            &Instr::Store { location, value } => {
-                let val = frame.results[&value].clone();
-                let result = frame.results.entry(location).or_insert(Value::Nothing);
-                result.store(val);
-                Value::Nothing
-            },
-            &Instr::AddressOfStatic(statik) => {
-                if let InterpMode::CompileTime = self.interp.mode {
-                    panic!("Can't access static at compile time!");
-                }
-                let static_value = Value::from_const(&self.code.mir_code.statics[statik].val, &*self);
-                let statik = self.interp.statics.entry(statik)
-                    .or_insert(static_value);
-                Value::from_usize(unsafe { mem::transmute(statik.as_bytes().as_ptr()) })
-            },
-            &Instr::Pointer { op, is_mut } => {
-                Value::from_ty(frame.results[&op].as_ty().clone().ptr_with_mut(is_mut))
-            },
-            &Instr::Struct { ref fields, id } => {
-                if !self.code.mir_code.structs.contains_key(&id) {
-                    let mut field_tys = SmallVec::new();
-                    for &field in fields {
-                        field_tys.push(frame.results[&field].as_ty().clone());
+                            Value::from_big_int(big_int, width, is_signed, self.arch)
+                        },
+                        _ => panic!("Invalid destination type in float to int cast: {:?}", dest_ty),
                     }
-                    let layout = self.layout_struct(&field_tys);
-                    self.code.mir_code.structs.insert(
-                        id,
-                        Struct {
-                            field_tys,
+                }
+                &Instr::IntToFloat(instr, ref dest_ty) => {
+                    let frame = stack.last().unwrap();
+                    let val = &frame.results[&instr];
+                    let src_ty = &self.type_of(instr);
+                    let dest_size = self.size_of(dest_ty);
+                    match src_ty {
+                        &Type::Int { is_signed, .. } => {
+                            let big_int = val.as_big_int(is_signed);
+                            if is_signed {
+                                let int: i64 = big_int.try_into().unwrap();
+                                match dest_size * 8 {
+                                    32 => Value::from_f32(int as _),
+                                    64 => Value::from_f64(int as _),
+                                    _ => panic!("Invalid destination size in int to float cast"),
+                                }
+                            } else {
+                                let int: u64 = big_int.try_into().unwrap();
+                                match dest_size * 8 {
+                                    32 => Value::from_f32(int as _),
+                                    64 => Value::from_f64(int as _),
+                                    _ => panic!("Invalid destination size in int to float cast"),
+                                }
+                            }
+                        },
+                        _ => panic!("Invalid source type in int to float cast: {:?}", src_ty),
+                    }
+                }
+                &Instr::Load(location) => {
+                    let frame = stack.last().unwrap();
+                    let op = self.code.blocks[frame.block].ops[frame.pc];
+                    let ty = self.type_of(op);
+                    let ty = frame.canonicalize_type(&ty);
+                    let size = self.size_of(&ty);
+                    let frame = stack.last_mut().unwrap();
+                    frame.results[&location].load(size)
+                },
+                &Instr::Store { location, value } => {
+                    let val = frame.results[&value].clone();
+                    let result = frame.results.entry(location).or_insert(Value::Nothing);
+                    result.store(val);
+                    Value::Nothing
+                },
+                &Instr::AddressOfStatic(statik) => {
+                    if let InterpMode::CompileTime = self.interp.mode {
+                        panic!("Can't access static at compile time!");
+                    }
+                    let static_value = Value::from_const(&self.code.mir_code.statics[statik].val, &*self);
+                    let statik = self.interp.statics.entry(statik)
+                        .or_insert(static_value);
+                    Value::from_usize(unsafe { mem::transmute(statik.as_bytes().as_ptr()) })
+                },
+                &Instr::Pointer { op, is_mut } => {
+                    Value::from_ty(frame.results[&op].as_ty().clone().ptr_with_mut(is_mut))
+                },
+                &Instr::Struct { ref fields, id } => {
+                    if !self.code.mir_code.structs.contains_key(&id) {
+                        let mut field_tys = SmallVec::new();
+                        for &field in fields {
+                            field_tys.push(frame.results[&field].as_ty().clone());
+                        }
+                        let layout = self.layout_struct(&field_tys);
+                        self.code.mir_code.structs.insert(
+                            id,
+                            Struct {
+                                field_tys,
+                                layout,
+                            }
+                        );
+                    }
+                    Value::from_ty(Type::Struct(id))
+                },
+                &Instr::Enum { ref variants, id } => {
+                    if !self.code.mir_code.enums.contains_key(&id) {
+                        let mut variant_tys = Vec::new();
+                        for &variant in variants {
+                            variant_tys.push(frame.results[&variant].as_ty().clone());
+                        }
+                        let layout = self.layout_enum(&variant_tys);
+                        self.code.mir_code.enums.insert(
+                            id,
                             layout,
-                        }
-                    );
-                }
-                Value::from_ty(Type::Struct(id))
-            },
-            &Instr::Enum { ref variants, id } => {
-                if !self.code.mir_code.enums.contains_key(&id) {
-                    let mut variant_tys = Vec::new();
-                    for &variant in variants {
-                        variant_tys.push(frame.results[&variant].as_ty().clone());
+                        );
                     }
-                    let layout = self.layout_enum(&variant_tys);
-                    self.code.mir_code.enums.insert(
+                    Value::from_ty(Type::Enum(id))
+                }
+                &Instr::StructLit { ref fields, id } => {
+                    let frame = stack.last().unwrap();
+                    self.eval_struct_lit(
                         id,
-                        layout,
-                    );
-                }
-                Value::from_ty(Type::Enum(id))
-            }
-            &Instr::StructLit { ref fields, id } => {
-                let frame = self.interp.stack.last().unwrap();
-                self.eval_struct_lit(
-                    id,
-                    fields.iter()
-                        .map(|&instr| frame.results[&instr].clone())
-                )
-            },
-            &Instr::Ret(instr) => {
-                let val = frame.results.entry(instr).or_insert_with(|| panic!("tried to return instr {}, which has no value", instr.index()));
-                let val = mem::replace(val, Value::Nothing);
-                return Some(val)
-            },
-            &Instr::Br(bb) => {
-                frame.branch_to(bb);
-                return None
-            },
-            &Instr::CondBr { condition, true_bb, false_bb } => {
-                let condition = frame.results[&condition].as_bool();
-                let branch = if condition { true_bb } else { false_bb };
-                frame.branch_to(branch);
-                return None
-            },
-            &Instr::SwitchBr { scrutinee, ref cases, catch_all_bb } => {
-                let scrutinee = frame.results[&scrutinee].as_u32();
-                for case in cases {
-                    let val = Value::from_const(&case.value, self).as_u32();
-                    let frame = self.interp.stack.last_mut().unwrap();
-                    if val == scrutinee {
-                        frame.branch_to(case.bb);
-                        return None
+                        fields.iter()
+                            .map(|&instr| frame.results[&instr].clone())
+                    )
+                },
+                &Instr::Ret(instr) => {
+                    let val = frame.results.entry(instr).or_insert_with(|| panic!("tried to return instr {}, which has no value", instr.index()));
+                    let val = mem::replace(val, Value::Nothing);
+                    return Some(val)
+                },
+                &Instr::Br(bb) => {
+                    frame.branch_to(bb);
+                    return None
+                },
+                &Instr::CondBr { condition, true_bb, false_bb } => {
+                    let condition = frame.results[&condition].as_bool();
+                    let branch = if condition { true_bb } else { false_bb };
+                    frame.branch_to(branch);
+                    return None
+                },
+                &Instr::SwitchBr { scrutinee, ref cases, catch_all_bb } => {
+                    let scrutinee = frame.results[&scrutinee].as_u32();
+                    for case in cases {
+                        let val = Value::from_const(&case.value, self).as_u32();
+                        let frame = stack.last_mut().unwrap();
+                        if val == scrutinee {
+                            frame.branch_to(case.bb);
+                            return None
+                        }
                     }
-                }
-                let frame = self.interp.stack.last_mut().unwrap();
-                frame.branch_to(catch_all_bb);
-                return None
-            },
-            &Instr::Variant { enuum, index, payload } => {
-                let payload = frame.results[&payload].clone();
-                Value::from_variant(self, enuum, index, payload)
-            },
-            &Instr::DiscriminantAccess { val } => {
-                let enuum = frame.results[&val].as_enum();
-                Value::from_u32(enuum.discriminant)
-            },
-            &Instr::DirectFieldAccess { val, index } => {
-                let frame = self.interp.stack.last().unwrap();
-                let bytes = frame.results[&val].as_bytes();
-                let strukt = match self.type_of(val) {
-                    Type::Struct(strukt) => strukt,
-                    _ => panic!("Can't directly get field of non-struct"),
-                };
-                let strukt = &self.code.mir_code.structs[&strukt];
-                let ty = strukt.field_tys[index].clone();
-                let size = self.size_of(&ty);
-                let offset = strukt.layout.field_offsets[index];
-                Value::from_bytes(&bytes[offset..(offset + size)])
-            },
-            &Instr::IndirectFieldAccess { val, index } => {
-                let addr = frame.results[&val].as_usize();
-                let base_ty = self.type_of(val).deref().unwrap().ty;
-                let strukt = match base_ty {
-                    Type::Struct(strukt) => strukt,
-                    _ => panic!("Can't directly get field of non-struct"),
-                };
-                let offset = self.code.mir_code.structs[&strukt].layout.field_offsets[index];
-                Value::from_usize(addr + offset)
-            },
-            Instr::Parameter(_) => panic!("Invalid parameter instruction in the middle of a function!"),
+                    let frame = stack.last_mut().unwrap();
+                    frame.branch_to(catch_all_bb);
+                    return None
+                },
+                &Instr::Variant { enuum, index, payload } => {
+                    let payload = frame.results[&payload].clone();
+                    Value::from_variant(self, enuum, index, payload)
+                },
+                &Instr::DiscriminantAccess { val } => {
+                    let enuum = frame.results[&val].as_enum();
+                    Value::from_u32(enuum.discriminant)
+                },
+                &Instr::DirectFieldAccess { val, index } => {
+                    let frame = stack.last().unwrap();
+                    let bytes = frame.results[&val].as_bytes();
+                    let strukt = match self.type_of(val) {
+                        Type::Struct(strukt) => strukt,
+                        _ => panic!("Can't directly get field of non-struct"),
+                    };
+                    let strukt = &self.code.mir_code.structs[&strukt];
+                    let ty = strukt.field_tys[index].clone();
+                    let size = self.size_of(&ty);
+                    let offset = strukt.layout.field_offsets[index];
+                    Value::from_bytes(&bytes[offset..(offset + size)])
+                },
+                &Instr::IndirectFieldAccess { val, index } => {
+                    let addr = frame.results[&val].as_usize();
+                    let base_ty = self.type_of(val).deref().unwrap().ty;
+                    let strukt = match base_ty {
+                        Type::Struct(strukt) => strukt,
+                        _ => panic!("Can't directly get field of non-struct"),
+                    };
+                    let offset = self.code.mir_code.structs[&strukt].layout.field_offsets[index];
+                    Value::from_usize(addr + offset)
+                },
+                Instr::Parameter(_) => panic!("Invalid parameter instruction in the middle of a function!"),
+            }
         };
 
-        let frame = self.interp.stack.last_mut().unwrap();
+        let mut stack = stack_cell.borrow_mut();
+        let frame = stack.last_mut().unwrap();
         let op = self.code.blocks[frame.block].ops[frame.pc];
         frame.results.insert(op, val);
         frame.pc += 1;
