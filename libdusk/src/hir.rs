@@ -15,6 +15,7 @@ use crate::driver::Driver;
 use crate::index_vec::*;
 use crate::builder::{BinOp, UnOp};
 use crate::source_info::ToSourceRange;
+use crate::debug::{self, Message as DvdMessage};
 
 use dusk_proc_macros::*;
 
@@ -136,6 +137,8 @@ impl Driver {
         self.code.hir_code.expr_to_items.push_at(expr_id, item_id);
         self.code.hir_code.source_ranges.push_at(item_id, range);
 
+        debug::send(|| DvdMessage::DidAddExpr { id: expr_id, item_id, text: None });
+
         expr_id
     }
 
@@ -152,6 +155,8 @@ impl Driver {
         self.code.hir_code.decl_to_items.push_at(decl_id, item_id);
 
         self.code.hir_code.source_ranges.push_at(item_id, range);
+
+        debug::send(|| DvdMessage::DidAddDecl { id: decl_id, item_id, text: None });
 
         decl_id
     }

@@ -10,6 +10,7 @@ use libdusk::source_info::SourceMap;
 use libdusk::interpreter::InterpMode;
 use libdusk::mir::FunctionRef;
 use libdusk::error::Error;
+use libdusk::debug::{self, Message as DvdMessage};
 
 #[repr(u8)]
 #[derive(ArgEnum, Copy, Clone, Debug)]
@@ -53,6 +54,9 @@ struct Opt {
 fn main() {
     let opt = Opt::parse();
 
+    debug::connect();
+    debug::send(|| DvdMessage::WillBegin);
+
     let mut src_map = SourceMap::new();
     src_map.add_file(opt.input).unwrap();
     let mut driver = Driver::new(src_map, Arch::X86_64, opt.run_refiner);
@@ -72,13 +76,17 @@ fn main() {
     driver.parse();
 
     begin_phase!(Tir);
+    debug::send(|| DvdMessage::WillInitializeTir);
     driver.initialize_tir();
+    debug::send(|| DvdMessage::DidInitializeTir);
 
 
     begin_phase!(Typecheck);
     let mut tp = driver.get_real_type_provider(opt.output_tc_diff);
     while let Some(units) = driver.build_more_tir(opt.tir_output) {
+        debug::send(|| DvdMessage::WillTypeCheckSet);
         driver.type_check(&units, &mut tp);
+        debug::send(|| DvdMessage::DidTypeCheckSet);
         driver.flush_errors();
     }
 

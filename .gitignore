@@ -34,3 +34,6 @@ Temporary Items
 # Node stuff
 **/node_modules/*
 **/out/*
+
+# ABS stuff
+**/abs/*

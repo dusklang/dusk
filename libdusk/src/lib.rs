@@ -18,6 +18,7 @@ pub mod mir;
 pub mod driver;
 pub mod interpreter;
 pub mod error;
+pub mod debug;
 
 #[derive(ArgEnum, Debug, Copy, Clone)]
 pub enum TirGraphOutput {

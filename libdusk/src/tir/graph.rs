@@ -15,10 +15,11 @@ use dire::hir::{self, ItemId, VOID_EXPR_ITEM};
 use crate::index_vec::*;
 use crate::driver::Driver;
 use crate::TirGraphOutput;
+use crate::debug::{self, Message as DvdMessage};
 
 use dusk_proc_macros::*;
 
-define_index_type!(struct CompId = u32;);
+define_index_type!(pub struct CompId = u32;);
 
 #[derive(Debug, Default)]
 pub struct Graph {
@@ -119,6 +120,8 @@ impl Graph {
         
         self.dependees[a].push(b);
         self.dependers[b].push(a);
+
+        debug::send(|| DvdMessage::DidAddTirType1Dependency { depender: a, dependee: b });
     }
 
     /// a must either be in the same unit as b or a later unit, but if they are in the same unit, a must have a higher level than b
@@ -126,6 +129,8 @@ impl Graph {
         self.t2_dependees[a].push(b);
         let a_comp = self.item_to_components[a];
         self.transfer_item_dep_to_component(a_comp, b, ComponentRelation::TYPE_2_3_FORWARD, ComponentRelation::TYPE_2_3_BACKWARD);
+
+        debug::send(|| DvdMessage::DidAddTirType2Dependency { depender: a, dependee: b });
     }
 
     /// a must either be in the same unit as b or a later unit, but their levels are independent
@@ -133,6 +138,8 @@ impl Graph {
         self.t3_dependees[a].push(b);
         let a_comp = self.item_to_components[a];
         self.transfer_item_dep_to_component(a_comp, b, ComponentRelation::TYPE_2_3_FORWARD, ComponentRelation::TYPE_2_3_BACKWARD);
+
+        debug::send(|| DvdMessage::DidAddTirType3Dependency { depender: a, dependee: b });
     }
 
     /// a must be in an later unit than b, but their levels are independent
@@ -140,9 +147,11 @@ impl Graph {
         self.t4_dependees[a].push(b);
         let a_comp = self.item_to_components[a];
         self.transfer_item_dep_to_component(a_comp, b, ComponentRelation::BEFORE, ComponentRelation::AFTER);
+
+        debug::send(|| DvdMessage::DidAddTirType4Dependency { depender: a, dependee: b });
     }
 
-    /// in order to know the type 2-4 dependencies of a, we need to know all possible members of b
+    /// in order to add the type 2-4 dependencies of a, we need to know all possible members of b
     ///
     /// NOTE: An item meta-depending on another does not imply anything about their relative units
     ///       or levels. For this reason, I'm pretty sure that a meta-dependency should always
@@ -152,12 +161,16 @@ impl Graph {
         self.meta_dependees.entry(a).or_default().insert(b);
         self.meta_dependers.entry(b).or_default().push(a);
         self.global_meta_dependees.insert(b);
+
+        debug::send(|| DvdMessage::DidAddTirMetaDependency { depender: a, dependee: b });
     }
 
     fn find_subcomponent(&mut self, item: ItemId, state: &mut ComponentState) {
         state.visited[item] = true;
         state.cur_component.items.push(item);
-        self.item_to_components[item] = CompId::new(self.components.len());
+        let component = CompId::new(self.components.len());
+        self.item_to_components[item] = component;
+        debug::send(|| DvdMessage::DidAddItemToTirComponent { component, item });
         macro_rules! find_subcomponents {
             ($item_array:ident) => {{
                 for i in 0..self.$item_array[item].len() {
@@ -174,7 +187,8 @@ impl Graph {
         if state.visited[item] { return; }
         self.find_subcomponent(item, state);
         let new_component = mem::replace(&mut state.cur_component, Component::default());
-        self.components.push(new_component);
+        let component = self.components.push(new_component);
+        debug::send(|| DvdMessage::DidAddTirComponent { id: component });
     }
 
     fn transfer_item_dep_to_component(
