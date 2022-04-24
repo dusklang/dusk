@@ -42,6 +42,10 @@ struct Opt {
     #[clap(short='r', long)]
     run_refiner: bool,
 
+    /// Run the Dusk Visual Debugger (DVD)
+    #[clap(long)]
+    dvd: bool,
+
     /// The phase to stop the compiler at
     #[clap(arg_enum, short='s', long, default_value="interp", ignore_case = true)]
     stop_phase: StopPhase,
@@ -54,7 +58,9 @@ struct Opt {
 fn main() {
     let opt = Opt::parse();
 
-    debug::connect();
+    if opt.dvd {
+        debug::connect();
+    }
     debug::send(|| DvdMessage::WillBegin);
 
     let mut src_map = SourceMap::new();
