@@ -129,9 +129,8 @@ impl Value {
             _ => {
                 let ptr = self.as_raw_ptr();
                 let val = val.as_bytes();
-                for (i, &byte) in val.iter().enumerate() {
-                    unsafe { *ptr.add(i) = byte; }
-                }
+                let slice = unsafe { std::slice::from_raw_parts_mut(ptr, val.len()) };
+                slice.copy_from_slice(val);
             }
         }
     }
@@ -193,10 +192,7 @@ impl Value {
     }
 
     fn from_bytes(bytes: &[u8]) -> Value {
-        let mut storage = SmallVec::new();
-        for &byte in bytes {
-            storage.push(byte);
-        }
+        let storage = SmallVec::from_slice(bytes);
         Value::Inline(storage)
     }
 

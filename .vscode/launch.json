@@ -20,9 +20,9 @@
                 }
             },
             "args": [
-                "extern_mod.dusk"
+                "main.dusk"
             ],
-            "cwd": "${workspaceFolder}"
+            "cwd": "${workspaceFolder}/../prettyboy/"
         },
         {
             "type": "lldb",
