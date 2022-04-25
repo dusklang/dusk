@@ -873,13 +873,13 @@ impl Driver {
                             assert_eq!(arguments.len(), 1);
                             let frame = stack.last().unwrap();
                             let arg = arguments[0];
-                            let ty =  self.type_of(arg);
+                            let ty = self.type_of(arg);
                             let arg = frame.get_val(arg, self);
                             match ty {
-                                Type::Int { width, is_signed } => {
+                                &Type::Int { width, is_signed } => {
                                     Value::from_big_int(-arg.as_big_int(is_signed), width, is_signed, self.arch)
                                 },
-                                Type::Float(width) => match width {
+                                &Type::Float(width) => match width {
                                     FloatWidth::W32 => Value::from_f32(-arg.as_f32()),
                                     FloatWidth::W64 => Value::from_f64(-arg.as_f64()),
                                 },
@@ -1010,7 +1010,7 @@ impl Driver {
                 },
                 &Instr::SignExtend(val, ref dest_ty) => {
                     let frame = stack.last().unwrap();
-                    let src_ty = &self.type_of(val);
+                    let src_ty = self.type_of(val);
                     let val = frame.get_val(val, self);
                     match (src_ty, dest_ty) {
                         (
@@ -1022,7 +1022,7 @@ impl Driver {
                 },
                 &Instr::ZeroExtend(val, ref dest_ty) => {
                     let frame = stack.last().unwrap();
-                    let src_ty = &self.type_of(val);
+                    let src_ty = self.type_of(val);
                     let val = frame.get_val(val, self);
                     match (src_ty, dest_ty) {
                         (
@@ -1075,7 +1075,7 @@ impl Driver {
                 &Instr::IntToFloat(instr, ref dest_ty) => {
                     let frame = stack.last().unwrap();
                     let val = frame.get_val(instr, self);
-                    let src_ty = &self.type_of(instr);
+                    let src_ty = self.type_of(instr);
                     let dest_size = self.size_of(dest_ty);
                     match src_ty {
                         &Type::Int { is_signed, .. } => {
@@ -1216,9 +1216,9 @@ impl Driver {
                 },
                 &Instr::IndirectFieldAccess { val, index } => {
                     let addr = frame.get_val(val, self).as_usize();
-                    let base_ty = self.type_of(val).deref().unwrap().ty;
+                    let base_ty = &self.type_of(val).deref().unwrap().ty;
                     let strukt = match base_ty {
-                        Type::Struct(strukt) => strukt,
+                        &Type::Struct(strukt) => strukt,
                         _ => panic!("Can't directly get field of non-struct"),
                     };
                     let offset = self.code.mir_code.structs[&strukt].layout.field_offsets[index];

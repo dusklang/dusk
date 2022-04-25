@@ -57,6 +57,7 @@ pub enum Instr {
     SwitchBr { scrutinee: OpId, cases: Vec<SwitchCase>, catch_all_bb: BlockId },
     GenericParam(GenericParamId),
     /// Only valid at the beginning of a function, right after the void instruction
+    // TODO: Get rid of the type here! It is no longer required because instruction types are now stored on each Op
     Parameter(Type),
 }
 

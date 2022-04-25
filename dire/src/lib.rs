@@ -11,6 +11,7 @@ use display_adapter::display_adapter;
 use hir::{HirCode, Item};
 use mir::{MirCode, Instr, InstrId, VOID_INSTR};
 use source_info::SourceRange;
+use ty::Type;
 
 define_index_type!(pub struct OpId = u32;);
 define_index_type!(pub struct BlockId = u32;);
@@ -18,20 +19,30 @@ define_index_type!(pub struct BlockId = u32;);
 #[derive(Clone, Debug)]
 pub enum Op {
     HirItem(Item),
-    MirInstr(Instr, InstrId),
+    MirInstr(Instr, InstrId, Type),
 }
 
 impl Op {
+    #[inline]
     pub fn as_mir_instr(&self) -> Option<&Instr> {
         match self {
-            Op::MirInstr(instr, _) => Some(instr),
+            Op::MirInstr(instr, _, _) => Some(instr),
             _ => None,
         }
     }
 
+    #[inline]
     pub fn get_mir_instr_id(&self) -> Option<InstrId> {
         match self {
-            &Op::MirInstr(_, id) => Some(id),
+            &Op::MirInstr(_, id, _) => Some(id),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub fn get_mir_instr_type(&self) -> Option<&Type> {
+        match self {
+            Op::MirInstr(_, _, ty) => Some(ty),
             _ => None,
         }
     }
@@ -59,7 +70,7 @@ impl Default for Code {
     fn default() -> Self {
         let mut val = Code {
             blocks: IndexVec::default(),
-            ops: index_vec![Op::MirInstr(Instr::Void, InstrId::new(0))],
+            ops: index_vec![Op::MirInstr(Instr::Void, InstrId::new(0), Type::Void)],
             hir_code: HirCode::default(),
             mir_code: MirCode::default(),
         };
@@ -90,7 +101,7 @@ impl Code {
                         }
                     }
                 },
-                Op::MirInstr(ref instr, _) => {
+                Op::MirInstr(ref instr, _, _) => {
                     writeln!(w, " = mir.{:?}", instr)?;
                 },
             }

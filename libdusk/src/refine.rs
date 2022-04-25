@@ -495,7 +495,7 @@ impl Driver {
             for op in requirement.get_involved_ops() {
                 let ty = self.type_of(op);
                 match ty {
-                    Type::Int { width, is_signed } => {
+                    &Type::Int { width, is_signed } => {
                         let (lo, hi) = self.get_int_range(width, is_signed);
                         implicit_constraints.insert(Constraint::Lte(lo.into(), op.into()));
                         implicit_constraints.insert(Constraint::Lte(op.into(), hi.into()));
@@ -519,7 +519,7 @@ impl Driver {
             for op in guarantee.get_involved_ops() {
                 let ty = self.type_of(op);
                 match ty {
-                    Type::Int { width, is_signed } => {
+                    &Type::Int { width, is_signed } => {
                         let (lo, hi) = self.get_int_range(width, is_signed);
                         implicit_constraints.insert(Constraint::Lte(lo.into(), op.into()));
                         implicit_constraints.insert(Constraint::Lte(op.into(), hi.into()));

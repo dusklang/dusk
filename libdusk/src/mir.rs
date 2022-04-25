@@ -216,47 +216,6 @@ impl Builder {
 // TODO: remove this as soon as discriminants can be other types, and deal with the fallout from that
 const TYPE_OF_DISCRIMINANTS: Type = Type::u32();
 
-fn type_of(b: &MirCode, instr: OpId, code: &IndexVec<OpId, Op>) -> Type {
-    match code[instr].as_mir_instr().unwrap() {
-        Instr::Void | Instr::Store { .. } => Type::Void,
-        Instr::Pointer { .. } | Instr::Struct { .. } | Instr::GenericParam(_) | Instr::Enum { .. } => Type::Ty,
-        &Instr::StructLit { id, .. } => Type::Struct(id),
-        Instr::Const(konst) => konst.ty(),
-        Instr::Alloca(ty) => ty.clone().mut_ptr(),
-        Instr::LogicalNot(_) => Type::Bool,
-        &Instr::Call { func, .. } => b.functions[func].ret_ty.clone(),
-        Instr::ExternCall { func, .. } => b.extern_mods[&func.extern_mod].imported_functions[func.index].return_ty.clone(),
-        Instr::Intrinsic { ty, .. } => ty.clone(),
-        Instr::Reinterpret(_, ty) | Instr::Truncate(_, ty) | Instr::SignExtend(_, ty)
-        | Instr::ZeroExtend(_, ty) | Instr::FloatCast(_, ty) | Instr::FloatToInt(_, ty)
-        | Instr::IntToFloat(_, ty)
-        => ty.clone(),
-        &Instr::Load(instr) => match type_of(b, instr, code) {
-            Type::Pointer(pointee) => pointee.ty,
-            _ => Type::Error,
-        },
-        &Instr::AddressOfStatic(statik) => b.statics[statik].val.ty().mut_ptr(),
-        Instr::Ret(_) | Instr::Br(_) | Instr::CondBr { .. } | Instr::SwitchBr { .. } => Type::Never,
-        Instr::Parameter(ty) => ty.clone(),
-        &Instr::DirectFieldAccess { val, index } => {
-            let base_ty = type_of(b, val, code);
-            match base_ty {
-                Type::Struct(strukt) => b.structs[&strukt].field_tys[index].clone(),
-                _ => panic!("Cannot directly access field of non-struct type {:?}!", base_ty),
-            }
-        },
-        &Instr::IndirectFieldAccess { val, index } => {
-            let base_ty = type_of(b, val, code).deref().unwrap();
-            match base_ty.ty {
-                Type::Struct(strukt) => b.structs[&strukt].field_tys[index].clone().ptr_with_mut(base_ty.is_mut),
-                _ => panic!("Cannot directly access field of non-struct type {:?}!", base_ty),
-            }
-        },
-        &Instr::Variant { enuum, .. } => Type::Enum(enuum),
-        Instr::DiscriminantAccess { .. } => TYPE_OF_DISCRIMINANTS, // TODO: update this when discriminants can be other types
-    }
-}
-
 pub fn function_by_ref<'a>(code: &'a MirCode, func_ref: &'a FunctionRef) -> &'a Function {
     match func_ref {
         &FunctionRef::Id(id) => &code.functions[id],
@@ -856,8 +815,8 @@ impl Driver {
         );
     }
 
-    pub fn type_of(&self, instr: OpId) -> Type {
-        type_of(&self.code.mir_code, instr, &self.code.ops)
+    pub fn type_of(&self, instr: OpId) -> &Type {
+        self.code.ops[instr].get_mir_instr_type().unwrap()
     }
 
     fn build_function(&mut self, name: Option<Sym>, ret_ty: Type, body: FunctionBody, params: Range<DeclId>, generic_params: Vec<GenericParamId>, tp: &impl TypeProvider) -> Function {
@@ -870,9 +829,11 @@ impl Driver {
         for param in params.start.index()..params.end.index() {
             let param = DeclId::new(param);
             assert!(matches!(df!(param.hir), hir::Decl::Parameter { .. }));
-            let instr = Instr::Parameter(self.decl_type(param, tp).clone());
+            let ty = self.decl_type(param, tp);
+            let instr = Instr::Parameter(ty.clone());
             let instr_id = instrs.next();
-            let op = self.code.ops.push(Op::MirInstr(instr, instr_id));
+            let ty = ty.clone();
+            let op = self.code.ops.push(Op::MirInstr(instr, instr_id, ty));
             let range = df!(param.range);
             let name = instr_namespace.insert(format!("{}", self.display_item(range)));
             self.code.mir_code.source_ranges.insert(op, range);
@@ -926,22 +887,65 @@ impl Driver {
         });
     }
 
+    fn generate_type_of(&self, instr: &Instr) -> Type {
+        let b = &self.code.mir_code;
+        match instr {
+            Instr::Void | Instr::Store { .. } => Type::Void,
+            Instr::Pointer { .. } | Instr::Struct { .. } | Instr::GenericParam(_) | Instr::Enum { .. } => Type::Ty,
+            &Instr::StructLit { id, .. } => Type::Struct(id),
+            Instr::Const(konst) => konst.ty(),
+            Instr::Alloca(ty) => ty.clone().mut_ptr(),
+            Instr::LogicalNot(_) => Type::Bool,
+            &Instr::Call { func, .. } => b.functions[func].ret_ty.clone(),
+            Instr::ExternCall { func, .. } => b.extern_mods[&func.extern_mod].imported_functions[func.index].return_ty.clone(),
+            Instr::Intrinsic { ty, .. } => ty.clone(),
+            Instr::Reinterpret(_, ty) | Instr::Truncate(_, ty) | Instr::SignExtend(_, ty)
+            | Instr::ZeroExtend(_, ty) | Instr::FloatCast(_, ty) | Instr::FloatToInt(_, ty)
+            | Instr::IntToFloat(_, ty)
+            => ty.clone(),
+            &Instr::Load(instr) => match self.type_of(instr) {
+                Type::Pointer(pointee) => pointee.ty.clone(),
+                _ => Type::Error,
+            },
+            &Instr::AddressOfStatic(statik) => b.statics[statik].val.ty().mut_ptr(),
+            Instr::Ret(_) | Instr::Br(_) | Instr::CondBr { .. } | Instr::SwitchBr { .. } => Type::Never,
+            Instr::Parameter(_) => panic!("should not call generate_type_of() on a parameter"),
+            &Instr::DirectFieldAccess { val, index } => {
+                let base_ty = self.type_of(val);
+                match base_ty {
+                    Type::Struct(strukt) => b.structs[&strukt].field_tys[index].clone(),
+                    _ => panic!("Cannot directly access field of non-struct type {:?}!", base_ty),
+                }
+            },
+            &Instr::IndirectFieldAccess { val, index } => {
+                let base_ty = self.type_of(val).deref().unwrap();
+                match base_ty.ty {
+                    Type::Struct(strukt) => b.structs[&strukt].field_tys[index].clone().ptr_with_mut(base_ty.is_mut),
+                    _ => panic!("Cannot directly access field of non-struct type {:?}!", base_ty),
+                }
+            },
+            &Instr::Variant { enuum, .. } => Type::Enum(enuum),
+            Instr::DiscriminantAccess { .. } => TYPE_OF_DISCRIMINANTS, // TODO: update this when discriminants can be other types
+        }
+    }
+
     fn push_instr(&mut self, b: &mut FunctionBuilder, instr: Instr, item: impl Into<ToSourceRange>) -> OpId {
         let instr_id = b.instrs.next();
-        let op = self.code.ops.push(Op::MirInstr(instr, instr_id));
+        let ty = self.generate_type_of(&instr);
+        let op = self.code.ops.push(Op::MirInstr(instr, instr_id, ty));
         let source_range = self.get_range(item);
         self.code.mir_code.source_ranges.insert(op, source_range);
 
         let block = &mut self.code.blocks[b.current_block];
         block.ops.push(op);
 
-
         op
     }
 
     fn push_instr_with_name(&mut self, b: &mut FunctionBuilder, instr: Instr, item: impl Into<ToSourceRange>, name: impl Into<String>) -> OpId {
         let instr_id = b.instrs.next();
-        let op = self.code.ops.push(Op::MirInstr(instr, instr_id));
+        let ty = self.generate_type_of(&instr);
+        let op = self.code.ops.push(Op::MirInstr(instr, instr_id, ty));
         let source_range = self.get_range(item);
         self.code.mir_code.source_ranges.insert(op, source_range);
         let name = b.instr_namespace.insert(name.into());
@@ -1576,7 +1580,7 @@ impl Driver {
                 val.indirection -= 1;
             }
         } else if val.indirection < 0 {
-            let mut ty = self.type_of(val.instr);
+            let mut ty = self.type_of(val.instr).clone();
             while val.indirection < 0 {
                 let location = self.push_instr(b, Instr::Alloca(ty.clone()), val.instr);
                 self.push_instr(b, Instr::Store { location, value: val.instr }, val.instr);

@@ -59,9 +59,9 @@ impl Type {
         )
     }
 
-    pub fn deref(self) -> Option<QualType> {
+    pub fn deref(&self) -> Option<&QualType> {
         if let Type::Pointer(pointee) = self {
-            Some(*pointee)
+            Some(pointee)
         } else {
             None
         }
