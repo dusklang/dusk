@@ -1112,22 +1112,7 @@ impl Driver {
         }
     }
 
-    fn build_if_expr(&mut self, b: &mut FunctionBuilder, expr: ExprId, ty: Type, condition: ExprId, then_scope: ImperScopeId, else_scope: Option<ImperScopeId>, ctx: Context, tp: &impl TypeProvider) -> Value {
-        let true_bb = self.create_bb(b);
-        let false_bb = self.create_bb(b);
-        let post_bb = if else_scope.is_some() {
-            self.create_bb(b)
-        } else {
-            false_bb
-        };
-
-        let result_location = match (&ctx.data, else_scope) {
-            (DataDest::Read, Some(_)) => Some(
-                // TODO: this will be the wrong type if indirection != 0
-                self.push_instr(b, Instr::Alloca(ty.clone()), expr)
-            ),
-            _ => None,
-        };
+    fn build_if_expr_recurse(&mut self, b: &mut FunctionBuilder, condition: ExprId, then_scope: ImperScopeId, result_location: Option<OpId>, true_bb: BlockId, false_bb: BlockId, post_bb: BlockId, ctx: Context, tp: &impl TypeProvider) {
         self.build_expr(
             b,
             condition,
@@ -1137,9 +1122,53 @@ impl Driver {
         self.start_bb(b, true_bb);
         let scope_ctx = ctx.redirect(result_location, Some(post_bb));
         self.build_scope(b, then_scope, scope_ctx.clone(), tp);
-        if let Some(else_scope) = else_scope {
-            self.start_bb(b, false_bb);
-            self.build_scope(b, else_scope, scope_ctx, tp);
+    }
+
+    fn build_if_expr(&mut self, b: &mut FunctionBuilder, expr: ExprId, ty: Type, condition: ExprId, then_scope: ImperScopeId, else_scope: Option<ImperScopeId>, ctx: Context, tp: &impl TypeProvider) -> Value {
+        // Create a location on the stack to store the result of the if, if necessary
+        let result_location = match (&ctx.data, else_scope) {
+            (DataDest::Read, Some(_)) => Some(
+                // TODO: this will be the wrong type if indirection != 0
+                self.push_instr(b, Instr::Alloca(ty.clone()), expr)
+            ),
+            _ => None,
+        };
+
+        let true_bb = self.create_bb(b);
+        let false_bb = self.create_bb(b);
+        let post_bb = if else_scope.is_some() {
+            self.create_bb(b)
+        } else {
+            false_bb
+        };
+
+        self.build_if_expr_recurse(b, condition, then_scope, result_location, true_bb, false_bb, post_bb, ctx, tp);
+        let mut next_scope = else_scope;
+        let mut next_bb = false_bb;
+
+        // Iterate through a linked list of if-else-if branches. Terminate when you find an if with no else branch or
+        // an else branch with something other than an if.
+        // This is done to reduce the size of the stack when generating code for long chains of if statements.
+        while let Some(cur) = next_scope {
+            self.start_bb(b, next_bb);
+
+            let scope_ctx = ctx.redirect(result_location, Some(post_bb));
+            let scope = &self.code.hir_code.imper_scopes[cur];
+            let block = self.code.hir_code.imper_scopes[cur].block;
+            // If the current scope consists of a lone if expression
+            if self.code.blocks[block].ops.is_empty() {
+                if let Expr::If { condition, then_scope, else_scope } = ef!(scope.terminal_expr.hir) {
+                    let true_bb = self.create_bb(b);
+                    let false_bb = self.create_bb(b);
+                    self.build_if_expr_recurse(b, condition, then_scope, result_location, true_bb, false_bb, post_bb, scope_ctx, tp);
+                    next_scope = else_scope;
+                    next_bb = false_bb;
+                    continue;
+                }
+            }
+
+            self.build_scope(b, cur, scope_ctx, tp);
+            next_scope = None;
         }
 
         self.start_bb(b, post_bb);
