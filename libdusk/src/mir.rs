@@ -1112,6 +1112,46 @@ impl Driver {
         }
     }
 
+    fn build_if_expr(&mut self, b: &mut FunctionBuilder, expr: ExprId, ty: Type, condition: ExprId, then_scope: ImperScopeId, else_scope: Option<ImperScopeId>, ctx: Context, tp: &impl TypeProvider) -> Value {
+        let true_bb = self.create_bb(b);
+        let false_bb = self.create_bb(b);
+        let post_bb = if else_scope.is_some() {
+            self.create_bb(b)
+        } else {
+            false_bb
+        };
+
+        let result_location = match (&ctx.data, else_scope) {
+            (DataDest::Read, Some(_)) => Some(
+                // TODO: this will be the wrong type if indirection != 0
+                self.push_instr(b, Instr::Alloca(ty.clone()), expr)
+            ),
+            _ => None,
+        };
+        self.build_expr(
+            b,
+            condition,
+            Context::new(0, DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
+            tp,
+        );
+        self.start_bb(b, true_bb);
+        let scope_ctx = ctx.redirect(result_location, Some(post_bb));
+        self.build_scope(b, then_scope, scope_ctx.clone(), tp);
+        if let Some(else_scope) = else_scope {
+            self.start_bb(b, false_bb);
+            self.build_scope(b, else_scope, scope_ctx, tp);
+        }
+
+        self.start_bb(b, post_bb);
+        if let Some(location) = result_location {
+            return self.push_instr(b, Instr::Load(location), expr).direct()
+        } else if else_scope.is_some() {
+            return self.handle_control(b, VOID_INSTR.direct(), ctx.control)
+        } else {
+            VOID_INSTR.direct()
+        }
+    }
+
     fn build_expr(&mut self, b: &mut FunctionBuilder, expr: ExprId, ctx: Context, tp: &impl TypeProvider) -> Value {
         let ty = tp.ty(expr).clone();
 
@@ -1391,45 +1431,7 @@ impl Driver {
                 tp,
             ),
             Expr::Do { scope } => return self.build_scope(b, scope, ctx, tp),
-            Expr::If { condition, then_scope, else_scope } => {
-                let true_bb = self.create_bb(b);
-                let false_bb = self.create_bb(b);
-                let post_bb = if else_scope.is_some() {
-                    self.create_bb(b)
-                } else {
-                    false_bb
-                };
-
-                let result_location = match (&ctx.data, else_scope) {
-                    (DataDest::Read, Some(_)) => Some(
-                        // TODO: this will be the wrong type if indirection != 0
-                        self.push_instr(b, Instr::Alloca(ty.clone()), expr)
-                    ),
-                    _ => None,
-                };
-                self.build_expr(
-                    b,
-                    condition,
-                    Context::new(0, DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
-                    tp,
-                );
-                self.start_bb(b, true_bb);
-                let scope_ctx = ctx.redirect(result_location, Some(post_bb));
-                self.build_scope(b, then_scope, scope_ctx.clone(), tp);
-                if let Some(else_scope) = else_scope {
-                    self.start_bb(b, false_bb);
-                    self.build_scope(b, else_scope, scope_ctx, tp);
-                }
-
-                self.start_bb(b, post_bb);
-                if let Some(location) = result_location {
-                    return self.push_instr(b, Instr::Load(location), expr).direct()
-                } else if else_scope.is_some() {
-                    return self.handle_control(b, VOID_INSTR.direct(), ctx.control)
-                } else {
-                    VOID_INSTR.direct()
-                }
-            },
+            Expr::If { condition, then_scope, else_scope } => return self.build_if_expr(b, expr, ty, condition, then_scope, else_scope, ctx, tp),
             Expr::Switch { scrutinee, ref cases } => {
                 let cases = cases.clone();
                 let scrutinee_val = self.build_expr(b, scrutinee, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
