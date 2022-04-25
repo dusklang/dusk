@@ -14,6 +14,7 @@ use crate::source_info::SourceRange;
 define_index_type!(pub struct FuncId = u32;);
 define_index_type!(pub struct StaticId = u32;);
 define_index_type!(pub struct StrId = u32;);
+define_index_type!(pub struct InstrId = u32;);
 
 pub const VOID_INSTR: OpId = OpId::from_usize_unchecked(0);
 
@@ -109,6 +110,7 @@ impl InstrNamespace {
 pub struct Function {
     pub name: Option<Sym>,
     pub ret_ty: Type,
+    pub num_instrs: usize,
     /// Index 0 is defined to be the entry block
     pub blocks: Vec<BlockId>,
     pub decl: Option<DeclId>,

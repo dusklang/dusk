@@ -2,12 +2,13 @@ use std::collections::HashMap;
 use std::ffi::CString;
 use std::ops::Range;
 
+use dire::index_counter::IndexCounter;
 use smallvec::SmallVec;
 use string_interner::DefaultSymbol as Sym;
 use display_adapter::display_adapter;
 
 use dire::hir::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, GenericParamId, Item, PatternBindingDeclId, ExternModId, ExternFunctionRef, PatternBindingPathComponent, VOID_TYPE};
-use dire::mir::{FuncId, StaticId, Const, Instr, Function, MirCode, StructLayout, EnumLayout, ExternMod, ExternFunction, InstrNamespace, SwitchCase, VOID_INSTR};
+use dire::mir::{FuncId, StaticId, Const, Instr, InstrId, Function, MirCode, StructLayout, EnumLayout, ExternMod, ExternFunction, InstrNamespace, SwitchCase, VOID_INSTR};
 use dire::{Block, BlockId, Op, OpId};
 use dire::ty::{Type, FloatWidth};
 use dire::source_info::SourceRange;
@@ -820,6 +821,7 @@ enum FunctionBody {
 struct FunctionBuilder {
     name: Option<Sym>,
     ret_ty: Type,
+    instrs: IndexCounter<InstrId>,
     blocks: Vec<BlockId>,
     current_block: BlockId,
     stored_decl_locs: IndexVec<StoredDeclId, OpId>,
@@ -863,11 +865,14 @@ impl Driver {
 
         let mut entry = Block::default();
         let mut instr_namespace = InstrNamespace::default();
+        let mut instrs = IndexCounter::new();
+        instrs.next(); // void
         for param in params.start.index()..params.end.index() {
             let param = DeclId::new(param);
             assert!(matches!(df!(param.hir), hir::Decl::Parameter { .. }));
             let instr = Instr::Parameter(self.decl_type(param, tp).clone());
-            let op = self.code.ops.push(Op::MirInstr(instr));
+            let instr_id = instrs.next();
+            let op = self.code.ops.push(Op::MirInstr(instr, instr_id));
             let range = df!(param.range);
             let name = instr_namespace.insert(format!("{}", self.display_item(range)));
             self.code.mir_code.source_ranges.insert(op, range);
@@ -878,6 +883,7 @@ impl Driver {
         let mut b = FunctionBuilder {
             name,
             ret_ty,
+            instrs,
             blocks: vec![entry],
             current_block: entry,
             stored_decl_locs: IndexVec::new(),
@@ -899,6 +905,7 @@ impl Driver {
         let mut function = Function {
             name: b.name,
             ret_ty: b.ret_ty,
+            num_instrs: b.instrs.len(),
             blocks: b.blocks,
             instr_namespace: b.instr_namespace,
             decl,
@@ -920,7 +927,8 @@ impl Driver {
     }
 
     fn push_instr(&mut self, b: &mut FunctionBuilder, instr: Instr, item: impl Into<ToSourceRange>) -> OpId {
-        let op = self.code.ops.push(Op::MirInstr(instr));
+        let instr_id = b.instrs.next();
+        let op = self.code.ops.push(Op::MirInstr(instr, instr_id));
         let source_range = self.get_range(item);
         self.code.mir_code.source_ranges.insert(op, source_range);
 
@@ -932,7 +940,8 @@ impl Driver {
     }
 
     fn push_instr_with_name(&mut self, b: &mut FunctionBuilder, instr: Instr, item: impl Into<ToSourceRange>, name: impl Into<String>) -> OpId {
-        let op = self.code.ops.push(Op::MirInstr(instr));
+        let instr_id = b.instrs.next();
+        let op = self.code.ops.push(Op::MirInstr(instr, instr_id));
         let source_range = self.get_range(item);
         self.code.mir_code.source_ranges.insert(op, source_range);
         let name = b.instr_namespace.insert(name.into());
