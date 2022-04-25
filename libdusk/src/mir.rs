@@ -655,7 +655,7 @@ impl Driver {
                         Instr::Alloca(ty) => writeln!(f, "%{} = alloca {:?}", self.display_instr_name(op_id), ty)?,
                         Instr::Br(block) => writeln!(f, "br %bb{}", block.index())?,
                         &Instr::CondBr { condition, true_bb, false_bb }
-                            => writeln!(f, "condbr %{}, %bb{}, %bb{}", condition.index(), true_bb.index(), false_bb.index())?,
+                            => writeln!(f, "condbr %{}, %bb{}, %bb{}", self.display_instr_name(condition), true_bb.index(), false_bb.index())?,
                         &Instr::SwitchBr { scrutinee, ref cases, catch_all_bb } => {
                             write!(f, "switchbr %{} : ", self.display_instr_name(scrutinee))?;
                             for case in cases {
