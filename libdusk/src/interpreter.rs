@@ -110,17 +110,12 @@ impl Value {
         match self {
             Value::Inline(_) => {
                 let ptr = self.as_raw_ptr();
-                let mut buf = SmallVec::new();
-                for i in 0..size {
-                    buf.push(unsafe { *ptr.add(i) });
-                }
+                let slice = unsafe { std::slice::from_raw_parts(ptr, size) };
+                let buf = SmallVec::from_slice(slice);
                 Value::Inline(buf)
             },
             Value::Dynamic(val) => {
-                let mut buf = SmallVec::new();
-                for &byte in &**val {
-                    buf.push(byte);
-                }
+                let buf = SmallVec::from_slice(val);
                 Value::Inline(buf)
             },
             Value::Internal { val, indirection } => Value::Internal { val: val.clone(), indirection: indirection - 1 },
