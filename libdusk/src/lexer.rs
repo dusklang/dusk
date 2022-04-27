@@ -171,6 +171,14 @@ impl Driver {
             false
         }
     }
+    fn is_hex_digit(&self, l: &Lexer) -> bool {
+        let mut chars = self.cur_tok(l).chars();
+        if let Some(character) = chars.next() {
+            chars.next().is_none() && character.is_ascii_hexdigit()
+        } else {
+            false
+        }
+    }
     fn is_newline(&self, l: &Lexer) -> bool { self.is(l, b'\n') || self.is(l, b'\r') || self.is_str(l, b"\r\n") }
     fn is_whitespace(&self, l: &Lexer) -> bool { self.is(l, b' ') || self.is(l, b'\t') }
     fn is_num(&self, l: &Lexer) -> bool {
@@ -395,6 +403,16 @@ impl Driver {
             } else {
                 Ok(self.pack_tok(l, TokenKind::IntLit(lit.parse().unwrap())))
             }
+        } else if self.is(l, b'$') {
+            // Ignore the dollar sign
+            self.advance(l);
+            l.tok_start_loc = l.cur_loc();
+
+            while l.has_chars() && self.is_hex_digit(l) {
+                self.advance(l);
+            }
+            let lit = &self.file(l).src[l.tok_start_loc..l.cur_loc()];
+            Ok(self.pack_tok(l, TokenKind::IntLit(u64::from_str_radix(lit, 16).unwrap())))
         } else {
             macro_rules! match_symbols {
                 ($($kind: ident $symbol: expr)+) => {
