@@ -77,6 +77,9 @@ impl Driver {
                 self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], ty.clone(), false);
             }
         }
+        for ty in integers {
+            self.add_intrinsic(BitwiseNot, smallvec![ty.clone()], ty.clone(), false);
+        }
         for &intr in &[LogicalAnd, LogicalOr] {
             self.add_intrinsic(intr, smallvec![boool, boool], boool, false);
         }
@@ -179,6 +182,7 @@ impl Driver {
             TokenKind::Sub        => UnOp::Neg,
             TokenKind::Add        => UnOp::Plus,
             TokenKind::LogicalNot => UnOp::Not,
+            TokenKind::Tilde      => UnOp::BitwiseNot,
             TokenKind::Asterisk   => UnOp::Deref,
             TokenKind::Ampersand  => if let TokenKind::Mut = self.peek_next(p).kind {
                 let mut_range = self.next(p).range;

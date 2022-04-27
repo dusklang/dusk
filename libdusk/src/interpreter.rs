@@ -877,6 +877,26 @@ impl Driver {
                                 _ => panic!("Unexpected type for intrinsic arguments"),
                             }
                         },
+                        Intrinsic::BitwiseNot => {
+                            assert_eq!(arguments.len(), 1);
+                            let arg = arguments[0];
+                            let ty = self.type_of(arg);
+                            let arg = frame.get_val(arg, self);
+                            match ty {
+                                &Type::Int { width, .. } => {
+                                    match width {
+                                        IntWidth::Pointer | IntWidth::W64 => {
+                                            assert_eq!(self.arch.pointer_size(), 64);
+                                            Value::from_u64(!arg.as_u64())
+                                        },
+                                        IntWidth::W32 => Value::from_u32(!arg.as_u32()),
+                                        IntWidth::W16 => Value::from_u16(!arg.as_u16()),
+                                        IntWidth::W8  => Value::from_u8(!arg.as_u8()),
+                                    }
+                                },
+                                _ => panic!("Unexpected type for intrinsic arguments")
+                            }
+                        },
                         Intrinsic::Pos => {
                             assert_eq!(arguments.len(), 1);
                             frame.get_val(arguments[0], self).clone()

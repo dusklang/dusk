@@ -19,7 +19,7 @@ pub enum BinOp {
 #[derive(Clone, Copy, Debug)]
 pub enum UnOp {
     /// Prefix
-    Not, Deref, AddrOf, Neg, Plus, AddrOfMut,
+    Not, BitwiseNot, Deref, AddrOf, Neg, Plus, AddrOfMut,
     
     /// Postfix
     Pointer, PointerMut,
@@ -46,7 +46,7 @@ impl UnOp {
     pub fn placement(self) -> OpPlacement {
         match self {
             UnOp::Deref | UnOp::AddrOf | UnOp::Neg | UnOp::Plus => OpPlacement::PREFIX | OpPlacement::INFIX,
-            UnOp::Not | UnOp::AddrOfMut => OpPlacement::PREFIX,
+            UnOp::Not | UnOp::BitwiseNot | UnOp::AddrOfMut => OpPlacement::PREFIX,
             UnOp::Pointer => OpPlacement::PREFIX | OpPlacement::INFIX | OpPlacement::POSTFIX,
             UnOp::PointerMut => OpPlacement::POSTFIX,
         }
@@ -103,6 +103,7 @@ impl UnOp {
     pub fn symbol(self) -> &'static str {
         use UnOp::*;
         match self {
+            BitwiseNot => "~",
             Not => "!",
             Neg => "-",
             Plus => "+",
