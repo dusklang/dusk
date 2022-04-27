@@ -81,6 +81,8 @@ pub struct StrLit;
 #[derive(Debug)]
 pub struct CharLit;
 #[derive(Debug)]
+pub struct BoolLit;
+#[derive(Debug)]
 pub struct ConstTy;
 #[derive(Debug)]
 pub struct GenericParam { pub id: DeclId }
@@ -119,6 +121,7 @@ pub struct UnitItems {
     pub dec_lits: Vec<Expr<DecLit>>,
     pub str_lits: Vec<Expr<StrLit>>,
     pub char_lits: Vec<Expr<CharLit>>,
+    pub bool_lits: Vec<Expr<BoolLit>>,
     pub const_tys: Vec<Expr<ConstTy>>,
     pub error_exprs: Vec<Expr<ErrorExpr>>,
     pub generic_params: Vec<GenericParam>,
@@ -442,6 +445,7 @@ impl Driver {
             hir::Expr::DecLit { .. } => flat_insert_expr!(dec_lits, DecLit),
             hir::Expr::StrLit { .. } => flat_insert_expr!(str_lits, StrLit),
             hir::Expr::CharLit { .. } => flat_insert_expr!(char_lits, CharLit),
+            hir::Expr::BoolLit { .. } => flat_insert_expr!(bool_lits, BoolLit),
             hir::Expr::ConstTy(_) => flat_insert_expr!(const_tys, ConstTy),
             &hir::Expr::AddrOf { expr, is_mut } => insert_expr!(addr_ofs, AddrOf { expr, is_mut }),
             &hir::Expr::Deref(expr) => insert_expr!(derefs, Dereference { expr }),
@@ -599,7 +603,8 @@ impl Driver {
             let id = ef!(expr_id.item);
             match ef!(expr_id.hir) {
                 hir::Expr::Void | hir::Expr::Error | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
-                    | hir::Expr::CharLit { .. } | hir::Expr::ConstTy(_) | hir::Expr::Mod { .. } | hir::Expr::Import { .. } => {},
+                    | hir::Expr::CharLit { .. } | hir::Expr::BoolLit { .. } | hir::Expr::ConstTy(_) | hir::Expr::Mod { .. }
+                    | hir::Expr::Import { .. } => {},
                 hir::Expr::AddrOf { expr, .. } | hir::Expr::Deref(expr) | hir::Expr::Pointer { expr, .. }
                     | hir::Expr::Cast { expr, .. } | hir::Expr::Ret { expr, .. } => self.tir.graph.add_type1_dep(id, ef!(expr.item)),
                 hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => {
@@ -740,9 +745,9 @@ impl Driver {
                 hir::Item::Expr(expr_id) => {
                     match ef!(expr_id.hir) {
                         hir::Expr::Void | hir::Expr::Error | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
-                            | hir::Expr::CharLit { .. } | hir::Expr::ConstTy(_) | hir::Expr::AddrOf { .. } | hir::Expr::Deref(_)
-                            | hir::Expr::Pointer { .. } | hir::Expr::Set { .. } | hir::Expr::Mod { .. } |  hir::Expr::Import { .. }
-                            | hir::Expr::Struct(_) | hir::Expr::Enum(_) => {},
+                            | hir::Expr::CharLit { .. } | hir::Expr::BoolLit { .. } | hir::Expr::ConstTy(_) | hir::Expr::AddrOf { .. }
+                            | hir::Expr::Deref(_) | hir::Expr::Pointer { .. } | hir::Expr::Set { .. } | hir::Expr::Mod { .. }
+                            | hir::Expr::Import { .. } | hir::Expr::Struct(_) | hir::Expr::Enum(_) => {},
                         hir::Expr::Cast { ty, .. } => {
                             add_eval_dep!(id, ty);
                         },

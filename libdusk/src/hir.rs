@@ -173,6 +173,9 @@ impl Driver {
     pub fn char_lit(&mut self, lit: i8, range: SourceRange) -> ExprId { 
         self.push_expr(Expr::CharLit { lit }, range)
     }
+    pub fn bool_lit(&mut self, lit: bool, range: SourceRange) -> ExprId { 
+        self.push_expr(Expr::BoolLit { lit }, range)
+    }
     pub fn cast(&mut self, expr: ExprId, ty: ExprId, range: SourceRange) -> ExprId {
         let cast_id = self.code.hir_code.cast_counter.next();
         self.push_expr(Expr::Cast { expr, ty, cast_id }, range)

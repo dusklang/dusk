@@ -180,6 +180,7 @@ impl Driver {
                 },
                 _ => panic!("unexpected type for character")
             },
+            Expr::BoolLit { lit } => Const::Bool(lit),
             Expr::ConstTy(ref ty) => Const::Ty(ty.clone()),
             Expr::Mod { id } => Const::Mod(id),
             Expr::Import { file } => Const::Mod(self.code.hir_code.global_scopes[file]),
@@ -1186,7 +1187,7 @@ impl Driver {
 
         let val = match ef!(expr.hir) {
             Expr::Void | Expr::Error => VOID_INSTR.direct(),
-            Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::StrLit { .. } | Expr::CharLit { .. } | Expr::ConstTy(_) | Expr::Mod { .. } | Expr::Import { .. } => {
+            Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::StrLit { .. } | Expr::CharLit { .. } | Expr::BoolLit { .. } | Expr::ConstTy(_) | Expr::Mod { .. } | Expr::Import { .. } => {
                 let konst = self.expr_to_const(expr, ty.clone());
                 let name = format!("{}", self.fmt_const_for_instr_name(&konst));
                 self.push_instr_with_name(b, Instr::Const(konst), expr, name).direct()

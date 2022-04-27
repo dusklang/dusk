@@ -413,6 +413,16 @@ impl Driver {
                 self.next(p);
                 Ok(lit)
             },
+            TokenKind::True => {
+                let lit = self.bool_lit(true, self.cur(p).range);
+                self.next(p);
+                Ok(lit)
+            },
+            TokenKind::False => {
+                let lit = self.bool_lit(false, self.cur(p).range);
+                self.next(p);
+                Ok(lit)
+            },
             &TokenKind::Ident(name) => Ok(self.parse_decl_ref(p, None, name)),
             TokenKind::Do => {
                 let do_range = self.eat_tok(p, TokenKind::Do);

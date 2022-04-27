@@ -109,6 +109,15 @@ impl tir::Expr<tir::CharLit> {
         *tp.ty_mut(self.id) = tp.constraints(self.id).solve().expect("Ambiguous type for character literal").ty;
     }
 }
+impl tir::Expr<tir::BoolLit> {
+    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
+        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Bool.into()]), None);
+        *tp.ty_mut(self.id) = Type::Bool;
+    }
+
+    fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut impl TypeProvider) {
+    }
+}
 
 impl tir::Expr<tir::ConstTy> {
     fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
@@ -1143,7 +1152,7 @@ impl Driver {
                 )+
             }
         }
-        run_pass_1_flat!(int_lits, dec_lits, str_lits, char_lits, const_tys, generic_params, error_exprs);
+        run_pass_1_flat!(int_lits, dec_lits, str_lits, char_lits, bool_lits, const_tys, generic_params, error_exprs);
 
         for level in start_level..unit.num_levels() {
             macro_rules! run_pass_1 {
@@ -1203,7 +1212,7 @@ impl Driver {
                 )+
             }
         }
-        run_pass_2_flat!(int_lits, dec_lits, str_lits, char_lits, const_tys, generic_params, stmts, error_exprs);
+        run_pass_2_flat!(int_lits, dec_lits, str_lits, char_lits, bool_lits, const_tys, generic_params, stmts, error_exprs);
         tp.debug_output(self, 0);
     }
 

@@ -143,6 +143,7 @@ pub enum Expr {
     DecLit { lit: f64 },
     StrLit { lit: CString },
     CharLit { lit: i8 },
+    BoolLit { lit: bool },
     ConstTy(Type),
     DeclRef { arguments: SmallVec<[ExprId; 2]>, id: DeclRefId },
     AddrOf { expr: ExprId, is_mut: bool },
