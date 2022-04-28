@@ -50,9 +50,12 @@ pub enum TokenKind {
     OpenSquareBracket,
     CloseSquareBracket,
     AtSign,
-    Tilde,
 
     // Operators
+    Tilde,
+    Caret,
+    LeftShift,
+    RightShift,
     AddAssign,
     SubAssign,
     MultAssign,

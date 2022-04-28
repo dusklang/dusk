@@ -72,7 +72,7 @@ impl Driver {
                 self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], boool, false);
             }
         }
-        for &intr in &[BitwiseAnd, BitwiseOr] {
+        for &intr in &[BitwiseAnd, BitwiseOr, BitwiseXor, LeftShift, RightShift] {
             for ty in integers {
                 self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], ty.clone(), false);
             }
@@ -150,6 +150,9 @@ impl Driver {
             TokenKind::ModAssign => BinOp::ModAssign,
             TokenKind::BitwiseAndAssign => BinOp::BitwiseAndAssign,
             TokenKind::BitwiseOrAssign => BinOp::BitwiseOrAssign,
+            TokenKind::Caret => BinOp::BitwiseXor,
+            TokenKind::LeftShift => BinOp::LeftShift,
+            TokenKind::RightShift => BinOp::RightShift,
             TokenKind::Equal => BinOp::Eq,
             TokenKind::NotEqual => BinOp::NotEq,
             TokenKind::LT => BinOp::Less,

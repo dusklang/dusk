@@ -448,8 +448,11 @@ impl Driver {
                 CloseCurly          b"}"
                 OpenSquareBracket   b"["
                 CloseSquareBracket  b"]"
+                
                 Tilde               b"~"
-
+                Caret               b"^"
+                LeftShift           b"<<"
+                RightShift          b">>"
                 AddAssign           b"+="
                 SubAssign           b"-="
                 MultAssign          b"*="

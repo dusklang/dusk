@@ -8,12 +8,13 @@ pub enum BinOp {
     Add, Sub,
     Less, LessOrEq, Greater, GreaterOrEq,
     Eq, NotEq,
-    BitwiseAnd, BitwiseOr,
+    BitwiseAnd, BitwiseOr, BitwiseXor,
     LogicalAnd, LogicalOr,
     Assign,
     MultAssign, DivAssign, ModAssign,
     AddAssign, SubAssign,
     BitwiseAndAssign, BitwiseOrAssign,
+    LeftShift, RightShift,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -79,6 +80,9 @@ impl BinOp {
             SubAssign => "-=",
             BitwiseAndAssign => "&=",
             BitwiseOrAssign => "|=",
+            BitwiseXor => "^",
+            LeftShift => "<<",
+            RightShift => ">>",
             Assign => panic!("operator has no symbol"),
         }
     }
@@ -86,11 +90,11 @@ impl BinOp {
     pub fn precedence(self) -> u8 {
         use BinOp::*;
         match self {
-            Mult | Div | Mod => 0,
+            Mult | Div | Mod | LeftShift | RightShift => 0,
             Add | Sub => 1,
             Less | LessOrEq | Greater | GreaterOrEq => 2,
             Eq | NotEq => 3,
-            BitwiseAnd | BitwiseOr => 4,
+            BitwiseAnd | BitwiseOr | BitwiseXor => 4,
             LogicalAnd | LogicalOr => 5,
             Assign | AddAssign | SubAssign | MultAssign |
                 DivAssign | ModAssign | BitwiseAndAssign | 

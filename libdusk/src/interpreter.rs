@@ -859,6 +859,9 @@ impl Driver {
                         },
                         Intrinsic::BitwiseAnd => bin_op!(self, stack, arguments, convert, Int, {&}),
                         Intrinsic::BitwiseOr => bin_op!(self, stack, arguments, convert, Int, {|}),
+                        Intrinsic::BitwiseXor => bin_op!(self, stack, arguments, convert, Int, {^}),
+                        Intrinsic::LeftShift => bin_op!(self, stack, arguments, convert, Int, {<<}),
+                        Intrinsic::RightShift => bin_op!(self, stack, arguments, convert, Int, {>>}),
                         Intrinsic::LogicalNot => panic!("Unexpected logical not intrinsic, should've been replaced by instruction"),
                         Intrinsic::Neg => {
                             assert_eq!(arguments.len(), 1);
