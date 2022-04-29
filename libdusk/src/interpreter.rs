@@ -1194,11 +1194,13 @@ impl Driver {
                     return None
                 },
                 &Instr::SwitchBr { scrutinee, ref cases, catch_all_bb } => {
-                    let scrutinee = frame.get_val(scrutinee, self).as_u32();
+                    // TODO: this is a very crude (and possibly slow) way of supporting arbitrary integer scrutinees
+                    let scrutinee = frame.get_val(scrutinee, self).as_bytes();
                     for case in cases {
-                        let val = Value::from_const(&case.value, self).as_u32();
-                        let frame = stack.last_mut().unwrap();
+                        let val = Value::from_const(&case.value, self);
+                        let val = val.as_bytes();
                         if val == scrutinee {
+                            let frame = stack.last_mut().unwrap();
                             frame.branch_to(case.bb);
                             return None
                         }

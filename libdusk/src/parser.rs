@@ -685,6 +685,10 @@ impl Driver {
                     PatternKind::NamedCatchAll(name)
                 }
             },
+            &TokenKind::IntLit(value) => {
+                self.next(p);
+                PatternKind::IntLit { value, range: initial_range }
+            },
             _ => panic!("unexpected token"),
         }   
     }

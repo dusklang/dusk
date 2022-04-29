@@ -1465,7 +1465,12 @@ impl Driver {
             Expr::Switch { scrutinee, ref cases } => {
                 let cases = cases.clone();
                 let scrutinee_val = self.build_expr(b, scrutinee, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
-                let discriminant = self.get_discriminant(b, scrutinee_val);
+                let scrutinee_ty = tp.ty(scrutinee);
+                let discriminant = match scrutinee_ty {
+                    Type::Enum(_) => self.get_discriminant(b, scrutinee_val),
+                    Type::Int { .. } => self.handle_indirection(b, scrutinee_val),
+                    _ => todo!(),
+                };
                 let result_location = match &ctx.data {
                     DataDest::Read => Some(
                         // TODO: this will be the wrong type if indirection != 0
@@ -1477,7 +1482,6 @@ impl Driver {
                 let post_bb = self.create_bb(b);
                 let scope_ctx = ctx.redirect(result_location, Some(post_bb));
                 let mut mir_cases = Vec::new();
-                let scrutinee_ty = tp.ty(scrutinee);
                 let enum_info = match scrutinee_ty {
                     &Type::Enum(id) => {
                         Some((id, self.code.hir_code.enums[id].variants.clone()))
