@@ -1,5 +1,7 @@
 use std::collections::HashMap;
+
 use smallvec::{SmallVec, smallvec};
+use num_bigint::BigUint;
 
 mod constraints;
 pub mod type_provider;
@@ -476,12 +478,18 @@ impl tir::Expr<tir::Switch> {
                         },
                         PatternKind::NamedCatchAll(Ident { range, .. }) | PatternKind::AnonymousCatchAll(range) => {
                             if exhaustion.is_total(driver, &scrutinee_ty, tp) {
-                                let err = Error::new(format!("Switch case unreachable"))
+                                let err = Error::new("switch case unreachable")
                                     .adding_primary_range(range, "all possible values already handled before this point");
                                 driver.errors.push(err);
                             } else {
                                 exhaustion.make_total(driver, &scrutinee_ty, range, tp);
                             }
+                        },
+                        PatternKind::IntLit { range, .. } => {
+                            let error = Error::new("cannot match enum type with integer pattern")
+                                .adding_primary_range(range, "pattern here")
+                                .adding_secondary_range(ef!(driver, self.scrutinee.range), "scrutinee here");
+                            driver.errors.push(error);
                         },
                     }
                 }
@@ -515,11 +523,71 @@ impl tir::Expr<tir::Switch> {
                     err_msg.push_str("unhandled in switch expression. switch expressions must be exhaustive.");
 
                     let err = Error::new(err_msg)
-                        .adding_primary_range(driver.get_range(self.id), "");
+                        .adding_primary_range(ef!(driver, self.id.range), "");
                     driver.errors.push(err);
                 }
             },
-            _ => todo!("Only enums are supported in switch expression scrutinee position"),
+            Type::Int { width, is_signed: false } => {
+                let mut exhaustion = HashMap::new();
+                let mut catch_all_range = None;
+                let mut all_exhausted = false;
+                let mut num_values = BigUint::from(1u64);
+                num_values <<= width.bit_width(driver.arch);
+                
+                for case in &self.cases {
+                    match case.pattern.kind {
+                        PatternKind::IntLit { value, range } => {
+                            let already_handled_message = || format!("value `{}` already handled in switch expression", value);
+                            if BigUint::from(value) >= num_values {
+                                let err = Error::new(format!("value `{}` does not fit into type {:?}", value, scrutinee_ty))
+                                    .adding_primary_range(range, "in pattern here");
+                                driver.errors.push(err);
+                            }
+                            if let Some(prior_use) = exhaustion.get(&value) {
+                                // TODO: print as hex if necessary to match the user
+                                let err = Error::new(already_handled_message())
+                                    .adding_primary_range(range, "redundant case here")
+                                    .adding_secondary_range(*prior_use, "previously handled here");
+                                driver.errors.push(err);
+                            } else if let Some(catch_all_range) = catch_all_range {
+                                let err = Error::new(already_handled_message())
+                                    .adding_primary_range(range, "redundant case here")
+                                    .adding_secondary_range(catch_all_range, "previously handled by catch-all case here");
+                                driver.errors.push(err);
+                            }
+                            exhaustion.insert(value, range);
+                        },
+                        PatternKind::NamedCatchAll(Ident { range, .. }) | PatternKind::AnonymousCatchAll(range) => {
+                            if all_exhausted {
+                                let mut err = Error::new("switch case unreachable")
+                                    .adding_primary_range(range, "all possible values already handled before this point");
+                                if let Some(catch_all_range) = catch_all_range {
+                                    err.add_secondary_range(catch_all_range, "additional values handled by pattern here");
+                                }
+                                driver.errors.push(err);
+                            } else {
+                                catch_all_range = Some(range);
+                            }
+                        },
+                        PatternKind::ContextualMember { range, .. } => {
+                            let error = Error::new(format!("cannot match integer type {:?} with contextual member pattern", scrutinee_ty))
+                                .adding_primary_range(range, "pattern here")
+                                .adding_secondary_range(ef!(driver, self.scrutinee.range), "scrutinee here");
+                            driver.errors.push(error);
+                        },
+                    }
+
+                    if !all_exhausted && (catch_all_range.is_some() || BigUint::from(exhaustion.len()) >= num_values) {
+                        all_exhausted = true;
+                    }
+                }
+                if !all_exhausted {
+                    let err = Error::new(format!("not all values of {:?} handled in switch expression. switch expressions must be exhaustive", scrutinee_ty))
+                        .adding_primary_range(ef!(driver, self.id.range), "consider adding a catch-all case to the end of this switch");
+                    driver.errors.push(err);
+                }
+            }
+            _ => todo!("Type {:?} is not supported in switch expression scrutinee position", scrutinee_ty),
         }
 
         let constraints = if self.cases.is_empty() {

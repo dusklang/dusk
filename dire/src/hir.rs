@@ -299,6 +299,10 @@ pub enum PatternKind {
     },
     NamedCatchAll(Ident),
     AnonymousCatchAll(SourceRange),
+    IntLit {
+        value: u64,
+        range: SourceRange,
+    },
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

@@ -1477,10 +1477,12 @@ impl Driver {
                 let post_bb = self.create_bb(b);
                 let scope_ctx = ctx.redirect(result_location, Some(post_bb));
                 let mut mir_cases = Vec::new();
-                let (enum_id, variants) = match tp.ty(scrutinee) {
+                let scrutinee_ty = tp.ty(scrutinee);
+                let enum_info = match scrutinee_ty {
                     &Type::Enum(id) => {
-                        (id, self.code.hir_code.enums[id].variants.clone())
+                        Some((id, self.code.hir_code.enums[id].variants.clone()))
                     },
+                    Type::Int { .. } => None,
                     _ => todo!(),
                 };
                 let mut catch_all_bb = None;
@@ -1511,6 +1513,7 @@ impl Driver {
                     self.start_bb(b, begin_bb);
                     match case.pattern.kind {
                         hir::PatternKind::ContextualMember { name, .. } => {
+                            let (enum_id, variants) = enum_info.as_ref().expect("found contextual member pattern on non-enum type. typechecker should've caught this.");
                             let mut index = None;
                             for (i, variant) in variants.iter().enumerate() {
                                 if variant.name == name.symbol {
@@ -1519,7 +1522,7 @@ impl Driver {
                                 }
                             }
                             let index = index.expect("Unrecognized variant in switch case. Typechecker should have caught this.");
-                            let discriminant = self.get_const_discriminant(enum_id, index);
+                            let discriminant = self.get_const_discriminant(*enum_id, index);
                             mir_cases.push(
                                 SwitchCase {
                                     value: discriminant,
@@ -1527,6 +1530,14 @@ impl Driver {
                                 }
                             );
                         },
+                        hir::PatternKind::IntLit { value, .. } => {
+                            mir_cases.push(
+                                SwitchCase {
+                                    value: Const::Int { lit: value, ty: scrutinee_ty.clone() },
+                                    bb: case_bb,
+                                }
+                            );
+                        }
                         hir::PatternKind::NamedCatchAll(_) | hir::PatternKind::AnonymousCatchAll(_) => {
                             catch_all_bb = Some(case_bb);
                         },

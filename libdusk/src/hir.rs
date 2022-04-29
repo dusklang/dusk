@@ -277,7 +277,7 @@ impl Driver {
         let mut decls = Vec::new();
         let mut bindings = Vec::new();
         match pattern {
-            PatternKind::ContextualMember { .. } | PatternKind::AnonymousCatchAll(_) => {},
+            PatternKind::ContextualMember { .. } | PatternKind::AnonymousCatchAll(_) | PatternKind::IntLit { .. } => {},
             PatternKind::NamedCatchAll(name) => {
                 let paths = vec![
                     PatternBindingPath::identity()
