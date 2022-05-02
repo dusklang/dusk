@@ -294,11 +294,6 @@ impl Driver {
 
     fn parse_decl_ref(&mut self, p: &mut Parser, base_expr: Option<ExprId>, name: Sym) -> ExprId {
         let name_range = self.cur(p).range;
-        let begin_range = if let Some(base_expr) = base_expr {
-            self.get_range(base_expr)
-        } else {
-            name_range
-        };
         if let TokenKind::OpenSquareBracket = self.next(p).kind {
             self.next(p);
             let mut args = Vec::new();
@@ -323,17 +318,15 @@ impl Driver {
             }
         }
         let mut args = SmallVec::new();
-        let mut end_range = name_range;
         let mut has_parens = false;
         if let TokenKind::LeftParen = self.cur(p).kind {
             has_parens = true;
             self.next(p);
             loop {
                 // TODO: actually implement proper comma and newline handling like I've thought about
-                let Token { kind, range } = self.cur(p);
+                let Token { kind, .. } = self.cur(p);
                 match kind {
                     TokenKind::RightParen => {
-                        end_range = range;
                         self.next(p);
                         break;
                     }
@@ -354,10 +347,7 @@ impl Driver {
             name,
             args,
             has_parens,
-            source_info::concat(
-                begin_range,
-                end_range,
-            )
+            name_range,
         )
     }
 

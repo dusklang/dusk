@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
-use dire::hir::{ExprId, DeclId, DeclRefId, StructLitId, CastId, Namespace};
+use dire::hir::{ExprId, DeclId, DeclRefId, StructLitId, CastId, Namespace, VOID_EXPR};
 use dire::mir::Const;
 use dire::ty::{Type, QualType};
 
-use super::{CastMethod, StructLit, constraints::ConstraintList, Overload};
+use super::{CastMethod, StructLit, constraints::ConstraintList, Overload, Overloads};
 use crate::index_vec::*;
 use crate::source_info::CommentatedSourceRange;
 use crate::driver::Driver;
@@ -20,8 +20,8 @@ pub trait TypeProvider: private::Sealed {
     fn ty(&self, expr: ExprId) -> &Type;
     fn ty_mut(&mut self, expr: ExprId) -> &mut Type;
 
-    fn overloads(&self, decl_ref: DeclRefId) -> &Vec<Overload>;
-    fn overloads_mut(&mut self, decl_ref: DeclRefId) -> &mut Vec<Overload>;
+    fn overloads(&self, decl_ref: DeclRefId) -> &Overloads;
+    fn overloads_mut(&mut self, decl_ref: DeclRefId) -> &mut Overloads;
 
     fn selected_overload(&self, decl_ref: DeclRefId) -> Option<DeclId>;
     fn selected_overload_mut(&mut self, decl_ref: DeclRefId) -> &mut Option<DeclId>;
@@ -64,7 +64,7 @@ pub struct RealTypeProvider {
     /// The type of each expression
     types: IndexVec<ExprId, Type>,
     /// The list of overloads for each decl ref
-    overloads: IndexVec<DeclRefId, Vec<Overload>>,
+    overloads: IndexVec<DeclRefId, Overloads>,
     /// The selected overload for each decl ref
     selected_overloads: IndexVec<DeclRefId, Option<DeclId>>,
     /// The generic arguments for each decl ref
@@ -205,10 +205,10 @@ impl TypeProvider for RealTypeProvider {
         &mut self.types[expr]
     }
 
-    fn overloads(&self, decl_ref: DeclRefId) -> &Vec<Overload> {
+    fn overloads(&self, decl_ref: DeclRefId) -> &Overloads {
         &self.overloads[decl_ref]
     }
-    fn overloads_mut(&mut self, decl_ref: DeclRefId) -> &mut Vec<Overload> {
+    fn overloads_mut(&mut self, decl_ref: DeclRefId) -> &mut Overloads {
         &mut self.overloads[decl_ref]
     }
 
@@ -244,6 +244,9 @@ impl TypeProvider for RealTypeProvider {
         &self.constraints[expr]
     }
     fn constraints_mut(&mut self, expr: ExprId) -> &mut ConstraintList {
+        if expr == VOID_EXPR {
+
+        }
         &mut self.constraints[expr]
     }
     fn multi_constraints_mut(&mut self, a: ExprId, b: ExprId) -> (&mut ConstraintList, &mut ConstraintList) {
@@ -281,7 +284,7 @@ pub struct MockTypeProvider<'base> {
     /// The type of each expression
     types: HashMap<ExprId, Type>,
     /// The list of overloads for each decl ref
-    overloads: HashMap<DeclRefId, Vec<Overload>>,
+    overloads: HashMap<DeclRefId, Overloads>,
     /// The selected overload for each decl ref
     selected_overloads: HashMap<DeclRefId, Option<DeclId>>,
     /// The generic arguments for each decl ref
@@ -414,7 +417,7 @@ impl<'base> TypeProvider for MockTypeProvider<'base> {
         self.fw_decl_types_mut(decl)
     }
 
-    forward_mock!(overloads, overloads, overloads_mut, DeclRefId, Vec<Overload>);
+    forward_mock!(overloads, overloads, overloads_mut, DeclRefId, Overloads);
     forward_mock!(selected_overloads, selected_overload, selected_overload_mut, DeclRefId, Option<DeclId>, deref: deref);
     forward_mock!(generic_arguments, generic_arguments, generic_arguments_mut, DeclRefId, Option<Vec<Type>>);
     forward_mock!(struct_lits, struct_lit, struct_lit_mut, StructLitId, Option<StructLit>);

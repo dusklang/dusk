@@ -56,6 +56,12 @@ pub struct Overload {
     pub generic_param_constraints: Vec<ConstraintList>,
 }
 
+#[derive(Clone, Default)]
+pub struct Overloads {
+    pub overloads: Vec<Overload>,
+    pub nonviable_overloads: Vec<Overload>,
+}
+
 impl tir::Expr<tir::IntLit> {
     fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
         *tp.constraints_mut(self.id) = ConstraintList::new(
@@ -714,6 +720,7 @@ impl tir::Expr<tir::DeclRef> {
             overloads.push(overload);
         }
 
+        let mut nonviable_overloads = Vec::new();
         // Rule out overloads that don't match the arguments
         overloads.retain(|overload| {
             assert_eq!(decls[overload.decl].param_tys.len(), args.len());
@@ -721,6 +728,7 @@ impl tir::Expr<tir::DeclRef> {
             let param_tys = decls[overload.decl].param_tys.iter().map(|&expr| tp_immutable.get_evaluated_type(expr));
             for (constraints, ty) in arg_constraints.zip(param_tys) {
                 if can_unify_to_in_generic_context(&constraints, &ty.into(), &decls[overload.decl].generic_params).is_err() {
+                    nonviable_overloads.push(overload.clone());
                     return false;
                 }
             }
@@ -758,7 +766,7 @@ impl tir::Expr<tir::DeclRef> {
             }
         }
         *tp.constraints_mut(id) = ConstraintList::new(BuiltinTraits::empty(), Some(one_of), pref);
-        *tp.overloads_mut(decl_ref_id) = overloads;
+        *tp.overloads_mut(decl_ref_id) = Overloads { overloads, nonviable_overloads };
     }
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
@@ -768,15 +776,15 @@ impl tir::Expr<tir::DeclRef> {
         // P.S. These borrows are only here because the borrow checker is dumb
         let decls = &driver.tir.decls;
         let mut overloads = tp.overloads(self.decl_ref_id).clone();
-        overloads.retain(|overload| {
+        overloads.overloads.retain(|overload| {
             tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id)).trivially_convertible_to(&ty)
         });
         let pref = tp.preferred_overload(self.decl_ref_id);
 
-        let (overload, generic_arguments) = if !overloads.is_empty() {
+        let (overload, generic_arguments) = if !overloads.overloads.is_empty() {
             let mut overload = pref.as_ref().cloned()
-                .filter(|overload| overloads.iter().find(|&other| other.decl == overload.decl).is_some())
-                .unwrap_or_else(|| overloads[0].clone());
+                .filter(|overload| overloads.overloads.iter().find(|&other| other.decl == overload.decl).is_some())
+                .unwrap_or_else(|| overloads.overloads[0].clone());
             let overload_is_function = match df!(driver, overload.decl.hir) {
                 hir::Decl::Computed { .. } | hir::Decl::ComputedPrototype { .. } => true,
                 hir::Decl::Intrinsic { function_like, .. } => function_like,
@@ -815,12 +823,24 @@ impl tir::Expr<tir::DeclRef> {
             }
             (Some(overload), Some(generic_args))
         } else {
-            driver.errors.push(
-                Error::new("no matching overload for declaration")
-                    .adding_primary_range(driver.get_range(self.id), "expression here")
-            );
+            let name = driver.code.hir_code.decl_refs[self.decl_ref_id].name;
+            let name = driver.interner.resolve(name).unwrap();
+            if overloads.nonviable_overloads.is_empty() {
+                driver.errors.push(
+                    Error::new(format!("no declarations named \"{}\" found in scope", name))
+                        .adding_primary_range(driver.get_range(self.id), "referenced here")
+                );
+            } else {
+                let mut err = Error::new(format!("no matching declarations named \"{}\" found in scope", name))
+                    .adding_primary_range(driver.get_range(self.id), "referenced here");
+                for overload in &overloads.nonviable_overloads {
+                    let range = df!(driver, overload.decl.range);
+                    err.add_secondary_range(range, "non-viable overload found here");
+                }
+                driver.errors.push(err);
+            }
             for &arg in &self.args {
-                tp.constraints_mut(arg).set_to(Type::Error);
+                tp.constraints_mut(arg).make_error();
             }
             (None, None)
         };
@@ -1256,6 +1276,7 @@ impl Driver {
                 ($($name:ident$(,)*)+) => {
                     $(
                         for item in unit.$name.get_level(level) {
+                            self.initialize_global_expressions(tp); // this is a hack to erase the effects of modifying constraints on VOID_EXPR and ERROR_EXPR
                             item.run_pass_2(self, tp);
                         }
                     )+
@@ -1284,13 +1305,17 @@ impl Driver {
         tp.debug_output(self, 0);
     }
 
-    pub fn get_real_type_provider(&self, dbg: bool) -> RealTypeProvider {
-        // Assign the type of the void expression to be void.
-        let mut tp = RealTypeProvider::new(dbg, self);
+    fn initialize_global_expressions(&self, tp: &mut impl TypeProvider) {
         *tp.constraints_mut(hir::VOID_EXPR) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
         *tp.ty_mut(hir::VOID_EXPR) = Type::Void;
         *tp.constraints_mut(hir::ERROR_EXPR) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Error.into()]), None);
         *tp.ty_mut(hir::ERROR_EXPR) = Type::Error;
+    }
+
+    pub fn get_real_type_provider(&self, dbg: bool) -> RealTypeProvider {
+        // Assign the type of the void expression to be void.
+        let mut tp = RealTypeProvider::new(dbg, self);
+        self.initialize_global_expressions(&mut tp);
         tp
     }
 

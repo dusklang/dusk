@@ -10,6 +10,7 @@ pub struct ConstraintList {
     trait_impls: BuiltinTraits,
     one_of: Option<SmallVec<[QualType; 1]>>,
     preferred_type: Option<QualType>,
+    is_error: bool,
 }
 
 pub enum UnificationError<'a> {
@@ -28,7 +29,7 @@ pub enum SolveError<'a> {
 
 impl ConstraintList {
     pub const fn new(trait_impls: BuiltinTraits, one_of: Option<SmallVec<[QualType; 1]>>, preferred_type: Option<QualType>) -> Self {
-        Self { trait_impls, one_of, preferred_type }
+        Self { trait_impls, one_of, preferred_type, is_error: false }
     }
 
     pub fn one_of(&self) -> &[QualType] {
@@ -66,6 +67,26 @@ impl ConstraintList {
 
     pub fn preferred_type(&self) -> Option<&QualType> {
         self.preferred_type.as_ref()
+    }
+
+    pub fn make_error(&mut self) {
+        self.is_error = true;
+    }
+
+    pub fn is_error(&self) -> bool {
+        self.is_error ||
+        self.one_of
+            .as_ref()
+            .map(|one_of|
+                one_of.is_empty() ||
+                one_of
+                    .iter()
+                    .find(|ty|
+                        &ty.ty == &Type::Error
+                    )
+                    .is_some()
+            )
+            .unwrap_or(false)
     }
 
     pub fn filter_map(&self, type_map: impl FnMut(&QualType) -> Option<QualType> + Copy) -> Self {
@@ -221,6 +242,9 @@ fn contains_any_of_generic_params(ty: &Type, generic_params: &[GenericParamId]) 
 pub fn can_unify_to_in_generic_context<'a>(constraints: &'a ConstraintList, ty: &QualType, generic_params: &[GenericParamId]) -> Result<(), UnificationError<'a>> {
     // Never is the "bottom type", so it unifies to anything.
     if constraints.one_of_exists(|ty| ty.ty == Type::Never) { return Ok(()); }
+
+    // If this value is already an error, just say it unifies to anything
+    if constraints.is_error() { return Ok(()); }
 
     if contains_any_of_generic_params(&ty.ty, generic_params) {
         return Ok(());
