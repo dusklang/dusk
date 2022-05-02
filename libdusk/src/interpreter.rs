@@ -341,6 +341,7 @@ pub enum InterpMode {
 pub struct Interpreter {
     statics: HashMap<StaticId, Value>,
     allocations: HashMap<usize, alloc::Layout>,
+    switch_cache: HashMap<OpId, HashMap<Box<[u8]>, BlockId>>,
     pub mode: InterpMode,
 }
 
@@ -349,6 +350,7 @@ impl Interpreter {
         Self {
             statics: HashMap::new(),
             allocations: HashMap::new(),
+            switch_cache: HashMap::new(),
             mode: InterpMode::CompileTime,
         }
     }
@@ -1195,18 +1197,21 @@ impl Driver {
                 },
                 &Instr::SwitchBr { scrutinee, ref cases, catch_all_bb } => {
                     // TODO: this is a very crude (and possibly slow) way of supporting arbitrary integer scrutinees
-                    let scrutinee = frame.get_val(scrutinee, self).as_bytes();
-                    for case in cases {
-                        let val = Value::from_const(&case.value, self);
-                        let val = val.as_bytes();
-                        if val == scrutinee {
-                            let frame = stack.last_mut().unwrap();
-                            frame.branch_to(case.bb);
-                            return None
+                    let scrutinee = frame.get_val(scrutinee, self).as_bytes().to_owned();
+                    if !self.interp.switch_cache.contains_key(&next_op) {
+                        let mut table = HashMap::new();
+                        for case in cases {
+                            let val = Value::from_const(&case.value, self);
+                            let val = val.as_bytes();
+                            table.insert(val.to_owned().into_boxed_slice(), case.bb);
                         }
+                        self.interp.switch_cache.insert(next_op, table);
                     }
+                    let table = self.interp.switch_cache.get(&next_op).unwrap();
+                    let block = table.get(scrutinee.as_slice()).cloned().unwrap_or(catch_all_bb);
+
                     let frame = stack.last_mut().unwrap();
-                    frame.branch_to(catch_all_bb);
+                    frame.branch_to(block);
                     return None
                 },
                 &Instr::Variant { enuum, index, payload } => {
