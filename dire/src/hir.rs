@@ -102,7 +102,6 @@ pub enum Namespace {
 pub struct DeclRef {
     pub name: Sym,
     pub namespace: Namespace,
-    pub has_parens: bool,
     pub expr: ExprId,
 }
 

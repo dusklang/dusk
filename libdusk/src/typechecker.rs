@@ -798,24 +798,19 @@ impl tir::Expr<tir::DeclRef> {
             let mut overload = pref.as_ref().cloned()
                 .filter(|overload| overloads.overloads.iter().find(|&other| other.decl == overload.decl).is_some())
                 .unwrap_or_else(|| overloads.overloads[0].clone());
-            let overload_is_function = match df!(driver, overload.decl.hir) {
+
+
+
+
+            // TODO: I might need this logic soon.
+            let _overload_is_function = match df!(driver, overload.decl.hir) {
                 hir::Decl::Computed { .. } | hir::Decl::ComputedPrototype { .. } => true,
                 hir::Decl::Intrinsic { function_like, .. } => function_like,
                 hir::Decl::Variant { payload_ty, .. } => payload_ty.is_some(),
                 _ => false,
             };
-            let has_parens = driver.code.hir_code.decl_refs[self.decl_ref_id].has_parens;
-            if has_parens && !overload_is_function {
-                driver.errors.push(
-                    Error::new("reference to non-function must not have parentheses")
-                        .adding_primary_range(driver.get_range(self.id), "")
-                );
-            } else if !has_parens && overload_is_function {
-                driver.errors.push(
-                    Error::new("function call must have parentheses")
-                        .adding_primary_range(driver.get_range(self.id), "")
-                );
-            }
+
+
             let decl = &decls[overload.decl];
             for (i, &arg) in self.args.iter().enumerate() {
                 let ty = tp.get_evaluated_type(decl.param_tys[i]).clone();
