@@ -45,7 +45,7 @@ impl ConstraintList {
             if one_of.len() == 1 {
                 return Ok(one_of[0].clone())
             } else if one_of.is_empty() {
-                return Err(SolveError::NoValidChoices)
+                return Ok(Type::Error.into())
             }
         }
         
@@ -53,11 +53,7 @@ impl ConstraintList {
             Some(ref pref) => if can_unify_to(self, pref).is_ok() {
                 Ok(pref.clone())
             } else if let Some(one_of) = &self.one_of {
-                if one_of.is_empty() {
-                    Err(SolveError::NoValidChoices)
-                } else {
-                    Err(SolveError::Ambiguous { choices: one_of })
-                }
+                Err(SolveError::Ambiguous { choices: one_of })
             } else {
                 Err(SolveError::CantUnifyToPreferredType)
             },

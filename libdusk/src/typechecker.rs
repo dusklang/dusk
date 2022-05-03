@@ -180,8 +180,15 @@ impl tir::AssignedDecl {
                 driver.errors.push(error);
             }
             explicit_ty
+        } else if let Ok(ty) = constraints.solve() {
+            ty.ty
         } else {
-            constraints.solve().expect("Ambiguous type for assigned declaration").ty
+            let range = df!(driver, self.decl_id.range);
+            driver.errors.push(
+                Error::new("failed to infer type for assigned declaration")
+                    .adding_primary_range(range, "declaration here")
+            );
+            Type::Error
         };
         tp.decl_type_mut(self.decl_id).ty = ty;
     }
@@ -776,8 +783,14 @@ impl tir::Expr<tir::DeclRef> {
         // P.S. These borrows are only here because the borrow checker is dumb
         let decls = &driver.tir.decls;
         let mut overloads = tp.overloads(self.decl_ref_id).clone();
+        let nonviable_overloads = &mut overloads.nonviable_overloads;
         overloads.overloads.retain(|overload| {
-            tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id)).trivially_convertible_to(&ty)
+            if tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id)).trivially_convertible_to(&ty) {
+                true
+            } else {
+                nonviable_overloads.push(overload.clone());
+                false
+            }
         });
         let pref = tp.preferred_overload(self.decl_ref_id);
 
