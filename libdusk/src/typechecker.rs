@@ -730,7 +730,11 @@ impl tir::Expr<tir::DeclRef> {
         let mut nonviable_overloads = Vec::new();
         // Rule out overloads that don't match the arguments
         overloads.retain(|overload| {
-            assert_eq!(decls[overload.decl].param_tys.len(), args.len());
+            if decls[overload.decl].param_tys.len() != args.len() {
+                nonviable_overloads.push(overload.clone());
+                return false;
+            }
+
             let arg_constraints = args.iter().map(|&arg| tp_immutable.constraints(arg));
             let param_tys = decls[overload.decl].param_tys.iter().map(|&expr| tp_immutable.get_evaluated_type(expr));
             for (constraints, ty) in arg_constraints.zip(param_tys) {
