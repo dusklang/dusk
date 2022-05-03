@@ -224,7 +224,6 @@ impl Driver {
         if let Some(group) = self.code.hir_code.mod_scopes[scope].decl_groups.get(&decl_ref.name) {
             overloads.extend(
                 group.iter()
-                    .filter(|decl| decl.num_params == decl_ref.num_arguments)
                     .map(|decl| decl.id)
             );
         }
@@ -240,7 +239,7 @@ impl Driver {
     fn find_overloads_in_enum(&self, decl_ref: &hir::DeclRef, id: EnumId, overloads: &mut HashSet<DeclId>) {
         for variant in &self.code.hir_code.enums[id].variants {
             let num_params = if variant.payload_ty.is_some() { 1 } else { 0 };
-            if variant.name == decl_ref.name && decl_ref.num_arguments == num_params {
+            if variant.name == decl_ref.name {
                 overloads.insert(variant.decl);
                 return;
             }
@@ -274,7 +273,7 @@ impl Driver {
                         let namespace = &self.code.hir_code.imper_ns[scope];
                         let result = namespace.decls[0..end_offset].iter()
                             .rev()
-                            .find(|&decl| decl.name == decl_ref.name && decl.num_params == decl_ref.num_arguments);
+                            .find(|&decl| decl.name == decl_ref.name);
                         if let Some(decl) = result {
                             overloads.insert(decl.id);
                             break;

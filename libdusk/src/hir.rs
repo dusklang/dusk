@@ -445,7 +445,6 @@ impl Driver {
             DeclRef {
                 name,
                 namespace,
-                num_arguments: 0,
                 has_parens: false,
                 expr,
             }
