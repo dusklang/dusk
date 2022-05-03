@@ -55,6 +55,8 @@ pub struct Assignment { pub lhs: ExprId, pub rhs: ExprId }
 #[derive(Debug)]
 pub struct DeclRef { pub args: SmallVec<[ExprId; 2]>, pub decl_ref_id: DeclRefId }
 #[derive(Debug)]
+pub struct Call { pub function: ExprId, pub args: SmallVec<[ExprId; 2]> }
+#[derive(Debug)]
 pub struct If { pub condition: ExprId, pub then_expr: ExprId, pub else_expr: ExprId }
 #[derive(Debug)]
 pub struct While { pub condition: ExprId }
@@ -137,6 +139,7 @@ pub struct UnitItems {
     pub pattern_bindings: DepVec<PatternBinding>,
     pub assignments: DepVec<Expr<Assignment>>,
     pub decl_refs: DepVec<Expr<DeclRef>>,
+    pub calls: DepVec<Expr<Call>>,
     pub addr_ofs: DepVec<Expr<AddrOf>>,
     pub derefs: DepVec<Expr<Dereference>>,
     pub pointers: DepVec<Expr<Pointer>>,
@@ -157,7 +160,7 @@ impl UnitItems {
 impl UnitItems {
     fn unify_sizes(&mut self) {
         dep_vec::unify_sizes(&mut [
-            &mut self.assigned_decls, &mut self.assignments, &mut self.decl_refs, 
+            &mut self.assigned_decls, &mut self.assignments, &mut self.decl_refs, &mut self.calls,
             &mut self.addr_ofs, &mut self.derefs, &mut self.pointers, &mut self.ifs,
             &mut self.dos, &mut self.ret_groups, &mut self.casts, &mut self.whiles,
             &mut self.explicit_rets, &mut self.modules, &mut self.imports, &mut self.structs,
@@ -457,6 +460,7 @@ impl Driver {
                 insert_expr!(explicit_rets, ExplicitRet)
             }
             &hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => insert_expr!(decl_refs, DeclRef { args: arguments.clone(), decl_ref_id }),
+            &hir::Expr::Call { function, ref arguments } => insert_expr!(calls, Call { function, args: arguments.clone() }),
             &hir::Expr::Set { lhs, rhs } => insert_expr!(assignments, Assignment { lhs, rhs }),
             &hir::Expr::Do { scope } => insert_expr!(dos, Do { terminal_expr: self.code.hir_code.imper_scopes[scope].terminal_expr }),
             &hir::Expr::If { condition, then_scope, else_scope } => {
@@ -616,6 +620,12 @@ impl Driver {
                         self.tir.graph.add_type1_dep(id, ef!(arg.item));
                     }
                 },
+                hir::Expr::Call { function, ref arguments } => {
+                    self.tir.graph.add_type1_dep(id, ef!(function.item));
+                    for &arg in arguments {
+                        self.tir.graph.add_type1_dep(id, ef!(arg.item));
+                    }
+                },
                 hir::Expr::Set { lhs, rhs } => {
                     self.tir.graph.add_type1_dep(id, ef!(lhs.item));
                     self.tir.graph.add_type1_dep(id, ef!(rhs.item));
@@ -747,7 +757,7 @@ impl Driver {
                         hir::Expr::Void | hir::Expr::Error | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
                             | hir::Expr::CharLit { .. } | hir::Expr::BoolLit { .. } | hir::Expr::ConstTy(_) | hir::Expr::AddrOf { .. }
                             | hir::Expr::Deref(_) | hir::Expr::Pointer { .. } | hir::Expr::Set { .. } | hir::Expr::Mod { .. }
-                            | hir::Expr::Import { .. } | hir::Expr::Struct(_) | hir::Expr::Enum(_) => {},
+                            | hir::Expr::Import { .. } | hir::Expr::Struct(_) | hir::Expr::Enum(_) | hir::Expr::Call { .. } => {},
                         hir::Expr::Cast { ty, .. } => {
                             add_eval_dep!(id, ty);
                         },

@@ -146,6 +146,7 @@ pub enum Expr {
     BoolLit { lit: bool },
     ConstTy(Type),
     DeclRef { arguments: SmallVec<[ExprId; 2]>, id: DeclRefId },
+    Call { function: ExprId, arguments: SmallVec<[ExprId; 2]>, },
     AddrOf { expr: ExprId, is_mut: bool },
     /// Transforms type into pointer type
     Pointer { expr: ExprId, is_mut: bool },

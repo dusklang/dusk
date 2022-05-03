@@ -864,6 +864,16 @@ impl tir::Expr<tir::DeclRef> {
     }
 }
 
+impl tir::Expr<tir::Call> {
+    fn run_pass_1(&self, _driver: &mut Driver, _tp: &mut impl TypeProvider) {
+        
+    }
+
+    fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut impl TypeProvider) {
+        
+    }
+}
+
 impl tir::Expr<tir::AddrOf> {
     fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
         let constraints = tp.constraints(self.expr).filter_map(|ty| {
@@ -1267,7 +1277,7 @@ impl Driver {
             }
             run_pass_1!(
                 assigned_decls, assignments, casts, whiles, explicit_rets, modules, imports,
-                decl_refs, addr_ofs, derefs, pointers, structs, struct_lits, ifs, dos, ret_groups,
+                decl_refs, calls, addr_ofs, derefs, pointers, structs, struct_lits, ifs, dos, ret_groups,
                 switches, enums, pattern_bindings,
             );
             tp.debug_output(self, level as usize);
@@ -1297,7 +1307,7 @@ impl Driver {
             }
             run_pass_2!(
                 assigned_decls, assignments, casts, whiles, explicit_rets, modules, imports,
-                decl_refs, addr_ofs, derefs, pointers, structs, struct_lits, ifs, dos, ret_groups,
+                decl_refs, calls, addr_ofs, derefs, pointers, structs, struct_lits, ifs, dos, ret_groups,
                 switches, enums, pattern_bindings,
             );
 

@@ -1336,6 +1336,7 @@ impl Driver {
 
                 break self.get(b, arguments, id, tp);
             },
+            Expr::Call { .. } => todo!(),
             Expr::Cast { expr: operand, ty: dest_ty, cast_id } => {
                 let dest_ty = tp.get_evaluated_type(dest_ty).clone();
                 match tp.cast_method(cast_id) {
