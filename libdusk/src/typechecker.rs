@@ -730,11 +730,7 @@ impl tir::Expr<tir::DeclRef> {
         let mut nonviable_overloads = Vec::new();
         // Rule out overloads that don't match the arguments
         overloads.retain(|overload| {
-            if decls[overload.decl].param_tys.len() != args.len() {
-                nonviable_overloads.push(overload.clone());
-                return false;
-            }
-
+            assert_eq!(decls[overload.decl].param_tys.len(), args.len());
             let arg_constraints = args.iter().map(|&arg| tp_immutable.constraints(arg));
             let param_tys = decls[overload.decl].param_tys.iter().map(|&expr| tp_immutable.get_evaluated_type(expr));
             for (constraints, ty) in arg_constraints.zip(param_tys) {
@@ -802,19 +798,24 @@ impl tir::Expr<tir::DeclRef> {
             let mut overload = pref.as_ref().cloned()
                 .filter(|overload| overloads.overloads.iter().find(|&other| other.decl == overload.decl).is_some())
                 .unwrap_or_else(|| overloads.overloads[0].clone());
-
-
-
-
-            // TODO: I might need this logic soon.
-            let _overload_is_function = match df!(driver, overload.decl.hir) {
+            let overload_is_function = match df!(driver, overload.decl.hir) {
                 hir::Decl::Computed { .. } | hir::Decl::ComputedPrototype { .. } => true,
                 hir::Decl::Intrinsic { function_like, .. } => function_like,
                 hir::Decl::Variant { payload_ty, .. } => payload_ty.is_some(),
                 _ => false,
             };
-
-
+            let has_parens = driver.code.hir_code.decl_refs[self.decl_ref_id].has_parens;
+            if has_parens && !overload_is_function {
+                driver.errors.push(
+                    Error::new("reference to non-function must not have parentheses")
+                        .adding_primary_range(driver.get_range(self.id), "")
+                );
+            } else if !has_parens && overload_is_function {
+                driver.errors.push(
+                    Error::new("function call must have parentheses")
+                        .adding_primary_range(driver.get_range(self.id), "")
+                );
+            }
             let decl = &decls[overload.decl];
             for (i, &arg) in self.args.iter().enumerate() {
                 let ty = tp.get_evaluated_type(decl.param_tys[i]).clone();
@@ -860,16 +861,6 @@ impl tir::Expr<tir::DeclRef> {
         *tp.overloads_mut(self.decl_ref_id) = overloads;
         *tp.selected_overload_mut(self.decl_ref_id) = overload.map(|overload| overload.decl);
         *tp.generic_arguments_mut(self.decl_ref_id) = generic_arguments;
-    }
-}
-
-impl tir::Expr<tir::Call> {
-    fn run_pass_1(&self, _driver: &mut Driver, _tp: &mut impl TypeProvider) {
-        
-    }
-
-    fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut impl TypeProvider) {
-        
     }
 }
 
@@ -1276,7 +1267,7 @@ impl Driver {
             }
             run_pass_1!(
                 assigned_decls, assignments, casts, whiles, explicit_rets, modules, imports,
-                decl_refs, calls, addr_ofs, derefs, pointers, structs, struct_lits, ifs, dos, ret_groups,
+                decl_refs, addr_ofs, derefs, pointers, structs, struct_lits, ifs, dos, ret_groups,
                 switches, enums, pattern_bindings,
             );
             tp.debug_output(self, level as usize);
@@ -1306,7 +1297,7 @@ impl Driver {
             }
             run_pass_2!(
                 assigned_decls, assignments, casts, whiles, explicit_rets, modules, imports,
-                decl_refs, calls, addr_ofs, derefs, pointers, structs, struct_lits, ifs, dos, ret_groups,
+                decl_refs, addr_ofs, derefs, pointers, structs, struct_lits, ifs, dos, ret_groups,
                 switches, enums, pattern_bindings,
             );
 

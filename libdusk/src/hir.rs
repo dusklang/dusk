@@ -433,25 +433,25 @@ impl Driver {
 
         id
     }
-    pub fn decl_ref(&mut self, base_expr: Option<ExprId>, name: Sym, range: SourceRange) -> ExprId {
+    pub fn decl_ref(&mut self, base_expr: Option<ExprId>, name: Sym, arguments: SmallVec<[ExprId; 2]>, has_parens: bool, range: SourceRange) -> ExprId {
         let namespace = match base_expr {
             Some(base_expr) => Namespace::MemberRef { base_expr },
             None => self.cur_namespace(),
         };
         let id = self.code.hir_code.decl_refs.next_idx();
-        let expr = self.push_expr(Expr::DeclRef { arguments: Default::default(), id }, range);
+        let num_arguments = arguments.len();
+        let expr = self.push_expr(Expr::DeclRef { arguments, id }, range);
         self.code.hir_code.decl_refs.push_at(
             id,
             DeclRef {
                 name,
                 namespace,
+                num_arguments,
+                has_parens,
                 expr,
             }
         );
         expr
-    }
-    pub fn call_expr(&mut self, function: ExprId, arguments: SmallVec<[ExprId; 2]>, range: SourceRange)-> ExprId {
-        self.push_expr(Expr::Call { function, arguments }, range)
     }
     // TODO: intern constant type expressions
     pub fn add_const_ty(&mut self, ty: Type) -> ExprId {
@@ -472,8 +472,7 @@ impl Driver {
             BinOp::Assign => self.push_expr(Expr::Set { lhs, rhs }, range),
             _ => {
                 let name = self.interner.get_or_intern(op.symbol());
-                let op = self.decl_ref(None, name, range);
-                self.call_expr(op, smallvec![lhs, rhs], range)
+                self.decl_ref(None, name, smallvec![lhs, rhs], false, range)
             }
         }
     }
@@ -486,8 +485,7 @@ impl Driver {
             UnOp::PointerMut => self.push_expr(Expr::Pointer { expr, is_mut: true  }, range),
             _ => {
                 let name = self.interner.get_or_intern(op.symbol());
-                let op = self.decl_ref(None, name, range);
-                self.call_expr(op, smallvec![expr], range)
+                self.decl_ref(None, name, smallvec![expr], false, range)
             },
         }
     }

@@ -253,7 +253,7 @@ impl Driver {
     pub fn size_of(&self, ty: &Type) -> usize {
         let arch = self.arch;
         match ty {
-            Type::Error | Type::Void | Type::Never | Type::Ty | Type::Mod | Type::Function { .. } => 0,
+            Type::Error | Type::Void | Type::Never | Type::Ty | Type::Mod => 0,
             Type::Int { width, .. } => {
                 let bit_width = width.bit_width(arch);
                 assert_eq!(bit_width % 8, 0, "Unexpected bit width: not a multiple of eight!");
@@ -1336,7 +1336,6 @@ impl Driver {
 
                 break self.get(b, arguments, id, tp);
             },
-            Expr::Call { .. } => todo!(),
             Expr::Cast { expr: operand, ty: dest_ty, cast_id } => {
                 let dest_ty = tp.get_evaluated_type(dest_ty).clone();
                 match tp.cast_method(cast_id) {

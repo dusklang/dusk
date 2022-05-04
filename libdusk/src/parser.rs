@@ -317,37 +317,38 @@ impl Driver {
                 }
             }
         }
-        self.decl_ref(
-            base_expr,
-            name,
-            name_range,
-        )
-    }
-
-    fn parse_call(&mut self, p: &mut Parser, function: ExprId) -> ExprId {
-        let left_paren_range = self.eat_tok(p, TokenKind::LeftParen);
         let mut args = SmallVec::new();
-        loop {
-            // TODO: actually implement proper comma and newline handling like I've thought about
-            let Token { kind, .. } = self.cur(p);
-            match kind {
-                TokenKind::RightParen => {
-                    self.next(p);
-                    break;
-                }
-                TokenKind::Comma => { self.next(p); }
-                TokenKind::Eof => {
-                    panic!("Reached eof in middle of function call");
-                }
-                _ => {
-                    if let Ok(arg) = self.parse_expr(p) {
-                        args.push(arg);
+        let mut has_parens = false;
+        if let TokenKind::LeftParen = self.cur(p).kind {
+            has_parens = true;
+            self.next(p);
+            loop {
+                // TODO: actually implement proper comma and newline handling like I've thought about
+                let Token { kind, .. } = self.cur(p);
+                match kind {
+                    TokenKind::RightParen => {
+                        self.next(p);
+                        break;
+                    }
+                    TokenKind::Comma => { self.next(p); }
+                    TokenKind::Eof => {
+                        panic!("Reached eof in middle of decl ref");
+                    }
+                    _ => {
+                        if let Ok(arg) = self.parse_expr(p) {
+                            args.push(arg);
+                        }
                     }
                 }
             }
         }
-
-        self.call_expr(function, args, left_paren_range)
+        self.decl_ref(
+            base_expr,
+            name,
+            args,
+            has_parens,
+            name_range,
+        )
     }
 
     /// A restricted term doesn't include cast or struct literal expressions
@@ -448,7 +449,7 @@ impl Driver {
             },
             x => Err(x.clone()),
         }.map(|mut expr| {
-            // Parse arbitrary sequence of postfix operators, member refs and calls
+            // Parse arbitrary sequence of postfix operators and member refs
             loop {
                 let mut modified = false;
                 while let Some((op, mut range)) = self.parse_postfix_operator(p) {
@@ -481,10 +482,6 @@ impl Driver {
                     };
                     expr = self.parse_decl_ref(p, Some(expr), name);
 
-                    modified = true;
-                }
-                while self.cur(p).kind == &TokenKind::LeftParen {
-                    expr = self.parse_call(p, expr);
                     modified = true;
                 }
                 if !modified { break; }
@@ -743,7 +740,7 @@ impl Driver {
     fn convert_ambiguous_generic_list_to_arguments(&mut self, idents: &Vec<Ident>) -> Vec<ExprId> {
         let mut arguments = Vec::new();
         for ident in idents {
-            let ty = self.decl_ref(None, ident.symbol, ident.range);
+            let ty = self.decl_ref(None, ident.symbol, SmallVec::new(), false, ident.range);
             arguments.push(ty);
         }
         arguments
