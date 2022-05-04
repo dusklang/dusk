@@ -430,7 +430,7 @@ impl Driver {
                 let params = params.clone();
                 let func = self.build_function(
                     Some(self.code.hir_code.names[id]),
-                    self.decl_type(id, tp).clone(),
+                    self.decl_type(id, tp).return_ty().unwrap().clone(),
                     FunctionBody::Scope { scope, decl: id },
                     params,
                     generic_params,
@@ -468,7 +468,7 @@ impl Driver {
                 decl
             },
             hir::Decl::Intrinsic { intr, .. } => {
-                let decl = Decl::Intrinsic(intr, self.decl_type(id, tp).clone());
+                let decl = Decl::Intrinsic(intr, self.decl_type(id, tp));
                 self.mir.decls.insert(id, decl.clone());
                 decl
             },
@@ -833,7 +833,6 @@ impl Driver {
             let ty = self.decl_type(param, tp);
             let instr = Instr::Parameter(ty.clone());
             let instr_id = instrs.next();
-            let ty = ty.clone();
             let op = self.code.ops.push(Op::MirInstr(instr, instr_id, ty));
             let range = df!(param.range);
             let name = instr_namespace.insert(format!("{}", self.display_item(range)));

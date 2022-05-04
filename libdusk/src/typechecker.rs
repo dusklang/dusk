@@ -50,13 +50,13 @@ enum UnitKind {
     Mock(usize),
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Overload {
     pub decl: DeclId,
     pub generic_param_constraints: Vec<ConstraintList>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Overloads {
     pub overloads: Vec<Overload>,
     pub nonviable_overloads: Vec<Overload>,
@@ -747,7 +747,10 @@ impl tir::Expr<tir::DeclRef> {
         one_of.reserve(overloads.len());
         for i in 0..overloads.len() {
             let overload = &overloads[i];
-            let ty = tp.fetch_decl_type(driver, overload.decl, Some(decl_ref_id)).ty;
+            let mut ty = tp.fetch_decl_type(driver, overload.decl, Some(decl_ref_id)).ty;
+            if matches!(df!(driver, overload.decl.hir), hir::Decl::Computed { .. } | hir::Decl::ComputedPrototype { .. }) {
+                ty = ty.return_ty().unwrap().clone();
+            }
             let mut is_mut = driver.tir.decls[overload.decl].is_mut;
             if let hir::Namespace::MemberRef { base_expr } = driver.code.hir_code.decl_refs[decl_ref_id].namespace {
                 let constraints = tp.constraints(base_expr);
@@ -785,7 +788,12 @@ impl tir::Expr<tir::DeclRef> {
         let mut overloads = tp.overloads(self.decl_ref_id).clone();
         let nonviable_overloads = &mut overloads.nonviable_overloads;
         overloads.overloads.retain(|overload| {
-            if tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id)).trivially_convertible_to(&ty) {
+            let mut overload_ty = tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id));
+            if matches!(df!(driver, overload.decl.hir), hir::Decl::Computed { .. } | hir::Decl::ComputedPrototype { .. }) {
+                overload_ty = overload_ty.ty.return_ty().unwrap().clone().into();
+            }
+
+            if overload_ty.trivially_convertible_to(&ty) {
                 true
             } else {
                 nonviable_overloads.push(overload.clone());
@@ -1231,8 +1239,17 @@ impl tir::RetGroup {
 }
 
 impl Driver {
-    pub fn decl_type<'a>(&'a self, id: DeclId, tp: &'a impl TypeProvider) -> &Type {
-        self.code.hir_code.explicit_tys[id].map(|ty| tp.get_evaluated_type(ty)).unwrap_or(&tp.fw_decl_types(id).ty)
+    pub fn decl_type(&self, id: DeclId, tp: &impl TypeProvider) -> Type {
+        let explicit_ty = self.code.hir_code.explicit_tys[id].map(|ty| tp.get_evaluated_type(ty)).unwrap_or(&tp.fw_decl_types(id).ty).clone();
+        if let hir::Decl::Computed { param_tys, .. } | hir::Decl::ComputedPrototype { param_tys, .. } = &df!(id.hir) {
+            let param_tys: Vec<_> = param_tys.iter().copied()
+                .map(|ty| tp.get_evaluated_type(ty).clone())
+                .collect();
+            let return_ty = Box::new(explicit_ty);
+            Type::Function { param_tys, return_ty }
+        } else {
+            explicit_ty
+        }
     }
 
     fn run_pass_1(&mut self, unit: &UnitItems, unit_kind: UnitKind, start_level: u32, tp: &mut impl TypeProvider) {

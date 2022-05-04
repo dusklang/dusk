@@ -59,37 +59,37 @@ impl Driver {
         use Intrinsic::*;
         for &intr in &[Mult, Div, Mod, Add, Sub] {
             for ty in numerics {
-                self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], ty.clone(), false);
+                self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], ty.clone(), true);
             }
         }
         for &intr in &[Less, LessOrEq, Greater, GreaterOrEq] {
             for ty in numerics {
-                self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], boool, false);
+                self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], boool, true);
             }
         }
         for &intr in &[Eq, NotEq] {
             for ty in &values {
-                self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], boool, false);
+                self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], boool, true);
             }
         }
         for &intr in &[BitwiseAnd, BitwiseOr, BitwiseXor, LeftShift, RightShift] {
             for ty in integers {
-                self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], ty.clone(), false);
+                self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], ty.clone(), true);
             }
         }
         for ty in integers {
-            self.add_intrinsic(BitwiseNot, smallvec![ty.clone()], ty.clone(), false);
+            self.add_intrinsic(BitwiseNot, smallvec![ty.clone()], ty.clone(), true);
         }
         for &intr in &[LogicalAnd, LogicalOr] {
-            self.add_intrinsic(intr, smallvec![boool, boool], boool, false);
+            self.add_intrinsic(intr, smallvec![boool, boool], boool, true);
         }
         for ty in signed_numerics {
-            self.add_intrinsic(Neg, smallvec![ty.clone()], ty.clone(), false);
+            self.add_intrinsic(Neg, smallvec![ty.clone()], ty.clone(), true);
         }
         for ty in numerics {
-            self.add_intrinsic(Pos, smallvec![ty.clone()], ty.clone(), false);
+            self.add_intrinsic(Pos, smallvec![ty.clone()], ty.clone(), true);
         }
-        self.add_intrinsic(LogicalNot, smallvec![boool], boool, false);
+        self.add_intrinsic(LogicalNot, smallvec![boool], boool, true);
 
         self.add_intrinsic(Panic, SmallVec::new(), never, true);
         self.add_intrinsic(Panic, smallvec![u8_ptr], never, true);
@@ -1067,8 +1067,8 @@ impl Driver {
 
         // Add intrinsics for comparison of enums
         let boool = self.add_const_ty(Type::Bool);
-        self.add_intrinsic(Intrinsic::Eq, smallvec![expr, expr], boool, false);
-        self.add_intrinsic(Intrinsic::NotEq, smallvec![expr, expr], boool, false);
+        self.add_intrinsic(Intrinsic::Eq, smallvec![expr, expr], boool, true);
+        self.add_intrinsic(Intrinsic::NotEq, smallvec![expr, expr], boool, true);
         expr
     }
 

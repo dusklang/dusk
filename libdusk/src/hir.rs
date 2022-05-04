@@ -472,7 +472,7 @@ impl Driver {
             BinOp::Assign => self.push_expr(Expr::Set { lhs, rhs }, range),
             _ => {
                 let name = self.interner.get_or_intern(op.symbol());
-                self.decl_ref(None, name, smallvec![lhs, rhs], false, range)
+                self.decl_ref(None, name, smallvec![lhs, rhs], true, range)
             }
         }
     }
@@ -485,7 +485,7 @@ impl Driver {
             UnOp::PointerMut => self.push_expr(Expr::Pointer { expr, is_mut: true  }, range),
             _ => {
                 let name = self.interner.get_or_intern(op.symbol());
-                self.decl_ref(None, name, smallvec![expr], false, range)
+                self.decl_ref(None, name, smallvec![expr], true, range)
             },
         }
     }
