@@ -196,7 +196,7 @@ impl tir::AssignedDecl {
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         let decl_id = self.decl_id;
         let root_expr = self.root_expr;
-        let ty = tp.fetch_decl_type(driver, decl_id, None).ty.clone();
+        let ty = tp.fetch_decl_type(driver, decl_id, None).ty;
         tp.constraints_mut(root_expr).set_to(ty);
     }
 }
@@ -747,7 +747,7 @@ impl tir::Expr<tir::DeclRef> {
         one_of.reserve(overloads.len());
         for i in 0..overloads.len() {
             let overload = &overloads[i];
-            let ty = tp.fetch_decl_type(driver, overload.decl, Some(decl_ref_id)).ty.clone();
+            let ty = tp.fetch_decl_type(driver, overload.decl, Some(decl_ref_id)).ty;
             let mut is_mut = driver.tir.decls[overload.decl].is_mut;
             if let hir::Namespace::MemberRef { base_expr } = driver.code.hir_code.decl_refs[decl_ref_id].namespace {
                 let constraints = tp.constraints(base_expr);
@@ -764,7 +764,7 @@ impl tir::Expr<tir::DeclRef> {
                 for overload in &overloads {
                     let decl = &driver.tir.decls[overload.decl];
                     if ty.ty.trivially_convertible_to(tp.get_evaluated_type(decl.param_tys[i])) {
-                        let ty = tp.fetch_decl_type(driver, overload.decl, None).clone();
+                        let ty = tp.fetch_decl_type(driver, overload.decl, None);
                         pref = Some(ty);
                         *tp.preferred_overload_mut(decl_ref_id) = Some(overload.clone());
                         break 'find_preference;
@@ -821,7 +821,7 @@ impl tir::Expr<tir::DeclRef> {
                 let ty = tp.get_evaluated_type(decl.param_tys[i]).clone();
                 tp.constraints_mut(arg).set_to(ty);
             }
-            let ret_ty = tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id)).ty.clone();
+            let ret_ty = tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id)).ty;
             let mut ret_ty_constraints = ConstraintList::default();
             ret_ty_constraints.set_to(ret_ty.clone());
             let mut generic_args = Vec::new();
@@ -1102,7 +1102,7 @@ impl tir::Expr<tir::StructLit> {
             for i in 0..fields.len() {
                 let field = &fields[i];
                 let field = field.decl;
-                let field_ty = tp.fetch_decl_type(driver, field, None).ty.clone();
+                let field_ty = tp.fetch_decl_type(driver, field, None).ty;
 
                 tp.constraints_mut(lit.fields[i]).set_to(field_ty);
             }

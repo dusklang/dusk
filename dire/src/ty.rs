@@ -63,6 +63,14 @@ impl Type {
         )
     }
 
+    pub fn return_ty(&self) -> Option<&Type> {
+        if let Type::Function { return_ty, .. } = self {
+            Some(return_ty)
+        } else {
+            None
+        }
+    }
+
     pub fn deref(&self) -> Option<&QualType> {
         if let Type::Pointer(pointee) = self {
             Some(pointee)

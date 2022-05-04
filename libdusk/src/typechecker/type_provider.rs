@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
-use dire::hir::{ExprId, DeclId, DeclRefId, StructLitId, CastId, Namespace, VOID_EXPR};
+use dire::hir::{ExprId, DeclId, DeclRefId, StructLitId, CastId, Namespace, VOID_EXPR, Decl};
 use dire::mir::Const;
 use dire::ty::{Type, QualType};
+use dusk_proc_macros::df;
 
 use super::{CastMethod, StructLit, constraints::ConstraintList, Overload, Overloads};
 use crate::index_vec::*;
@@ -46,7 +47,7 @@ pub trait TypeProvider: private::Sealed {
     /// Doesn't get the type *of* `id`, gets the type that `id` as an expression *is*
     fn get_evaluated_type(&self, id: ExprId) -> &Type;
 
-    fn fetch_decl_type(&mut self, d: &Driver, id: DeclId, decl_ref: Option<DeclRefId>) -> &QualType;
+    fn fetch_decl_type(&mut self, d: &Driver, id: DeclId, decl_ref: Option<DeclRefId>) -> QualType;
     fn decl_type_mut(&mut self, decl: DeclId) -> &mut QualType;
 
     #[doc(hidden)]
@@ -145,9 +146,20 @@ impl private::Sealed for RealTypeProvider {}
 
 impl RealTypeProvider {
     fn set_decl_type_to_explicit_type_if_exists(&mut self, d: &Driver, id: DeclId) {
-        d.code.hir_code.explicit_tys[id]
-            .map(|expr| self.get_evaluated_type(expr).clone())
-            .map(|ty| self.decl_types[id].ty = ty);
+        let explicit_ty = d.code.hir_code.explicit_tys[id]
+            .map(|expr| self.get_evaluated_type(expr).clone());
+        match &df!(d, id.hir) {
+            Decl::Computed { param_tys, .. } | Decl::ComputedPrototype { param_tys, .. } => {
+                let param_tys: Vec<_> = param_tys.iter().copied()
+                    .map(|ty| self.get_evaluated_type(ty).clone())
+                    .collect();
+                let return_ty = Box::new(explicit_ty.unwrap());
+                self.decl_types[id].ty = Type::Function { param_tys, return_ty };
+            }
+            _ => if let Some(explicit_ty) = explicit_ty {
+                self.decl_types[id].ty = explicit_ty;
+            }
+        }
     }
 }
 
@@ -174,14 +186,14 @@ impl TypeProvider for RealTypeProvider {
         }
     }
 
-    fn fetch_decl_type(&mut self, d: &Driver, id: DeclId, decl_ref: Option<DeclRefId>) -> &QualType {
+    fn fetch_decl_type(&mut self, d: &Driver, id: DeclId, decl_ref: Option<DeclRefId>) -> QualType {
         if let Type::Error = self.decl_types[id].ty {
             if let Some(decl_ref) = decl_ref {
                 let decl_ref = &d.code.hir_code.decl_refs[decl_ref];
                 match decl_ref.namespace {
                     Namespace::Guarantee(ns) if decl_ref.name == d.hir.return_value_sym => {
                         let func = d.code.hir_code.condition_ns[ns].func;
-                        return self.fetch_decl_type(d, func, None);
+                        return self.fetch_decl_type(d, func, None).ty.return_ty().unwrap().into();
                     }
                     _ => self.set_decl_type_to_explicit_type_if_exists(d, id),
                 }
@@ -190,7 +202,7 @@ impl TypeProvider for RealTypeProvider {
             }
         }
 
-        &self.decl_types[id]
+        self.decl_types[id].clone()
     }
 
     fn decl_type_mut(&mut self, decl: DeclId) -> &mut QualType {
@@ -362,9 +374,20 @@ impl<'base> MockTypeProvider<'base> {
     }
 
     fn set_decl_type_to_explicit_type_if_exists(&mut self, d: &Driver, id: DeclId) {
-        d.code.hir_code.explicit_tys[id]
-            .map(|expr| self.get_evaluated_type(expr).clone())
-            .map(|ty| self.fw_decl_types_mut(id).ty = ty);
+        let explicit_ty = d.code.hir_code.explicit_tys[id]
+            .map(|expr| self.get_evaluated_type(expr).clone());
+        match &df!(d, id.hir) {
+            Decl::Computed { param_tys, .. } | Decl::ComputedPrototype { param_tys, .. } => {
+                let param_tys: Vec<_> = param_tys.iter().copied()
+                    .map(|ty| self.get_evaluated_type(ty).clone())
+                    .collect();
+                let return_ty = Box::new(explicit_ty.unwrap());
+                self.fw_decl_types_mut(id).ty = Type::Function { param_tys, return_ty };
+            }
+            _ => if let Some(explicit_ty) = explicit_ty {
+                self.fw_decl_types_mut(id).ty = explicit_ty;
+            }
+        }
     }
 }
 
@@ -394,14 +417,14 @@ impl<'base> TypeProvider for MockTypeProvider<'base> {
         }
     }
 
-    fn fetch_decl_type(&mut self, d: &Driver, id: DeclId, decl_ref: Option<DeclRefId>) -> &QualType {
+    fn fetch_decl_type(&mut self, d: &Driver, id: DeclId, decl_ref: Option<DeclRefId>) -> QualType {
         if let Type::Error = self.fw_decl_types(id).ty {
             if let Some(decl_ref) = decl_ref {
                 let decl_ref = &d.code.hir_code.decl_refs[decl_ref];
                 match decl_ref.namespace {
                     Namespace::Guarantee(ns) if decl_ref.name == d.hir.return_value_sym => {
                         let func = d.code.hir_code.condition_ns[ns].func;
-                        return self.fetch_decl_type(d, func, None);
+                        return self.fetch_decl_type(d, func, None).ty.return_ty().unwrap().into();
                     }
                     _ => self.set_decl_type_to_explicit_type_if_exists(d, id),
                 }
@@ -410,7 +433,7 @@ impl<'base> TypeProvider for MockTypeProvider<'base> {
             }
         }
 
-        self.fw_decl_types(id)
+        self.fw_decl_types(id).clone()
     }
 
     fn decl_type_mut(&mut self, decl: DeclId) -> &mut QualType {
