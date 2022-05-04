@@ -748,7 +748,7 @@ impl tir::Expr<tir::DeclRef> {
         for i in 0..overloads.len() {
             let overload = &overloads[i];
             let mut ty = tp.fetch_decl_type(driver, overload.decl, Some(decl_ref_id)).ty;
-            if matches!(df!(driver, overload.decl.hir), hir::Decl::Computed { .. } | hir::Decl::ComputedPrototype { .. }) {
+            if matches!(df!(driver, overload.decl.hir), hir::Decl::Computed { .. } | hir::Decl::ComputedPrototype { .. } | hir::Decl::Intrinsic { function_like: true, .. }) {
                 ty = ty.return_ty().unwrap().clone();
             }
             let mut is_mut = driver.tir.decls[overload.decl].is_mut;
@@ -767,7 +767,10 @@ impl tir::Expr<tir::DeclRef> {
                 for overload in &overloads {
                     let decl = &driver.tir.decls[overload.decl];
                     if ty.ty.trivially_convertible_to(tp.get_evaluated_type(decl.param_tys[i])) {
-                        let ty = tp.fetch_decl_type(driver, overload.decl, None);
+                        let mut ty = tp.fetch_decl_type(driver, overload.decl, None);
+                        if matches!(df!(driver, overload.decl.hir), hir::Decl::Computed { .. } | hir::Decl::ComputedPrototype { .. } | hir::Decl::Intrinsic { function_like: true, .. }) {
+                            ty = ty.ty.return_ty().unwrap().into();
+                        }
                         pref = Some(ty);
                         *tp.preferred_overload_mut(decl_ref_id) = Some(overload.clone());
                         break 'find_preference;
@@ -789,7 +792,7 @@ impl tir::Expr<tir::DeclRef> {
         let nonviable_overloads = &mut overloads.nonviable_overloads;
         overloads.overloads.retain(|overload| {
             let mut overload_ty = tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id));
-            if matches!(df!(driver, overload.decl.hir), hir::Decl::Computed { .. } | hir::Decl::ComputedPrototype { .. }) {
+            if matches!(df!(driver, overload.decl.hir), hir::Decl::Computed { .. } | hir::Decl::ComputedPrototype { .. } | hir::Decl::Intrinsic { function_like: true, .. }) {
                 overload_ty = overload_ty.ty.return_ty().unwrap().clone().into();
             }
 
@@ -1241,7 +1244,7 @@ impl tir::RetGroup {
 impl Driver {
     pub fn decl_type(&self, id: DeclId, tp: &impl TypeProvider) -> Type {
         let explicit_ty = self.code.hir_code.explicit_tys[id].map(|ty| tp.get_evaluated_type(ty)).unwrap_or(&tp.fw_decl_types(id).ty).clone();
-        if let hir::Decl::Computed { param_tys, .. } | hir::Decl::ComputedPrototype { param_tys, .. } = &df!(id.hir) {
+        if let hir::Decl::Computed { param_tys, .. } | hir::Decl::ComputedPrototype { param_tys, .. } | hir::Decl::Intrinsic { function_like: true, param_tys, .. } = &df!(id.hir) {
             let param_tys: Vec<_> = param_tys.iter().copied()
                 .map(|ty| tp.get_evaluated_type(ty).clone())
                 .collect();

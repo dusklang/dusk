@@ -149,7 +149,7 @@ impl RealTypeProvider {
         let explicit_ty = d.code.hir_code.explicit_tys[id]
             .map(|expr| self.get_evaluated_type(expr).clone());
         match &df!(d, id.hir) {
-            Decl::Computed { param_tys, .. } | Decl::ComputedPrototype { param_tys, .. } => {
+            Decl::Computed { param_tys, .. } | Decl::ComputedPrototype { param_tys, .. } | Decl::Intrinsic { function_like: true, param_tys, .. } => {
                 let param_tys: Vec<_> = param_tys.iter().copied()
                     .map(|ty| self.get_evaluated_type(ty).clone())
                     .collect();
@@ -377,7 +377,7 @@ impl<'base> MockTypeProvider<'base> {
         let explicit_ty = d.code.hir_code.explicit_tys[id]
             .map(|expr| self.get_evaluated_type(expr).clone());
         match &df!(d, id.hir) {
-            Decl::Computed { param_tys, .. } | Decl::ComputedPrototype { param_tys, .. } => {
+            Decl::Computed { param_tys, .. } | Decl::ComputedPrototype { param_tys, .. } | Decl::Intrinsic { function_like: true, param_tys, .. } => {
                 let param_tys: Vec<_> = param_tys.iter().copied()
                     .map(|ty| self.get_evaluated_type(ty).clone())
                     .collect();

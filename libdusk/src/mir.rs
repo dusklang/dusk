@@ -467,8 +467,12 @@ impl Driver {
                 self.mir.decls.insert(id, decl.clone());
                 decl
             },
-            hir::Decl::Intrinsic { intr, .. } => {
-                let decl = Decl::Intrinsic(intr, self.decl_type(id, tp));
+            hir::Decl::Intrinsic { intr, function_like, .. } => {
+                let mut ty = self.decl_type(id, tp);
+                if function_like {
+                    ty = ty.return_ty().unwrap().clone();
+                }
+                let decl = Decl::Intrinsic(intr, ty);
                 self.mir.decls.insert(id, decl.clone());
                 decl
             },
