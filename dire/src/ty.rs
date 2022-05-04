@@ -34,6 +34,10 @@ pub enum Type {
     Float(FloatWidth),
     // TODO: Eliminate this separate heap allocation by interning all types into an IndexVec
     Pointer(Box<QualType>),
+    Function {
+        param_tys: Vec<Type>,
+        return_ty: Box<Type>,
+    },
     Struct(StructId),
     Enum(EnumId),
     Bool,
@@ -168,6 +172,16 @@ impl fmt::Debug for Type {
                     write!(f, "*")
                 }
             },
+            Type::Function { param_tys, return_ty } => {
+                write!(f, "fn(")?;
+                for (i, param) in param_tys.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{:?}", param)?;
+                }
+                write!(f, "): {:?}", return_ty)
+            }
             // TODO: print out fields (issue #76)
             &Type::Struct(id) => {
                 write!(f, "struct{}", id.index())
