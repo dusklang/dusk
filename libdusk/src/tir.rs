@@ -519,11 +519,7 @@ impl Driver {
             },
             hir::Decl::Computed { scope, .. } => {
                 let terminal_expr = self.code.hir_code.imper_scopes[scope].terminal_expr;
-                if let Some(_) = self.code.hir_code.explicit_tys[id] {
-                    self.tir.staged_ret_groups.entry(id).or_default().push(terminal_expr);
-                } else {
-                    unit.assigned_decls.insert(level, AssignedDecl { explicit_ty: None, root_expr: terminal_expr, decl_id: id });
-                }
+                self.tir.staged_ret_groups.entry(id).or_default().push(terminal_expr);
             },
         }
     }

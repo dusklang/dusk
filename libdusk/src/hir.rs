@@ -343,9 +343,9 @@ impl Driver {
         self.hir.scope_stack.push(ScopeState::Mod { id, namespace, extern_mod });
         self.push_expr(Expr::Mod { id }, SourceRange::default())
     }
-    pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, generic_param_names: SmallVec<[Sym; 1]>, generic_params: Range<GenericParamId>, generic_param_ranges: SmallVec<[SourceRange; 1]>, explicit_ty: Option<ExprId>, proto_range: SourceRange) -> DeclId {
+    pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, generic_param_names: SmallVec<[Sym; 1]>, generic_params: Range<GenericParamId>, generic_param_ranges: SmallVec<[SourceRange; 1]>, return_ty: ExprId, proto_range: SourceRange) -> DeclId {
         // This is a placeholder value that gets replaced once the parameter declarations get allocated.
-        let id = self.decl(Decl::Const(ExprId::new(u32::MAX as usize)), name, explicit_ty, proto_range);
+        let id = self.decl(Decl::Const(ExprId::new(u32::MAX as usize)), name, Some(return_ty), proto_range);
 
         assert_eq!(param_names.len(), param_tys.len());
         self.code.hir_code.decls.reserve(param_tys.len());
@@ -402,14 +402,14 @@ impl Driver {
 
         id
     }
-    pub fn comp_decl_prototype(&mut self, name: Sym, param_tys: SmallVec<[ExprId; 2]>, _param_ranges: SmallVec<[SourceRange; 2]>, explicit_ty: Option<ExprId>, range: SourceRange) -> DeclId {
+    pub fn comp_decl_prototype(&mut self, name: Sym, param_tys: SmallVec<[ExprId; 2]>, _param_ranges: SmallVec<[SourceRange; 2]>, return_ty: ExprId, range: SourceRange) -> DeclId {
         // This is a placeholder value that gets replaced once the parameter declarations get allocated.
         let num_params = param_tys.len();
         let extern_func = if let &ScopeState::Mod { extern_mod: Some(extern_mod), .. } = self.hir.scope_stack.last().unwrap() {
             let funcs = &mut self.code.hir_code.extern_mods[extern_mod].imported_functions;
             let index = funcs.len();
             let name = self.interner.resolve(name).unwrap();
-            funcs.push(ExternFunction { name: name.to_string(), param_tys: param_tys.iter().cloned().collect(), return_ty: explicit_ty.unwrap_or(VOID_TYPE) });
+            funcs.push(ExternFunction { name: name.to_string(), param_tys: param_tys.iter().cloned().collect(), return_ty });
             Some(
                 ExternFunctionRef {
                     extern_mod,
@@ -419,7 +419,7 @@ impl Driver {
         } else {
             None
         };
-        let id = self.decl(Decl::ComputedPrototype { param_tys, extern_func }, name, explicit_ty, range);
+        let id = self.decl(Decl::ComputedPrototype { param_tys, extern_func }, name, Some(return_ty), range);
         match self.hir.scope_stack.last().unwrap() {
             ScopeState::Imper { .. } => {
                 self.flush_stmt_buffer();

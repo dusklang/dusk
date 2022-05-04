@@ -1185,19 +1185,18 @@ impl Driver {
             );
             None
         };
-        // Parse ": ty", "= val" or "{"
+        // Parse ": ty" or "{"
         let ty = match self.cur(p).kind {
             TokenKind::Colon => {
                 self.next(p);
                 let (ty, range) = self.parse_type(p);
                 proto_range = source_info::concat(proto_range, range);
-                Some(ty)
+                ty
             },
-            TokenKind::OpenCurly => Some(hir::VOID_TYPE),
-            TokenKind::Assign => None,
+            TokenKind::OpenCurly => hir::VOID_TYPE,
             _ => {
                 assert_eq!(generic_param_names.len(), 0, "generic parameters on a function prototype are not allowed");
-                return self.comp_decl_prototype(name, param_tys, param_ranges, None, proto_range);
+                return self.comp_decl_prototype(name, param_tys, param_ranges, hir::VOID_TYPE, proto_range);
             },
         };
         let decl_id = match self.cur(p).kind {
@@ -1207,19 +1206,6 @@ impl Driver {
                     self.code.hir_code.comp_decl_params_ns[ns].func = decl_id;
                 }
                 self.parse_scope(p, &[]);
-                self.end_computed_decl();
-                decl_id
-            },
-            TokenKind::Assign => {
-                let decl_id = self.begin_computed_decl(name, param_names, param_tys, param_ranges, generic_param_names, generic_params, generic_param_ranges, ty, proto_range);
-                if let Some(ns) = params_ns {
-                    self.code.hir_code.comp_decl_params_ns[ns].func = decl_id;
-                }
-                self.next(p);
-                self.begin_imper_scope();
-                let assigned_expr = self.parse_expr(p).unwrap_or_else(|err| err);
-                self.stmt(assigned_expr);
-                self.end_imper_scope(true);
                 self.end_computed_decl();
                 decl_id
             },
