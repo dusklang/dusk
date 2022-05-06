@@ -64,9 +64,13 @@ fn main() {
     debug::send(|| DvdMessage::WillBegin);
 
     let mut src_map = SourceMap::new();
-    src_map.add_file(opt.input).unwrap();
+    let loaded_file = src_map.add_file(&opt.input).is_ok();
     let mut driver = Driver::new(src_map, Arch::X86_64, opt.run_refiner);
     driver.initialize_hir();
+
+    if !loaded_file {
+        driver.errors.push(Error::new(format!("unable to load input file \"{}\"", opt.input.as_os_str().to_string_lossy())));
+    }
 
     macro_rules! begin_phase {
         ($phase:ident) => {{
