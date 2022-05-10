@@ -805,32 +805,30 @@ impl tir::Expr<tir::DeclRef> {
     }
 
 
-
-    fn run_pass_2_call(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+    // The callee_one_of parameter should be replaced by the callee's constraints one_of
+    fn run_pass_2_call(&self, _driver: &mut Driver, tp: &mut impl TypeProvider, callee_one_of: &mut Vec<QualType>) {
         let ty = tp.constraints(self.id).solve().unwrap_or(Type::Error.into());
         *tp.ty_mut(self.id) = ty.ty.clone();
 
-        let mut overloads = tp.overloads(self.decl_ref_id).clone();
-        overloads.overloads.retain(|overload| {
-            let mut overload_ty = tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id));
-            overload_ty = overload_ty.ty.return_ty().unwrap().clone().into();
-
-            if overload_ty.trivially_convertible_to(&ty) {
-                true
-            } else {
-                overloads.nonviable_overloads.push(overload.clone());
-                false
-            }
+        callee_one_of.retain(|callee_ty| {
+            let return_ty: QualType = callee_ty.ty.return_ty().unwrap().clone().into();
+            return_ty.trivially_convertible_to(&ty)
         });
-
-        *tp.overloads_mut(self.decl_ref_id) = overloads;
     }
 
-    fn run_pass_2_declref(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+    // This one_of parameter should be replaced by the one_of of the declref once calls and declrefs are separated.
+    fn run_pass_2_declref(&self, driver: &mut Driver, tp: &mut impl TypeProvider, one_of: Option<&[QualType]>) {
         let ty = tp.constraints(self.id).solve().unwrap_or(Type::Error.into());
         *tp.ty_mut(self.id) = ty.ty.clone();
 
         let mut overloads = tp.overloads(self.decl_ref_id).clone();
+        if let Some(one_of) = one_of {
+            overloads.overloads.retain(|overload| {
+                let overload_ty = tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id));
+                one_of.iter().any(|ty| overload_ty.trivially_convertible_to(ty))
+            });
+        }
+
         // TODO: make this unconditional! It is only conditional right now because for functions, `ty` is equal to the return type, not the function type.
         // Thus, it goes without saying that the function types returned by fetch_decl_type() will never be trivially convertible to their own return type.
         let has_parens = driver.code.hir_code.decl_refs[self.decl_ref_id].has_parens;
@@ -904,11 +902,23 @@ impl tir::Expr<tir::DeclRef> {
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         let has_parens = driver.code.hir_code.decl_refs[self.decl_ref_id].has_parens;
-        if has_parens {
-            self.run_pass_2_call(driver, tp);
-        }
+        let one_of = if has_parens {
+            let overloads = tp.overloads(self.decl_ref_id).clone();
+            let mut one_of: Vec<_> = overloads.overloads.iter().map(|overload| {
+                tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id))
+            }).collect();
+            self.run_pass_2_call(driver, tp, &mut one_of);
+            Some(one_of)
+        } else {
+            None
+        };
+        let one_of: Option<&[QualType]> = if let Some(one_of) = &one_of {
+            Some(one_of)
+        } else {
+            None
+        };
 
-        self.run_pass_2_declref(driver, tp);
+        self.run_pass_2_declref(driver, tp, one_of);
     }
 }
 
