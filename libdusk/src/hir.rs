@@ -447,7 +447,6 @@ impl Driver {
                 name,
                 namespace,
                 num_arguments,
-                has_parens,
                 expr,
             }
         );

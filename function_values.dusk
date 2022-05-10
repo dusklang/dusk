@@ -3,5 +3,5 @@ fn other() {
 }
 
 fn main() {
-    other()
+    foo :: print("1" + 2)
 }

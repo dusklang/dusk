@@ -61,6 +61,10 @@ impl ConstraintList {
         }
     }
 
+    pub fn set_preferred_type(&mut self, ty: impl Into<QualType>) {
+        self.preferred_type = Some(ty.into());
+    }
+
     pub fn preferred_type(&self) -> Option<&QualType> {
         self.preferred_type.as_ref()
     }
@@ -100,6 +104,10 @@ impl ConstraintList {
             }
         }
         false
+    }
+
+    pub fn set_one_of(&mut self, one_of: impl Into<SmallVec<[QualType; 1]>>) {
+        self.one_of = Some(one_of.into());
     }
 
     pub fn max_ranked_type_with_assoc_data<T: Clone>(&self, mut rank: impl FnMut(&QualType) -> (usize, T)) -> Result<(&QualType, T), Vec<(&QualType, T)>> {

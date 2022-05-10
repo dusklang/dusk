@@ -103,7 +103,6 @@ pub struct DeclRef {
     pub name: Sym,
     pub namespace: Namespace,
     pub num_arguments: usize,
-    pub has_parens: bool,
     pub expr: ExprId,
 }
 

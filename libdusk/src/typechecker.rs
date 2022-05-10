@@ -734,46 +734,27 @@ impl tir::Expr<tir::DeclRef> {
         *tp.overloads_mut(self.decl_ref_id) = Overloads { overloads, nonviable_overloads: Default::default() };
     }
 
-
-    // The callee_one_of parameter should be replaced by the callee's constraints one_of
-    fn run_pass_2_call(&self, _driver: &mut Driver, tp: &mut impl TypeProvider, callee_one_of: &mut Vec<QualType>) {
-        let ty = tp.constraints(self.id).solve().unwrap_or(Type::Error.into());
-        *tp.ty_mut(self.id) = ty.ty.clone();
-
-        callee_one_of.retain(|callee_ty| {
-            let return_ty: QualType = callee_ty.ty.return_ty().unwrap().clone().into();
-            return_ty.trivially_convertible_to(&ty)
-        });
-    }
-
-    // This one_of parameter should be replaced by the one_of of the declref once calls and declrefs are separated.
-    fn run_pass_2_declref(&self, driver: &mut Driver, tp: &mut impl TypeProvider, one_of: Option<&[QualType]>) {
+    fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         let ty = tp.constraints(self.id).solve().unwrap_or(Type::Error.into());
         *tp.ty_mut(self.id) = ty.ty.clone();
 
         let mut overloads = tp.overloads(self.decl_ref_id).clone();
-        if let Some(one_of) = one_of {
-            overloads.overloads.retain(|overload| {
-                let overload_ty = tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id));
-                one_of.iter().any(|ty| overload_ty.trivially_convertible_to(ty))
-            });
-        }
+        let one_of = tp.constraints(self.id).one_of().to_owned();
+        overloads.overloads.retain(|overload| {
+            let overload_ty = tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id));
+            one_of.iter().any(|ty| overload_ty.trivially_convertible_to(ty))
+        });
 
-        // TODO: make this unconditional! It is only conditional right now because for functions, `ty` is equal to the return type, not the function type.
-        // Thus, it goes without saying that the function types returned by fetch_decl_type() will never be trivially convertible to their own return type.
-        let has_parens = driver.code.hir_code.decl_refs[self.decl_ref_id].has_parens;
-        if !has_parens {
-            overloads.overloads.retain(|overload| {
-                let overload_ty = tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id));
-    
-                if overload_ty.trivially_convertible_to(&ty) {
-                    true
-                } else {
-                    overloads.nonviable_overloads.push(overload.clone());
-                    false
-                }
-            });
-        }
+        overloads.overloads.retain(|overload| {
+            let overload_ty = tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id));
+
+            if overload_ty.trivially_convertible_to(&ty) {
+                true
+            } else {
+                overloads.nonviable_overloads.push(overload.clone());
+                false
+            }
+        });
 
 
 
@@ -828,27 +809,6 @@ impl tir::Expr<tir::DeclRef> {
         *tp.overloads_mut(self.decl_ref_id) = overloads;
         *tp.selected_overload_mut(self.decl_ref_id) = overload.map(|overload| overload.decl);
         *tp.generic_arguments_mut(self.decl_ref_id) = generic_arguments;
-    }
-
-    fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        let has_parens = driver.code.hir_code.decl_refs[self.decl_ref_id].has_parens;
-        let one_of = if has_parens {
-            let overloads = tp.overloads(self.decl_ref_id).clone();
-            let mut one_of: Vec<_> = overloads.overloads.iter().map(|overload| {
-                tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id))
-            }).collect();
-            self.run_pass_2_call(driver, tp, &mut one_of);
-            Some(one_of)
-        } else {
-            None
-        };
-        let one_of: Option<&[QualType]> = if let Some(one_of) = &one_of {
-            Some(one_of)
-        } else {
-            None
-        };
-
-        self.run_pass_2_declref(driver, tp, one_of);
     }
 }
 
@@ -915,7 +875,31 @@ impl tir::Expr<tir::Call> {
     }
 
     fn run_pass_2(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
-        *tp.constraints_mut(self.callee) = tp.constraints(self.id).clone();
+        let ty = tp.constraints(self.id).solve().unwrap_or(Type::Error.into());
+        *tp.ty_mut(self.id) = ty.ty.clone();
+
+        let callee_one_of: SmallVec<[QualType; 1]> = tp.constraints(self.callee).one_of().iter()
+            .filter(|&callee_ty| {
+                let return_ty: QualType = callee_ty.ty.return_ty().unwrap().clone().into();
+                if let Type::Function { param_tys, .. } = &callee_ty.ty {
+                    for (arg, param) in self.args.iter().copied().zip(param_tys) {
+                        if can_unify_to(tp.constraints(arg), &param.into()).is_err() {
+                            return false;
+                        }
+                    }
+                }
+                return_ty.trivially_convertible_to(&ty)
+            })
+            .cloned()
+            .collect();
+        let pref = tp.preferred_overload(self.decl_ref_id)
+            .clone();
+            tp.constraints_mut(self.callee).set_one_of(callee_one_of);
+        let pref = pref
+            .map(|pref| tp.fw_decl_types(pref.decl).clone());
+        if let Some(pref) = pref {
+            tp.constraints_mut(self.callee).set_preferred_type(pref);
+        }
     }
 }
 
@@ -1364,15 +1348,6 @@ impl Driver {
                 decl_refs, calls, addr_ofs, derefs, pointers, structs, struct_lits, ifs, dos,
                 ret_groups, switches, enums, pattern_bindings,
             );
-
-            // TODO: This is a temporary hack in order to work around the fact that call expressions are just treated as passthroughs
-            if level + 1 < unit.num_levels() {
-                for item in unit.calls.get_level(level + 1) {
-                    self.initialize_global_expressions(tp); // this is a hack to erase the effects of modifying constraints on VOID_EXPR and ERROR_EXPR
-                    *tp.ty_mut(item.id) = tp.ty(item.callee).clone();
-                    item.run_pass_2(self, tp);
-                }
-            }
 
             if level > 0 {
                 tp.debug_output(self, level as usize);
