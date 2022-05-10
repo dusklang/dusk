@@ -701,7 +701,7 @@ impl tir::Expr<tir::Import> {
 }
 
 impl tir::Expr<tir::DeclRef> {
-    fn run_pass_1_declref(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         // Initialize overloads
         let decls = &driver.tir.decls;
         let overload_decls = driver.find_overloads(&driver.code.hir_code.decl_refs[self.decl_ref_id]);
@@ -732,76 +732,6 @@ impl tir::Expr<tir::DeclRef> {
 
         *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(one_of), None);
         *tp.overloads_mut(self.decl_ref_id) = Overloads { overloads, nonviable_overloads: Default::default() };
-    }
-
-    fn run_pass_1_call(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        // TODO: maybe std::mem::swap() with default here instead of cloning? As the overloads in the type provider will just be overwritten later anyway.
-        let mut overloads = tp.overloads(self.decl_ref_id).clone();
-        // Rule out overloads that don't match the arguments
-        let mut i = 0usize;
-        let mut one_of: SmallVec<[QualType; 1]> = SmallVec::new();
-        let decls = &driver.tir.decls;
-        let callee_one_of = tp.constraints(self.id).one_of();
-        overloads.overloads.retain(|overload| {
-            assert_eq!(decls[overload.decl].param_tys.len(), self.args.len());
-            let arg_constraints = self.args.iter().map(|&arg| tp.constraints(arg));
-            let param_tys = decls[overload.decl].param_tys.iter().map(|&expr| tp.get_evaluated_type(expr));
-            for (constraints, ty) in arg_constraints.zip(param_tys) {
-                if can_unify_to_in_generic_context(&constraints, &ty.into(), &decls[overload.decl].generic_params).is_err() {
-                    overloads.nonviable_overloads.push(overload.clone());
-                    i += 1;
-                    return false;
-                }
-            }
-            one_of.push(callee_one_of[i].ty.return_ty().unwrap().into());
-            i += 1;
-            true
-        });
-
-        // Find preferred type
-        // TODO: this logic seems so broken it should never have worked at all?!?!
-        // I apparently just choose the first (argument, overload) pair such that
-        //   - argument has a preferred type, and
-        //   - that preferred type is trivially convertible to overload's parameter type at that position
-        let mut pref = None;
-        'find_preference: for (i, &arg) in self.args.iter().enumerate() {
-            if let Some(ty) = tp.constraints(arg).preferred_type() {
-                for overload in &overloads.overloads {
-                    let decl = &driver.tir.decls[overload.decl];
-                    if ty.ty.trivially_convertible_to(tp.get_evaluated_type(decl.param_tys[i])) {
-                        let ty = tp.fetch_decl_type(driver, overload.decl, None);
-                        pref = Some(ty.ty.return_ty().unwrap().into());
-                        *tp.preferred_overload_mut(self.decl_ref_id) = Some(overload.clone());
-                        break 'find_preference;
-                    }
-                }
-            }
-        }
-
-        // For each overload, infer generic constraints from the arguments
-        for overload in &mut overloads.overloads {
-            let decl = &decls[overload.decl];
-            for (&param_ty, &arg) in decl.param_tys.iter().zip(&self.args) {
-                let param_ty = tp.get_evaluated_type(param_ty);
-                let arg_constraints = tp.constraints(arg);
-                for (i, &generic_param) in decl.generic_params.iter().enumerate() {
-                    let constraints = arg_constraints.get_implied_generic_constraints(generic_param, param_ty);
-                    overload.generic_param_constraints[i] = overload.generic_param_constraints[i].intersect_with_in_generic_context(&constraints, &decl.generic_params);
-                }
-            }
-        }
-
-        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(one_of), pref);
-        *tp.overloads_mut(self.decl_ref_id) = overloads;
-    }
-
-    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        self.run_pass_1_declref(driver, tp);
-
-        let has_parens = driver.code.hir_code.decl_refs[self.decl_ref_id].has_parens;
-        if has_parens {
-            self.run_pass_1_call(driver, tp);
-        }
     }
 
 
@@ -923,9 +853,65 @@ impl tir::Expr<tir::DeclRef> {
 }
 
 impl tir::Expr<tir::Call> {
-    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
-        *tp.constraints_mut(self.id) = tp.constraints(self.callee).clone();
-        *tp.ty_mut(self.id) = tp.ty(self.callee).clone();
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+        // TODO: maybe std::mem::swap() with default here instead of cloning? As the overloads in the type provider will just be overwritten later anyway.
+        let mut overloads = tp.overloads(self.decl_ref_id).clone();
+        // Rule out overloads that don't match the arguments
+        let mut i = 0usize;
+        let mut one_of: SmallVec<[QualType; 1]> = SmallVec::new();
+        let decls = &driver.tir.decls;
+        let callee_one_of = tp.constraints(self.callee).one_of();
+        overloads.overloads.retain(|overload| {
+            assert_eq!(decls[overload.decl].param_tys.len(), self.args.len());
+            let arg_constraints = self.args.iter().map(|&arg| tp.constraints(arg));
+            let param_tys = decls[overload.decl].param_tys.iter().map(|&expr| tp.get_evaluated_type(expr));
+            for (constraints, ty) in arg_constraints.zip(param_tys) {
+                if can_unify_to_in_generic_context(&constraints, &ty.into(), &decls[overload.decl].generic_params).is_err() {
+                    overloads.nonviable_overloads.push(overload.clone());
+                    i += 1;
+                    return false;
+                }
+            }
+            one_of.push(callee_one_of[i].ty.return_ty().unwrap().into());
+            i += 1;
+            true
+        });
+
+        // Find preferred type
+        // TODO: this logic seems so broken it should never have worked at all?!?!
+        // I apparently just choose the first (argument, overload) pair such that
+        //   - argument has a preferred type, and
+        //   - that preferred type is trivially convertible to overload's parameter type at that position
+        let mut pref = None;
+        'find_preference: for (i, &arg) in self.args.iter().enumerate() {
+            if let Some(ty) = tp.constraints(arg).preferred_type() {
+                for overload in &overloads.overloads {
+                    let decl = &driver.tir.decls[overload.decl];
+                    if ty.ty.trivially_convertible_to(tp.get_evaluated_type(decl.param_tys[i])) {
+                        let ty = tp.fetch_decl_type(driver, overload.decl, None);
+                        pref = Some(ty.ty.return_ty().unwrap().into());
+                        *tp.preferred_overload_mut(self.decl_ref_id) = Some(overload.clone());
+                        break 'find_preference;
+                    }
+                }
+            }
+        }
+
+        // For each overload, infer generic constraints from the arguments
+        for overload in &mut overloads.overloads {
+            let decl = &decls[overload.decl];
+            for (&param_ty, &arg) in decl.param_tys.iter().zip(&self.args) {
+                let param_ty = tp.get_evaluated_type(param_ty);
+                let arg_constraints = tp.constraints(arg);
+                for (i, &generic_param) in decl.generic_params.iter().enumerate() {
+                    let constraints = arg_constraints.get_implied_generic_constraints(generic_param, param_ty);
+                    overload.generic_param_constraints[i] = overload.generic_param_constraints[i].intersect_with_in_generic_context(&constraints, &decl.generic_params);
+                }
+            }
+        }
+
+        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(one_of), pref);
+        *tp.overloads_mut(self.decl_ref_id) = overloads;
     }
 
     fn run_pass_2(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
