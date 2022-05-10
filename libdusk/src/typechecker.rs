@@ -922,6 +922,17 @@ impl tir::Expr<tir::DeclRef> {
     }
 }
 
+impl tir::Expr<tir::Call> {
+    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
+        *tp.constraints_mut(self.id) = tp.constraints(self.callee).clone();
+        *tp.ty_mut(self.id) = tp.ty(self.callee).clone();
+    }
+
+    fn run_pass_2(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
+        *tp.constraints_mut(self.callee) = tp.constraints(self.id).clone();
+    }
+}
+
 impl tir::Expr<tir::AddrOf> {
     fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
         let constraints = tp.constraints(self.expr).filter_map(|ty| {
@@ -1334,8 +1345,8 @@ impl Driver {
             }
             run_pass_1!(
                 assigned_decls, assignments, casts, whiles, explicit_rets, modules, imports,
-                decl_refs, addr_ofs, derefs, pointers, structs, struct_lits, ifs, dos, ret_groups,
-                switches, enums, pattern_bindings,
+                decl_refs, calls, addr_ofs, derefs, pointers, structs, struct_lits, ifs, dos,
+                ret_groups, switches, enums, pattern_bindings,
             );
             tp.debug_output(self, level as usize);
         }
@@ -1364,9 +1375,18 @@ impl Driver {
             }
             run_pass_2!(
                 assigned_decls, assignments, casts, whiles, explicit_rets, modules, imports,
-                decl_refs, addr_ofs, derefs, pointers, structs, struct_lits, ifs, dos, ret_groups,
-                switches, enums, pattern_bindings,
+                decl_refs, calls, addr_ofs, derefs, pointers, structs, struct_lits, ifs, dos,
+                ret_groups, switches, enums, pattern_bindings,
             );
+
+            // TODO: This is a temporary hack in order to work around the fact that call expressions are just treated as passthroughs
+            if level + 1 < unit.num_levels() {
+                for item in unit.calls.get_level(level + 1) {
+                    self.initialize_global_expressions(tp); // this is a hack to erase the effects of modifying constraints on VOID_EXPR and ERROR_EXPR
+                    *tp.ty_mut(item.id) = tp.ty(item.callee).clone();
+                    item.run_pass_2(self, tp);
+                }
+            }
 
             if level > 0 {
                 tp.debug_output(self, level as usize);

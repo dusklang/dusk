@@ -440,7 +440,7 @@ impl Driver {
         };
         let id = self.code.hir_code.decl_refs.next_idx();
         let num_arguments = arguments.len();
-        let expr = self.push_expr(Expr::DeclRef { arguments, id }, range);
+        let expr = self.push_expr(Expr::DeclRef { arguments: arguments.clone(), id }, range);
         self.code.hir_code.decl_refs.push_at(
             id,
             DeclRef {
@@ -451,7 +451,11 @@ impl Driver {
                 expr,
             }
         );
-        expr
+        if has_parens {
+            self.push_expr(Expr::Call { callee: expr, arguments, decl_ref_id: id }, range)
+        } else {
+            expr
+        }
     }
     // TODO: intern constant type expressions
     pub fn add_const_ty(&mut self, ty: Type) -> ExprId {

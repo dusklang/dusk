@@ -1339,6 +1339,9 @@ impl Driver {
 
                 break self.get(b, arguments, id, tp);
             },
+            Expr::Call { callee, .. } => {
+                return self.build_expr(b, callee, ctx, tp);
+            },
             Expr::Cast { expr: operand, ty: dest_ty, cast_id } => {
                 let dest_ty = tp.get_evaluated_type(dest_ty).clone();
                 match tp.cast_method(cast_id) {
@@ -1352,7 +1355,7 @@ impl Driver {
                         let (src_width, _src_is_signed, dest_width, dest_is_signed) = match (tp.ty(operand), &dest_ty) {
                             (&Type::Int { width: ref src_width, is_signed: src_is_signed }, &Type::Int { width: ref dest_width, is_signed: dest_is_signed })
                                 => (src_width.clone(), src_is_signed, dest_width.clone(), dest_is_signed),
-                            _ => panic!("Internal compiler error: found invalid cast types while generating MIR")
+                            (a, b) => panic!("Internal compiler error: found invalid cast types while generating MIR ({:?}, {:?})", a, b)
                         };
                         let (src_bit_width, dest_bit_width) = (src_width.bit_width(self.arch), dest_width.bit_width(self.arch));
                         let value = self.build_expr(b, operand, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
