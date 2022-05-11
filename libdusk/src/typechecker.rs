@@ -742,7 +742,12 @@ impl tir::Expr<tir::DeclRef> {
         let one_of = tp.constraints(self.id).one_of().to_owned();
         overloads.overloads.retain(|overload| {
             let overload_ty = tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id));
-            one_of.iter().any(|ty| overload_ty.trivially_convertible_to(ty))
+            if one_of.iter().any(|ty| overload_ty.trivially_convertible_to(ty)) {
+                true
+            } else {
+                overloads.nonviable_overloads.push(overload.clone());
+                false
+            }
         });
 
         overloads.overloads.retain(|overload| {
@@ -756,9 +761,15 @@ impl tir::Expr<tir::DeclRef> {
             }
         });
 
-
-
-        let pref = tp.preferred_overload(self.decl_ref_id);
+        let pref = tp.constraints(self.id)
+            .preferred_type()
+            .iter()
+            .flat_map(|&ty| {
+                overloads.overloads.iter().find(|&overload| {
+                    tp.fw_decl_types(overload.decl).trivially_convertible_to(ty)
+                })
+            }).next()
+            .cloned();
 
         let (overload, generic_arguments) = if !overloads.overloads.is_empty() {
             let mut overload = pref.as_ref().cloned()
@@ -850,7 +861,7 @@ impl tir::Expr<tir::Call> {
                     if ty.ty.trivially_convertible_to(tp.get_evaluated_type(decl.param_tys[i])) {
                         let ty = tp.fetch_decl_type(driver, overload.decl, None);
                         pref = Some(ty.ty.return_ty().unwrap().into());
-                        *tp.preferred_overload_mut(self.decl_ref_id) = Some(overload.clone());
+                        tp.constraints_mut(self.callee).set_preferred_type(ty);
                         break 'find_preference;
                     }
                 }
@@ -892,11 +903,8 @@ impl tir::Expr<tir::Call> {
             })
             .cloned()
             .collect();
-        let pref = tp.preferred_overload(self.decl_ref_id)
-            .clone();
-            tp.constraints_mut(self.callee).set_one_of(callee_one_of);
-        let pref = pref
-            .map(|pref| tp.fw_decl_types(pref.decl).clone());
+        let pref = tp.constraints(self.callee).preferred_type().cloned();
+        tp.constraints_mut(self.callee).set_one_of(callee_one_of);
         if let Some(pref) = pref {
             tp.constraints_mut(self.callee).set_preferred_type(pref);
         }

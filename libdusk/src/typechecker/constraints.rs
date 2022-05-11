@@ -1,9 +1,16 @@
 use smallvec::{SmallVec, smallvec};
+use std::collections::HashMap;
 
 use dire::ty::{Type, QualType, IntWidth};
 use dire::hir::GenericParamId;
 
 use crate::ty::BuiltinTraits;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypePossibility {
+    ty: QualType,
+    generic_arg_constraints: HashMap<GenericParamId, ConstraintList>,
+}
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ConstraintList {

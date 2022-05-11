@@ -1,7 +1,8 @@
-fn other() {
+fn other[T](value: T) {
     
 }
 
 fn main() {
-    foo :: print("1" + 2)
+    a := 12
+    other(5)
 }
