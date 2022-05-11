@@ -816,7 +816,8 @@ impl Driver {
                     self.extern_call(func, copied_args)
                 },
                 &Instr::GenericParam(id) => {
-                    Value::from_ty(Type::GenericParam(id))
+                    let ty = Type::GenericParam(id);
+                    Value::from_ty(frame.canonicalize_type(&ty))
                 },
                 &Instr::Intrinsic { ref arguments, intr, .. } => {
                     match intr {
