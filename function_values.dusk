@@ -1,9 +1,8 @@
-fn other[T](value: T) {
-    print_type(T)
-}
-
 fn type_of[T](value: T): type { T }
 
 fn main() {
-    print_type(type_of(12))
+    f: i8 = 2
+    print_type(type_of(f))
+    print("\n")
+    print_type(type_of(-34 as i8))
 }

@@ -239,7 +239,7 @@ impl Driver {
                 self.advance(l);
             }
             if levels > 0 {
-                let range = l.make_src_range(comment_begin..l.cur_loc());
+                let range = l.make_src_range(comment_begin..(comment_begin+2));
                 let mut err = Error::new(
                     "unterminated '/*' comment"
                 ).adding_primary_range(
