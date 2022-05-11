@@ -1,6 +1,6 @@
-/*fn other[T](value: T) {
+fn other[T](value: T) {
     print_type(T)
-}*/
+}
 
 fn type_of[T](value: T): type { T }
 

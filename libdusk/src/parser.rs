@@ -1125,6 +1125,7 @@ impl Driver {
             self.next(p);
             if matches!(self.cur(p).kind, TokenKind::Ident(_)) {
                 generic_params.start = self.hir.generic_params.peek_next();
+                generic_params.end = generic_params.start;
                 while let TokenKind::Ident(name) = *self.cur(p).kind {
                     // Claim a GenericParamId for yourself, then set the `end` value to be one past the end
                     let generic_param = self.hir.generic_params.next();
