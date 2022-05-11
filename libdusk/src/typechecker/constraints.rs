@@ -295,7 +295,6 @@ fn implements_traits_in_generic_context(ty: &Type, traits: BuiltinTraits, generi
     }
 }
 
-// NOTE: can_unify_to and can_unify_to_in_generic_context have duplicated logic!
 pub fn can_unify_to<'a>(constraints: &'a ConstraintList, ty: &QualType) -> Result<(), UnificationError<'a>> {
     can_unify_to_in_generic_context(constraints, ty, &[])
 }
