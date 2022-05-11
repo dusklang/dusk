@@ -1,8 +1,8 @@
 fn other[T](value: T) {
-    
+    print(size_of(T) as u8 + "0")
 }
 
 fn main() {
-    a := 12
-    other(5)
+    a := 12 as usize + 5
+    other(12)
 }

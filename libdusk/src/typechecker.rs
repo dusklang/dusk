@@ -885,21 +885,29 @@ impl tir::Expr<tir::Call> {
         *tp.overloads_mut(self.decl_ref_id) = overloads;
     }
 
-    fn run_pass_2(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
+    fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         let ty = tp.constraints(self.id).solve().unwrap_or(Type::Error.into());
         *tp.ty_mut(self.id) = ty.ty.clone();
 
         let callee_one_of: SmallVec<[QualType; 1]> = tp.constraints(self.callee).one_of().iter()
             .filter(|&callee_ty| {
                 let return_ty: QualType = callee_ty.ty.return_ty().unwrap().clone().into();
-                if let Type::Function { param_tys, .. } = &callee_ty.ty {
-                    for (arg, param) in self.args.iter().copied().zip(param_tys) {
-                        if can_unify_to(tp.constraints(arg), &param.into()).is_err() {
-                            return false;
+                // TODO: this is a temporary hack that should be removed.
+                let overload_decl = tp.overloads(self.decl_ref_id).overloads.iter()
+                    .map(|overload| overload.decl)
+                    .find(|&decl| tp.fw_decl_types(decl).trivially_convertible_to(callee_ty));
+                if let Some(overload_decl) = overload_decl {
+                    if let Type::Function { param_tys, .. } = &callee_ty.ty {
+                        for (arg, param) in self.args.iter().copied().zip(param_tys) {
+                            if can_unify_to_in_generic_context(tp.constraints(arg), &param.into(), &driver.tir.decls[overload_decl].generic_params).is_err() {
+                                return false;
+                            }
                         }
                     }
+                    return_ty.trivially_convertible_to(&ty)
+                } else {
+                    false
                 }
-                return_ty.trivially_convertible_to(&ty)
             })
             .cloned()
             .collect();
