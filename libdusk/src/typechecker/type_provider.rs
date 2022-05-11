@@ -5,7 +5,7 @@ use dire::mir::Const;
 use dire::ty::{Type, QualType};
 use dusk_proc_macros::df;
 
-use super::{CastMethod, StructLit, constraints::ConstraintList, Overload, Overloads};
+use super::{CastMethod, StructLit, constraints::ConstraintList, Overloads};
 use crate::index_vec::*;
 use crate::source_info::CommentatedSourceRange;
 use crate::driver::Driver;
