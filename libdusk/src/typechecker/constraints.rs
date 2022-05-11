@@ -25,6 +25,49 @@ impl<I: IntoIterator<Item=QualType>> From<I> for TypePossibilities where I::Into
     }
 }
 
+impl TypePossibilities {
+    fn new() -> Self {
+        Self {
+            one_of: SmallVec::new(),
+            generic_context: SmallVec::new(),
+        }
+    }
+
+    fn retain(&mut self, mut pred: impl FnMut(&QualType, &GenericContext) -> bool) {
+        // TODO: efficiency!!!!!
+        debug_assert_eq!(self.one_of.len(), self.generic_context.len());
+        let mut pred_result = Vec::with_capacity(self.one_of.len());
+        for (ty, ctx) in self.one_of.iter().zip(&self.generic_context) {
+            pred_result.push(pred(ty, ctx));
+        }
+
+        let mut i = 0;
+        self.one_of.retain(|_| {
+            let pred_result = pred_result[i];
+            i += 1;
+            pred_result
+        });
+
+        let mut i = 0;
+        self.generic_context.retain(|_| {
+            let pred_result = pred_result[i];
+            i += 1;
+            pred_result
+        });
+    }
+
+    fn push(&mut self, ty: QualType, ctx: GenericContext) {
+        debug_assert_eq!(self.one_of.len(), self.generic_context.len());
+        self.one_of.push(ty);
+        self.generic_context.push(ctx);
+    }
+
+    fn iter(&self) -> impl ExactSizeIterator<Item=(&QualType, &GenericContext)> {
+        debug_assert_eq!(self.one_of.len(), self.generic_context.len());
+        self.one_of.iter().zip(&self.generic_context)
+    }
+}
+
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ConstraintList {
     trait_impls: BuiltinTraits,
@@ -317,23 +360,22 @@ impl ConstraintList {
             (None, None) => None,
             (Some(one_of), None) | (None, Some(one_of)) => Some(one_of.clone()),
             (Some(lhs), Some(rhs)) => {
-                let mut one_of: SmallVec<[QualType; 1]> = SmallVec::new();
-                for lty in &lhs.one_of {
+                let mut one_of = TypePossibilities::new();
+                for (lty, lctx) in lhs.iter() {
                     if implements_traits_in_generic_context(&lty.ty, trait_impls, generic_params).is_err() { continue; }
 
-                    for rty in &rhs.one_of {
+                    for (rty, rctx) in rhs.iter() {
                         if implements_traits_in_generic_context(&rty.ty, trait_impls, generic_params).is_err() { continue; }
 
                         // TODO: would it be ok to break from this loop after finding a match here?
                         if lty.trivially_convertible_to(rty) {
-                            one_of.push(rty.clone());
+                            one_of.push(rty.clone(), rctx.clone());
                         } else if rty.trivially_convertible_to(lty) {
-                            one_of.push(lty.clone());
+                            one_of.push(lty.clone(), lctx.clone());
                         }
                     }
                 }
-                // TODO: preserve generic context probably!
-                Some(one_of.into())
+                Some(one_of)
             }
         };
 
@@ -368,23 +410,17 @@ impl ConstraintList {
 
         if !self.is_never() && !other.is_never() {
             let lhs = self.one_of.as_mut().expect("can't assign to expression without a one-of constraint");
-            lhs.one_of.retain(|lty| implements_traits(&lty.ty, trait_impls).is_ok());
+            lhs.retain(|lty, _| implements_traits(&lty.ty, trait_impls).is_ok());
             if other.one_of.is_some() {
-                lhs.one_of.retain(|lty|
+                lhs.retain(|lty, _|
                     other.one_of_exists(|rty| rty.ty.trivially_convertible_to(&lty.ty))
                 );
 
                 let rhs = other.one_of.as_mut().unwrap();
-                rhs.one_of.retain(|rty|
+                rhs.retain(|rty, _|
                     implements_traits(&rty.ty, trait_impls).is_ok() && self.one_of_exists(|lty| rty.ty.trivially_convertible_to(&lty.ty))
                 );
-
-                // TODO: preserve generic context probably!
-                *rhs = rhs.one_of.clone().into();
             }
-            // TODO: preserve generic context probably!
-            let lhs = self.one_of.as_mut().expect("can't assign to expression without a one-of constraint");
-            *lhs = lhs.one_of.clone().into();
         }
 
         if self.preferred_type.as_ref().map(|ty| &ty.ty) != other.preferred_type.as_ref().map(|ty| &ty.ty) {
@@ -400,16 +436,18 @@ impl ConstraintList {
                 } else {
                     other.preferred_type = None;
                     if other.one_of.is_none() {
-                        let rhs_one_of: Option<SmallVec<[QualType; 1]>> = self.one_of.as_ref().map(|one_of| one_of.one_of.iter().filter_map(|ty| {
-                            let ty = ty.ty.clone().into();
-                            if can_unify_to(other, &ty).is_ok() {
-                                Some(ty)
-                            } else {
-                                None
+                        if let Some(one_of) = &self.one_of {
+                            let mut rhs_one_of = TypePossibilities::new();
+                            for (ty, ctx) in one_of.iter() {
+                                let ty = ty.ty.clone().into();
+                                if can_unify_to(other, &ty).is_ok() {
+                                    rhs_one_of.push(ty, ctx.clone());
+                                }
                             }
-                        }).collect());
-                        // TODO: preserve generic context probably!
-                        other.one_of = rhs_one_of.map(Into::into);
+                            other.one_of = Some(rhs_one_of);
+                        } else {
+                            other.one_of = None;
+                        }
                     }
                 }
             }
