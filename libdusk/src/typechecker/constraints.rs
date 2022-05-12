@@ -26,18 +26,23 @@ impl<I: IntoIterator<Item=QualType>> From<I> for TypePossibilities where I::Into
 }
 
 impl TypePossibilities {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             one_of: SmallVec::new(),
             generic_context: SmallVec::new(),
         }
     }
 
-    fn retain(&mut self, mut pred: impl FnMut(&QualType, &GenericContext) -> bool) {
-        // TODO: efficiency!!!!!
+    pub fn reserve(&mut self, additional: usize) {
+        self.one_of.reserve(additional);
+        self.generic_context.reserve(additional);
+    }
+
+    pub fn retain(&mut self, mut pred: impl FnMut(&mut QualType, &mut GenericContext) -> bool) {
+        // TODO: efficiency! This could just be one loop over both collections simultaneously, but instead I loop over them both once, then each one again individually.
         debug_assert_eq!(self.one_of.len(), self.generic_context.len());
         let mut pred_result = Vec::with_capacity(self.one_of.len());
-        for (ty, ctx) in self.one_of.iter().zip(&self.generic_context) {
+        for (ty, ctx) in self.iter_mut() {
             pred_result.push(pred(ty, ctx));
         }
 
@@ -56,15 +61,20 @@ impl TypePossibilities {
         });
     }
 
-    fn push(&mut self, ty: QualType, ctx: GenericContext) {
+    pub fn push(&mut self, ty: QualType, ctx: GenericContext) {
         debug_assert_eq!(self.one_of.len(), self.generic_context.len());
         self.one_of.push(ty);
         self.generic_context.push(ctx);
     }
 
-    fn iter(&self) -> impl ExactSizeIterator<Item=(&QualType, &GenericContext)> {
+    pub fn iter(&self) -> impl ExactSizeIterator<Item=(&QualType, &GenericContext)> {
         debug_assert_eq!(self.one_of.len(), self.generic_context.len());
         self.one_of.iter().zip(&self.generic_context)
+    }
+
+    pub fn iter_mut(&mut self) -> impl ExactSizeIterator<Item=(&mut QualType, &mut GenericContext)> {
+        debug_assert_eq!(self.one_of.len(), self.generic_context.len());
+        self.one_of.iter_mut().zip(&mut self.generic_context)
     }
 }
 
@@ -103,6 +113,14 @@ impl ConstraintList {
         } else {
             &[]
         }
+    }
+
+    pub fn get_one_of(&self) -> Option<&TypePossibilities> {
+        self.one_of.as_ref()
+    }
+
+    pub fn get_one_of_mut(&mut self) -> Option<&mut TypePossibilities> {
+        self.one_of.as_mut()
     }
 
     pub fn solve(&self) -> Result<QualType, SolveError> {

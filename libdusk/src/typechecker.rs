@@ -50,10 +50,11 @@ enum UnitKind {
     Mock(usize),
 }
 
+
+// TODO: delet this
 #[derive(Debug, Clone)]
 pub struct Overload {
     pub decl: DeclId,
-    pub generic_param_constraints: Vec<ConstraintList>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -700,26 +701,35 @@ impl tir::Expr<tir::Import> {
     }
 }
 
+
+fn find_generic_context_for_decl<'a>(expr: ExprId, ty: &'a (impl Into<QualType> + Clone), tp: &'a mut impl TypeProvider) -> &'a mut GenericContext {
+    // Find the type possibility for this declaration (TODO: this is kind of a hack)
+    let (_, ctx) = tp.constraints_mut(expr)
+        .get_one_of_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|(other_ty, _)| other_ty.trivially_convertible_to(&ty.clone().into()))
+        .unwrap();
+    ctx
+}
+
 impl tir::Expr<tir::DeclRef> {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         // Initialize overloads
-        let decls = &driver.tir.decls;
         let overload_decls = driver.find_overloads(&driver.code.hir_code.decl_refs[self.decl_ref_id]);
         let mut overloads = Vec::new();
         for &overload_decl in &overload_decls {
-            let decl = &decls[overload_decl];
-            let generic_constraints: Vec<_> = decl.generic_params.iter().map(|_| ConstraintList::default()).collect();
-            let overload = Overload { decl: overload_decl, generic_param_constraints: generic_constraints };
-            overloads.push(overload);
+            overloads.push(Overload { decl: overload_decl });
         }
 
         // Find type possibilities
-        let mut one_of: SmallVec<[QualType; 1]> = SmallVec::new();
+        let mut one_of = TypePossibilities::new();
         one_of.reserve(overloads.len());
         for i in 0..overloads.len() {
             let overload = &overloads[i];
             let ty = tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id)).ty;
-            let mut is_mut = driver.tir.decls[overload.decl].is_mut;
+            let decl = &driver.tir.decls[overload.decl];
+            let mut is_mut = decl.is_mut;
             if let hir::Namespace::MemberRef { base_expr } = driver.code.hir_code.decl_refs[self.decl_ref_id].namespace {
                 let constraints = tp.constraints(base_expr);
                 // TODO: Robustness! Base_expr could be an overload set with these types, but also include struct types
@@ -727,7 +737,11 @@ impl tir::Expr<tir::DeclRef> {
                     is_mut = is_mut && constraints.solve().unwrap().is_mut;
                 }
             }
-            one_of.push(QualType { ty, is_mut });
+            let mut constraints = GenericContext::new();
+            for &param in &decl.generic_params {
+                constraints.insert(param, ConstraintList::default());
+            }
+            one_of.push(QualType { ty, is_mut }, constraints);
         }
 
         *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(one_of), None);
@@ -772,7 +786,8 @@ impl tir::Expr<tir::DeclRef> {
             .cloned();
 
         let (overload, generic_arguments) = if !overloads.overloads.is_empty() {
-            let mut overload = pref.as_ref().cloned()
+            // Select an overload. If `pref` is in the list of overloads, choose it. Otherwise choose the first in the list.
+            let overload = pref.as_ref().cloned()
                 .filter(|overload| overloads.overloads.iter().find(|&other| other.decl == overload.decl).is_some())
                 .unwrap_or_else(|| overloads.overloads[0].clone());
             let decl = &driver.tir.decls[overload.decl];
@@ -780,14 +795,18 @@ impl tir::Expr<tir::DeclRef> {
                 let ty = tp.get_evaluated_type(decl.param_tys[i]).clone();
                 tp.constraints_mut(arg).set_to(ty);
             }
+            // TODO: probably rename this from ret_ty.
             let ret_ty = tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id)).ty;
             let mut ret_ty_constraints = ConstraintList::default();
             ret_ty_constraints.set_to(ret_ty.clone());
             let mut generic_args = Vec::new();
-            for (i, &generic_param) in decl.generic_params.iter().enumerate() {
+
+            let generic_constraints = find_generic_context_for_decl(self.id, &ret_ty, tp);
+            for &generic_param in &decl.generic_params {
                 let implied_constraints = ret_ty_constraints.get_implied_generic_constraints(generic_param, &ret_ty);
-                overload.generic_param_constraints[i] = overload.generic_param_constraints[i].intersect_with(&implied_constraints);
-                let generic_arg = overload.generic_param_constraints[i].solve().unwrap().ty;
+                let generic_param_constraints = generic_constraints.get_mut(&generic_param).unwrap();
+                *generic_param_constraints = generic_param_constraints.intersect_with(&implied_constraints);
+                let generic_arg = generic_param_constraints.solve().unwrap().ty;
                 generic_args.push(generic_arg);
             }
             for &arg in &self.args {
@@ -872,11 +891,16 @@ impl tir::Expr<tir::Call> {
         for overload in &mut overloads.overloads {
             let decl = &decls[overload.decl];
             for (&param_ty, &arg) in decl.param_tys.iter().zip(&self.args) {
-                let param_ty = tp.get_evaluated_type(param_ty);
-                let arg_constraints = tp.constraints(arg);
-                for (i, &generic_param) in decl.generic_params.iter().enumerate() {
-                    let constraints = arg_constraints.get_implied_generic_constraints(generic_param, param_ty);
-                    overload.generic_param_constraints[i] = overload.generic_param_constraints[i].intersect_with_in_generic_context(&constraints, &decl.generic_params);
+                let param_ty = tp.get_evaluated_type(param_ty).clone();
+                let arg_constraints = tp.constraints(arg).clone();
+
+                // Ideally, this stuff would be just outside this loop above. But that isn't possible due to the typechecker.
+                let func_ty = tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id));
+                let generic_ctx = find_generic_context_for_decl(self.callee, &func_ty, tp);
+                for &generic_param in &decl.generic_params {
+                    let constraints = arg_constraints.get_implied_generic_constraints(generic_param, &param_ty);
+                    let generic_constraints = generic_ctx.get_mut(&generic_param).unwrap();
+                    *generic_constraints = generic_constraints.intersect_with_in_generic_context(&constraints, &decl.generic_params);
                 }
             }
         }
