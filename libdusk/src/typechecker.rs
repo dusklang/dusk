@@ -50,17 +50,10 @@ enum UnitKind {
     Mock(usize),
 }
 
-
-// TODO: delet this
-#[derive(Debug, Clone)]
-pub struct Overload {
-    pub decl: DeclId,
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct Overloads {
-    pub overloads: Vec<Overload>,
-    pub nonviable_overloads: Vec<Overload>,
+    pub overloads: Vec<DeclId>,
+    pub nonviable_overloads: Vec<DeclId>,
 }
 
 impl tir::Expr<tir::IntLit> {
@@ -719,16 +712,16 @@ impl tir::Expr<tir::DeclRef> {
         let overload_decls = driver.find_overloads(&driver.code.hir_code.decl_refs[self.decl_ref_id]);
         let mut overloads = Vec::new();
         for &overload_decl in &overload_decls {
-            overloads.push(Overload { decl: overload_decl });
+            overloads.push(overload_decl);
         }
 
         // Find type possibilities
         let mut one_of = TypePossibilities::new();
         one_of.reserve(overloads.len());
         for i in 0..overloads.len() {
-            let overload = &overloads[i];
-            let ty = tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id)).ty;
-            let decl = &driver.tir.decls[overload.decl];
+            let overload = overloads[i];
+            let ty = tp.fetch_decl_type(driver, overload, Some(self.decl_ref_id)).ty;
+            let decl = &driver.tir.decls[overload];
             let mut is_mut = decl.is_mut;
             if let hir::Namespace::MemberRef { base_expr } = driver.code.hir_code.decl_refs[self.decl_ref_id].namespace {
                 let constraints = tp.constraints(base_expr);
@@ -754,23 +747,23 @@ impl tir::Expr<tir::DeclRef> {
 
         let mut overloads = tp.overloads(self.decl_ref_id).clone();
         let one_of = tp.constraints(self.id).one_of().to_owned();
-        overloads.overloads.retain(|overload| {
-            let overload_ty = tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id));
+        overloads.overloads.retain(|&overload| {
+            let overload_ty = tp.fetch_decl_type(driver, overload, Some(self.decl_ref_id));
             if one_of.iter().any(|ty| overload_ty.trivially_convertible_to(ty)) {
                 true
             } else {
-                overloads.nonviable_overloads.push(overload.clone());
+                overloads.nonviable_overloads.push(overload);
                 false
             }
         });
 
-        overloads.overloads.retain(|overload| {
-            let overload_ty = tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id));
+        overloads.overloads.retain(|&overload| {
+            let overload_ty = tp.fetch_decl_type(driver, overload, Some(self.decl_ref_id));
 
             if overload_ty.trivially_convertible_to(&ty) {
                 true
             } else {
-                overloads.nonviable_overloads.push(overload.clone());
+                overloads.nonviable_overloads.push(overload);
                 false
             }
         });
@@ -779,8 +772,8 @@ impl tir::Expr<tir::DeclRef> {
             .preferred_type()
             .iter()
             .flat_map(|&ty| {
-                overloads.overloads.iter().find(|&overload| {
-                    tp.fw_decl_types(overload.decl).trivially_convertible_to(ty)
+                overloads.overloads.iter().find(|&&overload| {
+                    tp.fw_decl_types(overload).trivially_convertible_to(ty)
                 })
             }).next()
             .cloned();
@@ -788,15 +781,15 @@ impl tir::Expr<tir::DeclRef> {
         let (overload, generic_arguments) = if !overloads.overloads.is_empty() {
             // Select an overload. If `pref` is in the list of overloads, choose it. Otherwise choose the first in the list.
             let overload = pref.as_ref().cloned()
-                .filter(|overload| overloads.overloads.iter().find(|&other| other.decl == overload.decl).is_some())
+                .filter(|overload| overloads.overloads.contains(overload))
                 .unwrap_or_else(|| overloads.overloads[0].clone());
-            let decl = &driver.tir.decls[overload.decl];
+            let decl = &driver.tir.decls[overload];
             for (i, &arg) in self.args.iter().enumerate() {
                 let ty = tp.get_evaluated_type(decl.param_tys[i]).clone();
                 tp.constraints_mut(arg).set_to(ty);
             }
             // TODO: probably rename this from ret_ty.
-            let ret_ty = tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id)).ty;
+            let ret_ty = tp.fetch_decl_type(driver, overload, Some(self.decl_ref_id)).ty;
             let mut ret_ty_constraints = ConstraintList::default();
             ret_ty_constraints.set_to(ret_ty.clone());
             let mut generic_args = Vec::new();
@@ -824,8 +817,8 @@ impl tir::Expr<tir::DeclRef> {
             } else {
                 let mut err = Error::new(format!("no matching declarations named \"{}\" found in scope", name))
                     .adding_primary_range(driver.get_range(self.id), "referenced here");
-                for overload in &overloads.nonviable_overloads {
-                    let range = df!(driver, overload.decl.range);
+                for &overload in &overloads.nonviable_overloads {
+                    let range = df!(driver, overload.range);
                     err.add_secondary_range(range, "non-viable overload found here");
                 }
                 driver.errors.push(err);
@@ -837,7 +830,7 @@ impl tir::Expr<tir::DeclRef> {
         };
 
         *tp.overloads_mut(self.decl_ref_id) = overloads;
-        *tp.selected_overload_mut(self.decl_ref_id) = overload.map(|overload| overload.decl);
+        *tp.selected_overload_mut(self.decl_ref_id) = overload.map(|overload| overload);
         *tp.generic_arguments_mut(self.decl_ref_id) = generic_arguments;
     }
 }
@@ -851,13 +844,13 @@ impl tir::Expr<tir::Call> {
         let mut one_of: SmallVec<[QualType; 1]> = SmallVec::new();
         let decls = &driver.tir.decls;
         let callee_one_of = tp.constraints(self.callee).one_of();
-        overloads.overloads.retain(|overload| {
-            assert_eq!(decls[overload.decl].param_tys.len(), self.args.len());
+        overloads.overloads.retain(|&overload| {
+            assert_eq!(decls[overload].param_tys.len(), self.args.len());
             let arg_constraints = self.args.iter().map(|&arg| tp.constraints(arg));
-            let param_tys = decls[overload.decl].param_tys.iter().map(|&expr| tp.get_evaluated_type(expr));
+            let param_tys = decls[overload].param_tys.iter().map(|&expr| tp.get_evaluated_type(expr));
             for (constraints, ty) in arg_constraints.zip(param_tys) {
-                if can_unify_to_in_generic_context(&constraints, &ty.into(), &decls[overload.decl].generic_params).is_err() {
-                    overloads.nonviable_overloads.push(overload.clone());
+                if can_unify_to_in_generic_context(&constraints, &ty.into(), &decls[overload].generic_params).is_err() {
+                    overloads.nonviable_overloads.push(overload);
                     i += 1;
                     return false;
                 }
@@ -875,10 +868,10 @@ impl tir::Expr<tir::Call> {
         let mut pref = None;
         'find_preference: for (i, &arg) in self.args.iter().enumerate() {
             if let Some(ty) = tp.constraints(arg).preferred_type() {
-                for overload in &overloads.overloads {
-                    let decl = &driver.tir.decls[overload.decl];
+                for &overload in &overloads.overloads {
+                    let decl = &driver.tir.decls[overload];
                     if ty.ty.trivially_convertible_to(tp.get_evaluated_type(decl.param_tys[i])) {
-                        let ty = tp.fetch_decl_type(driver, overload.decl, None);
+                        let ty = tp.fetch_decl_type(driver, overload, None);
                         pref = Some(ty.ty.return_ty().unwrap().into());
                         tp.constraints_mut(self.callee).set_preferred_type(ty);
                         break 'find_preference;
@@ -888,14 +881,14 @@ impl tir::Expr<tir::Call> {
         }
 
         // For each overload, infer generic constraints from the arguments
-        for overload in &mut overloads.overloads {
-            let decl = &decls[overload.decl];
+        for &overload in &overloads.overloads {
+            let decl = &decls[overload];
             for (&param_ty, &arg) in decl.param_tys.iter().zip(&self.args) {
                 let param_ty = tp.get_evaluated_type(param_ty).clone();
                 let arg_constraints = tp.constraints(arg).clone();
 
                 // Ideally, this stuff would be just outside this loop above. But that isn't possible due to the typechecker.
-                let func_ty = tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id));
+                let func_ty = tp.fetch_decl_type(driver, overload, Some(self.decl_ref_id));
                 let generic_ctx = find_generic_context_for_decl(self.callee, &func_ty, tp);
                 for &generic_param in &decl.generic_params {
                     let constraints = arg_constraints.get_implied_generic_constraints(generic_param, &param_ty);
@@ -917,8 +910,7 @@ impl tir::Expr<tir::Call> {
             .filter(|&callee_ty| {
                 let return_ty: QualType = callee_ty.ty.return_ty().unwrap().clone().into();
                 // TODO: this is a temporary hack that should be removed.
-                let overload_decl = tp.overloads(self.decl_ref_id).overloads.iter()
-                    .map(|overload| overload.decl)
+                let overload_decl = tp.overloads(self.decl_ref_id).overloads.iter().copied()
                     .find(|&decl| tp.fw_decl_types(decl).trivially_convertible_to(callee_ty));
                 if let Some(overload_decl) = overload_decl {
                     if let Type::Function { param_tys, .. } = &callee_ty.ty {
