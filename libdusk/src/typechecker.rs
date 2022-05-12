@@ -701,7 +701,7 @@ fn find_generic_context_for_decl<'a>(expr: ExprId, ty: &'a (impl Into<QualType> 
         .get_one_of_mut()
         .unwrap()
         .iter_mut()
-        .find(|(other_ty, _)| other_ty.trivially_convertible_to(&ty.clone().into()))
+        .find(|(other_ty, _)| ty.clone().into().trivially_convertible_to(other_ty))
         .unwrap();
     ctx
 }
@@ -789,14 +789,14 @@ impl tir::Expr<tir::DeclRef> {
                 tp.constraints_mut(arg).set_to(ty);
             }
             // TODO: probably rename this from ret_ty.
-            let ret_ty = tp.fetch_decl_type(driver, overload, Some(self.decl_ref_id)).ty;
+            let ret_ty = tp.fetch_decl_type(driver, overload, Some(self.decl_ref_id));
             let mut ret_ty_constraints = ConstraintList::default();
             ret_ty_constraints.set_to(ret_ty.clone());
             let mut generic_args = Vec::new();
 
             let generic_constraints = find_generic_context_for_decl(self.id, &ret_ty, tp);
             for &generic_param in &decl.generic_params {
-                let implied_constraints = ret_ty_constraints.get_implied_generic_constraints(generic_param, &ret_ty);
+                let implied_constraints = ret_ty_constraints.get_implied_generic_constraints(generic_param, &ret_ty.ty);
                 let generic_param_constraints = generic_constraints.get_mut(&generic_param).unwrap();
                 *generic_param_constraints = generic_param_constraints.intersect_with(&implied_constraints);
                 let generic_arg = generic_param_constraints.solve().unwrap().ty;
@@ -906,9 +906,9 @@ impl tir::Expr<tir::Call> {
         let ty = tp.constraints(self.id).solve().unwrap_or(Type::Error.into());
         *tp.ty_mut(self.id) = ty.ty.clone();
 
-        let callee_one_of: SmallVec<[QualType; 1]> = tp.constraints(self.callee).one_of().iter()
-            .filter(|&callee_ty| {
-                let return_ty: QualType = callee_ty.ty.return_ty().unwrap().clone().into();
+        let mut callee_one_of = tp.constraints_mut(self.callee).get_one_of().unwrap().clone();
+        callee_one_of.retain(|callee_ty, _| {
+            let return_ty: QualType = callee_ty.ty.return_ty().unwrap().clone().into();
                 // TODO: this is a temporary hack that should be removed.
                 let overload_decl = tp.overloads(self.decl_ref_id).overloads.iter().copied()
                     .find(|&decl| tp.fw_decl_types(decl).trivially_convertible_to(callee_ty));
@@ -924,11 +924,9 @@ impl tir::Expr<tir::Call> {
                 } else {
                     false
                 }
-            })
-            .cloned()
-            .collect();
-        let pref = tp.constraints(self.callee).preferred_type().cloned();
+        });
         tp.constraints_mut(self.callee).set_one_of(callee_one_of);
+        let pref = tp.constraints(self.callee).preferred_type().cloned();
         if let Some(pref) = pref {
             tp.constraints_mut(self.callee).set_preferred_type(pref);
         }
