@@ -752,7 +752,7 @@ impl Driver {
                         match ty {
                             &Type::Int { is_signed, .. } => {
                                 // TODO: this is kind of silly, but it was the path of least resistance.
-                                let val = Value::from_const(konst, self).as_big_int(is_signed);
+                                let val = Value::from_const(&konst.clone(), self).as_big_int(is_signed);
                                 guarantees.push(Constraint::Eq(op.into(), val.to_string().into()));
                             },
                             unhandled => panic!("Literal with unhandled type {:?}", unhandled),

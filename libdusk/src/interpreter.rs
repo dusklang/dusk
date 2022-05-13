@@ -6,6 +6,7 @@ use std::mem;
 use std::slice;
 use std::fmt::Write;
 use std::cell::RefCell;
+use std::borrow::Cow;
 
 use indenter::indented;
 use smallvec::SmallVec;
@@ -45,7 +46,7 @@ impl Clone for Value {
     fn clone(&self) -> Value {
         match self {
             Value::Inline(storage) => Value::Inline(storage.clone()),
-            Value::Dynamic(_) => Value::from_bytes(self.as_bytes()),
+            Value::Dynamic(_) => Value::from_bytes(&self.as_bytes()),
             &Value::Internal { ref val, indirection } => Value::Internal { val: val.clone(), indirection },
             Value::Nothing => Value::Nothing,
         }
@@ -59,7 +60,7 @@ macro_rules! int_conversions {
                 $(
                     #[allow(dead_code)]
                     fn [<as_ $ty_name>](&self) -> $ty_name {
-                        $ty_name::from_le_bytes(self.as_bytes().try_into().unwrap())
+                        $ty_name::from_le_bytes(self.as_bytes().as_ref().try_into().unwrap())
                     }
 
                     #[allow(dead_code)]
@@ -74,16 +75,16 @@ macro_rules! int_conversions {
 int_conversions!(u8, u16, u32, u64, usize, i8, i16, i32, i64, isize);
 
 impl Driver {
-    fn eval_struct_lit(&self, id: StructId, fields: impl Iterator<Item=Value>) -> Value {
-        let strukt = &self.code.mir_code.structs[&id];
+    fn eval_struct_lit(&mut self, id: StructId, fields: impl Iterator<Item=Value>) -> Value {
+        let strukt = self.code.mir_code.structs[&id].clone();
         let mut buf = SmallVec::new();
         buf.resize(strukt.layout.size, 0);
         for (i, field) in fields.enumerate() {
             let offset = strukt.layout.field_offsets[i];
             let ty = &strukt.field_tys[i];
             let size = self.size_of(ty);
-            let val = field.as_bytes();
-            buf[offset..(offset + size)].copy_from_slice(val);
+            let val = field.as_bytes_with_driver(self);
+            buf[offset..(offset + size)].copy_from_slice(&val);
         }
         Value::Inline(buf)
     }
@@ -94,16 +95,26 @@ struct Enum {
 }
 
 impl Value {
-    fn as_bytes(&self) -> &[u8] {
+    fn as_bytes_with_driver_maybe(&self, d: Option<&mut Driver>) -> Cow<[u8]> {
         match self {
-            Value::Inline(storage) => storage.as_ref(),
+            Value::Inline(storage) => Cow::Borrowed(storage.as_ref()),
             Value::Dynamic(ptr) => unsafe {
                 let address_bits = mem::transmute::<&Box<_>, *const u8>(ptr);
-                slice::from_raw_parts(address_bits, mem::size_of::<usize>())
+                Cow::Borrowed(slice::from_raw_parts(address_bits, mem::size_of::<usize>()))
+            },
+            &Value::Internal { val: InternalValue::FunctionPointer { ref generic_arguments, func }, indirection: 0 } if d.is_some() => {
+                assert!(generic_arguments.is_empty());
+                Cow::Owned(d.unwrap().fetch_inverse_thunk(func).as_bytes().to_vec())
             },
             Value::Internal { .. } => panic!("Can't get bytes of a compiler internal data structure!"),
-            Value::Nothing => &[],
+            Value::Nothing => Cow::Borrowed(&[]),
         }
+    }
+    fn as_bytes_with_driver(&self, d: &mut Driver) -> Cow<[u8]> {
+        self.as_bytes_with_driver_maybe(Some(d))
+    }
+    fn as_bytes(&self) -> Cow<[u8]> {
+        self.as_bytes_with_driver_maybe(None)
     }
 
     /// Interprets the value as a pointer and loads from it
@@ -131,21 +142,21 @@ impl Value {
                 let ptr = self.as_raw_ptr();
                 let val = val.as_bytes();
                 let slice = unsafe { std::slice::from_raw_parts_mut(ptr, val.len()) };
-                slice.copy_from_slice(val);
+                slice.copy_from_slice(&val);
             }
         }
     }
 
     pub fn as_big_int(&self, signed: bool) -> BigInt {
         if signed {
-            BigInt::from_signed_bytes_le(self.as_bytes())
+            BigInt::from_signed_bytes_le(self.as_bytes().as_ref())
         } else {
-            BigInt::from_bytes_le(Sign::Plus, self.as_bytes())
+            BigInt::from_bytes_le(Sign::Plus, self.as_bytes().as_ref())
         }
     }
 
     fn as_raw_ptr(&self) -> *mut u8 {
-        unsafe { mem::transmute(usize::from_le_bytes(self.as_bytes().try_into().unwrap())) }
+        unsafe { mem::transmute(usize::from_le_bytes(self.as_bytes().as_ref().try_into().unwrap())) }
     }
 
     fn as_f64(&self) -> f64 {
@@ -227,7 +238,7 @@ impl Value {
         Value::from_bytes(&bytes)
     }
 
-    pub fn from_const(konst: &Const, driver: &Driver) -> Value {
+    pub fn from_const(konst: &Const, driver: &mut Driver) -> Value {
         match *konst {
             Const::Int { lit, ref ty } => match ty {
                 &Type::Int { width, is_signed } => Value::from_big_int(BigInt::from(lit), width, is_signed, driver.arch),
@@ -248,8 +259,8 @@ impl Value {
             Const::Mod(id) => Value::from_mod(id),
             Const::BasicVariant { enuum, index } => Value::from_variant(driver, enuum, index, Value::Nothing),
             Const::StructLit { ref fields, id } => {
-                let fields = fields.iter().map(|val| Value::from_const(val, driver));
-                driver.eval_struct_lit(id, fields)
+                let fields: Vec<_> = fields.iter().map(|val| Value::from_const(val, driver)).collect();
+                driver.eval_struct_lit(id, fields.into_iter())
             }
         }
     }
@@ -270,11 +281,11 @@ impl Value {
         let layout = &d.code.mir_code.enums[&enuum];
         let payload_offset = layout.payload_offsets[index];
         let mut bytes = Vec::new();
-        bytes.extend(Value::from_u32(index as u32).as_bytes());
+        bytes.extend(Value::from_u32(index as u32).as_bytes().as_ref());
         while bytes.len() < payload_offset {
             bytes.push(0);
         }
-        bytes.extend(payload.as_bytes());
+        bytes.extend(payload.as_bytes().as_ref());
         Value::from_bytes(&bytes)
     }
 
@@ -343,6 +354,7 @@ pub struct Interpreter {
     statics: HashMap<StaticId, Value>,
     allocations: HashMap<usize, alloc::Layout>,
     switch_cache: HashMap<OpId, HashMap<Box<[u8]>, BlockId>>,
+    inverse_thunk_cache: HashMap<FuncId, region::Allocation>,
     pub mode: InterpMode,
 }
 
@@ -352,6 +364,7 @@ impl Interpreter {
             statics: HashMap::new(),
             allocations: HashMap::new(),
             switch_cache: HashMap::new(),
+            inverse_thunk_cache: HashMap::new(),
             mode: InterpMode::CompileTime,
         }
     }
@@ -555,6 +568,27 @@ impl Driver {
             }
         })
     }
+
+    pub fn fetch_inverse_thunk(&mut self, func: FuncId) -> Value {
+        if let Some(alloc) = self.interp.inverse_thunk_cache.get(&func) {
+            return Value::from_usize(alloc.as_ptr::<()>() as usize);
+        }
+
+        // Generate thunk here:
+        let mut thunk_data: Vec<u8> = Vec::new();
+        thunk_data.extend(std::iter::repeat(0).take(24));
+
+
+        let mut thunk = region::alloc(thunk_data.len(), region::Protection::READ_WRITE_EXECUTE).unwrap();
+        let val = unsafe {
+            let thunk_ptr = thunk.as_mut_ptr::<u8>();
+            thunk_ptr.copy_from(thunk_data.as_ptr(), thunk_data.len());
+            Value::from_usize(thunk_ptr as usize)
+        };
+        self.interp.inverse_thunk_cache.insert(func, thunk);
+
+        val
+    }
     
     pub fn extern_call(&mut self, func_ref: ExternFunctionRef, mut args: Vec<Box<[u8]>>) -> Value {
         let indirect_args: Vec<*mut u8> = args.iter_mut()
@@ -746,8 +780,8 @@ impl Driver {
         unsafe {
             let thunk_ptr = thunk.as_mut_ptr::<u8>();
             thunk_ptr.copy_from(thunk_data.as_ptr(), thunk_data.len());
-            type TestThunk = fn(*const *mut u8, *mut u8);
-            let thunk: TestThunk = std::mem::transmute(thunk_ptr);
+            type Thunk = fn(*const *mut u8, *mut u8);
+            let thunk: Thunk = std::mem::transmute(thunk_ptr);
             let mut return_val_storage = SmallVec::new();
             return_val_storage.resize(self.size_of(&func.return_ty), 0);
             thunk(indirect_args.as_ptr(), return_val_storage.as_mut_ptr());
@@ -785,7 +819,7 @@ impl Driver {
             let next_op = self.code.blocks[frame.block].ops[frame.pc];
             match self.code.ops[next_op].as_mir_instr().unwrap() {
                 Instr::Void => Value::Nothing,
-                Instr::Const(konst) => Value::from_const(konst, &*self),
+                Instr::Const(konst) => Value::from_const(&konst.clone(), self),
                 Instr::Alloca(ty) => {
                     let mut storage = Vec::new();
                     storage.resize(self.size_of(ty), 0);
@@ -813,7 +847,7 @@ impl Driver {
                     let mut copied_args = Vec::new();
                     copied_args.reserve_exact(arguments.len());
                     for &arg in arguments {
-                        copied_args.push(frame.get_val(arg, self).as_bytes().to_owned().into_boxed_slice());
+                        copied_args.push(frame.get_val(arg, self).as_bytes().as_ref().to_owned().into_boxed_slice());
                     }
                     // Stop immutably borrowing the stack, because there may come a time where extern functions can transparently call into the interpreter
                     std::mem::drop(stack);
@@ -1139,7 +1173,7 @@ impl Driver {
                     if let InterpMode::CompileTime = self.interp.mode {
                         panic!("Can't access static at compile time!");
                     }
-                    let static_value = Value::from_const(&self.code.mir_code.statics[statik].val, &*self);
+                    let static_value = Value::from_const(&self.code.mir_code.statics[statik].val.clone(), self);
                     let statik = self.interp.statics.entry(statik)
                         .or_insert(static_value);
                     Value::from_usize(unsafe { mem::transmute(statik.as_bytes().as_ptr()) })
@@ -1188,11 +1222,10 @@ impl Driver {
                 }
                 &Instr::StructLit { ref fields, id } => {
                     let frame = stack.last().unwrap();
-                    self.eval_struct_lit(
-                        id,
-                        fields.iter()
-                            .map(|&instr| frame.get_val(instr, self).clone())
-                    )
+                    let fields: Vec<_> = fields.iter()
+                        .map(|&instr| frame.get_val(instr, self).clone())
+                        .collect();
+                    self.eval_struct_lit(id, fields.into_iter())
                 },
                 &Instr::Ret(instr) => {
                     let val = frame.get_val(instr, self).clone();
@@ -1213,15 +1246,15 @@ impl Driver {
                     let scrutinee = frame.get_val(scrutinee, self).as_bytes().to_owned();
                     if !self.interp.switch_cache.contains_key(&next_op) {
                         let mut table = HashMap::new();
-                        for case in cases {
+                        for case in cases.clone() {
                             let val = Value::from_const(&case.value, self);
                             let val = val.as_bytes();
-                            table.insert(val.to_owned().into_boxed_slice(), case.bb);
+                            table.insert(val.as_ref().to_owned().into_boxed_slice(), case.bb);
                         }
                         self.interp.switch_cache.insert(next_op, table);
                     }
                     let table = self.interp.switch_cache.get(&next_op).unwrap();
-                    let block = table.get(scrutinee.as_slice()).cloned().unwrap_or(catch_all_bb);
+                    let block = table.get(scrutinee.as_ref()).cloned().unwrap_or(catch_all_bb);
 
                     let frame = stack.last_mut().unwrap();
                     frame.branch_to(block);
