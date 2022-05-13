@@ -800,6 +800,14 @@ struct FunctionBuilder {
     instr_namespace: InstrNamespace,
 }
 
+enum DeclRef {
+    Intrinsic { intrinsic: Intrinsic, ty: Type },
+    Function { func: FuncId, generic_args: Vec<Type> },
+    ExternFunction { func: ExternFunctionRef },
+    EnumVariantWithPayload { enuum: EnumId, index: usize, payload_ty: Option<Type> },
+    Value(Value),
+}
+
 impl Driver {
     fn create_bb(&mut self, b: &mut FunctionBuilder) -> BlockId {
         let block = self.code.blocks.push(Block::default());
@@ -1007,121 +1015,73 @@ impl Driver {
         }
     }
 
-    fn get(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[OpId; 2]>, decl_ref_id: DeclRefId, tp: &impl TypeProvider) -> Value {
+    fn get_callee_declref(&mut self, b: &mut FunctionBuilder, tp: &impl TypeProvider, callee_id: ExprId) -> DeclRef {
+        let callee = &ef!(callee_id.hir);
+        if let &Expr::DeclRef { id, .. } = callee {
+            self.get(b, SmallVec::new(), id, tp)
+        } else {
+            panic!("expected declref callee");
+        }
+    }
+
+    fn get(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[OpId; 2]>, decl_ref_id: DeclRefId, tp: &impl TypeProvider) -> DeclRef {
         let id = tp.selected_overload(decl_ref_id).expect("No overload found!");
         let generic_arguments = tp.generic_arguments(decl_ref_id).as_ref().unwrap_or(&Vec::new()).clone();
         let expr = self.code.hir_code.decl_refs[decl_ref_id].expr;
         let name = format!("{}", self.display_item(id));
         match self.get_decl(id, tp) {
-            Decl::Computed { get } => self.push_instr(b, Instr::Call { arguments, generic_arguments, func: get }, expr).direct(),
+            Decl::Computed { get } => DeclRef::Function { func: get, generic_args: generic_arguments },
             Decl::ExternFunction(func) => {
                 assert!(generic_arguments.is_empty());
-                self.push_instr(b, Instr::ExternCall { arguments, func }, expr).direct()
+                DeclRef::ExternFunction { func }
             },
             Decl::Stored(id) => {
                 assert!(arguments.is_empty());
-                b.stored_decl_locs[id].indirect()
+                DeclRef::Value(b.stored_decl_locs[id].indirect())
             },
             Decl::PatternBinding { id: binding_id } => {
                 assert!(arguments.is_empty());
-                b.pattern_binding_locs[&binding_id]
+                DeclRef::Value(b.pattern_binding_locs[&binding_id])
             },
             Decl::Parameter { index } => {
                 let entry_block = b.blocks[0];
                 let value = self.code.blocks[entry_block].ops[index];
-                value.direct()
+                DeclRef::Value(value.direct())
             },
             Decl::GenericParam(param) => {
-                self.push_instr(b, Instr::GenericParam(param), expr).direct()
+                DeclRef::Value(self.push_instr(b, Instr::GenericParam(param), expr).direct())
             },
             Decl::Intrinsic(intr, ref ty) => {
                 let ty = ty.clone();
-                self.push_instr(b, Instr::Intrinsic { arguments, ty, intr }, expr).direct()
+                DeclRef::Intrinsic { intrinsic: intr, ty }
             },
             Decl::Const(ref konst) => {
                 let konst = konst.clone();
-                self.push_instr_with_name(b, Instr::Const(konst.clone()), expr, name).direct()
+                DeclRef::Value(self.push_instr_with_name(b, Instr::Const(konst.clone()), expr, name).direct())
             },
             Decl::Static(statik) => {
-                self.push_instr_with_name(b, Instr::AddressOfStatic(statik), expr, format!("static_{}", name)).indirect()
+                DeclRef::Value(self.push_instr_with_name(b, Instr::AddressOfStatic(statik), expr, format!("static_{}", name)).indirect())
             },
             Decl::Field { index } => {
                 let base = self.get_base(decl_ref_id);
                 let base = self.build_expr(b, base, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
                 if base.indirection > 0 {
                     let base_ptr = self.handle_indirection(b, base.get_address());
-                    self.push_instr(b, Instr::IndirectFieldAccess { val: base_ptr, index }, expr).indirect()
+                    DeclRef::Value(self.push_instr(b, Instr::IndirectFieldAccess { val: base_ptr, index }, expr).indirect())
                 } else {
                     debug_assert_eq!(base.indirection, 0, "tried to dereference a struct?!");
-                    self.push_instr(b, Instr::DirectFieldAccess { val: base.instr, index }, expr).direct()   
+                    DeclRef::Value(self.push_instr(b, Instr::DirectFieldAccess { val: base.instr, index }, expr).direct())
                 }
             },
             Decl::Variant { enuum, index, payload_ty } => {
                 if payload_ty.is_some() {
                     debug_assert_eq!(arguments.len(), 1);
-                    self.push_instr_with_name(b, Instr::Variant { enuum, index, payload: arguments[0] }, expr, name).direct()
+                    DeclRef::EnumVariantWithPayload { enuum, index, payload_ty }
                 } else {
                     debug_assert!(arguments.is_empty());
-                    self.push_instr_with_name(b, Instr::Const(Const::BasicVariant { enuum, index }), expr, name).direct()
+                    DeclRef::Value(self.push_instr_with_name(b, Instr::Const(Const::BasicVariant { enuum, index }), expr, name).direct())
                 }
             },
-            Decl::Invalid => panic!("INVALID DECL"),
-        }
-    }
-
-    #[allow(unused)]
-    fn set(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[OpId; 2]>, id: DeclRefId, value: OpId, tp: &impl TypeProvider) -> OpId {
-        let expr = self.code.hir_code.decl_refs[id].expr;
-        let id = tp.selected_overload(id).expect("No overload found!");
-        let range = self.get_range(expr) + self.get_range(value);
-        match self.get_decl(id, tp) {
-            Decl::Computed { .. } => panic!("setters not yet implemented!"),
-            Decl::Stored(id) => {
-                assert!(arguments.is_empty());
-                let location = b.stored_decl_locs[id];
-                self.push_instr(b, Instr::Store { location, value }, range)
-            },
-            Decl::PatternBinding { id: binding_id } => {
-                todo!();
-                // assert!(arguments.is_empty());
-                // let location = b.pattern_binding_locs[&binding_id];
-                // self.push_instr(b, Instr::Store { location, value }, range)
-            },
-            Decl::Parameter { .. } | Decl::Const(_) | Decl::GenericParam(_) => panic!("can't set a constant!"),
-            Decl::Intrinsic(_, _) => panic!("can't set an intrinsic! (yet?)"),
-            Decl::Static(statik) => {
-                let location = self.push_instr(b, Instr::AddressOfStatic(statik), expr);
-                self.push_instr(b, Instr::Store { location, value }, range)
-            },
-            Decl::Field { .. } => panic!("Unhandled struct field!"),
-            Decl::Variant { .. } => panic!("Can't modify an enum variant"),
-            Decl::ExternFunction(_) => panic!("Can't set an external function"),
-            Decl::Invalid => panic!("INVALID DECL"),
-        }
-    }
-
-    #[allow(unused)]
-    fn modify(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[OpId; 2]>, id: DeclRefId, tp: &impl TypeProvider) -> Value {
-        let expr = self.code.hir_code.decl_refs[id].expr;
-        let id = tp.selected_overload(id).expect("No overload found!");
-        match self.get_decl(id, tp) {
-            Decl::Computed { .. } => panic!("modify accessors not yet implemented!"),
-            Decl::Stored(id) => {
-                assert!(arguments.is_empty());
-                b.stored_decl_locs[id].indirect()
-            },
-            Decl::PatternBinding { id: binding_id } => {
-                todo!()
-                // assert!(arguments.is_empty());
-                // b.pattern_binding_locs[&binding_id]
-            },
-            Decl::GenericParam(_) => panic!("can't modify a generic parameter!"),
-            Decl::Parameter { .. } | Decl::Const(_) => panic!("can't modify a constant!"),
-            Decl::Intrinsic(_, _) => panic!("can't modify an intrinsic! (yet?)"),
-            Decl::Static(statik) => self.push_instr(b, Instr::AddressOfStatic(statik), expr).indirect(),
-            Decl::Field { .. } => panic!("Unhandled struct field!"),
-            Decl::Variant { .. } => panic!("Can't modify an enum variant"),
-            Decl::ExternFunction(_) => panic!("Can't modify an external function"),
             Decl::Invalid => panic!("INVALID DECL"),
         }
     }
@@ -1212,16 +1172,28 @@ impl Driver {
                 ctx.new_data_dest(DataDest::Set { dest: lhs }),
                 tp,
             )},
-            // This isn't really a loop! It's just a control flow hack to get around the fact
-            // that you can't chain `if let`s in Rust.
-            Expr::DeclRef { ref arguments, id } => loop {
-                let decl_id = tp.selected_overload(id).unwrap();
+            Expr::DeclRef { ref arguments, .. } => {
+                let arguments = arguments.clone();
+                let decl_ref = self.get_callee_declref(b, tp, expr);
 
-                // Check if the declaration is an intrinsic
-                if let hir::Decl::Intrinsic { intr, .. } = df!(decl_id.hir) {
-                    // Check if we need to special case the intrinsic
-                    match intr {
-                        Intrinsic::LogicalAnd => break {
+                fn get_args(d: &mut Driver, b: &mut FunctionBuilder, tp: &impl TypeProvider, arguments: &[ExprId]) -> SmallVec<[OpId; 2]> {
+                    arguments.iter().map(|&argument| {
+                        let val = d.build_expr(b, argument, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                        d.handle_indirection(b, val)
+                    }).collect()
+                }
+
+                match decl_ref {
+                    DeclRef::Function { func, generic_args } => {
+                        let arguments = get_args(self, b, tp, &arguments);
+                        self.push_instr(b, Instr::Call { func, arguments, generic_arguments: generic_args }, expr).direct()
+                    },
+                    DeclRef::ExternFunction { func } => {
+                        let arguments = get_args(self, b, tp, &arguments);
+                        self.push_instr(b, Instr::ExternCall { arguments, func }, expr).direct()
+                    },
+                    DeclRef::Intrinsic { intrinsic, ty } => match intrinsic {
+                        Intrinsic::LogicalAnd => {
                             assert_eq!(arguments.len(), 2);
                             let (lhs, rhs) = (arguments[0], arguments[1]);
                             let left_true_bb = self.create_bb(b);
@@ -1274,7 +1246,7 @@ impl Driver {
                                 }
                             }
                         },
-                        Intrinsic::LogicalOr => break {
+                        Intrinsic::LogicalOr => {
                             assert_eq!(arguments.len(), 2);
                             let (lhs, rhs) = (arguments[0], arguments[1]);
                             let left_false_bb = self.create_bb(b);
@@ -1326,7 +1298,7 @@ impl Driver {
                                 }
                             }
                         },
-                        Intrinsic::LogicalNot => break {
+                        Intrinsic::LogicalNot => {
                             assert_eq!(arguments.len(), 1);
                             let operand = arguments[0];
                             if let DataDest::Branch(true_bb, false_bb) = ctx.data {
@@ -1336,20 +1308,19 @@ impl Driver {
                                 self.push_instr(b, Instr::LogicalNot(operand.instr), expr).direct()
                             }
                         },
-                        _ => {},
-                    }
+                        intrinsic => {
+                            let arguments = get_args(self, b, tp, &arguments);
+                            self.push_instr(b, Instr::Intrinsic { arguments, ty, intr: intrinsic }, expr).direct()
+                        }
+                    },
+                    DeclRef::EnumVariantWithPayload { enuum, index, .. } => {
+                        let arguments = get_args(self, b, tp, &arguments);
+                        self.push_instr(b, Instr::Variant { enuum, index, payload: arguments[0] }, expr).direct()
+                    },
+                    DeclRef::Value(val) => val,
                 }
-
-                // Otherwise, just handle the general case
-                // TODO: Don't clone arguments
-                let arguments = arguments.clone().iter().map(|&argument| {
-                    let val = self.build_expr(b, argument, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
-                    self.handle_indirection(b, val)
-                }).collect();
-
-                break self.get(b, arguments, id, tp);
             },
-            Expr::Call { callee, .. } => {
+            Expr::Call { callee, ref arguments, .. } => {
                 return self.build_expr(b, callee, ctx, tp);
             },
             Expr::Cast { expr: operand, ty: dest_ty, cast_id } => {
