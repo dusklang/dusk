@@ -538,7 +538,7 @@ impl Driver {
     fn expr_to_constraint_val(&self, expr: ExprId, tp: &impl TypeProvider) -> ConstraintValue {
         match &ef!(expr.hir) {
             &Expr::IntLit { lit } => ConstraintValue::Str(lit.to_string()),
-            &Expr::DeclRef { ref arguments, id } => {
+            &Expr::DeclRef { id } => {
                 let overload = tp.selected_overload(id).unwrap();
                 match df!(overload.hir) {
                     Decl::Const(expr) => self.expr_to_constraint_val(expr, tp),
@@ -546,26 +546,6 @@ impl Driver {
                     Decl::ReturnValue => ConstraintValue::ReturnValue,
                     Decl::Intrinsic { intr, .. } => {
                         match intr {
-                            Intrinsic::Add => {
-                                assert_eq!(arguments.len(), 2);
-                                ConstraintValue::Add(
-                                    Box::new(self.expr_to_constraint_val(arguments[0], tp)),
-                                    Box::new(self.expr_to_constraint_val(arguments[1], tp)),
-                                )
-                            },
-                            Intrinsic::Sub => {
-                                assert_eq!(arguments.len(), 2);
-                                ConstraintValue::Sub(
-                                    Box::new(self.expr_to_constraint_val(arguments[0], tp)),
-                                    Box::new(self.expr_to_constraint_val(arguments[1], tp)),
-                                )
-                            },
-                            Intrinsic::Neg => {
-                                assert_eq!(arguments.len(), 1);
-                                ConstraintValue::Neg(
-                                    Box::new(self.expr_to_constraint_val(arguments[0], tp)),
-                                )
-                            },
                             _ => panic!("Unsupported intrinsic call in condition attribute"),
                         }
                     },
@@ -578,24 +558,11 @@ impl Driver {
 
     fn expr_to_constraint(&self, expr: ExprId, tp: &impl TypeProvider) -> Constraint {
         match &ef!(expr.hir) {
-            &Expr::DeclRef { ref arguments, id } => {
+            &Expr::DeclRef { id } => {
                 let overload = tp.selected_overload(id).unwrap();
                 match df!(overload.hir) {
                     Decl::Intrinsic { intr, .. } => {
-                        assert_eq!(arguments.len(), 2);
                         match intr {
-                            Intrinsic::LessOrEq => Constraint::Lte(
-                                self.expr_to_constraint_val(arguments[0], tp),
-                                self.expr_to_constraint_val(arguments[1], tp),
-                            ),
-                            Intrinsic::GreaterOrEq => Constraint::Gte(
-                                self.expr_to_constraint_val(arguments[0], tp),
-                                self.expr_to_constraint_val(arguments[1], tp),
-                            ),
-                            Intrinsic::Eq => Constraint::Eq(
-                                self.expr_to_constraint_val(arguments[0], tp),
-                                self.expr_to_constraint_val(arguments[1], tp),
-                            ),
                             _ => panic!("Unsupported intrinsic call in condition attribute"),
                         }
                     },

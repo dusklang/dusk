@@ -53,7 +53,7 @@ pub struct PatternBinding { pub binding_id: PatternBindingDeclId, pub scrutinee:
 #[derive(Debug)]
 pub struct Assignment { pub lhs: ExprId, pub rhs: ExprId }
 #[derive(Debug)]
-pub struct DeclRef { pub args: SmallVec<[ExprId; 2]>, pub decl_ref_id: DeclRefId }
+pub struct DeclRef { pub decl_ref_id: DeclRefId }
 #[derive(Debug)]
 pub struct Call { pub callee: ExprId, pub args: SmallVec<[ExprId; 2]>, pub decl_ref_id: DeclRefId }
 #[derive(Debug)]
@@ -457,7 +457,7 @@ impl Driver {
                 self.tir.staged_ret_groups.entry(decl).or_default().push(expr);
                 insert_expr!(explicit_rets, ExplicitRet)
             }
-            &hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => insert_expr!(decl_refs, DeclRef { args: arguments.clone(), decl_ref_id }),
+            &hir::Expr::DeclRef { id: decl_ref_id } => insert_expr!(decl_refs, DeclRef { decl_ref_id }),
             &hir::Expr::Call { callee, ref arguments, decl_ref_id } => insert_expr!(calls, Call { callee, args: arguments.clone(), decl_ref_id }),
             &hir::Expr::Set { lhs, rhs } => insert_expr!(assignments, Assignment { lhs, rhs }),
             &hir::Expr::Do { scope } => insert_expr!(dos, Do { terminal_expr: self.code.hir_code.imper_scopes[scope].terminal_expr }),
