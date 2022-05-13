@@ -1,8 +1,14 @@
 fn type_of[T](value: T): type { T }
 
+fn hello(a: u32, b: u32) {
+
+}
+
 fn main() {
     f: i8 = 2
     print_type(type_of(f))
     print("\n")
     print_type(type_of(-34 as i8))
+
+    //alias :: hello
 }

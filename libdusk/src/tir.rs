@@ -607,19 +607,22 @@ impl Driver {
                     | hir::Expr::Import { .. } => {},
                 hir::Expr::AddrOf { expr, .. } | hir::Expr::Deref(expr) | hir::Expr::Pointer { expr, .. }
                     | hir::Expr::Cast { expr, .. } | hir::Expr::Ret { expr, .. } => self.tir.graph.add_type1_dep(id, ef!(expr.item)),
-                hir::Expr::DeclRef { ref arguments, id: decl_ref_id } => {
+                hir::Expr::DeclRef { id: decl_ref_id, .. } => {
                     let decl_ref = &self.code.hir_code.decl_refs[decl_ref_id];
                     if let hir::Namespace::MemberRef { base_expr } = decl_ref.namespace {
                         self.tir.graph.add_type1_dep(id, ef!(base_expr.item));
-                    }
-                    for &arg in arguments {
-                        self.tir.graph.add_type1_dep(id, ef!(arg.item));
                     }
                 },
                 hir::Expr::Call { callee, ref arguments, .. } => {
                     self.tir.graph.add_type1_dep(id, ef!(callee.item));
                     for &arg in arguments {
                         self.tir.graph.add_type1_dep(id, ef!(arg.item));
+
+                        // NOTE: if the callee is a declref, it is important for it to have a type 1 dependency on all
+                        // arguments, because declrefs do not lock their generic argument values in until pass 2, when
+                        // the caller's pass 2 has already passed. This is important because declrefs need to
+                        // substitute all generic arguments for the appropriate generic parameter types.
+                        self.tir.graph.add_type1_dep(ef!(callee.item), ef!(arg.item));
                     }
                 },
                 hir::Expr::Set { lhs, rhs } => {

@@ -784,10 +784,6 @@ impl tir::Expr<tir::DeclRef> {
                 .filter(|overload| overloads.overloads.contains(overload))
                 .unwrap_or_else(|| overloads.overloads[0].clone());
             let decl = &driver.tir.decls[overload];
-            for (i, &arg) in self.args.iter().enumerate() {
-                let ty = tp.get_evaluated_type(decl.param_tys[i]).clone();
-                tp.constraints_mut(arg).set_to(ty);
-            }
             // TODO: probably rename this from ret_ty.
             let ret_ty = tp.fetch_decl_type(driver, overload, Some(self.decl_ref_id));
             let mut ret_ty_constraints = ConstraintList::default();
@@ -801,9 +797,6 @@ impl tir::Expr<tir::DeclRef> {
                 *generic_param_constraints = generic_param_constraints.intersect_with(&implied_constraints);
                 let generic_arg = generic_param_constraints.solve().unwrap().ty;
                 generic_args.push(generic_arg);
-            }
-            for &arg in &self.args {
-                tp.constraints_mut(arg).substitute_generic_args(&decl.generic_params, &generic_args);
             }
             (Some(overload), Some(generic_args))
         } else {
@@ -822,9 +815,6 @@ impl tir::Expr<tir::DeclRef> {
                     err.add_secondary_range(range, "non-viable overload found here");
                 }
                 driver.errors.push(err);
-            }
-            for &arg in &self.args {
-                tp.constraints_mut(arg).make_error();
             }
             (None, None)
         };
@@ -925,8 +915,23 @@ impl tir::Expr<tir::Call> {
                     false
                 }
         });
-        tp.constraints_mut(self.callee).set_one_of(callee_one_of);
+
         let pref = tp.constraints(self.callee).preferred_type().cloned();
+        
+        // Select callee function type.
+        let callee_ty = pref.as_ref().cloned()
+            .filter(|pref| callee_one_of.iter().any(|(ty, _)| ty.trivially_convertible_to(pref) || pref.trivially_convertible_to(ty)))
+            .unwrap_or_else(|| callee_one_of.iter().next().unwrap().0.clone());
+        if let Type::Function { param_tys, .. } = &callee_ty.ty {
+            debug_assert_eq!(param_tys.len(), self.args.len());
+            for (&arg, param_ty) in self.args.iter().zip(param_tys) {
+                tp.constraints_mut(arg).set_to(param_ty);
+            }
+        } else {
+            panic!("expected function type");
+        }
+
+        tp.constraints_mut(self.callee).set_to(callee_ty);
         if let Some(pref) = pref {
             tp.constraints_mut(self.callee).set_preferred_type(pref);
         }

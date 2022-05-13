@@ -33,6 +33,11 @@ impl TypePossibilities {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        debug_assert_eq!(self.one_of.len(), self.generic_context.len());
+        self.one_of.is_empty()
+    }
+
     pub fn reserve(&mut self, additional: usize) {
         self.one_of.reserve(additional);
         self.generic_context.reserve(additional);
@@ -356,6 +361,14 @@ impl ConstraintList {
     pub fn set_to(&mut self, ty: impl Into<QualType>) {
         // If we're never, we should stay never.
         if !self.is_never() {
+            let ty = ty.into();
+
+            // Preserve generic constraints if possible. TODO: efficiency! The caller should pass in this information
+            // instead so we don't have to iterate.
+            if let Some(one_of) = &mut self.one_of {
+                one_of.retain(|other, _| other == &ty);
+                if !one_of.is_empty() { return; }
+            }
             self.one_of = Some([ty.into()].into());
         }
     }
@@ -509,8 +522,8 @@ fn contains_generic_param(ty: &Type, generic_param: GenericParamId) -> bool {
     }
 }
 
-fn substitute_generic_args(ty: &mut QualType, generic_params: &[GenericParamId], generic_args: &[Type]) {
-    match &mut ty.ty {
+fn substitute_generic_args(ty: &mut Type, generic_params: &[GenericParamId], generic_args: &[Type]) {
+    match ty {
         Type::GenericParam(generic_param) => {
             let mut replacement = None;
             for (param, arg) in generic_params.iter().zip(generic_args) {
@@ -520,10 +533,16 @@ fn substitute_generic_args(ty: &mut QualType, generic_params: &[GenericParamId],
                 }
             }
             if let Some(replacement) = replacement {
-                ty.ty = replacement;
+                *ty = replacement;
             }
         },
-        Type::Pointer(pointee) => substitute_generic_args(&mut *pointee, generic_params, generic_args),
+        Type::Pointer(pointee) => substitute_generic_args(&mut pointee.ty, generic_params, generic_args),
+        Type::Function { param_tys, return_ty } => {
+            substitute_generic_args(return_ty, generic_params, generic_args);
+            for param_ty in param_tys {
+                substitute_generic_args(param_ty, generic_params, generic_args);
+            }
+        },
         _ => {},
     }
 }
@@ -566,12 +585,12 @@ impl ConstraintList {
         assert_eq!(generic_params.len(), generic_args.len());
         if let Some(one_of) = &mut self.one_of {
             for ty in &mut one_of.one_of {
-                substitute_generic_args(ty, generic_params, generic_args);
+                substitute_generic_args(&mut ty.ty, generic_params, generic_args);
             }
         }
 
         if let Some(preferred_ty) = &mut self.preferred_type {
-            substitute_generic_args(preferred_ty, generic_params, generic_args);
+            substitute_generic_args(&mut preferred_ty.ty, generic_params, generic_args);
         }
     }
 
