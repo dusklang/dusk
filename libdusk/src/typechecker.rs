@@ -798,6 +798,9 @@ impl tir::Expr<tir::DeclRef> {
                 let generic_arg = generic_param_constraints.solve().unwrap().ty;
                 generic_args.push(generic_arg);
             }
+            for expr in tp.generic_substitution_list(self.decl_ref_id).clone() {
+                tp.constraints_mut(expr).substitute_generic_args(&decl.generic_params, &generic_args);
+            }
             (Some(overload), Some(generic_args))
         } else {
             let name = driver.code.hir_code.decl_refs[self.decl_ref_id].name;
@@ -927,6 +930,7 @@ impl tir::Expr<tir::Call> {
             for (&arg, param_ty) in self.args.iter().zip(param_tys) {
                 tp.constraints_mut(arg).set_to(param_ty);
             }
+            tp.generic_substitution_list_mut(self.decl_ref_id).extend(&self.args);
         } else {
             panic!("expected function type");
         }
