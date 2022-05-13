@@ -16,7 +16,7 @@ use index_vec::IndexVec;
 
 use dire::arch::Arch;
 use dire::hir::{Intrinsic, ModScopeId, StructId, EnumId, GenericParamId, ExternFunctionRef};
-use dire::mir::{Const, Instr, InstrId, StaticId, Struct};
+use dire::mir::{Const, Instr, InstrId, FuncId, StaticId, Struct};
 use dire::ty::{Type, QualType, IntWidth, FloatWidth};
 use dire::{OpId, BlockId};
 
@@ -28,6 +28,7 @@ use crate::typechecker::type_provider::TypeProvider;
 pub enum InternalValue {
     Ty(Type),
     Mod(ModScopeId),
+    FunctionPointer { generic_arguments: Vec<Type>, func: FuncId },
 }
 
 #[derive(Debug)]
@@ -794,7 +795,9 @@ impl Driver {
                     let val = frame.get_val(val, self).as_bool();
                     Value::from_bool(!val)
                 },
-                &Instr::FunctionRef { .. } => todo!(),
+                &Instr::FunctionRef { ref generic_arguments, func } => {
+                    Value::from_internal(InternalValue::FunctionPointer { generic_arguments: generic_arguments.clone(), func })
+                },
                 &Instr::Call { ref arguments, ref generic_arguments, func } => {
                     let mut copied_args = Vec::new();
                     copied_args.reserve_exact(arguments.len());
