@@ -10,5 +10,5 @@ fn main() {
     print("\n")
     print_type(type_of(-34 as i8))
 
-    //alias :: hello
+    alias :: hello
 }

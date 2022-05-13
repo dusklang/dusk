@@ -32,6 +32,7 @@ pub enum Instr {
     LogicalNot(OpId),
     Call { arguments: SmallVec<[OpId; 2]>, generic_arguments: Vec<Type>, func: FuncId },
     ExternCall { arguments: SmallVec<[OpId; 2]>, func: ExternFunctionRef },
+    FunctionRef { generic_arguments: Vec<Type>, func: FuncId, },
     Intrinsic { arguments: SmallVec<[OpId; 2]>, ty: Type, intr: Intrinsic },
     Reinterpret(OpId, Type),
     Truncate(OpId, Type),
@@ -111,6 +112,7 @@ impl InstrNamespace {
 pub struct Function {
     pub name: Option<Sym>,
     pub ret_ty: Type,
+    pub func_ty: Type,
     pub num_instrs: usize,
     /// Index 0 is defined to be the entry block
     pub blocks: Vec<BlockId>,

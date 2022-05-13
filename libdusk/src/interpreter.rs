@@ -794,6 +794,7 @@ impl Driver {
                     let val = frame.get_val(val, self).as_bool();
                     Value::from_bool(!val)
                 },
+                &Instr::FunctionRef { .. } => todo!(),
                 &Instr::Call { ref arguments, ref generic_arguments, func } => {
                     let mut copied_args = Vec::new();
                     copied_args.reserve_exact(arguments.len());
