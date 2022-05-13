@@ -59,7 +59,7 @@ enum DataDest {
     Branch(BlockId, BlockId),
 }
 
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 struct Value {
     instr: OpId,
     /// The number of pointer hops the value is away from instr.
@@ -800,6 +800,7 @@ struct FunctionBuilder {
     instr_namespace: InstrNamespace,
 }
 
+#[derive(Debug)]
 enum DeclRef {
     Intrinsic { intrinsic: Intrinsic, ty: Type },
     Function { func: FuncId, generic_args: Vec<Type> },
@@ -1018,13 +1019,13 @@ impl Driver {
     fn get_callee_declref(&mut self, b: &mut FunctionBuilder, tp: &impl TypeProvider, callee_id: ExprId) -> DeclRef {
         let callee = &ef!(callee_id.hir);
         if let &Expr::DeclRef { id, .. } = callee {
-            self.get(b, SmallVec::new(), id, tp)
+            self.get(b, id, tp)
         } else {
             panic!("expected declref callee");
         }
     }
 
-    fn get(&mut self, b: &mut FunctionBuilder, arguments: SmallVec<[OpId; 2]>, decl_ref_id: DeclRefId, tp: &impl TypeProvider) -> DeclRef {
+    fn get(&mut self, b: &mut FunctionBuilder, decl_ref_id: DeclRefId, tp: &impl TypeProvider) -> DeclRef {
         let id = tp.selected_overload(decl_ref_id).expect("No overload found!");
         let generic_arguments = tp.generic_arguments(decl_ref_id).as_ref().unwrap_or(&Vec::new()).clone();
         let expr = self.code.hir_code.decl_refs[decl_ref_id].expr;
@@ -1036,11 +1037,9 @@ impl Driver {
                 DeclRef::ExternFunction { func }
             },
             Decl::Stored(id) => {
-                assert!(arguments.is_empty());
                 DeclRef::Value(b.stored_decl_locs[id].indirect())
             },
             Decl::PatternBinding { id: binding_id } => {
-                assert!(arguments.is_empty());
                 DeclRef::Value(b.pattern_binding_locs[&binding_id])
             },
             Decl::Parameter { index } => {
@@ -1075,10 +1074,8 @@ impl Driver {
             },
             Decl::Variant { enuum, index, payload_ty } => {
                 if payload_ty.is_some() {
-                    debug_assert_eq!(arguments.len(), 1);
                     DeclRef::EnumVariantWithPayload { enuum, index, payload_ty }
                 } else {
-                    debug_assert!(arguments.is_empty());
                     DeclRef::Value(self.push_instr_with_name(b, Instr::Const(Const::BasicVariant { enuum, index }), expr, name).direct())
                 }
             },
@@ -1172,9 +1169,24 @@ impl Driver {
                 ctx.new_data_dest(DataDest::Set { dest: lhs }),
                 tp,
             )},
-            Expr::DeclRef { ref arguments, .. } => {
+            Expr::DeclRef { id, .. } => {
+                let decl_ref = self.get(b, id, tp);
+
+                match decl_ref {
+                    DeclRef::Function { func, generic_args } => {
+                        self.push_instr(b, Instr::FunctionRef { func, generic_arguments: generic_args }, expr).direct()
+                    },
+                    DeclRef::Intrinsic { intrinsic, ty } => {
+                        assert!(tp.ty(expr).return_ty().is_none(), "referring to intrinsic functions is not yet supported");
+                        self.push_instr(b, Instr::Intrinsic { arguments: SmallVec::new(), ty, intr: intrinsic }, expr).direct()
+                    },
+                    DeclRef::Value(value) => value,
+                    other => todo!("referring to {:?} not yet supported", other),
+                }
+            },
+            Expr::Call { callee, ref arguments, .. } => {
                 let arguments = arguments.clone();
-                let decl_ref = self.get_callee_declref(b, tp, expr);
+                let decl_ref = self.get_callee_declref(b, tp, callee);
 
                 fn get_args(d: &mut Driver, b: &mut FunctionBuilder, tp: &impl TypeProvider, arguments: &[ExprId]) -> SmallVec<[OpId; 2]> {
                     arguments.iter().map(|&argument| {
@@ -1317,11 +1329,8 @@ impl Driver {
                         let arguments = get_args(self, b, tp, &arguments);
                         self.push_instr(b, Instr::Variant { enuum, index, payload: arguments[0] }, expr).direct()
                     },
-                    DeclRef::Value(val) => val,
+                    DeclRef::Value(_) => todo!("calling function pointers is not yet supported"),
                 }
-            },
-            Expr::Call { callee, ref arguments, .. } => {
-                return self.build_expr(b, callee, ctx, tp);
             },
             Expr::Cast { expr: operand, ty: dest_ty, cast_id } => {
                 let dest_ty = tp.get_evaluated_type(dest_ty).clone();
