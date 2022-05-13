@@ -4,7 +4,7 @@ fn hello(a: u32, b: u32) {
 
 }
 
-sig :: fn(u32, u64)
+sig :: fn(u32, u32)
 
 fn main() {
     f: i8 = 2
@@ -12,5 +12,5 @@ fn main() {
     print("\n")
     print_type(type_of(-34 as i8))
 
-    alias :: hello
+    alias :: hello as sig
 }

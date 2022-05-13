@@ -470,7 +470,7 @@ impl Driver {
                 let id = self.code.mir_code.strings.push(string);
                 Const::Str { id, ty }
             },
-            Type::Ty => Const::Ty(val.as_ty().clone()),
+            Type::Ty => Const::Ty(val.as_ty()),
             Type::Mod => Const::Mod(val.as_mod()),
             Type::Struct(id) => {
                 // Yay borrow checker
@@ -1145,13 +1145,21 @@ impl Driver {
                     Value::from_usize(unsafe { mem::transmute(statik.as_bytes().as_ptr()) })
                 },
                 &Instr::Pointer { op, is_mut } => {
-                    Value::from_ty(frame.get_val(op, self).as_ty().clone().ptr_with_mut(is_mut))
+                    Value::from_ty(frame.get_val(op, self).as_ty().ptr_with_mut(is_mut))
                 },
+                &Instr::FunctionTy { ref param_tys, ret_ty } => {
+                    let param_tys = param_tys.iter()
+                        .map(|&ty| frame.get_val(ty, self).as_ty())
+                        .collect();
+                    let ret_ty = frame.get_val(ret_ty, self).as_ty();
+
+                    Value::from_ty(Type::Function { param_tys, return_ty: Box::new(ret_ty) })
+                }
                 &Instr::Struct { ref fields, id } => {
                     if !self.code.mir_code.structs.contains_key(&id) {
                         let mut field_tys = SmallVec::new();
                         for &field in fields {
-                            field_tys.push(frame.get_val(field, self).as_ty().clone());
+                            field_tys.push(frame.get_val(field, self).as_ty());
                         }
                         let layout = self.layout_struct(&field_tys);
                         self.code.mir_code.structs.insert(
@@ -1168,7 +1176,7 @@ impl Driver {
                     if !self.code.mir_code.enums.contains_key(&id) {
                         let mut variant_tys = Vec::new();
                         for &variant in variants {
-                            variant_tys.push(frame.get_val(variant, self).as_ty().clone());
+                            variant_tys.push(frame.get_val(variant, self).as_ty());
                         }
                         let layout = self.layout_enum(&variant_tys);
                         self.code.mir_code.enums.insert(

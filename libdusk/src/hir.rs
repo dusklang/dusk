@@ -490,6 +490,9 @@ impl Driver {
             },
         }
     }
+    pub fn fn_type(&mut self, param_tys: Vec<ExprId>, ret_ty: ExprId, range: SourceRange) -> ExprId {
+        self.push_expr(Expr::FunctionTy { param_tys, ret_ty }, range)
+    }
     pub fn start_new_file(&mut self, file: SourceFileId) {
         let global_scope = self.code.hir_code.mod_scopes.push(ModScope::default());
         let global_namespace = self.code.hir_code.mod_ns.push(

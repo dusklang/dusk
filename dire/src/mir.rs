@@ -47,6 +47,7 @@ pub enum Instr {
     Pointer { op: OpId, is_mut: bool },
     Struct { fields: SmallVec<[OpId; 2]>, id: StructId },
     Enum { variants: SmallVec<[OpId; 2]>, id: EnumId },
+    FunctionTy { param_tys: Vec<OpId>, ret_ty: OpId },
     StructLit { fields: SmallVec<[OpId; 2]>, id: StructId },
     DirectFieldAccess { val: OpId, index: usize },
     IndirectFieldAccess { val: OpId, index: usize },

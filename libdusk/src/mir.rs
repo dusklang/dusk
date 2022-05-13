@@ -752,7 +752,17 @@ impl Driver {
                             }
 
                             writeln!(f, "}}")?;
-                        }
+                        },
+                        &Instr::FunctionTy { ref param_tys, ret_ty } => {
+                            write!(f, "%{} = fn type (", self.display_instr_name(op_id))?;
+                            for (i, &param) in param_tys.iter().enumerate() {
+                                if i > 0 {
+                                    write!(f, ", ")?;
+                                }
+                                write!(f, "%{}", self.display_instr_name(param))?;
+                            }
+                            writeln!(f, " -> {}", self.display_instr_name(ret_ty))?;
+                        },
                         &Instr::Variant { enuum, index, payload } => {
                             let variant = &self.code.hir_code.enums[enuum].variants[index];
                             let variant_name = variant.name;
@@ -913,7 +923,7 @@ impl Driver {
         let b = &self.code.mir_code;
         match instr {
             Instr::Void | Instr::Store { .. } => Type::Void,
-            Instr::Pointer { .. } | Instr::Struct { .. } | Instr::GenericParam(_) | Instr::Enum { .. } => Type::Ty,
+            Instr::Pointer { .. } | Instr::Struct { .. } | Instr::GenericParam(_) | Instr::Enum { .. } | Instr::FunctionTy { .. } => Type::Ty,
             &Instr::StructLit { id, .. } => Type::Struct(id),
             Instr::Const(konst) => konst.ty(),
             Instr::Alloca(ty) => ty.clone().mut_ptr(),
@@ -1403,6 +1413,27 @@ impl Driver {
                 let op = self.handle_indirection(b, op);
                 self.push_instr(b, Instr::Pointer { op, is_mut }, expr).direct()
             },
+            Expr::FunctionTy { ref param_tys, ret_ty } => {
+                let param_tys: Vec<_> = param_tys.clone().iter()
+                    .map(|&ty| {
+                        let param_ty = self.build_expr(
+                            b,
+                            ty,
+                            Context::new(0, DataDest::Read, ControlDest::Continue),
+                            tp,
+                        );
+                        self.handle_indirection(b, param_ty)
+                    }).collect();
+                let ret_ty = self.build_expr(
+                    b,
+                    ret_ty,
+                    Context::new(0, DataDest::Read, ControlDest::Continue),
+                    tp,
+                );
+                let ret_ty = self.handle_indirection(b, ret_ty);
+
+                self.push_instr(b, Instr::FunctionTy { param_tys, ret_ty }, expr).direct()
+            }
             Expr::Struct(id) => {
                 let mut fields = SmallVec::new();
                 for i in 0..self.code.hir_code.structs[id].fields.len() {

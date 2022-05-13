@@ -148,6 +148,7 @@ pub enum Expr {
     AddrOf { expr: ExprId, is_mut: bool },
     /// Transforms type into pointer type
     Pointer { expr: ExprId, is_mut: bool },
+    FunctionTy { param_tys: Vec<ExprId>, ret_ty: ExprId },
     Deref(ExprId),
     Set { lhs: ExprId, rhs: ExprId },
     Do { scope: ImperScopeId },

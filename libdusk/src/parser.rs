@@ -468,8 +468,7 @@ impl Driver {
                 } else {
                     VOID_TYPE
                 };
-                Ok(VOID_TYPE)
-                // Ok(self.fn_type(param_tys, ret_ty, fn_range))
+                Ok(self.fn_type(param_tys, ret_ty, fn_range))
             },
             x => Err(x.clone()),
         }.map(|mut expr| {
