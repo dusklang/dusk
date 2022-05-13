@@ -2,7 +2,7 @@ use smallvec::{SmallVec, smallvec};
 
 use string_interner::DefaultSymbol as Sym;
 
-use dire::hir::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment, GenericParamId, Ident, Pattern, PatternKind, SwitchCase, ImperScopedDecl, ExternMod, ERROR_EXPR, ERROR_TYPE};
+use dire::hir::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment, GenericParamId, Ident, Pattern, PatternKind, SwitchCase, ImperScopedDecl, ExternMod, ERROR_EXPR, ERROR_TYPE, VOID_TYPE};
 use dire::ty::Type;
 use dire::source_info::{self, SourceFileId, SourceRange};
 
@@ -446,6 +446,30 @@ impl Driver {
                 let ret_expr = self.try_parse_expr(p, true).unwrap_or_else(|_| hir::VOID_EXPR);
                 let expr_range = self.get_range(ret_expr);
                 Ok(self.ret(ret_expr, source_info::concat(ret_range, expr_range)))
+            },
+            TokenKind::Fn => {
+                let fn_range = self.cur(p).range;
+                self.next(p);
+                self.eat_tok(p, TokenKind::LeftParen);
+                let mut param_tys = Vec::new();
+                // TODO: implement proper comma/newline handling here
+                loop {
+                    match self.cur(p).kind {
+                        TokenKind::Eof => panic!("Unexpected eof while parsing function type"),
+                        TokenKind::RightParen => break,
+                        TokenKind::Comma => { self.next(p); },
+                        _ => param_tys.push(self.parse_type(p).0),
+                    }
+                }
+                self.eat_tok(p, TokenKind::RightParen);
+                let ret_ty = if matches!(self.cur(p).kind, TokenKind::ReturnArrow) {
+                    self.next(p);
+                    self.parse_type(p).0
+                } else {
+                    VOID_TYPE
+                };
+                Ok(VOID_TYPE)
+                // Ok(self.fn_type(param_tys, ret_ty, fn_range))
             },
             x => Err(x.clone()),
         }.map(|mut expr| {

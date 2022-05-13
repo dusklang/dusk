@@ -448,6 +448,7 @@ impl Driver {
                 CloseCurly          b"}"
                 OpenSquareBracket   b"["
                 CloseSquareBracket  b"]"
+                ReturnArrow         b"->"
                 
                 Tilde               b"~"
                 Caret               b"^"
