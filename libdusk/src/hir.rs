@@ -439,14 +439,12 @@ impl Driver {
             None => self.cur_namespace(),
         };
         let id = self.code.hir_code.decl_refs.next_idx();
-        let num_arguments = arguments.len();
         let expr = self.push_expr(Expr::DeclRef { arguments: arguments.clone(), id }, range);
         self.code.hir_code.decl_refs.push_at(
             id,
             DeclRef {
                 name,
                 namespace,
-                num_arguments,
                 expr,
             }
         );

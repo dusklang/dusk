@@ -838,7 +838,12 @@ impl tir::Expr<tir::Call> {
         let decls = &driver.tir.decls;
         let callee_one_of = tp.constraints(self.callee).one_of();
         overloads.overloads.retain(|&overload| {
-            assert_eq!(decls[overload].param_tys.len(), self.args.len());
+            if decls[overload].param_tys.len() != self.args.len() {
+                overloads.nonviable_overloads.push(overload);
+                i += 1;
+                return false;
+            }
+
             let arg_constraints = self.args.iter().map(|&arg| tp.constraints(arg));
             let param_tys = decls[overload].param_tys.iter().map(|&expr| tp.get_evaluated_type(expr));
             for (constraints, ty) in arg_constraints.zip(param_tys) {
