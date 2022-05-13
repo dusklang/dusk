@@ -453,6 +453,49 @@ macro_rules! bin_op {
     };
 }
 
+trait IntoBytes {
+    type Bytes: IntoIterator<Item=u8>;
+    fn into_bytes(&self) -> Self::Bytes;
+}
+macro_rules! into_bytes_impl {
+    ($($ty:ty),*) => {
+        $(
+            impl IntoBytes for $ty {
+                type Bytes = [u8; std::mem::size_of::<Self>()];
+                fn into_bytes(&self) -> Self::Bytes { self.to_le_bytes() }
+            }
+        )*
+    }
+}
+into_bytes_impl!(u8, u16, u32, u64, i8, i16, i32, i64);
+
+#[derive(Default)]
+struct X64Encoder {
+    data: Vec<u8>,
+}
+
+impl X64Encoder {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn push_any(&mut self, val: impl IntoBytes) {
+        self.data.extend(val.into_bytes());
+    }
+    fn push(&mut self, byte: u8) {
+        self.push_any(byte);
+    }
+
+    fn allocate(self) -> region::Allocation {
+        let mut thunk = region::alloc(self.data.len(), region::Protection::READ_WRITE_EXECUTE).unwrap();
+        unsafe {
+            let thunk_ptr = thunk.as_mut_ptr::<u8>();
+            thunk_ptr.copy_from(self.data.as_ptr(), self.data.len());
+        }
+        thunk
+    }
+}
+
 impl Driver {
     pub fn value_to_const(&mut self, val: Value, ty: Type, tp: &impl TypeProvider) -> Const {
         match ty {
@@ -575,16 +618,14 @@ impl Driver {
         }
 
         // Generate thunk here:
-        let mut thunk_data: Vec<u8> = Vec::new();
-        thunk_data.extend(std::iter::repeat(0).take(24));
+        let mut thunk = X64Encoder::new();
+        for _ in 0..25 {
+            thunk.push(0);
+        }
 
 
-        let mut thunk = region::alloc(thunk_data.len(), region::Protection::READ_WRITE_EXECUTE).unwrap();
-        let val = unsafe {
-            let thunk_ptr = thunk.as_mut_ptr::<u8>();
-            thunk_ptr.copy_from(thunk_data.as_ptr(), thunk_data.len());
-            Value::from_usize(thunk_ptr as usize)
-        };
+        let thunk = thunk.allocate();
+        let val = Value::from_usize(thunk.as_ptr::<u8>() as usize);
         self.interp.inverse_thunk_cache.insert(func, thunk);
 
         val
@@ -609,82 +650,82 @@ impl Driver {
         }
         let func_address: u64 = unsafe { std::mem::transmute(func_ptr) };
         
-        let mut thunk_data: Vec<u8> = Vec::new();
+        let mut thunk = X64Encoder::new();
         // mov QWORD PTR [rsp+16], rdx
-        thunk_data.push(0x48);
-        thunk_data.push(0x89);
-        thunk_data.push(0x54);
-        thunk_data.push(0x24);
-        thunk_data.push(0x10);
+        thunk.push(0x48);
+        thunk.push(0x89);
+        thunk.push(0x54);
+        thunk.push(0x24);
+        thunk.push(0x10);
 
         // mov QWORD PTR [rsp+8], rcx
-        thunk_data.push(0x48);
-        thunk_data.push(0x89);
-        thunk_data.push(0x4C);
-        thunk_data.push(0x24);
-        thunk_data.push(0x08);
+        thunk.push(0x48);
+        thunk.push(0x89);
+        thunk.push(0x4C);
+        thunk.push(0x24);
+        thunk.push(0x08);
 
         let mut extension: u8 = 40;
         if args.len() > 4 {
             extension += ((args.len() - 3) / 2 * 16) as u8;
         }
         // sub rsp, extension
-        thunk_data.push(0x48);
-        thunk_data.push(0x83);
-        thunk_data.push(0xEC);
-        thunk_data.push(extension);
+        thunk.push(0x48);
+        thunk.push(0x83);
+        thunk.push(0xEC);
+        thunk.push(extension);
 
         assert_eq!(args.len(), func.param_tys.len());
         for i in (0..args.len()).rev() {
             // mov rax, QWORD PTR [rsp+extension+8]   (get pointer to arguments)
-            thunk_data.push(0x48);
-            thunk_data.push(0x8B);
-            thunk_data.push(0x44);
-            thunk_data.push(0x24);
-            thunk_data.push(extension + 8);
+            thunk.push(0x48);
+            thunk.push(0x8B);
+            thunk.push(0x44);
+            thunk.push(0x24);
+            thunk.push(extension + 8);
 
             // mov rax, QWORD PTR [rax+i*8]             (get pointer to i'th argument)
-            thunk_data.push(0x48);
-            thunk_data.push(0x8B);
-            thunk_data.push(0x40);
-            thunk_data.push((i * 8) as u8);
+            thunk.push(0x48);
+            thunk.push(0x8B);
+            thunk.push(0x40);
+            thunk.push((i * 8) as u8);
 
             match func.param_tys[i] {
                 Type::Int { width: IntWidth::W32, .. } => {
                     match i {
                         0 => {
                             // mov ecx, DWORD PTR [rax]       (read i'th argument as a 32-bit value)
-                            thunk_data.push(0x8B);
-                            thunk_data.push(0x08);
+                            thunk.push(0x8B);
+                            thunk.push(0x08);
                         },
                         1 => {
                             // mov edx, DWORD PTR [rax]       (read i'th argument as a 32-bit value)
-                            thunk_data.push(0x8B);
-                            thunk_data.push(0x10);
+                            thunk.push(0x8B);
+                            thunk.push(0x10);
                         },
                         2 => {
                             // mov r8d, DWORD PTR [rax]       (read i'th argument as a 32-bit value)
-                            thunk_data.push(0x44);
-                            thunk_data.push(0x8B);
-                            thunk_data.push(0x00);
+                            thunk.push(0x44);
+                            thunk.push(0x8B);
+                            thunk.push(0x00);
                         },
                         3 => {
                             // mov r9d, DWORD PTR [rax]       (read i'th argument as a 32-bit value)
-                            thunk_data.push(0x44);
-                            thunk_data.push(0x8B);
-                            thunk_data.push(0x08);
+                            thunk.push(0x44);
+                            thunk.push(0x8B);
+                            thunk.push(0x08);
                         },
                         _ => {
                             // mov eax, DWORD PTR [rax]       (read i'th argument as a 32-bit value)
-                            thunk_data.push(0x8B);
-                            thunk_data.push(0x00);
+                            thunk.push(0x8B);
+                            thunk.push(0x00);
 
                             // mov DWORD PTR[rsp + 32 + (i-4)*8], eax
                             let offset = (32 + (i-4) * 8) as u8;
-                            thunk_data.push(0x89);
-                            thunk_data.push(0x44);
-                            thunk_data.push(0x24);
-                            thunk_data.push(offset);
+                            thunk.push(0x89);
+                            thunk.push(0x44);
+                            thunk.push(0x24);
+                            thunk.push(offset);
                         }
                     }
                 },
@@ -692,41 +733,41 @@ impl Driver {
                     match i {
                         0 => {
                             // mov rcx, QWORD PTR [rax]       (read i'th argument as a 64-bit value)
-                            thunk_data.push(0x48);
-                            thunk_data.push(0x8B);
-                            thunk_data.push(0x08);
+                            thunk.push(0x48);
+                            thunk.push(0x8B);
+                            thunk.push(0x08);
                         },
                         1 => {
                             // mov rdx, QWORD PTR [rax]       (read i'th argument as a 64-bit value)
-                            thunk_data.push(0x48);
-                            thunk_data.push(0x8B);
-                            thunk_data.push(0x10);
+                            thunk.push(0x48);
+                            thunk.push(0x8B);
+                            thunk.push(0x10);
                         },
                         2 => {
                             // mov r8, QWORD PTR [rax]       (read i'th argument as a 64-bit value)
-                            thunk_data.push(0x4c);
-                            thunk_data.push(0x8B);
-                            thunk_data.push(0x00);
+                            thunk.push(0x4c);
+                            thunk.push(0x8B);
+                            thunk.push(0x00);
                         },
                         3 => {
                             // mov r9, QWORD PTR [rax]       (read i'th argument as a 64-bit value)
-                            thunk_data.push(0x4c);
-                            thunk_data.push(0x8B);
-                            thunk_data.push(0x08);
+                            thunk.push(0x4c);
+                            thunk.push(0x8B);
+                            thunk.push(0x08);
                         },
                         _ => {
                             // mov rax, QWORD PTR [rax]       (read i'th argument as a 64-bit value)
-                            thunk_data.push(0x48);
-                            thunk_data.push(0x8B);
-                            thunk_data.push(0x00);
+                            thunk.push(0x48);
+                            thunk.push(0x8B);
+                            thunk.push(0x00);
 
                             // mov QWORD PTR[rsp + 32 + (i-4)*8], rax
                             let offset = (32 + (i-4) * 8) as u8;
-                            thunk_data.push(0x48);
-                            thunk_data.push(0x89);
-                            thunk_data.push(0x44);
-                            thunk_data.push(0x24);
-                            thunk_data.push(offset);
+                            thunk.push(0x48);
+                            thunk.push(0x89);
+                            thunk.push(0x44);
+                            thunk.push(0x24);
+                            thunk.push(offset);
                         },
                     }
                 },
@@ -735,51 +776,50 @@ impl Driver {
         }
 
         // movabs r10, func
-        thunk_data.push(0x49);
-        thunk_data.push(0xBA);
-        thunk_data.extend(func_address.to_le_bytes());
+        thunk.push(0x49);
+        thunk.push(0xBA);
+        thunk.push_any(func_address);
 
         // call r10
-        thunk_data.push(0x41);
-        thunk_data.push(0xFF);
-        thunk_data.push(0xD2);
+        thunk.push(0x41);
+        thunk.push(0xFF);
+        thunk.push(0xD2);
 
         // mov rcx, QWORD PTR [rsp+extension+16]              (get pointer to return value)
-        thunk_data.push(0x48);
-        thunk_data.push(0x8B);
-        thunk_data.push(0x4C);
-        thunk_data.push(0x24);
-        thunk_data.push(extension + 16);
+        thunk.push(0x48);
+        thunk.push(0x8B);
+        thunk.push(0x4C);
+        thunk.push(0x24);
+        thunk.push(extension + 16);
 
         // TODO: large values require passing a pointer as the first parameter
         match func.return_ty {
             Type::Int { width: IntWidth::W32, .. } => {
                 // mov DWORD PTR [rcx], eax                           (copy return value to the passed in location)
-                thunk_data.push(0x89);
-                thunk_data.push(0x01);
+                thunk.push(0x89);
+                thunk.push(0x01);
             },
             Type::Pointer(_) => {
                 // mov QWORD PTR [rcx], rax                           (copy return value to the passed in location)
-                thunk_data.push(0x48);
-                thunk_data.push(0x89);
-                thunk_data.push(0x01);
+                thunk.push(0x48);
+                thunk.push(0x89);
+                thunk.push(0x01);
             },
             _ => todo!("return type {:?}", func.return_ty),
         }
 
         // add rsp, extension
-        thunk_data.push(0x48);
-        thunk_data.push(0x83);
-        thunk_data.push(0xC4);
-        thunk_data.push(extension);
+        thunk.push(0x48);
+        thunk.push(0x83);
+        thunk.push(0xC4);
+        thunk.push(extension);
 
         // ret
-        thunk_data.push(0xC3);
+        thunk.push(0xC3);
 
-        let mut thunk = region::alloc(thunk_data.len(), region::Protection::READ_WRITE_EXECUTE).unwrap();
+        let thunk = thunk.allocate();
         unsafe {
-            let thunk_ptr = thunk.as_mut_ptr::<u8>();
-            thunk_ptr.copy_from(thunk_data.as_ptr(), thunk_data.len());
+            let thunk_ptr = thunk.as_ptr::<u8>();
             type Thunk = fn(*const *mut u8, *mut u8);
             let thunk: Thunk = std::mem::transmute(thunk_ptr);
             let mut return_val_storage = SmallVec::new();
