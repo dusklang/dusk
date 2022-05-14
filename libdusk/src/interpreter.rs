@@ -664,14 +664,14 @@ impl Driver {
         thunk.push(0xFF);
         thunk.push(0xD2);
 
-        // mov rcx, QWORD PTR [rsp+extension+16]              (get pointer to return value)
+        // get pointer to return value
         thunk.load64(Register64::Rcx, Register64::Rsp + extension + 16);
 
         // TODO: large values require passing a pointer as the first parameter
         // copy return value to the passed in location
         match func.return_ty {
             Type::Int { width: IntWidth::W32, .. } => thunk.store32(Register64::Rcx, Register32::Eax),
-            Type::Pointer(_) => thunk.store64(Register64::Rcx, Register64::Rax),
+            Type::Pointer(_)                       => thunk.store64(Register64::Rcx, Register64::Rax),
             _ => todo!("return type {:?}", func.return_ty),
         }
 
