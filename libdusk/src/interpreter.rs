@@ -578,6 +578,22 @@ impl Driver {
 
         // Generate thunk here:
         let mut thunk = X64Encoder::new();
+/*
+        // Sample thunk implementation in C
+        #include <windows.h>
+
+        void interpreter_entrypoint(UINT func_id, void** args, void* ret_value);
+
+        LRESULT window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
+            void* args[] = {&hwnd, &msg, &wparam, &lparam};
+            LRESULT ret_value;
+
+            interpreter_entrypoint(25, args, &ret_value);
+
+            return ret_value;
+        }
+*/
+
         for _ in 0..25 {
             thunk.push(0);
         }
