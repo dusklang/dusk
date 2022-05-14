@@ -12,6 +12,7 @@ mod hir;
 mod ty;
 mod typechecker;
 mod refine;
+mod x64;
 
 pub mod source_info;
 pub mod mir;
