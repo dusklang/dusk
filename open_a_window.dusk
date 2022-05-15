@@ -11,6 +11,7 @@ FILE_SHARE_READ :: 1 as DWORD
 fn INVALID_HANDLE_VALUE(): HANDLE {
     -1 as isize as usize as HANDLE
 }
+WORD :: u16
 DWORD :: u32
 UINT :: u32
 UINT_PTR :: usize
@@ -63,7 +64,7 @@ kernel32 :: extern_mod("kernel32.dll") {
 
 user32 :: extern_mod("user32.dll") {
     fn MessageBoxA(hwnd: HWND, lpText: i8*, lpCaption: i8*, uType: u32): i32
-    
+    fn RegisterClassA(lpWndClass: WNDCLASS*): ATOM
 }
 
 
@@ -80,6 +81,8 @@ WNDCLASS :: struct {
     lpszMenuName: i8*
     lpszClassName: i8*
 }
+
+ATOM :: WORD
 
 fn main_window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM): LRESULT {
     0
@@ -98,4 +101,6 @@ fn main() {
         lpszMenuName: NULL() as i8*
         lpszClassName: "MAIN_WINDOW_CLASS"
     }
+
+    ignore :: user32.RegisterClassA(&main_class)
 }

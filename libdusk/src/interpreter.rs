@@ -631,6 +631,11 @@ impl Driver {
         for (i, param_ty) in param_tys.iter().take(4).enumerate().rev() {
             let offset = (i as i32 + 1) * 8;
             match *param_ty {
+                Type::Int { width: IntWidth::W16, .. } => {
+                    // Store i'th argument as 16-bit value
+                    let registers = [Reg16::Cx, Reg16::Dx, Reg16::R8w, Reg16::R9w];
+                    thunk.store16(Reg64::Rsp + offset, registers[i]);
+                },
                 Type::Int { width: IntWidth::W32, .. } => {
                     // Store i'th argument as 32-bit value
                     let registers = [Reg32::Ecx, Reg32::Edx, Reg32::R8d, Reg32::R9d];
@@ -662,13 +667,15 @@ impl Driver {
         // Fill the parameter array with the addresses of each parameter.
         for (i, param_ty) in param_tys.iter().enumerate() {
             let rsp_offset = i as i32 * 8;
+            // Get the address
             if self.size_of(param_ty) > 8 {
-                // If the value is larger than 64 bits, it was passed by pointer. Therefore, we should load this
+                // If the value is larger than 64 bits, it was passed by address. Therefore, we should load this
                 // address from shadow space directly, instead of loading the address of the address.
                 thunk.load64(Reg64::Rax, Reg64::Rsp + shadow_offset + rsp_offset)
             } else {
                 thunk.lea64(Reg64::Rax, Reg64::Rsp + shadow_offset + rsp_offset);
             }
+            // Store the address in the array.
             thunk.store64(Reg64::Rsp + param_address_array_offset + rsp_offset, Reg64::Rax);
         }
 
@@ -683,6 +690,7 @@ impl Driver {
 
         // Move return value into rax or eax
         match func.ret_ty {
+            Type::Int { width: IntWidth::W16, .. } => thunk.load16(Reg16::Ax, Reg64::Rsp + return_value_offset),
             Type::Int { width: IntWidth::W32, .. } => thunk.load32(Reg32::Eax, Reg64::Rsp + return_value_offset),
             Type::Pointer(_) | Type::Int { width: IntWidth::W64 | IntWidth::Pointer, .. } => {
                 assert_eq!(self.arch.pointer_size(), 64);
@@ -743,6 +751,17 @@ impl Driver {
             thunk.load64(Reg64::Rax, Reg64::Rax + (i as i32 * 8));
 
             match func.param_tys[i] {
+                Type::Int { width: IntWidth::W16, .. } => {
+                    // Read i'th argument as 32-bit value
+                    let registers = [Reg16::Cx, Reg16::Dx, Reg16::R8w, Reg16::R9w, Reg16::Ax];
+                    thunk.load16(registers[min(i, 4)], Reg64::Rax);
+
+                    // If this is one of the first four parameters, then we're done. Otherwise, we must store the parameter on the stack.
+                    if i >= 4 {
+                        let offset = (32 + (i-4) * 8) as i32;
+                        thunk.store16(Reg64::Rsp + offset, Reg16::Ax);
+                    }
+                },
                 Type::Int { width: IntWidth::W32, .. } => {
                     // Read i'th argument as 32-bit value
                     let registers = [Reg32::Ecx, Reg32::Edx, Reg32::R8d, Reg32::R9d, Reg32::Eax];
@@ -779,8 +798,12 @@ impl Driver {
         // TODO: large values require passing a pointer as the first parameter
         // copy return value to the passed in location
         match func.return_ty {
+            Type::Int { width: IntWidth::W16, .. } => thunk.store16(Reg64::Rcx, Reg16::Ax),
             Type::Int { width: IntWidth::W32, .. } => thunk.store32(Reg64::Rcx, Reg32::Eax),
-            Type::Pointer(_)                       => thunk.store64(Reg64::Rcx, Reg64::Rax),
+            Type::Pointer(_) | Type::Int { width: IntWidth::W64 | IntWidth::Pointer, .. } => {
+                assert_eq!(self.arch.pointer_size(), 64);
+                thunk.store64(Reg64::Rcx, Reg64::Rax);
+            },
             _ => todo!("return type {:?}", func.return_ty),
         }
 

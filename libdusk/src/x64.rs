@@ -245,7 +245,7 @@ impl X64Encoder {
         self.push_any::<i8>(imm.try_into().unwrap());
     }
 
-    // Handles several variants of 32-bit and 64-bit MOV and LEA instructions.
+    // Handles several variants of 16-bit, 32-bit and 64-bit MOV and LEA instructions.
     fn addr32_64_impl(&mut self, bit64: bool, opcode: u8, reg: impl Register, loc: MemoryLoc64) {
         if bit64 || reg.ext() || loc.base.ext() {
             self.push_any(RexBuilder::new32().w_bit(bit64).r_bit(reg.ext()).b_bit(loc.base.ext()));
@@ -321,6 +321,22 @@ impl X64Encoder {
     pub fn store32(&mut self, dest: impl Into<MemoryLoc64>, src: Reg32) {
         let dest = dest.into();
         self.begin_instr("mov", &dest, &src);
+        self.addr32_64_impl(false, 0x89, src, dest);
+    }
+
+    pub fn load16(&mut self, dest: Reg16, src: impl Into<MemoryLoc64>) {
+        let src = src.into();
+        self.begin_instr("mov", &dest, &src);
+        // operand size override prefix
+        self.push(0x66);
+        self.addr32_64_impl(false, 0x8b, dest, src);
+    }
+
+    pub fn store16(&mut self, dest: impl Into<MemoryLoc64>, src: Reg16) {
+        let dest = dest.into();
+        self.begin_instr("mov", &dest, &src);
+        // operand size override prefix
+        self.push(0x66);
         self.addr32_64_impl(false, 0x89, src, dest);
     }
 
