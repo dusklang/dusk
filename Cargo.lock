@@ -218,6 +218,7 @@ version = "0.1.0"
 dependencies = [
  "display_adapter",
  "index_vec",
+ "num-bigint 0.3.3",
  "smallvec",
  "string-interner",
 ]

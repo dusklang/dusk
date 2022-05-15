@@ -11,3 +11,4 @@ index_vec = "0.1.2"
 smallvec = "1.5.1"
 string-interner = "0.12.1"
 display_adapter = { path = "../../display_adapter/display_adapter" }
+num-bigint = "0.3"

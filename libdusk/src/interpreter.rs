@@ -242,8 +242,8 @@ impl Value {
 
     pub fn from_const(konst: &Const, driver: &mut Driver) -> Value {
         match *konst {
-            Const::Int { lit, ref ty } => match ty {
-                &Type::Int { width, is_signed } => Value::from_big_int(BigInt::from(lit), width, is_signed, driver.arch),
+            Const::Int { ref lit, ref ty } => match ty {
+                &Type::Int { width, is_signed } => Value::from_big_int(lit.clone(), width, is_signed, driver.arch),
                 _ => panic!("unexpected int constant type {:?}", ty),
             },
             Const::Float { lit, ref ty } => match driver.size_of(ty) {
@@ -483,15 +483,8 @@ fn nearest_multiple_of_8(val: i32) -> i32 { ((val - 1) | 7) + 1 }
 impl Driver {
     pub fn value_to_const(&mut self, val: Value, ty: Type, tp: &impl TypeProvider) -> Const {
         match ty {
-            Type::Int { is_signed, .. } => {
-                let big_int = val.as_big_int(is_signed);
-                let lit = if is_signed {
-                    let int: i64 = big_int.try_into().unwrap();
-                    int as u64
-                } else {
-                    let int: u64 = big_int.try_into().unwrap();
-                    int
-                };
+            Type::Int { is_signed, width } => {
+                let lit = val.as_big_int(is_signed);
                 Const::Int { lit, ty }
             },
             Type::Float(width) => {

@@ -747,19 +747,20 @@ impl Driver {
                 }
             },
             Instr::Const(konst) => {
-                match konst {
-                    Const::Int { ty, .. } => {
-                        match ty {
-                            &Type::Int { is_signed, .. } => {
-                                // TODO: this is kind of silly, but it was the path of least resistance.
-                                let val = Value::from_const(&konst.clone(), self).as_big_int(is_signed);
-                                guarantees.push(Constraint::Eq(op.into(), val.to_string().into()));
-                            },
-                            unhandled => panic!("Literal with unhandled type {:?}", unhandled),
-                        }
-                    },
-                    _ => {},
-                }
+                todo!();
+                // match konst {
+                //     Const::Int { ty, .. } => {
+                //         match ty {
+                //             &Type::Int { is_signed, .. } => {
+                //                 // TODO: this is kind of silly, but it was the path of least resistance.
+                //                 let val = Value::from_const(&konst.clone(), self).as_big_int(is_signed);
+                //                 guarantees.push(Constraint::Eq(op.into(), val.to_string().into()));
+                //             },
+                //             unhandled => panic!("Literal with unhandled type {:?}", unhandled),
+                //         }
+                //     },
+                //     _ => {},
+                // }
             },
             Instr::Intrinsic { arguments, ty, intr } => {
                 match intr {

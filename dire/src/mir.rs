@@ -5,6 +5,7 @@ use index_vec::{IndexVec, define_index_type};
 use smallvec::SmallVec;
 use string_interner::DefaultSymbol as Sym;
 use display_adapter::display_adapter;
+use num_bigint::BigInt;
 
 use crate::hir::{Intrinsic, DeclId, StructId, EnumId, ModScopeId, ExternModId, ExternFunctionRef, GenericParamId};
 use crate::ty::Type;
@@ -65,7 +66,7 @@ pub enum Instr {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Const {
-    Int { lit: u64, ty: Type },
+    Int { lit: BigInt, ty: Type },
     Float { lit: f64, ty: Type },
     Str { id: StrId, ty: Type },
     Bool(bool),
@@ -79,9 +80,7 @@ pub enum Const {
 impl Const {
     pub fn ty(&self) -> Type {
         match self {
-            Const::Int { ty, .. } => ty.clone(),
-            Const::Float { ty, .. } => ty.clone(),
-            Const::Str { ty, .. } => ty.clone(),
+            Const::Int { ty, .. } | Const::Float { ty, .. } | Const::Str { ty, .. } => ty.clone(),
             Const::Bool(_) => Type::Bool,
             Const::Ty(_) => Type::Ty,
             &Const::BasicVariant { enuum, .. } => Type::Enum(enuum),
