@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 pub trait IntoBytes {
     type Bytes: IntoIterator<Item=u8>;
     fn into_bytes(&self) -> Self::Bytes;
@@ -24,7 +26,7 @@ macro_rules! define_registers {
         #[repr(u8)]
         #[allow(unused)]
         #[derive(Clone, Copy, Debug)]
-        pub enum Register8 {
+        pub enum Reg8 {
             $($bit8),*,
 
             // When bit 4 is set (as it is with these registers), there should be a REX prefix (with the relevant
@@ -35,7 +37,7 @@ macro_rules! define_registers {
             Dil,
         }
 
-        impl Register for Register8 {
+        impl Register for Reg8 {
             fn main_bits(&self) -> u8 {
                 *self as u8 & 7
             }
@@ -44,20 +46,25 @@ macro_rules! define_registers {
                 (*self as u8 & 8) != 0
             }
         }
-        impl Register8 {
+        impl Reg8 {
             #[allow(unused)]
             fn requires_rex(&self) -> bool {
                 self.ext() || (*self as u8 & 16) != 0
             }
         }
+        impl Display for Reg8 {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}", format!("{:?}", self).to_lowercase())
+            }
+        }
 
-        define_registers!(@define_enum Register16 $($bit16),*);
-        define_registers!(@define_enum Register32 $($bit32),*);
-        define_registers!(@define_enum Register64 $($bit64),*);
-        define_registers!(@define_enum RegisterXmm $($xmm),*);
-        define_registers!(@define_enum RegisterYmm $($ymm),*);
-        define_registers!(@define_enum RegisterControl $($control32),*);
-        define_registers!(@define_enum RegisterDebug $($debug32),*);
+        define_registers!(@define_enum Reg16 $($bit16),*);
+        define_registers!(@define_enum Reg32 $($bit32),*);
+        define_registers!(@define_enum Reg64 $($bit64),*);
+        define_registers!(@define_enum RegXmm $($xmm),*);
+        define_registers!(@define_enum RegYmm $($ymm),*);
+        define_registers!(@define_enum RegControl $($control32),*);
+        define_registers!(@define_enum RegDebug $($debug32),*);
     };
     (@define_enum $name:ident $($variant:ident),*) => {
         #[repr(u8)]
@@ -74,6 +81,12 @@ macro_rules! define_registers {
             #[allow(unused)]
             fn ext(&self) -> bool {
                 (*self as u8 & 8) != 0
+            }
+        }
+
+        impl Display for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}", format!("{:?}", self).to_lowercase())
             }
         }
     };
@@ -100,9 +113,9 @@ define_registers!(
     R14l R14w R14d R14 Xmm14 Ymm14 Cr14 Dr14,
     R15l R15w R15d R15 Xmm15 Ymm15 Cr15 Dr15,
 );
-define_registers!(@define_enum RegisterMmx Mmx0, Mmx1, Mmx2, Mmx3, Mmx4, Mmx5, Mmx6, Mmx7);
-define_registers!(@define_enum RegisterX87 St0, St1, St2, St3, St4, St5, St6, St7);
-define_registers!(@define_enum RegisterSegment Es, Cs, Ss, Ds, Fs, Gs);
+define_registers!(@define_enum RegMmx Mmx0, Mmx1, Mmx2, Mmx3, Mmx4, Mmx5, Mmx6, Mmx7);
+define_registers!(@define_enum RegX87 St0, St1, St2, St3, St4, St5, St6, St7);
+define_registers!(@define_enum RegSegment Es, Cs, Ss, Ds, Fs, Gs);
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
@@ -161,17 +174,47 @@ impl IntoBytes for RexBuilder {
 #[derive(Default)]
 pub struct X64Encoder {
     data: Vec<u8>,
+
+    // TODO: use cfg attributes to disable this field and all associated code in a release build
+    debug: bool,
 }
 
 #[derive(Debug)]
 pub struct MemoryLoc64 {
-    base: Register64,
+    base: Reg64,
     offset: i32,
+}
+
+impl Display for MemoryLoc64 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{}", self.base)?;
+        if self.offset > 0 {
+            write!(f, "+{}", self.offset)?;
+        } else if self.offset < 0 {
+            write!(f, "{}", self.offset)?;
+        }
+        write!(f, "]")
+    }
 }
 
 impl X64Encoder {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn enable_debug(&mut self, debug: bool) {
+        self.debug = debug;
+    }
+
+    fn begin_instr_no_operands(&self, mnemonic: &str) {
+        if self.debug {
+            println!("{}", mnemonic);
+        }
+    }
+    fn begin_instr(&self, mnemonic: &str, operand_a: &impl Display, operand_b: &impl Display) {
+        if self.debug {
+            println!("{} {}, {}", mnemonic, operand_a, operand_b);
+        }
     }
 
     pub fn push_any<Val: IntoBytes>(&mut self, val: Val) {
@@ -181,14 +224,16 @@ impl X64Encoder {
         self.push_any(byte);
     }
 
-    pub fn sub64_imm(&mut self, reg: Register64, imm: i32) {
+    pub fn sub64_imm(&mut self, reg: Reg64, imm: i32) {
+        self.begin_instr("sub", &reg, &imm);
         self.push_any(RexBuilder::new().b_bit(reg.ext()));
         self.push(0x83);
         self.push(build_modrm(0b11, 0b101, reg.main_bits()));
         self.push_any::<i8>(imm.try_into().unwrap());
     }
 
-    pub fn add64_imm(&mut self, reg: Register64, imm: i32) {
+    pub fn add64_imm(&mut self, reg: Reg64, imm: i32) {
+        self.begin_instr("add", &reg, &imm);
         self.push_any(RexBuilder::new().b_bit(reg.ext()));
         self.push(0x83);
         self.push(build_modrm(0b11, 0b000, reg.main_bits()));
@@ -249,31 +294,40 @@ impl X64Encoder {
         }
     }
 
-    fn mov64_impl(&mut self, opcode: u8, reg: Register64, loc: MemoryLoc64) {
+    fn mov64_impl(&mut self, opcode: u8, reg: Reg64, loc: MemoryLoc64) {
         self.mov32_64_impl(true, opcode, reg, loc);
     }
 
-    pub fn load64(&mut self, dest: Register64, src: impl Into<MemoryLoc64>) {
-        self.mov64_impl(0x8b, dest, src.into());
+    pub fn load64(&mut self, dest: Reg64, src: impl Into<MemoryLoc64>) {
+        let src = src.into();
+        self.begin_instr("mov", &dest, &src);
+        self.mov64_impl(0x8b, dest, src);
     }
 
-    pub fn store64(&mut self, dest: impl Into<MemoryLoc64>, src: Register64) {
-        self.mov64_impl(0x89, src, dest.into());
+    pub fn store64(&mut self, dest: impl Into<MemoryLoc64>, src: Reg64) {
+        let dest = dest.into();
+        self.begin_instr("mov", &dest, &src);
+        self.mov64_impl(0x89, src, dest);
     }
 
-    fn mov32_impl(&mut self, opcode: u8, reg: Register32, loc: MemoryLoc64) {
+    fn mov32_impl(&mut self, opcode: u8, reg: Reg32, loc: MemoryLoc64) {
         self.mov32_64_impl(false, opcode, reg, loc);
     }
 
-    pub fn load32(&mut self, dest: Register32, src: impl Into<MemoryLoc64>) {
-        self.mov32_impl(0x8b, dest, src.into());
+    pub fn load32(&mut self, dest: Reg32, src: impl Into<MemoryLoc64>) {
+        let src = src.into();
+        self.begin_instr("mov", &dest, &src);
+        self.mov32_impl(0x8b, dest, src);
     }
 
-    pub fn store32(&mut self, dest: impl Into<MemoryLoc64>, src: Register32) {
-        self.mov32_impl(0x89, src, dest.into());
+    pub fn store32(&mut self, dest: impl Into<MemoryLoc64>, src: Reg32) {
+        let dest = dest.into();
+        self.begin_instr("mov", &dest, &src);
+        self.mov32_impl(0x89, src, dest);
     }
 
     pub fn ret(&mut self) {
+        self.begin_instr_no_operands("ret");
         self.push(0xc3);
     }
 
@@ -287,7 +341,7 @@ impl X64Encoder {
     }
 }
 
-impl std::ops::Add<i32> for Register64 {
+impl std::ops::Add<i32> for Reg64 {
     type Output = MemoryLoc64;
 
     fn add(self, rhs: i32) -> Self::Output {
@@ -302,6 +356,6 @@ impl std::ops::Add<i32> for MemoryLoc64 {
         self
     }
 }
-impl From<Register64> for MemoryLoc64 {
-    fn from(base: Register64) -> Self { Self { base, offset: 0 } }
+impl From<Reg64> for MemoryLoc64 {
+    fn from(base: Reg64) -> Self { Self { base, offset: 0 } }
 }

@@ -455,6 +455,10 @@ macro_rules! bin_op {
     };
 }
 
+extern "C" fn interp_global_entry_point(func: u32, params: *const *const (), return_value: *const ()) {
+
+}
+
 impl Driver {
     pub fn value_to_const(&mut self, val: Value, ty: Type, tp: &impl TypeProvider) -> Const {
         match ty {
@@ -571,13 +575,60 @@ impl Driver {
         })
     }
 
-    pub fn fetch_inverse_thunk(&mut self, func: FuncId) -> Value {
-        if let Some(alloc) = self.interp.inverse_thunk_cache.get(&func) {
+    /// Generates a so-called "inverse thunk", which is a native function with the appropriate calling convention for
+    /// func, which accepts all of func's parameters, allocates space on the stack for func's return value, and calls
+    /// into the interpreter. It then returns the value given by the interpreter. For example, given the following Dusk
+    /// function:
+    ///     ```dusk
+    ///     fn add(a: u32, b: u32): u32 { a + b }
+    ///     ```
+    /// `fetch_inverse_thunk` would generate a thunk that closely corresponds to the following C code:
+    ///     ```c
+    ///     #include <stdint.h>
+    ///     #define ADD_FUNC_ID (insert the FuncId of add here)
+    ///     uint32_t add(uint32_t a, uint32_t b) {
+    ///         void* arguments[] = {&a, &b};
+    ///         int return_value;
+    ///         interp_global_entry_point(ADD_FUNC_ID, arguments, &return_value);
+    ///         return return_value;
+    ///     }
+    ///     ```
+    pub fn fetch_inverse_thunk(&mut self, func_id: FuncId) -> Value {
+        if let Some(alloc) = self.interp.inverse_thunk_cache.get(&func_id) {
             return Value::from_usize(alloc.as_ptr::<()>() as usize);
         }
 
-        // Generate thunk here:
+        let func = &self.code.mir_code.functions[func_id];
+        let param_tys = if let Type::Function { param_tys, .. } = &func.func_ty {
+            param_tys.clone()
+        } else {
+            panic!("expected function type");
+        };
+
         let mut thunk = X64Encoder::new();
+        thunk.enable_debug(true);
+        // Store the first four parameters in shadow space in reverse order
+        for (i, param_ty) in param_tys.iter().take(4).enumerate().rev() {
+            let offset = (i as i32 + 1) * 8;
+            match *param_ty {
+                Type::Int { width: IntWidth::W32, .. } => {
+                    // Store i'th argument as 32-bit value
+                    let registers = [Reg32::Ecx, Reg32::Edx, Reg32::R8d, Reg32::R9d];
+                    thunk.store32(Reg64::Rsp + offset, registers[i]);
+                },
+                Type::Pointer(_) | Type::Int { width: IntWidth::W64 | IntWidth::Pointer, .. } => {
+                    assert_eq!(self.arch.pointer_size(), 64);
+                    // Store i'th argument as 64-bit value
+                    let registers = [Reg64::Rcx, Reg64::Rdx, Reg64::R8, Reg64::R9];
+                    thunk.store64(Reg64::Rsp + offset, registers[i]);
+                },
+                _ => todo!("parameter type {:?}", param_ty),
+            }
+        }
+        let param_space = param_tys.len() * 8;
+        let return_value_space = self.size_of(&func.ret_ty);
+        assert!(return_value_space <= 8, "return values bigger than 8 bytes are not yet supported in inverse thunks!");
+        
 /*
         // Sample thunk implementation in C
         #include <windows.h>
@@ -601,7 +652,7 @@ impl Driver {
 
         let thunk = thunk.allocate();
         let val = Value::from_usize(thunk.as_ptr::<u8>() as usize);
-        self.interp.inverse_thunk_cache.insert(func, thunk);
+        self.interp.inverse_thunk_cache.insert(func_id, thunk);
 
         val
     }
@@ -613,7 +664,7 @@ impl Driver {
         
         let library = &self.code.mir_code.extern_mods[&func_ref.extern_mod];
         let func = &library.imported_functions[func_ref.index];
-        // TODO: cache library and proc addresses
+        // TODO: cache library and proc addresses (and thunks, for that matter)
         let module = unsafe { kernel32::LoadLibraryA(library.library_path.as_ptr()) };
         if module.is_null() {
             panic!("unable to load library {:?}", library.library_path);
@@ -626,44 +677,44 @@ impl Driver {
         let func_address: u64 = unsafe { std::mem::transmute(func_ptr) };
         
         let mut thunk = X64Encoder::new();
-        thunk.store64(Register64::Rsp + 16, Register64::Rdx);
-        thunk.store64(Register64::Rsp + 8, Register64::Rcx);
+        thunk.store64(Reg64::Rsp + 16, Reg64::Rdx);
+        thunk.store64(Reg64::Rsp + 8, Reg64::Rcx);
 
         let mut extension: i32 = 40;
         if args.len() > 4 {
             extension += ((args.len() - 3) / 2 * 16) as i32;
         }
-        thunk.sub64_imm(Register64::Rsp, extension);
+        thunk.sub64_imm(Reg64::Rsp, extension);
 
         assert_eq!(args.len(), func.param_tys.len());
         for i in (0..args.len()).rev() {
             // get pointer to arguments
-            thunk.load64(Register64::Rax, Register64::Rsp + extension + 8);
+            thunk.load64(Reg64::Rax, Reg64::Rsp + extension + 8);
 
             // get pointer to i'th argument
-            thunk.load64(Register64::Rax, Register64::Rax + (i as i32 * 8));
+            thunk.load64(Reg64::Rax, Reg64::Rax + (i as i32 * 8));
 
             match func.param_tys[i] {
                 Type::Int { width: IntWidth::W32, .. } => {
                     // Read i'th argument as 32-bit value
-                    let registers = [Register32::Ecx, Register32::Edx, Register32::R8d, Register32::R9d, Register32::Eax];
-                    thunk.load32(registers[min(i, 4)], Register64::Rax);
+                    let registers = [Reg32::Ecx, Reg32::Edx, Reg32::R8d, Reg32::R9d, Reg32::Eax];
+                    thunk.load32(registers[min(i, 4)], Reg64::Rax);
 
                     // If this is one of the first four parameters, then we're done. Otherwise, we must store the parameter on the stack.
                     if i >= 4 {
                         let offset = (32 + (i-4) * 8) as i32;
-                        thunk.store32(Register64::Rsp + offset, Register32::Eax);
+                        thunk.store32(Reg64::Rsp + offset, Reg32::Eax);
                     }
                 },
-                Type::Pointer(_) => {
+                Type::Pointer(_) | Type::Int { width: IntWidth::W64, .. } => {
                     // Read i'th argument as 64-bit value
-                    let registers = [Register64::Rcx, Register64::Rdx, Register64::R8, Register64::R9, Register64::Rax];
-                    thunk.load64(registers[min(i, 4)], Register64::Rax);
+                    let registers = [Reg64::Rcx, Reg64::Rdx, Reg64::R8, Reg64::R9, Reg64::Rax];
+                    thunk.load64(registers[min(i, 4)], Reg64::Rax);
 
                     // If this is one of the first four parameters, then we're done. Otherwise, we must store the parameter on the stack.
                     if i >= 4 {
                         let offset = (32 + (i-4) * 8) as i32;
-                        thunk.store64(Register64::Rsp + offset, Register64::Rax);
+                        thunk.store64(Reg64::Rsp + offset, Reg64::Rax);
                     }
                 },
                 _ => todo!("parameter type {:?}", func.param_tys[i]),
@@ -681,17 +732,17 @@ impl Driver {
         thunk.push(0xD2);
 
         // get pointer to return value
-        thunk.load64(Register64::Rcx, Register64::Rsp + extension + 16);
+        thunk.load64(Reg64::Rcx, Reg64::Rsp + extension + 16);
 
         // TODO: large values require passing a pointer as the first parameter
         // copy return value to the passed in location
         match func.return_ty {
-            Type::Int { width: IntWidth::W32, .. } => thunk.store32(Register64::Rcx, Register32::Eax),
-            Type::Pointer(_)                       => thunk.store64(Register64::Rcx, Register64::Rax),
+            Type::Int { width: IntWidth::W32, .. } => thunk.store32(Reg64::Rcx, Reg32::Eax),
+            Type::Pointer(_)                       => thunk.store64(Reg64::Rcx, Reg64::Rax),
             _ => todo!("return type {:?}", func.return_ty),
         }
 
-        thunk.add64_imm(Register64::Rsp, extension);
+        thunk.add64_imm(Reg64::Rsp, extension);
         thunk.ret();
 
         let thunk = thunk.allocate();
