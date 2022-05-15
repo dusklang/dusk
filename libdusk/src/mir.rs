@@ -1154,9 +1154,9 @@ impl Driver {
 
         self.start_bb(b, post_bb);
         if let Some(location) = result_location {
-            return self.push_instr(b, Instr::Load(location), expr).direct()
-        } else if else_scope.is_some() {
-            return self.handle_control(b, VOID_INSTR.direct(), ctx.control)
+            self.push_instr(b, Instr::Load(location), expr).direct()
+        } else if else_scope.is_none() {
+            self.handle_context(b, VOID_INSTR.direct(), ctx, tp)
         } else {
             VOID_INSTR.direct()
         }

@@ -105,7 +105,5 @@ fn main() {
     ignore :: user32.RegisterClassA(&main_class)
     if ignore == 0 {
         panic("RegisterClass failed")
-    } else {
-        
     }
 }
