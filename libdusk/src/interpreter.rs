@@ -455,7 +455,7 @@ macro_rules! bin_op {
     };
 }
 
-extern "C" fn interp_global_entry_point(func: u32, params: *const *const (), return_value: *mut ()) {
+extern "C" fn interp_ffi_entry_point(func: u32, params: *const *const (), return_value: *mut ()) {
     let _func = FuncId::new(func as usize);
     
     let module = unsafe {
@@ -477,7 +477,6 @@ extern "C" fn interp_global_entry_point(func: u32, params: *const *const (), ret
             **(params.add(2) as *const *const u64),
             **(params.add(3) as *const *const i64)
         );
-        println!("Returning {}!", *(return_value as *mut i64));
     }
 }
 
@@ -608,7 +607,7 @@ impl Driver {
     ///     uint32_t add(uint32_t a, uint32_t b) {
     ///         void* parameters[] = {&a, &b};
     ///         int return_value;
-    ///         interp_global_entry_point(ADD_FUNC_ID, parameters, &return_value);
+    ///         interp_ffi_entry_point(ADD_FUNC_ID, parameters, &return_value);
     ///         return return_value;
     ///     }
     ///     ```
@@ -682,8 +681,8 @@ impl Driver {
         thunk.lea64(Reg64::Rdx, Reg64::Rsp + param_address_array_offset);
         thunk.mov32_imm(Reg32::Ecx, func_id.index() as i32);
 
-        // Call interp_global_entry_point
-        thunk.movabs(Reg64::Rax, (interp_global_entry_point as isize).try_into().unwrap());
+        // Call interp_ffi_entry_point
+        thunk.movabs(Reg64::Rax, (interp_ffi_entry_point as isize).try_into().unwrap());
         thunk.call_direct(Reg64::Rax);
 
         // Move return value into rax or eax
