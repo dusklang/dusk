@@ -211,6 +211,11 @@ impl X64Encoder {
             println!("{}", mnemonic);
         }
     }
+    fn begin_instr_one_operand(&self, mnemonic: &str, operand: &impl Display) {
+        if self.debug {
+            println!("{} {}", mnemonic, operand);
+        }
+    }
     fn begin_instr(&self, mnemonic: &str, operand_a: &impl Display, operand_b: &impl Display) {
         if self.debug {
             println!("{} {}, {}", mnemonic, operand_a, operand_b);
@@ -240,7 +245,8 @@ impl X64Encoder {
         self.push_any::<i8>(imm.try_into().unwrap());
     }
 
-    fn mov32_64_impl(&mut self, bit64: bool, opcode: u8, reg: impl Register, loc: MemoryLoc64) {
+    // Handles several variants of 32-bit and 64-bit MOV and LEA instructions.
+    fn addr32_64_impl(&mut self, bit64: bool, opcode: u8, reg: impl Register, loc: MemoryLoc64) {
         if bit64 || reg.ext() || loc.base.ext() {
             self.push_any(RexBuilder::new32().w_bit(bit64).r_bit(reg.ext()).b_bit(loc.base.ext()));
         }
@@ -294,36 +300,60 @@ impl X64Encoder {
         }
     }
 
-    fn mov64_impl(&mut self, opcode: u8, reg: Reg64, loc: MemoryLoc64) {
-        self.mov32_64_impl(true, opcode, reg, loc);
-    }
-
     pub fn load64(&mut self, dest: Reg64, src: impl Into<MemoryLoc64>) {
         let src = src.into();
         self.begin_instr("mov", &dest, &src);
-        self.mov64_impl(0x8b, dest, src);
+        self.addr32_64_impl(true, 0x8b, dest, src);
     }
 
     pub fn store64(&mut self, dest: impl Into<MemoryLoc64>, src: Reg64) {
         let dest = dest.into();
         self.begin_instr("mov", &dest, &src);
-        self.mov64_impl(0x89, src, dest);
-    }
-
-    fn mov32_impl(&mut self, opcode: u8, reg: Reg32, loc: MemoryLoc64) {
-        self.mov32_64_impl(false, opcode, reg, loc);
+        self.addr32_64_impl(true, 0x89, src, dest);
     }
 
     pub fn load32(&mut self, dest: Reg32, src: impl Into<MemoryLoc64>) {
         let src = src.into();
         self.begin_instr("mov", &dest, &src);
-        self.mov32_impl(0x8b, dest, src);
+        self.addr32_64_impl(false, 0x8b, dest, src);
     }
 
     pub fn store32(&mut self, dest: impl Into<MemoryLoc64>, src: Reg32) {
         let dest = dest.into();
         self.begin_instr("mov", &dest, &src);
-        self.mov32_impl(0x89, src, dest);
+        self.addr32_64_impl(false, 0x89, src, dest);
+    }
+
+    pub fn lea64(&mut self, dest: Reg64, src: impl Into<MemoryLoc64>) {
+        let src = src.into();
+        self.begin_instr("lea", &dest, &src);
+        self.addr32_64_impl(true, 0x8d, dest, src);
+    }
+
+    pub fn mov32_imm(&mut self, dest: Reg32, src: i32) {
+        self.begin_instr("mov", &dest, &src);
+        if dest.ext() {
+            self.push_any(RexBuilder::new32().b_bit(true));
+        }
+        self.push(0xb8 | dest.main_bits());
+        self.push_any(src);
+    }
+
+    pub fn movabs(&mut self, dest: Reg64, imm: i64) {
+        self.begin_instr("movabs", &dest, &imm);
+        self.push_any(RexBuilder::new().b_bit(dest.ext()));
+        self.push(0xb8 | dest.main_bits());
+        self.push_any(imm);
+    }
+
+    pub fn call_direct(&mut self, func: Reg64) {
+        self.begin_instr_one_operand("call", &func);
+        if func.ext() {
+            // 64 bits is the default for this instruction, so there is no need to set to W bit.
+            self.push_any(RexBuilder::new32().b_bit(func.ext()));
+        }
+        self.push(0xff);
+        self.push(build_modrm(0b11, 0b010, func.main_bits()));
     }
 
     pub fn ret(&mut self) {

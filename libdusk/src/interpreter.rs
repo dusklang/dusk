@@ -459,6 +459,10 @@ extern "C" fn interp_global_entry_point(func: u32, params: *const *const (), ret
 
 }
 
+// Thank you, Hagen von Eitzen: https://math.stackexchange.com/a/291494
+fn nearest_multiple_of_16(val: i32) -> i32 { ((val - 1) | 15) + 1 }
+fn nearest_multiple_of_8(val: i32) -> i32 { ((val - 1) | 7) + 1 }
+
 impl Driver {
     pub fn value_to_const(&mut self, val: Value, ty: Type, tp: &impl TypeProvider) -> Const {
         match ty {
@@ -587,9 +591,9 @@ impl Driver {
     ///     #include <stdint.h>
     ///     #define ADD_FUNC_ID (insert the FuncId of add here)
     ///     uint32_t add(uint32_t a, uint32_t b) {
-    ///         void* arguments[] = {&a, &b};
+    ///         void* parameters[] = {&a, &b};
     ///         int return_value;
-    ///         interp_global_entry_point(ADD_FUNC_ID, arguments, &return_value);
+    ///         interp_global_entry_point(ADD_FUNC_ID, parameters, &return_value);
     ///         return return_value;
     ///     }
     ///     ```
@@ -606,7 +610,6 @@ impl Driver {
         };
 
         let mut thunk = X64Encoder::new();
-        thunk.enable_debug(true);
         // Store the first four parameters in shadow space in reverse order
         for (i, param_ty) in param_tys.iter().take(4).enumerate().rev() {
             let offset = (i as i32 + 1) * 8;
@@ -625,30 +628,58 @@ impl Driver {
                 _ => todo!("parameter type {:?}", param_ty),
             }
         }
-        let param_space = param_tys.len() * 8;
-        let return_value_space = self.size_of(&func.ret_ty);
+        let param_address_array_space = param_tys.len() as i32 * 8;
+        // round up to the nearest multiple of 8 if necessary, to make sure that the parameter address array is 8-byte
+        // aligned.
+        let return_value_space = nearest_multiple_of_8(self.size_of(&func.ret_ty) as i32);
         assert!(return_value_space <= 8, "return values bigger than 8 bytes are not yet supported in inverse thunks!");
+        let call_space = 4 * 8;
+        let total_stack_allocation = nearest_multiple_of_16(param_address_array_space + return_value_space + call_space) + 8;
+        let return_value_offset = call_space;
+        let param_address_array_offset = return_value_offset + return_value_space;
+        let shadow_offset = total_stack_allocation + 8;
+
+        // Allocate the necessary space on the stack
+        thunk.sub64_imm(Reg64::Rsp, total_stack_allocation);
+
+        // Fill the parameter array with the addresses of each parameter.
+        for (i, param_ty) in param_tys.iter().enumerate() {
+            let rsp_offset = i as i32 * 8;
+            if self.size_of(param_ty) > 8 {
+                // If the value is larger than 64 bits, it was passed by pointer. Therefore, we should load this
+                // address from shadow space directly, instead of loading the address of the address.
+                thunk.load64(Reg64::Rax, Reg64::Rsp + shadow_offset + rsp_offset)
+            } else {
+                thunk.lea64(Reg64::Rax, Reg64::Rsp + shadow_offset + rsp_offset);
+            }
+            thunk.store64(Reg64::Rsp + param_address_array_offset + rsp_offset, Reg64::Rax);
+        }
+
+        // Pass arguments to interpreter entry point
+        thunk.lea64(Reg64::R8, Reg64::Rsp + return_value_offset);
+        thunk.lea64(Reg64::Rdx, Reg64::Rsp + param_address_array_offset);
+        thunk.mov32_imm(Reg32::Ecx, func_id.index() as i32);
+
+        // Call interp_global_entry_point
+        thunk.movabs(Reg64::Rax, (interp_global_entry_point as isize).try_into().unwrap());
+        thunk.call_direct(Reg64::Rax);
+
+        // Move return value into rax or eax
+        match func.ret_ty {
+            Type::Int { width: IntWidth::W32, .. } => thunk.load32(Reg32::Eax, Reg64::Rsp + return_value_offset),
+            Type::Pointer(_) | Type::Int { width: IntWidth::W64 | IntWidth::Pointer, .. } => {
+                assert_eq!(self.arch.pointer_size(), 64);
+                thunk.load64(Reg64::Rax, Reg64::Rsp + return_value_offset);
+            },
+            _ if self.size_of(&func.ret_ty) == 0 => {},
+            _ => todo!("return type {:?}", func.ret_ty),
+        }
+
+        // Return the stack to its previous state
+        thunk.add64_imm(Reg64::Rsp, total_stack_allocation);
         
-/*
-        // Sample thunk implementation in C
-        #include <windows.h>
-
-        void interpreter_entrypoint(UINT func_id, void** args, void* ret_value);
-
-        LRESULT window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
-            void* args[] = {&hwnd, &msg, &wparam, &lparam};
-            LRESULT ret_value;
-
-            interpreter_entrypoint(25, args, &ret_value);
-
-            return ret_value;
-        }
-*/
-
-        for _ in 0..25 {
-            thunk.push(0);
-        }
-
+        // Return
+        thunk.ret();
 
         let thunk = thunk.allocate();
         let val = Value::from_usize(thunk.as_ptr::<u8>() as usize);
@@ -674,7 +705,7 @@ impl Driver {
         if func_ptr == std::ptr::null() {
             panic!("unable to load function {:?} from library {:?}", func_name, library.library_path);
         }
-        let func_address: u64 = unsafe { std::mem::transmute(func_ptr) };
+        let func_address: i64 = unsafe { std::mem::transmute(func_ptr) };
         
         let mut thunk = X64Encoder::new();
         thunk.store64(Reg64::Rsp + 16, Reg64::Rdx);
@@ -721,15 +752,9 @@ impl Driver {
             }
         }
 
-        // movabs r10, func
-        thunk.push(0x49);
-        thunk.push(0xBA);
-        thunk.push_any(func_address);
-
-        // call r10
-        thunk.push(0x41);
-        thunk.push(0xFF);
-        thunk.push(0xD2);
+        // Call function
+        thunk.movabs(Reg64::R10, func_address);
+        thunk.call_direct(Reg64::R10);
 
         // get pointer to return value
         thunk.load64(Reg64::Rcx, Reg64::Rsp + extension + 16);
