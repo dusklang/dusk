@@ -455,8 +455,25 @@ macro_rules! bin_op {
     };
 }
 
-extern "C" fn interp_global_entry_point(func: u32, params: *const *const (), return_value: *const ()) {
-
+extern "C" fn interp_global_entry_point(func: u32, params: *const *const (), return_value: *mut ()) {
+    let func = FuncId::new(func as usize);
+    println!("Attempting to call window procedure {:?}!", func);
+    
+    let module = unsafe {
+        let user32 = CString::new("user32.dll").unwrap();
+        kernel32::LoadLibraryA(user32.as_ptr()) 
+    };
+    if module.is_null() {
+        panic!("unable to load library user32");
+    }
+    let func_name = CString::new("DefWindowProcA").unwrap();
+    let func_ptr = unsafe { kernel32::GetProcAddress(module, func_name.as_ptr()) };
+    unsafe {
+        type WndProc = fn(*const (), u32, u64, i64) -> i64;
+        let func_ptr: WndProc = std::mem::transmute(func_ptr);
+        *(return_value as *mut i64) = func_ptr(*(params.add(0) as *const *const ()), *(params.add(1) as *const u32), *(params.add(2) as *const u64), *(params.add(3) as *const i64));
+        println!("Returning {}!", *(return_value as *mut i64));
+    }
 }
 
 // Thank you, Hagen von Eitzen: https://math.stackexchange.com/a/291494
