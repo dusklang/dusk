@@ -378,7 +378,9 @@ impl Backend {
     
             let mut tp = driver.get_real_type_provider(false);
             while let Some(units) = driver.build_more_tir(None) {
-                driver.type_check(&units, &mut tp);
+                if driver.type_check(&units, &mut tp).is_err() {
+                    break;
+                }
                 self.flush_errors(&mut driver, path).await;
             }
     

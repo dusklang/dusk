@@ -1469,13 +1469,17 @@ impl Driver {
         tp
     }
 
-    pub fn type_check(&mut self, units: &Units, tp: &mut RealTypeProvider) {
+    pub fn type_check(&mut self, units: &Units, tp: &mut RealTypeProvider) -> Result<(), ()> {
         for (num, unit) in units.units.iter().enumerate() {
             // Pass 1: propagate info down from leaves to roots
             self.run_pass_1(&unit.items, UnitKind::Normal(num), 0, tp);
             
             // Pass 2: propagate info up from roots to leaves
             self.run_pass_2(&unit.items, UnitKind::Normal(num), tp);
+
+            if !self.errors.is_empty() {
+                return Err(());
+            }
 
             for i in 0..unit.eval_dependees.len() {
                 let expr = unit.eval_dependees[i];
@@ -1516,5 +1520,6 @@ impl Driver {
                 self.tir.expr_namespaces.entry(unit.main_expr).or_default().push(ns);
             }
         }
+        Ok(())
     }
 }

@@ -95,7 +95,9 @@ fn main() {
     let mut tp = driver.get_real_type_provider(opt.output_tc_diff);
     while let Some(units) = driver.build_more_tir(opt.tir_output) {
         debug::send(|| DvdMessage::WillTypeCheckSet);
-        driver.type_check(&units, &mut tp);
+        if driver.type_check(&units, &mut tp).is_err() {
+            break;
+        }
         debug::send(|| DvdMessage::DidTypeCheckSet);
         driver.flush_errors();
     }
