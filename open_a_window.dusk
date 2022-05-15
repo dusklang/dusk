@@ -4,6 +4,7 @@ HINSTANCE :: HANDLE
 HICON :: HANDLE
 HCURSOR :: HICON
 HBRUSH :: HANDLE
+HMENU :: HANDLE
 
 MB_OK :: 0 as u32
 FILE_SHARE_READ :: 1 as DWORD
@@ -16,6 +17,7 @@ DWORD :: u32
 UINT :: u32
 UINT_PTR :: usize
 LONG_PTR :: isize
+LONG :: i32
 STD_INPUT_HANDLE :: (-10) as i32 as DWORD
 STD_OUTPUT_HANDLE :: (-11) as i32 as DWORD
 STD_ERROR_HANDLE :: (-12) as i32 as DWORD
@@ -47,6 +49,55 @@ SECURITY_ATTRIBUTES :: struct {
     bInheritHandle: BOOL
 }
 
+/*
+ * Window Styles
+ */
+WS_OVERLAPPED: DWORD : $00000000
+WS_POPUP: DWORD : $80000000
+WS_CHILD: DWORD : $40000000
+WS_MINIMIZE: DWORD : $20000000
+WS_VISIBLE: DWORD : $10000000
+WS_DISABLED: DWORD : $08000000
+WS_CLIPSIBLINGS: DWORD : $04000000
+WS_CLIPCHILDREN: DWORD : $02000000
+WS_MAXIMIZE: DWORD : $01000000
+WS_CAPTION: DWORD : $00C00000     /* WS_BORDER | WS_DLGFRAME  */
+WS_BORDER: DWORD : $00800000
+WS_DLGFRAME: DWORD : $00400000
+WS_VSCROLL: DWORD : $00200000
+WS_HSCROLL: DWORD : $00100000
+WS_SYSMENU: DWORD : $00080000
+WS_THICKFRAME: DWORD : $00040000
+WS_GROUP: DWORD : $00020000
+WS_TABSTOP: DWORD : $00010000
+
+WS_MINIMIZEBOX: DWORD : $00020000
+WS_MAXIMIZEBOX: DWORD : $00010000
+
+
+WS_TILED: DWORD : WS_OVERLAPPED
+WS_ICONIC: DWORD : WS_MINIMIZE
+WS_SIZEBOX: DWORD : WS_THICKFRAME
+WS_TILEDWINDOW: DWORD : WS_OVERLAPPEDWINDOW
+
+/*
+ * Common Window Styles
+ */
+WS_OVERLAPPEDWINDOW :: WS_OVERLAPPED       |
+                            WS_CAPTION     | 
+                            WS_SYSMENU     | 
+                            WS_THICKFRAME  | 
+                            WS_MINIMIZEBOX | 
+                            WS_MAXIMIZEBOX
+
+WS_POPUPWINDOW :: WS_POPUP  |
+                  WS_BORDER | 
+                  WS_SYSMENU
+
+WS_CHILDWINDOW :: WS_CHILD
+
+CW_USEDEFAULT: i32 : $80000000 as u32 as i32 // $80000000 is too big for i32. Should hex literals be allowed to contain a 1 in the MSB?
+
 OVERLAPPED :: struct {}
 
 kernel32 :: extern_mod("kernel32.dll") {
@@ -65,6 +116,12 @@ kernel32 :: extern_mod("kernel32.dll") {
 user32 :: extern_mod("user32.dll") {
     fn MessageBoxA(hwnd: HWND, lpText: i8*, lpCaption: i8*, uType: u32): i32
     fn RegisterClassA(lpWndClass: WNDCLASS*): ATOM
+    fn CreateWindowExA(dwExStyle: DWORD, lpClassName: i8*, lpWindowName: i8*, dwStyle: DWORD, x: i32, y: i32, nWidth: i32, nHeight: i32, hWndParent: HWND, hMenu: HMENU, hInstance: HINSTANCE, lpParam: void *mut): HWND
+    fn ShowWindow(hWnd: HWND, nCmdShow: i32): BOOL
+    fn GetMessageA(lpMsg: MSG *mut, hWnd: HWND, wMsgFilterMin: UINT, wMsgFilterMax: UINT): BOOL
+    fn TranslateMessage(lpMsg: MSG*): BOOL
+    fn DispatchMessageA(lpMsg: MSG*): LRESULT
+    fn LoadCursorA(hInstance: HINSTANCE, lpCursorName: usize): HCURSOR
 }
 
 
@@ -88,6 +145,28 @@ fn main_window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM): LRES
     0
 }
 
+POINT :: struct {
+    x: LONG
+    y: LONG
+}
+
+MSG :: struct {
+    hwnd: HWND
+    message: UINT
+    wParam: WPARAM
+    lParam: LPARAM
+    time: DWORD
+    pt: POINT
+    lPrivate: DWORD
+}
+
+fn MAKEINTRESOURCE(id: u16): usize {
+    id as usize
+}
+
+IDC_ARROW :: MAKEINTRESOURCE(32512)
+
+
 fn main() {
     main_class :: WNDCLASS {
         style: 0
@@ -96,7 +175,7 @@ fn main() {
         cbWndExtra: 0
         hInstance: NULL()
         hIcon: NULL()
-        hCursor: NULL()
+        hCursor: user32.LoadCursorA(NULL(), IDC_ARROW)
         hbrBackground: NULL()
         lpszMenuName: NULL() as i8*
         lpszClassName: "MAIN_WINDOW_CLASS"
@@ -105,5 +184,37 @@ fn main() {
     ignore :: user32.RegisterClassA(&main_class)
     if ignore == 0 {
         panic("RegisterClass failed")
+    }
+
+    gah :: CW_USEDEFAULT
+
+    hwnd :: user32.CreateWindowExA(0, "MAIN_WINDOW_CLASS", "First Dusk Window", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, NULL(), NULL(), NULL(), NULL())
+    if (hwnd as usize) == 0 {
+        panic("Create window failed")
+    }
+
+    ignore :: user32.ShowWindow(hwnd, 1)
+
+    msg := MSG {
+        hwnd: NULL() as HWND
+        message: 0
+        wParam: 0
+        lParam: 0
+        time: 0
+        pt: POINT {
+            x: 0
+            y: 0
+        }
+        lPrivate: 0
+    }
+
+    while true {
+        ret :: user32.GetMessageA(&mut msg, hwnd, 0, 0)
+        if ret == 0 || ret == -1 {
+            return // TODO: implement break expressions
+        } else {
+            ignore :: user32.TranslateMessage(&msg)
+            ignore :: user32.DispatchMessageA(&msg)
+        }
     }
 }

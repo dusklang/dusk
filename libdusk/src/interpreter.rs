@@ -770,7 +770,8 @@ impl Driver {
                         thunk.store32(Reg64::Rsp + offset, Reg32::Eax);
                     }
                 },
-                Type::Pointer(_) | Type::Int { width: IntWidth::W64, .. } => {
+                Type::Pointer(_) | Type::Int { width: IntWidth::W64 | IntWidth::Pointer, .. } => {
+                    assert_eq!(self.arch.pointer_size(), 64);
                     // Read i'th argument as 64-bit value
                     let registers = [Reg64::Rcx, Reg64::Rdx, Reg64::R8, Reg64::R9, Reg64::Rax];
                     thunk.load64(registers[min(i, 4)], Reg64::Rax);
