@@ -65,7 +65,7 @@ pub enum Instr {
 }
 
 impl Instr {
-    fn replace_bb(&mut self, old: BlockId, new: BlockId) {
+    pub fn replace_bb(&mut self, old: BlockId, new: BlockId) {
         fn replace(target: &mut BlockId, old: BlockId, new: BlockId) {
             if *target == old {
                 *target = new;
@@ -84,6 +84,59 @@ impl Instr {
                 replace(catch_all_bb, old, new);
             },
             _ => {}
+        }
+    }
+
+    pub fn references_value(&self, val: OpId) -> bool {
+        match *self {
+            Instr::Void | Instr::Const(_) | Instr::Alloca(_) | Instr::AddressOfStatic(_) | Instr::Br(_)
+                | Instr::GenericParam(_) | Instr::Parameter(_) | Instr::FunctionRef { .. } => false,
+            Instr::LogicalNot(op) | Instr::Reinterpret(op, _) | Instr::Truncate(op, _) | Instr::SignExtend(op, _)
+                | Instr::ZeroExtend(op, _) | Instr::FloatCast(op, _) | Instr::FloatToInt(op, _)
+                | Instr::IntToFloat(op, _) | Instr::Load(op) | Instr::Pointer { op, .. }
+                | Instr::DirectFieldAccess { val: op, .. } | Instr::IndirectFieldAccess { val: op, .. }
+                | Instr::DiscriminantAccess { val: op } | Instr::Ret(op) | Instr::CondBr { condition: op, .. }
+                | Instr::SwitchBr { scrutinee: op, .. } | Instr::Variant { payload: op, .. } => op == val,
+            Instr::Store { location, value } => location == val || value == val,
+            Instr::Call { arguments: ref ops, .. } | Instr::ExternCall { arguments: ref ops, .. }
+                | Instr::Intrinsic { arguments: ref ops, .. } | Instr::Struct { fields: ref ops, .. }
+                | Instr::Enum { variants: ref ops, .. } | Instr::StructLit { fields: ref ops, .. } => ops.iter().any(|&op| op == val),
+            Instr::FunctionTy { ref param_tys, ref ret_ty } => param_tys.iter().any(|&op| op == val) || *ret_ty == val,
+        }
+    }
+
+    pub fn replace_value(&mut self, old: OpId, new: OpId) {
+        fn replace(target: &mut OpId, old: OpId, new: OpId) {
+            if *target == old {
+                *target = new;
+            }
+        }
+        match self {
+            Instr::Void | Instr::Const(_) | Instr::Alloca(_) | Instr::AddressOfStatic(_) | Instr::Br(_)
+                | Instr::GenericParam(_) | Instr::Parameter(_) | Instr::FunctionRef { .. } => {},
+            Instr::LogicalNot(op) | Instr::Reinterpret(op, _) | Instr::Truncate(op, _) | Instr::SignExtend(op, _)
+                | Instr::ZeroExtend(op, _) | Instr::FloatCast(op, _) | Instr::FloatToInt(op, _)
+                | Instr::IntToFloat(op, _) | Instr::Load(op) | Instr::Pointer { op, .. }
+                | Instr::DirectFieldAccess { val: op, .. } | Instr::IndirectFieldAccess { val: op, .. }
+                | Instr::DiscriminantAccess { val: op } | Instr::Ret(op) | Instr::CondBr { condition: op, .. }
+                | Instr::SwitchBr { scrutinee: op, .. } | Instr::Variant { payload: op, .. } => replace(op, old, new),
+            Instr::Store { location, value } => {
+                replace(location, old, new);
+                replace(value, old, new);
+            },
+            Instr::Call { arguments: ref mut ops, .. } | Instr::ExternCall { arguments: ref mut ops, .. }
+                | Instr::Intrinsic { arguments: ref mut ops, .. } | Instr::Struct { fields: ref mut ops, .. }
+                | Instr::Enum { variants: ref mut ops, .. } | Instr::StructLit { fields: ref mut ops, .. } => {
+                    for op in ops {
+                        replace(op, old, new);
+                    }
+                }
+            Instr::FunctionTy { ref mut param_tys, ref mut ret_ty } => {
+                for op in param_tys {
+                    replace(op, old, new);
+                }
+                replace(ret_ty, old, new);
+            }
         }
     }
 }

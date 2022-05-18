@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashSet, HashMap};
 use std::ffi::CString;
 use std::ops::Range;
 
@@ -915,7 +915,7 @@ impl Driver {
         function 
     }
 
-    fn optimize_function(&self, func: &mut Function) {
+    fn optimize_function(&mut self, func: &mut Function) {
         // Get rid of empty blocks
         // TODO: get rid of unreachable blocks instead. Otherwise we might accidentally remove an
         // empty, reachable block and fail silently (at MIR generation time).
@@ -923,6 +923,96 @@ impl Driver {
             let block = &self.code.blocks[block];
             !block.ops.is_empty()
         });
+
+        // Remove obviously-redundant loads (assumes no other threads are accessing a memory location simultaneously)
+        let mut replace_list = Vec::new();
+        for &block_id in &func.blocks {
+            let block = &self.code.blocks[block_id];
+            let mut delete_list = HashSet::new();
+            for (i, &op_id) in block.ops.iter().enumerate() {
+                let instr = self.code.ops[op_id].as_mir_instr().unwrap();
+                if let &Instr::Store { location, value } = instr {
+                    if i + 1 < block.ops.len() {
+                        let next_op = block.ops[i+1];
+                        let next_instr = self.code.ops[next_op].as_mir_instr().unwrap();
+                        if let &Instr::Load(load_loc) = next_instr {
+                            if load_loc == location {
+                                replace_list.push((next_op, value));
+                                delete_list.insert(next_op);
+                                println!("deleted redundant load!");
+                            }
+                        }
+                    }
+                }
+            }
+            
+            self.code.blocks[block_id].ops.retain(|op| !delete_list.contains(op));
+        }
+        for &block_id in &func.blocks {
+            let block = &self.code.blocks[block_id];
+            for &op in &block.ops {
+                for &(old, new) in &replace_list {
+                    self.code.ops[op].as_mir_instr_mut().unwrap().replace_value(old, new);
+                }
+            }
+        }
+
+        // Get rid of obviously-unused values
+        for &block_id in &func.blocks {
+            let block = &self.code.blocks[block_id];
+            let mut delete_list = HashSet::new();
+
+            for &op_id in &block.ops {
+                let instr = self.code.ops[op_id].as_mir_instr().unwrap();
+                if let Instr::Const(_) | Instr::Load(_) = instr {
+                    let mut is_used = false;
+                    'check_uses: for &other_block_id in &func.blocks {
+                        let other_block = &self.code.blocks[other_block_id];
+
+                        for &other_op_id in &other_block.ops {
+                            let other_instr = self.code.ops[other_op_id].as_mir_instr().unwrap();
+                            if other_instr.references_value(op_id) {
+                                is_used = true;
+                                break 'check_uses;
+                            }
+                        }
+                    }
+                    if !is_used {
+                        delete_list.insert(op_id);
+                        println!("deleted unused value!");
+                    }
+                }
+            }
+
+            self.code.blocks[block_id].ops.retain(|op| !delete_list.contains(op));
+        }
+
+        // Replace blocks that do nothing but branch to another block
+        let mut replace_list = Vec::new();
+        let mut delete_list = HashSet::new();
+        for &block_id in &func.blocks {
+            let block = &self.code.blocks[block_id];
+            if block.ops.len() != 1 { continue; }
+
+            let terminal = self.code.ops[block.ops[0]].as_mir_instr().unwrap();
+            if let &Instr::Br(other) = terminal {
+                // don't remove infinite loops
+                if other != block_id {
+                    replace_list.push((block_id, other));
+                    delete_list.insert(block_id);
+                    println!("deleted redundant block!");
+                }
+            }
+        }
+        func.blocks.retain(|block| !delete_list.contains(block));
+        for &block_id in &func.blocks {
+            let block = &self.code.blocks[block_id];
+            let terminal = *block.ops.last().unwrap();
+            let terminal = self.code.ops[terminal].as_mir_instr_mut().unwrap();
+            for &(from, to) in &replace_list {
+                terminal.replace_bb(from, to);
+            }
+        }
     }
 
     fn generate_type_of(&self, instr: &Instr) -> Type {

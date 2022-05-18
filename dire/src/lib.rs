@@ -32,6 +32,14 @@ impl Op {
     }
 
     #[inline]
+    pub fn as_mir_instr_mut(&mut self) -> Option<&mut Instr> {
+        match self {
+            Op::MirInstr(instr, _, _) => Some(instr),
+            _ => None,
+        }
+    }
+
+    #[inline]
     pub fn get_mir_instr_id(&self) -> Option<InstrId> {
         match self {
             &Op::MirInstr(_, id, _) => Some(id),
