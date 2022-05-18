@@ -350,6 +350,7 @@ struct EnumExhaustion {
 }
 
 enum Exhaustion {
+    #[allow(unused)]
     Enum(EnumExhaustion),
     Total,
 }

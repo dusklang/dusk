@@ -587,7 +587,7 @@ impl Driver {
             let id = df!(decl_id.item);
             match df!(decl_id.hir) {
                 hir::Decl::Parameter { .. } | hir::Decl::Intrinsic { .. } | hir::Decl::Field { .. } | hir::Decl::ReturnValue | hir::Decl::GenericParam(_) | hir::Decl::Variant { .. } | hir::Decl::ComputedPrototype { .. } => {},
-                hir::Decl::PatternBinding { id: binding_id, .. } => {
+                hir::Decl::PatternBinding { id: _binding_id, .. } => {
                     // let scrutinee = self.code.hir_code.pattern_binding_decls[binding_id].scrutinee;
 
                     // // TODO: find out why this seems to cause an infinite loop if it's moved to build_more_tir() and changed to a type 2 dependency

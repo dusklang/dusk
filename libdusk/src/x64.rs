@@ -202,6 +202,7 @@ impl X64Encoder {
         Self::default()
     }
 
+    #[allow(unused)]
     pub fn enable_debug(&mut self, debug: bool) {
         self.debug = debug;
     }

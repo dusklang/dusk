@@ -83,7 +83,7 @@ fn main() {
     }
 
     begin_phase!(Parse);
-    driver.parse();
+    let _ = driver.parse(); // There's no need to do anything specific to handle this error.
 
     begin_phase!(Tir);
     debug::send(|| DvdMessage::WillInitializeTir);

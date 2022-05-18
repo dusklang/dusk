@@ -487,7 +487,7 @@ fn nearest_multiple_of_8(val: i32) -> i32 { ((val - 1) | 7) + 1 }
 impl Driver {
     pub fn value_to_const(&mut self, val: Value, ty: Type, tp: &impl TypeProvider) -> Const {
         match ty {
-            Type::Int { is_signed, width } => {
+            Type::Int { is_signed, .. } => {
                 let lit = val.as_big_int(is_signed);
                 Const::Int { lit, ty }
             },

@@ -822,6 +822,7 @@ enum DeclRef {
     Intrinsic { intrinsic: Intrinsic, ty: Type },
     Function { func: FuncId, generic_args: Vec<Type> },
     ExternFunction { func: ExternFunctionRef },
+    #[allow(unused)]
     EnumVariantWithPayload { enuum: EnumId, index: usize, payload_ty: Option<Type> },
     Value(Value),
 }
