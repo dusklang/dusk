@@ -19,7 +19,7 @@ use index_vec::IndexVec;
 use dire::arch::Arch;
 use dire::hir::{Intrinsic, ModScopeId, StructId, EnumId, GenericParamId, ExternFunctionRef};
 use dire::mir::{Const, Instr, InstrId, FuncId, StaticId, Struct};
-use dire::ty::{Type, QualType, IntWidth, FloatWidth};
+use dire::ty::{Type, FunctionType, QualType, IntWidth, FloatWidth};
 use dire::{OpId, BlockId};
 
 use crate::driver::Driver;
@@ -617,11 +617,7 @@ impl Driver {
         }
 
         let func = &self.code.mir_code.functions[func_id];
-        let param_tys = if let Type::Function { param_tys, .. } = &func.func_ty {
-            param_tys.clone()
-        } else {
-            panic!("expected function type");
-        };
+        let param_tys = func.ty.param_tys.clone();
 
         let mut thunk = X64Encoder::new();
         // Store the first four parameters in shadow space in reverse order
@@ -650,7 +646,7 @@ impl Driver {
         let param_address_array_space = param_tys.len() as i32 * 8;
         // round up to the nearest multiple of 8 if necessary, to make sure that the parameter address array is 8-byte
         // aligned.
-        let return_value_space = nearest_multiple_of_8(self.size_of(&func.ret_ty) as i32);
+        let return_value_space = nearest_multiple_of_8(self.size_of(&func.ty.return_ty) as i32);
         assert!(return_value_space <= 8, "return values bigger than 8 bytes are not yet supported in inverse thunks!");
         let call_space = 4 * 8;
         let total_stack_allocation = nearest_multiple_of_16(param_address_array_space + return_value_space + call_space) + 8;
@@ -685,16 +681,16 @@ impl Driver {
         thunk.movabs(Reg64::Rax, (interp_ffi_entry_point as isize).try_into().unwrap());
         thunk.call_direct(Reg64::Rax);
 
-        // Move return value into rax or eax
-        match func.ret_ty {
+        // Move return value into *ax
+        match &*func.ty.return_ty {
             Type::Int { width: IntWidth::W16, .. } => thunk.load16(Reg16::Ax, Reg64::Rsp + return_value_offset),
             Type::Int { width: IntWidth::W32, .. } => thunk.load32(Reg32::Eax, Reg64::Rsp + return_value_offset),
             Type::Pointer(_) | Type::Int { width: IntWidth::W64 | IntWidth::Pointer, .. } => {
                 assert_eq!(self.arch.pointer_size(), 64);
                 thunk.load64(Reg64::Rax, Reg64::Rsp + return_value_offset);
             },
-            _ if self.size_of(&func.ret_ty) == 0 => {},
-            _ => todo!("return type {:?}", func.ret_ty),
+            _ if self.size_of(&func.ty.return_ty) == 0 => {},
+            _ => todo!("return type {:?}", func.ty.return_ty),
         }
 
         // Return the stack to its previous state
@@ -739,7 +735,7 @@ impl Driver {
         }
         thunk.sub64_imm(Reg64::Rsp, extension);
 
-        assert_eq!(args.len(), func.param_tys.len());
+        assert_eq!(args.len(), func.ty.param_tys.len());
         for i in (0..args.len()).rev() {
             // get pointer to arguments
             thunk.load64(Reg64::Rax, Reg64::Rsp + extension + 8);
@@ -747,7 +743,7 @@ impl Driver {
             // get pointer to i'th argument
             thunk.load64(Reg64::Rax, Reg64::Rax + (i as i32 * 8));
 
-            match func.param_tys[i] {
+            match func.ty.param_tys[i] {
                 Type::Int { width: IntWidth::W16, .. } => {
                     // Read i'th argument as 32-bit value
                     let registers = [Reg16::Cx, Reg16::Dx, Reg16::R8w, Reg16::R9w, Reg16::Ax];
@@ -782,7 +778,7 @@ impl Driver {
                         thunk.store64(Reg64::Rsp + offset, Reg64::Rax);
                     }
                 },
-                _ => todo!("parameter type {:?}", func.param_tys[i]),
+                _ => todo!("parameter type {:?}", func.ty.param_tys[i]),
             }
         }
 
@@ -795,14 +791,14 @@ impl Driver {
 
         // TODO: large values require passing a pointer as the first parameter
         // copy return value to the passed in location
-        match func.return_ty {
+        match &*func.ty.return_ty {
             Type::Int { width: IntWidth::W16, .. } => thunk.store16(Reg64::Rcx, Reg16::Ax),
             Type::Int { width: IntWidth::W32, .. } => thunk.store32(Reg64::Rcx, Reg32::Eax),
             Type::Pointer(_) | Type::Int { width: IntWidth::W64 | IntWidth::Pointer, .. } => {
                 assert_eq!(self.arch.pointer_size(), 64);
                 thunk.store64(Reg64::Rcx, Reg64::Rax);
             },
-            _ => todo!("return type {:?}", func.return_ty),
+            _ => todo!("return type {:?}", func.ty.return_ty),
         }
 
         thunk.add64_imm(Reg64::Rsp, extension);
@@ -814,7 +810,7 @@ impl Driver {
             type Thunk = fn(*const *mut u8, *mut u8);
             let thunk: Thunk = std::mem::transmute(thunk_ptr);
             let mut return_val_storage = SmallVec::new();
-            return_val_storage.resize(self.size_of(&func.return_ty), 0);
+            return_val_storage.resize(self.size_of(&func.ty.return_ty), 0);
             thunk(indirect_args.as_ptr(), return_val_storage.as_mut_ptr());
 
             kernel32::FreeLibrary(module);
@@ -1218,7 +1214,7 @@ impl Driver {
                         .collect();
                     let ret_ty = frame.get_val(ret_ty, self).as_ty();
 
-                    Value::from_ty(Type::Function { param_tys, return_ty: Box::new(ret_ty) })
+                    Value::from_ty(Type::Function(FunctionType { param_tys, return_ty: Box::new(ret_ty) }))
                 }
                 &Instr::Struct { ref fields, id } => {
                     if !self.code.mir_code.structs.contains_key(&id) {

@@ -122,7 +122,7 @@ fn main() {
     let main = driver.code.mir_code.functions.iter()
         .position(|func| {
             match func.name {
-                Some(name) => name == main_sym && func.ret_ty == Type::Void && driver.code.num_parameters(func) == 0,
+                Some(name) => name == main_sym && *func.ty.return_ty == Type::Void && driver.code.num_parameters(func) == 0,
                 None => false,
             }
         });

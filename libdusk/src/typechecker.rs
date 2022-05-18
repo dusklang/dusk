@@ -11,7 +11,7 @@ use type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 
 use dire::hir::{self, ExprId, DeclId, StructId, PatternKind, Ident, VOID_EXPR};
 use dire::mir::Const;
-use dire::ty::{Type, QualType, IntWidth};
+use dire::ty::{Type, FunctionType, QualType, IntWidth};
 use dire::source_info::SourceRange;
 
 use crate::driver::Driver;
@@ -911,8 +911,8 @@ impl tir::Expr<tir::Call> {
                 let overload_decl = tp.overloads(self.decl_ref_id).overloads.iter().copied()
                     .find(|&decl| tp.fw_decl_types(decl).trivially_convertible_to(callee_ty));
                 if let Some(overload_decl) = overload_decl {
-                    if let Type::Function { param_tys, .. } = &callee_ty.ty {
-                        for (arg, param) in self.args.iter().copied().zip(param_tys) {
+                    if let Some(fun) = callee_ty.ty.as_function() {
+                        for (arg, param) in self.args.iter().copied().zip(&fun.param_tys) {
                             if can_unify_to_in_generic_context(tp.constraints(arg), &param.into(), &driver.tir.decls[overload_decl].generic_params).is_err() {
                                 return false;
                             }
@@ -930,15 +930,12 @@ impl tir::Expr<tir::Call> {
         let callee_ty = pref.as_ref().cloned()
             .filter(|pref| callee_one_of.iter().any(|(ty, _)| ty.trivially_convertible_to(pref) || pref.trivially_convertible_to(ty)))
             .unwrap_or_else(|| callee_one_of.iter().next().unwrap().0.clone());
-        if let Type::Function { param_tys, .. } = &callee_ty.ty {
-            debug_assert_eq!(param_tys.len(), self.args.len());
-            for (&arg, param_ty) in self.args.iter().zip(param_tys) {
-                tp.constraints_mut(arg).set_to(param_ty);
-            }
-            tp.generic_substitution_list_mut(self.decl_ref_id).extend(&self.args);
-        } else {
-            panic!("expected function type");
+        let param_tys = &callee_ty.ty.as_function().unwrap().param_tys;
+        debug_assert_eq!(param_tys.len(), self.args.len());
+        for (&arg, param_ty) in self.args.iter().zip(param_tys) {
+            tp.constraints_mut(arg).set_to(param_ty);
         }
+        tp.generic_substitution_list_mut(self.decl_ref_id).extend(&self.args);
 
         tp.constraints_mut(self.callee).set_to(callee_ty);
         if let Some(pref) = pref {
@@ -1366,7 +1363,7 @@ impl Driver {
                 .map(|ty| tp.get_evaluated_type(ty).clone())
                 .collect();
             let return_ty = Box::new(explicit_ty);
-            Type::Function { param_tys, return_ty }
+            Type::Function(FunctionType { param_tys, return_ty })
         } else {
             explicit_ty
         }

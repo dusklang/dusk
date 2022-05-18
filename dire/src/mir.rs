@@ -8,7 +8,7 @@ use display_adapter::display_adapter;
 use num_bigint::BigInt;
 
 use crate::hir::{Intrinsic, DeclId, StructId, EnumId, ModScopeId, ExternModId, ExternFunctionRef, GenericParamId};
-use crate::ty::Type;
+use crate::ty::{Type, FunctionType};
 use crate::{Code, BlockId, OpId};
 use crate::source_info::SourceRange;
 
@@ -111,8 +111,7 @@ impl InstrNamespace {
 #[derive(Debug, Default)]
 pub struct Function {
     pub name: Option<Sym>,
-    pub ret_ty: Type,
-    pub func_ty: Type,
+    pub ty: FunctionType,
     pub num_instrs: usize,
     /// Index 0 is defined to be the entry block
     pub blocks: Vec<BlockId>,
@@ -185,8 +184,7 @@ pub struct ExternMod {
 #[derive(Debug)]
 pub struct ExternFunction {
     pub name: String,
-    pub param_tys: Vec<Type>,
-    pub return_ty: Type,
+    pub ty: FunctionType,
 }
 
 pub struct MirCode {

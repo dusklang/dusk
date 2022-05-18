@@ -1,7 +1,7 @@
 use smallvec::SmallVec;
 use std::collections::HashMap;
 
-use dire::ty::{Type, QualType, IntWidth};
+use dire::ty::{Type, FunctionType, QualType, IntWidth};
 use dire::hir::GenericParamId;
 
 use crate::ty::BuiltinTraits;
@@ -537,7 +537,7 @@ fn substitute_generic_args(ty: &mut Type, generic_params: &[GenericParamId], gen
             }
         },
         Type::Pointer(pointee) => substitute_generic_args(&mut pointee.ty, generic_params, generic_args),
-        Type::Function { param_tys, return_ty } => {
+        Type::Function(FunctionType { param_tys, return_ty }) => {
             substitute_generic_args(return_ty, generic_params, generic_args);
             for param_ty in param_tys {
                 substitute_generic_args(param_ty, generic_params, generic_args);

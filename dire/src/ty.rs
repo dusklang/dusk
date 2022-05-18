@@ -24,6 +24,12 @@ pub enum FloatWidth {
     W32, W64,
 }
 
+#[derive(Clone, PartialEq, Eq, Default)]
+pub struct FunctionType {
+    pub param_tys: Vec<Type>,
+    pub return_ty: Box<Type>,
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub enum Type {
     Error,
@@ -34,10 +40,7 @@ pub enum Type {
     Float(FloatWidth),
     // TODO: Eliminate this separate heap allocation by interning all types into an IndexVec
     Pointer(Box<QualType>),
-    Function {
-        param_tys: Vec<Type>,
-        return_ty: Box<Type>,
-    },
+    Function(FunctionType),
     Struct(StructId),
     Enum(EnumId),
     Bool,
@@ -63,12 +66,16 @@ impl Type {
         )
     }
 
-    pub fn return_ty(&self) -> Option<&Type> {
-        if let Type::Function { return_ty, .. } = self {
-            Some(return_ty)
+    pub fn as_function(&self) -> Option<&FunctionType> {
+        if let Type::Function(fun) = self {
+            Some(fun)
         } else {
             None
         }
+    }
+
+    pub fn return_ty(&self) -> Option<&Type> {
+        self.as_function().map(|fun| fun.return_ty.as_ref())
     }
 
     pub fn deref(&self) -> Option<&QualType> {
@@ -180,16 +187,7 @@ impl fmt::Debug for Type {
                     write!(f, "*")
                 }
             },
-            Type::Function { param_tys, return_ty } => {
-                write!(f, "fn(")?;
-                for (i, param) in param_tys.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{:?}", param)?;
-                }
-                write!(f, "): {:?}", return_ty)
-            }
+            Type::Function(fun) => fun.fmt(f),
             // TODO: print out fields (issue #76)
             &Type::Struct(id) => {
                 write!(f, "struct{}", id.index())
@@ -201,6 +199,19 @@ impl fmt::Debug for Type {
                 write!(f, "generic_param{}", id.index())
             }
         }
+    }
+}
+
+impl fmt::Debug for FunctionType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "fn(")?;
+        for (i, param) in self.param_tys.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{:?}", param)?;
+        }
+        write!(f, "): {:?}", self.return_ty)
     }
 }
 

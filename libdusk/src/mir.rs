@@ -11,7 +11,7 @@ use display_adapter::display_adapter;
 use dire::hir::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, GenericParamId, Item, PatternBindingDeclId, ExternModId, ExternFunctionRef, PatternBindingPathComponent, VOID_TYPE};
 use dire::mir::{FuncId, StaticId, Const, Instr, InstrId, Function, MirCode, StructLayout, EnumLayout, ExternMod, ExternFunction, InstrNamespace, SwitchCase, VOID_INSTR};
 use dire::{Block, BlockId, Op, OpId};
-use dire::ty::{Type, FloatWidth};
+use dire::ty::{Type, FunctionType, FloatWidth};
 use dire::source_info::SourceRange;
 
 use crate::driver::Driver;
@@ -264,7 +264,7 @@ impl Driver {
                 FloatWidth::W32 => 32 / 8,
                 FloatWidth::W64 => 64 / 8,
             },
-            Type::Pointer(_) | Type::Function { .. } => {
+            Type::Pointer(_) | Type::Function(_) => {
                 let bit_width = arch.pointer_size();
                 assert_eq!(bit_width % 8, 0, "Unexpected bit width: not a multiple of eight!");
                 bit_width / 8
@@ -374,8 +374,8 @@ impl Driver {
     }
 
     pub fn build_standalone_expr(&mut self, expr: ExprId, tp: &impl TypeProvider) -> Function {
-        let func_ty = Type::Function { param_tys: Vec::new(), return_ty: Box::new(tp.ty(expr).clone()) };
-        self.build_function(None, tp.ty(expr).clone(), func_ty, FunctionBody::Expr(expr), DeclId::new(0)..DeclId::new(0), Vec::new(), tp)
+        let func_ty = FunctionType { param_tys: Vec::new(), return_ty: Box::new(tp.ty(expr).clone()) };
+        self.build_function(None, func_ty, FunctionBody::Expr(expr), DeclId::new(0)..DeclId::new(0), Vec::new(), tp)
     }
 
     fn resolve_extern_mod(&mut self, id: ExternModId, tp: &impl TypeProvider) {
@@ -393,8 +393,10 @@ impl Driver {
             imported_functions.push(
                 ExternFunction {
                     name: func.name.clone(),
-                    param_tys,
-                    return_ty,
+                    ty: FunctionType {
+                        param_tys,
+                        return_ty: Box::new(return_ty),
+                    },
                 }
             );
         }
@@ -430,10 +432,9 @@ impl Driver {
                 }
 
                 let params = params.clone();
-                let func_ty = self.decl_type(id, tp);
+                let func_ty = self.decl_type(id, tp).as_function().unwrap().clone();
                 let func = self.build_function(
                     Some(self.code.hir_code.names[id]),
-                    func_ty.return_ty().unwrap().clone(),
                     func_ty,
                     FunctionBody::Scope { scope, decl: id },
                     params,
@@ -619,7 +620,7 @@ impl Driver {
                 break;
             }
         }
-        writeln!(f, "): {:?} {{", func.ret_ty)?;
+        writeln!(f, "): {:?} {{", func.ty.return_ty.as_ref())?;
         for i in 0..func.blocks.len() {
             let block_id = func.blocks[i];
             writeln!(f, "%bb{}:", block_id.index())?;
@@ -807,8 +808,7 @@ enum FunctionBody {
 
 struct FunctionBuilder {
     name: Option<Sym>,
-    ret_ty: Type,
-    func_ty: Type,
+    ty: FunctionType,
     instrs: IndexCounter<InstrId>,
     blocks: Vec<BlockId>,
     current_block: BlockId,
@@ -857,8 +857,8 @@ impl Driver {
         self.code.ops[instr].get_mir_instr_type().unwrap()
     }
 
-    fn build_function(&mut self, name: Option<Sym>, ret_ty: Type, func_ty: Type, body: FunctionBody, params: Range<DeclId>, generic_params: Vec<GenericParamId>, tp: &impl TypeProvider) -> Function {
-        debug_assert_ne!(ret_ty, Type::Error, "can't build MIR function with Error return type");
+    fn build_function(&mut self, name: Option<Sym>, func_ty: FunctionType, body: FunctionBody, params: Range<DeclId>, generic_params: Vec<GenericParamId>, tp: &impl TypeProvider) -> Function {
+        debug_assert_ne!(func_ty.return_ty.as_ref(), &Type::Error, "can't build MIR function with Error return type");
 
         let mut entry = Block::default();
         let mut instr_namespace = InstrNamespace::default();
@@ -880,8 +880,7 @@ impl Driver {
         let entry = self.code.blocks.push(entry);
         let mut b = FunctionBuilder {
             name,
-            ret_ty,
-            func_ty,
+            ty: func_ty,
             instrs,
             blocks: vec![entry],
             current_block: entry,
@@ -903,8 +902,7 @@ impl Driver {
         };
         let mut function = Function {
             name: b.name,
-            ret_ty: b.ret_ty,
-            func_ty: b.func_ty,
+            ty: b.ty,
             num_instrs: b.instrs.len(),
             blocks: b.blocks,
             instr_namespace: b.instr_namespace,
@@ -935,9 +933,9 @@ impl Driver {
             Instr::Const(konst) => konst.ty(),
             Instr::Alloca(ty) => ty.clone().mut_ptr(),
             Instr::LogicalNot(_) => Type::Bool,
-            &Instr::Call { func, .. } => b.functions[func].ret_ty.clone(),
-            &Instr::FunctionRef { func, .. } => b.functions[func].func_ty.clone(),
-            Instr::ExternCall { func, .. } => b.extern_mods[&func.extern_mod].imported_functions[func.index].return_ty.clone(),
+            &Instr::Call { func, .. } => b.functions[func].ty.return_ty.as_ref().clone(),
+            &Instr::FunctionRef { func, .. } => Type::Function(b.functions[func].ty.clone()),
+            Instr::ExternCall { func, .. } => b.extern_mods[&func.extern_mod].imported_functions[func.index].ty.return_ty.as_ref().clone(),
             Instr::Intrinsic { ty, .. } => ty.clone(),
             Instr::Reinterpret(_, ty) | Instr::Truncate(_, ty) | Instr::SignExtend(_, ty)
             | Instr::ZeroExtend(_, ty) | Instr::FloatCast(_, ty) | Instr::FloatToInt(_, ty)

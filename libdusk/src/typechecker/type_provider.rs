@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use dire::hir::{ExprId, DeclId, DeclRefId, StructLitId, CastId, Namespace, VOID_EXPR, Decl};
 use dire::mir::Const;
-use dire::ty::{Type, QualType};
+use dire::ty::{Type, FunctionType, QualType};
 use dusk_proc_macros::df;
 
 use super::{CastMethod, StructLit, constraints::ConstraintList, Overloads};
@@ -154,7 +154,7 @@ impl RealTypeProvider {
                     .map(|ty| self.get_evaluated_type(ty).clone())
                     .collect();
                 let return_ty = Box::new(explicit_ty.unwrap());
-                self.decl_types[id].ty = Type::Function { param_tys, return_ty };
+                self.decl_types[id].ty = Type::Function(FunctionType { param_tys, return_ty });
             }
             _ => if let Some(explicit_ty) = explicit_ty {
                 self.decl_types[id].ty = explicit_ty;
@@ -383,7 +383,7 @@ impl<'base> MockTypeProvider<'base> {
                     .map(|ty| self.get_evaluated_type(ty).clone())
                     .collect();
                 let return_ty = Box::new(explicit_ty.unwrap());
-                self.fw_decl_types_mut(id).ty = Type::Function { param_tys, return_ty };
+                self.fw_decl_types_mut(id).ty = Type::Function(FunctionType { param_tys, return_ty });
             }
             _ => if let Some(explicit_ty) = explicit_ty {
                 self.fw_decl_types_mut(id).ty = explicit_ty;
