@@ -20,9 +20,8 @@
                 }
             },
             "args": [
-                "main.dusk"
-            ],
-            "cwd": "${workspaceFolder}/../prettyboy/"
+                "open_a_window.dusk"
+            ]
         },
         {
             "type": "lldb",
