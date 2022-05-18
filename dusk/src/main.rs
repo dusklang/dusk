@@ -7,7 +7,7 @@ use dire::arch::Arch;
 use libdusk::TirGraphOutput;
 use libdusk::driver::Driver;
 use libdusk::source_info::SourceMap;
-use libdusk::interpreter::InterpMode;
+use libdusk::interpreter::{restart_interp, register_driver, InterpMode};
 use libdusk::mir::FunctionRef;
 use libdusk::error::Error;
 use libdusk::debug::{self, Message as DvdMessage};
@@ -66,6 +66,9 @@ fn main() {
     let mut src_map = SourceMap::new();
     let loaded_file = src_map.add_file(&opt.input).is_ok();
     let mut driver = Driver::new(src_map, Arch::X86_64, opt.run_refiner);
+    unsafe {
+        register_driver(&mut driver);
+    }
     driver.initialize_hir();
 
     if !loaded_file {
@@ -128,7 +131,7 @@ fn main() {
         });
     if let Some(main) = main {
         println!("Running main in the interpreter:\n");
-        driver.interp.mode = InterpMode::RunTime;
+        restart_interp(InterpMode::RunTime);
         driver.call(FunctionRef::Id(FuncId::new(main)), Vec::new(), Vec::new());
     } else {
         driver.errors.push(Error::new("Couldn't find main function with no parameters and a return type of `void`"));

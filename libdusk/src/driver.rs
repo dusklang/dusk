@@ -12,7 +12,7 @@ use crate::hir;
 use crate::tir;
 use crate::error::Error;
 use crate::mir::{self, FunctionRef};
-use crate::interpreter::Interpreter;
+use crate::interpreter::{Interpreter, InterpMode};
 use crate::typechecker::type_provider::TypeProvider;
 use crate::refine::Refine;
 use crate::index_vec::*;
@@ -47,7 +47,7 @@ impl Driver {
             mir: mir::Builder::new(),
             refine: Refine::default(),
             code: Code::default(),
-            interp: Interpreter::new(),
+            interp: Interpreter::new(InterpMode::CompileTime),
             flushed_errors: 0,
             run_refiner,
         }

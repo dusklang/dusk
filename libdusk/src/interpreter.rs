@@ -6,6 +6,7 @@ use std::mem;
 use std::slice;
 use std::fmt::Write;
 use std::cell::RefCell;
+use std::sync::RwLock;
 use std::borrow::Cow;
 use std::cmp::min;
 
@@ -15,6 +16,7 @@ use paste::paste;
 use num_bigint::{BigInt, Sign};
 use display_adapter::display_adapter;
 use index_vec::IndexVec;
+use lazy_static::lazy_static;
 
 use dire::arch::Arch;
 use dire::hir::{Intrinsic, ModScopeId, StructId, EnumId, GenericParamId, ExternFunctionRef};
@@ -352,28 +354,28 @@ pub enum InterpMode {
     RunTime,
 }
 
+struct Allocation(region::Allocation);
+unsafe impl Sync for Allocation {}
+unsafe impl Send for Allocation {}
+
 pub struct Interpreter {
     statics: HashMap<StaticId, Value>,
     allocations: HashMap<usize, alloc::Layout>,
     switch_cache: HashMap<OpId, HashMap<Box<[u8]>, BlockId>>,
-    inverse_thunk_cache: HashMap<FuncId, region::Allocation>,
-    pub mode: InterpMode,
+    inverse_thunk_cache: HashMap<FuncId, Allocation>,
+    mode: InterpMode,
 }
 
 impl Interpreter {
-    pub fn new() -> Self {
+    pub fn new(mode: InterpMode) -> Self {
         Self {
             statics: HashMap::new(),
             allocations: HashMap::new(),
             switch_cache: HashMap::new(),
             inverse_thunk_cache: HashMap::new(),
-            mode: InterpMode::CompileTime,
+            mode,
         }
     }
-}
-
-thread_local! {
-    static INTERP_STACK: RefCell<Vec<StackFrame>> = RefCell::new(Vec::new());
 }
 
 macro_rules! bin_op {
@@ -455,8 +457,8 @@ macro_rules! bin_op {
     };
 }
 
-extern "C" fn interp_ffi_entry_point(func: u32, params: *const *const (), return_value: *mut ()) {
-    let _func = FuncId::new(func as usize);
+extern "C" fn interp_ffi_entry_point(func: u32, params: *const *const (), return_value_addr: *mut ()) {
+    let func_id = FuncId::new(func as usize);
     
     let module = unsafe {
         let user32 = CString::new("user32.dll").unwrap();
@@ -465,18 +467,48 @@ extern "C" fn interp_ffi_entry_point(func: u32, params: *const *const (), return
     if module.is_null() {
         panic!("unable to load library user32");
     }
-    let func_name = CString::new("DefWindowProcA").unwrap();
-    let func_ptr = unsafe { kernel32::GetProcAddress(module, func_name.as_ptr()) };
-    unsafe {
-        type WndProc = fn(*const (), u32, u64, i64) -> i64;
-        let func_ptr: WndProc = std::mem::transmute(func_ptr);
-        // Nothing to see here, this is totally safe.
-        *(return_value as *mut i64) = func_ptr(
-            **(params.add(0) as *const  *const *const ()),
-            **(params.add(1) as *const *const u32),
-            **(params.add(2) as *const *const u64),
-            **(params.add(3) as *const *const i64)
-        );
+    let driver = unsafe { &mut *DRIVER.read().unwrap().0 };
+
+    let func = &driver.code.mir_code.functions[func_id];
+    let return_ty = func.ty.return_ty.as_ref().clone();
+    let mut arguments = Vec::with_capacity(func.ty.param_tys.len());
+    macro_rules! get_param {
+        ($index:ident) => {
+            unsafe {
+                **(params.add($index) as *const *const _)
+            }
+        }
+    }
+    for (i, ty) in func.ty.param_tys.iter().enumerate() {
+        let val = match ty {
+            Type::Int { width: IntWidth::W8, .. } => Value::from_u8(get_param!(i)),
+            Type::Int { width: IntWidth::W16, .. } => Value::from_u16(get_param!(i)),
+            Type::Int { width: IntWidth::W32, .. } => Value::from_u32(get_param!(i)),
+            Type::Int { width: IntWidth::W64 | IntWidth::Pointer, .. } | Type::Pointer(_) => {
+                assert_eq!(driver.arch.pointer_size(), 64);
+                Value::from_u64(get_param!(i))
+            },
+            _ => todo!("parameter type {:?}", ty),
+        };
+        arguments.push(val);
+    }
+    let return_value = driver.call(FunctionRef::Id(func_id), arguments, Vec::new());
+    macro_rules! set_ret_val {
+        ($val:expr) => {
+            unsafe {
+                *(return_value_addr as *mut _) = $val;
+            }
+        }
+    }
+    match return_ty {
+        Type::Int { width: IntWidth::W8, .. } => set_ret_val!(return_value.as_u8()),
+        Type::Int { width: IntWidth::W16, .. } => set_ret_val!(return_value.as_u16()),
+        Type::Int { width: IntWidth::W32, .. } => set_ret_val!(return_value.as_u32()),
+        Type::Int { width: IntWidth::W64 | IntWidth::Pointer, .. } | Type::Pointer(_) => {
+            assert_eq!(driver.arch.pointer_size(), 64);
+            set_ret_val!(return_value.as_u64());
+        },
+        _ => todo!("parameter type {:?}", return_ty),
     }
 }
 
@@ -612,8 +644,8 @@ impl Driver {
     ///     }
     ///     ```
     pub fn fetch_inverse_thunk(&mut self, func_id: FuncId) -> Value {
-        if let Some(alloc) = self.interp.inverse_thunk_cache.get(&func_id) {
-            return Value::from_usize(alloc.as_ptr::<()>() as usize);
+        if let Some(alloc) = INTERP.read().unwrap().inverse_thunk_cache.get(&func_id) {
+            return Value::from_usize(alloc.0.as_ptr::<()>() as usize);
         }
 
         let func = &self.code.mir_code.functions[func_id];
@@ -701,7 +733,7 @@ impl Driver {
 
         let thunk = thunk.allocate();
         let val = Value::from_usize(thunk.as_ptr::<u8>() as usize);
-        self.interp.inverse_thunk_cache.insert(func_id, thunk);
+        INTERP.write().unwrap().inverse_thunk_cache.insert(func_id, Allocation(thunk));
 
         val
     }
@@ -1002,7 +1034,7 @@ impl Driver {
                             let layout = alloc::Layout::from_size_align(size, 8).unwrap();
                             let buf = unsafe { alloc::alloc(layout) };
                             let address: usize = unsafe { mem::transmute(buf) };
-                            self.interp.allocations.insert(address, layout);
+                            INTERP.write().unwrap().allocations.insert(address, layout);
                             Value::from_usize(address)
                         }
                         Intrinsic::Free => {
@@ -1010,7 +1042,7 @@ impl Driver {
                             assert_eq!(self.arch.pointer_size(), 64);
                             let ptr = frame.get_val(arguments[0], self).as_raw_ptr();
                             let address: usize = unsafe { mem::transmute(ptr) };
-                            let layout = self.interp.allocations.remove(&address).unwrap();
+                            let layout = INTERP.write().unwrap().allocations.remove(&address).unwrap();
                             unsafe { alloc::dealloc(ptr, layout) };
                             Value::Nothing
                         },
@@ -1197,13 +1229,15 @@ impl Driver {
                     Value::Nothing
                 },
                 &Instr::AddressOfStatic(statik) => {
-                    if let InterpMode::CompileTime = self.interp.mode {
+                    if let InterpMode::CompileTime = INTERP.read().unwrap().mode {
                         panic!("Can't access static at compile time!");
                     }
                     let static_value = Value::from_const(&self.code.mir_code.statics[statik].val.clone(), self);
-                    let statik = self.interp.statics.entry(statik)
-                        .or_insert(static_value);
-                    Value::from_usize(unsafe { mem::transmute(statik.as_bytes().as_ptr()) })
+                    let statik = INTERP.write().unwrap().statics.entry(statik)
+                        .or_insert(static_value)
+                        .as_bytes()
+                        .as_ptr();
+                    Value::from_usize(unsafe { mem::transmute(statik) })
                 },
                 &Instr::Pointer { op, is_mut } => {
                     Value::from_ty(frame.get_val(op, self).as_ty().ptr_with_mut(is_mut))
@@ -1271,17 +1305,18 @@ impl Driver {
                 &Instr::SwitchBr { scrutinee, ref cases, catch_all_bb } => {
                     // TODO: this is a very crude (and possibly slow) way of supporting arbitrary integer scrutinees
                     let scrutinee = frame.get_val(scrutinee, self).as_bytes().to_owned();
-                    if !self.interp.switch_cache.contains_key(&next_op) {
+                    let block = if let Some(table) = INTERP.read().unwrap().switch_cache.get(&next_op) {
+                        table.get(scrutinee.as_ref()).copied()
+                    } else {
                         let mut table = HashMap::new();
                         for case in cases.clone() {
                             let val = Value::from_const(&case.value, self);
                             let val = val.as_bytes();
                             table.insert(val.as_ref().to_owned().into_boxed_slice(), case.bb);
                         }
-                        self.interp.switch_cache.insert(next_op, table);
-                    }
-                    let table = self.interp.switch_cache.get(&next_op).unwrap();
-                    let block = table.get(scrutinee.as_ref()).cloned().unwrap_or(catch_all_bb);
+                        INTERP.write().unwrap().switch_cache.entry(next_op).or_insert(table)
+                            .get(scrutinee.as_ref()).copied()
+                    }.unwrap_or(catch_all_bb);
 
                     let frame = stack.last_mut().unwrap();
                     frame.branch_to(block);
@@ -1329,4 +1364,24 @@ impl Driver {
         frame.pc += 1;
         None
     }
+}
+
+struct GlobalDriver(*mut Driver);
+unsafe impl Send for GlobalDriver {}
+unsafe impl Sync for GlobalDriver {}
+
+lazy_static! {
+    static ref INTERP: RwLock<Interpreter> = RwLock::new(Interpreter::new(InterpMode::CompileTime));
+
+    // TODO: Thread safety!!!!!!!!!
+    static ref DRIVER: RwLock<GlobalDriver> = RwLock::new(GlobalDriver(std::ptr::null_mut()));
+}
+thread_local! {
+    static INTERP_STACK: RefCell<Vec<StackFrame>> = RefCell::new(Vec::new());
+}
+pub fn restart_interp(mode: InterpMode) {
+    *INTERP.write().unwrap() = Interpreter::new(mode);
+}
+pub unsafe fn register_driver(driver: &mut Driver) {
+    DRIVER.write().unwrap().0 = driver;
 }
