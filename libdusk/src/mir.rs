@@ -565,7 +565,7 @@ impl Driver {
                     .replace(".", "_dot_");
                 write!(f, "const_{}", name)?
             },
-            Const::Int { ref lit, .. } => write!(f, "const_int {}", lit)?,
+            Const::Int { ref lit, .. } => write!(f, "const_int_{}", lit)?,
             Const::Str { id, .. } => write!(f, "string_{}", identifierify(self.code.mir_code.strings[id].clone().into_bytes()))?,
             Const::Ty(ref ty) => write!(f, "type_{}", identifierify(format!("{:?}", ty).into_bytes()))?,
             Const::Void => write!(f, "const_void")?,
