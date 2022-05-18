@@ -915,15 +915,7 @@ impl Driver {
         function 
     }
 
-    fn optimize_function(&mut self, func: &mut Function) {
-        // Get rid of empty blocks
-        // TODO: get rid of unreachable blocks instead. Otherwise we might accidentally remove an
-        // empty, reachable block and fail silently (at MIR generation time).
-        func.blocks.retain(|&block| {
-            let block = &self.code.blocks[block];
-            !block.ops.is_empty()
-        });
-
+    fn remove_redundant_loads(&mut self, func: &mut Function) {
         // Remove obviously-redundant loads (assumes no other threads are accessing a memory location simultaneously)
         let mut replace_list = Vec::new();
         for &block_id in &func.blocks {
@@ -939,7 +931,6 @@ impl Driver {
                             if load_loc == location {
                                 replace_list.push((next_op, value));
                                 delete_list.insert(next_op);
-                                println!("deleted redundant load!");
                             }
                         }
                     }
@@ -956,8 +947,52 @@ impl Driver {
                 }
             }
         }
+    }
 
-        // Get rid of obviously-unused values
+    fn remove_unused_allocas(&mut self, func: &mut Function) {
+        for &block_id in &func.blocks {
+            let block = &self.code.blocks[block_id];
+            let mut delete_list = HashSet::new();
+            for &op_id in &block.ops {
+                let instr = self.code.ops[op_id].as_mir_instr().unwrap();
+                let mut potential_deletions = Vec::new();
+                if let Instr::Alloca(_) = instr {
+                    let mut is_used = false;
+                    'check_uses: for &other_block_id in &func.blocks {
+                        let other_block = &self.code.blocks[other_block_id];
+
+                        for &other_op_id in &other_block.ops {
+                            let other_instr = self.code.ops[other_op_id].as_mir_instr().unwrap();
+                            if other_instr.references_value(op_id) {
+                                if let &Instr::Store { value, .. } = other_instr {
+                                    // If the address of the alloca is used as the *value* in the store, then we can't
+                                    // delete either instruction. Otherwise, it must be the location, in which case we
+                                    // can delete both (assuming the alloca isn't used elsewhere).
+                                    if value == op_id {
+                                        is_used = true;
+                                        break 'check_uses;
+                                    } else {
+                                        potential_deletions.push(other_op_id);
+                                    }
+                                } else {
+                                    is_used = true;
+                                    break 'check_uses;
+                                }
+                            }
+                        }
+                    }
+                    if !is_used {
+                        delete_list.insert(op_id);
+                        delete_list.extend(potential_deletions);
+                    }
+                }
+            }
+            
+            self.code.blocks[block_id].ops.retain(|op| !delete_list.contains(op));
+        }
+    }
+
+    fn remove_unused_values(&mut self, func: &mut Function) {
         for &block_id in &func.blocks {
             let block = &self.code.blocks[block_id];
             let mut delete_list = HashSet::new();
@@ -979,14 +1014,15 @@ impl Driver {
                     }
                     if !is_used {
                         delete_list.insert(op_id);
-                        println!("deleted unused value!");
                     }
                 }
             }
 
             self.code.blocks[block_id].ops.retain(|op| !delete_list.contains(op));
         }
+    }
 
+    fn remove_redundant_blocks(&mut self, func: &mut Function) {
         // Replace blocks that do nothing but branch to another block
         let mut replace_list = Vec::new();
         let mut delete_list = HashSet::new();
@@ -1000,7 +1036,6 @@ impl Driver {
                 if other != block_id {
                     replace_list.push((block_id, other));
                     delete_list.insert(block_id);
-                    println!("deleted redundant block!");
                 }
             }
         }
@@ -1012,6 +1047,23 @@ impl Driver {
             for &(from, to) in &replace_list {
                 terminal.replace_bb(from, to);
             }
+        }
+    }
+
+    fn optimize_function(&mut self, func: &mut Function) {
+        // Get rid of empty blocks
+        // TODO: get rid of unreachable blocks instead. Otherwise we might accidentally remove an
+        // empty, reachable block and fail silently (at MIR generation time).
+        func.blocks.retain(|&block| {
+            let block = &self.code.blocks[block];
+            !block.ops.is_empty()
+        });
+
+        for _ in 0..5 {
+            self.remove_redundant_loads(func);
+            self.remove_unused_allocas(func);
+            self.remove_unused_values(func);
+            self.remove_redundant_blocks(func);
         }
     }
 
