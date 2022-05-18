@@ -1305,9 +1305,13 @@ impl Driver {
                 &Instr::SwitchBr { scrutinee, ref cases, catch_all_bb } => {
                     // TODO: this is a very crude (and possibly slow) way of supporting arbitrary integer scrutinees
                     let scrutinee = frame.get_val(scrutinee, self).as_bytes().to_owned();
-                    let block = if let Some(table) = INTERP.read().unwrap().switch_cache.get(&next_op) {
-                        table.get(scrutinee.as_ref()).copied()
+                    let interp = INTERP.read().unwrap();
+                    let block = if let Some(table) = interp.switch_cache.get(&next_op) {
+                        let block = table.get(scrutinee.as_ref()).copied();
+                        std::mem::drop(interp);
+                        block
                     } else {
+                        std::mem::drop(interp);
                         let mut table = HashMap::new();
                         for case in cases.clone() {
                             let val = Value::from_const(&case.value, self);

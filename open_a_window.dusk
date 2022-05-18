@@ -142,8 +142,15 @@ WNDCLASS :: struct {
 
 ATOM :: WORD
 
+
 fn main_window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM): LRESULT {
-    print("Hello from Dusk window proc!\n")
+    switch msg {
+        // WM_CREATE
+        $0001: {
+            print("WM_CREATE\n")
+        }
+        _: {}
+    }
     user32.DefWindowProcA(hwnd, msg, wparam, lparam)
 }
 
