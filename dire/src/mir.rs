@@ -64,6 +64,30 @@ pub enum Instr {
     Parameter(Type),
 }
 
+impl Instr {
+    fn replace_bb(&mut self, old: BlockId, new: BlockId) {
+        fn replace(target: &mut BlockId, old: BlockId, new: BlockId) {
+            if *target == old {
+                *target = new;
+            }
+        }
+        match self {
+            Instr::Br(bb) => replace(bb, old, new),
+            Instr::CondBr { true_bb, false_bb, .. } => {
+                replace(true_bb, old, new);
+                replace(false_bb, old, new);
+            },
+            Instr::SwitchBr { cases, catch_all_bb, .. } => {
+                for case in cases {
+                    replace(&mut case.bb, old, new);
+                }
+                replace(catch_all_bb, old, new);
+            },
+            _ => {}
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Const {
     Int { lit: BigInt, ty: Type },
