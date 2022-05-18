@@ -1702,7 +1702,12 @@ impl Driver {
             },
             DataDest::Branch(true_bb, false_bb) => {
                 let instr = self.handle_indirection(b, val);
-                let val = self.push_instr(b, Instr::CondBr { condition: instr, true_bb, false_bb }, instr).direct();
+                let val = if let &Instr::Const(Const::Bool(val)) = self.code.ops[instr].as_mir_instr().unwrap() {
+                    let bb = [false_bb, true_bb][val as usize];
+                    self.push_instr(b, Instr::Br(bb), instr).direct()
+                } else {
+                    self.push_instr(b, Instr::CondBr { condition: instr, true_bb, false_bb }, instr).direct()
+                };
                 self.end_current_bb(b);
                 return val;
             },
