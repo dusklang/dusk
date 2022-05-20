@@ -79,7 +79,7 @@ macro_rules! int_conversions {
 int_conversions!(u8, u16, u32, u64, usize, i8, i16, i32, i64, isize);
 
 impl Driver {
-    fn eval_struct_lit(&mut self, id: StructId, fields: impl Iterator<Item=Value>) -> Value {
+    fn eval_struct_lit(&self, id: StructId, fields: impl Iterator<Item=Value>) -> Value {
         let strukt = self.code.mir_code.structs[&id].clone();
         let mut buf = SmallVec::new();
         buf.resize(strukt.layout.size, 0);
@@ -99,7 +99,7 @@ struct Enum {
 }
 
 impl Value {
-    fn as_bytes_with_driver_maybe(&self, d: Option<&mut Driver>) -> Cow<[u8]> {
+    fn as_bytes_with_driver_maybe(&self, d: Option<&Driver>) -> Cow<[u8]> {
         match self {
             Value::Inline(storage) => Cow::Borrowed(storage.as_ref()),
             Value::Dynamic(ptr) => unsafe {
@@ -114,7 +114,7 @@ impl Value {
             Value::Nothing => Cow::Borrowed(&[]),
         }
     }
-    fn as_bytes_with_driver(&self, d: &mut Driver) -> Cow<[u8]> {
+    fn as_bytes_with_driver(&self, d: &Driver) -> Cow<[u8]> {
         self.as_bytes_with_driver_maybe(Some(d))
     }
     fn as_bytes(&self) -> Cow<[u8]> {
@@ -242,7 +242,7 @@ impl Value {
         Value::from_bytes(&bytes)
     }
 
-    pub fn from_const(konst: &Const, driver: &mut Driver) -> Value {
+    pub fn from_const(konst: &Const, driver: &Driver) -> Value {
         match *konst {
             Const::Int { ref lit, ref ty } => match ty {
                 &Type::Int { width, is_signed } => Value::from_big_int(lit.clone(), width, is_signed, driver.arch),
@@ -643,7 +643,7 @@ impl Driver {
     ///         return return_value;
     ///     }
     ///     ```
-    pub fn fetch_inverse_thunk(&mut self, func_id: FuncId) -> Value {
+    pub fn fetch_inverse_thunk(&self, func_id: FuncId) -> Value {
         if let Some(alloc) = INTERP.read().unwrap().inverse_thunk_cache.get(&func_id) {
             return Value::from_usize(alloc.0.as_ptr::<()>() as usize);
         }
@@ -738,7 +738,7 @@ impl Driver {
         val
     }
     
-    pub fn extern_call(&mut self, func_ref: ExternFunctionRef, mut args: Vec<Box<[u8]>>) -> Value {
+    pub fn extern_call(&self, func_ref: ExternFunctionRef, mut args: Vec<Box<[u8]>>) -> Value {
         let indirect_args: Vec<*mut u8> = args.iter_mut()
             .map(|arg| arg.as_mut_ptr())
             .collect();
@@ -1096,18 +1096,20 @@ impl Driver {
                             assert_eq!(arguments.len(), 2);
                             let ty = frame.get_val(arguments[0], self).as_ty();
                             let field_name = unsafe { CStr::from_ptr(frame.get_val(arguments[1], self).as_raw_ptr() as *const _) };
-                            let field_name = self.interner.get_or_intern(field_name.to_str().unwrap());
+                            let field_name = self.interner.get(field_name.to_str().unwrap());
                             let mut offset = None;
-                            match ty {
-                                Type::Struct(strukt) => {
-                                    for (index, field) in self.code.hir_code.structs[strukt].fields.iter().enumerate() {
-                                        if field_name == field.name {
-                                            offset = Some(self.code.mir_code.structs[&strukt].layout.field_offsets[index]);
-                                            break;
+                            if let Some(field_name) = field_name {
+                                match ty {
+                                    Type::Struct(strukt) => {
+                                        for (index, field) in self.code.hir_code.structs[strukt].fields.iter().enumerate() {
+                                            if field_name == field.name {
+                                                offset = Some(self.code.mir_code.structs[&strukt].layout.field_offsets[index]);
+                                                break;
+                                            }
                                         }
                                     }
+                                    _ => panic!("Can't get field offset on a non-struct type"),
                                 }
-                                _ => panic!("Can't get field offset on a non-struct type"),
                             }
                             let offset = offset.expect("No such field name in call to offset_of");
                             Value::from_usize(offset)
