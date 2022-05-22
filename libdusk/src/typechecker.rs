@@ -923,21 +923,21 @@ impl tir::Expr<tir::Call> {
         let mut callee_one_of = tp.constraints_mut(self.callee).get_one_of().unwrap().clone();
         callee_one_of.retain(|callee_ty, _| {
             let return_ty: QualType = callee_ty.ty.return_ty().unwrap().clone().into();
-                // TODO: this is a temporary hack that should be removed.
-                let overload_decl = tp.overloads(self.decl_ref_id).overloads.iter().copied()
-                    .find(|&decl| tp.fw_decl_types(decl).trivially_convertible_to(callee_ty));
-                if let Some(overload_decl) = overload_decl {
-                    if let Some(fun) = callee_ty.ty.as_function() {
-                        for (arg, param) in self.args.iter().copied().zip(&fun.param_tys) {
-                            if can_unify_to_in_generic_context(tp.constraints(arg), &param.into(), &driver.tir.decls[overload_decl].generic_params).is_err() {
-                                return false;
-                            }
+            // TODO: this is a temporary hack that should be removed.
+            let overload_decl = tp.overloads(self.decl_ref_id).overloads.iter().copied()
+                .find(|&decl| tp.fw_decl_types(decl).trivially_convertible_to(callee_ty));
+            if let Some(overload_decl) = overload_decl {
+                if let Some(fun) = callee_ty.ty.as_function() {
+                    for (arg, param) in self.args.iter().copied().zip(&fun.param_tys) {
+                        if can_unify_to_in_generic_context(tp.constraints(arg), &param.into(), &driver.tir.decls[overload_decl].generic_params).is_err() {
+                            return false;
                         }
                     }
-                    return_ty.trivially_convertible_to(&ty)
-                } else {
-                    false
                 }
+                return_ty.trivially_convertible_to(&ty)
+            } else {
+                false
+            }
         });
 
         let pref = tp.constraints(self.callee).preferred_type().cloned();
@@ -949,7 +949,11 @@ impl tir::Expr<tir::Call> {
         let param_tys = &callee_ty.ty.as_function().unwrap().param_tys;
         debug_assert_eq!(param_tys.len(), self.args.len());
         for (&arg, param_ty) in self.args.iter().zip(param_tys) {
-            tp.constraints_mut(arg).set_to(param_ty);
+            if let Type::Inout(param_ty) = param_ty {
+                tp.constraints_mut(arg).set_to(QualType { ty: param_ty.as_ref().clone(), is_mut: true });
+            } else {
+                tp.constraints_mut(arg).set_to(param_ty);
+            }
         }
         tp.generic_substitution_list_mut(self.decl_ref_id).extend(&self.args);
 

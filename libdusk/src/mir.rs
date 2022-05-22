@@ -274,6 +274,7 @@ impl Driver {
             &Type::Struct(id) => self.code.mir_code.structs[&id].layout.size,
             &Type::Enum(_id) => 4,
             Type::GenericParam(_) => panic!("can't get size of generic parameter without more context"),
+            Type::Inout(_) => panic!("can't get size of inout parameter type"),
         }
     }
 

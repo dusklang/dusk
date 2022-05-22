@@ -14,6 +14,8 @@ pub enum BinOp {
     MultAssign, DivAssign, ModAssign,
     AddAssign, SubAssign,
     BitwiseAndAssign, BitwiseOrAssign,
+    LeftShiftAssign, RightShiftAssign,
+    XorAssign,
     LeftShift, RightShift,
 }
 
@@ -80,6 +82,9 @@ impl BinOp {
             SubAssign => "-=",
             BitwiseAndAssign => "&=",
             BitwiseOrAssign => "|=",
+            XorAssign => "^=",
+            LeftShiftAssign => "<<=",
+            RightShiftAssign => ">>=",
             BitwiseXor => "^",
             LeftShift => "<<",
             RightShift => ">>",
@@ -98,7 +103,7 @@ impl BinOp {
             LogicalAnd | LogicalOr => 5,
             Assign | AddAssign | SubAssign | MultAssign |
                 DivAssign | ModAssign | BitwiseAndAssign | 
-                BitwiseOrAssign => 6
+                BitwiseOrAssign | XorAssign | LeftShiftAssign | RightShiftAssign => 6,
         }
     }
 }

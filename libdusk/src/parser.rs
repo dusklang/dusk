@@ -39,17 +39,23 @@ impl Driver {
         // TODO: Add intrinsics literally anywhere but in the parser.
 
         // Integers, floats and bool
-        let values: Vec<_> = [
+        let types = [
             Type::u8(), Type::u16(), Type::u32(), Type::u64(), Type::usize(),
             Type::i8(), Type::i16(), Type::i32(), Type::i64(), Type::isize(),
             Type::f32(), Type::f64(), Type::Bool
-        ].iter().map(|ty| self.add_const_ty(ty.clone())).collect();
-        let numerics = &values[0..12];
+        ];
+        let inout_types = types.clone().into_iter().map(|ty| ty.inout());
+        let types: Vec<_> = types.iter().map(|ty| self.add_const_ty(ty.clone())).collect();
+        let inout_types: Vec<_> = inout_types.map(|ty| self.add_const_ty(ty.clone())).collect();
+
+        let numerics = &types[0..12];
+        let inout_numerics = &inout_types[0..12];
         let signed_numerics = &numerics[5..];
         let integers = &numerics[0..10];
+        let inout_integers = &inout_numerics[0..10];
 
-        let boool        = values[12];
-        let uu8          = values[0];
+        let boool        = types[12];
+        let uu8          = types[0];
         let never        = self.add_const_ty(Type::Never);
         let uusize       = self.add_const_ty(Type::usize());
         let u8_ptr       = self.add_const_ty(Type::u8().ptr());
@@ -62,19 +68,29 @@ impl Driver {
                 self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], ty.clone(), true);
             }
         }
+        for &intr in &[MultAssign, DivAssign, ModAssign, AddAssign, SubAssign] {
+            for (inout_ty, ty) in inout_numerics.iter().zip(numerics) {
+                self.add_intrinsic(intr, smallvec![inout_ty.clone(), ty.clone()], hir::VOID_TYPE, true);
+            }
+        }
         for &intr in &[Less, LessOrEq, Greater, GreaterOrEq] {
             for ty in numerics {
                 self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], boool, true);
             }
         }
         for &intr in &[Eq, NotEq] {
-            for ty in &values {
+            for ty in &types {
                 self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], boool, true);
             }
         }
         for &intr in &[BitwiseAnd, BitwiseOr, BitwiseXor, LeftShift, RightShift] {
             for ty in integers {
                 self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], ty.clone(), true);
+            }
+        }
+        for &intr in &[AndAssign, OrAssign, XorAssign, LeftShiftAssign, RightShiftAssign] {
+            for (inout_ty, ty) in inout_integers.iter().zip(integers) {
+                self.add_intrinsic(intr, smallvec![inout_ty.clone(), ty.clone()], hir::VOID_TYPE, true);
             }
         }
         for ty in integers {
@@ -150,6 +166,9 @@ impl Driver {
             TokenKind::ModAssign => BinOp::ModAssign,
             TokenKind::BitwiseAndAssign => BinOp::BitwiseAndAssign,
             TokenKind::BitwiseOrAssign => BinOp::BitwiseOrAssign,
+            TokenKind::XorAssign => BinOp::XorAssign,
+            TokenKind::LeftShiftAssign => BinOp::LeftShiftAssign,
+            TokenKind::RightShiftAssign => BinOp::RightShiftAssign,
             TokenKind::Caret => BinOp::BitwiseXor,
             TokenKind::LeftShift => BinOp::LeftShift,
             TokenKind::RightShift => BinOp::RightShift,

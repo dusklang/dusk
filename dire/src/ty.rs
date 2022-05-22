@@ -40,6 +40,7 @@ pub enum Type {
     Float(FloatWidth),
     // TODO: Eliminate this separate heap allocation by interning all types into an IndexVec
     Pointer(Box<QualType>),
+    Inout(Box<Type>),
     Function(FunctionType),
     Struct(StructId),
     Enum(EnumId),
@@ -63,6 +64,12 @@ impl Type {
     pub fn ptr_with_mut(self, is_mut: bool) -> Self {
         Type::Pointer(
             Box::new(QualType { ty: self, is_mut })
+        )
+    }
+
+    pub fn inout(self) -> Self {
+        Type::Inout(
+            Box::new(self)
         )
     }
 
@@ -187,6 +194,7 @@ impl fmt::Debug for Type {
                     write!(f, "*")
                 }
             },
+            Type::Inout(ty) => write!(f, "inout {:?}", ty),
             Type::Function(fun) => fun.fmt(f),
             // TODO: print out fields (issue #76)
             &Type::Struct(id) => {
@@ -223,6 +231,13 @@ pub struct QualType {
 
 impl QualType {
     pub fn trivially_convertible_to(&self, other: &QualType) -> bool {
+        if let Type::Inout(ty) = &other.ty {
+            if !self.is_mut {
+                return false;
+            } else {
+                return self.ty.trivially_convertible_to(&ty);
+            }
+        }
         if !self.is_mut && other.is_mut {
             return false;
         }

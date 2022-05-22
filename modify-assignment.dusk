@@ -1,0 +1,4 @@
+fn main() {
+    val := 0
+    val += 3
+}

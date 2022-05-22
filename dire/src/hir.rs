@@ -329,6 +329,19 @@ pub enum Intrinsic {
     LogicalNot,
     Neg,
     Pos,
+
+    // modify-assignment operators
+    MultAssign,
+    DivAssign,
+    ModAssign,
+    AddAssign,
+    SubAssign,
+    AndAssign,
+    OrAssign,
+    XorAssign,
+    LeftShiftAssign,
+    RightShiftAssign,
+
     Panic,
     Print,
     Malloc,
@@ -385,6 +398,18 @@ impl Intrinsic {
             LogicalNot => "!",
             Neg => "-",
             Pos => "+",
+
+            MultAssign => "*=",
+            DivAssign => "/=",
+            ModAssign => "%=",
+            AddAssign => "+=",
+            SubAssign => "-=",
+            AndAssign => "&=",
+            OrAssign => "|=",
+            XorAssign => "^=",
+            LeftShiftAssign => "<<=",
+            RightShiftAssign => ">>=",
+
             Panic => "panic",
             Print => "print",
             Malloc => "malloc",
