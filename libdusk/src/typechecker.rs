@@ -14,7 +14,7 @@ use dire::mir::Const;
 use dire::ty::{Type, FunctionType, QualType, IntWidth};
 use dire::source_info::SourceRange;
 
-use crate::driver::Driver;
+use crate::driver::{Driver, DriverRef};
 use crate::error::Error;
 use crate::ty::BuiltinTraits;
 use crate::tir::{Units, UnitItems, ExprNamespace, self};
@@ -1466,16 +1466,18 @@ impl Driver {
         self.initialize_global_expressions(&mut tp);
         tp
     }
+}
 
+impl DriverRef<'_> {
     pub fn type_check(&mut self, units: &Units, tp: &mut RealTypeProvider) -> Result<(), ()> {
         for (num, unit) in units.units.iter().enumerate() {
             // Pass 1: propagate info down from leaves to roots
-            self.run_pass_1(&unit.items, UnitKind::Normal(num), 0, tp);
+            self.write().run_pass_1(&unit.items, UnitKind::Normal(num), 0, tp);
             
             // Pass 2: propagate info up from roots to leaves
-            self.run_pass_2(&unit.items, UnitKind::Normal(num), tp);
+            self.write().run_pass_2(&unit.items, UnitKind::Normal(num), tp);
 
-            if !self.errors.is_empty() {
+            if !self.read().errors.is_empty() {
                 return Err(());
             }
 
@@ -1488,7 +1490,7 @@ impl Driver {
 
         for (num, unit) in units.mock_units.iter().enumerate() {
             let mut mock_tp = MockTypeProvider::new(tp);
-            self.run_pass_1(&unit.items, UnitKind::Mock(num), 0, &mut mock_tp);
+            self.write().run_pass_1(&unit.items, UnitKind::Mock(num), 0, &mut mock_tp);
             let one_of = mock_tp.constraints(unit.main_expr)
                 .one_of().iter()
                 .map(|ty| ty.ty.clone())
@@ -1496,7 +1498,7 @@ impl Driver {
             for ty in one_of {
                 let ns = match ty {
                     Type::Mod => {
-                        self.run_pass_2(&unit.items, UnitKind::Mock(num), &mut mock_tp);
+                        self.write().run_pass_2(&unit.items, UnitKind::Mock(num), &mut mock_tp);
                         let module = self.eval_expr(unit.main_expr, &mut mock_tp);
                         match module {
                             Const::Mod(scope) => ExprNamespace::Mod(scope),
@@ -1505,7 +1507,7 @@ impl Driver {
                     },
                     Type::Struct(strukt) => ExprNamespace::Struct(strukt),
                     Type::Ty => {
-                        self.run_pass_2(&unit.items, UnitKind::Mock(num), &mut mock_tp);
+                        self.write().run_pass_2(&unit.items, UnitKind::Mock(num), &mut mock_tp);
                         let ty = self.eval_expr(unit.main_expr, &mut mock_tp);
 
                         match ty {
@@ -1515,7 +1517,7 @@ impl Driver {
                     },
                     _ => continue,
                 };
-                self.tir.expr_namespaces.entry(unit.main_expr).or_default().push(ns);
+                self.write().tir.expr_namespaces.entry(unit.main_expr).or_default().push(ns);
             }
         }
         Ok(())

@@ -15,6 +15,7 @@ use crate::mir::{self, FunctionRef};
 use crate::typechecker::type_provider::TypeProvider;
 use crate::refine::Refine;
 use crate::index_vec::*;
+use crate::rw_ref::RwRef;
 
 pub struct Driver {
     pub arch: Arch,
@@ -31,6 +32,7 @@ pub struct Driver {
     pub flushed_errors: u32,
     pub run_refiner: bool,
 }
+pub type DriverRef<'l> = RwRef<'l, Driver>;
 
 impl Driver {
     pub fn new(src_map: SourceMap, arch: Arch, run_refiner: bool) -> Self {
@@ -49,14 +51,15 @@ impl Driver {
             run_refiner,
         }
     }
-
+}
+impl DriverRef<'_> {
     pub fn eval_expr(&mut self, expr: ExprId, tp: &impl TypeProvider) -> Const {
         let func = self.build_standalone_expr(expr, tp);
         let function_ref = FunctionRef::Ref(func);
-        if self.run_refiner {
-            self.refine_func(&function_ref, tp);
+        if self.read().run_refiner {
+            self.write().refine_func(&function_ref, tp);
         }
-        let val = self.call(function_ref, Vec::new(), Vec::new());
-        self.value_to_const(val, tp.ty(expr).clone(), tp)
+        let val = self.write().call(function_ref, Vec::new(), Vec::new());
+        self.write().value_to_const(val, tp.ty(expr).clone(), tp)
     }
 }

@@ -1,11 +1,12 @@
 use clap::{Parser, ArgEnum};
 use std::path::PathBuf;
+use std::sync::RwLock;
 
 use dire::ty::Type;
 use dire::mir::FuncId;
 use dire::arch::Arch;
 use libdusk::TirGraphOutput;
-use libdusk::driver::Driver;
+use libdusk::driver::{Driver, DriverRef};
 use libdusk::source_info::SourceMap;
 use libdusk::interpreter::{restart_interp, register_driver, InterpMode};
 use libdusk::mir::FunctionRef;
@@ -65,77 +66,86 @@ fn main() {
 
     let mut src_map = SourceMap::new();
     let loaded_file = src_map.add_file(&opt.input).is_ok();
-    let mut driver = Driver::new(src_map, Arch::X86_64, opt.run_refiner);
+    let locked_driver = RwLock::new(
+        Driver::new(src_map, Arch::X86_64, opt.run_refiner)
+    );
+    let mut driver = DriverRef::new(&locked_driver);
     unsafe {
-        register_driver(&mut driver);
+        register_driver(&mut *driver.write());
     }
-    driver.initialize_hir();
+    driver.write().initialize_hir();
 
     if !loaded_file {
-        driver.errors.push(Error::new(format!("unable to load input file \"{}\"", opt.input.as_os_str().to_string_lossy())));
+        driver.write().errors.push(Error::new(format!("unable to load input file \"{}\"", opt.input.as_os_str().to_string_lossy())));
     }
 
     macro_rules! begin_phase {
         ($phase:ident) => {{
-            driver.flush_errors();
+            driver.write().flush_errors();
             if (opt.stop_phase as u8) < (StopPhase::$phase as u8) {
-                driver.check_for_failure();
+                driver.read().check_for_failure();
                 return;
             }
         }}
     }
 
     begin_phase!(Parse);
-    let _ = driver.parse(); // There's no need to do anything specific to handle this error.
+    let _ = driver.write().parse(); // There's no need to do anything specific to handle this error.
 
     begin_phase!(Tir);
     debug::send(|| DvdMessage::WillInitializeTir);
-    driver.initialize_tir();
+    driver.write().initialize_tir();
     debug::send(|| DvdMessage::DidInitializeTir);
 
 
     begin_phase!(Typecheck);
-    let mut tp = driver.get_real_type_provider(opt.output_tc_diff);
-    while let Some(units) = driver.build_more_tir(opt.tir_output) {
-        debug::send(|| DvdMessage::WillTypeCheckSet);
-        if driver.type_check(&units, &mut tp).is_err() {
+    let mut tp = driver.read().get_real_type_provider(opt.output_tc_diff);
+    loop {
+        let mut driver_write = driver.write();
+        if let Some(units) = driver_write.build_more_tir(opt.tir_output) {
+            drop(driver_write);
+            debug::send(|| DvdMessage::WillTypeCheckSet);
+            if driver.type_check(&units, &mut tp).is_err() {
+                break;
+            }
+            debug::send(|| DvdMessage::DidTypeCheckSet);
+            // { driver.write().flush_errors(); }
+        } else {
             break;
         }
-        debug::send(|| DvdMessage::DidTypeCheckSet);
-        driver.flush_errors();
     }
 
-    driver.flush_errors();
-    if driver.check_for_failure() { return; }
+    driver.write().flush_errors();
+    if driver.read().check_for_failure() { return; }
 
     begin_phase!(Mir);
     driver.build_mir(&tp);
     
     if opt.output_mir {
-        println!("{}", driver.display_mir());
+        println!("{}", driver.read().display_mir());
     }
 
     begin_phase!(Refine);
     if opt.run_refiner {
-        driver.refine(&tp);
+        driver.write().refine(&tp);
     }
 
     begin_phase!(Interp);
-    let main_sym = driver.interner.get_or_intern_static("main");
-    let main = driver.code.mir_code.functions.iter()
+    let main_sym = driver.write().interner.get_or_intern_static("main");
+    let main = driver.read().code.mir_code.functions.iter()
         .position(|func| {
             match func.name {
-                Some(name) => name == main_sym && *func.ty.return_ty == Type::Void && driver.code.num_parameters(func) == 0,
+                Some(name) => name == main_sym && *func.ty.return_ty == Type::Void && driver.read().code.num_parameters(func) == 0,
                 None => false,
             }
         });
     if let Some(main) = main {
         println!("Running main in the interpreter:\n");
         restart_interp(InterpMode::RunTime);
-        driver.call(FunctionRef::Id(FuncId::new(main)), Vec::new(), Vec::new());
+        driver.write().call(FunctionRef::Id(FuncId::new(main)), Vec::new(), Vec::new());
     } else {
-        driver.errors.push(Error::new("Couldn't find main function with no parameters and a return type of `void`"));
-        driver.flush_errors();
-        driver.check_for_failure();
+        driver.write().errors.push(Error::new("Couldn't find main function with no parameters and a return type of `void`"));
+        driver.write().flush_errors();
+        driver.read().check_for_failure();
     }
 }

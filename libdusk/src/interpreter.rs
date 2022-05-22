@@ -899,7 +899,7 @@ impl Driver {
                     }
                     let generic_arguments = generic_arguments.clone();
                     // Stop immutably borrowing the stack, so it can be borrowed again in call()
-                    std::mem::drop(stack);
+                    drop(stack);
                     self.call(FunctionRef::Id(func), copied_args, generic_arguments)
                 },
                 &Instr::ExternCall { ref arguments, func } => {
@@ -909,7 +909,7 @@ impl Driver {
                         copied_args.push(frame.get_val(arg, self).as_bytes().as_ref().to_owned().into_boxed_slice());
                     }
                     // Stop immutably borrowing the stack, because there may come a time where extern functions can transparently call into the interpreter
-                    std::mem::drop(stack);
+                    drop(stack);
                     self.extern_call(func, copied_args)
                 },
                 &Instr::GenericParam(id) => {
@@ -1310,10 +1310,10 @@ impl Driver {
                     let interp = INTERP.read().unwrap();
                     let block = if let Some(table) = interp.switch_cache.get(&next_op) {
                         let block = table.get(scrutinee.as_ref()).copied();
-                        std::mem::drop(interp);
+                        drop(interp);
                         block
                     } else {
-                        std::mem::drop(interp);
+                        drop(interp);
                         let mut table = HashMap::new();
                         for case in cases.clone() {
                             let val = Value::from_const(&case.value, self);
