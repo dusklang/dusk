@@ -1283,7 +1283,11 @@ impl DriverRef<'_> {
             },
             Decl::Field { index } => {
                 let base = self.read().get_base(decl_ref_id);
-                let base = self.build_expr(b, base, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                let base_ty = tp.ty(base);
+                let mut base = self.build_expr(b, base, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                if matches!(base_ty, Type::Pointer(_)) {
+                    base.indirection += 1;
+                }
                 if base.indirection > 0 {
                     let base_ptr = self.write().handle_indirection(b, base.get_address());
                     DeclRef::Value(self.write().push_instr(b, Instr::IndirectFieldAccess { val: base_ptr, index }, expr).indirect())

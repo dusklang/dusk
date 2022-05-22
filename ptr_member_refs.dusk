@@ -1,0 +1,10 @@
+MyStruct :: struct {
+    a: i32
+    b: i32
+}
+
+fn main() {
+    val := MyStruct { a: 12, b: 64 }
+    val_ptr :: &mut val
+    val_ptr.a = 56
+}

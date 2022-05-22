@@ -725,10 +725,17 @@ impl tir::Expr<tir::DeclRef> {
             let decl = &driver.tir.decls[overload];
             let mut is_mut = decl.is_mut;
             if let hir::Namespace::MemberRef { base_expr } = driver.code.hir_code.decl_refs[self.decl_ref_id].namespace {
+                
                 let constraints = tp.constraints(base_expr);
                 // TODO: Robustness! Base_expr could be an overload set with these types, but also include struct types
                 if can_unify_to(&constraints, &Type::Ty.into()).is_err() && can_unify_to(&constraints, &Type::Mod.into()).is_err() {
-                    is_mut = is_mut && constraints.solve().unwrap().is_mut;
+                    let base_ty = constraints.solve().unwrap();
+                    // Handle member refs with pointers to structs
+                    is_mut &= if let Type::Pointer(pointee) = &base_ty.ty {
+                        pointee.is_mut
+                    } else {
+                        base_ty.is_mut
+                    };
                 }
             }
             let mut constraints = GenericContext::new();
@@ -1506,6 +1513,12 @@ impl DriverRef<'_> {
                         }
                     },
                     Type::Struct(strukt) => ExprNamespace::Struct(strukt),
+                    Type::Pointer(ref pointee) => {
+                        match pointee.ty {
+                            Type::Struct(strukt) => ExprNamespace::Struct(strukt),
+                            _ => continue,
+                        }
+                    },
                     Type::Ty => {
                         self.write().run_pass_2(&unit.items, UnitKind::Mock(num), &mut mock_tp);
                         let ty = self.eval_expr(unit.main_expr, &mut mock_tp);
