@@ -63,7 +63,7 @@ impl DriverRef<'_> {
         if self.read().run_refiner {
             self.write().refine_func(&function_ref, tp);
         }
-        let val = self.write().call(function_ref, Vec::new(), Vec::new());
+        let val = self.call(function_ref, Vec::new(), Vec::new());
         self.write().value_to_const(val, tp.ty(expr).clone(), tp)
     }
 }

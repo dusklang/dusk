@@ -1,6 +1,5 @@
 use clap::{Parser, ArgEnum};
 use std::path::PathBuf;
-use std::sync::RwLock;
 
 use dire::ty::Type;
 use dire::mir::FuncId;
@@ -137,7 +136,7 @@ fn main() {
     if let Some(main) = main {
         println!("Running main in the interpreter:\n");
         restart_interp(InterpMode::RunTime);
-        driver.write().call(FunctionRef::Id(FuncId::new(main)), Vec::new(), Vec::new());
+        driver.call(FunctionRef::Id(FuncId::new(main)), Vec::new(), Vec::new());
     } else {
         driver.write().errors.push(Error::new("Couldn't find main function with no parameters and a return type of `void`"));
         driver.write().flush_errors();
