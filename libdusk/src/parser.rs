@@ -55,6 +55,7 @@ impl Driver {
         let inout_integers = &inout_numerics[0..10];
 
         let boool        = types[12];
+        let inout_bool   = inout_types[12];
         let uu8          = types[0];
         let never        = self.add_const_ty(Type::Never);
         let uusize       = self.add_const_ty(Type::usize());
@@ -92,6 +93,9 @@ impl Driver {
             for (inout_ty, ty) in inout_integers.iter().zip(integers) {
                 self.add_intrinsic(intr, smallvec![inout_ty.clone(), ty.clone()], hir::VOID_TYPE, true);
             }
+        }
+        for &intr in &[AndAssign, OrAssign, XorAssign] {
+            self.add_intrinsic(intr, smallvec![inout_bool, boool], hir::VOID_TYPE, true);
         }
         for ty in integers {
             self.add_intrinsic(BitwiseNot, smallvec![ty.clone()], ty.clone(), true);

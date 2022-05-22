@@ -1,14 +1,18 @@
 MyStruct :: struct {
     a: u32
     b: u64
+    c: bool
 }
 
 fn main() {
     val := MyStruct {
         a: 54
         b: 65
+        c: true
     }
     val.b += 2
     val.a *= 5
     val.a <<= 4
+
+    val.c |= false
 }
