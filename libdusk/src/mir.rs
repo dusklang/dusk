@@ -633,6 +633,166 @@ impl Driver {
     }
 
     #[display_adapter]
+    pub fn display_mir_instr(&self, op_id: OpId, f: &mut Formatter) {
+        let instr = self.code.ops[op_id].as_mir_instr().unwrap();
+        write!(f, "    ")?;
+        macro_rules! write_args {
+            ($args:expr) => {{
+                let mut first = true;
+                for &arg in $args {
+                    if first {
+                        write!(f, "(")?;
+                        first = false;
+                    } else {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "%{}", self.display_instr_name(arg))?;
+                }
+                if !first {
+                    write!(f, ")")?;
+                }
+            }}
+        }
+        match instr {
+            Instr::Alloca(ty) => write!(f, "%{} = alloca {:?}", self.display_instr_name(op_id), ty)?,
+            Instr::Br(block) => write!(f, "br %bb{}", block.index())?,
+            &Instr::CondBr { condition, true_bb, false_bb }
+                => write!(f, "condbr %{}, %bb{}, %bb{}", self.display_instr_name(condition), true_bb.index(), false_bb.index())?,
+            &Instr::SwitchBr { scrutinee, ref cases, catch_all_bb } => {
+                write!(f, "switchbr %{} : ", self.display_instr_name(scrutinee))?;
+                for case in cases {
+                    write!(f, "case {} => %bb{}, ", self.fmt_const(&case.value), case.bb.index())?;
+                }
+                write!(f, "else => %bb{}", catch_all_bb.index())?;
+            }
+            // TODO: print generic arguments
+            &Instr::Call { ref arguments, func: callee, .. } => {
+                write!(f, "%{} = call `{}`", self.display_instr_name(op_id), self.fn_name(self.code.mir_code.functions[callee].name))?;
+                write_args!(arguments);
+            },
+            &Instr::FunctionRef { func: callee, .. } => {
+                write!(f, "%{} = function_ref `{}`", self.display_instr_name(op_id), self.fn_name(self.code.mir_code.functions[callee].name))?
+            },
+            &Instr::ExternCall { ref arguments, func: callee, .. } => {
+                let extern_mod = &self.code.mir_code.extern_mods[&callee.extern_mod];
+                let callee_func = &extern_mod.imported_functions[callee.index];
+                write!(f, "%{} = externcall `{}`", self.display_instr_name(op_id), callee_func.name)?;
+                write_args!(arguments);
+                write!(f, " from {:?}", extern_mod.library_path)?
+            },
+            Instr::Const(konst) => {
+                write!(f, "%{} = {}", self.display_instr_name(op_id), self.fmt_const(konst))?;
+            },
+            Instr::Intrinsic { arguments, intr, .. } => {
+                write!(f, "%{} = intrinsic `{}`", self.display_instr_name(op_id), intr.name())?;
+                write_args!(arguments);
+            },
+            &Instr::Pointer { op, is_mut } => {
+                write!(f, "%{} = %{} *", self.display_instr_name(op_id), self.display_instr_name(op))?;
+                if is_mut {
+                    write!(f, "mut")?
+                }
+            },
+            &Instr::Load(location) => write!(f, "%{} = load %{}", self.display_instr_name(op_id), self.display_instr_name(location))?,
+            &Instr::LogicalNot(op) => write!(f, "%{} = not %{}", self.display_instr_name(op_id), self.display_instr_name(op))?,
+            &Instr::Ret(val) => write!(f,  "return %{}", self.display_instr_name(val))?,
+            &Instr::Store { location, value } => write!(f, "store %{} in %{}", self.display_instr_name(value), self.display_instr_name(location))?,
+            &Instr::AddressOfStatic(statik) => write!(f, "%{} = address of static %{}", self.display_instr_name(op_id), self.code.mir_code.statics[statik].name)?,
+            &Instr::Reinterpret(val, ref ty) => write!(f, "%{} = reinterpret %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
+            &Instr::SignExtend(val, ref ty) => write!(f, "%{} = sign-extend %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
+            &Instr::ZeroExtend(val, ref ty) => write!(f, "%{} = zero-extend %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
+            &Instr::Truncate(val, ref ty) => write!(f, "%{} = truncate %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
+            &Instr::FloatCast(val, ref ty) => write!(f, "%{} = floatcast %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
+            &Instr::IntToFloat(val, ref ty) => write!(f, "%{} = inttofloat %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
+            &Instr::FloatToInt(val, ref ty) => write!(f, "%{} = floattoint %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
+            &Instr::Struct { ref fields, id } => {
+                write!(f, "%{} = define struct{} {{ ", self.display_instr_name(op_id), id.index())?;
+                for i in 0..fields.len() {
+                    write!(f, "%{}", self.display_instr_name(fields[i]))?;
+                    if i < (fields.len() - 1) {
+                        write!(f, ",")?;
+                    }
+                    write!(f, " ")?;
+                }
+                write!(f, "}}")?;
+            },
+            &Instr::StructLit { ref fields, id } => {
+                write!(f, "%{} = literal struct{} {{ ", self.display_instr_name(op_id), id.index())?;
+                for i in 0..fields.len() {
+                    write!(f, "%{}", self.display_instr_name(fields[i]))?;
+                    if i < (fields.len() - 1) {
+                        write!(f, ",")?;
+                    }
+                    write!(f, " ")?;
+                }
+                write!(f, "}}")?;
+            },
+            &Instr::Enum { ref variants, id } => {
+                write!(f, "%{} = define enum{} {{", self.display_instr_name(op_id), id.index())?;
+
+                for (i, variant) in self.code.hir_code.enums[id].variants.iter().enumerate() {
+                    write!(f, "{}", self.interner.resolve(variant.name).unwrap())?;
+                    if variant.payload_ty.is_some() {
+                        write!(f, "(%{})", self.display_instr_name(variants[i]))?;
+                    }
+                    if i < (variants.len() - 1) {
+                        write!(f, ",")?;
+                    }
+                    write!(f, " ")?;
+                }
+
+                write!(f, "}}")?;
+            },
+            &Instr::FunctionTy { ref param_tys, ret_ty } => {
+                write!(f, "%{} = fn type (", self.display_instr_name(op_id))?;
+                for (i, &param) in param_tys.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "%{}", self.display_instr_name(param))?;
+                }
+                write!(f, " -> {}", self.display_instr_name(ret_ty))?;
+            },
+            &Instr::Variant { enuum, index, payload } => {
+                let variant = &self.code.hir_code.enums[enuum].variants[index];
+                let variant_name = variant.name;
+                write!(f, "%{} = %enum{}.{}", self.display_instr_name(op_id), enuum.index(), self.interner.resolve(variant_name).unwrap())?;
+                if variant.payload_ty.is_some() {
+                    write!(f, "(%{})", self.display_instr_name(payload))?
+                }
+            },
+            &Instr::DirectFieldAccess { val, index } => write!(f, "%{} = %{}.field{}", self.display_instr_name(op_id), self.display_instr_name(val), index)?,
+            &Instr::IndirectFieldAccess { val, index } => write!(f, "%{} = &(*%{}).field{}", self.display_instr_name(op_id), self.display_instr_name(val), index)?,
+            &Instr::DiscriminantAccess { val } => write!(f, "%{} = discriminant of %{}", self.display_instr_name(op_id), self.display_instr_name(val))?,
+            &Instr::GenericParam(param) => {
+                write!(f, "%{} = generic_param{}", self.display_instr_name(op_id), param.index())?
+            },
+            Instr::Parameter(_) => {},
+            Instr::Void => panic!("unexpected void!"),
+        };
+        Ok(())
+    }
+
+    #[display_adapter]
+    pub fn display_mir_block(&self, id: BlockId, f: &mut Formatter) {
+        writeln!(f, "%bb{}:", id.index())?;
+        let block = &self.code.blocks[id];
+        let mut start = 0;
+        for (i, &op) in block.ops.iter().enumerate() {
+            let instr = self.code.ops[op].as_mir_instr().unwrap();
+            if !matches!(instr, Instr::Parameter(_)) {
+                start = i;
+                break;
+            }
+        }
+        
+        for &op_id in &block.ops[start..] {
+            writeln!(f, "{}", self.display_mir_instr(op_id))?;
+        }
+        Ok(())
+    }
+
+    #[display_adapter]
     pub fn display_mir_function(&self, func: &FunctionRef, f: &mut Formatter) {
         let func = function_by_ref(&self.code.mir_code, func);
         write!(f, "fn {}(", self.fn_name(func.name))?;
@@ -654,160 +814,7 @@ impl Driver {
         writeln!(f, "): {:?} {{", func.ty.return_ty.as_ref())?;
         for i in 0..func.blocks.len() {
             let block_id = func.blocks[i];
-            writeln!(f, "%bb{}:", block_id.index())?;
-            let block = &self.code.blocks[func.blocks[i]];
-            let mut start = 0;
-            for (i, &op) in block.ops.iter().enumerate() {
-                let instr = self.code.ops[op].as_mir_instr().unwrap();
-                if !matches!(instr, Instr::Parameter(_)) {
-                    start = i;
-                    break;
-                }
-            }
-            
-            for &op_id in &block.ops[start..] {
-                let instr = self.code.ops[op_id].as_mir_instr().unwrap();
-                write!(f, "    ")?;
-                macro_rules! write_args {
-                    ($args:expr) => {{
-                        let mut first = true;
-                        for &arg in $args {
-                            if first {
-                                write!(f, "(")?;
-                                first = false;
-                            } else {
-                                write!(f, ", ")?;
-                            }
-                            write!(f, "%{}", self.display_instr_name(arg))?;
-                        }
-                        if !first {
-                            write!(f, ")")?;
-                        }
-                    }}
-                }
-                match instr {
-                    Instr::Alloca(ty) => writeln!(f, "%{} = alloca {:?}", self.display_instr_name(op_id), ty)?,
-                    Instr::Br(block) => writeln!(f, "br %bb{}", block.index())?,
-                    &Instr::CondBr { condition, true_bb, false_bb }
-                        => writeln!(f, "condbr %{}, %bb{}, %bb{}", self.display_instr_name(condition), true_bb.index(), false_bb.index())?,
-                    &Instr::SwitchBr { scrutinee, ref cases, catch_all_bb } => {
-                        write!(f, "switchbr %{} : ", self.display_instr_name(scrutinee))?;
-                        for case in cases {
-                            write!(f, "case {} => %bb{}, ", self.fmt_const(&case.value), case.bb.index())?;
-                        }
-                        writeln!(f, "else => %bb{}", catch_all_bb.index())?;
-                    }
-                    // TODO: print generic arguments
-                    &Instr::Call { ref arguments, func: callee, .. } => {
-                        write!(f, "%{} = call `{}`", self.display_instr_name(op_id), self.fn_name(self.code.mir_code.functions[callee].name))?;
-                        write_args!(arguments);
-                        writeln!(f)?
-                    },
-                    &Instr::FunctionRef { func: callee, .. } => {
-                        writeln!(f, "%{} = function_ref `{}`", self.display_instr_name(op_id), self.fn_name(self.code.mir_code.functions[callee].name))?
-                    },
-                    &Instr::ExternCall { ref arguments, func: callee, .. } => {
-                        let extern_mod = &self.code.mir_code.extern_mods[&callee.extern_mod];
-                        let callee_func = &extern_mod.imported_functions[callee.index];
-                        write!(f, "%{} = externcall `{}`", self.display_instr_name(op_id), callee_func.name)?;
-                        write_args!(arguments);
-                        writeln!(f, " from {:?}", extern_mod.library_path)?
-                    },
-                    Instr::Const(konst) => {
-                        writeln!(f, "%{} = {}", self.display_instr_name(op_id), self.fmt_const(konst))?;
-                    },
-                    Instr::Intrinsic { arguments, intr, .. } => {
-                        write!(f, "%{} = intrinsic `{}`", self.display_instr_name(op_id), intr.name())?;
-                        write_args!(arguments);
-                        writeln!(f)?
-                    },
-                    &Instr::Pointer { op, is_mut } => {
-                        write!(f, "%{} = %{} *", self.display_instr_name(op_id), self.display_instr_name(op))?;
-                        if is_mut {
-                            writeln!(f, "mut")?
-                        } else {
-                            writeln!(f)?
-                        }
-                    }
-                    &Instr::Load(location) => writeln!(f, "%{} = load %{}", self.display_instr_name(op_id), self.display_instr_name(location))?,
-                    &Instr::LogicalNot(op) => writeln!(f, "%{} = not %{}", self.display_instr_name(op_id), self.display_instr_name(op))?,
-                    &Instr::Ret(val) => writeln!(f,  "return %{}", self.display_instr_name(val))?,
-                    &Instr::Store { location, value } => writeln!(f, "store %{} in %{}", self.display_instr_name(value), self.display_instr_name(location))?,
-                    &Instr::AddressOfStatic(statik) => writeln!(f, "%{} = address of static %{}", self.display_instr_name(op_id), self.code.mir_code.statics[statik].name)?,
-                    &Instr::Reinterpret(val, ref ty) => writeln!(f, "%{} = reinterpret %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
-                    &Instr::SignExtend(val, ref ty) => writeln!(f, "%{} = sign-extend %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
-                    &Instr::ZeroExtend(val, ref ty) => writeln!(f, "%{} = zero-extend %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
-                    &Instr::Truncate(val, ref ty) => writeln!(f, "%{} = truncate %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
-                    &Instr::FloatCast(val, ref ty) => writeln!(f, "%{} = floatcast %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
-                    &Instr::IntToFloat(val, ref ty) => writeln!(f, "%{} = inttofloat %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
-                    &Instr::FloatToInt(val, ref ty) => writeln!(f, "%{} = floattoint %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
-                    &Instr::Struct { ref fields, id } => {
-                        write!(f, "%{} = define struct{} {{ ", self.display_instr_name(op_id), id.index())?;
-                        for i in 0..fields.len() {
-                            write!(f, "%{}", self.display_instr_name(fields[i]))?;
-                            if i < (fields.len() - 1) {
-                                write!(f, ",")?;
-                            }
-                            write!(f, " ")?;
-                        }
-                        writeln!(f, "}}")?;
-                    },
-                    &Instr::StructLit { ref fields, id } => {
-                        write!(f, "%{} = literal struct{} {{ ", self.display_instr_name(op_id), id.index())?;
-                        for i in 0..fields.len() {
-                            write!(f, "%{}", self.display_instr_name(fields[i]))?;
-                            if i < (fields.len() - 1) {
-                                write!(f, ",")?;
-                            }
-                            write!(f, " ")?;
-                        }
-                        writeln!(f, "}}")?;
-                    },
-                    &Instr::Enum { ref variants, id } => {
-                        write!(f, "%{} = define enum{} {{", self.display_instr_name(op_id), id.index())?;
-
-                        for (i, variant) in self.code.hir_code.enums[id].variants.iter().enumerate() {
-                            write!(f, "{}", self.interner.resolve(variant.name).unwrap())?;
-                            if variant.payload_ty.is_some() {
-                                write!(f, "(%{})", self.display_instr_name(variants[i]))?;
-                            }
-                            if i < (variants.len() - 1) {
-                                write!(f, ",")?;
-                            }
-                            write!(f, " ")?;
-                        }
-
-                        writeln!(f, "}}")?;
-                    },
-                    &Instr::FunctionTy { ref param_tys, ret_ty } => {
-                        write!(f, "%{} = fn type (", self.display_instr_name(op_id))?;
-                        for (i, &param) in param_tys.iter().enumerate() {
-                            if i > 0 {
-                                write!(f, ", ")?;
-                            }
-                            write!(f, "%{}", self.display_instr_name(param))?;
-                        }
-                        writeln!(f, " -> {}", self.display_instr_name(ret_ty))?;
-                    },
-                    &Instr::Variant { enuum, index, payload } => {
-                        let variant = &self.code.hir_code.enums[enuum].variants[index];
-                        let variant_name = variant.name;
-                        write!(f, "%{} = %enum{}.{}", self.display_instr_name(op_id), enuum.index(), self.interner.resolve(variant_name).unwrap())?;
-                        if variant.payload_ty.is_some() {
-                            write!(f, "(%{})", self.display_instr_name(payload))?
-                        }
-                        writeln!(f)?
-                    },
-                    &Instr::DirectFieldAccess { val, index } => writeln!(f, "%{} = %{}.field{}", self.display_instr_name(op_id), self.display_instr_name(val), index)?,
-                    &Instr::IndirectFieldAccess { val, index } => writeln!(f, "%{} = &(*%{}).field{}", self.display_instr_name(op_id), self.display_instr_name(val), index)?,
-                    &Instr::DiscriminantAccess { val } => writeln!(f, "%{} = discriminant of %{}", self.display_instr_name(op_id), self.display_instr_name(val))?,
-                    &Instr::GenericParam(param) => {
-                        writeln!(f, "%{} = generic_param{}", self.display_instr_name(op_id), param.index())?
-                    },
-                    Instr::Parameter(_) => {},
-                    Instr::Void => panic!("unexpected void!"),
-                };
-            }
+            write!(f, "{}", self.display_mir_block(block_id))?;
         }
         write!(f, "}}")
     }
