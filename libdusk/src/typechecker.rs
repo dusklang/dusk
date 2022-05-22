@@ -237,9 +237,17 @@ impl tir::Expr<tir::Assignment> {
         *tp.ty_mut(self.id) = Type::Void;
     }
 
-    fn run_pass_2(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
+    fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         let (lhs, rhs) = tp.multi_constraints_mut(self.lhs, self.rhs);
-        lhs.lopsided_intersect_with(rhs);
+        if let Err(err) = lhs.lopsided_intersect_with(rhs) {
+            match err {
+                AssignmentError::Immutable => {
+                    let err = Error::new("unable to assign to immutable expression")
+                        .adding_primary_range(ef!(driver, self.lhs.range), "expression here");
+                    driver.errors.push(err);
+                }
+            }
+        }
     }
 }
 

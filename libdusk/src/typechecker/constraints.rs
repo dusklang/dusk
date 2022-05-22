@@ -427,13 +427,20 @@ impl ConstraintList {
 
         Self::new(trait_impls, one_of, preferred_type)
     }
+}
 
+#[derive(Debug)]
+pub enum AssignmentError {
+    Immutable,
+}
+
+impl ConstraintList {
     // Same as intersect_with, but: 
     //  - mutates `self` and `other` in-place instead of creating a new `ConstraintList`
     //  - evaluates mutability independently between the arguments, with precedence given to self
     //  - is literally just used for assignment expressions
     //  - is a terrible abstraction :(
-    pub fn lopsided_intersect_with(&mut self, other: &mut ConstraintList) {
+    pub fn lopsided_intersect_with(&mut self, other: &mut ConstraintList) -> Result<(), AssignmentError> {
         let trait_impls = self.trait_impls | other.trait_impls;
         self.trait_impls = trait_impls;
         other.trait_impls = trait_impls;
@@ -492,7 +499,10 @@ impl ConstraintList {
                 }
             }
         }
-        assert!(self.one_of.as_ref().unwrap().one_of.is_empty() || self.one_of_exists(|ty| ty.is_mut), "can't assign to immutable expression");
+        if !self.one_of.as_ref().unwrap().one_of.is_empty() && !self.is_error() && !self.one_of_exists(|ty| ty.is_mut) {
+            return Err(AssignmentError::Immutable);
+        }
+        Ok(())
     }
 }
 
