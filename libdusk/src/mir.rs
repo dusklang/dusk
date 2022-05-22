@@ -996,9 +996,9 @@ impl Driver {
     }
 
     fn remove_unused_allocas(&mut self, func: &mut Function) {
+        let mut delete_list = HashSet::new();
         for &block_id in &func.blocks {
             let block = &self.code.blocks[block_id];
-            let mut delete_list = HashSet::new();
             for &op_id in &block.ops {
                 let instr = self.code.ops[op_id].as_mir_instr().unwrap();
                 let mut potential_deletions = Vec::new();
@@ -1034,6 +1034,8 @@ impl Driver {
                 }
             }
             
+        }
+        for &block_id in &func.blocks {
             self.code.blocks[block_id].ops.retain(|op| !delete_list.contains(op));
         }
     }
