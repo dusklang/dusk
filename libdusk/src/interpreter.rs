@@ -431,7 +431,7 @@ macro_rules! bin_op {
     };
     (@kontinue $salf:ident, $ty:ident, $lhs:ident, $rhs:ident, $conv:ident, Bool, {$sign:tt}, $final_val:ident) => {
         if let Type::Bool = $ty {
-            bin_op!(@out $final_val, $conv, $ty, $lhs, $rhs, {$sign});
+            bin_op!(@out $final_val, $conv, bool, $lhs, $rhs, {$sign});
         }
     };
     (@kontinue $salf:ident, $ty:ident, $lhs:ident, $rhs:ident, $conv:ident, Int, {$sign:tt}, $final_val:ident) => {
@@ -971,9 +971,9 @@ impl DriverRef<'_> {
                                 _ => bin_op!(self, stack, arguments, bool_convert, Int | Float | Bool, {!=}),
                             }
                         },
-                        Intrinsic::BitwiseAnd => bin_op!(self, stack, arguments, convert, Int, {&}),
-                        Intrinsic::BitwiseOr => bin_op!(self, stack, arguments, convert, Int, {|}),
-                        Intrinsic::BitwiseXor => bin_op!(self, stack, arguments, convert, Int, {^}),
+                        Intrinsic::BitwiseAnd => bin_op!(self, stack, arguments, convert, Int | Bool, {&}),
+                        Intrinsic::BitwiseOr => bin_op!(self, stack, arguments, convert, Int | Bool, {|}),
+                        Intrinsic::BitwiseXor => bin_op!(self, stack, arguments, convert, Int | Bool, {^}),
                         Intrinsic::LeftShift => bin_op!(self, stack, arguments, convert, Int, {<<}),
                         Intrinsic::RightShift => bin_op!(self, stack, arguments, convert, Int, {>>}),
                         Intrinsic::LogicalNot => panic!("Unexpected logical not intrinsic, should've been replaced by instruction"),

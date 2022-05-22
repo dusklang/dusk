@@ -1,4 +1,14 @@
+MyStruct :: struct {
+    a: u32
+    b: u64
+}
+
 fn main() {
-    val := 0
-    val += 3
+    val := MyStruct {
+        a: 54
+        b: 65
+    }
+    val.b += 2
+    val.a *= 5
+    val.a <<= 4
 }

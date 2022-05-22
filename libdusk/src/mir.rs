@@ -4,7 +4,7 @@ use std::ops::Range;
 
 use dire::index_counter::IndexCounter;
 use num_bigint::BigInt;
-use smallvec::SmallVec;
+use smallvec::{SmallVec, smallvec};
 use string_interner::DefaultSymbol as Sym;
 use display_adapter::display_adapter;
 
@@ -1559,6 +1559,36 @@ impl DriverRef<'_> {
                                 let operand = self.build_expr(b, operand, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
                                 self.write().push_instr(b, Instr::LogicalNot(operand.instr), expr).direct()
                             }
+                        },
+                        Intrinsic::MultAssign | Intrinsic::DivAssign | Intrinsic::ModAssign | Intrinsic::AddAssign 
+                            | Intrinsic::SubAssign | Intrinsic::AndAssign | Intrinsic::OrAssign | Intrinsic::XorAssign
+                            | Intrinsic::LeftShiftAssign | Intrinsic::RightShiftAssign => {
+                            assert_eq!(arguments.len(), 2);
+                            let lhs = arguments[0];
+                            let rhs = arguments[1];
+
+                            let ty = tp.ty(lhs).clone();
+
+                            let address = self.build_expr(b, lhs, Context::new(1, DataDest::Read, ControlDest::Continue), tp);
+                            let address = self.write().handle_indirection(b, address);
+                            let loaded = self.write().push_instr(b, Instr::Load(address), lhs);
+                            let modifier = self.build_expr(b, rhs, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                            let modifier = self.write().handle_indirection(b, modifier);
+                            let intr = match intrinsic {
+                                Intrinsic::MultAssign => Intrinsic::Mult,
+                                Intrinsic::DivAssign => Intrinsic::Div,
+                                Intrinsic::ModAssign => Intrinsic::Mod,
+                                Intrinsic::AddAssign => Intrinsic::Add,
+                                Intrinsic::SubAssign => Intrinsic::Sub,
+                                Intrinsic::AndAssign => Intrinsic::BitwiseAnd,
+                                Intrinsic::OrAssign => Intrinsic::BitwiseOr,
+                                Intrinsic::XorAssign => Intrinsic::BitwiseXor,
+                                Intrinsic::LeftShiftAssign => Intrinsic::LeftShift,
+                                Intrinsic::RightShiftAssign => Intrinsic::RightShift,
+                                intrinsic => todo!("intrinsic {:?}", intrinsic),
+                            };
+                            let value = self.write().push_instr(b, Instr::Intrinsic { arguments: smallvec![loaded, modifier], ty, intr }, expr);
+                            self.write().push_instr(b, Instr::Store { location: address, value }, expr).direct()
                         },
                         intrinsic => {
                             let arguments = get_args(self, b, tp, &arguments);
