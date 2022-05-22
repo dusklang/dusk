@@ -201,6 +201,7 @@ struct Static {
     assignment: ExprId,
 }
 
+#[derive(Default)]
 pub struct Builder {
     decls: HashMap<DeclId, Decl>,
     statics: IndexVec<StaticId, Static>,

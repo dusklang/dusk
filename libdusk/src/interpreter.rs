@@ -24,7 +24,7 @@ use dire::mir::{Const, Instr, InstrId, FuncId, StaticId, Struct};
 use dire::ty::{Type, FunctionType, QualType, IntWidth, FloatWidth};
 use dire::{OpId, BlockId};
 
-use crate::driver::Driver;
+use crate::driver::{DRIVER, Driver, DriverRef};
 use crate::mir::{FunctionRef, function_by_ref};
 use crate::typechecker::type_provider::TypeProvider;
 use crate::x64::*;
@@ -467,11 +467,11 @@ extern "C" fn interp_ffi_entry_point(func: u32, params: *const *const (), return
     if module.is_null() {
         panic!("unable to load library user32");
     }
-    let driver = unsafe { &mut *DRIVER.read().unwrap().0 };
+    let mut driver = DriverRef::new(&DRIVER);
 
-    let func = &driver.code.mir_code.functions[func_id];
-    let return_ty = func.ty.return_ty.as_ref().clone();
-    let mut arguments = Vec::with_capacity(func.ty.param_tys.len());
+    let func_ty = driver.read().code.mir_code.functions[func_id].ty.clone();
+    let return_ty = func_ty.return_ty.as_ref().clone();
+    let mut arguments = Vec::with_capacity(func_ty.param_tys.len());
     macro_rules! get_param {
         ($index:ident) => {
             unsafe {
@@ -479,20 +479,20 @@ extern "C" fn interp_ffi_entry_point(func: u32, params: *const *const (), return
             }
         }
     }
-    for (i, ty) in func.ty.param_tys.iter().enumerate() {
+    for (i, ty) in func_ty.param_tys.iter().enumerate() {
         let val = match ty {
             Type::Int { width: IntWidth::W8, .. } => Value::from_u8(get_param!(i)),
             Type::Int { width: IntWidth::W16, .. } => Value::from_u16(get_param!(i)),
             Type::Int { width: IntWidth::W32, .. } => Value::from_u32(get_param!(i)),
             Type::Int { width: IntWidth::W64 | IntWidth::Pointer, .. } | Type::Pointer(_) => {
-                assert_eq!(driver.arch.pointer_size(), 64);
+                assert_eq!(driver.read().arch.pointer_size(), 64);
                 Value::from_u64(get_param!(i))
             },
             _ => todo!("parameter type {:?}", ty),
         };
         arguments.push(val);
     }
-    let return_value = driver.call(FunctionRef::Id(func_id), arguments, Vec::new());
+    let return_value = driver.write().call(FunctionRef::Id(func_id), arguments, Vec::new());
     macro_rules! set_ret_val {
         ($val:expr) => {
             unsafe {
@@ -505,7 +505,7 @@ extern "C" fn interp_ffi_entry_point(func: u32, params: *const *const (), return
         Type::Int { width: IntWidth::W16, .. } => set_ret_val!(return_value.as_u16()),
         Type::Int { width: IntWidth::W32, .. } => set_ret_val!(return_value.as_u32()),
         Type::Int { width: IntWidth::W64 | IntWidth::Pointer, .. } | Type::Pointer(_) => {
-            assert_eq!(driver.arch.pointer_size(), 64);
+            assert_eq!(driver.read().arch.pointer_size(), 64);
             set_ret_val!(return_value.as_u64());
         },
         _ => todo!("parameter type {:?}", return_ty),
@@ -1378,16 +1378,10 @@ unsafe impl Sync for GlobalDriver {}
 
 lazy_static! {
     static ref INTERP: RwLock<Interpreter> = RwLock::new(Interpreter::new(InterpMode::CompileTime));
-
-    // TODO: Thread safety!!!!!!!!!
-    static ref DRIVER: RwLock<GlobalDriver> = RwLock::new(GlobalDriver(std::ptr::null_mut()));
 }
 thread_local! {
     static INTERP_STACK: RefCell<Vec<StackFrame>> = RefCell::new(Vec::new());
 }
 pub fn restart_interp(mode: InterpMode) {
     *INTERP.write().unwrap() = Interpreter::new(mode);
-}
-pub unsafe fn register_driver(driver: &mut Driver) {
-    DRIVER.write().unwrap().0 = driver;
 }

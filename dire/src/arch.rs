@@ -16,3 +16,9 @@ impl Arch {
         }
     }
 }
+
+impl Default for Arch {
+    fn default() -> Self {
+        Arch::X86_64
+    }
+}

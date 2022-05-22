@@ -16,6 +16,7 @@ use crate::index_vec::*;
 
 use dusk_proc_macros::*;
 
+#[derive(Default)]
 pub struct SourceMap {
     pub files: IndexVec<SourceFileId, SourceFile>,
     paths: HashMap<PathBuf, SourceFileId>,

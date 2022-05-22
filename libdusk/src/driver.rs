@@ -1,4 +1,7 @@
+use std::sync::RwLock;
+
 use string_interner::StringInterner;
+use lazy_static::lazy_static;
 
 use dire::hir::ExprId;
 use dire::mir::Const;
@@ -17,6 +20,7 @@ use crate::refine::Refine;
 use crate::index_vec::*;
 use crate::rw_ref::RwRef;
 
+#[derive(Default)]
 pub struct Driver {
     pub arch: Arch,
     pub src_map: SourceMap,
@@ -62,4 +66,8 @@ impl DriverRef<'_> {
         let val = self.write().call(function_ref, Vec::new(), Vec::new());
         self.write().value_to_const(val, tp.ty(expr).clone(), tp)
     }
+}
+
+lazy_static! {
+    pub static ref DRIVER: RwLock<Driver> = RwLock::new(Driver::default());
 }

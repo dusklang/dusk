@@ -6,9 +6,9 @@ use dire::ty::Type;
 use dire::mir::FuncId;
 use dire::arch::Arch;
 use libdusk::TirGraphOutput;
-use libdusk::driver::{Driver, DriverRef};
+use libdusk::driver::{DRIVER, Driver, DriverRef};
 use libdusk::source_info::SourceMap;
-use libdusk::interpreter::{restart_interp, register_driver, InterpMode};
+use libdusk::interpreter::{restart_interp, InterpMode};
 use libdusk::mir::FunctionRef;
 use libdusk::error::Error;
 use libdusk::debug::{self, Message as DvdMessage};
@@ -66,13 +66,8 @@ fn main() {
 
     let mut src_map = SourceMap::new();
     let loaded_file = src_map.add_file(&opt.input).is_ok();
-    let locked_driver = RwLock::new(
-        Driver::new(src_map, Arch::X86_64, opt.run_refiner)
-    );
-    let mut driver = DriverRef::new(&locked_driver);
-    unsafe {
-        register_driver(&mut *driver.write());
-    }
+    let mut driver = DriverRef::new(&DRIVER);
+    *driver.write() = Driver::new(src_map, Arch::X86_64, opt.run_refiner);
     driver.write().initialize_hir();
 
     if !loaded_file {
