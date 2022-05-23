@@ -267,7 +267,10 @@ impl Driver {
 
         let mut started_at_mod_scope = false;
         let mut root_namespace = true;
-        let mut namespace = Some(decl_ref.namespace);
+        let mut namespace = Some(decl_ref.namespace.clone());
+        if Some(decl_ref.name) == self.interner.get("T") {
+            println!("Hello! {:?}", &namespace);
+        }
         'find_overloads: while let Some(ns) = namespace {
             namespace = match ns {
                 Namespace::Imper { scope, end_offset } => {
@@ -282,14 +285,14 @@ impl Driver {
                         }
                     }
 
-                    self.code.hir_code.imper_ns[scope].parent
+                    self.code.hir_code.imper_ns[scope].parent.clone()
                 },
                 Namespace::Mod(scope_ns) => {
                     let scope = self.code.hir_code.mod_ns[scope_ns].scope;
                     self.find_overloads_in_mod(decl_ref, scope, &mut overloads);
 
                     if root_namespace { started_at_mod_scope = true; }
-                    self.code.hir_code.mod_ns[scope_ns].parent
+                    self.code.hir_code.mod_ns[scope_ns].parent.clone()
                 },
                 Namespace::MemberRef { base_expr } => {
                     assert!(root_namespace, "member refs currently must be at the root of a namespace hierarchy");
@@ -306,27 +309,23 @@ impl Driver {
 
                     break;
                 },
-                Namespace::CompDeclParams(ns_id) => {
-                    let comp_decl_params_ns = &self.code.hir_code.comp_decl_params_ns[ns_id];
-                    let decl = &df!(comp_decl_params_ns.func.hir);
-                    if let hir::Decl::Computed { generic_params, .. } = decl {
-                        for i in generic_params.start.index()..generic_params.end.index() {
-                            let decl = DeclId::new(i);
-                            let param_name = self.code.hir_code.names[decl];
-                            if decl_ref.name == param_name {
-                                overloads.insert(decl);
-                                break 'find_overloads;
-                            }
+                Namespace::GenericContext(ns_id) => {
+                    let generic_context_ns = &self.code.hir_code.generic_context_ns[ns_id];
+                    let generic_params = &generic_context_ns.generic_params;
+                    for i in generic_params.start.index()..generic_params.end.index() {
+                        let decl = DeclId::new(i);
+                        let param_name = self.code.hir_code.names[decl];
+                        if decl_ref.name == param_name {
+                            overloads.insert(decl);
+                            break 'find_overloads;
                         }
-                    } else if !matches!(decl, hir::Decl::ComputedPrototype { .. }) {
-                        panic!("expected computed decl");
-                    };
-                    comp_decl_params_ns.parent
+                    }
+                    generic_context_ns.parent
                 },
                 Namespace::Requirement(ns_id) => {
                     let condition_ns = &self.code.hir_code.condition_ns[ns_id];
                     self.find_overloads_in_function_parameters(decl_ref, condition_ns.func, &mut overloads);
-                    condition_ns.parent
+                    condition_ns.parent.clone()
                 },
                 Namespace::Guarantee(ns_id) => {
                     let condition_ns = &self.code.hir_code.condition_ns[ns_id];
@@ -334,7 +333,7 @@ impl Driver {
                     if decl_ref.name == self.hir.return_value_sym && overloads.is_empty() {
                         overloads.insert(RETURN_VALUE_DECL);
                     }
-                    condition_ns.parent
+                    condition_ns.parent.clone()
                 },
             };
 

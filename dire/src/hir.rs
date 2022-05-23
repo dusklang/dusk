@@ -26,7 +26,7 @@ define_index_type!(pub struct PatternBindingDeclId = u32;);
 define_index_type!(pub struct ImperScopeNsId = u32;);
 define_index_type!(pub struct ModScopeNsId = u32;);
 define_index_type!(pub struct ConditionNsId = u32;);
-define_index_type!(pub struct CompDeclParamsNsId = u32;);
+define_index_type!(pub struct GenericContextNsId = u32;);
 define_index_type!(pub struct GenericParamId = u32;);
 define_index_type!(pub struct ExternModId = u32;);
 
@@ -80,6 +80,12 @@ pub struct CompDeclParamsNs {
 }
 
 #[derive(Debug)]
+pub struct GenericContextNs {
+    pub generic_params: Range<DeclId>,
+    pub parent: Option<Namespace>,
+}
+
+#[derive(Debug)]
 pub struct ImperScope {
     pub block: BlockId,
     pub terminal_expr: ExprId,
@@ -90,7 +96,7 @@ pub enum Namespace {
     Imper { scope: ImperScopeNsId, end_offset: usize },
     Mod(ModScopeNsId),
     MemberRef { base_expr: ExprId, },
-    CompDeclParams(CompDeclParamsNsId),
+    GenericContext(GenericContextNsId),
 
     /// Includes the parameters of the function
     Requirement(ConditionNsId),
@@ -475,7 +481,7 @@ pub struct HirCode {
     pub imper_ns: IndexVec<ImperScopeNsId, ImperScopeNs>,
     pub mod_ns: IndexVec<ModScopeNsId, ModScopeNs>,
     pub condition_ns: IndexVec<ConditionNsId, ConditionNs>,
-    pub comp_decl_params_ns: IndexVec<CompDeclParamsNsId, CompDeclParamsNs>,
+    pub generic_context_ns: IndexVec<GenericContextNsId, GenericContextNs>,
     pub cast_counter: IndexCounter<CastId>,
     pub structs: IndexVec<StructId, Struct>,
     pub enums: IndexVec<EnumId, Enum>,

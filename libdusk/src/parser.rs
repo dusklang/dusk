@@ -2,7 +2,7 @@ use smallvec::{SmallVec, smallvec};
 
 use string_interner::DefaultSymbol as Sym;
 
-use dire::hir::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment, GenericParamId, Ident, Pattern, PatternKind, SwitchCase, ImperScopedDecl, ExternMod, ERROR_EXPR, ERROR_TYPE, VOID_TYPE};
+use dire::hir::{self, ExprId, DeclId, Decl, ConditionNsId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment, GenericParamId, Ident, Pattern, PatternKind, SwitchCase, ImperScopedDecl, ExternMod, ERROR_EXPR, ERROR_TYPE, VOID_TYPE};
 use dire::ty::Type;
 use dire::source_info::{self, SourceFileId, SourceRange};
 
@@ -1163,9 +1163,9 @@ impl Driver {
         proto_range = source_info::concat(proto_range, name_range);
 
         // Parse optional [T, U, V, ...]
-        let mut generic_param_names = SmallVec::new();
+        let mut generic_param_names = Vec::new();
         let mut generic_params = GenericParamId::new(0)..GenericParamId::new(0);
-        let mut generic_param_ranges = SmallVec::new();
+        let mut generic_param_ranges = Vec::new();
         if let TokenKind::OpenSquareBracket = self.next(p).kind {
             let open_square_bracket_range = self.cur(p).range;
             self.next(p);
@@ -1197,12 +1197,24 @@ impl Driver {
             proto_range = source_info::concat(proto_range, bracket_range);
         }
 
+        assert_eq!(generic_param_names.len(), generic_params.end - generic_params.start);
+        assert_eq!(generic_param_names.len(), generic_param_ranges.len());
+        self.code.hir_code.decls.reserve(generic_param_names.len());
+        let first_generic_param = DeclId::new(self.code.hir_code.decls.len());
+        for id in generic_params.start.index()..generic_params.end.index() {
+            let param = GenericParamId::new(id);
+            let i = id - generic_params.start.index();
+            self.decl(Decl::GenericParam(param), generic_param_names[i], Some(VOID_TYPE), generic_param_ranges[i]);
+        }
+        let last_generic_param = DeclId::new(self.code.hir_code.decls.len());
+        let generic_params = first_generic_param..last_generic_param;
+
         // Parse (param_name: param_ty, param2_name: param2_ty, ...)
         let mut param_names = SmallVec::new();
         let mut param_tys = SmallVec::new();
         let mut param_ranges = SmallVec::new();
-        let params_ns = if let TokenKind::LeftParen = self.cur(p).kind {
-            let ns = self.begin_comp_decl_params_namespace();
+        if let TokenKind::LeftParen = self.cur(p).kind {
+            let ns = self.begin_generic_context(generic_params.clone());
             self.next(p);
             while let TokenKind::Ident(name) = *self.cur(p).kind {
                 let param_range = self.cur(p).range;
@@ -1218,9 +1230,9 @@ impl Driver {
             }
             let paren_range = self.eat_tok(p, TokenKind::RightParen);
             proto_range = source_info::concat(proto_range, paren_range);
-            self.end_comp_decl_params_namespace(ns);
-
-            Some(ns)
+            // TODO: end this later, after the ImperScope, so that generic parameters can be referred to from
+            // inside the function as well.
+            self.end_generic_context(ns);
         } else {
             self.errors.push(
                 Error::new("function declaration must have parentheses")
@@ -1230,8 +1242,7 @@ impl Driver {
                         "add '()' here"
                     )
             );
-            None
-        };
+        }
         // Parse ": ty" or "{"
         let ty = match self.cur(p).kind {
             TokenKind::Colon => {
@@ -1248,10 +1259,7 @@ impl Driver {
         };
         let decl_id = match self.cur(p).kind {
             TokenKind::OpenCurly => {
-                let decl_id = self.begin_computed_decl(name, param_names, param_tys, param_ranges, generic_param_names, generic_params, generic_param_ranges, ty, proto_range);
-                if let Some(ns) = params_ns {
-                    self.code.hir_code.comp_decl_params_ns[ns].func = decl_id;
-                }
+                let decl_id = self.begin_computed_decl(name, param_names, param_tys, param_ranges, generic_params, ty, proto_range);
                 self.parse_scope(p, &[]);
                 self.end_computed_decl();
                 decl_id
@@ -1259,9 +1267,6 @@ impl Driver {
             _ => {
                 assert_eq!(generic_param_names.len(), 0, "generic parameters on a function prototype are not allowed");
                 let decl_id = self.comp_decl_prototype(name, param_tys, param_ranges, ty, proto_range);
-                if let Some(ns) = params_ns {
-                    self.code.hir_code.comp_decl_params_ns[ns].func = decl_id;
-                }
                 decl_id
             }
         };

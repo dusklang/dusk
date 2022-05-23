@@ -50,7 +50,7 @@ pub enum ScopeState {
         namespace: ModScopeNsId,
         extern_mod: Option<ExternModId>,
     },
-    CompDeclParams(CompDeclParamsNsId),
+    GenericContext(GenericContextNsId),
     Condition {
         ns: ConditionNsId,
         condition_kind: ConditionKind,
@@ -146,7 +146,7 @@ impl Driver {
         self.push_expr(Expr::Import { file }, range)
     }
 
-    fn decl(&mut self, decl: Decl, name: Sym, explicit_ty: Option<ExprId>, range: SourceRange) -> DeclId {
+    pub fn decl(&mut self, decl: Decl, name: Sym, explicit_ty: Option<ExprId>, range: SourceRange) -> DeclId {
         let decl_id = self.code.hir_code.decls.push(decl);
         self.code.hir_code.explicit_tys.push_at(decl_id, explicit_ty);
         self.code.hir_code.names.push_at(decl_id, name);
@@ -218,7 +218,7 @@ impl Driver {
                 );
                 decl_id
             },
-            ScopeState::Condition { .. } | ScopeState::CompDeclParams(_) => panic!("Stored decl unsupported in this position"),
+            ScopeState::Condition { .. } | ScopeState::GenericContext(_) => panic!("Stored decl unsupported in this position"),
         }
     }
     pub fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
@@ -317,19 +317,19 @@ impl Driver {
             panic!("Tried to end condition namespace, but the top of the scope stack is not a condition namespace");
         }
     }
-    pub fn begin_comp_decl_params_namespace(&mut self) -> CompDeclParamsNsId {
+    pub fn begin_generic_context(&mut self, generic_params: Range<DeclId>) -> GenericContextNsId {
         let parent = self.cur_namespace();
-        let ns = self.code.hir_code.comp_decl_params_ns.push(CompDeclParamsNs { func: DeclId::from_raw(u32::MAX), parent: Some(parent) });
-        self.hir.scope_stack.push(ScopeState::CompDeclParams(ns));
+        let ns = self.code.hir_code.generic_context_ns.push(GenericContextNs { generic_params, parent: Some(parent) });
+        self.hir.scope_stack.push(ScopeState::GenericContext(ns));
 
         ns
     }
-    pub fn end_comp_decl_params_namespace(&mut self, desired_ns: CompDeclParamsNsId) {
-        if let Some(&ScopeState::CompDeclParams(ns)) = self.hir.scope_stack.last() {
-            assert_eq!(ns, desired_ns, "tried to end computed decl params namespace, but the current condition scope doesn't match");
+    pub fn end_generic_context(&mut self, desired_ns: GenericContextNsId) {
+        if let Some(&ScopeState::GenericContext(ns)) = self.hir.scope_stack.last() {
+            assert_eq!(ns, desired_ns, "tried to end generic context, but the current condition scope doesn't match");
             self.hir.scope_stack.pop();
         } else {
-            panic!("Tried to end computed decl params namespace, but the top of the scope stack is not a computed decl params namespace");
+            panic!("Tried to end generic context, but the top of the scope stack is not a generic context namespace");
         }
     }
     pub fn begin_module(&mut self, extern_mod: Option<ExternModId>) -> ExprId {
@@ -343,7 +343,7 @@ impl Driver {
         self.hir.scope_stack.push(ScopeState::Mod { id, namespace, extern_mod });
         self.push_expr(Expr::Mod { id }, SourceRange::default())
     }
-    pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, generic_param_names: SmallVec<[Sym; 1]>, generic_params: Range<GenericParamId>, generic_param_ranges: SmallVec<[SourceRange; 1]>, return_ty: ExprId, proto_range: SourceRange) -> DeclId {
+    pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, generic_params: Range<DeclId>, return_ty: ExprId, proto_range: SourceRange) -> DeclId {
         // This is a placeholder value that gets replaced once the parameter declarations get allocated.
         let id = self.decl(Decl::Const(ExprId::new(u32::MAX as usize)), name, Some(return_ty), proto_range);
 
@@ -360,18 +360,6 @@ impl Driver {
         let last_param = DeclId::new(self.code.hir_code.decls.len());
         let params = first_param..last_param;
 
-        assert_eq!(generic_param_names.len(), generic_params.end - generic_params.start);
-        assert_eq!(generic_param_names.len(), generic_param_ranges.len());
-        self.code.hir_code.decls.reserve(generic_param_names.len());
-        let first_generic_param = DeclId::new(self.code.hir_code.decls.len());
-        for id in generic_params.start.index()..generic_params.end.index() {
-            let param = GenericParamId::new(id);
-            let i = id - generic_params.start.index();
-            self.decl(Decl::GenericParam(param), generic_param_names[i], Some(VOID_TYPE), generic_param_ranges[i]);
-        }
-        let last_generic_param = DeclId::new(self.code.hir_code.decls.len());
-        let generic_params = first_generic_param..last_generic_param;
-
         // `end_computed_decl` will attach the real scope to this decl; we don't have it yet
         df!(id.hir) = Decl::Computed {
             param_tys,
@@ -387,7 +375,7 @@ impl Driver {
             &ScopeState::Mod { .. } => {
                 self.mod_scoped_decl(name, ModScopedDecl { num_params: param_names.len(), id });
             },
-            ScopeState::Condition { .. } | ScopeState::CompDeclParams(_) => panic!("Computed decls are not supported in this position"),
+            ScopeState::Condition { .. } | ScopeState::GenericContext(_) => panic!("Computed decls are not supported in this position"),
         }
         self.hir.comp_decl_stack.push(
             CompDeclState {
@@ -428,7 +416,7 @@ impl Driver {
             &ScopeState::Mod { .. } => {
                 self.mod_scoped_decl(name, ModScopedDecl { num_params, id });
             },
-            ScopeState::Condition { .. } | ScopeState::CompDeclParams(_) => panic!("Computed decls are not supported in this position"),
+            ScopeState::Condition { .. } | ScopeState::GenericContext(_) => panic!("Computed decls are not supported in this position"),
         }
 
         id
@@ -657,7 +645,7 @@ impl Driver {
                 Namespace::Imper { scope: namespace, end_offset }
             },
             ScopeState::Mod { namespace, .. } => Namespace::Mod(namespace),
-            ScopeState::CompDeclParams(ns) => Namespace::CompDeclParams(ns),
+            ScopeState::GenericContext(ns) => Namespace::GenericContext(ns),
             ScopeState::Condition { ns, condition_kind: ConditionKind::Requirement } => Namespace::Requirement(ns),
             ScopeState::Condition { ns, condition_kind: ConditionKind::Guarantee } => Namespace::Guarantee(ns),
         }
