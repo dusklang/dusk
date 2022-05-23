@@ -333,6 +333,14 @@ impl StackFrame {
                 Type::Pointer(
                     Box::new(QualType { ty: self.canonicalize_type(&pointee.ty), is_mut: pointee.is_mut })
                 ),
+            Type::Function(FunctionType { param_tys, return_ty }) =>
+                Type::Function(
+                    FunctionType {
+                        param_tys: param_tys.iter().map(|ty| self.canonicalize_type(ty)).collect(),
+                        return_ty: Box::new(self.canonicalize_type(&return_ty)),
+                    }
+                ),
+            &Type::Struct(strukt) => Type::Struct(strukt),
             ty => ty.clone(),
         }
     }

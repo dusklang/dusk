@@ -2,7 +2,7 @@ use smallvec::{SmallVec, smallvec};
 
 use string_interner::DefaultSymbol as Sym;
 
-use dire::hir::{self, ExprId, DeclId, Decl, ConditionNsId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment, GenericParamId, Ident, Pattern, PatternKind, SwitchCase, ImperScopedDecl, ExternMod, ERROR_EXPR, ERROR_TYPE, VOID_TYPE};
+use dire::hir::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment, Ident, Pattern, PatternKind, SwitchCase, ImperScopedDecl, ExternMod, ERROR_EXPR, ERROR_TYPE, VOID_TYPE};
 use dire::ty::Type;
 use dire::source_info::{self, SourceFileId, SourceRange};
 
@@ -931,13 +931,14 @@ impl Driver {
         }
     }
 
-    fn parse_decl(&mut self, name: Ident, generic_params: GenericParamList, p: &mut Parser) -> DeclId {
+    fn parse_decl(&mut self, name: Ident, generic_param_list: GenericParamList, p: &mut Parser) -> DeclId {
         let colon_range = self.eat_tok(p, TokenKind::Colon);
         let mut found_separator = true;
         let explicit_ty = match self.cur(p).kind {
             TokenKind::Ident(_) => Some(self.parse_type(p).0),
             _ => None,
         };
+        
         let is_mut = match self.cur(p).kind {
             TokenKind::Assign => true,
             TokenKind::Colon => false,
@@ -956,8 +957,11 @@ impl Driver {
             self.next(p);
         }
 
+        let generic_params = self.create_decls_for_generic_param_list(&generic_param_list);
+        let ns = self.begin_generic_context(generic_params);
         let root = self.parse_expr(p).unwrap_or_else(|err| err);
-        self.stored_decl(name.symbol, generic_params, explicit_ty, is_mut, root, name.range)
+        self.end_generic_context(ns);
+        self.stored_decl(name.symbol, generic_param_list, explicit_ty, is_mut, root, name.range)
     }
 
     fn parse_module(&mut self, p: &mut Parser) -> ExprId {
@@ -1163,26 +1167,24 @@ impl Driver {
         proto_range = source_info::concat(proto_range, name_range);
 
         // Parse optional [T, U, V, ...]
-        let mut generic_param_names = Vec::new();
-        let mut generic_params = GenericParamId::new(0)..GenericParamId::new(0);
-        let mut generic_param_ranges = Vec::new();
+        let mut generic_param_list = GenericParamList::default();
         if let TokenKind::OpenSquareBracket = self.next(p).kind {
             let open_square_bracket_range = self.cur(p).range;
             self.next(p);
             if matches!(self.cur(p).kind, TokenKind::Ident(_)) {
-                generic_params.start = self.hir.generic_params.peek_next();
-                generic_params.end = generic_params.start;
+                generic_param_list.ids.start = self.hir.generic_params.peek_next();
+                generic_param_list.ids.end = generic_param_list.ids.start;
                 while let TokenKind::Ident(name) = *self.cur(p).kind {
                     // Claim a GenericParamId for yourself, then set the `end` value to be one past the end
                     let generic_param = self.hir.generic_params.next();
                     // Make sure nobody interrupts this loop and creates an unrelated generic param
-                    debug_assert_eq!(generic_params.end, generic_param);
-                    generic_params.end = generic_param + 1;
+                    debug_assert_eq!(generic_param_list.ids.end, generic_param);
+                    generic_param_list.ids.end = generic_param + 1;
 
                     let param_range = self.cur(p).range;
-                    generic_param_names.push(name);
+                    generic_param_list.names.push(name);
                     self.next(p);
-                    generic_param_ranges.push(param_range);
+                    generic_param_list.ranges.push(param_range);
                     while let TokenKind::Comma = self.cur(p).kind {
                         self.next(p);
                     }
@@ -1197,17 +1199,7 @@ impl Driver {
             proto_range = source_info::concat(proto_range, bracket_range);
         }
 
-        assert_eq!(generic_param_names.len(), generic_params.end - generic_params.start);
-        assert_eq!(generic_param_names.len(), generic_param_ranges.len());
-        self.code.hir_code.decls.reserve(generic_param_names.len());
-        let first_generic_param = DeclId::new(self.code.hir_code.decls.len());
-        for id in generic_params.start.index()..generic_params.end.index() {
-            let param = GenericParamId::new(id);
-            let i = id - generic_params.start.index();
-            self.decl(Decl::GenericParam(param), generic_param_names[i], Some(VOID_TYPE), generic_param_ranges[i]);
-        }
-        let last_generic_param = DeclId::new(self.code.hir_code.decls.len());
-        let generic_params = first_generic_param..last_generic_param;
+        let generic_params = self.create_decls_for_generic_param_list(&generic_param_list);
 
         // Parse (param_name: param_ty, param2_name: param2_ty, ...)
         let mut param_names = SmallVec::new();
@@ -1253,7 +1245,7 @@ impl Driver {
             },
             TokenKind::OpenCurly => hir::VOID_TYPE,
             _ => {
-                assert_eq!(generic_param_names.len(), 0, "generic parameters on a function prototype are not allowed");
+                assert_eq!(generic_param_list.names.len(), 0, "generic parameters on a function prototype are not allowed");
                 return self.comp_decl_prototype(name, param_tys, param_ranges, hir::VOID_TYPE, proto_range);
             },
         };
@@ -1265,7 +1257,7 @@ impl Driver {
                 decl_id
             },
             _ => {
-                assert_eq!(generic_param_names.len(), 0, "generic parameters on a function prototype are not allowed");
+                assert_eq!(generic_param_list.names.len(), 0, "generic parameters on a function prototype are not allowed");
                 let decl_id = self.comp_decl_prototype(name, param_tys, param_ranges, ty, proto_range);
                 decl_id
             }

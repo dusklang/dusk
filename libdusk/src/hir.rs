@@ -28,6 +28,22 @@ pub struct GenericParamList {
     pub ranges: SmallVec<[SourceRange; 1]>,
 }
 
+impl Driver {
+    pub fn create_decls_for_generic_param_list(&mut self, list: &GenericParamList) -> Range<DeclId> {
+        assert_eq!(list.names.len(), list.ids.end - list.ids.start);
+        assert_eq!(list.names.len(), list.ranges.len());
+        self.code.hir_code.decls.reserve(list.names.len());
+        let first_generic_param = DeclId::new(self.code.hir_code.decls.len());
+        for id in list.ids.start.index()..list.ids.end.index() {
+            let param = GenericParamId::new(id);
+            let i = id - list.ids.start.index();
+            self.decl(Decl::GenericParam(param), list.names[i], Some(VOID_TYPE), list.ranges[i]);
+        }
+        let last_generic_param = DeclId::new(self.code.hir_code.decls.len());
+        first_generic_param..last_generic_param
+    }
+}
+
 impl Default for GenericParamList {
     fn default() -> Self {
         Self {
@@ -146,7 +162,7 @@ impl Driver {
         self.push_expr(Expr::Import { file }, range)
     }
 
-    pub fn decl(&mut self, decl: Decl, name: Sym, explicit_ty: Option<ExprId>, range: SourceRange) -> DeclId {
+    fn decl(&mut self, decl: Decl, name: Sym, explicit_ty: Option<ExprId>, range: SourceRange) -> DeclId {
         let decl_id = self.code.hir_code.decls.push(decl);
         self.code.hir_code.explicit_tys.push_at(decl_id, explicit_ty);
         self.code.hir_code.names.push_at(decl_id, name);
