@@ -225,12 +225,6 @@ impl Code {
 }
 
 #[derive(Clone)]
-pub struct Struct {
-    pub field_tys: SmallVec<[Type; 2]>,
-    pub layout: StructLayout,
-}
-
-#[derive(Clone)]
 pub struct StructLayout {
     pub field_offsets: SmallVec<[usize; 2]>,
     pub alignment: usize,
@@ -274,7 +268,6 @@ pub struct MirCode {
     pub functions: IndexVec<FuncId, Function>,
     pub statics: IndexVec<StaticId, Static>,
     pub extern_mods: HashMap<ExternModId, ExternMod>,
-    pub structs: HashMap<StructId, Struct>,
     pub enums: HashMap<EnumId, EnumLayout>,
     pub source_ranges: HashMap<OpId, SourceRange>,
     pub instr_names: HashMap<OpId, String>,
@@ -299,7 +292,6 @@ impl MirCode {
             functions: IndexVec::new(),
             statics: IndexVec::new(),
             extern_mods: HashMap::new(),
-            structs: HashMap::new(),
             enums: HashMap::new(),
             source_ranges: HashMap::new(),
             instr_names: HashMap::new(),

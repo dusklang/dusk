@@ -20,7 +20,7 @@ use lazy_static::lazy_static;
 
 use dire::arch::Arch;
 use dire::hir::{Intrinsic, ModScopeId, EnumId, GenericParamId, ExternFunctionRef};
-use dire::mir::{Const, Instr, InstrId, FuncId, StaticId, Struct};
+use dire::mir::{Const, Instr, InstrId, FuncId, StaticId};
 use dire::ty::{Type, FunctionType, QualType, IntWidth, FloatWidth, StructType};
 use dire::{OpId, BlockId};
 
