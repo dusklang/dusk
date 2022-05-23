@@ -19,9 +19,9 @@ use index_vec::IndexVec;
 use lazy_static::lazy_static;
 
 use dire::arch::Arch;
-use dire::hir::{Intrinsic, ModScopeId, StructId, EnumId, GenericParamId, ExternFunctionRef};
+use dire::hir::{Intrinsic, ModScopeId, EnumId, GenericParamId, ExternFunctionRef};
 use dire::mir::{Const, Instr, InstrId, FuncId, StaticId, Struct};
-use dire::ty::{Type, FunctionType, QualType, IntWidth, FloatWidth};
+use dire::ty::{Type, FunctionType, QualType, IntWidth, FloatWidth, StructType};
 use dire::{OpId, BlockId};
 
 use crate::driver::{DRIVER, Driver, DriverRef};
@@ -79,12 +79,12 @@ macro_rules! int_conversions {
 int_conversions!(u8, u16, u32, u64, usize, i8, i16, i32, i64, isize);
 
 impl Driver {
-    fn eval_struct_lit(&self, id: StructId, fields: impl Iterator<Item=Value>) -> Value {
-        let strukt = self.code.mir_code.structs[&id].clone();
+    fn eval_struct_lit(&self, strukt: &StructType, fields: impl Iterator<Item=Value>) -> Value {
+        let layout = self.layout_struct(strukt);
         let mut buf = SmallVec::new();
-        buf.resize(strukt.layout.size, 0);
+        buf.resize(layout.size, 0);
         for (i, field) in fields.enumerate() {
-            let offset = strukt.layout.field_offsets[i];
+            let offset = layout.field_offsets[i];
             let ty = &strukt.field_tys[i];
             let size = self.size_of(ty);
             let val = field.as_bytes_with_driver(self);
@@ -263,8 +263,13 @@ impl Value {
             Const::Mod(id) => Value::from_mod(id),
             Const::BasicVariant { enuum, index } => Value::from_variant(driver, enuum, index, Value::Nothing),
             Const::StructLit { ref fields, id } => {
+                let field_tys: Vec<_> = fields.iter().map(|val| val.ty()).collect();
                 let fields: Vec<_> = fields.iter().map(|val| Value::from_const(val, driver)).collect();
-                driver.eval_struct_lit(id, fields.into_iter())
+                let strukt = StructType {
+                    field_tys,
+                    identity: id,
+                };
+                driver.eval_struct_lit(&strukt, fields.into_iter())
             }
         }
     }
@@ -340,7 +345,12 @@ impl StackFrame {
                         return_ty: Box::new(self.canonicalize_type(&return_ty)),
                     }
                 ),
-            &Type::Struct(strukt) => Type::Struct(strukt),
+            &Type::Struct(StructType { ref field_tys, identity }) => Type::Struct(
+                StructType {
+                    field_tys: field_tys.iter().map(|ty| self.canonicalize_type(ty)).collect(),
+                    identity,
+                }
+            ),
             ty => ty.clone(),
         }
     }
@@ -550,20 +560,19 @@ impl Driver {
             },
             Type::Ty => Const::Ty(val.as_ty()),
             Type::Mod => Const::Mod(val.as_mod()),
-            Type::Struct(id) => {
-                // Yay borrow checker
-                let strukt = self.code.mir_code.structs[&id].clone();
+            Type::Struct(strukt) => {
+                let layout = self.layout_struct(&strukt);
                 let buf = val.as_bytes();
                 let mut fields = Vec::new();
                 for i in 0..strukt.field_tys.len() {
-                    let offset = strukt.layout.field_offsets[i];
+                    let offset = layout.field_offsets[i];
                     let ty = strukt.field_tys[i].clone();
                     let size = self.size_of(&ty);
                     let val = Value::from_bytes(&buf[offset..(offset+size)]);
                     let konst = self.value_to_const(val, ty.clone(), tp);
                     fields.push(konst);
                 }
-                Const::StructLit { fields, id }
+                Const::StructLit { fields, id: strukt.identity }
             },
             Type::Void => Const::Void,
             _ => panic!("Can't output value of type `{:?}` as constant", ty),
@@ -1123,9 +1132,10 @@ impl DriverRef<'_> {
                             if let Some(field_name) = field_name {
                                 match ty {
                                     Type::Struct(strukt) => {
-                                        for (index, field) in self.read().code.hir_code.structs[strukt].fields.iter().enumerate() {
+                                        let layout = self.read().layout_struct(&strukt);
+                                        for (index, field) in self.read().code.hir_code.structs[strukt.identity].fields.iter().enumerate() {
                                             if field_name == field.name {
-                                                offset = Some(self.read().code.mir_code.structs[&strukt].layout.field_offsets[index]);
+                                                offset = Some(layout.field_offsets[index]);
                                                 break;
                                             }
                                         }
@@ -1275,22 +1285,16 @@ impl DriverRef<'_> {
                     Value::from_ty(Type::Function(FunctionType { param_tys, return_ty: Box::new(ret_ty) }))
                 }
                 &Instr::Struct { ref fields, id } => {
-                    if !self.read().code.mir_code.structs.contains_key(&id) {
-                        let mut field_tys = SmallVec::new();
-                        for &field in fields {
-                            field_tys.push(frame.get_val(field, &*self.read()).as_ty());
-                        }
-                        drop(d);
-                        let layout = self.write().layout_struct(&field_tys);
-                        self.write().code.mir_code.structs.insert(
-                            id,
-                            Struct {
-                                field_tys,
-                                layout,
-                            }
-                        );
+                    let mut field_tys = Vec::new();
+                    for &field in fields {
+                        field_tys.push(frame.get_val(field, &*self.read()).as_ty());
                     }
-                    Value::from_ty(Type::Struct(id))
+                    drop(d);
+                    let strukt = StructType {
+                        field_tys,
+                        identity: id,
+                    };
+                    Value::from_ty(Type::Struct(strukt))
                 },
                 &Instr::Enum { ref variants, id } => {
                     if !self.read().code.mir_code.enums.contains_key(&id) {
@@ -1309,11 +1313,21 @@ impl DriverRef<'_> {
                 }
                 &Instr::StructLit { ref fields, id } => {
                     let frame = stack.last().unwrap();
+                    let field_tys: Vec<_> = fields.iter()
+                        .map(|&instr| {
+                            let ty = d.type_of(instr);
+                            frame.canonicalize_type(ty)
+                        })
+                        .collect();
                     let fields: Vec<_> = fields.iter()
                         .map(|&instr| frame.get_val(instr, &*self.read()).clone())
                         .collect();
                     drop(d);
-                    self.write().eval_struct_lit(id, fields.into_iter())
+                    let strukt = StructType {
+                        field_tys,
+                        identity: id,
+                    };
+                    self.write().eval_struct_lit(&strukt, fields.into_iter())
                 },
                 &Instr::Ret(instr) => {
                     let val = frame.get_val(instr, &*self.read()).clone();
@@ -1368,20 +1382,19 @@ impl DriverRef<'_> {
                         Type::Struct(strukt) => strukt,
                         _ => panic!("Can't directly get field of non-struct"),
                     };
-                    let strukt = &self.read().code.mir_code.structs[&strukt];
-                    let ty = strukt.field_tys[index].clone();
-                    let size = self.read().size_of(&ty);
-                    let offset = strukt.layout.field_offsets[index];
+                    let layout = self.read().layout_struct(strukt);
+                    let size = layout.size;
+                    let offset = layout.field_offsets[index];
                     Value::from_bytes(&bytes[offset..(offset + size)])
                 },
                 &Instr::IndirectFieldAccess { val, index } => {
                     let addr = frame.get_val(val, &*self.read()).as_usize();
                     let base_ty = &d.type_of(val).deref().unwrap().ty;
                     let strukt = match base_ty {
-                        &Type::Struct(strukt) => strukt,
+                        Type::Struct(strukt) => strukt,
                         _ => panic!("Can't directly get field of non-struct"),
                     };
-                    let offset = self.read().code.mir_code.structs[&strukt].layout.field_offsets[index];
+                    let offset = self.read().layout_struct(strukt).field_offsets[index];
                     Value::from_usize(addr + offset)
                 },
                 Instr::Parameter(_) => panic!("Invalid parameter instruction in the middle of a function!"),

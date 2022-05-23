@@ -8,7 +8,7 @@ use display_adapter::display_adapter;
 use num_bigint::BigInt;
 
 use crate::hir::{Intrinsic, DeclId, StructId, EnumId, ModScopeId, ExternModId, ExternFunctionRef, GenericParamId};
-use crate::ty::{Type, FunctionType};
+use crate::ty::{Type, FunctionType, StructType};
 use crate::{Code, BlockId, OpId};
 use crate::source_info::SourceRange;
 
@@ -162,7 +162,12 @@ impl Const {
             Const::Ty(_) => Type::Ty,
             &Const::BasicVariant { enuum, .. } => Type::Enum(enuum),
             Const::Mod(_) => Type::Mod,
-            &Const::StructLit { id, .. } => Type::Struct(id),
+            &Const::StructLit { id, ref fields } => Type::Struct(
+                StructType {
+                    field_tys: fields.iter().map(|field| field.ty()).collect(),
+                    identity: id,
+                }
+            ),
             Const::Void => Type::Void,
         }
     }

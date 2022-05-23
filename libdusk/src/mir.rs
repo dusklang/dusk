@@ -11,7 +11,7 @@ use display_adapter::display_adapter;
 use dire::hir::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, GenericParamId, Item, PatternBindingDeclId, ExternModId, ExternFunctionRef, PatternBindingPathComponent, VOID_TYPE};
 use dire::mir::{FuncId, StaticId, Const, Instr, InstrId, Function, MirCode, StructLayout, EnumLayout, ExternMod, ExternFunction, InstrNamespace, SwitchCase, VOID_INSTR};
 use dire::{Block, BlockId, Op, OpId};
-use dire::ty::{Type, FunctionType, FloatWidth};
+use dire::ty::{Type, FunctionType, FloatWidth, StructType};
 use dire::source_info::SourceRange;
 
 use crate::driver::{Driver, DriverRef};
@@ -271,7 +271,7 @@ impl Driver {
                 bit_width / 8
             },
             Type::Bool => 1,
-            &Type::Struct(id) => self.code.mir_code.structs[&id].layout.size,
+            Type::Struct(strukt) => self.layout_struct(strukt).size,
             &Type::Enum(_id) => 4,
             Type::GenericParam(_) => panic!("can't get size of generic parameter without more context"),
             Type::Inout(_) => panic!("can't get size of inout parameter type"),
@@ -280,8 +280,8 @@ impl Driver {
 
     /// Stride of an instance of a type in bytes
     pub fn stride_of(&self, ty: &Type) -> usize {
-        match *ty {
-            Type::Struct(id) => self.code.mir_code.structs[&id].layout.stride,
+        match ty {
+            Type::Struct(strukt) => self.layout_struct(strukt).stride,
             Type::Enum(_) => {
                 let size = self.size_of(ty);
                 match size {
@@ -296,8 +296,8 @@ impl Driver {
 
     /// Minimum alignment of an instance of a type in bytes
     pub fn align_of(&self, ty: &Type) -> usize {
-        match *ty {
-            Type::Struct(id) => self.code.mir_code.structs[&id].layout.alignment,
+        match ty {
+            Type::Struct(strukt) => self.layout_struct(strukt).alignment,
             Type::Enum(_) => self.stride_of(ty),
             // Otherwise, alignment == size
             _ => self.size_of(ty),
@@ -305,28 +305,28 @@ impl Driver {
     }
 
     /// Compute the layout (field offsets, alignment, size, and stride) for a struct
-    pub fn layout_struct(&self, field_tys: &[Type]) -> StructLayout {
+    pub fn layout_struct(&self, strukt: &StructType) -> StructLayout {
         // Get max alignment of all the fields.
-        let alignment = field_tys.iter()
+        let alignment = strukt.field_tys.iter()
             .map(|ty| self.align_of(ty))
             .max()
             .unwrap_or(0);
 
         let mut field_offsets = SmallVec::new();
         let mut last_size = 0;
-        if !field_tys.is_empty() {
+        if !strukt.field_tys.is_empty() {
             field_offsets.push(0);
-            last_size = self.size_of(&field_tys[0]);
+            last_size = self.size_of(&strukt.field_tys[0]);
         }
-        for i in 1..field_tys.len() {
+        for i in 1..strukt.field_tys.len() {
             let prev_field_end = field_offsets[i - 1] + last_size;
             field_offsets.push(
                 next_multiple_of(
                     prev_field_end,
-                    self.align_of(&field_tys[i])
+                    self.align_of(&strukt.field_tys[i])
                 )
             );
-            last_size = self.size_of(&field_tys[i]);
+            last_size = self.size_of(&strukt.field_tys[i]);
         }
         let size = field_offsets.last().copied().unwrap_or(0) + last_size;
         let stride = next_multiple_of(size, alignment);
@@ -1121,7 +1121,20 @@ impl Driver {
         match instr {
             Instr::Void | Instr::Store { .. } => Type::Void,
             Instr::Pointer { .. } | Instr::Struct { .. } | Instr::GenericParam(_) | Instr::Enum { .. } | Instr::FunctionTy { .. } => Type::Ty,
-            &Instr::StructLit { id, .. } => Type::Struct(id),
+            &Instr::StructLit { ref fields, id } => {
+                let field_tys = fields.iter()
+                    .map(|&op| {
+                        let instr = self.code.ops[op].as_mir_instr().unwrap();
+                        self.generate_type_of(instr)
+                    })
+                    .collect();
+                Type::Struct(
+                    StructType {
+                        field_tys,
+                        identity: id,
+                    }
+                )
+            },
             Instr::Const(konst) => konst.ty(),
             Instr::Alloca(ty) => ty.clone().mut_ptr(),
             Instr::LogicalNot(_) => Type::Bool,
@@ -1143,14 +1156,14 @@ impl Driver {
             &Instr::DirectFieldAccess { val, index } => {
                 let base_ty = self.type_of(val);
                 match base_ty {
-                    Type::Struct(strukt) => b.structs[&strukt].field_tys[index].clone(),
+                    Type::Struct(strukt) => strukt.field_tys[index].clone(),
                     _ => panic!("Cannot directly access field of non-struct type {:?}!", base_ty),
                 }
             },
             &Instr::IndirectFieldAccess { val, index } => {
                 let base_ty = self.type_of(val).deref().unwrap();
                 match base_ty.ty {
-                    Type::Struct(strukt) => b.structs[&strukt].field_tys[index].clone().ptr_with_mut(base_ty.is_mut),
+                    Type::Struct(ref strukt) => strukt.field_tys[index].clone().ptr_with_mut(base_ty.is_mut),
                     _ => panic!("Cannot directly access field of non-struct type {:?}!", base_ty),
                 }
             },

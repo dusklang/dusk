@@ -815,7 +815,7 @@ impl tir::Expr<tir::DeclRef> {
                 generic_args.push(generic_arg);
             }
             for expr in tp.generic_substitution_list(self.decl_ref_id).clone() {
-                tp.constraints_mut(expr).substitute_generic_args(&decl.generic_params, &generic_args);
+                dbg!(tp.constraints_mut(expr)).substitute_generic_args(&decl.generic_params, dbg!(&generic_args));
             }
             (Some(overload), Some(generic_args))
         } else {
@@ -1148,9 +1148,9 @@ impl tir::Expr<tir::StructLit> {
             Type::Error
         } else {
             let ty = tp.get_evaluated_type(self.ty).clone();
-            match ty {
-                Type::Struct(id) => {
-                    let struct_fields = &driver.code.hir_code.structs[id].fields;
+            match &ty {
+                Type::Struct(strukt) => {
+                    let struct_fields = &driver.code.hir_code.structs[strukt.identity].fields;
                     let mut matches = Vec::new();
                     matches.resize(struct_fields.len(), ExprId::new(u32::MAX as usize));
 
@@ -1216,11 +1216,11 @@ impl tir::Expr<tir::StructLit> {
 
                     if successful {
                         *tp.struct_lit_mut(self.struct_lit_id) = Some(
-                            StructLit { strukt: id, fields: matches }
+                            StructLit { strukt: strukt.identity, fields: matches }
                         );
                     }
                 },
-                ref other => {
+                other => {
                     let range = driver.get_range(self.ty);
                     driver.errors.push(
                         Error::new(format!("Expected struct type in literal, found {:?}", *other))
@@ -1524,10 +1524,10 @@ impl DriverRef<'_> {
                             _ => panic!("Unexpected const kind, expected module!"),
                         }
                     },
-                    Type::Struct(strukt) => ExprNamespace::Struct(strukt),
+                    Type::Struct(strukt) => ExprNamespace::Struct(strukt.identity),
                     Type::Pointer(ref pointee) => {
-                        match pointee.ty {
-                            Type::Struct(strukt) => ExprNamespace::Struct(strukt),
+                        match &pointee.ty {
+                            Type::Struct(strukt) => ExprNamespace::Struct(strukt.identity),
                             _ => continue,
                         }
                     },

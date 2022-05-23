@@ -8,5 +8,6 @@ DeGenericized :: MyGenericType[u64]
 fn main() {
     hello :: DeGenericized {
         non_generic_member: 54
+        generic_member: 67
     }
 }

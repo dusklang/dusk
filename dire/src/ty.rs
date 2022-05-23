@@ -31,6 +31,12 @@ pub struct FunctionType {
 }
 
 #[derive(Clone, PartialEq, Eq)]
+pub struct StructType {
+    pub field_tys: Vec<Type>,
+    pub identity: StructId,
+}
+
+#[derive(Clone, PartialEq, Eq)]
 pub enum Type {
     Error,
     Int {
@@ -42,7 +48,7 @@ pub enum Type {
     Pointer(Box<QualType>),
     Inout(Box<Type>),
     Function(FunctionType),
-    Struct(StructId),
+    Struct(StructType),
     Enum(EnumId),
     Bool,
     Void,
@@ -197,8 +203,15 @@ impl fmt::Debug for Type {
             Type::Inout(ty) => write!(f, "inout {:?}", ty),
             Type::Function(fun) => fun.fmt(f),
             // TODO: print out fields (issue #76)
-            &Type::Struct(id) => {
-                write!(f, "struct{}", id.index())
+            Type::Struct(ty) => {
+                write!(f, "struct{} {{ ", ty.identity.index())?;
+                for (i, ty) in ty.field_tys.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{:?}", ty)?;
+                }
+                write!(f, " }}")
             },
             &Type::Enum(id) => {
                 write!(f, "enum{}", id.index())
