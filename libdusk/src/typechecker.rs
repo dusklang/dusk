@@ -1193,7 +1193,7 @@ impl tir::Expr<tir::StructLit> {
                                     .adding_primary_range(lit_range, "")
                                     .adding_secondary_range(field_range, "field declared here")
                             );
-                        } else if let Some(err) = can_unify_to(tp.constraints(maatch), &field_ty.into()).err() {
+                        } else if let Some(err) = can_unify_to_in_generic_context(dbg!(tp.constraints(maatch)), dbg!(&field_ty.into()), &[]).err() {
                             successful = false;
                             let range = driver.get_range(maatch);
                             let mut error = Error::new("Invalid struct field type")
