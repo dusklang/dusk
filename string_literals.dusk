@@ -1,5 +1,9 @@
 fn take_literal(lit: StringLiteral) {
-    
+    i: usize = 0
+    while i < lit.length {
+        print(*((lit.data as usize + i) as u8*))
+        i += 1
+    }
 }
 
 fn main() {

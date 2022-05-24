@@ -6,6 +6,8 @@ use index_vec::define_index_type;
 
 use dire::source_info::SourceRange;
 use dire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, EnumId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, RETURN_VALUE_DECL};
+use dire::{internal_fields, internal_field_decls, InternalField, InternalFieldDecls, InternalNamespace};
+use dire::ty::Type;
 
 use crate::driver::Driver;
 use crate::dep_vec::{self, DepVec, AnyDepVec};
@@ -199,6 +201,7 @@ pub enum ExprNamespace {
     Mod(ModScopeId),
     Struct(StructId),
     Enum(EnumId),
+    Internal(InternalNamespace),
 }
 
 #[derive(Debug, Default)]
@@ -221,6 +224,47 @@ macro_rules! add_eval_dep_injector {
         }
     }
 }
+
+
+macro_rules! define_internal_types_internal {
+    ($(struct $name:ident {
+        $($field_name:ident: $ty:expr),*$(,)?
+    })*) => {
+        impl Driver {
+            pub fn register_internal_fields(&mut self) {
+                self.internal_field_decls = InternalFieldDecls {
+                    $(
+                        $name: internal_field_decls::$name {
+                            $(
+                                $field_name: self.internal_field(
+                                    InternalField::$name(internal_fields::$name::$field_name),
+                                    stringify!($field_name),
+                                    $ty
+                                )
+                            ),*
+                        }
+                    ),*  
+                };
+            }
+            fn find_overloads_in_internal(&self, decl_ref: &hir::DeclRef, ns: InternalNamespace, overloads: &mut HashSet<DeclId>) {
+                match ns {
+                    $(
+                        InternalNamespace::$name => {
+                            $({
+                                let decl = self.internal_field_decls.$name.$field_name;
+                                let name = self.code.hir_code.names[decl];
+                                if name == decl_ref.name {
+                                    overloads.insert(decl);
+                                }   
+                            })*
+                        }
+                    ),*
+                }
+            }
+        }
+    }
+}
+dire::define_internal_types!(define_internal_types_internal);
 
 impl Driver {
     fn find_overloads_in_mod(&self, decl_ref: &hir::DeclRef, scope: ModScopeId, overloads: &mut HashSet<DeclId>) {
@@ -303,6 +347,7 @@ impl Driver {
                                 ExprNamespace::Mod(scope) => self.find_overloads_in_mod(decl_ref, scope, &mut overloads),
                                 ExprNamespace::Struct(id) => self.find_overloads_in_struct(decl_ref, id, &mut overloads),
                                 ExprNamespace::Enum(id) => self.find_overloads_in_enum(decl_ref, id, &mut overloads),
+                                ExprNamespace::Internal(internal) => self.find_overloads_in_internal(decl_ref, internal, &mut overloads),
                             }
                         }
                     }
@@ -509,7 +554,7 @@ impl Driver {
     fn build_tir_decl(&mut self, unit: &mut UnitItems, level: u32, id: DeclId) {
         match df!(id.hir) {
             // TODO: Add parameter and field TIR items for (at least) checking that the type of the param is valid
-            hir::Decl::Parameter { .. } | hir::Decl::Field { .. } | hir::Decl::Variant { .. } | hir::Decl::ReturnValue | hir::Decl::Intrinsic { .. } | hir::Decl::ComputedPrototype { .. } => {},
+            hir::Decl::Parameter { .. } | hir::Decl::Field { .. } | hir::Decl::Variant { .. } | hir::Decl::ReturnValue | hir::Decl::Intrinsic { .. } | hir::Decl::ComputedPrototype { .. } | hir::Decl::InternalField(_) => {},
             hir::Decl::GenericParam(_) => {
                 assert_eq!(level, 0);
                 unit.generic_params.push(GenericParam { id });
@@ -570,6 +615,10 @@ impl Driver {
                     true,
                     SmallVec::new()
                 ),
+                hir::Decl::InternalField(_) => (
+                    false, // TODO: allow this to be changed per-field
+                    SmallVec::new()
+                ),
                 hir::Decl::Variant { payload_ty, .. } => (
                     false,
                     payload_ty.iter().cloned().collect(),
@@ -585,7 +634,7 @@ impl Driver {
             let decl_id = DeclId::new(i);
             let id = df!(decl_id.item);
             match df!(decl_id.hir) {
-                hir::Decl::Parameter { .. } | hir::Decl::Intrinsic { .. } | hir::Decl::Field { .. } | hir::Decl::ReturnValue | hir::Decl::GenericParam(_) | hir::Decl::Variant { .. } | hir::Decl::ComputedPrototype { .. } => {},
+                hir::Decl::Parameter { .. } | hir::Decl::Intrinsic { .. } | hir::Decl::Field { .. } | hir::Decl::ReturnValue | hir::Decl::GenericParam(_) | hir::Decl::Variant { .. } | hir::Decl::ComputedPrototype { .. } | hir::Decl::InternalField(_) => {},
                 hir::Decl::PatternBinding { id: _binding_id, .. } => {
                     // let scrutinee = self.code.hir_code.pattern_binding_decls[binding_id].scrutinee;
 
@@ -712,7 +761,7 @@ impl Driver {
             match self.code.hir_code.items[id] {
                 hir::Item::Decl(decl_id) => {
                     match df!(decl_id.hir) {
-                        hir::Decl::Parameter { .. } | hir::Decl::Static(_) | hir::Decl::Const(_) | hir::Decl::Stored { .. } | hir::Decl::Field { .. } | hir::Decl::ReturnValue /*  | hir::Decl::PatternBinding { .. }*/ => {},
+                        hir::Decl::Parameter { .. } | hir::Decl::Static(_) | hir::Decl::Const(_) | hir::Decl::Stored { .. } | hir::Decl::Field { .. } | hir::Decl::ReturnValue | hir::Decl::InternalField(_) /*  | hir::Decl::PatternBinding { .. }*/ => {},
                         hir::Decl::PatternBinding { id: binding_id, .. } => {
                             let scrutinee = self.code.hir_code.pattern_binding_decls[binding_id].scrutinee;
         

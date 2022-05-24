@@ -4,6 +4,9 @@ pub mod arch;
 pub mod index_counter;
 pub mod source_info;
 pub mod mir;
+mod internal_types;
+
+pub use internal_types::*;
 
 use index_vec::{IndexVec, index_vec, define_index_type};
 use display_adapter::display_adapter;

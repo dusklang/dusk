@@ -10,6 +10,7 @@ use dire::hir::*;
 use dire::index_counter::IndexCounter;
 use dire::ty::Type;
 use dire::source_info::{SourceFileId, SourceRange};
+use dire::InternalField;
 
 use crate::driver::Driver;
 use crate::index_vec::*;
@@ -136,6 +137,8 @@ impl Driver {
         self.hir.guarantees_sym = self.interner.get_or_intern_static("guarantees");
         self.hir.return_value_sym = return_value_sym;
         self.hir.underscore_sym = self.interner.get_or_intern_static("_");
+
+        self.register_internal_fields();
     }
 
     pub fn debug_mark_expr(&mut self, expr: ExprId) {
@@ -471,6 +474,13 @@ impl Driver {
             name,
             ModScopedDecl { num_params, id }
         );
+    }
+    pub fn internal_field(&mut self, field: InternalField, name: &str, ty: Type) -> DeclId {
+        let name = self.interner.get_or_intern(name);
+        let ty = self.add_const_ty(ty);
+        self.decl(
+            Decl::InternalField(field), name, Some(ty), SourceRange::default()
+        )
     }
     pub fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId {
         match op {

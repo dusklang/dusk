@@ -11,8 +11,9 @@ use type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 
 use dire::hir::{self, ExprId, DeclId, StructId, PatternKind, Ident, VOID_EXPR};
 use dire::mir::Const;
-use dire::ty::{Type, FunctionType, QualType, IntWidth};
+use dire::ty::{Type, InternalType, FunctionType, QualType, IntWidth};
 use dire::source_info::SourceRange;
+use dire::InternalNamespace;
 
 use crate::driver::{Driver, DriverRef};
 use crate::error::Error;
@@ -1539,6 +1540,9 @@ impl DriverRef<'_> {
                             Const::Ty(Type::Enum(id)) => ExprNamespace::Enum(id),
                             _ => panic!("Unexpected const kind, expected enum!"),
                         }
+                    },
+                    Type::Internal(ty) => match ty {
+                        InternalType::StringLiteral => ExprNamespace::Internal(InternalNamespace::StringLiteral),
                     },
                     _ => continue,
                 };

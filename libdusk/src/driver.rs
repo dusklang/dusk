@@ -8,6 +8,7 @@ use dire::mir::Const;
 use dire::arch::Arch;
 use dire::source_info::SourceFileId;
 use dire::Code;
+use dire::InternalFieldDecls;
 
 use crate::source_info::SourceMap;
 use crate::token::TokenVec;
@@ -32,6 +33,7 @@ pub struct Driver {
     pub mir: mir::Builder,
     pub refine: Refine,
     pub code: Code,
+    pub internal_field_decls: InternalFieldDecls,
     /// Total number of errors that have been flushed
     pub flushed_errors: u32,
     pub run_refiner: bool,
@@ -51,6 +53,7 @@ impl Driver {
             mir: mir::Builder::new(),
             refine: Refine::default(),
             code: Code::default(),
+            internal_field_decls: InternalFieldDecls::default(),
             flushed_errors: 0,
             run_refiner,
         }

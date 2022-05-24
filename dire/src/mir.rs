@@ -9,7 +9,7 @@ use num_bigint::BigInt;
 
 use crate::hir::{Intrinsic, DeclId, StructId, EnumId, ModScopeId, ExternModId, ExternFunctionRef, GenericParamId};
 use crate::ty::{Type, InternalType, FunctionType, StructType};
-use crate::{Code, BlockId, OpId};
+use crate::{Code, BlockId, OpId, InternalField};
 use crate::source_info::SourceRange;
 
 define_index_type!(pub struct FuncId = u32;);
@@ -53,6 +53,7 @@ pub enum Instr {
     StructLit { fields: SmallVec<[OpId; 2]>, id: StructId },
     DirectFieldAccess { val: OpId, index: usize },
     IndirectFieldAccess { val: OpId, index: usize },
+    InternalFieldAccess { val: OpId, field: InternalField },
     Variant { enuum: EnumId, index: usize, payload: OpId },
     DiscriminantAccess { val: OpId },
     Ret(OpId),
@@ -98,7 +99,8 @@ impl Instr {
                 | Instr::IntToFloat(op, _) | Instr::Load(op) | Instr::Pointer { op, .. }
                 | Instr::DirectFieldAccess { val: op, .. } | Instr::IndirectFieldAccess { val: op, .. }
                 | Instr::DiscriminantAccess { val: op } | Instr::Ret(op) | Instr::CondBr { condition: op, .. }
-                | Instr::SwitchBr { scrutinee: op, .. } | Instr::Variant { payload: op, .. } => vec![op],
+                | Instr::SwitchBr { scrutinee: op, .. } | Instr::Variant { payload: op, .. }
+                | Instr::InternalFieldAccess { val: op, .. } => vec![op],
             Instr::Store { location, value } => vec![location, value],
             Instr::Call { arguments: ref ops, .. } | Instr::ExternCall { arguments: ref ops, .. }
                 | Instr::Intrinsic { arguments: ref ops, .. } | Instr::Struct { fields: ref ops, .. }
@@ -125,7 +127,8 @@ impl Instr {
                 | Instr::IntToFloat(op, _) | Instr::Load(op) | Instr::Pointer { op, .. }
                 | Instr::DirectFieldAccess { val: op, .. } | Instr::IndirectFieldAccess { val: op, .. }
                 | Instr::DiscriminantAccess { val: op } | Instr::Ret(op) | Instr::CondBr { condition: op, .. }
-                | Instr::SwitchBr { scrutinee: op, .. } | Instr::Variant { payload: op, .. } => replace(op, old, new),
+                | Instr::SwitchBr { scrutinee: op, .. } | Instr::Variant { payload: op, .. }
+                | Instr::InternalFieldAccess { val: op, .. } => replace(op, old, new),
             Instr::Store { location, value } => {
                 replace(location, old, new);
                 replace(value, old, new);

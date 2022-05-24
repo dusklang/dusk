@@ -23,6 +23,7 @@ use dire::hir::{Intrinsic, ModScopeId, EnumId, GenericParamId, ExternFunctionRef
 use dire::mir::{Const, Instr, InstrId, FuncId, StaticId};
 use dire::ty::{Type, InternalType, FunctionType, QualType, IntWidth, FloatWidth, StructType};
 use dire::{OpId, BlockId};
+use dire::{InternalField, internal_fields};
 
 use crate::driver::{DRIVER, Driver, DriverRef};
 use crate::mir::{FunctionRef, function_by_ref};
@@ -257,7 +258,7 @@ impl Value {
             Const::Bool(val) => Value::from_bool(val),
             Const::Str { id, .. } => {
                 let ptr = driver.code.mir_code.strings[id].as_ptr();
-                Value::from_usize(unsafe { mem::transmute(ptr) })
+                Value::from_usize(ptr as usize)
             },
             Const::StrLit(ref lit) => Value::from_internal(InternalValue::StrLit(lit.clone())),
             Const::Ty(ref ty) => Value::from_ty(ty.clone()),
@@ -1066,7 +1067,7 @@ impl DriverRef<'_> {
                             let size = frame.get_val(arguments[0], &*self.read()).as_u64() as usize;
                             let layout = alloc::Layout::from_size_align(size, 8).unwrap();
                             let buf = unsafe { alloc::alloc(layout) };
-                            let address: usize = unsafe { mem::transmute(buf) };
+                            let address = buf as usize;
                             INTERP.write().unwrap().allocations.insert(address, layout);
                             Value::from_usize(address)
                         }
@@ -1074,7 +1075,7 @@ impl DriverRef<'_> {
                             assert_eq!(arguments.len(), 1);
                             assert_eq!(self.read().arch.pointer_size(), 64);
                             let ptr = frame.get_val(arguments[0], &*self.read()).as_raw_ptr();
-                            let address: usize = unsafe { mem::transmute(ptr) };
+                            let address = ptr as usize;
                             let layout = INTERP.write().unwrap().allocations.remove(&address).unwrap();
                             unsafe { alloc::dealloc(ptr, layout) };
                             Value::Nothing
@@ -1274,7 +1275,7 @@ impl DriverRef<'_> {
                         .or_insert(static_value)
                         .as_bytes()
                         .as_ptr();
-                    Value::from_usize(unsafe { mem::transmute(statik) })
+                    Value::from_usize(statik as usize)
                 },
                 &Instr::Pointer { op, is_mut } => {
                     Value::from_ty(frame.get_val(op, &*self.read()).as_ty().ptr_with_mut(is_mut))
@@ -1399,6 +1400,21 @@ impl DriverRef<'_> {
                     };
                     let offset = self.read().layout_struct(strukt).field_offsets[index];
                     Value::from_usize(addr + offset)
+                },
+                &Instr::InternalFieldAccess { val, field } => {
+                    let val = frame.get_val(val, &*self.read()).as_internal();
+                    match (val, field) {
+                        (InternalValue::StrLit(lit), InternalField::StringLiteral(field)) => {
+                            use internal_fields::StringLiteral::*;
+                            match field {
+                                length => {
+                                    Value::from_usize(lit.as_bytes().len())
+                                },
+                                data => Value::from_usize(lit.as_ptr() as usize),
+                            }
+                        },
+                        pair => unimplemented!("unimplemented internal field access: {:?}", pair),
+                    }
                 },
                 Instr::Parameter(_) => panic!("Invalid parameter instruction in the middle of a function!"),
                 Instr::Invalid => panic!("Must not have invalid instruction in an interpreted function!"),

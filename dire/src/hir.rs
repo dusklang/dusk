@@ -10,6 +10,7 @@ use crate::ty::Type;
 use crate::index_counter::IndexCounter;
 use crate::source_info::{SourceRange, SourceFileId};
 use crate::BlockId;
+use crate::InternalField;
 
 define_index_type!(pub struct ExprId = u32;);
 define_index_type!(pub struct DeclRefId = u32;);
@@ -246,6 +247,7 @@ pub enum Decl {
     Static(ExprId),
     Const(ExprId),
     Field { strukt: StructId, index: usize },
+    InternalField(InternalField),
     Variant { enuum: EnumId, index: usize, payload_ty: Option<ExprId>, },
     /// The magic `return_value` declaration, for use in `@guarantees` attributes
     ReturnValue,

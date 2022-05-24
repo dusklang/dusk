@@ -10,7 +10,7 @@ use display_adapter::display_adapter;
 
 use dire::hir::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, GenericParamId, Item, PatternBindingDeclId, ExternModId, ExternFunctionRef, PatternBindingPathComponent, VOID_TYPE};
 use dire::mir::{FuncId, StaticId, Const, Instr, InstrId, Function, MirCode, StructLayout, EnumLayout, ExternMod, ExternFunction, InstrNamespace, SwitchCase, VOID_INSTR};
-use dire::{Block, BlockId, Op, OpId};
+use dire::{Block, BlockId, Op, OpId, InternalField};
 use dire::ty::{Type, InternalType, FunctionType, FloatWidth, StructType};
 use dire::source_info::SourceRange;
 
@@ -35,6 +35,7 @@ enum Decl {
     Static(StaticId),
     Const(Const),
     Field { index: usize },
+    InternalField(InternalField),
     Variant { enuum: EnumId, index: usize, payload_ty: Option<Type> },
     GenericParam(GenericParamId),
 
@@ -539,6 +540,12 @@ impl DriverRef<'_> {
                 self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
+            hir::Decl::InternalField(field) => {
+                drop(d);
+                let decl = Decl::InternalField(field);
+                self.write().mir.decls.insert(id, decl.clone());
+                decl
+            },
             hir::Decl::Variant { enuum, index, payload_ty } => {
                 let payload_ty = payload_ty.map(|ty| tp.get_evaluated_type(ty).clone());
                 Decl::Variant { enuum, index, payload_ty }
@@ -770,6 +777,7 @@ impl Driver {
             },
             &Instr::DirectFieldAccess { val, index } => write!(f, "%{} = %{}.field{}", self.display_instr_name(op_id), self.display_instr_name(val), index)?,
             &Instr::IndirectFieldAccess { val, index } => write!(f, "%{} = &(*%{}).field{}", self.display_instr_name(op_id), self.display_instr_name(val), index)?,
+            &Instr::InternalFieldAccess { val, field } => write!(f, "%{} = %{}.{}", self.display_instr_name(op_id), self.display_instr_name(val), field.name())?,
             &Instr::DiscriminantAccess { val } => write!(f, "%{} = discriminant of %{}", self.display_instr_name(op_id), self.display_instr_name(val))?,
             &Instr::GenericParam(param) => {
                 write!(f, "%{} = generic_param{}", self.display_instr_name(op_id), param.index())?
@@ -1365,6 +1373,7 @@ impl Driver {
                     _ => panic!("Cannot directly access field of non-struct type {:?}!", base_ty),
                 }
             },
+            Instr::InternalFieldAccess { field, .. } => field.ty(),
             &Instr::Variant { enuum, .. } => Type::Enum(enuum),
             Instr::DiscriminantAccess { .. } => TYPE_OF_DISCRIMINANTS, // TODO: update this when discriminants can be other types
         }
@@ -1507,6 +1516,12 @@ impl DriverRef<'_> {
                     debug_assert_eq!(base.indirection, 0, "tried to dereference a struct?!");
                     DeclRef::Value(self.write().push_instr(b, Instr::DirectFieldAccess { val: base.instr, index }, expr).direct())
                 }
+            },
+            Decl::InternalField(field) => {
+                let base = self.read().get_base(decl_ref_id);
+                let base = self.build_expr(b, base, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                let base = self.write().handle_indirection(b, base);
+                DeclRef::Value(self.write().push_instr(b, Instr::InternalFieldAccess { val: base, field }, expr).direct())
             },
             Decl::Variant { enuum, index, payload_ty } => {
                 if payload_ty.is_some() {
