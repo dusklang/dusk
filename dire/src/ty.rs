@@ -36,6 +36,25 @@ pub struct StructType {
     pub identity: StructId,
 }
 
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum InternalType {
+    StringLiteral,
+}
+
+impl InternalType {
+    pub fn name(self) -> &'static str {
+        match self {
+            InternalType::StringLiteral => "StringLiteral",
+        }
+    }
+}
+
+impl From<InternalType> for Type {
+    fn from(internal: InternalType) -> Self {
+        Type::Internal(internal)
+    }
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub enum Type {
     Error,
@@ -50,7 +69,9 @@ pub enum Type {
     Function(FunctionType),
     Struct(StructType),
     Enum(EnumId),
-    StringLiteral,
+    /// Used for internal compiler data structures exposed to compile-time code
+    /// TODO: Mod and Ty, at minimum, could probably be moved here
+    Internal(InternalType),
     Bool,
     Void,
     Mod,
@@ -220,7 +241,7 @@ impl fmt::Debug for Type {
             &Type::GenericParam(id) => {
                 write!(f, "generic_param{}", id.index())
             },
-            Type::StringLiteral => write!(f, "StringLiteral"),
+            Type::Internal(internal) => write!(f, "{}", internal.name()),
         }
     }
 }

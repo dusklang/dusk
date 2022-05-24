@@ -1,7 +1,7 @@
 use smallvec::SmallVec;
 use std::collections::HashMap;
 
-use dire::ty::{Type, FunctionType, QualType, IntWidth};
+use dire::ty::{Type, InternalType, FunctionType, QualType, IntWidth};
 use dire::hir::GenericParamId;
 
 use crate::ty::BuiltinTraits;
@@ -248,7 +248,7 @@ fn implements_traits(ty: &Type, traits: BuiltinTraits) -> Result<(), BuiltinTrai
     fn expressible_by_str_lit(ty: &Type) -> bool {
         match ty {
             Type::Pointer(pointee) => matches!(pointee.ty, Type::Int { width: IntWidth::W8, .. }) && !pointee.is_mut,
-            Type::StringLiteral => true,
+            Type::Internal(InternalType::StringLiteral) => true,
             _ => false,
         }
     }

@@ -1,4 +1,5 @@
 fn take_literal(lit: StringLiteral) {
+    
 }
 
 fn main() {

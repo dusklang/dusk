@@ -21,7 +21,7 @@ use lazy_static::lazy_static;
 use dire::arch::Arch;
 use dire::hir::{Intrinsic, ModScopeId, EnumId, GenericParamId, ExternFunctionRef};
 use dire::mir::{Const, Instr, InstrId, FuncId, StaticId};
-use dire::ty::{Type, FunctionType, QualType, IntWidth, FloatWidth, StructType};
+use dire::ty::{Type, InternalType, FunctionType, QualType, IntWidth, FloatWidth, StructType};
 use dire::{OpId, BlockId};
 
 use crate::driver::{DRIVER, Driver, DriverRef};
@@ -1096,7 +1096,7 @@ impl DriverRef<'_> {
                         Intrinsic::Void => Value::from_ty(Type::Void),
                         Intrinsic::Ty => Value::from_ty(Type::Ty),
                         Intrinsic::Module => Value::from_ty(Type::Mod),
-                        Intrinsic::StringLiteral => Value::from_ty(Type::StringLiteral),
+                        Intrinsic::StringLiteral => Value::from_ty(InternalType::StringLiteral.into()),
                         Intrinsic::PrintType => {
                             let frame = stack.last().unwrap();
                             assert_eq!(arguments.len(), 1);
