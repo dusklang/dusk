@@ -1146,6 +1146,33 @@ impl Driver {
         }
     }
 
+    fn traverse_descendants(&self, func: &mut Function, visited: &mut HashSet<BlockId>, block: BlockId) {
+        if !visited.insert(block) { return; }
+
+        let terminal = *self.code.blocks[block].ops.last().unwrap();
+        let terminal = self.code.ops[terminal].as_mir_instr().unwrap();
+        match *terminal {
+            Instr::Br(block) => self.traverse_descendants(func, visited, block),
+            Instr::CondBr { true_bb, false_bb, .. } => {
+                self.traverse_descendants(func, visited, true_bb);
+                self.traverse_descendants(func, visited, false_bb);
+            },
+            Instr::SwitchBr { ref cases, catch_all_bb, .. } => {
+                for case in cases {
+                    self.traverse_descendants(func, visited, case.bb);
+                }
+                self.traverse_descendants(func, visited, catch_all_bb);
+            },
+            _ => {},
+        }
+    }
+
+    fn remove_unreachable_blocks(&mut self, func: &mut Function) {
+        let mut visited = HashSet::new();
+        self.traverse_descendants(func, &mut visited, func.blocks[0]);
+        func.blocks.retain(|block| visited.contains(block));
+    }
+
     fn remove_constant_branches(&mut self, func: &mut Function) {
         let mut replace_list = Vec::new();
         for &block_id in &func.blocks {
@@ -1253,6 +1280,7 @@ impl DriverRef<'_> {
             self.write().remove_unused_values(func);
             self.write().remove_constant_branches(func);
             self.write().remove_redundant_blocks(func);
+            self.write().remove_unreachable_blocks(func);
             if should_eval_constants {
                 self.eval_constants(func, tp);
             }
