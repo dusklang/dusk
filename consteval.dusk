@@ -4,3 +4,10 @@ fn main() {
         print("Hello, world!")
     }
 }
+
+fn function_with_parameters(a: i32, b: u32) {
+    test := 1 + 2 * 9
+    if test == 19 {
+        print("Hello, world!")
+    }
+}

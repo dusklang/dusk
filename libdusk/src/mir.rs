@@ -1108,7 +1108,8 @@ impl Driver {
             }
             if block.ops.len() - num_parameters != 1 { continue; }
 
-            let terminal = self.code.ops[block.ops[0]].as_mir_instr().unwrap();
+            let terminal = *block.ops.last().unwrap();
+            let terminal = self.code.ops[terminal].as_mir_instr().unwrap();
             if let &Instr::Br(other) = terminal {
                 // don't remove infinite loops
                 if other != block_id {
