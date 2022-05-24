@@ -1344,7 +1344,7 @@ impl Driver {
             },
             &Instr::AddressOfStatic(statik) => b.statics[statik].val.ty().mut_ptr(),
             Instr::Ret(_) | Instr::Br(_) | Instr::CondBr { .. } | Instr::SwitchBr { .. } => Type::Never,
-            Instr::Parameter(_) => panic!("should not call generate_type_of() on a parameter"),
+            Instr::Parameter(ref ty) => ty.clone(),
             &Instr::DirectFieldAccess { val, index } => {
                 let base_ty = self.type_of(val);
                 match base_ty {

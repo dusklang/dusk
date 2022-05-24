@@ -1383,7 +1383,7 @@ impl DriverRef<'_> {
                         _ => panic!("Can't directly get field of non-struct"),
                     };
                     let layout = self.read().layout_struct(strukt);
-                    let size = layout.size;
+                    let size = self.read().size_of(&strukt.field_tys[index]);
                     let offset = layout.field_offsets[index];
                     Value::from_bytes(&bytes[offset..(offset + size)])
                 },

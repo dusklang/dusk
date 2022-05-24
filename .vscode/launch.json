@@ -19,9 +19,11 @@
                     "kind": "bin"
                 }
             },
-            "args": [
-                "open_a_window.dusk"
-            ]
+            "args": ["main.dusk"],
+            "cwd": "../prettyboy"
+            // "args": [
+            //     "open_a_window.dusk"
+            // ]
         },
         {
             "type": "lldb",
