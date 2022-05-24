@@ -815,7 +815,7 @@ impl tir::Expr<tir::DeclRef> {
                 generic_args.push(generic_arg);
             }
             for expr in tp.generic_substitution_list(self.decl_ref_id).clone() {
-                dbg!(tp.constraints_mut(expr)).substitute_generic_args(&decl.generic_params, dbg!(&generic_args));
+                tp.constraints_mut(expr).substitute_generic_args(&decl.generic_params, &generic_args);
             }
             (Some(overload), Some(generic_args))
         } else {
@@ -1193,7 +1193,7 @@ impl tir::Expr<tir::StructLit> {
                                     .adding_primary_range(lit_range, "")
                                     .adding_secondary_range(field_range, "field declared here")
                             );
-                        } else if let Some(err) = can_unify_to_in_generic_context(dbg!(tp.constraints(maatch)), dbg!(&field_ty.into()), &[]).err() {
+                        } else if let Some(err) = can_unify_to_in_generic_context(tp.constraints(maatch), &field_ty.into(), &[]).err() {
                             successful = false;
                             let range = driver.get_range(maatch);
                             let mut error = Error::new("Invalid struct field type")
