@@ -1145,6 +1145,29 @@ impl Driver {
             self.code.blocks[new_entry_block].ops.splice(0..0, parameters);
         }
     }
+
+    fn remove_constant_branches(&mut self, func: &mut Function) {
+        let mut replace_list = Vec::new();
+        for &block_id in &func.blocks {
+            let block = &self.code.blocks[block_id];
+            if let Some(&terminal) = block.ops.last() {
+                match self.code.ops[terminal].as_mir_instr().unwrap() {
+                    &Instr::CondBr { condition, true_bb, false_bb } => {
+                        let condition = self.code.ops[condition].as_mir_instr().unwrap();
+                        if let &Instr::Const(Const::Bool(condition)) = condition {
+                            let destination = [false_bb, true_bb][condition as usize];
+                            replace_list.push((terminal, Instr::Br(destination)));
+                        }
+                    },
+                    _ => {},
+                }
+            }
+        }
+
+        for (id, new_instr) in replace_list {
+            *self.code.ops[id].as_mir_instr_mut().unwrap() = new_instr;
+        }
+    }
 }
 
 #[derive(Default)]
@@ -1228,6 +1251,7 @@ impl DriverRef<'_> {
             self.write().remove_redundant_loads(func);
             self.write().remove_unused_allocas(func);
             self.write().remove_unused_values(func);
+            self.write().remove_constant_branches(func);
             self.write().remove_redundant_blocks(func);
             if should_eval_constants {
                 self.eval_constants(func, tp);
