@@ -1096,9 +1096,17 @@ impl Driver {
         // Replace blocks that do nothing but branch to another block
         let mut replace_list = Vec::new();
         let mut delete_list = HashSet::new();
-        for &block_id in &func.blocks {
+        let mut new_entry_block = None;
+        for (i, &block_id) in func.blocks.iter().enumerate() {
             let block = &self.code.blocks[block_id];
-            if block.ops.len() != 1 { continue; }
+            let mut num_parameters = 0;
+            for &op in &block.ops {
+                if !matches!(self.code.ops[op].as_mir_instr().unwrap(), Instr::Parameter(_)) {
+                    break;
+                }
+                num_parameters += 1;
+            }
+            if block.ops.len() - num_parameters != 1 { continue; }
 
             let terminal = self.code.ops[block.ops[0]].as_mir_instr().unwrap();
             if let &Instr::Br(other) = terminal {
@@ -1106,17 +1114,35 @@ impl Driver {
                 if other != block_id {
                     replace_list.push((block_id, other));
                     delete_list.insert(block_id);
+                    if i == 0 {
+                        let parameters: Vec<_> = block.ops[..num_parameters].iter()
+                            .copied()
+                            .collect();
+                        new_entry_block = Some((other, parameters));
+                    }
+                    if new_entry_block.as_ref().map(|(b, _)| b) == Some(&block_id) {
+                        new_entry_block.as_mut().unwrap().0 = other;
+                    }
                 }
             }
         }
         func.blocks.retain(|block| !delete_list.contains(block));
-        for &block_id in &func.blocks {
+        let mut new_entry_block_index = None;
+        for (i, &block_id) in func.blocks.iter().enumerate() {
             let block = &self.code.blocks[block_id];
             let terminal = *block.ops.last().unwrap();
             let terminal = self.code.ops[terminal].as_mir_instr_mut().unwrap();
             for &(from, to) in &replace_list {
                 terminal.replace_bb(from, to);
             }
+            if new_entry_block.as_ref().map(|(b, _)| b) == Some(&block_id) {
+                new_entry_block_index = Some(i);
+            }
+        }
+        if let Some((new_entry_block, parameters)) = new_entry_block {
+            func.blocks.swap(0, new_entry_block_index.unwrap());
+            
+            self.code.blocks[new_entry_block].ops.splice(0..0, parameters);
         }
     }
 }
