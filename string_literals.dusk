@@ -1,0 +1,7 @@
+fn take_literal(lit: StringLiteral) {
+}
+
+fn main() {
+    literal: StringLiteral = "Hello, there!"
+    take_literal(literal)
+}

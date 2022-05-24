@@ -170,8 +170,12 @@ impl Driver {
             },
             Expr::DecLit { lit } => Const::Float { lit, ty },
             Expr::StrLit { ref lit } => {
-                let id = self.code.mir_code.strings.push(lit.clone());
-                Const::Str { id, ty }
+                if matches!(ty, Type::StringLiteral) {
+                    Const::StrLit(lit.clone())
+                } else {
+                    let id = self.code.mir_code.strings.push(lit.clone());
+                    Const::Str { id, ty }
+                }
             },
             Expr::CharLit { lit } => match ty {
                 Type::Int { .. } => Const::Int { lit: BigInt::from(lit), ty },
@@ -255,7 +259,7 @@ impl Driver {
     pub fn size_of(&self, ty: &Type) -> usize {
         let arch = self.arch;
         match ty {
-            Type::Error | Type::Void | Type::Never | Type::Ty | Type::Mod { .. } => 0,
+            Type::Error | Type::Void | Type::Never | Type::Ty | Type::Mod { .. } | Type::StringLiteral => 0,
             Type::Int { width, .. } => {
                 let bit_width = width.bit_width(arch);
                 assert_eq!(bit_width % 8, 0, "Unexpected bit width: not a multiple of eight!");
@@ -567,6 +571,7 @@ impl Driver {
             Const::Float { lit, ref ty } => write!(f, "{} as {:?}", lit, ty)?,
             Const::Int { ref lit, ref ty } => write!(f, "{} as {:?}", lit, ty)?,
             Const::Str { id, ref ty } => write!(f, "%str{} ({:?}) as {:?}", id.index(), self.code.mir_code.strings[id], ty)?,
+            Const::StrLit(ref lit) => write!(f, "str_lit \"{}\"", lit.clone().into_string().unwrap())?,
             Const::Ty(ref ty) => write!(f, "`{:?}`", ty)?,
             Const::Void => write!(f, "void")?,
             Const::Mod(id) => write!(f, "%mod{}", id.index())?,
@@ -599,6 +604,7 @@ impl Driver {
             },
             Const::Int { ref lit, .. } => write!(f, "const_int_{}", lit)?,
             Const::Str { id, .. } => write!(f, "string_{}", identifierify(self.code.mir_code.strings[id].clone().into_bytes()))?,
+            Const::StrLit(ref lit) => write!(f, "string_lit_{}", identifierify(lit.clone().into_bytes()))?,
             Const::Ty(ref ty) => write!(f, "type_{}", identifierify(format!("{:?}", ty).into_bytes()))?,
             Const::Void => write!(f, "const_void")?,
 
@@ -1597,7 +1603,7 @@ impl DriverRef<'_> {
                 drop(d);
                 VOID_INSTR.direct()
             },
-            Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::StrLit { .. } | Expr::CharLit { .. } | Expr::BoolLit { .. } | Expr::ConstTy(_) | Expr::Mod { .. } | Expr::Import { .. } => {
+            Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::CharLit { .. } | Expr::StrLit { .. } | Expr::BoolLit { .. } | Expr::ConstTy(_) | Expr::Mod { .. } | Expr::Import { .. } => {
                 drop(d);
                 let konst = self.write().expr_to_const(expr, ty.clone());
                 let name = format!("{}", self.read().fmt_const_for_instr_name(&konst));

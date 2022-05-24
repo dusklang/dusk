@@ -246,10 +246,10 @@ fn generic_constraints_mut<'a>(constraints: &'a mut [ConstraintList], generic_pa
 fn implements_traits(ty: &Type, traits: BuiltinTraits) -> Result<(), BuiltinTraits> {
     let mut not_implemented = BuiltinTraits::empty();
     fn expressible_by_str_lit(ty: &Type) -> bool {
-        if let Type::Pointer(pointee) = ty {
-            matches!(pointee.ty, Type::Int { width: IntWidth::W8, .. }) && !pointee.is_mut
-        } else {
-            false
+        match ty {
+            Type::Pointer(pointee) => matches!(pointee.ty, Type::Int { width: IntWidth::W8, .. }) && !pointee.is_mut,
+            Type::StringLiteral => true,
+            _ => false,
         }
     }
     let mut check_implements = |trayt: BuiltinTraits, check: fn(&Type) -> bool| {

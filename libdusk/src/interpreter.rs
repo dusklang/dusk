@@ -34,6 +34,7 @@ pub enum InternalValue {
     Ty(Type),
     Mod(ModScopeId),
     FunctionPointer { generic_arguments: Vec<Type>, func: FuncId },
+    StrLit(CString),
 }
 
 #[derive(Debug)]
@@ -258,6 +259,7 @@ impl Value {
                 let ptr = driver.code.mir_code.strings[id].as_ptr();
                 Value::from_usize(unsafe { mem::transmute(ptr) })
             },
+            Const::StrLit(ref lit) => Value::from_internal(InternalValue::StrLit(lit.clone())),
             Const::Ty(ref ty) => Value::from_ty(ty.clone()),
             Const::Void => Value::Nothing,
             Const::Mod(id) => Value::from_mod(id),
@@ -270,7 +272,7 @@ impl Value {
                     identity: id,
                 };
                 driver.eval_struct_lit(&strukt, fields.into_iter())
-            }
+            },
         }
     }
 
@@ -1094,6 +1096,7 @@ impl DriverRef<'_> {
                         Intrinsic::Void => Value::from_ty(Type::Void),
                         Intrinsic::Ty => Value::from_ty(Type::Ty),
                         Intrinsic::Module => Value::from_ty(Type::Mod),
+                        Intrinsic::StringLiteral => Value::from_ty(Type::StringLiteral),
                         Intrinsic::PrintType => {
                             let frame = stack.last().unwrap();
                             assert_eq!(arguments.len(), 1);

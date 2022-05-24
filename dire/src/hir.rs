@@ -376,6 +376,7 @@ pub enum Intrinsic {
     Ty,
     Module,
     PrintType,
+    StringLiteral,
 }
 
 impl Intrinsic {
@@ -437,6 +438,8 @@ impl Intrinsic {
             Void => "void",
             Ty => "type",
             Module => "module",
+            StringLiteral => "StringLiteral",
+
             PrintType => "print_type",
             AlignOf => "align_of",
             SizeOf => "size_of",

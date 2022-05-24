@@ -50,6 +50,7 @@ pub enum Type {
     Function(FunctionType),
     Struct(StructType),
     Enum(EnumId),
+    StringLiteral,
     Bool,
     Void,
     Mod,
@@ -218,7 +219,8 @@ impl fmt::Debug for Type {
             }
             &Type::GenericParam(id) => {
                 write!(f, "generic_param{}", id.index())
-            }
+            },
+            Type::StringLiteral => write!(f, "StringLiteral"),
         }
     }
 }

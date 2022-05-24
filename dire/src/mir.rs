@@ -152,6 +152,9 @@ pub enum Const {
     Int { lit: BigInt, ty: Type },
     Float { lit: f64, ty: Type },
     Str { id: StrId, ty: Type },
+    /// A compile-time known string that comes from a string literal. This will be used in the future to convert
+    /// to some user-defined type at compile-time.
+    StrLit(CString),
     Bool(bool),
     Ty(Type),
     Mod(ModScopeId),
@@ -164,6 +167,7 @@ impl Const {
     pub fn ty(&self) -> Type {
         match self {
             Const::Int { ty, .. } | Const::Float { ty, .. } | Const::Str { ty, .. } => ty.clone(),
+            Const::StrLit(_) => Type::StringLiteral,
             Const::Bool(_) => Type::Bool,
             Const::Ty(_) => Type::Ty,
             &Const::BasicVariant { enuum, .. } => Type::Enum(enuum),
