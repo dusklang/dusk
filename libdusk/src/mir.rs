@@ -934,7 +934,7 @@ impl DriverRef<'_> {
             current_block: entry,
             stored_decl_locs: IndexVec::new(),
             pattern_binding_locs: HashMap::new(),
-            instr_namespace: InstrNamespace::default(),
+            instr_namespace,
         };
         self.write().start_bb(&mut b, entry);
         let ctx = Context::new(0, DataDest::Ret, ControlDest::Unreachable);
