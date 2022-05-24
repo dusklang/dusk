@@ -1,0 +1,6 @@
+fn main() {
+    test := 1 + 2 * 9
+    if test == 19 {
+        print("Hello, world!")
+    }
+}

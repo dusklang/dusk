@@ -1398,6 +1398,7 @@ impl DriverRef<'_> {
                     Value::from_usize(addr + offset)
                 },
                 Instr::Parameter(_) => panic!("Invalid parameter instruction in the middle of a function!"),
+                Instr::Invalid => panic!("Must not have invalid instruction in an interpreted function!"),
             }
         };
 

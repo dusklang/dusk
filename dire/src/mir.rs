@@ -28,6 +28,7 @@ pub struct SwitchCase {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Instr {
     Void,
+    Invalid, // Used temporarily when copying functions
     Const(Const),
     Alloca(Type),
     LogicalNot(OpId),
@@ -87,22 +88,27 @@ impl Instr {
         }
     }
 
-    pub fn references_value(&self, val: OpId) -> bool {
+    // TODO: allocating a Vec here sucks!
+    pub fn referenced_values(&self) -> Vec<OpId> {
         match *self {
             Instr::Void | Instr::Const(_) | Instr::Alloca(_) | Instr::AddressOfStatic(_) | Instr::Br(_)
-                | Instr::GenericParam(_) | Instr::Parameter(_) | Instr::FunctionRef { .. } => false,
+                | Instr::GenericParam(_) | Instr::Parameter(_) | Instr::FunctionRef { .. } | Instr::Invalid => vec![],
             Instr::LogicalNot(op) | Instr::Reinterpret(op, _) | Instr::Truncate(op, _) | Instr::SignExtend(op, _)
                 | Instr::ZeroExtend(op, _) | Instr::FloatCast(op, _) | Instr::FloatToInt(op, _)
                 | Instr::IntToFloat(op, _) | Instr::Load(op) | Instr::Pointer { op, .. }
                 | Instr::DirectFieldAccess { val: op, .. } | Instr::IndirectFieldAccess { val: op, .. }
                 | Instr::DiscriminantAccess { val: op } | Instr::Ret(op) | Instr::CondBr { condition: op, .. }
-                | Instr::SwitchBr { scrutinee: op, .. } | Instr::Variant { payload: op, .. } => op == val,
-            Instr::Store { location, value } => location == val || value == val,
+                | Instr::SwitchBr { scrutinee: op, .. } | Instr::Variant { payload: op, .. } => vec![op],
+            Instr::Store { location, value } => vec![location, value],
             Instr::Call { arguments: ref ops, .. } | Instr::ExternCall { arguments: ref ops, .. }
                 | Instr::Intrinsic { arguments: ref ops, .. } | Instr::Struct { fields: ref ops, .. }
-                | Instr::Enum { variants: ref ops, .. } | Instr::StructLit { fields: ref ops, .. } => ops.iter().any(|&op| op == val),
-            Instr::FunctionTy { ref param_tys, ref ret_ty } => param_tys.iter().any(|&op| op == val) || *ret_ty == val,
+                | Instr::Enum { variants: ref ops, .. } | Instr::StructLit { fields: ref ops, .. } => ops.iter().copied().collect(),
+            Instr::FunctionTy { ref param_tys, ret_ty } => param_tys.iter().copied().chain(std::iter::once(ret_ty)).collect(),
         }
+    }
+
+    pub fn references_value(&self, val: OpId) -> bool {
+        self.referenced_values().iter().any(|&referenced| referenced == val)
     }
 
     pub fn replace_value(&mut self, old: OpId, new: OpId) {
@@ -113,7 +119,7 @@ impl Instr {
         }
         match self {
             Instr::Void | Instr::Const(_) | Instr::Alloca(_) | Instr::AddressOfStatic(_) | Instr::Br(_)
-                | Instr::GenericParam(_) | Instr::Parameter(_) | Instr::FunctionRef { .. } => {},
+                | Instr::GenericParam(_) | Instr::Parameter(_) | Instr::FunctionRef { .. } | Instr::Invalid => {},
             Instr::LogicalNot(op) | Instr::Reinterpret(op, _) | Instr::Truncate(op, _) | Instr::SignExtend(op, _)
                 | Instr::ZeroExtend(op, _) | Instr::FloatCast(op, _) | Instr::FloatToInt(op, _)
                 | Instr::IntToFloat(op, _) | Instr::Load(op) | Instr::Pointer { op, .. }

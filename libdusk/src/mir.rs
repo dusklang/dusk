@@ -769,6 +769,7 @@ impl Driver {
                 write!(f, "%{} = generic_param{}", self.display_instr_name(op_id), param.index())?
             },
             Instr::Parameter(_) => {},
+            Instr::Invalid => write!(f, "%{} = invalid!", self.display_instr_name(op_id))?,
             Instr::Void => panic!("unexpected void!"),
         };
         Ok(())
@@ -843,6 +844,7 @@ impl Driver {
 enum FunctionBody {
     Scope { scope: ImperScopeId, decl: DeclId },
     Expr(ExprId),
+    ConstantInstruction(OpId),
 }
 
 struct FunctionBuilder {
@@ -945,6 +947,22 @@ impl DriverRef<'_> {
                 self.build_scope(&mut b, scope, ctx, tp);
                 Some(decl)
             },
+            FunctionBody::ConstantInstruction(op) => {
+                let instruction = self.read().code.ops[op].as_mir_instr().unwrap().clone();
+                match instruction {
+                    Instr::Intrinsic { arguments, .. } => {
+                        let mut copier = MirCopier::default();
+                        for arg in arguments {
+                            self.copy_instruction_if_needed(&mut b, &mut copier, arg);
+                        }
+                        let result = self.copy_instruction_if_needed(&mut b, &mut copier, op);
+                        self.write().push_instr(&mut b, Instr::Ret(result), result);
+                        self.write().end_current_bb(&mut b);
+                    },
+                    _ => unimplemented!(),
+                }
+                None
+            },
         };
         let mut function = Function {
             name: b.name,
@@ -955,8 +973,11 @@ impl DriverRef<'_> {
             decl,
             generic_params,
         };
-        self.write().optimize_function(&mut function);
-        self.write().code.mir_code.check_all_blocks_ended(&function);
+
+        let is_constant_instruction = matches!(body, FunctionBody::ConstantInstruction(_));
+        self.optimize_function(&mut function, !is_constant_instruction, tp);
+        self.validate_function(&function);
+        self.read().code.mir_code.check_all_blocks_ended(&function);
         function 
     }
 }
@@ -1098,28 +1119,120 @@ impl Driver {
             }
         }
     }
+}
 
-    fn optimize_function(&mut self, func: &mut Function) {
+#[derive(Default)]
+struct MirCopier {
+    old_to_new: HashMap<OpId, OpId>,
+}
+
+impl DriverRef<'_> {
+    fn instruction_is_const(&self, instr: OpId) -> bool {
+        let d = self.read();
+        let instr = d.code.ops[instr].as_mir_instr().unwrap();
+        match *instr {
+            Instr::Const(_) | Instr::Void => true,
+            Instr::Intrinsic { intr, .. } => {
+                match intr {
+                    Intrinsic::Mult | Intrinsic::Div | Intrinsic::Mod | Intrinsic::Add | Intrinsic::Sub
+                        | Intrinsic::Less | Intrinsic::LessOrEq | Intrinsic::Greater | Intrinsic::GreaterOrEq
+                        | Intrinsic::Eq | Intrinsic::NotEq | Intrinsic::BitwiseAnd | Intrinsic::BitwiseOr
+                        | Intrinsic::BitwiseNot | Intrinsic::BitwiseXor | Intrinsic::LeftShift | Intrinsic::RightShift
+                        | Intrinsic::LogicalAnd | Intrinsic::LogicalOr | Intrinsic::LogicalNot | Intrinsic::Neg
+                        | Intrinsic::Pos => {
+                        instr.referenced_values().iter().all(|&val| self.instruction_is_const(val))
+                    }
+                    _ => false,
+                }
+            },
+            Instr::LogicalNot(val) | Instr::Truncate(val, _) | Instr::SignExtend(val, _) | Instr::ZeroExtend(val, _)
+                | Instr::FloatCast(val, _) | Instr::FloatToInt(val, _) | Instr::IntToFloat(val, _)
+                => self.instruction_is_const(val),
+            _ => false,
+        }
+    }
+
+    fn instruction_is_nontrivial_const(&self, instr: OpId) -> bool {
+        self.instruction_is_const(instr) && !matches!(self.read().code.ops[instr].as_mir_instr().unwrap(), Instr::Const(_))
+    }
+
+    fn copy_instruction_if_needed(&mut self, b: &mut FunctionBuilder, copier: &mut MirCopier, instr_id: OpId) -> OpId {
+        if let Some(&new) = copier.old_to_new.get(&instr_id) {
+            new
+        } else {
+            let mut instr = self.read().code.ops[instr_id].as_mir_instr().unwrap().clone();
+            let replacements: Vec<_> = instr.referenced_values().into_iter().map(|arg| (arg, self.copy_instruction_if_needed(b, copier, arg))).collect();
+            for (old, new) in replacements {
+                instr.replace_value(old, new);
+            }
+
+            let copied_instr_id = self.write().push_instr(b, instr, instr_id);
+            copier.old_to_new.insert(instr_id, copied_instr_id);
+            copied_instr_id
+        }
+    }
+
+    fn eval_constants(&mut self, func: &mut Function, tp: &impl TypeProvider) {
+        self.write();
+        for &block in &func.blocks {
+            let ops = self.read().code.blocks[block].ops.clone();
+            for op in ops {
+                if self.instruction_is_nontrivial_const(op) {
+                    let ty = self.read().type_of(op).clone();
+                    let func_ty = FunctionType { param_tys: vec![], return_ty: Box::new(ty.clone()) };
+                    let func = self.build_function(func.name, func_ty, FunctionBody::ConstantInstruction(op), DeclId::new(0)..DeclId::new(0), Vec::new(), tp);
+                    let result = self.call(FunctionRef::Ref(func), Vec::new(), Vec::new());
+                    let konst = self.write().value_to_const(result, ty, tp);
+                    *self.write().code.ops[op].as_mir_instr_mut().unwrap() = Instr::Const(konst);
+                }
+            }
+        }
+    }
+
+    fn optimize_function(&mut self, func: &mut Function, should_eval_constants: bool, tp: &impl TypeProvider) {
         // Get rid of empty blocks
         // TODO: get rid of unreachable blocks instead. Otherwise we might accidentally remove an
         // empty, reachable block and fail silently (at MIR generation time).
         func.blocks.retain(|&block| {
-            let block = &self.code.blocks[block];
+            let block = &self.read().code.blocks[block];
             !block.ops.is_empty()
         });
 
         for _ in 0..5 {
-            self.remove_redundant_loads(func);
-            self.remove_unused_allocas(func);
-            self.remove_unused_values(func);
-            self.remove_redundant_blocks(func);
+            self.write().remove_redundant_loads(func);
+            self.write().remove_unused_allocas(func);
+            self.write().remove_unused_values(func);
+            self.write().remove_redundant_blocks(func);
+            if should_eval_constants {
+                self.eval_constants(func, tp);
+            }
         }
     }
 
+    fn check_no_invalid_instructions(&self, func: &Function) {
+        let d = self.read();
+        for &block in &func.blocks {
+            let block = &d.code.blocks[block];
+            for &op in &block.ops {
+                if matches!(d.code.ops[op].as_mir_instr().unwrap(), Instr::Invalid) {
+                    panic!("Found invalid instruction in function");
+                }
+            }
+        }
+    }
+
+    fn validate_function(&self, func: &Function) {
+        self.read().code.mir_code.check_all_blocks_ended(func);
+        self.check_no_invalid_instructions(func);
+    }
+}
+
+impl Driver {
     fn generate_type_of(&self, instr: &Instr) -> Type {
         let b = &self.code.mir_code;
         match instr {
             Instr::Void | Instr::Store { .. } => Type::Void,
+            Instr::Invalid => Type::Error,
             Instr::Pointer { .. } | Instr::Struct { .. } | Instr::GenericParam(_) | Instr::Enum { .. } | Instr::FunctionTy { .. } => Type::Ty,
             &Instr::StructLit { ref fields, id } => {
                 let field_tys = fields.iter()
