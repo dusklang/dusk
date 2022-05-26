@@ -333,29 +333,24 @@ impl Driver {
         }
         (decls, bindings)
     }
-    pub fn begin_condition_namespace(&mut self) -> ConditionNsId {
+    pub fn create_condition_namespace(&mut self) -> ConditionNsId {
         let parent = self.cur_namespace();
         let ns = self.code.hir_code.condition_ns.push(ConditionNs { func: DeclId::from_raw(u32::MAX), parent: Some(parent) });
+        ns
+    }
+    pub fn enter_condition_namespace(&mut self, ns: ConditionNsId, condition_kind: ConditionKind) -> ConditionNsId {
         // This condition kind is just a placeholder which will be reset by each attribute. It is done this way so I can share a single
         // condition namespace across all condition attributes on a single function.
-        self.hir.scope_stack.push(ScopeState::Condition { ns, condition_kind: ConditionKind::Requirement });
+        self.hir.scope_stack.push(ScopeState::Condition { ns, condition_kind });
 
         ns
     }
-    pub fn set_condition_kind(&mut self, desired_ns: ConditionNsId, desired_condition_kind: ConditionKind) {
-        if let Some(ScopeState::Condition { ns, condition_kind }) = self.hir.scope_stack.last_mut() {
-            assert_eq!(&*ns, &desired_ns, "tried to set condition_kind, but the current condition scope doesn't match");
-            *condition_kind = desired_condition_kind;
-        } else {
-            panic!("tried to set condition_kind, but the top of the scope stack is not a condition namespace");
-        }
-    }
-    pub fn end_condition_namespace(&mut self, desired_ns: ConditionNsId) {
+    pub fn exit_condition_namespace(&mut self, desired_ns: ConditionNsId) {
         if let Some(&ScopeState::Condition { ns, .. }) = self.hir.scope_stack.last() {
-            assert_eq!(ns, desired_ns, "tried to end condition namespace, but the current condition scope doesn't match");
+            assert_eq!(desired_ns, ns, "tried to exit condition namespace, but the current condition scope doesn't match");
             self.hir.scope_stack.pop();
         } else {
-            panic!("Tried to end condition namespace, but the top of the scope stack is not a condition namespace");
+            panic!("Tried to exit condition namespace, but the top of the scope stack is not a condition namespace");
         }
     }
     pub fn begin_generic_context(&mut self, generic_params: Range<DeclId>) -> GenericContextNsId {

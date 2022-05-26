@@ -671,7 +671,7 @@ impl Driver {
         self.switch_expr(scrutinee, cases, range)
     }
 
-    fn parse_attribute(&mut self, p: &mut Parser, condition_ns: ConditionNsId) -> Attribute {
+    fn parse_attribute(&mut self, p: &mut Parser, condition_ns: &mut Option<ConditionNsId>) -> Attribute {
         let at_range = self.eat_tok(p, TokenKind::AtSign);
 
         let Token { kind, range: ident_range } = self.cur(p);
@@ -679,19 +679,42 @@ impl Driver {
             &TokenKind::Ident(sym) => sym,
             _ => panic!("Unexpected token when parsing attribute"),
         };
-        let condition_kind = if attr == self.hir.known_idents.requires {
-            ConditionKind::Requirement
-        } else if attr == self.hir.known_idents.guarantees {
-            ConditionKind::Guarantee
-        } else {
-            panic!("Unrecognized attribute");
-        };
-        self.set_condition_kind(condition_ns, condition_kind);
+        let is_requires = attr == self.hir.known_idents.requires;
+        let is_guarantees = attr == self.hir.known_idents.guarantees;
+        let is_comptime = attr == self.hir.known_idents.comptime;
+        let is_condition = is_requires || is_guarantees;
+
+        if !is_condition && !is_comptime {
+            self.errors.push(
+                Error::new(format!("Unrecognized attribute '{}'", self.interner.resolve(attr).unwrap()))
+                    .adding_primary_range(ident_range, "")
+            );
+        }
         let (arg, final_tok_range) = match self.next(p).kind {
             TokenKind::LeftParen => {
                 self.next(p);
+                if is_condition {
+                    let condition_kind = if is_requires {
+                        ConditionKind::Requirement
+                    } else if is_guarantees {
+                        ConditionKind::Guarantee
+                    } else {
+                        unreachable!();
+                    };
+                    let ns = if let &mut Some(condition_ns) = condition_ns {
+                        condition_ns
+                    } else {
+                        let ns = self.create_condition_namespace();
+                        *condition_ns = Some(ns);
+                        ns
+                    };
+                    self.enter_condition_namespace(ns, condition_kind);
+                }
                 let arg = self.parse_expr(p).unwrap_or_else(|err| err);
                 let paren_range = self.eat_tok(p, TokenKind::RightParen);
+                if is_condition {
+                    self.exit_condition_namespace(condition_ns.unwrap());
+                }
 
                 (Some(arg), paren_range)
             },
@@ -905,21 +928,20 @@ impl Driver {
             TokenKind::AtSign => {
                 let mut attributes = Vec::new();
 
-                // TODO: when non-condition attributes are added, I should create this lazily the
-                // first time I encounter a condition attribute.
-                let condition_ns = self.begin_condition_namespace();
+                let mut condition_ns = None;
                 let decl = loop {
-                    let attr = self.parse_attribute(p, condition_ns);
+                    let attr = self.parse_attribute(p, &mut condition_ns);
                     attributes.push(attr);
                     if self.cur(p).kind != &TokenKind::AtSign {
-                        self.end_condition_namespace(condition_ns);
                         match self.parse_item(p) {
                             Item::Decl(decl) => break decl,
                             Item::Expr(_) => panic!("Attributes on expressions are unsupported!"),
                         }
                     }
                 };
-                self.code.hir_code.condition_ns[condition_ns].func = decl;
+                if let Some(condition_ns) = condition_ns {
+                    self.code.hir_code.condition_ns[condition_ns].func = decl;
+                }
                 self.code.hir_code.decl_attributes.entry(decl).or_default()
                     .extend(attributes);
                 Item::Decl(decl)
