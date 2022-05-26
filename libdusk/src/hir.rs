@@ -94,41 +94,37 @@ pub struct Builder {
     pub known_idents: KnownIdents,
 }
 
-#[derive(Debug)]
-pub struct KnownIdents {
-    pub requires: Sym,
-    pub guarantees: Sym,
-    pub comptime: Sym,
-
-    pub return_value: Sym,
-    pub underscore: Sym,
-}
-
-impl KnownIdents {
-    fn uninit() -> Self {
-        KnownIdents {
-            requires: uninit_sym(),
-            guarantees: uninit_sym(),
-            comptime: uninit_sym(),
-            return_value: uninit_sym(),
-            underscore: uninit_sym(),
+macro_rules! declare_known_idents {
+    ($($name:ident $(= $assignment:expr)?),*) => {
+        #[derive(Debug)]
+        pub struct KnownIdents {
+            $(pub $name: Sym),*
         }
-    }
 
-    fn init(&mut self, interner: &mut StringInterner) {
-        *self = KnownIdents {
-            requires: interner.get_or_intern("requires"),
-            guarantees: interner.get_or_intern("guarantees"),
-            comptime: interner.get_or_intern("comptime"),
-            return_value: interner.get_or_intern("return_value"),
-            underscore: interner.get_or_intern("_"),
-        };
-    }
+        impl KnownIdents {
+            fn uninit() -> Self {
+                KnownIdents {
+                    $($name: Sym::try_from_usize((u32::MAX - 1) as usize).unwrap()),*
+                }
+            }
+        
+            fn init(&mut self, interner: &mut StringInterner) {
+                *self = KnownIdents {
+                    $(
+                        $name: declare_known_idents!(@init interner, $name $(= $assignment)?)
+                    ),*
+                };
+            }
+        }
+    };
+    (@init $interner:expr, $name:ident = $assignment:expr) => {
+        $interner.get_or_intern($assignment)
+    };
+    (@init $interner:expr, $name:ident) => {
+        $interner.get_or_intern(stringify!($name))
+    };
 }
-
-fn uninit_sym() -> Sym {
-    Sym::try_from_usize((u32::MAX - 1) as usize).unwrap()
-}
+declare_known_idents!(requires, guarantees, comptime, return_value, underscore = "_");
 
 impl Default for Builder {
     fn default() -> Self {
