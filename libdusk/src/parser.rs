@@ -686,13 +686,14 @@ impl Driver {
 
         if !is_condition && !is_comptime {
             self.errors.push(
-                Error::new(format!("Unrecognized attribute '{}'", self.interner.resolve(attr).unwrap()))
+                Error::new(format!("unrecognized attribute '{}'", self.interner.resolve(attr).unwrap()))
                     .adding_primary_range(ident_range, "")
             );
         }
         let (arg, final_tok_range) = match self.next(p).kind {
             TokenKind::LeftParen => {
                 self.next(p);
+                // Enter condition namespace
                 if is_condition {
                     let condition_kind = if is_requires {
                         ConditionKind::Requirement
@@ -701,6 +702,7 @@ impl Driver {
                     } else {
                         unreachable!();
                     };
+                    // Lazily create condition namespace if necessary
                     let ns = if let &mut Some(condition_ns) = condition_ns {
                         condition_ns
                     } else {
@@ -721,6 +723,15 @@ impl Driver {
             _ => (None, ident_range),
         };
         let range = source_info::concat(at_range, final_tok_range);
+
+        if let &Some(arg) = &arg {
+            if is_comptime {
+                self.errors.push(
+                    Error::new("unexpected argument to comptime attribute")
+                        .adding_primary_range(ef!(arg.range), "consider removing this expression and surrounding parentheses")
+                );
+            }
+        }
 
         Attribute { attr, arg, range }
     }
