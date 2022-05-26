@@ -84,7 +84,15 @@ fn main() {
     }
 
     begin_phase!(Parse);
-    let _ = driver.write().parse(); // There's no need to do anything specific to handle this error.
+    let _ = driver.write().parse(); // There's no need to do anything specific to handle this error, at least not yet.
+    driver.write().flush_errors();
+    // TODO: still proceed with other phases after some forms of parse error. I had to add this in the short term
+    // because after I improved the quality of the parser's error handling, some errors would prevent important data
+    // from being properly initialized (e.g., the two-phase initialization of various HIR data structures), leading to
+    // failures later in the pipeline.
+    if driver.read().check_for_failure() {
+        return;
+    }
 
     begin_phase!(Tir);
     debug::send(|| DvdMessage::WillInitializeTir);

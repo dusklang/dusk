@@ -428,7 +428,7 @@ impl Driver {
                         let range = l.make_src_range(l.tok_start_loc..(l.cur_loc() + 1));
                         self.errors.push(
                             Error::new(
-                                format!("unrecognized token {}", self.cur_tok(l))
+                                format!("unrecognized token '{}'", self.cur_tok(l))
                             ).adding_primary_range(
                                 range,
                                 ""
