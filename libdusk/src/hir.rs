@@ -93,8 +93,14 @@ pub struct Builder {
 
     pub requires_sym: Sym,
     pub guarantees_sym: Sym,
+    pub comptime_sym: Sym,
+
     pub return_value_sym: Sym,
     pub underscore_sym: Sym,
+}
+
+fn uninit_sym() -> Sym {
+    Sym::try_from_usize((u32::MAX - 1) as usize).unwrap()
 }
 
 impl Default for Builder {
@@ -107,10 +113,11 @@ impl Default for Builder {
             generic_params: IndexCounter::new(),
 
             // Note: gets initialized in Driver::initialize_hir() below
-            requires_sym: Sym::try_from_usize((u32::MAX - 1) as usize).unwrap(),
-            guarantees_sym: Sym::try_from_usize((u32::MAX - 1) as usize).unwrap(),
-            return_value_sym: Sym::try_from_usize((u32::MAX - 1) as usize).unwrap(),
-            underscore_sym: Sym::try_from_usize((u32::MAX - 1) as usize).unwrap(),
+            requires_sym: uninit_sym(),
+            guarantees_sym: uninit_sym(),
+            comptime_sym: uninit_sym(),
+            return_value_sym: uninit_sym(),
+            underscore_sym: uninit_sym(),
         }
     }
 }

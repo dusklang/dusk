@@ -1,0 +1,7 @@
+@comptime fn this_must_be_called_at_compile_time() {
+
+}
+
+fn main() {
+    
+}
