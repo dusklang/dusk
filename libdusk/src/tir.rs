@@ -375,7 +375,7 @@ impl Driver {
                 Namespace::Guarantee(ns_id) => {
                     let condition_ns = &self.code.hir_code.condition_ns[ns_id];
                     self.find_overloads_in_function_parameters(decl_ref, condition_ns.func, &mut overloads);
-                    if decl_ref.name == self.hir.return_value_sym && overloads.is_empty() {
+                    if decl_ref.name == self.hir.known_idents.return_value && overloads.is_empty() {
                         overloads.insert(RETURN_VALUE_DECL);
                     }
                     condition_ns.parent.clone()

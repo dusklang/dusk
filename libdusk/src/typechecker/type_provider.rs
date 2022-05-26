@@ -191,7 +191,7 @@ impl TypeProvider for RealTypeProvider {
             if let Some(decl_ref) = decl_ref {
                 let decl_ref = &d.code.hir_code.decl_refs[decl_ref];
                 match decl_ref.namespace {
-                    Namespace::Guarantee(ns) if decl_ref.name == d.hir.return_value_sym => {
+                    Namespace::Guarantee(ns) if decl_ref.name == d.hir.known_idents.return_value => {
                         let func = d.code.hir_code.condition_ns[ns].func;
                         // This gets the return value because this declref refers to the return_value decl
                         return self.fetch_decl_type(d, func, None).ty.return_ty().unwrap().into();
@@ -423,7 +423,7 @@ impl<'base> TypeProvider for MockTypeProvider<'base> {
             if let Some(decl_ref) = decl_ref {
                 let decl_ref = &d.code.hir_code.decl_refs[decl_ref];
                 match decl_ref.namespace {
-                    Namespace::Guarantee(ns) if decl_ref.name == d.hir.return_value_sym => {
+                    Namespace::Guarantee(ns) if decl_ref.name == d.hir.known_idents.return_value => {
                         let func = d.code.hir_code.condition_ns[ns].func;
                         // This gets the return value because this declref refers to the return_value decl
                         return self.fetch_decl_type(d, func, None).ty.return_ty().unwrap().into();

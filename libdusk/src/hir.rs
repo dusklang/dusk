@@ -3,7 +3,7 @@ use std::ops::Range;
 use std::collections::HashSet;
 
 use smallvec::{SmallVec, smallvec};
-use string_interner::{DefaultSymbol as Sym, Symbol};
+use string_interner::{DefaultSymbol as Sym, Symbol, StringInterner};
 
 use dire::{Op, Block};
 use dire::hir::*;
@@ -91,12 +91,39 @@ pub struct Builder {
     debug_marked_exprs: HashSet<ExprId>,
     pub generic_params: IndexCounter<GenericParamId>,
 
-    pub requires_sym: Sym,
-    pub guarantees_sym: Sym,
-    pub comptime_sym: Sym,
+    pub known_idents: KnownIdents,
+}
 
-    pub return_value_sym: Sym,
-    pub underscore_sym: Sym,
+#[derive(Debug)]
+pub struct KnownIdents {
+    pub requires: Sym,
+    pub guarantees: Sym,
+    pub comptime: Sym,
+
+    pub return_value: Sym,
+    pub underscore: Sym,
+}
+
+impl KnownIdents {
+    fn uninit() -> Self {
+        KnownIdents {
+            requires: uninit_sym(),
+            guarantees: uninit_sym(),
+            comptime: uninit_sym(),
+            return_value: uninit_sym(),
+            underscore: uninit_sym(),
+        }
+    }
+
+    fn init(&mut self, interner: &mut StringInterner) {
+        *self = KnownIdents {
+            requires: interner.get_or_intern("requires"),
+            guarantees: interner.get_or_intern("guarantees"),
+            comptime: interner.get_or_intern("comptime"),
+            return_value: interner.get_or_intern("return_value"),
+            underscore: interner.get_or_intern("_"),
+        };
+    }
 }
 
 fn uninit_sym() -> Sym {
@@ -113,11 +140,7 @@ impl Default for Builder {
             generic_params: IndexCounter::new(),
 
             // Note: gets initialized in Driver::initialize_hir() below
-            requires_sym: uninit_sym(),
-            guarantees_sym: uninit_sym(),
-            comptime_sym: uninit_sym(),
-            return_value_sym: uninit_sym(),
-            underscore_sym: uninit_sym(),
+            known_idents: KnownIdents::uninit(),
         }
     }
 }
@@ -137,13 +160,9 @@ impl Driver {
         self.push_expr(Expr::ConstTy(Type::Error), SourceRange::default());
         assert_eq!(self.code.hir_code.exprs.len(), 5);
 
-        let return_value_sym = self.interner.get_or_intern_static("return_value");
-        self.decl(Decl::ReturnValue, return_value_sym, None, SourceRange::default());
+        self.hir.known_idents.init(&mut self.interner);
+        self.decl(Decl::ReturnValue, self.hir.known_idents.return_value, None, SourceRange::default());
 
-        self.hir.requires_sym = self.interner.get_or_intern_static("requires");
-        self.hir.guarantees_sym = self.interner.get_or_intern_static("guarantees");
-        self.hir.return_value_sym = return_value_sym;
-        self.hir.underscore_sym = self.interner.get_or_intern_static("_");
 
         self.register_internal_fields();
     }

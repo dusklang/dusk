@@ -679,9 +679,9 @@ impl Driver {
             &TokenKind::Ident(sym) => sym,
             _ => panic!("Unexpected token when parsing attribute"),
         };
-        let condition_kind = if attr == self.hir.requires_sym {
+        let condition_kind = if attr == self.hir.known_idents.requires {
             ConditionKind::Requirement
-        } else if attr == self.hir.guarantees_sym {
+        } else if attr == self.hir.known_idents.guarantees {
             ConditionKind::Guarantee
         } else {
             panic!("Unrecognized attribute");
@@ -714,7 +714,7 @@ impl Driver {
             },
             &TokenKind::Ident(name) => {
                 self.next(p);
-                if name == self.hir.underscore_sym {
+                if name == self.hir.known_idents.underscore {
                     PatternKind::AnonymousCatchAll(initial_range)
                 } else {
                     let name = Ident { symbol: name, range: initial_range };

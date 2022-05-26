@@ -904,9 +904,9 @@ impl Driver {
                 for attr in attributes {
                     let arg = attr.arg.expect("missing attribute argument");
                     let constraint = self.expr_to_constraint(arg, tp);
-                    if attr.attr == self.hir.requires_sym {
+                    if attr.attr == self.hir.known_idents.requires {
                         explicit_requirements.push(constraint);
-                    } else if attr.attr == self.hir.guarantees_sym {
+                    } else if attr.attr == self.hir.known_idents.guarantees {
                         explicit_guarantees.push(constraint);
                     } else {
                         panic!("Unrecognized attribute");
