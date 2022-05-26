@@ -987,6 +987,14 @@ impl Driver {
                 if let Some(condition_ns) = condition_ns {
                     self.code.hir_code.condition_ns[condition_ns].func = decl;
                 }
+                if let Some(attr) = attributes.iter().find(|attr| attr.attr == self.hir.known_idents.comptime) {
+                    if !matches!(df!(decl.hir), hir::Decl::Computed { .. }) {
+                        self.errors.push(
+                            Error::new("unexpected @comptime attribute")
+                                .adding_primary_range(attr.range, "can only be applied to function declarations")
+                        );
+                    }
+                }
                 self.code.hir_code.decl_attributes.entry(decl).or_default()
                     .extend(attributes);
                 Ok(Item::Decl(decl))
