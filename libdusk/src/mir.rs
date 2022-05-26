@@ -390,7 +390,7 @@ impl DriverRef<'_> {
 impl DriverRef<'_> {
     pub fn build_standalone_expr(&mut self, expr: ExprId, tp: &impl TypeProvider) -> Function {
         let func_ty = FunctionType { param_tys: Vec::new(), return_ty: Box::new(tp.ty(expr).clone()) };
-        self.build_function(None, func_ty, FunctionBody::Expr(expr), DeclId::new(0)..DeclId::new(0), Vec::new(), tp)
+        self.build_function(None, func_ty, FunctionBody::Expr(expr), DeclId::new(0)..DeclId::new(0), Vec::new(), false, tp)
     }
 }
 
@@ -458,13 +458,21 @@ impl DriverRef<'_> {
                 let params = params.clone();
                 let func_ty = self.read().decl_type(id, tp).as_function().unwrap().clone();
                 let name = self.read().code.hir_code.names[id];
+                let comptime_sym = self.read().hir.known_idents.comptime;
+                let is_comptime = self.read().code.hir_code.decl_attributes.get(&id)
+                    .map(|attrs|
+                        attrs.iter()
+                            .find(|attr| attr.attr == comptime_sym)
+                            .is_some()
+                    ).unwrap_or(false);
                 let func = self.build_function(
                     Some(name),
                     func_ty,
                     FunctionBody::Scope { scope, decl: id },
                     params,
                     generic_params,
-                    tp
+                    is_comptime,
+                    tp,
                 );
                 self.write().code.mir_code.functions[get] = func;
                 decl
@@ -811,6 +819,9 @@ impl Driver {
     #[display_adapter]
     pub fn display_mir_function(&self, func: &FunctionRef, f: &mut Formatter) {
         let func = function_by_ref(&self.code.mir_code, func);
+        if func.is_comptime {
+            write!(f, "@comptime ")?;
+        }
         write!(f, "fn {}(", self.fn_name(func.name))?;
         let entry_block = &self.code.blocks[func.blocks[0]];
         let mut first = true;
@@ -915,7 +926,7 @@ impl Driver {
 }
 
 impl DriverRef<'_> {
-    fn build_function(&mut self, name: Option<Sym>, func_ty: FunctionType, body: FunctionBody, params: Range<DeclId>, generic_params: Vec<GenericParamId>, tp: &impl TypeProvider) -> Function {
+    fn build_function(&mut self, name: Option<Sym>, func_ty: FunctionType, body: FunctionBody, params: Range<DeclId>, generic_params: Vec<GenericParamId>, is_comptime: bool, tp: &impl TypeProvider) -> Function {
         debug_assert_ne!(func_ty.return_ty.as_ref(), &Type::Error, "can't build MIR function with Error return type");
 
         let mut entry = Block::default();
@@ -986,6 +997,7 @@ impl DriverRef<'_> {
             instr_namespace: b.instr_namespace,
             decl,
             generic_params,
+            is_comptime,
         };
 
         let is_constant_instruction = matches!(body, FunctionBody::ConstantInstruction(_));
@@ -1271,7 +1283,7 @@ impl DriverRef<'_> {
                 if self.instruction_is_nontrivial_const(op) {
                     let ty = self.read().type_of(op).clone();
                     let func_ty = FunctionType { param_tys: vec![], return_ty: Box::new(ty.clone()) };
-                    let func = self.build_function(func.name, func_ty, FunctionBody::ConstantInstruction(op), DeclId::new(0)..DeclId::new(0), Vec::new(), tp);
+                    let func = self.build_function(func.name, func_ty, FunctionBody::ConstantInstruction(op), DeclId::new(0)..DeclId::new(0), Vec::new(), false, tp);
                     let result = self.call(FunctionRef::Ref(func), Vec::new(), Vec::new());
                     let konst = self.write().value_to_const(result, ty, tp);
                     *self.write().code.ops[op].as_mir_instr_mut().unwrap() = Instr::Const(konst);

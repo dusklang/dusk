@@ -215,6 +215,7 @@ pub struct Function {
     // GenericParamId space
     pub generic_params: Vec<GenericParamId>,
     pub instr_namespace: InstrNamespace,
+    pub is_comptime: bool,
 }
 
 impl Code {
