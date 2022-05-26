@@ -2,8 +2,6 @@
 
 }
 
-@comptime constant :: 5
-
 fn main() {
-    
+    this_must_be_called_at_compile_time()
 }
