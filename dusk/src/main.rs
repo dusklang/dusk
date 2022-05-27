@@ -127,6 +127,9 @@ fn main() {
         println!("{}", driver.read().display_mir());
     }
 
+    driver.write().flush_errors();
+    if driver.read().check_for_failure() { return; }
+
     begin_phase!(Refine);
     if opt.run_refiner {
         driver.write().refine(&tp);

@@ -975,7 +975,7 @@ impl DriverRef<'_> {
             FunctionBody::ConstantInstruction(op) => {
                 let instruction = self.read().code.ops[op].as_mir_instr().unwrap().clone();
                 match instruction {
-                    Instr::Intrinsic { arguments, .. } => {
+                    Instr::Intrinsic { arguments, .. } | Instr::Call { arguments, .. } => {
                         let mut copier = MirCopier::default();
                         for arg in arguments {
                             self.copy_instruction_if_needed(&mut b, &mut copier, arg);
@@ -1003,15 +1003,22 @@ impl DriverRef<'_> {
         let is_constant_instruction = matches!(body, FunctionBody::ConstantInstruction(_));
         self.optimize_function(&mut function, !is_constant_instruction, tp);
         self.validate_function(&function);
+        // At this point, it is assumed that any comptime functions that can be evaluated at compile time already have
+        // been. Therefore, if there are any calls to comptime functions left, it must be because they were passed
+        // non-const arguments. If *this* function itself is comptime, then this is perfectly fine.
+        if !function.is_comptime {
+            self.check_no_comptime_calls(&function);
+        }
         self.read().code.mir_code.check_all_blocks_ended(&function);
         function 
     }
 }
 
 impl Driver {
-    fn remove_redundant_loads(&mut self, func: &mut Function) {
+    fn remove_redundant_loads(&mut self, func: &mut Function) -> bool {
         // Remove obviously-redundant loads (assumes no other threads are accessing a memory location simultaneously)
         let mut replace_list = Vec::new();
+        let mut did_something = false;
         for &block_id in &func.blocks {
             let block = &self.code.blocks[block_id];
             let mut delete_list = HashSet::new();
@@ -1025,6 +1032,7 @@ impl Driver {
                             if load_loc == location {
                                 replace_list.push((next_op, value));
                                 delete_list.insert(next_op);
+                                did_something = true;
                             }
                         }
                     }
@@ -1041,10 +1049,12 @@ impl Driver {
                 }
             }
         }
+        did_something
     }
 
-    fn remove_unused_allocas(&mut self, func: &mut Function) {
+    fn remove_unused_allocas(&mut self, func: &mut Function) -> bool {
         let mut delete_list = HashSet::new();
+        let mut did_something = false;
         for &block_id in &func.blocks {
             let block = &self.code.blocks[block_id];
             for &op_id in &block.ops {
@@ -1078,6 +1088,7 @@ impl Driver {
                     if !is_used {
                         delete_list.insert(op_id);
                         delete_list.extend(potential_deletions);
+                        did_something = true;
                     }
                 }
             }
@@ -1086,9 +1097,11 @@ impl Driver {
         for &block_id in &func.blocks {
             self.code.blocks[block_id].ops.retain(|op| !delete_list.contains(op));
         }
+        did_something
     }
 
-    fn remove_unused_values(&mut self, func: &mut Function) {
+    fn remove_unused_values(&mut self, func: &mut Function) -> bool {
+        let mut did_something = false;
         for &block_id in &func.blocks {
             let block = &self.code.blocks[block_id];
             let mut delete_list = HashSet::new();
@@ -1110,19 +1123,22 @@ impl Driver {
                     }
                     if !is_used {
                         delete_list.insert(op_id);
+                        did_something = true;
                     }
                 }
             }
 
             self.code.blocks[block_id].ops.retain(|op| !delete_list.contains(op));
         }
+        did_something
     }
 
-    fn remove_redundant_blocks(&mut self, func: &mut Function) {
+    fn remove_redundant_blocks(&mut self, func: &mut Function) -> bool {
         // Replace blocks that do nothing but branch to another block
         let mut replace_list = Vec::new();
         let mut delete_list = HashSet::new();
         let mut new_entry_block = None;
+        let mut did_something = false;
         for (i, &block_id) in func.blocks.iter().enumerate() {
             let block = &self.code.blocks[block_id];
             let mut num_parameters = 0;
@@ -1141,6 +1157,7 @@ impl Driver {
                 if other != block_id {
                     replace_list.push((block_id, other));
                     delete_list.insert(block_id);
+                    did_something = true;
                     if i == 0 {
                         let parameters: Vec<_> = block.ops[..num_parameters].iter()
                             .copied()
@@ -1171,6 +1188,7 @@ impl Driver {
             
             self.code.blocks[new_entry_block].ops.splice(0..0, parameters);
         }
+        did_something
     }
 
     fn traverse_descendants(&self, func: &mut Function, visited: &mut HashSet<BlockId>, block: BlockId) {
@@ -1194,14 +1212,20 @@ impl Driver {
         }
     }
 
-    fn remove_unreachable_blocks(&mut self, func: &mut Function) {
+    fn remove_unreachable_blocks(&mut self, func: &mut Function) -> bool {
+        let num_blocks_before = func.blocks.len();
+
         let mut visited = HashSet::new();
         self.traverse_descendants(func, &mut visited, func.blocks[0]);
         func.blocks.retain(|block| visited.contains(block));
+
+        let num_blocks_after = func.blocks.len();
+        num_blocks_before != num_blocks_after
     }
 
-    fn remove_constant_branches(&mut self, func: &mut Function) {
+    fn remove_constant_branches(&mut self, func: &mut Function) -> bool {
         let mut replace_list = Vec::new();
+        let mut did_something = false;
         for &block_id in &func.blocks {
             let block = &self.code.blocks[block_id];
             if let Some(&terminal) = block.ops.last() {
@@ -1211,6 +1235,7 @@ impl Driver {
                         if let &Instr::Const(Const::Bool(condition)) = condition {
                             let destination = [false_bb, true_bb][condition as usize];
                             replace_list.push((terminal, Instr::Br(destination)));
+                            did_something = true;
                         }
                     },
                     _ => {},
@@ -1221,6 +1246,7 @@ impl Driver {
         for (id, new_instr) in replace_list {
             *self.code.ops[id].as_mir_instr_mut().unwrap() = new_instr;
         }
+        did_something
     }
 }
 
@@ -1251,6 +1277,7 @@ impl DriverRef<'_> {
             Instr::LogicalNot(val) | Instr::Truncate(val, _) | Instr::SignExtend(val, _) | Instr::ZeroExtend(val, _)
                 | Instr::FloatCast(val, _) | Instr::FloatToInt(val, _) | Instr::IntToFloat(val, _)
                 => self.instruction_is_const(val),
+            Instr::Call { func, .. } if d.code.mir_code.functions[func].is_comptime => instr.referenced_values().iter().all(|&val| self.instruction_is_const(val)),
             _ => false,
         }
     }
@@ -1275,21 +1302,34 @@ impl DriverRef<'_> {
         }
     }
 
-    fn eval_constants(&mut self, func: &mut Function, tp: &impl TypeProvider) {
+    fn eval_constants(&mut self, func: &mut Function, tp: &impl TypeProvider) -> bool {
+        let mut did_something = false;
         self.write();
         for &block in &func.blocks {
             let ops = self.read().code.blocks[block].ops.clone();
             for op in ops {
+                // TODO: be greedy about the number of instructions you take to reduce the number of ad hoc MIR
+                // functions built. For example, in the MIR equivalent of 2 + 3 + 4, the current implementation would
+                // evaluate 2 + 3 as its own function, then 5 + 4 as another. We should put both operations in the same
+                // function whenever possible.
+                //
+                // With that being said, as I was writing this TODO, I realized that there is one problem: some of
+                // those intermediate instructions might be depended on by *other* instructions as well, making it not
+                // possible to put them all together (or they each need to be returned from the function via tuples or
+                // something). So it's not quite as simple to do this as I had initially thought. But still a good idea
+                // probably.
                 if self.instruction_is_nontrivial_const(op) {
                     let ty = self.read().type_of(op).clone();
                     let func_ty = FunctionType { param_tys: vec![], return_ty: Box::new(ty.clone()) };
-                    let func = self.build_function(func.name, func_ty, FunctionBody::ConstantInstruction(op), DeclId::new(0)..DeclId::new(0), Vec::new(), false, tp);
+                    let func = self.build_function(func.name, func_ty, FunctionBody::ConstantInstruction(op), DeclId::new(0)..DeclId::new(0), Vec::new(), true, tp);
                     let result = self.call(FunctionRef::Ref(func), Vec::new(), Vec::new());
                     let konst = self.write().value_to_const(result, ty, tp);
                     *self.write().code.ops[op].as_mir_instr_mut().unwrap() = Instr::Const(konst);
+                    did_something = true;
                 }
             }
         }
+        did_something
     }
 
     fn optimize_function(&mut self, func: &mut Function, should_eval_constants: bool, tp: &impl TypeProvider) {
@@ -1301,15 +1341,19 @@ impl DriverRef<'_> {
             !block.ops.is_empty()
         });
 
-        for _ in 0..5 {
-            self.write().remove_redundant_loads(func);
-            self.write().remove_unused_allocas(func);
-            self.write().remove_unused_values(func);
-            self.write().remove_constant_branches(func);
-            self.write().remove_redundant_blocks(func);
-            self.write().remove_unreachable_blocks(func);
+        loop {
+            let mut did_something = false;
+            did_something |= self.write().remove_redundant_loads(func);
+            did_something |= self.write().remove_unused_allocas(func);
+            did_something |= self.write().remove_unused_values(func);
+            did_something |= self.write().remove_constant_branches(func);
+            did_something |= self.write().remove_redundant_blocks(func);
+            did_something |= self.write().remove_unreachable_blocks(func);
             if should_eval_constants {
-                self.eval_constants(func, tp);
+                did_something |= self.eval_constants(func, tp);
+            }
+            if !did_something {
+                break;
             }
         }
     }
@@ -1323,6 +1367,27 @@ impl DriverRef<'_> {
                     panic!("Found invalid instruction in function");
                 }
             }
+        }
+    }
+
+    fn check_no_comptime_calls(&mut self, func: &Function) {
+        let mut comptime_calls = Vec::new();
+        for &block in &func.blocks {
+            let block = &self.read().code.blocks[block];
+            for &instr in &block.ops {
+                if let &Instr::Call { func: called_func, .. } = self.read().code.ops[instr].as_mir_instr().unwrap() {
+                    if self.read().code.mir_code.functions[called_func].is_comptime {
+                        comptime_calls.push((called_func, instr));
+                    }
+                }
+            }
+        }
+
+        for (func, _instr) in comptime_calls {
+            let name = self.read().fn_name(self.read().code.mir_code.functions[func].name).to_string();
+            self.write().errors.push(
+                Error::new(format!("unable to evaluate call to @comptime function '{}'", name))
+            );
         }
     }
 

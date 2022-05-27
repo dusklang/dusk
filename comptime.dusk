@@ -1,7 +1,15 @@
-@comptime fn this_must_be_called_at_compile_time() {
+@comptime fn this_must_be_called_at_compile_time(val: u32) {
 
 }
 
+fn this_must_not_be_called_automatically_at_compile_time(val: u32): u32 {
+    val
+}
+
 fn main() {
-    this_must_be_called_at_compile_time()
+    foo: u32 = 5 + 5
+    bar: u32 = foo + 65 / 2
+    this_must_be_called_at_compile_time(
+        this_must_not_be_called_automatically_at_compile_time(bar)
+    )
 }
