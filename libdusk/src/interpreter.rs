@@ -955,7 +955,7 @@ impl DriverRef<'_> {
                         Intrinsic::Mult => bin_op!(self, stack, arguments, convert, Int | Float, {*}),
                         Intrinsic::Div => bin_op!(self, stack, arguments, convert, Int | Float, {/}),
                         Intrinsic::Mod => bin_op!(self, stack, arguments, convert, Int | Float, {%}),
-                        Intrinsic::Add => bin_op!(self, stack, arguments, convert, Int | Float, {+}),
+                        Intrinsic::Add => {dbg!(arguments.iter().map(|&arg| d.type_of(arg)).collect::<Vec<_>>()); bin_op!(self, stack, arguments, convert, Int | Float, {+})},
                         Intrinsic::Sub => bin_op!(self, stack, arguments, convert, Int | Float, {-}),
                         Intrinsic::Less => bin_op!(self, stack, arguments, bool_convert, Int | Float, {<}),
                         Intrinsic::LessOrEq => bin_op!(self, stack, arguments, bool_convert, Int | Float, {<=}),

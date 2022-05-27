@@ -1,5 +1,13 @@
-@comptime fn this_must_be_called_at_compile_time(val: u32) {
+@comptime fn this_must_be_called_at_compile_time(val: u32): u32 {
+    fib(val)
+}
 
+@comptime fn fib(num: u32): u32 {
+    if num < 2 {
+        num
+    } else {
+        fib(num - 1) + fib(num - 2)
+    }
 }
 
 fn this_must_not_be_called_automatically_at_compile_time(val: u32): u32 {
@@ -7,7 +15,7 @@ fn this_must_not_be_called_automatically_at_compile_time(val: u32): u32 {
 }
 
 fn main() {
-    foo: u32 = 5 + 5
-    bar: u32 = foo + 65 / 2
-    this_must_be_called_at_compile_time(54)
+    val :: this_must_not_be_called_automatically_at_compile_time(
+        this_must_be_called_at_compile_time(5)
+    )
 }
