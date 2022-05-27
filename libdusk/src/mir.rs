@@ -1248,6 +1248,23 @@ impl Driver {
         }
         did_something
     }
+
+    fn remove_return_non_shared_void(&mut self, func: &mut Function) -> bool {
+        let mut did_something = false;
+        for &block_id in &func.blocks {
+            let block = &self.code.blocks[block_id];
+            for op_id in block.ops.clone() {
+                let instr = self.code.ops[op_id].as_mir_instr_mut().unwrap();
+                if let Instr::Ret(ret_val) = instr {
+                    if *func.ty.return_ty == Type::Void && *ret_val != VOID_INSTR {
+                        *ret_val = VOID_INSTR;
+                        did_something = true;
+                    }
+                }
+            }
+        }
+        did_something
+    }
 }
 
 #[derive(Default)]
@@ -1349,6 +1366,7 @@ impl DriverRef<'_> {
             did_something |= self.write().remove_constant_branches(func);
             did_something |= self.write().remove_redundant_blocks(func);
             did_something |= self.write().remove_unreachable_blocks(func);
+            did_something |= self.write().remove_return_non_shared_void(func);
             if should_eval_constants {
                 did_something |= self.eval_constants(func, tp);
             }
