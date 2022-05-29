@@ -1014,14 +1014,59 @@ impl DriverRef<'_> {
     }
 }
 
+#[derive(Default)]
+struct MirTransformer {
+    delete_list: HashSet<OpId>,
+    ref_replace_list: Vec<(OpId, OpId)>,
+    replace_list: Vec<(OpId, Instr)>,
+}
+
+impl MirTransformer {
+    fn q_delete_and_replace_references(&mut self, to_delete: OpId, to_replace_with: OpId) {
+        self.delete_list.insert(to_delete);
+        self.ref_replace_list.push((to_delete, to_replace_with));
+    }
+
+    fn q_delete(&mut self, to_delete: OpId) {
+        self.delete_list.insert(to_delete);
+    }
+
+    fn q_delete_items(&mut self, to_delete: impl IntoIterator<Item=OpId>) {
+        self.delete_list.extend(to_delete);
+    }
+
+    fn q_replace_instr(&mut self, to_replace: OpId, instr: Instr) {
+        self.replace_list.push((to_replace, instr));
+    }
+
+    fn transform(self, func: &mut Function, d: &mut Driver) -> bool {
+        if self.delete_list.is_empty() && self.ref_replace_list.is_empty() && self.replace_list.is_empty() {
+            return false;
+        }
+
+        for &block_id in &func.blocks {
+            let block = &mut d.code.blocks[block_id];
+            block.ops.retain(|op| !self.delete_list.contains(op));
+            for &op in &block.ops {
+                for &(old, new) in &self.ref_replace_list {
+                    d.code.ops[op].as_mir_instr_mut().unwrap().replace_value(old, new);
+                }
+            }
+        }
+        for (id, new_instr) in self.replace_list {
+            *d.code.ops[id].as_mir_instr_mut().unwrap() = new_instr;
+        }
+
+        true
+    }
+}
+
 impl Driver {
     fn remove_redundant_loads(&mut self, func: &mut Function) -> bool {
         // Remove obviously-redundant loads (assumes no other threads are accessing a memory location simultaneously)
-        let mut replace_list = Vec::new();
-        let mut did_something = false;
+        let mut transformer = MirTransformer::default();
         for &block_id in &func.blocks {
             let block = &self.code.blocks[block_id];
-            let mut delete_list = HashSet::new();
             for (i, &op_id) in block.ops.iter().enumerate() {
                 let instr = self.code.ops[op_id].as_mir_instr().unwrap();
                 if let &Instr::Store { location, value } = instr {
@@ -1030,31 +1075,18 @@ impl Driver {
                         let next_instr = self.code.ops[next_op].as_mir_instr().unwrap();
                         if let &Instr::Load(load_loc) = next_instr {
                             if load_loc == location {
-                                replace_list.push((next_op, value));
-                                delete_list.insert(next_op);
-                                did_something = true;
+                                transformer.q_delete_and_replace_references(next_op, value);
                             }
                         }
                     }
                 }
             }
-            
-            self.code.blocks[block_id].ops.retain(|op| !delete_list.contains(op));
         }
-        for &block_id in &func.blocks {
-            let block = &self.code.blocks[block_id];
-            for &op in &block.ops {
-                for &(old, new) in &replace_list {
-                    self.code.ops[op].as_mir_instr_mut().unwrap().replace_value(old, new);
-                }
-            }
-        }
-        did_something
+        transformer.transform(func, self)
     }
 
     fn remove_unused_allocas(&mut self, func: &mut Function) -> bool {
-        let mut delete_list = HashSet::new();
-        let mut did_something = false;
+        let mut transformer = MirTransformer::default();
         for &block_id in &func.blocks {
             let block = &self.code.blocks[block_id];
             for &op_id in &block.ops {
@@ -1086,25 +1118,20 @@ impl Driver {
                         }
                     }
                     if !is_used {
-                        delete_list.insert(op_id);
-                        delete_list.extend(potential_deletions);
-                        did_something = true;
+                        transformer.q_delete(op_id);
+                        transformer.q_delete_items(potential_deletions);
                     }
                 }
             }
             
         }
-        for &block_id in &func.blocks {
-            self.code.blocks[block_id].ops.retain(|op| !delete_list.contains(op));
-        }
-        did_something
+        transformer.transform(func, self)
     }
 
     fn remove_unused_values(&mut self, func: &mut Function) -> bool {
-        let mut did_something = false;
+        let mut transformer = MirTransformer::default();
         for &block_id in &func.blocks {
             let block = &self.code.blocks[block_id];
-            let mut delete_list = HashSet::new();
 
             for &op_id in &block.ops {
                 let instr = self.code.ops[op_id].as_mir_instr().unwrap();
@@ -1122,15 +1149,12 @@ impl Driver {
                         }
                     }
                     if !is_used {
-                        delete_list.insert(op_id);
-                        did_something = true;
+                        transformer.q_delete(op_id);
                     }
                 }
             }
-
-            self.code.blocks[block_id].ops.retain(|op| !delete_list.contains(op));
         }
-        did_something
+        transformer.transform(func, self)
     }
 
     fn remove_redundant_blocks(&mut self, func: &mut Function) -> bool {
@@ -1224,8 +1248,7 @@ impl Driver {
     }
 
     fn remove_constant_branches(&mut self, func: &mut Function) -> bool {
-        let mut replace_list = Vec::new();
-        let mut did_something = false;
+        let mut transformer = MirTransformer::default();
         for &block_id in &func.blocks {
             let block = &self.code.blocks[block_id];
             if let Some(&terminal) = block.ops.last() {
@@ -1234,8 +1257,7 @@ impl Driver {
                         let condition = self.code.ops[condition].as_mir_instr().unwrap();
                         if let &Instr::Const(Const::Bool(condition)) = condition {
                             let destination = [false_bb, true_bb][condition as usize];
-                            replace_list.push((terminal, Instr::Br(destination)));
-                            did_something = true;
+                            transformer.q_replace_instr(terminal, Instr::Br(destination));
                         }
                     },
                     _ => {},
@@ -1243,27 +1265,23 @@ impl Driver {
             }
         }
 
-        for (id, new_instr) in replace_list {
-            *self.code.ops[id].as_mir_instr_mut().unwrap() = new_instr;
-        }
-        did_something
+        transformer.transform(func, self)
     }
 
     fn remove_return_non_shared_void(&mut self, func: &mut Function) -> bool {
-        let mut did_something = false;
+        let mut transformer = MirTransformer::default();
         for &block_id in &func.blocks {
             let block = &self.code.blocks[block_id];
             for op_id in block.ops.clone() {
-                let instr = self.code.ops[op_id].as_mir_instr_mut().unwrap();
-                if let Instr::Ret(ret_val) = instr {
-                    if *func.ty.return_ty == Type::Void && *ret_val != VOID_INSTR {
-                        *ret_val = VOID_INSTR;
-                        did_something = true;
+                let instr = self.code.ops[op_id].as_mir_instr().unwrap();
+                if let &Instr::Ret(ret_val) = instr {
+                    if *func.ty.return_ty == Type::Void && ret_val != VOID_INSTR {
+                        transformer.q_replace_instr(op_id, Instr::Ret(VOID_INSTR));
                     }
                 }
             }
         }
-        did_something
+        transformer.transform(func, self)
     }
 }
 

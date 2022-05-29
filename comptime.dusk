@@ -1,5 +1,5 @@
 @comptime fn this_must_be_called_at_compile_time(val: u32): u32 {
-    fib(val)
+    56
 }
 
 @comptime fn fib(num: u32): u32 {
