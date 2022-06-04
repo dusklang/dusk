@@ -30,6 +30,7 @@ define_index_type!(pub struct ConditionNsId = u32;);
 define_index_type!(pub struct GenericContextNsId = u32;);
 define_index_type!(pub struct GenericParamId = u32;);
 define_index_type!(pub struct ExternModId = u32;);
+define_index_type!(pub struct GenericCtxId = u32;);
 
 #[derive(Debug, Clone, Copy)]
 pub struct FieldAssignment {
@@ -138,6 +139,18 @@ pub struct ExternFunction {
 pub struct ExternFunctionRef {
     pub extern_mod: ExternModId,
     pub index: usize,
+}
+
+pub enum GenericCtx {
+    Blank,
+    Decl {
+        parameters: Vec<GenericParamId>,
+        parent: GenericCtxId,
+    },
+    DeclRef {
+        id: DeclRefId,
+        parent: GenericCtxId,
+    },
 }
 
 #[derive(Debug)]
@@ -459,6 +472,7 @@ pub const VOID_TYPE: ExprId = ExprId { _raw: 2 };
 pub const TYPE_TYPE: ExprId = ExprId { _raw: 3 };
 pub const ERROR_TYPE: ExprId = ExprId { _raw: 4 };
 pub const RETURN_VALUE_DECL: DeclId = DeclId { _raw: 0 };
+pub const BLANK_GENERIC_CTX: GenericCtxId = GenericCtxId::from_usize_unchecked(0);
 
 pub struct Attribute {
     pub attr: Sym,
@@ -492,4 +506,5 @@ pub struct HirCode {
     pub enums: IndexVec<EnumId, Enum>,
     pub extern_mods: IndexVec<ExternModId, ExternMod>,
     pub struct_lits: IndexCounter<StructLitId>,
+    pub generic_ctxs: IndexVec<GenericCtxId, GenericCtx>,
 }

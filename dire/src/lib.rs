@@ -11,7 +11,7 @@ pub use internal_types::*;
 use index_vec::{IndexVec, index_vec, define_index_type};
 use display_adapter::display_adapter;
 
-use hir::{HirCode, Item};
+use hir::{HirCode, Item, GenericCtx};
 use mir::{MirCode, Instr, InstrId, VOID_INSTR};
 use source_info::SourceRange;
 use ty::Type;
@@ -87,6 +87,7 @@ impl Default for Code {
         };
         val.mir_code.source_ranges.insert(VOID_INSTR, SourceRange::default());
         val.mir_code.instr_names.insert(VOID_INSTR, "void".to_string());
+        val.hir_code.generic_ctxs.push(GenericCtx::Blank);
         val
     }
 }
