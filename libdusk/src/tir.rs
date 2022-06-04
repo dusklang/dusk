@@ -312,9 +312,6 @@ impl Driver {
         let mut started_at_mod_scope = false;
         let mut root_namespace = true;
         let mut namespace = Some(decl_ref.namespace.clone());
-        if Some(decl_ref.name) == self.interner.get("T") {
-            println!("Hello! {:?}", &namespace);
-        }
         'find_overloads: while let Some(ns) = namespace {
             namespace = match ns {
                 Namespace::Imper { scope, end_offset } => {

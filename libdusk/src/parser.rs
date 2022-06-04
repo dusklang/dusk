@@ -1286,8 +1286,8 @@ impl Driver {
         let mut param_names = SmallVec::new();
         let mut param_tys = SmallVec::new();
         let mut param_ranges = SmallVec::new();
+        let ns = self.begin_generic_context(generic_params.clone());
         if let TokenKind::LeftParen = self.cur(p).kind {
-            let ns = self.begin_generic_context(generic_params.clone());
             self.next(p);
             while let TokenKind::Ident(name) = *self.cur(p).kind {
                 let param_range = self.cur(p).range;
@@ -1303,9 +1303,6 @@ impl Driver {
             }
             let paren_range = self.eat_tok(p, TokenKind::RightParen)?;
             proto_range = source_info::concat(proto_range, paren_range);
-            // TODO: end this later, after the ImperScope, so that generic parameters can be referred to from
-            // inside the function as well.
-            self.end_generic_context(ns);
         } else {
             self.errors.push(
                 Error::new("function declaration must have parentheses")
@@ -1316,6 +1313,7 @@ impl Driver {
                     )
             );
         }
+
         // Parse ": ty" or "{"
         let ty = match self.cur(p).kind {
             TokenKind::Colon => {
@@ -1330,6 +1328,11 @@ impl Driver {
                 return Ok(self.comp_decl_prototype(name, param_tys, param_ranges, hir::VOID_TYPE, proto_range));
             },
         };
+
+        // TODO: end this later, after the ImperScope, so that generic parameters can be referred to from
+        // inside the function as well.
+        self.end_generic_context(ns);
+
         let decl_id = match self.cur(p).kind {
             TokenKind::OpenCurly => {
                 let decl_id = self.begin_computed_decl(name, param_names, param_tys, param_ranges, generic_params, ty, proto_range);
