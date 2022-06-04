@@ -172,9 +172,15 @@ impl Driver {
         self.hir.debug_marked_exprs.contains(&expr)
     }
 
+    // TODO: remove this wrapper and rename push_expr_with_generic_ctx() to push_expr()
     fn push_expr(&mut self, expr: Expr, range: SourceRange) -> ExprId {
+        self.push_expr_with_generic_ctx(expr, range, BLANK_GENERIC_CTX)
+    }
+
+    fn push_expr_with_generic_ctx(&mut self, expr: Expr, range: SourceRange, ctx: GenericCtxId) -> ExprId {
         let expr_id = self.code.hir_code.exprs.push(expr);
         let item_id = self.code.hir_code.items.push(Item::Expr(expr_id));
+        self.code.hir_code.item_generic_ctxs.push_at(item_id, ctx);
         self.code.hir_code.expr_to_items.push_at(expr_id, item_id);
         self.code.hir_code.source_ranges.push_at(item_id, range);
 

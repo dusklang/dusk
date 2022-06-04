@@ -507,4 +507,5 @@ pub struct HirCode {
     pub extern_mods: IndexVec<ExternModId, ExternMod>,
     pub struct_lits: IndexCounter<StructLitId>,
     pub generic_ctxs: IndexVec<GenericCtxId, GenericCtx>,
+    pub item_generic_ctxs: IndexVec<ItemId, GenericCtxId>,
 }
