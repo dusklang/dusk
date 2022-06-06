@@ -88,6 +88,7 @@ struct CompDeclState {
 pub struct Builder {
     comp_decl_stack: Vec<CompDeclState>,
     scope_stack: Vec<ScopeState>,
+    generic_ctx_stack: Vec<GenericCtxId>,
     debug_marked_exprs: HashSet<ExprId>,
     pub generic_params: IndexCounter<GenericParamId>,
 
@@ -131,11 +132,12 @@ impl Default for Builder {
         Builder {
             comp_decl_stack: Default::default(),
             scope_stack: Default::default(),
+            generic_ctx_stack: Default::default(),
             debug_marked_exprs: Default::default(),
 
             generic_params: IndexCounter::new(),
 
-            // Note: gets initialized in Driver::initialize_hir() below
+            // Gets initialized in Driver::initialize_hir() below
             known_idents: KnownIdents::uninit(),
         }
     }
@@ -158,7 +160,7 @@ impl Driver {
 
         self.hir.known_idents.init(&mut self.interner);
         self.decl(Decl::ReturnValue, self.hir.known_idents.return_value, None, SourceRange::default());
-
+        self.hir.generic_ctx_stack.push(BLANK_GENERIC_CTX);
 
         self.register_internal_fields();
     }
@@ -391,9 +393,26 @@ impl Driver {
         self.hir.scope_stack.push(ScopeState::Mod { id, namespace, extern_mod });
         self.push_expr(Expr::Mod { id }, SourceRange::default())
     }
-    pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, generic_params: Range<DeclId>, return_ty: ExprId, proto_range: SourceRange) -> DeclId {
+    fn push_generic_ctx(&mut self, ctx: impl FnOnce(GenericCtxId) -> GenericCtx) -> GenericCtxId {
+        let parent = self.hir.generic_ctx_stack.last().copied().unwrap();
+        let generic_ctx = self.code.hir_code.generic_ctxs.push(ctx(parent));
+        self.hir.generic_ctx_stack.push(generic_ctx);
+        generic_ctx
+    }
+    fn pop_generic_ctx(&mut self, ctx: GenericCtxId) {
+        let real_ctx = self.hir.generic_ctx_stack.pop();
+        if real_ctx != Some(ctx) {
+            panic!("internal compiler error: popped incorrect generic ctx");
+        }
+    }
+    pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, generic_params: Range<DeclId>, generic_param_list: GenericParamList, return_ty: ExprId, proto_range: SourceRange) -> DeclId {
+        let generic_param_ids = (generic_param_list.ids.start.index()..generic_param_list.ids.end.index())
+            .map(|id| GenericParamId::new(id))
+            .collect();
+        let generic_ctx = self.push_generic_ctx(|parent| GenericCtx::Decl { parameters: generic_param_ids, parent });
+
         // This is a placeholder value that gets replaced once the parameter declarations get allocated.
-        let id = self.decl(Decl::Const(ExprId::new(u32::MAX as usize)), name, Some(return_ty), proto_range);
+        let id = self.decl_with_generic_ctx(Decl::Const(ExprId::new(u32::MAX as usize)), name, Some(return_ty), proto_range, generic_ctx);
 
         assert_eq!(param_names.len(), param_tys.len());
         self.code.hir_code.decls.reserve(param_tys.len());
@@ -692,6 +711,7 @@ impl Driver {
         } else {
             panic!("Unexpected decl kind when ending computed decl!");
         }
+        self.pop_generic_ctx(df!(decl_state.id.generic_ctx_id));
     }
     fn cur_namespace(&self) -> Namespace {
         match *self.hir.scope_stack.last().unwrap() {

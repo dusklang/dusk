@@ -137,6 +137,13 @@ impl Builder {
             .field("source_ranges")
             .brackets(item_id)
     }
+
+    fn generic_ctx_id(self, driver: impl Into<TokenStream>, item_id: impl Into<TokenStream>) -> Self {
+        self
+            .hir_code(driver)
+            .field("item_generic_ctxs")
+            .brackets(item_id)
+    }
 }
 
 impl Into<TokenStream> for Builder {
@@ -198,6 +205,14 @@ pub fn df(input: TokenStream) -> TokenStream {
                 "range" => {
                     Builder::new()
                         .source_range(
+                            driver.clone(),
+                            Builder::new().decl_to_item(driver, base)
+                        )
+                        .stream
+                },
+                "generic_ctx_id" => {
+                    Builder::new()
+                        .generic_ctx_id(
                             driver.clone(),
                             Builder::new().decl_to_item(driver, base)
                         )

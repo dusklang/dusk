@@ -1335,7 +1335,7 @@ impl Driver {
 
         let decl_id = match self.cur(p).kind {
             TokenKind::OpenCurly => {
-                let decl_id = self.begin_computed_decl(name, param_names, param_tys, param_ranges, generic_params, ty, proto_range);
+                let decl_id = self.begin_computed_decl(name, param_names, param_tys, param_ranges, generic_params, generic_param_list, ty, proto_range);
                 self.parse_scope(p, &[])?;
                 self.end_computed_decl();
                 decl_id
