@@ -38,7 +38,7 @@ impl Driver {
         for id in list.ids.start.index()..list.ids.end.index() {
             let param = GenericParamId::new(id);
             let i = id - list.ids.start.index();
-            self.decl(Decl::GenericParam(param), list.names[i], Some(VOID_TYPE), list.ranges[i]);
+            self.add_decl(Decl::GenericParam(param), list.names[i], Some(VOID_TYPE), list.ranges[i]);
         }
         let last_generic_param = DeclId::new(self.code.hir.decls.len());
         first_generic_param..last_generic_param
@@ -151,15 +151,15 @@ pub enum ConditionKind {
 
 impl Driver {
     pub fn initialize_hir(&mut self) {
-        self.push_expr(Expr::Void, SourceRange::default());
-        self.push_expr(Expr::Error, SourceRange::default());
-        self.push_expr(Expr::ConstTy(Type::Void), SourceRange::default());
-        self.push_expr(Expr::ConstTy(Type::Ty), SourceRange::default());
-        self.push_expr(Expr::ConstTy(Type::Error), SourceRange::default());
+        self.add_expr(Expr::Void, SourceRange::default());
+        self.add_expr(Expr::Error, SourceRange::default());
+        self.add_expr(Expr::ConstTy(Type::Void), SourceRange::default());
+        self.add_expr(Expr::ConstTy(Type::Ty), SourceRange::default());
+        self.add_expr(Expr::ConstTy(Type::Error), SourceRange::default());
         assert_eq!(self.code.hir.exprs.len(), 5);
 
         self.hir.known_idents.init(&mut self.interner);
-        self.decl(Decl::ReturnValue, self.hir.known_idents.return_value, None, SourceRange::default());
+        self.add_decl(Decl::ReturnValue, self.hir.known_idents.return_value, None, SourceRange::default());
         self.hir.generic_ctx_stack.push(BLANK_GENERIC_CTX);
 
         self.register_internal_fields();
@@ -174,12 +174,12 @@ impl Driver {
         self.hir.debug_marked_exprs.contains(&expr)
     }
 
-    // TODO: remove this wrapper and rename push_expr_with_generic_ctx() to push_expr()
-    fn push_expr(&mut self, expr: Expr, range: SourceRange) -> ExprId {
-        self.push_expr_with_generic_ctx(expr, range, BLANK_GENERIC_CTX)
+    // TODO: remove this wrapper and rename add_expr_with_generic_ctx() to add_expr()
+    fn add_expr(&mut self, expr: Expr, range: SourceRange) -> ExprId {
+        self.add_expr_with_generic_ctx(expr, range, BLANK_GENERIC_CTX)
     }
 
-    fn push_expr_with_generic_ctx(&mut self, expr: Expr, range: SourceRange, ctx: GenericCtxId) -> ExprId {
+    fn add_expr_with_generic_ctx(&mut self, expr: Expr, range: SourceRange, ctx: GenericCtxId) -> ExprId {
         let expr_id = self.code.hir.exprs.push(expr);
         let item_id = self.code.hir.items.push(Item::Expr(expr_id));
         self.code.hir.item_generic_ctxs.push_at(item_id, ctx);
@@ -192,15 +192,15 @@ impl Driver {
     }
 
     pub fn import(&mut self, file: SourceFileId, range: SourceRange) -> ExprId {
-        self.push_expr(Expr::Import { file }, range)
+        self.add_expr(Expr::Import { file }, range)
     }
 
-    // TODO: remove this wrapper and rename decl_with_generic_ctx() to decl()
-    fn decl(&mut self, decl: Decl, name: Sym, explicit_ty: Option<ExprId>, range: SourceRange) -> DeclId {
-        self.decl_with_generic_ctx(decl, name, explicit_ty, range, BLANK_GENERIC_CTX)
+    // TODO: remove this wrapper and rename add_decl_with_generic_ctx() to add_decl()
+    fn add_decl(&mut self, decl: Decl, name: Sym, explicit_ty: Option<ExprId>, range: SourceRange) -> DeclId {
+        self.add_decl_with_generic_ctx(decl, name, explicit_ty, range, BLANK_GENERIC_CTX)
     }
 
-    fn decl_with_generic_ctx(&mut self, decl: Decl, name: Sym, explicit_ty: Option<ExprId>, range: SourceRange, ctx: GenericCtxId) -> DeclId {
+    fn add_decl_with_generic_ctx(&mut self, decl: Decl, name: Sym, explicit_ty: Option<ExprId>, range: SourceRange, ctx: GenericCtxId) -> DeclId {
         let decl_id = self.code.hir.decls.push(decl);
         self.code.hir.explicit_tys.push_at(decl_id, explicit_ty);
         self.code.hir.names.push_at(decl_id, name);
@@ -217,23 +217,23 @@ impl Driver {
     }
 
     pub fn int_lit(&mut self, lit: u64, range: SourceRange) -> ExprId {
-        self.push_expr(Expr::IntLit { lit }, range)
+        self.add_expr(Expr::IntLit { lit }, range)
     }
     pub fn dec_lit(&mut self, lit: f64, range: SourceRange) -> ExprId { 
-        self.push_expr(Expr::DecLit { lit }, range)
+        self.add_expr(Expr::DecLit { lit }, range)
     }
     pub fn str_lit(&mut self, lit: CString, range: SourceRange) -> ExprId { 
-        self.push_expr(Expr::StrLit { lit }, range)
+        self.add_expr(Expr::StrLit { lit }, range)
     }
     pub fn char_lit(&mut self, lit: i8, range: SourceRange) -> ExprId { 
-        self.push_expr(Expr::CharLit { lit }, range)
+        self.add_expr(Expr::CharLit { lit }, range)
     }
     pub fn bool_lit(&mut self, lit: bool, range: SourceRange) -> ExprId { 
-        self.push_expr(Expr::BoolLit { lit }, range)
+        self.add_expr(Expr::BoolLit { lit }, range)
     }
     pub fn cast(&mut self, expr: ExprId, ty: ExprId, range: SourceRange) -> ExprId {
         let cast_id = self.code.hir.cast_counter.next();
-        self.push_expr(Expr::Cast { expr, ty, cast_id }, range)
+        self.add_expr(Expr::Cast { expr, ty, cast_id }, range)
     }
     pub fn stored_decl(&mut self, name: Sym, _generic_params: GenericParamList, explicit_ty: Option<ExprId>, is_mut: bool, root_expr: ExprId, range: SourceRange) -> DeclId {
         self.flush_stmt_buffer();
@@ -242,7 +242,7 @@ impl Driver {
                 let decl = self.hir.comp_decl_stack.last_mut().unwrap();
                 let id = decl.stored_decl_counter.next();
 
-                let decl_id = self.decl(Decl::Stored { id, is_mut, root_expr }, name, explicit_ty, range);
+                let decl_id = self.add_decl(Decl::Stored { id, is_mut, root_expr }, name, explicit_ty, range);
                 self.scope_item(Item::Decl(decl_id));
                 self.imper_scoped_decl(
                     ImperScopedDecl {
@@ -254,7 +254,7 @@ impl Driver {
                 decl_id
             }
             ScopeState::Mod { .. } => {
-                let decl_id = self.decl(
+                let decl_id = self.add_decl(
                     if is_mut {
                         Decl::Static(root_expr)
                     } else {
@@ -278,34 +278,34 @@ impl Driver {
     }
     pub fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
         let decl = self.hir.comp_decl_stack.last().map(|decl| decl.id);
-        self.push_expr(Expr::Ret { expr, decl }, range)
+        self.add_expr(Expr::Ret { expr, decl }, range)
     }
     pub fn if_expr(&mut self, condition: ExprId, then_scope: ImperScopeId, else_scope: Option<ImperScopeId>, range: SourceRange) -> ExprId {
-        self.push_expr(
+        self.add_expr(
             Expr::If { condition, then_scope, else_scope },
             range,
         )
     }
     pub fn while_expr(&mut self, condition: ExprId, scope: ImperScopeId, range: SourceRange) -> ExprId {
-        self.push_expr(Expr::While { condition, scope }, range)
+        self.add_expr(Expr::While { condition, scope }, range)
     }
     pub fn switch_expr(&mut self, scrutinee: ExprId, cases: Vec<SwitchCase>, range: SourceRange) -> ExprId {
-        self.push_expr(Expr::Switch { scrutinee, cases }, range)
+        self.add_expr(Expr::Switch { scrutinee, cases }, range)
     }
     pub fn do_expr(&mut self, scope: ImperScopeId, range: SourceRange) -> ExprId {
-        self.push_expr(Expr::Do { scope }, range)
+        self.add_expr(Expr::Do { scope }, range)
     }
     pub fn field_decl(&mut self, name: Sym, strukt: StructId, ty: ExprId, index: usize, range: SourceRange) -> FieldDecl {
-        let decl = self.decl(Decl::Field { strukt, index }, name, Some(ty), range);
+        let decl = self.add_decl(Decl::Field { strukt, index }, name, Some(ty), range);
         FieldDecl { decl, name, ty }
     }
     pub fn variant_decl(&mut self, name: Sym, enuum: ExprId, enum_id: EnumId, index: usize, payload_ty: Option<ExprId>, range: SourceRange) -> VariantDecl {
-        let decl = self.decl(Decl::Variant { enuum: enum_id, index, payload_ty }, name, Some(enuum), range);
+        let decl = self.add_decl(Decl::Variant { enuum: enum_id, index, payload_ty }, name, Some(enuum), range);
         VariantDecl { decl, name, enuum, payload_ty }
     }
     pub fn reserve_struct(&mut self) -> (ExprId, StructId) {
         let strukt = self.code.hir.structs.push(Struct { fields: Vec::new() });
-        let expr = self.push_expr(Expr::Struct(strukt), Default::default());
+        let expr = self.add_expr(Expr::Struct(strukt), Default::default());
         (expr, strukt)
     }
     pub fn finish_struct(&mut self, fields: Vec<FieldDecl>, range: SourceRange, expr: ExprId, strukt: StructId) {
@@ -314,7 +314,7 @@ impl Driver {
     }
     pub fn reserve_enum(&mut self) -> (ExprId, EnumId) {
         let enuum = self.code.hir.enums.push(Enum { variants: Vec::new() });
-        let expr = self.push_expr(Expr::Enum(enuum), Default::default());
+        let expr = self.add_expr(Expr::Enum(enuum), Default::default());
         (expr, enuum)
     }
     pub fn finish_enum(&mut self, variants: Vec<VariantDecl>, range: SourceRange, expr: ExprId, enuum: EnumId) {
@@ -323,10 +323,10 @@ impl Driver {
     }
     pub fn struct_lit(&mut self, ty: ExprId, fields: Vec<FieldAssignment>, range: SourceRange) -> ExprId {
         let id = self.code.hir.struct_lits.next();
-        self.push_expr(Expr::StructLit { ty, fields, id }, range)
+        self.add_expr(Expr::StructLit { ty, fields, id }, range)
     }
     pub fn error_expr(&mut self, range: SourceRange) -> ExprId {
-        self.push_expr(Expr::Error, range)
+        self.add_expr(Expr::Error, range)
     }
     pub fn get_pattern_bindings(&mut self, pattern: &PatternKind, scrutinee: ExprId) -> (Vec<ImperScopedDecl>, Vec<PatternBindingDeclId>) {
         let mut decls = Vec::new();
@@ -339,7 +339,7 @@ impl Driver {
                 ];
                 let binding_decl = PatternBindingDecl { paths, scrutinee };
                 let id = self.code.hir.pattern_binding_decls.push(binding_decl);
-                let decl = self.decl(Decl::PatternBinding { id, is_mut: false }, name.symbol, None, name.range);
+                let decl = self.add_decl(Decl::PatternBinding { id, is_mut: false }, name.symbol, None, name.range);
                 let decl = ImperScopedDecl { name: name.symbol, num_params: 0, id: decl };
                 decls.push(decl);
                 bindings.push(id);
@@ -391,7 +391,7 @@ impl Driver {
             }
         );
         self.hir.scope_stack.push(ScopeState::Mod { id, namespace, extern_mod });
-        self.push_expr(Expr::Mod { id }, SourceRange::default())
+        self.add_expr(Expr::Mod { id }, SourceRange::default())
     }
     fn push_generic_ctx(&mut self, ctx: impl FnOnce(GenericCtxId) -> GenericCtx) -> GenericCtxId {
         let parent = self.hir.generic_ctx_stack.last().copied().unwrap();
@@ -412,7 +412,7 @@ impl Driver {
         let generic_ctx = self.push_generic_ctx(|parent| GenericCtx::Decl { parameters: generic_param_ids, parent });
 
         // This is a placeholder value that gets replaced once the parameter declarations get allocated.
-        let id = self.decl_with_generic_ctx(Decl::Const(ExprId::new(u32::MAX as usize)), name, Some(return_ty), proto_range, generic_ctx);
+        let id = self.add_decl_with_generic_ctx(Decl::Const(ExprId::new(u32::MAX as usize)), name, Some(return_ty), proto_range, generic_ctx);
 
         assert_eq!(param_names.len(), param_tys.len());
         self.code.hir.decls.reserve(param_tys.len());
@@ -422,7 +422,7 @@ impl Driver {
             .zip(&param_names)
             .zip(&param_ranges)
             .for_each(|(((index, ty), &name), &range)| {
-                self.decl(Decl::Parameter { index }, name, Some(ty.clone()), range);
+                self.add_decl(Decl::Parameter { index }, name, Some(ty.clone()), range);
             });
         let last_param = DeclId::new(self.code.hir.decls.len());
         let params = first_param..last_param;
@@ -474,7 +474,7 @@ impl Driver {
         } else {
             None
         };
-        let id = self.decl(Decl::ComputedPrototype { param_tys, extern_func }, name, Some(return_ty), range);
+        let id = self.add_decl(Decl::ComputedPrototype { param_tys, extern_func }, name, Some(return_ty), range);
         match self.hir.scope_stack.last().unwrap() {
             ScopeState::Imper { .. } => {
                 self.flush_stmt_buffer();
@@ -499,7 +499,7 @@ impl Driver {
         };
         let id = self.code.hir.decl_refs.next_idx();
         let generic_ctx = self.push_generic_ctx(|parent| GenericCtx::DeclRef { id, parent });
-        let expr = self.push_expr_with_generic_ctx(Expr::DeclRef { id }, range, generic_ctx);
+        let expr = self.add_expr_with_generic_ctx(Expr::DeclRef { id }, range, generic_ctx);
         self.pop_generic_ctx(generic_ctx);
         if let Some(base_generic_ctx) = base_generic_ctx {
             self.pop_generic_ctx(base_generic_ctx);
@@ -513,19 +513,19 @@ impl Driver {
             }
         );
         if has_parens {
-            self.push_expr(Expr::Call { callee: expr, arguments, decl_ref_id: id }, range)
+            self.add_expr(Expr::Call { callee: expr, arguments, decl_ref_id: id }, range)
         } else {
             expr
         }
     }
     // TODO: intern constant type expressions
     pub fn add_const_ty(&mut self, ty: Type) -> ExprId {
-        self.push_expr(Expr::ConstTy(ty), SourceRange::default())
+        self.add_expr(Expr::ConstTy(ty), SourceRange::default())
     }
     pub fn add_intrinsic(&mut self, intrinsic: Intrinsic, param_tys: SmallVec<[ExprId; 2]>, ret_ty: ExprId, function_like: bool) {
         let name = self.interner.get_or_intern(intrinsic.name());
         let num_params = param_tys.len();
-        let id = self.decl(Decl::Intrinsic { intr: intrinsic, param_tys, function_like }, name, Some(ret_ty), SourceRange::default());
+        let id = self.add_decl(Decl::Intrinsic { intr: intrinsic, param_tys, function_like }, name, Some(ret_ty), SourceRange::default());
         assert_eq!(self.hir.scope_stack.len(), 1, "cannot add intrinsic anywhere except global scope");
         self.mod_scoped_decl(
             name,
@@ -535,13 +535,13 @@ impl Driver {
     pub fn internal_field(&mut self, field: InternalField, name: &str, ty: Type) -> DeclId {
         let name = self.interner.get_or_intern(name);
         let ty = self.add_const_ty(ty);
-        self.decl(
+        self.add_decl(
             Decl::InternalField(field), name, Some(ty), SourceRange::default()
         )
     }
     pub fn bin_op(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId, range: SourceRange) -> ExprId {
         match op {
-            BinOp::Assign => self.push_expr(Expr::Set { lhs, rhs }, range),
+            BinOp::Assign => self.add_expr(Expr::Set { lhs, rhs }, range),
             _ => {
                 let name = self.interner.get_or_intern(op.symbol());
                 self.decl_ref(None, name, smallvec![lhs, rhs], true, range)
@@ -550,11 +550,11 @@ impl Driver {
     }
     pub fn un_op(&mut self, op: UnOp, expr: ExprId, range: SourceRange) -> ExprId {
         match op {
-            UnOp::Deref      => self.push_expr(Expr::Deref(expr), range),
-            UnOp::AddrOf     => self.push_expr(Expr::AddrOf  { expr, is_mut: false }, range),
-            UnOp::AddrOfMut  => self.push_expr(Expr::AddrOf  { expr, is_mut: true  }, range),
-            UnOp::Pointer    => self.push_expr(Expr::Pointer { expr, is_mut: false }, range),
-            UnOp::PointerMut => self.push_expr(Expr::Pointer { expr, is_mut: true  }, range),
+            UnOp::Deref      => self.add_expr(Expr::Deref(expr), range),
+            UnOp::AddrOf     => self.add_expr(Expr::AddrOf  { expr, is_mut: false }, range),
+            UnOp::AddrOfMut  => self.add_expr(Expr::AddrOf  { expr, is_mut: true  }, range),
+            UnOp::Pointer    => self.add_expr(Expr::Pointer { expr, is_mut: false }, range),
+            UnOp::PointerMut => self.add_expr(Expr::Pointer { expr, is_mut: true  }, range),
             _ => {
                 let name = self.interner.get_or_intern(op.symbol());
                 self.decl_ref(None, name, smallvec![expr], true, range)
@@ -562,7 +562,7 @@ impl Driver {
         }
     }
     pub fn fn_type(&mut self, param_tys: Vec<ExprId>, ret_ty: ExprId, range: SourceRange) -> ExprId {
-        self.push_expr(Expr::FunctionTy { param_tys, ret_ty }, range)
+        self.add_expr(Expr::FunctionTy { param_tys, ret_ty }, range)
     }
     pub fn start_new_file(&mut self, file: SourceFileId) {
         let global_scope = self.code.hir.mod_scopes.push(ModScope::default());
