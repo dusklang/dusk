@@ -193,7 +193,12 @@ impl Driver {
         self.push_expr(Expr::Import { file }, range)
     }
 
+    // TODO: remove this wrapper and rename decl_with_generic_ctx() to decl()
     fn decl(&mut self, decl: Decl, name: Sym, explicit_ty: Option<ExprId>, range: SourceRange) -> DeclId {
+        self.decl_with_generic_ctx(decl, name, explicit_ty, range, BLANK_GENERIC_CTX)
+    }
+
+    fn decl_with_generic_ctx(&mut self, decl: Decl, name: Sym, explicit_ty: Option<ExprId>, range: SourceRange, ctx: GenericCtxId) -> DeclId {
         let decl_id = self.code.hir_code.decls.push(decl);
         self.code.hir_code.explicit_tys.push_at(decl_id, explicit_ty);
         self.code.hir_code.names.push_at(decl_id, name);
@@ -202,6 +207,7 @@ impl Driver {
         self.code.hir_code.decl_to_items.push_at(decl_id, item_id);
 
         self.code.hir_code.source_ranges.push_at(item_id, range);
+        self.code.hir_code.item_generic_ctxs.push_at(item_id, ctx);
 
         debug::send(|| DvdMessage::DidAddDecl { id: decl_id, item_id, text: None });
 
