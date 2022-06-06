@@ -489,12 +489,21 @@ impl Driver {
         id
     }
     pub fn decl_ref(&mut self, base_expr: Option<ExprId>, name: Sym, arguments: SmallVec<[ExprId; 2]>, has_parens: bool, range: SourceRange) -> ExprId {
-        let namespace = match base_expr {
-            Some(base_expr) => Namespace::MemberRef { base_expr },
-            None => self.cur_namespace(),
+        let (namespace, base_generic_ctx) = match base_expr {
+            Some(base_expr) => {
+                let generic_ctx = ef!(base_expr.generic_ctx_id);
+                self.hir.generic_ctx_stack.push(generic_ctx);
+                (Namespace::MemberRef { base_expr }, Some(generic_ctx))
+            },
+            None => (self.cur_namespace(), None),
         };
         let id = self.code.hir_code.decl_refs.next_idx();
-        let expr = self.push_expr(Expr::DeclRef { id }, range);
+        let generic_ctx = self.push_generic_ctx(|parent| GenericCtx::DeclRef { id, parent });
+        let expr = self.push_expr_with_generic_ctx(Expr::DeclRef { id }, range, generic_ctx);
+        self.pop_generic_ctx(generic_ctx);
+        if let Some(base_generic_ctx) = base_generic_ctx {
+            self.pop_generic_ctx(base_generic_ctx);
+        }
         self.code.hir_code.decl_refs.push_at(
             id,
             DeclRef {

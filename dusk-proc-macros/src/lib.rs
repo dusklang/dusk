@@ -177,6 +177,14 @@ pub fn ef(input: TokenStream) -> TokenStream {
                         )
                         .stream
                 },
+                "generic_ctx_id" => {
+                    Builder::new()
+                        .generic_ctx_id(
+                            driver.clone(),
+                            Builder::new().expr_to_item(driver, base)
+                        )
+                        .stream
+                },
                 "hir" => {
                     Builder::new()
                         .hir_code(driver)
