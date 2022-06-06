@@ -174,14 +174,14 @@ impl Driver {
                 if matches!(ty, Type::Internal(InternalType::StringLiteral)) {
                     Const::StrLit(lit.clone())
                 } else {
-                    let id = self.code.mir_code.strings.push(lit.clone());
+                    let id = self.code.mir.strings.push(lit.clone());
                     Const::Str { id, ty }
                 }
             },
             Expr::CharLit { lit } => match ty {
                 Type::Int { .. } => Const::Int { lit: BigInt::from(lit), ty },
                 Type::Pointer(_) => {
-                    let id = self.code.mir_code.strings.push(CString::new([lit as u8].as_ref()).unwrap());
+                    let id = self.code.mir.strings.push(CString::new([lit as u8].as_ref()).unwrap());
                     Const::Str { id, ty }
                 },
                 _ => panic!("unexpected type for character")
@@ -189,7 +189,7 @@ impl Driver {
             Expr::BoolLit { lit } => Const::Bool(lit),
             Expr::ConstTy(ref ty) => Const::Ty(ty.clone()),
             Expr::Mod { id } => Const::Mod(id),
-            Expr::Import { file } => Const::Mod(self.code.hir_code.global_scopes[file]),
+            Expr::Import { file } => Const::Mod(self.code.hir.global_scopes[file]),
             _ => panic!("Cannot convert expression to constant: {:#?}", expr),
         }
     }
@@ -366,7 +366,7 @@ impl DriverRef<'_> {
         // It is important to hold on to the write lock throughout this entire method, maybe
         self.write();
         // Start at 1 to avoid RETURN_VALUE_DECL, which we can't and shouldn't generate code for
-        let len = self.read().code.hir_code.decls.len();
+        let len = self.read().code.hir.decls.len();
         for i in 1..len {
             self.get_decl(DeclId::new(i), tp);
         }
@@ -376,7 +376,7 @@ impl DriverRef<'_> {
             let id = StaticId::new(i);
             let statik = self.read().mir.statics[id].clone();
             let konst = self.eval_expr(statik.assignment, tp);
-            self.write().code.mir_code.statics.push_at(
+            self.write().code.mir.statics.push_at(
                 id,
                 dire::mir::Static {
                     name: statik.name,
@@ -396,9 +396,9 @@ impl DriverRef<'_> {
 
 impl Driver {
     fn resolve_extern_mod(&mut self, id: ExternModId, tp: &impl TypeProvider) {
-        if self.code.mir_code.extern_mods.get(&id).is_some() { return; }
+        if self.code.mir.extern_mods.get(&id).is_some() { return; }
 
-        let extern_mod = &self.code.hir_code.extern_mods[id];
+        let extern_mod = &self.code.hir.extern_mods[id];
         let library_path = extern_mod.library_path.clone();
         let mut imported_functions = Vec::with_capacity(extern_mod.imported_functions.len());
         for func in &extern_mod.imported_functions {
@@ -417,7 +417,7 @@ impl Driver {
                 }
             );
         }
-        self.code.mir_code.extern_mods.insert(
+        self.code.mir.extern_mods.insert(
             id,
             ExternMod {
                 library_path,
@@ -437,7 +437,7 @@ impl DriverRef<'_> {
                 let params = params.clone();
                 let generic_params_range = generic_params_range.clone();
                 drop(d);
-                let get = self.write().code.mir_code.functions.push(Function::default());
+                let get = self.write().code.mir.functions.push(Function::default());
                 let decl = Decl::Computed { get };
                 self.write().mir.decls.insert(id, decl.clone());
 
@@ -457,9 +457,9 @@ impl DriverRef<'_> {
 
                 let params = params.clone();
                 let func_ty = self.read().decl_type(id, tp).as_function().unwrap().clone();
-                let name = self.read().code.hir_code.names[id];
+                let name = self.read().code.hir.names[id];
                 let comptime_sym = self.read().hir.known_idents.comptime;
-                let is_comptime = self.read().code.hir_code.decl_attributes.get(&id)
+                let is_comptime = self.read().code.hir.decl_attributes.get(&id)
                     .map(|attrs|
                         attrs.iter()
                             .find(|attr| attr.attr == comptime_sym)
@@ -474,7 +474,7 @@ impl DriverRef<'_> {
                     is_comptime,
                     tp,
                 );
-                self.write().code.mir_code.functions[get] = func;
+                self.write().code.mir.functions[get] = func;
                 decl
             },
             hir::Decl::ComputedPrototype { extern_func, .. } => {
@@ -573,7 +573,7 @@ impl Driver {
     #[allow(dead_code)]
     #[display_adapter]
     fn fmt_variant_name(&self, f: &mut Formatter, enuum: EnumId, index: usize) {
-        let variant = &self.code.hir_code.enums[enuum].variants[index];
+        let variant = &self.code.hir.enums[enuum].variants[index];
         let name = self.interner.resolve(variant.name).unwrap();
         write!(f, "{}", name)
     }
@@ -585,7 +585,7 @@ impl Driver {
             Const::Bool(val) => write!(f, "{}", val)?,
             Const::Float { lit, ref ty } => write!(f, "{} as {:?}", lit, ty)?,
             Const::Int { ref lit, ref ty } => write!(f, "{} as {:?}", lit, ty)?,
-            Const::Str { id, ref ty } => write!(f, "%str{} ({:?}) as {:?}", id.index(), self.code.mir_code.strings[id], ty)?,
+            Const::Str { id, ref ty } => write!(f, "%str{} ({:?}) as {:?}", id.index(), self.code.mir.strings[id], ty)?,
             Const::StrLit(ref lit) => write!(f, "str_lit \"{}\"", lit.clone().into_string().unwrap())?,
             Const::Ty(ref ty) => write!(f, "`{:?}`", ty)?,
             Const::Void => write!(f, "void")?,
@@ -618,7 +618,7 @@ impl Driver {
                 write!(f, "const_{}", name)?
             },
             Const::Int { ref lit, .. } => write!(f, "const_int_{}", lit)?,
-            Const::Str { id, .. } => write!(f, "string_{}", identifierify(self.code.mir_code.strings[id].clone().into_bytes()))?,
+            Const::Str { id, .. } => write!(f, "string_{}", identifierify(self.code.mir.strings[id].clone().into_bytes()))?,
             Const::StrLit(ref lit) => write!(f, "string_lit_{}", identifierify(lit.clone().into_bytes()))?,
             Const::Ty(ref ty) => write!(f, "type_{}", identifierify(format!("{:?}", ty).into_bytes()))?,
             Const::Void => write!(f, "const_void")?,
@@ -650,7 +650,7 @@ impl Driver {
 
     #[display_adapter]
     pub fn display_instr_name(&self, item: OpId, f: &mut Formatter) {
-        write!(f, "{}", self.code.mir_code.instr_names.get(&item).cloned()
+        write!(f, "{}", self.code.mir.instr_names.get(&item).cloned()
             .unwrap_or_else(|| format!("instr{}", item.index())))
     }
 
@@ -689,14 +689,14 @@ impl Driver {
             }
             // TODO: print generic arguments
             &Instr::Call { ref arguments, func: callee, .. } => {
-                write!(f, "%{} = call `{}`", self.display_instr_name(op_id), self.fn_name(self.code.mir_code.functions[callee].name))?;
+                write!(f, "%{} = call `{}`", self.display_instr_name(op_id), self.fn_name(self.code.mir.functions[callee].name))?;
                 write_args!(arguments);
             },
             &Instr::FunctionRef { func: callee, .. } => {
-                write!(f, "%{} = function_ref `{}`", self.display_instr_name(op_id), self.fn_name(self.code.mir_code.functions[callee].name))?
+                write!(f, "%{} = function_ref `{}`", self.display_instr_name(op_id), self.fn_name(self.code.mir.functions[callee].name))?
             },
             &Instr::ExternCall { ref arguments, func: callee, .. } => {
-                let extern_mod = &self.code.mir_code.extern_mods[&callee.extern_mod];
+                let extern_mod = &self.code.mir.extern_mods[&callee.extern_mod];
                 let callee_func = &extern_mod.imported_functions[callee.index];
                 write!(f, "%{} = externcall `{}`", self.display_instr_name(op_id), callee_func.name)?;
                 write_args!(arguments);
@@ -719,7 +719,7 @@ impl Driver {
             &Instr::LogicalNot(op) => write!(f, "%{} = not %{}", self.display_instr_name(op_id), self.display_instr_name(op))?,
             &Instr::Ret(val) => write!(f,  "return %{}", self.display_instr_name(val))?,
             &Instr::Store { location, value } => write!(f, "store %{} in %{}", self.display_instr_name(value), self.display_instr_name(location))?,
-            &Instr::AddressOfStatic(statik) => write!(f, "%{} = address of static %{}", self.display_instr_name(op_id), self.code.mir_code.statics[statik].name)?,
+            &Instr::AddressOfStatic(statik) => write!(f, "%{} = address of static %{}", self.display_instr_name(op_id), self.code.mir.statics[statik].name)?,
             &Instr::Reinterpret(val, ref ty) => write!(f, "%{} = reinterpret %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
             &Instr::SignExtend(val, ref ty) => write!(f, "%{} = sign-extend %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
             &Instr::ZeroExtend(val, ref ty) => write!(f, "%{} = zero-extend %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
@@ -752,7 +752,7 @@ impl Driver {
             &Instr::Enum { ref variants, id } => {
                 write!(f, "%{} = define enum{} {{", self.display_instr_name(op_id), id.index())?;
 
-                for (i, variant) in self.code.hir_code.enums[id].variants.iter().enumerate() {
+                for (i, variant) in self.code.hir.enums[id].variants.iter().enumerate() {
                     write!(f, "{}", self.interner.resolve(variant.name).unwrap())?;
                     if variant.payload_ty.is_some() {
                         write!(f, "(%{})", self.display_instr_name(variants[i]))?;
@@ -776,7 +776,7 @@ impl Driver {
                 write!(f, " -> {}", self.display_instr_name(ret_ty))?;
             },
             &Instr::Variant { enuum, index, payload } => {
-                let variant = &self.code.hir_code.enums[enuum].variants[index];
+                let variant = &self.code.hir.enums[enuum].variants[index];
                 let variant_name = variant.name;
                 write!(f, "%{} = %enum{}.{}", self.display_instr_name(op_id), enuum.index(), self.interner.resolve(variant_name).unwrap())?;
                 if variant.payload_ty.is_some() {
@@ -818,7 +818,7 @@ impl Driver {
 
     #[display_adapter]
     pub fn display_mir_function(&self, func: &FunctionRef, f: &mut Formatter) {
-        let func = function_by_ref(&self.code.mir_code, func);
+        let func = function_by_ref(&self.code.mir, func);
         if func.is_comptime {
             write!(f, "@comptime ")?;
         }
@@ -848,16 +848,16 @@ impl Driver {
 
     #[display_adapter]
     pub fn display_mir(&self, f: &mut Formatter) {
-        if !self.code.mir_code.statics.raw.is_empty() {
-            for statik in &self.code.mir_code.statics {
+        if !self.code.mir.statics.raw.is_empty() {
+            for statik in &self.code.mir.statics {
                 writeln!(f, "%{} = {}", statik.name, self.fmt_const(&statik.val))?;
             }
             writeln!(f)?;
         }
 
-        for i in self.code.mir_code.functions.indices() {
+        for i in self.code.mir.functions.indices() {
             write!(f, "{}", self.display_mir_function(&FunctionRef::Id(i)))?;
-            if i + 1 < self.code.mir_code.functions.len() {
+            if i + 1 < self.code.mir.functions.len() {
                 writeln!(f, "\n")?;
             }
         }
@@ -900,12 +900,12 @@ impl Driver {
         block
     }
     fn start_bb(&mut self, b: &mut FunctionBuilder, block: BlockId) {
-        self.code.mir_code.start_block(block).unwrap();
+        self.code.mir.start_block(block).unwrap();
         b.current_block = block;
     }
     fn end_current_bb(&mut self, b: &FunctionBuilder) {
         let bb = b.current_block;
-        if self.code.mir_code.end_block(bb).is_err() {
+        if self.code.mir.end_block(bb).is_err() {
             panic!("Failed to end block {} in function {}:\n{}", bb.index(), self.fn_name(b.name), self.code.display_block(bb));
         }
         let block = &self.code.blocks[bb];
@@ -946,8 +946,8 @@ impl DriverRef<'_> {
             let range = df!(d, param.range);
             drop(d);
             let name = instr_namespace.insert(format!("{}", self.read().display_item(range)));
-            self.write().code.mir_code.source_ranges.insert(op, range);
-            self.write().code.mir_code.instr_names.insert(op, name);
+            self.write().code.mir.source_ranges.insert(op, range);
+            self.write().code.mir.instr_names.insert(op, name);
             entry.ops.push(op);
         }
         let entry = self.write().code.blocks.push(entry);
@@ -1009,7 +1009,7 @@ impl DriverRef<'_> {
         if !function.is_comptime {
             self.check_no_comptime_calls(&function);
         }
-        self.read().code.mir_code.check_all_blocks_ended(&function);
+        self.read().code.mir.check_all_blocks_ended(&function);
         function 
     }
 }
@@ -1312,7 +1312,7 @@ impl DriverRef<'_> {
             Instr::LogicalNot(val) | Instr::Truncate(val, _) | Instr::SignExtend(val, _) | Instr::ZeroExtend(val, _)
                 | Instr::FloatCast(val, _) | Instr::FloatToInt(val, _) | Instr::IntToFloat(val, _)
                 => self.instruction_is_const(val),
-            Instr::Call { func, .. } if d.code.mir_code.functions[func].is_comptime => instr.referenced_values().iter().all(|&val| self.instruction_is_const(val)),
+            Instr::Call { func, .. } if d.code.mir.functions[func].is_comptime => instr.referenced_values().iter().all(|&val| self.instruction_is_const(val)),
             _ => false,
         }
     }
@@ -1412,7 +1412,7 @@ impl DriverRef<'_> {
             let block = &self.read().code.blocks[block];
             for &instr in &block.ops {
                 if let &Instr::Call { func: called_func, .. } = self.read().code.ops[instr].as_mir_instr().unwrap() {
-                    if self.read().code.mir_code.functions[called_func].is_comptime {
+                    if self.read().code.mir.functions[called_func].is_comptime {
                         comptime_calls.push((called_func, instr));
                     }
                 }
@@ -1420,7 +1420,7 @@ impl DriverRef<'_> {
         }
 
         for (func, _instr) in comptime_calls {
-            let name = self.read().fn_name(self.read().code.mir_code.functions[func].name).to_string();
+            let name = self.read().fn_name(self.read().code.mir.functions[func].name).to_string();
             self.write().errors.push(
                 Error::new(format!("unable to evaluate call to @comptime function '{}'", name))
             );
@@ -1428,14 +1428,14 @@ impl DriverRef<'_> {
     }
 
     fn validate_function(&self, func: &Function) {
-        self.read().code.mir_code.check_all_blocks_ended(func);
+        self.read().code.mir.check_all_blocks_ended(func);
         self.check_no_invalid_instructions(func);
     }
 }
 
 impl Driver {
     fn generate_type_of(&self, instr: &Instr) -> Type {
-        let b = &self.code.mir_code;
+        let b = &self.code.mir;
         match instr {
             Instr::Void | Instr::Store { .. } => Type::Void,
             Instr::Invalid => Type::Error,
@@ -1497,7 +1497,7 @@ impl Driver {
         let ty = self.generate_type_of(&instr);
         let op = self.code.ops.push(Op::MirInstr(instr, instr_id, ty));
         let source_range = self.get_range(item);
-        self.code.mir_code.source_ranges.insert(op, source_range);
+        self.code.mir.source_ranges.insert(op, source_range);
 
         let block = &mut self.code.blocks[b.current_block];
         block.ops.push(op);
@@ -1510,9 +1510,9 @@ impl Driver {
         let ty = self.generate_type_of(&instr);
         let op = self.code.ops.push(Op::MirInstr(instr, instr_id, ty));
         let source_range = self.get_range(item);
-        self.code.mir_code.source_ranges.insert(op, source_range);
+        self.code.mir.source_ranges.insert(op, source_range);
         let name = b.instr_namespace.insert(name.into());
-        self.code.mir_code.instr_names.insert(op, name);
+        self.code.mir.instr_names.insert(op, name);
 
         let block = &mut self.code.blocks[b.current_block];
         block.ops.push(op);
@@ -1546,21 +1546,21 @@ impl DriverRef<'_> {
 
     fn build_scope(&mut self, b: &mut FunctionBuilder, scope: ImperScopeId, ctx: Context, tp: &impl TypeProvider) -> Value {
         self.write();
-        let block = self.read().code.hir_code.imper_scopes[scope].block;
+        let block = self.read().code.hir.imper_scopes[scope].block;
         let len = self.read().code.blocks[block].ops.len();
         for i in 0..len {
             let op = self.read().code.blocks[block].ops[i];
             let item = self.read().code.ops[op].as_hir_item().unwrap();
             self.build_scope_item(b, item, tp);
         }
-        let terminal_expr = self.read().code.hir_code.imper_scopes[scope].terminal_expr;
+        let terminal_expr = self.read().code.hir.imper_scopes[scope].terminal_expr;
         self.build_expr(b, terminal_expr, ctx, tp)
     }
 }
 
 impl Driver {
     fn get_base(&self, id: DeclRefId) -> ExprId {
-        match self.code.hir_code.decl_refs[id].namespace {
+        match self.code.hir.decl_refs[id].namespace {
             hir::Namespace::MemberRef { base_expr } => base_expr,
             _ => panic!("Expected member ref expression"),
         }
@@ -1582,7 +1582,7 @@ impl DriverRef<'_> {
     fn get(&mut self, b: &mut FunctionBuilder, decl_ref_id: DeclRefId, tp: &impl TypeProvider) -> DeclRef {
         let id = tp.selected_overload(decl_ref_id).expect("No overload found!");
         let generic_arguments = tp.generic_arguments(decl_ref_id).as_ref().unwrap_or(&Vec::new()).clone();
-        let expr = self.read().code.hir_code.decl_refs[decl_ref_id].expr;
+        let expr = self.read().code.hir.decl_refs[decl_ref_id].expr;
         let name = format!("{}", self.read().display_item(id));
         match self.get_decl(id, tp) {
             Decl::Computed { get } => DeclRef::Function { func: get, generic_args: generic_arguments },
@@ -1690,8 +1690,8 @@ impl DriverRef<'_> {
             self.write().start_bb(b, next_bb);
 
             let scope_ctx = ctx.redirect(result_location, Some(post_bb));
-            let terminal_expr = self.read().code.hir_code.imper_scopes[cur].terminal_expr;
-            let block = self.read().code.hir_code.imper_scopes[cur].block;
+            let terminal_expr = self.read().code.hir.imper_scopes[cur].terminal_expr;
+            let block = self.read().code.hir.imper_scopes[cur].block;
             // If the current scope consists of a lone if expression
             if self.read().code.blocks[block].ops.is_empty() {
                 let d = self.read();
@@ -2043,9 +2043,9 @@ impl DriverRef<'_> {
             Expr::Struct(id) => {
                 drop(d);
                 let mut fields = SmallVec::new();
-                let len = self.read().code.hir_code.structs[id].fields.len();
+                let len = self.read().code.hir.structs[id].fields.len();
                 for i in 0..len {
-                    let field_ty = self.read().code.hir_code.structs[id].fields[i].ty;
+                    let field_ty = self.read().code.hir.structs[id].fields[i].ty;
                     let field = self.build_expr(
                         b,
                         field_ty,
@@ -2060,9 +2060,9 @@ impl DriverRef<'_> {
             Expr::Enum(id) => {
                 drop(d);
                 let mut variants = SmallVec::new();
-                let len = self.read().code.hir_code.enums[id].variants.len();
+                let len = self.read().code.hir.enums[id].variants.len();
                 for i in 0..len {
-                    let payload_ty = self.read().code.hir_code.enums[id].variants[i].payload_ty.unwrap_or(VOID_TYPE);
+                    let payload_ty = self.read().code.hir.enums[id].variants[i].payload_ty.unwrap_or(VOID_TYPE);
                     let variant = self.build_expr(
                         b,
                         payload_ty,
@@ -2130,7 +2130,7 @@ impl DriverRef<'_> {
                 let mut mir_cases = Vec::new();
                 let enum_info = match scrutinee_ty {
                     &Type::Enum(id) => {
-                        Some((id, self.read().code.hir_code.enums[id].variants.clone()))
+                        Some((id, self.read().code.hir.enums[id].variants.clone()))
                     },
                     Type::Int { .. } => None,
                     _ => todo!(),
@@ -2143,7 +2143,7 @@ impl DriverRef<'_> {
                     // I will need some way of detecting aliases and allowing them, but at the same time splitting up the list of bindings when they don't alias, such as in disjuction patterns.
                     assert!(case.pattern.bindings.len() <= 1);
                     for &binding_id in &case.pattern.bindings {
-                        let binding = self.read().code.hir_code.pattern_binding_decls[binding_id].clone();
+                        let binding = self.read().code.hir.pattern_binding_decls[binding_id].clone();
                         // Can only ever bind one path to a particular binding at a time. Will need some way of splitting these up when I implement disjunction patterns
                         assert_eq!(binding.paths.len(), 1);
                         for path in &binding.paths {

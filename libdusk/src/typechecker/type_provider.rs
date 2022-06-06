@@ -107,17 +107,17 @@ impl RealTypeProvider {
             
             debug,
         };
-        tp.overloads.resize_with(d.code.hir_code.decl_refs.len(), Default::default);
-        tp.types.resize_with(d.code.hir_code.exprs.len(), Default::default);
-        tp.constraints.resize_with(d.code.hir_code.exprs.len(), Default::default);
+        tp.overloads.resize_with(d.code.hir.decl_refs.len(), Default::default);
+        tp.types.resize_with(d.code.hir.exprs.len(), Default::default);
+        tp.constraints.resize_with(d.code.hir.exprs.len(), Default::default);
         if debug {
-            tp.constraints_copy.resize_with(d.code.hir_code.exprs.len(), Default::default);
+            tp.constraints_copy.resize_with(d.code.hir.exprs.len(), Default::default);
         }
-        tp.selected_overloads.resize_with(d.code.hir_code.decl_refs.len(), || None);
-        tp.generic_substitution_list.resize_with(d.code.hir_code.decl_refs.len(), || Vec::new());
-        tp.generic_arguments.resize_with(d.code.hir_code.decl_refs.len(), || None);
-        tp.struct_lits.resize_with(d.code.hir_code.struct_lits.len(), || None);
-        tp.cast_methods.resize_with(d.code.hir_code.cast_counter.len(), || CastMethod::Noop);
+        tp.selected_overloads.resize_with(d.code.hir.decl_refs.len(), || None);
+        tp.generic_substitution_list.resize_with(d.code.hir.decl_refs.len(), || Vec::new());
+        tp.generic_arguments.resize_with(d.code.hir.decl_refs.len(), || None);
+        tp.struct_lits.resize_with(d.code.hir.struct_lits.len(), || None);
+        tp.cast_methods.resize_with(d.code.hir.cast_counter.len(), || CastMethod::Noop);
         
         for i in 0..d.tir.decls.len() {
             let id = DeclId::new(i);
@@ -146,7 +146,7 @@ impl private::Sealed for RealTypeProvider {}
 
 impl RealTypeProvider {
     fn set_decl_type_to_explicit_type_if_exists(&mut self, d: &Driver, id: DeclId) {
-        let explicit_ty = d.code.hir_code.explicit_tys[id]
+        let explicit_ty = d.code.hir.explicit_tys[id]
             .map(|expr| self.get_evaluated_type(expr).clone());
         match &df!(d, id.hir) {
             Decl::Computed { param_tys, .. } | Decl::ComputedPrototype { param_tys, .. } | Decl::Intrinsic { function_like: true, param_tys, .. } => {
@@ -189,10 +189,10 @@ impl TypeProvider for RealTypeProvider {
     fn fetch_decl_type(&mut self, d: &Driver, id: DeclId, decl_ref: Option<DeclRefId>) -> QualType {
         if let Type::Error = self.decl_types[id].ty {
             if let Some(decl_ref) = decl_ref {
-                let decl_ref = &d.code.hir_code.decl_refs[decl_ref];
+                let decl_ref = &d.code.hir.decl_refs[decl_ref];
                 match decl_ref.namespace {
                     Namespace::Guarantee(ns) if decl_ref.name == d.hir.known_idents.return_value => {
-                        let func = d.code.hir_code.condition_ns[ns].func;
+                        let func = d.code.hir.condition_ns[ns].func;
                         // This gets the return value because this declref refers to the return_value decl
                         return self.fetch_decl_type(d, func, None).ty.return_ty().unwrap().into();
                     }
@@ -375,7 +375,7 @@ impl<'base> MockTypeProvider<'base> {
     }
 
     fn set_decl_type_to_explicit_type_if_exists(&mut self, d: &Driver, id: DeclId) {
-        let explicit_ty = d.code.hir_code.explicit_tys[id]
+        let explicit_ty = d.code.hir.explicit_tys[id]
             .map(|expr| self.get_evaluated_type(expr).clone());
         match &df!(d, id.hir) {
             Decl::Computed { param_tys, .. } | Decl::ComputedPrototype { param_tys, .. } | Decl::Intrinsic { function_like: true, param_tys, .. } => {
@@ -421,10 +421,10 @@ impl<'base> TypeProvider for MockTypeProvider<'base> {
     fn fetch_decl_type(&mut self, d: &Driver, id: DeclId, decl_ref: Option<DeclRefId>) -> QualType {
         if let Type::Error = self.fw_decl_types(id).ty {
             if let Some(decl_ref) = decl_ref {
-                let decl_ref = &d.code.hir_code.decl_refs[decl_ref];
+                let decl_ref = &d.code.hir.decl_refs[decl_ref];
                 match decl_ref.namespace {
                     Namespace::Guarantee(ns) if decl_ref.name == d.hir.known_idents.return_value => {
-                        let func = d.code.hir_code.condition_ns[ns].func;
+                        let func = d.code.hir.condition_ns[ns].func;
                         // This gets the return value because this declref refers to the return_value decl
                         return self.fetch_decl_type(d, func, None).ty.return_ty().unwrap().into();
                     }

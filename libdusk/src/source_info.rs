@@ -74,7 +74,7 @@ impl Driver {
 
     #[allow(dead_code)]
     pub fn print_item(&self, item: ItemId) {
-        self.print_range(self.code.hir_code.source_ranges[item]);
+        self.print_range(self.code.hir.source_ranges[item]);
     }
 
     #[allow(dead_code)]
@@ -84,7 +84,7 @@ impl Driver {
 
     #[allow(dead_code)]
     pub fn print_decl(&self, id: DeclId) {
-        self.print_item(self.code.hir_code.decl_to_items[id]);
+        self.print_item(self.code.hir.decl_to_items[id]);
     }
 }
 

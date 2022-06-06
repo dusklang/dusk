@@ -137,7 +137,7 @@ fn main() {
 
     begin_phase!(Interp);
     let main_sym = driver.write().interner.get_or_intern_static("main");
-    let main = driver.read().code.mir_code.functions.iter()
+    let main = driver.read().code.mir.functions.iter()
         .position(|func| {
             match func.name {
                 Some(name) => name == main_sym && *func.ty.return_ty == Type::Void && driver.read().code.num_parameters(func) == 0,

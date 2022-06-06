@@ -257,7 +257,7 @@ impl Value {
             },
             Const::Bool(val) => Value::from_bool(val),
             Const::Str { id, .. } => {
-                let ptr = driver.code.mir_code.strings[id].as_ptr();
+                let ptr = driver.code.mir.strings[id].as_ptr();
                 Value::from_usize(ptr as usize)
             },
             Const::StrLit(ref lit) => Value::from_internal(InternalValue::StrLit(lit.clone())),
@@ -290,7 +290,7 @@ impl Value {
     }
 
     fn from_variant(d: &Driver, enuum: EnumId, index: usize, payload: Value) -> Value {
-        let layout = &d.code.mir_code.enums[&enuum];
+        let layout = &d.code.mir.enums[&enuum];
         let payload_offset = layout.payload_offsets[index];
         let mut bytes = Vec::new();
         bytes.extend(Value::from_u32(index as u32).as_bytes().as_ref());
@@ -491,7 +491,7 @@ extern "C" fn interp_ffi_entry_point(func: u32, params: *const *const (), return
     }
     let mut driver = DriverRef::new(&DRIVER);
 
-    let func_ty = driver.read().code.mir_code.functions[func_id].ty.clone();
+    let func_ty = driver.read().code.mir.functions[func_id].ty.clone();
     let return_ty = func_ty.return_ty.as_ref().clone();
     let mut arguments = Vec::with_capacity(func_ty.param_tys.len());
     macro_rules! get_param {
@@ -558,7 +558,7 @@ impl Driver {
                 assert!(pointee.ty == Type::i8() || pointee.ty == Type::u8());
                 println!("Warning: about to blindly copy a pointer into the global strings!");
                 let string = unsafe { CString::from(CStr::from_ptr(val.as_raw_ptr() as *const _)) };
-                let id = self.code.mir_code.strings.push(string);
+                let id = self.code.mir.strings.push(string);
                 Const::Str { id, ty }
             },
             Type::Ty => Const::Ty(val.as_ty()),
@@ -583,7 +583,7 @@ impl Driver {
     }
 
     fn new_stack_frame(&self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> StackFrame {
-        let func = function_by_ref(&self.code.mir_code, &func_ref);
+        let func = function_by_ref(&self.code.mir, &func_ref);
 
         let mut results = IndexVec::new();
 
@@ -626,7 +626,7 @@ impl Driver {
     #[display_adapter]
     pub fn stack_trace(&self, stack: &[StackFrame], f: &mut Formatter) {
         for (i, frame) in stack.iter().rev().enumerate() {
-            let func = function_by_ref(&self.code.mir_code, &frame.func_ref);
+            let func = function_by_ref(&self.code.mir, &frame.func_ref);
             writeln!(f, "{}: {}", i, self.fn_name(func.name))?;
         }
         Ok(())
@@ -673,7 +673,7 @@ impl Driver {
             return Value::from_usize(alloc.0.as_ptr::<()>() as usize);
         }
 
-        let func = &self.code.mir_code.functions[func_id];
+        let func = &self.code.mir.functions[func_id];
         let param_tys = func.ty.param_tys.clone();
 
         let mut thunk = X64Encoder::new();
@@ -769,7 +769,7 @@ impl DriverRef<'_> {
             .map(|arg| arg.as_mut_ptr())
             .collect();
         
-        let library = &self.read().code.mir_code.extern_mods[&func_ref.extern_mod];
+        let library = &self.read().code.mir.extern_mods[&func_ref.extern_mod];
         let func = &library.imported_functions[func_ref.index];
         // TODO: cache library and proc addresses (and thunks, for that matter)
         let module = unsafe { kernel32::LoadLibraryA(library.library_path.as_ptr()) };
@@ -1137,7 +1137,7 @@ impl DriverRef<'_> {
                                 match ty {
                                     Type::Struct(strukt) => {
                                         let layout = self.read().layout_struct(&strukt);
-                                        for (index, field) in self.read().code.hir_code.structs[strukt.identity].fields.iter().enumerate() {
+                                        for (index, field) in self.read().code.hir.structs[strukt.identity].fields.iter().enumerate() {
                                             if field_name == field.name {
                                                 offset = Some(layout.field_offsets[index]);
                                                 break;
@@ -1270,7 +1270,7 @@ impl DriverRef<'_> {
                     if let InterpMode::CompileTime = INTERP.read().unwrap().mode {
                         panic!("Can't access static at compile time!");
                     }
-                    let static_value = Value::from_const(&self.read().code.mir_code.statics[statik].val.clone(), &*self.read());
+                    let static_value = Value::from_const(&self.read().code.mir.statics[statik].val.clone(), &*self.read());
                     let statik = INTERP.write().unwrap().statics.entry(statik)
                         .or_insert(static_value)
                         .as_bytes()
@@ -1301,14 +1301,14 @@ impl DriverRef<'_> {
                     Value::from_ty(Type::Struct(strukt))
                 },
                 &Instr::Enum { ref variants, id } => {
-                    if !self.read().code.mir_code.enums.contains_key(&id) {
+                    if !self.read().code.mir.enums.contains_key(&id) {
                         let mut variant_tys = Vec::new();
                         for &variant in variants {
                             variant_tys.push(frame.get_val(variant, &*self.read()).as_ty());
                         }
                         let layout = self.read().layout_enum(&variant_tys);
                         drop(d);
-                        self.write().code.mir_code.enums.insert(
+                        self.write().code.mir.enums.insert(
                             id,
                             layout,
                         );

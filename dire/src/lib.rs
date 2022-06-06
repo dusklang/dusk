@@ -73,8 +73,8 @@ pub struct Block {
 pub struct Code {
     pub blocks: IndexVec<BlockId, Block>,
     pub ops: IndexVec<OpId, Op>,
-    pub hir_code: HirCode,
-    pub mir_code: MirCode,
+    pub hir: HirCode,
+    pub mir: MirCode,
 }
 
 impl Default for Code {
@@ -82,12 +82,12 @@ impl Default for Code {
         let mut val = Code {
             blocks: IndexVec::default(),
             ops: index_vec![Op::MirInstr(Instr::Void, InstrId::new(0), Type::Void)],
-            hir_code: HirCode::default(),
-            mir_code: MirCode::default(),
+            hir: HirCode::default(),
+            mir: MirCode::default(),
         };
-        val.mir_code.source_ranges.insert(VOID_INSTR, SourceRange::default());
-        val.mir_code.instr_names.insert(VOID_INSTR, "void".to_string());
-        val.hir_code.generic_ctxs.push(GenericCtx::Blank);
+        val.mir.source_ranges.insert(VOID_INSTR, SourceRange::default());
+        val.mir.instr_names.insert(VOID_INSTR, "void".to_string());
+        val.hir.generic_ctxs.push(GenericCtx::Blank);
         val
     }
 }
@@ -103,12 +103,12 @@ impl Code {
                     match item {
                         Item::Expr(expr) => {
                             write!(w, "(%expr{}) = hir.", expr.index())?;
-                            let expr = &self.hir_code.exprs[expr];
+                            let expr = &self.hir.exprs[expr];
                             writeln!(w, "{:?}", expr)?;
                         },
                         Item::Decl(decl) => {
                             write!(w, "(%decl{}) = hir.", decl.index())?;
-                            let decl = &self.hir_code.decls[decl];
+                            let decl = &self.hir.decls[decl];
                             writeln!(w, "{:?}", decl)?;
                         }
                     }

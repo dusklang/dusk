@@ -201,7 +201,7 @@ impl tir::PatternBinding {
         let constraints = tp.constraints(self.scrutinee);
         let scrutinee_ty = constraints.solve().expect("Ambiguous type for assigned declaration").ty;
         let mut binding_ty = None;
-        let binding = &driver.code.hir_code.pattern_binding_decls[self.binding_id];
+        let binding = &driver.code.hir.pattern_binding_decls[self.binding_id];
         // Note: no need to worry about mutability matching because that can be handled in the parser
         for path in &binding.paths {
             let mut path_ty = scrutinee_ty.clone();
@@ -210,7 +210,7 @@ impl tir::PatternBinding {
                     &hir::PatternBindingPathComponent::VariantPayload(index) => {
                         match path_ty {
                             Type::Enum(enuum) => {
-                                let payload_ty = driver.code.hir_code.enums[enuum].variants[index].payload_ty.unwrap();
+                                let payload_ty = driver.code.hir.enums[enuum].variants[index].payload_ty.unwrap();
                                 let payload_ty = tp.get_evaluated_type(payload_ty);
                                 path_ty = payload_ty.clone();
                             },
@@ -371,7 +371,7 @@ impl EnumExhaustion {
             _ => panic!("expected enum"),
         };
 
-        let variants = &driver.code.hir_code.enums[enum_id].variants;
+        let variants = &driver.code.hir.enums[enum_id].variants;
         if self.variants.len() < variants.len() {
             false
         } else {
@@ -397,7 +397,7 @@ impl EnumExhaustion {
             &Type::Enum(enum_id) => enum_id,
             _ => panic!("expected enum"),
         };
-        let variants = &driver.code.hir_code.enums[enum_id].variants;
+        let variants = &driver.code.hir.enums[enum_id].variants;
         for i in 0..variants.len() {
             if let Some(exhaustion) = self.variants.get_mut(&i) {
                 if let ExhaustionReason::Explicit { more_than_one_coverage, .. } = &mut exhaustion.reason {
@@ -444,7 +444,7 @@ impl tir::Expr<tir::Switch> {
                 // Make sure each switch case matches a variant name in the scrutinized enum, and
                 // that each variant in the enum is matched exactly once.
                 let mut exhaustion = EnumExhaustion::default();
-                let variants = &driver.code.hir_code.enums[id].variants;
+                let variants = &driver.code.hir.enums[id].variants;
                 for case in &self.cases {
                     match case.pattern.kind {
                         PatternKind::ContextualMember { name, range } => {
@@ -719,7 +719,7 @@ fn find_generic_context_for_decl<'a>(expr: ExprId, ty: &'a (impl Into<QualType> 
 impl tir::Expr<tir::DeclRef> {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         // Initialize overloads
-        let overload_decls = driver.find_overloads(&driver.code.hir_code.decl_refs[self.decl_ref_id]);
+        let overload_decls = driver.find_overloads(&driver.code.hir.decl_refs[self.decl_ref_id]);
         let mut overloads = Vec::new();
         for &overload_decl in &overload_decls {
             overloads.push(overload_decl);
@@ -733,7 +733,7 @@ impl tir::Expr<tir::DeclRef> {
             let ty = tp.fetch_decl_type(driver, overload, Some(self.decl_ref_id)).ty;
             let decl = &driver.tir.decls[overload];
             let mut is_mut = decl.is_mut;
-            if let hir::Namespace::MemberRef { base_expr } = driver.code.hir_code.decl_refs[self.decl_ref_id].namespace {
+            if let hir::Namespace::MemberRef { base_expr } = driver.code.hir.decl_refs[self.decl_ref_id].namespace {
                 
                 let constraints = tp.constraints(base_expr);
                 // TODO: Robustness! Base_expr could be an overload set with these types, but also include struct types
@@ -820,7 +820,7 @@ impl tir::Expr<tir::DeclRef> {
             }
             (Some(overload), Some(generic_args))
         } else {
-            let name = driver.code.hir_code.decl_refs[self.decl_ref_id].name;
+            let name = driver.code.hir.decl_refs[self.decl_ref_id].name;
             let name = driver.interner.resolve(name).unwrap();
             if overloads.nonviable_overloads.is_empty() {
                 driver.errors.push(
@@ -1151,7 +1151,7 @@ impl tir::Expr<tir::StructLit> {
             let ty = tp.get_evaluated_type(self.ty).clone();
             match &ty {
                 Type::Struct(strukt) => {
-                    let struct_fields = &driver.code.hir_code.structs[strukt.identity].fields;
+                    let struct_fields = &driver.code.hir.structs[strukt.identity].fields;
                     let mut matches = Vec::new();
                     matches.resize(struct_fields.len(), ExprId::new(u32::MAX as usize));
 
@@ -1242,7 +1242,7 @@ impl tir::Expr<tir::StructLit> {
 
         // Yay borrow checker:
         if let Some(lit) = tp.struct_lit(self.struct_lit_id).clone() {
-            let fields = &driver.code.hir_code.structs[lit.strukt].fields;
+            let fields = &driver.code.hir.structs[lit.strukt].fields;
             debug_assert_eq!(lit.fields.len(), fields.len());
 
             for i in 0..fields.len() {
@@ -1378,7 +1378,7 @@ impl tir::RetGroup {
 
 impl Driver {
     pub fn decl_type(&self, id: DeclId, tp: &impl TypeProvider) -> Type {
-        let explicit_ty = self.code.hir_code.explicit_tys[id].map(|ty| tp.get_evaluated_type(ty)).unwrap_or(&tp.fw_decl_types(id).ty).clone();
+        let explicit_ty = self.code.hir.explicit_tys[id].map(|ty| tp.get_evaluated_type(ty)).unwrap_or(&tp.fw_decl_types(id).ty).clone();
         if let hir::Decl::Computed { param_tys, .. } | hir::Decl::ComputedPrototype { param_tys, .. } | hir::Decl::Intrinsic { function_like: true, param_tys, .. } = &df!(id.hir) {
             let param_tys: Vec<_> = param_tys.iter().copied()
                 .map(|ty| tp.get_evaluated_type(ty).clone())

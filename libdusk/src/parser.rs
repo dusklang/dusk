@@ -29,7 +29,7 @@ pub type ParseResult<T> = Result<T, ParseError>;
 
 impl Driver {
     pub fn parse(&mut self) -> ParseResult<()> {
-        while self.code.hir_code.global_scopes.len() < self.src_map.files.len() {
+        while self.code.hir.global_scopes.len() < self.src_map.files.len() {
             // TODO: parse other files, even after a fatal parse error. Haven't done it yet because
             // it will require a bit of refactoring.
             self.parse_single_file()?;
@@ -985,7 +985,7 @@ impl Driver {
                     }
                 };
                 if let Some(condition_ns) = condition_ns {
-                    self.code.hir_code.condition_ns[condition_ns].func = decl;
+                    self.code.hir.condition_ns[condition_ns].func = decl;
                 }
                 if let Some(attr) = attributes.iter().find(|attr| attr.attr == self.hir.known_idents.comptime) {
                     if !matches!(df!(decl.hir), hir::Decl::Computed { .. }) {
@@ -995,7 +995,7 @@ impl Driver {
                         );
                     }
                 }
-                self.code.hir_code.decl_attributes.entry(decl).or_default()
+                self.code.hir.decl_attributes.entry(decl).or_default()
                     .extend(attributes);
                 Ok(Item::Decl(decl))
             },
@@ -1079,7 +1079,7 @@ impl Driver {
         self.next(p);
         self.eat_tok(p, TokenKind::RightParen)?;
 
-        let extern_mod = self.code.hir_code.extern_mods.push(ExternMod::new(library_path));
+        let extern_mod = self.code.hir.extern_mods.push(ExternMod::new(library_path));
 
         let module = self.begin_module(Some(extern_mod));
         self.eat_tok(p, TokenKind::OpenCurly)?;

@@ -602,7 +602,7 @@ impl Driver {
     }
 
     pub fn refine(&mut self, tp: &impl TypeProvider) {
-        for func_id in self.code.mir_code.functions.indices() {
+        for func_id in self.code.mir.functions.indices() {
             self.refine_func(&FunctionRef::Id(func_id), tp);
         }
     }
@@ -889,7 +889,7 @@ impl Driver {
             if self.refine.constraints.get(id).is_some() { return; }
         }
 
-        let func = function_by_ref(&self.code.mir_code, &func_ref);
+        let func = function_by_ref(&self.code.mir, &func_ref);
         let func_name = func.name;
         self.check_no_loops(func);
         assert_eq!(func.blocks.len(), 1, "Function has more than one block, which isn't yet supported");
@@ -900,7 +900,7 @@ impl Driver {
         let block = &self.code.blocks[block_id];
         let num_params = self.code.num_parameters(func);
         if let Some(decl) = func.decl {
-            if let Some(attributes) = self.code.hir_code.decl_attributes.get(&decl) {
+            if let Some(attributes) = self.code.hir.decl_attributes.get(&decl) {
                 for attr in attributes {
                     let arg = attr.arg.expect("missing attribute argument");
                     let constraint = self.expr_to_constraint(arg, tp);

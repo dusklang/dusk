@@ -116,7 +116,7 @@ impl Builder {
         self.stream.extend(driver.into());
         self
             .field("code")
-            .field("hir_code")
+            .field("hir")
     }
 
     fn expr_to_item(self, driver: impl Into<TokenStream>, expr_id: impl Into<TokenStream>) -> Self {
