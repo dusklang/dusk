@@ -259,7 +259,7 @@ impl fmt::Debug for FunctionType {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct QualType {
     pub ty: Type,
     pub is_mut: bool,

@@ -33,6 +33,12 @@ pub enum CastMethod {
     Invalid,
 }
 
+impl Default for CastMethod {
+    fn default() -> Self {
+        CastMethod::Noop
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct StructLit {
     pub strukt: StructId,
