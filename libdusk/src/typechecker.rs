@@ -57,6 +57,11 @@ pub struct Overloads {
     pub nonviable_overloads: Vec<DeclId>,
 }
 
+#[derive(Clone, Default)]
+pub struct GenericConstraints {
+
+}
+
 impl tir::Expr<tir::IntLit> {
     fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
         *tp.constraints_mut(self.id) = ConstraintList::new(

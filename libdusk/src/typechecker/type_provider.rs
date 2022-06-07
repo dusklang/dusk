@@ -5,7 +5,7 @@ use dire::mir::Const;
 use dire::ty::{Type, FunctionType, QualType};
 use dusk_proc_macros::df;
 
-use super::{CastMethod, StructLit, constraints::ConstraintList, Overloads};
+use super::{CastMethod, StructLit, constraints::ConstraintList, Overloads, GenericConstraints};
 use crate::index_vec::*;
 use crate::source_info::CommentatedSourceRange;
 use crate::driver::Driver;
@@ -32,6 +32,9 @@ pub trait TypeProvider: private::Sealed {
 
     fn generic_substitution_list(&self, decl_ref: DeclRefId) -> &Vec<ExprId>;
     fn generic_substitution_list_mut(&mut self, decl_ref: DeclRefId) -> &mut Vec<ExprId>;
+
+    fn generic_constraints(&self, decl_ref: DeclRefId) -> &GenericConstraints;
+    fn generic_constraints_mut(&mut self, decl_ref: DeclRefId) -> &mut GenericConstraints;
 
     fn struct_lit(&self, struct_lit: StructLitId) -> &Option<StructLit>;
     fn struct_lit_mut(&mut self, struct_lit: StructLitId) -> &mut Option<StructLit>;
@@ -72,6 +75,8 @@ pub struct RealTypeProvider {
     generic_substitution_list: IndexVec<DeclRefId, Vec<ExprId>>,
     /// The generic arguments for each decl ref
     generic_arguments: IndexVec<DeclRefId, Option<Vec<Type>>>,
+    /// The constraints on all generic arguments that might get passed by each declref
+    generic_constraints: IndexVec<DeclRefId, GenericConstraints>,
     /// Each struct literal matched to a structure
     struct_lits: IndexVec<StructLitId, Option<StructLit>>,
     /// The cast method for each cast expression
@@ -96,6 +101,7 @@ impl RealTypeProvider {
             selected_overloads: IndexVec::new(),
             generic_substitution_list: IndexVec::new(),
             generic_arguments: IndexVec::new(),
+            generic_constraints: IndexVec::new(),
             struct_lits: IndexVec::new(),
             cast_methods: IndexVec::new(),
             constraints: IndexVec::new(),
@@ -113,10 +119,11 @@ impl RealTypeProvider {
         if debug {
             tp.constraints_copy.resize_with(d.code.hir.exprs.len(), Default::default);
         }
-        tp.selected_overloads.resize_with(d.code.hir.decl_refs.len(), || None);
-        tp.generic_substitution_list.resize_with(d.code.hir.decl_refs.len(), || Vec::new());
-        tp.generic_arguments.resize_with(d.code.hir.decl_refs.len(), || None);
-        tp.struct_lits.resize_with(d.code.hir.struct_lits.len(), || None);
+        tp.selected_overloads.resize_with(d.code.hir.decl_refs.len(), Default::default);
+        tp.generic_substitution_list.resize_with(d.code.hir.decl_refs.len(), Default::default);
+        tp.generic_arguments.resize_with(d.code.hir.decl_refs.len(), Default::default);
+        tp.generic_constraints.resize_with(d.code.hir.decl_refs.len(), Default::default);
+        tp.struct_lits.resize_with(d.code.hir.struct_lits.len(), Default::default);
         tp.cast_methods.resize_with(d.code.hir.cast_counter.len(), || CastMethod::Noop);
         
         for i in 0..d.tir.decls.len() {
@@ -246,6 +253,13 @@ impl TypeProvider for RealTypeProvider {
         &mut self.generic_arguments[decl_ref]
     }
 
+    fn generic_constraints(&self, decl_ref: DeclRefId) -> &GenericConstraints {
+        &self.generic_constraints[decl_ref]
+    }
+    fn generic_constraints_mut(&mut self, decl_ref: DeclRefId) -> &mut GenericConstraints {
+        &mut self.generic_constraints[decl_ref]
+    }
+
     fn struct_lit(&self, struct_lit: StructLitId) -> &Option<StructLit> {
         &self.struct_lits[struct_lit]
     }
@@ -304,6 +318,8 @@ pub struct MockTypeProvider<'base> {
     generic_substitution_list: HashMap<DeclRefId, Vec<ExprId>>,
     /// The generic arguments for each decl ref
     generic_arguments: HashMap<DeclRefId, Option<Vec<Type>>>,
+    /// The constraints on all generic arguments that might get passed by each declref
+    generic_constraints: HashMap<DeclRefId, GenericConstraints>,
     /// Each struct literal matched to a structure
     struct_lits: HashMap<StructLitId, Option<StructLit>>,
     /// The cast method for each cast expression
@@ -365,6 +381,7 @@ impl<'base> MockTypeProvider<'base> {
             selected_overloads: HashMap::new(),
             generic_substitution_list: HashMap::new(),
             generic_arguments: HashMap::new(),
+            generic_constraints: HashMap::new(),
             struct_lits: HashMap::new(),
             cast_methods: HashMap::new(),
             constraints: HashMap::new(),
@@ -446,6 +463,7 @@ impl<'base> TypeProvider for MockTypeProvider<'base> {
     forward_mock!(selected_overloads, selected_overload, selected_overload_mut, DeclRefId, Option<DeclId>, deref: deref);
     forward_mock!(generic_substitution_list, generic_substitution_list, generic_substitution_list_mut, DeclRefId, Vec<ExprId>);
     forward_mock!(generic_arguments, generic_arguments, generic_arguments_mut, DeclRefId, Option<Vec<Type>>);
+    forward_mock!(generic_constraints, generic_constraints, generic_constraints_mut, DeclRefId, GenericConstraints);
     forward_mock!(struct_lits, struct_lit, struct_lit_mut, StructLitId, Option<StructLit>);
     forward_mock!(cast_methods, cast_method, cast_method_mut, CastId, CastMethod, deref: deref);
     forward_mock!(types, ty, ty_mut, ExprId, Type);
