@@ -801,7 +801,7 @@ impl tir::Expr<tir::DeclRef> {
             .iter()
             .flat_map(|&ty| {
                 overloads.overloads.iter().find(|&&overload| {
-                    tp.fw_decl_types(overload).trivially_convertible_to(ty)
+                    tp.decl_type(overload).trivially_convertible_to(ty)
                 })
             }).next()
             .cloned();
@@ -937,7 +937,7 @@ impl tir::Expr<tir::Call> {
             let return_ty: QualType = callee_ty.ty.return_ty().unwrap().clone().into();
             // TODO: this is a temporary hack that should be removed.
             let overload_decl = tp.overloads(self.decl_ref_id).overloads.iter().copied()
-                .find(|&decl| tp.fw_decl_types(decl).trivially_convertible_to(callee_ty));
+                .find(|&decl| tp.decl_type(decl).trivially_convertible_to(callee_ty));
             if let Some(overload_decl) = overload_decl {
                 if let Some(fun) = callee_ty.ty.as_function() {
                     for (arg, param) in self.args.iter().copied().zip(&fun.param_tys) {
@@ -1389,7 +1389,7 @@ impl tir::RetGroup {
 
 impl Driver {
     pub fn decl_type(&self, id: DeclId, tp: &impl TypeProvider) -> Type {
-        let explicit_ty = self.code.hir.explicit_tys[id].map(|ty| tp.get_evaluated_type(ty)).unwrap_or(&tp.fw_decl_types(id).ty).clone();
+        let explicit_ty = self.code.hir.explicit_tys[id].map(|ty| tp.get_evaluated_type(ty)).unwrap_or(&tp.decl_type(id).ty).clone();
         if let hir::Decl::Computed { param_tys, .. } | hir::Decl::ComputedPrototype { param_tys, .. } | hir::Decl::Intrinsic { function_like: true, param_tys, .. } = &df!(id.hir) {
             let param_tys: Vec<_> = param_tys.iter().copied()
                 .map(|ty| tp.get_evaluated_type(ty).clone())
