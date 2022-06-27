@@ -19,7 +19,6 @@ enum StopPhase {
     Tir,
     Typecheck,
     Mir,
-    Refine,
     Interp,
 }
 
@@ -37,10 +36,6 @@ struct Opt {
     /// Output MIR in textual format
     #[clap(short='m', long)]
     output_mir: bool,
-
-    /// Run the refinement checker
-    #[clap(short='r', long)]
-    run_refiner: bool,
 
     /// Run the Dusk Visual Debugger (DVD)
     #[clap(long)]
@@ -66,7 +61,7 @@ fn main() {
     let mut src_map = SourceMap::new();
     let loaded_file = src_map.add_file(&opt.input).is_ok();
     let mut driver = DriverRef::new(&DRIVER);
-    *driver.write() = Driver::new(src_map, Arch::X86_64, opt.run_refiner);
+    *driver.write() = Driver::new(src_map, Arch::X86_64);
     driver.write().initialize_hir();
 
     if !loaded_file {
@@ -129,11 +124,6 @@ fn main() {
 
     driver.write().flush_errors();
     if driver.read().check_for_failure() { return; }
-
-    begin_phase!(Refine);
-    if opt.run_refiner {
-        driver.write().refine(&tp);
-    }
 
     begin_phase!(Interp);
     let main_sym = driver.write().interner.get_or_intern_static("main");

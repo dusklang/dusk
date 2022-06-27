@@ -11,7 +11,6 @@ mod tir;
 mod hir;
 mod ty;
 mod typechecker;
-mod refine;
 mod x64;
 mod rw_ref;
 

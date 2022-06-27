@@ -356,7 +356,6 @@ impl Backend {
     async fn analyze_file(&self, path: &Url) {
         self.client.log_message(MessageType::INFO, format!("ANALYZING FILE AT PATH: {}", path)).await;
         let mut src_map = SourceMap::new();
-        let run_refiner = false;
         // TODO: non-file schemes, I guess?
         assert_eq!(path.scheme(), "file");
         // TODO: Add all files to the source map that are currently open
@@ -366,7 +365,7 @@ impl Backend {
             .contents.lines.join("\n")
             .to_string();
         src_map.add_file_with_src(path.to_file_path().unwrap(), src).unwrap();
-        let mut driver = Driver::new(src_map, Arch::X86_64, run_refiner);
+        let mut driver = Driver::new(src_map, Arch::X86_64);
         driver.initialize_hir();
 
         let fatal_parse_error = driver.parse().is_err();
@@ -388,11 +387,6 @@ impl Backend {
             if !driver.has_failed() {
                 driver.build_mir(&tp);
                 self.flush_errors(&mut driver, path).await;
-        
-                if run_refiner {
-                    driver.refine(&tp);
-                    self.flush_errors(&mut driver, path).await;
-                }
             }
         }
 
