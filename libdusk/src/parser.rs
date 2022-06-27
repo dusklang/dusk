@@ -54,7 +54,7 @@ impl Driver {
         ];
         let inout_types = types.clone().into_iter().map(|ty| ty.inout());
         let types: Vec<_> = types.iter().map(|ty| self.add_const_ty(ty.clone())).collect();
-        let inout_types: Vec<_> = inout_types.map(|ty| self.add_const_ty(ty.clone())).collect();
+        let inout_types: Vec<_> = inout_types.map(|ty| self.add_const_ty(ty)).collect();
 
         let numerics = &types[0..12];
         let inout_numerics = &inout_types[0..12];
@@ -73,49 +73,49 @@ impl Driver {
 
         use Intrinsic::*;
         for &intr in &[Mult, Div, Mod, Add, Sub] {
-            for ty in numerics {
-                self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], ty.clone(), true);
+            for &ty in numerics {
+                self.add_intrinsic(intr, smallvec![ty, ty], ty, true);
             }
         }
         for &intr in &[MultAssign, DivAssign, ModAssign, AddAssign, SubAssign] {
-            for (inout_ty, ty) in inout_numerics.iter().zip(numerics) {
-                self.add_intrinsic(intr, smallvec![inout_ty.clone(), ty.clone()], hir::VOID_TYPE, true);
+            for (&inout_ty, &ty) in inout_numerics.iter().zip(numerics) {
+                self.add_intrinsic(intr, smallvec![inout_ty, ty], hir::VOID_TYPE, true);
             }
         }
         for &intr in &[Less, LessOrEq, Greater, GreaterOrEq] {
-            for ty in numerics {
-                self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], boool, true);
+            for &ty in numerics {
+                self.add_intrinsic(intr, smallvec![ty, ty], boool, true);
             }
         }
         for &intr in &[Eq, NotEq] {
-            for ty in &types {
-                self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], boool, true);
+            for &ty in &types {
+                self.add_intrinsic(intr, smallvec![ty, ty], boool, true);
             }
         }
         for &intr in &[BitwiseAnd, BitwiseOr, BitwiseXor, LeftShift, RightShift] {
-            for ty in integers {
-                self.add_intrinsic(intr, smallvec![ty.clone(), ty.clone()], ty.clone(), true);
+            for &ty in integers {
+                self.add_intrinsic(intr, smallvec![ty, ty], ty, true);
             }
         }
         for &intr in &[AndAssign, OrAssign, XorAssign, LeftShiftAssign, RightShiftAssign] {
-            for (inout_ty, ty) in inout_integers.iter().zip(integers) {
-                self.add_intrinsic(intr, smallvec![inout_ty.clone(), ty.clone()], hir::VOID_TYPE, true);
+            for (&inout_ty, &ty) in inout_integers.iter().zip(integers) {
+                self.add_intrinsic(intr, smallvec![inout_ty, ty], hir::VOID_TYPE, true);
             }
         }
         for &intr in &[AndAssign, OrAssign, XorAssign] {
             self.add_intrinsic(intr, smallvec![inout_bool, boool], hir::VOID_TYPE, true);
         }
-        for ty in integers {
-            self.add_intrinsic(BitwiseNot, smallvec![ty.clone()], ty.clone(), true);
+        for &ty in integers {
+            self.add_intrinsic(BitwiseNot, smallvec![ty], ty, true);
         }
         for &intr in &[LogicalAnd, LogicalOr] {
             self.add_intrinsic(intr, smallvec![boool, boool], boool, true);
         }
-        for ty in signed_numerics {
-            self.add_intrinsic(Neg, smallvec![ty.clone()], ty.clone(), true);
+        for &ty in signed_numerics {
+            self.add_intrinsic(Neg, smallvec![ty], ty, true);
         }
-        for ty in numerics {
-            self.add_intrinsic(Pos, smallvec![ty.clone()], ty.clone(), true);
+        for &ty in numerics {
+            self.add_intrinsic(Pos, smallvec![ty], ty, true);
         }
         self.add_intrinsic(LogicalNot, smallvec![boool], boool, true);
 
@@ -186,10 +186,10 @@ impl Driver {
             TokenKind::RightShift => BinOp::RightShift,
             TokenKind::Equal => BinOp::Eq,
             TokenKind::NotEqual => BinOp::NotEq,
-            TokenKind::LT => BinOp::Less,
-            TokenKind::LTE => BinOp::LessOrEq,
+            TokenKind::Lt => BinOp::Less,
+            TokenKind::Lte => BinOp::LessOrEq,
             TokenKind::GT => BinOp::Greater,
-            TokenKind::GTE => BinOp::GreaterOrEq,
+            TokenKind::Gte => BinOp::GreaterOrEq,
             TokenKind::LogicalOr => BinOp::LogicalOr,
             TokenKind::LogicalAnd => BinOp::LogicalAnd,
             TokenKind::Pipe => BinOp::BitwiseOr,
@@ -481,7 +481,7 @@ impl Driver {
             TokenKind::Return => {
                 let ret_range = self.cur(p).range;
                 self.next(p);
-                let ret_expr = self.try_parse_expr(p, true).unwrap_or_else(|_| hir::VOID_EXPR);
+                let ret_expr = self.try_parse_expr(p, true).unwrap_or(hir::VOID_EXPR);
                 let expr_range = self.get_range(ret_expr);
                 Ok(self.ret(ret_expr, source_info::concat(ret_range, expr_range)))
             },
@@ -764,7 +764,7 @@ impl Driver {
 
     fn parse_pattern(&mut self, p: &mut Parser) -> PatternKind {
         let initial_tok = self.cur(p);
-        let initial_range = initial_tok.range.clone();
+        let initial_range = initial_tok.range;
         match initial_tok.kind {
             TokenKind::Dot => {
                 self.next(p);
@@ -797,7 +797,7 @@ impl Driver {
                 Error::new("unexpected token")
                     .adding_primary_range(range, format!("expected {:?} instead", kind)) // TODO: user-facing pretty-printing of token kinds
             );
-            Err(ParseError::UnexpectedToken(cur_kind.clone()))
+            Err(ParseError::UnexpectedToken(cur_kind))
         } else {
             self.next(p);
             Ok(range)
@@ -862,10 +862,10 @@ impl Driver {
 
     fn convert_ambiguous_generic_list_to_params(&mut self, idents: &Vec<Ident>) -> GenericParamList {
         let mut generic_params = GenericParamList::default();
-        generic_params.ids.start = self.hir.generic_params.peek_next();
+        generic_params.ids.start = self.hir.generic_params.peek_next_idx();
         for ident in idents {
             // Claim a GenericParamId for yourself, then set the `end` value to be one past the end
-            let generic_param = self.hir.generic_params.next();
+            let generic_param = self.hir.generic_params.next_idx();
             // Make sure nobody interrupts this loop and creates an unrelated generic param
             debug_assert_eq!(generic_params.ids.end, generic_param);
             generic_params.ids.end = generic_param + 1;
@@ -1253,11 +1253,11 @@ impl Driver {
             let open_square_bracket_range = self.cur(p).range;
             self.next(p);
             if matches!(self.cur(p).kind, TokenKind::Ident(_)) {
-                generic_param_list.ids.start = self.hir.generic_params.peek_next();
+                generic_param_list.ids.start = self.hir.generic_params.peek_next_idx();
                 generic_param_list.ids.end = generic_param_list.ids.start;
                 while let TokenKind::Ident(name) = *self.cur(p).kind {
                     // Claim a GenericParamId for yourself, then set the `end` value to be one past the end
-                    let generic_param = self.hir.generic_params.next();
+                    let generic_param = self.hir.generic_params.next_idx();
                     // Make sure nobody interrupts this loop and creates an unrelated generic param
                     debug_assert_eq!(generic_param_list.ids.end, generic_param);
                     generic_param_list.ids.end = generic_param + 1;
@@ -1342,8 +1342,7 @@ impl Driver {
             },
             _ => {
                 assert_eq!(generic_param_list.names.len(), 0, "generic parameters on a function prototype are not allowed");
-                let decl_id = self.comp_decl_prototype(name, param_tys, param_ranges, ty, proto_range);
-                decl_id
+                self.comp_decl_prototype(name, param_tys, param_ranges, ty, proto_range)
             }
         };
 

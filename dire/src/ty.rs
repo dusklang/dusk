@@ -271,7 +271,7 @@ impl QualType {
             if !self.is_mut {
                 return false;
             } else {
-                return self.ty.trivially_convertible_to(&ty);
+                return self.ty.trivially_convertible_to(ty);
             }
         }
         if !self.is_mut && other.is_mut {

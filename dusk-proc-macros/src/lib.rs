@@ -43,19 +43,15 @@ impl Parser {
     fn parse_expression(&mut self) -> Expression {
         let base = self.iter.next().unwrap();
         let mut expression = Expression::Simple(TokenStream::from(base));
-        loop {
-            let dot = if let Some(tok) = self.iter.peek() {
-                match tok {
-                    TokenTree::Punct(punct) if punct.as_char() == '.' => {
-                        self.iter.next().unwrap()
-                    },
-                    TokenTree::Punct(punct) if punct.as_char() == ',' => {
-                        break;
-                    },
-                    _ => panic!("unexpected token {}", tok),
-                }
-            } else {
-                break;
+        while let Some(tok) = self.iter.peek() {
+            let dot = match tok {
+                TokenTree::Punct(punct) if punct.as_char() == '.' => {
+                    self.iter.next().unwrap()
+                },
+                TokenTree::Punct(punct) if punct.as_char() == ',' => {
+                    break;
+                },
+                _ => panic!("unexpected token {}", tok),
             };
             let tok = self.iter.next().unwrap();
             match tok {

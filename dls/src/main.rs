@@ -191,39 +191,37 @@ impl LanguageServer for Backend {
                             // Finally, I insert all the middle lines, if any.
                             file.contents.lines.splice(begin..begin, addition_lines[1..addition_lines.len() - 1].to_owned());
                         }
+                    } else if addition_lines.len() == 1 {
+                        // Replace end of first replaced line with the single addition line
+                        let first_replaced: Vec<u16> = file.contents.lines[range.start.line as usize].encode_utf16().collect();
+                        let mut line: Vec<u16> = first_replaced[..(range.start.character as usize)].iter().copied().chain(addition_lines[0].encode_utf16()).collect();
+
+                        // Then, append the end of last replaced line
+                        let last_replaced: Vec<u16> = file.contents.lines[range.end.line as usize].encode_utf16().collect();
+                        let end_of_last_line = &last_replaced[(range.end.character as usize)..];
+                        line.extend(end_of_last_line);
+
+                        // Commit the changes to line
+                        file.contents.lines[range.start.line as usize] = String::from_utf16(&line).unwrap();
+
+                        // Remove all lines after the first replaced line and before or
+                        // including the last replaced line (because the important part of it
+                        // was already copied to the first replaced line)
+                        file.contents.lines.drain((range.start.line as usize + 1)..=(range.end.line as usize));
                     } else {
-                        if addition_lines.len() == 1 {
-                            // Replace end of first replaced line with the single addition line
-                            let first_replaced: Vec<u16> = file.contents.lines[range.start.line as usize].encode_utf16().collect();
-                            let mut line: Vec<u16> = first_replaced[..(range.start.character as usize)].iter().copied().chain(addition_lines[0].encode_utf16()).collect();
-    
-                            // Then, append the end of last replaced line
-                            let last_replaced: Vec<u16> = file.contents.lines[range.end.line as usize].encode_utf16().collect();
-                            let end_of_last_line = &last_replaced[(range.end.character as usize)..];
-                            line.extend(end_of_last_line);
-    
-                            // Commit the changes to line
-                            file.contents.lines[range.start.line as usize] = String::from_utf16(&line).unwrap();
-    
-                            // Remove all lines after the first replaced line and before or
-                            // including the last replaced line (because the important part of it
-                            // was already copied to the first replaced line)
-                            file.contents.lines.drain((range.start.line as usize + 1)..=(range.end.line as usize));
-                        } else {
-                            let mut first_replaced_line: Vec<u16> = file.contents.lines[range.start.line as usize].encode_utf16().collect();
-                            // Replace end of first replaced line with first addition line
-                            first_replaced_line.splice((range.start.character as usize).., addition_lines[0].encode_utf16());
-                            file.contents.lines[range.start.line as usize] = String::from_utf16(&first_replaced_line).unwrap();
-                            // Replace beginning of last replaced line with last addition line
-                            let mut last_replaced_line: Vec<u16> = file.contents.lines[range.end.line as usize].encode_utf16().collect();
-                            last_replaced_line.splice(..(range.end.character as usize), addition_lines.last().unwrap().encode_utf16());
-                            file.contents.lines[range.end.line as usize] = String::from_utf16(&last_replaced_line).unwrap();
-    
-                            // Replace middle lines
-                            let begin = range.start.line as usize + 1;
-                            let end = range.end.line as usize;
-                            file.contents.lines.splice(begin..end, addition_lines[1..addition_lines.len() - 1].to_owned());
-                        }
+                        let mut first_replaced_line: Vec<u16> = file.contents.lines[range.start.line as usize].encode_utf16().collect();
+                        // Replace end of first replaced line with first addition line
+                        first_replaced_line.splice((range.start.character as usize).., addition_lines[0].encode_utf16());
+                        file.contents.lines[range.start.line as usize] = String::from_utf16(&first_replaced_line).unwrap();
+                        // Replace beginning of last replaced line with last addition line
+                        let mut last_replaced_line: Vec<u16> = file.contents.lines[range.end.line as usize].encode_utf16().collect();
+                        last_replaced_line.splice(..(range.end.character as usize), addition_lines.last().unwrap().encode_utf16());
+                        file.contents.lines[range.end.line as usize] = String::from_utf16(&last_replaced_line).unwrap();
+
+                        // Replace middle lines
+                        let begin = range.start.line as usize + 1;
+                        let end = range.end.line as usize;
+                        file.contents.lines.splice(begin..end, addition_lines[1..addition_lines.len() - 1].to_owned());
                     }
                 }
             }
@@ -394,7 +392,7 @@ impl Backend {
         // this could lead to race conditions if, say, one request happens in the middle of another.
         let mut data = self.data.lock().await;
         for (url, file) in &mut data.open_files {
-            let errors = std::mem::replace(&mut file.flushed_errors, Vec::new());
+            let errors = std::mem::take(&mut file.flushed_errors);
             // TODO: keep track of and pass the file version these diagnostics are for (the 3rd parameter)
             self.client.publish_diagnostics(url.clone(), errors, None).await;
         }

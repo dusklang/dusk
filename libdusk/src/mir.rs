@@ -928,7 +928,7 @@ impl DriverRef<'_> {
         let mut entry = Block::default();
         let mut instr_namespace = InstrNamespace::default();
         let mut instrs = IndexCounter::new();
-        instrs.next(); // void
+        instrs.next_idx(); // void
         for param in params.start.index()..params.end.index() {
             let param = DeclId::new(param);
             let d = self.read();
@@ -936,7 +936,7 @@ impl DriverRef<'_> {
             drop(d);
             let ty = self.read().decl_type(param, tp);
             let instr = Instr::Parameter(ty.clone());
-            let instr_id = instrs.next();
+            let instr_id = instrs.next_idx();
             let op = self.write().code.ops.push(Op::MirInstr(instr, instr_id, ty));
             let d = self.read();
             let range = df!(d, param.range);
@@ -1490,7 +1490,7 @@ impl Driver {
     }
 
     fn push_instr(&mut self, b: &mut FunctionBuilder, instr: Instr, item: impl Into<ToSourceRange>) -> OpId {
-        let instr_id = b.instrs.next();
+        let instr_id = b.instrs.next_idx();
         let ty = self.generate_type_of(&instr);
         let op = self.code.ops.push(Op::MirInstr(instr, instr_id, ty));
         let source_range = self.get_range(item);
@@ -1503,7 +1503,7 @@ impl Driver {
     }
 
     fn push_instr_with_name(&mut self, b: &mut FunctionBuilder, instr: Instr, item: impl Into<ToSourceRange>, name: impl Into<String>) -> OpId {
-        let instr_id = b.instrs.next();
+        let instr_id = b.instrs.next_idx();
         let ty = self.generate_type_of(&instr);
         let op = self.code.ops.push(Op::MirInstr(instr, instr_id, ty));
         let source_range = self.get_range(item);

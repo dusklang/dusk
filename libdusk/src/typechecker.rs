@@ -167,7 +167,7 @@ impl tir::AssignedDecl {
         let constraints = tp.constraints(self.root_expr);
         let ty = if let &Some(explicit_ty) = &self.explicit_ty {
             let explicit_ty = tp.get_evaluated_type(explicit_ty).clone();
-            if let Some(err) = can_unify_to(&constraints, &explicit_ty.clone().into()).err() {
+            if let Some(err) = can_unify_to(constraints, &explicit_ty.clone().into()).err() {
                 let range = driver.get_range(self.root_expr);
                 let mut error = Error::new(format!("Couldn't unify expression to assigned decl type `{:?}`", explicit_ty))
                     .adding_primary_range(range, "expression here");
@@ -273,7 +273,7 @@ impl tir::Expr<tir::Cast> {
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         let ty = tp.get_evaluated_type(self.ty).clone();
         let constraints = tp.constraints_mut(self.expr);
-        let ty_and_method: Result<(Type, CastMethod), Vec<&QualType>> = if can_unify_to(&constraints, &QualType::from(&ty)).is_ok() {
+        let ty_and_method: Result<(Type, CastMethod), Vec<&QualType>> = if can_unify_to(constraints, &QualType::from(&ty)).is_ok() {
             Ok((ty, CastMethod::Noop))
         } else if let Type::Pointer(dest_pointee_ty) = ty {
             let dest_pointee_ty = dest_pointee_ty.as_ref();
@@ -303,7 +303,7 @@ impl tir::Expr<tir::Cast> {
                 }
             )
                 .map(|(ty, method)| (ty.ty.clone(), method))
-                .map_err(|options| options.iter().map(|(ty, _)| ty.clone()).collect())
+                .map_err(|options| options.iter().map(|(ty, _)| *ty).collect())
         } else if let Type::Float { .. } = ty {
             constraints.max_ranked_type_with_assoc_data(|ty|
                 match ty.ty {
@@ -313,7 +313,7 @@ impl tir::Expr<tir::Cast> {
                 }
             )
                 .map(|(ty, method)| (ty.ty.clone(), method))
-                .map_err(|options| options.iter().map(|(ty, _)| ty.clone()).collect())
+                .map_err(|options| options.iter().map(|(ty, _)| *ty).collect())
         } else {
             Err(Vec::new())
         };
@@ -388,11 +388,11 @@ impl EnumExhaustion {
         } else {
             // Return false early if you find something that proves non-total exhaustion.
             // Otherwise, return true.
-            for i in 0..variants.len() {
+            for (i, variant) in variants.iter().enumerate() {
                 let exhaustion = self.variants.get(&i).unwrap();
                 // No payload == total exhaustion. Otherwise:
                 if let Some(payload) = &exhaustion.payload {
-                    let ty = variants[i].payload_ty.unwrap();
+                    let ty = variant.payload_ty.unwrap();
                     let ty = tp.get_evaluated_type(ty);
                     if !payload.is_total(driver, ty, tp) {
                         return false;
@@ -409,18 +409,18 @@ impl EnumExhaustion {
             _ => panic!("expected enum"),
         };
         let variants = &driver.code.hir.enums[enum_id].variants;
-        for i in 0..variants.len() {
+        for (i, variant) in variants.iter().enumerate() {
             if let Some(exhaustion) = self.variants.get_mut(&i) {
                 if let ExhaustionReason::Explicit { more_than_one_coverage, .. } = &mut exhaustion.reason {
                     *more_than_one_coverage = true;
                 }
                 if let Some(payload) = &mut exhaustion.payload {
-                    let ty = variants[i].payload_ty.unwrap();
+                    let ty = variant.payload_ty.unwrap();
                     let ty = tp.get_evaluated_type(ty);
                     payload.make_total(driver, ty, catch_all_range, tp);
                 }
             } else {
-                let payload = if variants[i].payload_ty.is_some() {
+                let payload = if variant.payload_ty.is_some() {
                     Some(Box::new(Exhaustion::Total))
                 } else {
                     None
@@ -474,10 +474,10 @@ impl tir::Expr<tir::Switch> {
                                     driver.errors.push(err);
 
                                     // Even though the payload was ignored, still add record of attempt to match it. This will suppress unhandled variant errors.
-                                    if !exhaustion.variants.contains_key(&index) {
+                                    exhaustion.variants.entry(index).or_insert_with(|| {
                                         let payload = Box::new(Exhaustion::Total);
-                                        exhaustion.variants.insert(index, VariantExhaustion { reason: ExhaustionReason::Explicit { first_coverage: range, more_than_one_coverage: false }, payload: Some(payload) });
-                                    }
+                                        VariantExhaustion { reason: ExhaustionReason::Explicit { first_coverage: range, more_than_one_coverage: false }, payload: Some(payload) }
+                                    });
                                 } else if let Some(prior_match) = exhaustion.variants.get_mut(&index) {
                                     // This variant has no payload, and has already been matched.
                                     let mut err = Error::new(format!("Variant `{}` already covered in switch expression", variant_name_str))
@@ -739,8 +739,7 @@ impl tir::Expr<tir::DeclRef> {
         // Find type possibilities
         let mut one_of = TypePossibilities::new();
         one_of.reserve(overloads.len());
-        for i in 0..overloads.len() {
-            let overload = overloads[i];
+        for &overload in &overloads {
             let ty = tp.fetch_decl_type(driver, overload, Some(self.decl_ref_id)).ty;
             let decl = &driver.tir.decls[overload];
             let mut is_mut = decl.is_mut;
@@ -748,7 +747,7 @@ impl tir::Expr<tir::DeclRef> {
                 
                 let constraints = tp.constraints(base_expr);
                 // TODO: Robustness! Base_expr could be an overload set with these types, but also include struct types
-                if can_unify_to(&constraints, &Type::Ty.into()).is_err() && can_unify_to(&constraints, &Type::Mod.into()).is_err() {
+                if can_unify_to(constraints, &Type::Ty.into()).is_err() && can_unify_to(constraints, &Type::Mod.into()).is_err() {
                     let base_ty = constraints.solve().unwrap();
                     // Handle member refs with pointers to structs
                     is_mut &= if let Type::Pointer(pointee) = &base_ty.ty {
@@ -810,7 +809,7 @@ impl tir::Expr<tir::DeclRef> {
             // Select an overload. If `pref` is in the list of overloads, choose it. Otherwise choose the first in the list.
             let overload = pref.as_ref().cloned()
                 .filter(|overload| overloads.overloads.contains(overload))
-                .unwrap_or_else(|| overloads.overloads[0].clone());
+                .unwrap_or_else(|| overloads.overloads[0]);
             let decl = &driver.tir.decls[overload];
             // TODO: probably rename this from ret_ty.
             let ret_ty = tp.fetch_decl_type(driver, overload, Some(self.decl_ref_id));
@@ -851,7 +850,7 @@ impl tir::Expr<tir::DeclRef> {
         };
 
         *tp.overloads_mut(self.decl_ref_id) = overloads;
-        *tp.selected_overload_mut(self.decl_ref_id) = overload.map(|overload| overload);
+        *tp.selected_overload_mut(self.decl_ref_id) = overload;
         *tp.generic_arguments_mut(self.decl_ref_id) = generic_arguments;
     }
 }
@@ -875,7 +874,7 @@ impl tir::Expr<tir::Call> {
             let arg_constraints = self.args.iter().map(|&arg| tp.constraints(arg));
             let param_tys = decls[overload].param_tys.iter().map(|&expr| tp.get_evaluated_type(expr));
             for (constraints, ty) in arg_constraints.zip(param_tys) {
-                if can_unify_to_in_generic_context(&constraints, &ty.into(), &decls[overload].generic_params).is_err() {
+                if can_unify_to_in_generic_context(constraints, &ty.into(), &decls[overload].generic_params).is_err() {
                     overloads.nonviable_overloads.push(overload);
                     i += 1;
                     return false;
@@ -1249,7 +1248,7 @@ impl tir::Expr<tir::StructLit> {
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         let ty = tp.constraints(self.id).solve().unwrap();
-        *tp.ty_mut(self.id) = ty.ty.clone();
+        *tp.ty_mut(self.id) = ty.ty;
 
         // Yay borrow checker:
         if let Some(lit) = tp.struct_lit(self.struct_lit_id).clone() {
@@ -1529,7 +1528,7 @@ impl DriverRef<'_> {
                 let ns = match ty {
                     Type::Mod => {
                         self.write().run_pass_2(&unit.items, UnitKind::Mock(num), &mut mock_tp);
-                        let module = self.eval_expr(unit.main_expr, &mut mock_tp);
+                        let module = self.eval_expr(unit.main_expr, &mock_tp);
                         match module {
                             Const::Mod(scope) => ExprNamespace::Mod(scope),
                             _ => panic!("Unexpected const kind, expected module!"),
@@ -1544,7 +1543,7 @@ impl DriverRef<'_> {
                     },
                     Type::Ty => {
                         self.write().run_pass_2(&unit.items, UnitKind::Mock(num), &mut mock_tp);
-                        let ty = self.eval_expr(unit.main_expr, &mut mock_tp);
+                        let ty = self.eval_expr(unit.main_expr, &mock_tp);
 
                         match ty {
                             Const::Ty(Type::Enum(id)) => ExprNamespace::Enum(id),

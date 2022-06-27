@@ -311,7 +311,7 @@ impl Driver {
 
         let mut started_at_mod_scope = false;
         let mut root_namespace = true;
-        let mut namespace = Some(decl_ref.namespace.clone());
+        let mut namespace = Some(decl_ref.namespace);
         'find_overloads: while let Some(ns) = namespace {
             namespace = match ns {
                 Namespace::Imper { scope, end_offset } => {
@@ -326,14 +326,14 @@ impl Driver {
                         }
                     }
 
-                    self.code.hir.imper_ns[scope].parent.clone()
+                    self.code.hir.imper_ns[scope].parent
                 },
                 Namespace::Mod(scope_ns) => {
                     let scope = self.code.hir.mod_ns[scope_ns].scope;
                     self.find_overloads_in_mod(decl_ref, scope, &mut overloads);
 
                     if root_namespace { started_at_mod_scope = true; }
-                    self.code.hir.mod_ns[scope_ns].parent.clone()
+                    self.code.hir.mod_ns[scope_ns].parent
                 },
                 Namespace::MemberRef { base_expr } => {
                     assert!(root_namespace, "member refs currently must be at the root of a namespace hierarchy");
@@ -367,7 +367,7 @@ impl Driver {
                 Namespace::Requirement(ns_id) => {
                     let condition_ns = &self.code.hir.condition_ns[ns_id];
                     self.find_overloads_in_function_parameters(decl_ref, condition_ns.func, &mut overloads);
-                    condition_ns.parent.clone()
+                    condition_ns.parent
                 },
                 Namespace::Guarantee(ns_id) => {
                     let condition_ns = &self.code.hir.condition_ns[ns_id];
@@ -375,7 +375,7 @@ impl Driver {
                     if decl_ref.name == self.hir.known_idents.return_value && overloads.is_empty() {
                         overloads.insert(RETURN_VALUE_DECL);
                     }
-                    condition_ns.parent.clone()
+                    condition_ns.parent
                 },
             };
 
@@ -441,7 +441,7 @@ impl Driver {
     }
 
     fn flush_staged_ret_groups(&mut self, sp: &mut Subprogram) {
-        let staged_ret_groups = std::mem::replace(&mut self.tir.staged_ret_groups, HashMap::new());
+        let staged_ret_groups = std::mem::take(&mut self.tir.staged_ret_groups);
         for (decl, exprs) in staged_ret_groups {
             assert!(matches!(df!(decl.hir), hir::Decl::Computed { .. }));
 

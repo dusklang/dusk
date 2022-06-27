@@ -74,9 +74,9 @@ pub enum TokenKind {
     Mod,
     Equal,
     NotEqual,
-    LTE,
-    LT,
-    GTE,
+    Lte,
+    Lt,
+    Gte,
     GT,
     LogicalOr,
     LogicalAnd,
@@ -98,6 +98,12 @@ pub struct Token<'src> {
     pub range: SourceRange,
 }
 
+impl Default for TokenVec {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TokenVec {
     pub fn new() -> Self {
         Self {
@@ -111,7 +117,7 @@ impl TokenVec {
         self.ranges.push(range);
     }
 
-    pub fn at<'src>(&'src self, i: usize) -> Token<'src> {
+    pub fn at(&self, i: usize) -> Token {
         let i = std::cmp::min(i, self.kinds.len()-1);
         Token {
             kind: &self.kinds[i],
@@ -137,7 +143,7 @@ impl TokenKind {
             Eof | Whitespace | Newline | SingleLineComment | MultiLineComment | Fn | Else | As |
             Mut | Colon | Comma | RightParen | Dot | OpenCurly | CloseCurly | AddAssign |
             SubAssign | MultAssign | DivAssign | ModAssign | BitwiseOrAssign | BitwiseAndAssign |
-            Div | Mod | Equal | NotEqual | LTE | LT | GTE | GT | LogicalOr | LogicalAnd | Assign |
+            Div | Mod | Equal | NotEqual | Lte | Lt | Gte | GT | LogicalOr | LogicalAnd | Assign |
             Pipe | AtSign | OpenSquareBracket | CloseSquareBracket
         )
     }

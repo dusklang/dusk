@@ -186,7 +186,7 @@ impl Graph {
     fn find_component(&mut self, item: ItemId, state: &mut ComponentState) {
         if state.visited[item] { return; }
         self.find_subcomponent(item, state);
-        let new_component = mem::replace(&mut state.cur_component, Component::default());
+        let new_component = mem::take(&mut state.cur_component);
         let component = self.components.push(new_component);
         debug::send(|| DvdMessage::DidAddTirComponent { id: component });
     }
@@ -243,7 +243,7 @@ impl Graph {
 
         self.outstanding_components = HashSet::<CompId>::from_iter(
             (0..self.components.len())
-                .map(|i| CompId::new(i))
+                .map(CompId::new)
         );
     }
 
@@ -577,7 +577,7 @@ impl Driver {
             &mut self.tir.graph.dependers
         ];
         for dep in &mut deps {
-            dep.resize_with(self.code.hir.items.len(), || Vec::new());
+            dep.resize_with(self.code.hir.items.len(), Vec::new);
         }
 
         self.tir.graph.item_to_components.resize_with(self.code.hir.items.len(), || CompId::new(u32::MAX as usize));
@@ -626,7 +626,7 @@ impl Driver {
     }
 
     fn write_item(&self, w: &mut impl Write, item: ItemId) -> IoResult<()> {
-        let range = self.code.hir.source_ranges[item].clone();
+        let range = self.code.hir.source_ranges[item];
         write!(w, "    ")?;
         self.write_node_name(item, w)?;
         if range.start != range.end {
@@ -635,10 +635,10 @@ impl Driver {
                 " [label=\"{}\\l\"];",
                 // TODO: do something more efficient than calling replace multiple times
                 self.src_map.substring_from_range(range)
-                    .replace("\\", "\\\\")
-                    .replace("\"", "\\\"")
-                    .replace("\n", "\\n")
-                    .replace("\r", ""),
+                    .replace('\\', "\\\\")
+                    .replace('"', "\\\"")
+                    .replace('\n', "\\n")
+                    .replace('\r', ""),
             )?;
         } else {
             write!(w, " [label=\"")?;

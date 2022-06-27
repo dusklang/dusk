@@ -232,7 +232,7 @@ impl Driver {
         self.add_expr(Expr::BoolLit { lit }, range)
     }
     pub fn cast(&mut self, expr: ExprId, ty: ExprId, range: SourceRange) -> ExprId {
-        let cast_id = self.code.hir.cast_counter.next();
+        let cast_id = self.code.hir.cast_counter.next_idx();
         self.add_expr(Expr::Cast { expr, ty, cast_id }, range)
     }
     pub fn stored_decl(&mut self, name: Sym, _generic_params: GenericParamList, explicit_ty: Option<ExprId>, is_mut: bool, root_expr: ExprId, range: SourceRange) -> DeclId {
@@ -240,7 +240,7 @@ impl Driver {
         match self.hir.scope_stack.last().unwrap() {
             ScopeState::Imper { .. } => {
                 let decl = self.hir.comp_decl_stack.last_mut().unwrap();
-                let id = decl.stored_decl_counter.next();
+                let id = decl.stored_decl_counter.next_idx();
 
                 let decl_id = self.add_decl(Decl::Stored { id, is_mut, root_expr }, name, explicit_ty, range);
                 self.scope_item(Item::Decl(decl_id));
@@ -322,7 +322,7 @@ impl Driver {
         ef!(expr.range) = range;
     }
     pub fn struct_lit(&mut self, ty: ExprId, fields: Vec<FieldAssignment>, range: SourceRange) -> ExprId {
-        let id = self.code.hir.struct_lits.next();
+        let id = self.code.hir.struct_lits.next_idx();
         self.add_expr(Expr::StructLit { ty, fields, id }, range)
     }
     pub fn error_expr(&mut self, range: SourceRange) -> ExprId {
@@ -349,8 +349,7 @@ impl Driver {
     }
     pub fn create_condition_namespace(&mut self) -> ConditionNsId {
         let parent = self.cur_namespace();
-        let ns = self.code.hir.condition_ns.push(ConditionNs { func: DeclId::from_raw(u32::MAX), parent: Some(parent) });
-        ns
+        self.code.hir.condition_ns.push(ConditionNs { func: DeclId::from_raw(u32::MAX), parent: Some(parent) })
     }
     pub fn enter_condition_namespace(&mut self, ns: ConditionNsId, condition_kind: ConditionKind) -> ConditionNsId {
         // This condition kind is just a placeholder which will be reset by each attribute. It is done this way so I can share a single
@@ -407,7 +406,7 @@ impl Driver {
     }
     pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, generic_params: Range<DeclId>, generic_param_list: GenericParamList, return_ty: ExprId, proto_range: SourceRange) -> DeclId {
         let generic_param_ids = (generic_param_list.ids.start.index()..generic_param_list.ids.end.index())
-            .map(|id| GenericParamId::new(id))
+            .map(GenericParamId::new)
             .collect();
         let generic_ctx = self.push_generic_ctx(|parent| GenericCtx::Decl { parameters: generic_param_ids, parent });
 
@@ -422,7 +421,7 @@ impl Driver {
             .zip(&param_names)
             .zip(&param_ranges)
             .for_each(|(((index, ty), &name), &range)| {
-                self.add_decl(Decl::Parameter { index }, name, Some(ty.clone()), range);
+                self.add_decl(Decl::Parameter { index }, name, Some(*ty), range);
             });
         let last_param = DeclId::new(self.code.hir.decls.len());
         let params = first_param..last_param;
@@ -740,7 +739,7 @@ impl Driver {
                 Item::Expr(expr) => ef!(expr.range),
                 Item::Decl(decl) => df!(decl.range),
             }
-            ToSourceRange::Op(op) => self.code.mir.source_ranges.get(&op).unwrap().clone(),
+            ToSourceRange::Op(op) => *self.code.mir.source_ranges.get(&op).unwrap(),
             ToSourceRange::SourceRange(range) => range,
         }
     }

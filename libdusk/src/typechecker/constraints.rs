@@ -20,8 +20,14 @@ impl<I: IntoIterator<Item=QualType>> From<I> for TypePossibilities where I::Into
         let len = iter.len();
         Self {
             one_of: iter.collect(),
-            generic_context: std::iter::repeat_with(|| GenericContext::new()).take(len).collect(),
+            generic_context: std::iter::repeat_with(GenericContext::new).take(len).collect(),
         }
+    }
+}
+
+impl Default for TypePossibilities {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -169,10 +175,9 @@ impl ConstraintList {
                 one_of.one_of.is_empty() ||
                 one_of.one_of
                     .iter()
-                    .find(|ty|
-                        &ty.ty == &Type::Error
+                    .any(|ty|
+                        ty.ty == Type::Error
                     )
-                    .is_some()
             )
             .unwrap_or(false)
     }
@@ -369,7 +374,7 @@ impl ConstraintList {
                 one_of.retain(|other, _| other == &ty);
                 if !one_of.is_empty() { return; }
             }
-            self.one_of = Some([ty.into()].into());
+            self.one_of = Some([ty].into());
         }
     }
 

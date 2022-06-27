@@ -12,13 +12,13 @@ impl<I: Idx + AddAssign<usize>> IndexCounter<I> {
         IndexCounter { next_id: I::from_usize(0) }
     }
 
-    pub fn next(&mut self) -> I {
+    pub fn next_idx(&mut self) -> I {
         let next = self.next_id;
         self.next_id += 1;
         next
     }
 
-    pub fn peek_next(&self) -> I {
+    pub fn peek_next_idx(&self) -> I {
         self.next_id
     }
 
