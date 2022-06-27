@@ -176,7 +176,7 @@ impl Value {
     fn as_bool(&self) -> bool {
         let bytes = self.as_bytes();
         assert!(bytes.len() == 1);
-        unsafe { mem::transmute(bytes[0]) }
+        bytes[0] != 0
     }
 
     fn as_enum(&self) -> Enum {
@@ -252,7 +252,7 @@ impl Value {
             },
             Const::Float { lit, ref ty } => match driver.size_of(ty) {
                 4 => Value::from_f32(lit as f32),
-                8 => Value::from_f64(lit.try_into().unwrap()),
+                8 => Value::from_f64(lit),
                 _ => panic!("Unrecognized float constant size"),
             },
             Const::Bool(val) => Value::from_bool(val),
@@ -267,12 +267,12 @@ impl Value {
             Const::BasicVariant { enuum, index } => Value::from_variant(driver, enuum, index, Value::Nothing),
             Const::StructLit { ref fields, id } => {
                 let field_tys: Vec<_> = fields.iter().map(|val| val.ty()).collect();
-                let fields: Vec<_> = fields.iter().map(|val| Value::from_const(val, driver)).collect();
+                let fields = fields.iter().map(|val| Value::from_const(val, driver));
                 let strukt = StructType {
                     field_tys,
                     identity: id,
                 };
-                driver.eval_struct_lit(&strukt, fields.into_iter())
+                driver.eval_struct_lit(&strukt, fields)
             },
         }
     }
@@ -345,7 +345,7 @@ impl StackFrame {
                 Type::Function(
                     FunctionType {
                         param_tys: param_tys.iter().map(|ty| self.canonicalize_type(ty)).collect(),
-                        return_ty: Box::new(self.canonicalize_type(&return_ty)),
+                        return_ty: Box::new(self.canonicalize_type(return_ty)),
                     }
                 ),
             &Type::Struct(StructType { ref field_tys, identity }) => Type::Struct(
@@ -735,7 +735,7 @@ impl Driver {
         thunk.mov32_imm(Reg32::Ecx, func_id.index() as i32);
 
         // Call interp_ffi_entry_point
-        thunk.movabs(Reg64::Rax, (interp_ffi_entry_point as isize).try_into().unwrap());
+        thunk.movabs(Reg64::Rax, (interp_ffi_entry_point as usize as isize).try_into().unwrap());
         thunk.call_direct(Reg64::Rax);
 
         // Move return value into *ax
@@ -778,10 +778,10 @@ impl DriverRef<'_> {
         }
         let func_name = CString::new(func.name.clone()).unwrap();
         let func_ptr = unsafe { kernel32::GetProcAddress(module, func_name.as_ptr()) };
-        if func_ptr == std::ptr::null() {
+        if func_ptr.is_null() {
             panic!("unable to load function {:?} from library {:?}", func_name, library.library_path);
         }
-        let func_address: i64 = unsafe { std::mem::transmute(func_ptr) };
+        let func_address: i64 = func_ptr as i64;
         
         let mut thunk = X64Encoder::new();
         thunk.store64(Reg64::Rsp + 16, Reg64::Rdx);
@@ -1003,11 +1003,11 @@ impl DriverRef<'_> {
                             let arg = arguments[0];
                             let ty = d.type_of(arg);
                             let arg = frame.get_val(arg, &*self.read());
-                            match ty {
-                                &Type::Int { width, is_signed } => {
+                            match *ty {
+                                Type::Int { width, is_signed } => {
                                     Value::from_big_int(-arg.as_big_int(is_signed), width, is_signed, self.read().arch)
                                 },
-                                &Type::Float(width) => match width {
+                                Type::Float(width) => match width {
                                     FloatWidth::W32 => Value::from_f32(-arg.as_f32()),
                                     FloatWidth::W64 => Value::from_f64(-arg.as_f64()),
                                 },
@@ -1040,7 +1040,7 @@ impl DriverRef<'_> {
                         },
                         Intrinsic::Panic => {
                             assert!(arguments.len() <= 1);
-                            panic!("{}", self.read().panic_message(&mut stack, arguments.first().copied()));
+                            panic!("{}", self.read().panic_message(&stack, arguments.first().copied()));
                         },
                         Intrinsic::Print => {
                             let frame = stack.last().unwrap();
@@ -1200,7 +1200,7 @@ impl DriverRef<'_> {
                     let frame = stack.last().unwrap();
                     let val = frame.get_val(instr, &*self.read());
                     let src_ty = d.type_of(instr);
-                    let src_size = self.read().size_of(&src_ty);
+                    let src_size = self.read().size_of(src_ty);
 
                     match dest_ty {
                         &Type::Int { width, is_signed } => {
@@ -1255,7 +1255,7 @@ impl DriverRef<'_> {
                     let frame = stack.last().unwrap();
                     let op = self.read().code.blocks[frame.block].ops[frame.pc];
                     let ty = d.type_of(op);
-                    let ty = frame.canonicalize_type(&ty);
+                    let ty = frame.canonicalize_type(ty);
                     let size = self.read().size_of(&ty);
                     let frame = stack.last_mut().unwrap();
                     frame.get_val(location, &*self.read()).load(size)

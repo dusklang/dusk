@@ -1256,8 +1256,7 @@ impl tir::Expr<tir::StructLit> {
             let fields = &driver.code.hir.structs[lit.strukt].fields;
             debug_assert_eq!(lit.fields.len(), fields.len());
 
-            for i in 0..fields.len() {
-                let field = &fields[i];
+            for (i, field) in fields.iter().enumerate() {
                 let field = field.decl;
                 let field_ty = tp.fetch_decl_type(driver, field, None).ty;
 
@@ -1325,7 +1324,7 @@ impl tir::Expr<tir::Do> {
 impl tir::Stmt {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         let constraints = tp.constraints_mut(self.root_expr);
-        if let Some(err) = can_unify_to(&constraints, &Type::Void.into()).err() {
+        if let Some(err) = can_unify_to(constraints, &Type::Void.into()).err() {
             let mut error = Error::new("statements must return void");
             let range = driver.get_range(self.root_expr);
             match err {

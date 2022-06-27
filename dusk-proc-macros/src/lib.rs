@@ -146,9 +146,9 @@ impl Builder {
     }
 }
 
-impl Into<TokenStream> for Builder {
-    fn into(self) -> TokenStream {
-        self.stream
+impl From<Builder> for TokenStream {
+    fn from(b: Builder) -> TokenStream {
+        b.stream
     }
 }
 

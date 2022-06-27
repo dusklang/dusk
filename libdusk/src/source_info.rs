@@ -166,7 +166,7 @@ impl SourceMap {
 
     pub fn substring_from_range(&self, range: SourceRange) -> &str {
         let (file, range) = self.lookup_file(range);
-        &self.files[file].substring_from_range(range)
+        self.files[file].substring_from_range(range)
     }
 
     pub fn print_commentated_source_ranges(&self, ranges: &mut [CommentatedSourceRange]) {
@@ -209,7 +209,7 @@ impl SourceMap {
             let file = &self.files[file];
             let substr = file.substring_from_line(line);
             print!(" | {}", substr);
-            if !substr.ends_with("\n") {
+            if !substr.ends_with('\n') {
                 println!();
             }
         };

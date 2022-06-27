@@ -109,17 +109,15 @@ impl ConstraintValue {
                             (ConstraintValue::Str(l), r) => {
                                 let constant = l_fac * BigInt::from_str(l).unwrap() + offset;
                                 if r_fac == BigInt::from(-1) {
-                                    if &constant == &BigInt::from(0) {
+                                    if constant == BigInt::from(0) {
                                         *self = -r.clone();
                                     } else {
                                         *self = ConstraintValue::from(constant.to_string()) - r.clone();
                                     }
+                                } else if &constant == &BigInt::from(0) {
+                                    *self = r.clone();
                                 } else {
-                                    if &constant == &BigInt::from(0) {
-                                        *self = r.clone();
-                                    } else {
-                                        *self = ConstraintValue::from(constant.to_string()) + r.clone();
-                                    }
+                                    *self = ConstraintValue::from(constant.to_string()) + r.clone();
                                 }
                             },
                             (l, ConstraintValue::Str(r)) => {
@@ -130,12 +128,10 @@ impl ConstraintValue {
                                     } else {
                                         *self = ConstraintValue::from(constant.to_string()) - l.clone();
                                     }
+                                } else if &constant == &BigInt::from(0) {
+                                    *self = l.clone();
                                 } else {
-                                    if &constant == &BigInt::from(0) {
-                                        *self = l.clone();
-                                    } else {
-                                        *self = ConstraintValue::from(constant.to_string()) + l.clone();
-                                    }
+                                    *self = ConstraintValue::from(constant.to_string()) + l.clone();
                                 }
                             },
                             _ => {},
@@ -166,12 +162,10 @@ impl ConstraintValue {
                                     } else {
                                         *self = ConstraintValue::from(constant.to_string()) - r.clone();
                                     }
+                                } else if &constant == &BigInt::from(0) {
+                                    *self = r.clone();
                                 } else {
-                                    if &constant == &BigInt::from(0) {
-                                        *self = r.clone();
-                                    } else {
-                                        *self = ConstraintValue::from(constant.to_string()) + r.clone();
-                                    }
+                                    *self = ConstraintValue::from(constant.to_string()) + r.clone();
                                 }
                             },
                             (l, ConstraintValue::Str(r)) => {
@@ -182,12 +176,10 @@ impl ConstraintValue {
                                     } else {
                                         *self = ConstraintValue::from(constant.to_string()) - l.clone();
                                     }
+                                } else if &constant == &BigInt::from(0) {
+                                    *self = l.clone();
                                 } else {
-                                    if &constant == &BigInt::from(0) {
-                                        *self = l.clone();
-                                    } else {
-                                        *self = ConstraintValue::from(constant.to_string()) + l.clone();
-                                    }
+                                    *self = ConstraintValue::from(constant.to_string()) + l.clone();
                                 }
                             },
                             _ => {},
@@ -644,9 +636,9 @@ impl Driver {
     #[display_adapter]
     fn display_constraint(&self, constraint: &Constraint, f: &mut Formatter) {
         match constraint {
-            Constraint::Gte(l, r) => write!(f, "{}", self.display_bin_expr(">=", &l, &r)),
-            Constraint::Lte(l, r) => write!(f, "{}", self.display_bin_expr("<=", &l, &r)),
-            Constraint::Eq(l, r) => write!(f, "{}", self.display_bin_expr("=", &l, &r)),
+            Constraint::Gte(l, r) => write!(f, "{}", self.display_bin_expr(">=", l, r)),
+            Constraint::Lte(l, r) => write!(f, "{}", self.display_bin_expr("<=", l, r)),
+            Constraint::Eq(l, r) => write!(f, "{}", self.display_bin_expr("=", l, r)),
             &Constraint::Const(val) => write!(f, "{}", val),
         }
     }
@@ -712,8 +704,7 @@ impl Driver {
                 model.retain(|assignment| 
                     condition.get_involved_ops().iter()
                         .map(|&op| format!("{}", self.display_instr_name(op)))
-                        .collect::<Vec<_>>()
-                        .contains(&&assignment.0)
+                        .any(|name| name == assignment.0)
                 );
                 Err(ConstraintCheckError {
                     model,
@@ -889,7 +880,7 @@ impl Driver {
             if self.refine.constraints.get(id).is_some() { return; }
         }
 
-        let func = function_by_ref(&self.code.mir, &func_ref);
+        let func = function_by_ref(&self.code.mir, func_ref);
         let func_name = func.name;
         self.check_no_loops(func);
         assert_eq!(func.blocks.len(), 1, "Function has more than one block, which isn't yet supported");
@@ -959,11 +950,11 @@ impl Driver {
         println!("FUNCTION: {}", self.fn_name(func_name));
         println!("Requirements:");
         for constraint in &constraints.requirements {
-            println!("    {}", self.display_constraint(&constraint));
+            println!("    {}", self.display_constraint(constraint));
         }
         println!("\nGuarantees:");
         for constraint in &constraints.guarantees {
-            println!("    {}", self.display_constraint(&constraint));
+            println!("    {}", self.display_constraint(constraint));
         }
         println!("\n");
 
@@ -1004,8 +995,8 @@ impl Driver {
             self.refine.constraints.insert(
                 id,
                 Constraints {
-                    requirements: requirements.clone(),
-                    guarantees: guarantees.clone(),
+                    requirements,
+                    guarantees,
                     ..Default::default()
                 }
             );

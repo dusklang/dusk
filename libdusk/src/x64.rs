@@ -2,14 +2,14 @@ use std::fmt::Display;
 
 pub trait IntoBytes {
     type Bytes: IntoIterator<Item=u8>;
-    fn into_bytes(&self) -> Self::Bytes;
+    fn into_bytes(self) -> Self::Bytes;
 }
 macro_rules! into_bytes_impl {
     ($($ty:ty),*) => {
         $(
             impl IntoBytes for $ty {
                 type Bytes = [u8; std::mem::size_of::<Self>()];
-                fn into_bytes(&self) -> Self::Bytes { self.to_le_bytes() }
+                fn into_bytes(self) -> Self::Bytes { self.to_le_bytes() }
             }
         )*
     }
@@ -155,7 +155,7 @@ fn build_modrm(mawd: u8, reg: u8, rm: u8) -> u8 {
     debug_assert!(reg < 8);
     debug_assert!(rm < 8);
 
-    (mawd << 6) | (reg << 3) | (rm << 0)
+    (mawd << 6) | (reg << 3) | rm
 }
 
 fn build_sib(scale: u8, index: u8, base: u8) -> u8 {
@@ -163,12 +163,12 @@ fn build_sib(scale: u8, index: u8, base: u8) -> u8 {
     debug_assert!(index < 8);
     debug_assert!(base < 8);
 
-    (scale << 6) | (index << 3) | (base << 0)
+    (scale << 6) | (index << 3) | base
 }
 
 impl IntoBytes for RexBuilder {
     type Bytes = [u8; 1];
-    fn into_bytes(&self) -> Self::Bytes { self.0.into_bytes() }
+    fn into_bytes(self) -> Self::Bytes { self.0.into_bytes() }
 }
 
 #[derive(Default)]

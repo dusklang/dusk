@@ -42,7 +42,7 @@ impl Error {
 
 impl Driver {
     pub fn get_latest_errors(&mut self) -> Vec<Error> {
-        let errors = mem::replace(&mut self.errors, Vec::new());
+        let errors = mem::take(&mut self.errors);
         self.flushed_errors += errors.len() as u32;
         errors
     }

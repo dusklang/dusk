@@ -126,7 +126,7 @@ impl DvdCoordinatorTrait for DvdCoordinator {
     fn send(&mut self, message: &mut dyn FnMut() -> Message) {
         let message = format!("{:?}", message());
         println!("Sending message: {}", message);
-        self.send(&message.as_bytes());
+        self.send(message.as_bytes());
     }
 }
 

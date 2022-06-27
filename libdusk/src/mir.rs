@@ -1,6 +1,7 @@
 use std::collections::{HashSet, HashMap};
 use std::ffi::CString;
 use std::ops::Range;
+use std::cmp::Ordering;
 
 use dire::index_counter::IndexCounter;
 use num_bigint::BigInt;
@@ -140,11 +141,11 @@ impl Context {
             self.indirection,
             match (&self.data, read) {
                 (DataDest::Read, Some(location)) => DataDest::Store { location },
-                (x, _) => x.clone(),
+                (x, _) => *x,
             },
             match(&self.control, kontinue) {
                 (ControlDest::Continue, Some(block)) => ControlDest::Block(block),
-                (x, _) => x.clone(),
+                (x, _) => *x,
             }
         )
     }
@@ -455,15 +456,13 @@ impl DriverRef<'_> {
                     generic_params.push(generic_param);
                 }
 
-                let params = params.clone();
                 let func_ty = self.read().decl_type(id, tp).as_function().unwrap().clone();
                 let name = self.read().code.hir.names[id];
                 let comptime_sym = self.read().hir.known_idents.comptime;
                 let is_comptime = self.read().code.hir.decl_attributes.get(&id)
                     .map(|attrs|
                         attrs.iter()
-                            .find(|attr| attr.attr == comptime_sym)
-                            .is_some()
+                            .any(|attr| attr.attr == comptime_sym)
                     ).unwrap_or(false);
                 let func = self.build_function(
                     Some(name),
@@ -613,8 +612,8 @@ impl Driver {
             Const::Bool(val) => write!(f, "const_{}", val)?,
             Const::Float { lit, .. } => {
                 let name = lit.to_string()
-                    .replace("-", "negative_")
-                    .replace(".", "_dot_");
+                    .replace('-', "negative_")
+                    .replace('.', "_dot_");
                 write!(f, "const_{}", name)?
             },
             Const::Int { ref lit, .. } => write!(f, "const_int_{}", lit)?,
@@ -911,10 +910,7 @@ impl Driver {
         let block = &self.code.blocks[bb];
         let last_instr = self.code.ops[block.ops.last().copied().unwrap()].as_mir_instr().unwrap();
         assert!(
-            match last_instr {
-                Instr::Br(_) | Instr::CondBr { .. } | Instr::SwitchBr { .. } | Instr::Ret { .. } | Instr::Intrinsic { intr: Intrinsic::Panic, .. } => true,
-                _ => false,
-            },
+            matches!(last_instr, Instr::Br(_) | Instr::CondBr { .. } | Instr::SwitchBr { .. } | Instr::Ret { .. } | Instr::Intrinsic { intr: Intrinsic::Panic, .. }),
             "expected terminal instruction before moving on to next block, found {:?}",
             last_instr,
         );
@@ -982,7 +978,7 @@ impl DriverRef<'_> {
                         }
                         let result = self.copy_instruction_if_needed(&mut b, &mut copier, op);
                         self.write().push_instr(&mut b, Instr::Ret(result), result);
-                        self.write().end_current_bb(&mut b);
+                        self.write().end_current_bb(&b);
                     },
                     _ => unimplemented!(),
                 }
@@ -1183,9 +1179,7 @@ impl Driver {
                     delete_list.insert(block_id);
                     did_something = true;
                     if i == 0 {
-                        let parameters: Vec<_> = block.ops[..num_parameters].iter()
-                            .copied()
-                            .collect();
+                        let parameters = block.ops[..num_parameters].to_vec();
                         new_entry_block = Some((other, parameters));
                     }
                     if new_entry_block.as_ref().map(|(b, _)| b) == Some(&block_id) {
@@ -1252,13 +1246,16 @@ impl Driver {
         for &block_id in &func.blocks {
             let block = &self.code.blocks[block_id];
             if let Some(&terminal) = block.ops.last() {
-                match self.code.ops[terminal].as_mir_instr().unwrap() {
-                    &Instr::CondBr { condition, true_bb, false_bb } => {
+                match *self.code.ops[terminal].as_mir_instr().unwrap() {
+                    Instr::CondBr { condition, true_bb, false_bb } => {
                         let condition = self.code.ops[condition].as_mir_instr().unwrap();
                         if let &Instr::Const(Const::Bool(condition)) = condition {
                             let destination = [false_bb, true_bb][condition as usize];
                             transformer.q_replace_instr(terminal, Instr::Br(destination));
                         }
+                    },
+                    Instr::SwitchBr { .. } => {
+                        // TODO
                     },
                     _ => {},
                 }
@@ -1610,7 +1607,7 @@ impl DriverRef<'_> {
             },
             Decl::Const(ref konst) => {
                 let konst = konst.clone();
-                DeclRef::Value(self.write().push_instr_with_name(b, Instr::Const(konst.clone()), expr, name).direct())
+                DeclRef::Value(self.write().push_instr_with_name(b, Instr::Const(konst), expr, name).direct())
             },
             Decl::Static(statik) => {
                 DeclRef::Value(self.write().push_instr_with_name(b, Instr::AddressOfStatic(statik), expr, format!("static_{}", name)).indirect())
@@ -1656,7 +1653,7 @@ impl DriverRef<'_> {
         );
         self.write().start_bb(b, true_bb);
         let scope_ctx = ctx.redirect(result_location, Some(post_bb));
-        self.build_scope(b, then_scope, scope_ctx.clone(), tp);
+        self.build_scope(b, then_scope, scope_ctx, tp);
     }
 }
 
@@ -1666,7 +1663,7 @@ impl DriverRef<'_> {
         let result_location = match (&ctx.data, else_scope) {
             (DataDest::Read, Some(_)) => Some(
                 // TODO: this will be the wrong type if indirection != 0
-                self.write().push_instr(b, Instr::Alloca(ty.clone()), expr)
+                self.write().push_instr(b, Instr::Alloca(ty), expr)
             ),
             _ => None,
         };
@@ -1733,7 +1730,7 @@ impl DriverRef<'_> {
             },
             Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::CharLit { .. } | Expr::StrLit { .. } | Expr::BoolLit { .. } | Expr::ConstTy(_) | Expr::Mod { .. } | Expr::Import { .. } => {
                 drop(d);
-                let konst = self.write().expr_to_const(expr, ty.clone());
+                let konst = self.write().expr_to_const(expr, ty);
                 let name = format!("{}", self.read().fmt_const_for_instr_name(&konst));
                 self.write().push_instr_with_name(b, Instr::Const(konst), expr, name).direct()
             },
@@ -1789,7 +1786,7 @@ impl DriverRef<'_> {
                             let (lhs, rhs) = (arguments[0], arguments[1]);
                             let left_true_bb = self.write().create_bb(b);
                             let location = if let DataDest::Read = ctx.data {
-                                Some(self.write().push_instr(b, Instr::Alloca(ty.clone()), expr))
+                                Some(self.write().push_instr(b, Instr::Alloca(ty), expr))
                             } else {
                                 None
                             };
@@ -1821,7 +1818,7 @@ impl DriverRef<'_> {
                                 self.write().start_bb(b, left_true_bb);
                                 // No further branching required, because (true && foo) <=> foo
                                 let branch_ctx = ctx.redirect(location, Some(after_bb));
-                                self.build_expr(b, rhs, branch_ctx.clone(), tp);
+                                self.build_expr(b, rhs, branch_ctx, tp);
 
                                 self.write().start_bb(b, left_false_bb);
                                 let false_const = Const::Bool(false);
@@ -1860,7 +1857,7 @@ impl DriverRef<'_> {
                                 let left_true_bb = self.write().create_bb(b);
                                 let after_bb = self.write().create_bb(b);
                                 let location = if let DataDest::Read = ctx.data {
-                                    Some(self.write().push_instr(b, Instr::Alloca(ty.clone()), expr))
+                                    Some(self.write().push_instr(b, Instr::Alloca(ty), expr))
                                 } else {
                                     None
                                 };
@@ -1876,7 +1873,7 @@ impl DriverRef<'_> {
                                 let name = format!("{}", self.read().fmt_const_for_instr_name(&true_const));
                                 let true_val = self.write().push_instr_with_name(b, Instr::Const(true_const), expr, name).direct();
                                 let branch_ctx = ctx.redirect(location, Some(after_bb));
-                                self.handle_context(b, true_val, branch_ctx.clone(), tp);
+                                self.handle_context(b, true_val, branch_ctx, tp);
 
                                 self.write().start_bb(b, left_false_bb);
                                 self.build_expr(b, rhs, branch_ctx, tp);
@@ -1954,29 +1951,29 @@ impl DriverRef<'_> {
                     CastMethod::Int => {
                         let (src_width, _src_is_signed, dest_width, dest_is_signed) = match (tp.ty(operand), &dest_ty) {
                             (&Type::Int { width: ref src_width, is_signed: src_is_signed }, &Type::Int { width: ref dest_width, is_signed: dest_is_signed })
-                                => (src_width.clone(), src_is_signed, dest_width.clone(), dest_is_signed),
+                                => (src_width, src_is_signed, dest_width, dest_is_signed),
                             (a, b) => panic!("Internal compiler error: found invalid cast types while generating MIR ({:?}, {:?})", a, b)
                         };
                         let (src_bit_width, dest_bit_width) = (src_width.bit_width(self.read().arch), dest_width.bit_width(self.read().arch));
                         let value = self.build_expr(b, operand, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
                         let value = self.write().handle_indirection(b, value);
 
-                        if src_bit_width == dest_bit_width {
-                            // TODO: Bounds checking
-                            self.write().push_instr(b, Instr::Reinterpret(value, dest_ty), expr)
-                        } else if src_bit_width < dest_bit_width {
-                            if dest_is_signed {
+                        match src_bit_width.cmp(&dest_bit_width) {
+                            Ordering::Less => if dest_is_signed {
                                 // TODO: Bounds checking
                                 self.write().push_instr(b, Instr::SignExtend(value, dest_ty), expr)
                             } else {
                                 // TODO: Bounds checking
                                 self.write().push_instr(b, Instr::ZeroExtend(value, dest_ty), expr)
-                            }
-                        } else if src_bit_width > dest_bit_width {
-                            // TODO: Bounds checking
-                            self.write().push_instr(b, Instr::Truncate(value, dest_ty), expr)
-                        } else {
-                            unreachable!()
+                            },
+                            Ordering::Equal => {
+                                // TODO: Bounds checking
+                                self.write().push_instr(b, Instr::Reinterpret(value, dest_ty), expr)
+                            },
+                            Ordering::Greater => {
+                                // TODO: Bounds checking
+                                self.write().push_instr(b, Instr::Truncate(value, dest_ty), expr)
+                            },
                         }.direct()
                     },
                     CastMethod::Float => {
@@ -2120,7 +2117,7 @@ impl DriverRef<'_> {
                 let result_location = match &ctx.data {
                     DataDest::Read => Some(
                         // TODO: this will be the wrong type if indirection != 0
-                        self.write().push_instr(b, Instr::Alloca(ty.clone()), expr)
+                        self.write().push_instr(b, Instr::Alloca(ty), expr)
                     ),
                     _ => None,
                 };

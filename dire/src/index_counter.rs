@@ -23,6 +23,7 @@ impl<I: Idx + AddAssign<usize>> IndexCounter<I> {
     }
 
     pub fn len(&self) -> usize { self.next_id.index() }
+    pub fn is_empty(&self) -> bool { self.len() == 0 }
 }
 
 impl<I: Idx + AddAssign<usize>> Default for IndexCounter<I> {
