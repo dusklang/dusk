@@ -141,6 +141,7 @@ pub struct ExternFunctionRef {
     pub index: usize,
 }
 
+#[derive(Debug)]
 pub enum GenericCtx {
     Blank,
     Decl {
