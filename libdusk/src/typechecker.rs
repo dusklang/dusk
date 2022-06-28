@@ -9,7 +9,7 @@ pub mod type_provider;
 use constraints::*;
 use type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 
-use dire::hir::{self, ExprId, DeclId, StructId, PatternKind, GenericParamId, Ident, VOID_EXPR, GenericCtx};
+use dire::hir::{self, ExprId, DeclId, StructId, PatternKind, GenericParamId, Ident, VOID_EXPR, GenericCtx, DeclRefId};
 use dire::mir::Const;
 use dire::ty::{Type, InternalType, FunctionType, QualType, IntWidth};
 use dire::source_info::SourceRange;
@@ -840,9 +840,20 @@ impl tir::Expr<tir::DeclRef> {
 }
 
 impl tir::Expr<tir::Call> {
+    fn decl_ref_id(&self, driver: &Driver) -> DeclRefId {
+        let generic_ctx_id = ef!(driver, self.callee.generic_ctx_id);
+        let generic_ctx = &driver.code.hir.generic_ctxs[generic_ctx_id];
+        if let GenericCtx::DeclRef { id, .. } = *generic_ctx {
+            id
+        } else {
+            panic!("unexpected generic context '{:?}' for callee", generic_ctx);
+        }
+    }
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+        let decl_ref_id = self.decl_ref_id(driver);
+
         // TODO: maybe std::mem::take() here instead of cloning? As the overloads in the type provider will just be overwritten later anyway.
-        let mut overloads = tp.overloads(self.decl_ref_id).clone();
+        let mut overloads = tp.overloads(decl_ref_id).clone();
         // Rule out overloads that don't match the arguments
         let mut i = 0usize;
         let mut one_of: SmallVec<[QualType; 1]> = SmallVec::new();
@@ -890,13 +901,6 @@ impl tir::Expr<tir::Call> {
         }
 
         // For each overload, infer generic constraints from the arguments
-        let generic_ctx_id = ef!(driver, self.callee.generic_ctx_id);
-        let generic_ctx = &driver.code.hir.generic_ctxs[generic_ctx_id];
-        let decl_ref_id = if let GenericCtx::DeclRef { id, .. } = *generic_ctx {
-            id
-        } else {
-            panic!("unexpected generic context '{:?}' for callee", generic_ctx);
-        };
         for &overload in &overloads.overloads {
             let decl = &decls[overload];
             for (&param_ty, &arg) in decl.param_tys.iter().zip(&self.args) {
@@ -912,10 +916,12 @@ impl tir::Expr<tir::Call> {
         }
 
         *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(one_of), pref);
-        *tp.overloads_mut(self.decl_ref_id) = overloads;
+        *tp.overloads_mut(decl_ref_id) = overloads;
     }
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+        let decl_ref_id = self.decl_ref_id(driver);
+
         let ty = tp.constraints(self.id).solve().unwrap_or(Type::Error.into());
         *tp.ty_mut(self.id) = ty.ty.clone();
 
@@ -923,7 +929,7 @@ impl tir::Expr<tir::Call> {
         callee_one_of.retain(|callee_ty| {
             let return_ty: QualType = callee_ty.ty.return_ty().unwrap().clone().into();
             // TODO: this is a temporary hack that should be removed.
-            let overload_decl = tp.overloads(self.decl_ref_id).overloads.iter().copied()
+            let overload_decl = tp.overloads(decl_ref_id).overloads.iter().copied()
                 .find(|&decl| tp.decl_type(decl).trivially_convertible_to(callee_ty));
             if let Some(overload_decl) = overload_decl {
                 if let Some(fun) = callee_ty.ty.as_function() {
@@ -954,7 +960,7 @@ impl tir::Expr<tir::Call> {
                 tp.constraints_mut(arg).set_to(param_ty);
             }
         }
-        tp.generic_substitution_list_mut(self.decl_ref_id).extend(&self.args);
+        tp.generic_substitution_list_mut(decl_ref_id).extend(&self.args);
 
         tp.constraints_mut(self.callee).set_to(callee_ty);
         if let Some(pref) = pref {

@@ -1759,7 +1759,7 @@ impl DriverRef<'_> {
                     other => todo!("referring to {:?} not yet supported", other),
                 }
             },
-            Expr::Call { callee, ref arguments, .. } => {
+            Expr::Call { callee, ref arguments } => {
                 let arguments = arguments.clone();
                 drop(d);
                 let decl_ref = self.get_callee_declref(b, tp, callee);

@@ -512,7 +512,7 @@ impl Driver {
             }
         );
         if has_parens {
-            self.add_expr(Expr::Call { callee: expr, arguments, decl_ref_id: id }, range)
+            self.add_expr(Expr::Call { callee: expr, arguments }, range)
         } else {
             expr
         }

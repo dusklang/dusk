@@ -57,7 +57,7 @@ pub struct Assignment { pub lhs: ExprId, pub rhs: ExprId }
 #[derive(Debug)]
 pub struct DeclRef { pub decl_ref_id: DeclRefId }
 #[derive(Debug)]
-pub struct Call { pub callee: ExprId, pub args: SmallVec<[ExprId; 2]>, pub decl_ref_id: DeclRefId }
+pub struct Call { pub callee: ExprId, pub args: SmallVec<[ExprId; 2]> }
 #[derive(Debug)]
 pub struct FunctionTy { pub param_tys: Vec<ExprId>, pub ret_ty: ExprId }
 #[derive(Debug)]
@@ -502,7 +502,7 @@ impl Driver {
                 insert_expr!(explicit_rets, ExplicitRet)
             }
             &hir::Expr::DeclRef { id: decl_ref_id } => insert_expr!(decl_refs, DeclRef { decl_ref_id }),
-            &hir::Expr::Call { callee, ref arguments, decl_ref_id } => insert_expr!(calls, Call { callee, args: arguments.clone(), decl_ref_id }),
+            &hir::Expr::Call { callee, ref arguments } => insert_expr!(calls, Call { callee, args: arguments.clone() }),
             &hir::Expr::FunctionTy { ref param_tys, ret_ty } => insert_expr!(function_tys, FunctionTy { param_tys: param_tys.clone(), ret_ty }),
             &hir::Expr::Set { lhs, rhs } => insert_expr!(assignments, Assignment { lhs, rhs }),
             &hir::Expr::Do { scope } => insert_expr!(dos, Do { terminal_expr: self.code.hir.imper_scopes[scope].terminal_expr }),
@@ -660,7 +660,7 @@ impl Driver {
                         self.tir.graph.add_type1_dep(id, ef!(base_expr.item));
                     }
                 },
-                hir::Expr::Call { callee, ref arguments, .. } => {
+                hir::Expr::Call { callee, ref arguments } => {
                     self.tir.graph.add_type1_dep(id, ef!(callee.item));
                     for &arg in arguments {
                         self.tir.graph.add_type1_dep(id, ef!(arg.item));
