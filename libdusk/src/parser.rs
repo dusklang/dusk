@@ -353,6 +353,7 @@ impl Driver {
                 }
             }
         }
+        let generic_ctx = self.begin_decl_ref_generic_ctx();
         let mut args = SmallVec::new();
         let mut has_parens = false;
         if let TokenKind::LeftParen = self.cur(p).kind {
@@ -385,6 +386,7 @@ impl Driver {
                 args,
                 has_parens,
                 name_range,
+                generic_ctx,
             )
         )
     }
@@ -854,7 +856,8 @@ impl Driver {
     fn convert_ambiguous_generic_list_to_arguments(&mut self, idents: &Vec<Ident>) -> Vec<ExprId> {
         let mut arguments = Vec::new();
         for ident in idents {
-            let ty = self.decl_ref(None, ident.symbol, SmallVec::new(), false, ident.range);
+            let generic_ctx = self.begin_decl_ref_generic_ctx();
+            let ty = self.decl_ref(None, ident.symbol, SmallVec::new(), false, ident.range, generic_ctx);
             arguments.push(ty);
         }
         arguments
@@ -1281,6 +1284,7 @@ impl Driver {
         }
 
         let generic_params = self.create_decls_for_generic_param_list(&generic_param_list);
+        let generic_ctx = self.begin_computed_decl_generic_ctx(generic_param_list.clone());
 
         // Parse (param_name: param_ty, param2_name: param2_ty, ...)
         let mut param_names = SmallVec::new();
@@ -1335,7 +1339,7 @@ impl Driver {
 
         let decl_id = match self.cur(p).kind {
             TokenKind::OpenCurly => {
-                let decl_id = self.begin_computed_decl(name, param_names, param_tys, param_ranges, generic_params, generic_param_list, ty, proto_range);
+                let decl_id = self.begin_computed_decl(name, param_names, param_tys, param_ranges, generic_params, generic_ctx, ty, proto_range);
                 self.parse_scope(p, &[])?;
                 self.end_computed_decl();
                 decl_id

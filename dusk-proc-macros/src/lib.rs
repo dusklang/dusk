@@ -140,6 +140,10 @@ impl Builder {
             .field("item_generic_ctxs")
             .brackets(item_id)
     }
+
+    fn generic_ctx_id_from_expr(self, driver: impl Into<TokenStream> + Clone, expr_id: impl Into<TokenStream>) -> Self {
+        self.generic_ctx_id(driver.clone(), Builder::new().expr_to_item(driver, expr_id))
+    }
 }
 
 impl From<Builder> for TokenStream {
@@ -171,33 +175,35 @@ pub fn ef(input: TokenStream) -> TokenStream {
                             driver.clone(),
                             Builder::new().expr_to_item(driver, base)
                         )
-                        .stream
                 },
+                "generic_ctx" => {
+                    Builder::new()
+                        .hir_code(driver.clone())
+                        .field("generic_ctxs")
+                        .brackets(Builder::new().generic_ctx_id_from_expr(driver, base))
+                }
                 "generic_ctx_id" => {
                     Builder::new()
-                        .generic_ctx_id(
-                            driver.clone(),
-                            Builder::new().expr_to_item(driver, base)
+                        .generic_ctx_id_from_expr(
+                            driver,
+                            base,
                         )
-                        .stream
                 },
                 "hir" => {
                     Builder::new()
                         .hir_code(driver)
                         .field("exprs")
                         .brackets(base)
-                        .stream
                 },
                 "item" => {
                     Builder::new()
                         .expr_to_item(driver, base)
-                        .stream
                 }
                 name => panic!("Unrecognized expression field name {}", name),
             }
         },
         Expression::Simple(expr_id) => panic!("Unexpected bare identifier '{}'. Must have field", expr_id),
-    }
+    }.stream
 }
 
 #[proc_macro]

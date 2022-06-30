@@ -377,6 +377,9 @@ impl Driver {
                     }
                     condition_ns.parent
                 },
+                Namespace::Invalid => {
+                    panic!("internal compiler error: invalid namespace");
+                }
             };
 
             root_namespace = false;

@@ -89,6 +89,8 @@ fn main() {
         return;
     }
 
+    driver.write().finalize_hir();
+
     begin_phase!(Tir);
     debug::send(|| DvdMessage::WillInitializeTir);
     driver.write().initialize_tir();

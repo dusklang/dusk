@@ -1,10 +1,14 @@
+use dusk_proc_macros::ef;
 use smallvec::{SmallVec, smallvec};
 use std::collections::HashMap;
 
 use dire::ty::{Type, InternalType, FunctionType, QualType, IntWidth};
-use dire::hir::GenericParamId;
+use dire::hir::{GenericParamId, ExprId, GenericCtx};
 
+use crate::driver::Driver;
 use crate::ty::BuiltinTraits;
+
+use super::type_provider::TypeProvider;
 
 pub type GenericContext = HashMap<GenericParamId, ConstraintList>;
 
@@ -244,6 +248,80 @@ fn contains_any_of_generic_params(ty: &Type, generic_params: &[GenericParamId]) 
     }
 }
 
+pub enum UnificationType<'a> {
+    QualType(&'a QualType),
+    UnevaluatedType(ExprId),
+}
+
+impl<'a> From<&'a QualType> for UnificationType<'a> {
+    fn from(ty: &'a QualType) -> Self {
+        UnificationType::QualType(ty)
+    }
+}
+
+impl From<ExprId> for UnificationType<'static> {
+    fn from(ty: ExprId) -> Self {
+        UnificationType::UnevaluatedType(ty)
+    }
+}
+
+impl Driver {
+    // TODO: delete the other variants of this function
+    pub fn can_unify_to<'a>(&'a self, tp: &'a impl TypeProvider, expr: ExprId, ty: impl Into<UnificationType<'a>>) -> Result<(), UnificationError<'a>> {
+        let constraints = tp.constraints(expr);
+        // Never is the "bottom type", so it unifies to anything.
+        if constraints.one_of_exists(|ty| ty.ty == Type::Never) { return Ok(()); }
+
+        // If this value is already an error, just say it unifies to anything
+        if constraints.is_error() { return Ok(()); }
+
+        // TODO: more robust logic that looks at the current constraints of generic types
+        let ty = ty.into();
+        let (ty, generic_params) = match ty {
+            UnificationType::UnevaluatedType(ty) => {
+                let mut generic_ctx_id = ef!(ty.generic_ctx_id);
+                let generic_params: &[GenericParamId] = loop {
+                    match self.code.hir.generic_ctxs[generic_ctx_id] {
+                        GenericCtx::Blank => break &[],
+                        GenericCtx::Decl { ref parameters, .. } => {
+                            break parameters.as_slice();
+                        },
+                        GenericCtx::DeclRef { parent, .. } => {
+                            generic_ctx_id = parent;
+                        }
+                    }
+                };
+                let ty: QualType = tp.get_evaluated_type(ty).clone().into();
+                (ty, generic_params)
+            },
+            UnificationType::QualType(ty) => {
+                let generic_params: &[GenericParamId] = &[];
+                (ty.clone(), generic_params)
+            },
+        };
+        // TODO: this is dumb because I just automatically allow unification to any type that contains any of the
+        // contextual generic parameters. I should actually look at the constraints of the generic parameters to
+        // determine whether unification is possible.
+        if contains_any_of_generic_params(&ty.ty, generic_params) {
+            return Ok(());
+        }
+
+        use UnificationError::*;
+        if let Some(not_implemented) = implements_traits(&ty.ty, constraints.trait_impls).err() {
+            return Err(Trait(not_implemented));
+        }
+        if let Some(one_of) = &constraints.one_of {
+            for oty in one_of {
+                if oty.trivially_convertible_to(&ty) {
+                    return Ok(());
+                }
+            }
+            return Err(InvalidChoice(&one_of));
+        }
+
+        Ok(())
+    }
+}
 pub fn can_unify_to_in_generic_context<'a>(constraints: &'a ConstraintList, ty: &QualType, generic_params: &[GenericParamId]) -> Result<(), UnificationError<'a>> {
     // Never is the "bottom type", so it unifies to anything.
     if constraints.one_of_exists(|ty| ty.ty == Type::Never) { return Ok(()); }

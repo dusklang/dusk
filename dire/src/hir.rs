@@ -104,6 +104,7 @@ pub enum Namespace {
     Requirement(ConditionNsId),
     /// Includes the parameters of the function, and a magic "return_value" value
     Guarantee(ConditionNsId),
+    Invalid,
 }
 
 #[derive(Debug)]
