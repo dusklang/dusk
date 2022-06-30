@@ -475,6 +475,9 @@ pub const TYPE_TYPE: ExprId = ExprId { _raw: 3 };
 pub const ERROR_TYPE: ExprId = ExprId { _raw: 4 };
 pub const RETURN_VALUE_DECL: DeclId = DeclId { _raw: 0 };
 pub const BLANK_GENERIC_CTX: GenericCtxId = GenericCtxId::from_usize_unchecked(0);
+impl Default for GenericCtxId {
+    fn default() -> Self { BLANK_GENERIC_CTX }
+}
 
 pub struct Attribute {
     pub attr: Sym,

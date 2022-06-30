@@ -3,7 +3,7 @@ use smallvec::{SmallVec, smallvec};
 use std::collections::HashMap;
 
 use dire::ty::{Type, InternalType, FunctionType, QualType, IntWidth};
-use dire::hir::{GenericParamId, ExprId, GenericCtx, GenericCtxId};
+use dire::hir::{GenericParamId, ExprId, GenericCtx, GenericCtxId, BLANK_GENERIC_CTX};
 
 use crate::driver::Driver;
 use crate::ty::BuiltinTraits;
@@ -17,7 +17,7 @@ pub struct ConstraintList {
     trait_impls: BuiltinTraits,
     one_of: Option<SmallVec<[QualType; 1]>>,
     preferred_type: Option<QualType>,
-    generic_ctx: Option<GenericCtxId>,
+    generic_ctx: GenericCtxId,
     is_error: bool,
 }
 
@@ -36,12 +36,12 @@ pub enum SolveError<'a> {
 }
 
 impl ConstraintList {
-    pub fn new(trait_impls: BuiltinTraits, one_of: Option<SmallVec<[QualType; 1]>>, preferred_type: Option<QualType>) -> Self {
-        Self { trait_impls, one_of: one_of.map(|one_of| one_of.into()), preferred_type, generic_ctx: None, is_error: false }
+    pub fn new(trait_impls: BuiltinTraits, one_of: Option<SmallVec<[QualType; 1]>>, preferred_type: Option<QualType>, generic_ctx: GenericCtxId) -> Self {
+        Self { trait_impls, one_of: one_of.map(|one_of| one_of.into()), preferred_type, generic_ctx: generic_ctx, is_error: false }
     }
 
-    pub fn new_with_generic_ctx(trait_impls: BuiltinTraits, one_of: Option<SmallVec<[QualType; 1]>>, preferred_type: Option<QualType>, generic_ctx: Option<GenericCtxId>) -> Self {
-        Self { trait_impls, one_of: one_of.map(|one_of| one_of.into()), preferred_type, generic_ctx, is_error: false }
+    pub fn set_generic_ctx(&mut self, generic_ctx: GenericCtxId) {
+        self.generic_ctx = generic_ctx;
     }
 
     pub fn one_of(&self) -> &[QualType] {
@@ -105,6 +105,7 @@ impl ConstraintList {
             BuiltinTraits::empty(),
             self.one_of.as_ref().map(|one_of| -> SmallVec<[QualType; 1]> { one_of.iter().filter_map(type_map).collect() }),
             self.preferred_type().and_then(type_map),
+            self.generic_ctx,
         )
     }
 
@@ -195,7 +196,7 @@ fn implements_traits(ty: &Type, traits: BuiltinTraits) -> Result<(), BuiltinTrai
 }
 
 fn implements_traits_in_generic_context(ty: &Type, traits: BuiltinTraits, generic_params: &[GenericParamId]) -> Result<SmallVec<[ConstraintList; 1]>, BuiltinTraits> {
-    let mut constraints: SmallVec<_> = generic_params.iter().map(|_| ConstraintList::new(BuiltinTraits::empty(), None, None)).collect();
+    let mut constraints: SmallVec<_> = generic_params.iter().map(|_| ConstraintList::new(BuiltinTraits::empty(), None, None, BLANK_GENERIC_CTX)).collect();
 
     let mut not_implemented = BuiltinTraits::empty();
     fn expressible_by_str_lit(ty: &Type) -> bool {
@@ -425,7 +426,8 @@ impl ConstraintList {
             pref
         };
 
-        Self::new(trait_impls, one_of, preferred_type)
+        assert_eq!(self.generic_ctx, other.generic_ctx, "this might fail...");
+        Self::new(trait_impls, one_of, preferred_type, self.generic_ctx)
     }
 }
 
@@ -560,6 +562,7 @@ fn substitute_generic_args(ty: &mut Type, generic_params: &[GenericParamId], gen
 impl ConstraintList {
     /// Gets the constraints on `generic_param` implied if we are assumed to be of type `assumed_ty`
     pub fn get_implied_generic_constraints(&self, generic_param: GenericParamId, assumed_ty: &Type) -> ConstraintList {
+        // TODO: set the proper generic ctx on this
         let mut constraints = ConstraintList::default();
 
         if !contains_generic_param(assumed_ty, generic_param) {

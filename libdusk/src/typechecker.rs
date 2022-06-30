@@ -9,7 +9,7 @@ pub mod type_provider;
 use constraints::*;
 use type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 
-use dire::hir::{self, ExprId, DeclId, StructId, PatternKind, GenericParamId, Ident, VOID_EXPR, GenericCtx, DeclRefId};
+use dire::hir::{self, ExprId, DeclId, StructId, PatternKind, GenericParamId, Ident, VOID_EXPR, GenericCtx, DeclRefId, BLANK_GENERIC_CTX};
 use dire::mir::Const;
 use dire::ty::{Type, InternalType, FunctionType, QualType, IntWidth};
 use dire::source_info::SourceRange;
@@ -66,11 +66,12 @@ pub struct Overloads {
 pub type GenericConstraints = HashMap<GenericParamId, ConstraintList>;
 
 impl tir::Expr<tir::IntLit> {
-    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         *tp.constraints_mut(self.id) = ConstraintList::new(
             BuiltinTraits::INT, 
             None,
-            Some(Type::i32().into())
+            Some(Type::i32().into()),
+            ef!(driver, self.id.generic_ctx_id),
         );
     }
 
@@ -80,11 +81,12 @@ impl tir::Expr<tir::IntLit> {
 }
 
 impl tir::Expr<tir::DecLit> {
-    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         *tp.constraints_mut(self.id) = ConstraintList::new(
             BuiltinTraits::DEC, 
             None,
-            Some(Type::f64().into())
+            Some(Type::f64().into()),
+            ef!(driver, self.id.generic_ctx_id),
         );
     }
 
@@ -94,11 +96,12 @@ impl tir::Expr<tir::DecLit> {
 }
 
 impl tir::Expr<tir::StrLit> {
-    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         *tp.constraints_mut(self.id) = ConstraintList::new(
             BuiltinTraits::STR, 
             None,
-            Some(Type::u8().ptr().into())
+            Some(Type::u8().ptr().into()),
+            ef!(driver, self.id.generic_ctx_id),
         );
     }
 
@@ -108,11 +111,12 @@ impl tir::Expr<tir::StrLit> {
 }
 
 impl tir::Expr<tir::CharLit> {
-    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         *tp.constraints_mut(self.id) = ConstraintList::new(
             BuiltinTraits::CHAR, 
             None,
-            Some(Type::u8().ptr().into())
+            Some(Type::u8().ptr().into()),
+            ef!(driver, self.id.generic_ctx_id),
         );
     }
 
@@ -121,8 +125,8 @@ impl tir::Expr<tir::CharLit> {
     }
 }
 impl tir::Expr<tir::BoolLit> {
-    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
-        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Bool.into()]), None);
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Bool.into()]), None, ef!(driver, self.id.generic_ctx_id));
         *tp.ty_mut(self.id) = Type::Bool;
     }
 
@@ -131,8 +135,8 @@ impl tir::Expr<tir::BoolLit> {
 }
 
 impl tir::Expr<tir::ConstTy> {
-    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
-        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Ty.into()]), None);
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Ty.into()]), None, ef!(driver, self.id.generic_ctx_id));
         *tp.ty_mut(self.id) = Type::Ty;
     }
 
@@ -141,8 +145,8 @@ impl tir::Expr<tir::ConstTy> {
 }
 
 impl tir::Expr<tir::ErrorExpr> {
-    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
-        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Error.into()]), None);
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Error.into()]), None, ef!(driver, self.id.generic_ctx_id));
         *tp.ty_mut(self.id) = Type::Error;
     }
 
@@ -260,9 +264,9 @@ impl tir::Expr<tir::Assignment> {
 }
 
 impl tir::Expr<tir::Cast> {
-    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         let ty = tp.get_evaluated_type(self.ty).clone();
-        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![ty.clone().into()]), None);
+        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![ty.clone().into()]), None, ef!(driver, self.id.generic_ctx_id));
         *tp.ty_mut(self.id) = ty;
     }
 
@@ -332,8 +336,8 @@ impl tir::Expr<tir::Cast> {
 }
 
 impl tir::Expr<tir::While> {
-    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
-        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None, ef!(driver, self.id.generic_ctx_id));
         *tp.ty_mut(self.id) = Type::Void;
     }
 
@@ -619,7 +623,7 @@ impl tir::Expr<tir::Switch> {
         }
 
         let constraints = if self.cases.is_empty() {
-            ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None)
+            ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None, ef!(driver, self.id.generic_ctx_id))
         } else {
             let mut constraints = tp.constraints(self.cases[0].terminal_expr).clone();
             for case in &self.cases[1..self.cases.len()] {
@@ -649,8 +653,8 @@ impl tir::Expr<tir::Switch> {
 }
 
 impl tir::Expr<tir::ExplicitRet> {
-    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
-        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Never.into()]), None);
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Never.into()]), None, ef!(driver, self.id.generic_ctx_id));
         *tp.ty_mut(self.id) = Type::Never;
     }
 
@@ -659,8 +663,8 @@ impl tir::Expr<tir::ExplicitRet> {
 }
 
 impl tir::Expr<tir::Module> {
-    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
-        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Mod.into()]), None);
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Mod.into()]), None, ef!(driver, self.id.generic_ctx_id));
         *tp.ty_mut(self.id) = Type::Mod;
     }
 
@@ -670,7 +674,7 @@ impl tir::Expr<tir::Module> {
 
 impl tir::Expr<tir::Enum> {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Ty.into()]), None);
+        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Ty.into()]), None, ef!(driver, self.id.generic_ctx_id));
         *tp.ty_mut(self.id) = Type::Ty;
         for &payload_ty in &self.variant_payload_tys {
             if let Some(err) = driver.can_unify_to(tp, payload_ty, &Type::Ty.into()).err() {
@@ -706,8 +710,8 @@ impl tir::Expr<tir::Enum> {
 }
 
 impl tir::Expr<tir::Import> {
-    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
-        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Mod.into()]), None);
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Mod.into()]), None, ef!(driver, self.id.generic_ctx_id));
         *tp.ty_mut(self.id) = Type::Mod;
     }
 
@@ -745,12 +749,14 @@ impl tir::Expr<tir::DeclRef> {
             }
             let mut constraints = GenericContext::new();
             for &param in &decl.generic_params {
-                constraints.insert(param, ConstraintList::default());
+                let mut constraint_list = ConstraintList::default();
+                constraint_list.set_generic_ctx(df!(driver, overload.generic_ctx_id));
+                constraints.insert(param, constraint_list);
             }
             one_of.push(QualType { ty, is_mut });
         }
 
-        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(one_of), None);
+        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(one_of), None, ef!(driver, self.id.generic_ctx_id));
         *tp.overloads_mut(self.decl_ref_id) = Overloads { overloads, nonviable_overloads: Default::default() };
     }
 
@@ -800,6 +806,7 @@ impl tir::Expr<tir::DeclRef> {
             // TODO: probably rename this from ret_ty.
             let ret_ty = tp.fetch_decl_type(driver, overload, Some(self.decl_ref_id));
             let mut ret_ty_constraints = ConstraintList::default();
+            ret_ty_constraints.set_generic_ctx(df!(driver, overload.generic_ctx_id));
             ret_ty_constraints.set_to(ret_ty.clone());
             let mut generic_args = Vec::new();
 
@@ -915,7 +922,7 @@ impl tir::Expr<tir::Call> {
             }
         }
 
-        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(one_of), pref);
+        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(one_of), pref, ef!(driver, self.id.generic_ctx_id));
         *tp.overloads_mut(decl_ref_id) = overloads;
     }
 
@@ -1475,9 +1482,9 @@ impl Driver {
     }
 
     fn initialize_global_expressions(&self, tp: &mut impl TypeProvider) {
-        *tp.constraints_mut(hir::VOID_EXPR) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None);
+        *tp.constraints_mut(hir::VOID_EXPR) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None, BLANK_GENERIC_CTX);
         *tp.ty_mut(hir::VOID_EXPR) = Type::Void;
-        *tp.constraints_mut(hir::ERROR_EXPR) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Error.into()]), None);
+        *tp.constraints_mut(hir::ERROR_EXPR) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Error.into()]), None, BLANK_GENERIC_CTX);
         *tp.ty_mut(hir::ERROR_EXPR) = Type::Error;
     }
 
