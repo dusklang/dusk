@@ -3,7 +3,7 @@ use smallvec::{SmallVec, smallvec};
 use std::collections::HashMap;
 
 use dire::ty::{Type, InternalType, FunctionType, QualType, IntWidth};
-use dire::hir::{GenericParamId, ExprId, GenericCtx};
+use dire::hir::{GenericParamId, ExprId, GenericCtx, GenericCtxId};
 
 use crate::driver::Driver;
 use crate::ty::BuiltinTraits;
@@ -17,6 +17,7 @@ pub struct ConstraintList {
     trait_impls: BuiltinTraits,
     one_of: Option<SmallVec<[QualType; 1]>>,
     preferred_type: Option<QualType>,
+    generic_ctx: Option<GenericCtxId>,
     is_error: bool,
 }
 
@@ -36,7 +37,11 @@ pub enum SolveError<'a> {
 
 impl ConstraintList {
     pub fn new(trait_impls: BuiltinTraits, one_of: Option<SmallVec<[QualType; 1]>>, preferred_type: Option<QualType>) -> Self {
-        Self { trait_impls, one_of: one_of.map(|one_of| one_of.into()), preferred_type, is_error: false }
+        Self { trait_impls, one_of: one_of.map(|one_of| one_of.into()), preferred_type, generic_ctx: None, is_error: false }
+    }
+
+    pub fn new_with_generic_ctx(trait_impls: BuiltinTraits, one_of: Option<SmallVec<[QualType; 1]>>, preferred_type: Option<QualType>, generic_ctx: Option<GenericCtxId>) -> Self {
+        Self { trait_impls, one_of: one_of.map(|one_of| one_of.into()), preferred_type, generic_ctx, is_error: false }
     }
 
     pub fn one_of(&self) -> &[QualType] {
