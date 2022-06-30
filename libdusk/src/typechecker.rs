@@ -161,10 +161,9 @@ impl tir::GenericParam {
 
 impl tir::AssignedDecl {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        let constraints = tp.constraints(self.root_expr);
         let ty = if let &Some(explicit_ty) = &self.explicit_ty {
             let explicit_ty = tp.get_evaluated_type(explicit_ty).clone();
-            if let Some(err) = can_unify_to(constraints, &explicit_ty.clone().into()).err() {
+            if let Some(err) = driver.can_unify_to(tp, self.root_expr, &explicit_ty.clone().into()).err() {
                 let range = driver.get_range(self.root_expr);
                 let mut error = Error::new(format!("Couldn't unify expression to assigned decl type `{:?}`", explicit_ty))
                     .adding_primary_range(range, "expression here");
@@ -183,7 +182,7 @@ impl tir::AssignedDecl {
                 driver.errors.push(error);
             }
             explicit_ty
-        } else if let Ok(ty) = constraints.solve() {
+        } else if let Ok(ty) = tp.constraints(self.root_expr).solve() {
             ty.ty
         } else {
             let range = df!(driver, self.decl_id.range);
@@ -269,10 +268,11 @@ impl tir::Expr<tir::Cast> {
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         let ty = tp.get_evaluated_type(self.ty).clone();
-        let constraints = tp.constraints_mut(self.expr);
-        let ty_and_method: Result<(Type, CastMethod), Vec<&QualType>> = if can_unify_to(constraints, &QualType::from(&ty)).is_ok() {
+        // TODO: pass `self.ty` directly to can_unify_to() once its support for generics is more robust
+        let ty_and_method: Result<(Type, CastMethod), Vec<QualType>> = if driver.can_unify_to(tp, self.expr, &QualType::from(&ty)).is_ok() {
             Ok((ty, CastMethod::Noop))
         } else if let Type::Pointer(dest_pointee_ty) = ty {
+            let constraints = tp.constraints_mut(self.expr);
             let dest_pointee_ty = dest_pointee_ty.as_ref();
             constraints.max_ranked_type(|ty| {
                 match ty.ty {
@@ -291,6 +291,7 @@ impl tir::Expr<tir::Cast> {
                 .map(|src_ty| (src_ty.ty.clone(), CastMethod::Reinterpret))
                 .map_err(|_| Vec::new())
         } else if let Type::Int { width, .. } = ty {
+            let constraints = tp.constraints_mut(self.expr);
             constraints.max_ranked_type_with_assoc_data(|ty|
                 match ty.ty {
                     Type::Int { .. } => (3, CastMethod::Int),
@@ -300,8 +301,9 @@ impl tir::Expr<tir::Cast> {
                 }
             )
                 .map(|(ty, method)| (ty.ty.clone(), method))
-                .map_err(|options| options.iter().map(|(ty, _)| *ty).collect())
+                .map_err(|options| options.iter().map(|(ty, _)| ty.to_owned().to_owned()).collect())
         } else if let Type::Float { .. } = ty {
+            let constraints = tp.constraints_mut(self.expr);
             constraints.max_ranked_type_with_assoc_data(|ty|
                 match ty.ty {
                     Type::Float { .. } => (2, CastMethod::Float),
@@ -310,10 +312,11 @@ impl tir::Expr<tir::Cast> {
                 }
             )
                 .map(|(ty, method)| (ty.ty.clone(), method))
-                .map_err(|options| options.iter().map(|(ty, _)| *ty).collect())
+                .map_err(|options| options.iter().map(|(ty, _)| ty.to_owned().to_owned()).collect())
         } else {
             Err(Vec::new())
         };
+        let constraints = tp.constraints_mut(self.expr);
         match ty_and_method {
             Ok((ty, method)) => {
                 constraints.set_to(ty);
@@ -334,8 +337,8 @@ impl tir::Expr<tir::While> {
         *tp.ty_mut(self.id) = Type::Void;
     }
 
-    fn run_pass_2(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
-        if can_unify_to(tp.constraints(self.condition), &Type::Bool.into()).is_ok() {
+    fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+        if driver.can_unify_to(tp, self.condition, &Type::Bool.into()).is_ok() {
             tp.constraints_mut(self.condition).set_to(Type::Bool);
         } else {
             panic!("Expected boolean condition in while expression");
@@ -670,7 +673,7 @@ impl tir::Expr<tir::Enum> {
         *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Ty.into()]), None);
         *tp.ty_mut(self.id) = Type::Ty;
         for &payload_ty in &self.variant_payload_tys {
-            if let Some(err) = can_unify_to(tp.constraints(payload_ty), &Type::Ty.into()).err() {
+            if let Some(err) = driver.can_unify_to(tp, payload_ty, &Type::Ty.into()).err() {
                 let mut error = Error::new("Expected variant payload type");
                 let range = driver.get_range(payload_ty);
                 match err {
@@ -729,10 +732,9 @@ impl tir::Expr<tir::DeclRef> {
             let decl = &driver.tir.decls[overload];
             let mut is_mut = decl.is_mut;
             if let hir::Namespace::MemberRef { base_expr } = driver.code.hir.decl_refs[self.decl_ref_id].namespace {
-                let constraints = tp.constraints(base_expr);
                 // TODO: Robustness! Base_expr could be an overload set with these types, but also include struct types
-                if can_unify_to(constraints, &Type::Ty.into()).is_err() && can_unify_to(constraints, &Type::Mod.into()).is_err() {
-                    let base_ty = constraints.solve().unwrap();
+                if driver.can_unify_to(tp, base_expr, &Type::Ty.into()).is_err() && driver.can_unify_to(tp, base_expr, &Type::Mod.into()).is_err() {
+                    let base_ty = tp.constraints(base_expr).solve().unwrap();
                     // Handle member refs with pointers to structs
                     is_mut &= if let Type::Pointer(pointee) = &base_ty.ty {
                         pointee.is_mut
@@ -866,10 +868,8 @@ impl tir::Expr<tir::Call> {
                 return false;
             }
 
-            let arg_constraints = self.args.iter().map(|&arg| tp.constraints(arg));
-            let param_tys = decls[overload].param_tys.iter().map(|&expr| tp.get_evaluated_type(expr));
-            for (constraints, ty) in arg_constraints.zip(param_tys) {
-                if can_unify_to_in_generic_context(constraints, &ty.into(), &decls[overload].generic_params).is_err() {
+            for (arg, ty) in self.args.iter().copied().zip(decls[overload].param_tys.iter().copied()) {
+                if driver.can_unify_to(tp, arg, ty).is_err() {
                     overloads.nonviable_overloads.push(overload);
                     i += 1;
                     return false;
@@ -934,7 +934,7 @@ impl tir::Expr<tir::Call> {
             if let Some(overload_decl) = overload_decl {
                 if let Some(fun) = callee_ty.ty.as_function() {
                     for (arg, param) in self.args.iter().copied().zip(&fun.param_tys) {
-                        if can_unify_to_in_generic_context(tp.constraints(arg), &param.into(), &driver.tir.decls[overload_decl].generic_params).is_err() {
+                        if driver.can_unify_to(tp, arg, UnificationType::QualTypeWithOldSchoolGenericContext(&param.into(), &driver.tir.decls[overload_decl].generic_params)).is_err() {
                             return false;
                         }
                     }
@@ -1021,7 +1021,7 @@ impl tir::Expr<tir::Dereference> {
 
 impl tir::Expr<tir::Pointer> {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        if let Some(err) = can_unify_to(tp.constraints(self.expr), &Type::Ty.into()).err() {
+        if let Some(err) = driver.can_unify_to(tp, self.expr, &Type::Ty.into()).err() {
             let mut error = Error::new("Expected type operand to pointer operator");
             let range = driver.get_range(self.expr);
             match err {
@@ -1054,7 +1054,7 @@ impl tir::Expr<tir::Pointer> {
 impl tir::Expr<tir::FunctionTy> {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         fn check_type(driver: &mut Driver, tp: &impl TypeProvider, ty: ExprId) {
-            if let Some(err) = can_unify_to(tp.constraints(ty), &Type::Ty.into()).err() {
+            if let Some(err) = driver.can_unify_to(tp, ty, &Type::Ty.into()).err() {
                 let mut error = Error::new("Expected type");
                 let range = driver.get_range(ty);
                 match err {
@@ -1099,7 +1099,7 @@ impl tir::Expr<tir::FunctionTy> {
 impl tir::Expr<tir::Struct> {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         for &field_ty in &self.field_tys {
-            if let Some(err) = can_unify_to(tp.constraints(field_ty), &Type::Ty.into()).err() {
+            if let Some(err) = driver.can_unify_to(tp, field_ty, &Type::Ty.into()).err() {
                 let mut error = Error::new("Expected field type");
                 let range = driver.get_range(field_ty);
                 match err {
@@ -1134,7 +1134,7 @@ impl tir::Expr<tir::Struct> {
 
 impl tir::Expr<tir::StructLit> {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        let ty = if let Some(err) = can_unify_to(tp.constraints(self.ty), &Type::Ty.into()).err() {
+        let ty = if let Some(err) = driver.can_unify_to(tp, self.ty, &Type::Ty.into()).err() {
             let mut error = Error::new("Expected struct type");
             let range = driver.get_range(self.ty);
             match err {
@@ -1187,18 +1187,16 @@ impl tir::Expr<tir::StructLit> {
                     // Make sure each field in the struct has a match in the literal
                     for (i, &maatch) in matches.iter().enumerate() {
                         let field = &struct_fields[i];
-                        let field_ty = tp.get_evaluated_type(field.ty).clone();
                         if maatch == ExprId::new(u32::MAX as usize) {
                             successful = false;
 
                             let field_range = df!(driver, field.decl.range);
-
                             driver.errors.push(
                                 Error::new(format!("Field {} not included in struct literal", driver.interner.resolve(field.name).unwrap()))
                                     .adding_primary_range(lit_range, "")
                                     .adding_secondary_range(field_range, "field declared here")
                             );
-                        } else if let Some(err) = can_unify_to_in_generic_context(tp.constraints(maatch), &field_ty.into(), &[]).err() {
+                        } else if let Some(err) = driver.can_unify_to(tp, maatch, field.ty).err() {
                             successful = false;
                             let range = driver.get_range(maatch);
                             let mut error = Error::new("Invalid struct field type")
@@ -1261,7 +1259,7 @@ impl tir::Expr<tir::StructLit> {
 
 impl tir::Expr<tir::If> {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        if let Some(err) = can_unify_to(tp.constraints(self.condition), &Type::Bool.into()).err() {
+        if let Some(err) = driver.can_unify_to(tp, self.condition, &Type::Bool.into()).err() {
             let mut error = Error::new("Expected boolean condition in if expression");
             let range = driver.get_range(self.condition);
             match err {
@@ -1316,8 +1314,7 @@ impl tir::Expr<tir::Do> {
 
 impl tir::Stmt {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        let constraints = tp.constraints_mut(self.root_expr);
-        if let Some(err) = can_unify_to(constraints, &Type::Void.into()).err() {
+        if let Some(err) = driver.can_unify_to(tp, self.root_expr, &Type::Void.into()).err() {
             let mut error = Error::new("statements must return void");
             let range = driver.get_range(self.root_expr);
             match err {
@@ -1334,6 +1331,7 @@ impl tir::Stmt {
             }
             driver.errors.push(error);
         }
+        let constraints = tp.constraints_mut(self.root_expr);
         constraints.set_to(Type::Void);
     }
 
@@ -1347,7 +1345,7 @@ impl tir::RetGroup {
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         let ty = tp.get_evaluated_type(self.ty).clone();
         for &expr in &self.exprs {
-            if let Some(err) = can_unify_to(tp.constraints(expr), &QualType::from(&ty)).err() {
+            if let Some(err) = driver.can_unify_to(tp, expr, &QualType::from(&ty)).err() {
                 let range = driver.get_range(expr);
                 let error = if expr == VOID_EXPR {
                     Error::new(format!("expected return value of type `{:?}`, found nothing instead", ty))

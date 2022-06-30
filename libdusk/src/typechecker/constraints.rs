@@ -250,6 +250,8 @@ fn contains_any_of_generic_params(ty: &Type, generic_params: &[GenericParamId]) 
 
 pub enum UnificationType<'a> {
     QualType(&'a QualType),
+    // TODO: get rid of this
+    QualTypeWithOldSchoolGenericContext(&'a QualType, &'a [GenericParamId]),
     UnevaluatedType(ExprId),
 }
 
@@ -267,7 +269,7 @@ impl From<ExprId> for UnificationType<'static> {
 
 impl Driver {
     // TODO: delete the other variants of this function
-    pub fn can_unify_to<'a>(&'a self, tp: &'a impl TypeProvider, expr: ExprId, ty: impl Into<UnificationType<'a>>) -> Result<(), UnificationError<'a>> {
+    pub fn can_unify_to<'a, 'b: 'a>(&'a self, tp: &'a impl TypeProvider, expr: ExprId, ty: impl Into<UnificationType<'b>>) -> Result<(), UnificationError<'a>> {
         let constraints = tp.constraints(expr);
         // Never is the "bottom type", so it unifies to anything.
         if constraints.one_of_exists(|ty| ty.ty == Type::Never) { return Ok(()); }
@@ -294,6 +296,7 @@ impl Driver {
                 let ty: QualType = tp.get_evaluated_type(ty).clone().into();
                 (ty, generic_params)
             },
+            UnificationType::QualTypeWithOldSchoolGenericContext(ty, generic_params) => (ty.clone(), generic_params),
             UnificationType::QualType(ty) => {
                 let generic_params: &[GenericParamId] = &[];
                 (ty.clone(), generic_params)
