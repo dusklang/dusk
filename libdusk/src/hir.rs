@@ -603,7 +603,6 @@ impl Driver {
         let name = self.interner.get_or_intern(intrinsic.name());
         let num_params = param_tys.len();
         let id = self.add_decl(Decl::Intrinsic { intr: intrinsic, param_tys, function_like }, name, Some(ret_ty), SourceRange::default());
-        assert_eq!(self.hir.scope_stack.lock().unwrap().borrow().len(), 1, "cannot add intrinsic anywhere except global scope");
         self.mod_scoped_decl(
             name,
             ModScopedDecl { num_params, id }
@@ -685,10 +684,13 @@ impl Driver {
     }
 
     fn mod_scoped_decl(&mut self, name: Sym, decl: ModScopedDecl) {
-        if let Some(&ScopeState::Mod { id, .. }) = self.hir.scope_stack.lock().unwrap().borrow().last() {
+        let scope_stack = self.hir.scope_stack.lock().unwrap();
+        let scope_stack = scope_stack.borrow();
+        let state = scope_stack.last();
+        if let Some(&ScopeState::Mod { id, .. }) = state {
             self.code.hir.mod_scopes[id].decl_groups.entry(name).or_default().push(decl);
         } else {
-            panic!("tried to add module-scoped declaration in a non-module scope");
+            panic!("tried to add module-scoped declaration in a non-module scope {:?}", state);
         }
     }
 
