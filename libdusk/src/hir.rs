@@ -62,6 +62,7 @@ impl Default for GenericParamList {
 pub enum ScopeState {
     Imper {
         id: ImperScopeId,
+        // TODO: choose `namespace` or `ns` and use it consistently for all variants of this enum
         namespace: ImperScopeNsId,
         stmt_buffer: Option<ExprId>,
     },
@@ -92,20 +93,23 @@ type AutoPopStack<T> = Arc<Mutex<RefCell<Vec<T>>>>;
 /// Because parser methods often exit early on failure, it previously would've been possible to push to the stack, exit
 /// due to an error, and never end up popping. This type prevents that scenario from happening, by automatically
 /// popping on drop, and checking that the expected value has been popped.
-/// TODO: this problem almost certainly exists right now for comp_decl_stack and scope_stack, so
-/// something similar should be applied to them as well.
-pub struct AutoPopStackEntry<T: Debug, Id=T> where Id: PartialEq<T> + Debug {
+/// TODO: this problem almost certainly exists right now for comp_decl_stack, so
+/// I should use it there as well.
+#[must_use]
+pub struct AutoPopStackEntry<T: Debug, Id=T> where Id: PartialEq<T> + Debug + Copy {
     id: Id,
     stack: AutoPopStack<T>,
 }
 
-impl<T: Debug, Id: PartialEq<T> + Debug> AutoPopStackEntry<T, Id> {
+impl<T: Debug, Id: PartialEq<T> + Debug + Copy> AutoPopStackEntry<T, Id> {
     fn new(id: Id, stack: AutoPopStack<T>) -> Self {
         Self { id, stack }
     }
+
+    pub fn id(&self) -> Id { self.id }
 }
 
-impl<T: Debug, Id: PartialEq<T> + Debug> Drop for AutoPopStackEntry<T, Id> {
+impl<T: Debug, Id: PartialEq<T> + Debug + Copy> Drop for AutoPopStackEntry<T, Id> {
     fn drop(&mut self) {
         let top = self.stack.lock().unwrap().borrow_mut().pop();
         debug_assert_eq!(
@@ -119,7 +123,7 @@ impl<T: Debug, Id: PartialEq<T> + Debug> Drop for AutoPopStackEntry<T, Id> {
 #[derive(Debug)]
 pub struct Builder {
     comp_decl_stack: Vec<CompDeclState>,
-    scope_stack: Vec<ScopeState>,
+    scope_stack: AutoPopStack<ScopeState>,
     generic_ctx_stack: AutoPopStack<GenericCtxId>,
     debug_marked_exprs: HashSet<ExprId>,
     pub generic_params: IndexCounter<GenericParamId>,
@@ -171,6 +175,39 @@ impl Default for Builder {
 
             // Gets initialized in Driver::initialize_hir() below
             known_idents: KnownIdents::uninit(),
+        }
+    }
+}
+
+impl PartialEq<ScopeState> for ConditionNsId {
+    fn eq(&self, other: &ScopeState) -> bool {
+        match other {
+            ScopeState::Condition { ns, .. } => ns == self,
+            _ => false,
+        }
+    }
+}
+impl PartialEq<ScopeState> for GenericContextNsId {
+    fn eq(&self, other: &ScopeState) -> bool {
+        match other {
+            ScopeState::GenericContext(ns) => ns == self,
+            _ => false,
+        }
+    }
+}
+impl PartialEq<ScopeState> for ModScopeNsId {
+    fn eq(&self, other: &ScopeState) -> bool {
+        match other {
+            ScopeState::Mod { namespace: ns, .. } => ns == self,
+            _ => false,
+        }
+    }
+}
+impl PartialEq<ScopeState> for ImperScopeId {
+    fn eq(&self, other: &ScopeState) -> bool {
+        match other {
+            ScopeState::Imper { id, .. } => id == self,
+            _ => false,
         }
     }
 }
@@ -274,8 +311,12 @@ impl Driver {
     }
     pub fn stored_decl(&mut self, name: Sym, _generic_params: GenericParamList, explicit_ty: Option<ExprId>, is_mut: bool, root_expr: ExprId, range: SourceRange) -> DeclId {
         self.flush_stmt_buffer();
-        match self.hir.scope_stack.last().unwrap() {
+        let scope_stack = self.hir.scope_stack.lock().unwrap();
+        let scope_stack_ref = scope_stack.borrow();
+        match scope_stack_ref.last().unwrap() {
             ScopeState::Imper { .. } => {
+                drop(scope_stack_ref);
+                drop(scope_stack);
                 let decl = self.hir.comp_decl_stack.last_mut().unwrap();
                 let id = decl.stored_decl_counter.next_idx();
 
@@ -291,6 +332,8 @@ impl Driver {
                 decl_id
             }
             ScopeState::Mod { .. } => {
+                drop(scope_stack_ref);
+                drop(scope_stack);
                 let decl_id = self.add_decl(
                     if is_mut {
                         Decl::Static(root_expr)
@@ -384,41 +427,25 @@ impl Driver {
         }
         (decls, bindings)
     }
+    fn push_to_scope_stack<Id: PartialEq<ScopeState> + Debug + Copy>(&self, id: Id, state: ScopeState) -> AutoPopStackEntry<ScopeState, Id> {
+        self.hir.scope_stack.lock().unwrap().borrow_mut().push(state);
+        AutoPopStackEntry::new(id, self.hir.scope_stack.clone())
+    }
     pub fn create_condition_namespace(&mut self) -> ConditionNsId {
         let parent = self.cur_namespace();
         self.code.hir.condition_ns.push(ConditionNs { func: DeclId::from_raw(u32::MAX), parent: Some(parent) })
     }
-    pub fn enter_condition_namespace(&mut self, ns: ConditionNsId, condition_kind: ConditionKind) -> ConditionNsId {
+    pub fn enter_condition_namespace(&mut self, ns: ConditionNsId, condition_kind: ConditionKind) -> AutoPopStackEntry<ScopeState, ConditionNsId> {
         // This condition kind is just a placeholder which will be reset by each attribute. It is done this way so I can share a single
         // condition namespace across all condition attributes on a single function.
-        self.hir.scope_stack.push(ScopeState::Condition { ns, condition_kind });
-
-        ns
+        self.push_to_scope_stack(ns, ScopeState::Condition { ns, condition_kind })
     }
-    pub fn exit_condition_namespace(&mut self, desired_ns: ConditionNsId) {
-        if let Some(&ScopeState::Condition { ns, .. }) = self.hir.scope_stack.last() {
-            assert_eq!(desired_ns, ns, "tried to exit condition namespace, but the current condition scope doesn't match");
-            self.hir.scope_stack.pop();
-        } else {
-            panic!("Tried to exit condition namespace, but the top of the scope stack is not a condition namespace");
-        }
-    }
-    pub fn begin_generic_context(&mut self, generic_params: Range<DeclId>) -> GenericContextNsId {
+    pub fn begin_generic_context(&mut self, generic_params: Range<DeclId>) -> AutoPopStackEntry<ScopeState, GenericContextNsId> {
         let parent = self.cur_namespace();
         let ns = self.code.hir.generic_context_ns.push(GenericContextNs { generic_params, parent: Some(parent) });
-        self.hir.scope_stack.push(ScopeState::GenericContext(ns));
-
-        ns
+        self.push_to_scope_stack(ns, ScopeState::GenericContext(ns))
     }
-    pub fn end_generic_context(&mut self, desired_ns: GenericContextNsId) {
-        if let Some(&ScopeState::GenericContext(ns)) = self.hir.scope_stack.last() {
-            assert_eq!(ns, desired_ns, "tried to end generic context, but the current condition scope doesn't match");
-            self.hir.scope_stack.pop();
-        } else {
-            panic!("Tried to end generic context, but the top of the scope stack is not a generic context namespace");
-        }
-    }
-    pub fn begin_module(&mut self, extern_mod: Option<ExternModId>) -> ExprId {
+    pub fn begin_module(&mut self, extern_mod: Option<ExternModId>, range: SourceRange) -> (AutoPopStackEntry<ScopeState, ModScopeNsId>, ExprId) {
         let parent = self.cur_namespace();
         let id = self.code.hir.mod_scopes.push(ModScope::default());
         let namespace = self.code.hir.mod_ns.push(
@@ -426,8 +453,9 @@ impl Driver {
                 scope: id, parent: Some(parent)
             }
         );
-        self.hir.scope_stack.push(ScopeState::Mod { id, namespace, extern_mod });
-        self.add_expr(Expr::Mod { id }, SourceRange::default())
+        let entry = self.push_to_scope_stack(namespace, ScopeState::Mod { id, namespace, extern_mod });
+        let expr = self.add_expr(Expr::Mod { id }, range);
+        (entry, expr)
     }
     fn push_generic_ctx(&mut self, ctx: impl FnOnce(GenericCtxId) -> GenericCtx) -> AutoPopStackEntry<GenericCtxId> {
         let stack = self.hir.generic_ctx_stack.lock().unwrap();
@@ -467,12 +495,18 @@ impl Driver {
             scope: ImperScopeId::new(u32::MAX as usize),
             generic_params: generic_params.clone(),
         };
-        match self.hir.scope_stack.last().unwrap() {
+        let scope_stack = self.hir.scope_stack.lock().unwrap();
+        let scope_stack_ref = scope_stack.borrow();
+        match scope_stack_ref.last().unwrap() {
             ScopeState::Imper { .. } => {
+                drop(scope_stack_ref);
+                drop(scope_stack);
                 self.flush_stmt_buffer();
                 self.scope_item(Item::Decl(id));
             },
             &ScopeState::Mod { .. } => {
+                drop(scope_stack_ref);
+                drop(scope_stack);
                 self.mod_scoped_decl(name, ModScopedDecl { num_params: param_names.len(), id });
             },
             ScopeState::Condition { .. } | ScopeState::GenericContext(_) => panic!("Computed decls are not supported in this position"),
@@ -493,7 +527,7 @@ impl Driver {
     pub fn comp_decl_prototype(&mut self, name: Sym, param_tys: SmallVec<[ExprId; 2]>, _param_ranges: SmallVec<[SourceRange; 2]>, return_ty: ExprId, range: SourceRange) -> DeclId {
         // This is a placeholder value that gets replaced once the parameter declarations get allocated.
         let num_params = param_tys.len();
-        let extern_func = if let &ScopeState::Mod { extern_mod: Some(extern_mod), .. } = self.hir.scope_stack.last().unwrap() {
+        let extern_func = if let &ScopeState::Mod { extern_mod: Some(extern_mod), .. } = self.hir.scope_stack.lock().unwrap().borrow().last().unwrap() {
             let funcs = &mut self.code.hir.extern_mods[extern_mod].imported_functions;
             let index = funcs.len();
             let name = self.interner.resolve(name).unwrap();
@@ -508,12 +542,18 @@ impl Driver {
             None
         };
         let id = self.add_decl(Decl::ComputedPrototype { param_tys, extern_func }, name, Some(return_ty), range);
-        match self.hir.scope_stack.last().unwrap() {
+        let scope_stack = self.hir.scope_stack.lock().unwrap();
+        let scope_stack_ref = scope_stack.borrow();
+        match scope_stack_ref.last().unwrap() {
             ScopeState::Imper { .. } => {
+                drop(scope_stack_ref);
+                drop(scope_stack);
                 self.flush_stmt_buffer();
                 self.scope_item(Item::Decl(id));
             },
             &ScopeState::Mod { .. } => {
+                drop(scope_stack_ref);
+                drop(scope_stack);
                 self.mod_scoped_decl(name, ModScopedDecl { num_params, id });
             },
             ScopeState::Condition { .. } | ScopeState::GenericContext(_) => panic!("Computed decls are not supported in this position"),
@@ -563,7 +603,7 @@ impl Driver {
         let name = self.interner.get_or_intern(intrinsic.name());
         let num_params = param_tys.len();
         let id = self.add_decl(Decl::Intrinsic { intr: intrinsic, param_tys, function_like }, name, Some(ret_ty), SourceRange::default());
-        assert_eq!(self.hir.scope_stack.len(), 1, "cannot add intrinsic anywhere except global scope");
+        assert_eq!(self.hir.scope_stack.lock().unwrap().borrow().len(), 1, "cannot add intrinsic anywhere except global scope");
         self.mod_scoped_decl(
             name,
             ModScopedDecl { num_params, id }
@@ -613,12 +653,12 @@ impl Driver {
                 parent: None
             }
         );
-        self.hir.scope_stack = vec![ScopeState::Mod { id: global_scope, namespace: global_namespace, extern_mod: None }];
+        *self.hir.scope_stack.lock().unwrap().borrow_mut() = vec![ScopeState::Mod { id: global_scope, namespace: global_namespace, extern_mod: None }];
         self.code.hir.global_scopes.push_at(file, global_scope);
     }
 
     fn flush_stmt_buffer(&mut self) {
-        if let Some(ScopeState::Imper { id, stmt_buffer, .. }) = self.hir.scope_stack.last_mut() {
+        if let Some(ScopeState::Imper { id, stmt_buffer, .. }) = self.hir.scope_stack.lock().unwrap().borrow_mut().last_mut() {
             if let Some(stmt) = *stmt_buffer {
                 let block = self.code.hir.imper_scopes[*id].block;
                 let op = self.code.ops.push(Op::HirItem(Item::Expr(stmt)));
@@ -629,7 +669,7 @@ impl Driver {
     }
 
     fn scope_item(&mut self, item: Item) {
-        if let &ScopeState::Imper { id, .. } = self.hir.scope_stack.last().unwrap() {
+        if let &ScopeState::Imper { id, .. } = self.hir.scope_stack.lock().unwrap().borrow().last().unwrap() {
             let block = self.code.hir.imper_scopes[id].block;
             let op = self.code.ops.push(Op::HirItem(item));
             self.code.blocks[block].ops.push(op);
@@ -637,7 +677,7 @@ impl Driver {
     }
 
     pub fn imper_scoped_decl(&mut self, decl: ImperScopedDecl) {
-        if let Some(&ScopeState::Imper { namespace, .. }) = self.hir.scope_stack.last() {
+        if let Some(&ScopeState::Imper { namespace, .. }) = self.hir.scope_stack.lock().unwrap().borrow().last() {
             self.code.hir.imper_ns[namespace].decls.push(decl);
         } else {
             panic!("tried to add imperative-scoped declaration in a non-imperative scope");
@@ -645,7 +685,7 @@ impl Driver {
     }
 
     fn mod_scoped_decl(&mut self, name: Sym, decl: ModScopedDecl) {
-        if let Some(&ScopeState::Mod { id, .. }) = self.hir.scope_stack.last() {
+        if let Some(&ScopeState::Mod { id, .. }) = self.hir.scope_stack.lock().unwrap().borrow().last() {
             self.code.hir.mod_scopes[id].decl_groups.entry(name).or_default().push(decl);
         } else {
             panic!("tried to add module-scoped declaration in a non-module scope");
@@ -654,11 +694,11 @@ impl Driver {
 
     pub fn stmt(&mut self, expr: ExprId) {
         self.flush_stmt_buffer();
-        if let Some(ScopeState::Imper { stmt_buffer, .. }) = self.hir.scope_stack.last_mut() {
+        if let Some(ScopeState::Imper { stmt_buffer, .. }) = self.hir.scope_stack.lock().unwrap().borrow_mut().last_mut() {
             *stmt_buffer = Some(expr);
         }
     }
-    pub fn begin_imper_scope(&mut self) -> ImperScopeId {
+    pub fn begin_imper_scope(&mut self) -> AutoPopStackEntry<ScopeState, ImperScopeId> {
         let parent = self.cur_namespace();
 
         let comp_decl = self.hir.comp_decl_stack.last_mut().unwrap();
@@ -683,12 +723,14 @@ impl Driver {
         }
         comp_decl.imper_scope_stack += 1;
 
-        self.hir.scope_stack.push(
+        let entry = self.push_to_scope_stack(
+            id,
             ScopeState::Imper {
                 id, namespace, stmt_buffer: None,
             }
         );
 
+        let comp_decl = self.hir.comp_decl_stack.last_mut().unwrap();
         if is_first_scope {
             let name = self.code.hir.names[comp_decl.id];
             let num_params = comp_decl.params.end.index() - comp_decl.params.start.index();
@@ -731,27 +773,16 @@ impl Driver {
             }
         }
 
-        id
+        entry
     }
-    pub fn end_imper_scope(&mut self, has_terminal_expr: bool) {
-        if let Some(&ScopeState::Imper { id, stmt_buffer, .. }) = self.hir.scope_stack.last() {
+    pub fn end_imper_scope(&mut self, _entry: AutoPopStackEntry<ScopeState, ImperScopeId>, has_terminal_expr: bool) {
+        if let Some(&ScopeState::Imper { id, stmt_buffer, .. }) = self.hir.scope_stack.lock().unwrap().borrow().last() {
             if has_terminal_expr {
                 let terminal_expr = stmt_buffer.expect("must pass terminal expression via Builder::stmt()");
                 self.code.hir.imper_scopes[id].terminal_expr = terminal_expr;
             }
-            self.hir.scope_stack.pop().unwrap();
         } else {
             panic!("tried to end imperative scope, but the top scope in the stack is not an imperative scope");
-        }
-    }
-    pub fn end_module(&mut self, mod_expr: ExprId, range: SourceRange) {
-        debug_assert!(matches!(ef!(mod_expr.hir), Expr::Mod { .. }));
-
-        if let Some(ScopeState::Mod { .. }) = self.hir.scope_stack.last() {
-            ef!(mod_expr.range) = range;
-            self.hir.scope_stack.pop().unwrap();
-        } else {
-            panic!("tried to end the module, but the top scope in the stack is not a module scope");
         }
     }
     pub fn end_computed_decl(&mut self) {
@@ -763,7 +794,7 @@ impl Driver {
         }
     }
     fn cur_namespace(&self) -> Namespace {
-        match *self.hir.scope_stack.last().unwrap() {
+        match *self.hir.scope_stack.lock().unwrap().borrow().last().unwrap() {
             ScopeState::Imper { namespace, .. } => {
                 let end_offset = self.code.hir.imper_ns[namespace].decls.len();
                 Namespace::Imper { scope: namespace, end_offset }

@@ -622,12 +622,13 @@ impl Driver {
             match self.next(p).kind {
                 TokenKind::If => {
                     let scope = self.begin_imper_scope();
+                    let scope_id = scope.id();
                     let if_expr = self.parse_if(p)?;
                     let if_range = self.get_range(if_expr);
                     range = source_info::concat(range, if_range);
                     self.stmt(if_expr);
-                    self.end_imper_scope(true);
-                    Some(scope)
+                    self.end_imper_scope(scope, true);
+                    Some(scope_id)
                 },
                 TokenKind::OpenCurly => {
                     let (else_scope, else_range) = self.parse_scope(p, &[])?;
@@ -664,11 +665,12 @@ impl Driver {
                         TokenKind::OpenCurly => self.parse_scope(p, &bindings)?,
                         _ => {
                             let scope = self.begin_imper_scope();
+                            let scope_id = scope.id();
                             let case_expr = self.parse_expr(p).unwrap_or_else(|err| err);
                             self.stmt(case_expr);
-                            self.end_imper_scope(true);
+                            self.end_imper_scope(scope, true);
                             let scope_range = self.get_range(case_expr);
-                            (scope, scope_range)
+                            (scope_id, scope_range)
                         }
                     };
                     let switch_case = SwitchCase {
@@ -721,7 +723,7 @@ impl Driver {
                     (None, self.cur(p).range)
                 } else {
                     // Enter condition namespace
-                    if is_condition {
+                    let _condition_entry = if is_condition {
                         let condition_kind = if is_requires {
                             ConditionKind::Requirement
                         } else if is_guarantees {
@@ -737,13 +739,12 @@ impl Driver {
                             *condition_ns = Some(ns);
                             ns
                         };
-                        self.enter_condition_namespace(ns, condition_kind);
-                    }
+                        Some(self.enter_condition_namespace(ns, condition_kind))
+                    } else {
+                        None
+                    };
                     let arg = self.parse_expr(p).unwrap_or_else(|err| err);
                     let paren_range = self.eat_tok(p, TokenKind::RightParen)?;
-                    if is_condition {
-                        self.exit_condition_namespace(condition_ns.unwrap());
-                    }
     
                     (Some(arg), paren_range)
                 }
@@ -1038,22 +1039,21 @@ impl Driver {
         let generic_params = self.create_decls_for_generic_param_list(&generic_param_list);
         let ns = self.begin_generic_context(generic_params);
         let root = self.parse_expr(p).unwrap_or_else(|err| err);
-        self.end_generic_context(ns);
+        drop(ns);
         Ok(self.stored_decl(name.symbol, generic_param_list, explicit_ty, is_mut, root, name.range))
     }
 
     fn parse_module(&mut self, p: &mut Parser) -> ParseResult<ExprId> {
         let mod_range = self.eat_tok(p, TokenKind::Module)?;
 
-        let module = self.begin_module(None);
+        let (_mod_entry, module) = self.begin_module(None, mod_range);
         self.eat_tok(p, TokenKind::OpenCurly)?;
-        let close_curly_range = loop {
+        loop {
             match self.cur(p).kind {
                 TokenKind::Eof => panic!("Unexpected eof while parsing scope"),
                 TokenKind::CloseCurly => {
-                    let close_curly_range = self.cur(p).range;
                     self.next(p);
-                    break close_curly_range;
+                    break;
                 },
                 _ => {
                     let item = self.parse_item(p)?;
@@ -1065,8 +1065,7 @@ impl Driver {
                     }
                 }
             }
-        };
-        self.end_module(module, source_info::concat(mod_range, close_curly_range));
+        }
         Ok(module)
     }
 
@@ -1084,15 +1083,14 @@ impl Driver {
 
         let extern_mod = self.code.hir.extern_mods.push(ExternMod::new(library_path));
 
-        let module = self.begin_module(Some(extern_mod));
+        let (_module_entry, module) = self.begin_module(Some(extern_mod), mod_range);
         self.eat_tok(p, TokenKind::OpenCurly)?;
-        let close_curly_range = loop {
+        loop {
             match self.cur(p).kind {
                 TokenKind::Eof => panic!("Unexpected eof while parsing scope"),
                 TokenKind::CloseCurly => {
-                    let close_curly_range = self.cur(p).range;
                     self.next(p);
-                    break close_curly_range;
+                    break;
                 },
                 _ => {
                     let item = self.parse_item(p)?;
@@ -1104,8 +1102,7 @@ impl Driver {
                     }
                 }
             }
-        };
-        self.end_module(module, source_info::concat(mod_range, close_curly_range));
+        }
         Ok(module)
     }
 
@@ -1203,6 +1200,7 @@ impl Driver {
     // Parses an open curly brace, then a list of Items, then a closing curly brace.
     fn parse_scope(&mut self, p: &mut Parser, additional_imper_decls: &[ImperScopedDecl]) -> ParseResult<(ImperScopeId, SourceRange)> {
         let scope = self.begin_imper_scope();
+        let scope_id = scope.id();
         for &decl in additional_imper_decls {
             self.imper_scoped_decl(decl);
         }
@@ -1235,8 +1233,8 @@ impl Driver {
                 }
             }
         };
-        self.end_imper_scope(last_was_expr);
-        Ok((scope, source_info::concat(open_curly_range, close_curly_range)))
+        self.end_imper_scope(scope, last_was_expr);
+        Ok((scope_id, source_info::concat(open_curly_range, close_curly_range)))
     }
 
     fn parse_comp_decl(&mut self, p: &mut Parser) -> ParseResult<DeclId> {
@@ -1335,7 +1333,7 @@ impl Driver {
 
         // TODO: end this later, after the ImperScope, so that generic parameters can be referred to from
         // inside the function as well.
-        self.end_generic_context(ns);
+        drop(ns);
 
         let decl_id = match self.cur(p).kind {
             TokenKind::OpenCurly => {
