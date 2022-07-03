@@ -481,14 +481,7 @@ macro_rules! bin_op {
 
 extern "C" fn interp_ffi_entry_point(func: u32, params: *const *const (), return_value_addr: *mut ()) {
     let func_id = FuncId::new(func as usize);
-    
-    let module = unsafe {
-        let user32 = CString::new("user32.dll").unwrap();
-        kernel32::LoadLibraryA(user32.as_ptr()) 
-    };
-    if module.is_null() {
-        panic!("unable to load library user32");
-    }
+
     let mut driver = DriverRef::new(&DRIVER);
 
     let func_ty = driver.read().code.mir.functions[func_id].ty.clone();
