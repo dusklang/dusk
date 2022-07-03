@@ -8,6 +8,7 @@ use std::fmt::Write;
 use std::cell::RefCell;
 use std::sync::RwLock;
 use std::borrow::Cow;
+#[cfg(windows)]
 use std::cmp::min;
 
 use indenter::indented;
@@ -28,6 +29,7 @@ use dire::{InternalField, internal_fields};
 use crate::driver::{DRIVER, Driver, DriverRef};
 use crate::mir::{FunctionRef, function_by_ref};
 use crate::typechecker::type_provider::TypeProvider;
+#[cfg(windows)]
 use crate::x64::*;
 
 #[derive(Debug, Clone)]
@@ -383,6 +385,7 @@ pub struct Interpreter {
     statics: HashMap<StaticId, Value>,
     allocations: HashMap<usize, alloc::Layout>,
     switch_cache: HashMap<OpId, HashMap<Box<[u8]>, BlockId>>,
+    #[cfg(windows)]
     inverse_thunk_cache: HashMap<FuncId, Allocation>,
     mode: InterpMode,
 }
@@ -393,6 +396,7 @@ impl Interpreter {
             statics: HashMap::new(),
             allocations: HashMap::new(),
             switch_cache: HashMap::new(),
+            #[cfg(windows)]
             inverse_thunk_cache: HashMap::new(),
             mode,
         }
@@ -479,6 +483,7 @@ macro_rules! bin_op {
     };
 }
 
+#[cfg_attr(not(windows), allow(unused))]
 extern "C" fn interp_ffi_entry_point(func: u32, params: *const *const (), return_value_addr: *mut ()) {
     let func_id = FuncId::new(func as usize);
 
@@ -528,7 +533,9 @@ extern "C" fn interp_ffi_entry_point(func: u32, params: *const *const (), return
 }
 
 // Thank you, Hagen von Eitzen: https://math.stackexchange.com/a/291494
+#[cfg(windows)]
 fn nearest_multiple_of_16(val: i32) -> i32 { ((val - 1) | 15) + 1 }
+#[cfg(windows)]
 fn nearest_multiple_of_8(val: i32) -> i32 { ((val - 1) | 7) + 1 }
 
 impl Driver {
@@ -661,6 +668,7 @@ impl Driver {
     ///         return return_value;
     ///     }
     ///     ```
+    #[cfg(windows)]
     pub fn fetch_inverse_thunk(&self, func_id: FuncId) -> Value {
         if let Some(alloc) = INTERP.read().unwrap().inverse_thunk_cache.get(&func_id) {
             return Value::from_usize(alloc.0.as_ptr::<()>() as usize);
@@ -755,8 +763,13 @@ impl Driver {
 
         val
     }
+    #[cfg(not(windows))]
+    pub fn fetch_inverse_thunk(&self, _func_id: FuncId) -> Value {
+        panic!("getting a function pointer to a Dusk function is not yet supported on non-Windows platforms");
+    }
 }
 impl DriverRef<'_> {
+    #[cfg(windows)]
     pub fn extern_call(&self, func_ref: ExternFunctionRef, mut args: Vec<Box<[u8]>>) -> Value {
         let indirect_args: Vec<*mut u8> = args.iter_mut()
             .map(|arg| arg.as_mut_ptr())
@@ -868,6 +881,10 @@ impl DriverRef<'_> {
 
             Value::Inline(return_val_storage)
         }
+    }
+    #[cfg(not(windows))]
+    pub fn extern_call(&self, _func_ref: ExternFunctionRef, mut _args: Vec<Box<[u8]>>) -> Value {
+        panic!("extern calls are not yet supported on non-Windows platforms");
     }
 }
 

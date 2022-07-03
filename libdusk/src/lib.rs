@@ -11,6 +11,7 @@ mod tir;
 mod hir;
 mod ty;
 mod typechecker;
+#[cfg(windows)]
 mod x64;
 mod rw_ref;
 
