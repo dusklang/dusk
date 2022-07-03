@@ -91,7 +91,7 @@ type AutoPopStack<T> = Arc<Mutex<RefCell<Vec<T>>>>;
 
 /// Because parser methods often exit early on failure, it previously would've been possible to push to the stack, exit
 /// due to an error, and never end up popping. This type prevents that scenario from happening, by automatically
-/// popping on drop.
+/// popping on drop, and checking that the expected value has been popped.
 /// TODO: this problem almost certainly exists right now for comp_decl_stack and scope_stack, so
 /// something similar should be applied to them as well.
 pub struct AutoPopStackEntry<T: Debug, Id=T> where Id: PartialEq<T> + Debug {
