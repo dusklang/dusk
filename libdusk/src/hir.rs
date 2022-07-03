@@ -1,6 +1,8 @@
+use std::cell::RefCell;
 use std::ffi::CString;
 use std::ops::Range;
 use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 
 use smallvec::{SmallVec, smallvec};
 use string_interner::{DefaultSymbol as Sym, Symbol, StringInterner};
@@ -84,11 +86,36 @@ struct CompDeclState {
     stored_decl_counter: IndexCounter<StoredDeclId>,
 }
 
+type GenericCtxStack = Arc<Mutex<RefCell<Vec<GenericCtxId>>>>;
+
+/// Because parser methods often exit early on failure, it previously would've been possible to push to the stack, exit
+/// due to an error, and never end up popping. This type prevents that scenario from happening, by automatically
+/// popping on drop.
+/// TODO: this problem almost certainly exists right now for comp_decl_stack and scope_stack, so
+/// something similar should be applied to them as well.
+pub struct GenericCtxStackEntry {
+    id: GenericCtxId,
+    stack: GenericCtxStack,
+}
+
+impl GenericCtxStackEntry {
+    fn new(id: GenericCtxId, stack: GenericCtxStack) -> Self {
+        Self { id: id, stack }
+    }
+}
+
+impl Drop for GenericCtxStackEntry {
+    fn drop(&mut self) {
+        let top = self.stack.lock().unwrap().borrow_mut().pop();
+        debug_assert_eq!(top, Some(self.id), "internal compiler error: popped incorrect generic ctx");
+    }
+}
+
 #[derive(Debug)]
 pub struct Builder {
     comp_decl_stack: Vec<CompDeclState>,
     scope_stack: Vec<ScopeState>,
-    generic_ctx_stack: Vec<GenericCtxId>,
+    generic_ctx_stack: GenericCtxStack,
     debug_marked_exprs: HashSet<ExprId>,
     pub generic_params: IndexCounter<GenericParamId>,
 
@@ -148,10 +175,9 @@ pub enum ConditionKind {
     Requirement, Guarantee,
 }
 
-
 impl Driver {
     pub fn initialize_hir(&mut self) {
-        self.hir.generic_ctx_stack.push(BLANK_GENERIC_CTX);
+        self.hir.generic_ctx_stack.lock().unwrap().borrow_mut().push(BLANK_GENERIC_CTX);
         self.add_expr(Expr::Void, SourceRange::default());
         self.add_expr(Expr::Error, SourceRange::default());
         self.add_expr(Expr::ConstTy(Type::Void), SourceRange::default());
@@ -170,7 +196,7 @@ impl Driver {
         // recoverable way, leaving the generic ctx stack in an invalid state. As long as this assertion passes
         // (and there are no other panics before we even get here), we're fine for now.
         // TODO: fix this for real.
-        assert_eq!(self.hir.generic_ctx_stack.len(), 1);
+        assert_eq!(self.hir.generic_ctx_stack.lock().unwrap().borrow().len(), 1);
     }
 
     pub fn debug_mark_expr(&mut self, expr: ExprId) {
@@ -186,7 +212,7 @@ impl Driver {
         // TODO: I used to require callers to explicitly pass in the generic ctx id, but it seems fine to just take it
         // from the top of the stack. Is there some major downside to this approach that I have since forgotten?
         // NOTE: also, see add_decl()
-        let generic_ctx = self.hir.generic_ctx_stack.last().copied().unwrap();
+        let generic_ctx = self.hir.generic_ctx_stack.lock().unwrap().borrow().last().copied().unwrap();
         let expr_id = self.code.hir.exprs.push(expr);
         let item_id = self.code.hir.items.push(Item::Expr(expr_id));
         self.code.hir.item_generic_ctxs.push_at(item_id, generic_ctx);
@@ -202,7 +228,7 @@ impl Driver {
         // TODO: I used to require callers to explicitly pass in the generic ctx id, but it seems fine to just take it
         // from the top of the stack. Is there some major downside to this approach that I have since forgotten?
         // NOTE: also, see add_expr()
-        let generic_ctx = self.hir.generic_ctx_stack.last().copied().unwrap();
+        let generic_ctx = self.hir.generic_ctx_stack.lock().unwrap().borrow().last().copied().unwrap();
         let decl_id = self.code.hir.decls.push(decl);
         self.code.hir.explicit_tys.push_at(decl_id, explicit_ty);
         self.code.hir.names.push_at(decl_id, name);
@@ -398,30 +424,21 @@ impl Driver {
         self.hir.scope_stack.push(ScopeState::Mod { id, namespace, extern_mod });
         self.add_expr(Expr::Mod { id }, SourceRange::default())
     }
-    fn push_generic_ctx(&mut self, ctx: impl FnOnce(GenericCtxId) -> GenericCtx) -> GenericCtxId {
-        let parent = self.hir.generic_ctx_stack.last().copied().unwrap();
+    fn push_generic_ctx(&mut self, ctx: impl FnOnce(GenericCtxId) -> GenericCtx) -> GenericCtxStackEntry {
+        let stack = self.hir.generic_ctx_stack.lock().unwrap();
+        let mut stack = stack.borrow_mut();
+        let parent = stack.last().copied().unwrap();
         let generic_ctx = self.code.hir.generic_ctxs.push(ctx(parent));
-        self.hir.generic_ctx_stack.push(generic_ctx);
-        generic_ctx
+        stack.push(generic_ctx);
+        GenericCtxStackEntry::new(generic_ctx, self.hir.generic_ctx_stack.clone())
     }
-    fn pop_generic_ctx(&mut self, ctx: GenericCtxId) {
-        let real_ctx = self.hir.generic_ctx_stack.pop();
-        if real_ctx != Some(ctx) {
-            panic!("internal compiler error: popped incorrect generic ctx");
-        }
-    }
-    pub fn begin_computed_decl_generic_ctx(&mut self, generic_param_list: GenericParamList) -> GenericCtxId {
+    pub fn begin_computed_decl_generic_ctx(&mut self, generic_param_list: GenericParamList) -> GenericCtxStackEntry {
         let generic_param_ids = (generic_param_list.ids.start.index()..generic_param_list.ids.end.index())
             .map(GenericParamId::new)
             .collect();
         self.push_generic_ctx(|parent| GenericCtx::Decl { parameters: generic_param_ids, parent })
     }
-    pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, generic_params: Range<DeclId>, generic_ctx: GenericCtxId, return_ty: ExprId, proto_range: SourceRange) -> DeclId {
-        // Silence unused variable warning. It is expected that begin_computed_decl_generic_ctx() is called before this
-        // function, and the return value is passed as the generic_ctx parameter. However, add_decl() reads whatever is
-        // on the top of the stack. As a loose form of enforcement, I take a generic_ctx parameter and then ignore it.
-        let _ = generic_ctx;
-
+    pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, generic_params: Range<DeclId>, return_ty: ExprId, proto_range: SourceRange) -> DeclId {
         // This is a placeholder value that gets replaced once the parameter declarations get allocated.
         let id = self.add_decl(Decl::Const(ExprId::new(u32::MAX as usize)), name, Some(return_ty), proto_range);
 
@@ -499,7 +516,7 @@ impl Driver {
 
         id
     }
-    pub fn begin_decl_ref_generic_ctx(&mut self) -> GenericCtxId {
+    pub fn begin_decl_ref_generic_ctx(&mut self) -> GenericCtxStackEntry {
         let id = self.code.hir.decl_refs.push(
             DeclRef {
                 name: self.hir.known_idents.invalid_declref,
@@ -509,20 +526,19 @@ impl Driver {
         );
         self.push_generic_ctx(|parent| GenericCtx::DeclRef { id, parent })
     }
-    pub fn decl_ref(&mut self, base_expr: Option<ExprId>, name: Sym, arguments: SmallVec<[ExprId; 2]>, has_parens: bool, range: SourceRange, generic_ctx: GenericCtxId) -> ExprId {
+    pub fn decl_ref(&mut self, base_expr: Option<ExprId>, name: Sym, arguments: SmallVec<[ExprId; 2]>, has_parens: bool, range: SourceRange, generic_ctx: GenericCtxStackEntry) -> ExprId {
         let namespace = match base_expr {
             Some(base_expr) => {
                 Namespace::MemberRef { base_expr }
             },
             None => self.cur_namespace(),
         };
-        let id = if let GenericCtx::DeclRef { id, .. } = self.code.hir.generic_ctxs[generic_ctx] {
+        let id = if let GenericCtx::DeclRef { id, .. } = self.code.hir.generic_ctxs[generic_ctx.id] {
             id
         } else {
             panic!("Invalid generic context passed in");
         };
         let expr = self.add_expr(Expr::DeclRef { id }, range);
-        self.pop_generic_ctx(generic_ctx);
         self.code.hir.decl_refs[id] = DeclRef {
             name,
             namespace,
@@ -740,7 +756,6 @@ impl Driver {
         } else {
             panic!("Unexpected decl kind when ending computed decl!");
         }
-        self.pop_generic_ctx(df!(decl_state.id.generic_ctx_id));
     }
     fn cur_namespace(&self) -> Namespace {
         match *self.hir.scope_stack.last().unwrap() {

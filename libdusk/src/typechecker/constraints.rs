@@ -426,7 +426,11 @@ impl ConstraintList {
             pref
         };
 
-        assert_eq!(self.generic_ctx, other.generic_ctx, "this might fail...");
+        // Apparently the generic contexts are not guaranteed to match; yuck.
+        // On second thought, this makes perfect sense.
+        // TODO: I probably need something a little more complex than a single GenericCtxId per ConstraintList (but
+        // hopefully something not too much more complex)
+        //   assert_eq!(self.generic_ctx, other.generic_ctx, "this might fail...");
         Self::new(trait_impls, one_of, preferred_type, self.generic_ctx)
     }
 }
