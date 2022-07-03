@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::ffi::CString;
+use std::fmt::Debug;
 use std::ops::Range;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -86,28 +87,32 @@ struct CompDeclState {
     stored_decl_counter: IndexCounter<StoredDeclId>,
 }
 
-type GenericCtxStack = Arc<Mutex<RefCell<Vec<GenericCtxId>>>>;
+type AutoPopStack<T> = Arc<Mutex<RefCell<Vec<T>>>>;
 
 /// Because parser methods often exit early on failure, it previously would've been possible to push to the stack, exit
 /// due to an error, and never end up popping. This type prevents that scenario from happening, by automatically
 /// popping on drop.
 /// TODO: this problem almost certainly exists right now for comp_decl_stack and scope_stack, so
 /// something similar should be applied to them as well.
-pub struct GenericCtxStackEntry {
-    id: GenericCtxId,
-    stack: GenericCtxStack,
+pub struct AutoPopStackEntry<T: Debug, Id=T> where Id: PartialEq<T> + Debug {
+    id: Id,
+    stack: AutoPopStack<T>,
 }
 
-impl GenericCtxStackEntry {
-    fn new(id: GenericCtxId, stack: GenericCtxStack) -> Self {
-        Self { id: id, stack }
+impl<T: Debug, Id: PartialEq<T> + Debug> AutoPopStackEntry<T, Id> {
+    fn new(id: Id, stack: AutoPopStack<T>) -> Self {
+        Self { id, stack }
     }
 }
 
-impl Drop for GenericCtxStackEntry {
+impl<T: Debug, Id: PartialEq<T> + Debug> Drop for AutoPopStackEntry<T, Id> {
     fn drop(&mut self) {
         let top = self.stack.lock().unwrap().borrow_mut().pop();
-        debug_assert_eq!(top, Some(self.id), "internal compiler error: popped incorrect generic ctx");
+        debug_assert_eq!(
+            self.id,
+            top.expect("internal compiler error: tried to pop from empty stack"),
+            "internal compiler error: popped incorrect value"
+        );
     }
 }
 
@@ -115,7 +120,7 @@ impl Drop for GenericCtxStackEntry {
 pub struct Builder {
     comp_decl_stack: Vec<CompDeclState>,
     scope_stack: Vec<ScopeState>,
-    generic_ctx_stack: GenericCtxStack,
+    generic_ctx_stack: AutoPopStack<GenericCtxId>,
     debug_marked_exprs: HashSet<ExprId>,
     pub generic_params: IndexCounter<GenericParamId>,
 
@@ -424,15 +429,15 @@ impl Driver {
         self.hir.scope_stack.push(ScopeState::Mod { id, namespace, extern_mod });
         self.add_expr(Expr::Mod { id }, SourceRange::default())
     }
-    fn push_generic_ctx(&mut self, ctx: impl FnOnce(GenericCtxId) -> GenericCtx) -> GenericCtxStackEntry {
+    fn push_generic_ctx(&mut self, ctx: impl FnOnce(GenericCtxId) -> GenericCtx) -> AutoPopStackEntry<GenericCtxId> {
         let stack = self.hir.generic_ctx_stack.lock().unwrap();
         let mut stack = stack.borrow_mut();
         let parent = stack.last().copied().unwrap();
         let generic_ctx = self.code.hir.generic_ctxs.push(ctx(parent));
         stack.push(generic_ctx);
-        GenericCtxStackEntry::new(generic_ctx, self.hir.generic_ctx_stack.clone())
+        AutoPopStackEntry::new(generic_ctx, self.hir.generic_ctx_stack.clone())
     }
-    pub fn begin_computed_decl_generic_ctx(&mut self, generic_param_list: GenericParamList) -> GenericCtxStackEntry {
+    pub fn begin_computed_decl_generic_ctx(&mut self, generic_param_list: GenericParamList) -> AutoPopStackEntry<GenericCtxId> {
         let generic_param_ids = (generic_param_list.ids.start.index()..generic_param_list.ids.end.index())
             .map(GenericParamId::new)
             .collect();
@@ -516,7 +521,7 @@ impl Driver {
 
         id
     }
-    pub fn begin_decl_ref_generic_ctx(&mut self) -> GenericCtxStackEntry {
+    pub fn begin_decl_ref_generic_ctx(&mut self) -> AutoPopStackEntry<GenericCtxId> {
         let id = self.code.hir.decl_refs.push(
             DeclRef {
                 name: self.hir.known_idents.invalid_declref,
@@ -526,7 +531,7 @@ impl Driver {
         );
         self.push_generic_ctx(|parent| GenericCtx::DeclRef { id, parent })
     }
-    pub fn decl_ref(&mut self, base_expr: Option<ExprId>, name: Sym, arguments: SmallVec<[ExprId; 2]>, has_parens: bool, range: SourceRange, generic_ctx: GenericCtxStackEntry) -> ExprId {
+    pub fn decl_ref(&mut self, base_expr: Option<ExprId>, name: Sym, arguments: SmallVec<[ExprId; 2]>, has_parens: bool, range: SourceRange, generic_ctx: AutoPopStackEntry<GenericCtxId>) -> ExprId {
         let namespace = match base_expr {
             Some(base_expr) => {
                 Namespace::MemberRef { base_expr }
