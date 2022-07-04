@@ -336,9 +336,7 @@ impl X64Encoder {
     #[allow(unused)]
     pub fn mov64(&mut self, dest: Reg64, src: Reg64) {
         self.begin_instr("mov", &dest, &src);
-        if dest.ext() || src.ext() {
-            self.push_any(RexBuilder::new().r_bit(src.ext()).b_bit(dest.ext()));
-        }
+        self.push_any(RexBuilder::new().r_bit(src.ext()).b_bit(dest.ext()));
         self.push(0x89);
         self.push(build_modrm(0b11, src.main_bits(), dest.main_bits()));
     }
@@ -371,12 +369,14 @@ impl X64Encoder {
         self.addr32_64_impl(false, 0x89, src, dest);
     }
 
+    #[allow(unused)]
     pub fn lea64(&mut self, dest: Reg64, src: impl Into<MemoryLoc64>) {
         let src = src.into();
         self.begin_instr("lea", &dest, &src);
         self.addr32_64_impl(true, 0x8d, dest, src);
     }
 
+    #[allow(unused)]
     pub fn mov32_imm(&mut self, dest: Reg32, src: i32) {
         self.begin_instr("mov", &dest, &src);
         if dest.ext() {

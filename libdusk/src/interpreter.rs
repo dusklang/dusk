@@ -880,9 +880,8 @@ impl DriverRef<'_> {
     }
     #[cfg(unix)]
     #[cfg(target_arch="x86_64")]
-    fn generate_thunk(&self, func: &ExternFunction, func_address: i64, args: Vec<Box<[u8]>>) -> region::Allocation {
+    fn generate_thunk(&self, func: &ExternFunction, func_address: i64, args: &[Box<[u8]>]) -> region::Allocation {
         let mut thunk = X64Encoder::new();
-        // TODO: implement push, pop, and reg-to-reg mov
         thunk.push64(Reg64::Rbp);
         thunk.mov64(Reg64::Rbp, Reg64::Rsp);
 
@@ -894,7 +893,7 @@ impl DriverRef<'_> {
 
         assert!(args.len() <= 6, "more than 6 arguments are not yet supported on UNIX platforms");
         assert_eq!(args.len(), func.ty.param_tys.len());
-        for i in (0..args.len()).rev() {
+        for i in 0..args.len() {
             // get pointer to arguments
             thunk.load64(Reg64::Rax, Reg64::Rbp - 8);
 
@@ -943,7 +942,7 @@ impl DriverRef<'_> {
             _ => todo!("return type {:?}", func.ty.return_ty),
         }
 
-        thunk.sub64_imm(Reg64::Rsp, extension);
+        thunk.add64_imm(Reg64::Rsp, extension);
         thunk.pop64(Reg64::Rbp);
         thunk.ret();
 
@@ -968,7 +967,7 @@ impl DriverRef<'_> {
         }
         let func_address: i64 = func_ptr as i64;
         
-        let thunk = self.generate_thunk(func, func_address, args);
+        let thunk = self.generate_thunk(func, func_address, &args);
         unsafe {
             let thunk_ptr = thunk.as_ptr::<u8>();
             type Thunk = fn(*const *mut u8, *mut u8);

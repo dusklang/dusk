@@ -1,0 +1,17 @@
+libc :: extern_mod("libc.so.6") {
+    fn puts(str: i8*): i32
+    fn fopen(filename: i8*, mode: i8*): FILE *mut
+    fn fread(buffer: void *mut, size: usize, count: usize, stream: FILE *mut): usize
+}
+
+FILE :: struct {}
+
+fn main() {
+    ignore :: libc.puts("This string is being printed using libc on Linux!")
+    ignore :: libc.puts("\nBelow is the source code to the program you are running:")
+    self :: libc.fopen("linux.dusk", "r")
+    buffer :: malloc(25000)
+    bytes_read :: libc.fread(buffer, 1, 25000, self)
+    *(((buffer as usize) + bytes_read) as i8 *mut) = 0
+    ignore :: libc.puts(buffer as i8*)
+}
