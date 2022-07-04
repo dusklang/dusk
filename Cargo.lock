@@ -519,6 +519,7 @@ dependencies = [
  "interprocess",
  "kernel32-sys",
  "lazy_static",
+ "libc",
  "num-bigint",
  "paste",
  "region",

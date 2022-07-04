@@ -17,9 +17,14 @@ num-bigint = "0.3"
 index_vec = "0.1.3"
 indenter = "0.3.2"
 region = "3.0"
-kernel32-sys = "0.2.2"
 display_adapter = { path = "../../display_adapter/display_adapter" }
 dire = { path = "../dire/" }
 dusk-proc-macros = { path = "../dusk-proc-macros" }
 lazy_static = "1.4.0"
 interprocess = "1.1.1"
+
+[target.'cfg(windows)'.dependencies]
+kernel32-sys = "0.2.2"
+
+[target.'cfg(not(windows))'.dependencies]
+libc = "0.2"

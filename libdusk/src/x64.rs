@@ -223,10 +223,10 @@ impl X64Encoder {
         }
     }
 
-    pub fn push_any<Val: IntoBytes>(&mut self, val: Val) {
+    fn push_any<Val: IntoBytes>(&mut self, val: Val) {
         self.data.extend(val.into_bytes());
     }
-    pub fn push(&mut self, byte: u8) {
+    fn push(&mut self, byte: u8) {
         self.push_any(byte);
     }
 
@@ -311,6 +311,36 @@ impl X64Encoder {
         let dest = dest.into();
         self.begin_instr("mov", &dest, &src);
         self.addr32_64_impl(true, 0x89, src, dest);
+    }
+
+    #[allow(unused)]
+    pub fn push64(&mut self, reg: Reg64) {
+        self.begin_instr_one_operand("push", &reg);
+        if reg.ext() {
+            // I call new32() here because push is an exception such that 64-bits is the default
+            self.push_any(RexBuilder::new32().b_bit(reg.ext()));
+        }
+        self.push(0x50 | reg.main_bits());
+    }
+
+    #[allow(unused)]
+    pub fn pop64(&mut self, reg: Reg64) {
+        self.begin_instr_one_operand("pop", &reg);
+        if reg.ext() {
+            // I call new32() here because pop is an exception such that 64-bits is the default
+            self.push_any(RexBuilder::new32().b_bit(reg.ext()));
+        }
+        self.push(0x58 | reg.main_bits());
+    }
+
+    #[allow(unused)]
+    pub fn mov64(&mut self, dest: Reg64, src: Reg64) {
+        self.begin_instr("mov", &dest, &src);
+        if dest.ext() || src.ext() {
+            self.push_any(RexBuilder::new().r_bit(src.ext()).b_bit(dest.ext()));
+        }
+        self.push(0x89);
+        self.push(build_modrm(0b11, src.main_bits(), dest.main_bits()));
     }
 
     pub fn load32(&mut self, dest: Reg32, src: impl Into<MemoryLoc64>) {
@@ -400,6 +430,21 @@ impl std::ops::Add<i32> for MemoryLoc64 {
 
     fn add(mut self, rhs: i32) -> Self::Output {
         self.offset += rhs;
+        self
+    }
+}
+impl std::ops::Sub<i32> for Reg64 {
+    type Output = MemoryLoc64;
+
+    fn sub(self, rhs: i32) -> Self::Output {
+        MemoryLoc64 { base: self, offset: -rhs }
+    }
+}
+impl std::ops::Sub<i32> for MemoryLoc64 {
+    type Output = MemoryLoc64;
+
+    fn sub(mut self, rhs: i32) -> Self::Output {
+        self.offset -= rhs;
         self
     }
 }

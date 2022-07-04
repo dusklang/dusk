@@ -1,7 +1,7 @@
 use std::alloc;
 use std::collections::HashMap;
 use std::convert::TryInto;
-use std::ffi::{CStr, CString};
+use std::ffi::{CStr, CString, c_void};
 use std::mem;
 use std::slice;
 use std::fmt::Write;
@@ -21,7 +21,7 @@ use lazy_static::lazy_static;
 
 use dire::arch::Arch;
 use dire::hir::{Intrinsic, ModScopeId, EnumId, GenericParamId, ExternFunctionRef};
-use dire::mir::{Const, Instr, InstrId, FuncId, StaticId};
+use dire::mir::{Const, Instr, InstrId, FuncId, StaticId, ExternFunction};
 use dire::ty::{Type, InternalType, FunctionType, QualType, IntWidth, FloatWidth, StructType};
 use dire::{OpId, BlockId};
 use dire::{InternalField, internal_fields};
@@ -29,7 +29,6 @@ use dire::{InternalField, internal_fields};
 use crate::driver::{DRIVER, Driver, DriverRef};
 use crate::mir::{FunctionRef, function_by_ref};
 use crate::typechecker::type_provider::TypeProvider;
-#[cfg(windows)]
 use crate::x64::*;
 
 #[derive(Debug, Clone)]
@@ -768,27 +767,36 @@ impl Driver {
         panic!("getting a function pointer to a Dusk function is not yet supported on non-Windows platforms");
     }
 }
+
+#[cfg(windows)]
+unsafe fn open_dylib(path: *const i8) -> *mut c_void {
+    kernel32::LoadLibraryA(path) as *mut _
+}
+#[cfg(not(windows))]
+unsafe fn open_dylib(path: *const i8) -> *mut c_void {
+    libc::dlopen(path, libc::RTLD_LAZY)
+}
+#[cfg(windows)]
+unsafe fn get_dylib_symbol(dylib: *mut c_void, name: *const i8) -> *const c_void {
+    kernel32::GetProcAddress(dylib as *mut _, name)
+}
+#[cfg(not(windows))]
+unsafe fn get_dylib_symbol(dylib: *mut c_void, name: *const i8) -> *const c_void {
+    libc::dlsym(dylib, name)
+}
+#[cfg(windows)]
+unsafe fn free_dylib(dylib: *mut c_void) {
+    kernel32::FreeLibrary(dylib as *mut _);
+}
+#[cfg(not(windows))]
+unsafe fn free_dylib(dylib: *mut c_void) {
+    libc::dlclose(dylib);
+}
+
 impl DriverRef<'_> {
     #[cfg(windows)]
-    pub fn extern_call(&self, func_ref: ExternFunctionRef, mut args: Vec<Box<[u8]>>) -> Value {
-        let indirect_args: Vec<*mut u8> = args.iter_mut()
-            .map(|arg| arg.as_mut_ptr())
-            .collect();
-        
-        let library = &self.read().code.mir.extern_mods[&func_ref.extern_mod];
-        let func = &library.imported_functions[func_ref.index];
-        // TODO: cache library and proc addresses (and thunks, for that matter)
-        let module = unsafe { kernel32::LoadLibraryA(library.library_path.as_ptr()) };
-        if module.is_null() {
-            panic!("unable to load library {:?}", library.library_path);
-        }
-        let func_name = CString::new(func.name.clone()).unwrap();
-        let func_ptr = unsafe { kernel32::GetProcAddress(module, func_name.as_ptr()) };
-        if func_ptr.is_null() {
-            panic!("unable to load function {:?} from library {:?}", func_name, library.library_path);
-        }
-        let func_address: i64 = func_ptr as i64;
-        
+    #[cfg(target_arch="x86_64")]
+    fn generate_thunk(&self, func: &ExternFunction, func_address: i64, args: Vec<Box<[u8]>>) -> region::Allocation {
         let mut thunk = X64Encoder::new();
         thunk.store64(Reg64::Rsp + 16, Reg64::Rdx);
         thunk.store64(Reg64::Rsp + 8, Reg64::Rcx);
@@ -809,7 +817,7 @@ impl DriverRef<'_> {
 
             match func.ty.param_tys[i] {
                 Type::Int { width: IntWidth::W16, .. } => {
-                    // Read i'th argument as 32-bit value
+                    // Read i'th argument as 16-bit value
                     let registers = [Reg16::Cx, Reg16::Dx, Reg16::R8w, Reg16::R9w, Reg16::Ax];
                     thunk.load16(registers[min(i, 4)], Reg64::Rax);
 
@@ -868,7 +876,99 @@ impl DriverRef<'_> {
         thunk.add64_imm(Reg64::Rsp, extension);
         thunk.ret();
 
-        let thunk = thunk.allocate();
+        thunk.allocate()
+    }
+    #[cfg(unix)]
+    #[cfg(target_arch="x86_64")]
+    fn generate_thunk(&self, func: &ExternFunction, func_address: i64, args: Vec<Box<[u8]>>) -> region::Allocation {
+        let mut thunk = X64Encoder::new();
+        // TODO: implement push, pop, and reg-to-reg mov
+        thunk.push64(Reg64::Rbp);
+        thunk.mov64(Reg64::Rbp, Reg64::Rsp);
+
+        // Copy the two arguments to the stack
+        let extension = 16;
+        thunk.sub64_imm(Reg64::Rsp, extension);
+        thunk.store64(Reg64::Rbp - 8, Reg64::Rdi);
+        thunk.store64(Reg64::Rbp - 16, Reg64::Rsi);
+
+        assert!(args.len() <= 6, "more than 6 arguments are not yet supported on UNIX platforms");
+        assert_eq!(args.len(), func.ty.param_tys.len());
+        for i in (0..args.len()).rev() {
+            // get pointer to arguments
+            thunk.load64(Reg64::Rax, Reg64::Rbp - 8);
+
+            // get pointer to i'th argument
+            thunk.load64(Reg64::Rax, Reg64::Rax + (i as i32 * 8));
+
+            match func.ty.param_tys[i] {
+                Type::Int { width: IntWidth::W16, .. } => {
+                    // Read i'th argument as 16-bit value
+                    let registers = [Reg16::Di, Reg16::Si, Reg16::Dx, Reg16::Cx, Reg16::R8w, Reg16::R9w];
+                    thunk.load16(registers[i], Reg64::Rax);
+                },
+                Type::Int { width: IntWidth::W32, .. } => {
+                    // Read i'th argument as 32-bit value
+                    let registers = [Reg32::Edi, Reg32::Esi, Reg32::Edx, Reg32::Ecx, Reg32::R8d, Reg32::R9d];
+                    thunk.load32(registers[i], Reg64::Rax);
+                },
+                Type::Pointer(_) | Type::Int { width: IntWidth::W64 | IntWidth::Pointer, .. } => {
+                    assert_eq!(self.read().arch.pointer_size(), 64);
+                    // Read i'th argument as 64-bit value
+                    let registers = [Reg64::Rdi, Reg64::Rsi, Reg64::Rdx, Reg64::Rcx, Reg64::R8, Reg64::R9];
+                    thunk.load64(registers[i], Reg64::Rax);
+                },
+                _ => todo!("parameter type {:?}", func.ty.param_tys[i]),
+            }
+        }
+
+        // Call the function
+        thunk.movabs(Reg64::R10, func_address);
+        thunk.call_direct(Reg64::R10);
+
+        // get pointer to return value
+        if !matches!(*func.ty.return_ty, Type::Void) {
+            thunk.load64(Reg64::Rcx, Reg64::Rbp - 16);
+        }
+
+        match &*func.ty.return_ty {
+            Type::Int { width: IntWidth::W16, .. } => thunk.store16(Reg64::Rcx, Reg16::Ax),
+            Type::Int { width: IntWidth::W32, .. } => thunk.store32(Reg64::Rcx, Reg32::Eax),
+            Type::Pointer(_) | Type::Int { width: IntWidth::W64 | IntWidth::Pointer, .. } => {
+                assert_eq!(self.read().arch.pointer_size(), 64);
+                thunk.store64(Reg64::Rcx, Reg64::Rax);
+            },
+            Type::Void => {},
+
+            _ => todo!("return type {:?}", func.ty.return_ty),
+        }
+
+        thunk.sub64_imm(Reg64::Rsp, extension);
+        thunk.pop64(Reg64::Rbp);
+        thunk.ret();
+
+        thunk.allocate()
+    }
+    pub fn extern_call(&self, func_ref: ExternFunctionRef, mut args: Vec<Box<[u8]>>) -> Value {
+        let indirect_args: Vec<*mut u8> = args.iter_mut()
+            .map(|arg| arg.as_mut_ptr())
+            .collect();
+        
+        let library = &self.read().code.mir.extern_mods[&func_ref.extern_mod];
+        let func = &library.imported_functions[func_ref.index];
+        // TODO: cache library and proc addresses (and thunks, for that matter)
+        let dylib = unsafe { open_dylib(library.library_path.as_ptr()) };
+        if dylib.is_null() {
+            panic!("unable to load library {:?}", library.library_path);
+        }
+        let func_name = CString::new(func.name.clone()).unwrap();
+        let func_ptr = unsafe { get_dylib_symbol(dylib, func_name.as_ptr()) };
+        if func_ptr.is_null() {
+            panic!("unable to load function {:?} from library {:?}", func_name, library.library_path);
+        }
+        let func_address: i64 = func_ptr as i64;
+        
+        let thunk = self.generate_thunk(func, func_address, args);
         unsafe {
             let thunk_ptr = thunk.as_ptr::<u8>();
             type Thunk = fn(*const *mut u8, *mut u8);
@@ -877,14 +977,10 @@ impl DriverRef<'_> {
             return_val_storage.resize(self.read().size_of(&func.ty.return_ty), 0);
             thunk(indirect_args.as_ptr(), return_val_storage.as_mut_ptr());
 
-            kernel32::FreeLibrary(module);
+            free_dylib(dylib);
 
             Value::Inline(return_val_storage)
         }
-    }
-    #[cfg(not(windows))]
-    pub fn extern_call(&self, _func_ref: ExternFunctionRef, mut _args: Vec<Box<[u8]>>) -> Value {
-        panic!("extern calls are not yet supported on non-Windows platforms");
     }
 }
 
