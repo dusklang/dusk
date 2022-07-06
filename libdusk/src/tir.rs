@@ -202,6 +202,7 @@ pub enum ExprNamespace {
     Struct(StructId),
     Enum(EnumId),
     Internal(InternalNamespace),
+    Error,
 }
 
 #[derive(Debug, Default)]
@@ -305,8 +306,9 @@ impl Driver {
             _ => panic!("Can only have requirements clause on computed decls"),
         }
     }
-    // Returns the overloads for a declref, if they are known (they won't be if it's an unresolved member ref)
-    pub fn find_overloads(&self, decl_ref: &hir::DeclRef) -> Vec<DeclId> {
+    /// Returns the overloads for a declref, if they are known (they won't be if it's an unresolved member ref)
+    /// Returns None if the declref is a memberref AND the memberref base expression has an error (e.g., invalid variable reference)
+    pub fn find_overloads(&self, decl_ref: &hir::DeclRef) -> Option<Vec<DeclId>> {
         let mut overloads = HashSet::new();
 
         let mut started_at_mod_scope = false;
@@ -345,6 +347,7 @@ impl Driver {
                                 ExprNamespace::Struct(id) => self.find_overloads_in_struct(decl_ref, id, &mut overloads),
                                 ExprNamespace::Enum(id) => self.find_overloads_in_enum(decl_ref, id, &mut overloads),
                                 ExprNamespace::Internal(internal) => self.find_overloads_in_internal(decl_ref, internal, &mut overloads),
+                                ExprNamespace::Error => return None,
                             }
                         }
                     }
@@ -385,14 +388,14 @@ impl Driver {
             root_namespace = false;
         }
 
-        overloads.into_iter().collect()
+        Some(overloads.into_iter().collect())
     }
 
     fn add_types_2_to_4_deps_to_member_ref(&mut self, id: ItemId, decl_ref_id: DeclRefId) {
         add_eval_dep_injector!(self, add_eval_dep);
 
         let decl_ref = &self.code.hir.decl_refs[decl_ref_id];
-        let overloads = self.find_overloads(decl_ref);
+        let overloads = self.find_overloads(decl_ref).unwrap_or_default();
         for overload in overloads {
             match df!(overload.hir) {
                 hir::Decl::Computed { ref param_tys, .. } => {

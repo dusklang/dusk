@@ -31,6 +31,8 @@ macro_rules! declare_tp_fields {
         $receiver! {
             /// The list of overloads for each decl ref
             overloads overloads: DeclRefId -> Overloads,
+            /// Whether each declref's overload list was affected by an error (e.g., accessing a field on a nonexistent variable)
+            decl_ref_has_error decl_ref_has_error: DeclRefId -> bool,
             /// The selected overload for each decl ref
             selected_overloads selected_overload: DeclRefId -> Option<DeclId>,
             // The list of expressions that the given declref must iterate through to substitute its generic arguments into their types

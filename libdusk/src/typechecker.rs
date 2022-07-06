@@ -722,7 +722,13 @@ impl tir::Expr<tir::Import> {
 impl tir::Expr<tir::DeclRef> {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         // Initialize overloads
-        let overload_decls = driver.find_overloads(&driver.code.hir.decl_refs[self.decl_ref_id]);
+        let overload_decls = match driver.find_overloads(&driver.code.hir.decl_refs[self.decl_ref_id]) {
+            Some(overloads) => overloads,
+            None => {
+                *tp.decl_ref_has_error_mut(self.decl_ref_id) = true;
+                Default::default()
+            },
+        };
         let mut overloads = Vec::new();
         for &overload_decl in &overload_decls {
             overloads.push(overload_decl);
@@ -826,10 +832,12 @@ impl tir::Expr<tir::DeclRef> {
             let name = driver.code.hir.decl_refs[self.decl_ref_id].name;
             let name = driver.interner.resolve(name).unwrap();
             if overloads.nonviable_overloads.is_empty() {
-                driver.errors.push(
-                    Error::new(format!("no declarations named \"{}\" found in scope", name))
-                        .adding_primary_range(driver.get_range(self.id), "referenced here")
-                );
+                if !*tp.decl_ref_has_error(self.decl_ref_id) {
+                    driver.errors.push(
+                        Error::new(format!("no declarations named \"{}\" found in scope", name))
+                            .adding_primary_range(driver.get_range(self.id), "referenced here")
+                    );
+                }
             } else {
                 let mut err = Error::new(format!("no matching declarations named \"{}\" found in scope", name))
                     .adding_primary_range(driver.get_range(self.id), "referenced here");
@@ -1558,6 +1566,7 @@ impl DriverRef<'_> {
                     Type::Internal(ty) => match ty {
                         InternalType::StringLiteral => ExprNamespace::Internal(InternalNamespace::StringLiteral),
                     },
+                    Type::Error => ExprNamespace::Error,
                     _ => continue,
                 };
                 self.write().tir.expr_namespaces.entry(unit.main_expr).or_default().push(ns);
