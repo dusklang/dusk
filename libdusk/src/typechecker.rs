@@ -1539,43 +1539,48 @@ impl DriverRef<'_> {
         for (num, unit) in units.mock_units.iter().enumerate() {
             let mut mock_tp = MockTypeProvider::new(tp);
             self.write().run_pass_1(&unit.items, UnitKind::Mock(num), 0, &mut mock_tp);
-            let one_of = mock_tp.constraints(unit.main_expr)
+            let constraints = mock_tp.constraints(unit.main_expr);
+            let one_of = constraints
                 .one_of().iter()
                 .map(|ty| ty.ty.clone())
                 .collect::<Vec<_>>();
-            for ty in one_of {
-                let ns = match ty {
-                    Type::Mod => {
-                        self.write().run_pass_2(&unit.items, UnitKind::Mock(num), &mut mock_tp);
-                        let module = self.eval_expr(unit.main_expr, &mock_tp);
-                        match module {
-                            Const::Mod(scope) => ExprNamespace::Mod(scope),
-                            _ => panic!("Unexpected const kind, expected module!"),
-                        }
-                    },
-                    Type::Struct(strukt) => ExprNamespace::Struct(strukt.identity),
-                    Type::Pointer(ref pointee) => {
-                        match &pointee.ty {
-                            Type::Struct(strukt) => ExprNamespace::Struct(strukt.identity),
-                            _ => continue,
-                        }
-                    },
-                    Type::Ty => {
-                        self.write().run_pass_2(&unit.items, UnitKind::Mock(num), &mut mock_tp);
-                        let ty = self.eval_expr(unit.main_expr, &mock_tp);
-
-                        match ty {
-                            Const::Ty(Type::Enum(id)) => ExprNamespace::Enum(id),
-                            _ => panic!("Unexpected const kind, expected enum!"),
-                        }
-                    },
-                    Type::Internal(ty) => match ty {
-                        InternalType::StringLiteral => ExprNamespace::Internal(InternalNamespace::StringLiteral),
-                    },
-                    Type::Error => ExprNamespace::Error,
-                    _ => continue,
-                };
-                self.write().tir.expr_namespaces.entry(unit.main_expr).or_default().push(ns);
+            if constraints.is_error() {
+                self.write().tir.expr_namespaces.entry(unit.main_expr).or_default().push(ExprNamespace::Error);
+            } else {
+                for ty in one_of {
+                    let ns = match ty {
+                        Type::Mod => {
+                            self.write().run_pass_2(&unit.items, UnitKind::Mock(num), &mut mock_tp);
+                            let module = self.eval_expr(unit.main_expr, &mock_tp);
+                            match module {
+                                Const::Mod(scope) => ExprNamespace::Mod(scope),
+                                _ => panic!("Unexpected const kind, expected module!"),
+                            }
+                        },
+                        Type::Struct(strukt) => ExprNamespace::Struct(strukt.identity),
+                        Type::Pointer(ref pointee) => {
+                            match &pointee.ty {
+                                Type::Struct(strukt) => ExprNamespace::Struct(strukt.identity),
+                                _ => continue,
+                            }
+                        },
+                        Type::Ty => {
+                            self.write().run_pass_2(&unit.items, UnitKind::Mock(num), &mut mock_tp);
+                            let ty = self.eval_expr(unit.main_expr, &mock_tp);
+    
+                            match ty {
+                                Const::Ty(Type::Enum(id)) => ExprNamespace::Enum(id),
+                                _ => panic!("Unexpected const kind, expected enum!"),
+                            }
+                        },
+                        Type::Internal(ty) => match ty {
+                            InternalType::StringLiteral => ExprNamespace::Internal(InternalNamespace::StringLiteral),
+                        },
+                        Type::Error => ExprNamespace::Error,
+                        _ => continue,
+                    };
+                    self.write().tir.expr_namespaces.entry(unit.main_expr).or_default().push(ns);
+                }
             }
         }
         Ok(())
