@@ -955,21 +955,27 @@ impl tir::Expr<tir::Call> {
         let pref = tp.constraints(self.callee).preferred_type().cloned();
         
         // Select callee function type.
+        driver.flush_errors();
         let callee_ty = pref.as_ref().cloned()
             .filter(|pref| callee_one_of.iter().any(|ty| ty.trivially_convertible_to(pref) || pref.trivially_convertible_to(ty)))
-            .unwrap_or_else(|| callee_one_of.iter().next().unwrap().clone());
-        let param_tys = &callee_ty.ty.as_function().unwrap().param_tys;
-        debug_assert_eq!(param_tys.len(), self.args.len());
-        for (&arg, param_ty) in self.args.iter().zip(param_tys) {
-            if let Type::Inout(param_ty) = param_ty {
-                tp.constraints_mut(arg).set_to(QualType { ty: param_ty.as_ref().clone(), is_mut: true });
-            } else {
-                tp.constraints_mut(arg).set_to(param_ty);
+            .or_else(|| callee_one_of.iter().next().cloned());
+        if let Some(callee_ty) = callee_ty {
+            let param_tys = &callee_ty.ty.as_function().unwrap().param_tys;
+            debug_assert_eq!(param_tys.len(), self.args.len());
+            for (&arg, param_ty) in self.args.iter().zip(param_tys) {
+                if let Type::Inout(param_ty) = param_ty {
+                    tp.constraints_mut(arg).set_to(QualType { ty: param_ty.as_ref().clone(), is_mut: true });
+                } else {
+                    tp.constraints_mut(arg).set_to(param_ty);
+                }
             }
+            tp.constraints_mut(self.callee).set_to(callee_ty);
+        } else {
+            // TODO: maybe push an error here? Right now I don't bother because DeclRef does it for me.
+            tp.constraints_mut(self.callee).set_to(Type::Error);
         }
         tp.generic_substitution_list_mut(decl_ref_id).extend(&self.args);
 
-        tp.constraints_mut(self.callee).set_to(callee_ty);
         if let Some(pref) = pref {
             tp.constraints_mut(self.callee).set_preferred_type(pref);
         }
