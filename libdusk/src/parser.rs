@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use smallvec::{SmallVec, smallvec};
 
 use string_interner::DefaultSymbol as Sym;
@@ -1112,6 +1114,7 @@ impl Driver {
 
         let mut fields = Vec::new();
         let (expr, strukt) = self.reserve_struct();
+        let mut used_names = HashMap::new();
         let close_curly_range = loop {
             match self.cur(p).kind {
                 TokenKind::Eof => panic!("Unexpected eof while parsing struct expression"),
@@ -1129,6 +1132,16 @@ impl Driver {
                         let index = fields.len();
                         let range = source_info::concat(ident_range, ty_range);
                         fields.push(self.field_decl(name, strukt, ty, index, range));
+                        if let Some(first_range) = used_names.get(&name).copied() {
+                            let name_str = self.interner.resolve(name).unwrap();
+                            self.errors.push(
+                                Error::new(format!("field with name '{}' already exists", name_str))
+                                    .adding_primary_range(ident_range, "")
+                                    .adding_secondary_range(first_range, format!("first field with name '{}' here", name_str))
+                            )
+                        } else {
+                            used_names.insert(name, ident_range);
+                        }
                     } else {
                         panic!("Unexpected token {:?}, expected field name", self.cur(p).kind);
                     }
