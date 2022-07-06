@@ -20,7 +20,7 @@
                 }
             },
             "args": ["main.dusk"],
-            "cwd": "../prettyboy"
+            "cwd": "../dusk-windows"
             // "args": [
             //     "open_a_window.dusk"
             // ]

@@ -828,16 +828,14 @@ impl tir::Expr<tir::DeclRef> {
                 tp.constraints_mut(expr).substitute_generic_args(&decl.generic_params, &generic_args);
             }
             (Some(overload), Some(generic_args))
-        } else {
+        } else if !*tp.decl_ref_has_error(self.decl_ref_id) {
             let name = driver.code.hir.decl_refs[self.decl_ref_id].name;
             let name = driver.interner.resolve(name).unwrap();
             if overloads.nonviable_overloads.is_empty() {
-                if !*tp.decl_ref_has_error(self.decl_ref_id) {
-                    driver.errors.push(
-                        Error::new(format!("no declarations named \"{}\" found in scope", name))
-                            .adding_primary_range(driver.get_range(self.id), "referenced here")
-                    );
-                }
+                driver.errors.push(
+                    Error::new(format!("no declarations named \"{}\" found in scope", name))
+                        .adding_primary_range(driver.get_range(self.id), "referenced here")
+                );
             } else {
                 let mut err = Error::new(format!("no matching declarations named \"{}\" found in scope", name))
                     .adding_primary_range(driver.get_range(self.id), "referenced here");
@@ -847,6 +845,8 @@ impl tir::Expr<tir::DeclRef> {
                 }
                 driver.errors.push(err);
             }
+            (None, None)
+        } else {
             (None, None)
         };
 
@@ -928,6 +928,11 @@ impl tir::Expr<tir::Call> {
                     *generic_param_constraints = generic_param_constraints.intersect_with_in_generic_context(&constraints, &decl.generic_params);
                 }
             }
+        }
+
+        // If any of the arguments have errors, propagate that to the declref
+        if self.args.iter().any(|&arg| tp.constraints(arg).is_error()) {
+            *tp.decl_ref_has_error_mut(decl_ref_id) = true;
         }
 
         *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(one_of), pref, ef!(driver, self.id.generic_ctx_id));
