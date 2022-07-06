@@ -1351,9 +1351,10 @@ impl tir::Stmt {
                 ),
             }
             driver.errors.push(error);
+        } else {
+            let constraints = tp.constraints_mut(self.root_expr);
+            constraints.set_to(Type::Void);
         }
-        let constraints = tp.constraints_mut(self.root_expr);
-        constraints.set_to(Type::Void);
     }
 
     fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut impl TypeProvider) {
