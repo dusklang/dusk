@@ -1137,7 +1137,7 @@ impl Driver {
                             self.errors.push(
                                 Error::new(format!("field with name '{}' already exists", name_str))
                                     .adding_primary_range(ident_range, "")
-                                    .adding_secondary_range(first_range, format!("first field with name '{}' here", name_str))
+                                    .adding_secondary_range(first_range, "first field with that name here")
                             )
                         } else {
                             used_names.insert(name, ident_range);
