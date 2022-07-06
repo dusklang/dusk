@@ -796,7 +796,7 @@ unsafe fn free_dylib(dylib: *mut c_void) {
 impl DriverRef<'_> {
     #[cfg(windows)]
     #[cfg(target_arch="x86_64")]
-    fn generate_thunk(&self, func: &ExternFunction, func_address: i64, args: Vec<Box<[u8]>>) -> region::Allocation {
+    fn generate_thunk(&self, func: &ExternFunction, func_address: i64, args: &[Box<[u8]>]) -> region::Allocation {
         let mut thunk = X64Encoder::new();
         thunk.store64(Reg64::Rsp + 16, Reg64::Rdx);
         thunk.store64(Reg64::Rsp + 8, Reg64::Rcx);
