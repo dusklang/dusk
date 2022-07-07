@@ -1225,8 +1225,9 @@ impl tir::Expr<tir::StructLit> {
                         } else if let Some(err) = driver.can_unify_to(tp, maatch, field.ty).err() {
                             successful = false;
                             let range = driver.get_range(maatch);
+                            let field_ty = tp.get_evaluated_type(field.ty).clone();
                             let mut error = Error::new("Invalid struct field type")
-                                .adding_primary_range(range, "");
+                                .adding_primary_range(range, format!("expected {:?}", field_ty));
                             match err {
                                 UnificationError::InvalidChoice(choices)
                                     => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
