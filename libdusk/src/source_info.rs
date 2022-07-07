@@ -11,6 +11,8 @@ use dire::hir::{ExprId, DeclId, ItemId, Item};
 use dire::OpId;
 use dire::source_info::{SourceRange, SourceFileId};
 
+use lspower::lsp::Url;
+
 use crate::driver::Driver;
 use crate::index_vec::*;
 
@@ -45,6 +47,8 @@ pub struct SourceFile {
     /// The starting position of each line (relative to this source file!!!).
     pub lines: Vec<usize>,
     pub path: PathBuf,
+    // TODO: this is kind of redundant with path, but is used for dls
+    pub url: Option<Url>,
 }
 
 #[derive(Debug)]
@@ -110,7 +114,7 @@ impl SourceMap {
         let src = src(&path)?;
         let file_len = src.len();
         let id = self.files.push(
-            SourceFile { src, lines: vec![0], path: path.clone() }
+            SourceFile { src, lines: vec![0], path: path.clone(), url: None }
         );
         let had_result = self.paths.insert(path, id);
         debug_assert_eq!(had_result, None);

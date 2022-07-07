@@ -520,6 +520,7 @@ dependencies = [
  "kernel32-sys",
  "lazy_static",
  "libc",
+ "lspower",
  "num-bigint",
  "paste",
  "region",
