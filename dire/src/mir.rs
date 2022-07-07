@@ -186,7 +186,7 @@ impl Const {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct InstrNamespace {
     name_usages: HashMap<String, u16>,
 }
@@ -203,7 +203,7 @@ impl InstrNamespace {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Function {
     pub name: Option<Sym>,
     pub ty: FunctionType,

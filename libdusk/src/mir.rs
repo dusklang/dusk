@@ -1669,9 +1669,12 @@ impl DriverRef<'_> {
         };
 
         let true_bb = self.write().create_bb(b);
-        let false_bb = self.write().create_bb(b);
+        let mut false_bb = self.write().create_bb(b);
         let post_bb = if else_scope.is_some() {
             self.write().create_bb(b)
+        } else if let ControlDest::Block(block) = ctx.control {
+            false_bb = block;
+            block
         } else {
             false_bb
         };
@@ -1695,7 +1698,11 @@ impl DriverRef<'_> {
                 if let Expr::If { condition, then_scope, else_scope } = ef!(d, terminal_expr.hir) {
                     drop(d);
                     let true_bb = self.write().create_bb(b);
-                    let false_bb = self.write().create_bb(b);
+                    let false_bb = if else_scope.is_some() {
+                        self.write().create_bb(b)
+                    } else {
+                        post_bb
+                    };
                     self.build_if_expr_recurse(b, condition, then_scope, result_location, true_bb, false_bb, post_bb, scope_ctx, tp);
                     next_scope = else_scope;
                     next_bb = false_bb;
