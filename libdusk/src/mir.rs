@@ -980,7 +980,7 @@ impl DriverRef<'_> {
                         self.write().push_instr(&mut b, Instr::Ret(result), result);
                         self.write().end_current_bb(&b);
                     },
-                    _ => unimplemented!(),
+                    _ => unimplemented!("{:?}", instruction),
                 }
                 None
             },

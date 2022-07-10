@@ -11,7 +11,7 @@ use dire::hir::{ExprId, DeclId, ItemId, Item};
 use dire::OpId;
 use dire::source_info::{SourceRange, SourceFileId};
 
-use lspower::lsp::Url;
+use lsp_types::Url;
 
 use crate::driver::Driver;
 use crate::index_vec::*;
@@ -105,7 +105,7 @@ impl SourceMap {
         self.file_ends[file.index()]
     }
 
-    fn add_file_impl(&mut self, path: impl Into<PathBuf>, src: impl FnOnce(&Path) -> io::Result<String>) -> io::Result<SourceFileId> {
+    fn add_file_impl(&mut self, path: impl Into<PathBuf>, src: impl FnOnce(&Path) -> io::Result<String>, url: Option<Url>) -> io::Result<SourceFileId> {
         let path = fs::canonicalize(path.into())?;
         if let Some(&id) = self.paths.get(&path) {
             return Ok(id);
@@ -114,7 +114,7 @@ impl SourceMap {
         let src = src(&path)?;
         let file_len = src.len();
         let id = self.files.push(
-            SourceFile { src, lines: vec![0], path: path.clone(), url: None }
+            SourceFile { src, lines: vec![0], path: path.clone(), url }
         );
         let had_result = self.paths.insert(path, id);
         debug_assert_eq!(had_result, None);
@@ -125,11 +125,11 @@ impl SourceMap {
     }
 
     pub fn add_file(&mut self, path: impl Into<PathBuf>) -> io::Result<SourceFileId> {
-        self.add_file_impl(path, |path| fs::read_to_string(path))
+        self.add_file_impl(path, |path| fs::read_to_string(path), None)
     }
 
-    pub fn add_file_with_src(&mut self, path: impl Into<PathBuf>, src: String) -> io::Result<SourceFileId> {
-        self.add_file_impl(path, |_| Ok(src))
+    pub fn add_file_with_src(&mut self, url: &Url, src: String, ) -> io::Result<SourceFileId> {
+        self.add_file_impl(url.to_file_path().unwrap(), |_| Ok(src), Some(url.clone()))
     }
 
     fn lookup_file(&self, range: SourceRange) -> (SourceFileId, Range<usize>) {

@@ -687,10 +687,22 @@ impl Driver {
         let scope_stack = self.hir.scope_stack.lock().unwrap();
         let scope_stack = scope_stack.borrow();
         let state = scope_stack.last();
-        if let Some(&ScopeState::Mod { id, .. }) = state {
-            self.code.hir.mod_scopes[id].decl_groups.entry(name).or_default().push(decl);
-        } else {
-            panic!("tried to add module-scoped declaration in a non-module scope {:?}", state);
+        match *state.unwrap() {
+            ScopeState::Mod { id, .. } => {
+                self.code.hir.mod_scopes[id].decl_groups.entry(name).or_default().push(decl);
+            },
+
+            // This is a hack to allow intrinsics to be added for comparing enum types
+            ScopeState::GenericContext(id) => {
+                match self.code.hir.generic_context_ns[id].parent {
+                    Some(Namespace::Mod(id)) => {
+                        let id = self.code.hir.mod_ns[id].scope;
+                        self.code.hir.mod_scopes[id].decl_groups.entry(name).or_default().push(decl);
+                    }
+                    _ => panic!("tried to add module-scoped declaration in a non-module scope {:?}", state),
+                }
+            },
+            ref state => panic!("tried to add module-scoped declaration in a non-module scope {:?}", state),
         }
     }
 

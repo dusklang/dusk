@@ -1,14 +1,16 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::error::Error;
 
 use dire::source_info::{SourceFileId, SourceRange};
-use lspower::jsonrpc::Result;
-use lspower::lsp::*;
-use lspower::{Client, LanguageServer, LspService, Server};
+use lsp_server::{Connection, Message, Request, RequestId, ExtractError, Notification, Response};
+use lsp_types::notification::{PublishDiagnostics, DidOpenTextDocument, Notification as NotificationTrait, DidChangeTextDocument, DidCloseTextDocument};
+use lsp_types::request::{Completion, ResolveCompletionItem};
+use lsp_types::{ServerCapabilities, CompletionOptions, WorkspaceServerCapabilities, WorkspaceFoldersServerCapabilities, TextDocumentSyncKind, Diagnostic, Url, DidOpenTextDocumentParams, Position, Range, Location, DiagnosticRelatedInformation, DiagnosticSeverity, PublishDiagnosticsParams, CompletionParams, CompletionItem, Documentation, DidCloseTextDocumentParams, DidChangeTextDocumentParams, CompletionResponse, CompletionItemKind};
 
 use libdusk::source_info::SourceMap;
-use libdusk::driver::Driver;
+use libdusk::driver::{Driver, DRIVER, DriverRef};
 use dire::arch::Arch;
-use tokio::sync::Mutex;
 
 fn break_lines(text: String) -> Vec<String> {
     let mut lines = Vec::new();
@@ -52,100 +54,42 @@ struct OpenFile {
     flushed_errors: Vec<Diagnostic>,
 }
 
-#[derive(Default, Debug)]
-struct MutableData {
-    open_files: HashMap<Url, OpenFile>,
+struct Server {
+    connection: Connection,
+    open_files: RefCell<HashMap<Url, OpenFile>>,
 }
 
-#[derive(Debug)]
-struct Backend {
-    client: Client,
-    data: Mutex<MutableData>,
-}
-
-impl Backend {
-    fn new(client: Client) -> Self {
+impl Server {
+    fn new(connection: Connection) -> Self {
         Self {
-            client,
-            data: Default::default(),
+            connection,
+            open_files: Default::default(),
         }
     }
 }
 
-#[lspower::async_trait]
-impl LanguageServer for Backend {
-    async fn initialize(&self, init_params: InitializeParams) -> Result<InitializeResult> {
-        let capabilities = init_params.capabilities;
-        let has_workspace_folder_capability = capabilities.workspace
-            .map(|caps| caps.configuration.unwrap_or(false))
-            .unwrap_or(false);
-        let server_capabilities = ServerCapabilities {
-            text_document_sync: Some(TextDocumentSyncKind::INCREMENTAL.into()),
-            completion_provider: Some(
-                CompletionOptions {
-                    resolve_provider: Some(true),
-                    ..Default::default()
-                }
-            ),
-            workspace: if has_workspace_folder_capability {
-                Some(
-                    WorkspaceServerCapabilities {
-                        workspace_folders: Some(WorkspaceFoldersServerCapabilities {
-                            supported: Some(true),
-                            ..Default::default()
-                        }),
-                        ..Default::default()
-                    }
-                )
-            } else {
-                None
-            },
-            ..Default::default()
-        };
-        Ok(
-            InitializeResult {
-                capabilities: server_capabilities,
-                server_info: Some(
-                    ServerInfo {
-                        name: "dls".to_string(),
-                        version: Some("0.1".to_string()),
-                    }
-                )
-            }
-        )
-    }
-
-    async fn initialized(&self, _: InitializedParams) {
-        self.client
-            .log_message(MessageType::INFO, "server initialized!")
-            .await;
-    }
-
-    async fn shutdown(&self) -> Result<()> {
-        Ok(())
-    }
-
-    async fn did_open(&self, params: DidOpenTextDocumentParams) {
+impl Server {
+    fn did_open(&self, params: DidOpenTextDocumentParams) {
         let document = params.text_document;
         let open_file = OpenFile {
             contents: FileContents::new(document.text),
             version: document.version,
             flushed_errors: Vec::new(),
         };
-        self.data.lock().await.open_files.insert(document.uri.clone(), open_file);
-        self.analyze_file(&document.uri).await;
+        self.open_files.borrow_mut().insert(document.uri.clone(), open_file);
+        self.analyze_file(&document.uri);
     }
 
-    async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        self.data.lock().await.open_files.remove(&params.text_document.uri);
+    fn did_close(&self, params: DidCloseTextDocumentParams) {
+        self.open_files.borrow_mut().remove(&params.text_document.uri);
     }
 
-    async fn did_change(&self, DidChangeTextDocumentParams { text_document, mut content_changes }: DidChangeTextDocumentParams) {
+    fn did_change(&self, DidChangeTextDocumentParams { text_document, mut content_changes }: DidChangeTextDocumentParams) {
         // This is in its own block to limit the lifetime of the lock on `self.data`.
         // Without this, you get deadlock, because analyze_file() (called at the end of this
         // function) also locks `self.data`.
         {
-            let open_files = &mut self.data.lock().await.open_files;
+            let mut open_files = self.open_files.borrow_mut();
             let file = open_files.get_mut(&text_document.uri).unwrap();
             assert!(file.version < text_document.version);
             content_changes.sort_by_key(|change| change.range.map(|range| range.start).unwrap_or(Position::new(0, 0)));
@@ -225,48 +169,46 @@ impl LanguageServer for Backend {
                     }
                 }
             }
-            self.client.log_message(MessageType::INFO, format!("New contents: {:?}!", file.contents)).await;
+            eprintln!("New contents: {:?}!", file.contents);
             file.version = text_document.version;
         }
-        self.analyze_file(&text_document.uri).await;
+        self.analyze_file(&text_document.uri);
     }
+}
 
-    async fn completion(&self, _params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        return Ok(
-            Some(
-                CompletionResponse::Array(
-                    vec![
-                        CompletionItem {
-                            label: "hello".into(),
-                            kind: Some(CompletionItemKind::FUNCTION),
-                            data: Some(1u32.into()),
-                            ..Default::default()
-                        },
-                        CompletionItem {
-                            label: "goodbye".into(),
-                            kind: Some(CompletionItemKind::FUNCTION),
-                            data: Some(2u32.into()),
-                            ..Default::default()
-                        },
-                        CompletionItem {
-                            label: "Greeting".into(),
-                            kind: Some(CompletionItemKind::STRUCT),
-                            data: Some(3u32.into()),
-                            ..Default::default()
-                        },
-                        CompletionItem {
-                            label: "type".into(),
-                            kind: Some(CompletionItemKind::CONSTANT),
-                            data: Some(4u32.into()),
-                            ..Default::default()
-                        },
-                    ]
-                )
-            )
+impl Server {
+    fn completion(&self, _params: CompletionParams) -> CompletionResponse {
+        CompletionResponse::Array(
+            vec![
+                CompletionItem {
+                    label: "hello".into(),
+                    kind: Some(CompletionItemKind::FUNCTION),
+                    data: Some(1u32.into()),
+                    ..Default::default()
+                },
+                CompletionItem {
+                    label: "goodbye".into(),
+                    kind: Some(CompletionItemKind::FUNCTION),
+                    data: Some(2u32.into()),
+                    ..Default::default()
+                },
+                CompletionItem {
+                    label: "Greeting".into(),
+                    kind: Some(CompletionItemKind::STRUCT),
+                    data: Some(3u32.into()),
+                    ..Default::default()
+                },
+                CompletionItem {
+                    label: "type".into(),
+                    kind: Some(CompletionItemKind::CONSTANT),
+                    data: Some(4u32.into()),
+                    ..Default::default()
+                },
+            ]
         )
     }
 
-    async fn completion_resolve(&self, mut item: CompletionItem) -> Result<CompletionItem> {
+    fn completion_resolve(&self, mut item: CompletionItem) -> CompletionItem {
         if item.data == Some(1u32.into()) {
             item.detail = Some("Greeting".into());
             item.documentation = Some(Documentation::String("Says hello".into()));
@@ -280,11 +222,11 @@ impl LanguageServer for Backend {
             item.detail = Some("type".into());
             item.documentation = Some(Documentation::String("A type".into()));
         }
-        Ok(item)
+        item
     }
 }
 
-impl Backend {
+impl Server {
     fn dusk_pos_to_lsp_pos(&self, driver: &Driver, pos: usize) -> (SourceFileId, Position) {
         let (file, line, offset) = driver.src_map.lookup_file_line_and_offset(pos);
         let line_str = driver.src_map.files[file].substring_from_line(line);
@@ -308,8 +250,30 @@ impl Backend {
         let range = Range { start, end };
         (start_file, range)
     }
+}
 
-    async fn flush_errors(&self, driver: &mut Driver, path: &Url) {
+// This would be a method on Server if Rust had partial borrowing
+fn send_notification<N>(connection: &Connection, params: N::Params) -> Result<(), Box<dyn Error + Sync + Send>>
+where
+    N: NotificationTrait,
+    N::Params: serde::Serialize
+{
+    let params = serde_json::to_value(&params).unwrap();
+    let notification = Notification { method: N::METHOD.to_string(), params };
+    connection.sender.send(Message::Notification(notification))?;
+    Ok(())
+}
+
+
+fn send_response<R: serde::Serialize>(connection: &Connection, id: RequestId, response: R)
+{
+    let result = serde_json::to_value(&response).unwrap();
+    let response = Response { id, result: Some(result), error: None };
+    connection.sender.send(Message::Response(response)).unwrap();
+}
+
+impl Server {
+    fn flush_errors(&self, driver: &mut Driver, path: &Url) {
         let errors = driver.get_latest_errors();
         let mut new_diagnostics = Vec::new();
         if !errors.is_empty() {
@@ -346,67 +310,162 @@ impl Backend {
                 new_diagnostics.push(diagnostic);
             }
         }
-        self.data.lock().await
-            .open_files.get_mut(path).unwrap()
+        self.open_files.borrow_mut().get_mut(path).unwrap()
             .flushed_errors.extend(new_diagnostics);
     }
-
-    async fn analyze_file(&self, path: &Url) {
-        self.client.log_message(MessageType::INFO, format!("ANALYZING FILE AT PATH: {}", path)).await;
+    fn analyze_file(&self, path: &Url) {
+        eprintln!("ANALYZING FILE AT PATH: {}", path);
         let mut src_map = SourceMap::new();
         // TODO: non-file schemes, I guess?
         assert_eq!(path.scheme(), "file");
         // TODO: Add all files to the source map that are currently open
 
-        let src = self.data.lock().await.open_files
+        let src = self.open_files
+            .borrow()
             .get(path).unwrap()
             .contents.lines.join("\n")
             .to_string();
-        src_map.add_file_with_src(path.to_file_path().unwrap(), src).unwrap();
-        let mut driver = Driver::new(src_map, Arch::X86_64);
-        driver.initialize_hir();
+        src_map.add_file_with_src(path, src).unwrap();
+        let mut driver = DriverRef::new(&DRIVER);
+        *driver.write() = Driver::new(src_map, Arch::X86_64);
+        driver.write().initialize_hir();
 
-        let fatal_parse_error = driver.parse().is_err();
-        self.flush_errors(&mut driver, path).await;
+        let fatal_parse_error = driver.write().parse().is_err();
+        self.flush_errors(&mut driver.write(), path);
+        
+        driver.write().finalize_hir();
 
         if !fatal_parse_error {
-            driver.initialize_tir();
-            self.flush_errors(&mut driver, path).await;
+            driver.write().initialize_tir();
+            self.flush_errors(&mut driver.write(), path);
     
-            let mut tp = driver.get_real_type_provider(false);
-            while let Some(units) = driver.build_more_tir(None) {
-                if driver.type_check(&units, &mut tp).is_err() {
+            let mut tp = driver.read().get_real_type_provider(false);
+            loop {
+                let mut driver_write = driver.write();
+                if let Some(units) = driver_write.build_more_tir(None) {
+                    drop(driver_write);
+                    if driver.type_check(&units, &mut tp).is_err() {
+                        break;
+                    }
+                    self.flush_errors(&mut driver.write(), path);
+                } else {
                     break;
                 }
-                self.flush_errors(&mut driver, path).await;
             }
     
-            self.flush_errors(&mut driver, path).await;
-            if !driver.has_failed() {
+            self.flush_errors(&mut driver.write(), path);
+            if !driver.read().has_failed() {
                 driver.build_mir(&tp);
-                self.flush_errors(&mut driver, path).await;
+                self.flush_errors(&mut driver.write(), path);
             }
         }
 
-        // TODO: I'm not sure whether lspower runs requests concurrently or not. If it does, then
-        // this could lead to race conditions if, say, one request happens in the middle of another.
-        let mut data = self.data.lock().await;
-        for (url, file) in &mut data.open_files {
+        for (url, file) in self.open_files.borrow_mut().iter_mut() {
             let errors = std::mem::take(&mut file.flushed_errors);
             // TODO: keep track of and pass the file version these diagnostics are for (the 3rd parameter)
-            self.client.publish_diagnostics(url.clone(), errors, None).await;
+            send_notification::<PublishDiagnostics>(&self.connection, PublishDiagnosticsParams {
+                uri: url.clone(),
+                diagnostics: errors,
+                version: None,
+            }).unwrap();
         }
     }
 }
 
-#[tokio::main]
-async fn main() {
-    let stdin = tokio::io::stdin();
-    let stdout = tokio::io::stdout();
+impl Server {
+    fn run(&mut self) -> Result<(), Box<dyn Error + Sync + Send>> {
+        for msg in &self.connection.receiver {
+            match msg {
+                Message::Request(req) => {
+                    if self.connection.handle_shutdown(&req)? {
+                        break;
+                    }
+                    match req.method.as_str() {
+                        "textDocument/completion" => {
+                            // TODO: ignore (but warn on) invalid requests, maybe.
+                            let (id, completion) = cast::<Completion>(req)?;
+                            let response = self.completion(completion);
+                            send_response(&self.connection, id, response);
+                        },
+                        "completionItem/resolve" => {
+                            let (id, completion) = cast::<ResolveCompletionItem>(req)?;
+                            let response = self.completion_resolve(completion);
+                            send_response(&self.connection, id, response)
+                        },
+                        method => unimplemented!("request method: {}", method)
+                    }
+                },
+                Message::Response(response) => {
+                    eprintln!("got response: {:?}", response);
+                },
+                Message::Notification(notification) => {
+                    match notification.method.as_str() {
+                        "textDocument/didOpen" => {
+                            let params = cast_notif::<DidOpenTextDocument>(notification)?;
+                            self.did_open(params);
+                        },
+                        "textDocument/didChange" => {
+                            let params = cast_notif::<DidChangeTextDocument>(notification)?;
+                            self.did_change(params);
+                        },
+                        "textDocument/didClose" => {
+                            let params = cast_notif::<DidCloseTextDocument>(notification)?;
+                            self.did_close(params);
+                        },
+                        _ => eprintln!("got notification: {:?}", notification),
+                    }
+                },
+            }
+        }
+        Ok(())
+    }
+}
 
-    let (service, messages) = LspService::new(|client| Backend::new(client));
-    Server::new(stdin, stdout)
-        .interleave(messages)
-        .serve(service)
-        .await;
+fn run_server(connection: Connection) -> Result<(), Box<dyn Error + Sync + Send>> {
+    let mut server = Server::new(connection);
+    server.run()
+}
+
+fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
+    let (connection, io_threads) = Connection::stdio();
+    let server_capabilities = ServerCapabilities {
+        text_document_sync: Some(TextDocumentSyncKind::INCREMENTAL.into()),
+        completion_provider: Some(
+            CompletionOptions {
+                resolve_provider: Some(true),
+                ..Default::default()
+            }
+        ),
+        workspace: Some(
+            WorkspaceServerCapabilities {
+                workspace_folders: Some(WorkspaceFoldersServerCapabilities {
+                    supported: Some(true),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }
+        ),
+        ..Default::default()
+    };
+    let server_capabilities = serde_json::to_value(&server_capabilities).unwrap();
+    let _initialization_params = connection.initialize(server_capabilities)?;
+    run_server(connection)?;
+    io_threads.join()?;
+    Ok(())
+}
+
+fn cast<R>(req: Request) -> Result<(RequestId, R::Params), ExtractError<Request>>
+where
+    R: lsp_types::request::Request,
+    R::Params: serde::de::DeserializeOwned,
+{
+    req.extract(R::METHOD)
+}
+
+fn cast_notif<N>(notif: Notification) -> Result<N::Params, ExtractError<Notification>>
+where
+    N: NotificationTrait,
+    N::Params: serde::de::DeserializeOwned
+{
+    notif.extract(N::METHOD)
 }

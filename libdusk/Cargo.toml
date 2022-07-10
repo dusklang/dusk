@@ -22,7 +22,7 @@ dire = { path = "../dire/" }
 dusk-proc-macros = { path = "../dusk-proc-macros" }
 lazy_static = "1.4.0"
 interprocess = "1.1.1"
-lspower = "1.5.0"
+lsp-types = "0.93"
 
 [target.'cfg(windows)'.dependencies]
 kernel32-sys = "0.2.2"

@@ -50,6 +50,10 @@ struct Opt {
     input: PathBuf,
 }
 
+trait DuskDelegate {
+    fn flush_errors(&self, driver: &Driver, );
+}
+
 fn main() {
     let opt = Opt::parse();
 
