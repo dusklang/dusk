@@ -85,9 +85,9 @@ impl Server {
     }
 
     fn did_change(&self, DidChangeTextDocumentParams { text_document, mut content_changes }: DidChangeTextDocumentParams) {
-        // This is in its own block to limit the lifetime of the lock on `self.data`.
-        // Without this, you get deadlock, because analyze_file() (called at the end of this
-        // function) also locks `self.data`.
+        // This is in its own block to limit the lifetime of the borrow on `self.data`.
+        // Without this, you get a panic, because analyze_file() (called at the end of this
+        // function) also borrows `self.data`.
         {
             let mut open_files = self.open_files.borrow_mut();
             let file = open_files.get_mut(&text_document.uri).unwrap();
