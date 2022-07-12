@@ -23,8 +23,6 @@ fn main() {
     // enum is c!
     // enum is a!
 
-
-
     create_adt()
 
     catch_all()
@@ -69,7 +67,7 @@ fn more_tests(e: MyEnum): u8* {
         .c: "Hello, c!",
     }
     print(hello)
-    print("\n")
+    print("\n")    
 
     switch e {
         .a: switch e { .a: "Hello, a!", .b: "Hello, b!", .c: "Hello, c!" },

@@ -5,6 +5,7 @@ members = [
     "dire",
     "dls",
     "dusk-proc-macros",
+    "xtask"
 ]
 
 [profile.profiling]
