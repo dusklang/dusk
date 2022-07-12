@@ -1256,7 +1256,12 @@ impl Driver {
         let name = if let TokenKind::Ident(name) = *self.cur(p).kind {
             name
         } else {
-            panic!("expected function name after 'fn'")
+            self.errors.push(
+                Error::new("expected function name after 'fn'")
+                    .adding_primary_range(proto_range, "'fn' here")
+                    .adding_secondary_range(self.cur(p).range, "note: found this instead")
+            );
+            return Err(ParseError::UnexpectedToken(self.cur(p).kind.clone()));
         };
         let name_range = self.cur(p).range;
         proto_range = source_info::concat(proto_range, name_range);
