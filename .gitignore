@@ -34,6 +34,7 @@ Temporary Items
 # Node stuff
 **/node_modules/*
 **/out/*
+**/build/*.vsix
 
 # ABS stuff
 **/abs/*

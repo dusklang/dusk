@@ -1,4 +1,5 @@
 use std::error::Error;
+use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use xshell::{Shell, cmd};
@@ -23,6 +24,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
     match args.command {
         Command::InstallDls { debug } => {
+            let root_path = cmd!(shell, "cargo locate-project --workspace --message-format plain").read()?;
+            let mut root_path = PathBuf::from(root_path);
+            root_path.pop(); // remove Cargo.toml
+            shell.change_dir(root_path);
             let config = if debug {
                 None
             } else {
