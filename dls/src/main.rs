@@ -265,8 +265,7 @@ where
 }
 
 
-fn send_response<R: serde::Serialize>(connection: &Connection, id: RequestId, response: R)
-{
+fn send_response<R: serde::Serialize>(connection: &Connection, id: RequestId, response: R) {
     let result = serde_json::to_value(&response).unwrap();
     let response = Response { id, result: Some(result), error: None };
     connection.sender.send(Message::Response(response)).unwrap();
@@ -396,21 +395,22 @@ impl Server {
                     eprintln!("got response: {:?}", response);
                 },
                 Message::Notification(notification) => {
-                    match notification.method.as_str() {
-                        "textDocument/didOpen" => {
-                            let params = cast_notif::<DidOpenTextDocument>(notification)?;
-                            self.did_open(params);
-                        },
-                        "textDocument/didChange" => {
-                            let params = cast_notif::<DidChangeTextDocument>(notification)?;
-                            self.did_change(params);
-                        },
-                        "textDocument/didClose" => {
-                            let params = cast_notif::<DidCloseTextDocument>(notification)?;
-                            self.did_close(params);
-                        },
-                        _ => eprintln!("got notification: {:?}", notification),
+                    macro_rules! handle_notifications {
+                        ($($method:literal: $params_ty:ty => $method_name:ident);*;) => {
+                            match notification.method.as_str() {
+                                $($method => {
+                                    let params = cast_notif::<$params_ty>(notification)?;
+                                    self.$method_name(params);
+                                }),*
+                                _ => eprintln!("got notification: {:?}", notification),
+                            }
+                        }
                     }
+                    handle_notifications! {
+                        "textDocument/didOpen": DidOpenTextDocument => did_open;
+                        "textDocument/didChange": DidChangeTextDocument => did_change;
+                        "textDocument/didClose": DidCloseTextDocument => did_close;
+                    };
                 },
             }
         }
