@@ -35,6 +35,7 @@ Temporary Items
 **/node_modules/*
 **/out/*
 **/build/*.vsix
+dls-client/server/*
 
 # ABS stuff
 **/abs/*
