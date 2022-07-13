@@ -225,11 +225,9 @@ impl SourceMap {
                 println!("  --> {}", self.files[group.file].path.display());
                 prev_file = group.file;
             }
-            let next_group = if i + 1 < ranges.len() {
-                Some(&line_range_groups[i + 1])
-            } else {
-                None
-            };
+            let next_group = (i + 1 < ranges.len()).then(|| {
+                &line_range_groups[i + 1]
+            });
             let mut first = true;
             for line in &group.ranges {
                 if !first {

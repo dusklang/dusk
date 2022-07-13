@@ -160,11 +160,9 @@ impl ConstraintList {
 }
 
 fn generic_constraints_mut<'a>(constraints: &'a mut [ConstraintList], generic_params: &[GenericParamId], id: GenericParamId) -> Option<&'a mut ConstraintList> {
-    if let Some(index) = generic_params.iter().enumerate().find(|(_, &oid)| oid == id).map(|(i, _)| i) {
-        Some(&mut constraints[index])
-    } else {
-        None
-    }
+    generic_params.iter().enumerate()
+        .find(|(_, &oid)| oid == id)
+        .map(|(i, _)| &mut constraints[i])
 }
 
 fn implements_traits(ty: &Type, traits: BuiltinTraits) -> Result<(), BuiltinTraits> {
@@ -514,19 +512,13 @@ impl ConstraintList {
 
 fn match_generic_type(generic_param: GenericParamId, actual_ty: &Type, assumed_ty: &Type) -> Option<Type> {
     match (actual_ty, assumed_ty) {
-        (actual_ty, &Type::GenericParam(param)) if param == generic_param => {
-            Some(actual_ty.clone())
-        },
-        (Type::Pointer(actual_pointee), Type::Pointer(assumed_pointee)) => {
-            if !actual_pointee.is_mut && assumed_pointee.is_mut {
-                None
-            } else {
-                match_generic_type(generic_param, &actual_pointee.ty, &assumed_pointee.ty)
-            }
-        },
-        _ => {
-            None
-        }
+        (actual_ty, &Type::GenericParam(param)) if param == generic_param =>
+            Some(actual_ty.clone()),
+        (Type::Pointer(actual_pointee), Type::Pointer(assumed_pointee)) =>
+            (actual_pointee.is_mut || !assumed_pointee.is_mut)
+                .then(|| match_generic_type(generic_param, &actual_pointee.ty, &assumed_pointee.ty))
+                .flatten(),
+        _ => None,
     }
 }
 

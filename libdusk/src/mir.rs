@@ -1792,11 +1792,8 @@ impl DriverRef<'_> {
                             assert_eq!(arguments.len(), 2);
                             let (lhs, rhs) = (arguments[0], arguments[1]);
                             let left_true_bb = self.write().create_bb(b);
-                            let location = if let DataDest::Read = ctx.data {
-                                Some(self.write().push_instr(b, Instr::Alloca(ty), expr))
-                            } else {
-                                None
-                            };
+                            let location = matches!(ctx.data, DataDest::Read)
+                                .then(|| self.write().push_instr(b, Instr::Alloca(ty), expr));
                             if let DataDest::Branch(true_bb, false_bb) = ctx.data {
                                 self.build_expr(
                                     b,
@@ -1863,11 +1860,8 @@ impl DriverRef<'_> {
                             } else {
                                 let left_true_bb = self.write().create_bb(b);
                                 let after_bb = self.write().create_bb(b);
-                                let location = if let DataDest::Read = ctx.data {
-                                    Some(self.write().push_instr(b, Instr::Alloca(ty), expr))
-                                } else {
-                                    None
-                                };
+                                let location = matches!(ctx.data, DataDest::Read)
+                                    .then(|| self.write().push_instr(b, Instr::Alloca(ty), expr));
                                 self.build_expr(
                                     b,
                                     lhs,

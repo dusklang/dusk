@@ -28,12 +28,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             let mut root_path = PathBuf::from(root_path);
             root_path.pop(); // remove Cargo.toml
             shell.change_dir(root_path);
-            let config = if debug {
-                None
-            } else {
-                Some("--release")
-            };
-            cmd!(shell, "cargo build --package dls {config...}").run()?;
+            let mode = (!debug).then(|| "--release");
+            cmd!(shell, "cargo build --package dls {mode...}").run()?;
 
             shell.change_dir("./dls-client");
             

@@ -424,11 +424,8 @@ impl EnumExhaustion {
                     payload.make_total(driver, ty, catch_all_range, tp);
                 }
             } else {
-                let payload = if variant.payload_ty.is_some() {
-                    Some(Box::new(Exhaustion::Total))
-                } else {
-                    None
-                };
+                let payload = variant.payload_ty.is_some()
+                    .then(|| Box::new(Exhaustion::Total));
                 self.variants.insert(i, VariantExhaustion { reason: ExhaustionReason::CatchAll(catch_all_range), payload });
             }
         }
@@ -1025,11 +1022,7 @@ impl tir::Expr<tir::AddrOf> {
 impl tir::Expr<tir::Dereference> {
     fn run_pass_1(&self, _driver: &mut Driver, tp: &mut impl TypeProvider) {
         let constraints = tp.constraints(self.expr).filter_map(|ty| {
-            if let Type::Pointer(pointee) = &ty.ty {
-                Some(pointee.as_ref().clone())
-            } else {
-                None
-            }
+            ty.ty.deref().cloned()
         });
         *tp.constraints_mut(self.id) = constraints;
     }

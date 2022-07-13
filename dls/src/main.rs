@@ -300,11 +300,7 @@ impl Server {
                     severity: Some(DiagnosticSeverity::ERROR),
                     source: Some("dusk".to_string()),
                     message: error.message.to_string(),
-                    related_information: if related_info.is_empty() {
-                        None
-                    } else {
-                        Some(related_info)
-                    },
+                    related_information: (!related_info.is_empty()).then(|| related_info),
                     ..Default::default()
                 };
                 new_diagnostics.push(diagnostic);

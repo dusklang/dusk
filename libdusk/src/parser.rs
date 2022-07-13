@@ -620,8 +620,8 @@ impl Driver {
         let condition = self.parse_non_struct_lit_expr(p);
         let (then_scope, then_range) = self.parse_scope(p, &[])?;
         let mut range = source_info::concat(if_range, then_range);
-        let else_scope = if let TokenKind::Else = self.cur(p).kind {
-            match self.next(p).kind {
+        let else_scope = match self.cur(p).kind {
+            TokenKind::Else => match self.next(p).kind {
                 TokenKind::If => {
                     let scope = self.begin_imper_scope();
                     let scope_id = scope.id();
@@ -638,9 +638,8 @@ impl Driver {
                     Some(else_scope)
                 },
                 _ => panic!("{}", "Expected '{' or 'if' after 'else'"),
-            }
-        } else {
-            None
+            },
+            _ => None,
         };
         Ok(self.if_expr(condition, then_scope, else_scope, range))
     }
@@ -725,7 +724,7 @@ impl Driver {
                     (None, self.cur(p).range)
                 } else {
                     // Enter condition namespace
-                    let _condition_entry = if is_condition {
+                    let _condition_entry = is_condition.then(|| {
                         let condition_kind = if is_requires {
                             ConditionKind::Requirement
                         } else if is_guarantees {
@@ -742,9 +741,7 @@ impl Driver {
                             ns
                         };
                         Some(self.enter_condition_namespace(ns, condition_kind))
-                    } else {
-                        None
-                    };
+                    });
                     let arg = self.parse_expr(p).unwrap_or_else(|err| err);
                     let paren_range = self.eat_tok(p, TokenKind::RightParen)?;
     

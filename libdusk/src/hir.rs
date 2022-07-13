@@ -527,19 +527,20 @@ impl Driver {
     pub fn comp_decl_prototype(&mut self, name: Sym, param_tys: SmallVec<[ExprId; 2]>, _param_ranges: SmallVec<[SourceRange; 2]>, return_ty: ExprId, range: SourceRange) -> DeclId {
         // This is a placeholder value that gets replaced once the parameter declarations get allocated.
         let num_params = param_tys.len();
-        let extern_func = if let &ScopeState::Mod { extern_mod: Some(extern_mod), .. } = self.hir.scope_stack.lock().unwrap().borrow().last().unwrap() {
-            let funcs = &mut self.code.hir.extern_mods[extern_mod].imported_functions;
-            let index = funcs.len();
-            let name = self.interner.resolve(name).unwrap();
-            funcs.push(ExternFunction { name: name.to_string(), param_tys: param_tys.iter().cloned().collect(), return_ty });
-            Some(
-                ExternFunctionRef {
-                    extern_mod,
-                    index
-                }
-            )
-        } else {
-            None
+        let extern_func = match self.hir.scope_stack.lock().unwrap().borrow().last().unwrap() {
+            &ScopeState::Mod { extern_mod: Some(extern_mod), .. } => {
+                let funcs = &mut self.code.hir.extern_mods[extern_mod].imported_functions;
+                let index = funcs.len();
+                let name = self.interner.resolve(name).unwrap();
+                funcs.push(ExternFunction { name: name.to_string(), param_tys: param_tys.iter().cloned().collect(), return_ty });
+                Some(
+                    ExternFunctionRef {
+                        extern_mod,
+                        index
+                    }
+                )
+            },
+            _ => None,
         };
         let id = self.add_decl(Decl::ComputedPrototype { param_tys, extern_func }, name, Some(return_ty), range);
         let scope_stack = self.hir.scope_stack.lock().unwrap();

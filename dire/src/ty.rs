@@ -102,10 +102,9 @@ impl Type {
     }
 
     pub fn as_function(&self) -> Option<&FunctionType> {
-        if let Type::Function(fun) = self {
-            Some(fun)
-        } else {
-            None
+        match self {
+            Type::Function(fun) => Some(fun),
+            _ => None,
         }
     }
 
@@ -114,10 +113,9 @@ impl Type {
     }
 
     pub fn deref(&self) -> Option<&QualType> {
-        if let Type::Pointer(pointee) = self {
-            Some(pointee)
-        } else {
-            None
+        match self {
+            Type::Pointer(pointee) => Some(pointee),
+            _ => None,
         }
     }
 
