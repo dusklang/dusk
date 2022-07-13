@@ -376,19 +376,21 @@ impl Server {
                     if self.connection.handle_shutdown(&req)? {
                         break;
                     }
-                    match req.method.as_str() {
-                        "textDocument/completion" => {
-                            // TODO: ignore (but warn on) invalid requests, maybe.
-                            let (id, completion) = cast::<Completion>(req)?;
-                            let response = self.completion(completion);
-                            send_response(&self.connection, id, response);
-                        },
-                        "completionItem/resolve" => {
-                            let (id, completion) = cast::<ResolveCompletionItem>(req)?;
-                            let response = self.completion_resolve(completion);
-                            send_response(&self.connection, id, response)
-                        },
-                        method => unimplemented!("request method: {}", method)
+                    macro_rules! handle_requests {
+                        ($($method:literal: $params_ty:ty => $method_name:ident);*;) => {
+                            match req.method.as_str() {
+                                $($method => {
+                                    let (id, params) = cast::<$params_ty>(req)?;
+                                    let response = self.$method_name(params);
+                                    send_response(&self.connection, id, response);
+                                }),*
+                                method => unimplemented!("request method: {}", method)
+                            }
+                        }
+                    }
+                    handle_requests! {
+                        "textDocument/completion": Completion => completion;
+                        "completionItem/resolve": ResolveCompletionItem => completion_resolve;
                     }
                 },
                 Message::Response(response) => {
@@ -410,7 +412,7 @@ impl Server {
                         "textDocument/didOpen": DidOpenTextDocument => did_open;
                         "textDocument/didChange": DidChangeTextDocument => did_change;
                         "textDocument/didClose": DidCloseTextDocument => did_close;
-                    };
+                    }
                 },
             }
         }
