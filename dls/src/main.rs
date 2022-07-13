@@ -326,7 +326,7 @@ impl Server {
         *driver.write() = Driver::new(src_map, Arch::X86_64);
         driver.write().initialize_hir();
 
-        let fatal_parse_error = driver.write().parse().is_err();
+        let fatal_parse_error = driver.write().parse_added_files().is_err();
         self.flush_errors(&mut driver.write(), path);
         
         driver.write().finalize_hir();

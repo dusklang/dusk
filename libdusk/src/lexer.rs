@@ -1,4 +1,5 @@
 
+use std::cmp::max;
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::ops::Range;
@@ -8,10 +9,9 @@ use unicode_segmentation::GraphemeCursor;
 use dire::source_info::{SourceRange, SourceFileId};
 
 use crate::driver::Driver;
-use crate::token::{TokenKind, TokenVec};
+use crate::token::TokenKind;
 use crate::error::Error;
 use crate::source_info::SourceFile;
-use crate::index_vec::*;
 
 struct Lexer {
     /// Byte offset of the current file in the global source map
@@ -47,7 +47,7 @@ impl Lexer {
 }
 
 impl Driver {
-    pub fn lex(&mut self) -> Result<SourceFileId, ()> {
+    pub fn lex(&mut self, file: SourceFileId) -> Result<(), ()> {
         let special_escape_characters = {
             let mut map = HashMap::new();
             map.insert("n", "\n");
@@ -57,7 +57,6 @@ impl Driver {
             map
         };
 
-        let file = self.toks.next_idx();
         let f = &self.src_map.files[file];
         let file_offset = self.src_map.get_begin_offset(file);
 
@@ -87,8 +86,7 @@ impl Driver {
             }
         }
         self.set_pos(&mut l, 0);
-
-        self.toks.push_at(file, TokenVec::new());
+        self.toks.resize_with(max(self.toks.len(), file.index() + 1), Default::default);
         loop {
             let (tok, range) = if let Ok(next) = self.l_next(&mut l) {
                 next
@@ -100,7 +98,7 @@ impl Driver {
             if should_break { break; }
         }
 
-        Ok(file)
+        Ok(())
     }
 
     fn file(&self, l: &Lexer) -> &SourceFile {

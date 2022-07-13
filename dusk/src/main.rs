@@ -83,7 +83,7 @@ fn main() {
     }
 
     begin_phase!(Parse);
-    let _ = driver.write().parse(); // There's no need to do anything specific to handle this error, at least not yet.
+    let _ = driver.write().parse_added_files(); // There's no need to do anything specific to handle this error, at least not yet.
     driver.write().flush_errors();
     // TODO: still proceed with other phases after some forms of parse error. I had to add this in the short term
     // because after I improved the quality of the parser's error handling, some errors would prevent important data

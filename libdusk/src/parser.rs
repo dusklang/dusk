@@ -30,17 +30,16 @@ pub enum ParseError {
 pub type ParseResult<T> = Result<T, ParseError>;
 
 impl Driver {
-    pub fn parse(&mut self) -> ParseResult<()> {
-        while self.code.hir.global_scopes.len() < self.src_map.files.len() {
-            // TODO: parse other files, even after a fatal parse error. Haven't done it yet because
-            // it will require a bit of refactoring.
-            self.parse_single_file()?;
+    pub fn parse_added_files(&mut self) -> ParseResult<()> {
+        while let Some(&file) = self.src_map.unparsed_files.iter().next() {
+            self.src_map.unparsed_files.remove(&file);
+            self.parse_single_file(file)?;
         }
         Ok(())
     }
 
-    fn parse_single_file(&mut self) -> ParseResult<()> {
-        let file = self.lex().map_err(|_| ParseError::UnableToLex)?;
+    fn parse_single_file(&mut self, file: SourceFileId) -> ParseResult<()> {
+        self.lex(file).map_err(|_| ParseError::UnableToLex)?;
         self.start_new_file(file);
         let mut p = Parser { file, cur: 0 };
 

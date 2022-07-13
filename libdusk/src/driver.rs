@@ -20,6 +20,8 @@ use crate::typechecker::type_provider::TypeProvider;
 use crate::index_vec::*;
 use crate::rw_ref::RwRef;
 
+// This derive is here so that I can initialize the global Driver instance with something. It is *not* recommended that
+// anyone actually uses `Driver` in its default state.
 #[derive(Default)]
 pub struct Driver {
     pub arch: Arch,

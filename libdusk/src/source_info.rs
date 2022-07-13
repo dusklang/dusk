@@ -4,7 +4,7 @@ use std::str;
 use std::path::{Path, PathBuf};
 use std::fs;
 use std::io;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 use dire::hir::{ExprId, DeclId, ItemId, Item};
@@ -21,6 +21,7 @@ use dusk_proc_macros::*;
 #[derive(Default)]
 pub struct SourceMap {
     pub files: IndexVec<SourceFileId, SourceFile>,
+    pub(crate) unparsed_files: HashSet<SourceFileId>,
     paths: HashMap<PathBuf, SourceFileId>,
 
     /// Contains vec![0, end(0), end(1), end(2)], etc.,
@@ -96,8 +97,9 @@ impl Driver {
 impl SourceMap {
     pub fn new() -> Self {
         SourceMap {
-            files: IndexVec::new(),
-            paths: HashMap::new(),
+            files: Default::default(),
+            unparsed_files: Default::default(),
+            paths: Default::default(),
             file_ends: vec![0],
         }
     }
@@ -117,6 +119,7 @@ impl SourceMap {
         let id = self.files.push(
             SourceFile { src, lines: vec![0], path: path.clone(), url }
         );
+        self.unparsed_files.insert(id);
         let had_result = self.paths.insert(path, id);
         debug_assert_eq!(had_result, None);
         let end = self.file_ends.last().unwrap() + file_len;
