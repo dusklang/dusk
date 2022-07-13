@@ -47,7 +47,8 @@ pub struct SourceFile {
     /// The starting position of each line (relative to this source file!!!).
     pub lines: Vec<usize>,
     pub path: PathBuf,
-    // TODO: this is kind of redundant with path, but is used for dls
+    // This is used for DLS. It is usually kind of redundant with `path`, but sometimes differs in that `path` is
+    // always canonicalized, but `url` is unmodified, coming straight from the IDE.
     pub url: Option<Url>,
 }
 

@@ -283,9 +283,10 @@ impl Server {
                 let mut related_info = Vec::new();
                 for other_range in others {
                     let (file, range) = self.dusk_range_to_lsp_range(driver, other_range.range);
-                    let path = &driver.src_map.files[file].path;
+                    let file = &driver.src_map.files[file];
+                    let uri = file.url.clone().unwrap_or_else(|| Url::from_file_path(file.path.clone()).unwrap());
                     let location = Location {
-                        uri: Url::from_file_path(path).unwrap(),
+                        uri,
                         range,
                     };
                     let info = DiagnosticRelatedInformation {
