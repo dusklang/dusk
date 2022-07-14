@@ -19,7 +19,7 @@ use crate::driver::{Driver, DriverRef};
 use crate::error::Error;
 use crate::new_code::NewCode;
 use crate::ty::BuiltinTraits;
-use crate::tir::{Units, UnitItems, ExprNamespace, self};
+use crate::tir::{Units, UnitItems, ExprNamespace, self, NameLookup};
 
 use dusk_proc_macros::*;
 
@@ -720,7 +720,8 @@ impl tir::Expr<tir::Import> {
 impl tir::Expr<tir::DeclRef> {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         // Initialize overloads
-        let overload_decls = match driver.find_overloads(&driver.code.hir.decl_refs[self.decl_ref_id]) {
+        let decl_ref = &driver.code.hir.decl_refs[self.decl_ref_id];
+        let overload_decls = match driver.find_overloads(decl_ref.namespace, &NameLookup::Exact(decl_ref.name)) {
             Some(overloads) => overloads,
             None => {
                 *tp.decl_ref_has_error_mut(self.decl_ref_id) = true;

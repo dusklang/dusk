@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 use smallvec::SmallVec;
 use index_vec::{define_index_type, IdxRangeBounds};
+use string_interner::DefaultSymbol as Sym;
 
 use dire::source_info::SourceRange;
 use dire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, EnumId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, RETURN_VALUE_DECL};
@@ -248,14 +249,14 @@ macro_rules! define_internal_types_internal {
                     ),*  
                 };
             }
-            fn find_overloads_in_internal(&self, decl_ref: &hir::DeclRef, ns: InternalNamespace, overloads: &mut HashSet<DeclId>) {
+            fn find_overloads_in_internal(&self, lookup: &NameLookup, ns: InternalNamespace, overloads: &mut HashSet<DeclId>) {
                 match ns {
                     $(
                         InternalNamespace::$name => {
                             $({
                                 let decl = self.internal_field_decls.$name.$field_name;
                                 let name = self.code.hir.names[decl];
-                                if name == decl_ref.name {
+                                if self.name_matches(lookup, name) {
                                     overloads.insert(decl);
                                 }   
                             })*
@@ -268,38 +269,49 @@ macro_rules! define_internal_types_internal {
 }
 dire::define_internal_types!(define_internal_types_internal);
 
+pub enum NameLookup {
+    Exact(Sym),
+    // TODO: should we actually only look up the beginning of symbols?
+    Beginning(String),
+}
+
 impl Driver {
-    fn find_overloads_in_mod(&self, decl_ref: &hir::DeclRef, scope: ModScopeId, overloads: &mut HashSet<DeclId>) {
-        if let Some(group) = self.code.hir.mod_scopes[scope].decl_groups.get(&decl_ref.name) {
-            overloads.extend(
-                group.iter()
-                    .map(|decl| decl.id)
-            );
+    fn find_overloads_in_mod(&self, name: &NameLookup, scope: ModScopeId, overloads: &mut HashSet<DeclId>) {
+        // TODO: don't iterate over hashmap if `name` is an `Exact` variant, because in that case we could just look it
+        // up directly
+        for (&actual, group) in &self.code.hir.mod_scopes[scope].decl_groups {
+            if self.name_matches(name, actual) {
+                overloads.extend(
+                    group.iter()
+                        .map(|decl| decl.id)
+                );
+            }
         }
     }
-    fn find_overloads_in_struct(&self, decl_ref: &hir::DeclRef, strukt: StructId, overloads: &mut HashSet<DeclId>) {
+    fn find_overloads_in_struct(&self, name: &NameLookup, strukt: StructId, overloads: &mut HashSet<DeclId>) {
         for field in &self.code.hir.structs[strukt].fields {
-            if field.name == decl_ref.name {
+            if self.name_matches(name, field.name) {
                 overloads.insert(field.decl);
                 return;
             }
         }
     }
-    fn find_overloads_in_enum(&self, decl_ref: &hir::DeclRef, id: EnumId, overloads: &mut HashSet<DeclId>) {
+    fn find_overloads_in_enum(&self, name: &NameLookup, id: EnumId, overloads: &mut HashSet<DeclId>) {
         for variant in &self.code.hir.enums[id].variants {
-            if variant.name == decl_ref.name {
+            if self.name_matches(name, variant.name) {
                 overloads.insert(variant.decl);
                 return;
             }
         }
     }
-    fn find_overloads_in_function_parameters(&self, decl_ref: &hir::DeclRef, func: DeclId, overloads: &mut HashSet<DeclId>) {
+    fn find_overloads_in_function_parameters(&self, name: &NameLookup, func: DeclId, overloads: &mut HashSet<DeclId>) {
         match &df!(func.hir) {
             hir::Decl::Computed { params, .. } => {
                 for i in params.start.index()..params.end.index() {
                     let decl = DeclId::new(i);
                     let param_name = self.code.hir.names[decl];
-                    if decl_ref.name == param_name {
+                    
+                    if self.name_matches(name, param_name) {
                         overloads.insert(decl);
                     }
                 }
@@ -307,14 +319,24 @@ impl Driver {
             _ => panic!("Can only have requirements clause on computed decls"),
         }
     }
-    /// Returns the overloads for a declref, if they are known (they won't be if it's an unresolved member ref)
-    /// Returns None if the declref is a memberref AND the memberref base expression has an error (e.g., invalid variable reference)
-    pub fn find_overloads(&self, decl_ref: &hir::DeclRef) -> Option<Vec<DeclId>> {
+    fn name_matches(&self, lookup: &NameLookup, actual: Sym) -> bool {
+        match lookup {
+            NameLookup::Beginning(beginning) => {
+                let actual = self.interner.resolve(actual).unwrap();
+                actual.starts_with(beginning)
+            },
+            &NameLookup::Exact(name) => name == actual,
+        }
+    }
+
+    /// Returns the overloads for a name in a namespace, if they are known (they won't be if it's an unresolved member ref)
+    /// Returns None if the namespace comes from a memberref AND the memberref base expression has an error (e.g., invalid variable reference)
+    pub fn find_overloads(&self, namespace: Namespace, name: &NameLookup) -> Option<Vec<DeclId>> {
         let mut overloads = HashSet::new();
 
         let mut started_at_mod_scope = false;
         let mut root_namespace = true;
-        let mut namespace = Some(decl_ref.namespace);
+        let mut namespace = Some(namespace);
         'find_overloads: while let Some(ns) = namespace {
             namespace = match ns {
                 Namespace::Imper { scope, end_offset } => {
@@ -322,7 +344,7 @@ impl Driver {
                         let namespace = &self.code.hir.imper_ns[scope];
                         let result = namespace.decls[0..end_offset].iter()
                             .rev()
-                            .find(|&decl| decl.name == decl_ref.name);
+                            .find(|&decl| self.name_matches(name, decl.name));
                         if let Some(decl) = result {
                             overloads.insert(decl.id);
                             break;
@@ -333,7 +355,7 @@ impl Driver {
                 },
                 Namespace::Mod(scope_ns) => {
                     let scope = self.code.hir.mod_ns[scope_ns].scope;
-                    self.find_overloads_in_mod(decl_ref, scope, &mut overloads);
+                    self.find_overloads_in_mod(name, scope, &mut overloads);
 
                     if root_namespace { started_at_mod_scope = true; }
                     self.code.hir.mod_ns[scope_ns].parent
@@ -344,10 +366,10 @@ impl Driver {
                     if let Some(expr_namespaces) = self.tir.expr_namespaces.get(&base_expr) {
                         for ns in expr_namespaces {
                             match *ns {
-                                ExprNamespace::Mod(scope) => self.find_overloads_in_mod(decl_ref, scope, &mut overloads),
-                                ExprNamespace::Struct(id) => self.find_overloads_in_struct(decl_ref, id, &mut overloads),
-                                ExprNamespace::Enum(id) => self.find_overloads_in_enum(decl_ref, id, &mut overloads),
-                                ExprNamespace::Internal(internal) => self.find_overloads_in_internal(decl_ref, internal, &mut overloads),
+                                ExprNamespace::Mod(scope) => self.find_overloads_in_mod(name, scope, &mut overloads),
+                                ExprNamespace::Struct(id) => self.find_overloads_in_struct(name, id, &mut overloads),
+                                ExprNamespace::Enum(id) => self.find_overloads_in_enum(name, id, &mut overloads),
+                                ExprNamespace::Internal(internal) => self.find_overloads_in_internal(name, internal, &mut overloads),
                                 ExprNamespace::Error => return None,
                             }
                         }
@@ -361,7 +383,7 @@ impl Driver {
                     for i in generic_params.start.index()..generic_params.end.index() {
                         let decl = DeclId::new(i);
                         let param_name = self.code.hir.names[decl];
-                        if decl_ref.name == param_name {
+                        if self.name_matches(name, param_name) {
                             overloads.insert(decl);
                             break 'find_overloads;
                         }
@@ -370,13 +392,13 @@ impl Driver {
                 },
                 Namespace::Requirement(ns_id) => {
                     let condition_ns = &self.code.hir.condition_ns[ns_id];
-                    self.find_overloads_in_function_parameters(decl_ref, condition_ns.func, &mut overloads);
+                    self.find_overloads_in_function_parameters(name, condition_ns.func, &mut overloads);
                     condition_ns.parent
                 },
                 Namespace::Guarantee(ns_id) => {
                     let condition_ns = &self.code.hir.condition_ns[ns_id];
-                    self.find_overloads_in_function_parameters(decl_ref, condition_ns.func, &mut overloads);
-                    if decl_ref.name == self.hir.known_idents.return_value && overloads.is_empty() {
+                    self.find_overloads_in_function_parameters(name, condition_ns.func, &mut overloads);
+                    if self.name_matches(name, self.hir.known_idents.return_value) && overloads.is_empty() {
                         overloads.insert(RETURN_VALUE_DECL);
                     }
                     condition_ns.parent
@@ -396,7 +418,7 @@ impl Driver {
         add_eval_dep_injector!(self, add_eval_dep);
 
         let decl_ref = &self.code.hir.decl_refs[decl_ref_id];
-        let overloads = self.find_overloads(decl_ref).unwrap_or_default();
+        let overloads = self.find_overloads(decl_ref.namespace, &NameLookup::Exact(decl_ref.name)).unwrap_or_default();
         for overload in overloads {
             match df!(overload.hir) {
                 hir::Decl::Computed { ref param_tys, .. } => {
