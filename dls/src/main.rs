@@ -326,13 +326,13 @@ impl Server {
         *driver.write() = Driver::new(src_map, Arch::X86_64);
         driver.write().initialize_hir();
 
-        let fatal_parse_error = driver.write().parse_added_files().is_err();
+        let new_code = driver.write().parse_added_files().ok();
         self.flush_errors(&mut driver.write(), path);
         
         driver.write().finalize_hir();
 
-        if !fatal_parse_error {
-            driver.write().initialize_tir();
+        if let Some(new_code) = new_code {
+            driver.write().initialize_tir(&new_code);
             self.flush_errors(&mut driver.write(), path);
     
             let mut tp = driver.read().get_real_type_provider(false);

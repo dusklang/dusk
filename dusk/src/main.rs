@@ -83,21 +83,27 @@ fn main() {
     }
 
     begin_phase!(Parse);
-    let _ = driver.write().parse_added_files(); // There's no need to do anything specific to handle this error, at least not yet.
-    driver.write().flush_errors();
-    // TODO: still proceed with other phases after some forms of parse error. I had to add this in the short term
-    // because after I improved the quality of the parser's error handling, some errors would prevent important data
-    // from being properly initialized (e.g., the two-phase initialization of various HIR data structures), leading to
-    // failures later in the pipeline.
-    if driver.read().check_for_failure() {
+    let mut driver_write = driver.write();
+    let new_code = if let Ok(new_code) = driver_write.parse_added_files() {
+        new_code
+    } else {
+        drop(driver_write);
+        driver.write().flush_errors();
+        // TODO: still proceed with other phases after some forms of parse error. I had to add this in the short term
+        // because after I improved the quality of the parser's error handling, some errors would prevent important data
+        // from being properly initialized (e.g., the two-phase initialization of various HIR data structures), leading to
+        // failures later in the pipeline.
+        driver.read().check_for_failure();
         return;
-    }
+    };
+    drop(driver_write);
+    
 
     driver.write().finalize_hir();
 
     begin_phase!(Tir);
     debug::send(|| DvdMessage::WillInitializeTir);
-    driver.write().initialize_tir();
+    driver.write().initialize_tir(&new_code);
     debug::send(|| DvdMessage::DidInitializeTir);
 
 

@@ -2,7 +2,7 @@ use std::ops::{Deref, DerefMut};
 use std::collections::{HashMap, HashSet};
 
 use smallvec::SmallVec;
-use index_vec::define_index_type;
+use index_vec::{define_index_type, IdxRangeBounds};
 
 use dire::source_info::SourceRange;
 use dire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, EnumId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, RETURN_VALUE_DECL};
@@ -14,6 +14,7 @@ use crate::dep_vec::{self, DepVec, AnyDepVec};
 use crate::index_vec::*;
 use crate::TirGraphOutput;
 use crate::debug::{self, Message as DvdMessage};
+use crate::new_code::NewCode;
 
 mod graph;
 use graph::{Graph, Levels};
@@ -577,9 +578,9 @@ impl Driver {
         }
     }
 
-    pub fn initialize_tir(&mut self) {
+    pub fn initialize_tir(&mut self, new_code: &NewCode) {
         // Populate `decls`
-        for decl in &self.code.hir.decls {
+        for decl in &self.code.hir.decls[new_code.decls.clone()] {
             let mut generic_params = SmallVec::new();
             let (is_mut, param_tys) = match *decl {
                 hir::Decl::Computed { ref param_tys, generic_params: ref og_generic_params, .. } => {
@@ -633,7 +634,7 @@ impl Driver {
 
         self.initialize_graph();
         // Add type 1 dependencies to the graph
-        for i in 0..self.code.hir.decls.len() {
+        for i in new_code.decls.clone().into_range() {
             let decl_id = DeclId::new(i);
             let id = df!(decl_id.item);
             match df!(decl_id.hir) {
@@ -651,7 +652,7 @@ impl Driver {
                 },
             }
         }
-        for i in 0..self.code.hir.exprs.len() {
+        for i in new_code.exprs.clone().into_range() {
             let expr_id = ExprId::new(i);
             let id = ef!(expr_id.item);
             match ef!(expr_id.hir) {

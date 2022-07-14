@@ -10,6 +10,7 @@ use dire::source_info::{self, SourceFileId, SourceRange};
 
 use crate::driver::Driver;
 use crate::hir::{ConditionKind, GenericParamList};
+use crate::new_code::NewCode;
 use crate::token::{TokenKind, Token};
 use crate::builder::{BinOp, UnOp, OpPlacement};
 use crate::error::Error;
@@ -30,12 +31,13 @@ pub enum ParseError {
 pub type ParseResult<T> = Result<T, ParseError>;
 
 impl Driver {
-    pub fn parse_added_files(&mut self) -> ParseResult<()> {
+    pub fn parse_added_files(&mut self) -> ParseResult<NewCode> {
+        let before = self.take_snapshot();
         while let Some(&file) = self.src_map.unparsed_files.iter().next() {
             self.src_map.unparsed_files.remove(&file);
             self.parse_single_file(file)?;
         }
-        Ok(())
+        Ok(self.get_new_code_since(before))
     }
 
     fn parse_single_file(&mut self, file: SourceFileId) -> ParseResult<()> {
