@@ -5,6 +5,7 @@ use std::ops::Range;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
+use display_adapter::display_adapter;
 use smallvec::{SmallVec, smallvec};
 use string_interner::{DefaultSymbol as Sym, Symbol, StringInterner};
 
@@ -239,6 +240,15 @@ impl Driver {
         // (and there are no other panics before we even get here), we're fine for now.
         // TODO: fix this for real.
         assert_eq!(self.hir.generic_ctx_stack.lock().unwrap().borrow().len(), 1);
+    }
+
+    #[allow(unused)]
+    #[display_adapter]
+    pub fn dump_scope_stack(&self, w: &mut Formatter) {
+        for scope in self.hir.scope_stack.lock().unwrap().borrow().iter().rev() {
+            writeln!(w, "{:?}", scope)?;
+        }
+        Ok(())
     }
 
     pub fn debug_mark_expr(&mut self, expr: ExprId) {
