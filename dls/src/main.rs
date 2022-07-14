@@ -341,7 +341,7 @@ impl Server {
             self.flush_errors(&mut driver.write(), path);
     
             let mut tp = driver.read().get_real_type_provider(false);
-            let mut new_code = NewCode::default();
+            let mut new_code = NewCode::placeholder();
             loop {
                 let mut driver_write = driver.write();
                 if let Some(units) = driver_write.build_more_tir(None) {
