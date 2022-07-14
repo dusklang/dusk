@@ -1238,6 +1238,20 @@ impl Driver {
         Ok((scope_id, source_info::concat(open_curly_range, close_curly_range)))
     }
 
+    fn check_for_fn_equal(&mut self, p: &mut Parser) -> ParseResult<bool> {
+        if matches!(self.cur(p).kind, TokenKind::Assign) {
+            self.errors.push(
+                Error::new("assigned functions are not yet supported")
+                    .adding_primary_range(self.cur(p).range, "")
+            );
+            self.next(p);
+            self.parse_expr(p).unwrap();
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
     fn parse_comp_decl(&mut self, p: &mut Parser) -> ParseResult<DeclId> {
         // Parse fn {name}
         let mut proto_range = self.eat_tok(p, TokenKind::Fn)?;
@@ -1332,7 +1346,9 @@ impl Driver {
             },
             TokenKind::OpenCurly => hir::VOID_TYPE,
             _ => {
+                self.check_for_fn_equal(p)?;
                 assert_eq!(generic_param_list.names.len(), 0, "generic parameters on a function prototype are not allowed");
+                drop(ns);
                 return Ok(self.comp_decl_prototype(name, param_tys, param_ranges, hir::VOID_TYPE, proto_range));
             },
         };
@@ -1349,6 +1365,7 @@ impl Driver {
                 decl_id
             },
             _ => {
+                self.check_for_fn_equal(p)?;
                 assert_eq!(generic_param_list.names.len(), 0, "generic parameters on a function prototype are not allowed");
                 self.comp_decl_prototype(name, param_tys, param_ranges, ty, proto_range)
             }
