@@ -1,4 +1,33 @@
-foo :: import("defer_imported_module.dusk")
+foo :: import(concat("defer_imported_module", ".dusk"))
+
+fn concat(a: u8*, b: u8*): u8* {
+    len :: len(a) + len(b)
+    buf := malloc(len + 1) as u8 *mut
+    ret_val :: buf
+    a := a
+    while *a != 0 {
+        *buf = *a
+        a = (a as usize + 1) as u8*
+        buf = (buf as usize + 1) as u8 *mut
+    }
+    b := b
+    while *b != 0 {
+        *buf = *b
+        b = (b as usize + 1) as u8*
+        buf = (buf as usize + 1) as u8 *mut
+    }
+    *buf = 0
+    ret_val
+}
+
+fn len(str: u8*): usize {
+    str := str
+    len: usize = 0
+    while *((str as usize + len) as u8*) != 0 {
+        len += 1
+    }
+    len
+}
 
 fn main() {
     foo.say_hi()
