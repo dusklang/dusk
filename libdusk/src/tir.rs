@@ -580,7 +580,9 @@ impl Driver {
 
     pub fn initialize_tir(&mut self, new_code: &NewCode) {
         // Populate `decls`
-        for decl in &self.code.hir.decls[new_code.decls.clone()] {
+        for id in new_code.decls.clone().into_range() {
+            let id = DeclId::new(id);
+            let decl = &self.code.hir.decls[id];
             let mut generic_params = SmallVec::new();
             let (is_mut, param_tys) = match *decl {
                 hir::Decl::Computed { ref param_tys, generic_params: ref og_generic_params, .. } => {
@@ -629,7 +631,7 @@ impl Driver {
                 ),
             };
             debug::send(|| DvdMessage::DidInitializeTirForDecl { id: DeclId::new(self.tir.decls.len()), is_mut, param_tys: param_tys.iter().cloned().collect() });
-            self.tir.decls.push(Decl { param_tys, is_mut, generic_params });
+            self.tir.decls.push_at(id, Decl { param_tys, is_mut, generic_params });
         }
 
         self.initialize_graph();
@@ -737,7 +739,7 @@ impl Driver {
         }
 
         // Split the graph into components
-        self.tir.graph.split();
+        self.tir.graph.split(new_code);
 
         // TODO: do something better than an array of bools :(
         self.tir.depended_on.resize_with(self.code.hir.exprs.len(), || false);

@@ -11,6 +11,8 @@ use std::collections::HashMap;
 
 use paste::paste;
 
+use index_vec::IdxRangeBounds;
+
 use dire::hir::{ExprId, DeclId, DeclRefId, StructLitId, CastId, Namespace, Decl};
 use dire::mir::Const;
 use dire::ty::{Type, FunctionType, QualType};
@@ -20,6 +22,7 @@ use super::{CastMethod, StructLit, constraints::ConstraintList, Overloads, Gener
 use crate::index_vec::*;
 use crate::source_info::CommentatedSourceRange;
 use crate::driver::Driver;
+use crate::new_code::NewCode;
 
 /// The body of this macro defines the fields of the type provider. Each one maps to all of the following:
 /// - A field of type [`IndexVec<IdType, ValueType>`] in [RealTypeProvider]
@@ -193,32 +196,45 @@ macro_rules! declare_tp {
                     
                     debug,
                 };
+
+                tp.resize_impl(d, DeclId::new(0));
+                
+                tp
+            }
+
+            fn resize_impl(&mut self, d: &Driver, decl_start: DeclId) {
                 macro_rules! resize_idx_vec {
                     ($fname:ident, DeclRefId) => {
-                        tp.$fname.resize_with(d.code.hir.decl_refs.len(), Default::default);
+                        self.$fname.resize_with(d.code.hir.decl_refs.len(), Default::default);
                     };
                     ($fname:ident, ExprId) => {
-                        tp.$fname.resize_with(d.code.hir.exprs.len(), Default::default);
+                        self.$fname.resize_with(d.code.hir.exprs.len(), Default::default);
                     };
                     ($fname:ident, DeclId) => {
-                        tp.$fname.resize_with(d.code.hir.decls.len(), Default::default);
+                        self.$fname.resize_with(d.code.hir.decls.len(), Default::default);
                     };
                     ($fname:ident, StructLitId) => {
-                        tp.$fname.resize_with(d.code.hir.struct_lits.len(), Default::default);
+                        self.$fname.resize_with(d.code.hir.struct_lits.len(), Default::default);
                     };
                     ($fname:ident, CastId) => {
-                        tp.$fname.resize_with(d.code.hir.cast_counter.len(), Default::default);
+                        self.$fname.resize_with(d.code.hir.cast_counter.len(), Default::default);
                     };
                 }
                 $(resize_idx_vec!($field_name, $id_ty);)*
-                if debug {
-                    tp.constraints_copy.resize_with(d.code.hir.exprs.len(), Default::default);
+                if self.debug {
+                    self.constraints_copy.resize_with(d.code.hir.exprs.len(), Default::default);
                 }
-                for (decl, ty) in tp.decl_types.iter_mut_enumerated() {
+                for i in (decl_start..self.decl_types.next_idx()).into_range() {
+                    let decl = DeclId::new(i);
+                    self.decl_types[decl].is_mut = d.tir.decls[decl].is_mut;
+                }
+                for (decl, ty) in self.decl_types.iter_mut_enumerated() {
                     ty.is_mut = d.tir.decls[decl].is_mut;
                 }
-                
-                tp
+            }
+
+            pub fn resize(&mut self, d: &Driver, new_code: NewCode) {
+                self.resize_impl(d, new_code.decls.start);
             }
         }
         

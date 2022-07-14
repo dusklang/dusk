@@ -8,6 +8,7 @@ macro_rules! generate_new_code {
     (pub struct $name:ident {
         $(pub $field_name:ident: Range<$id_ty:ty>),*$(,)*
     }) => {
+        #[derive(Debug)]
         pub struct $name {
             $(pub $field_name: Range<$id_ty>),*,
         }
@@ -29,6 +30,14 @@ macro_rules! generate_new_code {
                 let after = self.take_snapshot();
                 NewCode {
                     $($field_name: before.$field_name..after.$field_name),*,
+                }
+            }
+        }
+
+        impl $name {
+            pub fn placeholder() -> Self {
+                Self {
+                    $($field_name: <$id_ty>::new(0)..<$id_ty>::new(0)),*,
                 }
             }
         }

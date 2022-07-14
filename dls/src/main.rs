@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::error::Error;
 
 use dire::source_info::{SourceFileId, SourceRange};
+use libdusk::new_code::NewCode;
 use lsp_server::{Connection, Message, Request, RequestId, ExtractError, Notification, Response};
 use lsp_types::notification::{PublishDiagnostics, DidOpenTextDocument, Notification as NotificationTrait, DidChangeTextDocument, DidCloseTextDocument};
 use lsp_types::request::{Completion, ResolveCompletionItem};
@@ -324,25 +325,35 @@ impl Server {
         src_map.add_file_with_src(path, src).unwrap();
         let mut driver = DriverRef::new(&DRIVER);
         *driver.write() = Driver::new(src_map, Arch::X86_64);
+        let before = driver.read().take_snapshot();
+
         driver.write().initialize_hir();
 
-        let new_code = driver.write().parse_added_files().ok();
+        let fatal_parse_error = driver.write().parse_added_files().is_err();
         self.flush_errors(&mut driver.write(), path);
         
         driver.write().finalize_hir();
 
-        if let Some(new_code) = new_code {
+        let new_code = driver.read().get_new_code_since(before);
+
+        if !fatal_parse_error {
             driver.write().initialize_tir(&new_code);
             self.flush_errors(&mut driver.write(), path);
     
             let mut tp = driver.read().get_real_type_provider(false);
+            let mut new_code = NewCode::default();
             loop {
                 let mut driver_write = driver.write();
                 if let Some(units) = driver_write.build_more_tir(None) {
                     drop(driver_write);
-                    if driver.type_check(&units, &mut tp).is_err() {
+                    // Typechecking can lead to expressions being evaluated, which in turn can result in new HIR being
+                    // added. Therefore, we take a snapshot before typechecking.
+                    let before = driver.read().take_snapshot();
+                    if driver.type_check(&units, &mut tp, new_code).is_err() {
                         break;
                     }
+                    new_code = driver.read().get_new_code_since(before);
+
                     self.flush_errors(&mut driver.write(), path);
                 } else {
                     break;

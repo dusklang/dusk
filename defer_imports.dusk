@@ -1,0 +1,5 @@
+foo :: import("defer_imported_module.dusk")
+
+fn main() {
+    foo.say_hi()
+}

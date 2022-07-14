@@ -1,4 +1,5 @@
 use clap::{Parser, ArgEnum};
+use libdusk::new_code::NewCode;
 use std::path::PathBuf;
 
 use dire::ty::Type;
@@ -66,6 +67,7 @@ fn main() {
     let loaded_file = src_map.add_file(&opt.input).is_ok();
     let mut driver = DriverRef::new(&DRIVER);
     *driver.write() = Driver::new(src_map, Arch::X86_64);
+    let before = driver.read().take_snapshot();
     driver.write().initialize_hir();
 
     if !loaded_file {
@@ -83,11 +85,8 @@ fn main() {
     }
 
     begin_phase!(Parse);
-    let mut driver_write = driver.write();
-    let new_code = if let Ok(new_code) = driver_write.parse_added_files() {
-        new_code
-    } else {
-        drop(driver_write);
+    let fatal_parse_error = driver.write().parse_added_files().is_err();
+    if fatal_parse_error {
         driver.write().flush_errors();
         // TODO: still proceed with other phases after some forms of parse error. I had to add this in the short term
         // because after I improved the quality of the parser's error handling, some errors would prevent important data
@@ -96,8 +95,7 @@ fn main() {
         driver.read().check_for_failure();
         return;
     };
-    drop(driver_write);
-    
+    let new_code = driver.read().get_new_code_since(before);
 
     driver.write().finalize_hir();
 
@@ -109,14 +107,19 @@ fn main() {
 
     begin_phase!(Typecheck);
     let mut tp = driver.read().get_real_type_provider(opt.output_tc_diff);
+    let mut new_code = NewCode::placeholder();
     loop {
         let mut driver_write = driver.write();
         if let Some(units) = driver_write.build_more_tir(opt.tir_output) {
             drop(driver_write);
             debug::send(|| DvdMessage::WillTypeCheckSet);
-            if driver.type_check(&units, &mut tp).is_err() {
+            // Typechecking can lead to expressions being evaluated, which in turn can result in new HIR being
+            // added. Therefore, we take a snapshot before typechecking.
+            let before = driver.read().take_snapshot();
+            if driver.type_check(&units, &mut tp, new_code).is_err() {
                 break;
             }
+            new_code = driver.read().get_new_code_since(before);
             debug::send(|| DvdMessage::DidTypeCheckSet);
             // { driver.write().flush_errors(); }
         } else {

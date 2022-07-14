@@ -36,6 +36,7 @@ pub enum Instr {
     ExternCall { arguments: SmallVec<[OpId; 2]>, func: ExternFunctionRef },
     FunctionRef { generic_arguments: Vec<Type>, func: FuncId, },
     Intrinsic { arguments: SmallVec<[OpId; 2]>, ty: Type, intr: Intrinsic },
+    Import(OpId), // TODO: make this an intrinsic, or even a core library function
     Reinterpret(OpId, Type),
     Truncate(OpId, Type),
     SignExtend(OpId, Type),
@@ -100,7 +101,7 @@ impl Instr {
                 | Instr::DirectFieldAccess { val: op, .. } | Instr::IndirectFieldAccess { val: op, .. }
                 | Instr::DiscriminantAccess { val: op } | Instr::Ret(op) | Instr::CondBr { condition: op, .. }
                 | Instr::SwitchBr { scrutinee: op, .. } | Instr::Variant { payload: op, .. }
-                | Instr::InternalFieldAccess { val: op, .. } => vec![op],
+                | Instr::InternalFieldAccess { val: op, .. } | Instr::Import(op) => vec![op],
             Instr::Store { location, value } => vec![location, value],
             Instr::Call { arguments: ref ops, .. } | Instr::ExternCall { arguments: ref ops, .. }
                 | Instr::Intrinsic { arguments: ref ops, .. } | Instr::Struct { fields: ref ops, .. }
@@ -128,7 +129,7 @@ impl Instr {
                 | Instr::DirectFieldAccess { val: op, .. } | Instr::IndirectFieldAccess { val: op, .. }
                 | Instr::DiscriminantAccess { val: op } | Instr::Ret(op) | Instr::CondBr { condition: op, .. }
                 | Instr::SwitchBr { scrutinee: op, .. } | Instr::Variant { payload: op, .. }
-                | Instr::InternalFieldAccess { val: op, .. } => replace(op, old, new),
+                | Instr::InternalFieldAccess { val: op, .. } | Instr::Import(op) => replace(op, old, new),
             Instr::Store { location, value } => {
                 replace(location, old, new);
                 replace(value, old, new);

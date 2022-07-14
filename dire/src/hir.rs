@@ -183,7 +183,7 @@ pub enum Expr {
     Cast { expr: ExprId, ty: ExprId, cast_id: CastId },
     Ret { expr: ExprId, decl: Option<DeclId> },
     Mod { id: ModScopeId },
-    Import { file: SourceFileId },
+    Import { path: ExprId },
     Struct(StructId),
     Enum(EnumId),
     StructLit {

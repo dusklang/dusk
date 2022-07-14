@@ -17,6 +17,7 @@ use dire::InternalNamespace;
 
 use crate::driver::{Driver, DriverRef};
 use crate::error::Error;
+use crate::new_code::NewCode;
 use crate::ty::BuiltinTraits;
 use crate::tir::{Units, UnitItems, ExprNamespace, self};
 
@@ -1511,7 +1512,8 @@ impl Driver {
 }
 
 impl DriverRef<'_> {
-    pub fn type_check(&mut self, units: &Units, tp: &mut RealTypeProvider) -> Result<(), ()> {
+    pub fn type_check(&mut self, units: &Units, tp: &mut RealTypeProvider, new_code: NewCode) -> Result<(), ()> {
+        tp.resize(&self.read(), new_code);
         for (num, unit) in units.units.iter().enumerate() {
             // Pass 1: propagate info down from leaves to roots
             self.write().run_pass_1(&unit.items, UnitKind::Normal(num), 0, tp);

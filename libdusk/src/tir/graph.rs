@@ -3,19 +3,19 @@ use std::process::{Command, Stdio};
 use std::fs::{self, File};
 use std::path::PathBuf;
 use std::mem;
-use std::iter::FromIterator;
 use std::collections::{HashMap, HashSet};
 use std::cmp::max;
 
 use bitflags::bitflags;
 
-use index_vec::define_index_type;
+use index_vec::{define_index_type, IdxRangeBounds};
 use dire::hir::{self, ItemId, VOID_EXPR_ITEM};
 
 use crate::index_vec::*;
 use crate::driver::Driver;
 use crate::TirGraphOutput;
 use crate::debug::{self, Message as DvdMessage};
+use crate::new_code::NewCode;
 
 use dusk_proc_macros::*;
 
@@ -27,6 +27,10 @@ pub struct Graph {
     t2_dependees: IndexVec<ItemId, Vec<ItemId>>,
     t3_dependees: IndexVec<ItemId, Vec<ItemId>>,
     t4_dependees: IndexVec<ItemId, Vec<ItemId>>,
+
+    // Whether each item has been visited (for the purpose of splitting into connected components)
+    // TODO: Vec of bools == gross
+    visited: IndexVec<ItemId, bool>,
 
     /// Set of all meta-dependees that are not yet ready to be added to a normal unit
     global_meta_dependees: HashSet<ItemId>,
@@ -101,12 +105,6 @@ struct Component {
     has_meta_dep: bool,
 }
 
-struct ComponentState {
-    // TODO: Vec of bools == gross
-    visited: IndexVec<ItemId, bool>,
-    cur_component: Component,
-}
-
 #[derive(Debug, Default)]
 struct InternalUnit {
     components: HashSet<CompId>,
@@ -165,9 +163,9 @@ impl Graph {
         debug::send(|| DvdMessage::DidAddTirMetaDependency { depender: a, dependee: b });
     }
 
-    fn find_subcomponent(&mut self, item: ItemId, state: &mut ComponentState) {
-        state.visited[item] = true;
-        state.cur_component.items.push(item);
+    fn find_subcomponent(&mut self, item: ItemId, cur_component: &mut Component) {
+        self.visited[item] = true;
+        cur_component.items.push(item);
         let component = CompId::new(self.components.len());
         self.item_to_components[item] = component;
         debug::send(|| DvdMessage::DidAddItemToTirComponent { component, item });
@@ -175,7 +173,7 @@ impl Graph {
             ($item_array:ident) => {{
                 for i in 0..self.$item_array[item].len() {
                     let adj = self.$item_array[item][i];
-                    if !state.visited[adj] { self.find_subcomponent(adj, state); }
+                    if !self.visited[adj] { self.find_subcomponent(adj, cur_component); }
                 }
             }}
         }
@@ -183,10 +181,10 @@ impl Graph {
         find_subcomponents!(dependers);
     }
 
-    fn find_component(&mut self, item: ItemId, state: &mut ComponentState) {
-        if state.visited[item] { return; }
-        self.find_subcomponent(item, state);
-        let new_component = mem::take(&mut state.cur_component);
+    fn find_component(&mut self, item: ItemId, cur_component: &mut Component) {
+        if self.visited[item] { return; }
+        self.find_subcomponent(item, cur_component);
+        let new_component = mem::take(cur_component);
         let component = self.components.push(new_component);
         debug::send(|| DvdMessage::DidAddTirComponent { id: component });
     }
@@ -229,20 +227,18 @@ impl Graph {
     }
 
     // Find the weak components of the graph
-    pub fn split(&mut self) {
-        let mut visited = IndexVec::new();
-        visited.resize_with(self.dependees.len(), || false);
-        let mut state = ComponentState {
-            visited, cur_component: Component::default(),
-        };
+    pub fn split(&mut self, new_code: &NewCode) {
+        let before_components = self.components.len();
+        self.visited.resize_with(self.dependees.len(), || false);
+        let mut cur_component = Component::default();
         self.item_to_components.resize_with(self.dependees.len(), || CompId::new(u32::MAX as usize));
-        assert!(self.components.is_empty());
-        for i in 0..self.dependees.len() {
-            self.find_component(ItemId::new(i), &mut state);
+        for i in new_code.items.clone().into_range() {
+            self.find_component(ItemId::new(i), &mut cur_component);
         }
 
-        self.outstanding_components = HashSet::<CompId>::from_iter(
-            (0..self.components.len())
+        let after_components = self.components.len();
+        self.outstanding_components.extend(
+            (before_components..after_components)
                 .map(CompId::new)
         );
     }
@@ -318,12 +314,18 @@ impl Graph {
         }
     }
 
+    fn item_has_meta_dependees(&self, item: ItemId) -> bool {
+        self.meta_dependees.get(&item)
+            .map(|dependees| !dependees.is_empty())
+            .unwrap_or(false)
+    }
+
     pub fn get_items_that_need_dependencies(&mut self) -> Vec<ItemId> {
         let items: Vec<ItemId> = self.outstanding_components.iter()
             .flat_map(|&comp| &self.components[comp].items)
             .copied()
             .filter(|item| !self.dependencies_added.contains(item))
-            .filter(|item| !self.meta_dependees.contains_key(item))
+            .filter(|&item| !self.item_has_meta_dependees(item))
             .collect();
 
         self.dependencies_added.extend(&items);
@@ -527,9 +529,6 @@ impl Graph {
         for depender in &self.meta_dependers[&item] {
             let dependees = self.meta_dependees.get_mut(depender).unwrap();
             dependees.remove(&item);
-            if dependees.is_empty() {
-                self.meta_dependees.remove(depender);
-            }
         }
 
         for i in 0..self.dependees[item].len() {

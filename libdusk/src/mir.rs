@@ -190,7 +190,6 @@ impl Driver {
             Expr::BoolLit { lit } => Const::Bool(lit),
             Expr::ConstTy(ref ty) => Const::Ty(ty.clone()),
             Expr::Mod { id } => Const::Mod(id),
-            Expr::Import { file } => Const::Mod(self.code.hir.global_scopes[file]),
             _ => panic!("Cannot convert expression to constant: {:#?}", expr),
         }
     }
@@ -790,6 +789,9 @@ impl Driver {
                 write!(f, "%{} = generic_param{}", self.display_instr_name(op_id), param.index())?
             },
             Instr::Parameter(_) => {},
+            &Instr::Import(path) => {
+                write!(f, "%{} = import(%{})", self.display_instr_name(op_id), self.display_instr_name(path))?
+            },
             Instr::Invalid => write!(f, "%{} = invalid!", self.display_instr_name(op_id))?,
             Instr::Void => panic!("unexpected void!"),
         };
@@ -1486,6 +1488,7 @@ impl Driver {
             Instr::InternalFieldAccess { field, .. } => field.ty(),
             &Instr::Variant { enuum, .. } => Type::Enum(enuum),
             Instr::DiscriminantAccess { .. } => TYPE_OF_DISCRIMINANTS, // TODO: update this when discriminants can be other types
+            Instr::Import(_) => Type::Mod,
         }
     }
 
@@ -1735,12 +1738,18 @@ impl DriverRef<'_> {
                 drop(d);
                 VOID_INSTR.direct()
             },
-            Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::CharLit { .. } | Expr::StrLit { .. } | Expr::BoolLit { .. } | Expr::ConstTy(_) | Expr::Mod { .. } | Expr::Import { .. } => {
+            Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::CharLit { .. } | Expr::StrLit { .. } | Expr::BoolLit { .. } | Expr::ConstTy(_) | Expr::Mod { .. } => {
                 drop(d);
                 let konst = self.write().expr_to_const(expr, ty);
                 let name = format!("{}", self.read().fmt_const_for_instr_name(&konst));
                 self.write().push_instr_with_name(b, Instr::Const(konst), expr, name).direct()
             },
+            Expr::Import { path } => {
+                drop(d);
+                let path = self.build_expr(b, path, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                let path = self.write().handle_indirection(b, path);
+                self.write().push_instr_with_name(b, Instr::Import(path), expr, "import").direct()
+            }
             Expr::Set { lhs, rhs } => {
                 drop(d);
                 return self.build_expr(

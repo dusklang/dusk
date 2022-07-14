@@ -1521,6 +1521,25 @@ impl DriverRef<'_> {
                         pair => unimplemented!("unimplemented internal field access: {:?}", pair),
                     }
                 },
+                &Instr::Import(path) => {
+                    let val = frame.get_val(path, &*self.read());
+                    let ptr = val.as_raw_ptr();
+                    
+                    let str = unsafe { CStr::from_ptr(ptr as _) };
+                    let path = str.to_str().unwrap();
+                    drop(d);
+                    let before = self.read().take_snapshot();
+                    self.write().src_map.add_file(path).unwrap();
+                    let next_mod = self.read().code.hir.mod_scopes.next_idx();
+                    self.write().parse_added_files().unwrap();
+                    let new_code = self.read().get_new_code_since(before);
+                    self.write().finalize_hir();
+                    self.write().initialize_tir(&new_code);
+                    
+
+                    assert_eq!(next_mod.index(), self.read().code.hir.mod_scopes.len() - 1);
+                    Value::from_mod(next_mod)
+                },
                 Instr::Parameter(_) => panic!("Invalid parameter instruction in the middle of a function!"),
                 Instr::Invalid => panic!("Must not have invalid instruction in an interpreted function!"),
             }

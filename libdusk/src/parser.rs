@@ -10,7 +10,6 @@ use dire::source_info::{self, SourceFileId, SourceRange};
 
 use crate::driver::Driver;
 use crate::hir::{ConditionKind, GenericParamList};
-use crate::new_code::NewCode;
 use crate::token::{TokenKind, Token};
 use crate::builder::{BinOp, UnOp, OpPlacement};
 use crate::error::Error;
@@ -31,13 +30,12 @@ pub enum ParseError {
 pub type ParseResult<T> = Result<T, ParseError>;
 
 impl Driver {
-    pub fn parse_added_files(&mut self) -> ParseResult<NewCode> {
-        let before = self.take_snapshot();
+    pub fn parse_added_files(&mut self) -> ParseResult<()> {
         while let Some(&file) = self.src_map.unparsed_files.iter().next() {
             self.src_map.unparsed_files.remove(&file);
             self.parse_single_file(file)?;
         }
-        Ok(self.get_new_code_since(before))
+        Ok(())
     }
 
     fn parse_single_file(&mut self, file: SourceFileId) -> ParseResult<()> {
@@ -311,19 +309,11 @@ impl Driver {
     fn parse_import(&mut self, p: &mut Parser) -> ParseResult<ExprId> {
         let import_range = self.eat_tok(p, TokenKind::Import)?;
         self.eat_tok(p, TokenKind::LeftParen)?;
+        let path = self.parse_expr(p)
+            .unwrap_or_else(|err| err);
+        self.eat_tok(p, TokenKind::RightParen)?;
 
-        let path = self.cur(p).kind;
-        let file = if let TokenKind::StrLit(path) = path {
-            let path = path.to_str().unwrap().to_string();
-            self.src_map.add_file(path).unwrap()
-        } else {
-            panic!("unexpected token");
-        };
-
-        self.next(p);
-        let paren_range = self.eat_tok(p, TokenKind::RightParen)?;
-
-        Ok(self.import(file, source_info::concat(import_range, paren_range)))
+        Ok(self.import(path, import_range))
     }
 
     fn parse_decl_ref(&mut self, p: &mut Parser, base_expr: Option<ExprId>, name: Sym) -> ParseResult<ExprId> {
