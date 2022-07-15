@@ -18,7 +18,7 @@ use dire::mir::Const;
 use dire::ty::{Type, FunctionType, QualType};
 use dusk_proc_macros::df;
 
-use super::{CastMethod, StructLit, constraints::ConstraintList, Overloads, GenericConstraints};
+use crate::typechecker::{CastMethod, StructLit, constraints::ConstraintList, Overloads, GenericConstraints};
 use crate::index_vec::*;
 use crate::source_info::CommentatedSourceRange;
 use crate::driver::Driver;

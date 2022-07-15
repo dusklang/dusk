@@ -211,6 +211,7 @@ name = "dls"
 version = "0.1.0"
 dependencies = [
  "dire",
+ "dusk-proc-macros",
  "libdusk",
  "lsp-server",
  "lsp-types",

@@ -27,6 +27,10 @@ impl SourceRange {
             end: index+1
         }
     }
+
+    pub fn contains(&self, pos: usize) -> bool {
+        self.start <= pos && pos < self.end
+    }
 }
 
 pub fn concat(a: SourceRange, b: SourceRange) -> SourceRange {

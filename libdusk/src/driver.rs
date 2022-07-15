@@ -16,7 +16,7 @@ use crate::hir;
 use crate::tir;
 use crate::error::Error;
 use crate::mir::{self, FunctionRef};
-use crate::typechecker::type_provider::TypeProvider;
+use crate::type_provider::TypeProvider;
 use crate::index_vec::*;
 use crate::rw_ref::RwRef;
 

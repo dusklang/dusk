@@ -3,11 +3,10 @@ use std::collections::HashMap;
 use smallvec::{SmallVec, smallvec};
 use num_bigint::BigUint;
 
-mod constraints;
-pub mod type_provider;
+pub mod constraints;
 
 use constraints::*;
-use type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
+use crate::type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 
 use dire::hir::{self, ExprId, DeclId, StructId, PatternKind, GenericParamId, Ident, VOID_EXPR, GenericCtx, DeclRefId, BLANK_GENERIC_CTX};
 use dire::mir::Const;

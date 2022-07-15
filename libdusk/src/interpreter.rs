@@ -28,7 +28,7 @@ use dire::{InternalField, internal_fields};
 
 use crate::driver::{DRIVER, Driver, DriverRef};
 use crate::mir::{FunctionRef, function_by_ref};
-use crate::typechecker::type_provider::TypeProvider;
+use crate::type_provider::TypeProvider;
 use crate::x64::*;
 
 #[derive(Debug, Clone)]

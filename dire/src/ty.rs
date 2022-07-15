@@ -186,7 +186,7 @@ impl Default for Type {
 impl fmt::Debug for Type {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Type::Error => write!(f, "<ERROR>"),
+            Type::Error => write!(f, "error"),
             Type::Never => write!(f, "never"),
             Type::Bool => write!(f, "bool"),
             Type::Void => write!(f, "void"),

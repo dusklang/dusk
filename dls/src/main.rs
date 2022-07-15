@@ -2,15 +2,18 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
 
+use dire::hir::{Item, Expr};
 use dire::source_info::{SourceFileId, SourceRange};
 use libdusk::new_code::NewCode;
+use libdusk::type_provider::{RealTypeProvider, TypeProvider};
 use lsp_server::{Connection, Message, Request, RequestId, ExtractError, Notification, Response};
 use lsp_types::notification::{PublishDiagnostics, DidOpenTextDocument, Notification as NotificationTrait, DidChangeTextDocument, DidCloseTextDocument};
-use lsp_types::request::{Completion, ResolveCompletionItem};
-use lsp_types::{ServerCapabilities, CompletionOptions, WorkspaceServerCapabilities, WorkspaceFoldersServerCapabilities, TextDocumentSyncKind, Diagnostic, Url, DidOpenTextDocumentParams, Position, Range, Location, DiagnosticRelatedInformation, DiagnosticSeverity, PublishDiagnosticsParams, CompletionParams, CompletionItem, Documentation, DidCloseTextDocumentParams, DidChangeTextDocumentParams, CompletionResponse, CompletionItemKind};
+use lsp_types::request::{Completion, ResolveCompletionItem, HoverRequest};
+use lsp_types::{ServerCapabilities, CompletionOptions, WorkspaceServerCapabilities, WorkspaceFoldersServerCapabilities, TextDocumentSyncKind, Diagnostic, Url, DidOpenTextDocumentParams, Position, Range, Location, DiagnosticRelatedInformation, DiagnosticSeverity, PublishDiagnosticsParams, CompletionParams, CompletionItem, Documentation, DidCloseTextDocumentParams, DidChangeTextDocumentParams, CompletionResponse, CompletionItemKind, HoverProviderCapability, HoverParams, Hover, MarkupContent, HoverContents, MarkupKind};
 
 use libdusk::source_info::SourceMap;
 use libdusk::driver::{Driver, DRIVER, DriverRef};
+use dusk_proc_macros::ef;
 use dire::arch::Arch;
 
 fn break_lines(text: String) -> Vec<String> {
@@ -225,6 +228,82 @@ impl Server {
         }
         item
     }
+
+    fn hover_resolve(&self, params: HoverParams) -> Option<Hover> {
+        let url = &params.text_document_position_params.text_document.uri;
+        let (driver, tp) = self.analyze_file(url);
+        let pos = self.lsp_pos_to_dusk_pos(&driver.read(), url, params.text_document_position_params.position);
+        // TODO: this is preposterously stupid
+        let mut hovered_item = None;
+        for (id, range) in driver.read().code.hir.source_ranges.iter_enumerated() {
+            if range.contains(pos) {
+                hovered_item = Some(id);
+                break;
+            }
+        }
+        hovered_item.map(|item| {
+            let range = driver.read().code.hir.source_ranges[item];
+            let range = self.dusk_range_to_lsp_range(&driver.read(), range).1;
+            let message = match driver.read().code.hir.items[item] {
+                Item::Expr(expr) => {
+                    let mut message = String::new();
+                    let d = driver.read();
+                    match ef!(d, expr.hir) {
+                        Expr::DeclRef { id } => {
+                            let name = d.code.hir.decl_refs[id].name;
+                            let name = d.interner.resolve(name).unwrap();
+                            let mut ty = None;
+                            if let Some(tp) = &tp {
+                                if let Some(overload) = *tp.selected_overload(id) {
+                                    ty = Some(tp.decl_type(overload).clone());                                    
+                                }
+                            }
+                            if ty.as_ref().map(|ty| ty.is_mut).unwrap_or(false) {
+                                message.push_str("mut ");
+                            }
+                            message.push_str(name);
+                            message.push_str(": ");
+                            if let Some(ty) = ty {
+                                message.push_str(&format!("{:?}", ty.ty));
+                            } else {
+                                message.push_str("unknown type");
+                            }
+                        },
+                        _ => message.push_str(&format!("unhandled expression {:?}", ef!(d, expr.hir))),
+                    }
+                    message
+                },
+                Item::Decl(decl) => {
+                    let mut message = String::new();
+                    let d = driver.read();
+                    let name = d.code.hir.names[decl];
+                    let name = d.interner.resolve(name).unwrap();
+                    let mut ty = None;
+                    if let Some(tp) = &tp {
+                        ty = Some(tp.decl_type(decl).clone());
+                    }
+                    if ty.as_ref().map(|ty| ty.is_mut).unwrap_or(false) {
+                        message.push_str("mut ");
+                    }
+                    message.push_str(name);
+                    message.push_str(": ");
+                    if let Some(ty) = ty {
+                        message.push_str(&format!("{:?}", ty.ty));
+                    } else {
+                        message.push_str("unknown type");
+                    }
+                    message
+                },
+            };
+            Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: message,
+                }),
+                range: Some(range),
+            }
+        })
+    }
 }
 
 impl Server {
@@ -250,6 +329,27 @@ impl Server {
 
         let range = Range { start, end };
         (start_file, range)
+    }
+
+    fn lsp_pos_to_dusk_pos(&self, driver: &Driver, url: &Url, pos: Position) -> usize {
+        let file = driver.src_map.lookup_file_by_url(url).unwrap();
+    
+        // byte offset to the beginning of the file
+        let file_offset = driver.src_map.get_begin_offset(file);
+    
+        let file = &driver.src_map.files[file];
+    
+        // byte offset from the beginning of the file to the beginning of the line
+        let line_offset = file.lines[pos.line as usize];
+
+        let open_files = self.open_files.borrow();
+        let line = &open_files.get(url).unwrap().contents.lines[pos.line as usize];
+        let utf16: Vec<_> = line.encode_utf16().take(pos.character as usize).collect();
+
+        // byte offset from the beginning of the line to the actual position
+        let intra_line_byte_offset = String::from_utf16(&utf16).unwrap().len();
+
+        file_offset + line_offset + intra_line_byte_offset
     }
 }
 
@@ -310,7 +410,7 @@ impl Server {
         self.open_files.borrow_mut().get_mut(path).unwrap()
             .flushed_errors.extend(new_diagnostics);
     }
-    fn analyze_file(&self, path: &Url) {
+    fn analyze_file(&self, path: &Url) -> (DriverRef, Option<RealTypeProvider>) {
         eprintln!("ANALYZING FILE AT PATH: {}", path);
         let mut src_map = SourceMap::new();
         // TODO: non-file schemes, I guess?
@@ -336,7 +436,7 @@ impl Server {
 
         let new_code = driver.read().get_new_code_since(before);
 
-        if !fatal_parse_error {
+        let tp = (!fatal_parse_error).then(|| {
             driver.write().initialize_tir(&new_code);
             self.flush_errors(&mut driver.write(), path);
     
@@ -365,7 +465,8 @@ impl Server {
                 driver.build_mir(&tp);
                 self.flush_errors(&mut driver.write(), path);
             }
-        }
+            tp
+        });
 
         for (url, file) in self.open_files.borrow_mut().iter_mut() {
             let errors = std::mem::take(&mut file.flushed_errors);
@@ -376,6 +477,8 @@ impl Server {
                 version: None,
             }).unwrap();
         }
+
+        (driver, tp)
     }
 }
 
@@ -395,13 +498,14 @@ impl Server {
                                     let response = self.$method_name(params);
                                     send_response(&self.connection, id, response);
                                 }),*
-                                method => unimplemented!("request method: {}", method)
+                                method => unimplemented!("request method: {}\n{:?}", method, req),
                             }
                         }
                     }
                     handle_requests! {
                         "textDocument/completion": Completion => completion;
                         "completionItem/resolve": ResolveCompletionItem => completion_resolve;
+                        "textDocument/hover": HoverRequest => hover_resolve;
                     }
                 },
                 Message::Response(response) => {
@@ -446,6 +550,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
                 ..Default::default()
             }
         ),
+        hover_provider: Some(HoverProviderCapability::Simple(true)),
         workspace: Some(
             WorkspaceServerCapabilities {
                 workspace_folders: Some(WorkspaceFoldersServerCapabilities {

@@ -172,6 +172,16 @@ impl SourceMap {
         (file_id, line, byte_offset)
     }
 
+    pub fn lookup_file_by_url(&self, url: &Url) -> Option<SourceFileId> {
+        let path = url.to_file_path().unwrap().canonicalize().unwrap();
+        for (id, file) in self.files.iter_enumerated() {
+            if file.url.as_ref() == Some(url) || file.path == path {
+                return Some(id)
+            }
+        }
+        None
+    }
+
     pub fn substring_from_range(&self, range: SourceRange) -> &str {
         let (file, range) = self.lookup_file(range);
         self.files[file].substring_from_range(range)

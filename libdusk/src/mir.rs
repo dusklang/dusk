@@ -17,7 +17,7 @@ use dire::source_info::SourceRange;
 
 use crate::driver::{Driver, DriverRef};
 use crate::typechecker as tc;
-use tc::type_provider::TypeProvider;
+use crate::type_provider::TypeProvider;
 use tc::CastMethod;
 use crate::index_vec::*;
 use crate::source_info::ToSourceRange;

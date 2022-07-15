@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 libdusk = { path = "../libdusk" }
 dire = { path = "../dire" }
+dusk-proc-macros = { path = "../dusk-proc-macros" }
 lsp-server = "0.6"
 lsp-types = "0.93"
 serde_json = "1.0"

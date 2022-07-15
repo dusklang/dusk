@@ -7,8 +7,7 @@ use dire::hir::{GenericParamId, ExprId, GenericCtx, GenericCtxId, BLANK_GENERIC_
 
 use crate::driver::Driver;
 use crate::ty::BuiltinTraits;
-
-use super::type_provider::TypeProvider;
+use crate::type_provider::TypeProvider;
 
 pub type GenericContext = HashMap<GenericParamId, ConstraintList>;
 
