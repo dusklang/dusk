@@ -1398,6 +1398,14 @@ impl tir::RetGroup {
     }
 }
 
+impl tir::FunctionDecl {
+    fn run_pass_1(&self, driver: &Driver, tp: &mut impl TypeProvider) {
+        tp.set_decl_type_to_explicit_type_if_exists(driver, self.id);
+    }
+
+    fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut impl TypeProvider) {}
+}
+
 impl Driver {
     pub fn decl_type(&self, id: DeclId, tp: &impl TypeProvider) -> Type {
         let explicit_ty = self.code.hir.explicit_tys[id].map(|ty| tp.get_evaluated_type(ty)).unwrap_or(&tp.decl_type(id).ty).clone();
@@ -1430,7 +1438,7 @@ impl Driver {
                 )+
             }
         }
-        run_pass_1_flat!(int_lits, dec_lits, str_lits, char_lits, bool_lits, const_tys, generic_params, error_exprs);
+        run_pass_1_flat!(int_lits, dec_lits, str_lits, char_lits, bool_lits, const_tys, generic_params, error_exprs, func_decls);
 
         for level in start_level..unit.num_levels() {
             macro_rules! run_pass_1 {
@@ -1491,7 +1499,7 @@ impl Driver {
                 )+
             }
         }
-        run_pass_2_flat!(int_lits, dec_lits, str_lits, char_lits, bool_lits, const_tys, generic_params, stmts, error_exprs);
+        run_pass_2_flat!(int_lits, dec_lits, str_lits, char_lits, bool_lits, const_tys, generic_params, stmts, error_exprs, func_decls);
         tp.debug_output(self, 0);
     }
 

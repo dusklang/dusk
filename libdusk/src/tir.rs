@@ -94,6 +94,8 @@ pub struct BoolLit;
 pub struct ConstTy;
 #[derive(Debug)]
 pub struct GenericParam { pub id: DeclId }
+#[derive(Debug)]
+pub struct FunctionDecl { pub id: DeclId }
 
 #[derive(Debug)]
 pub struct Expr<T> {
@@ -134,6 +136,7 @@ pub struct UnitItems {
     pub error_exprs: Vec<Expr<ErrorExpr>>,
     pub generic_params: Vec<GenericParam>,
     pub stmts: Vec<Stmt>,
+    pub func_decls: Vec<FunctionDecl>,
     pub explicit_rets: DepVec<Expr<ExplicitRet>>,
     pub ret_groups: DepVec<RetGroup>,
     pub casts: DepVec<Expr<Cast>>,
@@ -580,7 +583,7 @@ impl Driver {
     fn build_tir_decl(&mut self, unit: &mut UnitItems, level: u32, id: DeclId) {
         match df!(id.hir) {
             // TODO: Add parameter and field TIR items for (at least) checking that the type of the param is valid
-            hir::Decl::Parameter { .. } | hir::Decl::Field { .. } | hir::Decl::Variant { .. } | hir::Decl::ReturnValue | hir::Decl::Intrinsic { .. } | hir::Decl::ComputedPrototype { .. } | hir::Decl::InternalField(_) => {},
+            hir::Decl::Parameter { .. } | hir::Decl::Field { .. } | hir::Decl::Variant { .. } | hir::Decl::ReturnValue | hir::Decl::Intrinsic { .. } | hir::Decl::InternalField(_) => {},
             hir::Decl::GenericParam(_) => {
                 assert_eq!(level, 0);
                 unit.generic_params.push(GenericParam { id });
@@ -596,6 +599,10 @@ impl Driver {
             hir::Decl::Computed { scope, .. } => {
                 let terminal_expr = self.code.hir.imper_scopes[scope].terminal_expr;
                 self.tir.staged_ret_groups.entry(id).or_default().push(terminal_expr);
+                unit.func_decls.push(FunctionDecl { id });
+            },
+            hir::Decl::ComputedPrototype { .. } => {
+                unit.func_decls.push(FunctionDecl { id });
             },
         }
     }
