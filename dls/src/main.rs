@@ -255,7 +255,7 @@ impl Server {
                             let mut ty = None;
                             if let Some(tp) = &tp {
                                 if let Some(overload) = *tp.selected_overload(id) {
-                                    ty = Some(tp.decl_type(overload).clone());                                    
+                                    ty = Some(tp.decl_type(overload).clone());
                                 }
                             }
                             if ty.as_ref().map(|ty| ty.is_mut).unwrap_or(false) {
