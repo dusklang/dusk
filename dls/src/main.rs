@@ -232,7 +232,7 @@ impl Server {
     fn hover_resolve(&self, params: HoverParams) -> Option<Hover> {
         let url = &params.text_document_position_params.text_document.uri;
         let (driver, tp) = self.analyze_file(url);
-        let pos = self.lsp_pos_to_dusk_pos(&driver.read(), url, params.text_document_position_params.position);
+        let pos = lsp_pos_to_dusk_pos(&driver.read(), url, params.text_document_position_params.position);
         // TODO: this is preposterously stupid
         let mut hovered_item = None;
         for (id, range) in driver.read().code.hir.source_ranges.iter_enumerated() {
@@ -243,7 +243,7 @@ impl Server {
         }
         hovered_item.map(|item| {
             let range = driver.read().code.hir.source_ranges[item];
-            let range = self.dusk_range_to_lsp_range(&driver.read(), range).1;
+            let range = dusk_range_to_lsp_range(&driver.read(), range).1;
             let message = match driver.read().code.hir.items[item] {
                 Item::Expr(expr) => {
                     let mut message = String::new();
@@ -306,51 +306,48 @@ impl Server {
     }
 }
 
-impl Server {
-    fn dusk_pos_to_lsp_pos(&self, driver: &Driver, pos: usize) -> (SourceFileId, Position) {
-        let (file, line, offset) = driver.src_map.lookup_file_line_and_offset(pos);
-        let line_str = driver.src_map.files[file].substring_from_line(line);
-        debug_assert!(line_str.is_char_boundary(offset));
-        // TODO: This is kind of awful.
-        let line_bytes = line_str.as_bytes();
-        let first_section = &line_bytes[..offset];
-        let character = String::from_utf8_lossy(first_section).encode_utf16().count();
-        let position = Position {
-            line: line as u32,
-            character: character as u32
-        };
-        (file, position)
-    }
+fn dusk_pos_to_lsp_pos(driver: &Driver, pos: usize) -> (SourceFileId, Position) {
+    let (file, line, offset) = driver.src_map.lookup_file_line_and_offset(pos);
+    let line_str = driver.src_map.files[file].substring_from_line(line);
+    debug_assert!(line_str.is_char_boundary(offset));
+    // TODO: This is kind of awful.
+    let line_bytes = line_str.as_bytes();
+    let first_section = &line_bytes[..offset];
+    let character = String::from_utf8_lossy(first_section).encode_utf16().count();
+    let position = Position {
+        line: line as u32,
+        character: character as u32
+    };
+    (file, position)
+}
 
-    fn dusk_range_to_lsp_range(&self, driver: &Driver, range: SourceRange) -> (SourceFileId, Range) {
-        let (start_file, start) = self.dusk_pos_to_lsp_pos(driver, range.start);
-        let (end_file, end) = self.dusk_pos_to_lsp_pos(driver, range.end);
-        debug_assert_eq!(start_file, end_file);
+fn dusk_range_to_lsp_range(driver: &Driver, range: SourceRange) -> (SourceFileId, Range) {
+    let (start_file, start) = dusk_pos_to_lsp_pos(driver, range.start);
+    let (end_file, end) = dusk_pos_to_lsp_pos(driver, range.end);
+    debug_assert_eq!(start_file, end_file);
 
-        let range = Range { start, end };
-        (start_file, range)
-    }
+    let range = Range { start, end };
+    (start_file, range)
+}
 
-    fn lsp_pos_to_dusk_pos(&self, driver: &Driver, url: &Url, pos: Position) -> usize {
-        let file = driver.src_map.lookup_file_by_url(url).unwrap();
-    
-        // byte offset to the beginning of the file
-        let file_offset = driver.src_map.get_begin_offset(file);
-    
-        let file = &driver.src_map.files[file];
-    
-        // byte offset from the beginning of the file to the beginning of the line
-        let line_offset = file.lines[pos.line as usize];
+fn lsp_pos_to_dusk_pos(driver: &Driver, url: &Url, pos: Position) -> usize {
+    let file = driver.src_map.lookup_file_by_url(url).unwrap();
 
-        let open_files = self.open_files.borrow();
-        let line = &open_files.get(url).unwrap().contents.lines[pos.line as usize];
-        let utf16: Vec<_> = line.encode_utf16().take(pos.character as usize).collect();
+    // byte offset to the beginning of the file
+    let file_offset = driver.src_map.get_begin_offset(file);
 
-        // byte offset from the beginning of the line to the actual position
-        let intra_line_byte_offset = String::from_utf16(&utf16).unwrap().len();
+    let file = &driver.src_map.files[file];
 
-        file_offset + line_offset + intra_line_byte_offset
-    }
+    // byte offset from the beginning of the file to the beginning of the line
+    let line_offset = file.lines[pos.line as usize];
+
+    let line = file.substring_from_line(pos.line as usize);
+    let utf16: Vec<_> = line.encode_utf16().take(pos.character as usize).collect();
+
+    // byte offset from the beginning of the line to the actual position
+    let intra_line_byte_offset = String::from_utf16(&utf16).unwrap().len();
+
+    file_offset + line_offset + intra_line_byte_offset
 }
 
 // This would be a method on Server if Rust had partial borrowing
@@ -379,10 +376,10 @@ impl Server {
         if !errors.is_empty() {
             for error in errors {
                 let (main, others) = error.ranges.split_first().unwrap();
-                let (_, main_range) = self.dusk_range_to_lsp_range(driver, main.range);
+                let (_, main_range) = dusk_range_to_lsp_range(driver, main.range);
                 let mut related_info = Vec::new();
                 for other_range in others {
-                    let (file, range) = self.dusk_range_to_lsp_range(driver, other_range.range);
+                    let (file, range) = dusk_range_to_lsp_range(driver, other_range.range);
                     let file = &driver.src_map.files[file];
                     let uri = file.url.clone().unwrap_or_else(|| Url::from_file_path(file.path.clone()).unwrap());
                     let location = Location {
