@@ -966,7 +966,6 @@ impl tir::Expr<tir::Call> {
         let pref = tp.constraints(self.callee).preferred_type().cloned();
         
         // Select callee function type.
-        driver.flush_errors();
         let callee_ty = pref.as_ref().cloned()
             .filter(|pref| callee_one_of.iter().any(|ty| ty.trivially_convertible_to(pref) || pref.trivially_convertible_to(ty)))
             .or_else(|| callee_one_of.iter().next().cloned());

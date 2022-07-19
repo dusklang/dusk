@@ -51,8 +51,12 @@ struct Opt {
     input: PathBuf,
 }
 
-trait DuskDelegate {
-    fn flush_errors(&self, driver: &Driver, );
+fn flush_errors(driver: &mut Driver) {
+    let errors = driver.get_latest_errors();
+    for mut err in errors {
+        println!("\u{001B}[31merror:\u{001B}[0m {}", &err.message);
+        driver.src_map.print_commentated_source_ranges(&mut err.ranges);
+    }
 }
 
 fn main() {
@@ -76,7 +80,7 @@ fn main() {
 
     macro_rules! begin_phase {
         ($phase:ident) => {{
-            driver.write().flush_errors();
+            flush_errors(&mut driver.write());
             if (opt.stop_phase as u8) < (StopPhase::$phase as u8) {
                 driver.read().check_for_failure();
                 return;
@@ -87,7 +91,7 @@ fn main() {
     begin_phase!(Parse);
     let fatal_parse_error = driver.write().parse_added_files().is_err();
     if fatal_parse_error {
-        driver.write().flush_errors();
+        flush_errors(&mut driver.write());
         // TODO: still proceed with other phases after some forms of parse error. I had to add this in the short term
         // because after I improved the quality of the parser's error handling, some errors would prevent important data
         // from being properly initialized (e.g., the two-phase initialization of various HIR data structures), leading to
@@ -121,13 +125,13 @@ fn main() {
             }
             new_code = driver.read().get_new_code_since(before);
             debug::send(|| DvdMessage::DidTypeCheckSet);
-            // { driver.write().flush_errors(); }
+            // { flush_errors(&mut driver.write()); }
         } else {
             break;
         }
     }
 
-    driver.write().flush_errors();
+    flush_errors(&mut driver.write());
     if driver.read().check_for_failure() { return; }
 
     begin_phase!(Mir);
@@ -137,7 +141,7 @@ fn main() {
         println!("{}", driver.read().display_mir());
     }
 
-    driver.write().flush_errors();
+    flush_errors(&mut driver.write());
     if driver.read().check_for_failure() { return; }
 
     begin_phase!(Interp);
@@ -155,7 +159,7 @@ fn main() {
         driver.call(FunctionRef::Id(FuncId::new(main)), Vec::new(), Vec::new());
     } else {
         driver.write().errors.push(Error::new("Couldn't find main function with no parameters and a return type of `void`"));
-        driver.write().flush_errors();
+        flush_errors(&mut driver.write());
         driver.read().check_for_failure();
     }
 }

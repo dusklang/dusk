@@ -47,14 +47,6 @@ impl Driver {
         errors
     }
 
-    pub fn flush_errors(&mut self) {
-        let errors = self.get_latest_errors();
-        for mut err in errors {
-            println!("\u{001B}[31merror:\u{001B}[0m {}", &err.message);
-            self.src_map.print_commentated_source_ranges(&mut err.ranges);
-        }
-    }
-
     pub fn has_failed(&self) -> bool {
         self.flushed_errors > 0
     }
