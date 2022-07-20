@@ -770,7 +770,7 @@ impl Driver {
 
 #[cfg(windows)]
 unsafe fn open_dylib(path: *const i8) -> *mut c_void {
-    kernel32::LoadLibraryA(path) as *mut _
+    winapi::um::libloaderapi::LoadLibraryA(path) as *mut _
 }
 #[cfg(not(windows))]
 unsafe fn open_dylib(path: *const i8) -> *mut c_void {
@@ -778,7 +778,7 @@ unsafe fn open_dylib(path: *const i8) -> *mut c_void {
 }
 #[cfg(windows)]
 unsafe fn get_dylib_symbol(dylib: *mut c_void, name: *const i8) -> *const c_void {
-    kernel32::GetProcAddress(dylib as *mut _, name)
+    winapi::um::libloaderapi::GetProcAddress(dylib as *mut _, name) as *const _
 }
 #[cfg(not(windows))]
 unsafe fn get_dylib_symbol(dylib: *mut c_void, name: *const i8) -> *const c_void {
@@ -786,7 +786,7 @@ unsafe fn get_dylib_symbol(dylib: *mut c_void, name: *const i8) -> *const c_void
 }
 #[cfg(windows)]
 unsafe fn free_dylib(dylib: *mut c_void) {
-    kernel32::FreeLibrary(dylib as *mut _);
+    winapi::um::libloaderapi::FreeLibrary(dylib as *mut _);
 }
 #[cfg(not(windows))]
 unsafe fn free_dylib(dylib: *mut c_void) {
