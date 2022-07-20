@@ -3,17 +3,17 @@ use std::ffi::CString;
 use std::ops::Range;
 use std::cmp::Ordering;
 
-use dire::index_counter::IndexCounter;
+use dusk_dire::index_counter::IndexCounter;
 use num_bigint::BigInt;
 use smallvec::{SmallVec, smallvec};
 use string_interner::DefaultSymbol as Sym;
 use display_adapter::display_adapter;
 
-use dire::hir::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, GenericParamId, Item, PatternBindingDeclId, ExternModId, ExternFunctionRef, PatternBindingPathComponent, VOID_TYPE};
-use dire::mir::{FuncId, StaticId, Const, Instr, InstrId, Function, MirCode, StructLayout, EnumLayout, ExternMod, ExternFunction, InstrNamespace, SwitchCase, VOID_INSTR};
-use dire::{Block, BlockId, Op, OpId, InternalField};
-use dire::ty::{Type, InternalType, FunctionType, FloatWidth, StructType};
-use dire::source_info::SourceRange;
+use dusk_dire::hir::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, GenericParamId, Item, PatternBindingDeclId, ExternModId, ExternFunctionRef, PatternBindingPathComponent, VOID_TYPE};
+use dusk_dire::mir::{FuncId, StaticId, Const, Instr, InstrId, Function, MirCode, StructLayout, EnumLayout, ExternMod, ExternFunction, InstrNamespace, SwitchCase, VOID_INSTR};
+use dusk_dire::{Block, BlockId, Op, OpId, InternalField};
+use dusk_dire::ty::{Type, InternalType, FunctionType, FloatWidth, StructType};
+use dusk_dire::source_info::SourceRange;
 
 use crate::driver::{Driver, DriverRef};
 use crate::typechecker as tc;
@@ -378,7 +378,7 @@ impl DriverRef<'_> {
             let konst = self.eval_expr(statik.assignment, tp);
             self.write().code.mir.statics.push_at(
                 id,
-                dire::mir::Static {
+                dusk_dire::mir::Static {
                     name: statik.name,
                     val: konst.clone(),
                 }

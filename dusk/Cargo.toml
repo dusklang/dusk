@@ -1,11 +1,14 @@
 [package]
-name = "dusk"
+name = "dusklang"
 version = "0.1.0"
 authors = ["Zach <zachrwolfe@me.com>"]
 edition = "2021"
-default-run = "dusk"
+default-run = "dusklang"
+description = "This crate contains a compiler for the Dusk programming language"
+license = "MIT"
+repository = "https://github.com/dusklang/dusk"
 
 [dependencies]
 clap = { version = "3.0", features = ["derive"] }
-libdusk = { path = "../libdusk" }
-dire = { path = "../dire/" }
+libdusk = { version = "0.1", path = "../libdusk" }
+dusk_dire = { version = "0.1", path = "../dire" }

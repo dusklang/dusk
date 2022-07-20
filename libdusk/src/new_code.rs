@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use dire::hir::{ExprId, DeclId, ItemId};
+use dusk_dire::hir::{ExprId, DeclId, ItemId};
 
 use crate::driver::Driver;
 

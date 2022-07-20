@@ -161,17 +161,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dire"
-version = "0.1.0"
-dependencies = [
- "display_adapter",
- "index_vec",
- "num-bigint",
- "smallvec",
- "string-interner",
-]
-
-[[package]]
 name = "dirs"
 version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -193,14 +182,14 @@ dependencies = [
 
 [[package]]
 name = "display_adapter"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "display_adapter_attr",
 ]
 
 [[package]]
 name = "display_adapter_attr"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "quote",
  "syn",
@@ -210,8 +199,8 @@ dependencies = [
 name = "dls"
 version = "0.1.0"
 dependencies = [
- "dire",
  "dusk-proc-macros",
+ "dusk_dire",
  "libdusk",
  "lsp-server",
  "lsp-types",
@@ -220,19 +209,30 @@ dependencies = [
 ]
 
 [[package]]
-name = "dusk"
-version = "0.1.0"
-dependencies = [
- "clap",
- "dire",
- "libdusk",
-]
-
-[[package]]
 name = "dusk-proc-macros"
 version = "0.1.0"
 dependencies = [
  "syn",
+]
+
+[[package]]
+name = "dusk_dire"
+version = "0.1.1"
+dependencies = [
+ "display_adapter",
+ "index_vec",
+ "num-bigint",
+ "smallvec",
+ "string-interner",
+]
+
+[[package]]
+name = "dusklang"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "dusk_dire",
+ "libdusk",
 ]
 
 [[package]]
@@ -514,9 +514,9 @@ dependencies = [
  "arrayvec",
  "bitflags",
  "clap",
- "dire",
  "display_adapter",
  "dusk-proc-macros",
+ "dusk_dire",
  "indenter",
  "index_vec",
  "interprocess",

@@ -8,11 +8,11 @@ pub mod constraints;
 use constraints::*;
 use crate::type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 
-use dire::hir::{self, ExprId, DeclId, StructId, PatternKind, GenericParamId, Ident, VOID_EXPR, GenericCtx, DeclRefId, BLANK_GENERIC_CTX};
-use dire::mir::Const;
-use dire::ty::{Type, InternalType, FunctionType, QualType, IntWidth};
-use dire::source_info::SourceRange;
-use dire::InternalNamespace;
+use dusk_dire::hir::{self, ExprId, DeclId, StructId, PatternKind, GenericParamId, Ident, VOID_EXPR, GenericCtx, DeclRefId, BLANK_GENERIC_CTX};
+use dusk_dire::mir::Const;
+use dusk_dire::ty::{Type, InternalType, FunctionType, QualType, IntWidth};
+use dusk_dire::source_info::SourceRange;
+use dusk_dire::InternalNamespace;
 
 use crate::driver::{Driver, DriverRef};
 use crate::error::Error;

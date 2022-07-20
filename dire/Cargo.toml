@@ -1,8 +1,11 @@
 [package]
-name = "dire"
-version = "0.1.0"
+name = "dusk_dire"
+version = "0.1.1"
 authors = ["Zach Wolfe <zachrwolfe@me.com>"]
 edition = "2021"
+description = "A work-in-progress intermediate representation library, designed primarily for use in the Dusk programming language"
+license = "MIT"
+repository = "https://github.com/dusklang/dusk"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -10,5 +13,5 @@ edition = "2021"
 index_vec = "0.1.2"
 smallvec = "1.5.1"
 string-interner = "0.12.1"
-display_adapter = { path = "../../display_adapter/display_adapter" }
+display_adapter = { version = "0.1", path = "../../display_adapter/display_adapter" }
 num-bigint = "0.3"

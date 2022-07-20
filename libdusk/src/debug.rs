@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use std::process::{Command, Stdio};
 use std::io::Write;
 
-use dire::hir::{ExprId, DeclId, ItemId};
+use dusk_dire::hir::{ExprId, DeclId, ItemId};
 use crate::tir::CompId;
 use lazy_static::lazy_static;
 use interprocess::local_socket::{LocalSocketListener, LocalSocketStream};

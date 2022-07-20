@@ -13,9 +13,9 @@ use paste::paste;
 
 use index_vec::IdxRangeBounds;
 
-use dire::hir::{ExprId, DeclId, DeclRefId, StructLitId, CastId, Namespace, Decl};
-use dire::mir::Const;
-use dire::ty::{Type, FunctionType, QualType};
+use dusk_dire::hir::{ExprId, DeclId, DeclRefId, StructLitId, CastId, Namespace, Decl};
+use dusk_dire::mir::Const;
+use dusk_dire::ty::{Type, FunctionType, QualType};
 use dusk_proc_macros::df;
 
 use crate::typechecker::{CastMethod, StructLit, constraints::ConstraintList, Overloads, GenericConstraints};

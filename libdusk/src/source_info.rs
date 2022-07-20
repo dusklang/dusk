@@ -7,9 +7,9 @@ use std::io;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
-use dire::hir::{ExprId, DeclId, ItemId, Item};
-use dire::OpId;
-use dire::source_info::{SourceRange, SourceFileId};
+use dusk_dire::hir::{ExprId, DeclId, ItemId, Item};
+use dusk_dire::OpId;
+use dusk_dire::source_info::{SourceRange, SourceFileId};
 
 use lsp_types::Url;
 

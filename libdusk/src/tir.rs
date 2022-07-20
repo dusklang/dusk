@@ -5,10 +5,10 @@ use smallvec::SmallVec;
 use index_vec::{define_index_type, IdxRangeBounds};
 use string_interner::DefaultSymbol as Sym;
 
-use dire::source_info::SourceRange;
-use dire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, EnumId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, RETURN_VALUE_DECL};
-use dire::{internal_fields, internal_field_decls, InternalField, InternalFieldDecls, InternalNamespace};
-use dire::ty::Type;
+use dusk_dire::source_info::SourceRange;
+use dusk_dire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, EnumId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, RETURN_VALUE_DECL};
+use dusk_dire::{internal_fields, internal_field_decls, InternalField, InternalFieldDecls, InternalNamespace};
+use dusk_dire::ty::Type;
 
 use crate::driver::Driver;
 use crate::dep_vec::{self, DepVec, AnyDepVec};
@@ -270,7 +270,7 @@ macro_rules! define_internal_types_internal {
         }
     }
 }
-dire::define_internal_types!(define_internal_types_internal);
+dusk_dire::define_internal_types!(define_internal_types_internal);
 
 pub enum NameLookup {
     Exact(Sym),

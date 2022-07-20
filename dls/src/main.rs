@@ -2,8 +2,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
 
-use dire::hir::{Item, Expr};
-use dire::source_info::{SourceFileId, SourceRange};
+use dusk_dire::hir::{Item, Expr};
+use dusk_dire::source_info::{SourceFileId, SourceRange};
 use libdusk::new_code::NewCode;
 use libdusk::type_provider::{RealTypeProvider, TypeProvider};
 use lsp_server::{Connection, Message, Request, RequestId, ExtractError, Notification, Response};
@@ -14,7 +14,7 @@ use lsp_types::{ServerCapabilities, CompletionOptions, WorkspaceServerCapabiliti
 use libdusk::source_info::SourceMap;
 use libdusk::driver::{Driver, DRIVER, DriverRef};
 use dusk_proc_macros::ef;
-use dire::arch::Arch;
+use dusk_dire::arch::Arch;
 
 fn break_lines(text: String) -> Vec<String> {
     let mut lines = Vec::new();

@@ -3,6 +3,9 @@ name = "libdusk"
 version = "0.1.0"
 authors = ["Zach <zachrwolfe@me.com>"]
 edition = "2021"
+description = "This crate implements most of the compiler for the Dusk programming language, in library form."
+license = "MIT"
+repository = "https://github.com/dusklang/dusk/"
 
 [dependencies]
 unicode-segmentation = "1.9"
@@ -17,9 +20,9 @@ num-bigint = "0.3"
 index_vec = "0.1.3"
 indenter = "0.3.2"
 region = "3.0"
-display_adapter = { path = "../../display_adapter/display_adapter" }
-dire = { path = "../dire/" }
-dusk-proc-macros = { path = "../dusk-proc-macros" }
+display_adapter = { version = "0.1", path = "../../display_adapter/display_adapter" }
+dusk_dire = { version = "0.1", path = "../dire" }
+dusk-proc-macros = { version = "0.1", path = "../dusk-proc-macros" }
 lazy_static = "1.4.0"
 interprocess = "1.1.1"
 lsp-types = "0.93"

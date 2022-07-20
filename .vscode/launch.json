@@ -11,11 +11,11 @@
             "cargo": {
                 "args": [
                     "build",
-                    "--bin=dusk",
-                    "--package=dusk"
+                    "--bin=dusklang",
+                    "--package=dusklang"
                 ],
                 "filter": {
-                    "name": "dusk",
+                    "name": "dusklang",
                     "kind": "bin"
                 }
             },
@@ -33,11 +33,11 @@
                 "args": [
                     "test",
                     "--no-run",
-                    "--bin=dusk",
-                    "--package=dusk"
+                    "--bin=dusklang",
+                    "--package=dusklang"
                 ],
                 "filter": {
-                    "name": "dusk",
+                    "name": "dusklang",
                     "kind": "bin"
                 }
             },

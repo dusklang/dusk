@@ -19,12 +19,12 @@ use display_adapter::display_adapter;
 use index_vec::IndexVec;
 use lazy_static::lazy_static;
 
-use dire::arch::Arch;
-use dire::hir::{Intrinsic, ModScopeId, EnumId, GenericParamId, ExternFunctionRef};
-use dire::mir::{Const, Instr, InstrId, FuncId, StaticId, ExternFunction};
-use dire::ty::{Type, InternalType, FunctionType, QualType, IntWidth, FloatWidth, StructType};
-use dire::{OpId, BlockId};
-use dire::{InternalField, internal_fields};
+use dusk_dire::arch::Arch;
+use dusk_dire::hir::{Intrinsic, ModScopeId, EnumId, GenericParamId, ExternFunctionRef};
+use dusk_dire::mir::{Const, Instr, InstrId, FuncId, StaticId, ExternFunction};
+use dusk_dire::ty::{Type, InternalType, FunctionType, QualType, IntWidth, FloatWidth, StructType};
+use dusk_dire::{OpId, BlockId};
+use dusk_dire::{InternalField, internal_fields};
 
 use crate::driver::{DRIVER, Driver, DriverRef};
 use crate::mir::{FunctionRef, function_by_ref};

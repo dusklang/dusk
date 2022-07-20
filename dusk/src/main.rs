@@ -2,9 +2,9 @@ use clap::{Parser, ArgEnum};
 use libdusk::new_code::NewCode;
 use std::path::PathBuf;
 
-use dire::ty::Type;
-use dire::mir::FuncId;
-use dire::arch::Arch;
+use dusk_dire::ty::Type;
+use dusk_dire::mir::FuncId;
+use dusk_dire::arch::Arch;
 use libdusk::TirGraphOutput;
 use libdusk::driver::{DRIVER, Driver, DriverRef};
 use libdusk::source_info::SourceMap;

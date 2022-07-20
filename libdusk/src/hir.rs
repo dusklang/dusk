@@ -9,12 +9,12 @@ use display_adapter::display_adapter;
 use smallvec::{SmallVec, smallvec};
 use string_interner::{DefaultSymbol as Sym, Symbol, StringInterner};
 
-use dire::{Op, Block};
-use dire::hir::*;
-use dire::index_counter::IndexCounter;
-use dire::ty::Type;
-use dire::source_info::{SourceFileId, SourceRange};
-use dire::InternalField;
+use dusk_dire::{Op, Block};
+use dusk_dire::hir::*;
+use dusk_dire::index_counter::IndexCounter;
+use dusk_dire::ty::Type;
+use dusk_dire::source_info::{SourceFileId, SourceRange};
+use dusk_dire::InternalField;
 
 use crate::driver::Driver;
 use crate::index_vec::*;
