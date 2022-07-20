@@ -1375,8 +1375,9 @@ impl DriverRef<'_> {
             !block.ops.is_empty()
         });
 
-        loop {
-            let mut did_something = false;
+        let mut did_something = true;
+        while did_something {
+            did_something = false;
             did_something |= self.write().remove_redundant_loads(func);
             did_something |= self.write().remove_unused_allocas(func);
             did_something |= self.write().remove_unused_values(func);
@@ -1386,9 +1387,6 @@ impl DriverRef<'_> {
             did_something |= self.write().remove_return_non_shared_void(func);
             if should_eval_constants {
                 did_something |= self.eval_constants(func, tp);
-            }
-            if !did_something {
-                break;
             }
         }
     }
@@ -1673,10 +1671,14 @@ impl DriverRef<'_> {
 
         let true_bb = self.write().create_bb(b);
         let mut false_bb = self.write().create_bb(b);
+        // specifies whether or not we created the `post_bb` within this call to build_if_expr().
+        // If not, we mustn't call start_bb() on it later, because it may already have been completed.
+        let mut we_own_post_bb = true;
         let post_bb = if else_scope.is_some() {
             self.write().create_bb(b)
         } else if let ControlDest::Block(block) = ctx.control {
             false_bb = block;
+            we_own_post_bb = false;
             block
         } else {
             false_bb
@@ -1717,11 +1719,15 @@ impl DriverRef<'_> {
             next_scope = None;
         }
 
-        self.write().start_bb(b, post_bb);
-        if let Some(location) = result_location {
-            self.write().push_instr(b, Instr::Load(location), expr).direct()
-        } else if else_scope.is_none() {
-            self.handle_context(b, VOID_INSTR.direct(), ctx, tp)
+        if we_own_post_bb {
+            self.write().start_bb(b, post_bb);
+            if let Some(location) = result_location {
+                self.write().push_instr(b, Instr::Load(location), expr).direct()
+            } else if else_scope.is_none() {
+                self.handle_context(b, VOID_INSTR.direct(), ctx, tp)
+            } else {
+                VOID_INSTR.direct()
+            }
         } else {
             VOID_INSTR.direct()
         }

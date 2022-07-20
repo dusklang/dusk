@@ -1,0 +1,15 @@
+fn bool_val(): bool {
+    true
+}
+
+fn do_something() {
+
+}
+
+fn main() {
+    while bool_val() {
+        if bool_val() {
+            do_something() 
+        }
+    }
+}
