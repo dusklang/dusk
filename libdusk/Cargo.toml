@@ -1,11 +1,12 @@
 [package]
 name = "libdusk"
-version = "0.1.0"
+version = "0.1.2"
 authors = ["Zach <zachrwolfe@me.com>"]
 edition = "2021"
 description = "This crate implements most of the compiler for the Dusk programming language, in library form."
 license = "MIT"
 repository = "https://github.com/dusklang/dusk/"
+homepage = "https://dusklang.org/"
 
 [dependencies]
 unicode-segmentation = "1.9"

@@ -1,12 +1,13 @@
 [package]
 name = "dusklang"
-version = "0.1.0"
+version = "0.1.2"
 authors = ["Zach <zachrwolfe@me.com>"]
 edition = "2021"
 default-run = "dusklang"
 description = "This crate contains a compiler for the Dusk programming language"
 license = "MIT"
 repository = "https://github.com/dusklang/dusk"
+homepage = "https://dusklang.org/"
 
 [dependencies]
 clap = { version = "3.0", features = ["derive"] }
