@@ -6,7 +6,7 @@ use index_vec::{IndexVec, define_index_type};
 use smallvec::SmallVec;
 use string_interner::DefaultSymbol as Sym;
 
-use crate::ty::Type;
+use crate::mir::Const;
 use crate::index_counter::IndexCounter;
 use crate::source_info::{SourceRange, SourceFileId};
 use crate::BlockId;
@@ -164,7 +164,7 @@ pub enum Expr {
     StrLit { lit: CString },
     CharLit { lit: i8 },
     BoolLit { lit: bool },
-    ConstTy(Type),
+    Const(Const),
     DeclRef { id: DeclRefId },
     Call { callee: ExprId, arguments: SmallVec<[ExprId; 2]> },
     AddrOf { expr: ExprId, is_mut: bool },
@@ -377,27 +377,7 @@ pub enum Intrinsic {
     StrideOf,
     AlignOf,
     OffsetOf,
-
-    // Named types
-    I8,
-    I16,
-    I32,
-    I64,
-    Isize,
-    U8,
-    U16,
-    U32,
-    U64,
-    Usize,
-    F32,
-    F64,
-    Never,
-    Bool,
-    Void,
-    Ty,
-    Module,
     PrintType,
-    StringLiteral,
 }
 
 impl Intrinsic {
@@ -442,24 +422,6 @@ impl Intrinsic {
             Print => "print",
             Malloc => "malloc",
             Free => "free",
-            I8 => "i8",
-            I16 => "i16",
-            I32 => "i32",
-            I64 => "i64",
-            Isize => "isize",
-            U8 => "u8",
-            U16 => "u16",
-            U32 => "u32",
-            U64 => "u64",
-            Usize => "usize",
-            F32 => "f32",
-            F64 => "f64",
-            Never => "never",
-            Bool => "bool",
-            Void => "void",
-            Ty => "type",
-            Module => "module",
-            StringLiteral => "StringLiteral",
 
             PrintType => "print_type",
             AlignOf => "align_of",

@@ -13,6 +13,7 @@ mod ty;
 mod typechecker;
 mod x64;
 mod rw_ref;
+mod builtins;
 
 pub mod source_info;
 pub mod mir;

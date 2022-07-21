@@ -188,7 +188,7 @@ impl Driver {
                 _ => panic!("unexpected type for character")
             },
             Expr::BoolLit { lit } => Const::Bool(lit),
-            Expr::ConstTy(ref ty) => Const::Ty(ty.clone()),
+            Expr::Const(ref val) => val.clone(),
             Expr::Mod { id } => Const::Mod(id),
             _ => panic!("Cannot convert expression to constant: {:#?}", expr),
         }
@@ -1744,7 +1744,7 @@ impl DriverRef<'_> {
                 drop(d);
                 VOID_INSTR.direct()
             },
-            Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::CharLit { .. } | Expr::StrLit { .. } | Expr::BoolLit { .. } | Expr::ConstTy(_) | Expr::Mod { .. } => {
+            Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::CharLit { .. } | Expr::StrLit { .. } | Expr::BoolLit { .. } | Expr::Const(_) | Expr::Mod { .. } => {
                 drop(d);
                 let konst = self.write().expr_to_const(expr, ty);
                 let name = format!("{}", self.read().fmt_const_for_instr_name(&konst));

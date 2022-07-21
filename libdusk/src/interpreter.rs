@@ -22,7 +22,7 @@ use lazy_static::lazy_static;
 use dusk_dire::arch::Arch;
 use dusk_dire::hir::{Intrinsic, ModScopeId, EnumId, GenericParamId, ExternFunctionRef};
 use dusk_dire::mir::{Const, Instr, InstrId, FuncId, StaticId, ExternFunction};
-use dusk_dire::ty::{Type, InternalType, FunctionType, QualType, IntWidth, FloatWidth, StructType};
+use dusk_dire::ty::{Type, FunctionType, QualType, IntWidth, FloatWidth, StructType};
 use dusk_dire::{OpId, BlockId};
 use dusk_dire::{InternalField, internal_fields};
 
@@ -1185,24 +1185,6 @@ impl DriverRef<'_> {
                             unsafe { alloc::dealloc(ptr, layout) };
                             Value::Nothing
                         },
-                        Intrinsic::I8 => Value::from_ty(Type::i8()),
-                        Intrinsic::I16 => Value::from_ty(Type::i16()),
-                        Intrinsic::I32 => Value::from_ty(Type::i32()),
-                        Intrinsic::I64 => Value::from_ty(Type::i64()),
-                        Intrinsic::Isize => Value::from_ty(Type::isize()),
-                        Intrinsic::U8 => Value::from_ty(Type::u8()),
-                        Intrinsic::U16 => Value::from_ty(Type::u16()),
-                        Intrinsic::U32 => Value::from_ty(Type::u32()),
-                        Intrinsic::U64 => Value::from_ty(Type::u64()),
-                        Intrinsic::Usize => Value::from_ty(Type::usize()),
-                        Intrinsic::F32 => Value::from_ty(Type::f32()),
-                        Intrinsic::F64 => Value::from_ty(Type::f64()),
-                        Intrinsic::Never => Value::from_ty(Type::Never),
-                        Intrinsic::Bool => Value::from_ty(Type::Bool),
-                        Intrinsic::Void => Value::from_ty(Type::Void),
-                        Intrinsic::Ty => Value::from_ty(Type::Ty),
-                        Intrinsic::Module => Value::from_ty(Type::Mod),
-                        Intrinsic::StringLiteral => Value::from_ty(InternalType::StringLiteral.into()),
                         Intrinsic::PrintType => {
                             let frame = stack.last().unwrap();
                             assert_eq!(arguments.len(), 1);
