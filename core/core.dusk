@@ -1,5 +1,150 @@
 // This file defines the Dusk core library.
 
-fn hello_from_core() {
-    print("Hello, from the core library.")
+ByteBuffer :: struct {
+    size: usize
+    data: u8 *mut
+}
+
+fn free_slice(slice: ByteBuffer *mut) {
+    free(slice.data as void *mut)
+    slice.data = 0 as usize as u8 *mut
+    slice.size = 0
+}
+
+fn read_file(path: i8*): ByteBuffer {
+    switch compiler.target {
+        .macos: unix.read_file(path),
+        .linux: unix.read_file(path),
+        .windows: windows.read_file(path)
+    }
+}
+
+windows :: mod {
+    fn read_file(path: i8*): ByteBuffer {
+        file :: kernel32.CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, 0 as usize as SECURITY_ATTRIBUTES *mut, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0 as usize as HANDLE)
+        invalid :: -1 as isize as usize as HANDLE
+        if file as usize == INVALID_HANDLE_VALUE() as usize {
+            panic("unable to open file")
+        }
+    
+        size := 0 as u64
+        succ :: kernel32.GetFileSizeEx(file, &mut size)
+        if succ == FALSE {
+            panic("unable to get file size")
+        }
+    
+        size :: size as usize
+        buf :: malloc(size)
+    
+        i := 0 as usize
+        while i < size {
+            bytes_to_read :: (size - i) as DWORD
+            bytes_read := 0 as DWORD
+            succ :: kernel32.ReadFile(file, (buf as usize + i) as void *mut, bytes_to_read, &mut bytes_read, 0 as usize as OVERLAPPED *mut)
+            if succ == FALSE {
+                panic("unable to read from file")
+            }
+            i += bytes_read as usize
+        }
+        ignore :: kernel32.CloseHandle(file)
+    
+        ByteBuffer {
+            size: size
+            data: buf as u8 *mut
+        }
+    }
+
+    // FFI code. To be cleaned up later, likely with https://github.com/dusklang/dusk-windows
+
+    HWND :: void *mut
+    HANDLE :: void *mut
+
+    MB_OK :: 0 as u32
+    FILE_SHARE_READ :: 1 as DWORD
+
+    fn INVALID_HANDLE_VALUE(): HANDLE {
+        -1 as isize as usize as HANDLE
+    }
+    DWORD :: u32
+    STD_INPUT_HANDLE :: (-10) as i32 as DWORD
+    STD_OUTPUT_HANDLE :: (-11) as i32 as DWORD
+    STD_ERROR_HANDLE :: (-12) as i32 as DWORD
+    BOOL :: i32
+    TRUE :: 1
+    FALSE :: 0
+
+    GENERIC_READ :: 2147483648 as DWORD
+    GENERIC_WRITE :: 1073741824 as DWORD
+
+    CREATE_ALWAYS :: 2 as DWORD
+    CREATE_NEW :: 1 as DWORD
+    OPEN_ALWAYS :: 4 as DWORD
+    OPEN_EXISTING :: 3 as DWORD
+    TRUNCATE_EXISTING :: 5 as DWORD
+
+    FILE_ATTRIBUTE_NORMAL :: 128 as DWORD
+
+    // it is not currently possible to have constant pointers, which is why this is a function for now
+    fn NULL(): void *mut { 0 as usize as void *mut }
+
+    SECURITY_ATTRIBUTES :: struct {
+        nLength: DWORD
+        lpSecurityDescriptor: void *mut
+        bInheritHandle: BOOL
+    }
+
+    OVERLAPPED :: struct {}
+
+    kernel32 :: extern_mod("kernel32.dll") {
+        fn GetStdHandle(nStdHandle: DWORD): HANDLE
+        fn WriteConsoleA(hConsoleOutput: HANDLE, lpBuffer: void*, nNumberOfCharsToWrite: DWORD, lpNumberOfCharsWritten: DWORD *mut, lpReserved: void *mut): BOOL
+        fn ReadConsoleA(hConsoleInput: HANDLE, lpBuffer: void *mut, nNumberOfCharsToRead: DWORD, lpNumberOfCharsRead: DWORD *mut, pInputControl: void *mut): BOOL
+        fn CreateFileA(lpFileName: i8*, dwDesiredAccess: DWORD, dwShareMode: DWORD, lpSecurityAttributes: SECURITY_ATTRIBUTES *mut, dwCreationDisposition: DWORD, dwFlagsAndAttributes: DWORD, hTemplateFile: HANDLE): HANDLE
+        fn CloseHandle(hObject: HANDLE): BOOL
+        fn GetFileSizeEx(hFile: HANDLE, lpFileSize: u64 *mut): BOOL
+        fn ReadFile(hFile: HANDLE, lpBuffer: void *mut, nNumberOfBytesToRead: DWORD, lpNumberOfBytesRead: DWORD *mut, lpOverlapped: OVERLAPPED *mut): BOOL
+
+        fn QueryPerformanceCounter(lpPerformanceCount: u64 *mut): BOOL
+        fn QueryPerformanceFrequency(lpFrequency: u64 *mut): BOOL
+    }
+}
+
+unix :: mod {
+    fn read_file(path: i8*): ByteBuffer {
+        file :: libc.fopen(path, "rb")
+        if file as usize == 0 {
+            panic("Failed to open file")
+        }
+        ignore :: libc.fseek(file, 0, SEEK_END)
+        size :: libc.ftell(file) as usize
+        ignore :: libc.fseek(file, 0, SEEK_SET)
+        data :: malloc(size + 1) as u8 *mut
+        ignore :: libc.fread(data as void *mut, 1, size, file)
+        ignore :: libc.fclose(file)
+        ByteBuffer {
+            size: size
+            data: data
+        }
+    }
+    // FFI stuff
+    fn libc_path(): compiler.StringLiteral {
+        switch compiler.target {
+            .macos: "libSystem.dylib",
+            .linux: "libc.so.6",
+            .windows: "libc is not provided on windows"
+        }
+    }
+    FILE :: struct {}
+    size_t :: usize
+    long_int :: i64
+    int :: i32
+    SEEK_SET: int: 0
+    SEEK_END: int: 2
+    libc :: extern_mod(libc_path()) {
+        fn fopen(filename: i8*, mode: i8*): FILE *mut
+        fn fread(ptr: void *mut, size: size_t, count: size_t, stream: FILE *mut): size_t
+        fn fseek(stream: FILE *mut, offset: long_int, origin: int): int
+        fn ftell(stream: FILE *mut): long_int
+        fn fclose(stream: FILE *mut): int
+    }
 }
