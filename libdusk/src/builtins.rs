@@ -1,12 +1,12 @@
 use dusk_dire::source_info::SourceRange;
 use smallvec::{smallvec, SmallVec};
 
-use dusk_dire::hir::{ModScopeNs, ModScope, Intrinsic, Decl, VOID_TYPE, ModScopedDecl};
+use dusk_dire::hir::{ModScopeNs, ModScope, Intrinsic, Decl, VOID_TYPE, ModScopedDecl, ModScopeNsId};
 use dusk_dire::ty::{Type, InternalType};
 use dusk_dire::mir::Const;
 
 use crate::driver::Driver;
-use crate::hir::ScopeState;
+use crate::hir::{ScopeState, AutoPopStackEntry};
 
 impl Driver {
     pub fn add_prelude(&mut self) {
@@ -127,6 +127,8 @@ impl Driver {
         self.add_constant_type_decl("void", Type::Void);
         self.add_constant_type_decl("type", Type::Ty);
         self.add_constant_type_decl("module", Type::Mod);
+
+        let _compiler_module = self.add_module_decl("compiler");
         self.add_constant_type_decl("StringLiteral", Type::Internal(InternalType::StringLiteral));
     }
 
@@ -145,5 +147,21 @@ impl Driver {
 
     fn add_constant_type_decl(&mut self, name: &str, ty: Type) {
         self.add_constant_decl(name, Const::Ty(ty));
+    }
+
+    fn add_module_decl(&mut self, name: &str) -> AutoPopStackEntry<ScopeState, ModScopeNsId> {
+        let prelude_scope = self.code.hir.mod_scopes.push(ModScope::default());
+        let prelude_namespace = self.code.hir.mod_ns.push(
+            ModScopeNs {
+                scope: prelude_scope,
+
+                // technically this field could be filled with whatever is on the top of the stack, but it doesn't
+                // matter because the only thing going in this module will be builtins, which don't refer to anything
+                // else by name
+                parent: None,
+            }
+        );
+        self.add_constant_decl(name, Const::Mod(prelude_scope));
+        self.push_to_scope_stack(prelude_namespace, ScopeState::Mod { id: prelude_scope, namespace: prelude_namespace, extern_mod: None })
     }
 }

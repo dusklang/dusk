@@ -1,4 +1,4 @@
-fn take_literal(lit: StringLiteral) {
+fn take_literal(lit: compiler.StringLiteral) {
     i: usize = 0
     while i < lit.length {
         print(*((lit.data as usize + i) as u8*))
@@ -7,6 +7,6 @@ fn take_literal(lit: StringLiteral) {
 }
 
 fn main() {
-    literal: StringLiteral = "Hello, there!"
+    literal: compiler.StringLiteral = "Hello, there!"
     take_literal(literal)
 }

@@ -291,7 +291,7 @@ impl Driver {
                 );
             }
         }
-        let mut all_unresolved = true;
+        let mut all_unresolved = !scope.blanket_uses.is_empty();
         for &used_namespace in &scope.blanket_uses {
             all_unresolved &= !self.find_overloads_in_namespace(name, used_namespace, overloads);
         }
