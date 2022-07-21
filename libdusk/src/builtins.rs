@@ -1,12 +1,25 @@
+use std::mem;
+
 use dusk_dire::source_info::SourceRange;
 use smallvec::{smallvec, SmallVec};
 
-use dusk_dire::hir::{ModScopeNs, ModScope, Intrinsic, Decl, VOID_TYPE, ModScopedDecl, ModScopeNsId};
+use dusk_dire::hir::{ModScopeNs, ModScope, Intrinsic, Decl, VOID_TYPE, ModScopedDecl, ModScopeNsId, EnumId, ExprId, VariantDecl};
 use dusk_dire::ty::{Type, InternalType};
 use dusk_dire::mir::Const;
 
 use crate::driver::Driver;
 use crate::hir::{ScopeState, AutoPopStackEntry};
+
+struct EnumBuilder {
+    expr: ExprId,
+    id:  EnumId,
+    variants: Vec<VariantDecl>,
+}
+impl Drop for EnumBuilder {
+    fn drop(&mut self) {
+        panic!("Must end enum with Driver::end_enum()");
+    }
+}
 
 impl Driver {
     pub fn add_prelude(&mut self) {
@@ -130,6 +143,13 @@ impl Driver {
 
         let _compiler_module = self.add_module_decl("compiler");
         self.add_constant_type_decl("StringLiteral", Type::Internal(InternalType::StringLiteral));
+
+        // Add Platform enum
+        let mut platform_enum = self.start_enum("Platform");
+        self.add_variant(&mut platform_enum, "windows", None);
+        self.add_variant(&mut platform_enum, "linux", None);
+        self.add_variant(&mut platform_enum, "macos", None);
+        self.end_enum(platform_enum);
     }
 
     fn add_constant_decl(&mut self, name: &str, value: Const) {
@@ -163,5 +183,23 @@ impl Driver {
         );
         self.add_constant_decl(name, Const::Mod(prelude_scope));
         self.push_to_scope_stack(prelude_namespace, ScopeState::Mod { id: prelude_scope, namespace: prelude_namespace, extern_mod: None })
+    }
+    
+    fn start_enum(&mut self, name: &str) -> EnumBuilder {
+        let (expr, id) = self.reserve_enum();
+        self.add_constant_type_decl(name, Type::Enum(id));
+        EnumBuilder { expr, id, variants: Default::default() }
+    }
+
+    fn add_variant(&mut self, b: &mut EnumBuilder, name: &str, payload_ty: Option<Type>) {
+        let name = self.interner.get_or_intern(name);
+        let payload_ty = payload_ty.map(|ty| self.add_const_expr(Const::Ty(ty)));
+        let next_variant = self.variant_decl(name, b.expr, b.id, b.variants.len(), payload_ty, SourceRange::default());
+        b.variants.push(next_variant);
+    }
+
+    fn end_enum(&mut self, mut b: EnumBuilder) {
+        self.finish_enum(mem::take(&mut b.variants), SourceRange::default(), b.expr, b.id);
+        mem::forget(b);
     }
 }
