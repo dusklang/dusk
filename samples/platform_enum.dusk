@@ -1,6 +1,5 @@
 fn main() {
-    platform :: compiler.Platform.windows
-    switch platform {
+    switch compiler.target {
         .windows: print("Hello from Windows!\n"),
         .linux:   print("Hello from Linux!\n"),
         .macos:   print("Hello from macOS!\n"),

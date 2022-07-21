@@ -146,10 +146,23 @@ impl Driver {
 
         // Add Platform enum
         let mut platform_enum = self.start_enum("Platform");
+        let platform_id = platform_enum.id;
         self.add_variant(&mut platform_enum, "windows", None);
         self.add_variant(&mut platform_enum, "linux", None);
         self.add_variant(&mut platform_enum, "macos", None);
         self.end_enum(platform_enum);
+
+        // TODO: brittle
+        let index = if cfg!(target_os = "windows") {
+            0
+        } else if cfg!(target_os = "linux") {
+            1
+        } else if cfg!(target_os = "macos") {
+            2
+        } else {
+            todo!("unsupported OS");
+        };
+        self.add_constant_decl("target", Const::BasicVariant { enuum: platform_id, index });
     }
 
     fn add_constant_decl(&mut self, name: &str, value: Const) {

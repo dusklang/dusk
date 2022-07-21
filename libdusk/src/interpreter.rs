@@ -576,6 +576,12 @@ impl Driver {
                 }
                 Const::StructLit { fields, id: strukt.identity }
             },
+            Type::Enum(enuum) => {
+                let enum_val = &self.code.hir.enums[enuum];
+                let valid = enum_val.variants.iter().map(|variant| variant.payload_ty).all(|ty| ty.is_none());
+                assert!(valid, "In order to output vaue of type {:?} as constant, it must not have any payloads", Type::Enum(enuum));
+                Const::BasicVariant { enuum, index: val.as_enum().discriminant as usize }
+            },
             Type::Void => Const::Void,
             _ => panic!("Can't output value of type `{:?}` as constant", ty),
         }

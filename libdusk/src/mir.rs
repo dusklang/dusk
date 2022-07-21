@@ -341,7 +341,7 @@ impl Driver {
 
     pub fn layout_enum(&self, variant_payload_tys: &[Type]) -> EnumLayout {
         use std::cmp::max;
-        // Get max alignment of all the fields.
+        // Get max alignment of all the payload types.
         let alignment = variant_payload_tys.iter()
             .map(|ty| self.align_of(ty))
             .max()
