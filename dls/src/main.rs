@@ -381,7 +381,7 @@ impl Server {
                 for other_range in others {
                     let (file, range) = dusk_range_to_lsp_range(driver, other_range.range);
                     let file = &driver.src_map.files[file];
-                    let uri = file.url.clone().unwrap_or_else(|| Url::from_file_path(file.path.clone()).unwrap());
+                    let uri = file.location.as_url().unwrap();
                     let location = Location {
                         uri,
                         range,
@@ -419,7 +419,7 @@ impl Server {
             .get(path).unwrap()
             .contents.lines.join("\n")
             .to_string();
-        src_map.add_file_with_src(path, src).unwrap();
+        src_map.add_file_in_memory(path, src).unwrap();
         let mut driver = DriverRef::new(&DRIVER);
         *driver.write() = Driver::new(src_map, Arch::X86_64);
         let before = driver.read().take_snapshot();

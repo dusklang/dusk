@@ -68,7 +68,7 @@ fn main() {
     debug::send(|| DvdMessage::WillBegin);
 
     let mut src_map = SourceMap::new();
-    let loaded_file = src_map.add_file(&opt.input).is_ok();
+    let loaded_file = src_map.add_file_on_disk(&opt.input).is_ok();
     let mut driver = DriverRef::new(&DRIVER);
     *driver.write() = Driver::new(src_map, Arch::X86_64);
     let before = driver.read().take_snapshot();

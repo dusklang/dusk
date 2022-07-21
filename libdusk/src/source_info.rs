@@ -1,12 +1,13 @@
 use std::borrow::Cow;
 use std::cmp::max;
 use std::str;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::fs;
 use std::io;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
+use display_adapter::display_adapter;
 use dusk_dire::hir::{ExprId, DeclId, ItemId, Item};
 use dusk_dire::OpId;
 use dusk_dire::source_info::{SourceRange, SourceFileId};
@@ -22,7 +23,7 @@ use dusk_proc_macros::*;
 pub struct SourceMap {
     pub files: IndexVec<SourceFileId, SourceFile>,
     pub(crate) unparsed_files: HashSet<SourceFileId>,
-    paths: HashMap<PathBuf, SourceFileId>,
+    locations: HashMap<SourceFileLocation, SourceFileId>,
 
     /// Contains vec![0, end(0), end(1), end(2)], etc.,
     /// where end(i) is the global byte index of the end of the file with id SourceFileId(i).
@@ -43,14 +44,54 @@ struct LineRangeGroup {
     file: SourceFileId,
 }
 
+#[derive(Clone, Hash, PartialEq, Eq)]
+pub enum SourceFileLocation {
+    OnDisk(PathBuf), // A file loaded from disk.
+    InMemory(Url),   // A file that exists on disk, but whose modified contents are stored in memory. Used for DLS.
+    // A "file" that may or may not have ever actually existed on disk.
+    Virtual {
+        name: String,
+    }
+}
+impl From<PathBuf> for SourceFileLocation {
+    fn from(path: PathBuf) -> Self {
+        Self::OnDisk(path)
+    }
+}
+impl From<Url> for SourceFileLocation {
+    fn from(url: Url) -> Self {
+        Self::InMemory(url)
+    }
+}
+impl SourceFileLocation {
+    fn canonicalize_if_on_disk(&self) -> io::Result<SourceFileLocation> {
+        match self {
+            Self::OnDisk(path) => Ok(fs::canonicalize(path)?.into()),
+            other => Ok(other.clone()),
+        }
+    }
+    #[display_adapter]
+    fn display(&self, f: &mut fmt::Formatter) {
+        match self {
+            Self::OnDisk(path) => write!(f, "{}", path.display()),
+            Self::InMemory(url) => write!(f, "{}", url),
+            Self::Virtual { name } => write!(f, "{}", name),
+        }
+    }
+    pub fn as_url(&self) -> Option<Url> {
+        match self {
+            Self::OnDisk(path) => Url::from_file_path(path).ok(),
+            Self::InMemory(url) => Some(url.clone()),
+            Self::Virtual { .. } => None,
+        }
+    }
+}
+
 pub struct SourceFile {
     pub src: String,
     /// The starting position of each line (relative to this source file!!!).
     pub lines: Vec<usize>,
-    pub path: PathBuf,
-    // This is used for DLS. It is usually kind of redundant with `path`, but sometimes differs in that `path` is
-    // always canonicalized, but `url` is unmodified, coming straight from the IDE.
-    pub url: Option<Url>,
+    pub location: SourceFileLocation,
 }
 
 #[derive(Debug)]
@@ -99,7 +140,7 @@ impl SourceMap {
         SourceMap {
             files: Default::default(),
             unparsed_files: Default::default(),
-            paths: Default::default(),
+            locations: Default::default(),
             file_ends: vec![0],
         }
     }
@@ -108,19 +149,19 @@ impl SourceMap {
         self.file_ends[file.index()]
     }
 
-    fn add_file_impl(&mut self, path: impl Into<PathBuf>, src: impl FnOnce(&Path) -> io::Result<String>, url: Option<Url>) -> io::Result<SourceFileId> {
-        let path = fs::canonicalize(path.into())?;
-        if let Some(&id) = self.paths.get(&path) {
+    fn add_file_impl(&mut self, location: impl Into<SourceFileLocation>, src: impl FnOnce() -> io::Result<String>) -> io::Result<SourceFileId> {
+        let location = location.into().canonicalize_if_on_disk()?;
+        if let Some(&id) = self.locations.get(&location) {
             return Ok(id);
         }
 
-        let src = src(&path)?;
+        let src = src()?;
         let file_len = src.len();
         let id = self.files.push(
-            SourceFile { src, lines: vec![0], path: path.clone(), url }
+            SourceFile { src, lines: vec![0], location: location.clone(), }
         );
         self.unparsed_files.insert(id);
-        let had_result = self.paths.insert(path, id);
+        let had_result = self.locations.insert(location, id);
         debug_assert_eq!(had_result, None);
         let end = self.file_ends.last().unwrap() + file_len;
         self.file_ends.push(end);
@@ -128,12 +169,18 @@ impl SourceMap {
         Ok(id)
     }
 
-    pub fn add_file(&mut self, path: impl Into<PathBuf>) -> io::Result<SourceFileId> {
-        self.add_file_impl(path, |path| fs::read_to_string(path), None)
+    pub fn add_file_on_disk(&mut self, path: impl Into<PathBuf>) -> io::Result<SourceFileId> {
+        let path = path.into();
+        let path_clone = path.clone();
+        self.add_file_impl(path, || fs::read_to_string(path_clone))
     }
 
-    pub fn add_file_with_src(&mut self, url: &Url, src: String, ) -> io::Result<SourceFileId> {
-        self.add_file_impl(url.to_file_path().unwrap(), |_| Ok(src), Some(url.clone()))
+    pub fn add_file_in_memory(&mut self, url: &Url, src: String) -> io::Result<SourceFileId> {
+        self.add_file_impl(url.clone(), || Ok(src))
+    }
+
+    pub fn add_virtual_file(&mut self, name: impl Into<String>, src: String) -> io::Result<SourceFileId> {
+        self.add_file_impl(SourceFileLocation::Virtual { name: name.into() }, || Ok(src))
     }
 
     fn lookup_file(&self, range: SourceRange) -> (SourceFileId, Range<usize>) {
@@ -173,9 +220,9 @@ impl SourceMap {
     }
 
     pub fn lookup_file_by_url(&self, url: &Url) -> Option<SourceFileId> {
-        let path = url.to_file_path().unwrap().canonicalize().unwrap();
+        let location: SourceFileLocation = url.clone().into();
         for (id, file) in self.files.iter_enumerated() {
-            if file.url.as_ref() == Some(url) || file.path == path {
+            if file.location == location {
                 return Some(id)
             }
         }
@@ -236,7 +283,7 @@ impl SourceMap {
         for (i, range) in ranges.iter().enumerate() {
             let group = &line_range_groups[i];
             if group.file != prev_file {
-                println!("  --> {}", self.files[group.file].path.display());
+                println!("  --> {}", self.files[group.file].location.display());
                 prev_file = group.file;
             }
             let next_group = (i + 1 < ranges.len()).then(|| {

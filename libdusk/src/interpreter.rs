@@ -1521,7 +1521,7 @@ impl DriverRef<'_> {
                     let path = str.to_str().unwrap();
                     drop(d);
                     let before = self.read().take_snapshot();
-                    let file = self.write().src_map.add_file(path).unwrap();
+                    let file = self.write().src_map.add_file_on_disk(path).unwrap();
                     self.write().parse_added_files().unwrap();
                     let new_code = self.read().get_new_code_since(before);
                     self.write().finalize_hir();
