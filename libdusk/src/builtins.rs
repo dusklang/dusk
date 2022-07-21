@@ -9,6 +9,7 @@ use dusk_dire::mir::Const;
 
 use crate::driver::Driver;
 use crate::hir::{ScopeState, AutoPopStackEntry};
+use crate::parser::ParseResult;
 
 struct EnumBuilder {
     expr: ExprId,
@@ -31,7 +32,7 @@ impl Driver {
                 parent: None
             }
         );
-        let _scope_entry = self.push_to_scope_stack(prelude_namespace, ScopeState::Mod { id: prelude_scope, namespace: prelude_namespace, extern_mod: None });
+        let _prelude_scope = self.push_to_scope_stack(prelude_namespace, ScopeState::Mod { id: prelude_scope, namespace: prelude_namespace, extern_mod: None });
         self.hir.prelude_namespace = Some(prelude_namespace);
 
         // Add intrinsics to prelude
@@ -141,7 +142,7 @@ impl Driver {
         self.add_constant_type_decl("type", Type::Ty);
         self.add_constant_type_decl("module", Type::Mod);
 
-        let _compiler_module = self.add_module_decl("compiler");
+        let compiler_module = self.add_module_decl("compiler");
         self.add_constant_type_decl("StringLiteral", Type::Internal(InternalType::StringLiteral));
 
         // Add Platform enum
@@ -163,6 +164,10 @@ impl Driver {
             todo!("unsupported OS");
         };
         self.add_constant_decl("target", Const::BasicVariant { enuum: platform_id, index });
+
+        drop(compiler_module);
+
+        self.add_virtual_file_module("core", include_str!("../../core/core.dusk")).unwrap();
     }
 
     fn add_constant_decl(&mut self, name: &str, value: Const) {
@@ -214,5 +219,13 @@ impl Driver {
     fn end_enum(&mut self, mut b: EnumBuilder) {
         self.finish_enum(mem::take(&mut b.variants), SourceRange::default(), b.expr, b.id);
         mem::forget(b);
+    }
+
+    fn add_virtual_file_module(&mut self, name: &str, src: &str) -> ParseResult<()>  {
+        let file = self.src_map.add_virtual_file(name, src.to_string()).unwrap();
+        self.parse_added_files()?;
+        let scope = self.code.hir.global_scopes[file];
+        self.add_constant_decl(name, Const::Mod(scope));
+        Ok(())
     }
 }

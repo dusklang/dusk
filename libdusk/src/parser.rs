@@ -31,7 +31,11 @@ pub type ParseResult<T> = Result<T, ParseError>;
 
 impl Driver {
     pub fn parse_added_files(&mut self) -> ParseResult<()> {
-        while let Some(&file) = self.src_map.unparsed_files.iter().next() {
+        // TODO: this is pretty dumb! I think the unparsed_files set always consists of contiguous values, so I should
+        // just make it a Range.
+        let mut unparsed_files: Vec<_> = self.src_map.unparsed_files.iter().copied().collect();
+        unparsed_files.sort();
+        for file in unparsed_files {
             self.src_map.unparsed_files.remove(&file);
             self.parse_single_file(file)?;
         }
@@ -40,7 +44,7 @@ impl Driver {
 
     fn parse_single_file(&mut self, file: SourceFileId) -> ParseResult<()> {
         self.lex(file).map_err(|_| ParseError::UnableToLex)?;
-        self.start_new_file(file);
+        let _new_file = self.start_new_file(file);
         let mut p = Parser { file, cur: 0 };
 
         self.skip_insignificant(&mut p);

@@ -1,0 +1,3 @@
+fn main() {
+    core.hello_from_core()
+}

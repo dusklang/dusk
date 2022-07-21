@@ -664,7 +664,7 @@ impl Driver {
     pub fn fn_type(&mut self, param_tys: Vec<ExprId>, ret_ty: ExprId, range: SourceRange) -> ExprId {
         self.add_expr(Expr::FunctionTy { param_tys, ret_ty }, range)
     }
-    pub fn start_new_file(&mut self, file: SourceFileId) {
+    pub fn start_new_file(&mut self, file: SourceFileId) -> AutoPopStackEntry<ScopeState, ModScopeNsId> {
         let mut global_scope = ModScope::default();
         // Use all of prelude
         global_scope.blanket_uses.push(Namespace::Mod(self.hir.prelude_namespace.unwrap()));
@@ -675,8 +675,8 @@ impl Driver {
                 parent: None
             }
         );
-        *self.hir.scope_stack.lock().unwrap().borrow_mut() = vec![ScopeState::Mod { id: global_scope, namespace: global_namespace, extern_mod: None }];
         self.code.hir.global_scopes.push_at(file, global_scope);
+        self.push_to_scope_stack(global_namespace, ScopeState::Mod { id: global_scope, namespace: global_namespace, extern_mod: None })
     }
 
     fn flush_stmt_buffer(&mut self) {

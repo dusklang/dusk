@@ -1,0 +1,5 @@
+// This file defines the Dusk core library.
+
+fn hello_from_core() {
+    print("Hello, from the core library.")
+}
