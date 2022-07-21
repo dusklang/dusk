@@ -189,7 +189,7 @@ impl Driver {
             },
             Expr::BoolLit { lit } => Const::Bool(lit),
             Expr::Const(ref val) => val.clone(),
-            Expr::Mod { id } => Const::Mod(id),
+            Expr::Mod { id, .. } => Const::Mod(id),
             _ => panic!("Cannot convert expression to constant: {:#?}", expr),
         }
     }
@@ -400,10 +400,10 @@ impl Driver {
 
         let extern_mod = &self.code.hir.extern_mods[id];
         let library_path = extern_mod.library_path.clone();
-        let library_path = if let Const::Str { id, .. } = *tp.eval_result(library_path) {
-            self.code.mir.strings[id].clone()
-        } else {
-            panic!("unable to get path as string")
+        let library_path = match *tp.eval_result(library_path) {
+            Const::Str { id, .. } => self.code.mir.strings[id].clone(),
+            Const::StrLit(ref string) => string.clone(),
+            _ => panic!("unable to get path as string"),
         };
 
         let mut imported_functions = Vec::with_capacity(extern_mod.imported_functions.len());

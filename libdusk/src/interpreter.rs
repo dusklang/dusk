@@ -22,7 +22,7 @@ use lazy_static::lazy_static;
 use dusk_dire::arch::Arch;
 use dusk_dire::hir::{Intrinsic, ModScopeId, EnumId, GenericParamId, ExternFunctionRef};
 use dusk_dire::mir::{Const, Instr, InstrId, FuncId, StaticId, ExternFunction};
-use dusk_dire::ty::{Type, FunctionType, QualType, IntWidth, FloatWidth, StructType};
+use dusk_dire::ty::{Type, FunctionType, QualType, IntWidth, FloatWidth, StructType, InternalType};
 use dusk_dire::{OpId, BlockId};
 use dusk_dire::{InternalField, internal_fields};
 
@@ -583,6 +583,10 @@ impl Driver {
                 Const::BasicVariant { enuum, index: val.as_enum().discriminant as usize }
             },
             Type::Void => Const::Void,
+            Type::Internal(InternalType::StringLiteral) => match val.as_internal() {
+                InternalValue::StrLit(string) => Const::StrLit(string.clone()),
+                _ => panic!("unexpected non-StrLit in StringLiteral"),
+            },
             _ => panic!("Can't output value of type `{:?}` as constant", ty),
         }
     }

@@ -182,7 +182,7 @@ pub enum Expr {
     },
     Cast { expr: ExprId, ty: ExprId, cast_id: CastId },
     Ret { expr: ExprId, decl: Option<DeclId> },
-    Mod { id: ModScopeId },
+    Mod { id: ModScopeId, extern_library_path: Option<ExprId> },
     Import { path: ExprId },
     Struct(StructId),
     Enum(EnumId),

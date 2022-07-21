@@ -469,7 +469,8 @@ impl Driver {
             }
         );
         let entry = self.push_to_scope_stack(namespace, ScopeState::Mod { id, namespace, extern_mod });
-        let expr = self.add_expr(Expr::Mod { id }, range);
+        let extern_library_path = extern_mod.map(|mawd| self.code.hir.extern_mods[mawd].library_path);
+        let expr = self.add_expr(Expr::Mod { id, extern_library_path }, range);
         (entry, expr)
     }
     fn push_generic_ctx(&mut self, ctx: impl FnOnce(GenericCtxId) -> GenericCtx) -> AutoPopStackEntry<GenericCtxId> {

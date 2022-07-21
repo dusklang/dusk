@@ -77,7 +77,9 @@ pub struct Enum { pub variant_payload_tys: SmallVec<[ExprId; 2]> }
 #[derive(Debug)]
 pub struct ExplicitRet;
 #[derive(Debug)]
-pub struct Module;
+pub struct Module {
+    pub extern_library_path: Option<ExprId>,
+}
 #[derive(Debug)]
 pub struct Import {
     pub path: ExprId,
@@ -573,7 +575,7 @@ impl Driver {
                 }
                 insert_expr!(switches, Switch { scrutinee, cases: tir_cases })
             },
-            hir::Expr::Mod { .. } => insert_expr!(modules, Module),
+            &hir::Expr::Mod { extern_library_path, .. } => insert_expr!(modules, Module { extern_library_path }),
             &hir::Expr::Import { path } => insert_expr!(imports, Import { path }),
             &hir::Expr::Struct(struct_id) => {
                 let field_tys = self.code.hir.structs[struct_id].fields.iter().map(|field| field.ty).collect();
@@ -702,7 +704,12 @@ impl Driver {
             let id = ef!(expr_id.item);
             match ef!(expr_id.hir) {
                 hir::Expr::Void | hir::Expr::Error | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
-                    | hir::Expr::CharLit { .. } | hir::Expr::BoolLit { .. } | hir::Expr::Const(_) | hir::Expr::Mod { .. } => {},
+                    | hir::Expr::CharLit { .. } | hir::Expr::BoolLit { .. } | hir::Expr::Const(_) => {},
+                hir::Expr::Mod { extern_library_path, .. } => {
+                    if let Some(extern_library_path) = extern_library_path {
+                        self.tir.graph.add_type1_dep(id, ef!(extern_library_path.item));
+                    }
+                },
                 hir::Expr::Import { path } => {
                     self.tir.graph.add_type1_dep(id, ef!(path.item));
                 },
@@ -842,13 +849,18 @@ impl Driver {
                                 add_eval_dep!(id, hir::VOID_TYPE);
                             }
                         },
-                        hir::Decl::ComputedPrototype { ref param_tys, .. } => {
+                        hir::Decl::ComputedPrototype { ref param_tys, extern_func } => {
                             for &ty in param_tys {
                                 add_eval_dep!(id, ty);
                             }
                             // NOTE: the Some case is handled below this match expression
                             if self.code.hir.explicit_tys[decl_id].is_none() {
                                 add_eval_dep!(id, hir::VOID_TYPE);
+                            }
+
+                            if let Some(extern_func) = extern_func {
+                                let extern_library_path = self.code.hir.extern_mods[extern_func.extern_mod].library_path;
+                                add_eval_dep!(id, extern_library_path);
                             }
                         },
                     }

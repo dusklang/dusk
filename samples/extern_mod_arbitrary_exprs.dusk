@@ -1,0 +1,27 @@
+fn libc_path(): compiler.StringLiteral {
+    switch compiler.target {
+        .macos: "libSystem.dylib",
+        .linux: "libc.so.6",
+        .windows: "libc does not exist on Windows"
+    }
+}
+
+fn is_unix(): bool {
+    switch compiler.target {
+        .macos: true,
+        .linux: true,
+        .windows: false
+    }
+}
+
+libc :: extern_mod(libc_path()) {
+    fn puts(s: i8*): i32
+}
+
+fn main() {
+    if is_unix() {
+        ignore :: libc.puts("Hello, world! (from libc)\n")
+    } else {
+        print("Hello, world! (from the Dusk print intrinsic on Windows)\n")
+    }
+}
