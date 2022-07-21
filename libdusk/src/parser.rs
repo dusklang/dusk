@@ -958,13 +958,7 @@ impl Driver {
     fn parse_extern_module(&mut self, p: &mut Parser) -> ParseResult<ExprId> {
         let mod_range = self.eat_tok(p, TokenKind::ExternModule)?;
         self.eat_tok(p, TokenKind::LeftParen)?;
-        // TODO: evaluate string expression instead of string literal
-        let library_path = if let TokenKind::StrLit(library_path) = self.cur(p).kind {
-            library_path.to_owned()
-        } else {
-            Default::default()
-        };
-        self.next(p);
+        let library_path = self.parse_expr(p).unwrap_or_else(|err| err);
         self.eat_tok(p, TokenKind::RightParen)?;
 
         let extern_mod = self.code.hir.extern_mods.push(ExternMod::new(library_path));

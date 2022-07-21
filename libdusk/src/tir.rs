@@ -79,7 +79,9 @@ pub struct ExplicitRet;
 #[derive(Debug)]
 pub struct Module;
 #[derive(Debug)]
-pub struct Import;
+pub struct Import {
+    pub path: ExprId,
+}
 #[derive(Debug)]
 pub struct IntLit;
 #[derive(Debug)]
@@ -572,7 +574,7 @@ impl Driver {
                 insert_expr!(switches, Switch { scrutinee, cases: tir_cases })
             },
             hir::Expr::Mod { .. } => insert_expr!(modules, Module),
-            hir::Expr::Import { .. } => insert_expr!(imports, Import),
+            &hir::Expr::Import { path } => insert_expr!(imports, Import { path }),
             &hir::Expr::Struct(struct_id) => {
                 let field_tys = self.code.hir.structs[struct_id].fields.iter().map(|field| field.ty).collect();
                 insert_expr!(structs, Struct { field_tys })
@@ -700,8 +702,10 @@ impl Driver {
             let id = ef!(expr_id.item);
             match ef!(expr_id.hir) {
                 hir::Expr::Void | hir::Expr::Error | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
-                    | hir::Expr::CharLit { .. } | hir::Expr::BoolLit { .. } | hir::Expr::Const(_) | hir::Expr::Mod { .. }
-                    | hir::Expr::Import { .. } => {},
+                    | hir::Expr::CharLit { .. } | hir::Expr::BoolLit { .. } | hir::Expr::Const(_) | hir::Expr::Mod { .. } => {},
+                hir::Expr::Import { path } => {
+                    self.tir.graph.add_type1_dep(id, ef!(path.item));
+                },
                 hir::Expr::AddrOf { expr, .. } | hir::Expr::Deref(expr) | hir::Expr::Pointer { expr, .. }
                     | hir::Expr::Cast { expr, .. } | hir::Expr::Ret { expr, .. } => self.tir.graph.add_type1_dep(id, ef!(expr.item)),
                 hir::Expr::DeclRef { id: decl_ref_id, .. } => {

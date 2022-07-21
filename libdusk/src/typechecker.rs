@@ -707,13 +707,34 @@ impl tir::Expr<tir::Enum> {
     }
 }
 
+fn string_types() -> [Type; 3] {
+    [
+        Type::i8().ptr().into(),
+        Type::u8().ptr().into(),
+        Type::Internal(InternalType::StringLiteral),
+    ]
+}
+
 impl tir::Expr<tir::Import> {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Mod.into()]), None, ef!(driver, self.id.generic_ctx_id));
         *tp.ty_mut(self.id) = Type::Mod;
+
+        if
+            !tp.constraints(self.path).is_error() &&
+            !string_types().iter().any(|ty| driver.can_unify_to(tp, self.path, &ty.into()).is_ok())
+        {
+            driver.errors.push(
+                Error::new("Invalid expression passed to import; expected string")
+                    .adding_primary_range(ef!(driver, self.path.range), "")
+            )
+        }
     }
 
-    fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut impl TypeProvider) {
+    fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+        let selected_type = string_types().into_iter()
+            .find(|ty| driver.can_unify_to(tp, self.path, &ty.into()).is_ok());
+        tp.constraints_mut(self.path).set_to(selected_type.unwrap_or_else(|| Type::Error));
     }
 }
 

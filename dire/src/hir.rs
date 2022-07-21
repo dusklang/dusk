@@ -116,12 +116,12 @@ pub struct DeclRef {
 
 #[derive(Debug)]
 pub struct ExternMod {
-    pub library_path: CString,
+    pub library_path: ExprId,
     pub imported_functions: Vec<ExternFunction>,
 }
 
 impl ExternMod {
-    pub fn new(library_path: CString) -> Self {
+    pub fn new(library_path: ExprId) -> Self {
         Self {
             library_path,
             imported_functions: Vec::new(),

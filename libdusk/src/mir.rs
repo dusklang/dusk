@@ -400,6 +400,12 @@ impl Driver {
 
         let extern_mod = &self.code.hir.extern_mods[id];
         let library_path = extern_mod.library_path.clone();
+        let library_path = if let Const::Str { id, .. } = *tp.eval_result(library_path) {
+            self.code.mir.strings[id].clone()
+        } else {
+            panic!("unable to get path as string")
+        };
+
         let mut imported_functions = Vec::with_capacity(extern_mod.imported_functions.len());
         for func in &extern_mod.imported_functions {
             let param_tys = func.param_tys.iter()
