@@ -213,7 +213,11 @@ impl From<DeclId> for Item {
 
 #[derive(Debug, Default)]
 pub struct ModScope {
+    // TODO: ideally, names declared below a `use modulename.*` should take precedence over conflicting names in
+    // `modulename`, while names declared inside `modulename` should take precedence over names declared before the
+    // `use`.
     pub decl_groups: HashMap<Sym, Vec<ModScopedDecl>>,
+    pub blanket_uses: Vec<Namespace>,
 }
 
 #[derive(Debug, Clone)]

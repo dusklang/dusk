@@ -279,10 +279,11 @@ pub enum NameLookup {
 }
 
 impl Driver {
-    fn find_overloads_in_mod(&self, name: &NameLookup, scope: ModScopeId, overloads: &mut HashSet<DeclId>) {
+    fn find_overloads_in_mod(&self, name: &NameLookup, scope: ModScopeId, overloads: &mut HashSet<DeclId>) -> bool {
         // TODO: don't iterate over hashmap if `name` is an `Exact` variant, because in that case we could just look it
         // up directly
-        for (&actual, group) in &self.code.hir.mod_scopes[scope].decl_groups {
+        let scope = &self.code.hir.mod_scopes[scope];
+        for (&actual, group) in &scope.decl_groups {
             if self.name_matches(name, actual) {
                 overloads.extend(
                     group.iter()
@@ -290,6 +291,11 @@ impl Driver {
                 );
             }
         }
+        let mut all_unresolved = true;
+        for &used_namespace in &scope.blanket_uses {
+            all_unresolved &= !self.find_overloads_in_namespace(name, used_namespace, overloads);
+        }
+        !all_unresolved
     }
     fn find_overloads_in_struct(&self, name: &NameLookup, strukt: StructId, overloads: &mut HashSet<DeclId>) {
         for field in &self.code.hir.structs[strukt].fields {
@@ -322,21 +328,7 @@ impl Driver {
             _ => panic!("Can only have requirements clause on computed decls"),
         }
     }
-    fn name_matches(&self, lookup: &NameLookup, actual: Sym) -> bool {
-        match lookup {
-            NameLookup::Beginning(beginning) => {
-                let actual = self.interner.resolve(actual).unwrap();
-                actual.starts_with(beginning)
-            },
-            &NameLookup::Exact(name) => name == actual,
-        }
-    }
-
-    /// Returns the overloads for a name in a namespace, if they are known (they won't be if it's an unresolved member ref)
-    /// Returns None if the namespace comes from a memberref AND the memberref base expression has an error (e.g., invalid variable reference)
-    pub fn find_overloads(&self, namespace: Namespace, name: &NameLookup) -> Option<Vec<DeclId>> {
-        let mut overloads = HashSet::new();
-
+    fn find_overloads_in_namespace(&self, name: &NameLookup, namespace: Namespace, overloads: &mut HashSet<DeclId>) -> bool {
         let mut started_at_mod_scope = false;
         let mut root_namespace = true;
         let mut namespace = Some(namespace);
@@ -358,7 +350,7 @@ impl Driver {
                 },
                 Namespace::Mod(scope_ns) => {
                     let scope = self.code.hir.mod_ns[scope_ns].scope;
-                    self.find_overloads_in_mod(name, scope, &mut overloads);
+                    self.find_overloads_in_mod(name, scope, overloads);
 
                     if root_namespace { started_at_mod_scope = true; }
                     self.code.hir.mod_ns[scope_ns].parent
@@ -369,11 +361,15 @@ impl Driver {
                     if let Some(expr_namespaces) = self.tir.expr_namespaces.get(&base_expr) {
                         for ns in expr_namespaces {
                             match *ns {
-                                ExprNamespace::Mod(scope) => self.find_overloads_in_mod(name, scope, &mut overloads),
-                                ExprNamespace::Struct(id) => self.find_overloads_in_struct(name, id, &mut overloads),
-                                ExprNamespace::Enum(id) => self.find_overloads_in_enum(name, id, &mut overloads),
-                                ExprNamespace::Internal(internal) => self.find_overloads_in_internal(name, internal, &mut overloads),
-                                ExprNamespace::Error => return None,
+                                ExprNamespace::Mod(scope) => {
+                                    if !self.find_overloads_in_mod(name, scope, overloads) {
+                                        return false
+                                    }
+                                },
+                                ExprNamespace::Struct(id) => self.find_overloads_in_struct(name, id, overloads),
+                                ExprNamespace::Enum(id) => self.find_overloads_in_enum(name, id, overloads),
+                                ExprNamespace::Internal(internal) => self.find_overloads_in_internal(name, internal, overloads),
+                                ExprNamespace::Error => return false,
                             }
                         }
                     }
@@ -395,12 +391,12 @@ impl Driver {
                 },
                 Namespace::Requirement(ns_id) => {
                     let condition_ns = &self.code.hir.condition_ns[ns_id];
-                    self.find_overloads_in_function_parameters(name, condition_ns.func, &mut overloads);
+                    self.find_overloads_in_function_parameters(name, condition_ns.func, overloads);
                     condition_ns.parent
                 },
                 Namespace::Guarantee(ns_id) => {
                     let condition_ns = &self.code.hir.condition_ns[ns_id];
-                    self.find_overloads_in_function_parameters(name, condition_ns.func, &mut overloads);
+                    self.find_overloads_in_function_parameters(name, condition_ns.func, overloads);
                     if self.name_matches(name, self.hir.known_idents.return_value) && overloads.is_empty() {
                         overloads.insert(RETURN_VALUE_DECL);
                     }
@@ -413,8 +409,24 @@ impl Driver {
 
             root_namespace = false;
         }
+        true
+    }
+    fn name_matches(&self, lookup: &NameLookup, actual: Sym) -> bool {
+        match lookup {
+            NameLookup::Beginning(beginning) => {
+                let actual = self.interner.resolve(actual).unwrap();
+                actual.starts_with(beginning)
+            },
+            &NameLookup::Exact(name) => name == actual,
+        }
+    }
 
-        Some(overloads.into_iter().collect())
+    /// Returns the overloads for a name in a namespace, if they are known (they won't be if it's an unresolved member ref)
+    /// Returns None if the namespace comes from a memberref AND the memberref base expression has an error (e.g., invalid variable reference)
+    pub fn find_overloads(&self, namespace: Namespace, name: &NameLookup) -> Option<Vec<DeclId>> {
+        let mut overloads = HashSet::new();
+        self.find_overloads_in_namespace(name, namespace, &mut overloads)
+            .then(|| overloads.into_iter().collect())
     }
 
     fn add_types_2_to_4_deps_to_member_ref(&mut self, id: ItemId, decl_ref_id: DeclRefId) {
