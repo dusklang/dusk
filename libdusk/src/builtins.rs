@@ -167,7 +167,7 @@ impl Driver {
 
         drop(compiler_module);
 
-        self.add_virtual_file_module("core", include_str!("../../core/core.dusk")).unwrap();
+        self.add_virtual_file_module("core", include_str!("../core/core.dusk")).unwrap();
     }
 
     fn add_constant_decl(&mut self, name: &str, value: Const) {
