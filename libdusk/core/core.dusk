@@ -5,10 +5,26 @@ ByteBuffer :: struct {
     data: u8 *mut
 }
 
-fn free_slice(slice: ByteBuffer *mut) {
-    free(slice.data as void *mut)
-    slice.data = 0 as usize as u8 *mut
-    slice.size = 0
+fn free_buffer(buffer: ByteBuffer *mut) {
+    free(buffer.data as void *mut)
+    buffer.data = 0 as usize as u8 *mut
+    buffer.size = 0
+}
+
+fn at(buffer: ByteBuffer*, index: usize): u8 {
+    assert(index < buffer.size)
+    *((buffer.data as usize + index) as u8*)
+}
+
+fn at_mut(buffer: ByteBuffer *mut, index: usize): u8 *mut {
+    assert(index < buffer.size)
+    (buffer.data as usize + index) as u8 *mut
+}
+
+fn assert(condition: bool) {
+    if !condition {
+        panic("assertion failed")
+    }
 }
 
 fn read_file(path: i8*): ByteBuffer {
@@ -118,7 +134,7 @@ unix :: mod {
         ignore :: libc.fseek(file, 0, SEEK_END)
         size :: libc.ftell(file) as usize
         ignore :: libc.fseek(file, 0, SEEK_SET)
-        data :: malloc(size + 1) as u8 *mut
+        data :: malloc(size) as u8 *mut
         ignore :: libc.fread(data as void *mut, 1, size, file)
         ignore :: libc.fclose(file)
         ByteBuffer {
