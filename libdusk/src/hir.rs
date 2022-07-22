@@ -384,6 +384,9 @@ impl Driver {
     pub fn while_expr(&mut self, condition: ExprId, scope: ImperScopeId, range: SourceRange) -> ExprId {
         self.add_expr(Expr::While { condition, scope }, range)
     }
+    pub fn for_expr(&mut self, var_name: ExprId, scope: ImperScopeId, range: SourceRange) -> ExprId {
+        self.add_expr(Expr::While { condition, scope }, range)
+    }
     pub fn switch_expr(&mut self, scrutinee: ExprId, cases: Vec<SwitchCase>, range: SourceRange) -> ExprId {
         self.add_expr(Expr::Switch { scrutinee, cases }, range)
     }

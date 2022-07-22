@@ -355,6 +355,8 @@ impl Driver {
                 "if" => If,
                 "else" => Else,
                 "while" => While,
+                "for" => For,
+                "in" => In,
                 "switch" => Switch,
                 "as" => As,
                 "struct" => Struct,
@@ -441,6 +443,7 @@ impl Driver {
                 Comma               b","
                 LeftParen           b"("
                 RightParen          b")"
+                DoubleDot           b".."
                 Dot                 b"."
                 OpenCurly           b"{"
                 CloseCurly          b"}"

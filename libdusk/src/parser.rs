@@ -372,6 +372,21 @@ impl Driver {
                 let (scope, scope_range) = self.parse_scope(p, &[])?;
                 Ok(self.while_expr(condition, scope, source_info::concat(while_range, scope_range)))
             },
+            TokenKind::For => {
+                let for_range = self.cur(p).range;
+                self.next(p);
+                let var_name = self.eat_ident(p);
+                let var_ty = matches!(self.cur(p).kind, TokenKind::Colon).then(|| {
+                    self.next(p);
+                    Some(self.parse_type(p).0)
+                });
+                self.eat_tok(p, TokenKind::In)?;
+                let lower_bound = self.parse_expr(p).unwrap_or_else(|err| err);
+                self.eat_tok(p, TokenKind::DoubleDot)?;
+                let upper_bound = self.parse_non_struct_lit_expr(p);
+                let (scope, scope_range) = self.parse_scope(p, &[])?;
+                Ok(self.for_expr(var_name, var_ty, lower_bound, upper_bound, for_range))
+            },
             TokenKind::Switch => Ok(self.parse_switch(p)?),
             TokenKind::Return => {
                 let ret_range = self.cur(p).range;
