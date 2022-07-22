@@ -5,6 +5,13 @@ ByteBuffer :: struct {
     data: u8 *mut
 }
 
+fn new_buffer(size: usize): ByteBuffer {
+    ByteBuffer {
+        size: size
+        data: malloc(size) as u8 *mut
+    }
+}
+
 fn free_buffer(buffer: ByteBuffer *mut) {
     free(buffer.data as void *mut)
     buffer.data = 0 as usize as u8 *mut
@@ -20,6 +27,27 @@ fn at_mut(buffer: ByteBuffer *mut, index: usize): u8 *mut {
     assert(index < buffer.size)
     (buffer.data as usize + index) as u8 *mut
 }
+
+fn at(lit: compiler.StringLiteral, index: usize): u8 {
+    assert(index < lit.length)
+    *((lit.data as usize + index) as u8*)
+}
+
+// COMPILER BUG: this seemingly can't be named print(), or there will be an infinite loop.
+fn print_literal(lit: compiler.StringLiteral) {
+    i: usize = 0
+    while i < lit.length {
+        print(at(lit, i))
+        i += 1
+    }
+}
+
+fn to_c_string(lit: compiler.StringLiteral): ByteBuffer {
+    buf := new_buffer(lit.length)
+    *at_mut(&mut buf, lit.length) = 0
+    buf
+}
+
 
 fn assert(condition: bool) {
     if !condition {

@@ -1,0 +1,10 @@
+fn main() {
+    print("Received the following command line arguments:\n")
+    i: usize = 0
+    while i < runtime.get_num_args() {
+        print("    ")
+        core.print_literal(runtime.get_arg(i))
+        print("\n")
+        i += 1
+    }
+}

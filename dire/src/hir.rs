@@ -378,6 +378,9 @@ pub enum Intrinsic {
     AlignOf,
     OffsetOf,
     PrintType,
+
+    GetNumArgs, // runtime.get_num_args()
+    GetArg,     // runtime.get_arg(usize)
 }
 
 impl Intrinsic {
@@ -428,6 +431,9 @@ impl Intrinsic {
             SizeOf => "size_of",
             StrideOf => "stride_of",
             OffsetOf => "offset_of",
+
+            GetNumArgs => "get_num_args",
+            GetArg => "get_arg",
         }
     }
 }

@@ -143,6 +143,7 @@ impl Driver {
         self.add_constant_type_decl("module", Type::Mod);
 
         let compiler_module = self.add_module_decl("compiler");
+        let string_lit_type = self.add_const_ty(Type::Internal(InternalType::StringLiteral));
         self.add_constant_type_decl("StringLiteral", Type::Internal(InternalType::StringLiteral));
 
         // Add Platform enum
@@ -164,8 +165,12 @@ impl Driver {
             todo!("unsupported OS");
         };
         self.add_constant_decl("target", Const::BasicVariant { enuum: platform_id, index });
-
         drop(compiler_module);
+
+        let runtime_module = self.add_module_decl("runtime");
+        self.add_intrinsic(GetNumArgs, smallvec![], uusize, true);
+        self.add_intrinsic(GetArg, smallvec![uusize], string_lit_type, true);
+        drop(runtime_module);
 
         self.add_virtual_file_module("core", include_str!("../core/core.dusk")).unwrap();
     }

@@ -22,8 +22,8 @@ macro_rules! define_internal_types_impl {
         }
 
         pub mod internal_field_decls {
+            use crate::hir::DeclId;
             $(
-                use crate::hir::DeclId;
                 #[derive(Debug)]
                 pub struct $name {
                     $(
@@ -72,7 +72,7 @@ macro_rules! define_internal_types_impl {
             pub fn ty(&self) -> Type {
                 match self {
                     $(
-                        $(InternalField::$name(internal_fields::$name::$field_name) => $ty),*
+                        $(InternalField::$name(internal_fields::$name::$field_name) => $ty),*,
                     )*
                 }
             }
@@ -80,7 +80,7 @@ macro_rules! define_internal_types_impl {
             pub fn name(&self) -> &'static str {
                 match self {
                     $(
-                        $(InternalField::$name(internal_fields::$name::$field_name) => stringify!($field_name)),*
+                        $(InternalField::$name(internal_fields::$name::$field_name) => stringify!($field_name)),*,
                     )*
                 }
             }

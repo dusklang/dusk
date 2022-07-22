@@ -1,5 +1,6 @@
 use clap::{Parser, ArgEnum};
 use libdusk::new_code::NewCode;
+use std::ffi::OsStr;
 use std::path::PathBuf;
 
 use dusk_dire::ty::Type;
@@ -60,7 +61,11 @@ fn flush_errors(driver: &mut Driver) {
 }
 
 fn main() {
-    let opt = Opt::parse();
+    let args: Vec<_> = std::env::args_os().collect();
+    let mut split = args.split(|arg| arg == OsStr::new("--"));
+    let clap_args = split.next().unwrap();
+    let program_args = split.next().unwrap_or(&[]);
+    let opt = Opt::parse_from(clap_args);
 
     if opt.dvd {
         debug::connect();
@@ -154,8 +159,10 @@ fn main() {
             }
         });
     if let Some(main) = main {
+        #[cfg(debug_assertions)]
         println!("Running main in the interpreter:\n");
         restart_interp(InterpMode::RunTime);
+        driver.set_command_line_arguments(program_args);
         driver.call(FunctionRef::Id(FuncId::new(main)), Vec::new(), Vec::new());
     } else {
         driver.write().errors.push(Error::new("Couldn't find main function with no parameters and a return type of `void`"));

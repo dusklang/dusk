@@ -1,7 +1,7 @@
 use std::alloc;
 use std::collections::HashMap;
 use std::convert::TryInto;
-use std::ffi::{CStr, CString, c_void};
+use std::ffi::{CStr, CString, c_void, OsString};
 use std::mem;
 use std::slice;
 use std::fmt::Write;
@@ -37,6 +37,7 @@ pub enum InternalValue {
     Mod(ModScopeId),
     FunctionPointer { generic_arguments: Vec<Type>, func: FuncId },
     StrLit(CString),
+    Args(Vec<CString>),
 }
 
 #[derive(Debug)]
@@ -387,6 +388,7 @@ pub struct Interpreter {
     #[cfg(windows)]
     inverse_thunk_cache: HashMap<FuncId, Allocation>,
     mode: InterpMode,
+    command_line_args: Vec<CString>,
 }
 
 impl Interpreter {
@@ -397,6 +399,7 @@ impl Interpreter {
             switch_cache: HashMap::new(),
             #[cfg(windows)]
             inverse_thunk_cache: HashMap::new(),
+            command_line_args: Vec::new(),
             mode,
         }
     }
@@ -555,9 +558,8 @@ impl Driver {
             Type::Pointer(ref pointee) => {
                 assert!(!pointee.is_mut);
                 assert!(pointee.ty == Type::i8() || pointee.ty == Type::u8());
-                if cfg!(debug_assertions) {
-                    println!("Warning: about to blindly copy a pointer into the global strings!");
-                }
+                #[cfg(debug_assertions)]
+                println!("Warning: about to blindly copy a pointer into the global strings!");
                 let string = unsafe { CString::from(CStr::from_ptr(val.as_raw_ptr() as *const _)) };
                 let id = self.code.mir.strings.push(string);
                 Const::Str { id, ty }
@@ -645,6 +647,11 @@ impl Driver {
 }
 
 impl DriverRef<'_> {
+    pub fn set_command_line_arguments(&mut self, args: &[OsString]) {
+        INTERP.write().unwrap().command_line_args = args.iter().map(|arg| {
+            CString::new(arg.to_string_lossy().as_bytes()).unwrap()
+        }).collect();
+    }
     pub fn call(&mut self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> Value {
         let frame = self.read().new_stack_frame(func_ref, arguments, generic_arguments);
         INTERP_STACK.with(|stack| {
@@ -1248,6 +1255,15 @@ impl DriverRef<'_> {
                             }
                             let offset = offset.expect("No such field name in call to offset_of");
                             Value::from_usize(offset)
+                        },
+                        Intrinsic::GetNumArgs => {
+                            Value::from_usize(INTERP.read().unwrap().command_line_args.len())
+                        },
+                        Intrinsic::GetArg => {
+                            assert_eq!(arguments.len(), 1);
+                            let index = frame.get_val(arguments[0], &*self.read()).as_usize();
+                            let command_line_args = &INTERP.read().unwrap().command_line_args;
+                            Value::from_internal(InternalValue::StrLit(command_line_args[index].clone()))
                         },
                         _ => panic!("Call to unimplemented intrinsic {:?}", intr),
                     }
