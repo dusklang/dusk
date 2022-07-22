@@ -378,14 +378,21 @@ impl Driver {
                 let var_name = self.eat_ident(p);
                 let var_ty = matches!(self.cur(p).kind, TokenKind::Colon).then(|| {
                     self.next(p);
-                    Some(self.parse_type(p).0)
+                    self.parse_type(p).0
                 });
                 self.eat_tok(p, TokenKind::In)?;
                 let lower_bound = self.parse_expr(p).unwrap_or_else(|err| err);
                 self.eat_tok(p, TokenKind::DoubleDot)?;
                 let upper_bound = self.parse_non_struct_lit_expr(p);
-                let (scope, scope_range) = self.parse_scope(p, &[])?;
-                Ok(self.for_expr(var_name, var_ty, lower_bound, upper_bound, for_range))
+                let stored_decl_id = self.next_stored_decl();
+                let binding_decl = self.add_decl(hir::Decl::LoopBinding { id: stored_decl_id, is_mut: false }, var_name.symbol, var_ty, var_name.range);
+                let binding_decl = ImperScopedDecl {
+                    name: var_name.symbol,
+                    num_params: 0,
+                    id: binding_decl,
+                };
+                let (scope, _scope_range) = self.parse_scope(p, &[binding_decl])?;
+                Ok(self.for_expr(binding_decl.id, lower_bound, upper_bound, scope, for_range))
             },
             TokenKind::Switch => Ok(self.parse_switch(p)?),
             TokenKind::Return => {

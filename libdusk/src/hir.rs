@@ -324,6 +324,10 @@ impl Driver {
         let cast_id = self.code.hir.cast_counter.next_idx();
         self.add_expr(Expr::Cast { expr, ty, cast_id }, range)
     }
+    pub fn next_stored_decl(&mut self) -> StoredDeclId {
+        let decl = self.hir.comp_decl_stack.last_mut().unwrap();
+        decl.stored_decl_counter.next_idx()
+    }
     pub fn stored_decl(&mut self, name: Sym, _generic_params: GenericParamList, explicit_ty: Option<ExprId>, is_mut: bool, root_expr: ExprId, range: SourceRange) -> DeclId {
         self.flush_stmt_buffer();
         let scope_stack = self.hir.scope_stack.lock().unwrap();
@@ -332,8 +336,7 @@ impl Driver {
             ScopeState::Imper { .. } => {
                 drop(scope_stack_ref);
                 drop(scope_stack);
-                let decl = self.hir.comp_decl_stack.last_mut().unwrap();
-                let id = decl.stored_decl_counter.next_idx();
+                let id = self.next_stored_decl();
 
                 let decl_id = self.add_decl(Decl::Stored { id, is_mut, root_expr }, name, explicit_ty, range);
                 self.scope_item(Item::Decl(decl_id));
@@ -384,8 +387,8 @@ impl Driver {
     pub fn while_expr(&mut self, condition: ExprId, scope: ImperScopeId, range: SourceRange) -> ExprId {
         self.add_expr(Expr::While { condition, scope }, range)
     }
-    pub fn for_expr(&mut self, var_name: ExprId, scope: ImperScopeId, range: SourceRange) -> ExprId {
-        self.add_expr(Expr::While { condition, scope }, range)
+    pub fn for_expr(&mut self, binding: DeclId, lower_bound: ExprId, upper_bound: ExprId, scope: ImperScopeId, range: SourceRange) -> ExprId {
+        self.add_expr(Expr::For { binding, lower_bound, upper_bound, scope }, range)
     }
     pub fn switch_expr(&mut self, scrutinee: ExprId, cases: Vec<SwitchCase>, range: SourceRange) -> ExprId {
         self.add_expr(Expr::Switch { scrutinee, cases }, range)
