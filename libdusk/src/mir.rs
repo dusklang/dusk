@@ -118,6 +118,11 @@ enum ControlDest {
     Continue,
     Unreachable,
     Block(BlockId),
+    // Block is a noun, not a verb here.
+    IncrementVariableAndThenBlock {
+        location: OpId,
+        block: BlockId
+    },
     RetVoid,
 }
 
@@ -129,6 +134,12 @@ struct Context {
     indirection: i8,
     data: DataDest,
     control: ControlDest,
+}
+
+impl Default for Context {
+    fn default() -> Self {
+        Self::new(0, DataDest::Read, ControlDest::Continue)
+    }
 }
 
 impl Context {
@@ -143,7 +154,7 @@ impl Context {
                 (DataDest::Read, Some(location)) => DataDest::Store { location },
                 (x, _) => *x,
             },
-            match(&self.control, kontinue) {
+            match (&self.control, kontinue) {
                 (ControlDest::Continue, Some(block)) => ControlDest::Block(block),
                 (x, _) => *x,
             }
@@ -496,7 +507,7 @@ impl DriverRef<'_> {
                 self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
-            hir::Decl::Stored { id: index, .. } => {
+            hir::Decl::Stored { id: index, .. } | hir::Decl::LoopBinding { id: index, .. } => {
                 drop(d);
                 let decl = Decl::Stored(index);
                 self.write().mir.decls.insert(id, decl.clone());
@@ -526,7 +537,7 @@ impl DriverRef<'_> {
             },
             hir::Decl::Static(expr) => {
                 drop(d);
-                let name = format!("{}", self.read().display_item(id));
+                let name = self.read().display_item(id).to_string();
                 let decl = Decl::Static(StaticId::new(self.read().mir.statics.len()));
                 self.write().mir.decls.insert(id, decl.clone());
                 self.write().mir.statics.push(
@@ -949,7 +960,7 @@ impl DriverRef<'_> {
             let d = self.read();
             let range = df!(d, param.range);
             drop(d);
-            let name = instr_namespace.insert(format!("{}", self.read().display_item(range)));
+            let name = instr_namespace.insert(self.read().display_item(range).to_string());
             self.write().code.mir.source_ranges.insert(op, range);
             self.write().code.mir.instr_names.insert(op, name);
             entry.ops.push(op);
@@ -1537,7 +1548,7 @@ impl DriverRef<'_> {
                 hir::Decl::Stored { id, root_expr, .. } => {
                     drop(d);
                     let ty = tp.ty(root_expr).clone();
-                    let name = format!("{}", self.read().display_item(decl));
+                    let name = self.read().display_item(decl).to_string();
                     let location = self.write().push_instr_with_name(b, Instr::Alloca(ty), decl, name);
                     b.stored_decl_locs.push_at(id, location);
                     self.build_expr(b, root_expr, Context::new(0, DataDest::Store { location }, ControlDest::Continue), tp);
@@ -1587,7 +1598,7 @@ impl DriverRef<'_> {
         let id = tp.selected_overload(decl_ref_id).expect("No overload found!");
         let generic_arguments = tp.generic_arguments(decl_ref_id).as_ref().unwrap_or(&Vec::new()).clone();
         let expr = self.read().code.hir.decl_refs[decl_ref_id].expr;
-        let name = format!("{}", self.read().display_item(id));
+        let name = self.read().display_item(id).to_string();
         match self.get_decl(id, tp) {
             Decl::Computed { get } => DeclRef::Function { func: get, generic_args: generic_arguments },
             Decl::ExternFunction(func) => {
@@ -1622,7 +1633,7 @@ impl DriverRef<'_> {
             Decl::Field { index } => {
                 let base = self.read().get_base(decl_ref_id);
                 let base_ty = tp.ty(base);
-                let mut base = self.build_expr(b, base, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                let mut base = self.build_expr(b, base, Context::default(), tp);
                 if matches!(base_ty, Type::Pointer(_)) {
                     base.indirection += 1;
                 }
@@ -1636,7 +1647,7 @@ impl DriverRef<'_> {
             },
             Decl::InternalField(field) => {
                 let base = self.read().get_base(decl_ref_id);
-                let base = self.build_expr(b, base, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                let base = self.build_expr(b, base, Context::default(), tp);
                 let base = self.write().handle_indirection(b, base);
                 DeclRef::Value(self.write().push_instr(b, Instr::InternalFieldAccess { val: base, field }, expr).direct())
             },
@@ -1753,12 +1764,12 @@ impl DriverRef<'_> {
             Expr::IntLit { .. } | Expr::DecLit { .. } | Expr::CharLit { .. } | Expr::StrLit { .. } | Expr::BoolLit { .. } | Expr::Const(_) | Expr::Mod { .. } => {
                 drop(d);
                 let konst = self.write().expr_to_const(expr, ty);
-                let name = format!("{}", self.read().fmt_const_for_instr_name(&konst));
+                let name = self.read().fmt_const_for_instr_name(&konst).to_string();
                 self.write().push_instr_with_name(b, Instr::Const(konst), expr, name).direct()
             },
             Expr::Import { path } => {
                 drop(d);
-                let path = self.build_expr(b, path, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                let path = self.build_expr(b, path, Context::default(), tp);
                 let path = self.write().handle_indirection(b, path);
                 self.write().push_instr_with_name(b, Instr::Import(path), expr, "import").direct()
             }
@@ -1794,7 +1805,7 @@ impl DriverRef<'_> {
 
                 fn get_args(d: &mut DriverRef, b: &mut FunctionBuilder, tp: &impl TypeProvider, arguments: &[ExprId]) -> SmallVec<[OpId; 2]> {
                     arguments.iter().map(|&argument| {
-                        let val = d.build_expr(b, argument, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                        let val = d.build_expr(b, argument, Context::default(), tp);
                         d.write().handle_indirection(b, val)
                     }).collect()
                 }
@@ -1847,7 +1858,7 @@ impl DriverRef<'_> {
 
                                 self.write().start_bb(b, left_false_bb);
                                 let false_const = Const::Bool(false);
-                                let name = format!("{}", self.read().fmt_const_for_instr_name(&false_const));
+                                let name = self.read().fmt_const_for_instr_name(&false_const).to_string();
                                 let false_val = self.write().push_instr_with_name(b, Instr::Const(false_const), expr, name).direct();
                                 self.handle_context(b, false_val, branch_ctx, tp);
 
@@ -1892,7 +1903,7 @@ impl DriverRef<'_> {
 
                                 self.write().start_bb(b, left_true_bb);
                                 let true_const = Const::Bool(true);
-                                let name = format!("{}", self.read().fmt_const_for_instr_name(&true_const));
+                                let name = self.read().fmt_const_for_instr_name(&true_const).to_string();
                                 let true_val = self.write().push_instr_with_name(b, Instr::Const(true_const), expr, name).direct();
                                 let branch_ctx = ctx.redirect(location, Some(after_bb));
                                 self.handle_context(b, true_val, branch_ctx, tp);
@@ -1914,7 +1925,7 @@ impl DriverRef<'_> {
                             if let DataDest::Branch(true_bb, false_bb) = ctx.data {
                                 return self.build_expr(b, operand, Context::new(0, DataDest::Branch(false_bb, true_bb), ctx.control), tp)
                             } else {
-                                let operand = self.build_expr(b, operand, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                                let operand = self.build_expr(b, operand, Context::default(), tp);
                                 self.write().push_instr(b, Instr::LogicalNot(operand.instr), expr).direct()
                             }
                         },
@@ -1930,7 +1941,7 @@ impl DriverRef<'_> {
                             let address = self.build_expr(b, lhs, Context::new(1, DataDest::Read, ControlDest::Continue), tp);
                             let address = self.write().handle_indirection(b, address);
                             let loaded = self.write().push_instr(b, Instr::Load(address), lhs);
-                            let modifier = self.build_expr(b, rhs, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                            let modifier = self.build_expr(b, rhs, Context::default(), tp);
                             let modifier = self.write().handle_indirection(b, modifier);
                             let intr = match intrinsic {
                                 Intrinsic::MultAssign => Intrinsic::Mult,
@@ -1966,7 +1977,7 @@ impl DriverRef<'_> {
                 match tp.cast_method(cast_id) {
                     CastMethod::Noop => return self.build_expr(b, operand, ctx, tp),
                     CastMethod::Reinterpret => {
-                        let value = self.build_expr(b, operand, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                        let value = self.build_expr(b, operand, Context::default(), tp);
                         let value = self.write().handle_indirection(b, value);
                         self.write().push_instr(b, Instr::Reinterpret(value, dest_ty), expr).direct()
                     },
@@ -1977,7 +1988,7 @@ impl DriverRef<'_> {
                             (a, b) => panic!("Internal compiler error: found invalid cast types while generating MIR ({:?}, {:?})", a, b)
                         };
                         let (src_bit_width, dest_bit_width) = (src_width.bit_width(self.read().arch), dest_width.bit_width(self.read().arch));
-                        let value = self.build_expr(b, operand, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                        let value = self.build_expr(b, operand, Context::default(), tp);
                         let value = self.write().handle_indirection(b, value);
 
                         match src_bit_width.cmp(&dest_bit_width) {
@@ -1999,17 +2010,17 @@ impl DriverRef<'_> {
                         }.direct()
                     },
                     CastMethod::Float => {
-                        let value = self.build_expr(b, operand, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                        let value = self.build_expr(b, operand, Context::default(), tp);
                         let value = self.write().handle_indirection(b, value);
                         self.write().push_instr(b, Instr::FloatCast(value, dest_ty), expr).direct()
                     },
                     CastMethod::FloatToInt => {
-                        let value = self.build_expr(b, operand, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                        let value = self.build_expr(b, operand, Context::default(), tp);
                         let value = self.write().handle_indirection(b, value);
                         self.write().push_instr(b, Instr::FloatToInt(value, dest_ty), expr).direct()
                     },
                     CastMethod::IntToFloat => {
-                        let value = self.build_expr(b, operand, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                        let value = self.build_expr(b, operand, Context::default(), tp);
                         let value = self.write().handle_indirection(b, value);
                         self.write().push_instr(b, Instr::IntToFloat(value, dest_ty), expr).direct()
                     },
@@ -2030,7 +2041,7 @@ impl DriverRef<'_> {
                 let op = self.build_expr(
                     b,
                     operand,
-                    Context::new(0, DataDest::Read, ControlDest::Continue),
+                    Context::default(),
                     tp,
                 );
                 let op = self.write().handle_indirection(b, op);
@@ -2044,7 +2055,7 @@ impl DriverRef<'_> {
                         let param_ty = self.build_expr(
                             b,
                             ty,
-                            Context::new(0, DataDest::Read, ControlDest::Continue),
+                            Context::default(),
                             tp,
                         );
                         self.write().handle_indirection(b, param_ty)
@@ -2052,7 +2063,7 @@ impl DriverRef<'_> {
                 let ret_ty = self.build_expr(
                     b,
                     ret_ty,
-                    Context::new(0, DataDest::Read, ControlDest::Continue),
+                    Context::default(),
                     tp,
                 );
                 let ret_ty = self.write().handle_indirection(b, ret_ty);
@@ -2068,7 +2079,7 @@ impl DriverRef<'_> {
                     let field = self.build_expr(
                         b,
                         field_ty,
-                        Context::new(0, DataDest::Read, ControlDest::Continue),
+                        Context::default(),
                         tp,
                     );
                     let field = self.write().handle_indirection(b, field);
@@ -2085,7 +2096,7 @@ impl DriverRef<'_> {
                     let variant = self.build_expr(
                         b,
                         payload_ty,
-                        Context::new(0, DataDest::Read, ControlDest::Continue),
+                        Context::default(),
                         tp,
                     );
                     let variant = self.write().handle_indirection(b, variant);
@@ -2101,7 +2112,7 @@ impl DriverRef<'_> {
                     let field = self.build_expr(
                         b,
                         field,
-                        Context::new(0, DataDest::Read, ControlDest::Continue),
+                        Context::default(),
                         tp,
                     );
                     let field = self.write().handle_indirection(b, field);
@@ -2129,7 +2140,7 @@ impl DriverRef<'_> {
             Expr::Switch { scrutinee, ref cases } => {
                 let cases = cases.clone();
                 drop(d);
-                let scrutinee_val = self.build_expr(b, scrutinee, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                let scrutinee_val = self.build_expr(b, scrutinee, Context::default(), tp);
                 let scrutinee_ty = tp.ty(scrutinee);
                 let discriminant = match scrutinee_ty {
                     Type::Enum(_) => self.write().get_discriminant(b, scrutinee_val),
@@ -2240,7 +2251,7 @@ impl DriverRef<'_> {
                 let test_bb = self.write().create_bb(b);
                 let loop_bb = self.write().create_bb(b);
                 let post_bb = match ctx.control {
-                    ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid => self.write().create_bb(b),
+                    ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenBlock { .. } => self.write().create_bb(b),
                     ControlDest::Block(block) => block,
                 };
 
@@ -2253,7 +2264,49 @@ impl DriverRef<'_> {
                 self.build_scope(b, scope, Context::new(0, DataDest::Void, ControlDest::Block(test_bb)), tp);
 
                 match ctx.control {
-                    ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid => {
+                    ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenBlock { .. } => {
+                        self.write().start_bb(b, post_bb);
+                        VOID_INSTR.direct()
+                    },
+                    // Already handled this above
+                    ControlDest::Block(_) => return VOID_INSTR.direct(),
+                }
+            },
+            Expr::For { binding, lower_bound, upper_bound, scope } => {
+                let binding_stored_decl_id = if let hir::Decl::LoopBinding { id, .. } = df!(d, binding.hir) {
+                    id
+                } else {
+                    panic!("incorrect type of decl found in decl binding id");
+                };
+                drop(d);
+                let binding_ty = tp.ty(lower_bound).clone();
+                let binding_name = self.read().display_item(binding).to_string();
+                let binding_location = self.write().push_instr_with_name(b, Instr::Alloca(binding_ty), binding, &binding_name);
+                b.stored_decl_locs.push_at(binding_stored_decl_id, binding_location);
+                self.build_expr(b, lower_bound, Context::new(0, DataDest::Store { location: binding_location }, ControlDest::Continue), tp);
+                let upper_bound = self.build_expr(b, upper_bound, Context::default(), tp);
+                let upper_bound = self.write().handle_indirection(b, upper_bound);
+
+                let test_bb = self.write().create_bb(b);
+                let loop_bb = self.write().create_bb(b);
+                let post_bb = match ctx.control {
+                    ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenBlock { .. } => self.write().create_bb(b),
+                    ControlDest::Block(block) => block,
+                };
+
+                self.write().push_instr(b, Instr::Br(test_bb), expr);
+                self.write().end_current_bb(b);
+                self.write().start_bb(b, test_bb);
+                let cur_binding_value = self.write().push_instr_with_name(b, Instr::Load(binding_location), binding, &binding_name);
+                let less_than = self.write().push_instr_with_name(b, Instr::Intrinsic { arguments: smallvec![cur_binding_value, upper_bound], ty: Type::Bool, intr: Intrinsic::Less }, binding, &binding_name);
+                self.write().push_instr_with_name(b, Instr::CondBr { condition: less_than, true_bb: loop_bb, false_bb: post_bb }, binding, &binding_name);
+                self.write().end_current_bb(b);
+
+                self.write().start_bb(b, loop_bb);
+                self.build_scope(b, scope, Context::new(0, DataDest::Void, ControlDest::IncrementVariableAndThenBlock { location: binding_location, block: test_bb }), tp);
+
+                match ctx.control {
+                    ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenBlock { .. } => {
                         self.write().start_bb(b, post_bb);
                         VOID_INSTR.direct()
                     },
@@ -2310,6 +2363,19 @@ impl Driver {
     fn handle_control(&mut self, b: &mut FunctionBuilder, val: Value, control: ControlDest) -> Value {
         match control {
             ControlDest::Block(block) => {
+                let val = self.push_instr(b, Instr::Br(block), val.instr).direct();
+                self.end_current_bb(b);
+                val
+            },
+            ControlDest::IncrementVariableAndThenBlock { location, block } => {
+                // *location += 1
+                let ty = self.type_of(location).deref().unwrap().clone().ty;
+                let loaded = self.push_instr(b, Instr::Load(location), location);
+                let one = self.push_instr(b, Instr::Const(Const::Int { lit: BigInt::from(1), ty: ty.clone() }), location);
+                let value = self.push_instr(b, Instr::Intrinsic { arguments: smallvec![loaded, one], ty, intr: Intrinsic::Add }, location);
+                self.push_instr(b, Instr::Store { location, value }, location);
+
+                // br block
                 let val = self.push_instr(b, Instr::Br(block), val.instr).direct();
                 self.end_current_bb(b);
                 val

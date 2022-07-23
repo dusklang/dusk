@@ -176,6 +176,7 @@ pub enum Expr {
     Do { scope: ImperScopeId },
     If { condition: ExprId, then_scope: ImperScopeId, else_scope: Option<ImperScopeId> },
     While { condition: ExprId, scope: ImperScopeId },
+    For { binding: DeclId, lower_bound: ExprId, upper_bound: ExprId, scope: ImperScopeId },
     Switch {
         scrutinee: ExprId,
         cases: Vec<SwitchCase>,
@@ -258,6 +259,7 @@ pub enum Decl {
     },
     Stored { id: StoredDeclId, is_mut: bool, root_expr: ExprId, },
     PatternBinding { id: PatternBindingDeclId, is_mut: bool, },
+    LoopBinding { id: StoredDeclId, is_mut: bool }, // The `i` in `for i in 0..100 {}`
     Parameter {
         /// Parameter index within the function
         index: usize,

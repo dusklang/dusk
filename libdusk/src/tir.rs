@@ -55,6 +55,8 @@ pub struct AssignedDecl { pub explicit_ty: Option<ExprId>, pub root_expr: ExprId
 #[derive(Debug)]
 pub struct PatternBinding { pub binding_id: PatternBindingDeclId, pub scrutinee: ExprId, pub decl_id: DeclId }
 #[derive(Debug)]
+pub struct For { pub binding_decl: DeclId, pub binding_explicit_ty: Option<ExprId>, pub lower_bound: ExprId, pub upper_bound: ExprId }
+#[derive(Debug)]
 pub struct Assignment { pub lhs: ExprId, pub rhs: ExprId }
 #[derive(Debug)]
 pub struct DeclRef { pub decl_ref_id: DeclRefId }
@@ -145,6 +147,7 @@ pub struct UnitItems {
     pub ret_groups: DepVec<RetGroup>,
     pub casts: DepVec<Expr<Cast>>,
     pub whiles: DepVec<Expr<While>>,
+    pub fors: DepVec<Expr<For>>,
     pub modules: DepVec<Expr<Module>>,
     pub imports: DepVec<Expr<Import>>,
     pub dos: DepVec<Expr<Do>>,
@@ -163,23 +166,22 @@ pub struct UnitItems {
     pub struct_lits: DepVec<Expr<StructLit>>,
     pub enums: DepVec<Expr<Enum>>,
 }
-
-impl UnitItems {
-    pub fn num_levels(&self) -> u32 {
-        // Assumption: all DepVecs in the unit have the same number of levels!
-        self.assigned_decls.num_levels()
-    }
-}
-
 impl UnitItems {
     fn unify_sizes(&mut self) {
         dep_vec::unify_sizes(&mut [
             &mut self.assigned_decls, &mut self.assignments, &mut self.decl_refs, &mut self.calls,
             &mut self.addr_ofs, &mut self.derefs, &mut self.pointers, &mut self.ifs, &mut self.dos,
-            &mut self.ret_groups, &mut self.casts, &mut self.whiles, &mut self.explicit_rets,
+            &mut self.ret_groups, &mut self.casts, &mut self.whiles, &mut self.fors, &mut self.explicit_rets,
             &mut self.modules, &mut self.imports, &mut self.structs, &mut self.struct_lits,
             &mut self.switches, &mut self.enums, &mut self.pattern_bindings, &mut self.function_tys,
         ]);
+    }
+}
+
+impl UnitItems {
+    pub fn num_levels(&self) -> u32 {
+        // Assumption: all DepVecs in the unit have the same number of levels!
+        self.assigned_decls.num_levels()
     }
 }
 
@@ -564,6 +566,10 @@ impl Driver {
                 insert_expr!(ifs, If { condition, then_expr, else_expr });
             },
             &hir::Expr::While { condition, .. } => insert_expr!(whiles, While { condition }),
+            &hir::Expr::For { binding, lower_bound, upper_bound, .. } => {
+                let explicit_ty = self.code.hir.explicit_tys[binding];
+                insert_expr!(fors, For { binding_decl: binding, binding_explicit_ty: explicit_ty, lower_bound, upper_bound })
+            },
             &hir::Expr::Switch { scrutinee, ref cases, } => {
                 let mut tir_cases = Vec::with_capacity(cases.len());
                 for case in cases {
@@ -599,7 +605,9 @@ impl Driver {
     fn build_tir_decl(&mut self, unit: &mut UnitItems, level: u32, id: DeclId) {
         match df!(id.hir) {
             // TODO: Add parameter and field TIR items for (at least) checking that the type of the param is valid
-            hir::Decl::Parameter { .. } | hir::Decl::Field { .. } | hir::Decl::Variant { .. } | hir::Decl::ReturnValue | hir::Decl::Intrinsic { .. } | hir::Decl::InternalField(_) => {},
+            // LoopBinding doesn't require a TIR decl because it is current checked by its parent `For` expr
+            hir::Decl::Parameter { .. } | hir::Decl::Field { .. } | hir::Decl::Variant { .. } |
+                hir::Decl::ReturnValue | hir::Decl::Intrinsic { .. } | hir::Decl::InternalField(_) | hir::Decl::LoopBinding { .. } => {},
             hir::Decl::GenericParam(_) => {
                 assert_eq!(level, 0);
                 unit.generic_params.push(GenericParam { id });
@@ -674,6 +682,10 @@ impl Driver {
                     false,
                     payload_ty.iter().cloned().collect(),
                 ),
+                hir::Decl::LoopBinding { is_mut, .. } => (
+                    is_mut,
+                    SmallVec::new(),
+                ),
             };
             debug::send(|| DvdMessage::DidInitializeTirForDecl { id: DeclId::new(self.tir.decls.len()), is_mut, param_tys: param_tys.iter().cloned().collect() });
             self.tir.decls.push_at(id, Decl { param_tys, is_mut, generic_params });
@@ -685,7 +697,8 @@ impl Driver {
             let decl_id = DeclId::new(i);
             let id = df!(decl_id.item);
             match df!(decl_id.hir) {
-                hir::Decl::Parameter { .. } | hir::Decl::Intrinsic { .. } | hir::Decl::Field { .. } | hir::Decl::ReturnValue | hir::Decl::GenericParam(_) | hir::Decl::Variant { .. } | hir::Decl::ComputedPrototype { .. } | hir::Decl::InternalField(_) => {},
+                // NOTE: type 1 dependencies are currently added to LoopBinding by its parent `for` loop; see below.
+                hir::Decl::Parameter { .. } | hir::Decl::Intrinsic { .. } | hir::Decl::Field { .. } | hir::Decl::ReturnValue | hir::Decl::GenericParam(_) | hir::Decl::Variant { .. } | hir::Decl::ComputedPrototype { .. } | hir::Decl::InternalField(_) | hir::Decl::LoopBinding { .. } => {},
                 hir::Decl::PatternBinding { id: _binding_id, .. } => {
                     // let scrutinee = self.code.hir.pattern_binding_decls[binding_id].scrutinee;
 
@@ -787,6 +800,14 @@ impl Driver {
                         self.tir.graph.add_type1_dep(id, ef!(field.expr.item));
                     }
                 },
+                hir::Expr::For { binding, lower_bound, upper_bound, .. } => {
+                    self.tir.graph.add_type1_dep(id, df!(binding.item));
+
+                    // THIS IS KIND OF A HACK. The HIR variants for loop binding variables do not currently keep track
+                    // of the lower_bound or upper_bound, so I just add the dependencies here.
+                    self.tir.graph.add_type1_dep(df!(binding.item), ef!(lower_bound.item));
+                    self.tir.graph.add_type1_dep(df!(binding.item), ef!(upper_bound.item));
+                },
             }
         }
 
@@ -819,7 +840,7 @@ impl Driver {
             match self.code.hir.items[id] {
                 hir::Item::Decl(decl_id) => {
                     match df!(decl_id.hir) {
-                        hir::Decl::Parameter { .. } | hir::Decl::Static(_) | hir::Decl::Const(_) | hir::Decl::Stored { .. } | hir::Decl::Field { .. } | hir::Decl::ReturnValue | hir::Decl::InternalField(_) /*  | hir::Decl::PatternBinding { .. }*/ => {},
+                        hir::Decl::Parameter { .. } | hir::Decl::Static(_) | hir::Decl::Const(_) | hir::Decl::Stored { .. } | hir::Decl::Field { .. } | hir::Decl::ReturnValue | hir::Decl::InternalField(_) | hir::Decl::LoopBinding { .. } /*  | hir::Decl::PatternBinding { .. }*/ => {},
                         hir::Decl::PatternBinding { id: binding_id, .. } => {
                             let scrutinee = self.code.hir.pattern_binding_decls[binding_id].scrutinee;
         
@@ -907,6 +928,9 @@ impl Driver {
                             }
                         }
                         hir::Expr::While { scope, .. } => {
+                            self.add_type3_scope_dep(id, scope);
+                        },
+                        hir::Expr::For { scope, .. } => {
                             self.add_type3_scope_dep(id, scope);
                         },
                     }
