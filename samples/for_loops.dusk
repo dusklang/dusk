@@ -4,7 +4,7 @@ fn type_of[T](val: T): type {
 
 fn bool_value(): bool { true }
 fn main() {
-    for i in 0..2 {
+    for mut i in 0..2 {
         print("Outer loop:\n")
         for j in 0..2 {
             print("  inner loop\n")

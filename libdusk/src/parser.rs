@@ -375,6 +375,10 @@ impl Driver {
             TokenKind::For => {
                 let for_range = self.cur(p).range;
                 self.next(p);
+                let is_mut = matches!(self.cur(p).kind, TokenKind::Mut);
+                if is_mut {
+                    self.next(p);
+                }
                 let var_name = self.eat_ident(p);
                 let var_ty = matches!(self.cur(p).kind, TokenKind::Colon).then(|| {
                     self.next(p);
@@ -385,7 +389,7 @@ impl Driver {
                 self.eat_tok(p, TokenKind::DoubleDot)?;
                 let upper_bound = self.parse_non_struct_lit_expr(p);
                 let stored_decl_id = self.next_stored_decl();
-                let binding_decl = self.add_decl(hir::Decl::LoopBinding { id: stored_decl_id, is_mut: false }, var_name.symbol, var_ty, var_name.range);
+                let binding_decl = self.add_decl(hir::Decl::LoopBinding { id: stored_decl_id, is_mut }, var_name.symbol, var_ty, var_name.range);
                 let binding_decl = ImperScopedDecl {
                     name: var_name.symbol,
                     num_params: 0,
