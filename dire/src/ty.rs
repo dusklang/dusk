@@ -175,6 +175,9 @@ impl Type {
             (a, b) => a == b,
         }
     }
+
+    pub fn is_error(&self) -> bool { matches!(self, Type::Error) }
+    pub fn is_int(&self) -> bool { matches!(self, Type::Int { .. }) }
 }
 
 impl Default for Type {

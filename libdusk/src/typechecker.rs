@@ -352,14 +352,97 @@ impl tir::Expr<tir::While> {
 }
 
 impl tir::Expr<tir::For> {
-    fn run_pass_1(&self, _driver: &mut Driver, _tp: &mut impl TypeProvider) {
-        todo!();
-        // *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None, ef!(driver, self.id.generic_ctx_id));
-        // *tp.ty_mut(self.id) = Type::Void;
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None, ef!(driver, self.id.generic_ctx_id));
+        *tp.ty_mut(self.id) = Type::Void;
+
+        let range_range = driver.get_range(self.lower_bound) + driver.get_range(self.upper_bound);
+
+        let loop_binding_ty = if let Some(explicit_ty_expr) = self.binding_explicit_ty {
+            let explicit_ty = tp.get_evaluated_type(explicit_ty_expr);
+            // TODO: less code duplication (both here and in the many other places this code has been copied and pasted to)
+            if let Some(err) = driver.can_unify_to(tp, self.lower_bound, &explicit_ty.clone().into()).err() {
+                let range = driver.get_range(self.lower_bound);
+                let mut error = Error::new(format!("Couldn't unify lower bound to loop variable type `{:?}`", explicit_ty))
+                    .adding_primary_range(range, "expression here");
+                match err {
+                    UnificationError::InvalidChoice(choices)
+                        => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                    UnificationError::Trait(not_implemented)
+                        => error.add_secondary_range(
+                            range,
+                            format!(
+                                "note: couldn't unify because expression requires implementations of {:?}",
+                                not_implemented.names(),
+                            ),
+                        ),
+                }
+                driver.errors.push(error);
+            }
+            if let Some(err) = driver.can_unify_to(tp, self.upper_bound, &explicit_ty.clone().into()).err() {
+                let range = driver.get_range(self.upper_bound);
+                let mut error = Error::new(format!("Couldn't unify upper bound to loop variable type `{:?}`", explicit_ty))
+                    .adding_primary_range(range, "expression here");
+                match err {
+                    UnificationError::InvalidChoice(choices)
+                        => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                    UnificationError::Trait(not_implemented)
+                        => error.add_secondary_range(
+                            range,
+                            format!(
+                                "note: couldn't unify because expression requires implementations of {:?}",
+                                not_implemented.names(),
+                            ),
+                        ),
+                }
+                driver.errors.push(error);
+            }
+
+            let ty = explicit_ty.to_owned();
+
+            if !ty.is_int() && !ty.is_error() {
+                driver.errors.push(
+                    Error::new(format!("unsupported loop variable type `{:?}`", ty))
+                        .adding_primary_range(driver.get_range(explicit_ty_expr), "range bounds must be integers")
+                );
+            }
+
+            ty
+        } else {
+            let lower_bound_constraints = tp.constraints(self.lower_bound);
+            let upper_bound_constraints = tp.constraints(self.upper_bound);
+            let loop_binding_constraints = lower_bound_constraints.intersect_with(upper_bound_constraints);
+            
+            let ty = match loop_binding_constraints.solve() {
+                Ok(ty) => ty.ty,
+                Err(_) => {
+                    // TODO: better error message, probably
+                    driver.errors.push(
+                        Error::new("unable to reconcile the types of the lower and upper bounds in range")
+                            .adding_primary_range(range_range, "")
+                    );
+                    Type::Error
+                }
+            };
+
+            if !ty.is_int() && !ty.is_error() {
+                driver.errors.push(
+                    Error::new(format!("values of unsupported type `{:?}` used in range", ty))
+                        .adding_primary_range(range_range, "range bounds must be integers")
+                );
+            }
+
+            ty
+        };
+
+        let is_mut = driver.tir.decls[self.binding_decl].is_mut;
+        *tp.decl_type_mut(self.binding_decl) = QualType { ty: loop_binding_ty, is_mut };
     }
 
-    fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut impl TypeProvider) {
-        todo!();
+    fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+        let ty = tp.fetch_decl_type(driver, self.binding_decl, None).ty;
+        tp.constraints_mut(self.lower_bound).set_to(ty.clone());
+        tp.constraints_mut(self.upper_bound).set_to(ty);
     }
 }
 

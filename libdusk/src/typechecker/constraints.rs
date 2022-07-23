@@ -357,10 +357,11 @@ pub fn can_unify_to_in_generic_context<'a>(constraints: &'a ConstraintList, ty: 
 
 impl ConstraintList {
     pub fn set_to(&mut self, ty: impl Into<QualType>) {
+        let ty = ty.into();
         // If we're never, we should stay never.
-        if !self.is_never() {
-            let ty = ty.into();
-
+        // If the passed in type is Error, we should stay whatever we are.
+        // (this second clause is experimental and may not turn out to be a good idea. reevaluate later.)
+        if !self.is_never() && !ty.ty.is_error() {
             // Preserve generic constraints if possible. TODO: efficiency! The caller should pass in this information
             // instead so we don't have to iterate.
             if let Some(one_of) = &mut self.one_of {
