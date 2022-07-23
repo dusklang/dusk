@@ -134,6 +134,26 @@ impl tir::Expr<tir::BoolLit> {
     }
 }
 
+impl tir::Expr<tir::Break> {
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Never.into()]), None, ef!(driver, self.id.generic_ctx_id));
+        *tp.ty_mut(self.id) = Type::Never;
+    }
+
+    fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut impl TypeProvider) {
+    }
+}
+
+impl tir::Expr<tir::Continue> {
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+        *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Never.into()]), None, ef!(driver, self.id.generic_ctx_id));
+        *tp.ty_mut(self.id) = Type::Never;
+    }
+
+    fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut impl TypeProvider) {
+    }
+}
+
 impl tir::Expr<tir::ConstExpr> {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         let ty = self.0.clone();
@@ -1572,7 +1592,7 @@ impl Driver {
                 )+
             }
         }
-        run_pass_1_flat!(int_lits, dec_lits, str_lits, char_lits, bool_lits, consts, generic_params, error_exprs, func_decls);
+        run_pass_1_flat!(int_lits, dec_lits, str_lits, char_lits, bool_lits, consts, generic_params, error_exprs, func_decls, breaks, continues);
 
         for level in start_level..unit.num_levels() {
             macro_rules! run_pass_1 {
@@ -1633,7 +1653,7 @@ impl Driver {
                 )+
             }
         }
-        run_pass_2_flat!(int_lits, dec_lits, str_lits, char_lits, bool_lits, consts, generic_params, stmts, error_exprs, func_decls);
+        run_pass_2_flat!(int_lits, dec_lits, str_lits, char_lits, bool_lits, consts, generic_params, stmts, error_exprs, func_decls, breaks, continues);
         tp.debug_output(self, 0);
     }
 

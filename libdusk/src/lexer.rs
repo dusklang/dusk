@@ -346,6 +346,7 @@ impl Driver {
             let ident_bytes = &self.src_map.files[l.file].src.as_bytes()[ident_start..ident_end];
             let ident = unsafe { std::str::from_utf8_unchecked(ident_bytes) };
 
+            // Add keywords
             use TokenKind::*;
             let kind: TokenKind = match ident {
                 "fn" => Fn,
@@ -355,6 +356,8 @@ impl Driver {
                 "if" => If,
                 "else" => Else,
                 "while" => While,
+                "break" => Break,
+                "continue" => Continue,
                 "for" => For,
                 "in" => In,
                 "switch" => Switch,

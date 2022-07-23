@@ -378,6 +378,12 @@ impl Driver {
         let decl = self.hir.comp_decl_stack.last().map(|decl| decl.id);
         self.add_expr(Expr::Ret { expr, decl }, range)
     }
+    pub fn break_expr(&mut self, range: SourceRange) -> ExprId {
+        self.add_expr(Expr::Break, range)
+    }
+    pub fn continue_expr(&mut self, range: SourceRange) -> ExprId {
+        self.add_expr(Expr::Continue, range)
+    }
     pub fn if_expr(&mut self, condition: ExprId, then_scope: ImperScopeId, else_scope: Option<ImperScopeId>, range: SourceRange) -> ExprId {
         self.add_expr(
             Expr::If { condition, then_scope, else_scope },

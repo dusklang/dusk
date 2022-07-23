@@ -890,6 +890,13 @@ enum FunctionBody {
     ConstantInstruction(OpId),
 }
 
+#[derive(Copy, Clone, Debug, PartialEq)]
+struct LoopState {
+    break_block: BlockId,
+    continue_block: BlockId,
+    continue_location_of_variable_to_increment: Option<OpId>,
+}
+
 struct FunctionBuilder {
     name: Option<Sym>,
     ty: FunctionType,
@@ -899,6 +906,7 @@ struct FunctionBuilder {
     stored_decl_locs: IndexVec<StoredDeclId, OpId>,
     pattern_binding_locs: HashMap<PatternBindingDeclId, Value>,
     instr_namespace: InstrNamespace,
+    loop_stack: Vec<LoopState>,
 }
 
 #[derive(Debug)]
@@ -975,6 +983,7 @@ impl DriverRef<'_> {
             stored_decl_locs: IndexVec::new(),
             pattern_binding_locs: HashMap::new(),
             instr_namespace,
+            loop_stack: Vec::new(),
         };
         self.write().start_bb(&mut b, entry);
         let ctx = Context::new(0, DataDest::Ret, ControlDest::Unreachable);
@@ -2261,7 +2270,14 @@ impl DriverRef<'_> {
                 self.build_expr(b, condition, Context::new(0, DataDest::Branch(loop_bb, post_bb), ControlDest::Continue), tp);
 
                 self.write().start_bb(b, loop_bb);
+                let loop_state = LoopState {
+                    break_block: post_bb,
+                    continue_block: test_bb,
+                    continue_location_of_variable_to_increment: None,
+                };
+                b.loop_stack.push(loop_state);
                 self.build_scope(b, scope, Context::new(0, DataDest::Void, ControlDest::Block(test_bb)), tp);
+                debug_assert_eq!(loop_state, b.loop_stack.pop().unwrap());
 
                 match ctx.control {
                     ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenBlock { .. } => {
@@ -2303,7 +2319,14 @@ impl DriverRef<'_> {
                 self.write().end_current_bb(b);
 
                 self.write().start_bb(b, loop_bb);
+                let loop_state = LoopState {
+                    break_block: post_bb,
+                    continue_block: test_bb,
+                    continue_location_of_variable_to_increment: Some(binding_location),
+                };
+                b.loop_stack.push(loop_state);
                 self.build_scope(b, scope, Context::new(0, DataDest::Void, ControlDest::IncrementVariableAndThenBlock { location: binding_location, block: test_bb }), tp);
+                debug_assert_eq!(loop_state, b.loop_stack.pop().unwrap());
 
                 match ctx.control {
                     ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenBlock { .. } => {
@@ -2312,6 +2335,47 @@ impl DriverRef<'_> {
                     },
                     // Already handled this above
                     ControlDest::Block(_) => return VOID_INSTR.direct(),
+                }
+            },
+            Expr::Break => {
+                drop(d);
+                if let Some(loop_state) = b.loop_stack.last() {
+                    let branch = self.write().push_instr(b, Instr::Br(loop_state.break_block), expr);
+                    self.write().end_current_bb(b);
+                    // Must create unreachable basic block in case there are more statements in this loop
+                    let unreachable_bb = self.write().create_bb(b);
+                    self.write().start_bb(b, unreachable_bb);
+
+                    return branch.direct();
+                } else {
+                    let range = self.read().get_range(expr);
+                    self.write().errors.push(
+                        Error::new("`break` expression found outside of loop")
+                            .adding_primary_range(range, "only valid within `while` or `for` loops")
+                    );
+                    VOID_INSTR.direct()
+                }
+            },
+            Expr::Continue => {
+                drop(d);
+                if let Some(loop_state) = b.loop_stack.last().copied() {
+                    if let Some(variable_to_increment) = loop_state.continue_location_of_variable_to_increment {
+                        self.write().increment_variable(b, variable_to_increment);
+                    }
+                    let branch = self.write().push_instr(b, Instr::Br(loop_state.continue_block), expr);
+                    self.write().end_current_bb(b);
+                    // Must create unreachable basic block in case there are more statements in this loop
+                    let unreachable_bb = self.write().create_bb(b);
+                    self.write().start_bb(b, unreachable_bb);
+
+                    return branch.direct();
+                } else {
+                    let range = self.read().get_range(expr);
+                    self.write().errors.push(
+                        Error::new("`continue` expression found outside of loop")
+                            .adding_primary_range(range, "only valid within `while` or `for` loops")
+                    );
+                    VOID_INSTR.direct()
                 }
             },
             Expr::Ret { expr, .. } => {
@@ -2360,6 +2424,14 @@ impl Driver {
         val.instr
     }
 
+    fn increment_variable(&mut self, b: &mut FunctionBuilder, location: OpId) {
+        let ty = self.type_of(location).deref().unwrap().clone().ty;
+        let loaded = self.push_instr(b, Instr::Load(location), location);
+        let one = self.push_instr(b, Instr::Const(Const::Int { lit: BigInt::from(1), ty: ty.clone() }), location);
+        let value = self.push_instr(b, Instr::Intrinsic { arguments: smallvec![loaded, one], ty, intr: Intrinsic::Add }, location);
+        self.push_instr(b, Instr::Store { location, value }, location);
+    }
+
     fn handle_control(&mut self, b: &mut FunctionBuilder, val: Value, control: ControlDest) -> Value {
         match control {
             ControlDest::Block(block) => {
@@ -2369,11 +2441,7 @@ impl Driver {
             },
             ControlDest::IncrementVariableAndThenBlock { location, block } => {
                 // *location += 1
-                let ty = self.type_of(location).deref().unwrap().clone().ty;
-                let loaded = self.push_instr(b, Instr::Load(location), location);
-                let one = self.push_instr(b, Instr::Const(Const::Int { lit: BigInt::from(1), ty: ty.clone() }), location);
-                let value = self.push_instr(b, Instr::Intrinsic { arguments: smallvec![loaded, one], ty, intr: Intrinsic::Add }, location);
-                self.push_instr(b, Instr::Store { location, value }, location);
+                self.increment_variable(b, location);
 
                 // br block
                 let val = self.push_instr(b, Instr::Br(block), val.instr).direct();

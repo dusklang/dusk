@@ -177,6 +177,8 @@ pub enum Expr {
     If { condition: ExprId, then_scope: ImperScopeId, else_scope: Option<ImperScopeId> },
     While { condition: ExprId, scope: ImperScopeId },
     For { binding: DeclId, lower_bound: ExprId, upper_bound: ExprId, scope: ImperScopeId },
+    Break,
+    Continue,
     Switch {
         scrutinee: ExprId,
         cases: Vec<SwitchCase>,

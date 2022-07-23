@@ -13,6 +13,12 @@ fn main() {
             } else {
                 print("    End of inner loop, but like, different, man.\n")
             }
+
+            hello :: if bool_value() {
+                0
+            } else {
+                break
+            }
         }
     }
 }

@@ -29,6 +29,8 @@ pub enum TokenKind {
     Else,
     While,
     For,
+    Break,
+    Continue,
     In,
     Switch,
     As,

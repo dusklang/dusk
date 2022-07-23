@@ -402,6 +402,16 @@ impl Driver {
                 let expr_range = self.get_range(ret_expr);
                 Ok(self.ret(ret_expr, source_info::concat(ret_range, expr_range)))
             },
+            TokenKind::Break => {
+                let range = self.cur(p).range;
+                self.next(p);
+                Ok(self.break_expr(range))
+            },
+            TokenKind::Continue => {
+                let range = self.cur(p).range;
+                self.next(p);
+                Ok(self.continue_expr(range))
+            },
             TokenKind::Fn => {
                 let fn_range = self.cur(p).range;
                 self.next(p);
