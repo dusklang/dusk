@@ -7,7 +7,10 @@
 
 use std::sync::Mutex;
 use std::process::{Command, Stdio};
-use std::io::Write;
+use std::io::{Write, Read};
+
+use serde::de::DeserializeOwned;
+use serde::{Serialize, Deserialize};
 
 use dusk_dire::hir::{ExprId, DeclId, ItemId};
 use dusk_dire::tir::CompId;
@@ -15,7 +18,7 @@ use lazy_static::lazy_static;
 use interprocess::local_socket::{LocalSocketListener, LocalSocketStream};
 
 /// Messages *from* the compiler *to* the debugger.
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Message {
     /// Sent before compilation begins
     WillBegin,
@@ -94,9 +97,13 @@ pub enum Message {
 
     /// Sent after typechecking a set of TIR
     DidTypeCheckSet,
+
+    /// Sent just before exiting
+    WillExit,
 }
 
 /// Responses *from* the debugger *to* the compiler.
+#[derive(Serialize, Deserialize)]
 pub enum Response {
     /// Continue compiling as normal
     Continue,
@@ -113,20 +120,36 @@ impl DvdCoordinatorTrait for MockCoordinator {
     fn send(&mut self, _message: &mut dyn FnMut() -> Message) {}
 }
 
+pub fn send_value(w: &mut impl Write, value: impl Serialize) {
+    let payload = serde_json::to_vec(&value).unwrap();
+    w.write_all(&(payload.len() as u32).to_ne_bytes()).unwrap();
+    w.write_all(&payload).unwrap();
+}
+
+pub fn receive_value<V: DeserializeOwned>(r: &mut impl Read) -> V {
+    let mut len = [0u8; 4];
+    r.read_exact(&mut len).unwrap();
+    let len = u32::from_ne_bytes(len);
+    let mut payload = Vec::new();
+    payload.resize(len as usize, 0u8);
+    r.read_exact(&mut payload).unwrap();
+    serde_json::from_slice(&payload).unwrap()
+}
+
 struct DvdCoordinator {
     conn: LocalSocketStream,
 }
-impl DvdCoordinator {
-    fn send(&mut self, bytes: &[u8]) {
-        self.conn.write_all(&(bytes.len() as u32).to_ne_bytes()).unwrap();
-        self.conn.write_all(bytes).unwrap();
-    }
-}
 impl DvdCoordinatorTrait for DvdCoordinator {
     fn send(&mut self, message: &mut dyn FnMut() -> Message) {
-        let message = format!("{:?}", message());
-        println!("Sending message: {}", message);
-        self.send(message.as_bytes());
+        send_value(&mut self.conn, message());
+        let response: Response = receive_value(&mut self.conn);
+        match response {
+            Response::Continue => {},
+            Response::Quit => {
+                println!("Told to quit");
+                std::process::exit(0);
+            }
+        }
     }
 }
 

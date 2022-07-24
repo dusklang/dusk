@@ -21,7 +21,6 @@
 //     SOFTWARE.
 //
 
-
 use glium::glutin;
 use glium::glutin::event::{Event, WindowEvent};
 use glium::glutin::event_loop::{ControlFlow, EventLoop};
@@ -31,8 +30,12 @@ use imgui::*;
 use imgui::sys::igGetMainViewport;
 use imgui_glium_renderer::Renderer;
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
+use std::time::{Instant, Duration};
+use std::sync::mpsc::{self, Receiver, Sender};
+use interprocess::local_socket::LocalSocketStream;
 use rand::Rng;
-use std::time::Instant;
+
+use dvd_ipc::{Message, Response};
 
 struct Rectangle {
     origin: [f32; 2],
@@ -51,22 +54,34 @@ struct UiState {
     rectangles: Vec<Rectangle>,
     headers: Vec<Header>,
     rectangles_left: f32,
+    rx: Receiver<Message>,
+    tx: Sender<Response>,
 }
 
-impl Default for UiState {
-    fn default() -> Self {
+impl UiState {
+    fn new(rx: Receiver<Message>, tx: Sender<Response>) -> Self {
         Self {
             running: true,
             scrolling: [0.0, 0.0],
             rectangles: Vec::new(),
             headers: Vec::new(),
             rectangles_left: 0.0,
+            rx,
+            tx,
         }
     }
 
 }
 
 fn run_ui(state: &mut UiState, ui: &mut Ui) {
+    while let Ok(message) = state.rx.recv_timeout(Duration::from_millis(1)) {
+        state.tx.send(Response::Continue).unwrap();
+        match message {
+            Message::WillExit => state.running = false,
+            _ => {},
+        }
+    }
+
     let (pos, size) = unsafe {
         let viewport = igGetMainViewport();
         ((*viewport).WorkPos, (*viewport).WorkSize)
@@ -188,11 +203,22 @@ fn main() {
     let builder = WindowBuilder::new()
         .with_title("Dusk Visual Debugger")
         .with_inner_size(glutin::dpi::LogicalSize::new(1024f64, 768f64));
-    let display =
-        Display::new(builder, context, &event_loop).expect("Failed to initialize display");
+    let display = Display::new(builder, context, &event_loop).expect("Failed to initialize display");
 
     let mut imgui = Context::create();
     imgui.set_ini_filename(None);
+
+    let (msg_tx, msg_rx) = mpsc::channel();
+    let (resp_tx, resp_rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut stream = LocalSocketStream::connect("DUSK_VISUAL_DEBUGGER").unwrap();
+        loop {
+            let message: Message = dvd_ipc::receive_value(&mut stream);
+            msg_tx.send(message).unwrap();
+            let response: Response = resp_rx.recv().unwrap();
+            dvd_ipc::send_value(&mut stream, response);
+        }
+    });
 
     let mut platform = WinitPlatform::init(&mut imgui);
     {
@@ -214,7 +240,7 @@ fn main() {
 
     let mut renderer = Renderer::init(&mut imgui, &display).expect("Failed to initialize renderer");
     let mut last_frame = Instant::now();
-    let mut state = UiState::default();
+    let mut state = UiState::new(msg_rx, resp_tx);
     state.running = true;
     event_loop.run(move |event, _, control_flow| match event {
         Event::NewEvents(_) => {

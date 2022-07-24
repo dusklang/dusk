@@ -13,5 +13,7 @@ homepage = "https://dusklang.org/"
 [dependencies]
 interprocess = "1.1.1"
 lazy_static = "1.4.0"
+serde_json = "1.0"
+serde = "1.0"
 
 dusk_dire = { version = "0.1", path = "../dire" }

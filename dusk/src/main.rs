@@ -60,6 +60,13 @@ fn flush_errors(driver: &mut Driver) {
     }
 }
 
+struct SendExitMsg;
+impl Drop for SendExitMsg {
+    fn drop(&mut self) {
+        dvd_ipc::send(|| DvdMessage::WillExit);
+    }
+}
+
 fn main() {
     let args: Vec<_> = std::env::args_os().collect();
     let mut split = args.split(|arg| arg == OsStr::new("--"));
@@ -71,6 +78,8 @@ fn main() {
         dvd_ipc::connect();
     }
     dvd_ipc::send(|| DvdMessage::WillBegin);
+    let _exit_handler = SendExitMsg;
+
 
     let mut src_map = SourceMap::new();
     let loaded_file = src_map.add_file_on_disk(&opt.input).is_ok();
