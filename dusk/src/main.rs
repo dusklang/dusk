@@ -12,7 +12,7 @@ use libdusk::source_info::SourceMap;
 use libdusk::interpreter::{restart_interp, InterpMode};
 use libdusk::mir::FunctionRef;
 use libdusk::error::Error;
-use libdusk::debug::{self, Message as DvdMessage};
+use dvd_ipc::Message as DvdMessage;
 
 #[repr(u8)]
 #[derive(ArgEnum, Copy, Clone, Debug)]
@@ -68,9 +68,9 @@ fn main() {
     let opt = Opt::parse_from(clap_args);
 
     if opt.dvd {
-        debug::connect();
+        dvd_ipc::connect();
     }
-    debug::send(|| DvdMessage::WillBegin);
+    dvd_ipc::send(|| DvdMessage::WillBegin);
 
     let mut src_map = SourceMap::new();
     let loaded_file = src_map.add_file_on_disk(&opt.input).is_ok();
@@ -109,9 +109,9 @@ fn main() {
     driver.write().finalize_hir();
 
     begin_phase!(Tir);
-    debug::send(|| DvdMessage::WillInitializeTir);
+    dvd_ipc::send(|| DvdMessage::WillInitializeTir);
     driver.write().initialize_tir(&new_code);
-    debug::send(|| DvdMessage::DidInitializeTir);
+    dvd_ipc::send(|| DvdMessage::DidInitializeTir);
 
 
     begin_phase!(Typecheck);
@@ -121,7 +121,7 @@ fn main() {
         let mut driver_write = driver.write();
         if let Some(units) = driver_write.build_more_tir(opt.tir_output) {
             drop(driver_write);
-            debug::send(|| DvdMessage::WillTypeCheckSet);
+            dvd_ipc::send(|| DvdMessage::WillTypeCheckSet);
             // Typechecking can lead to expressions being evaluated, which in turn can result in new HIR being
             // added. Therefore, we take a snapshot before typechecking.
             let before = driver.read().take_snapshot();
@@ -129,7 +129,7 @@ fn main() {
                 break;
             }
             new_code = driver.read().get_new_code_since(before);
-            debug::send(|| DvdMessage::DidTypeCheckSet);
+            dvd_ipc::send(|| DvdMessage::DidTypeCheckSet);
             // { flush_errors(&mut driver.write()); }
         } else {
             break;

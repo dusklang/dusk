@@ -5,6 +5,8 @@ members = [
     "dire",
     "dls",
     "dusk-proc-macros",
+    "dvd",
+    "dvd_ipc",
     "xtask"
 ]
 

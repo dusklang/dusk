@@ -1,0 +1,17 @@
+[package]
+name = "dvd_ipc"
+version = "0.1.4"
+authors = ["Zach <zachrwolfe@me.com>"]
+description = "This crate implements the IPC protocol used between the Dusk compiler and the Dusk Visual Debugger (DVD)."
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/dusklang/dusk/"
+homepage = "https://dusklang.org/"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+interprocess = "1.1.1"
+lazy_static = "1.4.0"
+
+dusk_dire = { version = "0.1", path = "../dire" }

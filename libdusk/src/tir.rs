@@ -9,18 +9,19 @@ use dusk_dire::source_info::SourceRange;
 use dusk_dire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, EnumId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, RETURN_VALUE_DECL};
 use dusk_dire::{internal_fields, internal_field_decls, InternalField, InternalFieldDecls, InternalNamespace};
 use dusk_dire::ty::Type;
+pub use dusk_dire::tir::CompId;
+
+use dvd_ipc::Message as DvdMessage;
 
 use crate::driver::Driver;
 use crate::dep_vec::{self, DepVec, AnyDepVec};
 use crate::index_vec::*;
 use crate::TirGraphOutput;
-use crate::debug::{self, Message as DvdMessage};
 use crate::new_code::NewCode;
 
 mod graph;
 use graph::{Graph, Levels};
 
-pub use graph::CompId;
 
 use dusk_proc_macros::*;
 
@@ -695,7 +696,7 @@ impl Driver {
                     SmallVec::new(),
                 ),
             };
-            debug::send(|| DvdMessage::DidInitializeTirForDecl { id: DeclId::new(self.tir.decls.len()), is_mut, param_tys: param_tys.iter().cloned().collect() });
+            dvd_ipc::send(|| DvdMessage::DidInitializeTirForDecl { id: DeclId::new(self.tir.decls.len()), is_mut, param_tys: param_tys.iter().cloned().collect() });
             self.tir.decls.push_at(id, Decl { param_tys, is_mut, generic_params });
         }
 
@@ -834,16 +835,16 @@ impl Driver {
     }
 
     pub fn build_more_tir(&mut self, output: Option<TirGraphOutput>) -> Option<Units> {
-        debug::send(|| DvdMessage::WillBuildMoreTir);
+        dvd_ipc::send(|| DvdMessage::WillBuildMoreTir);
         if !self.tir.graph.has_outstanding_components() {
-            debug::send(|| DvdMessage::DidBuildMoreTir);
+            dvd_ipc::send(|| DvdMessage::DidBuildMoreTir);
             return None;
         }
 
         add_eval_dep_injector!(self, add_eval_dep);
 
         let items_that_need_dependencies = self.tir.graph.get_items_that_need_dependencies();
-        debug::send(|| DvdMessage::WillAddTirDependencies);
+        dvd_ipc::send(|| DvdMessage::WillAddTirDependencies);
         for id in items_that_need_dependencies {
             match self.code.hir.items[id] {
                 hir::Item::Decl(decl_id) => {
@@ -945,7 +946,7 @@ impl Driver {
                 }
             }
         }
-        debug::send(|| DvdMessage::DidAddTirDependencies);
+        dvd_ipc::send(|| DvdMessage::DidAddTirDependencies);
 
         // Solve for the unit and level of each item
         let levels = self.tir.graph.solve();
@@ -1023,7 +1024,7 @@ impl Driver {
             unit.items.unify_sizes();
         }
 
-        debug::send(|| DvdMessage::DidBuildMoreTir);
+        dvd_ipc::send(|| DvdMessage::DidBuildMoreTir);
         Some(
             Units { units: sp.units, mock_units: sp.mock_units }
         )

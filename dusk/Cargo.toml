@@ -13,3 +13,4 @@ homepage = "https://dusklang.org/"
 clap = { version = "3.0", features = ["derive"] }
 libdusk = { version = "0.1", path = "../libdusk" }
 dusk_dire = { version = "0.1", path = "../dire" }
+dvd_ipc = { version = "0.1", path = "../dvd_ipc" }

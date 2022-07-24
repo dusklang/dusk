@@ -4,6 +4,7 @@ pub mod arch;
 pub mod index_counter;
 pub mod source_info;
 pub mod mir;
+pub mod tir;
 mod internal_types;
 
 pub use internal_types::*;

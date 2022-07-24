@@ -1,4 +1,4 @@
-//! This module contains code for communicating with the Dusk Visual Debugger (DVD).
+//! This crate contains code for IPC between the Dusk compiler and the Dusk Visual Debugger (DVD).
 //! 
 //! The basic flow of execution when using DVD is:
 //! - Compiler sends a [message](Message) to DVD and blocks on a [response](Response). (TODO: consider optimizing this simple protocol if it's too slow)
@@ -10,7 +10,7 @@ use std::process::{Command, Stdio};
 use std::io::Write;
 
 use dusk_dire::hir::{ExprId, DeclId, ItemId};
-use crate::tir::CompId;
+use dusk_dire::tir::CompId;
 use lazy_static::lazy_static;
 use interprocess::local_socket::{LocalSocketListener, LocalSocketStream};
 
@@ -137,9 +137,10 @@ pub fn send(mut message: impl FnMut() -> Message) {
 
 pub fn connect() {
     let listener = LocalSocketListener::bind("DUSK_VISUAL_DEBUGGER").unwrap();
-    Command::new("abs")
+    Command::new("cargo")
         .arg("run")
-        .current_dir("dvd")
+        .arg("--bin")
+        .arg("dvd")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .stdin(Stdio::null())

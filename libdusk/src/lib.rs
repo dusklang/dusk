@@ -20,7 +20,6 @@ pub mod mir;
 pub mod driver;
 pub mod interpreter;
 pub mod error;
-pub mod debug;
 pub mod new_code;
 pub mod type_provider;
 

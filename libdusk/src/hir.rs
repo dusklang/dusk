@@ -17,11 +17,12 @@ use dusk_dire::ty::Type;
 use dusk_dire::source_info::{SourceFileId, SourceRange};
 use dusk_dire::InternalField;
 
+use dvd_ipc::Message as DvdMessage;
+
 use crate::driver::Driver;
 use crate::index_vec::*;
 use crate::builder::{BinOp, UnOp};
 use crate::source_info::ToSourceRange;
-use crate::debug::{self, Message as DvdMessage};
 
 use dusk_proc_macros::*;
 
@@ -276,7 +277,7 @@ impl Driver {
         self.code.hir.expr_to_items.push_at(expr_id, item_id);
         self.code.hir.source_ranges.push_at(item_id, range);
 
-        debug::send(|| DvdMessage::DidAddExpr { id: expr_id, item_id, text: None });
+        dvd_ipc::send(|| DvdMessage::DidAddExpr { id: expr_id, item_id, text: None });
 
         expr_id
     }
@@ -296,7 +297,7 @@ impl Driver {
         self.code.hir.source_ranges.push_at(item_id, range);
         self.code.hir.item_generic_ctxs.push_at(item_id, generic_ctx);
 
-        debug::send(|| DvdMessage::DidAddDecl { id: decl_id, item_id, text: None });
+        dvd_ipc::send(|| DvdMessage::DidAddDecl { id: decl_id, item_id, text: None });
 
         decl_id
     }
