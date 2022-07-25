@@ -12,6 +12,7 @@ use dusk_dire::hir::{ExprId, DeclId, ItemId, Item};
 use dusk_dire::OpId;
 use dusk_dire::source_info::{SourceRange, SourceFileId};
 
+#[cfg(feature = "dls")]
 use lsp_types::Url;
 
 use crate::driver::Driver;
@@ -47,6 +48,7 @@ struct LineRangeGroup {
 #[derive(Clone, Hash, PartialEq, Eq)]
 pub enum SourceFileLocation {
     OnDisk(PathBuf), // A file loaded from disk.
+    #[cfg(feature = "dls")]
     InMemory(Url),   // A file that exists on disk, but whose modified contents are stored in memory. Used for DLS.
     // A "file" that may or may not have ever actually existed on disk.
     Virtual {
@@ -58,6 +60,7 @@ impl From<PathBuf> for SourceFileLocation {
         Self::OnDisk(path)
     }
 }
+#[cfg(feature = "dls")]
 impl From<Url> for SourceFileLocation {
     fn from(url: Url) -> Self {
         Self::InMemory(url)
@@ -74,10 +77,12 @@ impl SourceFileLocation {
     fn display(&self, f: &mut fmt::Formatter) {
         match self {
             Self::OnDisk(path) => write!(f, "{}", path.display()),
+            #[cfg(feature = "dls")]
             Self::InMemory(url) => write!(f, "{}", url),
             Self::Virtual { name } => write!(f, "{}", name),
         }
     }
+    #[cfg(feature = "dls")]
     pub fn as_url(&self) -> Option<Url> {
         match self {
             Self::OnDisk(path) => Url::from_file_path(path).ok(),
@@ -175,6 +180,7 @@ impl SourceMap {
         self.add_file_impl(path, || fs::read_to_string(path_clone))
     }
 
+    #[cfg(feature = "dls")]
     pub fn add_file_in_memory(&mut self, url: &Url, src: String) -> io::Result<SourceFileId> {
         self.add_file_impl(url.clone(), || Ok(src))
     }
@@ -219,6 +225,7 @@ impl SourceMap {
         (file_id, line, byte_offset)
     }
 
+    #[cfg(feature = "dls")]
     pub fn lookup_file_by_url(&self, url: &Url) -> Option<SourceFileId> {
         let location: SourceFileLocation = url.clone().into();
         for (id, file) in self.files.iter_enumerated() {

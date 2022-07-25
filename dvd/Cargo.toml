@@ -13,4 +13,4 @@ imgui-winit-support = "0.8.2"
 interprocess = "1.1.1"
 rand = "0.8"
 
-dvd_ipc = { path = "../dvd_ipc" }
+dvd_ipc = { path = "../dvd_ipc", features = ["enabled"] }

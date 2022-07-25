@@ -18,16 +18,28 @@ webbrowser = "0.5.2"
 clap = { version = "3.0", features = ["derive"] }
 paste = "1.0.0"
 num-bigint = "0.3"
-index_vec = { version = "0.1.2", features = ["serde"] }
+index_vec = { version = "0.1.2" }
 indenter = "0.3.2"
 region = "3.0"
 display_adapter = { version = "0.1", path = "../../display_adapter/display_adapter" }
 dusk_dire = { version = "0.1", path = "../dire" }
 dusk-proc-macros = { version = "0.1", path = "../dusk-proc-macros" }
-dvd_ipc = { version = "0.1", path = "../dvd_ipc" }
 lazy_static = "1.4.0"
-lsp-types = "0.93"
-serde = "1.0"
+
+# LSP-related dependencies
+lsp-types = { version = "0.93", optional = true }
+
+# DVD-related dependencies
+dvd_ipc = { version = "0.1", path = "../dvd_ipc" }
+serde = { version = "1.0", optional = true }
+
+# Instrumentation-related dependencies
+tracing = { version = "0.1" }
+
+[features]
+dls = ["dep:lsp-types"]
+dvd = ["dvd_ipc/enabled", "dep:serde", "index_vec/serde"]
+instrumentation = []
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3.9", features = ["libloaderapi"] }

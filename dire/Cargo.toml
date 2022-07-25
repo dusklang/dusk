@@ -11,9 +11,13 @@ homepage = "https://dusklang.org/"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-index_vec = { version = "0.1.2", features = ["serde"] }
+index_vec = { version = "0.1.2" }
 smallvec = "1.5.1"
 string-interner = "0.12.1"
 display_adapter = { version = "0.1", path = "../../display_adapter/display_adapter" }
 num-bigint = "0.3"
-serde = "1.0"
+
+serde = { version = "1.0", optional = true }
+
+[features]
+serde = ["dep:serde", "index_vec/serde"]

@@ -13,4 +13,10 @@ homepage = "https://dusklang.org/"
 clap = { version = "3.0", features = ["derive"] }
 libdusk = { version = "0.1", path = "../libdusk" }
 dusk_dire = { version = "0.1", path = "../dire" }
+
+# Should compile away to nothing when the "dvd" feature below is not enabled
 dvd_ipc = { version = "0.1", path = "../dvd_ipc" }
+
+[features]
+# Enables the Dusk visual debugger
+dvd = ["dvd_ipc/enabled"]

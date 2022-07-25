@@ -39,6 +39,7 @@ struct Opt {
     #[clap(short='m', long)]
     output_mir: bool,
 
+    #[cfg(feature = "dvd")]
     /// Run the Dusk Visual Debugger (DVD)
     #[clap(long)]
     dvd: bool,
@@ -74,6 +75,7 @@ fn main() {
     let program_args = split.next().unwrap_or(&[]);
     let opt = Opt::parse_from(clap_args);
 
+    #[cfg(feature = "dvd")]
     if opt.dvd {
         dvd_ipc::connect();
     }
