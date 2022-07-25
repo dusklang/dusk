@@ -1,6 +1,6 @@
 [package]
 name = "dusklang"
-version = "0.1.4"
+version = "0.1.5"
 authors = ["Zach <zachrwolfe@me.com>"]
 edition = "2021"
 default-run = "dusklang"

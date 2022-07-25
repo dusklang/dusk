@@ -1,6 +1,6 @@
 [package]
 name = "dvd_ipc"
-version = "0.1.4"
+version = "0.1.5"
 authors = ["Zach <zachrwolfe@me.com>"]
 description = "This crate implements the IPC protocol used between the Dusk compiler and the Dusk Visual Debugger (DVD)."
 edition = "2021"
