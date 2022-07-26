@@ -206,6 +206,7 @@ impl Driver {
     }
 }
 
+#[derive(Debug)]
 pub enum FunctionRef {
     Id(FuncId),
     Ref(Function),

@@ -30,7 +30,7 @@ pub struct FunctionType {
     pub return_ty: Box<Type>,
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct StructType {
     pub field_tys: Vec<Type>,
     pub identity: StructId,

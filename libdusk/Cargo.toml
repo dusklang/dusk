@@ -38,7 +38,6 @@ tracing = { version = "0.1" }
 [features]
 dls = ["dep:lsp-types"]
 dvd = ["dvd_ipc/enabled", "dep:serde", "index_vec/serde"]
-instrumentation = []
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3.9", features = ["libloaderapi"] }

@@ -20,3 +20,6 @@ dvd_ipc = { version = "0.1", path = "../dvd_ipc" }
 [features]
 # Enables the Dusk visual debugger
 dvd = ["dvd_ipc/enabled"]
+
+# Enables instrumentation of the interpreter (and possibly other areas in the future, also)
+instrumentation = []
