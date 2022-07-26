@@ -16,18 +16,19 @@ enum Command {
         /// Compile dls server in debug mode (release mode is the default)
         #[clap(long)]
         debug: bool,
-    }
+    },
+    CheckAll,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
     let shell = Shell::new()?;
     let args = Args::parse();
+    let root_path = cmd!(shell, "cargo locate-project --workspace --message-format plain").read()?;
+    let mut root_path = PathBuf::from(root_path);
+    root_path.pop(); // remove Cargo.toml
+    shell.change_dir(root_path);
     match args.command {
         Command::InstallDls { debug } => {
-            let root_path = cmd!(shell, "cargo locate-project --workspace --message-format plain").read()?;
-            let mut root_path = PathBuf::from(root_path);
-            root_path.pop(); // remove Cargo.toml
-            shell.change_dir(root_path);
             let mode = (!debug).then(|| "--release");
             cmd!(shell, "cargo build --package dls {mode...}").run()?;
 
@@ -61,7 +62,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             let build_dir = shell.read_dir("./build")?;
             let extension_path = build_dir.first().ok_or("unable to find built extension")?;
             cmd!(shell, "{code} --install-extension {extension_path}").run()?;
-        }
+        },
+        Command::CheckAll => {
+            for dir in ["dire", "dls", "dusk", "dusk-proc-macros", "dvd", "dvd_ipc", "libdusk", "xtask"] {
+                let _push = shell.push_dir(dir);
+                cmd!(shell, "cargo check").run()?;
+            }
+        },
     }
     Ok(())
 }
