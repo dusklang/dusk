@@ -10,6 +10,7 @@ use std::sync::RwLock;
 use std::borrow::Cow;
 #[cfg(windows)]
 use std::cmp::min;
+use std::io::Write as IoWrite;
 
 use indenter::indented;
 use smallvec::SmallVec;
@@ -25,7 +26,6 @@ use dusk_dire::mir::{Const, Instr, InstrId, FuncId, StaticId, ExternFunction};
 use dusk_dire::ty::{Type, FunctionType, QualType, IntWidth, FloatWidth, StructType, InternalType};
 use dusk_dire::{OpId, BlockId};
 use dusk_dire::{InternalField, internal_fields};
-use tracing::instrument;
 
 use crate::driver::{DRIVER, Driver, DriverRef};
 use crate::mir::{FunctionRef, function_by_ref};
@@ -52,7 +52,6 @@ pub enum Value {
 }
 
 impl Clone for Value {
-    #[instrument]
     fn clone(&self) -> Value {
         match self {
             Value::Inline(storage) => Value::Inline(storage.clone()),
@@ -69,12 +68,10 @@ macro_rules! int_conversions {
             paste! {
                 $(
                     #[allow(dead_code)]
-                    #[instrument]
                     fn [<as_ $ty_name>](&self) -> $ty_name {
                         $ty_name::from_le_bytes(self.as_bytes().as_ref().try_into().unwrap())
                     }
 
-                    #[instrument]
                     #[allow(dead_code)]
                     fn [<from_ $ty_name>](val: $ty_name) -> Value {
                         Value::from_bytes(val.to_le_bytes().as_ref())
@@ -87,7 +84,6 @@ macro_rules! int_conversions {
 int_conversions!(u8, u16, u32, u64, usize, i8, i16, i32, i64, isize);
 
 impl Driver {
-    #[instrument(skip(self))]
     fn eval_struct_lit(&self, strukt: &StructType, fields: impl Iterator<Item=Value> + Debug) -> Value {
         let layout = self.layout_struct(strukt);
         let mut buf = SmallVec::new();
@@ -107,7 +103,6 @@ struct Enum {
     discriminant: u32,
 }
 impl Value {
-    #[instrument(skip(d))]
     fn as_bytes_with_driver_maybe(&self, d: Option<&Driver>) -> Cow<[u8]> {
         match self {
             Value::Inline(storage) => Cow::Borrowed(storage.as_ref()),
@@ -123,17 +118,14 @@ impl Value {
             Value::Nothing => Cow::Borrowed(&[]),
         }
     }
-    #[instrument(skip(d))]
     fn as_bytes_with_driver(&self, d: &Driver) -> Cow<[u8]> {
         self.as_bytes_with_driver_maybe(Some(d))
     }
-    #[instrument]
     fn as_bytes(&self) -> Cow<[u8]> {
         self.as_bytes_with_driver_maybe(None)
     }
 
     /// Interprets the value as a pointer and loads from it
-    #[instrument]
     fn load(&self, size: usize) -> Value {
         match self {
             Value::Inline(_) => {
@@ -151,7 +143,6 @@ impl Value {
         }
     }
 
-    #[instrument]
     fn store(&mut self, val: Value) {
         match val {
             Value::Internal { val, indirection } => *self = Value::Internal { val, indirection: indirection + 1 },
@@ -164,7 +155,6 @@ impl Value {
         }
     }
 
-    #[instrument]
     pub fn as_big_int(&self, signed: bool) -> BigInt {
         if signed {
             BigInt::from_signed_bytes_le(self.as_bytes().as_ref())
@@ -173,36 +163,30 @@ impl Value {
         }
     }
 
-    #[instrument]
     fn as_raw_ptr(&self) -> *mut u8 {
         unsafe { mem::transmute(usize::from_le_bytes(self.as_bytes().as_ref().try_into().unwrap())) }
     }
 
-    #[instrument]
     fn as_f64(&self) -> f64 {
         f64::from_bits(self.as_u64())
     }
 
-    #[instrument]
     fn as_f32(&self) -> f32 {
         f32::from_bits(self.as_u32())
     }
 
-    #[instrument]
     fn as_bool(&self) -> bool {
         let bytes = self.as_bytes();
         assert!(bytes.len() == 1);
         bytes[0] != 0
     }
 
-    #[instrument]
     fn as_enum(&self) -> Enum {
         Enum {
             discriminant: self.as_u32()
         }
     }
 
-    #[instrument]
     fn as_internal(&self) -> &InternalValue {
         match self {
             Value::Internal { val, indirection } => {
@@ -213,7 +197,6 @@ impl Value {
         }
     }
 
-    #[instrument]
     fn as_ty(&self) -> Type {
         match self.as_internal() {
             InternalValue::Ty(ty) => ty.clone(),
@@ -221,7 +204,6 @@ impl Value {
         }
     }
 
-    #[instrument]
     fn as_mod(&self) -> ModScopeId {
         match *self.as_internal() {
             InternalValue::Mod(id) => id,
@@ -229,13 +211,11 @@ impl Value {
         }
     }
 
-    #[instrument]
     fn from_bytes(bytes: &[u8]) -> Value {
         let storage = SmallVec::from_slice(bytes);
         Value::Inline(storage)
     }
 
-    #[instrument]
     fn from_big_int(big_int: BigInt, width: IntWidth, is_signed: bool, arch: Arch) -> Value {
         let size = match width {
             IntWidth::W8 => 1,
@@ -266,7 +246,6 @@ impl Value {
         Value::from_bytes(&bytes)
     }
 
-    #[instrument(skip(driver))]
     pub fn from_const(konst: &Const, driver: &Driver) -> Value {
         match *konst {
             Const::Int { ref lit, ref ty } => match ty {
@@ -300,22 +279,18 @@ impl Value {
         }
     }
 
-    #[instrument]
     fn from_f32(val: f32) -> Value {
         Value::from_u32(val.to_bits())
     }
 
-    #[instrument]
     fn from_f64(val: f64) -> Value {
         Value::from_u64(val.to_bits())
     }
 
-    #[instrument]
     fn from_bool(val: bool) -> Value {
         Value::from_u8(unsafe { mem::transmute(val) })
     }
 
-    #[instrument(skip(d))]
     fn from_variant(d: &Driver, enuum: EnumId, index: usize, payload: Value) -> Value {
         let layout = &d.code.mir.enums[&enuum];
         let payload_offset = layout.payload_offsets[index];
@@ -328,17 +303,14 @@ impl Value {
         Value::from_bytes(&bytes)
     }
 
-    #[instrument]
     fn from_internal(val: InternalValue) -> Value {
         Value::Internal { val, indirection: 0 }
     }
 
-    #[instrument]
     fn from_ty(ty: Type) -> Value {
         Self::from_internal(InternalValue::Ty(ty))
     }
 
-    #[instrument]
     fn from_mod(id: ModScopeId) -> Value {
         Self::from_internal(InternalValue::Mod(id))
     }
@@ -353,13 +325,11 @@ pub struct StackFrame {
 }
 
 impl StackFrame {
-    #[instrument(skip(self))]
     fn branch_to(&mut self, bb: BlockId) {
         self.block = bb;
         self.pc = 0;
     }
 
-    #[instrument(skip(self))]
     fn canonicalize_type(&self, ty: &Type) -> Type {
         match ty {
             &Type::GenericParam(id) => {
@@ -390,13 +360,11 @@ impl StackFrame {
         }
     }
 
-    #[instrument(skip(self, d))]
     fn get_val(&self, op: OpId, d: &Driver) -> &Value {
         let instr_id = d.code.ops[op].get_mir_instr_id().unwrap();
         &self.results[instr_id]
     }
 
-    #[instrument(skip(self, d))]
     fn get_val_mut(&mut self, op: OpId, d: &Driver) -> &mut Value {
         let instr_id = d.code.ops[op].get_mir_instr_id().unwrap();
         &mut self.results[instr_id]
@@ -424,7 +392,6 @@ pub struct Interpreter {
 }
 
 impl Interpreter {
-    #[instrument]
     pub fn new(mode: InterpMode) -> Self {
         Self {
             statics: HashMap::new(),
@@ -519,7 +486,6 @@ macro_rules! bin_op {
 }
 
 #[cfg_attr(not(windows), allow(unused))]
-#[instrument]
 extern "C" fn interp_ffi_entry_point(func: u32, params: *const *const (), return_value_addr: *mut ()) {
     let func_id = FuncId::new(func as usize);
 
@@ -570,14 +536,11 @@ extern "C" fn interp_ffi_entry_point(func: u32, params: *const *const (), return
 
 // Thank you, Hagen von Eitzen: https://math.stackexchange.com/a/291494
 #[cfg(windows)]
-#[instrument]
 fn nearest_multiple_of_16(val: i32) -> i32 { ((val - 1) | 15) + 1 }
 #[cfg(windows)]
-#[instrument]
 fn nearest_multiple_of_8(val: i32) -> i32 { ((val - 1) | 7) + 1 }
 
 impl Driver {
-    #[instrument(skip(self, tp))]
     pub fn value_to_const(&mut self, val: Value, ty: Type, tp: &impl TypeProvider) -> Const {
         match ty {
             Type::Int { is_signed, .. } => {
@@ -632,7 +595,6 @@ impl Driver {
         }
     }
 
-    #[instrument(skip(self))]
     fn new_stack_frame(&self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> StackFrame {
         let func = function_by_ref(&self.code.mir, &func_ref);
 
@@ -675,7 +637,6 @@ impl Driver {
     }
 
     #[display_adapter]
-    #[instrument(skip(self, stack))]
     pub fn stack_trace(&self, stack: &[StackFrame], f: &mut Formatter) {
         for (i, frame) in stack.iter().rev().enumerate() {
             let func = function_by_ref(&self.code.mir, &frame.func_ref);
@@ -686,13 +647,11 @@ impl Driver {
 }
 
 impl DriverRef<'_> {
-    #[instrument(skip(self))]
     pub fn set_command_line_arguments(&mut self, args: &[OsString]) {
         INTERP.write().unwrap().command_line_args = args.iter().map(|arg| {
             CString::new(arg.to_string_lossy().as_bytes()).unwrap()
         }).collect();
     }
-    #[instrument(skip(self))]
     pub fn call(&mut self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> Value {
         let frame = self.read().new_stack_frame(func_ref, arguments, generic_arguments);
         INTERP_STACK.with(|stack| {
@@ -728,7 +687,6 @@ impl Driver {
     ///     }
     ///     ```
     #[cfg(windows)]
-    #[instrument(skip(self))]
     pub fn fetch_inverse_thunk(&self, func_id: FuncId) -> Value {
         if let Some(alloc) = INTERP.read().unwrap().inverse_thunk_cache.get(&func_id) {
             return Value::from_usize(alloc.0.as_ptr::<()>() as usize);
@@ -824,39 +782,32 @@ impl Driver {
         val
     }
     #[cfg(not(windows))]
-    #[instrument(skip(self))]
     pub fn fetch_inverse_thunk(&self, _func_id: FuncId) -> Value {
         panic!("getting a function pointer to a Dusk function is not yet supported on non-Windows platforms");
     }
 }
 
 #[cfg(windows)]
-#[instrument]
 unsafe fn open_dylib(path: *const i8) -> *mut c_void {
     winapi::um::libloaderapi::LoadLibraryA(path) as *mut _
 }
 #[cfg(not(windows))]
-#[instrument]
 unsafe fn open_dylib(path: *const i8) -> *mut c_void {
     libc::dlopen(path, libc::RTLD_LAZY)
 }
 #[cfg(windows)]
-#[instrument]
 unsafe fn get_dylib_symbol(dylib: *mut c_void, name: *const i8) -> *const c_void {
     winapi::um::libloaderapi::GetProcAddress(dylib as *mut _, name) as *const _
 }
 #[cfg(not(windows))]
-#[instrument]
 unsafe fn get_dylib_symbol(dylib: *mut c_void, name: *const i8) -> *const c_void {
     libc::dlsym(dylib, name)
 }
 #[cfg(windows)]
-#[instrument]
 unsafe fn free_dylib(dylib: *mut c_void) {
     winapi::um::libloaderapi::FreeLibrary(dylib as *mut _);
 }
 #[cfg(not(windows))]
-#[instrument]
 unsafe fn free_dylib(dylib: *mut c_void) {
     libc::dlclose(dylib);
 }
@@ -864,7 +815,6 @@ unsafe fn free_dylib(dylib: *mut c_void) {
 impl DriverRef<'_> {
     #[cfg(windows)]
     #[cfg(target_arch="x86_64")]
-    #[instrument(skip(self))]
     fn generate_thunk(&self, func: &ExternFunction, func_address: i64, args: &[Box<[u8]>]) -> region::Allocation {
         let mut thunk = X64Encoder::new();
         thunk.store64(Reg64::Rsp + 16, Reg64::Rdx);
@@ -949,7 +899,6 @@ impl DriverRef<'_> {
     }
     #[cfg(unix)]
     #[cfg(target_arch="x86_64")]
-    #[instrument]
     fn generate_thunk(&self, func: &ExternFunction, func_address: i64, args: &[Box<[u8]>]) -> region::Allocation {
         let mut thunk = X64Encoder::new();
         thunk.push64(Reg64::Rbp);
@@ -1018,7 +967,6 @@ impl DriverRef<'_> {
 
         thunk.allocate()
     }
-    #[instrument(skip(self))]
     pub fn extern_call(&self, func_ref: ExternFunctionRef, mut args: Vec<Box<[u8]>>) -> Value {
         let indirect_args: Vec<*mut u8> = args.iter_mut()
             .map(|arg| arg.as_mut_ptr())
@@ -1056,7 +1004,6 @@ impl DriverRef<'_> {
 
 impl Driver {
     #[display_adapter]
-    #[instrument(skip(self, stack))]
     fn panic_message(&self, stack: &[StackFrame], msg: Option<OpId>, f: &mut Formatter) {
         let frame = stack.last().unwrap();
         let msg = msg.map(|msg| frame.get_val(msg, self).as_raw_ptr());
@@ -1077,8 +1024,7 @@ impl Driver {
 }
 
 impl DriverRef<'_> {
-    /// Execute the next instruction. Iff the instruction is a return, this function returns its `Value`
-    #[instrument(skip(self, stack_cell))]
+    /// Execute the next instruction. Iff the instruction is a return, this function returns its `Value`. Otherwise, it returns `None`.
     fn execute_next(&mut self, stack_cell: &RefCell<Vec<StackFrame>>) -> Option<Value> {
         let val = {
             let mut stack = stack_cell.borrow_mut();
@@ -1237,6 +1183,7 @@ impl DriverRef<'_> {
                                 Type::Int { .. } => print!("{}", val.as_u8() as char),
                                 _ => panic!("Unexpected type passed to `print`: {:?}", ty),
                             }
+                            std::io::stdout().flush().unwrap();
                             Value::Nothing 
                         },
                         Intrinsic::Malloc => {
@@ -1622,7 +1569,6 @@ lazy_static! {
 thread_local! {
     static INTERP_STACK: RefCell<Vec<StackFrame>> = RefCell::new(Vec::new());
 }
-#[instrument]
 pub fn restart_interp(mode: InterpMode) {
     *INTERP.write().unwrap() = Interpreter::new(mode);
 }

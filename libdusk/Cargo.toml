@@ -32,9 +32,6 @@ lsp-types = { version = "0.93", optional = true }
 dvd_ipc = { version = "0.1", path = "../dvd_ipc" }
 serde = { version = "1.0", optional = true }
 
-# Instrumentation-related dependencies
-tracing = { version = "0.1" }
-
 [features]
 dls = ["dep:lsp-types"]
 dvd = ["dvd_ipc/enabled", "dep:serde", "index_vec/serde"]
