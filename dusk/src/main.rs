@@ -6,7 +6,6 @@ use std::path::PathBuf;
 use dusk_dire::ty::Type;
 use dusk_dire::mir::FuncId;
 use dusk_dire::arch::Arch;
-use libdusk::TirGraphOutput;
 use libdusk::driver::{DRIVER, Driver, DriverRef};
 use libdusk::source_info::SourceMap;
 use libdusk::interpreter::{restart_interp, InterpMode};
@@ -27,14 +26,6 @@ enum StopPhase {
 #[derive(Parser, Debug)]
 #[clap(name = "dusk")]
 struct Opt {
-    /// Output per-level typechecking diffs
-    #[clap(short='d', long)]
-    output_tc_diff: bool,
-
-    /// The mode for displaying the TIR graph
-    #[clap(arg_enum, short='g', long, ignore_case = true)]
-    tir_output: Option<TirGraphOutput>,
-
     /// Output MIR in textual format
     #[clap(short='m', long)]
     output_mir: bool,
@@ -126,11 +117,11 @@ fn main() {
 
 
     begin_phase!(Typecheck);
-    let mut tp = driver.read().get_real_type_provider(opt.output_tc_diff);
+    let mut tp = driver.read().get_real_type_provider();
     let mut new_code = NewCode::placeholder();
     loop {
         let mut driver_write = driver.write();
-        if let Some(units) = driver_write.build_more_tir(opt.tir_output) {
+        if let Some(units) = driver_write.build_more_tir() {
             drop(driver_write);
             dvd_ipc::send(|| DvdMessage::WillTypeCheckSet);
             // Typechecking can lead to expressions being evaluated, which in turn can result in new HIR being

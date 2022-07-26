@@ -437,11 +437,11 @@ impl Server {
             driver.write().initialize_tir(&new_code);
             self.flush_errors(&mut driver.write(), path);
     
-            let mut tp = driver.read().get_real_type_provider(false);
+            let mut tp = driver.read().get_real_type_provider();
             let mut new_code = NewCode::placeholder();
             loop {
                 let mut driver_write = driver.write();
-                if let Some(units) = driver_write.build_more_tir(None) {
+                if let Some(units) = driver_write.build_more_tir() {
                     drop(driver_write);
                     // Typechecking can lead to expressions being evaluated, which in turn can result in new HIR being
                     // added. Therefore, we take a snapshot before typechecking.

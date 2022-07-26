@@ -1,5 +1,3 @@
-use clap::ArgEnum;
-
 mod dep_vec;
 #[macro_use]
 mod index_vec;
@@ -22,10 +20,3 @@ pub mod interpreter;
 pub mod error;
 pub mod new_code;
 pub mod type_provider;
-
-#[derive(ArgEnum, Debug, Copy, Clone)]
-pub enum TirGraphOutput {
-    Items,
-    Components,
-    Units,
-}

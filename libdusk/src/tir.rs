@@ -16,7 +16,6 @@ use dvd_ipc::Message as DvdMessage;
 use crate::driver::Driver;
 use crate::dep_vec::{self, DepVec, AnyDepVec};
 use crate::index_vec::*;
-use crate::TirGraphOutput;
 use crate::new_code::NewCode;
 
 mod graph;
@@ -834,7 +833,7 @@ impl Driver {
         }
     }
 
-    pub fn build_more_tir(&mut self, output: Option<TirGraphOutput>) -> Option<Units> {
+    pub fn build_more_tir(&mut self) -> Option<Units> {
         dvd_ipc::send(|| DvdMessage::WillBuildMoreTir);
         if !self.tir.graph.has_outstanding_components() {
             dvd_ipc::send(|| DvdMessage::DidBuildMoreTir);
@@ -950,11 +949,6 @@ impl Driver {
 
         // Solve for the unit and level of each item
         let levels = self.tir.graph.solve();
-
-        // Output TIR graph if necessary
-        if let Some(output) = output {
-            self.print_graph(output, &levels).unwrap();
-        }
 
         let mut sp = Subprogram { units: Vec::new(), mock_units: Vec::new(), levels };
         sp.units.resize_with(sp.levels.units.len(), Default::default);

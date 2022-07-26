@@ -45,18 +45,6 @@ pub struct StructLit {
     pub fields: Vec<ExprId>,
 }
 
-fn unit_string(unit_kind: UnitKind) -> String {
-    match unit_kind {
-        UnitKind::Normal(num) => format!("UNIT {}", num),
-        UnitKind::Mock(num) => format!("MOCK UNIT {}", num),
-    }
-}
-
-enum UnitKind {
-    Normal(usize),
-    Mock(usize),
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct Overloads {
     pub overloads: Vec<DeclId>,
@@ -1574,15 +1562,7 @@ impl Driver {
         }
     }
 
-    fn run_pass_1(&mut self, unit: &UnitItems, unit_kind: UnitKind, start_level: u32, tp: &mut impl TypeProvider) {
-        // Pass 1: propagate info down from leaves to roots
-        if tp.debug() {
-            println!(
-                "===============TYPECHECKING {}: PASS 1===============",
-                unit_string(unit_kind),
-            );
-        }
-
+    fn run_pass_1(&mut self, unit: &UnitItems, start_level: u32, tp: &mut impl TypeProvider) {
         macro_rules! run_pass_1_flat {
             ($($name:ident$(,)*)+) => {
                 $(
@@ -1609,20 +1589,13 @@ impl Driver {
                 decl_refs, calls, addr_ofs, derefs, pointers, structs, struct_lits, ifs, dos,
                 ret_groups, switches, enums, pattern_bindings, function_tys,
             );
-            tp.debug_output(self, level as usize);
         }
 
         // This code must be here, because it checks that all statements can unify to void
         run_pass_1_flat!(stmts);
     }
 
-    fn run_pass_2(&mut self, unit: &UnitItems, unit_kind: UnitKind, tp: &mut impl TypeProvider) {
-        if tp.debug() {
-            println!(
-                "===============TYPECHECKING {}: PASS 2===============",
-                unit_string(unit_kind)
-            );
-        }
+    fn run_pass_2(&mut self, unit: &UnitItems, tp: &mut impl TypeProvider) {
         for level in (0..unit.num_levels()).rev() {
             macro_rules! run_pass_2 {
                 ($($name:ident$(,)*)+) => {
@@ -1639,10 +1612,6 @@ impl Driver {
                 decl_refs, calls, addr_ofs, derefs, pointers, structs, struct_lits, ifs, dos,
                 ret_groups, switches, enums, pattern_bindings, function_tys,
             );
-
-            if level > 0 {
-                tp.debug_output(self, level as usize);
-            }
         }
         macro_rules! run_pass_2_flat {
             ($($name:ident$(,)*)+) => {
@@ -1654,7 +1623,6 @@ impl Driver {
             }
         }
         run_pass_2_flat!(int_lits, dec_lits, str_lits, char_lits, bool_lits, consts, generic_params, stmts, error_exprs, func_decls, breaks, continues);
-        tp.debug_output(self, 0);
     }
 
     fn initialize_global_expressions(&self, tp: &mut impl TypeProvider) {
@@ -1664,9 +1632,9 @@ impl Driver {
         *tp.ty_mut(hir::ERROR_EXPR) = Type::Error;
     }
 
-    pub fn get_real_type_provider(&self, dbg: bool) -> RealTypeProvider {
+    pub fn get_real_type_provider(&self) -> RealTypeProvider {
         // Assign the type of the void expression to be void.
-        let mut tp = RealTypeProvider::new(dbg, self);
+        let mut tp = RealTypeProvider::new(self);
         self.initialize_global_expressions(&mut tp);
         tp
     }
@@ -1675,12 +1643,12 @@ impl Driver {
 impl DriverRef<'_> {
     pub fn type_check(&mut self, units: &Units, tp: &mut RealTypeProvider, new_code: NewCode) -> Result<(), ()> {
         tp.resize(&self.read(), new_code);
-        for (num, unit) in units.units.iter().enumerate() {
+        for unit in &units.units {
             // Pass 1: propagate info down from leaves to roots
-            self.write().run_pass_1(&unit.items, UnitKind::Normal(num), 0, tp);
+            self.write().run_pass_1(&unit.items, 0, tp);
             
             // Pass 2: propagate info up from roots to leaves
-            self.write().run_pass_2(&unit.items, UnitKind::Normal(num), tp);
+            self.write().run_pass_2(&unit.items, tp);
 
             if !self.read().errors.is_empty() {
                 return Err(());
@@ -1693,9 +1661,9 @@ impl DriverRef<'_> {
             }
         }
 
-        for (num, unit) in units.mock_units.iter().enumerate() {
+        for unit in &units.mock_units {
             let mut mock_tp = MockTypeProvider::new(tp);
-            self.write().run_pass_1(&unit.items, UnitKind::Mock(num), 0, &mut mock_tp);
+            self.write().run_pass_1(&unit.items, 0, &mut mock_tp);
             let constraints = mock_tp.constraints(unit.main_expr);
             let one_of = constraints
                 .one_of().iter()
@@ -1707,7 +1675,7 @@ impl DriverRef<'_> {
                 for ty in one_of {
                     let ns = match ty {
                         Type::Mod => {
-                            self.write().run_pass_2(&unit.items, UnitKind::Mock(num), &mut mock_tp);
+                            self.write().run_pass_2(&unit.items, &mut mock_tp);
                             let module = self.eval_expr(unit.main_expr, &mock_tp);
                             match module {
                                 Const::Mod(scope) => ExprNamespace::Mod(scope),
@@ -1722,7 +1690,7 @@ impl DriverRef<'_> {
                             }
                         },
                         Type::Ty => {
-                            self.write().run_pass_2(&unit.items, UnitKind::Mock(num), &mut mock_tp);
+                            self.write().run_pass_2(&unit.items, &mut mock_tp);
                             let ty = self.eval_expr(unit.main_expr, &mock_tp);
     
                             match ty {

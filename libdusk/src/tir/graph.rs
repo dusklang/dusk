@@ -1,7 +1,3 @@
-use std::io::{Write, Result as IoResult};
-use std::process::{Command, Stdio};
-use std::fs::{self, File};
-use std::path::PathBuf;
 use std::mem;
 use std::collections::{HashMap, HashSet};
 use std::cmp::max;
@@ -9,16 +5,13 @@ use std::cmp::max;
 use bitflags::bitflags;
 
 use index_vec::IdxRangeBounds;
-use dusk_dire::hir::{self, ItemId, VOID_EXPR_ITEM};
+use dusk_dire::hir::{ItemId, VOID_EXPR_ITEM};
 use dusk_dire::tir::CompId;
 use dvd_ipc::Message as DvdMessage;
 
 use crate::index_vec::*;
 use crate::driver::Driver;
-use crate::TirGraphOutput;
 use crate::new_code::NewCode;
-
-use dusk_proc_macros::*;
 
 #[derive(Debug, Default)]
 pub struct Graph {
@@ -579,201 +572,5 @@ impl Driver {
         }
 
         self.tir.graph.item_to_components.resize_with(self.code.hir.items.len(), || CompId::new(u32::MAX as usize));
-    }
-
-    fn write_node_name(&self, item: ItemId, w: &mut impl Write) -> IoResult<()> {
-        match self.code.hir.items[item] {
-            hir::Item::Expr(id) => write!(w, "item{}expr{}", item.index(), id.index())?,
-            hir::Item::Decl(id) => write!(w, "item{}decl{}", item.index(), id.index())?,
-        }
-        Ok(())
-    }
-
-    fn write_debug(&self, item: ItemId, w: &mut impl Write) -> IoResult<()> {
-        match self.code.hir.items[item] {
-            hir::Item::Expr(id) => write!(w, "{:?}", ef!(id.hir))?,
-            hir::Item::Decl(id) => write!(w, "{:?}", df!(id.hir))?,
-        }
-        Ok(())
-    }
-
-    fn write_dep<W: Write>(&self, w: &mut W, a: ItemId, b: ItemId, write_attribs: impl FnOnce(&mut W) -> IoResult<()>) -> IoResult<()> {
-        write!(w, "    ")?;
-        self.write_node_name(a, w)?;
-        write!(w, " -> ")?;
-        self.write_node_name(b, w)?;
-        write_attribs(w)?;
-        writeln!(w, ";")?;
-        Ok(())
-    }
-
-    fn write_deps(&self, w: &mut impl Write, a: ItemId, graph: &Graph, constraint: bool) -> IoResult<()> {
-        for &b in &graph.dependees[a] {
-            self.write_dep(
-                w,
-                a,
-                b,
-                |w| {
-                    if !constraint {
-                        write!(w, " [constraint=false]")?
-                    }
-                    Ok(())
-                })?;
-        }
-        Ok(())
-    }
-
-    fn write_item(&self, w: &mut impl Write, item: ItemId) -> IoResult<()> {
-        let range = self.code.hir.source_ranges[item];
-        write!(w, "    ")?;
-        self.write_node_name(item, w)?;
-        if range.start != range.end {
-            writeln!(
-                w,
-                " [label=\"{}\\l\"];",
-                // TODO: do something more efficient than calling replace multiple times
-                self.src_map.substring_from_range(range)
-                    .replace('\\', "\\\\")
-                    .replace('"', "\\\"")
-                    .replace('\n', "\\n")
-                    .replace('\r', ""),
-            )?;
-        } else {
-            write!(w, " [label=\"")?;
-            self.write_debug(item, w)?;
-            writeln!(w, "\"];")?;
-        }
-        Ok(())
-    }
-    
-    fn write_component(&self, w: &mut impl Write, unit: usize, i: usize, component: &Component) -> IoResult<()> {
-        writeln!(w, "    subgraph cluster{}_{} {{", unit, i)?;
-        writeln!(w, "        label=\"component {}\";", i)?;
-        writeln!(w, "        style=filled;")?;
-        writeln!(w, "        color=lightgrey;")?;
-        writeln!(w, "        node [style=filled,color=white];")?;
-        for &item in &component.items {
-            if self.should_exclude_item_from_output(item) { continue; }
-            self.write_item(w, item)?;
-        }
-        writeln!(w, "    }}")?;
-
-        Ok(())
-    }
-
-    fn write_component_deps(&self, w: &mut impl Write, graph: &Graph, component: &Component) -> IoResult<()> {
-        for &item in &component.items {
-            if self.should_exclude_item_from_output(item) { continue; }
-            self.write_deps(w, item, graph, true)?;
-        }
-
-        Ok(())
-    }
-
-    fn should_exclude_item_from_output(&self, item: ItemId) -> bool {
-        let decl = match self.code.hir.items[item] {
-            hir::Item::Decl(decl) => decl,
-            hir::Item::Expr(_) => return false,
-        };
-        let is_intrinsic = matches!(df!(decl.hir), hir::Decl::Intrinsic { .. });
-        let is_not_depended_on = self.tir.graph.dependers[item].is_empty();
-        is_intrinsic && is_not_depended_on
-    }
-
-    /// Prints graph in Graphviz format, then opens a web browser to display the results.
-    pub fn print_graph(&self, output: TirGraphOutput, levels: &Levels) -> IoResult<()> {
-        let graph = &self.tir.graph;
-        let tmp_dir = fs::read_dir(".")?.find(|entry| entry.as_ref().unwrap().file_name() == "tmp");
-        if tmp_dir.is_none() {
-            fs::create_dir("tmp")?;
-        }
-        let mut w = File::create("tmp/tc_graph.gv")?;
-        writeln!(w, "digraph G {{")?;
-        writeln!(w, "    node [shape=box];")?;
-
-        match output {
-            TirGraphOutput::Items => {
-                for i in 0..graph.dependees.len() {
-                    let a = ItemId::new(i);
-                    if self.should_exclude_item_from_output(a) { continue; }
-
-                    self.write_item(&mut w, a)?;
-                    self.write_deps(&mut w, a, graph, true)?;
-                }
-            }
-            TirGraphOutput::Components => {
-                for (i, component) in graph.components.iter().enumerate() {
-                    self.write_component(&mut w, 0, i, component)?;
-                    self.write_component_deps(&mut w, graph, component)?;
-                }
-            }
-            TirGraphOutput::Units => {
-                writeln!(w, "    splines=ortho;")?;
-                writeln!(w, "    newrank=true;")?;
-                writeln!(w, "    rankdir = BT;")?;
-                let item_to_levels = &levels.item_to_levels;
-                let max_level = levels.units.iter()
-                    .flat_map(|unit| &unit.items)
-                    .map(|&item| item_to_levels[&item])
-                    .max()
-                    .unwrap_or(0);
-
-                writeln!(w, "    subgraph cluster_levels {{")?;
-                writeln!(w, "        label=\"Levels\";")?;
-                writeln!(w, "        style=filled;")?;
-                writeln!(w, "        color=lightgrey;")?;
-                writeln!(w, "        node [style=filled,color=white];")?;
-                write!(w, "    ")?;
-                for i in 0..=max_level {
-                    if i != 0 {
-                        write!(w, " -> ")?;
-                    }
-                    write!(w, "level{}", i)?;
-                }
-                writeln!(w, " [style=invis];")?;
-                writeln!(w, "    }}")?;
-
-                for (i, unit) in levels.units.iter().enumerate() {
-                    writeln!(w, "    subgraph cluster_unit{} {{", i)?;
-                    writeln!(w, "        label=\"Unit {}\";", i)?;
-                    writeln!(w, "        style=filled;")?;
-                    writeln!(w, "        color=lightgrey;")?;
-                    writeln!(w, "        node [style=filled,color=white];")?;
-                    for &item in &unit.items {
-                        if self.should_exclude_item_from_output(item) { continue; }
-
-                        let level = levels.item_to_levels[&item];
-                        self.write_item(&mut w, item)?;
-                        self.write_deps(&mut w, item, graph, false)?;
-
-                        // Constrain items to be in the correct level
-                        if level < max_level {
-                            write!(w, "        ")?;
-                            self.write_node_name(item, &mut w)?;
-                            writeln!(w, " -> level{} [style=invis];", level + 1)?;
-                        }
-                        if level > 0 {
-                            write!(w, "        level{} -> ", level - 1)?;
-                            self.write_node_name(item, &mut w)?;
-                            writeln!(w, " [style=invis];")?;
-                        }
-                    }
-                    writeln!(w, "    }}")?;
-                }
-            }
-        }
-        writeln!(w, "}}")?;
-        w.flush()?;
-
-        Command::new("dot")
-            .args(&["-Tsvg", "tmp/tc_graph.gv", "-o", "tmp/tc_graph.svg"])
-            .stdout(Stdio::inherit())
-            .output()
-            .expect("Failed to execute graph rendering command");
-
-        let graph_pdf_path: PathBuf = [".", "tmp", "tc_graph.svg"].iter().collect();
-        webbrowser::open(graph_pdf_path.to_str().unwrap()).unwrap();
-
-        Ok(())
     }
 }

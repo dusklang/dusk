@@ -602,37 +602,4 @@ impl ConstraintList {
             substitute_generic_args(&mut preferred_ty.ty, generic_params, generic_args);
         }
     }
-
-    pub fn print_diff(&self, other: &ConstraintList) {
-        if self.trait_impls != other.trait_impls {
-            let old = self.trait_impls.names();
-            let new = other.trait_impls.names();
-            for name in &old {
-                if !new.contains(name) {
-                    println!("no longer requires {}", name);
-                }
-            }
-            for name in &new {
-                if !old.contains(name) {
-                    println!("now requires {}", name);
-                }
-            }
-        }
-
-        if self.one_of != other.one_of {
-            if let Some(new) = &other.one_of {
-                println!("now one of {:?}", new);
-            }
-        }
-
-        if self.preferred_type != other.preferred_type {
-            if let Some(new) = &other.preferred_type {
-                println!("set preferred type to {:?}", new);
-            } else {
-                println!("removed preferred type {:?}", self.preferred_type.as_ref().unwrap())
-            }
-        }
-
-        println!();
-    }
 }

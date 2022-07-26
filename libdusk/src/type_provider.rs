@@ -20,7 +20,6 @@ use dusk_proc_macros::df;
 
 use crate::typechecker::{CastMethod, StructLit, constraints::ConstraintList, Overloads, GenericConstraints};
 use crate::index_vec::*;
-use crate::source_info::CommentatedSourceRange;
 use crate::driver::Driver;
 use crate::new_code::NewCode;
 
@@ -108,9 +107,6 @@ macro_rules! declare_tp {
         ),*$(,)*
     ) => {
         pub trait TypeProvider: private::Sealed {
-            fn debug(&self) -> bool;
-            fn debug_output(&mut self, d: &Driver, level: usize);
-        
             fn insert_eval_result(&mut self, expr: ExprId, result: Const);
 
             $(
@@ -179,22 +175,14 @@ macro_rules! declare_tp {
                 $(#[doc = $doc])*
                 $field_name: IndexVec<$id_ty, $payload_ty>,
             )*
-            /// A copy of the constraints, used for debugging the typechecker
-            constraints_copy: IndexVec<ExprId, ConstraintList>,
-        
             eval_results: HashMap<ExprId, Const>,
-        
-            debug: bool,
         }
         
         impl RealTypeProvider {
-            pub fn new(debug: bool, d: &Driver) -> Self {
+            pub fn new(d: &Driver) -> Self {
                 let mut tp = RealTypeProvider {
                     $($field_name: IndexVec::new(),)*
-                    constraints_copy: IndexVec::new(),
                     eval_results: HashMap::new(),
-                    
-                    debug,
                 };
 
                 tp.resize_impl(d, DeclId::new(0));
@@ -221,9 +209,6 @@ macro_rules! declare_tp {
                     };
                 }
                 $(resize_idx_vec!($field_name, $id_ty);)*
-                if self.debug {
-                    self.constraints_copy.resize_with(d.code.hir.exprs.len(), Default::default);
-                }
                 for i in (decl_start..self.decl_types.next_idx()).into_range() {
                     let decl = DeclId::new(i);
                     self.decl_types[decl].is_mut = d.tir.decls[decl].is_mut;
@@ -238,34 +223,9 @@ macro_rules! declare_tp {
             }
         }
         
-        impl Driver {
-            fn print_debug_diff_and_set_old_constraints(&self, id: ExprId, old_constraints: &mut ConstraintList, new_constraints: &ConstraintList) {
-                if new_constraints != old_constraints {
-                    self.src_map.print_commentated_source_ranges(&mut [
-                        CommentatedSourceRange::new(self.get_range(id), "", '-')
-                    ]);
-                    old_constraints.print_diff(new_constraints);
-                    *old_constraints = new_constraints.clone();
-                    println!("============================================================================================\n")
-                }
-            }
-        }
-        
         impl private::Sealed for RealTypeProvider {}
         
         impl TypeProvider for RealTypeProvider {
-            fn debug(&self) -> bool { self.debug }
-        
-            fn debug_output(&mut self, d: &Driver, level: usize) {
-                if !self.debug { return; }
-                println!("LEVEL {}", level);
-                assert_eq!(self.constraints.len(), self.constraints_copy.len());
-                for i in 0..self.constraints.len() {
-                    let id = ExprId::new(i);
-                    d.print_debug_diff_and_set_old_constraints(id, &mut self.constraints_copy[id], &self.constraints[id]);
-                }
-            }
-        
             fn insert_eval_result(&mut self, expr: ExprId, result: Const) {
                 self.eval_results.insert(expr, result);
             }
@@ -289,9 +249,6 @@ macro_rules! declare_tp {
                 $(#[doc = $doc])*
                 $field_name: HashMap<$id_ty, $payload_ty>,
             )*
-
-            /// A copy of the constraints, used for debugging the typechecker
-            constraints_copy: HashMap<ExprId, ConstraintList>,
         
             eval_results: HashMap<ExprId, Const>,
         }
@@ -301,7 +258,6 @@ macro_rules! declare_tp {
                 MockTypeProvider {
                     base,
                     $($field_name: HashMap::new(),)*
-                    constraints_copy: HashMap::new(),
                     eval_results: HashMap::new(),
                 }
             }
@@ -310,19 +266,6 @@ macro_rules! declare_tp {
         impl private::Sealed for MockTypeProvider<'_> {}
 
         impl<'base> TypeProvider for MockTypeProvider<'base> {
-            fn debug(&self) -> bool { self.base.debug() }
-
-            fn debug_output(&mut self, d: &Driver, level: usize) {
-                if !self.debug() { return; }
-                println!("LEVEL {}", level);
-                let base = self.base;
-                for (&id, new_constraints) in &self.constraints {
-                    let old_constraints = self.constraints_copy.entry(id)
-                        .or_insert_with(|| base.constraints(id).clone());
-                    d.print_debug_diff_and_set_old_constraints(id, old_constraints, new_constraints);
-                }
-            }
-
             fn insert_eval_result(&mut self, expr: ExprId, result: Const) {
                 self.eval_results.insert(expr, result);
             }
