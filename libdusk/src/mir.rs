@@ -2,6 +2,7 @@ use std::collections::{HashSet, HashMap};
 use std::ffi::CString;
 use std::ops::Range;
 use std::cmp::Ordering;
+use std::cell::RefCell;
 
 use dusk_dire::index_counter::IndexCounter;
 use num_bigint::BigInt;
@@ -9,7 +10,7 @@ use smallvec::{SmallVec, smallvec};
 use string_interner::DefaultSymbol as Sym;
 use display_adapter::display_adapter;
 
-use dusk_dire::hir::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, GenericParamId, Item, PatternBindingDeclId, ExternModId, ExternFunctionRef, PatternBindingPathComponent, VOID_TYPE};
+use dusk_dire::hir::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, GenericParamId, Item, PatternBindingDeclId, ExternModId, ExternFunctionRef, PatternBindingPathComponent, VOID_TYPE, StructId};
 use dusk_dire::mir::{FuncId, StaticId, Const, Instr, InstrId, Function, MirCode, StructLayout, EnumLayout, ExternMod, ExternFunction, InstrNamespace, SwitchCase, VOID_INSTR};
 use dusk_dire::{Block, BlockId, Op, OpId, InternalField};
 use dusk_dire::ty::{Type, InternalType, FunctionType, FloatWidth, StructType};
@@ -222,14 +223,12 @@ struct Static {
 pub struct Builder {
     decls: HashMap<DeclId, Decl>,
     statics: IndexVec<StaticId, Static>,
+    pub struct_was_non_generic: IndexVec<StructId, bool>,
 }
 
 impl Builder {
     pub fn new() -> Self {
-        Self {
-            decls: HashMap::new(),
-            statics: IndexVec::new(),
-        }
+        Self::default()
     }
 }
 
@@ -323,6 +322,19 @@ impl Driver {
 
     /// Compute the layout (field offsets, alignment, size, and stride) for a struct
     pub fn layout_struct(&self, strukt: &StructType) -> StructLayout {
+        let cached_layout = LAYOUT_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            // This is a fast path to avoid hashing the parameter types in the common case, non-generic functions
+            if self.mir.struct_was_non_generic[strukt.identity] {
+                cache.fast_struct_layouts.resize(self.code.hir.structs.len(), Default::default());
+                cache.fast_struct_layouts[strukt.identity].clone()
+            } else {
+                cache.struct_layouts.get(strukt).cloned()
+            }
+        });
+        if let Some(layout) = cached_layout {
+            return layout;
+        }
         // Get max alignment of all the fields.
         let alignment = strukt.field_tys.iter()
             .map(|ty| self.align_of(ty))
@@ -347,8 +359,17 @@ impl Driver {
         }
         let size = field_offsets.last().copied().unwrap_or(0) + last_size;
         let stride = next_multiple_of(size, alignment);
-
-        StructLayout { field_offsets, alignment, size, stride }
+        let layout = StructLayout { field_offsets, alignment, size, stride };
+        LAYOUT_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            if self.mir.struct_was_non_generic[strukt.identity] {
+                cache.fast_struct_layouts[strukt.identity] = Some(layout.clone());
+            } else {
+                cache.struct_layouts.insert(strukt.clone(), layout.clone());
+            }
+        });
+        
+        layout
     }
 
     pub fn layout_enum(&self, variant_payload_tys: &[Type]) -> EnumLayout {
@@ -2507,4 +2528,14 @@ impl DriverRef<'_> {
 
         self.write().handle_control(b, val, ctx.control)
     }
+}
+
+#[derive(Default)]
+struct LayoutCache {
+    struct_layouts: HashMap<StructType, StructLayout>,
+    fast_struct_layouts: IndexVec<StructId, Option<StructLayout>>,
+}
+
+thread_local! {
+    static LAYOUT_CACHE: RefCell<LayoutCache> = RefCell::new(LayoutCache::default());
 }

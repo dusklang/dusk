@@ -207,6 +207,9 @@ macro_rules! declare_tp {
                     ($fname:ident, CastId) => {
                         self.$fname.resize_with(d.code.hir.cast_counter.len(), Default::default);
                     };
+                    ($fname:ident, StructId) => {
+                        self.$fname.resize_with(d.code.hir.structs.len(), Default::default);
+                    };
                 }
                 $(resize_idx_vec!($field_name, $id_ty);)*
                 for i in (decl_start..self.decl_types.next_idx()).into_range() {

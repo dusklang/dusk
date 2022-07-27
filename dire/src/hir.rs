@@ -294,7 +294,6 @@ pub struct VariantDecl {
 
 #[derive(Debug)]
 pub struct Struct {
-    // TODO: store FieldDecls inline instead
     pub fields: Vec<FieldDecl>,
 }
 

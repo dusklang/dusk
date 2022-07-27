@@ -1407,6 +1407,11 @@ impl tir::Expr<tir::StructLit> {
         // Yay borrow checker:
         if let Some(lit) = tp.struct_lit(self.struct_lit_id).clone() {
             let fields = &driver.code.hir.structs[lit.strukt].fields;
+            let is_generic = fields.iter()
+                .any(|field| tp.get_evaluated_type(field.ty).has_generic_parameters());
+            driver.mir.struct_was_non_generic.resize(driver.code.hir.structs.len(), false);
+            driver.mir.struct_was_non_generic[lit.strukt] = !is_generic;
+
             debug_assert_eq!(lit.fields.len(), fields.len());
 
             for (i, field) in fields.iter().enumerate() {

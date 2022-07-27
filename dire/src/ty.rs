@@ -2,7 +2,7 @@ use std::fmt;
 
 use crate::arch::Arch;
 use crate::hir::{StructId, EnumId, GenericParamId};
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum IntWidth {
     W8, W16, W32, W64, Pointer,
 }
@@ -19,24 +19,24 @@ impl IntWidth {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum FloatWidth {
     W32, W64,
 }
 
-#[derive(Clone, PartialEq, Eq, Default)]
+#[derive(Clone, PartialEq, Eq, Default, Hash)]
 pub struct FunctionType {
     pub param_tys: Vec<Type>,
     pub return_ty: Box<Type>,
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Hash)]
 pub struct StructType {
     pub field_tys: Vec<Type>,
     pub identity: StructId,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub enum InternalType {
     StringLiteral,
 }
@@ -55,7 +55,7 @@ impl From<InternalType> for Type {
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     Error,
     Int {
@@ -80,7 +80,26 @@ pub enum Type {
     Never,
 }
 
+
 impl Type {
+    pub fn has_generic_parameters(&self) -> bool {
+        use Type::*;
+        match self {
+            Error | Int { .. } | Float(_) | Internal(_) | Bool | Void | Mod | Ty | Never => false,
+            // TODO: Eliminate this separate heap allocation by interning all types into an IndexVec
+            Pointer(ty) => ty.ty.has_generic_parameters(),
+            Inout(ty) => ty.has_generic_parameters(),
+            Function(ty) => {
+                ty.return_ty.has_generic_parameters() || ty.param_tys.iter().any(|ty| ty.has_generic_parameters())
+            },
+            Struct(ty) => ty.field_tys.iter().any(|ty| ty.has_generic_parameters()),
+            // TODO: this `true` is here because I don't have the necessary context to lookup whether the enum actually
+            // does have generic parameters. I should fix this, by moving the enum structure inline.
+            Enum(_) => true,
+            GenericParam(_) => true,
+        }
+    }
+
     pub fn ptr(self) -> Self {
         self.ptr_with_mut(false)
     }
@@ -260,7 +279,7 @@ impl fmt::Debug for FunctionType {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, PartialEq, Eq, Debug, Default, Hash)]
 pub struct QualType {
     pub ty: Type,
     pub is_mut: bool,
