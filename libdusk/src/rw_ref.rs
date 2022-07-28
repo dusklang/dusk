@@ -66,7 +66,7 @@ impl<'l, T> RwRef<'l, T> {
             _ => unreachable!()
         })
     }
-    
+
     pub fn unlock(&self) {
         *self.guard.borrow_mut() = RwRefGuard::Nothing;
     }
