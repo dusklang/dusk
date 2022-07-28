@@ -291,7 +291,8 @@ pub enum NameLookup {
 }
 
 impl Driver {
-    fn find_overloads_in_mod(&self, name: &NameLookup, scope: ModScopeId, overloads: &mut HashSet<DeclId>) -> bool {
+    // See comment about `should_traverse_blanket_uses` later in this file
+    fn find_overloads_in_mod(&self, name: &NameLookup, scope: ModScopeId, should_traverse_blanket_uses: bool, overloads: &mut HashSet<DeclId>) -> bool {
         // TODO: don't iterate over hashmap if `name` is an `Exact` variant, because in that case we could just look it
         // up directly
         let scope = &self.code.hir.mod_scopes[scope];
@@ -303,11 +304,15 @@ impl Driver {
                 );
             }
         }
-        let mut all_unresolved = !scope.blanket_uses.is_empty();
-        for &used_namespace in &scope.blanket_uses {
-            all_unresolved &= !self.find_overloads_in_namespace(name, used_namespace, overloads);
+        if should_traverse_blanket_uses {
+            let mut all_unresolved = !scope.blanket_uses.is_empty();
+            for &used_namespace in &scope.blanket_uses {
+                all_unresolved &= !self.find_overloads_in_namespace(name, used_namespace, true, overloads);
+            }
+            !all_unresolved
+        } else {
+            true
         }
-        !all_unresolved
     }
     fn find_overloads_in_struct(&self, name: &NameLookup, strukt: StructId, overloads: &mut HashSet<DeclId>) {
         for field in &self.code.hir.structs[strukt].fields {
@@ -340,7 +345,14 @@ impl Driver {
             _ => panic!("Can only have requirements clause on computed decls"),
         }
     }
-    fn find_overloads_in_namespace(&self, name: &NameLookup, namespace: Namespace, overloads: &mut HashSet<DeclId>) -> bool {
+
+    // `should_traverse_blanket_uses` keeps track of whether we should look for overloads in blanket uses (which
+    // currently don't have a syntax, and are only used for the prelude). The reason for this is, code in a module X
+    // wants to be able to traverse its own namespace tree up to and including the blanket use of the prelude. However,
+    // code outside module X does *not* want to see items from the prelude re-exported. E.g. mod{}.print("Hello, world")
+    //
+    // TODO: more robust support for access control
+    fn find_overloads_in_namespace(&self, name: &NameLookup, namespace: Namespace, mut should_traverse_blanket_uses: bool, overloads: &mut HashSet<DeclId>) -> bool {
         let mut started_at_mod_scope = false;
         let mut root_namespace = true;
         let mut namespace = Some(namespace);
@@ -362,7 +374,7 @@ impl Driver {
                 },
                 Namespace::Mod(scope_ns) => {
                     let scope = self.code.hir.mod_ns[scope_ns].scope;
-                    self.find_overloads_in_mod(name, scope, overloads);
+                    self.find_overloads_in_mod(name, scope, should_traverse_blanket_uses, overloads);
 
                     if root_namespace { started_at_mod_scope = true; }
                     self.code.hir.mod_ns[scope_ns].parent
@@ -370,11 +382,13 @@ impl Driver {
                 Namespace::MemberRef { base_expr } => {
                     assert!(root_namespace, "member refs currently must be at the root of a namespace hierarchy");
 
+                    should_traverse_blanket_uses = false;
+
                     if let Some(expr_namespaces) = self.tir.expr_namespaces.get(&base_expr) {
                         for ns in expr_namespaces {
                             match *ns {
                                 ExprNamespace::Mod(scope) => {
-                                    if !self.find_overloads_in_mod(name, scope, overloads) {
+                                    if !self.find_overloads_in_mod(name, scope, should_traverse_blanket_uses, overloads) {
                                         return false
                                     }
                                 },
@@ -437,7 +451,7 @@ impl Driver {
     /// Returns None if the namespace comes from a memberref AND the memberref base expression has an error (e.g., invalid variable reference)
     pub fn find_overloads(&self, namespace: Namespace, name: &NameLookup) -> Option<Vec<DeclId>> {
         let mut overloads = HashSet::new();
-        self.find_overloads_in_namespace(name, namespace, &mut overloads)
+        self.find_overloads_in_namespace(name, namespace, true, &mut overloads)
             .then(|| overloads.into_iter().collect())
     }
 
