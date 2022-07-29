@@ -356,6 +356,7 @@ impl Driver {
                 "if" => If,
                 "else" => Else,
                 "while" => While,
+                "loop" => Loop,
                 "break" => Break,
                 "continue" => Continue,
                 "for" => For,

@@ -284,6 +284,39 @@ impl Driver {
         )
     }
 
+    fn parse_while(&mut self, p: &mut Parser, label: Option<Sym>) -> ParseResult<ExprId> {
+        let while_range = self.eat_tok(p, TokenKind::While)?;
+        let condition = self.parse_non_struct_lit_expr(p);
+        let (scope, scope_range) = self.parse_scope(p, &[])?;
+        Ok(self.while_expr(condition, scope, source_info::concat(while_range, scope_range)))
+    }
+
+    fn parse_for(&mut self, p: &mut Parser, label: Option<Sym>) -> ParseResult<ExprId> {
+        let for_range = self.eat_tok(p, TokenKind::For)?;
+        let is_mut = matches!(self.cur(p).kind, TokenKind::Mut);
+        if is_mut {
+            self.next(p);
+        }
+        let var_name = self.eat_ident(p);
+        let var_ty = matches!(self.cur(p).kind, TokenKind::Colon).then(|| {
+            self.next(p);
+            self.parse_type(p).0
+        });
+        self.eat_tok(p, TokenKind::In)?;
+        let lower_bound = self.parse_expr(p).unwrap_or_else(|err| err);
+        self.eat_tok(p, TokenKind::DoubleDot)?;
+        let upper_bound = self.parse_non_struct_lit_expr(p);
+        let stored_decl_id = self.next_stored_decl();
+        let binding_decl = self.add_decl(hir::Decl::LoopBinding { id: stored_decl_id, is_mut }, var_name.symbol, var_ty, var_name.range);
+        let binding_decl = ImperScopedDecl {
+            name: var_name.symbol,
+            num_params: 0,
+            id: binding_decl,
+        };
+        let (scope, _scope_range) = self.parse_scope(p, &[binding_decl])?;
+        Ok(self.for_expr(binding_decl.id, lower_bound, upper_bound, scope, for_range))
+    }
+
     /// A restricted term doesn't include cast or struct literal expressions
     fn try_parse_restricted_term(&mut self, p: &mut Parser) -> ParseResult<ExprId> {
         if let Some((op, op_range)) = self.parse_prefix_operator(p) {
@@ -359,44 +392,32 @@ impl Driver {
                 let (scope, scope_range) = self.parse_scope(p, &[])?;
                 Ok(self.do_expr(scope, source_info::concat(do_range, scope_range)))
             },
-            TokenKind::Module => Ok(self.parse_module(p)?),
-            TokenKind::ExternModule => Ok(self.parse_extern_module(p)?),
-            TokenKind::Import => Ok(self.parse_import(p)?),
-            TokenKind::Struct => Ok(self.parse_struct(p)?),
-            TokenKind::Enum => Ok(self.parse_enum(p)?),
-            TokenKind::If => Ok(self.parse_if(p)?),
-            TokenKind::While => {
-                let while_range = self.cur(p).range;
+            TokenKind::Module => self.parse_module(p),
+            TokenKind::ExternModule => self.parse_extern_module(p),
+            TokenKind::Import => self.parse_import(p),
+            TokenKind::Struct => self.parse_struct(p),
+            TokenKind::Enum => self.parse_enum(p),
+            TokenKind::If => self.parse_if(p),
+            TokenKind::While => self.parse_while(p, None),
+            TokenKind::For => self.parse_for(p, None),
+            TokenKind::Loop => {
+                let loop_range = self.cur(p).range;
                 self.next(p);
-                let condition = self.parse_non_struct_lit_expr(p);
-                let (scope, scope_range) = self.parse_scope(p, &[])?;
-                Ok(self.while_expr(condition, scope, source_info::concat(while_range, scope_range)))
-            },
-            TokenKind::For => {
-                let for_range = self.cur(p).range;
-                self.next(p);
-                let is_mut = matches!(self.cur(p).kind, TokenKind::Mut);
-                if is_mut {
-                    self.next(p);
+                self.eat_tok(p, TokenKind::Colon)?;
+                let label = self.eat_ident(p);
+                match self.cur(p).kind {
+                    TokenKind::While => self.parse_while(p, Some(label.symbol)),
+                    TokenKind::For => self.parse_for(p, Some(label.symbol)),
+                    unexpected_token => {
+                        let unexpected_token = unexpected_token.clone();
+                        let range = self.cur(p).range;
+                        self.errors.push(
+                            Error::new("unexpected token")
+                                .adding_primary_range(range, "expected `while` or `for` instead")
+                        );
+                        Err(ParseError::UnexpectedToken(unexpected_token))
+                    },
                 }
-                let var_name = self.eat_ident(p);
-                let var_ty = matches!(self.cur(p).kind, TokenKind::Colon).then(|| {
-                    self.next(p);
-                    self.parse_type(p).0
-                });
-                self.eat_tok(p, TokenKind::In)?;
-                let lower_bound = self.parse_expr(p).unwrap_or_else(|err| err);
-                self.eat_tok(p, TokenKind::DoubleDot)?;
-                let upper_bound = self.parse_non_struct_lit_expr(p);
-                let stored_decl_id = self.next_stored_decl();
-                let binding_decl = self.add_decl(hir::Decl::LoopBinding { id: stored_decl_id, is_mut }, var_name.symbol, var_ty, var_name.range);
-                let binding_decl = ImperScopedDecl {
-                    name: var_name.symbol,
-                    num_params: 0,
-                    id: binding_decl,
-                };
-                let (scope, _scope_range) = self.parse_scope(p, &[binding_decl])?;
-                Ok(self.for_expr(binding_decl.id, lower_bound, upper_bound, scope, for_range))
             },
             TokenKind::Switch => Ok(self.parse_switch(p)?),
             TokenKind::Return => {

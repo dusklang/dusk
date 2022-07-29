@@ -1,0 +1,13 @@
+fn main() {
+    j := 0
+    loop :outer_loop while j < 4 {
+        loop :another_loop for i in 0..12 {
+            if i == 4 {
+                if j * i == 4 {
+                    continue
+                }
+            }
+        }
+        j += 1
+    }
+}
