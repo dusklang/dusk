@@ -63,6 +63,27 @@ fn read_file(path: i8*): ByteBuffer {
     }
 }
 
+fn print(str: i8*) {
+    switch compiler.target {
+        .macos: unix.print(str),
+        .linux: unix.print(str),
+        .windows: windows.print(str),
+    }
+}
+
+fn println(str: i8*) {
+    print(str)
+    print("\n")
+}
+
+fn strlen(str: i8*): usize {
+    len: usize = 0
+    while *((str as usize + len) as i8*) != 0 {
+        len += 1
+    }
+    len
+}
+
 windows :: mod {
     fn read_file(path: i8*): ByteBuffer {
         file :: kernel32.CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, 0 as usize as SECURITY_ATTRIBUTES *mut, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0 as usize as HANDLE)
@@ -95,6 +116,25 @@ windows :: mod {
         ByteBuffer {
             size: size
             data: buf as u8 *mut
+        }
+    }
+
+    fn print(str: i8*) {
+        stdout :: kernel32.GetStdHandle(STD_OUTPUT_HANDLE)
+        if stdout as usize == INVALID_HANDLE_VALUE() as usize {
+            panic("failed to get handle to stdout")
+        }
+
+        total_chars_to_write :: strlen(str) as DWORD
+        chars_left_to_write := total_chars_to_write
+        while chars_left_to_write > 0 {
+            i :: total_chars_to_write - chars_left_to_write
+            chars_written: DWORD = 0
+            succ :: kernel32.WriteConsoleA(stdout, (str as usize + i as usize) as void*, chars_left_to_write, &mut chars_written, 0 as usize as void *mut)
+            if succ == 0 {
+                panic("failed to write to console")
+            }
+            chars_left_to_write -= chars_written
         }
     }
 
@@ -170,6 +210,11 @@ unix :: mod {
             data: data
         }
     }
+    fn print(str: i8*) {
+        //ignore :: libc.fputs(str, libc.stdin)
+        panic("userspace print is unimplemented on non-Windows platform")
+    }
+
     // FFI stuff
     fn libc_path(): compiler.StringLiteral {
         switch compiler.target {
@@ -182,13 +227,24 @@ unix :: mod {
     size_t :: usize
     long_int :: i64
     int :: i32
+    char :: i8
     SEEK_SET: int: 0
     SEEK_END: int: 2
+
     libc :: extern_mod(libc_path()) {
-        fn fopen(filename: i8*, mode: i8*): FILE *mut
+        fn fopen(filename: i8*, mode: char*): FILE *mut
         fn fread(ptr: void *mut, size: size_t, count: size_t, stream: FILE *mut): size_t
         fn fseek(stream: FILE *mut, offset: long_int, origin: int): int
         fn ftell(stream: FILE *mut): long_int
         fn fclose(stream: FILE *mut): int
+        fn fputs(s: char*, stream: FILE *mut): int
+
+
+        // TODO: support dynamically-linked variables
+        // TODO: I think on macOS these are actually defined with differently-named symbols, so we also need to support
+        // specifying the symbol name
+        //   stdin: FILE *mut
+        //   stdout: FILE *mut
+        //   stderr: FILE *mut
     }
 }
