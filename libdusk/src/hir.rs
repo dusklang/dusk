@@ -20,6 +20,7 @@ use dusk_dire::InternalField;
 use dvd_ipc::Message as DvdMessage;
 
 use crate::driver::Driver;
+use crate::error::Error;
 use crate::index_vec::*;
 use crate::builder::{BinOp, UnOp};
 use crate::source_info::ToSourceRange;
@@ -89,6 +90,8 @@ struct CompDeclState {
     id: DeclId,
     imper_scope_stack: u32,
     stored_decl_counter: IndexCounter<StoredDeclId>,
+    // TODO: support loops outside of comp decls by moving this elsewhere.
+    loop_stack: AutoPopStack<LoopState>,
 }
 
 type AutoPopStack<T> = Arc<Mutex<RefCell<Vec<T>>>>;
@@ -185,6 +188,12 @@ impl Default for Builder {
     }
 }
 
+#[derive(Debug)]
+pub struct LoopState {
+    name: Option<Ident>,
+    used: bool, // whether the loop name has been used by a continue or break
+}
+
 impl PartialEq<ScopeState> for ConditionNsId {
     fn eq(&self, other: &ScopeState) -> bool {
         match other {
@@ -215,6 +224,11 @@ impl PartialEq<ScopeState> for ImperScopeId {
             ScopeState::Imper { id, .. } => id == self,
             _ => false,
         }
+    }
+}
+impl PartialEq<LoopState> for Option<Ident> {
+    fn eq(&self, other: &LoopState) -> bool {
+        other.name == *self
     }
 }
 
@@ -459,6 +473,50 @@ impl Driver {
         self.hir.scope_stack.lock().unwrap().borrow_mut().push(state);
         AutoPopStackEntry::new(id, self.hir.scope_stack.clone())
     }
+    /// unchecked invariant: must call end_loop after this
+    pub fn begin_loop(&mut self, name: Option<Ident>) -> AutoPopStackEntry<LoopState, Option<Ident>> {
+        // TODO: there's no reason loops shouldn't be allowed outside of comp decls
+        let loop_stack = self.hir.comp_decl_stack.last().unwrap().loop_stack.clone();
+        {
+            let loop_stack = loop_stack.lock().unwrap();
+            let mut loop_stack = loop_stack.borrow_mut();
+            if let Some(name) = name {
+                for state in &*loop_stack {
+                    if state.name.map(|ident| ident.symbol) == Some(name.symbol) {
+                        // AFAICT this is the first time I have emitted an error from inside the HIR generator instead
+                        // of the parser. This makes me a little uncomfortable. On the other hand, diagnosing this
+                        // inside the parser would require exposing more state to the parser, which I also don't love.
+                        let name_str = self.interner.resolve(name.symbol).unwrap();
+                        self.errors.push(
+                            Error::new(format!("loop with label `{}` already exists", name_str))
+                                .adding_primary_range(name.range, "")
+                                .adding_secondary_range(state.name.unwrap().range, "")
+                        );
+                        break;
+                    }
+                }
+                
+            }
+            loop_stack.push(LoopState { name, used: false });
+        }
+        AutoPopStackEntry::new(name, loop_stack)
+    }
+    pub fn end_loop(&mut self, entry: AutoPopStackEntry<LoopState, Option<Ident>>) {
+        let loop_stack = entry.stack.lock().unwrap();
+        let loop_stack = loop_stack.borrow();
+        let state = loop_stack.last().unwrap().to_owned();
+        if let Some(name) = state.name {
+            if !state.used {
+                let name_str = self.interner.resolve(name.symbol).unwrap().to_string();
+                // See comment in begin_loop() about the generating errors in HIR generation.
+                // TODO: this would be a good candidate for conversion to a warning, when I implement those.
+                self.errors.push(
+                    Error::new(format!("loop label `{}` never used", name_str))
+                        .adding_primary_range(name.range, "")
+                );
+            }
+        }
+    }
     pub fn create_condition_namespace(&mut self) -> ConditionNsId {
         let parent = self.cur_namespace();
         self.code.hir.condition_ns.push(ConditionNs { func: DeclId::from_raw(u32::MAX), parent: Some(parent) })
@@ -548,6 +606,7 @@ impl Driver {
                 id,
                 imper_scope_stack: 0,
                 stored_decl_counter: IndexCounter::new(),
+                loop_stack: Default::default(),
             }
         );
 

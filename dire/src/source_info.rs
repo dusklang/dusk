@@ -5,7 +5,7 @@ use index_vec::define_index_type;
 
 define_index_type!(pub struct SourceFileId = u32;);
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct SourceRange {
     pub start: usize,
     pub end: usize,

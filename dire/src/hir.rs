@@ -302,14 +302,14 @@ pub struct Enum {
     pub variants: Vec<VariantDecl>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone,)]
 pub struct SwitchCase {
     pub pattern: Pattern,
     pub scope: ImperScopeId,
     pub scope_range: SourceRange,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct Ident {
     pub symbol: Sym,
     pub range: SourceRange,

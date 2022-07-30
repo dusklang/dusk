@@ -284,14 +284,16 @@ impl Driver {
         )
     }
 
-    fn parse_while(&mut self, p: &mut Parser, label: Option<Sym>) -> ParseResult<ExprId> {
+    fn parse_while(&mut self, p: &mut Parser, label: Option<Ident>) -> ParseResult<ExprId> {
         let while_range = self.eat_tok(p, TokenKind::While)?;
         let condition = self.parse_non_struct_lit_expr(p);
+        let looop = self.begin_loop(label);
         let (scope, scope_range) = self.parse_scope(p, &[])?;
+        self.end_loop(looop);
         Ok(self.while_expr(condition, scope, source_info::concat(while_range, scope_range)))
     }
 
-    fn parse_for(&mut self, p: &mut Parser, label: Option<Sym>) -> ParseResult<ExprId> {
+    fn parse_for(&mut self, p: &mut Parser, label: Option<Ident>) -> ParseResult<ExprId> {
         let for_range = self.eat_tok(p, TokenKind::For)?;
         let is_mut = matches!(self.cur(p).kind, TokenKind::Mut);
         if is_mut {
@@ -313,7 +315,9 @@ impl Driver {
             num_params: 0,
             id: binding_decl,
         };
+        let looop = self.begin_loop(label);
         let (scope, _scope_range) = self.parse_scope(p, &[binding_decl])?;
+        self.end_loop(looop);
         Ok(self.for_expr(binding_decl.id, lower_bound, upper_bound, scope, for_range))
     }
 
@@ -401,13 +405,13 @@ impl Driver {
             TokenKind::While => self.parse_while(p, None),
             TokenKind::For => self.parse_for(p, None),
             TokenKind::Loop => {
-                let loop_range = self.cur(p).range;
+                let _loop_range = self.cur(p).range;
                 self.next(p);
                 self.eat_tok(p, TokenKind::Colon)?;
                 let label = self.eat_ident(p);
                 match self.cur(p).kind {
-                    TokenKind::While => self.parse_while(p, Some(label.symbol)),
-                    TokenKind::For => self.parse_for(p, Some(label.symbol)),
+                    TokenKind::While => self.parse_while(p, Some(label)),
+                    TokenKind::For => self.parse_for(p, Some(label)),
                     unexpected_token => {
                         let unexpected_token = unexpected_token.clone();
                         let range = self.cur(p).range;
