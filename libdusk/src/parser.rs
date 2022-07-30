@@ -434,12 +434,20 @@ impl Driver {
             TokenKind::Break => {
                 let range = self.cur(p).range;
                 self.next(p);
-                Ok(self.break_expr(range))
+                let label = matches!(self.cur(p).kind, TokenKind::Colon).then(|| {
+                    self.next(p);
+                    self.eat_ident(p)
+                });
+                Ok(self.break_expr(range, label))
             },
             TokenKind::Continue => {
                 let range = self.cur(p).range;
                 self.next(p);
-                Ok(self.continue_expr(range))
+                let label = matches!(self.cur(p).kind, TokenKind::Colon).then(|| {
+                    self.next(p);
+                    self.eat_ident(p)
+                });
+                Ok(self.continue_expr(range, label))
             },
             TokenKind::Fn => {
                 let fn_range = self.cur(p).range;

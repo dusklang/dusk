@@ -1,10 +1,10 @@
 fn main() {
     j := 0
     loop :outer_loop while j < 4 {
-        loop :outer_loop for i in 0..12 {
+        loop :inner_loop for i in 0..12 {
             if i == 4 {
                 if j * i == 4 {
-                    continue
+                    continue :outer_loop
                 }
             }
         }

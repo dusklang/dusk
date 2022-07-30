@@ -393,10 +393,33 @@ impl Driver {
         let decl = self.hir.comp_decl_stack.last().map(|decl| decl.id);
         self.add_expr(Expr::Ret { expr, decl }, range)
     }
-    pub fn break_expr(&mut self, range: SourceRange) -> ExprId {
+    // TODO: return a LoopId (a type that does not yet exist)
+    fn lookup_loop_by_label(&mut self, label: Ident) {
+        let loop_stack = self.hir.comp_decl_stack.last().unwrap().loop_stack.clone();
+        let loop_stack = loop_stack.lock().unwrap();
+        let mut loop_stack = loop_stack.borrow_mut();
+        for looop in loop_stack.iter_mut().rev() {
+            if looop.name.map(|ident| ident.symbol) == Some(label.symbol) {
+                looop.used = true;
+                return;
+            }
+        }
+        let label_str = self.interner.resolve(label.symbol).unwrap().to_owned();
+        self.errors.push(
+            Error::new(format!("unable to find loop label `{}`", label_str))
+                .adding_primary_range(label.range, "")
+        );
+    }
+    pub fn break_expr(&mut self, range: SourceRange, label: Option<Ident>) -> ExprId {
+        if let Some(label) = label {
+            self.lookup_loop_by_label(label);
+        }
         self.add_expr(Expr::Break, range)
     }
-    pub fn continue_expr(&mut self, range: SourceRange) -> ExprId {
+    pub fn continue_expr(&mut self, range: SourceRange, label: Option<Ident>) -> ExprId {
+        if let Some(label) = label {
+            self.lookup_loop_by_label(label);
+        }
         self.add_expr(Expr::Continue, range)
     }
     pub fn if_expr(&mut self, condition: ExprId, then_scope: ImperScopeId, else_scope: Option<ImperScopeId>, range: SourceRange) -> ExprId {
