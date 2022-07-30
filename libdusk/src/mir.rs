@@ -521,7 +521,7 @@ impl DriverRef<'_> {
                     Decl::ExternFunction(extern_func)
                 } else {
                     let err = Error::new("cannot declare prototype outside of extern module")
-                        .adding_primary_range(df!(d, id.range), "prototype here");
+                        .adding_primary_range(id, "prototype here");
                     drop(d);
                     self.write().errors.push(err);
                     Decl::Invalid
@@ -682,7 +682,7 @@ impl Driver {
     #[display_adapter]
     pub fn display_item(&'a self, item: impl Into<ToSourceRange> + Copy + 'a, f: &mut Formatter) {
         let range = self.get_range(item);
-        write!(f, "{}", self.src_map.substring_from_range(range))
+        write!(f, "{}", self.substring_from_range(range))
     }
 
     #[display_adapter]

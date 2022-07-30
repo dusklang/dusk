@@ -1,10 +1,8 @@
 use std::borrow::Cow;
 use std::mem;
 
-use dusk_dire::source_info::SourceRange;
-
 use crate::driver::Driver;
-use crate::source_info::CommentatedSourceRange;
+use crate::source_info::{ToSourceRange, CommentatedSourceRange};
 
 #[derive(Debug)]
 pub struct Error {
@@ -20,21 +18,21 @@ impl Error {
         }
     }
 
-    pub fn add_primary_range(&mut self, range: SourceRange, message: impl Into<Cow<'static, str>>) {
+    pub fn add_primary_range(&mut self, range: impl Into<ToSourceRange>, message: impl Into<Cow<'static, str>>) {
         self.ranges.push(CommentatedSourceRange::new(range, message, '^'));
     }
 
-    pub fn adding_primary_range(mut self, range: SourceRange, message: impl Into<Cow<'static, str>>) -> Error {
+    pub fn adding_primary_range(mut self, range: impl Into<ToSourceRange>, message: impl Into<Cow<'static, str>>) -> Error {
         self.add_primary_range(range, message);
         self
     }
 
-    pub fn add_secondary_range(&mut self, range: SourceRange, message: impl Into<Cow<'static, str>>) {
+    pub fn add_secondary_range(&mut self, range: impl Into<ToSourceRange>, message: impl Into<Cow<'static, str>>) {
         self.ranges.push(CommentatedSourceRange::new(range, message, '-'));
     }
 
     #[allow(dead_code)]
-    pub fn adding_secondary_range(mut self, range: SourceRange, message: impl Into<Cow<'static, str>>) -> Error {
+    pub fn adding_secondary_range(mut self, range: impl Into<ToSourceRange>, message: impl Into<Cow<'static, str>>) -> Error {
         self.add_secondary_range(range, message);
         self
     }

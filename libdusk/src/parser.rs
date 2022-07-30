@@ -718,7 +718,7 @@ impl Driver {
             if is_comptime {
                 self.errors.push(
                     Error::new("argument passed to @comptime attribute")
-                        .adding_primary_range(ef!(arg.range), "consider removing this expression and surrounding parentheses")
+                        .adding_primary_range(arg, "consider removing this expression and surrounding parentheses")
                 );
             }
         }

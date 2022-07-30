@@ -101,15 +101,15 @@ pub struct SourceFile {
 
 #[derive(Debug)]
 pub struct CommentatedSourceRange {
-    pub range: SourceRange,
+    pub range: ToSourceRange,
     pub message: Cow<'static, str>,
     pub highlight: char,
 }
 
 impl CommentatedSourceRange {
-    pub fn new(range: SourceRange, message: impl Into<Cow<'static, str>>, highlight: char) -> Self {
+    pub fn new(range: impl Into<ToSourceRange>, message: impl Into<Cow<'static, str>>, highlight: char) -> Self {
         Self {
-            range,
+            range: range.into(),
             message: message.into(),
             highlight,
         }
@@ -119,7 +119,7 @@ impl CommentatedSourceRange {
 impl Driver {
     #[allow(dead_code)]
     pub fn print_range(&self, range: SourceRange) {
-        self.src_map.print_commentated_source_ranges(&mut [
+        self.print_commentated_source_ranges(&mut [
             CommentatedSourceRange::new(range, "", '-')
         ]);
     }
@@ -188,13 +188,16 @@ impl SourceMap {
     pub fn add_virtual_file(&mut self, name: impl Into<String>, src: String) -> io::Result<SourceFileId> {
         self.add_file_impl(SourceFileLocation::Virtual { name: name.into() }, || Ok(src))
     }
+}
 
-    fn lookup_file(&self, range: SourceRange) -> (SourceFileId, Range<usize>) {
+impl Driver {
+    fn lookup_file(&self, range: impl Into<ToSourceRange>) -> (SourceFileId, Range<usize>) {
+        let range = self.get_range(range);
         // TODO: Speed. Binary search would be better.
-        for (i, &end) in self.file_ends.iter().enumerate() {
+        for (i, &end) in self.src_map.file_ends.iter().enumerate() {
             if end >= range.end {
                 let i = i.saturating_sub(1);
-                let start = self.file_ends[i];
+                let start = self.src_map.file_ends[i];
                 let adjusted_range = (range.start-start)..(range.end-start);
                 return (SourceFileId::new(i), adjusted_range);
             }
@@ -204,7 +207,7 @@ impl SourceMap {
         // So make sure it has zero content.
         assert_eq!(range.start, range.end, "Invalid range");
 
-        assert!(!self.files.is_empty());
+        assert!(!self.src_map.files.is_empty());
         (SourceFileId::new(0), 0..0)
     }
 
@@ -212,7 +215,7 @@ impl SourceMap {
     pub fn lookup_file_line_and_offset(&self, loc: usize) -> (SourceFileId, usize, usize) {
         let (file_id, intrafile_range) = self.lookup_file(SourceRange { start: loc, end: loc });
         let intrafile_loc = intrafile_range.start;
-        let file = &self.files[file_id];
+        let file = &self.src_map.files[file_id];
         let mut line = file.lines.len().saturating_sub(1);
         for (i, line_start) in file.lines.iter().copied().enumerate() {
             if line_start > intrafile_loc {
@@ -228,21 +231,23 @@ impl SourceMap {
     #[cfg(feature = "dls")]
     pub fn lookup_file_by_url(&self, url: &Url) -> Option<SourceFileId> {
         let location: SourceFileLocation = url.clone().into();
-        for (id, file) in self.files.iter_enumerated() {
+        for (id, file) in self.src_map.files.iter_enumerated() {
             if file.location == location {
                 return Some(id)
             }
         }
         None
     }
+}
 
+impl Driver {
     pub fn substring_from_range(&self, range: SourceRange) -> &str {
         let (file, range) = self.lookup_file(range);
-        self.files[file].substring_from_range(range)
+        self.src_map.files[file].substring_from_range(range)
     }
 
     pub fn print_commentated_source_ranges(&self, ranges: &mut [CommentatedSourceRange]) {
-        ranges.sort_by_key(|range| range.range.start);
+        ranges.sort_by_key(|range| self.get_range(range.range).start);
         let ranges = &*ranges;
         let mut line_range_groups: Vec<LineRangeGroup> = Vec::new();
         fn num_digits(num: usize) -> usize {
@@ -264,7 +269,7 @@ impl SourceMap {
         let mut max_line_number_digits = 0;
         for range in ranges {
             let (file, range) = self.lookup_file(range.range);
-            let ranges = self.files[file].lines_in_range(range);
+            let ranges = self.src_map.files[file].lines_in_range(range);
             for range in &ranges {
                 max_line_number_digits = max(max_line_number_digits, num_digits(range.line + 1));
             }
@@ -278,7 +283,7 @@ impl SourceMap {
             let line_no_as_string = format!("{}", line + 1);
             print!("{}", line_no_as_string);
             print_whitespace(max_line_number_digits - line_no_as_string.len());
-            let file = &self.files[file];
+            let file = &self.src_map.files[file];
             let substr = file.substring_from_line(line);
             print!(" | {}", substr);
             if !substr.ends_with('\n') {
@@ -290,7 +295,7 @@ impl SourceMap {
         for (i, range) in ranges.iter().enumerate() {
             let group = &line_range_groups[i];
             if group.file != prev_file {
-                println!("  --> {}", self.files[group.file].location.display());
+                println!("  --> {}", self.src_map.files[group.file].location.display());
                 prev_file = group.file;
             }
             let next_group = (i + 1 < ranges.len()).then(|| {
@@ -382,6 +387,7 @@ impl SourceFile {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
 pub enum ToSourceRange {
     Item(Item),
     Op(OpId),

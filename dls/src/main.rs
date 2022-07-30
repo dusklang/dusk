@@ -307,7 +307,7 @@ impl Server {
 }
 
 fn dusk_pos_to_lsp_pos(driver: &Driver, pos: usize) -> (SourceFileId, Position) {
-    let (file, line, offset) = driver.src_map.lookup_file_line_and_offset(pos);
+    let (file, line, offset) = driver.lookup_file_line_and_offset(pos);
     let line_str = driver.src_map.files[file].substring_from_line(line);
     debug_assert!(line_str.is_char_boundary(offset));
     // TODO: This is kind of awful.
@@ -331,7 +331,7 @@ fn dusk_range_to_lsp_range(driver: &Driver, range: SourceRange) -> (SourceFileId
 }
 
 fn lsp_pos_to_dusk_pos(driver: &Driver, url: &Url, pos: Position) -> usize {
-    let file = driver.src_map.lookup_file_by_url(url).unwrap();
+    let file = driver.lookup_file_by_url(url).unwrap();
 
     // byte offset to the beginning of the file
     let file_offset = driver.src_map.get_begin_offset(file);
@@ -376,10 +376,12 @@ impl Server {
         if !errors.is_empty() {
             for error in errors {
                 let (main, others) = error.ranges.split_first().unwrap();
-                let (_, main_range) = dusk_range_to_lsp_range(driver, main.range);
+                let dusk_main_range = driver.get_range(main.range);
+                let (_, main_range) = dusk_range_to_lsp_range(driver, dusk_main_range);
                 let mut related_info = Vec::new();
                 for other_range in others {
-                    let (file, range) = dusk_range_to_lsp_range(driver, other_range.range);
+                    let dusk_other_range = driver.get_range(other_range.range);
+                    let (file, range) = dusk_range_to_lsp_range(driver, dusk_other_range);
                     let file = &driver.src_map.files[file];
                     let uri = file.location.as_url().unwrap();
                     let location = Location {

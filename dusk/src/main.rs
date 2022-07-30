@@ -48,7 +48,7 @@ fn flush_errors(driver: &mut Driver) {
     let errors = driver.get_latest_errors();
     for mut err in errors {
         println!("\u{001B}[31merror:\u{001B}[0m {}", &err.message);
-        driver.src_map.print_commentated_source_ranges(&mut err.ranges);
+        driver.print_commentated_source_ranges(&mut err.ranges);
     }
 }
 

@@ -264,7 +264,7 @@ impl tir::Expr<tir::Assignment> {
             match err {
                 AssignmentError::Immutable => {
                     let err = Error::new("unable to assign to immutable expression")
-                        .adding_primary_range(ef!(driver, self.lhs.range), "expression here");
+                        .adding_primary_range(self.lhs, "expression here");
                     driver.errors.push(err);
                 }
             }
@@ -575,7 +575,7 @@ impl tir::Expr<tir::Switch> {
                                     let decl = variants[index].decl;
                                     let err = Error::new(format!("Variant `{}` has a payload which goes ignored in pattern", variant_name_str))
                                         .adding_primary_range(range, "pattern here")
-                                        .adding_secondary_range(df!(driver, decl.range), "variant here");
+                                        .adding_secondary_range(decl, "variant here");
                                     driver.errors.push(err);
 
                                     // Even though the payload was ignored, still add record of attempt to match it. This will suppress unhandled variant errors.
@@ -621,7 +621,7 @@ impl tir::Expr<tir::Switch> {
                         PatternKind::IntLit { range, .. } => {
                             let error = Error::new("cannot match enum type with integer pattern")
                                 .adding_primary_range(range, "pattern here")
-                                .adding_secondary_range(ef!(driver, self.scrutinee.range), "scrutinee here");
+                                .adding_secondary_range(self.scrutinee, "scrutinee here");
                             driver.errors.push(error);
                         },
                     }
@@ -656,7 +656,7 @@ impl tir::Expr<tir::Switch> {
                     err_msg.push_str("unhandled in switch expression. switch expressions must be exhaustive.");
 
                     let err = Error::new(err_msg)
-                        .adding_primary_range(ef!(driver, self.id.range), "");
+                        .adding_primary_range(self.id, "");
                     driver.errors.push(err);
                 }
             },
@@ -705,7 +705,7 @@ impl tir::Expr<tir::Switch> {
                         PatternKind::ContextualMember { range, .. } => {
                             let error = Error::new(format!("cannot match integer type {:?} with contextual member pattern", scrutinee_ty))
                                 .adding_primary_range(range, "pattern here")
-                                .adding_secondary_range(ef!(driver, self.scrutinee.range), "scrutinee here");
+                                .adding_secondary_range(self.scrutinee, "scrutinee here");
                             driver.errors.push(error);
                         },
                     }
@@ -716,7 +716,7 @@ impl tir::Expr<tir::Switch> {
                 }
                 if !all_exhausted {
                     let err = Error::new(format!("not all values of {:?} handled in switch expression. switch expressions must be exhaustive", scrutinee_ty))
-                        .adding_primary_range(ef!(driver, self.id.range), "consider adding a catch-all case to the end of this switch");
+                        .adding_primary_range(self.id, "consider adding a catch-all case to the end of this switch");
                     driver.errors.push(err);
                 }
             }
@@ -775,7 +775,7 @@ impl tir::Expr<tir::Module> {
             {
                 driver.errors.push(
                     Error::new("Invalid expression passed to extern_mod; expected string")
-                        .adding_primary_range(ef!(driver, extern_library_path.range), "")
+                        .adding_primary_range(extern_library_path, "")
                 )
             }
         }
@@ -846,7 +846,7 @@ impl tir::Expr<tir::Import> {
         {
             driver.errors.push(
                 Error::new("Invalid expression passed to import; expected string")
-                    .adding_primary_range(ef!(driver, self.path.range), "")
+                    .adding_primary_range(self.path, "")
             )
         }
     }
@@ -1351,11 +1351,10 @@ impl tir::Expr<tir::StructLit> {
                         if maatch == ExprId::new(u32::MAX as usize) {
                             successful = false;
 
-                            let field_range = df!(driver, field.decl.range);
                             driver.errors.push(
                                 Error::new(format!("Field {} not included in struct literal", driver.interner.resolve(field.name).unwrap()))
                                     .adding_primary_range(lit_range, "")
-                                    .adding_secondary_range(field_range, "field declared here")
+                                    .adding_secondary_range(field.decl, "field declared here")
                             );
                         } else if let Some(err) = driver.can_unify_to(tp, maatch, field.ty).err() {
                             successful = false;
