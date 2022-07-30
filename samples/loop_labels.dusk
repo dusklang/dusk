@@ -1,13 +1,11 @@
 fn main() {
-    j := 0
-    loop :outer_loop while j < 4 {
-        loop :inner_loop for i in 0..12 {
+    loop :outer_loop for j in 0..4 {
+        core.println("Outer loop")
+        for i in 0..12 {
+            core.println("    Inner loop")
             if i == 4 {
-                if j * i == 4 {
-                    continue :outer_loop
-                }
+                continue :outer_loop
             }
         }
-        j += 1
     }
 }

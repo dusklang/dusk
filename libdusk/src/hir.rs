@@ -92,6 +92,7 @@ struct CompDeclState {
     stored_decl_counter: IndexCounter<StoredDeclId>,
     // TODO: support loops outside of comp decls by moving this elsewhere.
     loop_stack: AutoPopStack<LoopState>,
+    loop_counter: IndexCounter<LoopId>,
 }
 
 type AutoPopStack<T> = Arc<Mutex<RefCell<Vec<T>>>>;
@@ -190,6 +191,7 @@ impl Default for Builder {
 
 #[derive(Debug)]
 pub struct LoopState {
+    id: LoopId,
     name: Option<Ident>,
     used: bool, // whether the loop name has been used by a continue or break
 }
@@ -226,9 +228,9 @@ impl PartialEq<ScopeState> for ImperScopeId {
         }
     }
 }
-impl PartialEq<LoopState> for Option<Ident> {
+impl PartialEq<LoopState> for LoopId {
     fn eq(&self, other: &LoopState) -> bool {
-        other.name == *self
+        other.id == *self
     }
 }
 
@@ -393,34 +395,46 @@ impl Driver {
         let decl = self.hir.comp_decl_stack.last().map(|decl| decl.id);
         self.add_expr(Expr::Ret { expr, decl }, range)
     }
-    // TODO: return a LoopId (a type that does not yet exist)
-    fn lookup_loop_by_label(&mut self, label: Ident) {
+    fn lookup_loop_by_label(&mut self, label: Option<Ident>) -> Option<LoopId> {
         let loop_stack = self.hir.comp_decl_stack.last().unwrap().loop_stack.clone();
         let loop_stack = loop_stack.lock().unwrap();
         let mut loop_stack = loop_stack.borrow_mut();
-        for looop in loop_stack.iter_mut().rev() {
-            if looop.name.map(|ident| ident.symbol) == Some(label.symbol) {
-                looop.used = true;
-                return;
+        if let Some(label) = label {
+            for looop in loop_stack.iter_mut().rev() {
+                if looop.name.map(|ident| ident.symbol) == Some(label.symbol) {
+                    looop.used = true;
+                    return Some(looop.id);
+                }
             }
+            let label_str = self.interner.resolve(label.symbol).unwrap().to_owned();
+            self.errors.push(
+                Error::new(format!("unable to find loop label `{}`", label_str))
+                    .adding_primary_range(label.range, "")
+            );
+            None
+        } else {
+            loop_stack.last().map(|state| state.id)
         }
-        let label_str = self.interner.resolve(label.symbol).unwrap().to_owned();
+    }
+    fn control_flow_outside_loop_error(&mut self, kind: &str, range: SourceRange) {
         self.errors.push(
-            Error::new(format!("unable to find loop label `{}`", label_str))
-                .adding_primary_range(label.range, "")
-        );
+            Error::new(format!("`{}` expression found outside of a loop", kind))
+                .adding_primary_range(range, "only valid inside a `for` or `while` loop")
+        )
     }
     pub fn break_expr(&mut self, range: SourceRange, label: Option<Ident>) -> ExprId {
-        if let Some(label) = label {
-            self.lookup_loop_by_label(label);
+        let id = self.lookup_loop_by_label(label);
+        if label.is_none() && id.is_none() {
+            self.control_flow_outside_loop_error("break", range);
         }
-        self.add_expr(Expr::Break, range)
+        self.add_expr(Expr::Break(id), range)
     }
     pub fn continue_expr(&mut self, range: SourceRange, label: Option<Ident>) -> ExprId {
-        if let Some(label) = label {
-            self.lookup_loop_by_label(label);
+        let id = self.lookup_loop_by_label(label);
+        if label.is_none() && id.is_none() {
+            self.control_flow_outside_loop_error("break", range);
         }
-        self.add_expr(Expr::Continue, range)
+        self.add_expr(Expr::Continue(id), range)
     }
     pub fn if_expr(&mut self, condition: ExprId, then_scope: ImperScopeId, else_scope: Option<ImperScopeId>, range: SourceRange) -> ExprId {
         self.add_expr(
@@ -428,11 +442,11 @@ impl Driver {
             range,
         )
     }
-    pub fn while_expr(&mut self, condition: ExprId, scope: ImperScopeId, range: SourceRange) -> ExprId {
-        self.add_expr(Expr::While { condition, scope }, range)
+    pub fn while_expr(&mut self, loop_id: LoopId, condition: ExprId, scope: ImperScopeId, range: SourceRange) -> ExprId {
+        self.add_expr(Expr::While { loop_id, condition, scope }, range)
     }
-    pub fn for_expr(&mut self, binding: DeclId, lower_bound: ExprId, upper_bound: ExprId, scope: ImperScopeId, range: SourceRange) -> ExprId {
-        self.add_expr(Expr::For { binding, lower_bound, upper_bound, scope }, range)
+    pub fn for_expr(&mut self, loop_id: LoopId, binding: DeclId, lower_bound: ExprId, upper_bound: ExprId, scope: ImperScopeId, range: SourceRange) -> ExprId {
+        self.add_expr(Expr::For { loop_id, binding, lower_bound, upper_bound, scope }, range)
     }
     pub fn switch_expr(&mut self, scrutinee: ExprId, cases: Vec<SwitchCase>, range: SourceRange) -> ExprId {
         self.add_expr(Expr::Switch { scrutinee, cases }, range)
@@ -497,9 +511,11 @@ impl Driver {
         AutoPopStackEntry::new(id, self.hir.scope_stack.clone())
     }
     /// unchecked invariant: must call end_loop after this
-    pub fn begin_loop(&mut self, name: Option<Ident>) -> AutoPopStackEntry<LoopState, Option<Ident>> {
+    pub fn begin_loop(&mut self, name: Option<Ident>) -> AutoPopStackEntry<LoopState, LoopId> {
         // TODO: there's no reason loops shouldn't be allowed outside of comp decls
-        let loop_stack = self.hir.comp_decl_stack.last().unwrap().loop_stack.clone();
+        let comp_decl_state = self.hir.comp_decl_stack.last_mut().unwrap();
+        let id = comp_decl_state.loop_counter.next_idx();
+        let loop_stack = comp_decl_state.loop_stack.clone();
         {
             let loop_stack = loop_stack.lock().unwrap();
             let mut loop_stack = loop_stack.borrow_mut();
@@ -520,11 +536,11 @@ impl Driver {
                 }
                 
             }
-            loop_stack.push(LoopState { name, used: false });
+            loop_stack.push(LoopState { id, name, used: false });
         }
-        AutoPopStackEntry::new(name, loop_stack)
+        AutoPopStackEntry::new(id, loop_stack)
     }
-    pub fn end_loop(&mut self, entry: AutoPopStackEntry<LoopState, Option<Ident>>) {
+    pub fn end_loop(&mut self, entry: AutoPopStackEntry<LoopState, LoopId>) {
         let loop_stack = entry.stack.lock().unwrap();
         let loop_stack = loop_stack.borrow();
         let state = loop_stack.last().unwrap().to_owned();
@@ -630,6 +646,7 @@ impl Driver {
                 imper_scope_stack: 0,
                 stored_decl_counter: IndexCounter::new(),
                 loop_stack: Default::default(),
+                loop_counter: Default::default(),
             }
         );
 

@@ -31,6 +31,7 @@ define_index_type!(pub struct GenericContextNsId = u32;);
 define_index_type!(pub struct GenericParamId = u32;);
 define_index_type!(pub struct ExternModId = u32;);
 define_index_type!(pub struct GenericCtxId = u32;);
+define_index_type!(pub struct LoopId = u32;);
 
 #[derive(Debug, Clone, Copy)]
 pub struct FieldAssignment {
@@ -175,10 +176,10 @@ pub enum Expr {
     Set { lhs: ExprId, rhs: ExprId },
     Do { scope: ImperScopeId },
     If { condition: ExprId, then_scope: ImperScopeId, else_scope: Option<ImperScopeId> },
-    While { condition: ExprId, scope: ImperScopeId },
-    For { binding: DeclId, lower_bound: ExprId, upper_bound: ExprId, scope: ImperScopeId },
-    Break,
-    Continue,
+    While { loop_id: LoopId, condition: ExprId, scope: ImperScopeId },
+    For { loop_id: LoopId, binding: DeclId, lower_bound: ExprId, upper_bound: ExprId, scope: ImperScopeId },
+    Break(Option<LoopId>),
+    Continue(Option<LoopId>),
     Switch {
         scrutinee: ExprId,
         cases: Vec<SwitchCase>,

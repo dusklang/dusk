@@ -288,9 +288,10 @@ impl Driver {
         let while_range = self.eat_tok(p, TokenKind::While)?;
         let condition = self.parse_non_struct_lit_expr(p);
         let looop = self.begin_loop(label);
+        let loop_id = looop.id();
         let (scope, scope_range) = self.parse_scope(p, &[])?;
         self.end_loop(looop);
-        Ok(self.while_expr(condition, scope, source_info::concat(while_range, scope_range)))
+        Ok(self.while_expr(loop_id, condition, scope, source_info::concat(while_range, scope_range)))
     }
 
     fn parse_for(&mut self, p: &mut Parser, label: Option<Ident>) -> ParseResult<ExprId> {
@@ -316,9 +317,10 @@ impl Driver {
             id: binding_decl,
         };
         let looop = self.begin_loop(label);
+        let loop_id = looop.id();
         let (scope, _scope_range) = self.parse_scope(p, &[binding_decl])?;
         self.end_loop(looop);
-        Ok(self.for_expr(binding_decl.id, lower_bound, upper_bound, scope, for_range))
+        Ok(self.for_expr(loop_id, binding_decl.id, lower_bound, upper_bound, scope, for_range))
     }
 
     /// A restricted term doesn't include cast or struct literal expressions

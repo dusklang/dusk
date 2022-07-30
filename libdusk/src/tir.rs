@@ -561,8 +561,8 @@ impl Driver {
             hir::Expr::StrLit { .. } => flat_insert_expr!(str_lits, StrLit),
             hir::Expr::CharLit { .. } => flat_insert_expr!(char_lits, CharLit),
             hir::Expr::BoolLit { .. } => flat_insert_expr!(bool_lits, BoolLit),
-            hir::Expr::Break => flat_insert_expr!(breaks, Break),
-            hir::Expr::Continue => flat_insert_expr!(continues, Continue),
+            hir::Expr::Break(_) => flat_insert_expr!(breaks, Break),
+            hir::Expr::Continue(_) => flat_insert_expr!(continues, Continue),
             hir::Expr::Const(val) => flat_insert_expr!(consts, ConstExpr(val.ty())),
             &hir::Expr::AddrOf { expr, is_mut } => insert_expr!(addr_ofs, AddrOf { expr, is_mut }),
             &hir::Expr::Deref(expr) => insert_expr!(derefs, Dereference { expr }),
@@ -739,7 +739,7 @@ impl Driver {
             let id = ef!(expr_id.item);
             match ef!(expr_id.hir) {
                 hir::Expr::Void | hir::Expr::Error | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
-                    | hir::Expr::CharLit { .. } | hir::Expr::BoolLit { .. } | hir::Expr::Const(_) | hir::Expr::Break | hir::Expr::Continue => {},
+                    | hir::Expr::CharLit { .. } | hir::Expr::BoolLit { .. } | hir::Expr::Const(_) | hir::Expr::Break(_) | hir::Expr::Continue(_) => {},
                 hir::Expr::Mod { extern_library_path, .. } => {
                     if let Some(extern_library_path) = extern_library_path {
                         self.tir.graph.add_type1_dep(id, ef!(extern_library_path.item));
@@ -800,7 +800,7 @@ impl Driver {
                         self.tir.graph.add_type1_dep(id, ef!(terminal.item));
                     }
                 },
-                hir::Expr::While { condition, scope } => {
+                hir::Expr::While { condition, scope, .. } => {
                     self.tir.graph.add_type1_dep(id, ef!(condition.item));
                     let terminal_expr = self.code.hir.imper_scopes[scope].terminal_expr;
                     self.tir.graph.add_type1_dep(id, ef!(terminal_expr.item));
@@ -919,7 +919,7 @@ impl Driver {
                             | hir::Expr::CharLit { .. } | hir::Expr::BoolLit { .. } | hir::Expr::Const(_) | hir::Expr::AddrOf { .. }
                             | hir::Expr::Deref(_) | hir::Expr::Pointer { .. } | hir::Expr::Set { .. } | hir::Expr::Mod { .. }
                             | hir::Expr::Import { .. } | hir::Expr::Struct(_) | hir::Expr::Enum(_) | hir::Expr::Call { .. }
-                            | hir::Expr::FunctionTy { .. } | hir::Expr::Break | hir::Expr::Continue => {},
+                            | hir::Expr::FunctionTy { .. } | hir::Expr::Break(_) | hir::Expr::Continue(_) => {},
                         hir::Expr::Cast { ty, .. } => {
                             add_eval_dep!(id, ty);
                         },

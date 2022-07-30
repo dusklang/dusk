@@ -10,7 +10,7 @@ use smallvec::{SmallVec, smallvec};
 use string_interner::DefaultSymbol as Sym;
 use display_adapter::display_adapter;
 
-use dusk_dire::hir::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, GenericParamId, Item, PatternBindingDeclId, ExternModId, ExternFunctionRef, PatternBindingPathComponent, VOID_TYPE, StructId};
+use dusk_dire::hir::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, GenericParamId, Item, PatternBindingDeclId, ExternModId, ExternFunctionRef, PatternBindingPathComponent, VOID_TYPE, StructId, LoopId};
 use dusk_dire::mir::{FuncId, StaticId, Const, Instr, InstrId, Function, MirCode, StructLayout, EnumLayout, ExternMod, ExternFunction, InstrNamespace, SwitchCase, VOID_INSTR};
 use dusk_dire::{Block, BlockId, Op, OpId, InternalField};
 use dusk_dire::ty::{Type, InternalType, FunctionType, FloatWidth, StructType};
@@ -928,7 +928,7 @@ struct FunctionBuilder {
     stored_decl_locs: IndexVec<StoredDeclId, OpId>,
     pattern_binding_locs: HashMap<PatternBindingDeclId, Value>,
     instr_namespace: InstrNamespace,
-    loop_stack: Vec<LoopState>,
+    loops: IndexVec<LoopId, LoopState>,
 }
 
 #[derive(Debug)]
@@ -1005,7 +1005,7 @@ impl DriverRef<'_> {
             stored_decl_locs: IndexVec::new(),
             pattern_binding_locs: HashMap::new(),
             instr_namespace,
-            loop_stack: Vec::new(),
+            loops: Default::default(),
         };
         self.write().start_bb(&mut b, entry);
         let ctx = Context::new(0, DataDest::Ret, ControlDest::Unreachable);
@@ -2277,7 +2277,7 @@ impl DriverRef<'_> {
                     return self.write().handle_control(b, VOID_INSTR.direct(), ctx.control)
                 }
             },
-            Expr::While { condition, scope } => {
+            Expr::While { loop_id, condition, scope } => {
                 drop(d);
                 let test_bb = self.write().create_bb(b);
                 let loop_bb = self.write().create_bb(b);
@@ -2297,9 +2297,8 @@ impl DriverRef<'_> {
                     continue_block: test_bb,
                     continue_location_of_variable_to_increment: None,
                 };
-                b.loop_stack.push(loop_state);
+                b.loops.push_at(loop_id, loop_state);
                 self.build_scope(b, scope, Context::new(0, DataDest::Void, ControlDest::Block(test_bb)), tp);
-                debug_assert_eq!(loop_state, b.loop_stack.pop().unwrap());
 
                 match ctx.control {
                     ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenBlock { .. } => {
@@ -2310,7 +2309,7 @@ impl DriverRef<'_> {
                     ControlDest::Block(_) => return VOID_INSTR.direct(),
                 }
             },
-            Expr::For { binding, lower_bound, upper_bound, scope } => {
+            Expr::For { loop_id, binding, lower_bound, upper_bound, scope } => {
                 let binding_stored_decl_id = if let hir::Decl::LoopBinding { id, .. } = df!(d, binding.hir) {
                     id
                 } else {
@@ -2346,9 +2345,8 @@ impl DriverRef<'_> {
                     continue_block: test_bb,
                     continue_location_of_variable_to_increment: Some(binding_location),
                 };
-                b.loop_stack.push(loop_state);
+                b.loops.push_at(loop_id, loop_state);
                 self.build_scope(b, scope, Context::new(0, DataDest::Void, ControlDest::IncrementVariableAndThenBlock { location: binding_location, block: test_bb }), tp);
-                debug_assert_eq!(loop_state, b.loop_stack.pop().unwrap());
 
                 match ctx.control {
                     ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenBlock { .. } => {
@@ -2359,46 +2357,32 @@ impl DriverRef<'_> {
                     ControlDest::Block(_) => return VOID_INSTR.direct(),
                 }
             },
-            Expr::Break => {
+            Expr::Break(loop_id) => {
                 drop(d);
-                if let Some(loop_state) = b.loop_stack.last() {
-                    let branch = self.write().push_instr(b, Instr::Br(loop_state.break_block), expr);
-                    self.write().end_current_bb(b);
-                    // Must create unreachable basic block in case there are more statements in this loop
-                    let unreachable_bb = self.write().create_bb(b);
-                    self.write().start_bb(b, unreachable_bb);
+                let loop_id = loop_id.expect("loop id should be filled in by MIR generation time");
+                let loop_state = b.loops[loop_id];
+                let branch = self.write().push_instr(b, Instr::Br(loop_state.break_block), expr);
+                self.write().end_current_bb(b);
+                // Must create unreachable basic block in case there are more statements in this loop
+                let unreachable_bb = self.write().create_bb(b);
+                self.write().start_bb(b, unreachable_bb);
 
-                    return branch.direct();
-                } else {
-                    let range = self.read().get_range(expr);
-                    self.write().errors.push(
-                        Error::new("`break` expression found outside of loop")
-                            .adding_primary_range(range, "only valid within `while` or `for` loops")
-                    );
-                    VOID_INSTR.direct()
-                }
+                return branch.direct();
             },
-            Expr::Continue => {
+            Expr::Continue(loop_id) => {
                 drop(d);
-                if let Some(loop_state) = b.loop_stack.last().copied() {
-                    if let Some(variable_to_increment) = loop_state.continue_location_of_variable_to_increment {
-                        self.write().increment_variable(b, variable_to_increment);
-                    }
-                    let branch = self.write().push_instr(b, Instr::Br(loop_state.continue_block), expr);
-                    self.write().end_current_bb(b);
-                    // Must create unreachable basic block in case there are more statements in this loop
-                    let unreachable_bb = self.write().create_bb(b);
-                    self.write().start_bb(b, unreachable_bb);
-
-                    return branch.direct();
-                } else {
-                    let range = self.read().get_range(expr);
-                    self.write().errors.push(
-                        Error::new("`continue` expression found outside of loop")
-                            .adding_primary_range(range, "only valid within `while` or `for` loops")
-                    );
-                    VOID_INSTR.direct()
+                let loop_id = loop_id.expect("loop id should be filled in by MIR generation time");
+                let loop_state = b.loops[loop_id];
+                if let Some(variable_to_increment) = loop_state.continue_location_of_variable_to_increment {
+                    self.write().increment_variable(b, variable_to_increment);
                 }
+                let branch = self.write().push_instr(b, Instr::Br(loop_state.continue_block), expr);
+                self.write().end_current_bb(b);
+                // Must create unreachable basic block in case there are more statements in this loop
+                let unreachable_bb = self.write().create_bb(b);
+                self.write().start_bb(b, unreachable_bb);
+
+                return branch.direct();
             },
             Expr::Ret { expr, .. } => {
                 drop(d);
