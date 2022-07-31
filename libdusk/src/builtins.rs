@@ -8,7 +8,8 @@ use dusk_dire::ty::{Type, InternalType};
 use dusk_dire::mir::Const;
 
 use crate::driver::Driver;
-use crate::hir::{ScopeState, AutoPopStackEntry};
+use crate::hir::ScopeState;
+use crate::autopop::AutoPopStackEntry;
 use crate::parser::ParseResult;
 
 struct EnumBuilder {

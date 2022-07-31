@@ -12,6 +12,7 @@ mod typechecker;
 mod x64;
 mod rw_ref;
 mod builtins;
+mod autopop;
 
 pub mod source_info;
 pub mod mir;
