@@ -523,7 +523,7 @@ impl DriverRef<'_> {
                     let err = Error::new("cannot declare prototype outside of extern module")
                         .adding_primary_range(id, "prototype here");
                     drop(d);
-                    self.write().errors.push(err);
+                    self.write().diag.push(err);
                     Decl::Invalid
                 };
                 self.write().mir.decls.insert(id, decl.clone());
@@ -1466,7 +1466,7 @@ impl DriverRef<'_> {
 
         for (func, _instr) in comptime_calls {
             let name = self.read().fn_name(self.read().code.mir.functions[func].name).to_string();
-            self.write().errors.push(
+            self.write().diag.push(
                 Error::new(format!("unable to evaluate call to @comptime function '{}'", name))
             );
         }

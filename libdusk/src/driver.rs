@@ -14,7 +14,7 @@ use crate::source_info::SourceMap;
 use crate::token::TokenVec;
 use crate::hir;
 use crate::tir;
-use crate::error::Error;
+use crate::error::DiagnosticReporter;
 use crate::mir::{self, FunctionRef};
 use crate::type_provider::TypeProvider;
 use crate::index_vec::*;
@@ -30,12 +30,10 @@ pub struct Driver {
     pub interner: StringInterner,
     pub hir: hir::Builder,
     pub tir: tir::Builder,
-    pub errors: Vec<Error>,
+    pub diag: DiagnosticReporter,
     pub mir: mir::Builder,
     pub code: Code,
     pub internal_field_decls: InternalFieldDecls,
-    /// Total number of errors that have been flushed
-    pub flushed_errors: u32,
 }
 pub type DriverRef<'l> = RwRef<'l, Driver>;
 
@@ -48,11 +46,10 @@ impl Driver {
             interner: StringInterner::new(),
             hir: hir::Builder::default(),
             tir: tir::Builder::default(),
-            errors: Vec::new(),
+            diag: Default::default(),
             mir: mir::Builder::new(),
             code: Code::default(),
             internal_field_decls: InternalFieldDecls::default(),
-            flushed_errors: 0,
         }
     }
 }

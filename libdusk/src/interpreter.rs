@@ -559,7 +559,7 @@ impl Driver {
                 assert!(!pointee.is_mut);
                 assert!(pointee.ty == Type::i8() || pointee.ty == Type::u8());
                 #[cfg(debug_assertions)]
-                println!("Warning: about to blindly copy a pointer into the global strings!");
+                println!("NOTICE: about to blindly copy a pointer into the global strings!");
                 let string = unsafe { CString::from(CStr::from_ptr(val.as_raw_ptr() as *const _)) };
                 let id = self.code.mir.strings.push(string);
                 Const::Str { id, ty }
@@ -990,7 +990,7 @@ impl DriverRef<'_> {
         unsafe {
             let thunk_ptr = thunk.as_ptr::<u8>();
             type Thunk = fn(*const *mut u8, *mut u8);
-            let thunk: Thunk = std::mem::transmute(thunk_ptr);
+            let thunk: Thunk = mem::transmute(thunk_ptr);
             let mut return_val_storage = SmallVec::new();
             return_val_storage.resize(self.read().size_of(&func.ty.return_ty), 0);
             thunk(indirect_args.as_ptr(), return_val_storage.as_mut_ptr());

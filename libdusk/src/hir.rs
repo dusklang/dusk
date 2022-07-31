@@ -407,9 +407,9 @@ impl Driver {
                 }
             }
             let label_str = self.interner.resolve(label.symbol).unwrap().to_owned();
-            self.errors.push(
-                Error::new(format!("unable to find loop label `{}`", label_str))
-                    .adding_primary_range(label.range, "")
+            self.diag.report_error_no_range_msg(
+                format!("unable to find loop label `{}`", label_str),
+                label.range,
             );
             None
         } else {
@@ -417,7 +417,7 @@ impl Driver {
         }
     }
     fn control_flow_outside_loop_error(&mut self, kind: &str, range: SourceRange) {
-        self.errors.push(
+        self.diag.push(
             Error::new(format!("`{}` expression found outside of a loop", kind))
                 .adding_primary_range(range, "only valid inside a `for` or `while` loop")
         )
@@ -526,7 +526,7 @@ impl Driver {
                         // of the parser. This makes me a little uncomfortable. On the other hand, diagnosing this
                         // inside the parser would require exposing more state to the parser, which I also don't love.
                         let name_str = self.interner.resolve(name.symbol).unwrap();
-                        self.errors.push(
+                        self.diag.push(
                             Error::new(format!("loop with label `{}` already exists", name_str))
                                 .adding_primary_range(name.range, "")
                                 .adding_secondary_range(state.name.unwrap().range, "")
@@ -547,11 +547,9 @@ impl Driver {
         if let Some(name) = state.name {
             if !state.used {
                 let name_str = self.interner.resolve(name.symbol).unwrap().to_string();
-                // See comment in begin_loop() about the generating errors in HIR generation.
-                // TODO: this would be a good candidate for conversion to a warning, when I implement those.
-                self.errors.push(
-                    Error::new(format!("loop label `{}` never used", name_str))
-                        .adding_primary_range(name.range, "")
+                self.diag.report_warning_no_range_msg(
+                    format!("loop label `{}` never used", name_str),
+                    name.range
                 );
             }
         }

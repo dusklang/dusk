@@ -52,7 +52,7 @@ impl Driver {
             match self.cur(&p).kind {
                 TokenKind::Eof => break,
                 TokenKind::CloseCurly => {
-                    self.errors.push(
+                    self.diag.push(
                         Error::new("Extraneous closing brace '}'")
                             .adding_primary_range(self.cur(&p).range, "brace here")
                     );
@@ -232,7 +232,7 @@ impl Driver {
                     }
                     TokenKind::Comma => { self.next(p); }
                     TokenKind::Eof => {
-                        self.errors.push(
+                        self.diag.push(
                             Error::new("unclosed generic argument list")
                                 .adding_primary_range(open_square_bracket_range, "generic argument list began here")
                         );
@@ -339,7 +339,7 @@ impl Driver {
                 let expr = self.parse_expr(p).unwrap_or_else(|err| err);
                 if let TokenKind::RightParen = self.cur(p).kind {}
                 else {
-                    self.errors.push(
+                    self.diag.push(
                         Error::new("unclosed parentheses")
                             .adding_primary_range(self.cur(p).range, "paren here")
                     );
@@ -417,7 +417,7 @@ impl Driver {
                     unexpected_token => {
                         let unexpected_token = unexpected_token.clone();
                         let range = self.cur(p).range;
-                        self.errors.push(
+                        self.diag.push(
                             Error::new("unexpected token")
                                 .adding_primary_range(range, "expected `while` or `for` instead")
                         );
@@ -490,7 +490,7 @@ impl Driver {
                     let name = match self.next(p).kind {
                         &TokenKind::Ident(name) => name,
                         TokenKind::CloseSquareBracket | TokenKind::CloseCurly | TokenKind::RightParen | TokenKind::Comma => {
-                            self.errors.push(
+                            self.diag.push(
                                 Error::new("expected identifier after '.'")
                                     .adding_primary_range(dot_range, "'.' here")
                                     .adding_secondary_range(self.cur(p).range, "note: found this instead")
@@ -498,7 +498,7 @@ impl Driver {
                             return Ok(expr)
                         },
                         _ => {
-                            self.errors.push(
+                            self.diag.push(
                                 Error::new("expected identifier after '.'")
                                     .adding_primary_range(dot_range, "'.' here")
                                     .adding_secondary_range(self.cur(p).range, "note: found this instead")
@@ -565,7 +565,7 @@ impl Driver {
         match self.try_parse_expr(p, true) {
             Ok(expr) => Ok(expr),
             Err(_token) => {
-                self.errors.push(
+                self.diag.push(
                     Error::new("unrecognized term")
                         .adding_primary_range(self.cur(p).range, "term here")
                 );
@@ -667,7 +667,7 @@ impl Driver {
         let is_condition = is_requires || is_guarantees;
 
         if !is_condition && !is_comptime {
-            self.errors.push(
+            self.diag.push(
                 Error::new(format!("unrecognized attribute '{}'", self.interner.resolve(attr).unwrap()))
                     .adding_primary_range(ident_range, "")
             );
@@ -678,7 +678,7 @@ impl Driver {
                 self.next(p);
                 if matches!(self.cur(p).kind, TokenKind::RightParen) {
                     let paren_range = left_paren_range + self.cur(p).range;
-                    self.errors.push(
+                    self.diag.push(
                         Error::new("unexpected empty argument list on attribute")
                             .adding_primary_range(paren_range, "try removing these parentheses")
                     );
@@ -716,7 +716,7 @@ impl Driver {
 
         if let &Some(arg) = &arg {
             if is_comptime {
-                self.errors.push(
+                self.diag.push(
                     Error::new("argument passed to @comptime attribute")
                         .adding_primary_range(arg, "consider removing this expression and surrounding parentheses")
                 );
@@ -757,7 +757,7 @@ impl Driver {
         let Token { kind: cur_kind, range } = self.cur(p);
         if cur_kind != &kind {
             let cur_kind = cur_kind.clone();
-            self.errors.push(
+            self.diag.push(
                 Error::new("unexpected token")
                     .adding_primary_range(range, format!("expected {:?} instead", kind)) // TODO: user-facing pretty-printing of token kinds
             );
@@ -910,7 +910,7 @@ impl Driver {
                             AmbiguousGenericListKind::Ambiguous(idents) =>
                                 self.convert_ambiguous_generic_list_to_params(&idents),
                             AmbiguousGenericListKind::Arguments(_args) => {
-                                self.errors.push(
+                                self.diag.push(
                                     Error::new("invalid syntax in generic parameter list")
                                         .adding_primary_range(list.range, "expected comma-separated list of identifiers")
                                 );
@@ -954,7 +954,7 @@ impl Driver {
                 }
                 if let Some(attr) = attributes.iter().find(|attr| attr.attr == self.hir.known_idents.comptime) {
                     if !matches!(df!(decl.hir), hir::Decl::Computed { .. }) {
-                        self.errors.push(
+                        self.diag.push(
                             Error::new("unexpected @comptime attribute")
                                 .adding_primary_range(attr.range, "can only be applied to function declarations")
                         );
@@ -983,7 +983,7 @@ impl Driver {
             TokenKind::Assign => true,
             TokenKind::Colon => false,
             _ => {
-                self.errors.push(
+                self.diag.push(
                     Error::new("expected '=' or ':' after ':' when parsing declaration")
                         .adding_primary_range(colon_range, "':' here")
                 );
@@ -1019,7 +1019,7 @@ impl Driver {
                 _ => {
                     let item = self.parse_item(p)?;
                     if let Item::Expr(expr) = item {
-                        self.errors.push(
+                        self.diag.push(
                             Error::new("expressions are not allowed in the top-level of a module")
                                 .adding_primary_range(self.get_range(expr), "delete this")
                         );
@@ -1050,7 +1050,7 @@ impl Driver {
                 _ => {
                     let item = self.parse_item(p)?;
                     if let Item::Expr(expr) = item {
-                        self.errors.push(
+                        self.diag.push(
                             Error::new("expressions are not allowed in the top-level of a module")
                                 .adding_primary_range(self.get_range(expr), "delete this")
                         );
@@ -1087,7 +1087,7 @@ impl Driver {
                         fields.push(self.field_decl(name, strukt, ty, index, range));
                         if let Some(first_range) = used_names.get(&name).copied() {
                             let name_str = self.interner.resolve(name).unwrap();
-                            self.errors.push(
+                            self.diag.push(
                                 Error::new(format!("field with name '{}' already exists", name_str))
                                     .adding_primary_range(ident_range, "")
                                     .adding_secondary_range(first_range, "first field with that name here")
@@ -1175,7 +1175,7 @@ impl Driver {
         let close_curly_range = loop {
             match self.cur(p).kind {
                 TokenKind::Eof => {
-                    self.errors.push(
+                    self.diag.push(
                         Error::new("unclosed brace")
                             .adding_primary_range(open_curly_range, "opening brace was here")
                     );
@@ -1205,7 +1205,7 @@ impl Driver {
 
     fn check_for_fn_equal(&mut self, p: &mut Parser) -> ParseResult<bool> {
         if matches!(self.cur(p).kind, TokenKind::Assign) {
-            self.errors.push(
+            self.diag.push(
                 Error::new("assigned functions are not yet supported")
                     .adding_primary_range(self.cur(p).range, "")
             );
@@ -1223,7 +1223,7 @@ impl Driver {
         let name = if let TokenKind::Ident(name) = *self.cur(p).kind {
             name
         } else {
-            self.errors.push(
+            self.diag.push(
                 Error::new("expected function name after 'fn'")
                     .adding_primary_range(proto_range, "'fn' here")
                     .adding_secondary_range(self.cur(p).range, "note: found this instead")
@@ -1257,7 +1257,7 @@ impl Driver {
                     }
                 }
             } else {
-                self.errors.push(
+                self.diag.push(
                     Error::new("expected at least one parameter in generic parameter list")
                         .adding_primary_range(open_square_bracket_range, "list starts here")
                 );
@@ -1291,7 +1291,7 @@ impl Driver {
             let paren_range = self.eat_tok(p, TokenKind::RightParen)?;
             proto_range = source_info::concat(proto_range, paren_range);
         } else {
-            self.errors.push(
+            self.diag.push(
                 Error::new("function declaration must have parentheses")
                     .adding_primary_range(name_range, "")
                     .adding_secondary_range(

@@ -253,13 +253,13 @@ impl Driver {
                     // This might be a terrible idea, we'll just have to wait and see.
                     self.set_pos(l, prev_ending_delimiter + 2);
                 }
-                self.errors.push(err);
+                self.diag.push(err);
             }
             Ok(self.pack_tok(l, TokenKind::MultiLineComment))
         } else if self.is_str(l, b"*/") {
             unsafe { self.advance_by_ascii(l, 2); }
             let range = l.make_src_range(l.tok_start_loc..l.cur_loc());
-            self.errors.push(
+            self.diag.push(
                 Error::new(
                     "unexpected '*/' delimiter"
                 ).adding_primary_range(
@@ -279,7 +279,7 @@ impl Driver {
                         character
                     } else {
                         let range = l.make_src_range(l.cur_loc()..(l.cur_loc() + 1));
-                        self.errors.push(
+                        self.diag.push(
                             Error::new(
                                 format!("invalid escape character '{}'", self.cur_tok(l))
                             ).adding_primary_range(
@@ -317,7 +317,7 @@ impl Driver {
                     "unterminated string literal"
                 };
                 let range = l.make_src_range(l.tok_start_loc..l.tok_start_loc + 1);
-                self.errors.push(
+                self.diag.push(
                     Error::new(
                         msg
                     ).adding_primary_range(
@@ -430,7 +430,7 @@ impl Driver {
                     )+
                     else {
                         let range = l.make_src_range(l.tok_start_loc..(l.cur_loc() + 1));
-                        self.errors.push(
+                        self.diag.push(
                             Error::new(
                                 format!("unrecognized token '{}'", self.cur_tok(l))
                             ).adding_primary_range(

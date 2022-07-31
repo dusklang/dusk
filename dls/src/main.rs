@@ -1,9 +1,11 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
+use std::mem;
 
 use dusk_dire::hir::{Item, Expr};
 use dusk_dire::source_info::{SourceFileId, SourceRange};
+use libdusk::error::DiagnosticKind;
 use libdusk::new_code::NewCode;
 use libdusk::type_provider::{RealTypeProvider, TypeProvider};
 use lsp_server::{Connection, Message, Request, RequestId, ExtractError, Notification, Response};
@@ -55,7 +57,7 @@ impl FileContents {
 struct OpenFile {
     contents: FileContents,
     version: i32,
-    flushed_errors: Vec<Diagnostic>,
+    flushed_diagnostics: Vec<Diagnostic>,
 }
 
 struct Server {
@@ -78,7 +80,7 @@ impl Server {
         let open_file = OpenFile {
             contents: FileContents::new(document.text),
             version: document.version,
-            flushed_errors: Vec::new(),
+            flushed_diagnostics: Vec::new(),
         };
         self.open_files.borrow_mut().insert(document.uri.clone(), open_file);
         self.analyze_file(&document.uri);
@@ -370,12 +372,12 @@ fn send_response<R: serde::Serialize>(connection: &Connection, id: RequestId, re
 }
 
 impl Server {
-    fn flush_errors(&self, driver: &mut Driver, path: &Url) {
-        let errors = driver.get_latest_errors();
+    fn flush_diagnostics(&self, driver: &mut Driver, path: &Url) {
+        let diagnostics = driver.diag.get_latest_diagnostics();
         let mut new_diagnostics = Vec::new();
-        if !errors.is_empty() {
-            for error in errors {
-                let (main, others) = error.ranges.split_first().unwrap();
+        if !diagnostics.is_empty() {
+            for diagnostic in diagnostics {
+                let (main, others) = diagnostic.ranges.split_first().unwrap();
                 let dusk_main_range = driver.get_range(main.range);
                 let (_, main_range) = dusk_range_to_lsp_range(driver, dusk_main_range);
                 let mut related_info = Vec::new();
@@ -395,11 +397,16 @@ impl Server {
                     related_info.push(info);
                 }
 
+                let severity = match diagnostic.kind {
+                    DiagnosticKind::Error => DiagnosticSeverity::ERROR,
+                    DiagnosticKind::Warning => DiagnosticSeverity::WARNING,
+                };
+
                 let diagnostic = Diagnostic {
                     range: main_range,
-                    severity: Some(DiagnosticSeverity::ERROR),
+                    severity: Some(severity),
                     source: Some("dusk".to_string()),
-                    message: error.message.to_string(),
+                    message: diagnostic.message.to_string(),
                     related_information: (!related_info.is_empty()).then(|| related_info),
                     ..Default::default()
                 };
@@ -407,7 +414,7 @@ impl Server {
             }
         }
         self.open_files.borrow_mut().get_mut(path).unwrap()
-            .flushed_errors.extend(new_diagnostics);
+            .flushed_diagnostics.extend(new_diagnostics);
     }
     fn analyze_file(&self, path: &Url) -> (DriverRef, Option<RealTypeProvider>) {
         eprintln!("ANALYZING FILE AT PATH: {}", path);
@@ -429,7 +436,7 @@ impl Server {
         driver.write().initialize_hir();
 
         let fatal_parse_error = driver.write().parse_added_files().is_err();
-        self.flush_errors(&mut driver.write(), path);
+        self.flush_diagnostics(&mut driver.write(), path);
         
         driver.write().finalize_hir();
 
@@ -437,7 +444,7 @@ impl Server {
 
         let tp = (!fatal_parse_error).then(|| {
             driver.write().initialize_tir(&new_code);
-            self.flush_errors(&mut driver.write(), path);
+            self.flush_diagnostics(&mut driver.write(), path);
     
             let mut tp = driver.read().get_real_type_provider();
             let mut new_code = NewCode::placeholder();
@@ -453,22 +460,22 @@ impl Server {
                     }
                     new_code = driver.read().get_new_code_since(before);
 
-                    self.flush_errors(&mut driver.write(), path);
+                    self.flush_diagnostics(&mut driver.write(), path);
                 } else {
                     break;
                 }
             }
     
-            self.flush_errors(&mut driver.write(), path);
-            if !driver.read().has_failed() {
+            self.flush_diagnostics(&mut driver.write(), path);
+            if !driver.read().diag.has_failed() {
                 driver.build_mir(&tp);
-                self.flush_errors(&mut driver.write(), path);
+                self.flush_diagnostics(&mut driver.write(), path);
             }
             tp
         });
 
         for (url, file) in self.open_files.borrow_mut().iter_mut() {
-            let errors = std::mem::take(&mut file.flushed_errors);
+            let errors = mem::take(&mut file.flushed_diagnostics);
             // TODO: keep track of and pass the file version these diagnostics are for (the 3rd parameter)
             send_notification::<PublishDiagnostics>(&self.connection, PublishDiagnosticsParams {
                 uri: url.clone(),

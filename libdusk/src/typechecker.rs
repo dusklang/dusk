@@ -192,14 +192,14 @@ impl tir::AssignedDecl {
                             ),
                         ),
                 }
-                driver.errors.push(error);
+                driver.diag.push(error);
             }
             explicit_ty
         } else if let Ok(ty) = tp.constraints(self.root_expr).solve() {
             ty.ty
         } else {
             let range = df!(driver, self.decl_id.range);
-            driver.errors.push(
+            driver.diag.push(
                 Error::new("failed to infer type for assigned declaration")
                     .adding_primary_range(range, "declaration here")
             );
@@ -265,7 +265,7 @@ impl tir::Expr<tir::Assignment> {
                 AssignmentError::Immutable => {
                     let err = Error::new("unable to assign to immutable expression")
                         .adding_primary_range(self.lhs, "expression here");
-                    driver.errors.push(err);
+                    driver.diag.push(err);
                 }
             }
         }
@@ -336,7 +336,7 @@ impl tir::Expr<tir::Cast> {
                 *tp.cast_method_mut(self.cast_id) = method;
             },
             Err(_) => {
-                driver.errors.push(Error::new("Invalid cast").adding_primary_range(driver.get_range(self.id), "cast here"));
+                driver.diag.push(Error::new("Invalid cast").adding_primary_range(driver.get_range(self.id), "cast here"));
                 constraints.set_to(Type::Error);
                 *tp.cast_method_mut(self.cast_id) = CastMethod::Invalid;
             }
@@ -385,7 +385,7 @@ impl tir::Expr<tir::For> {
                             ),
                         ),
                 }
-                driver.errors.push(error);
+                driver.diag.push(error);
             }
             if let Some(err) = driver.can_unify_to(tp, self.upper_bound, &explicit_ty.clone().into()).err() {
                 let range = driver.get_range(self.upper_bound);
@@ -403,13 +403,13 @@ impl tir::Expr<tir::For> {
                             ),
                         ),
                 }
-                driver.errors.push(error);
+                driver.diag.push(error);
             }
 
             let ty = explicit_ty.to_owned();
 
             if !ty.is_int() && !ty.is_error() {
-                driver.errors.push(
+                driver.diag.push(
                     Error::new(format!("unsupported loop variable type `{:?}`", ty))
                         .adding_primary_range(driver.get_range(explicit_ty_expr), "range bounds must be integers")
                 );
@@ -425,7 +425,7 @@ impl tir::Expr<tir::For> {
                 Ok(ty) => ty.ty,
                 Err(_) => {
                     // TODO: better error message, probably
-                    driver.errors.push(
+                    driver.diag.push(
                         Error::new("unable to reconcile the types of the lower and upper bounds in range")
                             .adding_primary_range(range_range, "")
                     );
@@ -434,7 +434,7 @@ impl tir::Expr<tir::For> {
             };
 
             if !ty.is_int() && !ty.is_error() {
-                driver.errors.push(
+                driver.diag.push(
                     Error::new(format!("values of unsupported type `{:?}` used in range", ty))
                         .adding_primary_range(range_range, "range bounds must be integers")
                 );
@@ -576,7 +576,7 @@ impl tir::Expr<tir::Switch> {
                                     let err = Error::new(format!("Variant `{}` has a payload which goes ignored in pattern", variant_name_str))
                                         .adding_primary_range(range, "pattern here")
                                         .adding_secondary_range(decl, "variant here");
-                                    driver.errors.push(err);
+                                    driver.diag.push(err);
 
                                     // Even though the payload was ignored, still add record of attempt to match it. This will suppress unhandled variant errors.
                                     exhaustion.variants.entry(index).or_insert_with(|| {
@@ -599,21 +599,21 @@ impl tir::Expr<tir::Switch> {
                                         },
                                         ExhaustionReason::CatchAll(range) => err.add_primary_range(range, "covered by catch-all pattern here"),
                                     }
-                                    driver.errors.push(err);
+                                    driver.diag.push(err);
                                 } else {
                                     exhaustion.variants.insert(index, VariantExhaustion { reason: ExhaustionReason::Explicit { first_coverage: range, more_than_one_coverage: false }, payload: None });
                                 }
                             } else {
                                 let err = Error::new(format!("Variant `{}` does not exist in enum {:?}", variant_name_str, scrutinee_ty))
                                     .adding_primary_range(range, "referred to by pattern here");
-                                driver.errors.push(err);
+                                driver.diag.push(err);
                             }
                         },
                         PatternKind::NamedCatchAll(Ident { range, .. }) | PatternKind::AnonymousCatchAll(range) => {
                             if exhaustion.is_total(driver, &scrutinee_ty, tp) {
                                 let err = Error::new("switch case unreachable")
                                     .adding_primary_range(range, "all possible values already handled before this point");
-                                driver.errors.push(err);
+                                driver.diag.push(err);
                             } else {
                                 exhaustion.make_total(driver, &scrutinee_ty, range, tp);
                             }
@@ -622,7 +622,7 @@ impl tir::Expr<tir::Switch> {
                             let error = Error::new("cannot match enum type with integer pattern")
                                 .adding_primary_range(range, "pattern here")
                                 .adding_secondary_range(self.scrutinee, "scrutinee here");
-                            driver.errors.push(error);
+                            driver.diag.push(error);
                         },
                     }
                 }
@@ -657,7 +657,7 @@ impl tir::Expr<tir::Switch> {
 
                     let err = Error::new(err_msg)
                         .adding_primary_range(self.id, "");
-                    driver.errors.push(err);
+                    driver.diag.push(err);
                 }
             },
             Type::Int { width, is_signed: false } => {
@@ -674,19 +674,19 @@ impl tir::Expr<tir::Switch> {
                             if BigUint::from(value) >= num_values {
                                 let err = Error::new(format!("value `{}` does not fit into type {:?}", value, scrutinee_ty))
                                     .adding_primary_range(range, "in pattern here");
-                                driver.errors.push(err);
+                                driver.diag.push(err);
                             }
                             if let Some(prior_use) = exhaustion.get(&value) {
                                 // TODO: print as hex if necessary to match the user
                                 let err = Error::new(already_handled_message())
                                     .adding_primary_range(range, "redundant case here")
                                     .adding_secondary_range(*prior_use, "previously handled here");
-                                driver.errors.push(err);
+                                driver.diag.push(err);
                             } else if let Some(catch_all_range) = catch_all_range {
                                 let err = Error::new(already_handled_message())
                                     .adding_primary_range(range, "redundant case here")
                                     .adding_secondary_range(catch_all_range, "previously handled by catch-all case here");
-                                driver.errors.push(err);
+                                driver.diag.push(err);
                             }
                             exhaustion.insert(value, range);
                         },
@@ -697,7 +697,7 @@ impl tir::Expr<tir::Switch> {
                                 if let Some(catch_all_range) = catch_all_range {
                                     err.add_secondary_range(catch_all_range, "additional values handled by pattern here");
                                 }
-                                driver.errors.push(err);
+                                driver.diag.push(err);
                             } else {
                                 catch_all_range = Some(range);
                             }
@@ -706,7 +706,7 @@ impl tir::Expr<tir::Switch> {
                             let error = Error::new(format!("cannot match integer type {:?} with contextual member pattern", scrutinee_ty))
                                 .adding_primary_range(range, "pattern here")
                                 .adding_secondary_range(self.scrutinee, "scrutinee here");
-                            driver.errors.push(error);
+                            driver.diag.push(error);
                         },
                     }
 
@@ -717,7 +717,7 @@ impl tir::Expr<tir::Switch> {
                 if !all_exhausted {
                     let err = Error::new(format!("not all values of {:?} handled in switch expression. switch expressions must be exhaustive", scrutinee_ty))
                         .adding_primary_range(self.id, "consider adding a catch-all case to the end of this switch");
-                    driver.errors.push(err);
+                    driver.diag.push(err);
                 }
             }
             _ => todo!("Type {:?} is not supported in switch expression scrutinee position", scrutinee_ty),
@@ -734,7 +734,7 @@ impl tir::Expr<tir::Switch> {
         };
         if constraints.solve().is_err() {
             // TODO: better error message
-            driver.errors.push(
+            driver.diag.push(
                 Error::new("Failed to unify cases of switch expression")
                     .adding_primary_range(driver.get_range(self.id), "")
             );
@@ -773,7 +773,7 @@ impl tir::Expr<tir::Module> {
                 !tp.constraints(extern_library_path).is_error() &&
                 !string_types().iter().any(|ty| driver.can_unify_to(tp, extern_library_path, &ty.into()).is_ok())
             {
-                driver.errors.push(
+                driver.diag.push(
                     Error::new("Invalid expression passed to extern_mod; expected string")
                         .adding_primary_range(extern_library_path, "")
                 )
@@ -810,7 +810,7 @@ impl tir::Expr<tir::Enum> {
                             ),
                         ),
                 }
-                driver.errors.push(error);
+                driver.diag.push(error);
             }
         }
         tp.constraints_mut(self.id).set_to(Type::Ty);
@@ -844,7 +844,7 @@ impl tir::Expr<tir::Import> {
             !tp.constraints(self.path).is_error() &&
             !string_types().iter().any(|ty| driver.can_unify_to(tp, self.path, &ty.into()).is_ok())
         {
-            driver.errors.push(
+            driver.diag.push(
                 Error::new("Invalid expression passed to import; expected string")
                     .adding_primary_range(self.path, "")
             )
@@ -972,7 +972,7 @@ impl tir::Expr<tir::DeclRef> {
             let name = driver.code.hir.decl_refs[self.decl_ref_id].name;
             let name = driver.interner.resolve(name).unwrap();
             if overloads.nonviable_overloads.is_empty() {
-                driver.errors.push(
+                driver.diag.push(
                     Error::new(format!("no declarations named \"{}\" found in scope", name))
                         .adding_primary_range(driver.get_range(self.id), "referenced here")
                 );
@@ -983,7 +983,7 @@ impl tir::Expr<tir::DeclRef> {
                     let range = df!(driver, overload.range);
                     err.add_secondary_range(range, "non-viable overload found here");
                 }
-                driver.errors.push(err);
+                driver.diag.push(err);
             }
             (None, None)
         } else {
@@ -1009,7 +1009,7 @@ impl tir::Expr<tir::Call> {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         let decl_ref_id = self.decl_ref_id(driver);
 
-        // TODO: maybe std::mem::take() here instead of cloning? As the overloads in the type provider will just be overwritten later anyway.
+        // TODO: maybe mem::take() here instead of cloning? As the overloads in the type provider will just be overwritten later anyway.
         let mut overloads = tp.overloads(decl_ref_id).clone();
         // Rule out overloads that don't match the arguments
         let mut i = 0usize;
@@ -1197,7 +1197,7 @@ impl tir::Expr<tir::Pointer> {
                         ),
                     ),
             }
-            driver.errors.push(error);
+            driver.diag.push(error);
         }
         tp.constraints_mut(self.id).set_to(Type::Ty);
     }
@@ -1230,7 +1230,7 @@ impl tir::Expr<tir::FunctionTy> {
                             ),
                         ),
                 }
-                driver.errors.push(error);
+                driver.diag.push(error);
             }
         }
         for &param_ty in &self.param_tys {
@@ -1275,7 +1275,7 @@ impl tir::Expr<tir::Struct> {
                             ),
                         ),
                 }
-                driver.errors.push(error);
+                driver.diag.push(error);
             }
         }
         tp.constraints_mut(self.id).set_to(Type::Ty);
@@ -1310,7 +1310,7 @@ impl tir::Expr<tir::StructLit> {
                         ),
                     ),
             }
-            driver.errors.push(error);
+            driver.diag.push(error);
             Type::Error
         } else {
             let ty = tp.get_evaluated_type(self.ty).clone();
@@ -1337,7 +1337,7 @@ impl tir::Expr<tir::StructLit> {
                         
                         // TODO: Use range of the field identifier, which we don't have fine-grained access to yet
                         let range = driver.get_range(self.id);
-                        driver.errors.push(
+                        driver.diag.push(
                             Error::new(format!("Unknown field {} in struct literal", driver.interner.resolve(lit_field.name).unwrap()))
                                 .adding_primary_range(range, "")
                         );
@@ -1351,7 +1351,7 @@ impl tir::Expr<tir::StructLit> {
                         if maatch == ExprId::new(u32::MAX as usize) {
                             successful = false;
 
-                            driver.errors.push(
+                            driver.diag.push(
                                 Error::new(format!("Field {} not included in struct literal", driver.interner.resolve(field.name).unwrap()))
                                     .adding_primary_range(lit_range, "")
                                     .adding_secondary_range(field.decl, "field declared here")
@@ -1374,7 +1374,7 @@ impl tir::Expr<tir::StructLit> {
                                         ),
                                     ),
                             }
-                            driver.errors.push(error);
+                            driver.diag.push(error);
                         }
                     }
 
@@ -1386,7 +1386,7 @@ impl tir::Expr<tir::StructLit> {
                 },
                 other => {
                     let range = driver.get_range(self.ty);
-                    driver.errors.push(
+                    driver.diag.push(
                         Error::new(format!("Expected struct type in literal, found {:?}", *other))
                             .adding_primary_range(range, "")
                     );
@@ -1440,13 +1440,13 @@ impl tir::Expr<tir::If> {
                         ),
                     ),
             }
-            driver.errors.push(error);
+            driver.diag.push(error);
         }
         let constraints = tp.constraints(self.then_expr).intersect_with(tp.constraints(self.else_expr));
 
         if constraints.solve().is_err() {
             // TODO: handle void expressions, which don't have appropriate source location info.
-            driver.errors.push(
+            driver.diag.push(
                 Error::new("Failed to unify branches of if expression")
                     .adding_primary_range(driver.get_range(self.then_expr), "first terminal expression here")
                     .adding_primary_range(driver.get_range(self.else_expr), "second terminal expression here")
@@ -1495,7 +1495,7 @@ impl tir::Stmt {
                     ),
                 ),
             }
-            driver.errors.push(error);
+            driver.diag.push(error);
         } else {
             let constraints = tp.constraints_mut(self.root_expr);
             constraints.set_to(Type::Void);
@@ -1535,7 +1535,7 @@ impl tir::RetGroup {
                     }
                     error
                 };
-                driver.errors.push(error);
+                driver.diag.push(error);
             }
 
             // Assume we panic above unless the returned expr can unify to the return type
@@ -1654,7 +1654,7 @@ impl DriverRef<'_> {
             // Pass 2: propagate info up from roots to leaves
             self.write().run_pass_2(&unit.items, tp);
 
-            if !self.read().errors.is_empty() {
+            if self.read().diag.has_errors() {
                 return Err(());
             }
 

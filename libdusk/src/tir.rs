@@ -1,5 +1,6 @@
 use std::ops::{Deref, DerefMut};
 use std::collections::{HashMap, HashSet};
+use std::mem;
 
 use smallvec::SmallVec;
 use index_vec::{define_index_type, IdxRangeBounds};
@@ -511,7 +512,7 @@ impl Driver {
     }
 
     fn flush_staged_ret_groups(&mut self, sp: &mut Subprogram) {
-        let staged_ret_groups = std::mem::take(&mut self.tir.staged_ret_groups);
+        let staged_ret_groups = mem::take(&mut self.tir.staged_ret_groups);
         for (decl, exprs) in staged_ret_groups {
             assert!(matches!(df!(decl.hir), hir::Decl::Computed { .. }));
 

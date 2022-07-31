@@ -1,4 +1,5 @@
 use std::fmt::Display;
+use std::mem;
 
 pub trait IntoBytes {
     type Bytes: IntoIterator<Item=u8>;
@@ -8,7 +9,7 @@ macro_rules! into_bytes_impl {
     ($($ty:ty),*) => {
         $(
             impl IntoBytes for $ty {
-                type Bytes = [u8; std::mem::size_of::<Self>()];
+                type Bytes = [u8; mem::size_of::<Self>()];
                 fn into_bytes(self) -> Self::Bytes { self.to_le_bytes() }
             }
         )*
