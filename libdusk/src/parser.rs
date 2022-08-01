@@ -1192,10 +1192,7 @@ impl Driver {
                     self.start_next_list_item(p, item_list.id());
                     let item = self.parse_item(p)?;
                     if let Item::Expr(expr) = item {
-                        self.diag.push(
-                            Error::new("expressions are not allowed in the top-level of a module")
-                                .adding_primary_range(self.get_range(expr), "delete this")
-                        );
+                        self.diag.report_error("expressions are not allowed in the top-level of a module", expr, "delete this");
                     }
                     self.eat_separators(p);
                 }
@@ -1214,6 +1211,7 @@ impl Driver {
 
         let (_module_entry, module) = self.begin_module(Some(extern_mod), mod_range);
         self.eat_tok(p, TokenKind::OpenCurly)?;
+        let item_list = self.begin_list(p, TokenKind::could_begin_statement, [TokenKind::Semicolon], Some(TokenKind::CloseCurly));
         loop {
             match self.cur(p).kind {
                 TokenKind::Eof => panic!("Unexpected eof while parsing scope"),
@@ -1222,13 +1220,12 @@ impl Driver {
                     break;
                 },
                 _ => {
+                    self.start_next_list_item(p, item_list.id());
                     let item = self.parse_item(p)?;
                     if let Item::Expr(expr) = item {
-                        self.diag.push(
-                            Error::new("expressions are not allowed in the top-level of a module")
-                                .adding_primary_range(self.get_range(expr), "delete this")
-                        );
+                        self.diag.report_error("expressions are not allowed in the top-level of a module", expr, "delete this");
                     }
+                    self.eat_separators(p);
                 }
             }
         }
