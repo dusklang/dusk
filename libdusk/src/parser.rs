@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use arrayvec::ArrayVec;
 use smallvec::{SmallVec, smallvec};
-
 use string_interner::DefaultSymbol as Sym;
+use derivative::Derivative;
 
 use dusk_dire::hir::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment, Ident, Pattern, PatternKind, SwitchCase, ImperScopedDecl, ExternMod, ERROR_EXPR, ERROR_TYPE, VOID_TYPE};
 use dusk_dire::ty::Type;
@@ -35,13 +35,17 @@ struct TokenBeginLoc {
     range: SourceRange,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Derivative)]
+#[derivative(Debug)]
+#[derive(Clone)]
 struct ListState {
     id: usize,
     first_token_loc: TokenBeginLoc,
     separators: ArrayVec<TokenKind, 2>,
     terminator: Option<TokenKind>,
     last_item_had_separator: bool,
+    #[derivative(Debug="ignore")]
+    could_begin_item_proc: fn(&TokenKind) -> bool,
 }
 
 impl PartialEq<ListState> for usize {
@@ -93,7 +97,7 @@ impl Driver {
         self.get_tok_begin_loc(range)
     }
 
-    fn begin_list(&mut self, p: &mut Parser, separators: impl IntoIterator<Item=TokenKind>, terminator: Option<TokenKind>) -> AutoPopStackEntry<ListState, usize> {
+    fn begin_list(&mut self, p: &mut Parser, could_begin_item_proc: fn(&TokenKind) -> bool, separators: impl IntoIterator<Item=TokenKind>, terminator: Option<TokenKind>) -> AutoPopStackEntry<ListState, usize> {
         let id = p.list_counter;
         p.list_counter += 1;
         let first_token_loc = self.get_cur_begin_loc(p);
@@ -110,6 +114,7 @@ impl Driver {
                 separators,
                 terminator,
                 last_item_had_separator: true,
+                could_begin_item_proc,
             }
         )
     }
@@ -146,7 +151,8 @@ impl Driver {
             let last_token_in_item_to_date = self.peek_prev(p).range;
             let last_token_in_item_to_date_loc = self.get_tok_begin_loc(last_token_in_item_to_date);
             let loc = self.get_cur_begin_loc(p);
-            loc.line > last_token_in_item_to_date_loc.line && loc.offset <= state.first_token_loc.offset
+            let cur = self.cur(p).kind;
+            loc.line > last_token_in_item_to_date_loc.line && loc.offset <= state.first_token_loc.offset && (state.could_begin_item_proc)(cur)
         } else {
             false
         }
@@ -325,7 +331,7 @@ impl Driver {
             if let TokenKind::OpenCurly = self.cur(p).kind {
                 self.next(p);
                 let mut fields = Vec::new();
-                let field_list = self.begin_list(p, [TokenKind::Comma], Some(TokenKind::CloseCurly));
+                let field_list = self.begin_list(p, TokenKind::could_begin_struct_literal_field, [TokenKind::Comma], Some(TokenKind::CloseCurly));
                 let close_curly_range = loop {
                     match self.cur(p).kind {
                         TokenKind::Eof => panic!("Unexpected eof while parsing struct literal"),
@@ -767,7 +773,7 @@ impl Driver {
         let switch_range = self.eat_tok(p, TokenKind::Switch)?;
         let scrutinee = self.parse_non_struct_lit_expr(p);
         self.eat_tok(p, TokenKind::OpenCurly)?;
-        let case_list = self.begin_list(p, [TokenKind::Comma], Some(TokenKind::CloseCurly));
+        let case_list = self.begin_list(p, TokenKind::could_begin_pattern, [TokenKind::Comma], Some(TokenKind::CloseCurly));
         let mut cases = Vec::new();
         let close_curly_range = loop {
             match self.cur(p).kind {

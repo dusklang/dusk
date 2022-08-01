@@ -147,12 +147,31 @@ impl TokenKind {
         use TokenKind::*;
         !matches!(
             self,
-            Eof | Whitespace | Newline | SingleLineComment | MultiLineComment | Fn | Else | As |
-            Mut | Colon | Comma | RightParen | Dot | OpenCurly | CloseCurly | AddAssign |
-            SubAssign | MultAssign | DivAssign | ModAssign | BitwiseOrAssign | BitwiseAndAssign |
+            Eof | Whitespace | Newline | SingleLineComment | MultiLineComment | Else | As |
+            Mut | Comma | RightParen | OpenCurly | CloseCurly | AddAssign | SubAssign |
+            MultAssign | DivAssign | ModAssign | BitwiseOrAssign | BitwiseAndAssign |
             Div | Mod | Equal | NotEqual | Lte | Lt | Gte | GT | LogicalOr | LogicalAnd | Assign |
-            Pipe | AtSign | OpenSquareBracket | CloseSquareBracket
+            Pipe | OpenSquareBracket | CloseSquareBracket
         )
+    }
+
+    pub fn could_begin_struct_literal_field(&self) -> bool {
+        matches!(self, TokenKind::Ident(_))
+    }
+
+    pub fn could_begin_struct_field(&self) -> bool {
+        // attributes on struct fields aren't supported yet, but probably will be.
+        matches!(self, TokenKind::Ident(_) | TokenKind::AtSign)
+    }
+
+    pub fn could_begin_pattern(&self) -> bool {
+        matches!(self, TokenKind::Dot | TokenKind::Ident(_) | TokenKind::IntLit(_))
+    }
+
+    pub fn could_begin_statement(&self) -> bool {
+        self.could_begin_expression() || 
+            self.could_begin_pattern() || 
+            matches!(self, TokenKind::AtSign | TokenKind::Ident(_) | TokenKind::Mut | TokenKind::Fn)
     }
 
     pub fn pretty_print_separator(&self) -> Option<&'static str> {
