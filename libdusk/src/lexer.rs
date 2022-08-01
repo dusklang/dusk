@@ -444,6 +444,7 @@ impl Driver {
             }
             match_symbols!(
                 Colon               b":"
+                Semicolon           b";"
                 Comma               b","
                 LeftParen           b"("
                 RightParen          b")"

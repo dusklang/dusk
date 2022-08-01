@@ -46,6 +46,7 @@ pub enum TokenKind {
 
     // Symbols
     Colon,
+    Semicolon,
     Comma,
     LeftParen,
     RightParen,
@@ -152,5 +153,13 @@ impl TokenKind {
             Div | Mod | Equal | NotEqual | Lte | Lt | Gte | GT | LogicalOr | LogicalAnd | Assign |
             Pipe | AtSign | OpenSquareBracket | CloseSquareBracket
         )
+    }
+
+    pub fn pretty_print_separator(&self) -> Option<&'static str> {
+        match self {
+            TokenKind::Comma => Some(","),
+            TokenKind::Semicolon => Some(";"),
+            _ => None,
+        }
     }
 }

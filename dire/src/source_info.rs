@@ -21,8 +21,8 @@ impl Default for SourceRange {
 }
 
 impl SourceRange {
-    pub fn from_single_char(index: usize) -> SourceRange {
-        SourceRange {
+    pub fn from_single_char(index: usize) -> Self {
+        Self {
             start: index,
             end: index+1
         }
@@ -30,6 +30,10 @@ impl SourceRange {
 
     pub fn contains(&self, pos: usize) -> bool {
         self.start <= pos && pos < self.end
+    }
+
+    pub fn first_char_only(&self) -> Self {
+        Self::from_single_char(self.start)
     }
 }
 

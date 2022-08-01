@@ -31,6 +31,8 @@ struct TokenBeginLoc {
     line: usize,
     /// number of bytes the token is away from the beginning of the line
     offset: usize,
+
+    range: SourceRange,
 }
 
 #[derive(Debug, Clone)]
@@ -39,6 +41,7 @@ struct ListState {
     first_token_loc: TokenBeginLoc,
     separators: ArrayVec<TokenKind, 2>,
     terminator: Option<TokenKind>,
+    last_item_had_separator: bool,
 }
 
 impl PartialEq<ListState> for usize {
@@ -76,13 +79,18 @@ impl Driver {
         Ok(())
     }
 
-    fn get_cur_begin_loc(&self, p: &Parser) -> TokenBeginLoc {
-        let cur_tok_begin = self.cur(p).range.start;
-        let (_, line, offset) = self.lookup_file_line_and_offset(cur_tok_begin);
+    fn get_tok_begin_loc(&self, range: SourceRange) -> TokenBeginLoc {
+        let (_, line, offset) = self.lookup_file_line_and_offset(range.start);
         TokenBeginLoc {
             line,
             offset,
+            range,
         }
+    }
+
+    fn get_cur_begin_loc(&self, p: &Parser) -> TokenBeginLoc {
+        let range = self.cur(p).range;
+        self.get_tok_begin_loc(range)
     }
 
     fn begin_list(&mut self, p: &mut Parser, separators: impl IntoIterator<Item=TokenKind>, terminator: Option<TokenKind>) -> AutoPopStackEntry<ListState, usize> {
@@ -93,6 +101,7 @@ impl Driver {
         if let Some(terminator) = &terminator {
             debug_assert!(!separators.contains(terminator));
         }
+        debug_assert!(separators.iter().all(|sep| sep.pretty_print_separator().is_some()));
         p.list_stack.push(
             id,
             ListState {
@@ -100,23 +109,44 @@ impl Driver {
                 first_token_loc,
                 separators,
                 terminator,
+                last_item_had_separator: true,
             }
         )
     }
 
     fn start_next_list_item(&mut self, p: &mut Parser, id: usize) {
         let new_loc = self.get_cur_begin_loc(p);
-        p.list_stack.peek_mut(|state| {
+        let (begin_range, had_separator) = p.list_stack.peek_mut(|state| {
             let state = state.unwrap();
             debug_assert_eq!(id, state.id);
+            let begin_range = state.first_token_loc.range;
+            let had_separator = state.last_item_had_separator;
+            state.last_item_had_separator = true;
             state.first_token_loc = new_loc;
+            (begin_range, had_separator)
         });
+
+        let state = p.list_stack.peek().unwrap();
+        if !had_separator {
+            let range = self.cur(p).range;
+            let mut msg = "expected ".to_string();
+            for sep in &state.separators {
+                msg.push('\'');
+                msg.push_str(sep.pretty_print_separator().unwrap());
+                msg.push_str("', ");
+            }
+            msg.push_str("or a newline followed by no less whitespace than the beginning of the previous item");
+            self.diag.report_error("no separator found", range, msg)
+                .adding_secondary_range_with_msg(begin_range.first_char_only(), "if on a separate line, this item must start no later than this column");
+        }
     }
 
     fn has_implicit_separator(&self, p: &Parser) -> bool {
         if let Some(state) = p.list_stack.peek() {
+            let last_token_in_item_to_date = self.peek_prev(p).range;
+            let last_token_in_item_to_date_loc = self.get_tok_begin_loc(last_token_in_item_to_date);
             let loc = self.get_cur_begin_loc(p);
-            loc.line > state.first_token_loc.line && loc.offset <= state.first_token_loc.offset
+            loc.line > last_token_in_item_to_date_loc.line && loc.offset <= state.first_token_loc.offset
         } else {
             false
         }
@@ -163,6 +193,7 @@ impl Driver {
         } else if found_implicit {
             SeparatorResult::Implicit
         } else {
+            p.list_stack.peek_mut(|state| state.unwrap().last_item_had_separator = false);
             SeparatorResult::None
         }
     }
@@ -1514,13 +1545,22 @@ impl Driver {
         self.toks[p.file].at(p.cur - 1)
     }
 
-    fn peek_next(&self, p: &Parser) -> Token {
-        for i in (p.cur+1)..self.toks[p.file].len() {
-            let cur = self.toks[p.file].at(i);
+    fn find_first_significant(&self, p: &Parser, token_range: impl Iterator<Item=usize>) -> Option<Token> {
+        let toks = &self.toks[p.file];
+        for i in token_range {
+            let cur = toks.at(i);
             if cur.kind.is_significant() {
-                return cur
+                return Some(cur)
             }
         }
-        panic!("No significant token found");
+        None
+    }
+
+    fn peek_prev(&self, p: &Parser) -> Token {
+        self.find_first_significant(p, (0..p.cur).rev()).unwrap()
+    }
+
+    fn peek_next(&self, p: &Parser) -> Token {
+        self.find_first_significant(p, (p.cur+1)..self.toks[p.file].len()).unwrap()
     }
 }
