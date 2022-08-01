@@ -1348,13 +1348,11 @@ impl Driver {
         }
         let mut last_was_expr = false;
         let open_curly_range = self.eat_tok(p, TokenKind::OpenCurly)?;
+        let statement_list = self.begin_list(p, TokenKind::could_begin_statement, [TokenKind::Semicolon], Some(TokenKind::CloseCurly));
         let close_curly_range = loop {
             match self.cur(p).kind {
                 TokenKind::Eof => {
-                    self.diag.push(
-                        Error::new("unclosed brace")
-                            .adding_primary_range(open_curly_range, "opening brace was here")
-                    );
+                    self.diag.report_error("unclosed brace", open_curly_range, "opening brace was here");
                     return Err(ParseError::Eof)
                 },
                 TokenKind::CloseCurly => {
@@ -1363,6 +1361,7 @@ impl Driver {
                     break close_curly_range;
                 },
                 _ => {
+                    self.start_next_list_item(p, statement_list.id());
                     let item = self.parse_item(p)?;
 
                     // If the item was a standalone expression, make it a statement
@@ -1372,6 +1371,7 @@ impl Driver {
                     } else {
                         last_was_expr = false;
                     }
+                    self.eat_separators(p);
                 }
             }
         };
