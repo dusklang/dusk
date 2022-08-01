@@ -387,6 +387,7 @@ impl Driver {
         if let TokenKind::OpenSquareBracket = self.next(p).kind {
             let open_square_bracket_range = self.cur(p).range;
             self.next(p);
+            let generic_arg_list = self.begin_list(p, TokenKind::could_begin_expression, [TokenKind::Comma], Some(TokenKind::CloseSquareBracket));
             let mut args = Vec::new();
             loop {
                 let kind = self.cur(p).kind;
@@ -395,7 +396,6 @@ impl Driver {
                         self.next(p);
                         break;
                     }
-                    TokenKind::Comma => { self.next(p); }
                     TokenKind::Eof => {
                         self.diag.push(
                             Error::new("unclosed generic argument list")
@@ -404,8 +404,10 @@ impl Driver {
                         return Err(ParseError::Eof);
                     }
                     _ => {
+                        self.start_next_list_item(p, generic_arg_list.id());
                         if let Ok(arg) = self.parse_expr(p) {
                             args.push(arg);
+                            self.eat_separators(p);
                         }
                     }
                 }
@@ -417,20 +419,21 @@ impl Driver {
         if let TokenKind::LeftParen = self.cur(p).kind {
             has_parens = true;
             self.next(p);
+            let arg_list = self.begin_list(p, TokenKind::could_begin_expression, [TokenKind::Comma], Some(TokenKind::RightParen));
             loop {
-                let Token { kind, .. } = self.cur(p);
-                match kind {
+                match self.cur(p).kind {
                     TokenKind::RightParen => {
                         self.next(p);
                         break;
                     }
-                    TokenKind::Comma => { self.next(p); }
                     TokenKind::Eof => {
                         panic!("Reached eof in middle of decl ref");
                     }
                     _ => {
+                        self.start_next_list_item(p, arg_list.id());
                         if let Ok(arg) = self.parse_expr(p) {
                             args.push(arg);
+                            self.eat_separators(p);
                         }
                     }
                 }
