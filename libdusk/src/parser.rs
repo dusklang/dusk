@@ -146,16 +146,26 @@ impl Driver {
         }
     }
 
-    fn has_implicit_separator(&self, p: &Parser) -> bool {
+    fn has_implicit_separator_impl(&self, p: &Parser, cur: Token, prev_range: SourceRange) -> bool {
         if let Some(state) = p.list_stack.peek() {
-            let last_token_in_item_to_date = self.peek_prev(p).range;
-            let last_token_in_item_to_date_loc = self.get_tok_begin_loc(last_token_in_item_to_date);
-            let loc = self.get_cur_begin_loc(p);
-            let cur = self.cur(p).kind;
-            loc.line > last_token_in_item_to_date_loc.line && loc.offset <= state.first_token_loc.offset && (state.could_begin_item_proc)(cur)
+            let prev_loc = self.get_tok_begin_loc(prev_range);
+            let loc = self.get_tok_begin_loc(cur.range);
+            loc.line > prev_loc.line && loc.offset <= state.first_token_loc.offset && (state.could_begin_item_proc)(cur.kind)
         } else {
             false
         }
+    }
+
+    fn has_implicit_separator(&self, p: &Parser) -> bool {
+        let cur = self.cur(p);
+        let prev_range = self.peek_prev(p).range;
+        self.has_implicit_separator_impl(p, cur, prev_range)
+    }
+
+    fn next_tok_has_implicit_separator(&self, p: &Parser) -> bool {
+        let cur = self.peek_next(p);
+        let prev_range = self.cur(p).range;
+        self.has_implicit_separator_impl(p, cur, prev_range)
     }
 
     fn eat_separators(&mut self, p: &mut Parser) -> SeparatorResult {
@@ -578,9 +588,7 @@ impl Driver {
             TokenKind::If => self.parse_if(p),
             TokenKind::While => self.parse_while(p, None),
             TokenKind::For => self.parse_for(p, None),
-            TokenKind::Loop => {
-                let _loop_range = self.cur(p).range;
-                self.next(p);
+            TokenKind::Colon => {
                 self.eat_tok(p, TokenKind::Colon)?;
                 let label = self.eat_ident(p);
                 match self.cur(p).kind {
@@ -1078,10 +1086,16 @@ impl Driver {
         match self.cur(p).kind {
             &TokenKind::Ident(name) => {
                 let name = Ident { symbol: name, range: self.cur(p).range };
-                if let TokenKind::OpenSquareBracket = self.peek_next(p).kind {
+                if self.next_tok_has_implicit_separator(p) {
+                    let expr = self.parse_expr(p).unwrap_or_else(|err| err);
+                    Ok(Item::Expr(expr))
+                } else if let TokenKind::OpenSquareBracket = self.peek_next(p).kind {
                     self.next(p);
                     let list = self.parse_ambiguous_generic_list(p)?;
-                    if let TokenKind::Colon = self.peek_next(p).kind {
+                    if self.next_tok_has_implicit_separator(p) {
+                        // THIS TODO IS DUPLICATED BELOW
+                        todo!("explicit generic arguments at the top-level scope are not yet supported");
+                    } else if let TokenKind::Colon = self.peek_next(p).kind {
                         let params = match list.kind {
                             AmbiguousGenericListKind::Ambiguous(idents) =>
                                 self.convert_ambiguous_generic_list_to_params(&idents),
@@ -1096,6 +1110,7 @@ impl Driver {
                         let decl = self.parse_decl(name, params, p)?;
                         Ok(Item::Decl(decl))
                     } else {
+                        // THIS TODO IS DUPLICATED ABOVE
                         todo!("explicit generic arguments at the top-level scope are not yet supported");
                     }
                 } else if let TokenKind::Colon = self.peek_next(p).kind {

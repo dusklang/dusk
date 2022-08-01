@@ -1,7 +1,7 @@
 fn main() {
-    loop :outer_loop for j in 0..4 {
+    :outer_loop for j in 0..4 {
         core.println("Outer loop")
-        loop :inner_loop for i in 0..12 {
+        :inner_loop for i in 0..12 {
             core.println("    Inner loop")
             if i == 4 {
                 continue :outer_loop
