@@ -623,12 +623,16 @@ impl Driver {
                 self.next(p);
                 self.eat_tok(p, TokenKind::LeftParen)?;
                 let mut param_tys = Vec::new();
+                let param_ty_list = self.begin_list(p, TokenKind::could_begin_expression, [TokenKind::Comma], Some(TokenKind::RightParen));
                 loop {
                     match self.cur(p).kind {
                         TokenKind::Eof => panic!("Unexpected eof while parsing function type"),
                         TokenKind::RightParen => break,
-                        TokenKind::Comma => { self.next(p); },
-                        _ => param_tys.push(self.parse_type(p).0),
+                        _ => {
+                            self.start_next_list_item(p, param_ty_list.id());
+                            param_tys.push(self.parse_type(p).0);
+                            self.eat_separators(p);
+                        },
                     }
                 }
                 self.eat_tok(p, TokenKind::RightParen)?;
@@ -656,11 +660,9 @@ impl Driver {
                     let name = match self.next(p).kind {
                         &TokenKind::Ident(name) => name,
                         TokenKind::CloseSquareBracket | TokenKind::CloseCurly | TokenKind::RightParen | TokenKind::Comma => {
-                            self.diag.push(
-                                Error::new("expected identifier after '.'")
-                                    .adding_primary_range(dot_range, "'.' here")
-                                    .adding_secondary_range(self.cur(p).range, "note: found this instead")
-                            );
+                            let range = self.cur(p).range;
+                            self.diag.report_error("expected identifier after '.'", dot_range, "'.' here")
+                                .adding_secondary_range_with_msg(range, "note: found this instead");
                             return Ok(expr)
                         },
                         _ => {
@@ -1237,6 +1239,7 @@ impl Driver {
         let mut fields = Vec::new();
         let (expr, strukt) = self.reserve_struct();
         let mut used_names = HashMap::new();
+        let field_list = self.begin_list(p, TokenKind::could_begin_struct_field, [TokenKind::Comma], Some(TokenKind::CloseCurly));
         let close_curly_range = loop {
             match self.cur(p).kind {
                 TokenKind::Eof => panic!("Unexpected eof while parsing struct expression"),
@@ -1245,8 +1248,8 @@ impl Driver {
                     self.next(p);
                     break close_curly_range;
                 },
-                TokenKind::Comma => { self.next(p); },
                 _ => {
+                    self.start_next_list_item(p, field_list.id());
                     if let Token { kind: &TokenKind::Ident(name), range: ident_range } = self.cur(p) {
                         self.next(p);
                         self.eat_tok(p, TokenKind::Colon)?;
@@ -1256,16 +1259,16 @@ impl Driver {
                         fields.push(self.field_decl(name, strukt, ty, index, range));
                         if let Some(first_range) = used_names.get(&name).copied() {
                             let name_str = self.interner.resolve(name).unwrap();
-                            self.diag.push(
-                                Error::new(format!("field with name '{}' already exists", name_str))
-                                    .adding_primary_range(ident_range, "")
-                                    .adding_secondary_range(first_range, "first field with that name here")
-                            )
+                            self.diag.report_error_no_range_msg(format!("field with name '{}' already exists", name_str), ident_range)
+                                .adding_secondary_range_with_msg(first_range, "first field with that name here");
                         } else {
                             used_names.insert(name, ident_range);
                         }
+                        self.eat_separators(p);
                     } else {
-                        panic!("Unexpected token {:?}, expected field name", self.cur(p).kind);
+                        let range = self.cur(p).range;
+                        self.diag.report_error("unexpected token", range, "expected field name");
+                        self.next(p);
                     }
                 }
             }
@@ -1291,6 +1294,7 @@ impl Driver {
         let (expr, enuum) = self.reserve_enum();
 
         let mut variants = Vec::new();
+        let variant_list = self.begin_list(p, TokenKind::could_begin_variant_decl, [TokenKind::Comma], Some(TokenKind::CloseCurly));
         let close_curly_range = loop {
             match self.cur(p).kind {
                 TokenKind::Eof => panic!("Unexpected eof while parsing struct expression"),
@@ -1299,8 +1303,8 @@ impl Driver {
                     self.next(p);
                     break close_curly_range;
                 },
-                TokenKind::Comma => { self.next(p); },
                 _ => {
+                    self.start_next_list_item(p, variant_list.id());
                     if let Token { kind: &TokenKind::Ident(name), range: ident_range } = self.cur(p) {
                         self.next(p);
                         let index = variants.len();
@@ -1317,8 +1321,11 @@ impl Driver {
                             _ => None,
                         };
                         variants.push(self.variant_decl(name, expr, enuum, index, payload_ty, ident_range));
+                        self.eat_separators(p);
                     } else {
-                        panic!("Unexpected token {:?}, expected variant name", self.cur(p).kind);
+                        let range = self.cur(p).range;
+                        self.diag.report_error("unexpected token", range, "expected variant name");
+                        self.next(p);
                     }
                 }
             }
@@ -1407,10 +1414,12 @@ impl Driver {
         if let TokenKind::OpenSquareBracket = self.next(p).kind {
             let open_square_bracket_range = self.cur(p).range;
             self.next(p);
+            let generic_param_syntax_list = self.begin_list(p, TokenKind::could_begin_generic_parameter, [TokenKind::Comma], Some(TokenKind::CloseSquareBracket));
             if matches!(self.cur(p).kind, TokenKind::Ident(_)) {
                 generic_param_list.ids.start = self.hir.generic_params.peek_next_idx();
                 generic_param_list.ids.end = generic_param_list.ids.start;
                 while let TokenKind::Ident(name) = *self.cur(p).kind {
+                    self.start_next_list_item(p, generic_param_syntax_list.id());
                     // Claim a GenericParamId for yourself, then set the `end` value to be one past the end
                     let generic_param = self.hir.generic_params.next_idx();
                     // Make sure nobody interrupts this loop and creates an unrelated generic param
@@ -1421,15 +1430,10 @@ impl Driver {
                     generic_param_list.names.push(name);
                     self.next(p);
                     generic_param_list.ranges.push(param_range);
-                    while let TokenKind::Comma = self.cur(p).kind {
-                        self.next(p);
-                    }
+                    self.eat_separators(p);
                 }
             } else {
-                self.diag.push(
-                    Error::new("expected at least one parameter in generic parameter list")
-                        .adding_primary_range(open_square_bracket_range, "list starts here")
-                );
+                self.diag.report_error("expected at least one parameter in generic parameter list", open_square_bracket_range, "list starts here");
             }
             let bracket_range = self.eat_tok(p, TokenKind::CloseSquareBracket)?;
             proto_range = source_info::concat(proto_range, bracket_range);
@@ -1445,7 +1449,9 @@ impl Driver {
         let ns = self.begin_generic_context(generic_params.clone());
         if let TokenKind::LeftParen = self.cur(p).kind {
             self.next(p);
+            let parameter_list = self.begin_list(p, TokenKind::could_begin_parameter, [TokenKind::Comma], Some(TokenKind::RightParen));
             while let TokenKind::Ident(name) = *self.cur(p).kind {
+                self.start_next_list_item(p, parameter_list.id());
                 let param_range = self.cur(p).range;
                 param_names.push(name);
                 self.next(p);
@@ -1453,9 +1459,7 @@ impl Driver {
                 let (ty, _ty_range) = self.parse_type(p);
                 param_ranges.push(param_range);
                 param_tys.push(ty);
-                while let TokenKind::Comma = self.cur(p).kind {
-                    self.next(p);
-                }
+                self.eat_separators(p);
             }
             let paren_range = self.eat_tok(p, TokenKind::RightParen)?;
             proto_range = source_info::concat(proto_range, paren_range);

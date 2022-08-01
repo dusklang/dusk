@@ -164,6 +164,16 @@ impl TokenKind {
         matches!(self, TokenKind::Ident(_) | TokenKind::AtSign)
     }
 
+    pub fn could_begin_parameter(&self) -> bool {
+        // attributes on parameters aren't supported yet, but probably will be.
+        matches!(self, TokenKind::Ident(_) | TokenKind::AtSign)
+    }
+
+    pub fn could_begin_variant_decl(&self) -> bool {
+        // attributes on enum variants aren't supported yet, but probably will be.
+        matches!(self, TokenKind::Ident(_) | TokenKind::AtSign)
+    }
+
     pub fn could_begin_pattern(&self) -> bool {
         matches!(self, TokenKind::Dot | TokenKind::Ident(_) | TokenKind::IntLit(_))
     }
@@ -172,6 +182,10 @@ impl TokenKind {
         self.could_begin_expression() || 
             self.could_begin_pattern() || 
             matches!(self, TokenKind::AtSign | TokenKind::Ident(_) | TokenKind::Mut | TokenKind::Fn)
+    }
+
+    pub fn could_begin_generic_parameter(&self) -> bool {
+        matches!(self, TokenKind::Ident(_))
     }
 
     pub fn pretty_print_separator(&self) -> Option<&'static str> {
