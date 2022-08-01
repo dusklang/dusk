@@ -210,6 +210,7 @@ impl Driver {
         let mut p = Parser { file, cur: 0, list_stack: Default::default(), list_counter: 0 };
 
         self.skip_insignificant(&mut p);
+        let item_list = self.begin_list(&mut p, TokenKind::could_begin_statement, [TokenKind::Semicolon], None);
         loop {
             match self.cur(&p).kind {
                 TokenKind::Eof => break,
@@ -220,7 +221,11 @@ impl Driver {
                     );
                     self.next(&mut p);
                 },
-                _ => { self.parse_item(&mut p)?; }
+                _ => {
+                    self.start_next_list_item(&mut p, item_list.id());
+                    self.parse_item(&mut p)?;
+                    self.eat_separators(&mut p);
+                }
             }
         }
         Ok(())
