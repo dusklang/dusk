@@ -137,7 +137,7 @@ impl Driver {
             }
             msg.push_str("or a newline followed by no less whitespace than the beginning of the previous item");
             self.diag.report_error("no separator found", range, msg)
-                .adding_secondary_range_with_msg(begin_range.first_char_only(), "if on a separate line, this item must start no later than this column");
+                .adding_secondary_range_with_msg(begin_range.first_char_only(), "if on a separate line, the next item must start no later than this column");
         }
     }
 
@@ -325,6 +325,7 @@ impl Driver {
             if let TokenKind::OpenCurly = self.cur(p).kind {
                 self.next(p);
                 let mut fields = Vec::new();
+                let field_list = self.begin_list(p, [TokenKind::Comma], Some(TokenKind::CloseCurly));
                 let close_curly_range = loop {
                     match self.cur(p).kind {
                         TokenKind::Eof => panic!("Unexpected eof while parsing struct literal"),
@@ -333,17 +334,20 @@ impl Driver {
                             self.next(p);
                             break close_curly_range;
                         },
-                        TokenKind::Comma => { self.next(p); },
                         _ => {
                             if let &TokenKind::Ident(name) = self.cur(p).kind {
+                                self.start_next_list_item(p, field_list.id());
                                 self.next(p);
                                 self.eat_tok(p, TokenKind::Colon)?;
                                 let expr = self.parse_expr(p).unwrap_or(ERROR_TYPE);
                                 fields.push(
                                     FieldAssignment { name, expr }
                                 );
+                                self.eat_separators(p);
                             } else {
-                                panic!("Unexpected token {:?}, expected field name", self.cur(p).kind);
+                                let range = self.cur(p).range;
+                                self.diag.report_error("unexpected token", range, "expected field name");
+                                self.next(p);
                             }
                         }
                     }
@@ -379,7 +383,6 @@ impl Driver {
             self.next(p);
             let mut args = Vec::new();
             loop {
-                // TODO: actually implement proper comma and newline handling like I've thought about
                 let kind = self.cur(p).kind;
                 match kind {
                     TokenKind::CloseSquareBracket => {
@@ -409,7 +412,6 @@ impl Driver {
             has_parens = true;
             self.next(p);
             loop {
-                // TODO: actually implement proper comma and newline handling like I've thought about
                 let Token { kind, .. } = self.cur(p);
                 match kind {
                     TokenKind::RightParen => {
@@ -612,7 +614,6 @@ impl Driver {
                 self.next(p);
                 self.eat_tok(p, TokenKind::LeftParen)?;
                 let mut param_tys = Vec::new();
-                // TODO: implement proper comma/newline handling here
                 loop {
                     match self.cur(p).kind {
                         TokenKind::Eof => panic!("Unexpected eof while parsing function type"),
