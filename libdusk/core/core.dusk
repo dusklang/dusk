@@ -57,17 +57,17 @@ fn assert(condition: bool) {
 
 fn read_file(path: i8*): ByteBuffer {
     switch compiler.target {
-        .macos: unix.read_file(path),
-        .linux: unix.read_file(path),
+        .macos: unix.read_file(path)
+        .linux: unix.read_file(path)
         .windows: windows.read_file(path)
     }
 }
 
 fn print(str: i8*) {
     switch compiler.target {
-        .macos: unix.print(str),
-        .linux: unix.print(str),
-        .windows: windows.print(str),
+        .macos: unix.print(str)
+        .linux: unix.print(str)
+        .windows: windows.print(str)
     }
 }
 
@@ -218,8 +218,8 @@ unix :: mod {
     // FFI stuff
     fn libc_path(): compiler.StringLiteral {
         switch compiler.target {
-            .macos: "libSystem.dylib",
-            .linux: "libc.so.6",
+            .macos: "libSystem.dylib"
+            .linux: "libc.so.6"
             .windows: "libc is not provided on windows"
         }
     }

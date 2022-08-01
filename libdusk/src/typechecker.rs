@@ -585,7 +585,7 @@ impl tir::Expr<tir::Switch> {
                                     });
                                 } else if let Some(prior_match) = exhaustion.variants.get_mut(&index) {
                                     // This variant has no payload, and has already been matched.
-                                    let mut err = Error::new(format!("Variant `{}` already covered in switch expression", variant_name_str))
+                                    let mut err = Error::new(format!("Variant `{}` already covered in `switch` expression", variant_name_str))
                                         .adding_primary_range(range, "redundant case here");
                                     match prior_match.reason {
                                         ExhaustionReason::Explicit { first_coverage, ref mut more_than_one_coverage } => {
@@ -1408,7 +1408,6 @@ impl tir::Expr<tir::StructLit> {
             let fields = &driver.code.hir.structs[lit.strukt].fields;
             let is_generic = fields.iter()
                 .any(|field| tp.get_evaluated_type(field.ty).has_generic_parameters());
-            driver.mir.struct_was_non_generic.resize(driver.code.hir.structs.len(), false);
             driver.mir.struct_was_non_generic[lit.strukt] = !is_generic;
 
             debug_assert_eq!(lit.fields.len(), fields.len());
@@ -1647,6 +1646,9 @@ impl Driver {
 impl DriverRef<'_> {
     pub fn type_check(&mut self, units: &Units, tp: &mut RealTypeProvider, new_code: NewCode) -> Result<(), ()> {
         tp.resize(&self.read(), new_code);
+        // depended on by StructLit
+        let num_structs = self.read().code.hir.structs.len();
+        self.write().mir.struct_was_non_generic.resize(num_structs, false);
         for unit in &units.units {
             // Pass 1: propagate info down from leaves to roots
             self.write().run_pass_1(&unit.items, 0, tp);

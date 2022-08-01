@@ -1,15 +1,15 @@
 fn libc_path(): compiler.StringLiteral {
     switch compiler.target {
-        .macos: "libSystem.dylib",
-        .linux: "libc.so.6",
+        .macos: "libSystem.dylib"
+        .linux: "libc.so.6"
         .windows: "libc does not exist on Windows"
     }
 }
 
 fn is_unix(): bool {
     switch compiler.target {
-        .macos: true,
-        .linux: true,
+        .macos: true
+        .linux: true
         .windows: false
     }
 }

@@ -1,7 +1,7 @@
 fn main() {
     switch compiler.target {
-        .windows: print("Hello from Windows!\n"),
-        .linux:   print("Hello from Linux!\n"),
-        .macos:   print("Hello from macOS!\n"),
+        .windows: print("Hello from Windows!\n")
+        .linux:   print("Hello from Linux!\n")
+        .macos:   print("Hello from macOS!\n")
     }
 }

@@ -33,9 +33,9 @@ impl<T: Debug> AutoPopStack<T> {
     }
 }
 
-impl<T: Debug + Copy> AutoPopStack<T> {
+impl<T: Debug + Clone> AutoPopStack<T> {
     pub fn peek(&self) -> Option<T> {
-        self.stack.lock().unwrap().borrow().last().copied()
+        self.stack.lock().unwrap().borrow().last().cloned()
     }
 }
 

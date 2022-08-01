@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use arrayvec::ArrayVec;
 use smallvec::{SmallVec, smallvec};
 
 use string_interner::DefaultSymbol as Sym;
@@ -13,12 +14,37 @@ use crate::hir::{ConditionKind, GenericParamList};
 use crate::token::{TokenKind, Token};
 use crate::builder::{BinOp, UnOp, OpPlacement};
 use crate::error::Error;
+use crate::autopop::{AutoPopStack, AutoPopStackEntry};
 
 use dusk_proc_macros::*;
 
 struct Parser {
     file: SourceFileId,
     cur: usize,
+    list_stack: AutoPopStack<ListState>,
+    list_counter: usize,
+}
+
+#[derive(Debug, Clone)]
+struct TokenBeginLoc {
+    /// zero-based line number
+    line: usize,
+    /// number of bytes the token is away from the beginning of the line
+    offset: usize,
+}
+
+#[derive(Debug, Clone)]
+struct ListState {
+    id: usize,
+    first_token_loc: TokenBeginLoc,
+    separators: ArrayVec<TokenKind, 2>,
+    terminator: Option<TokenKind>,
+}
+
+impl PartialEq<ListState> for usize {
+    fn eq(&self, other: &ListState) -> bool {
+        *self == other.id
+    }
 }
 
 #[derive(Debug)]
@@ -28,6 +54,14 @@ pub enum ParseError {
     Eof,
 }
 pub type ParseResult<T> = Result<T, ParseError>;
+
+enum SeparatorResult {
+    Implicit,
+    Explicit(TokenKind),
+    Terminator,
+    Eof,
+    None,
+}
 
 impl Driver {
     pub fn parse_added_files(&mut self) -> ParseResult<()> {
@@ -42,10 +76,101 @@ impl Driver {
         Ok(())
     }
 
+    fn get_cur_begin_loc(&self, p: &Parser) -> TokenBeginLoc {
+        let cur_tok_begin = self.cur(p).range.start;
+        let (_, line, offset) = self.lookup_file_line_and_offset(cur_tok_begin);
+        TokenBeginLoc {
+            line,
+            offset,
+        }
+    }
+
+    fn begin_list(&mut self, p: &mut Parser, separators: impl IntoIterator<Item=TokenKind>, terminator: Option<TokenKind>) -> AutoPopStackEntry<ListState, usize> {
+        let id = p.list_counter;
+        p.list_counter += 1;
+        let first_token_loc = self.get_cur_begin_loc(p);
+        let separators: ArrayVec<TokenKind, 2> = separators.into_iter().collect();
+        if let Some(terminator) = &terminator {
+            debug_assert!(!separators.contains(terminator));
+        }
+        p.list_stack.push(
+            id,
+            ListState {
+                id,
+                first_token_loc,
+                separators,
+                terminator,
+            }
+        )
+    }
+
+    fn start_next_list_item(&mut self, p: &mut Parser, id: usize) {
+        let new_loc = self.get_cur_begin_loc(p);
+        p.list_stack.peek_mut(|state| {
+            let state = state.unwrap();
+            debug_assert_eq!(id, state.id);
+            state.first_token_loc = new_loc;
+        });
+    }
+
+    fn has_implicit_separator(&self, p: &Parser) -> bool {
+        if let Some(state) = p.list_stack.peek() {
+            let loc = self.get_cur_begin_loc(p);
+            loc.line > state.first_token_loc.line && loc.offset <= state.first_token_loc.offset
+        } else {
+            false
+        }
+    }
+
+    fn eat_separators(&mut self, p: &mut Parser) -> SeparatorResult {
+        let list_state = p.list_stack.peek().expect("invalid call to expect_separator()");
+        let found_implicit = self.has_implicit_separator(p);
+        let mut found_explicit = None;
+        let mut first_extraneous_separator = None;
+        let mut num_separators_found = 0;
+        loop {
+            let Token { kind: cur_tok, range } = self.cur(p);
+            if Some(cur_tok) == list_state.terminator.as_ref() {
+                return SeparatorResult::Terminator;
+            } else if matches!(cur_tok, TokenKind::Eof) {
+                return SeparatorResult::Eof;
+            } else if list_state.separators.contains(cur_tok) {
+                num_separators_found += 1;
+                if num_separators_found == 1 {
+                    found_explicit = Some((cur_tok.clone(), range));
+                } else if num_separators_found == 2 {
+                    first_extraneous_separator = Some(range);
+                }
+                self.next(p);
+            } else {
+                break;
+            }
+        }
+
+        if let Some(first_extraneous_separator) = first_extraneous_separator {
+            let ess = if num_separators_found > 2 {
+                "s"
+            } else {
+                ""
+            };
+            
+            self.diag.report_warning_no_range_msg(format!("extraneous separator{}", ess), first_extraneous_separator)
+                .adding_secondary_range_with_msg(found_explicit.as_ref().unwrap().1, "first separator here is sufficient");
+        }
+
+        if let Some((tok, _)) = found_explicit {
+            SeparatorResult::Explicit(tok)
+        } else if found_implicit {
+            SeparatorResult::Implicit
+        } else {
+            SeparatorResult::None
+        }
+    }
+
     fn parse_single_file(&mut self, file: SourceFileId) -> ParseResult<()> {
         self.lex(file).map_err(|_| ParseError::UnableToLex)?;
         let _new_file = self.start_new_file(file);
-        let mut p = Parser { file, cur: 0 };
+        let mut p = Parser { file, cur: 0, list_stack: Default::default(), list_counter: 0 };
 
         self.skip_insignificant(&mut p);
         loop {
@@ -425,7 +550,7 @@ impl Driver {
                     },
                 }
             },
-            TokenKind::Switch => Ok(self.parse_switch(p)?),
+            TokenKind::Switch => self.parse_switch(p),
             TokenKind::Return => {
                 let ret_range = self.cur(p).range;
                 self.next(p);
@@ -485,7 +610,7 @@ impl Driver {
 
                     modified = true;
                 }
-                while self.cur(p).kind == &TokenKind::Dot {
+                while self.cur(p).kind == &TokenKind::Dot && !self.has_implicit_separator(p) {
                     let dot_range = self.cur(p).range;
                     let name = match self.next(p).kind {
                         &TokenKind::Ident(name) => name,
@@ -610,16 +735,21 @@ impl Driver {
         let switch_range = self.eat_tok(p, TokenKind::Switch)?;
         let scrutinee = self.parse_non_struct_lit_expr(p);
         self.eat_tok(p, TokenKind::OpenCurly)?;
+        let case_list = self.begin_list(p, [TokenKind::Comma], Some(TokenKind::CloseCurly));
         let mut cases = Vec::new();
         let close_curly_range = loop {
             match self.cur(p).kind {
-                TokenKind::Eof => panic!("Unexpected eof while parsing switch body"),
+                TokenKind::Eof => {
+                    self.diag.report_error("Unexpected end of file while parsing `switch` body", switch_range, "`switch` started here");
+                    return Err(ParseError::Eof);
+                },
                 TokenKind::CloseCurly => {
                     let close_curly_range = self.cur(p).range;
                     self.next(p);
                     break close_curly_range;
                 },
                 _ => {
+                    self.start_next_list_item(p, case_list.id());
                     let pattern_kind = self.parse_pattern(p);
                     let (bindings, binding_ids) = self.get_pattern_bindings(&pattern_kind, scrutinee);
                     let pattern = Pattern { kind: pattern_kind, bindings: binding_ids };
@@ -642,9 +772,7 @@ impl Driver {
                         scope_range,
                     };
                     cases.push(switch_case);
-                    while self.cur(p).kind == &TokenKind::Comma {
-                        self.next(p);
-                    }
+                    self.eat_separators(p);
                 }
             }
         };
