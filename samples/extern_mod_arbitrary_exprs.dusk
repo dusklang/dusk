@@ -20,7 +20,7 @@ libc :: extern_mod(libc_path()) {
 
 fn main() {
     if is_unix() {
-        ignore :: libc.puts("Hello, world! (from libc)\n")
+        libc.puts("Hello, world! (from libc)\n");
     } else {
         print("Hello, world! (from the Dusk print intrinsic on Windows)\n")
     }

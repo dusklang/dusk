@@ -727,6 +727,7 @@ impl tir::Expr<tir::Switch> {
             ConstraintList::new(BuiltinTraits::empty(), Some(smallvec![Type::Void.into()]), None, ef!(driver, self.id.generic_ctx_id))
         } else {
             let mut constraints = tp.constraints(self.cases[0].terminal_expr).clone();
+
             for case in &self.cases[1..self.cases.len()] {
                 constraints = constraints.intersect_with(tp.constraints(case.terminal_expr));
             }
@@ -1480,14 +1481,17 @@ impl tir::Expr<tir::Do> {
 impl tir::Stmt {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         if let Some(err) = driver.can_unify_to(tp, self.root_expr, &Type::Void.into()).err() {
-            let mut error = Error::new("statements must return void");
-            let range = driver.get_range(self.root_expr);
+            if self.has_semicolon {
+                return;
+            }
+            let mut error = Error::new("statements must return void")
+                .adding_primary_range(self.root_expr, "to ignore the result, try adding ';' at the end of this statement");
             match err {
                 UnificationError::InvalidChoice(choices)
-                => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                => error.add_secondary_range(self.root_expr, format!("note: expression could've unified to any of {:?}", choices)),
                 UnificationError::Trait(not_implemented)
                 => error.add_secondary_range(
-                    range,
+                    self.root_expr,
                     format!(
                         "note: couldn't unify because expression requires implementations of {:?}",
                         not_implemented.names(),

@@ -46,7 +46,7 @@ pub struct Dereference { pub expr: ExprId }
 #[derive(Debug)]
 pub struct Pointer { pub expr: ExprId }
 #[derive(Debug)]
-pub struct Stmt { pub root_expr: ExprId }
+pub struct Stmt { pub root_expr: ExprId, pub has_semicolon: bool }
 #[derive(Debug)]
 pub struct ErrorExpr;
 #[derive(Debug)]
@@ -1021,8 +1021,9 @@ impl Driver {
                     // TODO: This is a horrible hack! Instead of looping through all imperative scopes, I should somehow
                     // associate statements with their unit
                     Item::Expr(expr) => if let Some(&unit) = sp.levels.item_to_units.get(&ef!(expr.item)) {
+                        let has_semicolon = op.has_semicolon();
                         let unit = &mut sp.units[unit as usize];
-                        unit.items.stmts.push(Stmt { root_expr: expr });
+                        unit.items.stmts.push(Stmt { root_expr: expr, has_semicolon });
                     },
                     Item::Decl(decl) => assert!(matches!(df!(decl.hir), hir::Decl::Stored { .. } | hir::Decl::Computed { .. }), "Invalid scope item"),
                 }

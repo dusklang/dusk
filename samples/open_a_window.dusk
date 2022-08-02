@@ -190,8 +190,8 @@ fn main() {
         lpszClassName: "MAIN_WINDOW_CLASS"
     }
 
-    ignore :: user32.RegisterClassA(&main_class)
-    if ignore == 0 {
+    succ :: user32.RegisterClassA(&main_class)
+    if succ == 0 {
         panic("RegisterClass failed")
     }
 
@@ -202,7 +202,7 @@ fn main() {
         panic("Create window failed")
     }
 
-    ignore :: user32.ShowWindow(hwnd, 1)
+    user32.ShowWindow(hwnd, 1);
 
     msg := MSG {
         hwnd: NULL() as HWND
@@ -222,8 +222,8 @@ fn main() {
         if ret == 0 || ret == -1 {
             return // TODO: implement break expressions
         } else {
-            ignore :: user32.TranslateMessage(&msg)
-            ignore :: user32.DispatchMessageA(&msg)
+            user32.TranslateMessage(&msg);
+            user32.DispatchMessageA(&msg)
         }
     }
 }

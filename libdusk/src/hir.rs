@@ -62,12 +62,18 @@ impl Default for GenericParamList {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub struct BufferedStmt {
+    expr: ExprId,
+    has_semicolon: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum ScopeState {
     Imper {
         id: ImperScopeId,
         // TODO: choose `namespace` or `ns` and use it consistently for all variants of this enum
         namespace: ImperScopeNsId,
-        stmt_buffer: Option<ExprId>,
+        stmt_buffer: Option<BufferedStmt>,
     },
     Mod {
         id: ModScopeId,
@@ -319,7 +325,7 @@ impl Driver {
                 let id = self.next_stored_decl();
 
                 let decl_id = self.add_decl(Decl::Stored { id, is_mut, root_expr }, name, explicit_ty, range);
-                self.scope_item(Item::Decl(decl_id));
+                self.scope_item(Item::Decl(decl_id), false);
                 self.imper_scoped_decl(
                     ImperScopedDecl {
                         name,
@@ -577,7 +583,7 @@ impl Driver {
         match self.hir.scope_stack.peek().unwrap() {
             ScopeState::Imper { .. } => {
                 self.flush_stmt_buffer();
-                self.scope_item(Item::Decl(id));
+                self.scope_item(Item::Decl(id), false);
             },
             ScopeState::Mod { .. } => {
                 self.mod_scoped_decl(name, ModScopedDecl { num_params: param_names.len(), id });
@@ -621,7 +627,7 @@ impl Driver {
         match self.hir.scope_stack.peek().unwrap() {
             ScopeState::Imper { .. } => {
                 self.flush_stmt_buffer();
-                self.scope_item(Item::Decl(id));
+                self.scope_item(Item::Decl(id), false);
             },
             ScopeState::Mod { .. } => {
                 self.mod_scoped_decl(name, ModScopedDecl { num_params, id });
@@ -737,7 +743,7 @@ impl Driver {
             if let Some(ScopeState::Imper { id, stmt_buffer, .. }) = state {
                 if let Some(stmt) = *stmt_buffer {
                     let block = self.code.hir.imper_scopes[*id].block;
-                    let op = self.code.ops.push(Op::HirItem(Item::Expr(stmt)));
+                    let op = self.code.ops.push(Op::HirItem { item: Item::Expr(stmt.expr), has_semicolon: stmt.has_semicolon });
                     self.code.blocks[block].ops.push(op);
                     *stmt_buffer = None;
                 }
@@ -745,10 +751,10 @@ impl Driver {
         });
     }
 
-    fn scope_item(&mut self, item: Item) {
+    fn scope_item(&mut self, item: Item, has_semicolon: bool) {
         if let ScopeState::Imper { id, .. } = self.hir.scope_stack.peek().unwrap() {
             let block = self.code.hir.imper_scopes[id].block;
-            let op = self.code.ops.push(Op::HirItem(item));
+            let op = self.code.ops.push(Op::HirItem { item, has_semicolon });
             self.code.blocks[block].ops.push(op);
         }
     }
@@ -781,13 +787,21 @@ impl Driver {
         }
     }
 
-    pub fn stmt(&mut self, expr: ExprId) {
+    pub fn stmt(&mut self, expr: ExprId, has_semicolon: bool) {
         self.flush_stmt_buffer();
         self.hir.scope_stack.peek_mut(|state| {
             if let Some(ScopeState::Imper { stmt_buffer, .. }) = state {
-                *stmt_buffer = Some(expr);
+                *stmt_buffer = Some(
+                    BufferedStmt {
+                        expr,
+                        has_semicolon,
+                    }
+                );
             }
         });
+        if has_semicolon {
+            self.flush_stmt_buffer();
+        }
     }
     pub fn begin_imper_scope(&mut self) -> AutoPopStackEntry<ScopeState, ImperScopeId> {
         let parent = self.cur_namespace();
@@ -870,7 +884,7 @@ impl Driver {
         if let Some(ScopeState::Imper { id, stmt_buffer, .. }) = self.hir.scope_stack.peek() {
             if has_terminal_expr {
                 let terminal_expr = stmt_buffer.expect("must pass terminal expression via Builder::stmt()");
-                self.code.hir.imper_scopes[id].terminal_expr = terminal_expr;
+                self.code.hir.imper_scopes[id].terminal_expr = terminal_expr.expr;
             }
         } else {
             panic!("tried to end imperative scope, but the top scope in the stack is not an imperative scope");

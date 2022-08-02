@@ -111,7 +111,7 @@ windows :: mod {
             }
             i += bytes_read as usize
         }
-        ignore :: kernel32.CloseHandle(file)
+        kernel32.CloseHandle(file);
     
         ByteBuffer {
             size: size
@@ -199,19 +199,19 @@ unix :: mod {
         if file as usize == 0 {
             panic("Failed to open file")
         }
-        ignore :: libc.fseek(file, 0, SEEK_END)
+        libc.fseek(file, 0, SEEK_END);
         size :: libc.ftell(file) as usize
-        ignore :: libc.fseek(file, 0, SEEK_SET)
+        libc.fseek(file, 0, SEEK_SET);
         data :: malloc(size) as u8 *mut
-        ignore :: libc.fread(data as void *mut, 1, size, file)
-        ignore :: libc.fclose(file)
+        libc.fread(data as void *mut, 1, size, file);
+        libc.fclose(file);
         ByteBuffer {
             size: size
             data: data
         }
     }
     fn print(str: i8*) {
-        //ignore :: libc.fputs(str, libc.stdin)
+        //libc.fputs(str, libc.stdin);
         panic("userspace print is unimplemented on non-Windows platform")
     }
 

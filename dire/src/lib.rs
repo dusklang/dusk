@@ -22,7 +22,7 @@ define_index_type!(pub struct BlockId = u32;);
 
 #[derive(Clone, Debug)]
 pub enum Op {
-    HirItem(Item),
+    HirItem { item: Item, has_semicolon: bool },
     MirInstr(Instr, InstrId, Type),
 }
 
@@ -61,8 +61,15 @@ impl Op {
 
     pub fn as_hir_item(&self) -> Option<Item> {
         match self {
-            &Op::HirItem(item) => Some(item),
+            &Op::HirItem { item, .. } => Some(item),
             _ => None,
+        }
+    }
+
+    pub fn has_semicolon(&self) -> bool {
+        match self {
+            &Op::HirItem { has_semicolon, .. } => has_semicolon,
+            _ => false,
         }
     }
 }
@@ -100,7 +107,7 @@ impl Code {
         for &id in &block.ops {
             write!(w, "    %op{}", id.index())?;
             match self.ops[id] {
-                Op::HirItem(item) => {
+                Op::HirItem { item, .. } => {
                     match item {
                         Item::Expr(expr) => {
                             write!(w, "(%expr{}) = hir.", expr.index())?;

@@ -1,0 +1,17 @@
+MyEnum :: enum {
+    a, b, c
+}
+
+fn hello(): MyEnum {
+    MyEnum.a
+}
+
+fn main() {
+    hello();
+    switch hello() {
+        .a: hello();
+        .b: {}
+        .c: {}
+    }
+    15;
+}

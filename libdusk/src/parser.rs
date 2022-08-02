@@ -62,6 +62,7 @@ pub enum ParseError {
 }
 pub type ParseResult<T> = Result<T, ParseError>;
 
+#[derive(Debug)]
 enum SeparatorResult {
     Implicit,
     Explicit(TokenKind),
@@ -177,7 +178,11 @@ impl Driver {
         loop {
             let Token { kind: cur_tok, range } = self.cur(p);
             if Some(cur_tok) == list_state.terminator.as_ref() {
-                return SeparatorResult::Terminator;
+                if num_separators_found == 0 {
+                    return SeparatorResult::Terminator;
+                } else {
+                    break;
+                }
             } else if matches!(cur_tok, TokenKind::Eof) {
                 return SeparatorResult::Eof;
             } else if list_state.separators.contains(cur_tok) {
@@ -771,7 +776,7 @@ impl Driver {
                     let if_expr = self.parse_if(p)?;
                     let if_range = self.get_range(if_expr);
                     range = source_info::concat(range, if_range);
-                    self.stmt(if_expr);
+                    self.stmt(if_expr, false);
                     self.end_imper_scope(scope, true);
                     Some(scope_id)
                 },
@@ -791,7 +796,7 @@ impl Driver {
         let switch_range = self.eat_tok(p, TokenKind::Switch)?;
         let scrutinee = self.parse_non_struct_lit_expr(p);
         self.eat_tok(p, TokenKind::OpenCurly)?;
-        let case_list = self.begin_list(p, TokenKind::could_begin_pattern, [TokenKind::Comma], Some(TokenKind::CloseCurly));
+        let case_list = self.begin_list(p, TokenKind::could_begin_pattern, [TokenKind::Comma, TokenKind::Semicolon], Some(TokenKind::CloseCurly));
         let mut cases = Vec::new();
         let close_curly_range = loop {
             match self.cur(p).kind {
@@ -811,13 +816,19 @@ impl Driver {
                     let pattern = Pattern { kind: pattern_kind, bindings: binding_ids };
                     self.eat_tok(p, TokenKind::Colon)?;
                     let (scope, scope_range) = match self.cur(p).kind {
-                        TokenKind::OpenCurly => self.parse_scope(p, &bindings)?,
+                        TokenKind::OpenCurly => {
+                            let scope = self.parse_scope(p, &bindings)?;
+                            self.eat_separators(p);
+                            scope
+                        },
                         _ => {
                             let scope = self.begin_imper_scope();
                             let scope_id = scope.id();
                             let case_expr = self.parse_expr(p).unwrap_or_else(|err| err);
-                            self.stmt(case_expr);
-                            self.end_imper_scope(scope, true);
+                            let separators = self.eat_separators(p);
+                            let has_semicolon = matches!(separators, SeparatorResult::Explicit(TokenKind::Semicolon));
+                            self.stmt(case_expr, has_semicolon);
+                            self.end_imper_scope(scope, !has_semicolon);
                             let scope_range = self.get_range(case_expr);
                             (scope_id, scope_range)
                         }
@@ -828,7 +839,6 @@ impl Driver {
                         scope_range,
                     };
                     cases.push(switch_case);
-                    self.eat_separators(p);
                 }
             }
         };
@@ -1386,12 +1396,14 @@ impl Driver {
 
                     // If the item was a standalone expression, make it a statement
                     if let Item::Expr(expr) = item {
-                        last_was_expr = true;
-                        self.stmt(expr);
+                        let separators = self.eat_separators(p);
+                        let has_semicolon = matches!(separators, SeparatorResult::Explicit(TokenKind::Semicolon));
+                        last_was_expr = !has_semicolon;
+                        self.stmt(expr, has_semicolon);
                     } else {
                         last_was_expr = false;
+                        self.eat_separators(p);
                     }
-                    self.eat_separators(p);
                 }
             }
         };

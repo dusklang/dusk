@@ -56,7 +56,7 @@ impl ConstraintList {
             if one_of.len() == 1 {
                 return Ok(one_of[0].clone())
             } else if one_of.is_empty() {
-                return Ok(Type::Error.into())
+                return Err(SolveError::NoValidChoices)
             }
         }
         
