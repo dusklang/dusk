@@ -3,7 +3,7 @@ name = "dusklang"
 version = "0.1.5"
 authors = ["Zach <zachrwolfe@me.com>"]
 edition = "2021"
-default-run = "dusklang"
+default-run = "dusk"
 description = "This crate contains a compiler for the Dusk programming language"
 license = "MIT"
 repository = "https://github.com/dusklang/dusk"
@@ -20,3 +20,7 @@ dvd_ipc = { version = "0.1", path = "../dvd_ipc" }
 [features]
 # Enables the Dusk visual debugger
 dvd = ["dvd_ipc/enabled"]
+
+[[bin]]
+path = "src/main.rs"
+name = "dusk"

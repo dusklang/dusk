@@ -11,7 +11,7 @@
             "cargo": {
                 "args": [
                     "build",
-                    "--bin=dusklang",
+                    "--bin=dusk",
                     "--package=dusklang"
                 ],
                 "filter": {
@@ -33,7 +33,7 @@
                 "args": [
                     "test",
                     "--no-run",
-                    "--bin=dusklang",
+                    "--bin=dusk",
                     "--package=dusklang"
                 ],
                 "filter": {
