@@ -570,7 +570,13 @@ dependencies = [
  "clap",
  "dusk_dire",
  "dvd_ipc",
+ "glium",
+ "imgui",
+ "imgui-glium-renderer",
+ "imgui-winit-support",
+ "interprocess",
  "libdusk",
+ "rand",
 ]
 
 [[package]]

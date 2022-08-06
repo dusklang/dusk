@@ -197,7 +197,7 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
     
 }
 
-fn main() {
+pub fn dvd_main() {
     let event_loop = EventLoop::new();
     let context = glutin::ContextBuilder::new().with_vsync(true);
     let builder = WindowBuilder::new()

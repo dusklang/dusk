@@ -170,10 +170,9 @@ mod dependent_exports {
     
     pub fn connect() {
         let listener = LocalSocketListener::bind("DUSK_VISUAL_DEBUGGER").unwrap();
-        Command::new("cargo")
-            .arg("run")
-            .arg("--bin")
-            .arg("dvd")
+        let exe_path = std::env::current_exe().unwrap();
+        Command::new(exe_path)
+            .arg("internal-launch-dvd")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .stdin(Stdio::null())

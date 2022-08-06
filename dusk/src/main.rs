@@ -1,6 +1,6 @@
 use clap::{Parser, ArgEnum};
 use libdusk::new_code::NewCode;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 
 use dusk_dire::ty::Type;
@@ -12,6 +12,9 @@ use libdusk::interpreter::{restart_interp, InterpMode};
 use libdusk::mir::FunctionRef;
 use libdusk::error::DiagnosticKind;
 use dvd_ipc::Message as DvdMessage;
+
+#[cfg(feature = "dvd")]
+mod dvd;
 
 #[repr(u8)]
 #[derive(ArgEnum, Copy, Clone, Debug)]
@@ -30,8 +33,8 @@ struct Opt {
     #[clap(short='m', long)]
     output_mir: bool,
 
-    #[cfg(feature = "dvd")]
     /// Run the Dusk Visual Debugger (DVD)
+    #[cfg(feature = "dvd")]
     #[clap(long)]
     dvd: bool,
 
@@ -63,13 +66,7 @@ impl Drop for SendExitMsg {
     }
 }
 
-fn main() {
-    let args: Vec<_> = std::env::args_os().collect();
-    let mut split = args.split(|arg| arg == OsStr::new("--"));
-    let clap_args = split.next().unwrap();
-    let program_args = split.next().unwrap_or(&[]);
-    let opt = Opt::parse_from(clap_args);
-
+fn dusk_main(opt: Opt, program_args: &[OsString]) {
     #[cfg(feature = "dvd")]
     if opt.dvd {
         dvd_ipc::connect();
@@ -180,4 +177,22 @@ fn main() {
         flush_diagnostics(&mut driver.write());
         driver.read().diag.check_for_failure();
     }
+}
+
+fn main() {
+    let args: Vec<_> = std::env::args_os().collect();
+    // What I really wanted here was a clap subcommand, with the default being set to "run" or "compile" or something.
+    // But Clap doesn't support default subcommands :( https://github.com/clap-rs/clap/issues/975
+    #[cfg(feature = "dvd")]
+    if args.iter().nth(1).map(|arg| arg.as_os_str()) == Some(OsStr::new("internal-launch-dvd")) {
+        dvd::dvd_main();
+        return;
+    }
+
+    let mut split = args.split(|arg| arg == OsStr::new("--"));
+    let clap_args = split.next().unwrap();
+    let program_args = split.next().unwrap_or(&[]);
+    let opt = Opt::parse_from(clap_args);
+
+    dusk_main(opt, program_args);
 }
