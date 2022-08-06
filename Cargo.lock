@@ -580,19 +580,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dvd"
-version = "0.1.0"
-dependencies = [
- "dvd_ipc",
- "glium",
- "imgui",
- "imgui-glium-renderer",
- "imgui-winit-support",
- "interprocess",
- "rand",
-]
-
-[[package]]
 name = "dvd_ipc"
 version = "0.1.5"
 dependencies = [

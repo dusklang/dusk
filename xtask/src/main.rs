@@ -41,7 +41,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             };
             let npm = format!("npm{}", script_ext);
             let vsce = format!("vsce{}", script_ext);
-            let code = format!("code{}", script_ext);
+            let editor_name = include_str!("../editor-name.txt");
+            let code = format!("{}{}", editor_name, script_ext);
             let esbuild = format!("esbuild{}", script_ext);
             cmd!(shell, "{npm} install").run()?;
             cmd!(shell, "{esbuild} ./src/extension.js --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node").run()?;
@@ -64,7 +65,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             cmd!(shell, "{code} --install-extension {extension_path}").run()?;
         },
         Command::CheckAll => {
-            for dir in ["dire", "dls", "dusk", "dusk-proc-macros", "dvd", "dvd_ipc", "libdusk", "xtask"] {
+            for dir in ["dire", "dls", "dusk", "dusk-proc-macros", "dvd_ipc", "libdusk", "xtask"] {
                 let _push = shell.push_dir(dir);
                 cmd!(shell, "cargo check").run()?;
             }
