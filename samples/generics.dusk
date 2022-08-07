@@ -9,10 +9,10 @@ fn memset[T](dest: T *mut, src: T, count: usize) {
 
 fn main() {
     buffer :: malloc(24) as u8 *mut
-    shit(*buffer)
+    foo(*buffer)
     memset(buffer, 34, 24)
     // Top-level generic function calls are not yet parsed, so assign to a temporary
     _ :: memset[u8](buffer, 34, 24)
 }
 
-fn shit[T](arg: T) {}
+fn foo[T](arg: T) {}
