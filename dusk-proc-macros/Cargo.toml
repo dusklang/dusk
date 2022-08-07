@@ -1,6 +1,6 @@
 [package]
 name = "dusk-proc-macros"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 description = "A collection of procedural macros for use by the Dusk programming language compiler"
 license = "MIT"

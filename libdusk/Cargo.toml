@@ -1,6 +1,6 @@
 [package]
 name = "libdusk"
-version = "0.1.5"
+version = "0.1.6"
 authors = ["Zach <zachrwolfe@me.com>"]
 edition = "2021"
 description = "This crate implements most of the compiler for the Dusk programming language, in library form."

@@ -4,6 +4,6 @@ MyStruct :: struct {
 
 fn main() {
     my_struct := MyStruct { a: 12 }
-    my_struct :: (&mut my_struct)
+    my_struct :: &mut my_struct
     (*my_struct).a = 12
 }

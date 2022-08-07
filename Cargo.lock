@@ -527,7 +527,7 @@ dependencies = [
 
 [[package]]
 name = "dls"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "dusk-proc-macros",
  "dusk_dire",
@@ -546,14 +546,14 @@ checksum = "9ea835d29036a4087793836fa931b08837ad5e957da9e23886b29586fb9b6650"
 
 [[package]]
 name = "dusk-proc-macros"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "syn",
 ]
 
 [[package]]
 name = "dusk_dire"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "display_adapter",
  "index_vec",
@@ -565,7 +565,7 @@ dependencies = [
 
 [[package]]
 name = "dusklang"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "clap",
  "dusk_dire",
@@ -1021,7 +1021,7 @@ checksum = "349d5a591cd28b49e1d1037471617a32ddcda5731b99419008085f72d5a53836"
 
 [[package]]
 name = "libdusk"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "arrayvec",
  "bitflags",
