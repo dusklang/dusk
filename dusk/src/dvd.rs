@@ -56,6 +56,9 @@ struct UiState {
     rectangles_left: f32,
     rx: Receiver<Message>,
     tx: Sender<Response>,
+
+    stepping: bool,
+    message: Option<Message>,
 }
 
 impl UiState {
@@ -68,19 +71,21 @@ impl UiState {
             rectangles_left: 0.0,
             rx,
             tx,
-        }
-    }
 
+            stepping: true,
+            message: None,
+        }
+    }   
 }
 
 fn run_ui(state: &mut UiState, ui: &mut Ui) {
-    while let Ok(message) = state.rx.recv_timeout(Duration::from_millis(1)) {
-        state.tx.send(Response::Continue).unwrap();
-        match message {
-            Message::WillExit => state.running = false,
-            _ => {},
-        }
-    }
+    // while let Ok(message) = state.rx.recv_timeout(Duration::from_millis(1)) {
+    //     state.tx.send(Response::Continue).unwrap();
+    //     match message {
+    //         Message::WillExit => state.running = false,
+    //         _ => {},
+    //     }
+    // }
 
     let (pos, size) = unsafe {
         let viewport = igGetMainViewport();
@@ -93,6 +98,24 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
         .collapsible(false)
         .title_bar(false)
         .build(ui, || {
+            if state.stepping {
+                if let Ok(message) = state.rx.recv_timeout(Duration::from_millis(1)) {
+                    state.message = Some(message);
+                }
+
+                if ui.button("Step") && state.message.is_some() {
+                    state.message = None;
+                    state.tx.send(Response::Continue).unwrap();
+                    if let Ok(message) = state.rx.recv_timeout(Duration::from_millis(1)) {
+                        state.message = Some(message);
+                    }
+                }
+                if let Some(message) = &state.message {
+                    ui.text_wrapped(format!("Message: {:?}", message));
+                } else {
+                    ui.text_wrapped("Message: no message");
+                }
+            }
             ui.text_wrapped("Drag with right mouse button");
             ui.text_wrapped("Use mouse wheel to scroll vertically");
             ui.text_wrapped("Hold CTRL while using mouse wheel to scroll horizontally");

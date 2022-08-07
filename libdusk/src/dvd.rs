@@ -5,14 +5,14 @@
 //! - DVD processes the information in the message, and eventually sends a [response](Response) (possibly in response to user input).
 //! - Compiler continues until the next message needs to be sent.
 
-#[cfg(feature = "enabled")]
+#[cfg(feature = "dvd")]
 use serde::{Serialize, Deserialize};
 
 use dusk_dire::hir::{ExprId, DeclId, ItemId};
 use dusk_dire::tir::CompId;
 
 /// Messages *from* the compiler *to* the debugger.
-#[cfg_attr(feature = "enabled", derive(Debug, Serialize, Deserialize))]
+#[cfg_attr(feature = "dvd", derive(Debug, Serialize, Deserialize))]
 pub enum Message {
     /// Sent before compilation begins
     WillBegin,
@@ -97,7 +97,7 @@ pub enum Message {
 }
 
 /// Responses *from* the debugger *to* the compiler.
-#[cfg_attr(feature = "enabled", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "dvd", derive(Serialize, Deserialize))]
 pub enum Response {
     /// Continue compiling as normal
     Continue,
@@ -105,10 +105,10 @@ pub enum Response {
     Quit
 }
 
-// Exports dependent on the presence of the "enabled" feature
+// Exports dependent on the presence of the "dvd" feature
 pub use dependent_exports::*;
 
-#[cfg(feature = "enabled")]
+#[cfg(feature = "dvd")]
 mod dependent_exports {
     use std::io::{Write, Read};
     use std::process::{Command, Stdio};
@@ -119,10 +119,10 @@ mod dependent_exports {
     use interprocess::local_socket::{LocalSocketListener, LocalSocketStream};
     use lazy_static::lazy_static;
 
-    use crate::{Message, Response};
+    use super::{Message, Response};
 
     trait DvdCoordinatorTrait: Send {
-        fn send(&mut self, message: &mut dyn FnMut() -> crate::Message);
+        fn send(&mut self, message: &mut dyn FnMut() -> super::Message);
     }
     
     struct MockCoordinator;
@@ -191,7 +191,7 @@ mod dependent_exports {
 }
 
 
-#[cfg(not(feature = "enabled"))]
+#[cfg(not(feature = "dvd"))]
 mod dependent_exports {
     use std::io::{Write, Read};
 
