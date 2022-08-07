@@ -569,7 +569,6 @@ version = "0.1.5"
 dependencies = [
  "clap",
  "dusk_dire",
- "dvd_ipc",
  "glium",
  "imgui",
  "imgui-glium-renderer",
@@ -577,17 +576,6 @@ dependencies = [
  "interprocess",
  "libdusk",
  "rand",
-]
-
-[[package]]
-name = "dvd_ipc"
-version = "0.1.5"
-dependencies = [
- "dusk_dire",
- "interprocess",
- "lazy_static",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -1042,9 +1030,9 @@ dependencies = [
  "display_adapter",
  "dusk-proc-macros",
  "dusk_dire",
- "dvd_ipc",
  "indenter",
  "index_vec",
+ "interprocess",
  "lazy_static",
  "libc",
  "lsp-types",
@@ -1052,6 +1040,7 @@ dependencies = [
  "paste",
  "region",
  "serde",
+ "serde_json",
  "smallvec",
  "string-interner",
  "unicode-segmentation",

@@ -11,7 +11,7 @@ use libdusk::source_info::SourceMap;
 use libdusk::interpreter::{restart_interp, InterpMode};
 use libdusk::mir::FunctionRef;
 use libdusk::error::DiagnosticKind;
-use dvd_ipc::Message as DvdMessage;
+use libdusk::dvd::{Message as DvdMessage, self as dvd_ipc};
 
 #[cfg(feature = "dvd")]
 mod dvd;

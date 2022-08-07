@@ -65,7 +65,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             cmd!(shell, "{code} --install-extension {extension_path}").run()?;
         },
         Command::CheckAll => {
-            for dir in ["dire", "dls", "dusk", "dusk-proc-macros", "dvd_ipc", "libdusk", "xtask"] {
+            for dir in ["dire", "dls", "dusk", "dusk-proc-macros", "libdusk"] {
                 let _push = shell.push_dir(dir);
                 cmd!(shell, "cargo check").run()?;
             }

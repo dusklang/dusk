@@ -30,12 +30,13 @@ derivative = "2.2"
 lsp-types = { version = "0.93", optional = true }
 
 # DVD-related dependencies
-dvd_ipc = { version = "0.1", path = "../dvd_ipc" }
-serde = { version = "1.0", optional = true }
+interprocess = { version = "1.1.1", optional = true }
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
 
 [features]
 dls = ["dep:lsp-types"]
-dvd = ["dvd_ipc/enabled", "dep:serde", "index_vec/serde"]
+dvd = ["dep:interprocess", "dep:serde", "dep:serde_json", "dusk_dire/serde", "index_vec/serde"]
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3.9", features = ["libloaderapi"] }

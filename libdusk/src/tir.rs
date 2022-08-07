@@ -12,7 +12,7 @@ use dusk_dire::{internal_fields, internal_field_decls, InternalField, InternalFi
 use dusk_dire::ty::Type;
 pub use dusk_dire::tir::CompId;
 
-use dvd_ipc::Message as DvdMessage;
+use crate::dvd::{Message as DvdMessage, self};
 
 use crate::driver::Driver;
 use crate::dep_vec::{self, DepVec, AnyDepVec};
@@ -710,7 +710,7 @@ impl Driver {
                     SmallVec::new(),
                 ),
             };
-            dvd_ipc::send(|| DvdMessage::DidInitializeTirForDecl { id: DeclId::new(self.tir.decls.len()), is_mut, param_tys: param_tys.iter().cloned().collect() });
+            dvd::send(|| DvdMessage::DidInitializeTirForDecl { id: DeclId::new(self.tir.decls.len()), is_mut, param_tys: param_tys.iter().cloned().collect() });
             self.tir.decls.push_at(id, Decl { param_tys, is_mut, generic_params });
         }
 
@@ -849,16 +849,16 @@ impl Driver {
     }
 
     pub fn build_more_tir(&mut self) -> Option<Units> {
-        dvd_ipc::send(|| DvdMessage::WillBuildMoreTir);
+        dvd::send(|| DvdMessage::WillBuildMoreTir);
         if !self.tir.graph.has_outstanding_components() {
-            dvd_ipc::send(|| DvdMessage::DidBuildMoreTir);
+            dvd::send(|| DvdMessage::DidBuildMoreTir);
             return None;
         }
 
         add_eval_dep_injector!(self, add_eval_dep);
 
         let items_that_need_dependencies = self.tir.graph.get_items_that_need_dependencies();
-        dvd_ipc::send(|| DvdMessage::WillAddTirDependencies);
+        dvd::send(|| DvdMessage::WillAddTirDependencies);
         for id in items_that_need_dependencies {
             match self.code.hir.items[id] {
                 hir::Item::Decl(decl_id) => {
@@ -960,7 +960,7 @@ impl Driver {
                 }
             }
         }
-        dvd_ipc::send(|| DvdMessage::DidAddTirDependencies);
+        dvd::send(|| DvdMessage::DidAddTirDependencies);
 
         // Solve for the unit and level of each item
         let levels = self.tir.graph.solve();
@@ -1034,7 +1034,7 @@ impl Driver {
             unit.items.unify_sizes();
         }
 
-        dvd_ipc::send(|| DvdMessage::DidBuildMoreTir);
+        dvd::send(|| DvdMessage::DidBuildMoreTir);
         Some(
             Units { units: sp.units, mock_units: sp.mock_units }
         )

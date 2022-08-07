@@ -35,7 +35,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use interprocess::local_socket::LocalSocketStream;
 use rand::Rng;
 
-use dvd_ipc::{Message, Response};
+use libdusk::dvd::{Message, Response, self};
 
 struct Rectangle {
     origin: [f32; 2],
@@ -213,10 +213,10 @@ pub fn dvd_main() {
     std::thread::spawn(move || {
         let mut stream = LocalSocketStream::connect("DUSK_VISUAL_DEBUGGER").unwrap();
         loop {
-            let message: Message = dvd_ipc::receive_value(&mut stream);
+            let message: Message = dvd::receive_value(&mut stream);
             msg_tx.send(message).unwrap();
             let response: Response = resp_rx.recv().unwrap();
-            dvd_ipc::send_value(&mut stream, response);
+            dvd::send_value(&mut stream, response);
         }
     });
 

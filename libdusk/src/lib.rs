@@ -21,3 +21,4 @@ pub mod interpreter;
 pub mod error;
 pub mod new_code;
 pub mod type_provider;
+pub mod dvd;

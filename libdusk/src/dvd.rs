@@ -195,14 +195,14 @@ mod dependent_exports {
 mod dependent_exports {
     use std::io::{Write, Read};
 
-    use crate::Message;
+    use super::Message;
     
     #[inline]
     pub fn send_value<V>(_w: &mut impl Write, _value: V) {}
     
     #[inline]
     pub fn receive_value<V>(_r: &mut impl Read) -> V {
-        unimplemented!("can't call dvd_ipc::receive_value() without the \"enabled\" feature")
+        unimplemented!("can't call libdusk::dvd::receive_value() without the \"dvd\" feature")
     }
 
     #[inline]

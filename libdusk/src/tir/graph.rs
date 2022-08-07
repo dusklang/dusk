@@ -7,7 +7,7 @@ use bitflags::bitflags;
 use index_vec::IdxRangeBounds;
 use dusk_dire::hir::{ItemId, VOID_EXPR_ITEM};
 use dusk_dire::tir::CompId;
-use dvd_ipc::Message as DvdMessage;
+use crate::dvd::{Message as DvdMessage, self};
 
 use crate::index_vec::*;
 use crate::driver::Driver;
@@ -111,7 +111,7 @@ impl Graph {
         self.dependees[a].push(b);
         self.dependers[b].push(a);
 
-        dvd_ipc::send(|| DvdMessage::DidAddTirType1Dependency { depender: a, dependee: b });
+        dvd::send(|| DvdMessage::DidAddTirType1Dependency { depender: a, dependee: b });
     }
 
     /// a must either be in the same unit as b or a later unit, but if they are in the same unit, a must have a higher level than b
@@ -120,7 +120,7 @@ impl Graph {
         let a_comp = self.item_to_components[a];
         self.transfer_item_dep_to_component(a_comp, b, ComponentRelation::TYPE_2_3_FORWARD, ComponentRelation::TYPE_2_3_BACKWARD);
 
-        dvd_ipc::send(|| DvdMessage::DidAddTirType2Dependency { depender: a, dependee: b });
+        dvd::send(|| DvdMessage::DidAddTirType2Dependency { depender: a, dependee: b });
     }
 
     /// a must either be in the same unit as b or a later unit, but their levels are independent
@@ -129,7 +129,7 @@ impl Graph {
         let a_comp = self.item_to_components[a];
         self.transfer_item_dep_to_component(a_comp, b, ComponentRelation::TYPE_2_3_FORWARD, ComponentRelation::TYPE_2_3_BACKWARD);
 
-        dvd_ipc::send(|| DvdMessage::DidAddTirType3Dependency { depender: a, dependee: b });
+        dvd::send(|| DvdMessage::DidAddTirType3Dependency { depender: a, dependee: b });
     }
 
     /// a must be in an later unit than b, but their levels are independent
@@ -138,7 +138,7 @@ impl Graph {
         let a_comp = self.item_to_components[a];
         self.transfer_item_dep_to_component(a_comp, b, ComponentRelation::BEFORE, ComponentRelation::AFTER);
 
-        dvd_ipc::send(|| DvdMessage::DidAddTirType4Dependency { depender: a, dependee: b });
+        dvd::send(|| DvdMessage::DidAddTirType4Dependency { depender: a, dependee: b });
     }
 
     /// in order to add the type 2-4 dependencies of a, we need to know all possible members of b
@@ -152,7 +152,7 @@ impl Graph {
         self.meta_dependers.entry(b).or_default().push(a);
         self.global_meta_dependees.insert(b);
 
-        dvd_ipc::send(|| DvdMessage::DidAddTirMetaDependency { depender: a, dependee: b });
+        dvd::send(|| DvdMessage::DidAddTirMetaDependency { depender: a, dependee: b });
     }
 
     fn find_subcomponent(&mut self, item: ItemId, cur_component: &mut Component) {
@@ -160,7 +160,7 @@ impl Graph {
         cur_component.items.push(item);
         let component = CompId::new(self.components.len());
         self.item_to_components[item] = component;
-        dvd_ipc::send(|| DvdMessage::DidAddItemToTirComponent { component, item });
+        dvd::send(|| DvdMessage::DidAddItemToTirComponent { component, item });
         macro_rules! find_subcomponents {
             ($item_array:ident) => {{
                 for i in 0..self.$item_array[item].len() {
@@ -178,7 +178,7 @@ impl Graph {
         self.find_subcomponent(item, cur_component);
         let new_component = mem::take(cur_component);
         let component = self.components.push(new_component);
-        dvd_ipc::send(|| DvdMessage::DidAddTirComponent { id: component });
+        dvd::send(|| DvdMessage::DidAddTirComponent { id: component });
     }
 
     fn transfer_item_dep_to_component(

@@ -22,12 +22,9 @@ imgui-winit-support = { version = "0.8.2", optional = true }
 interprocess = { version = "1.1.1", optional = true }
 imgui-glium-renderer = { version = "0.8.2", optional = true }
 
-# Should compile away to nothing when the "dvd" feature below is not enabled
-dvd_ipc = { version = "0.1", path = "../dvd_ipc" }
-
 [features]
 # Enables the Dusk visual debugger
-dvd = ["libdusk/dvd", "dvd_ipc/enabled", "dep:glium", "dep:imgui", "dep:rand", "dep:imgui-winit-support", "dep:interprocess", "dep:imgui-glium-renderer"]
+dvd = ["libdusk/dvd", "dep:glium", "dep:imgui", "dep:rand", "dep:imgui-winit-support", "dep:interprocess", "dep:imgui-glium-renderer"]
 
 [[bin]]
 path = "src/main.rs"
