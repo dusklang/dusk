@@ -399,14 +399,13 @@ impl DriverRef<'_> {
         // It is important to hold on to the write lock throughout this entire method, maybe
         self.write();
         // Start at 1 to avoid RETURN_VALUE_DECL, which we can't and shouldn't generate code for
-        let len = self.read().code.hir.decls.len();
-        for i in 1..len {
-            self.get_decl(DeclId::new(i), tp);
+        let range = DeclId::new(1)..self.read().code.hir.decls.next_idx();
+        for id in range_iter(range) {
+            self.get_decl(id, tp);
         }
 
-        let len = self.read().mir.statics.len();
-        for i in 0..len {
-            let id = StaticId::new(i);
+        let statics = self.read().mir.statics.indices();
+        for id in statics {
             let statik = self.read().mir.statics[id].clone();
             let konst = self.eval_expr(statik.assignment, tp);
             self.write().code.mir.statics.push_at(
@@ -484,8 +483,7 @@ impl DriverRef<'_> {
                 // TODO: don't require this?
                 let mut generic_params = Vec::new();
                 generic_params.reserve(generic_params_range.end.index() - generic_params_range.start.index());
-                for i in generic_params_range.start.index()..generic_params_range.end.index() {
-                    let id = DeclId::new(i);
+                for id in range_iter(generic_params_range.clone()) {
                     let d = self.read();
                     let generic_param = match df!(d, id.hir) {
                         hir::Decl::GenericParam(param) => param,
@@ -560,9 +558,11 @@ impl DriverRef<'_> {
             hir::Decl::Static(expr) => {
                 drop(d);
                 let name = self.read().display_item(id).to_string();
-                let decl = Decl::Static(StaticId::new(self.read().mir.statics.len()));
+                let statik = self.read().mir.statics.next_idx();
+                let decl = Decl::Static(statik);
                 self.write().mir.decls.insert(id, decl.clone());
-                self.write().mir.statics.push(
+                self.write().mir.statics.push_at(
+                    statik,
                     Static {
                         name,
                         assignment: expr,
@@ -978,8 +978,7 @@ impl DriverRef<'_> {
         let mut instr_namespace = InstrNamespace::default();
         let mut instrs = IndexCounter::new();
         instrs.next_idx(); // void
-        for param in params.start.index()..params.end.index() {
-            let param = DeclId::new(param);
+        for param in range_iter(params.clone()) {
             let d = self.read();
             assert!(matches!(df!(d, param.hir), hir::Decl::Parameter { .. }));
             drop(d);

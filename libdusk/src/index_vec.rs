@@ -1,3 +1,5 @@
+use std::ops::{Range, AddAssign};
+
 pub use index_vec::{IndexVec, Idx};
 
 pub trait IndexVecExt {
@@ -36,4 +38,25 @@ impl<I: Idx, T> IndexVecExt for IndexVec<I, T> {
         debug_assert_eq!(self.next_idx(), id);
         self.push(value);
     }
+}
+
+struct IdRangeIter<Id: Idx> {
+    range: Range<Id>,
+}
+
+impl<Id: Idx + AddAssign<usize>> Iterator for IdRangeIter<Id> {
+    type Item = Id;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.range.start >= self.range.end {
+            None
+        } else {
+            let val = self.range.start;
+            self.range.start += 1;
+            Some(val)
+        }
+    }
+}
+
+pub fn range_iter<Id: Idx + AddAssign<usize>>(range: Range<Id>) -> impl Iterator<Item=Id> {
+    IdRangeIter { range }
 }

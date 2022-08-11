@@ -158,7 +158,7 @@ impl Graph {
     fn find_subcomponent(&mut self, item: ItemId, cur_component: &mut Component) {
         self.visited[item] = true;
         cur_component.items.push(item);
-        let component = CompId::new(self.components.len());
+        let component = self.components.next_idx();
         self.item_to_components[item] = component;
         dvd::send(|| DvdMessage::DidAddItemToTirComponent { component, item });
         macro_rules! find_subcomponents {
@@ -220,18 +220,17 @@ impl Graph {
 
     // Find the weak components of the graph
     pub fn split(&mut self, new_code: &NewCode) {
-        let before_components = self.components.len();
+        let before_components = self.components.next_idx();
         self.visited.resize_with(self.dependees.len(), || false);
         let mut cur_component = Component::default();
         self.item_to_components.resize_with(self.dependees.len(), || CompId::new(u32::MAX as usize));
-        for i in new_code.items.clone().into_range() {
-            self.find_component(ItemId::new(i), &mut cur_component);
+        for id in range_iter(new_code.items.clone()) {
+            self.find_component(id, &mut cur_component);
         }
 
-        let after_components = self.components.len();
+        let after_components = self.components.next_idx();
         self.outstanding_components.extend(
-            (before_components..after_components)
-                .map(CompId::new)
+            range_iter(before_components..after_components)
         );
     }
 
@@ -419,8 +418,8 @@ impl Graph {
 
         let mut item_to_levels = HashMap::<ItemId, u32>::new();
 
-        for i in 0..self.dependees.len() {
-            self.find_level(ItemId::new(i), &mut item_to_levels, |_| true);
+        for id in self.dependees.indices() {
+            self.find_level(id, &mut item_to_levels, |_| true);
         }
 
         let mut item_to_units = HashMap::<ItemId, u32>::new();

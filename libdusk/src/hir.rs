@@ -39,13 +39,11 @@ impl Driver {
         assert_eq!(list.names.len(), list.ids.end - list.ids.start);
         assert_eq!(list.names.len(), list.ranges.len());
         self.code.hir.decls.reserve(list.names.len());
-        let first_generic_param = DeclId::new(self.code.hir.decls.len());
-        for id in list.ids.start.index()..list.ids.end.index() {
-            let param = GenericParamId::new(id);
-            let i = id - list.ids.start.index();
-            self.add_decl(Decl::GenericParam(param), list.names[i], Some(VOID_TYPE), list.ranges[i]);
+        let first_generic_param = self.code.hir.decls.next_idx();
+        for ((param, &name), &range) in range_iter(list.ids.clone()).zip(&list.names).zip(&list.ranges) {
+            self.add_decl(Decl::GenericParam(param), name, Some(VOID_TYPE), range);
         }
-        let last_generic_param = DeclId::new(self.code.hir.decls.len());
+        let last_generic_param = self.code.hir.decls.next_idx();
         first_generic_param..last_generic_param
     }
 }
@@ -550,8 +548,7 @@ impl Driver {
         self.hir.generic_ctx_stack.push(generic_ctx, generic_ctx)
     }
     pub fn begin_computed_decl_generic_ctx(&mut self, generic_param_list: GenericParamList) -> AutoPopStackEntry<GenericCtxId> {
-        let generic_param_ids = (generic_param_list.ids.start.index()..generic_param_list.ids.end.index())
-            .map(GenericParamId::new)
+        let generic_param_ids = range_iter(generic_param_list.ids.clone())
             .collect();
         self.push_generic_ctx(|parent| GenericCtx::Decl { parameters: generic_param_ids, parent })
     }
@@ -561,7 +558,7 @@ impl Driver {
 
         assert_eq!(param_names.len(), param_tys.len());
         self.code.hir.decls.reserve(param_tys.len());
-        let first_param = DeclId::new(self.code.hir.decls.len());
+        let first_param = self.code.hir.decls.next_idx();
         param_tys.iter()
             .enumerate()
             .zip(&param_names)
@@ -569,7 +566,7 @@ impl Driver {
             .for_each(|(((index, ty), &name), &range)| {
                 self.add_decl(Decl::Parameter { index }, name, Some(*ty), range);
             });
-        let last_param = DeclId::new(self.code.hir.decls.len());
+        let last_param = self.code.hir.decls.next_idx();
         let params = first_param..last_param;
 
         // `end_computed_decl` will attach the real scope to this decl; we don't have it yet
@@ -853,8 +850,7 @@ impl Driver {
             );
 
             // Add parameters to decl scope
-            for i in params.start.index()..params.end.index() {
-                let id = DeclId::new(i);
+            for id in range_iter(params.clone()) {
                 self.imper_scoped_decl(
                     ImperScopedDecl {
                         name: self.code.hir.names[id],
@@ -865,8 +861,7 @@ impl Driver {
             }
 
             // Add generic parameters to decl scope
-            for i in generic_params.start.index()..generic_params.end.index() {
-                let id = DeclId::new(i);
+            for id in range_iter(generic_params.clone()) {
                 self.imper_scoped_decl(
                     ImperScopedDecl {
                         name: self.code.hir.names[id],

@@ -64,7 +64,7 @@ pub enum Message {
     WillBuildMoreTir,
 
     /// Sent before adding all type 2-4 dependencies for this set
-    WillAddTirDependencies,
+    WillAddTirDependencies { items_that_need_dependencies: Vec<ItemId> },
     /// Sent after adding a type 2 dependency from `depender` on `dependee`
     DidAddTirType2Dependency {
         depender: ItemId,

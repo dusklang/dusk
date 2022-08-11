@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::mem;
 
 use smallvec::SmallVec;
-use index_vec::{define_index_type, IdxRangeBounds};
+use index_vec::define_index_type;
 use string_interner::DefaultSymbol as Sym;
 
 use dusk_dire::source_info::SourceRange;
@@ -334,8 +334,7 @@ impl Driver {
     fn find_overloads_in_function_parameters(&self, name: &NameLookup, func: DeclId, overloads: &mut HashSet<DeclId>) {
         match &df!(func.hir) {
             hir::Decl::Computed { params, .. } => {
-                for i in params.start.index()..params.end.index() {
-                    let decl = DeclId::new(i);
+                for decl in range_iter(params.clone()) {
                     let param_name = self.code.hir.names[decl];
                     
                     if self.name_matches(name, param_name) {
@@ -406,8 +405,7 @@ impl Driver {
                 Namespace::GenericContext(ns_id) => {
                     let generic_context_ns = &self.code.hir.generic_context_ns[ns_id];
                     let generic_params = &generic_context_ns.generic_params;
-                    for i in generic_params.start.index()..generic_params.end.index() {
-                        let decl = DeclId::new(i);
+                    for decl in range_iter(generic_params.clone()) {
                         let param_name = self.code.hir.names[decl];
                         if self.name_matches(name, param_name) {
                             overloads.insert(decl);
@@ -656,14 +654,12 @@ impl Driver {
 
     pub fn initialize_tir(&mut self, new_code: &NewCode) {
         // Populate `decls`
-        for id in new_code.decls.clone().into_range() {
-            let id = DeclId::new(id);
+        for id in range_iter(new_code.decls.clone()) {
             let decl = &self.code.hir.decls[id];
             let mut generic_params = SmallVec::new();
             let (is_mut, param_tys) = match *decl {
                 hir::Decl::Computed { ref param_tys, generic_params: ref og_generic_params, .. } => {
-                    for i in og_generic_params.start.index()..og_generic_params.end.index() {
-                        let decl = DeclId::new(i);
+                    for decl in range_iter(og_generic_params.clone()) {
                         let generic_param_id = match df!(decl.hir) {
                             hir::Decl::GenericParam(id) => id,
                             _ => panic!("COMPILER BUG: expected generic parameter"),
@@ -710,14 +706,13 @@ impl Driver {
                     SmallVec::new(),
                 ),
             };
-            dvd::send(|| DvdMessage::DidInitializeTirForDecl { id: DeclId::new(self.tir.decls.len()), is_mut, param_tys: param_tys.iter().cloned().collect() });
+            dvd::send(|| DvdMessage::DidInitializeTirForDecl { id, is_mut, param_tys: param_tys.iter().cloned().collect() });
             self.tir.decls.push_at(id, Decl { param_tys, is_mut, generic_params });
         }
 
         self.initialize_graph();
         // Add type 1 dependencies to the graph
-        for i in new_code.decls.clone().into_range() {
-            let decl_id = DeclId::new(i);
+        for decl_id in range_iter(new_code.decls.clone()) {
             let id = df!(decl_id.item);
             match df!(decl_id.hir) {
                 // NOTE: type 1 dependencies are currently added to LoopBinding by its parent `for` loop; see below.
@@ -735,8 +730,7 @@ impl Driver {
                 },
             }
         }
-        for i in new_code.exprs.clone().into_range() {
-            let expr_id = ExprId::new(i);
+        for expr_id in range_iter(new_code.exprs.clone()) {
             let id = ef!(expr_id.item);
             match ef!(expr_id.hir) {
                 hir::Expr::Void | hir::Expr::Error | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
@@ -858,7 +852,7 @@ impl Driver {
         add_eval_dep_injector!(self, add_eval_dep);
 
         let items_that_need_dependencies = self.tir.graph.get_items_that_need_dependencies();
-        dvd::send(|| DvdMessage::WillAddTirDependencies);
+        dvd::send(|| DvdMessage::WillAddTirDependencies { items_that_need_dependencies: items_that_need_dependencies.clone() });
         for id in items_that_need_dependencies {
             match self.code.hir.items[id] {
                 hir::Item::Decl(decl_id) => {

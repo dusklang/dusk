@@ -11,8 +11,6 @@ use std::collections::HashMap;
 
 use paste::paste;
 
-use index_vec::IdxRangeBounds;
-
 use dusk_dire::hir::{ExprId, DeclId, DeclRefId, StructLitId, CastId, Namespace, Decl};
 use dusk_dire::mir::Const;
 use dusk_dire::ty::{Type, FunctionType, QualType};
@@ -212,8 +210,8 @@ macro_rules! declare_tp {
                     };
                 }
                 $(resize_idx_vec!($field_name, $id_ty);)*
-                for i in (decl_start..self.decl_types.next_idx()).into_range() {
-                    let decl = DeclId::new(i);
+                let end = self.decl_types.next_idx();
+                for decl in range_iter(decl_start..end) {
                     self.decl_types[decl].is_mut = d.tir.decls[decl].is_mut;
                 }
                 for (decl, ty) in self.decl_types.iter_mut_enumerated() {

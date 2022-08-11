@@ -679,9 +679,12 @@ impl Driver {
     ///     ```c
     ///     #include <stdint.h>
     ///     #define ADD_FUNC_ID (insert the FuncId of add here)
+    ///
+    ///     void interp_ffi_entry_point(uint32_t func, void const* const* params, void* return_value_addr);
+    ///
     ///     uint32_t add(uint32_t a, uint32_t b) {
     ///         void* parameters[] = {&a, &b};
-    ///         int return_value;
+    ///         uint32_t return_value;
     ///         interp_ffi_entry_point(ADD_FUNC_ID, parameters, &return_value);
     ///         return return_value;
     ///     }
