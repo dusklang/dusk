@@ -48,6 +48,11 @@ struct Header {
     x_right: f32,
 }
 
+enum MessageState {
+    Paused { last_message: Option<Message>, },
+    Running,
+}
+
 struct UiState {
     running: bool,
     scrolling: [f32; 2],
@@ -57,8 +62,7 @@ struct UiState {
     rx: Receiver<Message>,
     tx: Sender<Response>,
 
-    stepping: bool,
-    message: Option<Message>,
+    message_state: MessageState,
 }
 
 impl UiState {
@@ -72,21 +76,12 @@ impl UiState {
             rx,
             tx,
 
-            stepping: true,
-            message: None,
+            message_state: MessageState::Paused { last_message: None },
         }
     }   
 }
 
 fn run_ui(state: &mut UiState, ui: &mut Ui) {
-    // while let Ok(message) = state.rx.recv_timeout(Duration::from_millis(1)) {
-    //     state.tx.send(Response::Continue).unwrap();
-    //     match message {
-    //         Message::WillExit => state.running = false,
-    //         _ => {},
-    //     }
-    // }
-
     let (pos, size) = unsafe {
         let viewport = igGetMainViewport();
         ((*viewport).WorkPos, (*viewport).WorkSize)
@@ -98,23 +93,53 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
         .collapsible(false)
         .title_bar(false)
         .build(ui, || {
-            if state.stepping {
-                if let Ok(message) = state.rx.recv_timeout(Duration::from_millis(1)) {
-                    state.message = Some(message);
-                }
-
-                if ui.button("Step") && state.message.is_some() {
-                    state.message = None;
-                    state.tx.send(Response::Continue).unwrap();
-                    if let Ok(message) = state.rx.recv_timeout(Duration::from_millis(1)) {
-                        state.message = Some(message);
+            match &mut state.message_state {
+                MessageState::Paused { last_message } => {
+                    if last_message.is_none() {
+                        if let Ok(message) = state.rx.recv_timeout(Duration::from_millis(1)) {
+                            if matches!(message, Message::WillExit) {
+                                state.running = false;
+                            }
+                            *last_message = Some(message);
+                        }
                     }
-                }
-                if let Some(message) = &state.message {
-                    ui.text_wrapped(format!("Message: {:?}", message));
-                } else {
-                    ui.text_wrapped("Message: no message");
-                }
+                    if let Some(message) = last_message {
+                        ui.text_wrapped(format!("Message: {:?}", message));
+                    } else {
+                        ui.text_wrapped("Message: no message");
+                    };
+                    if ui.button("Next") && last_message.is_some() {
+                        state.tx.send(Response::Continue).unwrap();
+                        *last_message = None; // Remove message because we don't want to send multiple Continue responses
+                    }
+                    if ui.button("Run") {
+                        if last_message.is_some() {
+                            state.tx.send(Response::Continue).unwrap();
+                        }
+                        state.message_state = MessageState::Running;
+                    }
+                },
+                MessageState::Running => {
+                    // In the worst case, this could take over a second, causing the FPS to drop to a slide show.
+                    // However, that would require 1000 messages in a row to take nearly close to (but not more than)
+                    // 1 millisecond, and messages tend to arrive much more frequently than that.
+                    //
+                    // In summary: this is fine probably.
+                    for _ in 0..1000 {
+                        if let Ok(message) = state.rx.recv_timeout(Duration::from_millis(1)) {
+                            state.tx.send(Response::Continue).unwrap();
+                            if matches!(message, Message::WillExit) {
+                                state.running = false;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                    ui.text_wrapped("Running...");
+                    if ui.button("Pause") {
+                        state.message_state = MessageState::Paused { last_message: None };
+                    }
+                },
             }
             ui.text_wrapped("Drag with right mouse button");
             ui.text_wrapped("Use mouse wheel to scroll vertically");
