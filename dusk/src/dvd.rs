@@ -234,9 +234,8 @@ pub fn dvd_main() {
     let (msg_tx, msg_rx) = mpsc::channel();
     let (resp_tx, resp_rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let mut stream = LocalSocketStream::connect("DUSK_VISUAL_DEBUGGER").unwrap();
-        loop {
-            let message: Message = dvd::receive_value(&mut stream);
+        let mut stream = LocalSocketStream::connect("@DUSK_VISUAL_DEBUGGER").unwrap();
+        while let Ok(message) = dvd::receive_value(&mut stream) {
             msg_tx.send(message).unwrap();
             let response: Response = resp_rx.recv().unwrap();
             dvd::send_value(&mut stream, response);

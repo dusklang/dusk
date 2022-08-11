@@ -110,7 +110,7 @@ pub use dependent_exports::*;
 
 #[cfg(feature = "dvd")]
 mod dependent_exports {
-    use std::io::{Write, Read};
+    use std::io::{Write, Read, Result as IoResult};
     use std::process::{Command, Stdio};
     use std::sync::Mutex;
     
@@ -136,14 +136,14 @@ mod dependent_exports {
         w.write_all(&payload).unwrap();
     }
     
-    pub fn receive_value<V: DeserializeOwned>(r: &mut impl Read) -> V {
+    pub fn receive_value<V: DeserializeOwned>(r: &mut impl Read) -> IoResult<V> {
         let mut len = [0u8; 4];
-        r.read_exact(&mut len).unwrap();
+        r.read_exact(&mut len)?;
         let len = u32::from_ne_bytes(len);
         let mut payload = Vec::new();
         payload.resize(len as usize, 0u8);
         r.read_exact(&mut payload).unwrap();
-        serde_json::from_slice(&payload).unwrap()
+        Ok(serde_json::from_slice(&payload).unwrap())
     }
     
     struct DvdCoordinator {
@@ -151,14 +151,19 @@ mod dependent_exports {
     }
     impl DvdCoordinatorTrait for DvdCoordinator {
         fn send(&mut self, message: &mut dyn FnMut() -> Message) {
-            send_value(&mut self.conn, message());
-            let response: Response = receive_value(&mut self.conn);
+            let message = message();
+            send_value(&mut self.conn, message);
+            let response: IoResult<Response> = receive_value(&mut self.conn);
             match response {
-                Response::Continue => {},
-                Response::Quit => {
-                    println!("Told to quit");
+                Ok(Response::Continue) => {},
+                Ok(Response::Quit) => {
+                    eprintln!("Told to quit");
                     std::process::exit(0);
-                }
+                },
+                Err(_) => {
+                    eprintln!("Lost connection with DVD");
+                    std::process::exit(0);
+                },
             }
         }
     }
@@ -169,7 +174,7 @@ mod dependent_exports {
     }
     
     pub fn connect() {
-        let listener = LocalSocketListener::bind("DUSK_VISUAL_DEBUGGER").unwrap();
+        let listener = LocalSocketListener::bind("@DUSK_VISUAL_DEBUGGER").unwrap();
         let exe_path = std::env::current_exe().unwrap();
         Command::new(exe_path)
             .arg("internal-launch-dvd")
