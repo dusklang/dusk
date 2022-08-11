@@ -198,21 +198,8 @@ mod dependent_exports {
 
 #[cfg(not(feature = "dvd"))]
 mod dependent_exports {
-    use std::io::{Write, Read};
-
     use super::Message;
-    
-    #[inline]
-    pub fn send_value<V>(_w: &mut impl Write, _value: V) {}
-    
-    #[inline]
-    pub fn receive_value<V>(_r: &mut impl Read) -> V {
-        unimplemented!("can't call libdusk::dvd::receive_value() without the \"dvd\" feature")
-    }
 
     #[inline]
     pub fn send(_message: impl FnMut() -> Message) {}
-    
-    #[inline]
-    pub fn connect() {}
 }
