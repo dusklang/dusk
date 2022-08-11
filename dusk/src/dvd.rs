@@ -121,7 +121,7 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                 },
                 MessageState::Running => {
                     // In the worst case, this could take over a second, causing the FPS to drop to a slide show.
-                    // However, that would require 1000 messages in a row to take nearly close to (but not more than)
+                    // However, that would require 1000 messages in a row to take close to (but not more than)
                     // 1 millisecond, and messages tend to arrive much more frequently than that.
                     //
                     // In summary: this is fine probably.
