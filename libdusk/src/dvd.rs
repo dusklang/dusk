@@ -161,7 +161,7 @@ mod dependent_exports {
                     std::process::exit(0);
                 },
                 Err(_) => {
-                    eprintln!("Lost connection with DVD");
+                    eprintln!("Lost connection.");
                     std::process::exit(0);
                 },
             }
@@ -183,9 +183,9 @@ mod dependent_exports {
             .stdin(Stdio::null())
             .spawn()
             .unwrap();
-        println!("Waiting for connection to DVD...");
+        eprintln!("Waiting for connection to DVD...");
         let conn = listener.incoming().next().unwrap().unwrap();
-        println!("Got connection.");
+        eprintln!("Got connection.");
         *COORDINATOR.lock().unwrap() = Box::new(DvdCoordinator { conn });
     }
     
