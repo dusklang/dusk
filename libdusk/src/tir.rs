@@ -845,7 +845,7 @@ impl Driver {
     pub fn build_more_tir(&mut self) -> Option<Units> {
         dvd::send(|| DvdMessage::WillBuildMoreTir);
         if !self.tir.graph.has_outstanding_components() {
-            dvd::send(|| DvdMessage::DidBuildMoreTir);
+            dvd::send(|| DvdMessage::DidBuildMoreTir { no_outstanding_components: true });
             return None;
         }
 
@@ -1028,7 +1028,7 @@ impl Driver {
             unit.items.unify_sizes();
         }
 
-        dvd::send(|| DvdMessage::DidBuildMoreTir);
+        dvd::send(|| DvdMessage::DidBuildMoreTir { no_outstanding_components: false });
         Some(
             Units { units: sp.units, mock_units: sp.mock_units }
         )

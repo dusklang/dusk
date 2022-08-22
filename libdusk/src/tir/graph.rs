@@ -233,15 +233,8 @@ impl Graph {
         );
     }
 
-    pub fn has_outstanding_components(&mut self) -> bool { !self.outstanding_components.is_empty() }
+    pub fn has_outstanding_components(&self) -> bool { !self.outstanding_components.is_empty() }
 
-    fn update_meta_deps(&mut self) {
-        for &comp in &self.outstanding_components {
-            let has_meta_dep = self.components[comp].items.iter()
-                .any(|item| self.global_meta_dependees.contains(item));
-            self.components[comp].has_meta_dep = has_meta_dep;
-        }
-    }
 
     fn find_comps_without_outstanding_type_4_deps(&self, comps: &HashSet<CompId>, output: &mut HashSet<CompId>) {
         'comps: for &comp_id in comps {
@@ -324,7 +317,19 @@ impl Graph {
     }
 
     pub fn solve(&mut self) -> Levels {
-        self.update_meta_deps();
+        dvd::send(|| {
+            let mut outstanding_components: Vec<_> = self.outstanding_components.iter().copied().collect();
+            outstanding_components.sort();
+            DvdMessage::WillSolveTirGraph { outstanding_components }
+        });
+
+
+        // Set the has_meta_dep field of all outstanding components
+        for &comp in &self.outstanding_components {
+            let has_meta_dep = self.components[comp].items.iter()
+                .any(|item| self.global_meta_dependees.contains(item));
+            self.components[comp].has_meta_dep = has_meta_dep;
+        }
 
         // Get the outstanding components with meta-dependees in them
         let mut meta_dep_components = HashSet::<CompId>::new();
@@ -360,6 +365,12 @@ impl Graph {
 
             excluded_components
         };
+
+        dvd::send(|| {
+            let mut excluded_components: Vec<_> = meta_dep_components.union(&excluded_components).copied().collect();
+            excluded_components.sort();
+            DvdMessage::DidExcludeTirComponentsFromSubprogram(excluded_components)
+        });
 
         // Temporarily remove all excluded components. Those that don't get staged will be added back after finding the units
         self.outstanding_components.retain(|comp| !meta_dep_components.contains(comp) && !excluded_components.contains(comp));
@@ -489,6 +500,7 @@ impl Graph {
             }
         }
 
+        dvd::send(|| DvdMessage::DidSolveTirGraph);
         let components = &self.components;
         Levels {
             item_to_levels: item_to_levels.clone(),
@@ -541,7 +553,7 @@ pub struct Levels {
     pub mock_units: Vec<MockUnit>,
 }
 
-#[derive(Debug)]
+#[derive(Debug,)]
 pub struct MockUnit {
     /// Main item of the mock unit; the meta-dependee
     pub item: ItemId,

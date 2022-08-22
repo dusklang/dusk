@@ -83,8 +83,14 @@ pub enum Message {
     /// Sent after adding all type 2-4 dependencies for this set
     DidAddTirDependencies,
 
+    WillSolveTirGraph { outstanding_components: Vec<CompId>, },
+
+    DidExcludeTirComponentsFromSubprogram(Vec<CompId>),
+
+    DidSolveTirGraph,
+
     /// Sent after building another set of units and meta-units of TIR
-    DidBuildMoreTir,
+    DidBuildMoreTir { no_outstanding_components: bool },
 
     /// Sent before typechecking a set of TIR
     WillTypeCheckSet,
@@ -94,6 +100,9 @@ pub enum Message {
 
     /// Sent just before exiting
     WillExit,
+
+
+    Debug(String),
 }
 
 /// Responses *from* the debugger *to* the compiler.
