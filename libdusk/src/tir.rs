@@ -136,6 +136,11 @@ struct Subprogram {
     levels: Levels,
 }
 
+#[derive(Debug)]
+pub enum TirError {
+    DependencyCycle,
+}
+
 #[derive(Default, Debug)]
 pub struct UnitItems {
     pub int_lits: Vec<Expr<IntLit>>,
@@ -842,11 +847,11 @@ impl Driver {
         }
     }
 
-    pub fn build_more_tir(&mut self) -> Option<Units> {
+    pub fn build_more_tir(&mut self) -> Result<Option<Units>, TirError> {
         dvd::send(|| DvdMessage::WillBuildMoreTir);
         if !self.tir.graph.has_outstanding_components() {
             dvd::send(|| DvdMessage::DidBuildMoreTir { no_outstanding_components: true });
-            return None;
+            return Ok(None);
         }
 
         add_eval_dep_injector!(self, add_eval_dep);
@@ -957,7 +962,15 @@ impl Driver {
         dvd::send(|| DvdMessage::DidAddTirDependencies);
 
         // Solve for the unit and level of each item
-        let levels = self.tir.graph.solve();
+        let levels = self.tir.graph.solve().map_err(|err| {
+            match err {
+                TirError::DependencyCycle => {
+                    self.diag.report_error_no_range("dependency cycle found. this is most likely a Dusk compiler bug.");
+                }
+            }
+            dvd::send(|| DvdMessage::DidBuildMoreTir { no_outstanding_components: false });
+            err
+        })?;
 
         let mut sp = Subprogram { units: Vec::new(), mock_units: Vec::new(), levels };
         sp.units.resize_with(sp.levels.units.len(), Default::default);
@@ -1029,8 +1042,10 @@ impl Driver {
         }
 
         dvd::send(|| DvdMessage::DidBuildMoreTir { no_outstanding_components: false });
-        Some(
-            Units { units: sp.units, mock_units: sp.mock_units }
+        Ok(
+            Some(
+                Units { units: sp.units, mock_units: sp.mock_units }
+            )
         )
     }
 }

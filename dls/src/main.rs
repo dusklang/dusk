@@ -450,7 +450,7 @@ impl Server {
             let mut new_code = NewCode::placeholder();
             loop {
                 let mut driver_write = driver.write();
-                if let Some(units) = driver_write.build_more_tir() {
+                if let Ok(Some(units)) = driver_write.build_more_tir() {
                     drop(driver_write);
                     // Typechecking can lead to expressions being evaluated, which in turn can result in new HIR being
                     // added. Therefore, we take a snapshot before typechecking.

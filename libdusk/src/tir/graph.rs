@@ -12,6 +12,8 @@ use crate::index_vec::*;
 use crate::driver::Driver;
 use crate::new_code::NewCode;
 
+use super::TirError;
+
 #[derive(Debug, Default)]
 pub struct Graph {
     dependees: IndexVec<ItemId, Vec<ItemId>>,
@@ -316,7 +318,7 @@ impl Graph {
         items
     }
 
-    pub fn solve(&mut self) -> Levels {
+    pub fn solve(&mut self) -> Result<Levels, TirError> {
         dvd::send(|| {
             let mut outstanding_components: Vec<_> = self.outstanding_components.iter().copied().collect();
             outstanding_components.sort();
@@ -374,6 +376,9 @@ impl Graph {
 
         // Temporarily remove all excluded components. Those that don't get staged will be added back after finding the units
         self.outstanding_components.retain(|comp| !meta_dep_components.contains(comp) && !excluded_components.contains(comp));
+        if self.outstanding_components.is_empty() {
+            return Err(TirError::DependencyCycle);
+        }
 
         let mut units = Vec::<InternalUnit>::new();
         while !self.outstanding_components.is_empty() {
@@ -502,18 +507,20 @@ impl Graph {
 
         dvd::send(|| DvdMessage::DidSolveTirGraph);
         let components = &self.components;
-        Levels {
-            item_to_levels: item_to_levels.clone(),
-            item_to_units,
-            units: units.into_iter()
-                .map(|unit| {
-                    let items = unit.components.iter()
-                        .flat_map(|&comp| components[comp].items.iter().copied())
-                        .collect();
-                    Unit { items }
-                }).collect::<Vec<Unit>>(),
-            mock_units,
-        }
+        Ok(
+            Levels {
+                item_to_levels: item_to_levels.clone(),
+                item_to_units,
+                units: units.into_iter()
+                    .map(|unit| {
+                        let items = unit.components.iter()
+                            .flat_map(|&comp| components[comp].items.iter().copied())
+                            .collect();
+                        Unit { items }
+                    }).collect::<Vec<Unit>>(),
+                mock_units,
+            }
+        )
     }
 
     fn get_deps(&self, item: ItemId, out: &mut HashSet<ItemId>) {
