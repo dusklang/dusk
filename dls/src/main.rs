@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
 use std::mem;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use dusk_dire::hir::{Item, Expr};
 use dusk_dire::source_info::{SourceFileId, SourceRange};
@@ -416,63 +417,87 @@ impl Server {
             .flushed_diagnostics.extend(new_diagnostics);
     }
     fn analyze_file(&self, path: &Url) -> (DriverRef, Option<RealTypeProvider>) {
-        eprintln!("ANALYZING FILE AT PATH: {}", path);
-        let mut src_map = SourceMap::new();
-        // TODO: non-file schemes, I guess?
-        assert_eq!(path.scheme(), "file");
-        // TODO: Add all files to the source map that are currently open
+        // I *think* this is safe...
+        let salf = AssertUnwindSafe(self);
+        let mut file_id = None;
+        let mut file_id_ref = AssertUnwindSafe(&mut file_id);
+        let unwind_result = catch_unwind(move || {
+            eprintln!("ANALYZING FILE AT PATH: {}", path);
+            let mut src_map = SourceMap::new();
+            // TODO: non-file schemes, I guess?
+            assert_eq!(path.scheme(), "file");
+            // TODO: Add all files to the source map that are currently open
 
-        let src = self.open_files
-            .borrow()
-            .get(path).unwrap()
-            .contents.lines.join("\n")
-            .to_string();
-        src_map.add_file_in_memory(path, src).unwrap();
-        let mut driver = DriverRef::new(&DRIVER);
-        *driver.write() = Driver::new(src_map, Arch::X86_64);
-        let before = driver.read().take_snapshot();
-
-        driver.write().initialize_hir();
-
-        let fatal_parse_error = driver.write().parse_added_files().is_err();
-        self.flush_diagnostics(&mut driver.write(), path);
-        
-        driver.write().finalize_hir();
-
-        let new_code = driver.read().get_new_code_since(before);
-
-        let tp = (!fatal_parse_error).then(|| {
-            driver.write().initialize_tir(&new_code);
-            self.flush_diagnostics(&mut driver.write(), path);
+            let src = salf.open_files
+                .borrow()
+                .get(path).unwrap()
+                .contents.lines.join("\n")
+                .to_string();            
+            let file = src_map.add_file_in_memory(path, src).unwrap();
+            **file_id_ref = Some(file);
+            let mut driver = DriverRef::new(&DRIVER);
+            *driver.write() = Driver::new(src_map, Arch::X86_64);
+            let before = driver.read().take_snapshot();
     
-            let mut tp = driver.read().get_real_type_provider();
-            let mut new_code = NewCode::placeholder();
-            loop {
-                let mut driver_write = driver.write();
-                if let Ok(Some(units)) = driver_write.build_more_tir() {
-                    drop(driver_write);
-                    // Typechecking can lead to expressions being evaluated, which in turn can result in new HIR being
-                    // added. Therefore, we take a snapshot before typechecking.
-                    let before = driver.read().take_snapshot();
-                    if driver.type_check(&units, &mut tp, new_code).is_err() {
+            driver.write().initialize_hir();
+    
+            let fatal_parse_error = driver.write().parse_added_files().is_err();
+            salf.flush_diagnostics(&mut driver.write(), path);
+            
+            driver.write().finalize_hir();
+    
+            let new_code = driver.read().get_new_code_since(before);
+    
+            let tp = (!fatal_parse_error).then(|| {
+                driver.write().initialize_tir(&new_code);
+                salf.flush_diagnostics(&mut driver.write(), path);
+        
+                let mut tp = driver.read().get_real_type_provider();
+                let mut new_code = NewCode::placeholder();
+                loop {
+                    let mut driver_write = driver.write();
+                    if let Ok(Some(units)) = driver_write.build_more_tir() {
+                        drop(driver_write);
+                        // Typechecking can lead to expressions being evaluated, which in turn can result in new HIR being
+                        // added. Therefore, we take a snapshot before typechecking.
+                        let before = driver.read().take_snapshot();
+                        if driver.type_check(&units, &mut tp, new_code).is_err() {
+                            break;
+                        }
+                        new_code = driver.read().get_new_code_since(before);
+    
+                        salf.flush_diagnostics(&mut driver.write(), path);
+                    } else {
                         break;
                     }
-                    new_code = driver.read().get_new_code_since(before);
-
-                    self.flush_diagnostics(&mut driver.write(), path);
-                } else {
-                    break;
                 }
-            }
+        
+                salf.flush_diagnostics(&mut driver.write(), path);
+                if !driver.read().diag.has_failed() {
+                    driver.build_mir(&tp);
+                    salf.flush_diagnostics(&mut driver.write(), path);
+                }
+                tp
+            });
     
-            self.flush_diagnostics(&mut driver.write(), path);
-            if !driver.read().diag.has_failed() {
-                driver.build_mir(&tp);
-                self.flush_diagnostics(&mut driver.write(), path);
-            }
             tp
         });
-
+        let mut driver = DriverRef::new(&DRIVER);
+        let mut tp = None;
+        match unwind_result {
+            Ok(type_provider) => tp = type_provider,
+            Err(reason) => {
+                let range = driver.read().src_map.get_file_range(file_id.unwrap());
+                let mut error_msg = String::from("compiler crashed");
+                if reason.is::<String>() {
+                    error_msg.push_str(&format!(": {}", reason.downcast::<String>().unwrap()));
+                } else if reason.is::<&'static str>() {
+                    error_msg.push_str(&format!(": {}", reason.downcast::<&'static str>().unwrap()));
+                }
+                driver.write().diag.report_error_no_range_msg(error_msg, range);
+                self.flush_diagnostics(&mut driver.write(), path)
+            }
+        }
         for (url, file) in self.open_files.borrow_mut().iter_mut() {
             let errors = mem::take(&mut file.flushed_diagnostics);
             // TODO: keep track of and pass the file version these diagnostics are for (the 3rd parameter)
@@ -482,7 +507,6 @@ impl Server {
                 version: None,
             }).unwrap();
         }
-
         (driver, tp)
     }
 }

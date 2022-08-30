@@ -154,6 +154,12 @@ impl SourceMap {
         self.file_ends[file.index()]
     }
 
+    pub fn get_file_range(&self, file: SourceFileId) -> SourceRange {
+        let start = self.get_begin_offset(file);
+        let len = self.files[file].src.len();
+        SourceRange { start, end: start + len }
+    }
+
     fn add_file_impl(&mut self, location: impl Into<SourceFileLocation>, src: impl FnOnce() -> io::Result<String>) -> io::Result<SourceFileId> {
         let location = location.into().canonicalize_if_on_disk()?;
         if let Some(&id) = self.locations.get(&location) {

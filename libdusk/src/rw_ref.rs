@@ -1,4 +1,4 @@
-use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, PoisonError};
 use std::cell::{RefCell, Ref, RefMut};
 
 /// Provides a convenient way to use a RwLock across nested function call boundaries, without paying the mental or
@@ -25,6 +25,14 @@ pub enum RwRefGuard<'l, T> {
     RefMut(RwLockWriteGuard<'l, T>)
 }
 
+// This could easily come back to bite me
+fn ignore_poison<T>(result: Result<T, PoisonError<T>>) -> T {
+    match result {
+        Ok(guard) => guard,
+        Err(err) => err.into_inner(),
+    }
+}
+
 impl<'l, T> RwRef<'l, T> {
     pub fn new(lock: &'l RwLock<T>) -> Self {
         Self {
@@ -35,7 +43,7 @@ impl<'l, T> RwRef<'l, T> {
     
     pub fn read(&self) -> Ref<T> {
         if matches!(*self.guard.borrow(), RwRefGuard::Nothing) {
-            *self.guard.borrow_mut() = RwRefGuard::Ref(self.lock.read().unwrap());
+            *self.guard.borrow_mut() = RwRefGuard::Ref(ignore_poison(self.lock.read()));
         }
         Ref::map(self.guard.borrow(), |guard| match guard {
             RwRefGuard::Ref(guard) => &**guard,
@@ -47,7 +55,7 @@ impl<'l, T> RwRef<'l, T> {
     pub fn read_only(&self) -> Ref<T> {
         if !matches!(*self.guard.borrow(), RwRefGuard::Ref(_)) {
             *self.guard.borrow_mut() = RwRefGuard::Nothing;
-            *self.guard.borrow_mut() = RwRefGuard::Ref(self.lock.read().unwrap());
+            *self.guard.borrow_mut() = RwRefGuard::Ref(ignore_poison(self.lock.read()));
         }
         Ref::map(self.guard.borrow(), |guard| match guard {
             RwRefGuard::Ref(guard) => &**guard,
@@ -58,7 +66,7 @@ impl<'l, T> RwRef<'l, T> {
     pub fn write(&mut self) -> RefMut<T> {
         if !matches!(*self.guard.borrow(), RwRefGuard::RefMut(_)) {
             *self.guard.borrow_mut() = RwRefGuard::Nothing;
-            *self.guard.borrow_mut() = RwRefGuard::RefMut(self.lock.write().unwrap());
+            *self.guard.borrow_mut() = RwRefGuard::RefMut(ignore_poison(self.lock.write()));
         }
         
         RefMut::map(self.guard.borrow_mut(), |guard| match guard {
