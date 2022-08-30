@@ -1,0 +1,362 @@
+PEHeader :: struct {
+    machine: u16
+    number_of_sections: u16
+    time_date_stamp: u32
+    pointer_to_symbol_table: u32
+    number_of_symbols: u32
+    optional_header_size: u16
+    characteristics: u16
+}
+
+/// Reference to a slice of bytes of size `size` in the PE file, starting at `rva`
+PEReference :: struct {
+    rva: u32
+    size: u32
+}
+
+PEOptionalHeader :: struct {
+    // standard fields
+    magic: u16
+    l_major: u8
+    l_minor: u8
+    code_size: u32
+    initialized_data_size: u32
+    uninitialized_data_size: u32
+    entry_point_rva: u32
+    base_of_code: u32
+    base_of_data: u32
+
+    // NT-specific fields
+    image_base: u32
+    section_alignment: u32
+    file_alignment: u32
+    os_major: u16
+    os_minor: u16
+    user_major: u16
+    user_minor: u16
+    subsys_major: u16
+    subsys_minor: u16
+    reserved: u32
+    image_size: u32
+    header_size: u32
+    file_checksum: u32
+    subsystem: u16
+    dll_flags: u16
+    stack_reserve_size: u32
+    stack_commit_size: u32
+    heap_reserve_size: u32
+    heap_commit_size: u32
+    loader_flags: u32
+    number_of_data_directories: u32
+
+    // Data directories
+    export_table: PEReference
+    import_table: PEReference
+    resource_table: PEReference
+    exception_table: PEReference
+    certificate_table: PEReference
+    base_relocation_table: PEReference
+    debug_table: PEReference
+    copyright_table: PEReference
+    global_ptr_table: PEReference
+    tls_table: PEReference
+    load_config_table: PEReference
+    bound_import_table: PEReference
+    iat: PEReference
+    delay_import_descriptor: PEReference
+    cli_header: PEReference
+    reserved_table: PEReference
+}
+
+PESectionHeader :: struct {
+    // TODO: fixed size arrays
+    name: u64
+    virtual_size: u32
+    virtual_address: u32
+    size_of_raw_data: u32
+    pointer_to_raw_data: u32
+    pointer_to_relocations: u32
+    pointer_to_linenumbers: u32
+    number_of_relocations: u16
+    number_of_linenumbers: u16
+    characteristics: u32
+}
+
+CLIHeader :: struct {
+    cb: u32
+    major_runtime_version: u16
+    minor_runtime_version: u16
+    meta_data: PEReference
+    flags: u32
+    entry_point_token: u32
+    resources: PEReference
+    strong_name_signature: PEReference
+    code_manager_table: PEReference
+    v_table_fixups: PEReference
+    export_address_table_jumps: PEReference
+    managed_native_header: PEReference
+}
+
+PEFile :: struct {
+    image: ByteSlice
+    header: PEHeader*
+    optional_header: PEOptionalHeader*
+    sections: PESectionHeader*
+}
+
+fn get_section(file: PEFile*, index: u16): PESectionHeader* {
+    if index >= file.header.number_of_sections {
+        panic("index out of bounds")
+    } 
+    (file.sections as usize + index as usize * size_of(PESectionHeader)) as PESectionHeader*
+}
+
+fn resolve_rva(file: PEFile*, rva: u32): u32 {
+    i: u16 = 0
+    print("Attempting to resolve rva ")
+    print_num(rva as u64)
+    print("\n")
+    while i < file.header.number_of_sections {
+        section :: get_section(file, i)
+        if section.virtual_address <= rva && rva < section.virtual_address + section.size_of_raw_data {
+            offset :: rva - section.virtual_address + section.pointer_to_raw_data
+            return offset
+        }
+        i += 1
+    }
+    panic("nope")
+}
+
+fn main() {
+    metadata := read_file("external/win32metadata/Windows.Win32.winmd")
+    
+    signature_location :: read_u32(metadata, $3c)
+    if read_byte(metadata, signature_location) != "P" || read_byte(metadata, signature_location+1) != "E" || read_byte(metadata, signature_location+2) != 0 || read_byte(metadata, signature_location+3) != 0 {
+        panic("Invalid PE signature. Exiting.")
+    }
+    cursor := signature_location + 4
+    // TODO: reverse endianness when running on a big-endian CPU
+    header :: read_pe_header(metadata, cursor)
+    if header.machine != $14c {
+        panic("Invalid machine number in PE file header. Exiting.")
+    }
+    if header.optional_header_size as usize != size_of(PEOptionalHeader) {
+        panic("Invalid optional header size. Exiting.")
+    }
+
+    cursor += size_of(PEHeader) as u32
+    optional_header :: read_pe_optional_header(metadata, cursor)
+    if optional_header.magic != $10b {
+        panic("Invalid PE optional header magic")
+    }
+    cursor += size_of(PEOptionalHeader) as u32
+    first_section_header :: read_pe_section_header(metadata, cursor)
+    file := PEFile {
+        image: metadata
+        header: header
+        optional_header: optional_header
+        sections: first_section_header
+    }
+    resolve_rva(&file, file.optional_header.cli_header.rva)
+
+
+    free_slice(&mut metadata)
+}
+
+
+
+// Library code.
+ByteSlice :: struct {
+    size: usize
+    data: u8 *mut
+}
+
+fn new_slice(size: usize): ByteSlice {
+    ByteSlice {
+        size: size
+        data: malloc(size) as u8 *mut
+    }
+}
+
+fn read_file(path: i8*): ByteSlice {
+    file :: kernel32.CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, 0 as usize as SECURITY_ATTRIBUTES *mut, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0 as usize as HANDLE)
+    invalid :: -1 as isize as usize as HANDLE
+    if file as usize == _debug_mark(INVALID_HANDLE_VALUE()) as usize {
+        panic("unable to open file")
+    }
+
+    size := 0 as u64
+    succ :: kernel32.GetFileSizeEx(file, &mut size)
+    if succ == FALSE {
+        panic("unable to get file size")
+    }
+
+    size :: size as usize
+    buf :: malloc(size)
+
+    i := 0 as usize
+    while i < size {
+        bytes_to_read :: (size - i) as DWORD
+        bytes_read := 0 as DWORD
+        succ :: kernel32.ReadFile(file, (buf as usize + i) as void *mut, bytes_to_read, &mut bytes_read, 0 as usize as OVERLAPPED *mut)
+        if succ == FALSE {
+            panic("unable to read from file")
+        }
+        i += bytes_read as usize
+    }
+    ignore :: kernel32.CloseHandle(file)
+
+    ByteSlice {
+        size: size
+        data: buf as u8 *mut
+    }
+}
+
+fn write_byte(slice: ByteSlice, index: u32, value: u8) {
+    *((slice.data as usize + index as usize) as u8 *mut) = value
+}
+
+fn read_byte(slice: ByteSlice, index: u32): u8 {
+    *((slice.data as usize + index as usize) as u8*)
+}
+
+fn read_u32(slice: ByteSlice, index: u32): u32 {
+    *((slice.data as usize + index as usize) as u32*)
+}
+
+// TODO: This function doesn't work yet, unfortunately
+fn read_as[T](slice: ByteSlice, index: u32): T {
+    if index as usize + size_of(T) > slice.size {
+        panic("index off the end")
+    }
+    *((slice.data as usize + index as usize) as T*)
+}
+fn read_pe_header(slice: ByteSlice, index: u32): PEHeader* {
+    if index as usize + size_of(PEHeader) > slice.size {
+        panic("index off the end")
+    }
+    ((slice.data as usize + index as usize) as PEHeader*)
+}
+fn read_pe_optional_header(slice: ByteSlice, index: u32): PEOptionalHeader* {
+    if index as usize + size_of(PEOptionalHeader) > slice.size {
+        panic("index off the end")
+    }
+    ((slice.data as usize + index as usize) as PEOptionalHeader*)
+}
+fn read_pe_section_header(slice: ByteSlice, index: u32): PESectionHeader* {
+    if index as usize + size_of(PESectionHeader) > slice.size {
+        panic("index off the end")
+    }
+    ((slice.data as usize + index as usize) as PESectionHeader*)
+}
+
+fn free_slice(slice: ByteSlice *mut) {
+    free(slice.data as void *mut)
+    slice.data = 0 as usize as u8 *mut
+    slice.size = 0
+}
+
+fn print_num(num: i64) {
+    num := num
+    if num < 0 {
+        print("-")
+        num = -num
+    }
+    if num >= 10 {
+        print_num(num / 10)
+    }
+    print((num % 10) as u8 + "0")
+}
+
+fn print_num(num: u64) {
+    num := num
+    if num >= 10 {
+        print_num(num / 10)
+    }
+    print((num % 10) as u8 + "0")
+}
+
+fn print_byte_recurse(num: u8, count: u8) {
+    num := num
+    if count < 1 {
+        print_byte_recurse(num / 16, count + 1)
+    }
+    num = num % 16
+    if num >= 10 {
+        print(num as u8 - 10 + "A")
+    } else {
+        print(num as u8 + "0")
+    }
+}
+
+fn print_byte(num: u8) {
+    print("$")
+    print_byte_recurse(num, 0)
+}
+
+fn print_word(num: u16) {
+    print("$")
+    print_byte_recurse((num >> 8) as u8, 0)
+    print_byte_recurse(num as u8, 0)
+}
+
+
+
+
+// Windows FFI code. To be cleaned up later
+
+HWND :: void *mut
+HANDLE :: void *mut
+
+MB_OK :: 0 as u32
+FILE_SHARE_READ :: 1 as DWORD
+
+fn INVALID_HANDLE_VALUE(): HANDLE {
+    -1 as isize as usize as HANDLE
+}
+DWORD :: u32
+STD_INPUT_HANDLE :: (-10) as i32 as DWORD
+STD_OUTPUT_HANDLE :: (-11) as i32 as DWORD
+STD_ERROR_HANDLE :: (-12) as i32 as DWORD
+BOOL :: i32
+TRUE :: 1
+FALSE :: 0
+
+GENERIC_READ :: 2147483648 as DWORD
+GENERIC_WRITE :: 1073741824 as DWORD
+
+CREATE_ALWAYS :: 2 as DWORD
+CREATE_NEW :: 1 as DWORD
+OPEN_ALWAYS :: 4 as DWORD
+OPEN_EXISTING :: 3 as DWORD
+TRUNCATE_EXISTING :: 5 as DWORD
+
+FILE_ATTRIBUTE_NORMAL :: 128 as DWORD
+
+// it is not currently possible to have constant pointers, which is why this is a function for now
+fn NULL(): void *mut { 0 as usize as void *mut }
+
+SECURITY_ATTRIBUTES :: struct {
+    nLength: DWORD
+    lpSecurityDescriptor: void *mut
+    bInheritHandle: BOOL
+}
+
+OVERLAPPED :: struct {}
+
+kernel32 :: extern_mod("kernel32.dll") {
+    fn GetStdHandle(nStdHandle: DWORD): HANDLE
+    fn WriteConsoleA(hConsoleOutput: HANDLE, lpBuffer: void*, nNumberOfCharsToWrite: DWORD, lpNumberOfCharsWritten: DWORD *mut, lpReserved: void *mut): BOOL
+    fn ReadConsoleA(hConsoleInput: HANDLE, lpBuffer: void *mut, nNumberOfCharsToRead: DWORD, lpNumberOfCharsRead: DWORD *mut, pInputControl: void *mut): BOOL
+    fn CreateFileA(lpFileName: i8*, dwDesiredAccess: DWORD, dwShareMode: DWORD, lpSecurityAttributes: SECURITY_ATTRIBUTES *mut, dwCreationDisposition: DWORD, dwFlagsAndAttributes: DWORD, hTemplateFile: HANDLE): HANDLE
+    fn CloseHandle(hObject: HANDLE): BOOL
+    fn GetFileSizeEx(hFile: HANDLE, lpFileSize: u64 *mut): BOOL
+    fn ReadFile(hFile: HANDLE, lpBuffer: void *mut, nNumberOfBytesToRead: DWORD, lpNumberOfBytesRead: DWORD *mut, lpOverlapped: OVERLAPPED *mut): BOOL
+
+    fn QueryPerformanceCounter(lpPerformanceCount: u64 *mut): BOOL
+    fn QueryPerformanceFrequency(lpFrequency: u64 *mut): BOOL
+}
+
+user32 :: extern_mod("user32.dll") {
+    fn MessageBoxA(hwnd: HWND, lpText: i8*, lpCaption: i8*, uType: u32): i32
+}
