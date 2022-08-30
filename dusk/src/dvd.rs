@@ -34,6 +34,8 @@ use std::time::{Instant, Duration};
 use std::sync::mpsc::{self, Receiver, Sender};
 use interprocess::local_socket::LocalSocketStream;
 use rand::Rng;
+use libdusk::index_vec::*;
+use dusk_dire::hir::ItemId;
 
 use libdusk::dvd::{Message, Response, self};
 
@@ -51,13 +53,17 @@ struct Header {
 enum MessageState {
     Paused { last_message: Option<Message>, },
     Running,
+    CompilerHasExit,
 }
+
+struct Item;
 
 struct UiState {
     running: bool,
     scrolling: [f32; 2],
     rectangles: Vec<Rectangle>,
     headers: Vec<Header>,
+    items: IndexVec<ItemId, Item>,
     rectangles_left: f32,
     rx: Receiver<Message>,
     tx: Sender<Response>,
@@ -72,6 +78,7 @@ impl UiState {
             scrolling: [0.0, 0.0],
             rectangles: Vec::new(),
             headers: Vec::new(),
+            items: Default::default(),
             rectangles_left: 0.0,
             rx,
             tx,
@@ -93,14 +100,23 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
         .collapsible(false)
         .title_bar(false)
         .build(ui, || {
+            fn handle_message(message: &Message, state: &mut UiState) {
+                match *message {
+                    Message::WillExit => {
+                        state.message_state = MessageState::CompilerHasExit;
+                    },
+                    Message::DidAddExpr { item_id, .. } => state.items.push_at(item_id, Item),
+                    Message::DidAddDecl { item_id, .. } => state.items.push_at(item_id, Item),
+                    _ => {},
+                }
+            }
             match &mut state.message_state {
                 MessageState::Paused { last_message } => {
+                    let mut new_message = None;
                     if last_message.is_none() {
                         if let Ok(message) = state.rx.recv_timeout(Duration::from_millis(1)) {
-                            if matches!(message, Message::WillExit) {
-                                state.running = false;
-                            }
                             *last_message = Some(message);
+                            new_message = last_message.clone();
                         }
                     }
                     if let Some(message) = last_message {
@@ -118,19 +134,20 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                         }
                         state.message_state = MessageState::Running;
                     }
+                    if let Some(new_message) = new_message {
+                        handle_message(&new_message, state);
+                    }
                 },
                 MessageState::Running => {
                     // In the worst case, this could take over a second, causing the FPS to drop to a slide show.
                     // However, that would require 1000 messages in a row to take close to (but not more than)
                     // 1 millisecond, and messages tend to arrive much more frequently than that.
                     //
-                    // In summary: this is fine probably.
+                    // In summary: this is a little iffy, but probably fine in practice.
                     for _ in 0..1000 {
                         if let Ok(message) = state.rx.recv_timeout(Duration::from_millis(1)) {
                             state.tx.send(Response::Continue).unwrap();
-                            if matches!(message, Message::WillExit) {
-                                state.running = false;
-                            }
+                            handle_message(&message, state);
                         } else {
                             break;
                         }
@@ -140,6 +157,9 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                         state.message_state = MessageState::Paused { last_message: None };
                     }
                 },
+                MessageState::CompilerHasExit => {
+                    ui.text_wrapped("Compiler has exit.");
+                }
             }
             ui.text_wrapped("Drag with right mouse button");
             ui.text_wrapped("Use mouse wheel to scroll vertically");
@@ -180,20 +200,23 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
 
             const GRID_STEP: f32 = 50.0;
             draw_list.with_clip_rect(p0, p1, || {
+                // Draw horizontal grid lines
                 let mut x = state.scrolling[0] % GRID_STEP;
                 let line_colour = ImColor32::from_rgba(200, 200, 200, 40);
                 while x < canvas_size[0] {
                     draw_list.add_line([p0[0] + x, p0[1]], [p0[0] + x, p1[1]], line_colour).build();
                     x += GRID_STEP;
                 }
+
+                // Draw vertical grid lines
                 let mut y = state.scrolling[1] % GRID_STEP;
                 while y < canvas_size[0] {
                     draw_list.add_line([p0[0], p0[1] + y], [p1[0], p0[1] + y], line_colour).build();
                     y += GRID_STEP;
                 }
 
+                // Generate boxes and headers once
                 const X_PADDING: f32 = 10.0;
-                // Draw boxes
                 if state.rectangles.is_empty() {
                     let mut y = 0.0;
                     state.rectangles_left = X_PADDING;
@@ -222,23 +245,32 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                     }
 
                 }
-                for header in &state.headers {
-                    const ESTIMATED_HEADER_WIDTH: f32 = 55.0;
-                    let rectangles_left = state.rectangles_left + origin[0];
-                    let rectangles_right = header.x_right + origin[0] - ESTIMATED_HEADER_WIDTH;
-                    let screen_left = X_PADDING + p0[0];
-                    let mut x = if rectangles_left > screen_left {
-                        rectangles_left
-                    } else {
-                        screen_left
-                    };
-                    if x > rectangles_right {
-                        x = rectangles_right;
-                    }
-                    draw_list.add_text([x, header.y_pos + origin[1] - ui.current_font_size()], ImColor32::WHITE, &header.label);
-                }
-                for rect in &state.rectangles {
-                    draw_list.add_rect(adjust!(rect.origin[0], rect.origin[1]), adjust!(rect.origin[0] + rect.size[0], rect.origin[1] + rect.size[1]), ImColor32::WHITE).filled(true).build();
+
+                // // Draw headers
+                // for header in &state.headers {
+                //     const ESTIMATED_HEADER_WIDTH: f32 = 55.0;
+                //     let rectangles_left = state.rectangles_left + origin[0];
+                //     let rectangles_right = header.x_right + origin[0] - ESTIMATED_HEADER_WIDTH;
+                //     let screen_left = X_PADDING + p0[0];
+                //     let mut x = if rectangles_left > screen_left {
+                //         rectangles_left
+                //     } else {
+                //         screen_left
+                //     };
+                //     if x > rectangles_right {
+                //         x = rectangles_right;
+                //     }
+                //     draw_list.add_text([x, header.y_pos + origin[1] - ui.current_font_size()], ImColor32::WHITE, &header.label);
+                // }
+                // // Draw boxes
+                // for rect in &state.rectangles {
+                //     draw_list.add_rect(adjust!(rect.origin[0], rect.origin[1]), adjust!(rect.origin[0] + rect.size[0], rect.origin[1] + rect.size[1]), ImColor32::WHITE).filled(true).build();
+                // }
+
+                let mut x: f32 = 0.0;
+                for (id, _item) in state.items.iter_enumerated() {
+                    draw_list.add_rect(adjust!(x, 0.0), adjust!(x + 45.0, 50.0), ImColor32::WHITE).filled(true).build();
+                    x += 50.0;
                 }
             });
         });
