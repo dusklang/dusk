@@ -186,6 +186,7 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
             }
             if is_hovered {
                 state.scrolling[!io.key_ctrl as usize] += io.mouse_wheel * 20.0;
+                state.scrolling[io.key_ctrl as usize]  -= io.mouse_wheel_h * 20.0;
             }
 
             macro_rules! adjust {
