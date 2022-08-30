@@ -21,6 +21,10 @@
 //     SOFTWARE.
 //
 
+use std::collections::HashSet;
+use std::time::{Instant, Duration};
+use std::sync::mpsc::{self, Receiver, Sender};
+
 use glium::glutin;
 use glium::glutin::event::{Event, WindowEvent};
 use glium::glutin::event_loop::{ControlFlow, EventLoop};
@@ -30,25 +34,11 @@ use imgui::*;
 use imgui::sys::igGetMainViewport;
 use imgui_glium_renderer::Renderer;
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
-use std::time::{Instant, Duration};
-use std::sync::mpsc::{self, Receiver, Sender};
 use interprocess::local_socket::LocalSocketStream;
-use rand::Rng;
 use libdusk::index_vec::*;
 use dusk_dire::hir::ItemId;
 
 use libdusk::dvd::{Message, Response, self};
-
-struct Rectangle {
-    origin: [f32; 2],
-    size: [f32; 2],
-}
-
-struct Header {
-    label: String,
-    y_pos: f32,
-    x_right: f32,
-}
 
 enum MessageState {
     Paused { last_message: Option<Message>, },
@@ -61,10 +51,10 @@ struct Item;
 struct UiState {
     running: bool,
     scrolling: [f32; 2],
-    rectangles: Vec<Rectangle>,
-    headers: Vec<Header>,
     items: IndexVec<ItemId, Item>,
-    rectangles_left: f32,
+    undirected_edges: IndexVec<ItemId, Vec<ItemId>>,
+    directed_edges: IndexVec<ItemId, Vec<ItemId>>,
+
     rx: Receiver<Message>,
     tx: Sender<Response>,
 
@@ -76,10 +66,9 @@ impl UiState {
         Self {
             running: true,
             scrolling: [0.0, 0.0],
-            rectangles: Vec::new(),
-            headers: Vec::new(),
             items: Default::default(),
-            rectangles_left: 0.0,
+            undirected_edges: Default::default(),
+            directed_edges: Default::default(),
             rx,
             tx,
 
@@ -107,6 +96,13 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                     },
                     Message::DidAddExpr { item_id, .. } => state.items.push_at(item_id, Item),
                     Message::DidAddDecl { item_id, .. } => state.items.push_at(item_id, Item),
+                    Message::DidAddTirType1Dependency { depender, dependee } => {
+                        state.undirected_edges.resize_with(state.items.len(), Default::default);
+                        state.directed_edges.resize_with(state.items.len(), Default::default);
+                        state.undirected_edges[depender].push(dependee);
+                        state.undirected_edges[dependee].push(depender);
+                        state.directed_edges[depender].push(dependee);
+                    },
                     _ => {},
                 }
             }
@@ -215,62 +211,136 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                     y += GRID_STEP;
                 }
 
-                // Generate boxes and headers once
-                const X_PADDING: f32 = 10.0;
-                if state.rectangles.is_empty() {
-                    let mut y = 0.0;
-                    state.rectangles_left = X_PADDING;
-                    for i in 0..100 {
-                        let mut level_x = 0.0;
-                        let mut level_max_height = 0.0;
-                        y += 50.0; // padding
+                let mut visited = IndexVec::new();
+                visited.resize(state.items.len(), false);
 
-                        let header_y_pos = y - 5.0;
-                        for _ in 0..100 {
-                            level_x += X_PADDING; // padding
-                            let width = rand::thread_rng().gen_range(40.0..60.0);
-                            let height = rand::thread_rng().gen_range(40.0..60.0);
-                            state.rectangles.push(Rectangle { origin: [level_x, y], size: [width, height] });
-                            if height > level_max_height { level_max_height = height; }
-                            level_x += width;
-                        }
-                        state.headers.push(
-                            Header {
-                                label: format!("Level {}", i),
-                                y_pos: header_y_pos,
-                                x_right: level_x,
-                            }
-                        );
-                        y += level_max_height;
+                let mut components = Vec::new();
+                fn find_component(state: &UiState, visited: &mut IndexVec<ItemId, bool>, component: &mut Vec<ItemId>, item: ItemId) -> bool {
+                    if visited[item] { return false; }
+                    visited[item] = true;
+
+                    component.push(item);
+
+                    for &edge in &state.undirected_edges[item] {
+                        find_component(state, visited, component, edge);
                     }
 
+                    return true;
                 }
 
-                // // Draw headers
-                // for header in &state.headers {
-                //     const ESTIMATED_HEADER_WIDTH: f32 = 55.0;
-                //     let rectangles_left = state.rectangles_left + origin[0];
-                //     let rectangles_right = header.x_right + origin[0] - ESTIMATED_HEADER_WIDTH;
-                //     let screen_left = X_PADDING + p0[0];
-                //     let mut x = if rectangles_left > screen_left {
-                //         rectangles_left
-                //     } else {
-                //         screen_left
-                //     };
-                //     if x > rectangles_right {
-                //         x = rectangles_right;
-                //     }
-                //     draw_list.add_text([x, header.y_pos + origin[1] - ui.current_font_size()], ImColor32::WHITE, &header.label);
-                // }
-                // // Draw boxes
-                // for rect in &state.rectangles {
-                //     draw_list.add_rect(adjust!(rect.origin[0], rect.origin[1]), adjust!(rect.origin[0] + rect.size[0], rect.origin[1] + rect.size[1]), ImColor32::WHITE).filled(true).build();
-                // }
+                state.undirected_edges.resize_with(state.items.len(), Default::default);
+                state.directed_edges.resize_with(state.items.len(), Default::default);
 
-                let mut x: f32 = 0.0;
+                let mut single_items = Vec::new();
                 for (id, _item) in state.items.iter_enumerated() {
-                    draw_list.add_rect(adjust!(x, 0.0), adjust!(x + 45.0, 50.0), ImColor32::WHITE).filled(true).build();
-                    x += 50.0;
+                    let mut component = Vec::new();
+                    if find_component(state, &mut visited, &mut component, id) {
+                        if component.len() == 1 {
+                            single_items.extend(component);
+                        } else {
+                            components.push(component);
+                        }
+                    }
+                }
+
+                let mut positions = IndexVec::<ItemId, [f32; 2]>::new();
+                positions.resize(state.items.len(), [0.0, 0.0]);
+
+                let mut levels = IndexVec::<ItemId, u32>::new();
+                levels.resize(state.items.len(), 0);
+                for visited in &mut visited {
+                    *visited = false;
+                }
+
+                fn get_level(state: &UiState, visited: &mut IndexVec<ItemId, bool>, levels: &mut IndexVec<ItemId, u32>, item: ItemId) -> u32 {
+                    if !visited[item] {
+                        visited[item] = true;
+                        levels[item] = state.directed_edges[item].iter().map(|&dependency| {
+                            get_level(state, visited, levels, dependency) + 1
+                        }).max().unwrap_or(0);
+                    }
+                    levels[item]
+                }
+
+                const HORI_SPACING: f32 = 5.0;
+                const ITEM_SIZE: f32 = 50.0;
+                const VERT_SPACING: f32 = 15.0;
+                let mut x_offset: f32 = 0.0;
+                for component in &components {
+                    let max_level = component.iter().map(|&item| get_level(state, &mut visited, &mut levels, item)).max().unwrap();
+                    // TODO: reuse memory
+                    let mut level_counters = Vec::new();
+                    level_counters.resize(max_level as usize + 1, 0);
+                    for &item in component {
+                        let level = levels[item];
+                        let x_pos = x_offset + level_counters[level as usize] as f32 * (ITEM_SIZE + HORI_SPACING);
+                        let y_pos = (max_level - level) as f32 * (ITEM_SIZE + VERT_SPACING);
+                        positions[item] = [x_pos, y_pos];
+                        level_counters[level as usize] += 1;
+                    }
+
+                    let max_count = level_counters.iter().copied().max().unwrap();
+                    let max_width = max_count as f32 * (ITEM_SIZE + HORI_SPACING);
+
+                    // Horizontally center each level within its component, by first calculating horizontal offsets for each level:
+                    let mut center_offsets = Vec::new();
+                    center_offsets.reserve(level_counters.len());
+                    for &count in &level_counters {
+                        let width = count as f32 * (ITEM_SIZE + HORI_SPACING);
+                        center_offsets.push((max_width - width) / 2.0);
+                    }
+                    // Then applying the level offsets to each item's position
+                    for &item in component {
+                        let level = levels[item];
+                        positions[item][0] += center_offsets[level as usize];
+                    }
+                    x_offset += max_width;
+                    x_offset += 50.0;
+                }
+                let mut highlighted_item = None;
+                const HIGHLIGHT_COLOR: ImColor32 = ImColor32::from_rgb(255, 0, 0);
+                fn draw_edges(draw_list: &DrawListMut, origin: [f32; 2], state: &UiState, positions: &IndexVec<ItemId, [f32; 2]>, item: ItemId, color: ImColor32, thickness: f32) {
+                    macro_rules! adjust {
+                        ($x:expr, $y: expr) => {{
+                            [$x + origin[0], $y + origin[1]]
+                        }}
+                    }
+                    let pos = positions[item];
+                    for &dep in &state.directed_edges[item] {
+                        let dep_pos = positions[dep];
+                        draw_list.add_line(adjust!(pos[0] + ITEM_SIZE / 2.0, pos[1] + ITEM_SIZE), adjust!(dep_pos[0] + ITEM_SIZE / 2.0, dep_pos[1]), color).thickness(thickness).build();
+                    }
+                }
+                for mut component in components {
+                    component.sort_by_key(|&item| u32::MAX - levels[item]);
+                    let mut depended_items = HashSet::new();
+                    for item in component {
+                        let pos = positions[item];
+                        let rect = [
+                            adjust!(pos[0], pos[1]),
+                            adjust!(pos[0] + ITEM_SIZE, pos[1] + ITEM_SIZE),
+                        ];
+                        let hovered = ui.is_mouse_hovering_rect(rect[0], rect[1]);
+                        let color = if hovered {
+                            highlighted_item = Some(item);
+                            depended_items.extend(state.directed_edges[item].iter().copied());
+                            HIGHLIGHT_COLOR
+                        } else if depended_items.contains(&item) {
+                            ImColor32::from_rgb(200, 100, 100)
+                        } else {
+                            ImColor32::WHITE
+                        };
+                        draw_list.add_rect(rect[0], rect[1], color).filled(true).rounding(5.0).build();
+                        if !hovered {
+                            draw_edges(&draw_list, origin, state, &positions, item, ImColor32::WHITE, 1.0);
+                        }
+                        
+                        x += ITEM_SIZE + HORI_SPACING;
+                    }
+                    y += ITEM_SIZE + VERT_SPACING;
+                }
+                if let Some(item) = highlighted_item {
+                    draw_edges(&draw_list, origin, state, &positions, item, HIGHLIGHT_COLOR, 2.0);
                 }
             });
         });

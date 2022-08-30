@@ -179,7 +179,7 @@ impl Graph {
         self.find_subcomponent(item, cur_component);
         let new_component = mem::take(cur_component);
         let component = self.components.push(new_component);
-        dvd::send(|| DvdMessage::DidAddTirComponent { id: component });
+        dvd::send(|| DvdMessage::DidFinishTirComponent(component));
     }
 
     fn transfer_item_dep_to_component(

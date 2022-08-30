@@ -43,15 +43,13 @@ pub enum Message {
         depender: ItemId,
         dependee: ItemId,
     },
-    /// Sent after adding a new component to the TIR graph
-    DidAddTirComponent {
-        id: CompId,
-    },
     /// Sent after adding an item to a TIR component
     DidAddItemToTirComponent {
         component: CompId,
         item: ItemId,
     },
+    /// Sent after finishing adding all items to a TIR component
+    DidFinishTirComponent(CompId),
     /// Sent after adding a meta-dependency from `depender` on `dependee`
     DidAddTirMetaDependency {
         depender: ItemId,
@@ -188,7 +186,7 @@ mod dependent_exports {
         Command::new(exe_path)
             .arg("internal-launch-dvd")
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            //.stderr(Stdio::null())
             .stdin(Stdio::null())
             .spawn()
             .unwrap();
