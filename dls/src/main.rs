@@ -175,7 +175,6 @@ impl Server {
                     }
                 }
             }
-            eprintln!("New contents: {:?}!", file.contents);
             file.version = text_document.version;
         }
         self.analyze_file(&text_document.uri);
