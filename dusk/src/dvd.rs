@@ -46,7 +46,9 @@ enum MessageState {
     CompilerHasExit,
 }
 
-struct Item;
+struct Item {
+    text: String,
+}
 
 struct UiState {
     running: bool,
@@ -94,8 +96,20 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                     Message::WillExit => {
                         state.message_state = MessageState::CompilerHasExit;
                     },
-                    Message::DidAddExpr { item_id, .. } => state.items.push_at(item_id, Item),
-                    Message::DidAddDecl { item_id, .. } => state.items.push_at(item_id, Item),
+                    Message::DidAddExpr { id, item_id, ref text } => {
+                        let text = text
+                            .as_ref()
+                            .map(|text| format!("expr{}:\n{}", id.index(), text))
+                            .unwrap_or_else(|| format!("expr{}", id.index()));
+                        state.items.push_at(item_id, Item { text });
+                    },
+                    Message::DidAddDecl { id, item_id, ref text } => {
+                        let text = text
+                        .as_ref()
+                            .map(|text| format!("decl{}:\n{}", id.index(), text))
+                            .unwrap_or_else(|| format!("decl{}", id.index()));
+                        state.items.push_at(item_id, Item { text });
+                    },
                     Message::DidAddTirType1Dependency { depender, dependee } => {
                         state.undirected_edges.resize_with(state.items.len(), Default::default);
                         state.directed_edges.resize_with(state.items.len(), Default::default);
@@ -270,9 +284,8 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                 const ITEM_HORI_TEXT_MARGIN: f32 = 10.0;
                 let mut item_sizes = IndexVec::<ItemId, [f32; 2]>::new();
                 item_sizes.resize(state.items.len(), [0.0, 0.0]);
-                let text = "This is some really long, but also\nmultiline text!\n     and here's a line with leading whitespace!!!!!!!!!!!!";
-                let text_lines: Vec<_> = text.lines().collect();
-                for [width, height] in &mut item_sizes {
+                for ([width, height], item) in item_sizes.iter_mut().zip(&state.items) {
+                    let text_lines: Vec<_> = item.text.lines().collect();
                     *width = 7.0 * text_lines.iter().map(|line| line.len()).max().unwrap() as f32 + ITEM_HORI_TEXT_MARGIN;
                     *height = 3.0 + 13.0 * text_lines.len() as f32;
                 }
@@ -365,7 +378,7 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                             ImColor32::WHITE
                         };
                         draw_list.add_rect(rect[0], rect[1], color).filled(true).rounding(5.0).build();
-                        draw_list.add_text([rect[0][0] + ITEM_HORI_TEXT_MARGIN / 2.0, rect[0][1]], ImColor32::BLACK, text);
+                        draw_list.add_text([rect[0][0] + ITEM_HORI_TEXT_MARGIN / 2.0, rect[0][1]], ImColor32::BLACK, &state.items[item].text);
                         if !hovered {
                             draw_edges(&draw_list, origin, state, &positions, &item_sizes, item, ImColor32::WHITE, 1.0);
                         }
