@@ -286,7 +286,10 @@ impl Driver {
         self.code.hir.source_ranges.push_at(item_id, range);
         self.code.hir.item_generic_ctxs.push_at(item_id, generic_ctx);
 
-        dvd::send(|| DvdMessage::DidAddDecl { id: decl_id, item_id, text: None });
+        dvd::send(|| {
+            let text = self.display_item(decl_id).to_string();
+            DvdMessage::DidAddDecl { id: decl_id, item_id, text: Some(text) }
+        });
 
         decl_id
     }
