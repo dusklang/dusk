@@ -263,7 +263,10 @@ impl Driver {
         self.code.hir.expr_to_items.push_at(expr_id, item_id);
         self.code.hir.source_ranges.push_at(item_id, range);
 
-        dvd::send(|| DvdMessage::DidAddExpr { id: expr_id, item_id, text: None });
+        dvd::send(|| {
+            let text = self.display_item(expr_id).to_string();
+            DvdMessage::DidAddExpr { id: expr_id, item_id, text: Some(text) }
+        });
 
         expr_id
     }

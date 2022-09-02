@@ -679,10 +679,22 @@ impl Driver {
         }
     }
 
+    // TODO: Move this out of MIR
     #[display_adapter]
     pub fn display_item(&'a self, item: impl Into<ToSourceRange> + Copy + 'a, f: &mut Formatter) {
         let range = self.get_range(item);
-        write!(f, "{}", self.substring_from_range(range))
+        if range.is_empty() {
+            let item = item.into();
+            match item {
+                ToSourceRange::Item(item) => match item {
+                    Item::Decl(decl) => write!(f, "{:?}", df!(decl.hir)),
+                    Item::Expr(expr) => write!(f, "{:?}", ef!(expr.hir)),
+                },
+                _ => write!(f, "{}", self.substring_from_range(range))
+            }
+        } else {
+            write!(f, "{}", self.substring_from_range(range))
+        }
     }
 
     #[display_adapter]

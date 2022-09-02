@@ -35,6 +35,10 @@ impl SourceRange {
     pub fn first_char_only(&self) -> Self {
         Self::from_single_char(self.start)
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.start >= self.end
+    }
 }
 
 pub fn concat(a: SourceRange, b: SourceRange) -> SourceRange {
