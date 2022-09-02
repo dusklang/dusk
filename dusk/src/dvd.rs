@@ -197,19 +197,21 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
 
             const GRID_STEP: f32 = 50.0;
             draw_list.with_clip_rect(p0, p1, || {
-                // Draw horizontal grid lines
-                let mut x = state.scrolling[0] % GRID_STEP;
-                let line_colour = ImColor32::from_rgba(200, 200, 200, 40);
-                while x < canvas_size[0] {
-                    draw_list.add_line([p0[0] + x, p0[1]], [p0[0] + x, p1[1]], line_colour).build();
-                    x += GRID_STEP;
-                }
+                {
+                    // Draw horizontal grid lines
+                    let mut x = state.scrolling[0] % GRID_STEP;
+                    let line_colour = ImColor32::from_rgba(200, 200, 200, 40);
+                    while x < canvas_size[0] {
+                        draw_list.add_line([p0[0] + x, p0[1]], [p0[0] + x, p1[1]], line_colour).build();
+                        x += GRID_STEP;
+                    }
 
-                // Draw vertical grid lines
-                let mut y = state.scrolling[1] % GRID_STEP;
-                while y < canvas_size[0] {
-                    draw_list.add_line([p0[0], p0[1] + y], [p1[0], p0[1] + y], line_colour).build();
-                    y += GRID_STEP;
+                    // Draw vertical grid lines
+                    let mut y = state.scrolling[1] % GRID_STEP;
+                    while y < canvas_size[0] {
+                        draw_list.add_line([p0[0], p0[1] + y], [p1[0], p0[1] + y], line_colour).build();
+                        y += GRID_STEP;
+                    }
                 }
 
                 let mut visited = IndexVec::new();
@@ -265,13 +267,13 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
 
                 const HORI_SPACING: f32 = 5.0;
                 const VERT_SPACING: f32 = 15.0;
-                const ITEM_VERT_SIZE: f32 = 15.0;
                 const ITEM_HORI_TEXT_MARGIN: f32 = 10.0;
                 let mut item_sizes = IndexVec::<ItemId, [f32; 2]>::new();
                 item_sizes.resize(state.items.len(), [0.0, 0.0]);
                 let text = "This is some really long text!";
-                for [width, _height] in &mut item_sizes {
+                for [width, height] in &mut item_sizes {
                     *width = 7.14 * text.len() as f32 + ITEM_HORI_TEXT_MARGIN;
+                    *height = 15.0;
                 }
                 // The horizontal offset of the current component, relative to the far left of the canvas
                 let mut x_offset: f32 = 10.0;
@@ -285,14 +287,21 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                     // Vertical offset of the current level, relative to the top of the canvas
                     let mut y_offset: f32 = 10.0;
                     let mut prev_level = max_level;
-                    // let mut 
+                    // max height of an item in the current level
+                    let mut max_height: f32 = f32::NEG_INFINITY;
                     for &item in &*component {
                         let level = levels[item];
+                        // Check whether we moved on to a new level.
+                        // (Because of the sort_by_key() call above, all items in a given level are guaranteed to be
+                        // together)
                         if level != prev_level {
-                            y_offset += ITEM_VERT_SIZE + VERT_SPACING;
+                            y_offset += max_height + VERT_SPACING;
+                            max_height = -1.0;
                             prev_level = level;
                         }
-                        let [width, _height] = item_sizes[item];
+                        let [width, height] = item_sizes[item];
+                        max_height = f32::max(height, max_height);
+
                         let level_width = &mut level_widths[level as usize];
                         if *level_width != 0.0 {
                             *level_width += HORI_SPACING;
@@ -332,7 +341,7 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                     for &dep in &state.directed_edges[item] {
                         let dep_pos = positions[dep];
                         let dep_size = sizes[dep];
-                        draw_list.add_line(adjust!(pos[0] + size[0] / 2.0, pos[1] + ITEM_VERT_SIZE), adjust!(dep_pos[0] + dep_size[0] / 2.0, dep_pos[1]), color).thickness(thickness).build();
+                        draw_list.add_line(adjust!(pos[0] + size[0] / 2.0, pos[1] + size[1]), adjust!(dep_pos[0] + dep_size[0] / 2.0, dep_pos[1]), color).thickness(thickness).build();
                     }
                 }
                 for component in components {
@@ -342,7 +351,7 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                         let size = item_sizes[item];
                         let rect = [
                             adjust!(pos[0], pos[1]),
-                            adjust!(pos[0] + size[0], pos[1] + ITEM_VERT_SIZE),
+                            adjust!(pos[0] + size[0], pos[1] + size[1]),
                         ];
                         let hovered = ui.is_mouse_hovering_rect(rect[0], rect[1]);
                         let color = if hovered {
@@ -359,10 +368,7 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                         if !hovered {
                             draw_edges(&draw_list, origin, state, &positions, &item_sizes, item, ImColor32::WHITE, 1.0);
                         }
-                        
-                        x += size[0] + HORI_SPACING;
                     }
-                    y += ITEM_VERT_SIZE + VERT_SPACING;
                 }
                 if let Some(item) = highlighted_item {
                     draw_edges(&draw_list, origin, state, &positions, &item_sizes, item, HIGHLIGHT_COLOR, 2.0);
