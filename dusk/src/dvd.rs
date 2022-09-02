@@ -276,20 +276,29 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                 // The horizontal offset of the current component, relative to the far left of the canvas
                 let mut x_offset: f32 = 10.0;
                 for component in &mut components {
-                    component.sort_by_key(|&item| u32::MAX - levels[item]);
                     let max_level = component.iter().map(|&item| get_level(state, &mut visited, &mut levels, item)).max().unwrap();
+                    // Deal with items in decreasing level order (top to bottom)
+                    component.sort_by_key(|&item| u32::MAX - levels[item]);
                     // TODO: reuse memory
                     let mut level_widths = Vec::new();
                     level_widths.resize(max_level as usize + 1, 0.0f32);
+                    // Vertical offset of the current level, relative to the top of the canvas
+                    let mut y_offset: f32 = 10.0;
+                    let mut prev_level = max_level;
+                    // let mut 
                     for &item in &*component {
-                        let [width, _height] = item_sizes[item];
                         let level = levels[item];
+                        if level != prev_level {
+                            y_offset += ITEM_VERT_SIZE + VERT_SPACING;
+                            prev_level = level;
+                        }
+                        let [width, _height] = item_sizes[item];
                         let level_width = &mut level_widths[level as usize];
                         if *level_width != 0.0 {
                             *level_width += HORI_SPACING;
                         }
                         let x_pos = x_offset + *level_width;
-                        let y_pos = (max_level - level) as f32 * (ITEM_VERT_SIZE + VERT_SPACING);
+                        let y_pos = y_offset;
                         positions[item] = [x_pos, y_pos];
                         *level_width += width;
                     }
