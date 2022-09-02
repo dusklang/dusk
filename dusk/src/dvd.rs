@@ -264,34 +264,46 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                 }
 
                 const HORI_SPACING: f32 = 5.0;
-                const ITEM_SIZE: f32 = 50.0;
                 const VERT_SPACING: f32 = 15.0;
-                let mut x_offset: f32 = 0.0;
-                for component in &components {
+                const ITEM_VERT_SIZE: f32 = 15.0;
+                const ITEM_HORI_TEXT_MARGIN: f32 = 10.0;
+                let mut item_sizes = IndexVec::<ItemId, [f32; 2]>::new();
+                item_sizes.resize(state.items.len(), [0.0, 0.0]);
+                let text = "This is some really long text!";
+                for [width, _height] in &mut item_sizes {
+                    *width = 7.14 * text.len() as f32 + ITEM_HORI_TEXT_MARGIN;
+                }
+                // The horizontal offset of the current component, relative to the far left of the canvas
+                let mut x_offset: f32 = 10.0;
+                for component in &mut components {
+                    component.sort_by_key(|&item| u32::MAX - levels[item]);
                     let max_level = component.iter().map(|&item| get_level(state, &mut visited, &mut levels, item)).max().unwrap();
                     // TODO: reuse memory
-                    let mut level_counters = Vec::new();
-                    level_counters.resize(max_level as usize + 1, 0);
-                    for &item in component {
+                    let mut level_widths = Vec::new();
+                    level_widths.resize(max_level as usize + 1, 0.0f32);
+                    for &item in &*component {
+                        let [width, _height] = item_sizes[item];
                         let level = levels[item];
-                        let x_pos = x_offset + level_counters[level as usize] as f32 * (ITEM_SIZE + HORI_SPACING);
-                        let y_pos = (max_level - level) as f32 * (ITEM_SIZE + VERT_SPACING);
+                        let level_width = &mut level_widths[level as usize];
+                        if *level_width != 0.0 {
+                            *level_width += HORI_SPACING;
+                        }
+                        let x_pos = x_offset + *level_width;
+                        let y_pos = (max_level - level) as f32 * (ITEM_VERT_SIZE + VERT_SPACING);
                         positions[item] = [x_pos, y_pos];
-                        level_counters[level as usize] += 1;
+                        *level_width += width;
                     }
 
-                    let max_count = level_counters.iter().copied().max().unwrap();
-                    let max_width = max_count as f32 * (ITEM_SIZE + HORI_SPACING);
+                    let max_width = level_widths.iter().copied().reduce(f32::max).unwrap();
 
                     // Horizontally center each level within its component, by first calculating horizontal offsets for each level:
                     let mut center_offsets = Vec::new();
-                    center_offsets.reserve(level_counters.len());
-                    for &count in &level_counters {
-                        let width = count as f32 * (ITEM_SIZE + HORI_SPACING);
+                    center_offsets.reserve(level_widths.len());
+                    for &width in &level_widths {
                         center_offsets.push((max_width - width) / 2.0);
                     }
                     // Then applying the level offsets to each item's position
-                    for &item in component {
+                    for &item in &*component {
                         let level = levels[item];
                         positions[item][0] += center_offsets[level as usize];
                     }
@@ -300,26 +312,28 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                 }
                 let mut highlighted_item = None;
                 const HIGHLIGHT_COLOR: ImColor32 = ImColor32::from_rgb(255, 0, 0);
-                fn draw_edges(draw_list: &DrawListMut, origin: [f32; 2], state: &UiState, positions: &IndexVec<ItemId, [f32; 2]>, item: ItemId, color: ImColor32, thickness: f32) {
+                fn draw_edges(draw_list: &DrawListMut, origin: [f32; 2], state: &UiState, positions: &IndexVec<ItemId, [f32; 2]>, sizes: &IndexVec<ItemId, [f32; 2]>, item: ItemId, color: ImColor32, thickness: f32) {
                     macro_rules! adjust {
                         ($x:expr, $y: expr) => {{
                             [$x + origin[0], $y + origin[1]]
                         }}
                     }
                     let pos = positions[item];
+                    let size = sizes[item];
                     for &dep in &state.directed_edges[item] {
                         let dep_pos = positions[dep];
-                        draw_list.add_line(adjust!(pos[0] + ITEM_SIZE / 2.0, pos[1] + ITEM_SIZE), adjust!(dep_pos[0] + ITEM_SIZE / 2.0, dep_pos[1]), color).thickness(thickness).build();
+                        let dep_size = sizes[dep];
+                        draw_list.add_line(adjust!(pos[0] + size[0] / 2.0, pos[1] + ITEM_VERT_SIZE), adjust!(dep_pos[0] + dep_size[0] / 2.0, dep_pos[1]), color).thickness(thickness).build();
                     }
                 }
-                for mut component in components {
-                    component.sort_by_key(|&item| u32::MAX - levels[item]);
+                for component in components {
                     let mut depended_items = HashSet::new();
                     for item in component {
                         let pos = positions[item];
+                        let size = item_sizes[item];
                         let rect = [
                             adjust!(pos[0], pos[1]),
-                            adjust!(pos[0] + ITEM_SIZE, pos[1] + ITEM_SIZE),
+                            adjust!(pos[0] + size[0], pos[1] + ITEM_VERT_SIZE),
                         ];
                         let hovered = ui.is_mouse_hovering_rect(rect[0], rect[1]);
                         let color = if hovered {
@@ -332,16 +346,17 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                             ImColor32::WHITE
                         };
                         draw_list.add_rect(rect[0], rect[1], color).filled(true).rounding(5.0).build();
+                        draw_list.add_text([rect[0][0] + ITEM_HORI_TEXT_MARGIN / 2.0, rect[0][1]], ImColor32::BLACK, text);
                         if !hovered {
-                            draw_edges(&draw_list, origin, state, &positions, item, ImColor32::WHITE, 1.0);
+                            draw_edges(&draw_list, origin, state, &positions, &item_sizes, item, ImColor32::WHITE, 1.0);
                         }
                         
-                        x += ITEM_SIZE + HORI_SPACING;
+                        x += size[0] + HORI_SPACING;
                     }
-                    y += ITEM_SIZE + VERT_SPACING;
+                    y += ITEM_VERT_SIZE + VERT_SPACING;
                 }
                 if let Some(item) = highlighted_item {
-                    draw_edges(&draw_list, origin, state, &positions, item, HIGHLIGHT_COLOR, 2.0);
+                    draw_edges(&draw_list, origin, state, &positions, &item_sizes, item, HIGHLIGHT_COLOR, 2.0);
                 }
             });
         });
