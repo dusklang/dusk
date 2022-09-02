@@ -270,10 +270,11 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                 const ITEM_HORI_TEXT_MARGIN: f32 = 10.0;
                 let mut item_sizes = IndexVec::<ItemId, [f32; 2]>::new();
                 item_sizes.resize(state.items.len(), [0.0, 0.0]);
-                let text = "This is some really long text!";
+                let text = "This is some really long, but also\nmultiline text!\n     and here's a line with leading whitespace!!!!!!!!!!!!";
+                let text_lines: Vec<_> = text.lines().collect();
                 for [width, height] in &mut item_sizes {
-                    *width = 7.14 * text.len() as f32 + ITEM_HORI_TEXT_MARGIN;
-                    *height = 15.0;
+                    *width = 7.0 * text_lines.iter().map(|line| line.len()).max().unwrap() as f32 + ITEM_HORI_TEXT_MARGIN;
+                    *height = 3.0 + 13.0 * text_lines.len() as f32;
                 }
                 // The horizontal offset of the current component, relative to the far left of the canvas
                 let mut x_offset: f32 = 10.0;
