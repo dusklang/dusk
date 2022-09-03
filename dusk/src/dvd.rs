@@ -24,6 +24,7 @@
 use std::collections::HashSet;
 use std::time::{Instant, Duration};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::cmp::max;
 
 use glium::glutin;
 use glium::glutin::event::{Event, WindowEvent};
@@ -35,6 +36,7 @@ use imgui::sys::igGetMainViewport;
 use imgui_glium_renderer::Renderer;
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
 use interprocess::local_socket::LocalSocketStream;
+use rect_packer::Packer;
 use libdusk::index_vec::*;
 use dusk_dire::hir::ItemId;
 
@@ -77,6 +79,110 @@ impl UiState {
             message_state: MessageState::Paused { last_message: None },
         }
     }   
+}
+
+/// Packs rectangles into an infinitely-sized canvas.
+/// Traffics in `f32`s for better interop with code in this module, but internally truncates them to integers.
+struct InfinitePacker {
+    packer: Packer,
+    state: PackerState,
+    stage: usize,
+    canvas_width: f32,
+    canvas_height: f32,
+}
+
+#[derive(Copy, Clone)]
+enum PackerState {
+    Side(usize),
+    Bottom(usize),
+    Corner,
+}
+
+impl InfinitePacker {
+    fn new(canvas_width: f32, canvas_height: f32) -> Self {
+        let config = rect_packer::Config {
+            width: canvas_width as i32,
+            height: canvas_height as i32,
+
+            border_padding: 12,
+            rectangle_padding: 24,
+        };
+        Self {
+            packer: Packer::new(config),
+            state: PackerState::Corner,
+            stage: 0,
+
+            canvas_width,
+            canvas_height,
+        }
+    }
+
+    fn next_packer(&mut self) {
+        self.packer = Packer::new(self.packer.config());
+        match &mut self.state {
+            PackerState::Bottom(index) => {
+                *index += 1;
+                if *index >= self.stage {
+                    self.state = PackerState::Side(0);
+                }
+            },
+            PackerState::Side(index) => {
+                *index += 1;
+                if *index >= self.stage {
+                    self.state = PackerState::Corner;
+                }
+            },
+            PackerState::Corner => {
+                self.stage += 1;
+                self.state = PackerState::Bottom(0);
+            },
+        }
+    }
+
+    fn grow_canvas(&mut self) {
+        let scaling_factor = max(2, self.stage + 1);
+        self.canvas_width *= scaling_factor as f32;
+        self.canvas_height *= scaling_factor as f32;
+        self.stage = 1;
+        self.state = PackerState::Bottom(0);
+
+        let config = rect_packer::Config {
+            width: self.canvas_width as i32,
+            height: self.canvas_height as i32,
+            ..self.packer.config()
+        };
+
+        self.packer = Packer::new(config);
+    }
+
+    fn pack(&mut self, width: f32, height: f32) -> [f32; 2] {
+        let pos = if let Some(pos) = self.packer.pack(width as i32, height as i32, false) {
+            pos
+        } else {
+            self.next_packer();
+            loop {
+                if let Some(pos) = self.packer.pack(width as i32, height as i32, false) {
+                    break pos;
+                } else {
+                    self.grow_canvas();
+                }
+            }
+        };
+
+        let [x_offset, y_offset] = match self.state {
+            PackerState::Bottom(index) => {
+                [self.canvas_width * index as f32, self.canvas_height * self.stage as f32]
+            },
+            PackerState::Side(index) => {
+                [self.canvas_width * self.stage as f32, self.canvas_height * index as f32]
+            },
+            PackerState::Corner => {
+                [self.canvas_width * self.stage as f32, self.canvas_height * self.stage as f32]
+            },
+        };
+
+        [pos.x as f32 + x_offset, pos.y as f32 + y_offset]
+    }
 }
 
 fn run_ui(state: &mut UiState, ui: &mut Ui) {
@@ -242,15 +348,10 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                 state.undirected_edges.resize_with(state.items.len(), Default::default);
                 state.directed_edges.resize_with(state.items.len(), Default::default);
 
-                let mut single_items = Vec::new();
                 for (id, _item) in state.items.iter_enumerated() {
                     let mut component = Vec::new();
                     if find_component(state, &mut visited, &mut component, id) {
-                        if component.len() == 1 {
-                            single_items.extend(component);
-                        } else {
-                            components.push(component);
-                        }
+                        components.push(component);
                     }
                 }
 
@@ -276,6 +377,8 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                 const HORI_SPACING: f32 = 5.0;
                 const VERT_SPACING: f32 = 15.0;
                 const ITEM_HORI_TEXT_MARGIN: f32 = 10.0;
+
+                // Compute the size of each item
                 let mut item_sizes = IndexVec::<ItemId, [f32; 2]>::new();
                 item_sizes.resize(state.items.len(), [0.0, 0.0]);
                 for ([width, height], item) in item_sizes.iter_mut().zip(&state.items) {
@@ -283,8 +386,9 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                     *width = 7.0 * text_lines.iter().map(|line| line.len()).max().unwrap() as f32 + ITEM_HORI_TEXT_MARGIN;
                     *height = 3.0 + 13.0 * text_lines.len() as f32;
                 }
-                // The horizontal offset of the current component, relative to the far left of the canvas
-                let mut x_offset: f32 = 10.0;
+
+                // Compute the position of each item
+                let mut packer = InfinitePacker::new(canvas_size[0], canvas_size[1]);
                 for component in &mut components {
                     let max_level = component.iter().map(|&item| get_level(state, &mut visited, &mut levels, item)).max().unwrap();
                     // Deal with items in decreasing level order (top to bottom)
@@ -292,19 +396,21 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                     // TODO: reuse memory
                     let mut level_widths = Vec::new();
                     level_widths.resize(max_level as usize + 1, 0.0f32);
-                    // Vertical offset of the current level, relative to the top of the canvas
-                    let mut y_offset: f32 = 10.0;
+                    // Vertical offset of the current level, relative to the top of the component
+                    let mut level_y_offset: f32 = 0.0;
                     let mut prev_level = max_level;
                     // max height of an item in the current level
                     let mut max_height: f32 = f32::NEG_INFINITY;
+
+                    // Compute positions of each item relative to to the top-left of the component's bounding box
                     for &item in &*component {
                         let level = levels[item];
                         // Check whether we moved on to a new level.
                         // (Because of the sort_by_key() call above, all items in a given level are guaranteed to be
                         // together)
                         if level != prev_level {
-                            y_offset += max_height + VERT_SPACING;
-                            max_height = -1.0;
+                            level_y_offset += max_height + VERT_SPACING;
+                            max_height = f32::NEG_INFINITY;
                             prev_level = level;
                         }
                         let [width, height] = item_sizes[item];
@@ -314,27 +420,32 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                         if *level_width != 0.0 {
                             *level_width += HORI_SPACING;
                         }
-                        let x_pos = x_offset + *level_width;
-                        let y_pos = y_offset;
+                        let x_pos = *level_width;
+                        let y_pos = level_y_offset;
                         positions[item] = [x_pos, y_pos];
                         *level_width += width;
                     }
 
-                    let max_width = level_widths.iter().copied().reduce(f32::max).unwrap();
+                    let component_bb_width = level_widths.iter().copied().reduce(f32::max).unwrap();
+                    let component_bb_height = level_y_offset + max_height;
 
                     // Horizontally center each level within its component, by first calculating horizontal offsets for each level:
                     let mut center_offsets = Vec::new();
                     center_offsets.reserve(level_widths.len());
                     for &width in &level_widths {
-                        center_offsets.push((max_width - width) / 2.0);
+                        center_offsets.push((component_bb_width - width) / 2.0);
                     }
                     // Then applying the level offsets to each item's position
                     for &item in &*component {
                         let level = levels[item];
                         positions[item][0] += center_offsets[level as usize];
                     }
-                    x_offset += max_width;
-                    x_offset += 50.0;
+
+                    let [x, y] = packer.pack(component_bb_width, component_bb_height);
+                    for &item in &*component {
+                        positions[item][0] += x as f32;
+                        positions[item][1] += y as f32;
+                    }
                 }
                 let mut highlighted_item = None;
                 const HIGHLIGHT_COLOR: ImColor32 = ImColor32::from_rgb(255, 0, 0);
