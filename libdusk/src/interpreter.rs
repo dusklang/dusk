@@ -559,7 +559,7 @@ impl Driver {
                 assert!(!pointee.is_mut);
                 assert!(pointee.ty == Type::i8() || pointee.ty == Type::u8());
                 #[cfg(debug_assertions)]
-                println!("NOTICE: about to blindly copy a pointer into the global strings!");
+                println!("NOTICE: about to blindly copy null-terminated data from an arbitrary address to the global strings!");
                 let string = unsafe { CString::from(CStr::from_ptr(val.as_raw_ptr() as *const _)) };
                 let id = self.code.mir.strings.push(string);
                 Const::Str { id, ty }
