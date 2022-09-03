@@ -366,7 +366,7 @@ impl Driver {
                 Namespace::Imper { scope, end_offset } => {
                     if !started_at_mod_scope {
                         let namespace = &self.code.hir.imper_ns[scope];
-                        let result = namespace.decls[0..end_offset].iter()
+                        let result = namespace.decls[..end_offset].iter()
                             .rev()
                             .find(|&decl| self.name_matches(name, decl.name));
                         if let Some(decl) = result {
@@ -839,7 +839,7 @@ impl Driver {
         // TODO: do something better than an array of bools :(
         self.tir.depended_on.resize_with(self.code.hir.exprs.len(), || false);
 
-        // Add meta-dependees to graph
+        // Add meta-dependencies
         for decl_ref in &self.code.hir.decl_refs {
             if let hir::Namespace::MemberRef { base_expr } = decl_ref.namespace {
                 self.tir.graph.add_meta_dep(ef!(decl_ref.expr.item), ef!(base_expr.item));
@@ -856,6 +856,7 @@ impl Driver {
 
         add_eval_dep_injector!(self, add_eval_dep);
 
+        // Add types 2-4 dependencies
         let items_that_need_dependencies = self.tir.graph.get_items_that_need_dependencies();
         dvd::send(|| DvdMessage::WillAddTirDependencies { items_that_need_dependencies: items_that_need_dependencies.clone() });
         for id in items_that_need_dependencies {
@@ -976,10 +977,8 @@ impl Driver {
         sp.units.resize_with(sp.levels.units.len(), Default::default);
 
         // Finally, convert HIR items to TIR and add them to the correct spot
-        for unit_id in 0..sp.levels.units.len() {
-            let unit = &mut sp.units[unit_id];
-            for i in 0..sp.levels.units[unit_id].items.len() {
-                let item_id = sp.levels.units[unit_id].items[i];
+        for (unit, levels_unit) in sp.units.iter_mut().zip(&sp.levels.units) {
+            for &item_id in &levels_unit.items {
                 let level = sp.levels.item_to_levels[&item_id];
                 match self.code.hir.items[item_id] {
                     hir::Item::Decl(id) => {
@@ -992,8 +991,7 @@ impl Driver {
                 }
             }
         }
-        for mock_id in 0..sp.levels.mock_units.len() {
-            let mock_unit = &sp.levels.mock_units[mock_id];
+        for mock_unit in &sp.levels.mock_units {
             let main_expr = match self.code.hir.items[mock_unit.item] {
                 hir::Item::Expr(id) => id,
                 hir::Item::Decl(_) => panic!("Can't have metadependency on a declaration!"),
