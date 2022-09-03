@@ -40,7 +40,6 @@ pub enum TokenKind {
     Mut,
     Module,
     ExternModule,
-    Import,
     DebugMark,
 
     // Symbols

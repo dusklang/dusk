@@ -1269,6 +1269,24 @@ impl DriverRef<'_> {
                             let command_line_args = &INTERP.read().unwrap().command_line_args;
                             Value::from_internal(InternalValue::StrLit(command_line_args[index].clone()))
                         },
+                        Intrinsic::Import => {
+                            assert_eq!(arguments.len(), 1);
+                            let val = frame.get_val(arguments[0], &*self.read());
+                            let ptr = val.as_raw_ptr();
+                            
+                            let str = unsafe { CStr::from_ptr(ptr as _) };
+                            let path = str.to_str().unwrap();
+                            drop(d);
+                            let before = self.read().take_snapshot();
+                            let file = self.write().src_map.add_file_on_disk(path).unwrap();
+                            self.write().parse_added_files().unwrap();
+                            let new_code = self.read().get_new_code_since(before);
+                            self.write().finalize_hir();
+                            self.write().initialize_tir(&new_code);
+
+                            let added_module = self.read().code.hir.global_scopes[file];
+                            Value::from_mod(added_module)
+                        },
                         _ => panic!("Call to unimplemented intrinsic {:?}", intr),
                     }
                 },
@@ -1534,23 +1552,6 @@ impl DriverRef<'_> {
                         },
                         pair => unimplemented!("unimplemented internal field access: {:?}", pair),
                     }
-                },
-                &Instr::Import(path) => {
-                    let val = frame.get_val(path, &*self.read());
-                    let ptr = val.as_raw_ptr();
-                    
-                    let str = unsafe { CStr::from_ptr(ptr as _) };
-                    let path = str.to_str().unwrap();
-                    drop(d);
-                    let before = self.read().take_snapshot();
-                    let file = self.write().src_map.add_file_on_disk(path).unwrap();
-                    self.write().parse_added_files().unwrap();
-                    let new_code = self.read().get_new_code_since(before);
-                    self.write().finalize_hir();
-                    self.write().initialize_tir(&new_code);
-
-                    let added_module = self.read().code.hir.global_scopes[file];
-                    Value::from_mod(added_module)
                 },
                 Instr::Parameter(_) => panic!("Invalid parameter instruction in the middle of a function!"),
                 Instr::Invalid => panic!("Must not have invalid instruction in an interpreted function!"),

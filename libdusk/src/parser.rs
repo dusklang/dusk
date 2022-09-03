@@ -392,16 +392,6 @@ impl Driver {
         Ok(term)
     }
 
-    fn parse_import(&mut self, p: &mut Parser) -> ParseResult<ExprId> {
-        let import_range = self.eat_tok(p, TokenKind::Import)?;
-        self.eat_tok(p, TokenKind::LeftParen)?;
-        let path = self.parse_expr(p)
-            .unwrap_or_else(|err| err);
-        self.eat_tok(p, TokenKind::RightParen)?;
-
-        Ok(self.import(path, import_range))
-    }
-
     fn parse_decl_ref(&mut self, p: &mut Parser, base_expr: Option<ExprId>, name: Sym) -> ParseResult<ExprId> {
         let name_range = self.cur(p).range;
         self.next(p);
@@ -588,7 +578,6 @@ impl Driver {
             },
             TokenKind::Module => self.parse_module(p),
             TokenKind::ExternModule => self.parse_extern_module(p),
-            TokenKind::Import => self.parse_import(p),
             TokenKind::Struct => self.parse_struct(p),
             TokenKind::Enum => self.parse_enum(p),
             TokenKind::If => self.parse_if(p),

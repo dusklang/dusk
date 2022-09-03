@@ -294,10 +294,6 @@ impl Driver {
         decl_id
     }
 
-    pub fn import(&mut self, path: ExprId, range: SourceRange) -> ExprId {
-        self.add_expr(Expr::Import { path }, range)
-    }
-
     pub fn int_lit(&mut self, lit: u64, range: SourceRange) -> ExprId {
         self.add_expr(Expr::IntLit { lit }, range)
     }

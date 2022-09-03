@@ -84,10 +84,6 @@ pub struct Module {
     pub extern_library_path: Option<ExprId>,
 }
 #[derive(Debug)]
-pub struct Import {
-    pub path: ExprId,
-}
-#[derive(Debug)]
 pub struct IntLit;
 #[derive(Debug)]
 pub struct DecLit;
@@ -161,7 +157,6 @@ pub struct UnitItems {
     pub whiles: DepVec<Expr<While>>,
     pub fors: DepVec<Expr<For>>,
     pub modules: DepVec<Expr<Module>>,
-    pub imports: DepVec<Expr<Import>>,
     pub dos: DepVec<Expr<Do>>,
     pub assigned_decls: DepVec<AssignedDecl>,
     pub pattern_bindings: DepVec<PatternBinding>,
@@ -184,8 +179,8 @@ impl UnitItems {
             &mut self.assigned_decls, &mut self.assignments, &mut self.decl_refs, &mut self.calls,
             &mut self.addr_ofs, &mut self.derefs, &mut self.pointers, &mut self.ifs, &mut self.dos,
             &mut self.ret_groups, &mut self.casts, &mut self.whiles, &mut self.fors, &mut self.explicit_rets,
-            &mut self.modules, &mut self.imports, &mut self.structs, &mut self.struct_lits,
-            &mut self.switches, &mut self.enums, &mut self.pattern_bindings, &mut self.function_tys,
+            &mut self.modules, &mut self.structs, &mut self.struct_lits, &mut self.switches, &mut self.enums,
+            &mut self.pattern_bindings, &mut self.function_tys,
         ]);
     }
 }
@@ -608,7 +603,6 @@ impl Driver {
                 insert_expr!(switches, Switch { scrutinee, cases: tir_cases })
             },
             &hir::Expr::Mod { extern_library_path, .. } => insert_expr!(modules, Module { extern_library_path }),
-            &hir::Expr::Import { path } => insert_expr!(imports, Import { path }),
             &hir::Expr::Struct(struct_id) => {
                 let field_tys = self.code.hir.structs[struct_id].fields.iter().map(|field| field.ty).collect();
                 insert_expr!(structs, Struct { field_tys })
@@ -744,9 +738,6 @@ impl Driver {
                     if let Some(extern_library_path) = extern_library_path {
                         self.tir.graph.add_type1_dep(id, ef!(extern_library_path.item));
                     }
-                },
-                hir::Expr::Import { path } => {
-                    self.tir.graph.add_type1_dep(id, ef!(path.item));
                 },
                 hir::Expr::AddrOf { expr, .. } | hir::Expr::Deref(expr) | hir::Expr::Pointer { expr, .. }
                     | hir::Expr::Cast { expr, .. } | hir::Expr::Ret { expr, .. } => self.tir.graph.add_type1_dep(id, ef!(expr.item)),
@@ -919,8 +910,8 @@ impl Driver {
                         hir::Expr::Void | hir::Expr::Error | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
                             | hir::Expr::CharLit { .. } | hir::Expr::BoolLit { .. } | hir::Expr::Const(_) | hir::Expr::AddrOf { .. }
                             | hir::Expr::Deref(_) | hir::Expr::Pointer { .. } | hir::Expr::Set { .. } | hir::Expr::Mod { .. }
-                            | hir::Expr::Import { .. } | hir::Expr::Struct(_) | hir::Expr::Enum(_) | hir::Expr::Call { .. }
-                            | hir::Expr::FunctionTy { .. } | hir::Expr::Break(_) | hir::Expr::Continue(_) => {},
+                            | hir::Expr::Struct(_) | hir::Expr::Enum(_) | hir::Expr::Call { .. } | hir::Expr::FunctionTy { .. }
+                            | hir::Expr::Break(_) | hir::Expr::Continue(_) => {},
                         hir::Expr::Cast { ty, .. } => {
                             add_eval_dep!(id, ty);
                         },

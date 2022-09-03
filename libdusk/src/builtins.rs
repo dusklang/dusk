@@ -62,6 +62,7 @@ impl Driver {
         let u8_ptr       = self.add_const_ty(Type::u8().ptr());
         let void_mut_ptr = self.add_const_ty(Type::Void.mut_ptr());
         let type_type    = self.add_const_ty(Type::Ty);
+        let mod_type     = self.add_const_ty(Type::Mod);
 
         use Intrinsic::*;
         for &intr in &[Mult, Div, Mod, Add, Sub] {
@@ -125,6 +126,8 @@ impl Driver {
         self.add_intrinsic(SizeOf, smallvec![type_type], uusize, true);
         self.add_intrinsic(StrideOf, smallvec![type_type], uusize, true);
         self.add_intrinsic(OffsetOf, smallvec![type_type, u8_ptr], uusize, true);
+
+        self.add_intrinsic(Import, smallvec![u8_ptr], mod_type, true);
 
         macro_rules! types {
             ($($ty:ident),+) => {

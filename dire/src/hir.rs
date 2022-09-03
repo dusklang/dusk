@@ -187,7 +187,6 @@ pub enum Expr {
     Cast { expr: ExprId, ty: ExprId, cast_id: CastId },
     Ret { expr: ExprId, decl: Option<DeclId> },
     Mod { id: ModScopeId, extern_library_path: Option<ExprId> },
-    Import { path: ExprId },
     Struct(StructId),
     Enum(EnumId),
     StructLit {
@@ -382,6 +381,7 @@ pub enum Intrinsic {
     AlignOf,
     OffsetOf,
     PrintType,
+    Import,
 
     GetNumArgs, // runtime.get_num_args()
     GetArg,     // runtime.get_arg(usize)
@@ -429,6 +429,7 @@ impl Intrinsic {
             Print => "print",
             Malloc => "malloc",
             Free => "free",
+            Import => "import",
 
             PrintType => "print_type",
             AlignOf => "align_of",

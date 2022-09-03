@@ -840,9 +840,6 @@ impl Driver {
                 write!(f, "%{} = generic_param{}", self.display_instr_name(op_id), param.index())?
             },
             Instr::Parameter(_) => {},
-            &Instr::Import(path) => {
-                write!(f, "%{} = import(%{})", self.display_instr_name(op_id), self.display_instr_name(path))?
-            },
             Instr::Invalid => write!(f, "%{} = invalid!", self.display_instr_name(op_id))?,
             Instr::Void => panic!("unexpected void!"),
         };
@@ -1545,7 +1542,6 @@ impl Driver {
             Instr::InternalFieldAccess { field, .. } => field.ty(),
             &Instr::Variant { enuum, .. } => Type::Enum(enuum),
             Instr::DiscriminantAccess { .. } => TYPE_OF_DISCRIMINANTS, // TODO: update this when discriminants can be other types
-            Instr::Import(_) => Type::Mod,
         }
     }
 
@@ -1809,12 +1805,6 @@ impl DriverRef<'_> {
                 let name = self.read().fmt_const_for_instr_name(&konst).to_string();
                 self.write().push_instr_with_name(b, Instr::Const(konst), expr, name).direct()
             },
-            Expr::Import { path } => {
-                drop(d);
-                let path = self.build_expr(b, path, Context::default(), tp);
-                let path = self.write().handle_indirection(b, path);
-                self.write().push_instr_with_name(b, Instr::Import(path), expr, "import").direct()
-            }
             Expr::Set { lhs, rhs } => {
                 drop(d);
                 return self.build_expr(
