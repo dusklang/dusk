@@ -97,17 +97,11 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                         state.message_state = MessageState::CompilerHasExit;
                     },
                     Message::DidAddExpr { id, item_id, ref text } => {
-                        let text = text
-                            .as_ref()
-                            .map(|text| format!("expr{}:\n{}", id.index(), text))
-                            .unwrap_or_else(|| format!("expr{}", id.index()));
+                        let text = format!("expr{}:\n{}", id.index(), text);
                         state.items.push_at(item_id, Item { text });
                     },
                     Message::DidAddDecl { id, item_id, ref text } => {
-                        let text = text
-                        .as_ref()
-                            .map(|text| format!("decl{}:\n{}", id.index(), text))
-                            .unwrap_or_else(|| format!("decl{}", id.index()));
+                        let text = format!("decl{}:\n{}", id.index(), text);
                         state.items.push_at(item_id, Item { text });
                     },
                     Message::DidAddTirType1Dependency { depender, dependee } => {

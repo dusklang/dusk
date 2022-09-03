@@ -265,7 +265,7 @@ impl Driver {
 
         dvd::send(|| {
             let text = self.display_item(expr_id).to_string();
-            DvdMessage::DidAddExpr { id: expr_id, item_id, text: Some(text) }
+            DvdMessage::DidAddExpr { id: expr_id, item_id, text }
         });
 
         expr_id
@@ -288,7 +288,7 @@ impl Driver {
 
         dvd::send(|| {
             let text = self.display_item(decl_id).to_string();
-            DvdMessage::DidAddDecl { id: decl_id, item_id, text: Some(text) }
+            DvdMessage::DidAddDecl { id: decl_id, item_id, text }
         });
 
         decl_id

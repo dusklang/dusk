@@ -20,13 +20,13 @@ pub enum Message {
     DidAddExpr {
         id: ExprId,
         item_id: ItemId,
-        text: Option<String>,
+        text: String,
     },
     /// Sent after adding a new declaration. Includes source text, if exists.
     DidAddDecl {
         id: DeclId,
         item_id: ItemId,
-        text: Option<String>,
+        text: String,
     },
 
     /// Sent before initializing TIR
