@@ -58,6 +58,7 @@ struct UiState {
     items: IndexVec<ItemId, Item>,
     undirected_edges: IndexVec<ItemId, Vec<ItemId>>,
     directed_edges: IndexVec<ItemId, Vec<ItemId>>,
+    metadependencies: IndexVec<ItemId, Vec<ItemId>>,
 
     rx: Receiver<Message>,
     tx: Sender<Response>,
@@ -73,6 +74,7 @@ impl UiState {
             items: Default::default(),
             undirected_edges: Default::default(),
             directed_edges: Default::default(),
+            metadependencies: Default::default(),
             rx,
             tx,
 
@@ -216,6 +218,10 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                         state.undirected_edges[depender].push(dependee);
                         state.undirected_edges[dependee].push(depender);
                         state.directed_edges[depender].push(dependee);
+                    },
+                    Message::DidAddTirMetaDependency { depender, dependee } => {
+                        state.metadependencies.resize_with(state.items.len(), Default::default);
+                        state.metadependencies[depender].push(dependee);
                     },
                     _ => {},
                 }
@@ -461,6 +467,24 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                         let dep_pos = positions[dep];
                         let dep_size = sizes[dep];
                         draw_list.add_line(adjust!(pos[0] + size[0] / 2.0, pos[1] + size[1]), adjust!(dep_pos[0] + dep_size[0] / 2.0, dep_pos[1]), color).thickness(thickness).build();
+                    }
+                }
+
+                // Draw metadependency edges
+                for (a, metadependencies) in state.metadependencies.iter_enumerated() {
+                    for &b in metadependencies {
+                        let a_pos = positions[a];
+                        let a_size = item_sizes[a];
+                        let b_pos = positions[b];
+                        let b_size = item_sizes[b];
+
+                        // This code would make some dependencies look nicer, but would also make it ambiguous which item is dependent vs. being depended on 
+                        // if b_pos[1] < a_pos[1] {
+                        //     swap(&mut a_pos, &mut b_pos);
+                        //     swap(&mut a_size, &mut b_size);
+                        // }
+
+                        draw_list.add_line(adjust!(a_pos[0] + a_size[0] / 2.0, a_pos[1] + a_size[1]), adjust!(b_pos[0] + b_size[0] / 2.0, b_pos[1]), ImColor32::from_rgb(0, 255, 0)).thickness(5.0).build();
                     }
                 }
                 for component in components {
