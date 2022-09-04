@@ -472,7 +472,9 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                             adjust!(pos[0], pos[1]),
                             adjust!(pos[0] + size[0], pos[1] + size[1]),
                         ];
-                        let hovered = ui.is_mouse_hovering_rect(rect[0], rect[1]);
+                        let hovered =
+                            ui.is_mouse_hovering_rect(rect[0], rect[1]) &&
+                            ui.is_mouse_hovering_rect(p0, p1);
                         let color = if hovered {
                             highlighted_item = Some(item);
                             depended_items.extend(state.directed_edges[item].iter().copied());
