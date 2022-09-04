@@ -105,7 +105,7 @@ impl Driver {
         &self.src_map.files[l.file]
     }
 
-    fn cur_tok(&self, l: &Lexer) -> &str {
+    fn cur_grapheme(&self, l: &Lexer) -> &str {
         &self.file(l).src[l.start..l.end.cur_cursor()]
     }
 
@@ -162,7 +162,7 @@ impl Driver {
     }
 
     fn is_letter(&self, l: &Lexer) -> bool {
-        let mut chars = self.cur_tok(l).chars();
+        let mut chars = self.cur_grapheme(l).chars();
         if let Some(character) = chars.next() {
             chars.next().is_none() && character.is_alphabetic()
         } else {
@@ -170,7 +170,7 @@ impl Driver {
         }
     }
     fn is_hex_digit(&self, l: &Lexer) -> bool {
-        let mut chars = self.cur_tok(l).chars();
+        let mut chars = self.cur_grapheme(l).chars();
         if let Some(character) = chars.next() {
             chars.next().is_none() && character.is_ascii_hexdigit()
         } else {
@@ -180,7 +180,7 @@ impl Driver {
     fn is_newline(&self, l: &Lexer) -> bool { self.is(l, b'\n') || self.is(l, b'\r') || self.is_str(l, b"\r\n") }
     fn is_whitespace(&self, l: &Lexer) -> bool { self.is(l, b' ') || self.is(l, b'\t') }
     fn is_num(&self, l: &Lexer) -> bool {
-        let mut chars = self.cur_tok(l).chars();
+        let mut chars = self.cur_grapheme(l).chars();
         if let Some(character) = chars.next() {
             chars.next().is_none() && character.is_numeric()
         } else {
@@ -275,22 +275,22 @@ impl Driver {
             let mut terminated = false;
             while l.has_chars() && !self.is_newline(l) {
                 let char_to_insert = if in_escape_mode {
-                    if let Some(character) = l.special_escape_characters.get(self.cur_tok(l)) {
+                    if let Some(character) = l.special_escape_characters.get(self.cur_grapheme(l)) {
                         character
                     } else {
                         let range = l.make_src_range(l.cur_loc()..(l.cur_loc() + 1));
                         self.diag.push(
                             Error::new(
-                                format!("invalid escape character '{}'", self.cur_tok(l))
+                                format!("invalid escape character '{}'", self.cur_grapheme(l))
                             ).adding_primary_range(
                                 range,
                                 "escaped here"
                             )
                         );
-                        self.cur_tok(l)
+                        self.cur_grapheme(l)
                     }
                 } else {
-                    self.cur_tok(l)
+                    self.cur_grapheme(l)
                 };
 
                 match char_to_insert {
@@ -434,7 +434,7 @@ impl Driver {
                         let range = l.make_src_range(l.tok_start_loc..(l.cur_loc() + 1));
                         self.diag.push(
                             Error::new(
-                                format!("unrecognized token '{}'", self.cur_tok(l))
+                                format!("unrecognized token '{}'", self.cur_grapheme(l))
                             ).adding_primary_range(
                                 range,
                                 ""
