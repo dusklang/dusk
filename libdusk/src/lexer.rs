@@ -195,6 +195,10 @@ impl Driver {
         (kind, range)
     }
 
+    fn diagnose_cpp_style_digit_separator(&mut self, l: &Lexer) {
+        self.diag.report_error("C++14-style digit separators are not supported in Dusk", l.make_src_range(l.cur_loc()..(l.cur_loc() + 1)), "hint: replace ' with _");
+    }
+
     fn l_next(&mut self, l: &mut Lexer) -> Result<(TokenKind, SourceRange), ()> {
         if !l.has_chars() {
             Ok(self.pack_tok(l, TokenKind::Eof))
@@ -378,32 +382,46 @@ impl Driver {
         } else if l.has_chars() && self.is_num(l) {
             let mut has_dot = false;
             let mut last_was_dot = None;
-            loop {
-                if !l.has_chars() || (!self.is_num(l) && !self.is(l, b'.')) {
+            let mut numeric_chars = String::new();
+            let mut has_cpp_style_digit_separator = false;
+            while l.has_chars() {
+                let is_num = self.is_num(l);
+                let is_dot = self.is(l, b'.');
+                let is_single_quote = self.is(l, b'\'');
+                let is_underscore = self.is(l, b'_');
+                if !(is_num || is_dot || is_single_quote || is_underscore) {
                     break;
                 }
-                if self.is(l, b'.') {
+
+                if is_num {
+                    numeric_chars.extend(self.cur_grapheme(l).chars());
+                } else if is_dot {
                     if has_dot {
                         break;
                     } else {
                         has_dot = true;
+                        numeric_chars.extend(self.cur_grapheme(l).chars());
                     }
                     last_was_dot = Some(l.cur_loc());
                 } else {
+                    if is_single_quote && !has_cpp_style_digit_separator {
+                        has_cpp_style_digit_separator = true;
+                        self.diagnose_cpp_style_digit_separator(l);
+                    }
                     last_was_dot = None;
                 }
                 self.advance(l);
             }
 
+            // If the last character was a dot, it is not part of the literal and should therefore be ignored
             if let Some(dot_pos) = last_was_dot {
                 self.set_pos(l, dot_pos);
                 has_dot = false;
             }
-            let lit = &self.file(l).src[l.tok_start_loc..l.cur_loc()];
             if has_dot {
-                Ok(self.pack_tok(l, TokenKind::DecLit(lit.parse().unwrap())))
+                Ok(self.pack_tok(l, TokenKind::DecLit(numeric_chars.parse().unwrap())))
             } else {
-                Ok(self.pack_tok(l, TokenKind::IntLit(lit.parse().unwrap())))
+                Ok(self.pack_tok(l, TokenKind::IntLit(numeric_chars.parse().unwrap())))
             }
         } else if self.is(l, b'$') {
             l.tok_start_loc = l.cur_loc();
@@ -411,14 +429,25 @@ impl Driver {
             // Ignore the dollar sign
             self.advance(l);
 
-            // Don't include the dollar sign in the number that we parse
-            let lit_start_loc = l.cur_loc();
+            let mut numeric_chars = String::new();
+            let mut has_cpp_style_digit_separator = false;
+            while l.has_chars() {
+                let is_hex = self.is_hex_digit(l);
+                let is_underscore = self.is(l, b'_');
+                let is_single_quote = self.is(l, b'\'');
+                if !(is_hex || is_underscore || is_single_quote) {
+                    break;
+                }
 
-            while l.has_chars() && self.is_hex_digit(l) {
+                if is_hex {
+                    numeric_chars.extend(self.cur_grapheme(l).chars());
+                } else if is_single_quote && !has_cpp_style_digit_separator {
+                    has_cpp_style_digit_separator = true;
+                    self.diagnose_cpp_style_digit_separator(l);
+                }
                 self.advance(l);
             }
-            let lit = &self.file(l).src[lit_start_loc..l.cur_loc()];
-            Ok(self.pack_tok(l, TokenKind::IntLit(u64::from_str_radix(lit, 16).unwrap())))
+            Ok(self.pack_tok(l, TokenKind::IntLit(u64::from_str_radix(&numeric_chars, 16).unwrap())))
         } else {
             macro_rules! match_symbols {
                 ($($kind: ident $symbol: expr)+) => {

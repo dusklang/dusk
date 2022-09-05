@@ -1,0 +1,14 @@
+fn main() {
+    // Integers
+    a := 1_000_000
+    b := $FF00_0000
+    // Expected: C++-style digit separator error
+    // c := 1'000'000
+
+    // Floating point
+    a := 1.1_256
+    b := 2_500.123_456_789
+    c := 1._1
+    // Expected: C++-style digit separator error
+    // d := 2.'05
+}
