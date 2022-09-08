@@ -427,9 +427,11 @@ impl Driver {
             }
         } else if self.is(l, b'$') {
             l.tok_start_loc = l.cur_loc();
+            let dollar_sign_location = l.cur_loc();
 
             // Ignore the dollar sign
             self.advance(l);
+
 
             let mut numeric_chars = String::new();
             let mut has_cpp_style_digit_separator = false;
@@ -449,7 +451,18 @@ impl Driver {
                 }
                 self.advance(l);
             }
-            Ok(self.pack_tok(l, TokenKind::IntLit(u64::from_str_radix(&numeric_chars, 16).unwrap())))
+            if numeric_chars.is_empty() {
+                let location = if l.has_chars() {
+                    l.cur_loc()
+                } else {
+                    dollar_sign_location
+                };
+                let range = l.make_src_range(location..(location + 1));
+                self.diag.report_error_no_range_msg("expected hex digit after $", range);
+                Ok(self.pack_tok(l, TokenKind::IntLit(0)))
+            } else {
+                Ok(self.pack_tok(l, TokenKind::IntLit(u64::from_str_radix(&numeric_chars, 16).unwrap())))
+            }
         } else {
             macro_rules! match_symbols {
                 ($($kind: ident $symbol: expr)+) => {
