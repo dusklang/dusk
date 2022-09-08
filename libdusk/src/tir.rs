@@ -710,7 +710,9 @@ impl Driver {
         }
 
         self.initialize_graph();
+
         // Add type 1 dependencies to the graph
+        dvd::send(|| DvdMessage::WillAddType1Dependencies);
         for decl_id in range_iter(new_code.decls.clone()) {
             let id = df!(decl_id.item);
             match df!(decl_id.hir) {
@@ -831,6 +833,7 @@ impl Driver {
         self.tir.depended_on.resize_with(self.code.hir.exprs.len(), || false);
 
         // Add meta-dependencies
+        dvd::send(|| DvdMessage::WillAddMetaDependencies);
         for decl_ref in &self.code.hir.decl_refs {
             if let hir::Namespace::MemberRef { base_expr } = decl_ref.namespace {
                 self.tir.graph.add_meta_dep(ef!(decl_ref.expr.item), ef!(base_expr.item));

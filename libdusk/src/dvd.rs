@@ -18,6 +18,8 @@ pub enum Message {
     WillBegin,
     WillBeginAddingBuiltins,
     WillBeginParsingInputFile(SourceFileLocation),
+    WillAddType1Dependencies,
+    WillAddMetaDependencies,
     /// Sent after adding a new expression. Includes source text, if exists.
     DidAddExpr {
         id: ExprId,

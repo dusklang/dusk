@@ -55,10 +55,17 @@ enum CompilationState {
     Begun,
     AddingBuiltins,
     ParsingInputFile(SourceFileLocation),
+    AddingType1Dependencies,
+    AddingMetaDependencies,
 }
 
 struct Item {
     text: String,
+}
+
+enum ScrollTarget {
+    Item(ItemId),
+    Dependency(ItemId, ItemId),
 }
 
 struct UiState {
@@ -76,7 +83,8 @@ struct UiState {
     compilation_state: CompilationState,
 
     scroll_to_new_items: bool,
-    has_new_item: bool,
+    scroll_target: Option<ScrollTarget>,
+    id_jump: i32,
 }
 
 impl UiState {
@@ -95,9 +103,21 @@ impl UiState {
             compilation_state: CompilationState::Begun,
 
             scroll_to_new_items: true,
-            has_new_item: false,
+            scroll_target: None,
+            id_jump: 0,
         }
-    }   
+    }
+
+    fn is_scrolling_to(&self, item: ItemId) -> bool {
+        if let Some(target) = &self.scroll_target {
+            match *target {
+                ScrollTarget::Item(target) => item == target,
+                ScrollTarget::Dependency(a, b) => item == a || item == b,
+            }
+        } else {
+            false
+        }
+    }
 }
 
 /// Packs rectangles into an infinitely-sized canvas.
@@ -216,7 +236,8 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
         .collapsible(false)
         .title_bar(false)
         .build(ui, || {
-            state.has_new_item = false;
+            state.scroll_target = None;
+            let mut scroll_override = false;
             fn handle_message(message: &Message, state: &mut UiState) {
                 match *message {
                     Message::WillBeginAddingBuiltins => {
@@ -224,19 +245,25 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                     },
                     Message::WillBeginParsingInputFile(ref location) => {
                         state.compilation_state = CompilationState::ParsingInputFile(location.clone());
-                    }
+                    },
+                    Message::WillAddType1Dependencies => {
+                        state.compilation_state = CompilationState::AddingType1Dependencies;
+                    },
+                    Message::WillAddMetaDependencies => {
+                        state.compilation_state = CompilationState::AddingMetaDependencies;
+                    },
                     Message::WillExit => {
                         state.message_state = MessageState::CompilerHasExit;
                     },
                     Message::DidAddExpr { id, item_id, ref text } => {
                         let text = format!("expr{}:\n{}", id.index(), text);
                         state.items.push_at(item_id, Item { text });
-                        state.has_new_item = true;
+                        state.scroll_target = Some(ScrollTarget::Item(item_id));
                     },
                     Message::DidAddDecl { id, item_id, ref text } => {
                         let text = format!("decl{}:\n{}", id.index(), text);
                         state.items.push_at(item_id, Item { text });
-                        state.has_new_item = true;
+                        state.scroll_target = Some(ScrollTarget::Item(item_id));
                     },
                     Message::DidAddTirType1Dependency { depender, dependee } => {
                         state.undirected_edges.resize_with(state.items.len(), Default::default);
@@ -244,10 +271,14 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                         state.undirected_edges[depender].push(dependee);
                         state.undirected_edges[dependee].push(depender);
                         state.directed_edges[depender].push(dependee);
+
+                        state.scroll_target = Some(ScrollTarget::Dependency(depender, dependee));
                     },
                     Message::DidAddTirMetaDependency { depender, dependee } => {
                         state.metadependencies.resize_with(state.items.len(), Default::default);
                         state.metadependencies[depender].push(dependee);
+
+                        state.scroll_target = Some(ScrollTarget::Dependency(depender, dependee));
                     },
                     _ => {},
                 }
@@ -271,7 +302,7 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                         state.tx.send(Response::Continue).unwrap();
                         *last_message = None; // Remove message because we don't want to send multiple Continue responses
                     }
-                    ui.checkbox("Scroll to new items", &mut state.scroll_to_new_items);
+                    ui.checkbox("Scroll to new items / dependencies", &mut state.scroll_to_new_items);
                     if ui.button("Run") {
                         if last_message.is_some() {
                             state.tx.send(Response::Continue).unwrap();
@@ -282,6 +313,15 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                             state.tx.send(Response::Continue).unwrap();
                         }
                         state.message_state = MessageState::RunningUntilNextCompilationState;
+                    }
+                    if ui.input_int("Scroll to item id", &mut state.id_jump).enter_returns_true(true).build() {
+                        if let Ok(jump_to) = state.id_jump.try_into() {
+                            let id = ItemId::from_usize(jump_to);
+                            if id.index() < state.items.len() {
+                                state.scroll_target = Some(ScrollTarget::Item(id));
+                                scroll_override = true;
+                            }
+                        }
                     }
                     if let Some(new_message) = new_message {
                         handle_message(&new_message, state);
@@ -509,26 +549,51 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
 
 
                 // Scroll to new item, if necessary
-                if state.scroll_to_new_items && state.has_new_item {
-                    let mut scroll_offset = [-state.scrolling[0], -state.scrolling[1]];
-                    let item_top_left = *positions.last().unwrap();
-                    let item_size = *item_sizes.last().unwrap();
-                    let item_bottom_right = [item_top_left[0] + item_size[0], item_top_left[1], item_size[1]];
-                    const MARGIN: f32 = 12.0;
-                    if item_top_left[0] < scroll_offset[0] {
-                        scroll_offset[0] = item_top_left[0] - MARGIN;
-                    } else if scroll_offset[0] + canvas_size[0] < item_bottom_right[0] {
-                        scroll_offset[0] = item_bottom_right[0] - canvas_size[0] + MARGIN;
+                if state.scroll_to_new_items || scroll_override {
+                    if let Some(scroll_target) = &state.scroll_target {
+                        let mut scroll_offset = [-state.scrolling[0], -state.scrolling[1]];
+                        let bottom_right = |item: ItemId| -> [f32; 2] {
+                            let top_left = positions[item];
+                            let item_size = item_sizes[item];
+                            [top_left[0] + item_size[0], top_left[1] + item_size[1]]
+                        };
+                        let (top_left, bottom_right) = match *scroll_target {
+                            ScrollTarget::Item(item) => {
+                                (positions[item], bottom_right(item))
+                            },
+                            ScrollTarget::Dependency(a, b) => {
+                                let a_top_left = positions[a];
+                                let b_top_left = positions[b];
+                                let a_bottom_right = bottom_right(a);
+                                let b_bottom_right = bottom_right(b);
+                                let top_left = [
+                                    f32::min(a_top_left[0], b_top_left[0]),
+                                    f32::min(a_top_left[1], b_top_left[1]),
+                                ];
+                                let bottom_right = [
+                                    f32::max(a_bottom_right[0], b_bottom_right[0]),
+                                    f32::max(a_bottom_right[1], b_bottom_right[1]),
+                                ];
+                                (top_left, bottom_right)
+                            },
+                        };
+                        
+                        const MARGIN: f32 = 12.0;
+                        if top_left[0] < scroll_offset[0] {
+                            scroll_offset[0] = top_left[0] - MARGIN;
+                        } else if scroll_offset[0] + canvas_size[0] < bottom_right[0] {
+                            scroll_offset[0] = bottom_right[0] - canvas_size[0] + MARGIN;
+                        }
+    
+                        if top_left[1] < scroll_offset[1] {
+                            scroll_offset[1] = top_left[1] - MARGIN;
+                        } else if scroll_offset[1] + canvas_size[1] < bottom_right[1] {
+                            scroll_offset[1] = bottom_right[1] - canvas_size[1] + MARGIN;
+                        }
+    
+                        state.scrolling[0] = -scroll_offset[0];
+                        state.scrolling[1] = -scroll_offset[1];
                     }
-
-                    if item_top_left[1] < scroll_offset[1] {
-                        scroll_offset[1] = item_top_left[1] - MARGIN;
-                    } else if scroll_offset[1] + canvas_size[1] < item_bottom_right[1] {
-                        scroll_offset[1] = item_bottom_right[1] - canvas_size[1] + MARGIN;
-                    }
-
-                    state.scrolling[0] = -scroll_offset[0];
-                    state.scrolling[1] = -scroll_offset[1];
                 }
 
                 let origin = [p0[0] + state.scrolling[0], p0[1] + state.scrolling[1]];
@@ -590,6 +655,8 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                             HIGHLIGHT_COLOR
                         } else if depended_items.contains(&item) {
                             ImColor32::from_rgb(200, 100, 100)
+                        } else if state.is_scrolling_to(item) {
+                            ImColor32::from_rgb(100, 200, 100)
                         } else {
                             ImColor32::WHITE
                         };
