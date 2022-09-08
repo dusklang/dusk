@@ -16,6 +16,8 @@ use dusk_dire::tir::CompId;
 pub enum Message {
     /// Sent before compilation begins
     WillBegin,
+    WillBeginAddingBuiltins,
+    WillBeginParsingInputFile(SourceFileLocation),
     /// Sent after adding a new expression. Includes source text, if exists.
     DidAddExpr {
         id: ExprId,
@@ -114,6 +116,8 @@ pub enum Response {
 
 // Exports dependent on the presence of the "dvd" feature
 pub use dependent_exports::*;
+
+use crate::source_info::SourceFileLocation;
 
 #[cfg(feature = "dvd")]
 mod dependent_exports {

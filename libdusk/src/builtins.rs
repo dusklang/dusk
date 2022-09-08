@@ -1,8 +1,8 @@
 use std::mem;
 
-use dusk_dire::source_info::SourceRange;
 use smallvec::{smallvec, SmallVec};
 
+use dusk_dire::source_info::SourceRange;
 use dusk_dire::hir::{ModScopeNs, ModScope, Intrinsic, Decl, VOID_TYPE, ModScopedDecl, ModScopeNsId, EnumId, ExprId, VariantDecl};
 use dusk_dire::ty::{Type, InternalType};
 use dusk_dire::mir::Const;

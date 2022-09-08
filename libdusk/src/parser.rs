@@ -15,6 +15,7 @@ use crate::token::{TokenKind, Token};
 use crate::builder::{BinOp, UnOp, OpPlacement};
 use crate::error::Error;
 use crate::autopop::{AutoPopStack, AutoPopStackEntry};
+use crate::dvd::{self, Message as DvdMessage};
 
 use dusk_proc_macros::*;
 
@@ -78,6 +79,7 @@ impl Driver {
         let mut unparsed_files: Vec<_> = self.src_map.unparsed_files.iter().copied().collect();
         unparsed_files.sort();
         for file in unparsed_files {
+            dvd::send(|| DvdMessage::WillBeginParsingInputFile(self.src_map.files[file].location.clone()));
             self.src_map.unparsed_files.remove(&file);
             self.parse_single_file(file)?;
         }

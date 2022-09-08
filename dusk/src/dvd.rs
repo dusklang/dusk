@@ -36,6 +36,7 @@ use imgui::sys::igGetMainViewport;
 use imgui_glium_renderer::Renderer;
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
 use interprocess::local_socket::LocalSocketStream;
+use libdusk::source_info::SourceFileLocation;
 use rect_packer::Packer;
 use libdusk::index_vec::*;
 use dusk_dire::hir::ItemId;
@@ -45,7 +46,15 @@ use libdusk::dvd::{Message, Response, self};
 enum MessageState {
     Paused { last_message: Option<Message>, },
     Running,
+    RunningUntilNextCompilationState,
     CompilerHasExit,
+}
+
+#[derive(PartialEq, Clone, Debug)]
+enum CompilationState {
+    Begun,
+    AddingBuiltins,
+    ParsingInputFile(SourceFileLocation),
 }
 
 struct Item {
@@ -64,6 +73,10 @@ struct UiState {
     tx: Sender<Response>,
 
     message_state: MessageState,
+    compilation_state: CompilationState,
+
+    scroll_to_new_items: bool,
+    has_new_item: bool,
 }
 
 impl UiState {
@@ -79,6 +92,10 @@ impl UiState {
             tx,
 
             message_state: MessageState::Paused { last_message: None },
+            compilation_state: CompilationState::Begun,
+
+            scroll_to_new_items: true,
+            has_new_item: false,
         }
     }   
 }
@@ -199,18 +216,27 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
         .collapsible(false)
         .title_bar(false)
         .build(ui, || {
+            state.has_new_item = false;
             fn handle_message(message: &Message, state: &mut UiState) {
                 match *message {
+                    Message::WillBeginAddingBuiltins => {
+                        state.compilation_state = CompilationState::AddingBuiltins;
+                    },
+                    Message::WillBeginParsingInputFile(ref location) => {
+                        state.compilation_state = CompilationState::ParsingInputFile(location.clone());
+                    }
                     Message::WillExit => {
                         state.message_state = MessageState::CompilerHasExit;
                     },
                     Message::DidAddExpr { id, item_id, ref text } => {
                         let text = format!("expr{}:\n{}", id.index(), text);
                         state.items.push_at(item_id, Item { text });
+                        state.has_new_item = true;
                     },
                     Message::DidAddDecl { id, item_id, ref text } => {
                         let text = format!("decl{}:\n{}", id.index(), text);
                         state.items.push_at(item_id, Item { text });
+                        state.has_new_item = true;
                     },
                     Message::DidAddTirType1Dependency { depender, dependee } => {
                         state.undirected_edges.resize_with(state.items.len(), Default::default);
@@ -240,15 +266,22 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                     } else {
                         ui.text_wrapped("Message: no message");
                     };
+                    ui.text_wrapped(format!("Compilation state: {:?}", state.compilation_state));
                     if ui.button("Next") && last_message.is_some() {
                         state.tx.send(Response::Continue).unwrap();
                         *last_message = None; // Remove message because we don't want to send multiple Continue responses
                     }
+                    ui.checkbox("Scroll to new items", &mut state.scroll_to_new_items);
                     if ui.button("Run") {
                         if last_message.is_some() {
                             state.tx.send(Response::Continue).unwrap();
                         }
                         state.message_state = MessageState::Running;
+                    } else if ui.button("Skip to next compilation state") {
+                        if last_message.is_some() {
+                            state.tx.send(Response::Continue).unwrap();
+                        }
+                        state.message_state = MessageState::RunningUntilNextCompilationState;
                     }
                     if let Some(new_message) = new_message {
                         handle_message(&new_message, state);
@@ -271,6 +304,36 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                     ui.text_wrapped("Running...");
                     if ui.button("Pause") {
                         state.message_state = MessageState::Paused { last_message: None };
+                    }
+                },
+                MessageState::RunningUntilNextCompilationState => {
+                    // In the worst case, this could take over a second, causing the FPS to drop to a slide show.
+                    // However, that would require 1000 messages in a row to take close to (but not more than)
+                    // 1 millisecond, and messages tend to arrive much more frequently than that.
+                    //
+                    // In summary: this is a little iffy, but probably fine in practice.
+                    let initial_compilation_state = state.compilation_state.clone();
+                    let mut transition_message = None;
+                    for _ in 0..1000 {
+                        if let Ok(message) = state.rx.recv_timeout(Duration::from_millis(1)) {
+                            handle_message(&message, state);
+                            if state.compilation_state != initial_compilation_state {
+                                transition_message = Some(message);
+                                break;
+                            } else {
+                                state.tx.send(Response::Continue).unwrap();
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                    if transition_message.is_some() {
+                        state.message_state = MessageState::Paused { last_message: transition_message };
+                    } else {
+                        ui.text_wrapped("Running...");
+                        if ui.button("Pause") {
+                            state.message_state = MessageState::Paused { last_message: None };
+                        }
                     }
                 },
                 MessageState::CompilerHasExit => {
@@ -297,9 +360,6 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
             let is_hovered = ui.is_item_hovered();
             let is_active = ui.is_item_active();
 
-            let origin = [p0[0] + state.scrolling[0], p0[1] + state.scrolling[1]];
-            // let mouse_pos_in_canvas = [io.mouse_pos[0] - origin[0], io.mouse_pos[1] - origin[1]];
-
             if is_active && ui.is_mouse_dragging_with_threshold(MouseButton::Right, 0.0) {
                 state.scrolling[0] += io.mouse_delta[0];
                 state.scrolling[1] += io.mouse_delta[1];
@@ -309,31 +369,8 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                 state.scrolling[io.key_ctrl as usize]  -= io.mouse_wheel_h * 20.0;
             }
 
-            macro_rules! adjust {
-                ($x:expr, $y: expr) => {{
-                    [$x + origin[0], $y + origin[1]]
-                }}
-            }
-
             const GRID_STEP: f32 = 50.0;
             draw_list.with_clip_rect(p0, p1, || {
-                {
-                    // Draw horizontal grid lines
-                    let mut x = state.scrolling[0] % GRID_STEP;
-                    let line_colour = ImColor32::from_rgba(200, 200, 200, 40);
-                    while x < canvas_size[0] {
-                        draw_list.add_line([p0[0] + x, p0[1]], [p0[0] + x, p1[1]], line_colour).build();
-                        x += GRID_STEP;
-                    }
-
-                    // Draw vertical grid lines
-                    let mut y = state.scrolling[1] % GRID_STEP;
-                    while y < canvas_size[0] {
-                        draw_list.add_line([p0[0], p0[1] + y], [p1[0], p0[1] + y], line_colour).build();
-                        y += GRID_STEP;
-                    }
-                }
-
                 let mut visited = IndexVec::new();
                 visited.resize(state.items.len(), false);
 
@@ -467,6 +504,54 @@ fn run_ui(state: &mut UiState, ui: &mut Ui) {
                         let dep_pos = positions[dep];
                         let dep_size = sizes[dep];
                         draw_list.add_line(adjust!(pos[0] + size[0] / 2.0, pos[1] + size[1]), adjust!(dep_pos[0] + dep_size[0] / 2.0, dep_pos[1]), color).thickness(thickness).build();
+                    }
+                }
+
+
+                // Scroll to new item, if necessary
+                if state.scroll_to_new_items && state.has_new_item {
+                    let mut scroll_offset = [-state.scrolling[0], -state.scrolling[1]];
+                    let item_top_left = *positions.last().unwrap();
+                    let item_size = *item_sizes.last().unwrap();
+                    let item_bottom_right = [item_top_left[0] + item_size[0], item_top_left[1], item_size[1]];
+                    const MARGIN: f32 = 12.0;
+                    if item_top_left[0] < scroll_offset[0] {
+                        scroll_offset[0] = item_top_left[0] - MARGIN;
+                    } else if scroll_offset[0] + canvas_size[0] < item_bottom_right[0] {
+                        scroll_offset[0] = item_bottom_right[0] - canvas_size[0] + MARGIN;
+                    }
+
+                    if item_top_left[1] < scroll_offset[1] {
+                        scroll_offset[1] = item_top_left[1] - MARGIN;
+                    } else if scroll_offset[1] + canvas_size[1] < item_bottom_right[1] {
+                        scroll_offset[1] = item_bottom_right[1] - canvas_size[1] + MARGIN;
+                    }
+
+                    state.scrolling[0] = -scroll_offset[0];
+                    state.scrolling[1] = -scroll_offset[1];
+                }
+
+                let origin = [p0[0] + state.scrolling[0], p0[1] + state.scrolling[1]];
+                macro_rules! adjust {
+                    ($x:expr, $y: expr) => {{
+                        [$x + origin[0], $y + origin[1]]
+                    }}
+                }
+
+                {
+                    // Draw horizontal grid lines
+                    let mut x = state.scrolling[0] % GRID_STEP;
+                    let line_colour = ImColor32::from_rgba(200, 200, 200, 40);
+                    while x < canvas_size[0] {
+                        draw_list.add_line([p0[0] + x, p0[1]], [p0[0] + x, p1[1]], line_colour).build();
+                        x += GRID_STEP;
+                    }
+
+                    // Draw vertical grid lines
+                    let mut y = state.scrolling[1] % GRID_STEP;
+                    while y < canvas_size[0] {
+                        draw_list.add_line([p0[0], p0[1] + y], [p1[0], p0[1] + y], line_colour).build();
+                        y += GRID_STEP;
                     }
                 }
 

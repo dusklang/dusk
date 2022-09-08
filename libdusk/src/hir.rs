@@ -211,6 +211,7 @@ pub enum ConditionKind {
 
 impl Driver {
     pub fn initialize_hir(&mut self) {
+        dvd::send(|| DvdMessage::WillBeginAddingBuiltins);
         self.hir.generic_ctx_stack.push(BLANK_GENERIC_CTX, BLANK_GENERIC_CTX).make_permanent();
         self.add_expr(Expr::Void, SourceRange::default());
         self.add_expr(Expr::Error, SourceRange::default());
