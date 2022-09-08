@@ -99,6 +99,9 @@ fn dusk_main(opt: Opt, program_args: &[OsString]) {
     }
 
     begin_phase!(Parse);
+    // TODO: I'm pretty sure this doesn't actually do anything anymore, because we add the source file above, then call
+    // initialize_tir(), which internally adds core.dusk and then calls parse_added_files().
+    // initialize_tir() should only parse the files it adds instead.
     let fatal_parse_error = driver.write().parse_added_files().is_err();
     if fatal_parse_error {
         flush_diagnostics(&mut driver.write());
