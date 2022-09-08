@@ -18,8 +18,6 @@ use super::TirError;
 pub struct Graph {
     dependees: IndexVec<ItemId, Vec<ItemId>>,
     t2_dependees: IndexVec<ItemId, Vec<ItemId>>,
-    t3_dependees: IndexVec<ItemId, Vec<ItemId>>,
-    t4_dependees: IndexVec<ItemId, Vec<ItemId>>,
 
     // Whether each item has been visited (for the purpose of splitting into connected components)
     // TODO: Vec of bools == gross
@@ -126,7 +124,6 @@ impl Graph {
 
     /// a must either be in the same unit as b or a later unit, but their levels are independent
     pub fn add_type3_dep(&mut self, a: ItemId, b: ItemId) {
-        self.t3_dependees[a].push(b);
         let a_comp = self.item_to_components[a];
         self.transfer_item_dep_to_component(a_comp, b, ComponentRelation::TYPE_2_3_FORWARD, ComponentRelation::TYPE_2_3_BACKWARD);
 
@@ -135,7 +132,6 @@ impl Graph {
 
     /// a must be in an later unit than b, but their levels are independent
     pub fn add_type4_dep(&mut self, a: ItemId, b: ItemId) {
-        self.t4_dependees[a].push(b);
         let a_comp = self.item_to_components[a];
         self.transfer_item_dep_to_component(a_comp, b, ComponentRelation::BEFORE, ComponentRelation::AFTER);
 
@@ -580,8 +576,6 @@ impl Driver {
         let mut deps = [
             &mut self.tir.graph.dependees,
             &mut self.tir.graph.t2_dependees,
-            &mut self.tir.graph.t3_dependees,
-            &mut self.tir.graph.t4_dependees,
             &mut self.tir.graph.dependers
         ];
         for dep in &mut deps {
