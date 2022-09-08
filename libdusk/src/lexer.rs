@@ -396,6 +396,7 @@ impl Driver {
                 if is_num {
                     numeric_chars.extend(self.cur_grapheme(l).chars());
                 } else if is_dot {
+                    // A decimal literal may have a maximum of one '.'
                     if has_dot {
                         break;
                     } else {
@@ -415,6 +416,7 @@ impl Driver {
 
             // If the last character was a dot, it is not part of the literal and should therefore be ignored
             if let Some(dot_pos) = last_was_dot {
+                numeric_chars.pop();
                 self.set_pos(l, dot_pos);
                 has_dot = false;
             }
