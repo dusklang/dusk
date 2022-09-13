@@ -568,8 +568,9 @@ impl Driver {
             &hir::Expr::Pointer { expr, .. } => insert_expr!(pointers, Pointer { expr }),
             &hir::Expr::Cast { expr, ty, cast_id } => insert_expr!(casts, Cast { expr, ty, cast_id }),
             &hir::Expr::Ret { expr, decl } => {
-                let decl = decl.expect("returning outside of a computed decl is invalid!");
-                self.tir.staged_ret_groups.entry(decl).or_default().push(expr);
+                if let Some(decl) = decl {
+                    self.tir.staged_ret_groups.entry(decl).or_default().push(expr);
+                }
                 insert_expr!(explicit_rets, ExplicitRet)
             }
             &hir::Expr::DeclRef { id: decl_ref_id } => insert_expr!(decl_refs, DeclRef { decl_ref_id }),

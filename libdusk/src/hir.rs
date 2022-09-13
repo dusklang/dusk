@@ -360,6 +360,9 @@ impl Driver {
     }
     pub fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
         let decl = self.hir.comp_decl_stack.last().map(|decl| decl.id);
+        if decl.is_none() {
+            self.diag.report_error_no_range_msg("returning outside of a function is invalid", range);
+        }
         self.add_expr(Expr::Ret { expr, decl }, range)
     }
     fn lookup_loop_by_label(&mut self, label: Option<Ident>) -> Option<LoopId> {
