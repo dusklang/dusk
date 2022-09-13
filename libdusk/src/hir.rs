@@ -800,24 +800,20 @@ impl Driver {
         }
     }
 
-    pub fn mod_scoped_decl(&mut self, name: Sym, decl: ModScopedDecl) {
-        match self.hir.scope_stack.peek().unwrap() {
-            ScopeState::Mod { id, .. } => {
-                self.code.hir.mod_scopes[id].decl_groups.entry(name).or_default().push(decl);
-            },
-
-            // This is a hack to allow intrinsics to be added for comparing enum types
-            state @ ScopeState::GenericContext(id) => {
-                match self.code.hir.generic_context_ns[id].parent {
-                    Some(Namespace::Mod(id)) => {
-                        let id = self.code.hir.mod_ns[id].scope;
-                        self.code.hir.mod_scopes[id].decl_groups.entry(name).or_default().push(decl);
-                    }
-                    _ => panic!("tried to add module-scoped declaration in a non-module scope {:?}", state),
-                }
-            },
-            ref state => panic!("tried to add module-scoped declaration in a non-module scope {:?}", state),
+    // This is a hack to allow intrinsics to be added for comparing enum types
+    fn find_nearest_mod_scope(&self) -> Option<ModScopeId> {
+        for &scope in self.hir.scope_stack.stack.lock().unwrap().borrow().iter().rev() {
+            match scope {
+                ScopeState::Mod { id, .. } => return Some(id),
+                _ => continue,
+            }
         }
+        None
+    }
+
+    pub fn mod_scoped_decl(&mut self, name: Sym, decl: ModScopedDecl) {
+        let id = self.find_nearest_mod_scope().expect("tried to add module-scoped declaration where there is no module scope");
+        self.code.hir.mod_scopes[id].decl_groups.entry(name).or_default().push(decl);
     }
 
     pub fn stmt(&mut self, expr: ExprId, has_semicolon: bool) {
