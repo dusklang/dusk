@@ -220,7 +220,7 @@ fn main() {
     while true {
         ret :: user32.GetMessageA(&mut msg, hwnd, 0, 0)
         if ret == 0 || ret == -1 {
-            return // TODO: implement break expressions
+            break
         } else {
             user32.TranslateMessage(&msg);
             user32.DispatchMessageA(&msg)
