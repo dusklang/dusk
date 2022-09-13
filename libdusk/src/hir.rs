@@ -242,6 +242,9 @@ impl Driver {
         // recoverable way, leaving the generic ctx stack in an invalid state. As long as this assertion passes
         // (and there are no other panics before we even get here), we're fine for now.
         // TODO: fix this for real.
+        //
+        // Update as of September 13, 2022: I feel like using AutoPopStack should have fixed this issue, right?
+        // I should investigate first to be sure.
         assert_eq!(self.hir.generic_ctx_stack.stack.lock().unwrap().borrow().len(), 1);
     }
 
