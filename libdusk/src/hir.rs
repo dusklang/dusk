@@ -5,6 +5,7 @@ use std::collections::HashSet;
 
 use display_adapter::display_adapter;
 use dusk_dire::mir::Const;
+use index_vec::define_index_type;
 use smallvec::{SmallVec, smallvec};
 use string_interner::{DefaultSymbol as Sym, Symbol, StringInterner};
 
@@ -24,6 +25,8 @@ use crate::builder::{BinOp, UnOp};
 use crate::source_info::ToSourceRange;
 
 use dusk_proc_macros::*;
+
+define_index_type!(pub struct ImperRootId = u32;);
 
 // TODO: switch to AOS here
 // TODO: move to dire, perhaps
@@ -71,6 +74,7 @@ pub enum ScopeState {
         // TODO: choose `namespace` or `ns` and use it consistently for all variants of this enum
         namespace: ImperScopeNsId,
         stmt_buffer: Option<BufferedStmt>,
+        root: ImperRootId,
     },
     Mod {
         id: ModScopeId,
@@ -84,6 +88,13 @@ pub enum ScopeState {
     },
 }
 
+#[derive(Debug, Default)]
+struct ImperRoot {
+    stored_decl_counter: IndexCounter<StoredDeclId>,
+    loop_stack: AutoPopStack<LoopState>,
+    loop_counter: IndexCounter<LoopId>,
+}
+
 #[derive(Debug)]
 struct CompDeclState {
     scope: Option<ImperScopeId>,
@@ -91,10 +102,6 @@ struct CompDeclState {
     generic_params: Range<DeclId>,
     id: DeclId,
     imper_scope_stack: u32,
-    stored_decl_counter: IndexCounter<StoredDeclId>,
-    // TODO: support loops outside of comp decls by moving this elsewhere.
-    loop_stack: AutoPopStack<LoopState>,
-    loop_counter: IndexCounter<LoopId>,
 }
 
 #[derive(Debug)]
@@ -103,6 +110,8 @@ pub struct Builder {
     scope_stack: AutoPopStack<ScopeState>,
     generic_ctx_stack: AutoPopStack<GenericCtxId>,
     debug_marked_exprs: HashSet<ExprId>,
+    imper_roots: IndexVec<ImperRootId, ImperRoot>,
+
     pub prelude_namespace: Option<ModScopeNsId>,
     pub generic_params: IndexCounter<GenericParamId>,
 
@@ -148,6 +157,7 @@ impl Default for Builder {
             scope_stack: Default::default(),
             generic_ctx_stack: Default::default(),
             debug_marked_exprs: Default::default(),
+            imper_roots: Default::default(),
 
             generic_params: IndexCounter::new(),
 
@@ -315,8 +325,28 @@ impl Driver {
         self.add_expr(Expr::Cast { expr, ty, cast_id }, range)
     }
     pub fn next_stored_decl(&mut self) -> StoredDeclId {
-        let decl = self.hir.comp_decl_stack.last_mut().unwrap();
-        decl.stored_decl_counter.next_idx()
+        let imper_root = self.get_imper_root().unwrap();
+        self.hir.imper_roots[imper_root].stored_decl_counter.next_idx()
+    }
+    pub fn is_in_imper_scope(&self) -> bool {
+        for scope in self.hir.scope_stack.stack.lock().unwrap().borrow().iter().rev() {
+            if matches!(scope, ScopeState::Imper { .. }) {
+                return true;
+            } else if matches!(scope, ScopeState::Mod { .. }) {
+                break;
+            }
+        }
+        false
+    }
+    pub fn is_in_mod_scope(&self) -> bool {
+        for scope in self.hir.scope_stack.stack.lock().unwrap().borrow().iter().rev() {
+            if matches!(scope, ScopeState::Mod { .. }) {
+                return true;
+            } else if matches!(scope, ScopeState::Imper { .. }) {
+                break;
+            }
+        }
+        false
     }
     pub fn stored_decl(&mut self, name: Sym, _generic_params: GenericParamList, explicit_ty: Option<ExprId>, is_mut: bool, root_expr: ExprId, range: SourceRange) -> DeclId {
         self.flush_stmt_buffer();
@@ -366,7 +396,8 @@ impl Driver {
         self.add_expr(Expr::Ret { expr, decl }, range)
     }
     fn lookup_loop_by_label(&mut self, label: Option<Ident>) -> Option<LoopId> {
-        let loop_stack = self.hir.comp_decl_stack.last().unwrap().loop_stack.clone();
+        let imper_root = self.get_imper_root().unwrap();
+        let loop_stack = self.hir.imper_roots[imper_root].loop_stack.clone();
         let loop_stack = loop_stack.stack.lock().unwrap();
         let mut loop_stack = loop_stack.borrow_mut();
         if let Some(label) = label {
@@ -481,10 +512,10 @@ impl Driver {
     }
     /// unchecked invariant: must call end_loop after this
     pub fn begin_loop(&mut self, name: Option<Ident>) -> AutoPopStackEntry<LoopState, LoopId> {
-        // TODO: there's no reason loops shouldn't be allowed outside of comp decls
-        let comp_decl_state = self.hir.comp_decl_stack.last_mut().unwrap();
-        let id = comp_decl_state.loop_counter.next_idx();
-        let mut loop_stack = comp_decl_state.loop_stack.clone();
+        let imper_root = self.get_imper_root().unwrap();
+        let imper_root = &mut self.hir.imper_roots[imper_root];
+        let id = imper_root.loop_counter.next_idx();
+        let mut loop_stack = imper_root.loop_stack.clone();
         {
             let loop_stack = loop_stack.stack.lock().unwrap();
             let loop_stack = loop_stack.borrow();
@@ -599,9 +630,6 @@ impl Driver {
                 generic_params,
                 id,
                 imper_scope_stack: 0,
-                stored_decl_counter: IndexCounter::new(),
-                loop_stack: Default::default(),
-                loop_counter: Default::default(),
             }
         );
 
@@ -821,10 +849,16 @@ impl Driver {
                 parent: Some(parent),
             }
         );
-        let entry = self.push_to_scope_stack(
+        let root = self.get_imper_root().unwrap_or_else(|| {
+            self.hir.imper_roots.push(Default::default())
+        });
+        let scope_entry = self.push_to_scope_stack(
             id,
             ScopeState::Imper {
-                id, namespace, stmt_buffer: None,
+                id,
+                namespace,
+                stmt_buffer: None,
+                root,
             }
         );
         
@@ -877,7 +911,7 @@ impl Driver {
             }
         }
 
-        entry
+        scope_entry
     }
     pub fn end_imper_scope(&mut self, _entry: AutoPopStackEntry<ScopeState, ImperScopeId>, has_terminal_expr: bool) {
         if let Some(ScopeState::Imper { id, stmt_buffer, .. }) = self.hir.scope_stack.peek() {
@@ -918,5 +952,18 @@ impl Driver {
             ToSourceRange::Op(op) => *self.code.mir.source_ranges.get(&op).unwrap(),
             ToSourceRange::SourceRange(range) => range,
         }
+    }
+
+    fn get_imper_root(&self) -> Option<ImperRootId> {
+        let stack = self.hir.scope_stack.stack.lock().unwrap();
+        let stack = stack.borrow();
+        for scope in stack.iter().rev() {
+            match *scope {
+                ScopeState::Imper { root, .. } => return Some(root),
+                ScopeState::Mod { .. } => break,
+                ScopeState::Condition { .. } | ScopeState::GenericContext(_) => continue,
+            }
+        }
+        None
     }
 }

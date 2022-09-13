@@ -1195,7 +1195,13 @@ impl Driver {
 
         let generic_params = self.create_decls_for_generic_param_list(&generic_param_list);
         let ns = self.begin_generic_context(generic_params);
+        // If this is a module-scoped decl, we should add an imperative scope to the assigned expression, tin order to
+        // support manipulation of `ImperRoot` state.
+        let imper_scope = self.is_in_mod_scope().then(|| {
+            self.begin_imper_scope()
+        });
         let root = self.parse_expr(p).unwrap_or_else(|err| err);
+        drop(imper_scope);
         drop(ns);
         Ok(self.stored_decl(name.symbol, generic_param_list, explicit_ty, is_mut, root, name.range))
     }

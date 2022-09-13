@@ -1,7 +1,7 @@
 foo :: do {
     path :: concat("defer_imported_module", ".dusk")
     my_module :: import(path)
-    free(concat as u8 *mut as void *mut)
+    free(path as u8 *mut as void *mut)
     my_module
 }
 
