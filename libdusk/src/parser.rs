@@ -229,7 +229,7 @@ impl Driver {
         let _new_file = self.start_new_file(file);
         let mut p = Parser { file, cur: 0, list_stack: Default::default(), list_counter: 0 };
 
-        self.skip_insignificant(&mut p);
+        self.skip_whitespace(&mut p);
         let item_list = self.begin_list(&mut p, TokenKind::could_begin_statement, [TokenKind::Semicolon], None);
         loop {
             match self.cur(&p).kind {
@@ -289,8 +289,8 @@ impl Driver {
         let placement = op.placement();
         debug_assert!(placement.contains(OpPlacement::INFIX));
         if placement.contains(OpPlacement::PREFIX) {
-            let lhs_whitespace = self.peek_prev_including_insignificant(p).kind.is_insignificant();
-            let rhs_whitespace = !self.peek_next_including_insignificant(p).kind.could_begin_expression();
+            let lhs_whitespace = self.peek_prev_including_whitespace(p).kind.is_whitespace();
+            let rhs_whitespace = !self.peek_next_including_whitespace(p).kind.could_begin_expression();
             if lhs_whitespace && !rhs_whitespace { return None; }
         }
         self.next(p);
@@ -321,7 +321,7 @@ impl Driver {
     }
 
     fn parse_postfix_operator(&mut self, p: &mut Parser) -> Option<(UnOp, SourceRange)> {
-        let lhs_whitespace = self.peek_prev_including_insignificant(p).kind.is_insignificant();
+        let lhs_whitespace = self.peek_prev_including_whitespace(p).kind.is_whitespace();
         let tok = self.cur(p);
         let mut range = tok.range;
         let op = match tok.kind {
@@ -341,7 +341,7 @@ impl Driver {
                 placement.contains(OpPlacement::INFIX),
                 "Operators that can be prefix and postfix but not infix are not supported. See https://github.com/dusk-lang/dusk/issues/14"
             );
-            let rhs_whitespace = !self.peek_next_including_insignificant(p).kind.could_begin_expression();
+            let rhs_whitespace = !self.peek_next_including_whitespace(p).kind.could_begin_expression();
             if lhs_whitespace || !rhs_whitespace { return None; }
         }
         self.next(p);
@@ -1565,38 +1565,37 @@ impl Driver {
         self.toks[p.file].at(p.cur)
     }
 
-    // TODO: come up with a better term for whitespace and comments than "insignificant".
-    // If they really were insignificant, we wouldn't be lexing them. :)
-    fn skip_insignificant(&mut self, p: &mut Parser) {
-        while self.cur(p).kind.is_insignificant() {
-            self.next_including_insignificant(p);
+    /// Skips whitespace and comments
+    fn skip_whitespace(&mut self, p: &mut Parser) {
+        while self.cur(p).kind.is_whitespace() {
+            self.next_including_whitespace(p);
         }
     }
 
-    fn next_including_insignificant(&mut self, p: &mut Parser) -> Token {
+    fn next_including_whitespace(&mut self, p: &mut Parser) -> Token {
         p.cur += 1;
         self.cur(p)
     }
 
     fn next(&mut self, p: &mut Parser) -> Token {
-        self.next_including_insignificant(p);
-        self.skip_insignificant(p);
+        self.next_including_whitespace(p);
+        self.skip_whitespace(p);
         self.cur(p)
     }
 
-    fn peek_next_including_insignificant(&self, p: &Parser) -> Token {
+    fn peek_next_including_whitespace(&self, p: &Parser) -> Token {
         self.toks[p.file].at(p.cur+1)
     }
 
-    fn peek_prev_including_insignificant(&self, p: &Parser) -> Token {
+    fn peek_prev_including_whitespace(&self, p: &Parser) -> Token {
         self.toks[p.file].at(p.cur - 1)
     }
 
-    fn find_first_significant(&self, p: &Parser, token_range: impl Iterator<Item=usize>) -> Option<Token> {
+    fn find_first_nonwhitespace(&self, p: &Parser, token_range: impl Iterator<Item=usize>) -> Option<Token> {
         let toks = &self.toks[p.file];
         for i in token_range {
             let cur = toks.at(i);
-            if cur.kind.is_significant() {
+            if !cur.kind.is_whitespace() {
                 return Some(cur)
             }
         }
@@ -1604,10 +1603,10 @@ impl Driver {
     }
 
     fn peek_prev(&self, p: &Parser) -> Token {
-        self.find_first_significant(p, (0..p.cur).rev()).unwrap()
+        self.find_first_nonwhitespace(p, (0..p.cur).rev()).unwrap()
     }
 
     fn peek_next(&self, p: &Parser) -> Token {
-        self.find_first_significant(p, (p.cur+1)..self.toks[p.file].len()).unwrap()
+        self.find_first_nonwhitespace(p, (p.cur+1)..self.toks[p.file].len()).unwrap()
     }
 }

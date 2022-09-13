@@ -134,12 +134,10 @@ impl TokenVec {
 }
 
 impl TokenKind {
-    pub fn is_insignificant(&self) -> bool {
+    pub fn is_whitespace(&self) -> bool {
         use TokenKind::*;
         matches!(self, Whitespace | SingleLineComment | MultiLineComment | Newline)
     }
-
-    pub fn is_significant(&self) -> bool { !self.is_insignificant() }
 
     pub fn could_begin_expression(&self) -> bool {
         use TokenKind::*;
