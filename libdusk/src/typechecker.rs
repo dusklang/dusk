@@ -1436,7 +1436,8 @@ impl tir::Expr<tir::If> {
         let condition_ty = tp.constraints(self.condition).solve().map(|ty| ty.ty).unwrap_or(Type::Error);
         // Don't bother checking if bool, because we already did that in pass 1
         tp.constraints_mut(self.condition).set_to(condition_ty);
-        let ty = tp.constraints(self.id).solve().expect("ambiguous type for if expression");
+        // If the if branches can't unify, it will be diagnosed above. So just propagate the error.
+        let ty = tp.constraints(self.id).solve().unwrap_or_else(|_| Type::Error.into());
         *tp.ty_mut(self.id) = ty.ty.clone();
         tp.constraints_mut(self.then_expr).set_to(ty.clone());
         tp.constraints_mut(self.else_expr).set_to(ty);
