@@ -1,4 +1,9 @@
-foo :: import(concat("defer_imported_module", ".dusk"))
+foo :: do {
+    path :: concat("defer_imported_module", ".dusk")
+    my_module :: import(path)
+    free(concat as u8 *mut as void *mut)
+    my_module
+}
 
 fn concat(a: u8*, b: u8*): u8* {
     len :: len(a) + len(b)

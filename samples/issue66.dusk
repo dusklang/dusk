@@ -1,0 +1,17 @@
+message_printer :: if true {
+    mod {
+        fn print_message() {
+            core.println("True!")
+        }
+    }
+} else {
+    mod {
+        fn print_message() {
+            core.println("False!")
+        }
+    }
+}
+
+fn main() {
+    message_printer.print_message()
+}

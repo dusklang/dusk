@@ -805,8 +805,6 @@ impl Driver {
     pub fn begin_imper_scope(&mut self) -> AutoPopStackEntry<ScopeState, ImperScopeId> {
         let parent = self.cur_namespace();
 
-        let comp_decl = self.hir.comp_decl_stack.last_mut().unwrap();
-        assert!(comp_decl.imper_scope_stack > 0 || comp_decl.has_scope.is_none(), "Can't add multiple top-level scopes to a computed decl");
         let block = self.code.blocks.push(Block::default());
         let id = self.code.hir.imper_scopes.push(
             ImperScope {
@@ -820,58 +818,59 @@ impl Driver {
                 parent: Some(parent),
             }
         );
-        
-        let is_first_scope = comp_decl.imper_scope_stack == 0;
-        if is_first_scope {
-            comp_decl.has_scope = Some(id);
-        }
-        comp_decl.imper_scope_stack += 1;
-
         let entry = self.push_to_scope_stack(
             id,
             ScopeState::Imper {
                 id, namespace, stmt_buffer: None,
             }
         );
-
-        let comp_decl = self.hir.comp_decl_stack.last_mut().unwrap();
-        if is_first_scope {
-            let name = self.code.hir.names[comp_decl.id];
-            let num_params = comp_decl.params.end.index() - comp_decl.params.start.index();
-            let id = comp_decl.id;
-
-            let params = comp_decl.params.clone();
-            let generic_params = comp_decl.generic_params.clone();
-
-            // Add the current comp decl to the decl scope, to enable recursion
-            self.imper_scoped_decl(
-                ImperScopedDecl {
-                    name,
-                    num_params,
-                    id
-                }
-            );
-
-            // Add parameters to decl scope
-            for id in range_iter(params.clone()) {
-                self.imper_scoped_decl(
-                    ImperScopedDecl {
-                        name: self.code.hir.names[id],
-                        num_params: 0,
-                        id,
-                    }
-                );
+        
+        if let Some(comp_decl) = self.hir.comp_decl_stack.last_mut() {
+            assert!(comp_decl.imper_scope_stack > 0 || comp_decl.has_scope.is_none(), "Can't add multiple top-level scopes to a computed decl");
+            let is_first_scope = comp_decl.imper_scope_stack == 0;
+            if is_first_scope {
+                comp_decl.has_scope = Some(id);
             }
+            comp_decl.imper_scope_stack += 1;
 
-            // Add generic parameters to decl scope
-            for id in range_iter(generic_params.clone()) {
+            if is_first_scope {
+                let name = self.code.hir.names[comp_decl.id];
+                let num_params = comp_decl.params.end.index() - comp_decl.params.start.index();
+                let id = comp_decl.id;
+    
+                let params = comp_decl.params.clone();
+                let generic_params = comp_decl.generic_params.clone();
+    
+                // Add the current comp decl to the decl scope, to enable recursion
                 self.imper_scoped_decl(
                     ImperScopedDecl {
-                        name: self.code.hir.names[id],
-                        num_params: 0,
-                        id,
+                        name,
+                        num_params,
+                        id
                     }
                 );
+    
+                // Add parameters to decl scope
+                for id in range_iter(params.clone()) {
+                    self.imper_scoped_decl(
+                        ImperScopedDecl {
+                            name: self.code.hir.names[id],
+                            num_params: 0,
+                            id,
+                        }
+                    );
+                }
+    
+                // Add generic parameters to decl scope
+                for id in range_iter(generic_params.clone()) {
+                    self.imper_scoped_decl(
+                        ImperScopedDecl {
+                            name: self.code.hir.names[id],
+                            num_params: 0,
+                            id,
+                        }
+                    );
+                }
             }
         }
 
