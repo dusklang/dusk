@@ -86,7 +86,7 @@ pub enum ScopeState {
 
 #[derive(Debug)]
 struct CompDeclState {
-    has_scope: Option<ImperScopeId>,
+    scope: Option<ImperScopeId>,
     params: Range<DeclId>,
     generic_params: Range<DeclId>,
     id: DeclId,
@@ -594,7 +594,7 @@ impl Driver {
         }
         self.hir.comp_decl_stack.push(
             CompDeclState {
-                has_scope: None,
+                scope: None,
                 params,
                 generic_params,
                 id,
@@ -829,10 +829,10 @@ impl Driver {
         );
         
         if let Some(comp_decl) = self.hir.comp_decl_stack.last_mut() {
-            assert!(comp_decl.imper_scope_stack > 0 || comp_decl.has_scope.is_none(), "Can't add multiple top-level scopes to a computed decl");
+            assert!(comp_decl.imper_scope_stack > 0 || comp_decl.scope.is_none(), "Can't add multiple top-level scopes to a computed decl");
             let is_first_scope = comp_decl.imper_scope_stack == 0;
             if is_first_scope {
-                comp_decl.has_scope = Some(id);
+                comp_decl.scope = Some(id);
             }
             comp_decl.imper_scope_stack += 1;
 
@@ -892,7 +892,7 @@ impl Driver {
     pub fn end_computed_decl(&mut self) {
         let decl_state = self.hir.comp_decl_stack.pop().unwrap();
         if let Decl::Computed { ref mut scope, .. } = df!(decl_state.id.hir) {
-            *scope = decl_state.has_scope.unwrap();
+            *scope = decl_state.scope.unwrap();
         } else {
             panic!("Unexpected decl kind when ending computed decl!");
         }
