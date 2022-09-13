@@ -1284,7 +1284,7 @@ impl DriverRef<'_> {
                             self.write().finalize_hir();
                             self.write().initialize_tir(&new_code);
 
-                            let added_module = self.read().code.hir.global_scopes[file];
+                            let added_module = self.read().code.hir.global_scopes[&file];
                             Value::from_mod(added_module)
                         },
                         _ => panic!("Call to unimplemented intrinsic {:?}", intr),

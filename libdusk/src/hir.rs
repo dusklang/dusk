@@ -733,7 +733,7 @@ impl Driver {
                 parent: None
             }
         );
-        self.code.hir.global_scopes.push_at(file, global_scope);
+        self.code.hir.global_scopes.insert(file, global_scope);
         self.push_to_scope_stack(global_namespace, ScopeState::Mod { id: global_scope, namespace: global_namespace, extern_mod: None })
     }
 

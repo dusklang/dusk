@@ -476,7 +476,7 @@ pub struct HirCode {
     pub decl_to_items: IndexVec<DeclId, ItemId>,
     pub names: IndexVec<DeclId, Sym>,
     pub explicit_tys: IndexVec<DeclId, Option<ExprId>>,
-    pub global_scopes: IndexVec<SourceFileId, ModScopeId>,
+    pub global_scopes: HashMap<SourceFileId, ModScopeId>,
     pub imper_scopes: IndexVec<ImperScopeId, ImperScope>,
     pub mod_scopes: IndexVec<ModScopeId, ModScope>,
     pub imper_ns: IndexVec<ImperScopeNsId, ImperScopeNs>,

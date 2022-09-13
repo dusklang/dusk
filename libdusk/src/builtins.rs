@@ -232,8 +232,8 @@ impl Driver {
 
     fn add_virtual_file_module(&mut self, name: &str, src: &str) -> ParseResult<()>  {
         let file = self.src_map.add_virtual_file(name, src.to_string()).unwrap();
-        self.parse_added_files()?;
-        let scope = self.code.hir.global_scopes[file];
+        self.parse_file(file)?;
+        let scope = self.code.hir.global_scopes[&file];
         self.add_constant_decl(name, Const::Mod(scope));
         Ok(())
     }
