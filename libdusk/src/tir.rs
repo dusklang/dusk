@@ -712,7 +712,7 @@ impl Driver {
 
         self.initialize_graph();
 
-        // Add type 1 dependencies to the graph
+        // Add type 1 dependencies and meta-dependencies to the graph
         dvd::send(|| DvdMessage::WillAddType1Dependencies);
         for decl_id in range_iter(new_code.decls.clone()) {
             let id = df!(decl_id.item);
@@ -748,6 +748,7 @@ impl Driver {
                     let decl_ref = &self.code.hir.decl_refs[decl_ref_id];
                     if let hir::Namespace::MemberRef { base_expr } = decl_ref.namespace {
                         self.tir.graph.add_type1_dep(id, ef!(base_expr.item));
+                        self.tir.graph.add_meta_dep(id, ef!(base_expr.item));
                     }
                 },
                 hir::Expr::Call { callee, ref arguments } => {
@@ -832,14 +833,6 @@ impl Driver {
 
         // TODO: do something better than an array of bools :(
         self.tir.depended_on.resize_with(self.code.hir.exprs.len(), || false);
-
-        // Add meta-dependencies
-        dvd::send(|| DvdMessage::WillAddMetaDependencies);
-        for decl_ref in &self.code.hir.decl_refs {
-            if let hir::Namespace::MemberRef { base_expr } = decl_ref.namespace {
-                self.tir.graph.add_meta_dep(ef!(decl_ref.expr.item), ef!(base_expr.item));
-            }
-        }
     }
 
     pub fn build_more_tir(&mut self) -> Result<Option<Units>, TirError> {
