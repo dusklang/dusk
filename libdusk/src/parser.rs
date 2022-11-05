@@ -1429,9 +1429,7 @@ impl Driver {
     fn parse_comp_decl(&mut self, p: &mut Parser) -> ParseResult<DeclId> {
         // Parse fn {name}
         let mut proto_range = self.eat_tok(p, TokenKind::Fn)?;
-        let name = if let TokenKind::Ident(name) = *self.cur(p).kind {
-            name
-        } else {
+        let TokenKind::Ident(name) = *self.cur(p).kind else {
             self.diag.push(
                 Error::new("expected function name after 'fn'")
                     .adding_primary_range(proto_range, "'fn' here")

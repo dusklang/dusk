@@ -2311,9 +2311,7 @@ impl DriverRef<'_> {
                 }
             },
             Expr::For { loop_id, binding, lower_bound, upper_bound, scope } => {
-                let binding_stored_decl_id = if let hir::Decl::LoopBinding { id, .. } = df!(d, binding.hir) {
-                    id
-                } else {
+                let hir::Decl::LoopBinding { id: binding_stored_decl_id, .. } = df!(d, binding.hir) else {
                     panic!("incorrect type of decl found in decl binding id");
                 };
                 drop(d);

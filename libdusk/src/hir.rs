@@ -687,9 +687,7 @@ impl Driver {
             },
             None => self.cur_namespace(),
         };
-        let id = if let GenericCtx::DeclRef { id, .. } = self.code.hir.generic_ctxs[generic_ctx.id()] {
-            id
-        } else {
+        let GenericCtx::DeclRef { id, .. } = self.code.hir.generic_ctxs[generic_ctx.id()] else {
             panic!("Invalid generic context passed in");
         };
         let expr = self.add_expr(Expr::DeclRef { id }, range);

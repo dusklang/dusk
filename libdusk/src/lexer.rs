@@ -88,9 +88,7 @@ impl Driver {
         self.set_pos(&mut l, 0);
         self.toks.resize_with(max(self.toks.len(), file.index() + 1), Default::default);
         loop {
-            let (tok, range) = if let Ok(next) = self.l_next(&mut l) {
-                next
-            } else {
+            let Ok((tok, range)) = self.l_next(&mut l) else {
                 return Err(());
             };
             let should_break = tok == TokenKind::Eof;
