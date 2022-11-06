@@ -180,7 +180,7 @@ impl Driver {
     fn is_num(&self, l: &Lexer) -> bool {
         let mut chars = self.cur_grapheme(l).chars();
         if let Some(character) = chars.next() {
-            chars.next().is_none() && character.is_numeric()
+            chars.next().is_none() && character.is_ascii_digit()
         } else {
             false
         }
@@ -421,6 +421,7 @@ impl Driver {
             if has_dot {
                 Ok(self.pack_tok(l, TokenKind::DecLit(numeric_chars.parse().unwrap())))
             } else {
+                println!("{}", numeric_chars);
                 Ok(self.pack_tok(l, TokenKind::IntLit(numeric_chars.parse().unwrap())))
             }
         } else if self.is(l, b'$') {
