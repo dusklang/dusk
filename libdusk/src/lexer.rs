@@ -393,6 +393,7 @@ impl Driver {
 
                 if is_num {
                     numeric_chars.extend(self.cur_grapheme(l).chars());
+                    last_was_dot = None;
                 } else if is_dot {
                     // A decimal literal may have a maximum of one '.'
                     if has_dot {
@@ -421,7 +422,6 @@ impl Driver {
             if has_dot {
                 Ok(self.pack_tok(l, TokenKind::DecLit(numeric_chars.parse().unwrap())))
             } else {
-                println!("{}", numeric_chars);
                 Ok(self.pack_tok(l, TokenKind::IntLit(numeric_chars.parse().unwrap())))
             }
         } else if self.is(l, b'$') {
