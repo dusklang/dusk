@@ -34,11 +34,12 @@ pub struct Driver {
     pub mir: mir::Builder,
     pub code: Code,
     pub internal_field_decls: InternalFieldDecls,
+    pub no_core: bool,
 }
 pub type DriverRef<'l> = RwRef<'l, Driver>;
 
 impl Driver {
-    pub fn new(src_map: SourceMap, arch: Arch) -> Self {
+    pub fn new(src_map: SourceMap, arch: Arch, no_core: bool) -> Self {
         Self {
             arch,
             src_map,
@@ -50,6 +51,7 @@ impl Driver {
             mir: mir::Builder::new(),
             code: Code::default(),
             internal_field_decls: InternalFieldDecls::default(),
+            no_core,
         }
     }
 }

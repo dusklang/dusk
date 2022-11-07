@@ -176,7 +176,9 @@ impl Driver {
         self.add_intrinsic(GetArg, smallvec![uusize], string_lit_type, true);
         drop(runtime_module);
 
-        self.add_virtual_file_module("core", include_str!("../core/core.dusk")).unwrap();
+        if !self.no_core {
+            self.add_virtual_file_module("core", include_str!("../core/core.dusk")).unwrap();
+        }
     }
 
     fn add_constant_decl(&mut self, name: &str, value: Const) {

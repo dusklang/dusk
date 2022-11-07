@@ -38,6 +38,10 @@ struct Opt {
     #[clap(long)]
     dvd: bool,
 
+    /// Do not make the core library available to your program
+    #[clap(long)]
+    no_core: bool,
+
     /// The phase to stop the compiler at
     #[clap(arg_enum, short='s', long, default_value="interp", ignore_case = true)]
     stop_phase: StopPhase,
@@ -78,7 +82,7 @@ fn dusk_main(opt: Opt, program_args: &[OsString]) {
     let mut src_map = SourceMap::new();
     let loaded_file = src_map.add_file_on_disk(&opt.input).is_ok();
     let mut driver = DriverRef::new(&DRIVER);
-    *driver.write() = Driver::new(src_map, Arch::X86_64);
+    *driver.write() = Driver::new(src_map, Arch::X86_64, opt.no_core);
     let before = driver.read().take_snapshot();
     driver.write().initialize_hir();
 

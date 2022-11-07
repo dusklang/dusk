@@ -436,7 +436,7 @@ impl Server {
             let file = src_map.add_file_in_memory(path, src).unwrap();
             **file_id_ref = Some(file);
             let mut driver = DriverRef::new(&DRIVER);
-            *driver.write() = Driver::new(src_map, Arch::X86_64);
+            *driver.write() = Driver::new(src_map, Arch::X86_64, false);
             let before = driver.read().take_snapshot();
     
             driver.write().initialize_hir();
