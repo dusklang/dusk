@@ -18,6 +18,7 @@ mod tir;
 mod hir;
 mod ty;
 mod typechecker;
+#[cfg(target_arch="x86_64")]
 mod x64;
 mod rw_ref;
 mod builtins;

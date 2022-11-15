@@ -30,6 +30,7 @@ use dusk_dire::{InternalField, internal_fields};
 use crate::driver::{DRIVER, Driver, DriverRef};
 use crate::mir::{FunctionRef, function_by_ref};
 use crate::type_provider::TypeProvider;
+#[cfg(target_arch="x86_64")]
 use crate::x64::*;
 
 #[derive(Debug, Clone)]
@@ -690,6 +691,7 @@ impl Driver {
     ///     }
     ///     ```
     #[cfg(windows)]
+    #[cfg(target_arch="x86_64")]
     pub fn fetch_inverse_thunk(&self, func_id: FuncId) -> Value {
         if let Some(alloc) = INTERP.read().unwrap().inverse_thunk_cache.get(&func_id) {
             return Value::from_usize(alloc.0.as_ptr::<()>() as usize);
@@ -784,9 +786,9 @@ impl Driver {
 
         val
     }
-    #[cfg(not(windows))]
+    #[cfg(any(not(windows), not(target_arch="x86_64")))]
     pub fn fetch_inverse_thunk(&self, _func_id: FuncId) -> Value {
-        panic!("getting a function pointer to a Dusk function is not yet supported on non-Windows platforms");
+        panic!("getting a function pointer to a Dusk function is not yet supported on your platform");
     }
 }
 
@@ -969,6 +971,10 @@ impl DriverRef<'_> {
         thunk.ret();
 
         thunk.allocate()
+    }
+    #[cfg(any(not(any(windows, unix)), not(target_arch="x86_64")))]
+    fn generate_thunk(&self, _func: &ExternFunction, _func_address: i64, _args: &[Box<[u8]>]) -> region::Allocation {
+        panic!("calling native functions not yet supported on your platform");
     }
     pub fn extern_call(&self, func_ref: ExternFunctionRef, mut args: Vec<Box<[u8]>>) -> Value {
         let indirect_args: Vec<*mut u8> = args.iter_mut()
