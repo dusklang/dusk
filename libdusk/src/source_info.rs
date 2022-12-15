@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::cmp::max;
 use std::str;
-use std::path::PathBuf;
+use std::path::{PathBuf, Path};
 use std::fs;
 use std::io;
 use std::collections::{HashMap, HashSet};
@@ -51,10 +51,14 @@ struct LineRangeGroup {
 #[cfg_attr(feature = "dvd", derive(Debug, Serialize, Deserialize))]
 #[derive(Clone, Hash, PartialEq, Eq)]
 pub enum SourceFileLocation {
-    OnDisk(PathBuf), // A file loaded from disk.
+    /// A file loaded from disk.
+    OnDisk(PathBuf),
+
     #[cfg(feature = "dls")]
-    InMemory(Url),   // A file that exists on disk, but whose modified contents are stored in memory. Used for DLS.
-    // A "file" that may or may not have ever actually existed on disk.
+    /// A file that exists on disk, but whose modified contents are stored in memory. Used for DLS.
+    InMemory(Url),
+
+    /// A "file" that may or may not have ever actually existed on disk.
     Virtual {
         name: String,
     }
@@ -84,6 +88,13 @@ impl SourceFileLocation {
             #[cfg(feature = "dls")]
             Self::InMemory(url) => write!(f, "{}", url),
             Self::Virtual { name } => write!(f, "{}", name),
+        }
+    }
+    pub fn as_path(&self) -> Option<Cow<Path>> {
+        match self {
+            Self::OnDisk(path) => Some(Cow::Borrowed(path)),
+            Self::InMemory(url) => url.to_file_path().ok().map(Cow::Owned),
+            Self::Virtual { .. } => None,
         }
     }
     #[cfg(feature = "dls")]
@@ -201,7 +212,7 @@ impl SourceMap {
 }
 
 impl Driver {
-    fn lookup_file(&self, range: impl Into<ToSourceRange>) -> (SourceFileId, Range<usize>) {
+    pub fn lookup_file(&self, range: impl Into<ToSourceRange>) -> (SourceFileId, Range<usize>) {
         let range = self.get_range(range);
         // TODO: Speed. Binary search would be better.
         for (i, &end) in self.src_map.file_ends.iter().enumerate() {
