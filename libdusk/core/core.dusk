@@ -211,8 +211,21 @@ unix :: mod {
         }
     }
     fn print(str: i8*) {
+        //implementation 1: depends on being able to link with non-function symbols like stdin:
         //libc.fputs(str, libc.stdin);
-        panic("userspace print is unimplemented on non-Windows platform")
+
+
+        //implementation 2: seemingly any call to putchar here causes "thread 'main' panicked at 'no entry found for key', libdusk/src/tir.rs:520:27"
+        //if str as usize == 0 { return }
+
+        //str := str
+        //while *str != 0 {
+        //    val :: *str as int
+        //    libc.putchar(*str as int);
+        //    str = (str as usize + 1) as i8*
+        //}
+
+        panic("userspace print is unimplemented on non-Windows platforms")
     }
 
     // FFI stuff
@@ -238,6 +251,8 @@ unix :: mod {
         fn ftell(stream: FILE *mut): long_int
         fn fclose(stream: FILE *mut): int
         fn fputs(s: char*, stream: FILE *mut): int
+
+        fn putchar(ch: int): int
 
 
         // TODO: support dynamically-linked variables
