@@ -1,3 +1,5 @@
 fn main() {
-    core.println("Hello, from core!")
+    //core.println("Hello, from core!")
+
+    file :: core.read_file("samples/windows.dusk")
 }

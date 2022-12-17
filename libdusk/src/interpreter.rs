@@ -32,6 +32,8 @@ use crate::mir::{FunctionRef, function_by_ref};
 use crate::type_provider::TypeProvider;
 #[cfg(target_arch="x86_64")]
 use crate::x64::*;
+#[cfg(target_arch="aarch64")]
+use crate::arm64::*;
 
 #[derive(Debug, Clone)]
 pub enum InternalValue {
@@ -972,10 +974,19 @@ impl DriverRef<'_> {
 
         thunk.allocate()
     }
-    #[cfg(any(not(any(windows, unix)), not(target_arch="x86_64")))]
+    #[cfg(all(target_os="macos", target_arch="aarch64"))]
+    fn generate_thunk(&self, _func: &ExternFunction, _func_address: i64, _args: &[Box<[u8]>]) -> region::Allocation {
+        let mut thunk = Arm64Encoder::new();
+
+        thunk.ret();
+
+        thunk.allocate()
+    }
+    #[cfg(all(any(not(any(windows, unix)), not(target_arch="x86_64")), not(all(target_os="macos", target_arch="aarch64"))))]
     fn generate_thunk(&self, _func: &ExternFunction, _func_address: i64, _args: &[Box<[u8]>]) -> region::Allocation {
         panic!("calling native functions not yet supported on your platform");
     }
+
     pub fn extern_call(&self, func_ref: ExternFunctionRef, mut args: Vec<Box<[u8]>>) -> Value {
         let indirect_args: Vec<*mut u8> = args.iter_mut()
             .map(|arg| arg.as_mut_ptr())

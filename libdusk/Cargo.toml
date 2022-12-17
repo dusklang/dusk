@@ -19,7 +19,7 @@ paste = "1.0.0"
 num-bigint = "0.3"
 index_vec = { version = "0.1.2" }
 indenter = "0.3.2"
-region = "3.0"
+region = { git = "https://github.com/darfink/region-rs", rev = "5087445f08b3f78c481fb8cde18b47bb67d5eb22" }
 display_adapter = { version = "0.1", path = "../../display_adapter/display_adapter" }
 dusk_dire = { version = "0.1", path = "../dire" }
 dusk-proc-macros = { version = "0.1", path = "../dusk-proc-macros" }
@@ -42,4 +42,5 @@ dvd = ["dep:interprocess", "dep:serde", "dep:serde_json", "dusk_dire/serde", "in
 winapi = { version = "0.3.9", features = ["libloaderapi"] }
 
 [target.'cfg(not(windows))'.dependencies]
-libc = "0.2"
+# This version is only locked in order to fix a clash with another crate which also depends on libc.
+libc = "=0.2.107"

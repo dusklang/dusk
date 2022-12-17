@@ -18,8 +18,11 @@ mod tir;
 mod hir;
 mod ty;
 mod typechecker;
+mod into_bytes;
 #[cfg(target_arch="x86_64")]
 mod x64;
+#[cfg(target_arch="aarch64")]
+mod arm64;
 mod rw_ref;
 mod builtins;
 mod autopop;
