@@ -93,6 +93,7 @@ impl SourceFileLocation {
     pub fn as_path(&self) -> Option<Cow<Path>> {
         match self {
             Self::OnDisk(path) => Some(Cow::Borrowed(path)),
+            #[cfg(feature = "dls")]
             Self::InMemory(url) => url.to_file_path().ok().map(Cow::Owned),
             Self::Virtual { .. } => None,
         }
