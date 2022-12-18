@@ -23,6 +23,8 @@ use crate::error::Error;
 use crate::index_vec::*;
 use crate::builder::{BinOp, UnOp};
 use crate::source_info::ToSourceRange;
+use crate::interpreter::Value;
+use crate::driver::DriverRef;
 
 use dusk_proc_macros::*;
 
@@ -35,6 +37,14 @@ pub struct GenericParamList {
     pub names: SmallVec<[Sym; 1]>,
     pub ids: Range<GenericParamId>,
     pub ranges: SmallVec<[SourceRange; 1]>,
+}
+
+pub type IntrinsicImpl = fn(&mut DriverRef, Vec<&Value>) -> Value;
+
+pub struct NewIntrinsic {
+    pub ret_ty: Type,
+    pub name: String,
+    pub implementation: IntrinsicImpl,
 }
 
 impl Driver {

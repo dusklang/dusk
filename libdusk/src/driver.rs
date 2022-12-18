@@ -4,7 +4,7 @@ use string_interner::StringInterner;
 use lazy_static::lazy_static;
 
 use dusk_dire::hir::ExprId;
-use dusk_dire::mir::Const;
+use dusk_dire::mir::{Const, IntrinsicId};
 use dusk_dire::arch::Arch;
 use dusk_dire::source_info::SourceFileId;
 use dusk_dire::Code;
@@ -34,6 +34,7 @@ pub struct Driver {
     pub mir: mir::Builder,
     pub code: Code,
     pub internal_field_decls: InternalFieldDecls,
+    pub new_intrinsics: IndexVec<IntrinsicId, hir::NewIntrinsic>,
     pub no_core: bool,
 }
 pub type DriverRef<'l> = RwRef<'l, Driver>;
@@ -51,6 +52,7 @@ impl Driver {
             mir: mir::Builder::new(),
             code: Code::default(),
             internal_field_decls: InternalFieldDecls::default(),
+            new_intrinsics: IndexVec::default(),
             no_core,
         }
     }

@@ -758,6 +758,10 @@ impl Driver {
                 write!(f, "%{} = intrinsic `{}`", self.display_instr_name(op_id), intr.name())?;
                 write_args!(arguments);
             },
+            Instr::NewIntrinsic { arguments, intr, .. } => {
+                write!(f, "%{} = new_style_intrinsic `{}`", self.display_instr_name(op_id), self.new_intrinsics[*intr].name)?;
+                write_args!(arguments);
+            },
             &Instr::Pointer { op, is_mut } => {
                 write!(f, "%{} = %{} *", self.display_instr_name(op_id), self.display_instr_name(op))?;
                 if is_mut {
@@ -1529,6 +1533,7 @@ impl Driver {
             &Instr::FunctionRef { func, .. } => Type::Function(b.functions[func].ty.clone()),
             Instr::ExternCall { func, .. } => b.extern_mods[&func.extern_mod].imported_functions[func.index].ty.return_ty.as_ref().clone(),
             Instr::Intrinsic { ty, .. } => ty.clone(),
+            &Instr::NewIntrinsic { intr, .. } => self.new_intrinsics[intr].ret_ty.clone(),
             Instr::Reinterpret(_, ty) | Instr::Truncate(_, ty) | Instr::SignExtend(_, ty)
             | Instr::ZeroExtend(_, ty) | Instr::FloatCast(_, ty) | Instr::FloatToInt(_, ty)
             | Instr::IntToFloat(_, ty)

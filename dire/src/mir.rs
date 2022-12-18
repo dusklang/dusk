@@ -16,6 +16,7 @@ define_index_type!(pub struct FuncId = u32;);
 define_index_type!(pub struct StaticId = u32;);
 define_index_type!(pub struct StrId = u32;);
 define_index_type!(pub struct InstrId = u32;);
+define_index_type!(pub struct IntrinsicId = u32;);
 
 pub const VOID_INSTR: OpId = OpId::from_usize_unchecked(0);
 
@@ -36,6 +37,7 @@ pub enum Instr {
     ExternCall { arguments: SmallVec<[OpId; 2]>, func: ExternFunctionRef },
     FunctionRef { generic_arguments: Vec<Type>, func: FuncId, },
     Intrinsic { arguments: SmallVec<[OpId; 2]>, ty: Type, intr: Intrinsic },
+    NewIntrinsic { arguments: SmallVec<[OpId; 2]>, intr: IntrinsicId },
     Reinterpret(OpId, Type),
     Truncate(OpId, Type),
     SignExtend(OpId, Type),
@@ -104,7 +106,8 @@ impl Instr {
             Instr::Store { location, value } => vec![location, value],
             Instr::Call { arguments: ref ops, .. } | Instr::ExternCall { arguments: ref ops, .. }
                 | Instr::Intrinsic { arguments: ref ops, .. } | Instr::Struct { fields: ref ops, .. }
-                | Instr::Enum { variants: ref ops, .. } | Instr::StructLit { fields: ref ops, .. } => ops.iter().copied().collect(),
+                | Instr::Enum { variants: ref ops, .. } | Instr::StructLit { fields: ref ops, .. }
+                | Instr::NewIntrinsic { arguments: ref ops, .. } => ops.iter().copied().collect(),
             Instr::FunctionTy { ref param_tys, ret_ty } => param_tys.iter().copied().chain(std::iter::once(ret_ty)).collect(),
         }
     }
@@ -135,7 +138,8 @@ impl Instr {
             },
             Instr::Call { arguments: ref mut ops, .. } | Instr::ExternCall { arguments: ref mut ops, .. }
                 | Instr::Intrinsic { arguments: ref mut ops, .. } | Instr::Struct { fields: ref mut ops, .. }
-                | Instr::Enum { variants: ref mut ops, .. } | Instr::StructLit { fields: ref mut ops, .. } => {
+                | Instr::Enum { variants: ref mut ops, .. } | Instr::StructLit { fields: ref mut ops, .. }
+                | Instr::NewIntrinsic { arguments: ref mut ops, .. } => {
                     for op in ops {
                         replace(op, old, new);
                     }

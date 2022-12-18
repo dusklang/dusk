@@ -1312,6 +1312,12 @@ impl DriverRef<'_> {
                         _ => panic!("Call to unimplemented intrinsic {:?}", intr),
                     }
                 },
+                &Instr::NewIntrinsic { ref arguments, intr } => {
+                    let arguments: Vec<&Value> = arguments.iter().map(|&arg| frame.get_val(arg, &d)).collect();
+                    let implementation = d.new_intrinsics[intr].implementation;
+                    drop(d);
+                    implementation(self, arguments)
+                },
                 &Instr::Reinterpret(instr, _) => frame.get_val(instr, &*self.read()).clone(),
                 &Instr::Truncate(instr, ref ty) => {
                     let frame = stack.last().unwrap();
