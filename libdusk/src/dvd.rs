@@ -129,8 +129,9 @@ mod dependent_exports {
     
     use serde::Serialize;
     use serde::de::DeserializeOwned;
-    use interprocess::local_socket::{LocalSocketListener, LocalSocketStream};
+    use interprocess::local_socket::{LocalSocketListener, LocalSocketStream, NameTypeSupport};
     use lazy_static::lazy_static;
+    use std::ffi::CString;
 
     use super::{Message, Response};
 
@@ -185,9 +186,27 @@ mod dependent_exports {
     pub fn send(mut message: impl FnMut() -> Message) {
         COORDINATOR.lock().unwrap().send(&mut message);
     }
-    
+
+    pub fn socket_name() -> &'static str {
+        match NameTypeSupport::query() {
+            NameTypeSupport::OnlyPaths =>                              "/tmp/DUSK_VISUAL_DEBUGGER",
+            NameTypeSupport::OnlyNamespaced | NameTypeSupport::Both => "@DUSK_VISUAL_DEBUGGER",
+        }
+    }
+
     pub fn connect() {
-        let listener = LocalSocketListener::bind("@DUSK_VISUAL_DEBUGGER").unwrap();
+        let socket_name = socket_name();
+        
+        #[cfg(not(any(windows, target_os="linux")))]
+        {
+            // Without this, we get an "Address already in use" error on macOS.
+            // My first thought to fix this was to make sure I always drop both ends of the socket, but that didn't fix
+            // the problem. It would be nice if `interprocess` could just handle this for us somehow?
+            let socket_name_cstr = CString::new(socket_name).unwrap();
+            unsafe { libc::unlink(socket_name_cstr.as_ptr()); }
+        }
+
+        let listener = LocalSocketListener::bind(socket_name).unwrap();
         let exe_path = std::env::current_exe().unwrap();
         Command::new(exe_path)
             .arg("internal-launch-dvd")

@@ -37,8 +37,9 @@ use imgui_glium_renderer::Renderer;
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
 use interprocess::local_socket::LocalSocketStream;
 use libdusk::source_info::SourceFileLocation;
-use rect_packer::Packer;
 use libdusk::index_vec::*;
+use libdusk::dvd::socket_name;
+use rect_packer::Packer;
 use dusk_dire::hir::ItemId;
 
 use libdusk::dvd::{Message, Response, self};
@@ -689,7 +690,7 @@ pub fn dvd_main() {
     let (msg_tx, msg_rx) = mpsc::channel();
     let (resp_tx, resp_rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let mut stream = LocalSocketStream::connect("@DUSK_VISUAL_DEBUGGER").unwrap();
+        let mut stream = LocalSocketStream::connect(socket_name()).unwrap();
         while let Ok(message) = dvd::receive_value(&mut stream) {
             msg_tx.send(message).unwrap();
             let response: Response = resp_rx.recv().unwrap();
