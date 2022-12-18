@@ -1038,6 +1038,13 @@ impl DriverRef<'_> {
                         self.write().push_instr(&mut b, Instr::Ret(result), result);
                         self.write().end_current_bb(&b);
                     },
+                    Instr::DiscriminantAccess { val } => {
+                        let mut copier = MirCopier::default();
+                        self.copy_instruction_if_needed(&mut b, &mut copier, val);
+                        let result = self.copy_instruction_if_needed(&mut b, &mut copier, op);
+                        self.write().push_instr(&mut b, Instr::Ret(result), result);
+                        self.write().end_current_bb(&b);
+                    }
                     _ => unimplemented!("{:?}", instruction),
                 }
                 None
@@ -1312,8 +1319,15 @@ impl Driver {
                             transformer.q_replace_instr(terminal, Instr::Br(destination));
                         }
                     },
-                    Instr::SwitchBr { .. } => {
-                        // TODO
+                    Instr::SwitchBr { scrutinee, ref cases, catch_all_bb } => {
+                        let scrutinee = self.code.ops[scrutinee].as_mir_instr().unwrap();
+                        if let Instr::Const(scrutinee @ Const::Int { .. }) = scrutinee {
+                            let destination = cases.iter()
+                                .find(|case| *scrutinee == case.value)
+                                .map(|case| case.bb)
+                                .unwrap_or(catch_all_bb);
+                            transformer.q_replace_instr(terminal, Instr::Br(destination));
+                        }
                     },
                     _ => {},
                 }
@@ -1366,6 +1380,7 @@ impl DriverRef<'_> {
             },
             Instr::LogicalNot(val) | Instr::Truncate(val, _) | Instr::SignExtend(val, _) | Instr::ZeroExtend(val, _)
                 | Instr::FloatCast(val, _) | Instr::FloatToInt(val, _) | Instr::IntToFloat(val, _)
+                | Instr::DiscriminantAccess { val }
                 => self.instruction_is_const(val),
             Instr::Call { func, .. } if d.code.mir.functions[func].is_comptime => instr.referenced_values().iter().all(|&val| self.instruction_is_const(val)),
             _ => false,
