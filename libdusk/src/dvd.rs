@@ -8,8 +8,8 @@
 #[cfg(feature = "dvd")]
 use serde::{Serialize, Deserialize};
 
-use dusk_dire::hir::{ExprId, DeclId, ItemId};
-use dusk_dire::tir::CompId;
+use crate::dire::hir::{ExprId, DeclId, ItemId};
+use crate::dire::tir::CompId;
 
 /// Messages *from* the compiler *to* the debugger.
 #[cfg_attr(feature = "dvd", derive(Debug, Serialize, Deserialize, Clone))]

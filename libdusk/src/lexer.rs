@@ -6,7 +6,7 @@ use std::ops::Range;
 
 use unicode_segmentation::GraphemeCursor;
 
-use dusk_dire::source_info::{SourceRange, SourceFileId};
+use crate::dire::source_info::{SourceRange, SourceFileId};
 
 use crate::driver::Driver;
 use crate::token::TokenKind;

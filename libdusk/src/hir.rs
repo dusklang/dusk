@@ -4,17 +4,17 @@ use std::ops::Range;
 use std::collections::HashSet;
 
 use display_adapter::display_adapter;
-use dusk_dire::mir::Const;
+use crate::dire::mir::Const;
 use index_vec::define_index_type;
 use smallvec::{SmallVec, smallvec};
 use string_interner::{DefaultSymbol as Sym, Symbol, StringInterner};
 
-use dusk_dire::{Op, Block};
-use dusk_dire::hir::*;
-use dusk_dire::index_counter::IndexCounter;
-use dusk_dire::ty::Type;
-use dusk_dire::source_info::{SourceFileId, SourceRange};
-use dusk_dire::InternalField;
+use crate::dire::{Op, Block};
+use crate::dire::hir::*;
+use crate::dire::index_counter::IndexCounter;
+use crate::dire::ty::Type;
+use crate::dire::source_info::{SourceFileId, SourceRange};
+use crate::dire::InternalField;
 
 use crate::dvd::{Message as DvdMessage, self};
 use crate::autopop::{AutoPopStack, AutoPopStackEntry};

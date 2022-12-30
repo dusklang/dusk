@@ -3,12 +3,12 @@ use std::sync::RwLock;
 use string_interner::StringInterner;
 use lazy_static::lazy_static;
 
-use dusk_dire::hir::ExprId;
-use dusk_dire::mir::{Const, IntrinsicId};
-use dusk_dire::arch::Arch;
-use dusk_dire::source_info::SourceFileId;
-use dusk_dire::Code;
-use dusk_dire::InternalFieldDecls;
+use crate::dire::hir::ExprId;
+use crate::dire::mir::{Const, IntrinsicId};
+use crate::dire::arch::Arch;
+use crate::dire::source_info::SourceFileId;
+use crate::dire::Code;
+use crate::dire::InternalFieldDecls;
 
 use crate::source_info::SourceMap;
 use crate::token::TokenVec;

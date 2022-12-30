@@ -1,5 +1,7 @@
 #[macro_use]
 pub mod index_vec;
+#[macro_use]
+pub mod dire;
 pub mod source_info;
 pub mod mir;
 pub mod driver;

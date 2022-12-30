@@ -2,10 +2,10 @@ use std::mem;
 
 use smallvec::{smallvec, SmallVec};
 
-use dusk_dire::source_info::SourceRange;
-use dusk_dire::hir::{ModScopeNs, ModScope, Intrinsic, Decl, VOID_TYPE, ModScopedDecl, ModScopeNsId, EnumId, ExprId, VariantDecl};
-use dusk_dire::ty::{Type, InternalType};
-use dusk_dire::mir::Const;
+use crate::dire::source_info::SourceRange;
+use crate::dire::hir::{ModScopeNs, ModScope, Intrinsic, Decl, VOID_TYPE, ModScopedDecl, ModScopeNsId, EnumId, ExprId, VariantDecl};
+use crate::dire::ty::{Type, InternalType};
+use crate::dire::mir::Const;
 
 use crate::driver::Driver;
 use crate::hir::ScopeState;

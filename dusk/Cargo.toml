@@ -13,7 +13,6 @@ readme = "../README.md"
 [dependencies]
 clap = { version = "3.0", features = ["derive"] }
 libdusk = { version = "0.1", path = "../libdusk" }
-dusk_dire = { version = "0.1", path = "../dire" }
 
 # DVD-specific dependencies
 glium = { version = "0.30.2", default-features = true, optional = true }

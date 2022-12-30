@@ -7,10 +7,10 @@ use string_interner::DefaultSymbol as Sym;
 use display_adapter::display_adapter;
 use num_bigint::BigInt;
 
-use crate::hir::{Intrinsic, DeclId, StructId, EnumId, ModScopeId, ExternModId, ExternFunctionRef, GenericParamId};
-use crate::ty::{Type, InternalType, FunctionType, StructType};
-use crate::{Code, BlockId, OpId, InternalField};
-use crate::source_info::SourceRange;
+use crate::dire::hir::{Intrinsic, DeclId, StructId, EnumId, ModScopeId, ExternModId, ExternFunctionRef, GenericParamId};
+use crate::dire::ty::{Type, InternalType, FunctionType, StructType};
+use crate::dire::{Code, BlockId, OpId, InternalField};
+use crate::dire::source_info::SourceRange;
 
 define_index_type!(pub struct FuncId = u32;);
 define_index_type!(pub struct StaticId = u32;);

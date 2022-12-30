@@ -4,8 +4,8 @@ use std::error::Error;
 use std::mem;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use dusk_dire::hir::{Item, Expr};
-use dusk_dire::source_info::{SourceFileId, SourceRange};
+use libdusk::dire::hir::{Item, Expr};
+use libdusk::dire::source_info::{SourceFileId, SourceRange};
 use libdusk::error::DiagnosticKind;
 use libdusk::new_code::NewCode;
 use libdusk::type_provider::{RealTypeProvider, TypeProvider};
@@ -17,7 +17,7 @@ use lsp_types::{ServerCapabilities, CompletionOptions, WorkspaceServerCapabiliti
 use libdusk::source_info::SourceMap;
 use libdusk::driver::{Driver, DRIVER, DriverRef};
 use dusk_proc_macros::ef;
-use dusk_dire::arch::Arch;
+use libdusk::dire::arch::Arch;
 
 fn break_lines(text: String) -> Vec<String> {
     let mut lines = Vec::new();

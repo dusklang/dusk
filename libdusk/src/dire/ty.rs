@@ -1,7 +1,7 @@
 use std::fmt;
 
-use crate::arch::Arch;
-use crate::hir::{StructId, EnumId, GenericParamId};
+use crate::dire::arch::Arch;
+use crate::dire::hir::{StructId, EnumId, GenericParamId};
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum IntWidth {
     W8, W16, W32, W64, Pointer,

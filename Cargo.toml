@@ -2,7 +2,6 @@
 members = [
     "dusk",
     "libdusk",
-    "dire",
     "dls",
     "dusk-proc-macros",
     "xtask"

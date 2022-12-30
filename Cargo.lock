@@ -530,7 +530,6 @@ name = "dls"
 version = "0.1.6"
 dependencies = [
  "dusk-proc-macros",
- "dusk_dire",
  "libdusk",
  "lsp-server",
  "lsp-types",
@@ -552,23 +551,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "dusk_dire"
-version = "0.1.6"
-dependencies = [
- "display_adapter",
- "index_vec",
- "num-bigint",
- "serde",
- "smallvec",
- "string-interner",
-]
-
-[[package]]
 name = "dusklang"
 version = "0.1.6"
 dependencies = [
  "clap",
- "dusk_dire",
  "glium",
  "imgui",
  "imgui-glium-renderer",
@@ -1030,7 +1016,6 @@ dependencies = [
  "derivative",
  "display_adapter",
  "dusk-proc-macros",
- "dusk_dire",
  "indenter",
  "index_vec",
  "interprocess",

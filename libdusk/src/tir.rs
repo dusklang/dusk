@@ -6,11 +6,11 @@ use smallvec::SmallVec;
 use index_vec::define_index_type;
 use string_interner::DefaultSymbol as Sym;
 
-use dusk_dire::source_info::SourceRange;
-use dusk_dire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, EnumId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, RETURN_VALUE_DECL};
-use dusk_dire::{internal_fields, internal_field_decls, InternalField, InternalFieldDecls, InternalNamespace};
-use dusk_dire::ty::Type;
-pub use dusk_dire::tir::CompId;
+use crate::dire::source_info::SourceRange;
+use crate::dire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, EnumId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, RETURN_VALUE_DECL};
+use crate::dire::{internal_fields, internal_field_decls, InternalField, InternalFieldDecls, InternalNamespace};
+use crate::dire::ty::Type;
+pub use crate::dire::tir::CompId;
 
 use crate::dvd::{Message as DvdMessage, self};
 
@@ -283,7 +283,7 @@ macro_rules! define_legacy_internal_types_internal {
         }
     }
 }
-dusk_dire::define_legacy_internal_types!(define_legacy_internal_types_internal);
+define_legacy_internal_types!(define_legacy_internal_types_internal);
 
 pub enum NameLookup {
     Exact(Sym),

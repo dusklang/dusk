@@ -11,9 +11,9 @@ use std::ops::Range;
 use serde::{Serialize, Deserialize};
 
 use display_adapter::display_adapter;
-use dusk_dire::hir::{ExprId, DeclId, ItemId, Item};
-use dusk_dire::OpId;
-use dusk_dire::source_info::{SourceRange, SourceFileId};
+use crate::dire::hir::{ExprId, DeclId, ItemId, Item};
+use crate::dire::OpId;
+use crate::dire::source_info::{SourceRange, SourceFileId};
 
 #[cfg(feature = "dls")]
 use lsp_types::Url;

@@ -3,9 +3,9 @@ use libdusk::new_code::NewCode;
 use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 
-use dusk_dire::ty::Type;
-use dusk_dire::mir::FuncId;
-use dusk_dire::arch::Arch;
+use libdusk::dire::ty::Type;
+use libdusk::dire::mir::FuncId;
+use libdusk::dire::arch::Arch;
 use libdusk::driver::{DRIVER, Driver, DriverRef};
 use libdusk::source_info::SourceMap;
 use libdusk::interpreter::{restart_interp, InterpMode};

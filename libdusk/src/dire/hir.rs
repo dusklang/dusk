@@ -6,11 +6,11 @@ use index_vec::{IndexVec, define_index_type};
 use smallvec::SmallVec;
 use string_interner::DefaultSymbol as Sym;
 
-use crate::mir::Const;
-use crate::index_counter::IndexCounter;
-use crate::source_info::{SourceRange, SourceFileId};
-use crate::BlockId;
-use crate::InternalField;
+use crate::dire::mir::Const;
+use crate::dire::index_counter::IndexCounter;
+use crate::dire::source_info::{SourceRange, SourceFileId};
+use crate::dire::BlockId;
+use crate::dire::InternalField;
 
 define_index_type!(pub struct ExprId = u32;);
 define_index_type!(pub struct DeclRefId = u32;);

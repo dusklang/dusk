@@ -1,5 +1,5 @@
 // This is a higher-order macro which takes in a macro and passes it all internal types and their members
-use crate::ty::Type;
+use crate::dire::ty::Type;
 #[macro_export]
 macro_rules! define_legacy_internal_types {
     ($name:ident) => {
@@ -22,7 +22,7 @@ macro_rules! define_legacy_internal_types_impl {
         }
 
         pub mod internal_field_decls {
-            use crate::hir::DeclId;
+            use crate::dire::hir::DeclId;
             $(
                 #[derive(Debug)]
                 pub struct $name {

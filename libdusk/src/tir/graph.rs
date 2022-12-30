@@ -4,8 +4,8 @@ use std::cmp::max;
 
 use bitflags::bitflags;
 
-use dusk_dire::hir::{ItemId, VOID_EXPR_ITEM};
-use dusk_dire::tir::CompId;
+use crate::dire::hir::{ItemId, VOID_EXPR_ITEM};
+use crate::dire::tir::CompId;
 use crate::dvd::{Message as DvdMessage, self};
 
 use crate::index_vec::*;
