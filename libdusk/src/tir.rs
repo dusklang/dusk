@@ -245,7 +245,7 @@ macro_rules! add_eval_dep_injector {
 }
 
 
-macro_rules! define_internal_types_internal {
+macro_rules! define_legacy_internal_types_internal {
     ($(struct $name:ident {
         $($field_name:ident: $ty:expr),*$(,)?
     })*) => {
@@ -283,7 +283,7 @@ macro_rules! define_internal_types_internal {
         }
     }
 }
-dusk_dire::define_internal_types!(define_internal_types_internal);
+dusk_dire::define_legacy_internal_types!(define_legacy_internal_types_internal);
 
 pub enum NameLookup {
     Exact(Sym),

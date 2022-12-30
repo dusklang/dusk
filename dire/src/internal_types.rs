@@ -1,7 +1,7 @@
 // This is a higher-order macro which takes in a macro and passes it all internal types and their members
 use crate::ty::Type;
 #[macro_export]
-macro_rules! define_internal_types {
+macro_rules! define_legacy_internal_types {
     ($name:ident) => {
         $name!(
             struct StringLiteral {
@@ -12,7 +12,7 @@ macro_rules! define_internal_types {
     };
 }
 
-macro_rules! define_internal_types_impl {
+macro_rules! define_legacy_internal_types_impl {
     ($(struct $name:ident {
         $($field_name:ident: $ty:expr),*$(,)?
     })*) => {
@@ -87,4 +87,4 @@ macro_rules! define_internal_types_impl {
         }
     };
 }
-define_internal_types!(define_internal_types_impl);
+define_legacy_internal_types!(define_legacy_internal_types_impl);
