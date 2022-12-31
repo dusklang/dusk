@@ -230,6 +230,10 @@ impl Driver {
     pub fn find_or_build_relative_mod_path(&mut self, path: &str) -> ModScopeId {
         let mut scope = self.find_nearest_mod_scope().unwrap();
 
+        if path.trim().is_empty() {
+            return scope;
+        }
+
         for name in path.split('.').map(str::trim) {
             assert!(!name.is_empty());
 
