@@ -276,17 +276,13 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
                 impl crate::dire::internal_types::DuskBridge for #struct_name {
                     fn register(d: &mut crate::driver::Driver) {
                         use crate::dire::{hir::*, ty::*, mir::*};
-                        use crate::dire::source_info::*;
-                        let scope = d.find_or_build_relative_mod_path(#module);
-                        let name = d.interner.get_or_intern(#struct_name_as_string);
+
                         let internal_type = InternalType { name: String::from(#struct_name_as_string), size: std::mem::size_of::<#struct_name>() };
                         let type_id = d.code.hir.internal_types.push(internal_type);
                         let ty = Type::Internal(type_id);
                         let konst = Const::Ty(ty);
                         let expr = d.add_const_expr(konst);
-                        let decl_id = d.add_decl(Decl::Const(expr), name, None, SourceRange::default());
-                        let decl = ModScopedDecl { num_params: 0, id: decl_id };
-                        d.code.hir.mod_scopes[scope].decl_groups.entry(name).or_default().push(decl);
+                        d.add_decl_to_module(#struct_name_as_string, #module, Decl::Const(expr), 0, None);
                     }
                 }
             }.into()

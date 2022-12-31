@@ -203,6 +203,14 @@ impl Driver {
         self.add_constant_decl(name, Const::Ty(ty));
     }
 
+    pub fn add_decl_to_module(&mut self, name: &str, path: &str, decl: Decl, num_params: usize, explicit_ty: Option<ExprId>) {
+        let scope = self.find_or_build_relative_mod_path(path);
+        let name = self.interner.get_or_intern(name);
+        let decl_id = self.add_decl(decl, name, explicit_ty, SourceRange::default());
+        let decl = ModScopedDecl { num_params, id: decl_id };
+        self.code.hir.mod_scopes[scope].decl_groups.entry(name).or_default().push(decl);
+    }
+
     fn add_module_decl(&mut self, name: &str) -> AutoPopStackEntry<ScopeState, ModScopeNsId> {
         let scope = self.code.hir.mod_scopes.push(ModScope::default());
         let namespace = self.code.hir.mod_ns.push(
