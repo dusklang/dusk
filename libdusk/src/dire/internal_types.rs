@@ -3,10 +3,10 @@ use dusk_proc_macros::DuskBridge;
 use crate::dire::ty::Type;
 use crate::driver::Driver;
 
-#[derive(DuskBridge)]
+#[derive(DuskBridge, Copy, Clone)]
 #[module = "core"]
-pub struct MyInternalType {
-
+pub struct BoxedInt {
+    pub index: usize
 }
 
 
@@ -27,7 +27,7 @@ macro_rules! declare_internal_types {
     };
 }
 
-declare_internal_types!(register: MyInternalType);
+declare_internal_types!(register: BoxedInt);
 
 // This is a higher-order macro which takes in a macro and passes it all internal types and their members
 macro_rules! define_legacy_internal_types {

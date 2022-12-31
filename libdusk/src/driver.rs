@@ -34,8 +34,11 @@ pub struct Driver {
     pub mir: mir::Builder,
     pub code: Code,
     pub internal_field_decls: InternalFieldDecls,
+    // TODO: move to `Code`, probably
     pub new_intrinsics: IndexVec<IntrinsicId, hir::NewIntrinsic>,
     pub no_core: bool,
+
+    pub boxed_ints: Vec<usize>,
 }
 pub type DriverRef<'l> = RwRef<'l, Driver>;
 
@@ -54,6 +57,8 @@ impl Driver {
             internal_field_decls: InternalFieldDecls::default(),
             new_intrinsics: IndexVec::default(),
             no_core,
+
+            boxed_ints: Vec::default(),
         }
     }
 }

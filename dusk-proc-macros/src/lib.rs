@@ -290,3 +290,11 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
         _ => panic!("unable to bridge type: unknown item kind"),
     }
 }
+
+#[proc_macro_attribute]
+pub fn dusk_bridge(_: TokenStream, item: TokenStream) -> TokenStream {
+    let item: Item = syn::parse(item).unwrap();
+    quote! {
+        #item
+    }.into()
+}

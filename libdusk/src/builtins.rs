@@ -13,7 +13,29 @@ use crate::hir::ScopeState;
 use crate::autopop::AutoPopStackEntry;
 use crate::parser::ParseResult;
 
-use dusk_proc_macros::{ef, df};
+use crate::dire::internal_types::BoxedInt;
+
+use dusk_proc_macros::{ef, df, dusk_bridge};
+
+#[dusk_bridge]
+#[allow(unused)]
+impl Driver {
+    fn get_boxed_zero(&mut self) -> BoxedInt {
+        let index = self.boxed_ints.len();
+        self.boxed_ints.push(0);
+        BoxedInt {
+            index,
+        }
+    }
+
+    fn increment_boxed_int(&mut self, val: BoxedInt) {
+        self.boxed_ints[val.index] += 1;
+    }
+
+    fn print_boxed_int(&mut self, val: BoxedInt) {
+        println!("boxed int: {}", self.boxed_ints[val.index]);
+    }
+}
 
 struct EnumBuilder {
     expr: ExprId,
