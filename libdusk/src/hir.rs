@@ -809,7 +809,7 @@ impl Driver {
     }
 
     // This is a hack to allow intrinsics to be added for comparing enum types
-    fn find_nearest_mod_scope(&self) -> Option<ModScopeId> {
+    pub fn find_nearest_mod_scope(&self) -> Option<ModScopeId> {
         for &scope in self.hir.scope_stack.stack.lock().unwrap().borrow().iter().rev() {
             match scope {
                 ScopeState::Mod { id, .. } => return Some(id),

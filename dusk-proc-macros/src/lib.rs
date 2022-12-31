@@ -2,6 +2,10 @@ extern crate proc_macro;
 
 use proc_macro::{TokenStream, TokenTree, Ident, Span, Punct, Spacing, Group, Delimiter};
 use proc_macro::token_stream::IntoIter as TokenIter;
+
+use quote::quote;
+use syn::{Item, Meta, Lit, LitStr};
+
 use std::iter::Peekable;
 
 struct Parser {
@@ -244,5 +248,49 @@ pub fn df(input: TokenStream) -> TokenStream {
             }
         },
         Expression::Simple(decl_id) => panic!("Unexpected bare identifier '{}'. Must have field", decl_id),
+    }
+}
+
+#[proc_macro_derive(DuskBridge, attributes(module))]
+pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
+    let item: Item = syn::parse(item).unwrap();
+    match item {
+        Item::Struct(strukt) => {
+            let Some(module) = strukt.attrs.iter()
+                .find(|attr| attr.path.is_ident("module"))
+                .map(|attr| {
+                    match attr.parse_meta().unwrap() {
+                        Meta::Path(_) | Meta::List(_) => panic!("expected module path in 'module' attribute, like #[module = \"the.module\"]"),
+                        Meta::NameValue(attr) => match attr.lit {
+                            Lit::Str(lit) => lit,
+                            _ => panic!("expected string literal for module path")
+                        }
+                    }
+                })
+            else {
+                panic!("expected 'module' attribute to specify where to put bridged type")
+            };
+            let struct_name = strukt.ident;
+            let struct_name_as_string = LitStr::new(&struct_name.to_string(), struct_name.span());
+            quote! {
+                impl crate::dire::internal_types::DuskBridge for #struct_name {
+                    fn register(d: &mut crate::driver::Driver) {
+                        use crate::dire::{hir::*, ty::*, mir::*};
+                        use crate::dire::source_info::*;
+                        let scope = d.find_or_build_relative_mod_path(#module);
+                        let name = d.interner.get_or_intern(#struct_name_as_string);
+                        let internal_type = InternalType { name: String::from(#struct_name_as_string), size: std::mem::size_of::<#struct_name>() };
+                        let type_id = d.code.hir.internal_types.push(internal_type);
+                        let ty = Type::Internal(type_id);
+                        let konst = Const::Ty(ty);
+                        let expr = d.add_const_expr(konst);
+                        let decl_id = d.add_decl(Decl::Const(expr), name, None, SourceRange::default());
+                        let decl = ModScopedDecl { num_params: 0, id: decl_id };
+                        d.code.hir.mod_scopes[scope].decl_groups.entry(name).or_default().push(decl);
+                    }
+                }
+            }.into()
+        },
+        _ => panic!("unable to bridge type: unknown item kind"),
     }
 }

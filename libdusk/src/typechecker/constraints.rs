@@ -2,7 +2,7 @@ use dusk_proc_macros::ef;
 use smallvec::{SmallVec, smallvec};
 use std::collections::HashMap;
 
-use crate::dire::ty::{Type, InternalType, FunctionType, QualType, IntWidth};
+use crate::dire::ty::{Type, LegacyInternalType, FunctionType, QualType, IntWidth};
 use crate::dire::hir::{GenericParamId, ExprId, GenericCtx, GenericCtxId, BLANK_GENERIC_CTX};
 
 use crate::driver::Driver;
@@ -169,7 +169,7 @@ fn implements_traits(ty: &Type, traits: BuiltinTraits) -> Result<(), BuiltinTrai
     fn expressible_by_str_lit(ty: &Type) -> bool {
         match ty {
             Type::Pointer(pointee) => matches!(pointee.ty, Type::Int { width: IntWidth::W8, .. }) && !pointee.is_mut,
-            Type::Internal(InternalType::StringLiteral) => true,
+            Type::LegacyInternal(LegacyInternalType::StringLiteral) => true,
             _ => false,
         }
     }

@@ -1,7 +1,10 @@
 use std::fmt;
 
+use index_vec::define_index_type;
+
 use crate::dire::arch::Arch;
 use crate::dire::hir::{StructId, EnumId, GenericParamId};
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum IntWidth {
     W8, W16, W32, W64, Pointer,
@@ -37,23 +40,39 @@ pub struct StructType {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
-pub enum InternalType {
+pub enum LegacyInternalType {
     StringLiteral,
 }
 
-impl InternalType {
+impl LegacyInternalType {
     pub fn name(self) -> &'static str {
         match self {
-            InternalType::StringLiteral => "StringLiteral",
+            LegacyInternalType::StringLiteral => "StringLiteral",
         }
     }
 }
 
-impl From<InternalType> for Type {
-    fn from(internal: InternalType) -> Self {
+impl From<LegacyInternalType> for Type {
+    fn from(internal: LegacyInternalType) -> Self {
+        Type::LegacyInternal(internal)
+    }
+}
+
+
+define_index_type!(pub struct InternalTypeId = u32;);
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct InternalType {
+    pub name: String,
+    pub size: usize,
+}
+
+impl From<InternalTypeId> for Type {
+    fn from(internal: InternalTypeId) -> Self {
         Type::Internal(internal)
     }
 }
+
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub enum Type {
@@ -71,7 +90,8 @@ pub enum Type {
     Enum(EnumId),
     /// Used for internal compiler data structures exposed to compile-time code
     /// TODO: Mod and Ty, at minimum, could probably be moved here
-    Internal(InternalType),
+    LegacyInternal(LegacyInternalType),
+    Internal(InternalTypeId),
     Bool,
     Void,
     Mod,
@@ -85,7 +105,7 @@ impl Type {
     pub fn has_generic_parameters(&self) -> bool {
         use Type::*;
         match self {
-            Error | Int { .. } | Float(_) | Internal(_) | Bool | Void | Mod | Ty | Never => false,
+            Error | Int { .. } | Float(_) | LegacyInternal(_) | Internal(_) | Bool | Void | Mod | Ty | Never => false,
             // TODO: Eliminate this separate heap allocation by interning all types into an IndexVec
             Pointer(ty) => ty.ty.has_generic_parameters(),
             Inout(ty) => ty.has_generic_parameters(),
@@ -261,7 +281,8 @@ impl fmt::Debug for Type {
             &Type::GenericParam(id) => {
                 write!(f, "generic_param{}", id.index())
             },
-            Type::Internal(internal) => write!(f, "{}", internal.name()),
+            Type::LegacyInternal(internal) => write!(f, "{}", internal.name()),
+            &Type::Internal(id) => write!(f, "internal_type{}", id.index()),
         }
     }
 }

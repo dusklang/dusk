@@ -1,6 +1,35 @@
-// This is a higher-order macro which takes in a macro and passes it all internal types and their members
+use dusk_proc_macros::DuskBridge;
+
 use crate::dire::ty::Type;
-#[macro_export]
+use crate::driver::Driver;
+
+#[derive(DuskBridge)]
+#[module = "core"]
+pub struct MyInternalType {
+
+}
+
+
+
+
+
+pub trait DuskBridge {
+    fn register(d: &mut Driver);
+}
+
+macro_rules! declare_internal_types {
+    ($register_name:ident : $($name:path),*) => {
+        pub fn $register_name(d: &mut Driver) {
+            $(
+                <$name>::register(d);
+            )*
+        }
+    };
+}
+
+declare_internal_types!(register: MyInternalType);
+
+// This is a higher-order macro which takes in a macro and passes it all internal types and their members
 macro_rules! define_legacy_internal_types {
     ($name:ident) => {
         $name!(

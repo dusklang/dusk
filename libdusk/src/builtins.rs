@@ -2,15 +2,18 @@ use std::mem;
 
 use smallvec::{smallvec, SmallVec};
 
+use crate::dire::internal_types;
 use crate::dire::source_info::SourceRange;
-use crate::dire::hir::{ModScopeNs, ModScope, Intrinsic, Decl, VOID_TYPE, ModScopedDecl, ModScopeNsId, EnumId, ExprId, VariantDecl};
-use crate::dire::ty::{Type, InternalType};
+use crate::dire::hir::{ModScopeId, ModScopeNs, ModScope, Intrinsic, Expr, Decl, VOID_TYPE, ModScopedDecl, ModScopeNsId, EnumId, ExprId, VariantDecl};
+use crate::dire::ty::{Type, LegacyInternalType};
 use crate::dire::mir::Const;
 
 use crate::driver::Driver;
 use crate::hir::ScopeState;
 use crate::autopop::AutoPopStackEntry;
 use crate::parser::ParseResult;
+
+use dusk_proc_macros::{ef, df};
 
 struct EnumBuilder {
     expr: ExprId,
@@ -147,8 +150,8 @@ impl Driver {
         self.add_constant_type_decl("module", Type::Mod);
 
         let compiler_module = self.add_module_decl("compiler");
-        let string_lit_type = self.add_const_ty(Type::Internal(InternalType::StringLiteral));
-        self.add_constant_type_decl("StringLiteral", Type::Internal(InternalType::StringLiteral));
+        let string_lit_type = self.add_const_ty(Type::LegacyInternal(LegacyInternalType::StringLiteral));
+        self.add_constant_type_decl("StringLiteral", Type::LegacyInternal(LegacyInternalType::StringLiteral));
 
         // Add Platform enum
         let mut platform_enum = self.start_enum("Platform");
@@ -179,6 +182,8 @@ impl Driver {
         if !self.no_core {
             self.add_virtual_file_module("core", include_str!("../core/core.dusk")).unwrap();
         }
+
+        internal_types::register(self);
     }
 
     fn add_constant_decl(&mut self, name: &str, value: Const) {
@@ -199,10 +204,10 @@ impl Driver {
     }
 
     fn add_module_decl(&mut self, name: &str) -> AutoPopStackEntry<ScopeState, ModScopeNsId> {
-        let prelude_scope = self.code.hir.mod_scopes.push(ModScope::default());
-        let prelude_namespace = self.code.hir.mod_ns.push(
+        let scope = self.code.hir.mod_scopes.push(ModScope::default());
+        let namespace = self.code.hir.mod_ns.push(
             ModScopeNs {
-                scope: prelude_scope,
+                scope,
 
                 // technically this field could be filled with whatever is on the top of the stack, but it doesn't
                 // matter because the only thing going in this module will be builtins, which don't refer to anything
@@ -210,8 +215,37 @@ impl Driver {
                 parent: None,
             }
         );
-        self.add_constant_decl(name, Const::Mod(prelude_scope));
-        self.push_to_scope_stack(prelude_namespace, ScopeState::Mod { id: prelude_scope, namespace: prelude_namespace, extern_mod: None })
+        self.add_constant_decl(name, Const::Mod(scope));
+        self.push_to_scope_stack(namespace, ScopeState::Mod { id: scope, namespace, extern_mod: None })
+    }
+
+    pub fn find_or_build_relative_mod_path(&mut self, path: &str) -> ModScopeId {
+        let mut scope = self.find_nearest_mod_scope().unwrap();
+
+        for name in path.split('.').map(str::trim) {
+            assert!(!name.is_empty());
+
+            let name = self.interner.get_or_intern(name);
+            let decl_groups = self.code.hir.mod_scopes[scope].decl_groups.entry(name).or_default();
+
+            scope = if !decl_groups.is_empty() {
+                assert!(decl_groups.len() == 1);
+                let group = decl_groups[0];
+                assert!(group.num_params == 0);
+                let Decl::Const(expr) = df!(group.id.hir) else { panic!("internal compiler error: expected const decl") };
+                let Expr::Const(konst) = &ef!(expr.hir) else { panic!("internal compiler error: expected const expr") };
+                let Const::Mod(new_scope) = *konst else { panic!("internal compiler error: expected const mod") };
+                new_scope
+            } else {
+                let new_scope = self.code.hir.mod_scopes.push(ModScope::default());
+                let konst = Const::Mod(new_scope);
+                let expr = self.add_const_expr(konst);
+                let decl = self.add_decl(Decl::Const(expr), name, None, SourceRange::default());
+                self.code.hir.mod_scopes[scope].decl_groups.get_mut(&name).unwrap().push(ModScopedDecl { num_params: 0, id: decl });
+                new_scope
+            }
+        }
+        scope
     }
     
     fn start_enum(&mut self, name: &str) -> EnumBuilder {

@@ -7,6 +7,7 @@ use smallvec::SmallVec;
 use string_interner::DefaultSymbol as Sym;
 
 use crate::dire::mir::Const;
+use crate::dire::ty::{InternalType, InternalTypeId};
 use crate::dire::index_counter::IndexCounter;
 use crate::dire::source_info::{SourceRange, SourceFileId};
 use crate::dire::BlockId;
@@ -48,7 +49,7 @@ pub struct ImperScopedDecl {
 }
 
 /// A declaration in module scope
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct ModScopedDecl {
     pub num_params: usize,
     pub id: DeclId,
@@ -484,6 +485,7 @@ pub struct HirCode {
     pub condition_ns: IndexVec<ConditionNsId, ConditionNs>,
     pub generic_context_ns: IndexVec<GenericContextNsId, GenericContextNs>,
     pub cast_counter: IndexCounter<CastId>,
+    pub internal_types: IndexVec<InternalTypeId, InternalType>,
     pub structs: IndexVec<StructId, Struct>,
     pub enums: IndexVec<EnumId, Enum>,
     pub extern_mods: IndexVec<ExternModId, ExternMod>,

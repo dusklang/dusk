@@ -6,7 +6,7 @@ pub mod source_info;
 pub mod mir;
 pub mod tir;
 #[macro_use]
-mod internal_types;
+pub mod internal_types;
 
 pub use internal_types::*;
 

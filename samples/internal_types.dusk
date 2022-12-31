@@ -1,0 +1,9 @@
+fn main() {
+
+}
+
+// core.MyInternalType is not declared in core.dusk at all; instead, it's converted from the ordinary Rust type
+// declaration in `internal_types.rs` to a Dusk type, then injected into the core module.
+fn uncallable(arg: core.MyInternalType) {
+
+}

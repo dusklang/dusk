@@ -8,7 +8,7 @@ use display_adapter::display_adapter;
 use num_bigint::BigInt;
 
 use crate::dire::hir::{Intrinsic, DeclId, StructId, EnumId, ModScopeId, ExternModId, ExternFunctionRef, GenericParamId};
-use crate::dire::ty::{Type, InternalType, FunctionType, StructType};
+use crate::dire::ty::{Type, LegacyInternalType, FunctionType, StructType};
 use crate::dire::{Code, BlockId, OpId, InternalField};
 use crate::dire::source_info::SourceRange;
 
@@ -174,7 +174,7 @@ impl Const {
     pub fn ty(&self) -> Type {
         match self {
             Const::Int { ty, .. } | Const::Float { ty, .. } | Const::Str { ty, .. } => ty.clone(),
-            Const::StrLit(_) => Type::Internal(InternalType::StringLiteral),
+            Const::StrLit(_) => Type::LegacyInternal(LegacyInternalType::StringLiteral),
             Const::Bool(_) => Type::Bool,
             Const::Ty(_) => Type::Ty,
             &Const::BasicVariant { enuum, .. } => Type::Enum(enuum),

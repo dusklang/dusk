@@ -13,7 +13,7 @@ use display_adapter::display_adapter;
 use crate::dire::hir::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, GenericParamId, Item, PatternBindingDeclId, ExternModId, ExternFunctionRef, PatternBindingPathComponent, VOID_TYPE, StructId, LoopId};
 use crate::dire::mir::{FuncId, StaticId, Const, Instr, InstrId, Function, MirCode, StructLayout, EnumLayout, ExternMod, ExternFunction, InstrNamespace, SwitchCase, VOID_INSTR};
 use crate::dire::{Block, BlockId, Op, OpId, InternalField};
-use crate::dire::ty::{Type, InternalType, FunctionType, FloatWidth, StructType};
+use crate::dire::ty::{Type, LegacyInternalType, FunctionType, FloatWidth, StructType};
 use crate::dire::source_info::SourceRange;
 
 use crate::driver::{Driver, DriverRef};
@@ -184,7 +184,7 @@ impl Driver {
             },
             Expr::DecLit { lit } => Const::Float { lit, ty },
             Expr::StrLit { ref lit } => {
-                if matches!(ty, Type::Internal(InternalType::StringLiteral)) {
+                if matches!(ty, Type::LegacyInternal(LegacyInternalType::StringLiteral)) {
                     Const::StrLit(lit.clone())
                 } else {
                     let id = self.code.mir.strings.push(lit.clone());
@@ -271,7 +271,8 @@ impl Driver {
     pub fn size_of(&self, ty: &Type) -> usize {
         let arch = self.arch;
         match ty {
-            Type::Error | Type::Void | Type::Never | Type::Ty | Type::Mod { .. } | Type::Internal(_) => 0,
+            Type::Error | Type::Void | Type::Never | Type::Ty | Type::Mod { .. } | Type::LegacyInternal(_) => 0,
+            &Type::Internal(id) => self.code.hir.internal_types[id].size,
             Type::Int { width, .. } => {
                 let bit_width = width.bit_width(arch);
                 assert_eq!(bit_width % 8, 0, "Unexpected bit width: not a multiple of eight!");

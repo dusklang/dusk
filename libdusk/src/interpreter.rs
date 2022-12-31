@@ -23,7 +23,7 @@ use lazy_static::lazy_static;
 use crate::dire::arch::Arch;
 use crate::dire::hir::{Intrinsic, ModScopeId, EnumId, GenericParamId, ExternFunctionRef};
 use crate::dire::mir::{Const, Instr, InstrId, FuncId, StaticId, ExternFunction};
-use crate::dire::ty::{Type, FunctionType, QualType, IntWidth, FloatWidth, StructType, InternalType};
+use crate::dire::ty::{Type, FunctionType, QualType, IntWidth, FloatWidth, StructType, LegacyInternalType};
 use crate::dire::{OpId, BlockId};
 use crate::dire::{InternalField, internal_fields};
 
@@ -590,7 +590,7 @@ impl Driver {
                 Const::BasicVariant { enuum, index: val.as_enum().discriminant as usize }
             },
             Type::Void => Const::Void,
-            Type::Internal(InternalType::StringLiteral) => match val.as_internal() {
+            Type::LegacyInternal(LegacyInternalType::StringLiteral) => match val.as_internal() {
                 InternalValue::StrLit(string) => Const::StrLit(string.clone()),
                 _ => panic!("unexpected non-StrLit in StringLiteral"),
             },

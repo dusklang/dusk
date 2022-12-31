@@ -10,7 +10,7 @@ use crate::type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 
 use crate::dire::hir::{self, ExprId, DeclId, StructId, PatternKind, GenericParamId, Ident, VOID_EXPR, GenericCtx, DeclRefId, BLANK_GENERIC_CTX};
 use crate::dire::mir::Const;
-use crate::dire::ty::{Type, InternalType, FunctionType, QualType, IntWidth};
+use crate::dire::ty::{Type, LegacyInternalType, FunctionType, QualType, IntWidth};
 use crate::dire::source_info::SourceRange;
 use crate::dire::InternalNamespace;
 
@@ -832,7 +832,7 @@ fn string_types() -> [Type; 3] {
     [
         Type::i8().ptr().into(),
         Type::u8().ptr().into(),
-        Type::Internal(InternalType::StringLiteral),
+        Type::LegacyInternal(LegacyInternalType::StringLiteral),
     ]
 }
 
@@ -1686,8 +1686,8 @@ impl DriverRef<'_> {
                                 _ => panic!("Unexpected const kind, expected enum!"),
                             }
                         },
-                        Type::Internal(ty) => match ty {
-                            InternalType::StringLiteral => ExprNamespace::Internal(InternalNamespace::StringLiteral),
+                        Type::LegacyInternal(ty) => match ty {
+                            LegacyInternalType::StringLiteral => ExprNamespace::Internal(InternalNamespace::StringLiteral),
                         },
                         Type::Error => ExprNamespace::Error,
                         _ => continue,
