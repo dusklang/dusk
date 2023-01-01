@@ -5,6 +5,7 @@ use proc_macro::token_stream::IntoIter as TokenIter;
 
 use quote::quote;
 use syn::{Item, Meta, Lit, LitStr, Type, ImplItem, FnArg, ReturnType};
+use syn::spanned::Spanned;
 
 use std::iter::Peekable;
 
@@ -286,6 +287,14 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
 
                         d.code.hir.bridged_types.insert(TypeId::of::<Self>(), ty);
                     }
+
+                    fn bridge_from_dusk(value: &Value, _d: &Driver) -> Self {
+                        unsafe { *value.as_arbitrary_value() }
+                    }
+
+                    fn bridge_to_dusk(self, d: &Driver) -> Value {
+                        unsafe { Value::from_arbitrary_value(self) }
+                    }
                 }
             }.into()
         },
@@ -325,23 +334,34 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                         assert!(method.sig.variadic.is_none());
 
                         let mut has_self = false;
-                        let mut has_params = false;
+                        let mut param_index = 0usize;
 
                         let mut param_tys = Vec::new();
+                        let mut param_val_decls = Vec::new();
+                        let mut param_val_names = Vec::new();
 
                         for input in &method.sig.inputs {
                             match input {
                                 FnArg::Receiver(receiver) => {
                                     assert!(!has_self);
-                                    assert!(!has_params);
+                                    assert!(param_index == 0);
                                     assert!(receiver.lifetime().is_none());
                                     assert!(receiver.reference.is_some());
 
                                     has_self = true;
                                 },
                                 FnArg::Typed(ty) => {
-                                    param_tys.push(ty.ty.clone());
-                                    has_params = true;
+                                    let ty = ty.ty.clone();
+                                    let param_val_variable_name = format!("__param_{}", param_index);
+                                    let param_val_variable_name = syn::Ident::new(&param_val_variable_name, input.span());
+                                    param_tys.push(ty.clone());
+                                    param_val_decls.push(
+                                        quote! {
+                                            let #param_val_variable_name = <#ty>::bridge_from_dusk(parameters[#param_index], &d.read());
+                                        }
+                                    );
+                                    param_val_names.push(param_val_variable_name);
+                                    param_index += 1;
                                 },
                             }
                         }
@@ -350,12 +370,20 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                             ReturnType::Default => syn::parse2(quote! { () }).unwrap(),
                             ReturnType::Type(_, ty) => ty.as_ref().clone(),
                         };
-                        let name_as_string = method.sig.ident.to_string();
+                        let name = method.sig.ident.clone();
+                        let name_as_string = name.to_string();
                         let num_params = param_tys.len();
+                        let implementation = if has_self {
+                            quote! { d.write().#name }
+                        } else {
+                            quote! { Driver::#name }
+                        };
                         registrations.push(
                             quote! {
-                                fn implementation(d: &mut DriverRef, parameters: Vec<&Value>) -> Value {
-                                    Value::Nothing
+                                fn thunk(d: &mut DriverRef, parameters: Vec<&Value>) -> Value {
+                                    #(#param_val_decls)*
+                                    let val = #implementation(#(#param_val_names),*);
+                                    val.bridge_to_dusk(&d.read())
                                 }
                                 let ret_ty = <#ret_ty>::to_dusk_type(d);
                                 let intr = Intrinsic {
@@ -366,7 +394,7 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                                     ],
                                     ret_ty: ret_ty.clone(),
                                     name: String::from(#name_as_string),
-                                    implementation,
+                                    implementation: thunk,
                                 };
                                 let ret_ty = d.add_const_ty(ret_ty);
                                 let intr_id = d.code.hir.intrinsics.push(intr);

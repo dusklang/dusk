@@ -4,6 +4,7 @@ use dusk_proc_macros::DuskBridge;
 
 use crate::dire::ty::Type;
 use crate::driver::Driver;
+use crate::interpreter::Value;
 
 #[derive(DuskBridge, Copy, Clone)]
 #[module = "core"]
@@ -19,11 +20,21 @@ pub trait DuskBridge: 'static {
         d.code.hir.bridged_types[&id].clone()
     }
     fn register(d: &mut Driver);
+    fn bridge_from_dusk(value: &Value, d: &Driver) -> Self;
+    fn bridge_to_dusk(self, d: &Driver) -> Value;
 }
 
 impl DuskBridge for () {
     fn register(d: &mut Driver) {
         d.code.hir.bridged_types.insert(TypeId::of::<()>(), Type::Void);
+    }
+
+    fn bridge_from_dusk(_value: &Value, _d: &Driver) -> Self {
+        ()
+    }
+
+    fn bridge_to_dusk(self, _d: &Driver) -> Value {
+        Value::Nothing
     }
 }
 

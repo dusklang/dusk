@@ -200,6 +200,11 @@ impl Value {
         }
     }
 
+    pub unsafe fn as_arbitrary_value<T>(&self) -> &T {
+        // TODO: alignment!
+        unsafe { &*(self.as_bytes().as_ptr() as *const T) }
+    }
+
     fn as_ty(&self) -> Type {
         match self.as_internal() {
             InternalValue::Ty(ty) => ty.clone(),
@@ -308,6 +313,14 @@ impl Value {
 
     fn from_internal(val: InternalValue) -> Value {
         Value::Internal { val, indirection: 0 }
+    }
+
+    pub unsafe fn from_arbitrary_value<T>(val: T) -> Value {
+        let addr = &val as *const T as *const u8;
+        let bytes = unsafe {
+            slice::from_raw_parts(addr, mem::size_of::<T>())
+        };
+        Value::from_bytes(bytes)
     }
 
     fn from_ty(ty: Type) -> Value {
