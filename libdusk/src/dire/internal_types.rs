@@ -38,6 +38,28 @@ impl DuskBridge for () {
     }
 }
 
+macro_rules! bridge_ints {
+    ($($int_name: ident),*) => {
+        $(
+            impl DuskBridge for $int_name {
+                fn register(d: &mut Driver) {
+                    d.code.hir.bridged_types.insert(TypeId::of::<$int_name>(), Type::$int_name());
+                }
+            
+                fn bridge_from_dusk(value: &Value, _d: &Driver) -> Self {
+                    unsafe { *value.as_arbitrary_value() }
+                }
+            
+                fn bridge_to_dusk(self, _d: &Driver) -> Value {
+                    unsafe { Value::from_arbitrary_value(self) }
+                }
+            }
+        )*
+    }
+}
+
+bridge_ints!(u8, u16, u32, u64, usize, i8, i16, i32, i64, isize);
+
 macro_rules! declare_internal_types {
     ($register_name:ident : $($name:ty),*) => {
         pub fn $register_name(d: &mut Driver) {
@@ -48,7 +70,12 @@ macro_rules! declare_internal_types {
     };
 }
 
-declare_internal_types!(register: BoxedInt, ());
+declare_internal_types!(
+    register:
+        BoxedInt,
+        u8, u16, u32, u64, usize, i8, i16, i32, i64, isize,
+        ()
+);
 
 // This is a higher-order macro which takes in a macro and passes it all internal types and their members
 macro_rules! define_legacy_internal_types {
