@@ -4,7 +4,7 @@ use proc_macro::{TokenStream, TokenTree, Ident, Span, Punct, Spacing, Group, Del
 use proc_macro::token_stream::IntoIter as TokenIter;
 
 use quote::quote;
-use syn::{Item, Meta, Lit, LitStr, Type, ImplItem};
+use syn::{Item, Meta, Lit, LitStr, Type, ImplItem, FnArg, ReturnType};
 
 use std::iter::Peekable;
 
@@ -280,9 +280,11 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
                         let internal_type = InternalType { name: String::from(#struct_name_as_string), size: std::mem::size_of::<#struct_name>() };
                         let type_id = d.code.hir.internal_types.push(internal_type);
                         let ty = Type::Internal(type_id);
-                        let konst = Const::Ty(ty);
+                        let konst = Const::Ty(ty.clone());
                         let expr = d.add_const_expr(konst);
                         d.add_decl_to_module(#struct_name_as_string, #module, Decl::Const(expr), 0, None);
+
+                        d.code.hir.bridged_types.insert(TypeId::of::<Self>(), ty);
                     }
                 }
             }.into()
@@ -296,6 +298,7 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
     assert!(attr.is_empty());
 
     let item: Item = syn::parse(item).unwrap();
+    let mut registrations = Vec::new();
     match &item {
         Item::Impl(impl_block) => {
             assert!(impl_block.defaultness.is_none());
@@ -320,6 +323,56 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                         assert!(method.sig.generics.params.is_empty());
                         assert!(method.sig.generics.where_clause.is_none());
                         assert!(method.sig.variadic.is_none());
+
+                        let mut has_self = false;
+                        let mut has_params = false;
+
+                        let mut param_tys = Vec::new();
+
+                        for input in &method.sig.inputs {
+                            match input {
+                                FnArg::Receiver(receiver) => {
+                                    assert!(!has_self);
+                                    assert!(!has_params);
+                                    assert!(receiver.lifetime().is_none());
+                                    assert!(receiver.reference.is_some());
+
+                                    has_self = true;
+                                },
+                                FnArg::Typed(ty) => {
+                                    param_tys.push(ty.ty.clone());
+                                    has_params = true;
+                                },
+                            }
+                        }
+
+                        let ret_ty = match &method.sig.output {
+                            ReturnType::Default => syn::parse2(quote! { () }).unwrap(),
+                            ReturnType::Type(_, ty) => ty.as_ref().clone(),
+                        };
+                        let name_as_string = method.sig.ident.to_string();
+                        let num_params = param_tys.len();
+                        registrations.push(
+                            quote! {
+                                fn implementation(d: &mut DriverRef, parameters: Vec<&Value>) -> Value {
+                                    Value::Nothing
+                                }
+                                let ret_ty = <#ret_ty>::to_dusk_type(d);
+                                let intr = Intrinsic {
+                                    param_tys: smallvec![
+                                        #(
+                                            d.add_const_ty(<#param_tys>::to_dusk_type(d)),
+                                        )*
+                                    ],
+                                    ret_ty: ret_ty.clone(),
+                                    name: String::from(#name_as_string),
+                                    implementation,
+                                };
+                                let ret_ty = d.add_const_ty(ret_ty);
+                                let intr_id = d.code.hir.intrinsics.push(intr);
+                                d.add_decl_to_module(#name_as_string, "", Decl::Intrinsic(intr_id), #num_params, Some(ret_ty));
+                            }
+                        );
                     },
                     _ => panic!("unhandled item in dusk_bridge impl block"),
                 }
@@ -330,15 +383,15 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
     quote! {
         #item
 
-        pub fn register_bridged_dusk_methods(d: &mut crate::driver::Driver) {
+        pub fn register_bridged_rust_methods(d: &mut crate::driver::Driver) {
+            use crate::dire::internal_types::DuskBridge;
             use crate::dire::{hir::*, ty::*, mir::*};
+            use crate::driver::DriverRef;
+            use crate::hir::Intrinsic;
+            use crate::interpreter::Value;
+            use smallvec::smallvec;
 
-            // let internal_type = InternalType { name: String::from(#struct_name_as_string), size: std::mem::size_of::<#struct_name>() };
-            // let type_id = d.code.hir.internal_types.push(internal_type);
-            // let ty = Type::Internal(type_id);
-            // let konst = Const::Ty(ty);
-            // let expr = d.add_const_expr(konst);
-            // d.add_decl_to_module(#struct_name_as_string, #module, Decl::Const(expr), 0, None);
+            #({ #registrations })*
         }
     }.into()
 }

@@ -4,7 +4,7 @@ use string_interner::StringInterner;
 use lazy_static::lazy_static;
 
 use crate::dire::hir::ExprId;
-use crate::dire::mir::{Const, IntrinsicId};
+use crate::dire::mir::Const;
 use crate::dire::arch::Arch;
 use crate::dire::source_info::SourceFileId;
 use crate::dire::Code;
@@ -34,8 +34,6 @@ pub struct Driver {
     pub mir: mir::Builder,
     pub code: Code,
     pub internal_field_decls: InternalFieldDecls,
-    // TODO: move to `Code`, probably
-    pub new_intrinsics: IndexVec<IntrinsicId, hir::NewIntrinsic>,
     pub no_core: bool,
 
     pub boxed_ints: Vec<usize>,
@@ -55,7 +53,6 @@ impl Driver {
             mir: mir::Builder::new(),
             code: Code::default(),
             internal_field_decls: InternalFieldDecls::default(),
-            new_intrinsics: IndexVec::default(),
             no_core,
 
             boxed_ints: Vec::default(),

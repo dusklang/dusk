@@ -10,7 +10,7 @@ use smallvec::{SmallVec, smallvec};
 use string_interner::DefaultSymbol as Sym;
 use display_adapter::display_adapter;
 
-use crate::dire::hir::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, Intrinsic, Expr, StoredDeclId, GenericParamId, Item, PatternBindingDeclId, ExternModId, ExternFunctionRef, PatternBindingPathComponent, VOID_TYPE, StructId, LoopId};
+use crate::dire::hir::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, LegacyIntrinsic, IntrinsicId, Expr, StoredDeclId, GenericParamId, Item, PatternBindingDeclId, ExternModId, ExternFunctionRef, PatternBindingPathComponent, VOID_TYPE, StructId, LoopId};
 use crate::dire::mir::{FuncId, StaticId, Const, Instr, InstrId, Function, MirCode, StructLayout, EnumLayout, ExternMod, ExternFunction, InstrNamespace, SwitchCase, VOID_INSTR};
 use crate::dire::{Block, BlockId, Op, OpId, InternalField};
 use crate::dire::ty::{Type, LegacyInternalType, FunctionType, FloatWidth, StructType};
@@ -33,7 +33,8 @@ enum Decl {
     ExternFunction(ExternFunctionRef),
     Parameter { index: usize },
     PatternBinding { id: PatternBindingDeclId },
-    Intrinsic(Intrinsic, Type),
+    LegacyIntrinsic(LegacyIntrinsic, Type),
+    Intrinsic(IntrinsicId),
     Static(StaticId),
     Const(Const),
     Field { index: usize },
@@ -546,13 +547,19 @@ impl DriverRef<'_> {
                 self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
-            hir::Decl::Intrinsic { intr, function_like, .. } => {
+            hir::Decl::LegacyIntrinsic { intr, function_like, .. } => {
                 drop(d);
                 let mut ty = self.read().decl_type(id, tp);
                 if function_like {
                     ty = ty.return_ty().unwrap().clone();
                 }
-                let decl = Decl::Intrinsic(intr, ty);
+                let decl = Decl::LegacyIntrinsic(intr, ty);
+                self.write().mir.decls.insert(id, decl.clone());
+                decl
+            },
+            hir::Decl::Intrinsic(intr) => {
+                drop(d);
+                let decl = Decl::Intrinsic(intr);
                 self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
@@ -755,12 +762,12 @@ impl Driver {
             Instr::Const(konst) => {
                 write!(f, "%{} = {}", self.display_instr_name(op_id), self.fmt_const(konst))?;
             },
-            Instr::Intrinsic { arguments, intr, .. } => {
+            Instr::LegacyIntrinsic { arguments, intr, .. } => {
                 write!(f, "%{} = intrinsic `{}`", self.display_instr_name(op_id), intr.name())?;
                 write_args!(arguments);
             },
-            Instr::NewIntrinsic { arguments, intr, .. } => {
-                write!(f, "%{} = new_style_intrinsic `{}`", self.display_instr_name(op_id), self.new_intrinsics[*intr].name)?;
+            Instr::Intrinsic { arguments, intr, .. } => {
+                write!(f, "%{} = new_style_intrinsic `{}`", self.display_instr_name(op_id), self.code.hir.intrinsics[*intr].name)?;
                 write_args!(arguments);
             },
             &Instr::Pointer { op, is_mut } => {
@@ -947,7 +954,8 @@ struct FunctionBuilder {
 
 #[derive(Debug)]
 enum DeclRef {
-    Intrinsic { intrinsic: Intrinsic, ty: Type },
+    LegacyIntrinsic { intrinsic: LegacyIntrinsic, ty: Type },
+    Intrinsic(IntrinsicId),
     Function { func: FuncId, generic_args: Vec<Type> },
     ExternFunction { func: ExternFunctionRef },
     #[allow(unused)]
@@ -973,7 +981,7 @@ impl Driver {
         let block = &self.code.blocks[bb];
         let last_instr = self.code.ops[block.ops.last().copied().unwrap()].as_mir_instr().unwrap();
         assert!(
-            matches!(last_instr, Instr::Br(_) | Instr::CondBr { .. } | Instr::SwitchBr { .. } | Instr::Ret { .. } | Instr::Intrinsic { intr: Intrinsic::Panic, .. }),
+            matches!(last_instr, Instr::Br(_) | Instr::CondBr { .. } | Instr::SwitchBr { .. } | Instr::Ret { .. } | Instr::LegacyIntrinsic { intr: LegacyIntrinsic::Panic, .. }),
             "expected terminal instruction before moving on to next block, found {:?}",
             last_instr,
         );
@@ -1034,7 +1042,7 @@ impl DriverRef<'_> {
             FunctionBody::ConstantInstruction(op) => {
                 let instruction = self.read().code.ops[op].as_mir_instr().unwrap().clone();
                 match instruction {
-                    Instr::Intrinsic { arguments, .. } | Instr::Call { arguments, .. } => {
+                    Instr::LegacyIntrinsic { arguments, .. } | Instr::Call { arguments, .. } => {
                         let mut copier = MirCopier::default();
                         for arg in arguments {
                             self.copy_instruction_if_needed(&mut b, &mut copier, arg);
@@ -1370,14 +1378,14 @@ impl DriverRef<'_> {
         let instr = d.code.ops[instr].as_mir_instr().unwrap();
         match *instr {
             Instr::Const(_) | Instr::Void => true,
-            Instr::Intrinsic { intr, .. } => {
+            Instr::LegacyIntrinsic { intr, .. } => {
                 match intr {
-                    Intrinsic::Mult | Intrinsic::Div | Intrinsic::Mod | Intrinsic::Add | Intrinsic::Sub
-                        | Intrinsic::Less | Intrinsic::LessOrEq | Intrinsic::Greater | Intrinsic::GreaterOrEq
-                        | Intrinsic::Eq | Intrinsic::NotEq | Intrinsic::BitwiseAnd | Intrinsic::BitwiseOr
-                        | Intrinsic::BitwiseNot | Intrinsic::BitwiseXor | Intrinsic::LeftShift | Intrinsic::RightShift
-                        | Intrinsic::LogicalAnd | Intrinsic::LogicalOr | Intrinsic::LogicalNot | Intrinsic::Neg
-                        | Intrinsic::Pos => {
+                    LegacyIntrinsic::Mult | LegacyIntrinsic::Div | LegacyIntrinsic::Mod | LegacyIntrinsic::Add | LegacyIntrinsic::Sub
+                        | LegacyIntrinsic::Less | LegacyIntrinsic::LessOrEq | LegacyIntrinsic::Greater | LegacyIntrinsic::GreaterOrEq
+                        | LegacyIntrinsic::Eq | LegacyIntrinsic::NotEq | LegacyIntrinsic::BitwiseAnd | LegacyIntrinsic::BitwiseOr
+                        | LegacyIntrinsic::BitwiseNot | LegacyIntrinsic::BitwiseXor | LegacyIntrinsic::LeftShift | LegacyIntrinsic::RightShift
+                        | LegacyIntrinsic::LogicalAnd | LegacyIntrinsic::LogicalOr | LegacyIntrinsic::LogicalNot | LegacyIntrinsic::Neg
+                        | LegacyIntrinsic::Pos => {
                         instr.referenced_values().iter().all(|&val| self.instruction_is_const(val))
                     }
                     _ => false,
@@ -1533,8 +1541,8 @@ impl Driver {
             &Instr::Call { func, .. } => b.functions[func].ty.return_ty.as_ref().clone(),
             &Instr::FunctionRef { func, .. } => Type::Function(b.functions[func].ty.clone()),
             Instr::ExternCall { func, .. } => b.extern_mods[&func.extern_mod].imported_functions[func.index].ty.return_ty.as_ref().clone(),
-            Instr::Intrinsic { ty, .. } => ty.clone(),
-            &Instr::NewIntrinsic { intr, .. } => self.new_intrinsics[intr].ret_ty.clone(),
+            Instr::LegacyIntrinsic { ty, .. } => ty.clone(),
+            &Instr::Intrinsic { intr, .. } => self.code.hir.intrinsics[intr].ret_ty.clone(),
             Instr::Reinterpret(_, ty) | Instr::Truncate(_, ty) | Instr::SignExtend(_, ty)
             | Instr::ZeroExtend(_, ty) | Instr::FloatCast(_, ty) | Instr::FloatToInt(_, ty)
             | Instr::IntToFloat(_, ty)
@@ -1678,10 +1686,11 @@ impl DriverRef<'_> {
             Decl::GenericParam(param) => {
                 DeclRef::Value(self.write().push_instr(b, Instr::GenericParam(param), expr).direct())
             },
-            Decl::Intrinsic(intr, ref ty) => {
+            Decl::LegacyIntrinsic(intr, ref ty) => {
                 let ty = ty.clone();
-                DeclRef::Intrinsic { intrinsic: intr, ty }
+                DeclRef::LegacyIntrinsic { intrinsic: intr, ty }
             },
+            Decl::Intrinsic(id) => DeclRef::Intrinsic(id),
             Decl::Const(ref konst) => {
                 let konst = konst.clone();
                 DeclRef::Value(self.write().push_instr_with_name(b, Instr::Const(konst), expr, name).direct())
@@ -1843,9 +1852,9 @@ impl DriverRef<'_> {
                     DeclRef::Function { func, generic_args } => {
                         self.write().push_instr(b, Instr::FunctionRef { func, generic_arguments: generic_args }, expr).direct()
                     },
-                    DeclRef::Intrinsic { intrinsic, ty } => {
+                    DeclRef::LegacyIntrinsic { intrinsic, ty } => {
                         assert!(tp.ty(expr).return_ty().is_none(), "referring to intrinsic functions is not yet supported");
-                        self.write().push_instr(b, Instr::Intrinsic { arguments: SmallVec::new(), ty, intr: intrinsic }, expr).direct()
+                        self.write().push_instr(b, Instr::LegacyIntrinsic { arguments: SmallVec::new(), ty, intr: intrinsic }, expr).direct()
                     },
                     DeclRef::Value(value) => value,
                     other => todo!("referring to {:?} not yet supported", other),
@@ -1872,8 +1881,8 @@ impl DriverRef<'_> {
                         let arguments = get_args(self, b, tp, &arguments);
                         self.write().push_instr(b, Instr::ExternCall { arguments, func }, expr).direct()
                     },
-                    DeclRef::Intrinsic { intrinsic, ty } => match intrinsic {
-                        Intrinsic::LogicalAnd => {
+                    DeclRef::LegacyIntrinsic { intrinsic, ty } => match intrinsic {
+                        LegacyIntrinsic::LogicalAnd => {
                             assert_eq!(arguments.len(), 2);
                             let (lhs, rhs) = (arguments[0], arguments[1]);
                             let left_true_bb = self.write().create_bb(b);
@@ -1923,7 +1932,7 @@ impl DriverRef<'_> {
                                 }
                             }
                         },
-                        Intrinsic::LogicalOr => {
+                        LegacyIntrinsic::LogicalOr => {
                             assert_eq!(arguments.len(), 2);
                             let (lhs, rhs) = (arguments[0], arguments[1]);
                             let left_false_bb = self.write().create_bb(b);
@@ -1972,7 +1981,7 @@ impl DriverRef<'_> {
                                 }
                             }
                         },
-                        Intrinsic::LogicalNot => {
+                        LegacyIntrinsic::LogicalNot => {
                             assert_eq!(arguments.len(), 1);
                             let operand = arguments[0];
                             if let DataDest::Branch(true_bb, false_bb) = ctx.data {
@@ -1982,9 +1991,9 @@ impl DriverRef<'_> {
                                 self.write().push_instr(b, Instr::LogicalNot(operand.instr), expr).direct()
                             }
                         },
-                        Intrinsic::MultAssign | Intrinsic::DivAssign | Intrinsic::ModAssign | Intrinsic::AddAssign 
-                            | Intrinsic::SubAssign | Intrinsic::AndAssign | Intrinsic::OrAssign | Intrinsic::XorAssign
-                            | Intrinsic::LeftShiftAssign | Intrinsic::RightShiftAssign => {
+                        LegacyIntrinsic::MultAssign | LegacyIntrinsic::DivAssign | LegacyIntrinsic::ModAssign | LegacyIntrinsic::AddAssign 
+                            | LegacyIntrinsic::SubAssign | LegacyIntrinsic::AndAssign | LegacyIntrinsic::OrAssign | LegacyIntrinsic::XorAssign
+                            | LegacyIntrinsic::LeftShiftAssign | LegacyIntrinsic::RightShiftAssign => {
                             assert_eq!(arguments.len(), 2);
                             let lhs = arguments[0];
                             let rhs = arguments[1];
@@ -1997,25 +2006,29 @@ impl DriverRef<'_> {
                             let modifier = self.build_expr(b, rhs, Context::default(), tp);
                             let modifier = self.write().handle_indirection(b, modifier);
                             let intr = match intrinsic {
-                                Intrinsic::MultAssign => Intrinsic::Mult,
-                                Intrinsic::DivAssign => Intrinsic::Div,
-                                Intrinsic::ModAssign => Intrinsic::Mod,
-                                Intrinsic::AddAssign => Intrinsic::Add,
-                                Intrinsic::SubAssign => Intrinsic::Sub,
-                                Intrinsic::AndAssign => Intrinsic::BitwiseAnd,
-                                Intrinsic::OrAssign => Intrinsic::BitwiseOr,
-                                Intrinsic::XorAssign => Intrinsic::BitwiseXor,
-                                Intrinsic::LeftShiftAssign => Intrinsic::LeftShift,
-                                Intrinsic::RightShiftAssign => Intrinsic::RightShift,
+                                LegacyIntrinsic::MultAssign => LegacyIntrinsic::Mult,
+                                LegacyIntrinsic::DivAssign => LegacyIntrinsic::Div,
+                                LegacyIntrinsic::ModAssign => LegacyIntrinsic::Mod,
+                                LegacyIntrinsic::AddAssign => LegacyIntrinsic::Add,
+                                LegacyIntrinsic::SubAssign => LegacyIntrinsic::Sub,
+                                LegacyIntrinsic::AndAssign => LegacyIntrinsic::BitwiseAnd,
+                                LegacyIntrinsic::OrAssign => LegacyIntrinsic::BitwiseOr,
+                                LegacyIntrinsic::XorAssign => LegacyIntrinsic::BitwiseXor,
+                                LegacyIntrinsic::LeftShiftAssign => LegacyIntrinsic::LeftShift,
+                                LegacyIntrinsic::RightShiftAssign => LegacyIntrinsic::RightShift,
                                 intrinsic => todo!("intrinsic {:?}", intrinsic),
                             };
-                            let value = self.write().push_instr(b, Instr::Intrinsic { arguments: smallvec![loaded, modifier], ty, intr }, expr);
+                            let value = self.write().push_instr(b, Instr::LegacyIntrinsic { arguments: smallvec![loaded, modifier], ty, intr }, expr);
                             self.write().push_instr(b, Instr::Store { location: address, value }, expr).direct()
                         },
                         intrinsic => {
                             let arguments = get_args(self, b, tp, &arguments);
-                            self.write().push_instr(b, Instr::Intrinsic { arguments, ty, intr: intrinsic }, expr).direct()
+                            self.write().push_instr(b, Instr::LegacyIntrinsic { arguments, ty, intr: intrinsic }, expr).direct()
                         }
+                    },
+                    DeclRef::Intrinsic(intr) => {
+                        let arguments = get_args(self, b, tp, &arguments);
+                        self.write().push_instr(b, Instr::Intrinsic { arguments, intr }, expr).direct()
                     },
                     DeclRef::EnumVariantWithPayload { enuum, index, .. } => {
                         let arguments = get_args(self, b, tp, &arguments);
@@ -2283,7 +2296,7 @@ impl DriverRef<'_> {
                     let catch_all_bb = self.write().create_bb(b);
                     self.write().start_bb(b, catch_all_bb);
                     // TODO: add unreachable instruction I guess?
-                    self.write().push_instr(b, Instr::Intrinsic { arguments: SmallVec::new(), ty: Type::Never, intr: Intrinsic::Panic }, SourceRange::default());
+                    self.write().push_instr(b, Instr::LegacyIntrinsic { arguments: SmallVec::new(), ty: Type::Never, intr: LegacyIntrinsic::Panic }, SourceRange::default());
                     self.write().end_current_bb(b);
                     catch_all_bb
                 };
@@ -2355,7 +2368,7 @@ impl DriverRef<'_> {
                 self.write().end_current_bb(b);
                 self.write().start_bb(b, test_bb);
                 let cur_binding_value = self.write().push_instr_with_name(b, Instr::Load(binding_location), binding, &binding_name);
-                let less_than = self.write().push_instr_with_name(b, Instr::Intrinsic { arguments: smallvec![cur_binding_value, upper_bound], ty: Type::Bool, intr: Intrinsic::Less }, binding, &binding_name);
+                let less_than = self.write().push_instr_with_name(b, Instr::LegacyIntrinsic { arguments: smallvec![cur_binding_value, upper_bound], ty: Type::Bool, intr: LegacyIntrinsic::Less }, binding, &binding_name);
                 self.write().push_instr_with_name(b, Instr::CondBr { condition: less_than, true_bb: loop_bb, false_bb: post_bb }, binding, &binding_name);
                 self.write().end_current_bb(b);
 
@@ -2454,7 +2467,7 @@ impl Driver {
         let ty = self.type_of(location).deref().unwrap().clone().ty;
         let loaded = self.push_instr(b, Instr::Load(location), location);
         let one = self.push_instr(b, Instr::Const(Const::Int { lit: BigInt::from(1), ty: ty.clone() }), location);
-        let value = self.push_instr(b, Instr::Intrinsic { arguments: smallvec![loaded, one], ty, intr: Intrinsic::Add }, location);
+        let value = self.push_instr(b, Instr::LegacyIntrinsic { arguments: smallvec![loaded, one], ty, intr: LegacyIntrinsic::Add }, location);
         self.push_instr(b, Instr::Store { location, value }, location);
     }
 

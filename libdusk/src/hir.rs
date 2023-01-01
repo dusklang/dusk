@@ -41,7 +41,8 @@ pub struct GenericParamList {
 
 pub type IntrinsicImpl = fn(&mut DriverRef, Vec<&Value>) -> Value;
 
-pub struct NewIntrinsic {
+pub struct Intrinsic {
+    pub param_tys: SmallVec<[ExprId; 2]>,
     pub ret_ty: Type,
     pub name: String,
     pub implementation: IntrinsicImpl,
@@ -719,10 +720,10 @@ impl Driver {
     pub fn add_const_ty(&mut self, ty: Type) -> ExprId {
         self.add_const_expr(Const::Ty(ty))
     }
-    pub fn add_intrinsic(&mut self, intrinsic: Intrinsic, param_tys: SmallVec<[ExprId; 2]>, ret_ty: ExprId, function_like: bool) {
+    pub fn add_intrinsic(&mut self, intrinsic: LegacyIntrinsic, param_tys: SmallVec<[ExprId; 2]>, ret_ty: ExprId, function_like: bool) {
         let name = self.interner.get_or_intern(intrinsic.name());
         let num_params = param_tys.len();
-        let id = self.add_decl(Decl::Intrinsic { intr: intrinsic, param_tys, function_like }, name, Some(ret_ty), SourceRange::default());
+        let id = self.add_decl(Decl::LegacyIntrinsic { intr: intrinsic, param_tys, function_like }, name, Some(ret_ty), SourceRange::default());
         self.mod_scoped_decl(
             name,
             ModScopedDecl { num_params, id }

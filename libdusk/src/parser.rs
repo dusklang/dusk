@@ -5,7 +5,7 @@ use smallvec::{SmallVec, smallvec};
 use string_interner::DefaultSymbol as Sym;
 use derivative::Derivative;
 
-use crate::dire::hir::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, Intrinsic, Attribute, FieldAssignment, Ident, Pattern, PatternKind, SwitchCase, ImperScopedDecl, ExternMod, ERROR_EXPR, ERROR_TYPE, VOID_TYPE};
+use crate::dire::hir::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, LegacyIntrinsic, Attribute, FieldAssignment, Ident, Pattern, PatternKind, SwitchCase, ImperScopedDecl, ExternMod, ERROR_EXPR, ERROR_TYPE, VOID_TYPE};
 use crate::dire::ty::Type;
 use crate::dire::source_info::{self, SourceFileId, SourceRange};
 
@@ -1365,8 +1365,8 @@ impl Driver {
 
         // Add intrinsics for comparison of enums
         let boool = self.add_const_ty(Type::Bool);
-        self.add_intrinsic(Intrinsic::Eq, smallvec![expr, expr], boool, true);
-        self.add_intrinsic(Intrinsic::NotEq, smallvec![expr, expr], boool, true);
+        self.add_intrinsic(LegacyIntrinsic::Eq, smallvec![expr, expr], boool, true);
+        self.add_intrinsic(LegacyIntrinsic::NotEq, smallvec![expr, expr], boool, true);
         Ok(expr)
     }
 

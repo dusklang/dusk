@@ -1534,17 +1534,25 @@ impl tir::FunctionDecl {
 }
 
 impl Driver {
-    pub fn decl_type(&self, id: DeclId, tp: &impl TypeProvider) -> Type {
+    pub fn decl_type(&self, id: DeclId, tp: &(impl TypeProvider + ?Sized)) -> Type {
         let explicit_ty = self.code.hir.explicit_tys[id].map(|ty| tp.get_evaluated_type(ty)).unwrap_or(&tp.decl_type(id).ty).clone();
-        if let hir::Decl::Computed { param_tys, .. } | hir::Decl::ComputedPrototype { param_tys, .. } | hir::Decl::Intrinsic { function_like: true, param_tys, .. } = &df!(id.hir) {
-            let param_tys: Vec<_> = param_tys.iter().copied()
-                .map(|ty| tp.get_evaluated_type(ty).clone())
-                .collect();
-            let return_ty = Box::new(explicit_ty);
-            Type::Function(FunctionType { param_tys, return_ty })
-        } else {
-            explicit_ty
+        match &df!(id.hir) {
+            hir::Decl::Computed { param_tys, .. } | hir::Decl::ComputedPrototype { param_tys, .. } | hir::Decl::LegacyIntrinsic { function_like: true, param_tys, .. } =>
+                self.function_decl_type(param_tys, explicit_ty, tp),
+            &hir::Decl::Intrinsic(intr) => {
+                let param_tys = &self.code.hir.intrinsics[intr].param_tys;
+                self.function_decl_type(param_tys, explicit_ty, tp)
+            }
+            _ => explicit_ty,
         }
+    }
+
+    fn function_decl_type(&self, param_tys: &[ExprId], explicit_ty: Type, tp: &(impl TypeProvider + ?Sized)) -> Type {
+        let param_tys: Vec<_> = param_tys.iter().copied()
+            .map(|ty| tp.get_evaluated_type(ty).clone())
+            .collect();
+        let return_ty = Box::new(explicit_ty);
+        Type::Function(FunctionType { param_tys, return_ty })
     }
 
     fn run_pass_1(&mut self, unit: &UnitItems, start_level: u32, tp: &mut impl TypeProvider) {

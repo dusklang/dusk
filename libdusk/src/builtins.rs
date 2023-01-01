@@ -4,7 +4,7 @@ use smallvec::{smallvec, SmallVec};
 
 use crate::dire::internal_types;
 use crate::dire::source_info::SourceRange;
-use crate::dire::hir::{ModScopeId, ModScopeNs, ModScope, Intrinsic, Expr, Decl, VOID_TYPE, ModScopedDecl, ModScopeNsId, EnumId, ExprId, VariantDecl};
+use crate::dire::hir::{ModScopeId, ModScopeNs, ModScope, LegacyIntrinsic, Expr, Decl, VOID_TYPE, ModScopedDecl, ModScopeNsId, EnumId, ExprId, VariantDecl};
 use crate::dire::ty::{Type, LegacyInternalType};
 use crate::dire::mir::Const;
 
@@ -89,7 +89,7 @@ impl Driver {
         let type_type    = self.add_const_ty(Type::Ty);
         let mod_type     = self.add_const_ty(Type::Mod);
 
-        use Intrinsic::*;
+        use LegacyIntrinsic::*;
         for &intr in &[Mult, Div, Mod, Add, Sub] {
             for &ty in numerics {
                 self.add_intrinsic(intr, smallvec![ty, ty], ty, true);
@@ -206,6 +206,7 @@ impl Driver {
         }
 
         internal_types::register(self);
+        register_bridged_rust_methods(self);
     }
 
     fn add_constant_decl(&mut self, name: &str, value: Const) {

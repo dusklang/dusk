@@ -1,3 +1,5 @@
+use std::any::TypeId;
+
 use dusk_proc_macros::DuskBridge;
 
 use crate::dire::ty::Type;
@@ -11,14 +13,22 @@ pub struct BoxedInt {
 
 
 
-
-
-pub trait DuskBridge {
+pub trait DuskBridge: 'static {
+    fn to_dusk_type(d: &Driver) -> Type {
+        let id = TypeId::of::<Self>();
+        d.code.hir.bridged_types[&id].clone()
+    }
     fn register(d: &mut Driver);
 }
 
+impl DuskBridge for () {
+    fn register(d: &mut Driver) {
+        d.code.hir.bridged_types.insert(TypeId::of::<()>(), Type::Void);
+    }
+}
+
 macro_rules! declare_internal_types {
-    ($register_name:ident : $($name:path),*) => {
+    ($register_name:ident : $($name:ty),*) => {
         pub fn $register_name(d: &mut Driver) {
             $(
                 <$name>::register(d);
@@ -27,7 +37,7 @@ macro_rules! declare_internal_types {
     };
 }
 
-declare_internal_types!(register: BoxedInt);
+declare_internal_types!(register: BoxedInt, ());
 
 // This is a higher-order macro which takes in a macro and passes it all internal types and their members
 macro_rules! define_legacy_internal_types {

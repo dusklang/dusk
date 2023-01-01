@@ -7,16 +7,17 @@ use string_interner::DefaultSymbol as Sym;
 use display_adapter::display_adapter;
 use num_bigint::BigInt;
 
-use crate::dire::hir::{Intrinsic, DeclId, StructId, EnumId, ModScopeId, ExternModId, ExternFunctionRef, GenericParamId};
+use crate::dire::hir::{LegacyIntrinsic, DeclId, StructId, EnumId, ModScopeId, ExternModId, ExternFunctionRef, GenericParamId};
 use crate::dire::ty::{Type, LegacyInternalType, FunctionType, StructType};
 use crate::dire::{Code, BlockId, OpId, InternalField};
 use crate::dire::source_info::SourceRange;
+
+use crate::dire::hir::IntrinsicId;
 
 define_index_type!(pub struct FuncId = u32;);
 define_index_type!(pub struct StaticId = u32;);
 define_index_type!(pub struct StrId = u32;);
 define_index_type!(pub struct InstrId = u32;);
-define_index_type!(pub struct IntrinsicId = u32;);
 
 pub const VOID_INSTR: OpId = OpId::from_usize_unchecked(0);
 
@@ -36,8 +37,8 @@ pub enum Instr {
     Call { arguments: SmallVec<[OpId; 2]>, generic_arguments: Vec<Type>, func: FuncId },
     ExternCall { arguments: SmallVec<[OpId; 2]>, func: ExternFunctionRef },
     FunctionRef { generic_arguments: Vec<Type>, func: FuncId, },
-    Intrinsic { arguments: SmallVec<[OpId; 2]>, ty: Type, intr: Intrinsic },
-    NewIntrinsic { arguments: SmallVec<[OpId; 2]>, intr: IntrinsicId },
+    LegacyIntrinsic { arguments: SmallVec<[OpId; 2]>, ty: Type, intr: LegacyIntrinsic },
+    Intrinsic { arguments: SmallVec<[OpId; 2]>, intr: IntrinsicId },
     Reinterpret(OpId, Type),
     Truncate(OpId, Type),
     SignExtend(OpId, Type),
@@ -105,9 +106,9 @@ impl Instr {
                 | Instr::InternalFieldAccess { val: op, .. } => vec![op],
             Instr::Store { location, value } => vec![location, value],
             Instr::Call { arguments: ref ops, .. } | Instr::ExternCall { arguments: ref ops, .. }
-                | Instr::Intrinsic { arguments: ref ops, .. } | Instr::Struct { fields: ref ops, .. }
+                | Instr::LegacyIntrinsic { arguments: ref ops, .. } | Instr::Struct { fields: ref ops, .. }
                 | Instr::Enum { variants: ref ops, .. } | Instr::StructLit { fields: ref ops, .. }
-                | Instr::NewIntrinsic { arguments: ref ops, .. } => ops.iter().copied().collect(),
+                | Instr::Intrinsic { arguments: ref ops, .. } => ops.iter().copied().collect(),
             Instr::FunctionTy { ref param_tys, ret_ty } => param_tys.iter().copied().chain(std::iter::once(ret_ty)).collect(),
         }
     }
@@ -137,9 +138,9 @@ impl Instr {
                 replace(value, old, new);
             },
             Instr::Call { arguments: ref mut ops, .. } | Instr::ExternCall { arguments: ref mut ops, .. }
-                | Instr::Intrinsic { arguments: ref mut ops, .. } | Instr::Struct { fields: ref mut ops, .. }
+                | Instr::LegacyIntrinsic { arguments: ref mut ops, .. } | Instr::Struct { fields: ref mut ops, .. }
                 | Instr::Enum { variants: ref mut ops, .. } | Instr::StructLit { fields: ref mut ops, .. }
-                | Instr::NewIntrinsic { arguments: ref mut ops, .. } => {
+                | Instr::Intrinsic { arguments: ref mut ops, .. } => {
                     for op in ops {
                         replace(op, old, new);
                     }

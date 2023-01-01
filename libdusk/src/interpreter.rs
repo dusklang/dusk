@@ -21,7 +21,7 @@ use index_vec::IndexVec;
 use lazy_static::lazy_static;
 
 use crate::dire::arch::Arch;
-use crate::dire::hir::{Intrinsic, ModScopeId, EnumId, GenericParamId, ExternFunctionRef};
+use crate::dire::hir::{LegacyIntrinsic, ModScopeId, EnumId, GenericParamId, ExternFunctionRef};
 use crate::dire::mir::{Const, Instr, InstrId, FuncId, StaticId, ExternFunction};
 use crate::dire::ty::{Type, FunctionType, QualType, IntWidth, FloatWidth, StructType, LegacyInternalType};
 use crate::dire::{OpId, BlockId};
@@ -1094,18 +1094,18 @@ impl DriverRef<'_> {
                     let ty = Type::GenericParam(id);
                     Value::from_ty(frame.canonicalize_type(&ty))
                 },
-                &Instr::Intrinsic { ref arguments, intr, .. } => {
+                &Instr::LegacyIntrinsic { ref arguments, intr, .. } => {
                     match intr {
-                        Intrinsic::Mult => bin_op!(self, stack, arguments, convert, Int | Float, {*}),
-                        Intrinsic::Div => bin_op!(self, stack, arguments, convert, Int | Float, {/}),
-                        Intrinsic::Mod => bin_op!(self, stack, arguments, convert, Int | Float, {%}),
-                        Intrinsic::Add => bin_op!(self, stack, arguments, convert, Int | Float, {+}),
-                        Intrinsic::Sub => bin_op!(self, stack, arguments, convert, Int | Float, {-}),
-                        Intrinsic::Less => bin_op!(self, stack, arguments, bool_convert, Int | Float, {<}),
-                        Intrinsic::LessOrEq => bin_op!(self, stack, arguments, bool_convert, Int | Float, {<=}),
-                        Intrinsic::Greater => bin_op!(self, stack, arguments, bool_convert, Int | Float, {>}),
-                        Intrinsic::GreaterOrEq => bin_op!(self, stack, arguments, bool_convert, Int | Float, {>=}),
-                        Intrinsic::Eq => {
+                        LegacyIntrinsic::Mult => bin_op!(self, stack, arguments, convert, Int | Float, {*}),
+                        LegacyIntrinsic::Div => bin_op!(self, stack, arguments, convert, Int | Float, {/}),
+                        LegacyIntrinsic::Mod => bin_op!(self, stack, arguments, convert, Int | Float, {%}),
+                        LegacyIntrinsic::Add => bin_op!(self, stack, arguments, convert, Int | Float, {+}),
+                        LegacyIntrinsic::Sub => bin_op!(self, stack, arguments, convert, Int | Float, {-}),
+                        LegacyIntrinsic::Less => bin_op!(self, stack, arguments, bool_convert, Int | Float, {<}),
+                        LegacyIntrinsic::LessOrEq => bin_op!(self, stack, arguments, bool_convert, Int | Float, {<=}),
+                        LegacyIntrinsic::Greater => bin_op!(self, stack, arguments, bool_convert, Int | Float, {>}),
+                        LegacyIntrinsic::GreaterOrEq => bin_op!(self, stack, arguments, bool_convert, Int | Float, {>=}),
+                        LegacyIntrinsic::Eq => {
                             let ty = d.type_of(arguments[0]);
                             match ty {
                                 Type::Enum(_) => {
@@ -1120,7 +1120,7 @@ impl DriverRef<'_> {
                                 _ => bin_op!(self, stack, arguments, bool_convert, Int | Float | Bool, {==}),
                             }
                         },
-                        Intrinsic::NotEq => {
+                        LegacyIntrinsic::NotEq => {
                             let ty = d.type_of(arguments[0]);
                             match ty {
                                 Type::Enum(_) => {
@@ -1135,13 +1135,13 @@ impl DriverRef<'_> {
                                 _ => bin_op!(self, stack, arguments, bool_convert, Int | Float | Bool, {!=}),
                             }
                         },
-                        Intrinsic::BitwiseAnd => bin_op!(self, stack, arguments, convert, Int | Bool, {&}),
-                        Intrinsic::BitwiseOr => bin_op!(self, stack, arguments, convert, Int | Bool, {|}),
-                        Intrinsic::BitwiseXor => bin_op!(self, stack, arguments, convert, Int | Bool, {^}),
-                        Intrinsic::LeftShift => bin_op!(self, stack, arguments, convert, Int, {<<}),
-                        Intrinsic::RightShift => bin_op!(self, stack, arguments, convert, Int, {>>}),
-                        Intrinsic::LogicalNot => panic!("Unexpected logical not intrinsic, should've been replaced by instruction"),
-                        Intrinsic::Neg => {
+                        LegacyIntrinsic::BitwiseAnd => bin_op!(self, stack, arguments, convert, Int | Bool, {&}),
+                        LegacyIntrinsic::BitwiseOr => bin_op!(self, stack, arguments, convert, Int | Bool, {|}),
+                        LegacyIntrinsic::BitwiseXor => bin_op!(self, stack, arguments, convert, Int | Bool, {^}),
+                        LegacyIntrinsic::LeftShift => bin_op!(self, stack, arguments, convert, Int, {<<}),
+                        LegacyIntrinsic::RightShift => bin_op!(self, stack, arguments, convert, Int, {>>}),
+                        LegacyIntrinsic::LogicalNot => panic!("Unexpected logical not intrinsic, should've been replaced by instruction"),
+                        LegacyIntrinsic::Neg => {
                             assert_eq!(arguments.len(), 1);
                             let frame = stack.last().unwrap();
                             let arg = arguments[0];
@@ -1158,7 +1158,7 @@ impl DriverRef<'_> {
                                 _ => panic!("Unexpected type for intrinsic arguments"),
                             }
                         },
-                        Intrinsic::BitwiseNot => {
+                        LegacyIntrinsic::BitwiseNot => {
                             assert_eq!(arguments.len(), 1);
                             let arg = arguments[0];
                             let ty = d.type_of(arg);
@@ -1178,15 +1178,15 @@ impl DriverRef<'_> {
                                 _ => panic!("Unexpected type for intrinsic arguments")
                             }
                         },
-                        Intrinsic::Pos => {
+                        LegacyIntrinsic::Pos => {
                             assert_eq!(arguments.len(), 1);
                             frame.get_val(arguments[0], &*self.read()).clone()
                         },
-                        Intrinsic::Panic => {
+                        LegacyIntrinsic::Panic => {
                             assert!(arguments.len() <= 1);
                             panic!("{}", self.read().panic_message(&stack, arguments.first().copied()));
                         },
-                        Intrinsic::Print => {
+                        LegacyIntrinsic::Print => {
                             let frame = stack.last().unwrap();
                             assert_eq!(arguments.len(), 1);
                             let id = arguments[0];
@@ -1206,7 +1206,7 @@ impl DriverRef<'_> {
                             std::io::stdout().flush().unwrap();
                             Value::Nothing 
                         },
-                        Intrinsic::Malloc => {
+                        LegacyIntrinsic::Malloc => {
                             assert_eq!(arguments.len(), 1);
                             assert_eq!(self.read().arch.pointer_size(), 64);
                             let size = frame.get_val(arguments[0], &*self.read()).as_u64() as usize;
@@ -1216,7 +1216,7 @@ impl DriverRef<'_> {
                             INTERP.write().unwrap().allocations.insert(address, layout);
                             Value::from_usize(address)
                         }
-                        Intrinsic::Free => {
+                        LegacyIntrinsic::Free => {
                             assert_eq!(arguments.len(), 1);
                             assert_eq!(self.read().arch.pointer_size(), 64);
                             let ptr = frame.get_val(arguments[0], &*self.read()).as_raw_ptr();
@@ -1225,7 +1225,7 @@ impl DriverRef<'_> {
                             unsafe { alloc::dealloc(ptr, layout) };
                             Value::Nothing
                         },
-                        Intrinsic::PrintType => {
+                        LegacyIntrinsic::PrintType => {
                             let frame = stack.last().unwrap();
                             assert_eq!(arguments.len(), 1);
                             let ty = frame.get_val(arguments[0], &*self.read()).as_ty();
@@ -1233,28 +1233,28 @@ impl DriverRef<'_> {
                             print!("{:?}", ty);
                             Value::Nothing
                         },
-                        Intrinsic::AlignOf => {
+                        LegacyIntrinsic::AlignOf => {
                             let frame = stack.last().unwrap();
                             assert_eq!(arguments.len(), 1);
                             let ty = frame.get_val(arguments[0], &*self.read()).as_ty();
                             let ty = frame.canonicalize_type(&ty);
                             Value::from_usize(self.read().align_of(&ty))
                         },
-                        Intrinsic::StrideOf => {
+                        LegacyIntrinsic::StrideOf => {
                             let frame = stack.last().unwrap();
                             assert_eq!(arguments.len(), 1);
                             let ty = frame.get_val(arguments[0], &*self.read()).as_ty();
                             let ty = frame.canonicalize_type(&ty);
                             Value::from_usize(self.read().stride_of(&ty))
                         },
-                        Intrinsic::SizeOf => {
+                        LegacyIntrinsic::SizeOf => {
                             let frame = stack.last().unwrap();
                             assert_eq!(arguments.len(), 1);
                             let ty = frame.get_val(arguments[0], &*self.read()).as_ty();
                             let ty = frame.canonicalize_type(&ty);
                             Value::from_usize(self.read().size_of(&ty))
                         },
-                        Intrinsic::OffsetOf => {
+                        LegacyIntrinsic::OffsetOf => {
                             assert_eq!(arguments.len(), 2);
                             let ty = frame.get_val(arguments[0], &*self.read()).as_ty();
                             let field_name = unsafe { CStr::from_ptr(frame.get_val(arguments[1], &*self.read()).as_raw_ptr() as *const _) };
@@ -1277,16 +1277,16 @@ impl DriverRef<'_> {
                             let offset = offset.expect("No such field name in call to offset_of");
                             Value::from_usize(offset)
                         },
-                        Intrinsic::GetNumArgs => {
+                        LegacyIntrinsic::GetNumArgs => {
                             Value::from_usize(INTERP.read().unwrap().command_line_args.len())
                         },
-                        Intrinsic::GetArg => {
+                        LegacyIntrinsic::GetArg => {
                             assert_eq!(arguments.len(), 1);
                             let index = frame.get_val(arguments[0], &*self.read()).as_usize();
                             let command_line_args = &INTERP.read().unwrap().command_line_args;
                             Value::from_internal(InternalValue::StrLit(command_line_args[index].clone()))
                         },
-                        Intrinsic::Import => {
+                        LegacyIntrinsic::Import => {
                             assert_eq!(arguments.len(), 1);
                             let val = frame.get_val(arguments[0], &*self.read());
                             let ptr = val.as_raw_ptr();
@@ -1312,9 +1312,9 @@ impl DriverRef<'_> {
                         _ => panic!("Call to unimplemented intrinsic {:?}", intr),
                     }
                 },
-                &Instr::NewIntrinsic { ref arguments, intr } => {
+                &Instr::Intrinsic { ref arguments, intr } => {
                     let arguments: Vec<&Value> = arguments.iter().map(|&arg| frame.get_val(arg, &d)).collect();
-                    let implementation = d.new_intrinsics[intr].implementation;
+                    let implementation = d.code.hir.intrinsics[intr].implementation;
                     drop(d);
                     implementation(self, arguments)
                 },

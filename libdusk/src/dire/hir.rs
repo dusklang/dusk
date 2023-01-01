@@ -1,3 +1,4 @@
+use std::any::TypeId;
 use std::ffi::CString;
 use std::collections::HashMap;
 use std::ops::Range;
@@ -7,11 +8,13 @@ use smallvec::SmallVec;
 use string_interner::DefaultSymbol as Sym;
 
 use crate::dire::mir::Const;
-use crate::dire::ty::{InternalType, InternalTypeId};
+use crate::dire::ty::{Type, InternalType, InternalTypeId};
 use crate::dire::index_counter::IndexCounter;
 use crate::dire::source_info::{SourceRange, SourceFileId};
 use crate::dire::BlockId;
 use crate::dire::InternalField;
+
+use crate::hir::Intrinsic;
 
 define_index_type!(pub struct ExprId = u32;);
 define_index_type!(pub struct DeclRefId = u32;);
@@ -33,6 +36,7 @@ define_index_type!(pub struct GenericParamId = u32;);
 define_index_type!(pub struct ExternModId = u32;);
 define_index_type!(pub struct GenericCtxId = u32;);
 define_index_type!(pub struct LoopId = u32;);
+define_index_type!(pub struct IntrinsicId = u32;);
 
 #[derive(Debug, Clone, Copy)]
 pub struct FieldAssignment {
@@ -267,7 +271,8 @@ pub enum Decl {
         /// Parameter index within the function
         index: usize,
     },
-    Intrinsic { intr: Intrinsic, param_tys: SmallVec<[ExprId; 2]>, function_like: bool },
+    LegacyIntrinsic { intr: LegacyIntrinsic, param_tys: SmallVec<[ExprId; 2]>, function_like: bool },
+    Intrinsic(IntrinsicId),
     Static(ExprId),
     Const(ExprId),
     Field { strukt: StructId, index: usize },
@@ -337,7 +342,7 @@ pub enum PatternKind {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum Intrinsic {
+pub enum LegacyIntrinsic {
     Mult,
     Div,
     Mod,
@@ -388,9 +393,9 @@ pub enum Intrinsic {
     GetArg,     // runtime.get_arg(usize)
 }
 
-impl Intrinsic {
+impl LegacyIntrinsic {
     pub fn name(&self) -> &str {
-        use Intrinsic::*;
+        use LegacyIntrinsic::*;
         match self {
             Mult => "*",
             Div => "/",
@@ -477,6 +482,7 @@ pub struct HirCode {
     pub decl_to_items: IndexVec<DeclId, ItemId>,
     pub names: IndexVec<DeclId, Sym>,
     pub explicit_tys: IndexVec<DeclId, Option<ExprId>>,
+    pub intrinsics: IndexVec<IntrinsicId, Intrinsic>,
     pub global_scopes: HashMap<SourceFileId, ModScopeId>,
     pub imper_scopes: IndexVec<ImperScopeId, ImperScope>,
     pub mod_scopes: IndexVec<ModScopeId, ModScope>,
@@ -486,6 +492,7 @@ pub struct HirCode {
     pub generic_context_ns: IndexVec<GenericContextNsId, GenericContextNs>,
     pub cast_counter: IndexCounter<CastId>,
     pub internal_types: IndexVec<InternalTypeId, InternalType>,
+    pub bridged_types: HashMap<TypeId, Type>,
     pub structs: IndexVec<StructId, Struct>,
     pub enums: IndexVec<EnumId, Enum>,
     pub extern_mods: IndexVec<ExternModId, ExternMod>,

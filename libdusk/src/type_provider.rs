@@ -11,10 +11,9 @@ use std::collections::HashMap;
 
 use paste::paste;
 
-use crate::dire::hir::{ExprId, DeclId, DeclRefId, StructLitId, CastId, Namespace, Decl};
+use crate::dire::hir::{ExprId, DeclId, DeclRefId, StructLitId, CastId, Namespace};
 use crate::dire::mir::Const;
-use crate::dire::ty::{Type, FunctionType, QualType};
-use dusk_proc_macros::df;
+use crate::dire::ty::{Type, QualType};
 
 use crate::typechecker::{CastMethod, StructLit, constraints::ConstraintList, Overloads, GenericConstraints};
 use crate::index_vec::*;
@@ -151,20 +150,8 @@ macro_rules! declare_tp {
             }
             #[doc(hidden)]
             fn set_decl_type_to_explicit_type_if_exists(&mut self, d: &Driver, id: DeclId) {
-                let explicit_ty = d.code.hir.explicit_tys[id]
-                    .map(|expr| self.get_evaluated_type(expr).clone());
-                match &df!(d, id.hir) {
-                    Decl::Computed { param_tys, .. } | Decl::ComputedPrototype { param_tys, .. } | Decl::Intrinsic { function_like: true, param_tys, .. } => {
-                        let param_tys: Vec<_> = param_tys.iter().copied()
-                            .map(|ty| self.get_evaluated_type(ty).clone())
-                            .collect();
-                        let return_ty = Box::new(explicit_ty.unwrap());
-                        self.decl_type_mut(id).ty = Type::Function(FunctionType { param_tys, return_ty });
-                    }
-                    _ => if let Some(explicit_ty) = explicit_ty {
-                        self.decl_type_mut(id).ty = explicit_ty;
-                    }
-                }
+                let ty = d.decl_type(id, self);
+                self.decl_type_mut(id).ty = ty;
             }
         }
         
