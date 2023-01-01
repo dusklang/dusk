@@ -4,7 +4,7 @@ use proc_macro::{TokenStream, TokenTree, Ident, Span, Punct, Spacing, Group, Del
 use proc_macro::token_stream::IntoIter as TokenIter;
 
 use quote::quote;
-use syn::{Item, Meta, Lit, LitStr};
+use syn::{Item, Meta, Lit, LitStr, Type, ImplItem};
 
 use std::iter::Peekable;
 
@@ -292,9 +292,53 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
 }
 
 #[proc_macro_attribute]
-pub fn dusk_bridge(_: TokenStream, item: TokenStream) -> TokenStream {
+pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
+    assert!(attr.is_empty());
+
     let item: Item = syn::parse(item).unwrap();
+    match &item {
+        Item::Impl(impl_block) => {
+            assert!(impl_block.defaultness.is_none());
+            assert!(impl_block.generics.params.is_empty());
+            assert!(impl_block.generics.where_clause.is_none());
+            assert!(impl_block.trait_.is_none());
+            assert!(impl_block.unsafety.is_none());
+            let Type::Path(self_ty) = impl_block.self_ty.as_ref() else {
+                panic!("invalid self type for bridging to Dusk; expected 'Driver'");
+            };
+            assert!(self_ty.qself.is_none());
+            assert!(self_ty.path.is_ident("Driver"));
+
+            for item in &impl_block.items {
+                match item {
+                    ImplItem::Method(method) => {
+                        assert!(method.defaultness.is_none());
+                        assert!(method.sig.constness.is_none());
+                        assert!(method.sig.asyncness.is_none());
+                        assert!(method.sig.unsafety.is_none());
+                        assert!(method.sig.abi.is_none());
+                        assert!(method.sig.generics.params.is_empty());
+                        assert!(method.sig.generics.where_clause.is_none());
+                        assert!(method.sig.variadic.is_none());
+                    },
+                    _ => panic!("unhandled item in dusk_bridge impl block"),
+                }
+            }
+        },
+        _ => panic!("unrecognized use of `dusk_bridge` macro: only valid on impl items")
+    }
     quote! {
         #item
+
+        pub fn register_bridged_dusk_methods(d: &mut crate::driver::Driver) {
+            use crate::dire::{hir::*, ty::*, mir::*};
+
+            // let internal_type = InternalType { name: String::from(#struct_name_as_string), size: std::mem::size_of::<#struct_name>() };
+            // let type_id = d.code.hir.internal_types.push(internal_type);
+            // let ty = Type::Internal(type_id);
+            // let konst = Const::Ty(ty);
+            // let expr = d.add_const_expr(konst);
+            // d.add_decl_to_module(#struct_name_as_string, #module, Decl::Const(expr), 0, None);
+        }
     }.into()
 }
