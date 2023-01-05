@@ -5,6 +5,8 @@ use index_vec::define_index_type;
 use crate::dire::arch::Arch;
 use crate::dire::hir::{StructId, EnumId, GenericParamId};
 
+use super::hir::NewNamespaceId;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum IntWidth {
     W8, W16, W32, W64, Pointer,
@@ -65,6 +67,7 @@ define_index_type!(pub struct InternalTypeId = u32;);
 pub struct InternalType {
     pub name: String,
     pub size: usize,
+    pub namespace: NewNamespaceId,
 }
 
 impl From<InternalTypeId> for Type {

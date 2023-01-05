@@ -1679,10 +1679,13 @@ impl DriverRef<'_> {
                             }
                         },
                         Type::Struct(strukt) => ExprNamespace::New(self.read().code.hir.structs[strukt.identity].namespace, NewNamespaceRefKind::Instance),
+                        Type::Enum(id) => ExprNamespace::New(self.read().code.hir.enums[id].namespace, NewNamespaceRefKind::Instance),
+                        Type::Internal(id) => ExprNamespace::New(self.read().code.hir.internal_types[id].namespace, NewNamespaceRefKind::Instance),
                         Type::Pointer(ref pointee) => {
                             match &pointee.ty {
                                 Type::Struct(strukt) => ExprNamespace::New(self.read().code.hir.structs[strukt.identity].namespace, NewNamespaceRefKind::Instance),
                                 &Type::Enum(id) => ExprNamespace::New(self.read().code.hir.enums[id].namespace, NewNamespaceRefKind::Instance),
+                                &Type::Internal(id) => ExprNamespace::New(self.read().code.hir.internal_types[id].namespace, NewNamespaceRefKind::Instance),
                                 _ => continue,
                             }
                         },
@@ -1691,8 +1694,9 @@ impl DriverRef<'_> {
                             let ty = self.eval_expr(unit.main_expr, &mock_tp);
     
                             match ty {
-                                Const::Ty(Type::Enum(id)) => ExprNamespace::New(self.read().code.hir.enums[id].namespace, NewNamespaceRefKind::Static),
                                 Const::Ty(Type::Struct(ref strukt)) => ExprNamespace::New(self.read().code.hir.structs[strukt.identity].namespace, NewNamespaceRefKind::Static),
+                                Const::Ty(Type::Enum(id)) => ExprNamespace::New(self.read().code.hir.enums[id].namespace, NewNamespaceRefKind::Static),
+                                Const::Ty(Type::Internal(id)) => ExprNamespace::New(self.read().code.hir.internal_types[id].namespace, NewNamespaceRefKind::Static),
                                 _ => panic!("Unexpected const kind, expected enum!"),
                             }
                         },

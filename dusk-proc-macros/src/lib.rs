@@ -278,7 +278,8 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
                     fn register(d: &mut crate::driver::Driver) {
                         use crate::dire::{hir::*, ty::*, mir::*};
 
-                        let internal_type = InternalType { name: String::from(#struct_name_as_string), size: std::mem::size_of::<#struct_name>() };
+                        let namespace = d.code.hir.new_namespaces.push(NewNamespace::default());
+                        let internal_type = InternalType { name: String::from(#struct_name_as_string), size: std::mem::size_of::<#struct_name>(), namespace };
                         let type_id = d.code.hir.internal_types.push(internal_type);
                         let ty = Type::Internal(type_id);
                         let konst = Const::Ty(ty.clone());
