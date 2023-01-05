@@ -487,12 +487,17 @@ impl Driver {
         ef!(expr.range) = range;
     }
     pub fn reserve_enum(&mut self) -> (ExprId, EnumId) {
-        let enuum = self.code.hir.enums.push(Enum { variants: Vec::new() });
+        let enuum = self.code.hir.enums.push(Enum { variants: Vec::new(), namespace: NewNamespaceId::from_raw(u32::MAX) });
         let expr = self.add_expr(Expr::Enum(enuum), Default::default());
         (expr, enuum)
     }
     pub fn finish_enum(&mut self, variants: Vec<VariantDecl>, range: SourceRange, expr: ExprId, enuum: EnumId) {
-        self.code.hir.enums[enuum] = Enum { variants };
+        let new_namespace = NewNamespace {
+            static_decls: variants.iter().map(|variant| variant.decl).collect(),
+            ..Default::default()
+        };
+        let new_namespace = self.code.hir.new_namespaces.push(new_namespace);
+        self.code.hir.enums[enuum] = Enum { variants, namespace: new_namespace };
         ef!(expr.range) = range;
     }
     pub fn struct_lit(&mut self, ty: ExprId, fields: Vec<FieldAssignment>, range: SourceRange) -> ExprId {

@@ -23,6 +23,7 @@ define_index_type!(pub struct CastId = u32;);
 define_index_type!(pub struct DeclId = u32;);
 define_index_type!(pub struct ItemId = u32;);
 define_index_type!(pub struct ModScopeId = u32;);
+define_index_type!(pub struct NewNamespaceId = u32;);
 define_index_type!(pub struct StructId = u32;);
 define_index_type!(pub struct StructLitId = u32;);
 define_index_type!(pub struct EnumId = u32;);
@@ -91,6 +92,16 @@ pub struct CompDeclParamsNs {
 pub struct GenericContextNs {
     pub generic_params: Range<DeclId>,
     pub parent: Option<Namespace>,
+}
+
+#[derive(Debug, Default)]
+pub struct NewNamespace {
+    // TODO: store as groups of overloads
+
+    // For fields & instance methods
+    pub instance_decls: Vec<DeclId>,
+    // For enum variants, static methods and mod-scoped decls
+    pub static_decls: Vec<DeclId>,
 }
 
 #[derive(Debug)]
@@ -306,6 +317,7 @@ pub struct Struct {
 #[derive(Debug)]
 pub struct Enum {
     pub variants: Vec<VariantDecl>,
+    pub namespace: NewNamespaceId,
 }
 
 #[derive(Debug, Clone,)]
@@ -490,6 +502,7 @@ pub struct HirCode {
     pub mod_ns: IndexVec<ModScopeNsId, ModScopeNs>,
     pub condition_ns: IndexVec<ConditionNsId, ConditionNs>,
     pub generic_context_ns: IndexVec<GenericContextNsId, GenericContextNs>,
+    pub new_namespaces: IndexVec<NewNamespaceId, NewNamespace>,
     pub cast_counter: IndexCounter<CastId>,
     pub internal_types: IndexVec<InternalTypeId, InternalType>,
     pub bridged_types: HashMap<TypeId, Type>,

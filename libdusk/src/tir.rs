@@ -7,7 +7,7 @@ use index_vec::define_index_type;
 use string_interner::DefaultSymbol as Sym;
 
 use crate::dire::source_info::SourceRange;
-use crate::dire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, EnumId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, RETURN_VALUE_DECL};
+use crate::dire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, NewNamespaceId, RETURN_VALUE_DECL};
 use crate::dire::{internal_fields, internal_field_decls, InternalField, InternalFieldDecls, InternalNamespace};
 use crate::dire::ty::Type;
 pub use crate::dire::tir::CompId;
@@ -212,14 +212,22 @@ pub struct Units {
     pub mock_units: Vec<MockUnit>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum NewNamespaceRefKind {
+    Instance,
+    Static,
+}
+
 /// The namespace "inside" an expression,
 /// i.e. what are all the declarations that you might be able to access as members of an expression
 #[derive(Debug)]
 pub enum ExprNamespace {
     Mod(ModScopeId),
     Struct(StructId),
-    Enum(EnumId),
     Internal(InternalNamespace),
+    // TODO: it would be really nice if this could be expanded to subsume not only all other variants here, but also
+    // the complicated web of `*Ns`, `*NsId` and `Namespace` values
+    New(NewNamespaceId, NewNamespaceRefKind),
     Error,
 }
 
@@ -323,10 +331,16 @@ impl Driver {
             }
         }
     }
-    fn find_overloads_in_enum(&self, name: &NameLookup, id: EnumId, overloads: &mut HashSet<DeclId>) {
-        for variant in &self.code.hir.enums[id].variants {
-            if self.name_matches(name, variant.name) {
-                overloads.insert(variant.decl);
+    fn find_overloads_in_new_namespace(&self, name: &NameLookup, id: NewNamespaceId, kind: NewNamespaceRefKind, overloads: &mut HashSet<DeclId>) {
+        let ns = &self.code.hir.new_namespaces[id];
+        let decls = match kind {
+            NewNamespaceRefKind::Instance => &ns.instance_decls,
+            NewNamespaceRefKind::Static => &ns.static_decls
+        };
+        for &decl in decls {
+            let decl_name = self.code.hir.names[decl];
+            if self.name_matches(name, decl_name) {
+                overloads.insert(decl);
                 return;
             }
         }
@@ -393,8 +407,8 @@ impl Driver {
                                     }
                                 },
                                 ExprNamespace::Struct(id) => self.find_overloads_in_struct(name, id, overloads),
-                                ExprNamespace::Enum(id) => self.find_overloads_in_enum(name, id, overloads),
                                 ExprNamespace::Internal(internal) => self.find_overloads_in_internal(name, internal, overloads),
+                                ExprNamespace::New(id, kind) => self.find_overloads_in_new_namespace(name, id, kind, overloads),
                                 ExprNamespace::Error => return false,
                             }
                         }

@@ -18,7 +18,7 @@ use crate::driver::{Driver, DriverRef};
 use crate::error::Error;
 use crate::new_code::NewCode;
 use crate::ty::BuiltinTraits;
-use crate::tir::{Units, UnitItems, ExprNamespace, self, NameLookup};
+use crate::tir::{Units, UnitItems, ExprNamespace, self, NameLookup, NewNamespaceRefKind};
 
 use dusk_proc_macros::*;
 
@@ -1690,7 +1690,8 @@ impl DriverRef<'_> {
                             let ty = self.eval_expr(unit.main_expr, &mock_tp);
     
                             match ty {
-                                Const::Ty(Type::Enum(id)) => ExprNamespace::Enum(id),
+                                Const::Ty(Type::Enum(id)) => ExprNamespace::New(self.read().code.hir.enums[id].namespace, NewNamespaceRefKind::Static),
+                                // Const::Ty(Type::Struct(ref strukt)) => ExprNamespace::New(self.read().code.hir.structs[strukt.identity].namespace, NewNamespaceRefKind::Static)
                                 _ => panic!("Unexpected const kind, expected enum!"),
                             }
                         },
