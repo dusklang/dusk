@@ -7,7 +7,7 @@ use index_vec::define_index_type;
 use string_interner::DefaultSymbol as Sym;
 
 use crate::dire::source_info::SourceRange;
-use crate::dire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ModScopeId, StructId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, NewNamespaceId, RETURN_VALUE_DECL};
+use crate::dire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ModScopeId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, NewNamespaceId, RETURN_VALUE_DECL};
 use crate::dire::{internal_fields, internal_field_decls, InternalField, InternalFieldDecls, InternalNamespace};
 use crate::dire::ty::Type;
 pub use crate::dire::tir::CompId;
@@ -223,7 +223,6 @@ pub enum NewNamespaceRefKind {
 #[derive(Debug)]
 pub enum ExprNamespace {
     Mod(ModScopeId),
-    Struct(StructId),
     Internal(InternalNamespace),
     // TODO: it would be really nice if this could be expanded to subsume not only all other variants here, but also
     // the complicated web of `*Ns`, `*NsId` and `Namespace` values
@@ -323,14 +322,6 @@ impl Driver {
             true
         }
     }
-    fn find_overloads_in_struct(&self, name: &NameLookup, strukt: StructId, overloads: &mut HashSet<DeclId>) {
-        for field in &self.code.hir.structs[strukt].fields {
-            if self.name_matches(name, field.name) {
-                overloads.insert(field.decl);
-                return;
-            }
-        }
-    }
     fn find_overloads_in_new_namespace(&self, name: &NameLookup, id: NewNamespaceId, kind: NewNamespaceRefKind, overloads: &mut HashSet<DeclId>) {
         let ns = &self.code.hir.new_namespaces[id];
         let decls = match kind {
@@ -406,7 +397,6 @@ impl Driver {
                                         return false
                                     }
                                 },
-                                ExprNamespace::Struct(id) => self.find_overloads_in_struct(name, id, overloads),
                                 ExprNamespace::Internal(internal) => self.find_overloads_in_internal(name, internal, overloads),
                                 ExprNamespace::New(id, kind) => self.find_overloads_in_new_namespace(name, id, kind, overloads),
                                 ExprNamespace::Error => return false,

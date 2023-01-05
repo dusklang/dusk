@@ -312,6 +312,7 @@ pub struct VariantDecl {
 #[derive(Debug)]
 pub struct Struct {
     pub fields: Vec<FieldDecl>,
+    pub namespace: NewNamespaceId,
 }
 
 #[derive(Debug)]

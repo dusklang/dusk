@@ -1678,10 +1678,11 @@ impl DriverRef<'_> {
                                 _ => panic!("Unexpected const kind, expected module!"),
                             }
                         },
-                        Type::Struct(strukt) => ExprNamespace::Struct(strukt.identity),
+                        Type::Struct(strukt) => ExprNamespace::New(self.read().code.hir.structs[strukt.identity].namespace, NewNamespaceRefKind::Instance),
                         Type::Pointer(ref pointee) => {
                             match &pointee.ty {
-                                Type::Struct(strukt) => ExprNamespace::Struct(strukt.identity),
+                                Type::Struct(strukt) => ExprNamespace::New(self.read().code.hir.structs[strukt.identity].namespace, NewNamespaceRefKind::Instance),
+                                &Type::Enum(id) => ExprNamespace::New(self.read().code.hir.enums[id].namespace, NewNamespaceRefKind::Instance),
                                 _ => continue,
                             }
                         },
@@ -1691,7 +1692,7 @@ impl DriverRef<'_> {
     
                             match ty {
                                 Const::Ty(Type::Enum(id)) => ExprNamespace::New(self.read().code.hir.enums[id].namespace, NewNamespaceRefKind::Static),
-                                // Const::Ty(Type::Struct(ref strukt)) => ExprNamespace::New(self.read().code.hir.structs[strukt.identity].namespace, NewNamespaceRefKind::Static)
+                                Const::Ty(Type::Struct(ref strukt)) => ExprNamespace::New(self.read().code.hir.structs[strukt.identity].namespace, NewNamespaceRefKind::Static),
                                 _ => panic!("Unexpected const kind, expected enum!"),
                             }
                         },

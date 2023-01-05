@@ -478,12 +478,17 @@ impl Driver {
         VariantDecl { decl, name, enuum, payload_ty }
     }
     pub fn reserve_struct(&mut self) -> (ExprId, StructId) {
-        let strukt = self.code.hir.structs.push(Struct { fields: Vec::new() });
+        let strukt = self.code.hir.structs.push(Struct { fields: Vec::new(), namespace: NewNamespaceId::from_raw(u32::MAX) });
         let expr = self.add_expr(Expr::Struct(strukt), Default::default());
         (expr, strukt)
     }
     pub fn finish_struct(&mut self, fields: Vec<FieldDecl>, range: SourceRange, expr: ExprId, strukt: StructId) {
-        self.code.hir.structs[strukt] = Struct { fields };
+        let namespace = NewNamespace {
+            instance_decls: fields.iter().map(|field| field.decl).collect(),
+            ..Default::default()
+        };
+        let namespace = self.code.hir.new_namespaces.push(namespace);
+        self.code.hir.structs[strukt] = Struct { fields, namespace };
         ef!(expr.range) = range;
     }
     pub fn reserve_enum(&mut self) -> (ExprId, EnumId) {
@@ -492,12 +497,12 @@ impl Driver {
         (expr, enuum)
     }
     pub fn finish_enum(&mut self, variants: Vec<VariantDecl>, range: SourceRange, expr: ExprId, enuum: EnumId) {
-        let new_namespace = NewNamespace {
+        let namespace = NewNamespace {
             static_decls: variants.iter().map(|variant| variant.decl).collect(),
             ..Default::default()
         };
-        let new_namespace = self.code.hir.new_namespaces.push(new_namespace);
-        self.code.hir.enums[enuum] = Enum { variants, namespace: new_namespace };
+        let namespace = self.code.hir.new_namespaces.push(namespace);
+        self.code.hir.enums[enuum] = Enum { variants, namespace };
         ef!(expr.range) = range;
     }
     pub fn struct_lit(&mut self, ty: ExprId, fields: Vec<FieldAssignment>, range: SourceRange) -> ExprId {
