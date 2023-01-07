@@ -284,7 +284,7 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
                         let ty = Type::Internal(type_id);
                         let konst = Const::Ty(ty.clone());
                         let expr = d.add_const_expr(konst);
-                        d.add_decl_to_module(#struct_name_as_string, #module, Decl::Const(expr), 0, None);
+                        d.add_decl_to_path(#struct_name_as_string, #module, Decl::Const(expr), false, 0, None);
 
                         d.code.hir.bridged_types.insert(TypeId::of::<Self>(), ty);
                     }
@@ -307,9 +307,9 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
 pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
     assert!(attr.is_empty());
 
-    let item: Item = syn::parse(item).unwrap();
+    let mut item: Item = syn::parse(item).unwrap();
     let mut registrations = Vec::new();
-    match &item {
+    match &mut item {
         Item::Impl(impl_block) => {
             assert!(impl_block.defaultness.is_none());
             assert!(impl_block.generics.params.is_empty());
@@ -322,7 +322,7 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
             assert!(self_ty.qself.is_none());
             assert!(self_ty.path.is_ident("Driver"));
 
-            for item in &impl_block.items {
+            for item in &mut impl_block.items {
                 match item {
                     ImplItem::Method(method) => {
                         assert!(method.defaultness.is_none());
@@ -334,6 +334,20 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                         assert!(method.sig.generics.where_clause.is_none());
                         assert!(method.sig.variadic.is_none());
 
+                        let path = method.attrs.iter()
+                            .find(|attr| attr.path.is_ident("path"))
+                            .map(|attr| {
+                                match attr.parse_meta().unwrap() {
+                                    Meta::Path(_) | Meta::List(_) => panic!("expected module or type path in 'path' attribute, like #[path = \"the.module\"] or #[path = \"the.module.TheType\"]"),
+                                    Meta::NameValue(attr) => match attr.lit {
+                                        Lit::Str(lit) => lit.value(),
+                                        _ => panic!("expected string literal for module or type path")
+                                    }
+                                }
+                            })
+                            .unwrap_or_else(|| String::from(""));
+
+                        let mut has_driver = false;
                         let mut has_self = false;
                         let mut param_index = 0usize;
 
@@ -341,17 +355,26 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                         let mut param_val_decls = Vec::new();
                         let mut param_val_names = Vec::new();
 
-                        for input in &method.sig.inputs {
+                        for input in &mut method.sig.inputs {
                             match input {
                                 FnArg::Receiver(receiver) => {
-                                    assert!(!has_self);
+                                    assert!(!has_driver);
                                     assert!(param_index == 0);
                                     assert!(receiver.lifetime().is_none());
                                     assert!(receiver.reference.is_some());
 
-                                    has_self = true;
+                                    has_driver = true;
                                 },
                                 FnArg::Typed(ty) => {
+                                    if ty.attrs.iter().find(|attr| attr.path.is_ident("self")).is_some() {
+                                        assert!(!has_self);
+                                        assert!(param_index == 0);
+
+                                        ty.attrs.retain(|attr| !attr.path.is_ident("self"));
+
+                                        has_self = true;
+                                    }
+
                                     let ty = ty.ty.clone();
                                     let param_val_variable_name = format!("__param_{}", param_index);
                                     let param_val_variable_name = syn::Ident::new(&param_val_variable_name, input.span());
@@ -374,7 +397,7 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                         let name = method.sig.ident.clone();
                         let name_as_string = name.to_string();
                         let num_params = param_tys.len();
-                        let implementation = if has_self {
+                        let implementation = if has_driver {
                             quote! { d.write().#name }
                         } else {
                             quote! { Driver::#name }
@@ -399,7 +422,7 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                                 };
                                 let ret_ty = d.add_const_ty(ret_ty);
                                 let intr_id = d.code.hir.intrinsics.push(intr);
-                                d.add_decl_to_module(#name_as_string, "", Decl::Intrinsic(intr_id), #num_params, Some(ret_ty));
+                                d.add_decl_to_path(#name_as_string, #path, Decl::Intrinsic(intr_id), #has_self, #num_params, Some(ret_ty));
                             }
                         );
                     },

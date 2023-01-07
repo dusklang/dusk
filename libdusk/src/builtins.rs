@@ -20,6 +20,7 @@ use dusk_proc_macros::{ef, df, dusk_bridge};
 #[dusk_bridge]
 #[allow(unused)]
 impl Driver {
+    #[path="core"]
     fn make_boxed_int(&mut self, value: usize) -> BoxedInt {
         let index = self.boxed_ints.len();
         self.boxed_ints.push(value);
@@ -28,15 +29,18 @@ impl Driver {
         }
     }
 
-    fn increment_boxed_int(&mut self, val: BoxedInt) {
+    // #[path="core.BoxedInt"]
+    fn increment_boxed_int(&mut self, #[self] val: BoxedInt) {
         self.boxed_ints[val.index] += 1;
     }
 
+    // #[path="core.BoxedInt"]
     fn print_int(&mut self, val: usize) {
         println!("int: {}", val);
     }
 
-    fn unbox_int(&mut self, val: BoxedInt) -> usize {
+    // #[path="core.BoxedInt"]
+    fn unbox_int(&mut self, #[self] val: BoxedInt) -> usize {
         self.boxed_ints[val.index]
     }
 }
@@ -230,8 +234,8 @@ impl Driver {
         self.add_constant_decl(name, Const::Ty(ty));
     }
 
-    pub fn add_decl_to_module(&mut self, name: &str, path: &str, decl: Decl, num_params: usize, explicit_ty: Option<ExprId>) {
-        let scope = self.find_or_build_relative_mod_path(path);
+    pub fn add_decl_to_path(&mut self, name: &str, path: &str, decl: Decl, _is_instance_method: bool, num_params: usize, explicit_ty: Option<ExprId>) {
+        let scope = self.find_or_build_relative_ns_path(path);
         let name = self.interner.get_or_intern(name);
         let decl_id = self.add_decl(decl, name, explicit_ty, SourceRange::default());
         let decl = ModScopedDecl { num_params, id: decl_id };
@@ -254,7 +258,7 @@ impl Driver {
         self.push_to_scope_stack(namespace, ScopeState::Mod { id: scope, namespace, extern_mod: None })
     }
 
-    pub fn find_or_build_relative_mod_path(&mut self, path: &str) -> ModScopeId {
+    pub fn find_or_build_relative_ns_path(&mut self, path: &str) -> ModScopeId {
         let mut scope = self.find_nearest_mod_scope().unwrap();
 
         if path.trim().is_empty() {
@@ -267,21 +271,15 @@ impl Driver {
             let name = self.interner.get_or_intern(name);
             let decl_groups = self.code.hir.mod_scopes[scope].decl_groups.entry(name).or_default();
 
-            scope = if !decl_groups.is_empty() {
-                assert!(decl_groups.len() == 1);
-                let group = decl_groups[0];
-                assert!(group.num_params == 0);
-                let Decl::Const(expr) = df!(group.id.hir) else { panic!("internal compiler error: expected const decl") };
-                let Expr::Const(konst) = &ef!(expr.hir) else { panic!("internal compiler error: expected const expr") };
-                let Const::Mod(new_scope) = *konst else { panic!("internal compiler error: expected const mod") };
-                new_scope
-            } else {
-                let new_scope = self.code.hir.mod_scopes.push(ModScope::default());
-                let konst = Const::Mod(new_scope);
-                let expr = self.add_const_expr(konst);
-                let decl = self.add_decl(Decl::Const(expr), name, None, SourceRange::default());
-                self.code.hir.mod_scopes[scope].decl_groups.get_mut(&name).unwrap().push(ModScopedDecl { num_params: 0, id: decl });
-                new_scope
+            assert!(decl_groups.len() == 1);
+            let group = decl_groups[0];
+            assert!(group.num_params == 0);
+            let Decl::Const(expr) = df!(group.id.hir) else { panic!("internal compiler error: expected const decl") };
+            let Expr::Const(konst) = &ef!(expr.hir) else { panic!("internal compiler error: expected const expr") };
+            match *konst {
+                Const::Mod(new_scope) => scope = new_scope,
+                // Const::Ty(Type::Internal(id)) => self.code.hir.internal_types[id].
+                _ => panic!("internal compiler error: expected const mod"),
             }
         }
         scope
