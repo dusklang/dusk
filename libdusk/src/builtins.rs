@@ -18,7 +18,6 @@ use crate::dire::internal_types::BoxedInt;
 use dusk_proc_macros::{ef, df, dusk_bridge};
 
 #[dusk_bridge]
-#[allow(unused)]
 impl Driver {
     #[path="core.BoxedInt"]
     fn new(&mut self, value: usize) -> BoxedInt {

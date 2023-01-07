@@ -347,6 +347,7 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                                 }
                             })
                             .unwrap_or_else(|| String::from(""));
+                        method.attrs.retain(|attr| !attr.path.is_ident("path"));
 
                         let mut has_driver = false;
                         let mut has_self = false;
