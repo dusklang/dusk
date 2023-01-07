@@ -4,7 +4,7 @@ use smallvec::{smallvec, SmallVec};
 
 use crate::dire::internal_types;
 use crate::dire::source_info::SourceRange;
-use crate::dire::hir::{ModScopeId, ModScopeNs, ModScope, LegacyIntrinsic, Expr, Decl, VOID_TYPE, ModScopedDecl, ModScopeNsId, EnumId, ExprId, VariantDecl};
+use crate::dire::hir::{ModScopeNs, LegacyIntrinsic, Expr, Decl, VOID_TYPE, ModScopeNsId, NewNamespaceId, EnumId, ExprId, VariantDecl, StaticDecl, NewNamespace};
 use crate::dire::ty::{Type, LegacyInternalType};
 use crate::dire::mir::Const;
 
@@ -20,7 +20,7 @@ use dusk_proc_macros::{ef, df, dusk_bridge};
 #[dusk_bridge]
 #[allow(unused)]
 impl Driver {
-    #[path="core"]
+    #[path="core.BoxedInt"]
     fn make_boxed_int(&mut self, value: usize) -> BoxedInt {
         let index = self.boxed_ints.len();
         self.boxed_ints.push(value);
@@ -59,7 +59,7 @@ impl Drop for EnumBuilder {
 impl Driver {
     pub fn add_prelude(&mut self) {
         assert!(self.hir.prelude_namespace.is_none());
-        let prelude_scope = self.code.hir.mod_scopes.push(ModScope::default());
+        let prelude_scope = self.code.hir.new_namespaces.push(NewNamespace::default());
         let prelude_namespace = self.code.hir.mod_ns.push(
             ModScopeNs {
                 scope: prelude_scope,
@@ -222,10 +222,10 @@ impl Driver {
         let name = self.interner.get_or_intern(name);
         let decl = self.add_decl(Decl::Const(expr), name, None, SourceRange::default());
         self.mod_scoped_decl(
-            name,
-            ModScopedDecl {
+            StaticDecl {
                 num_params: 0,
-                id: decl,
+                name,
+                decl,
             }
         );
     }
@@ -238,12 +238,12 @@ impl Driver {
         let scope = self.find_or_build_relative_ns_path(path);
         let name = self.interner.get_or_intern(name);
         let decl_id = self.add_decl(decl, name, explicit_ty, SourceRange::default());
-        let decl = ModScopedDecl { num_params, id: decl_id };
-        self.code.hir.mod_scopes[scope].decl_groups.entry(name).or_default().push(decl);
+        let decl = StaticDecl { name, num_params, decl: decl_id };
+        self.code.hir.new_namespaces[scope].static_decls.push(decl);
     }
 
     fn add_module_decl(&mut self, name: &str) -> AutoPopStackEntry<ScopeState, ModScopeNsId> {
-        let scope = self.code.hir.mod_scopes.push(ModScope::default());
+        let scope = self.code.hir.new_namespaces.push(NewNamespace::default());
         let namespace = self.code.hir.mod_ns.push(
             ModScopeNs {
                 scope,
@@ -258,31 +258,31 @@ impl Driver {
         self.push_to_scope_stack(namespace, ScopeState::Mod { id: scope, namespace, extern_mod: None })
     }
 
-    pub fn find_or_build_relative_ns_path(&mut self, path: &str) -> ModScopeId {
-        let mut scope = self.find_nearest_mod_scope().unwrap();
+    pub fn find_or_build_relative_ns_path(&mut self, path: &str) -> NewNamespaceId {
+        let mut ns = self.find_nearest_mod_scope().unwrap();
 
         if path.trim().is_empty() {
-            return scope;
+            return ns;
         }
 
         for name in path.split('.').map(str::trim) {
             assert!(!name.is_empty());
 
             let name = self.interner.get_or_intern(name);
-            let decl_groups = self.code.hir.mod_scopes[scope].decl_groups.entry(name).or_default();
+            let matching_decls: Vec<&StaticDecl> = self.code.hir.new_namespaces[ns].static_decls.iter().filter(|decl| decl.name == name).collect();
 
-            assert!(decl_groups.len() == 1);
-            let group = decl_groups[0];
-            assert!(group.num_params == 0);
-            let Decl::Const(expr) = df!(group.id.hir) else { panic!("internal compiler error: expected const decl") };
+            assert!(matching_decls.len() == 1);
+            let decl = matching_decls[0];
+            assert!(decl.num_params == 0);
+            let Decl::Const(expr) = df!(decl.decl.hir) else { panic!("internal compiler error: expected const decl") };
             let Expr::Const(konst) = &ef!(expr.hir) else { panic!("internal compiler error: expected const expr") };
-            match *konst {
-                Const::Mod(new_scope) => scope = new_scope,
-                // Const::Ty(Type::Internal(id)) => self.code.hir.internal_types[id].
-                _ => panic!("internal compiler error: expected const mod"),
-            }
+            ns = match *konst {
+                Const::Mod(new_ns) => new_ns,
+                Const::Ty(Type::Internal(id)) => self.code.hir.internal_types[id].namespace,
+                _ => panic!("internal compiler error: expected const mod or type"),
+            };
         }
-        scope
+        ns
     }
     
     fn start_enum(&mut self, name: &str) -> EnumBuilder {

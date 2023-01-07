@@ -88,7 +88,7 @@ pub enum ScopeState {
         root: ImperRootId,
     },
     Mod {
-        id: ModScopeId,
+        id: NewNamespaceId,
         namespace: ModScopeNsId,
         extern_mod: Option<ExternModId>,
     },
@@ -391,10 +391,10 @@ impl Driver {
                     range,
                 );
                 self.mod_scoped_decl(
-                    name,
-                    ModScopedDecl {
+                    StaticDecl {
                         num_params: 0,
-                        id: decl_id
+                        name,
+                        decl: decl_id
                     }
                 );
                 decl_id
@@ -498,7 +498,14 @@ impl Driver {
     }
     pub fn finish_enum(&mut self, variants: Vec<VariantDecl>, range: SourceRange, expr: ExprId, enuum: EnumId) {
         let namespace = NewNamespace {
-            static_decls: variants.iter().map(|variant| variant.decl).collect(),
+            static_decls: variants.iter()
+                .map(|variant|
+                    StaticDecl {
+                        decl: variant.decl,
+                        num_params: variant.payload_ty.is_some() as usize,
+                        name: variant.name
+                    }
+                ).collect(),
             ..Default::default()
         };
         let namespace = self.code.hir.new_namespaces.push(namespace);
@@ -592,7 +599,7 @@ impl Driver {
     }
     pub fn begin_module(&mut self, extern_mod: Option<ExternModId>, range: SourceRange) -> (AutoPopStackEntry<ScopeState, ModScopeNsId>, ExprId) {
         let parent = self.cur_namespace();
-        let id = self.code.hir.mod_scopes.push(ModScope::default());
+        let id = self.code.hir.new_namespaces.push(NewNamespace::default());
         let namespace = self.code.hir.mod_ns.push(
             ModScopeNs {
                 scope: id, parent: Some(parent)
@@ -643,7 +650,7 @@ impl Driver {
                 self.scope_item(Item::Decl(id), false);
             },
             ScopeState::Mod { .. } => {
-                self.mod_scoped_decl(name, ModScopedDecl { num_params: param_names.len(), id });
+                self.mod_scoped_decl(StaticDecl { num_params: param_names.len(), name, decl: id });
             },
             ScopeState::Condition { .. } | ScopeState::GenericContext(_) => panic!("Computed decls are not supported in this position"),
         }
@@ -684,7 +691,7 @@ impl Driver {
                 self.scope_item(Item::Decl(id), false);
             },
             ScopeState::Mod { .. } => {
-                self.mod_scoped_decl(name, ModScopedDecl { num_params, id });
+                self.mod_scoped_decl(StaticDecl { num_params, name, decl: id });
             },
             ScopeState::Condition { .. } | ScopeState::GenericContext(_) => panic!("Computed decls are not supported in this position"),
         }
@@ -735,8 +742,7 @@ impl Driver {
         let num_params = param_tys.len();
         let id = self.add_decl(Decl::LegacyIntrinsic { intr: intrinsic, param_tys, function_like }, name, Some(ret_ty), SourceRange::default());
         self.mod_scoped_decl(
-            name,
-            ModScopedDecl { num_params, id }
+            StaticDecl { num_params, name, decl: id }
         );
     }
     pub fn internal_field(&mut self, field: InternalField, name: &str, ty: Type) -> DeclId {
@@ -776,10 +782,10 @@ impl Driver {
         self.add_expr(Expr::FunctionTy { param_tys, ret_ty }, range)
     }
     pub fn start_new_file(&mut self, file: SourceFileId) -> AutoPopStackEntry<ScopeState, ModScopeNsId> {
-        let mut global_scope = ModScope::default();
+        let mut global_scope = NewNamespace::default();
         // Use all of prelude
         global_scope.blanket_uses.push(Namespace::Mod(self.hir.prelude_namespace.unwrap()));
-        let global_scope = self.code.hir.mod_scopes.push(global_scope);
+        let global_scope = self.code.hir.new_namespaces.push(global_scope);
         let global_namespace = self.code.hir.mod_ns.push(
             ModScopeNs {
                 scope: global_scope,
@@ -820,7 +826,7 @@ impl Driver {
     }
 
     // This is a hack to allow intrinsics to be added for comparing enum types
-    pub fn find_nearest_mod_scope(&self) -> Option<ModScopeId> {
+    pub fn find_nearest_mod_scope(&self) -> Option<NewNamespaceId> {
         for &scope in self.hir.scope_stack.stack.lock().unwrap().borrow().iter().rev() {
             match scope {
                 ScopeState::Mod { id, .. } => return Some(id),
@@ -830,9 +836,9 @@ impl Driver {
         None
     }
 
-    pub fn mod_scoped_decl(&mut self, name: Sym, decl: ModScopedDecl) {
+    pub fn mod_scoped_decl(&mut self, decl: StaticDecl) {
         let id = self.find_nearest_mod_scope().expect("tried to add module-scoped declaration where there is no module scope");
-        self.code.hir.mod_scopes[id].decl_groups.entry(name).or_default().push(decl);
+        self.code.hir.new_namespaces[id].static_decls.push(decl);
     }
 
     pub fn stmt(&mut self, expr: ExprId, has_semicolon: bool) {

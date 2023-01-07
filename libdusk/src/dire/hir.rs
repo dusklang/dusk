@@ -22,7 +22,6 @@ define_index_type!(pub struct ImperScopeId = u32;);
 define_index_type!(pub struct CastId = u32;);
 define_index_type!(pub struct DeclId = u32;);
 define_index_type!(pub struct ItemId = u32;);
-define_index_type!(pub struct ModScopeId = u32;);
 define_index_type!(pub struct NewNamespaceId = u32;);
 define_index_type!(pub struct StructId = u32;);
 define_index_type!(pub struct StructLitId = u32;);
@@ -53,13 +52,6 @@ pub struct ImperScopedDecl {
     pub id: DeclId,
 }
 
-/// A declaration in module scope
-#[derive(Debug, Clone, Copy)]
-pub struct ModScopedDecl {
-    pub num_params: usize,
-    pub id: DeclId,
-}
-
 #[derive(Debug)]
 pub struct ImperScopeNs {
     pub decls: Vec<ImperScopedDecl>,
@@ -68,7 +60,7 @@ pub struct ImperScopeNs {
 
 #[derive(Debug)]
 pub struct ModScopeNs {
-    pub scope: ModScopeId,
+    pub scope: NewNamespaceId,
     pub parent: Option<Namespace>,
 }
 
@@ -94,14 +86,29 @@ pub struct GenericContextNs {
     pub parent: Option<Namespace>,
 }
 
+#[derive(Debug)]
+pub struct StaticDecl {
+    pub decl: DeclId,
+    pub num_params: usize,
+    pub name: Sym,
+}
+
 #[derive(Debug, Default)]
 pub struct NewNamespace {
-    // TODO: store as groups of overloads
+    // TODO: store decls as groups of overloads, which is probably more efficient
 
     // For fields & instance methods
     pub instance_decls: Vec<DeclId>,
     // For enum variants, static methods and mod-scoped decls
-    pub static_decls: Vec<DeclId>,
+    pub static_decls: Vec<StaticDecl>,
+
+    // NOTE: below TODO comment copied from former `ModScope` type
+    //      TODO: ideally, names declared below a `use modulename.*` should take precedence over conflicting names in
+    //      `modulename`, while names declared inside `modulename` should take precedence over names declared before the
+    //      `use`.
+
+    // TODO: replace with a Vec of `NewNamespaceId` or something similar
+    pub blanket_uses: Vec<Namespace>,
 }
 
 #[derive(Debug)]
@@ -202,7 +209,7 @@ pub enum Expr {
     },
     Cast { expr: ExprId, ty: ExprId, cast_id: CastId },
     Ret { expr: ExprId, decl: Option<DeclId> },
-    Mod { id: ModScopeId, extern_library_path: Option<ExprId> },
+    Mod { id: NewNamespaceId, extern_library_path: Option<ExprId> },
     Struct(StructId),
     Enum(EnumId),
     StructLit {
@@ -228,15 +235,6 @@ impl From<DeclId> for Item {
     fn from(decl: DeclId) -> Self {
         Item::Decl(decl)
     }
-}
-
-#[derive(Debug, Default)]
-pub struct ModScope {
-    // TODO: ideally, names declared below a `use modulename.*` should take precedence over conflicting names in
-    // `modulename`, while names declared inside `modulename` should take precedence over names declared before the
-    // `use`.
-    pub decl_groups: HashMap<Sym, Vec<ModScopedDecl>>,
-    pub blanket_uses: Vec<Namespace>,
 }
 
 #[derive(Debug, Clone)]
@@ -496,9 +494,8 @@ pub struct HirCode {
     pub names: IndexVec<DeclId, Sym>,
     pub explicit_tys: IndexVec<DeclId, Option<ExprId>>,
     pub intrinsics: IndexVec<IntrinsicId, Intrinsic>,
-    pub global_scopes: HashMap<SourceFileId, ModScopeId>,
+    pub global_scopes: HashMap<SourceFileId, NewNamespaceId>,
     pub imper_scopes: IndexVec<ImperScopeId, ImperScope>,
-    pub mod_scopes: IndexVec<ModScopeId, ModScope>,
     pub imper_ns: IndexVec<ImperScopeNsId, ImperScopeNs>,
     pub mod_ns: IndexVec<ModScopeNsId, ModScopeNs>,
     pub condition_ns: IndexVec<ConditionNsId, ConditionNs>,

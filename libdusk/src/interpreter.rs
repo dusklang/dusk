@@ -21,7 +21,7 @@ use index_vec::IndexVec;
 use lazy_static::lazy_static;
 
 use crate::dire::arch::Arch;
-use crate::dire::hir::{LegacyIntrinsic, ModScopeId, EnumId, GenericParamId, ExternFunctionRef};
+use crate::dire::hir::{LegacyIntrinsic, EnumId, GenericParamId, ExternFunctionRef, NewNamespaceId};
 use crate::dire::mir::{Const, Instr, InstrId, FuncId, StaticId, ExternFunction};
 use crate::dire::ty::{Type, FunctionType, QualType, IntWidth, FloatWidth, StructType, LegacyInternalType};
 use crate::dire::{OpId, BlockId};
@@ -38,7 +38,7 @@ use crate::arm64::*;
 #[derive(Debug, Clone)]
 pub enum InternalValue {
     Ty(Type),
-    Mod(ModScopeId),
+    Mod(NewNamespaceId),
     FunctionPointer { generic_arguments: Vec<Type>, func: FuncId },
     StrLit(CString),
     Args(Vec<CString>),
@@ -212,7 +212,7 @@ impl Value {
         }
     }
 
-    fn as_mod(&self) -> ModScopeId {
+    fn as_mod(&self) -> NewNamespaceId {
         match *self.as_internal() {
             InternalValue::Mod(id) => id,
             _ => panic!("Can't get non-module as module"),
@@ -327,7 +327,7 @@ impl Value {
         Self::from_internal(InternalValue::Ty(ty))
     }
 
-    fn from_mod(id: ModScopeId) -> Value {
+    fn from_mod(id: NewNamespaceId) -> Value {
         Self::from_internal(InternalValue::Mod(id))
     }
 }

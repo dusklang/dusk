@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::ops::{Deref, DerefMut};
 use std::collections::{HashMap, HashSet};
 use std::mem;
@@ -7,7 +8,7 @@ use index_vec::define_index_type;
 use string_interner::DefaultSymbol as Sym;
 
 use crate::dire::source_info::SourceRange;
-use crate::dire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ModScopeId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, NewNamespaceId, RETURN_VALUE_DECL};
+use crate::dire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, NewNamespaceId, RETURN_VALUE_DECL};
 use crate::dire::{internal_fields, internal_field_decls, InternalField, InternalFieldDecls, InternalNamespace};
 use crate::dire::ty::Type;
 pub use crate::dire::tir::CompId;
@@ -222,7 +223,8 @@ pub enum NewNamespaceRefKind {
 /// i.e. what are all the declarations that you might be able to access as members of an expression
 #[derive(Debug)]
 pub enum ExprNamespace {
-    Mod(ModScopeId),
+    // TODO: merge this with `New(_,_)` variant (requires some additional behaviour)
+    Mod(NewNamespaceId),
     Internal(InternalNamespace),
     // TODO: it would be really nice if this could be expanded to subsume not only all other variants here, but also
     // the complicated web of `*Ns`, `*NsId` and `Namespace` values
@@ -300,16 +302,11 @@ pub enum NameLookup {
 
 impl Driver {
     // See comment about `should_traverse_blanket_uses` later in this file
-    fn find_overloads_in_mod(&self, name: &NameLookup, scope: ModScopeId, should_traverse_blanket_uses: bool, overloads: &mut HashSet<DeclId>) -> bool {
-        // TODO: don't iterate over hashmap if `name` is an `Exact` variant, because in that case we could just look it
-        // up directly
-        let scope = &self.code.hir.mod_scopes[scope];
-        for (&actual, group) in &scope.decl_groups {
-            if self.name_matches(name, actual) {
-                overloads.extend(
-                    group.iter()
-                        .map(|decl| decl.id)
-                );
+    fn find_overloads_in_mod(&self, name: &NameLookup, scope: NewNamespaceId, should_traverse_blanket_uses: bool, overloads: &mut HashSet<DeclId>) -> bool {
+        let scope = &self.code.hir.new_namespaces[scope];
+        for decl in &scope.static_decls {
+            if self.name_matches(name, decl.name) {
+                overloads.insert(decl.decl);
             }
         }
         if should_traverse_blanket_uses {
@@ -325,10 +322,10 @@ impl Driver {
     fn find_overloads_in_new_namespace(&self, name: &NameLookup, id: NewNamespaceId, kind: NewNamespaceRefKind, overloads: &mut HashSet<DeclId>) {
         let ns = &self.code.hir.new_namespaces[id];
         let decls = match kind {
-            NewNamespaceRefKind::Instance => &ns.instance_decls,
-            NewNamespaceRefKind::Static => &ns.static_decls
+            NewNamespaceRefKind::Instance => Cow::Borrowed(&ns.instance_decls),
+            NewNamespaceRefKind::Static => Cow::Owned(ns.static_decls.iter().map(|decl| decl.decl).collect()),
         };
-        for &decl in decls {
+        for &decl in decls.as_ref() {
             let decl_name = self.code.hir.names[decl];
             if self.name_matches(name, decl_name) {
                 overloads.insert(decl);

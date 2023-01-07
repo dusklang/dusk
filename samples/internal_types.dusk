@@ -1,5 +1,5 @@
 fn main() {
-    num :: core.make_boxed_int(1)
+    num :: core.BoxedInt.make_boxed_int(1)
     print_boxed_int(num)
     for i in 0..10 {
         increment_boxed_int(num)
