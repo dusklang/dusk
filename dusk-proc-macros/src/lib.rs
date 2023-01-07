@@ -4,7 +4,8 @@ use proc_macro::{TokenStream, TokenTree, Ident, Span, Punct, Spacing, Group, Del
 use proc_macro::token_stream::IntoIter as TokenIter;
 
 use quote::quote;
-use syn::{Item, Meta, Lit, LitStr, Type, ImplItem, FnArg, ReturnType};
+use syn::parse::{ParseStream, Parse};
+use syn::{Item, Meta, Lit, LitStr, Type, ImplItem, FnArg, ReturnType, Attribute};
 use syn::spanned::Spanned;
 
 use std::iter::Peekable;
@@ -394,13 +395,34 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                             ReturnType::Default => syn::parse2(quote! { () }).unwrap(),
                             ReturnType::Type(_, ty) => ty.as_ref().clone(),
                         };
-                        let name = method.sig.ident.clone();
-                        let name_as_string = name.to_string();
+                        let name = method.sig.ident.to_string();
+
+                        let mangled_name = format!("builtin_{}{}",
+                            if path.is_empty() { path.clone() } else { path.replace(".", "_") },
+                            method.sig.ident.to_string(),
+                        );
+                        let mangled_name = syn::Ident::new(&mangled_name, method.sig.ident.span());
+                        struct IShouldntHaveToWriteThisStructImo {
+                            attrs: Vec<Attribute>,
+                        }
+                        impl Parse for IShouldntHaveToWriteThisStructImo {
+                            fn parse(input: ParseStream) -> syn::Result<Self> {
+                                Ok(IShouldntHaveToWriteThisStructImo {
+                                    attrs: input.call(Attribute::parse_outer)?,
+                                })
+                            }
+                        }
+                        let new_attrs = syn::parse2::<IShouldntHaveToWriteThisStructImo>(quote! { #[allow(non_snake_case)] }).unwrap();
+                        
+                        method.sig.ident = mangled_name.clone();
+                        method.attrs.extend(new_attrs.attrs);
+
+
                         let num_params = param_tys.len();
                         let implementation = if has_driver {
-                            quote! { d.write().#name }
+                            quote! { d.write().#mangled_name }
                         } else {
-                            quote! { Driver::#name }
+                            quote! { Driver::#mangled_name }
                         };
                         registrations.push(
                             quote! {
@@ -417,12 +439,12 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                                         )*
                                     ],
                                     ret_ty: ret_ty.clone(),
-                                    name: String::from(#name_as_string),
+                                    name: String::from(#name),
                                     implementation: thunk,
                                 };
                                 let ret_ty = d.add_const_ty(ret_ty);
                                 let intr_id = d.code.hir.intrinsics.push(intr);
-                                d.add_decl_to_path(#name_as_string, #path, Decl::Intrinsic(intr_id), #has_self, #num_params, Some(ret_ty));
+                                d.add_decl_to_path(#name, #path, Decl::Intrinsic(intr_id), #has_self, #num_params, Some(ret_ty));
                             }
                         );
                     },

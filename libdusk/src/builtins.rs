@@ -21,7 +21,7 @@ use dusk_proc_macros::{ef, df, dusk_bridge};
 #[allow(unused)]
 impl Driver {
     #[path="core.BoxedInt"]
-    fn make_boxed_int(&mut self, value: usize) -> BoxedInt {
+    fn new(&mut self, value: usize) -> BoxedInt {
         let index = self.boxed_ints.len();
         self.boxed_ints.push(value);
         BoxedInt {
@@ -34,14 +34,13 @@ impl Driver {
         self.boxed_ints[val.index] += 1;
     }
 
-    // #[path="core.BoxedInt"]
-    fn print_int(&mut self, val: usize) {
-        println!("int: {}", val);
+    fn unbox_int(&mut self, #[self] val: BoxedInt) -> usize {
+        self.boxed_ints[val.index]
     }
 
     // #[path="core.BoxedInt"]
-    fn unbox_int(&mut self, #[self] val: BoxedInt) -> usize {
-        self.boxed_ints[val.index]
+    fn print_int(&mut self, val: usize) {
+        println!("int: {}", val);
     }
 }
 
