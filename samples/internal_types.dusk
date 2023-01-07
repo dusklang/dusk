@@ -2,12 +2,12 @@ fn main() {
     num :: core.BoxedInt.new(1)
     print_boxed_int(num)
     for i in 0..10 {
-        increment_boxed_int(num)
+        num.increment()
     }
-    unboxed:: unbox_int(num)
+    unboxed :: num.unbox()
     print_boxed_int(num)
 }
 
 fn print_boxed_int(val: core.BoxedInt) {
-    print_int(unbox_int(val))
+    print_int(val.unbox())
 }

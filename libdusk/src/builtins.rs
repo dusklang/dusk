@@ -28,16 +28,16 @@ impl Driver {
         }
     }
 
-    // #[path="core.BoxedInt"]
-    fn increment_boxed_int(&mut self, #[self] val: BoxedInt) {
+    #[path="core.BoxedInt"]
+    fn increment(&mut self, #[self] val: BoxedInt) {
         self.boxed_ints[val.index] += 1;
     }
 
-    fn unbox_int(&mut self, #[self] val: BoxedInt) -> usize {
+    #[path="core.BoxedInt"]
+    fn unbox(&mut self, #[self] val: BoxedInt) -> usize {
         self.boxed_ints[val.index]
     }
 
-    // #[path="core.BoxedInt"]
     fn print_int(&mut self, val: usize) {
         println!("int: {}", val);
     }
