@@ -1,13 +1,12 @@
 fn main() {
-    num :: core.BoxedInt.new(1)
-    print_boxed_int(num)
-    for i in 0..10 {
-        num.increment()
-    }
-    unboxed :: num.unbox()
-    print_boxed_int(num)
+    // Prints 68
+    print_int(build_mod().THE_CONSTANT)
 }
 
-fn print_boxed_int(val: core.BoxedInt) {
-    print_int(val.unbox())
+fn build_mod(): module {
+    b :: compiler.ModuleBuilder.new()
+
+    b.add_usize_constant("THE_CONSTANT", 68)
+
+    b.build()
 }

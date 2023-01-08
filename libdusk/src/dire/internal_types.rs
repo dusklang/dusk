@@ -2,17 +2,19 @@ use std::any::TypeId;
 
 use dusk_proc_macros::DuskBridge;
 
+use crate::dire::hir::NewNamespaceId;
 use crate::dire::ty::Type;
 use crate::driver::Driver;
 use crate::interpreter::Value;
 
 #[derive(DuskBridge, Copy, Clone)]
-#[module = "core"]
-pub struct BoxedInt {
-    pub index: usize
+#[module = "compiler"]
+pub struct ModuleBuilder {
+    pub namespace: NewNamespaceId,
 }
 
-
+#[derive(Copy, Clone)]
+pub struct Module(pub NewNamespaceId);
 
 pub trait DuskBridge: 'static {
     fn to_dusk_type(d: &Driver) -> Type {
@@ -26,7 +28,7 @@ pub trait DuskBridge: 'static {
 
 impl DuskBridge for () {
     fn register(d: &mut Driver) {
-        d.code.hir.bridged_types.insert(TypeId::of::<()>(), Type::Void);
+        d.code.hir.bridged_types.insert(TypeId::of::<Self>(), Type::Void);
     }
 
     fn bridge_from_dusk(_value: &Value, _d: &Driver) -> Self {
@@ -35,6 +37,34 @@ impl DuskBridge for () {
 
     fn bridge_to_dusk(self, _d: &Driver) -> Value {
         Value::Nothing
+    }
+}
+
+impl DuskBridge for &'static str {
+    fn register(d: &mut Driver) {
+        d.code.hir.bridged_types.insert(TypeId::of::<Self>(), Type::i8().ptr());
+    }
+
+    fn bridge_from_dusk(value: &Value, _d: &Driver) -> Self {
+        unsafe { &*(value.as_str() as *const str) }
+    }
+
+    fn bridge_to_dusk(self, _d: &Driver) -> Value {
+        unimplemented!("Rust strings are not null-terminated; use CStr instead")
+    }
+}
+
+impl DuskBridge for Module {
+    fn register(d: &mut Driver) {
+        d.code.hir.bridged_types.insert(TypeId::of::<Self>(), Type::Mod);
+    }
+
+    fn bridge_from_dusk(value: &Value, _d: &Driver) -> Self {
+        Self(value.as_mod())
+    }
+
+    fn bridge_to_dusk(self, _d: &Driver) -> Value {
+        Value::from_mod(self.0)
     }
 }
 
@@ -72,8 +102,9 @@ macro_rules! declare_internal_types {
 
 declare_internal_types!(
     register:
-        BoxedInt,
+        ModuleBuilder, Module,
         u8, u16, u32, u64, usize, i8, i16, i32, i64, isize,
+        &'static str,
         ()
 );
 

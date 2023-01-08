@@ -166,6 +166,10 @@ impl Value {
         }
     }
 
+    pub fn as_str(&self) -> &str {
+        unsafe { CStr::from_ptr(self.as_raw_ptr() as *const _).to_str().unwrap() }
+    }
+
     fn as_raw_ptr(&self) -> *mut u8 {
         unsafe { mem::transmute(usize::from_le_bytes(self.as_bytes().as_ref().try_into().unwrap())) }
     }
@@ -212,7 +216,7 @@ impl Value {
         }
     }
 
-    fn as_mod(&self) -> NewNamespaceId {
+    pub fn as_mod(&self) -> NewNamespaceId {
         match *self.as_internal() {
             InternalValue::Mod(id) => id,
             _ => panic!("Can't get non-module as module"),
@@ -327,7 +331,7 @@ impl Value {
         Self::from_internal(InternalValue::Ty(ty))
     }
 
-    fn from_mod(id: NewNamespaceId) -> Value {
+    pub fn from_mod(id: NewNamespaceId) -> Value {
         Self::from_internal(InternalValue::Mod(id))
     }
 }

@@ -1,6 +1,7 @@
 use std::mem;
 
 use smallvec::{smallvec, SmallVec};
+use num_bigint::BigInt;
 
 use crate::dire::internal_types;
 use crate::dire::source_info::SourceRange;
@@ -13,29 +14,39 @@ use crate::hir::ScopeState;
 use crate::autopop::AutoPopStackEntry;
 use crate::parser::ParseResult;
 
-use crate::dire::internal_types::BoxedInt;
+use crate::dire::internal_types::{ModuleBuilder, Module};
 
 use dusk_proc_macros::{ef, df, dusk_bridge};
 
 #[dusk_bridge]
 impl Driver {
-    #[path="core.BoxedInt"]
-    fn new(&mut self, value: usize) -> BoxedInt {
-        let index = self.boxed_ints.len();
-        self.boxed_ints.push(value);
-        BoxedInt {
-            index,
-        }
+    #[path="compiler.ModuleBuilder"]
+    fn new(&mut self) -> ModuleBuilder {
+        let namespace = self.code.hir.new_namespaces.push(NewNamespace::default());
+        ModuleBuilder { namespace }
     }
 
-    #[path="core.BoxedInt"]
-    fn increment(&mut self, #[self] val: BoxedInt) {
-        self.boxed_ints[val.index] += 1;
+    #[path="compiler.ModuleBuilder"]
+    fn add_usize_constant(&mut self, #[self] b: ModuleBuilder, name: &'static str, value: usize) {
+        let before = self.take_snapshot();
+
+        let name = self.interner.get_or_intern(name);
+        let konst = self.add_const_expr(Const::Int { lit: BigInt::from(value), ty: Type::usize() });
+        let ty = self.add_const_ty(Type::usize());
+        let decl_id = self.add_decl(Decl::Const(konst), name, Some(ty), SourceRange::default());
+        let static_decl = StaticDecl { name, num_params: 0, decl: decl_id };
+        self.code.hir.new_namespaces[b.namespace].static_decls.push(static_decl);
+
+        // NOTE: we currently have to do this every time this function is called, to be safe. Once we have proper collection types
+        // implemented in the language, the user can just build up an array of decls and add them all at once.
+        let new_code = self.get_new_code_since(before);
+        self.finalize_hir();
+        self.initialize_tir(&new_code);
     }
 
-    #[path="core.BoxedInt"]
-    fn unbox(&mut self, #[self] val: BoxedInt) -> usize {
-        self.boxed_ints[val.index]
+    #[path="compiler.ModuleBuilder"]
+    fn build(&mut self, #[self] b: ModuleBuilder) -> Module {
+        Module(b.namespace)
     }
 
     fn print_int(&mut self, val: usize) {
