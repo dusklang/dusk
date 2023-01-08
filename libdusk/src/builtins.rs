@@ -232,12 +232,21 @@ impl Driver {
         self.add_constant_decl(name, Const::Ty(ty));
     }
 
-    pub fn add_decl_to_path(&mut self, name: &str, path: &str, decl: Decl, _is_instance_method: bool, num_params: usize, explicit_ty: Option<ExprId>) {
+    pub fn add_decl_to_path(&mut self, name: &str, path: &str, decl: Decl, num_params: usize, explicit_ty: Option<ExprId>) {
         let scope = self.find_or_build_relative_ns_path(path);
         let name = self.interner.get_or_intern(name);
-        let decl_id = self.add_decl(decl, name, explicit_ty, SourceRange::default());
-        let decl = StaticDecl { name, num_params, decl: decl_id };
-        self.code.hir.new_namespaces[scope].static_decls.push(decl);
+        if let Decl::MethodIntrinsic(id) = decl {
+            let decl_id = self.add_decl(Decl::Intrinsic(id), name, explicit_ty, SourceRange::default());
+            let static_decl = StaticDecl { name, num_params, decl: decl_id };
+            self.code.hir.new_namespaces[scope].static_decls.push(static_decl);
+
+            let decl_id = self.add_decl(decl, name, explicit_ty, SourceRange::default());
+            self.code.hir.new_namespaces[scope].instance_decls.push(decl_id);
+        } else {
+            let decl_id = self.add_decl(decl, name, explicit_ty, SourceRange::default());
+            let static_decl = StaticDecl { name, num_params, decl: decl_id };
+            self.code.hir.new_namespaces[scope].static_decls.push(static_decl);
+        }
     }
 
     fn add_module_decl(&mut self, name: &str) -> AutoPopStackEntry<ScopeState, ModScopeNsId> {

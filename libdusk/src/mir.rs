@@ -35,6 +35,7 @@ enum Decl {
     PatternBinding { id: PatternBindingDeclId },
     LegacyIntrinsic(LegacyIntrinsic, Type),
     Intrinsic(IntrinsicId),
+    MethodIntrinsic(IntrinsicId),
     Static(StaticId),
     Const(Const),
     Field { index: usize },
@@ -563,6 +564,12 @@ impl DriverRef<'_> {
                 self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
+            hir::Decl::MethodIntrinsic(intr) => {
+                drop(d);
+                let decl = Decl::MethodIntrinsic(intr);
+                self.write().mir.decls.insert(id, decl.clone());
+                decl
+            },
             hir::Decl::Static(expr) => {
                 drop(d);
                 let name = self.read().display_item(id).to_string();
@@ -956,6 +963,7 @@ struct FunctionBuilder {
 enum DeclRef {
     LegacyIntrinsic { intrinsic: LegacyIntrinsic, ty: Type },
     Intrinsic(IntrinsicId),
+    MethodIntrinsic(IntrinsicId),
     Function { func: FuncId, generic_args: Vec<Type> },
     ExternFunction { func: ExternFunctionRef },
     #[allow(unused)]
@@ -1691,6 +1699,7 @@ impl DriverRef<'_> {
                 DeclRef::LegacyIntrinsic { intrinsic: intr, ty }
             },
             Decl::Intrinsic(id) => DeclRef::Intrinsic(id),
+            Decl::MethodIntrinsic(id) => DeclRef::MethodIntrinsic(id),
             Decl::Const(ref konst) => {
                 let konst = konst.clone();
                 DeclRef::Value(self.write().push_instr_with_name(b, Instr::Const(konst), expr, name).direct())
@@ -2028,6 +2037,23 @@ impl DriverRef<'_> {
                     },
                     DeclRef::Intrinsic(intr) => {
                         let arguments = get_args(self, b, tp, &arguments);
+                        self.write().push_instr(b, Instr::Intrinsic { arguments, intr }, expr).direct()
+                    },
+                    DeclRef::MethodIntrinsic(intr) => {
+                        let d = self.read();
+                        let Expr::DeclRef { id: decl_ref_id, .. } = ef!(d, callee.hir) else {
+                            panic!("expected declref callee");
+                        };
+                        drop(d);
+                        let base = self.read().get_base(decl_ref_id);
+                        let base_ty = tp.ty(base);
+                        let base = self.build_expr(b, base, Context::default(), tp);
+                        let param_tys = self.read().code.hir.intrinsics[intr].param_tys.clone();
+                        // TODO: implement actual typechecking for this!!!!!!!!!!!!!!!
+                        assert_eq!(tp.get_evaluated_type(param_tys[0]), base_ty);
+                        let base = self.write().handle_indirection(b, base);
+                        let mut arguments = get_args(self, b, tp, &arguments);
+                        arguments.insert(0, base);
                         self.write().push_instr(b, Instr::Intrinsic { arguments, intr }, expr).direct()
                     },
                     DeclRef::EnumVariantWithPayload { enuum, index, .. } => {

@@ -1542,7 +1542,11 @@ impl Driver {
             &hir::Decl::Intrinsic(intr) => {
                 let param_tys = &self.code.hir.intrinsics[intr].param_tys;
                 self.function_decl_type(param_tys, explicit_ty, tp)
-            }
+            },
+            &hir::Decl::MethodIntrinsic(intr) => {
+                let param_tys = &self.code.hir.intrinsics[intr].param_tys[1..];
+                self.function_decl_type(param_tys, explicit_ty, tp)
+            },
             _ => explicit_ty,
         }
     }

@@ -282,6 +282,7 @@ pub enum Decl {
     },
     LegacyIntrinsic { intr: LegacyIntrinsic, param_tys: SmallVec<[ExprId; 2]>, function_like: bool },
     Intrinsic(IntrinsicId),
+    MethodIntrinsic(IntrinsicId),
     Static(ExprId),
     Const(ExprId),
     Field { strukt: StructId, index: usize },

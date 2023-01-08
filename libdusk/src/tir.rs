@@ -629,7 +629,7 @@ impl Driver {
             // TODO: Add parameter and field TIR items for (at least) checking that the type of the param is valid
             // LoopBinding doesn't require a TIR decl because it is current checked by its parent `For` expr
             hir::Decl::Parameter { .. } | hir::Decl::Field { .. } | hir::Decl::Variant { .. } |
-                hir::Decl::ReturnValue | hir::Decl::LegacyIntrinsic { .. } | hir::Decl::Intrinsic(_) | hir::Decl::InternalField(_) | hir::Decl::LoopBinding { .. } => {},
+                hir::Decl::ReturnValue | hir::Decl::LegacyIntrinsic { .. } | hir::Decl::Intrinsic(_) | hir::Decl::MethodIntrinsic(_) | hir::Decl::InternalField(_) | hir::Decl::LoopBinding { .. } => {},
             hir::Decl::GenericParam(_) => {
                 assert_eq!(level, 0);
                 unit.generic_params.push(GenericParam { id });
@@ -686,6 +686,10 @@ impl Driver {
                     let param_tys = self.code.hir.intrinsics[id].param_tys.clone();
                     (false, param_tys)
                 },
+                hir::Decl::MethodIntrinsic(id) => {
+                    let param_tys = SmallVec::from(&self.code.hir.intrinsics[id].param_tys[1..]);
+                    (false, param_tys)
+                },
                 hir::Decl::Static(_) => (
                     true,
                     SmallVec::new(),
@@ -723,7 +727,7 @@ impl Driver {
             let id = df!(decl_id.item);
             match df!(decl_id.hir) {
                 // NOTE: type 1 dependencies are currently added to LoopBinding by its parent `for` loop; see below.
-                hir::Decl::Parameter { .. } | hir::Decl::LegacyIntrinsic { .. } | hir::Decl::Intrinsic(_) | hir::Decl::Field { .. } | hir::Decl::ReturnValue | hir::Decl::GenericParam(_) | hir::Decl::Variant { .. } | hir::Decl::ComputedPrototype { .. } | hir::Decl::InternalField(_) | hir::Decl::LoopBinding { .. } => {},
+                hir::Decl::Parameter { .. } | hir::Decl::LegacyIntrinsic { .. } | hir::Decl::Intrinsic(_) | hir::Decl::MethodIntrinsic(_) | hir::Decl::Field { .. } | hir::Decl::ReturnValue | hir::Decl::GenericParam(_) | hir::Decl::Variant { .. } | hir::Decl::ComputedPrototype { .. } | hir::Decl::InternalField(_) | hir::Decl::LoopBinding { .. } => {},
                 hir::Decl::PatternBinding { id: _binding_id, .. } => {
                     // let scrutinee = self.code.hir.pattern_binding_decls[binding_id].scrutinee;
 
@@ -871,7 +875,7 @@ impl Driver {
                                 add_eval_dep!(id, ty);
                             }
                         },
-                        hir::Decl::Intrinsic(intr) => {
+                        hir::Decl::Intrinsic(intr) | hir::Decl::MethodIntrinsic(intr) => {
                             let param_tys = self.code.hir.intrinsics[intr].param_tys.clone();
                             for ty in param_tys {
                                 add_eval_dep!(id, ty);

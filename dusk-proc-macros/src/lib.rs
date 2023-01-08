@@ -285,7 +285,7 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
                         let ty = Type::Internal(type_id);
                         let konst = Const::Ty(ty.clone());
                         let expr = d.add_const_expr(konst);
-                        d.add_decl_to_path(#struct_name_as_string, #module, Decl::Const(expr), false, 0, None);
+                        d.add_decl_to_path(#struct_name_as_string, #module, Decl::Const(expr), 0, None);
 
                         d.code.hir.bridged_types.insert(TypeId::of::<Self>(), ty);
                     }
@@ -425,6 +425,11 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                         } else {
                             quote! { Driver::#mangled_name }
                         };
+                        let decl = if has_self {
+                            quote! { Decl::MethodIntrinsic(intr_id) }
+                        } else {
+                            quote! { Decl::Intrinsic(intr_id) }
+                        };
                         registrations.push(
                             quote! {
                                 fn thunk(d: &mut DriverRef, parameters: Vec<&Value>) -> Value {
@@ -445,7 +450,7 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                                 };
                                 let ret_ty = d.add_const_ty(ret_ty);
                                 let intr_id = d.code.hir.intrinsics.push(intr);
-                                d.add_decl_to_path(#name, #path, Decl::Intrinsic(intr_id), #has_self, #num_params, Some(ret_ty));
+                                d.add_decl_to_path(#name, #path, #decl, #num_params, Some(ret_ty));
                             }
                         );
                     },
