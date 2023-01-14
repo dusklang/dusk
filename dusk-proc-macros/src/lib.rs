@@ -253,53 +253,74 @@ pub fn df(input: TokenStream) -> TokenStream {
     }
 }
 
-#[proc_macro_derive(DuskBridge, attributes(module))]
+#[proc_macro_derive(DuskBridge, attributes(module, name))]
 pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
     let item: Item = syn::parse(item).unwrap();
-    match item {
-        Item::Struct(strukt) => {
-            let Some(module) = strukt.attrs.iter()
-                .find(|attr| attr.path.is_ident("module"))
-                .map(|attr| {
-                    match attr.parse_meta().unwrap() {
-                        Meta::Path(_) | Meta::List(_) => panic!("expected module path in 'module' attribute, like #[module = \"the.module\"]"),
-                        Meta::NameValue(attr) => match attr.lit {
-                            Lit::Str(lit) => lit,
-                            _ => panic!("expected string literal for module path")
-                        }
-                    }
-                })
-            else {
-                panic!("expected 'module' attribute to specify where to put bridged type")
-            };
-            let struct_name = strukt.ident;
-            let struct_name_as_string = LitStr::new(&struct_name.to_string(), struct_name.span());
-            quote! {
-                impl crate::dire::internal_types::DuskBridge for #struct_name {
-                    fn register(d: &mut crate::driver::Driver) {
-                        use crate::dire::{hir::*, ty::*, mir::*};
-
-                        let namespace = d.code.hir.new_namespaces.push(NewNamespace::default());
-                        let internal_type = InternalType { name: String::from(#struct_name_as_string), size: std::mem::size_of::<#struct_name>(), namespace };
-                        let type_id = d.code.hir.internal_types.push(internal_type);
-                        let ty = Type::Internal(type_id);
-                        let konst = Const::Ty(ty.clone());
-                        let expr = d.add_const_expr(konst);
-                        d.add_decl_to_path(#struct_name_as_string, #module, Decl::Const(expr), 0, None);
-
-                        d.code.hir.bridged_types.insert(TypeId::of::<Self>(), ty);
-                    }
-
-                    fn bridge_from_dusk(value: &Value, _d: &Driver) -> Self {
-                        unsafe { *value.as_arbitrary_value() }
-                    }
-
-                    fn bridge_to_dusk(self, d: &Driver) -> Value {
-                        unsafe { Value::from_arbitrary_value(self) }
+    fn derive(attrs: Vec<Attribute>, decl_name: syn::Ident) -> TokenStream {
+        let Some(module) = attrs.iter()
+            .find(|attr| attr.path.is_ident("module"))
+            .map(|attr| {
+                match attr.parse_meta().unwrap() {
+                    Meta::Path(_) | Meta::List(_) => panic!("expected module path in 'module' attribute, like #[module = \"the.module\"]"),
+                    Meta::NameValue(attr) => match attr.lit {
+                        Lit::Str(lit) => lit,
+                        _ => panic!("expected string literal for module path")
                     }
                 }
-            }.into()
-        },
+            })
+        else {
+            panic!("expected 'module' attribute to specify where to put bridged type")
+        };
+        let bridged_name = attrs.iter()
+            .find(|attr| attr.path.is_ident("name"))
+            .map(|attr| {
+                match attr.parse_meta().unwrap() {
+                    Meta::Path(_) | Meta::List(_) => panic!("expected bridged type name in 'name' attribute, like #[name = \"SomeTypeName\"]"),
+                    Meta::NameValue(attr) => match attr.lit {
+                        Lit::Str(lit) => lit,
+                        _ => panic!("expected string literal for bridged type name")
+                    }
+                }
+            })
+            .unwrap_or_else(|| LitStr::new(&decl_name.to_string(), decl_name.span()));
+        quote! {
+            impl crate::dire::internal_types::DuskBridge for #decl_name {
+                fn register(d: &mut crate::driver::Driver) {
+                    use std::any::TypeId;
+                    use crate::dire::{hir::*, ty::*, mir::*};
+
+                    let namespace = d.code.hir.new_namespaces.push(NewNamespace::default());
+                    let internal_type = InternalType { name: String::from(#bridged_name), size: std::mem::size_of::<#decl_name>(), namespace };
+                    let type_id = d.code.hir.internal_types.push(internal_type);
+                    let ty = Type::Internal(type_id);
+                    let konst = Const::Ty(ty.clone());
+                    let expr = d.add_const_expr(konst);
+                    d.add_decl_to_path(#bridged_name, #module, Decl::Const(expr), 0, None);
+
+                    d.code.hir.bridged_types.insert(TypeId::of::<Self>(), ty);
+                }
+
+                fn bridge_from_dusk(value: &crate::interpreter::Value, _d: &crate::driver::Driver) -> Self {
+                    use std::{mem, ptr};
+                    unsafe {
+                        // I do this in order to make non-Copy types "work".
+                        // This is extremely unsafe.
+                        let addr: &Self = value.as_arbitrary_value();
+                        let mut val = mem::MaybeUninit::uninit();
+                        ptr::copy(addr, val.as_mut_ptr(), 1);
+                        val.assume_init()
+                    }
+                }
+
+                fn bridge_to_dusk(self, d: &crate::driver::Driver) -> crate::interpreter::Value {
+                    unsafe { crate::interpreter::Value::from_arbitrary_value(self) }
+                }
+            }
+        }.into()
+    }
+    match item {
+        Item::Struct(strukt) => derive(strukt.attrs, strukt.ident),
+        Item::Enum(enuum) => derive(enuum.attrs, enuum.ident),
         _ => panic!("unable to bridge type: unknown item kind"),
     }
 }

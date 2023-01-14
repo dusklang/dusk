@@ -1,12 +1,17 @@
 fn main() {
     // Prints 68
     print_int(build_mod().THE_CONSTANT)
+
+    // Should fail, but only after we call dlsym and it returns null
+    build_mod().this_function_doesnt_really_exist()
 }
 
 fn build_mod(): module {
     b :: compiler.ModuleBuilder.new()
 
     b.add_usize_constant("THE_CONSTANT", 68)
+
+    m :: compiler.ExternFunctionBuilder.new("this_function_doesnt_really_exist", void, "libSystem.dylib")
 
     b.build()
 }

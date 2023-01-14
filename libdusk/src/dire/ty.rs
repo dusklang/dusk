@@ -2,10 +2,10 @@ use std::fmt;
 
 use index_vec::define_index_type;
 
-use crate::dire::arch::Arch;
-use crate::dire::hir::{StructId, EnumId, GenericParamId};
+use dusk_proc_macros::DuskBridge;
 
-use super::hir::NewNamespaceId;
+use crate::dire::arch::Arch;
+use crate::dire::hir::{StructId, EnumId, GenericParamId, NewNamespaceId};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum IntWidth {
@@ -77,7 +77,9 @@ impl From<InternalTypeId> for Type {
 }
 
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(DuskBridge, Clone, PartialEq, Eq, Hash)]
+#[module = ""]
+#[name="type"]
 pub enum Type {
     Error,
     Int {

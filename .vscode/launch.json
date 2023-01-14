@@ -15,12 +15,12 @@
                     "--package=dusklang"
                 ],
                 "filter": {
-                    "name": "dusklang",
+                    "name": "dusk",
                     "kind": "bin"
                 }
             },
-            "args": ["main.dusk"],
-            "cwd": "../dusk-windows"
+            "args": ["samples/internal_types.dusk"]
+            // "cwd": "../dusk-windows"
             // "args": [
             //     "open_a_window.dusk"
             // ]

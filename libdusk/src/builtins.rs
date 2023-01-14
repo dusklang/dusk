@@ -14,7 +14,7 @@ use crate::hir::ScopeState;
 use crate::autopop::AutoPopStackEntry;
 use crate::parser::ParseResult;
 
-use crate::dire::internal_types::{ModuleBuilder, Module};
+use crate::dire::internal_types::{ModuleBuilder, Module, ExternFunctionBuilder};
 
 use dusk_proc_macros::{ef, df, dusk_bridge};
 
@@ -47,6 +47,11 @@ impl Driver {
     #[path="compiler.ModuleBuilder"]
     fn build(&mut self, #[self] b: ModuleBuilder) -> Module {
         Module(b.namespace)
+    }
+
+    #[path="compiler.ExternFunctionBuilder"]
+    fn new(&mut self, name: &'static str, ret_ty: Type, lib_name: &'static str) -> ExternFunctionBuilder {
+        ExternFunctionBuilder { name: name.to_string(), ret_ty, lib_name: lib_name.to_string() }
     }
 
     fn print_int(&mut self, val: usize) {
@@ -185,7 +190,6 @@ impl Driver {
         self.add_constant_type_decl("never", Type::Never);
         self.add_constant_type_decl("bool", Type::Bool);
         self.add_constant_type_decl("void", Type::Void);
-        self.add_constant_type_decl("type", Type::Ty);
         self.add_constant_type_decl("module", Type::Mod);
 
         let compiler_module = self.add_module_decl("compiler");

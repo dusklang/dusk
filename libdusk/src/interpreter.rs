@@ -24,7 +24,7 @@ use crate::dire::arch::Arch;
 use crate::dire::hir::{LegacyIntrinsic, EnumId, GenericParamId, ExternFunctionRef, NewNamespaceId};
 use crate::dire::mir::{Const, Instr, InstrId, FuncId, StaticId, ExternFunction};
 use crate::dire::ty::{Type, FunctionType, QualType, IntWidth, FloatWidth, StructType, LegacyInternalType};
-use crate::dire::{OpId, BlockId};
+use crate::dire::{OpId, BlockId, DuskBridge};
 use crate::dire::{InternalField, internal_fields};
 
 use crate::driver::{DRIVER, Driver, DriverRef};
@@ -37,7 +37,6 @@ use crate::arm64::*;
 
 #[derive(Debug, Clone)]
 pub enum InternalValue {
-    Ty(Type),
     Mod(NewNamespaceId),
     FunctionPointer { generic_arguments: Vec<Type>, func: FuncId },
     StrLit(CString),
@@ -210,10 +209,7 @@ impl Value {
     }
 
     fn as_ty(&self) -> Type {
-        match self.as_internal() {
-            InternalValue::Ty(ty) => ty.clone(),
-            _ => panic!("Can't get non-type as type"),
-        }
+        unsafe { dbg!(self.as_arbitrary_value::<Type>()).clone() }
     }
 
     pub fn as_mod(&self) -> NewNamespaceId {
@@ -275,7 +271,7 @@ impl Value {
                 Value::from_usize(ptr as usize)
             },
             Const::StrLit(ref lit) => Value::from_internal(InternalValue::StrLit(lit.clone())),
-            Const::Ty(ref ty) => Value::from_ty(ty.clone()),
+            Const::Ty(ref ty) => Value::from_new_internal(ty.clone(), driver),
             Const::Void => Value::Nothing,
             Const::Mod(id) => Value::from_mod(id),
             Const::BasicVariant { enuum, index } => Value::from_variant(driver, enuum, index, Value::Nothing),
@@ -319,16 +315,16 @@ impl Value {
         Value::Internal { val, indirection: 0 }
     }
 
+    fn from_new_internal<T: DuskBridge>(val: T, d: &Driver) -> Value {
+        T::bridge_to_dusk(val, d)
+    }
+
     pub unsafe fn from_arbitrary_value<T>(val: T) -> Value {
         let addr = &val as *const T as *const u8;
         let bytes = unsafe {
             slice::from_raw_parts(addr, mem::size_of::<T>())
         };
         Value::from_bytes(bytes)
-    }
-
-    fn from_ty(ty: Type) -> Value {
-        Self::from_internal(InternalValue::Ty(ty))
     }
 
     pub fn from_mod(id: NewNamespaceId) -> Value {
@@ -1109,7 +1105,8 @@ impl DriverRef<'_> {
                 },
                 &Instr::GenericParam(id) => {
                     let ty = Type::GenericParam(id);
-                    Value::from_ty(frame.canonicalize_type(&ty))
+                    let ty = frame.canonicalize_type(&ty);
+                    Value::from_new_internal(ty, &d)
                 },
                 &Instr::LegacyIntrinsic { ref arguments, intr, .. } => {
                     match intr {
@@ -1460,15 +1457,16 @@ impl DriverRef<'_> {
                     Value::from_usize(statik as usize)
                 },
                 &Instr::Pointer { op, is_mut } => {
-                    Value::from_ty(frame.get_val(op, &*self.read()).as_ty().ptr_with_mut(is_mut))
+                    let ty = frame.get_val(op, &*self.read()).as_ty().ptr_with_mut(is_mut);
+                    Value::from_new_internal(ty, &d)
                 },
                 &Instr::FunctionTy { ref param_tys, ret_ty } => {
                     let param_tys = param_tys.iter()
                         .map(|&ty| frame.get_val(ty, &*self.read()).as_ty())
                         .collect();
                     let ret_ty = frame.get_val(ret_ty, &*self.read()).as_ty();
-
-                    Value::from_ty(Type::Function(FunctionType { param_tys, return_ty: Box::new(ret_ty) }))
+                    let ty = Type::Function(FunctionType { param_tys, return_ty: Box::new(ret_ty) });
+                    Value::from_new_internal(ty, &d)
                 }
                 &Instr::Struct { ref fields, id } => {
                     let mut field_tys = Vec::new();
@@ -1480,7 +1478,7 @@ impl DriverRef<'_> {
                         field_tys,
                         identity: id,
                     };
-                    Value::from_ty(Type::Struct(strukt))
+                    Value::from_new_internal(Type::Struct(strukt), &self.read())
                 },
                 &Instr::Enum { ref variants, id } => {
                     if !self.read().code.mir.enums.contains_key(&id) {
@@ -1495,7 +1493,7 @@ impl DriverRef<'_> {
                             layout,
                         );
                     }
-                    Value::from_ty(Type::Enum(id))
+                    Value::from_new_internal(Type::Enum(id), &self.read())
                 }
                 &Instr::StructLit { ref fields, id } => {
                     let frame = stack.last().unwrap();
