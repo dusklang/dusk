@@ -197,10 +197,14 @@ impl tir::AssignedDecl {
             explicit_ty
         } else if let Ok(ty) = tp.constraints(self.root_expr).solve() {
             ty.ty
+        } else if tp.constraints(self.root_expr).is_error() {
+            // We should've already reported this error, so don't add to the noise.
+            Type::Error
         } else {
+            // TODO: more detail!
             let range = df!(driver, self.decl_id.range);
             driver.diag.push(
-                Error::new("failed to infer type for assigned declaration")
+                Error::new("ambiguous type for assigned declaration")
                     .adding_primary_range(range, "declaration here")
             );
             Type::Error
