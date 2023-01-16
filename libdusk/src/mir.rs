@@ -1059,7 +1059,7 @@ impl DriverRef<'_> {
                         self.write().push_instr(&mut b, Instr::Ret(result), result);
                         self.write().end_current_bb(&b);
                     },
-                    Instr::DiscriminantAccess { val } => {
+                    Instr::DiscriminantAccess { val } | Instr::SignExtend(val, _) | Instr::ZeroExtend(val, _) => {
                         let mut copier = MirCopier::default();
                         self.copy_instruction_if_needed(&mut b, &mut copier, val);
                         let result = self.copy_instruction_if_needed(&mut b, &mut copier, op);
