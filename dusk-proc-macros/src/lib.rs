@@ -253,7 +253,7 @@ pub fn df(input: TokenStream) -> TokenStream {
     }
 }
 
-#[proc_macro_derive(DuskBridge, attributes(module, name))]
+#[proc_macro_derive(DuskBridge, attributes(module, name, variant))]
 pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
     let item: Item = syn::parse(item).unwrap();
     fn derive(attrs: Vec<Attribute>, decl_name: syn::Ident) -> TokenStream {
@@ -271,6 +271,17 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
         else {
             panic!("expected 'module' attribute to specify where to put bridged type")
         };
+        let variant = attrs.iter()
+            .find(|attr| attr.path.is_ident("variant"))
+            .map(|attr| {
+                match attr.parse_meta().unwrap() {
+                    Meta::Path(_) | Meta::List(_) => panic!("expected `Type` variant in 'variant' attribute, like #[variant = \"Ty\"]"),
+                    Meta::NameValue(attr) => match attr.lit {
+                        Lit::Str(lit) => lit,
+                        _ => panic!("expected string literal for bridged `Type` name")
+                    }
+                }
+            });
         let bridged_name = attrs.iter()
             .find(|attr| attr.path.is_ident("name"))
             .map(|attr| {
@@ -283,16 +294,28 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
                 }
             })
             .unwrap_or_else(|| LitStr::new(&decl_name.to_string(), decl_name.span()));
+        
+        let get_ty_to_register = if let Some(variant) = variant {
+            let name = syn::Ident::new(&variant.value(), variant.span());
+            quote! {
+                let ty = Type::#name;
+            }
+        } else {
+            quote! {
+                let namespace = d.code.hir.new_namespaces.push(NewNamespace::default());
+                let internal_type = InternalType { name: String::from(#bridged_name), size: std::mem::size_of::<#decl_name>(), namespace };
+                let type_id = d.code.hir.internal_types.push(internal_type);
+                let ty = Type::Internal(type_id);
+            }
+        };
         quote! {
             impl crate::dire::internal_types::DuskBridge for #decl_name {
                 fn register(d: &mut crate::driver::Driver) {
                     use std::any::TypeId;
                     use crate::dire::{hir::*, ty::*, mir::*};
 
-                    let namespace = d.code.hir.new_namespaces.push(NewNamespace::default());
-                    let internal_type = InternalType { name: String::from(#bridged_name), size: std::mem::size_of::<#decl_name>(), namespace };
-                    let type_id = d.code.hir.internal_types.push(internal_type);
-                    let ty = Type::Internal(type_id);
+                    #get_ty_to_register // defines `ty` variable used below
+
                     let konst = Const::Ty(ty.clone());
                     let expr = d.add_const_expr(konst);
                     d.add_decl_to_path(#bridged_name, #module, Decl::Const(expr), 0, None);

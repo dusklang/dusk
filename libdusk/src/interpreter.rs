@@ -209,7 +209,7 @@ impl Value {
     }
 
     fn as_ty(&self) -> Type {
-        unsafe { dbg!(self.as_arbitrary_value::<Type>()).clone() }
+        unsafe { self.as_arbitrary_value::<Type>().clone() }
     }
 
     pub fn as_mod(&self) -> NewNamespaceId {

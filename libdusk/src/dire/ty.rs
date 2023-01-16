@@ -79,7 +79,8 @@ impl From<InternalTypeId> for Type {
 
 #[derive(DuskBridge, Clone, PartialEq, Eq, Hash)]
 #[module = ""]
-#[name="type"]
+#[name = "type"]
+#[variant = "Ty"]
 pub enum Type {
     Error,
     Int {

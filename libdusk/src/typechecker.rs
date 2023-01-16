@@ -963,7 +963,12 @@ impl tir::Expr<tir::DeclRef> {
                     .adding_primary_range(driver.get_range(self.id), "referenced here");
                 for &overload in &overloads.nonviable_overloads {
                     let range = df!(driver, overload.range);
+                    let crate::dire::hir::Decl::Intrinsic(id) = df!(driver, overload.hir) else { panic!() };
+                    for &param_ty in &driver.code.hir.intrinsics[id].param_tys {
+                        dbg!(tp.get_evaluated_type(param_ty));
+                    }
                     err.add_secondary_range(range, "non-viable overload found here");
+                    println!("{:?}", df!(driver, overload.hir));
                 }
                 driver.diag.push(err);
             }
@@ -1000,6 +1005,7 @@ impl tir::Expr<tir::Call> {
         let callee_one_of = tp.constraints(self.callee).one_of();
         overloads.overloads.retain(|&overload| {
             if decls[overload].param_tys.len() != self.args.len() {
+                if matches!(df!(driver, overload.hir), crate::dire::hir::Decl::Intrinsic(_)) { dbg!(); }
                 overloads.nonviable_overloads.push(overload);
                 i += 1;
                 return false;
@@ -1007,6 +1013,7 @@ impl tir::Expr<tir::Call> {
 
             for (arg, ty) in self.args.iter().copied().zip(decls[overload].param_tys.iter().copied()) {
                 if driver.can_unify_to(tp, arg, ty).is_err() {
+                    if matches!(df!(driver, overload.hir), crate::dire::hir::Decl::Intrinsic(_)) { dbg!(tp.get_evaluated_type(ty)); }
                     overloads.nonviable_overloads.push(overload);
                     i += 1;
                     return false;
