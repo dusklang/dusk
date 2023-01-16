@@ -324,7 +324,9 @@ impl Value {
         let bytes = unsafe {
             slice::from_raw_parts(addr, mem::size_of::<T>())
         };
-        Value::from_bytes(bytes)
+        let value = Value::from_bytes(bytes);
+        std::mem::forget(val);
+        value
     }
 
     pub fn from_mod(id: NewNamespaceId) -> Value {

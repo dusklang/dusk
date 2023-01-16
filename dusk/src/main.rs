@@ -1,8 +1,8 @@
 use clap::{Parser, ArgEnum};
-use libdusk::new_code::NewCode;
 use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 
+use libdusk::new_code::NewCode;
 use libdusk::dire::ty::Type;
 use libdusk::dire::mir::FuncId;
 use libdusk::dire::arch::Arch;
