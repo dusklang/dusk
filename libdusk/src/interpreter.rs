@@ -169,7 +169,7 @@ impl Value {
         unsafe { CStr::from_ptr(self.as_raw_ptr() as *const _).to_str().unwrap() }
     }
 
-    fn as_raw_ptr(&self) -> *mut u8 {
+    pub fn as_raw_ptr(&self) -> *mut u8 {
         unsafe { mem::transmute(usize::from_le_bytes(self.as_bytes().as_ref().try_into().unwrap())) }
     }
 

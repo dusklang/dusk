@@ -339,6 +339,28 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
                     unsafe { crate::interpreter::Value::from_arbitrary_value(self) }
                 }
             }
+
+            impl crate::dire::internal_types::DuskBridge for &'static mut #decl_name {
+                fn register(d: &mut crate::driver::Driver) {
+                    use std::any::TypeId;
+                    use crate::dire::{hir::*, ty::*, mir::*};
+
+                    let base_ty = d.code.hir.bridged_types.get(&TypeId::of::<#decl_name>()).unwrap().clone();
+
+                    d.code.hir.bridged_types.insert(TypeId::of::<Self>(), base_ty.mut_ptr());
+                }
+
+                fn bridge_from_dusk(value: &crate::interpreter::Value, _d: &crate::driver::Driver) -> Self {
+                    use std::{mem, ptr};
+                    unsafe {
+                        &mut *(value.as_raw_ptr() as *mut #decl_name)
+                    }
+                }
+
+                fn bridge_to_dusk(self, d: &crate::driver::Driver) -> crate::interpreter::Value {
+                    unsafe { crate::interpreter::Value::from_arbitrary_value(self) }
+                }
+            }
         }.into()
     }
     match item {

@@ -1,6 +1,7 @@
 use std::ffi::CString;
 use std::mem;
 
+use internal_types::ExternParam;
 use smallvec::{smallvec, SmallVec};
 use num_bigint::BigInt;
 
@@ -53,7 +54,11 @@ impl Driver {
         // TODO: also, rename ExternMod, since it no longer corresponds to a lexical module in the source code
         let name = self.interner.get_or_intern(&func_builder.name);
         let ret_ty = self.add_const_ty(func_builder.ret_ty);
-        let param_tys = SmallVec::new();
+        let mut param_tys = SmallVec::new();
+        for param in func_builder.params {
+            let ty = self.add_const_ty(param.ty);
+            param_tys.push(ty);
+        }
         let library_path = self.add_const_expr(Const::StrLit(CString::new(func_builder.lib_name).unwrap()));
         let func = ExternFunction {
             name: func_builder.name,
@@ -72,7 +77,7 @@ impl Driver {
         self.code.hir.new_namespaces[b.namespace].static_decls.push(static_decl);
 
         // NOTE: we currently have to do this every time this function is called, to be safe. Once we have proper collection types
-        // implemented in the language, the user can just build up an array of decls and add them all at once.
+        // implemented in the language, the user can just build up an array and add them all at once.
         let new_code = self.get_new_code_since(before);
         self.finalize_hir();
         self.initialize_tir(&new_code);
@@ -85,7 +90,12 @@ impl Driver {
 
     #[path="compiler.ExternFunctionBuilder"]
     fn new(&mut self, name: &'static str, ret_ty: Type, lib_name: &'static str) -> ExternFunctionBuilder {
-        ExternFunctionBuilder { name: name.to_string(), ret_ty, lib_name: lib_name.to_string() }
+        ExternFunctionBuilder { name: name.to_string(), ret_ty, lib_name: lib_name.to_string(), params: Default::default(), }
+    }
+
+    #[path="compiler.ExternFunctionBuilder"]
+    fn add_param(&mut self, #[self] b: &mut ExternFunctionBuilder, name: &'static str, ty: Type) {
+        b.params.push(ExternParam { name: name.to_string(), ty });
     }
 
     fn print_int(&mut self, val: usize) {

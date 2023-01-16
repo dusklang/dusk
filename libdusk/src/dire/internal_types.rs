@@ -13,12 +13,19 @@ pub struct ModuleBuilder {
     pub namespace: NewNamespaceId,
 }
 
+#[derive(Clone)]
+pub struct ExternParam {
+    pub name: String,
+    pub ty: Type,
+}
+
 #[derive(DuskBridge, Clone)]
 #[module = "compiler"]
 pub struct ExternFunctionBuilder {
     pub name: String,
     pub ret_ty: Type,
     pub lib_name: String,
+    pub params: Vec<ExternParam>,
 }
 
 #[derive(Copy, Clone)]
@@ -27,6 +34,7 @@ pub struct Module(pub NewNamespaceId);
 pub trait DuskBridge: 'static {
     fn to_dusk_type(d: &Driver) -> Type {
         let id = TypeId::of::<Self>();
+
         d.code.hir.bridged_types[&id].clone()
     }
     fn register(d: &mut Driver);
@@ -110,7 +118,7 @@ macro_rules! declare_internal_types {
 
 declare_internal_types!(
     register:
-        ModuleBuilder, ExternFunctionBuilder,
+        ModuleBuilder, ExternFunctionBuilder, &'static mut ExternFunctionBuilder,
         Module, Type,
         u8, u16, u32, u64, usize, i8, i16, i32, i64, isize,
         &'static str,
