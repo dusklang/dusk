@@ -2047,10 +2047,10 @@ impl DriverRef<'_> {
                         drop(d);
                         let base = self.read().get_base(decl_ref_id);
                         let base_ty = tp.ty(base);
-                        let base = self.build_expr(b, base, Context::default(), tp);
-                        let param_tys = self.read().code.hir.intrinsics[intr].param_tys.clone();
-                        // TODO: implement actual typechecking for this!!!!!!!!!!!!!!!
-                        assert_eq!(tp.get_evaluated_type(param_tys[0]), base_ty);
+                        let self_ty = self.read().code.hir.intrinsics[intr].param_tys[0];
+                        let self_ty = tp.get_evaluated_type(self_ty);
+                        let indirection = !base_ty.trivially_convertible_to(self_ty) as i8;
+                        let base = self.build_expr(b, base, Context::new(indirection, DataDest::Read, ControlDest::Continue), tp);
                         let base = self.write().handle_indirection(b, base);
                         let mut arguments = get_args(self, b, tp, &arguments);
                         arguments.insert(0, base);
