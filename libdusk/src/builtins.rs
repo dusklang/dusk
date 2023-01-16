@@ -1,3 +1,4 @@
+use std::ffi::CString;
 use std::mem;
 
 use smallvec::{smallvec, SmallVec};
@@ -5,7 +6,7 @@ use num_bigint::BigInt;
 
 use crate::dire::internal_types;
 use crate::dire::source_info::SourceRange;
-use crate::dire::hir::{ModScopeNs, LegacyIntrinsic, Expr, Decl, VOID_TYPE, ModScopeNsId, NewNamespaceId, EnumId, ExprId, VariantDecl, StaticDecl, NewNamespace};
+use crate::dire::hir::{ModScopeNs, LegacyIntrinsic, Expr, Decl, VOID_TYPE, ModScopeNsId, NewNamespaceId, EnumId, ExprId, VariantDecl, StaticDecl, NewNamespace, ExternFunctionRef, ExternFunction};
 use crate::dire::ty::{Type, LegacyInternalType};
 use crate::dire::mir::Const;
 
@@ -35,6 +36,39 @@ impl Driver {
         let ty = self.add_const_ty(Type::usize());
         let decl_id = self.add_decl(Decl::Const(konst), name, Some(ty), SourceRange::default());
         let static_decl = StaticDecl { name, num_params: 0, decl: decl_id };
+        self.code.hir.new_namespaces[b.namespace].static_decls.push(static_decl);
+
+        // NOTE: we currently have to do this every time this function is called, to be safe. Once we have proper collection types
+        // implemented in the language, the user can just build up an array of decls and add them all at once.
+        let new_code = self.get_new_code_since(before);
+        self.finalize_hir();
+        self.initialize_tir(&new_code);
+    }
+
+    #[path="compiler.ModuleBuilder"]
+    fn add_extern_function(&mut self, #[self] b: ModuleBuilder, func_builder: ExternFunctionBuilder) {
+        let before = self.take_snapshot();
+
+        // TODO: should group functions from the same library into the same ExternMod, and then also de-duplicate functions within the same ExternMod
+        // TODO: also, rename ExternMod, since it no longer corresponds to a lexical module in the source code
+        let name = self.interner.get_or_intern(&func_builder.name);
+        let ret_ty = self.add_const_ty(func_builder.ret_ty);
+        let param_tys = SmallVec::new();
+        let library_path = self.add_const_expr(Const::StrLit(CString::new(func_builder.lib_name).unwrap()));
+        let func = ExternFunction {
+            name: func_builder.name,
+            param_tys: param_tys.iter().cloned().collect(),
+            return_ty: ret_ty,
+        };
+        let extern_mod = crate::dire::hir::ExternMod { library_path, imported_functions: vec![func] };
+        let extern_mod = self.code.hir.extern_mods.push(extern_mod);
+        let extern_func_ref = ExternFunctionRef {
+            extern_mod,
+            index: 0,
+        };
+        let num_params = param_tys.len();
+        let decl_id = self.add_decl(Decl::ComputedPrototype { param_tys, extern_func: Some(extern_func_ref) }, name, Some(ret_ty), SourceRange::default());
+        let static_decl = StaticDecl { name, num_params, decl: decl_id };
         self.code.hir.new_namespaces[b.namespace].static_decls.push(static_decl);
 
         // NOTE: we currently have to do this every time this function is called, to be safe. Once we have proper collection types

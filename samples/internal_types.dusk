@@ -13,5 +13,7 @@ fn build_mod(): module {
 
     m :: compiler.ExternFunctionBuilder.new("this_function_doesnt_really_exist", void, "libSystem.dylib")
 
+    b.add_extern_function(m)
+
     b.build()
 }
