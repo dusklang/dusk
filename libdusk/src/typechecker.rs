@@ -8,7 +8,7 @@ pub mod constraints;
 use constraints::*;
 use crate::type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 
-use crate::dire::hir::{self, ExprId, DeclId, StructId, PatternKind, GenericParamId, Ident, VOID_EXPR, GenericCtx, DeclRefId, BLANK_GENERIC_CTX};
+use crate::dire::hir::{self, ExprId, DeclId, StructId, PatternKind, GenericParamId, Ident, VOID_EXPR, GenericCtx, DeclRefId, BLANK_GENERIC_CTX, Decl};
 use crate::dire::mir::Const;
 use crate::dire::ty::{Type, LegacyInternalType, FunctionType, QualType, IntWidth};
 use crate::dire::source_info::SourceRange;
@@ -1005,6 +1005,23 @@ impl tir::Expr<tir::Call> {
                 return false;
             }
 
+            if let Decl::MethodIntrinsic(intr) = df!(driver, overload.hir) {
+                let self_ty = driver.code.hir.intrinsics[intr].param_tys[0];
+                let self_ty = tp.get_evaluated_type(self_ty);
+                let hir::Namespace::MemberRef { base_expr } = driver.code.hir.decl_refs[decl_ref_id].namespace else {
+                    panic!("expected MemberRef as base of method intrinsic call");
+                };
+                if driver.can_unify_to(tp, base_expr, &QualType::from(self_ty.clone())).is_err() {
+                    if let Some(pointee_ty) = self_ty.deref() {
+                        if driver.can_unify_to(tp, base_expr, pointee_ty).is_err() {
+                            overloads.nonviable_overloads.push(overload);
+                            i += 1;
+                            return false;
+                        }
+                    }
+                }
+            }
+
             for (arg, ty) in self.args.iter().copied().zip(decls[overload].param_tys.iter().copied()) {
                 if driver.can_unify_to(tp, arg, ty).is_err() {
                     overloads.nonviable_overloads.push(overload);
@@ -1038,6 +1055,7 @@ impl tir::Expr<tir::Call> {
         }
 
         // For each overload, infer generic constraints from the arguments
+        // TODO: do this for self arguments as well
         for &overload in &overloads.overloads {
             let decl = &decls[overload];
             for (&param_ty, &arg) in decl.param_tys.iter().zip(&self.args) {
@@ -1053,6 +1071,7 @@ impl tir::Expr<tir::Call> {
         }
 
         // If any of the arguments have errors, propagate that to the declref
+        // TODO: do this for self arguments as well
         if self.args.iter().any(|&arg| tp.constraints(arg).is_error()) {
             *tp.decl_ref_has_error_mut(decl_ref_id) = true;
         }
@@ -1075,6 +1094,7 @@ impl tir::Expr<tir::Call> {
                 .find(|&decl| tp.decl_type(decl).trivially_convertible_to(callee_ty));
             if let Some(overload_decl) = overload_decl {
                 if let Some(fun) = callee_ty.ty.as_function() {
+                    // TODO: do this for self arguments as well
                     for (arg, param) in self.args.iter().copied().zip(&fun.param_tys) {
                         if driver.can_unify_to(tp, arg, UnificationType::QualTypeWithOldSchoolGenericContext(&param.into(), &driver.tir.decls[overload_decl].generic_params)).is_err() {
                             return false;
@@ -1096,6 +1116,7 @@ impl tir::Expr<tir::Call> {
         if let Some(callee_ty) = callee_ty {
             let param_tys = &callee_ty.ty.as_function().unwrap().param_tys;
             debug_assert_eq!(param_tys.len(), self.args.len());
+            // TODO: do this for self arguments as well
             for (&arg, param_ty) in self.args.iter().zip(param_tys) {
                 if let Type::Inout(param_ty) = param_ty {
                     tp.constraints_mut(arg).set_to(QualType { ty: param_ty.as_ref().clone(), is_mut: true });

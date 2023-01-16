@@ -10,7 +10,7 @@ fn build_mod(): module {
 
     b.add_usize_constant("THE_CONSTANT", 68)
 
-    m :: compiler.ExternFunctionBuilder.new("putchar", i32, "libSystem.dylib")
+    m := compiler.ExternFunctionBuilder.new("putchar", i32, "libSystem.dylib")
     m.add_param("char", i32)
     b.add_extern_function(m)
 
