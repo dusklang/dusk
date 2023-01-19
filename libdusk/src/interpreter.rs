@@ -990,11 +990,11 @@ impl DriverRef<'_> {
         thunk.allocate()
     }
     #[cfg(all(target_os="macos", target_arch="aarch64"))]
-    fn generate_thunk(&self, _func: &ExternFunction, _func_address: i64, _args: &[Box<[u8]>]) -> region::Allocation {
+    fn generate_thunk(&self, _func: &ExternFunction, func_address: i64, _args: &[Box<[u8]>]) -> region::Allocation {
         let mut thunk = Arm64Encoder::new();
 
-        // This thunk is hardcoded to call putchar...that is, if putchar was at a PC-relative offset of 0 from the bl instruction below.
-        // Will need to replace that with a blr!
+        // This thunk is hardcoded to call putchar, or any other function with the signature `int(int)`.
+        // TODO: handle other signatures.
         thunk.sub64_imm(false, Reg::SP, Reg::SP, 32);
         thunk.stp64(Reg::FP, Reg::LR, Reg::SP, 16);
         thunk.add64_imm(false, Reg::FP, Reg::SP, 16);
@@ -1003,7 +1003,8 @@ impl DriverRef<'_> {
         thunk.ldr64(Reg::R8, Reg::SP, 8);
         thunk.ldr64(Reg::R8, Reg::R8, 0);
         thunk.ldr32(Reg::R0, Reg::R8, 0);
-        thunk.bl(0);
+        thunk.macro_mov64_abs(Reg::R9, func_address as u64);
+        thunk.blr(Reg::R9);
         thunk.ldr64(Reg::R8, Reg::SP, 0);
         thunk.str32(Reg::R0, Reg::R8, 0);
         thunk.ldp64(Reg::FP, Reg::LR, Reg::SP, 16);

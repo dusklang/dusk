@@ -2,7 +2,16 @@ fn main() {
     // Prints 68
     print_int(build_mod().THE_CONSTANT)
 
-    H :: build_mod().putchar("H" as i8 as i32)
+    user_space_print("Hello, world!\n")
+}
+
+procedural_mod :: build_mod()
+fn user_space_print(val: i8*) {
+    val := val
+    while *val != 0 {
+        procedural_mod.putchar(*val as i32);
+        val = (val as usize + 1) as i8*
+    }
 }
 
 fn build_mod(): module {

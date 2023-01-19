@@ -12,6 +12,7 @@ pub struct Arm64Encoder {
 
 #[repr(u32)]
 #[allow(unused)]
+#[derive(Copy, Clone)]
 pub enum Reg {
     R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, R13, R14, R15,
     R16, R17, R18, R19, R20, R21, R22, R23, R24, R25, R26, R27, R28, R29, R30,
@@ -114,6 +115,7 @@ impl Drop for InstrEncoder {
     }
 }
 
+#[allow(unused)]
 impl Arm64Encoder {
     pub fn new() -> Self {
         Self::default()
@@ -240,6 +242,38 @@ impl Arm64Encoder {
         self.ldr_impl(false, dest, src_addr, imm12);
     }
 
+    fn mov_wide64_impl(&mut self, should_keep_other_bits: bool, dest: Reg, imm: u16, shift_amount: u8) {
+        assert!(shift_amount <= 48 && shift_amount % 16 == 0);
+
+        let mut instr = InstrEncoder::new();
+
+        // 64-bit
+        instr.push_value_of_size(1, 1);
+
+        instr.push_value_of_size(2 | (should_keep_other_bits as u32), 2);
+        instr.push_value_of_size(0x25, 6);
+        instr.push_value_of_size(shift_amount as u32 / 16, 2);
+        instr.push_value_of_size(imm as u32, 16);
+        instr.push_reg(dest);
+
+        self.push(instr);
+    }
+
+    pub fn movz64(&mut self, dest: Reg, imm: u16, shift_amount: u8) {
+        self.mov_wide64_impl(false, dest, imm, shift_amount);
+    }
+
+    pub fn movk64(&mut self, dest: Reg, imm: u16, shift_amount: u8) {
+        self.mov_wide64_impl(true, dest, imm, shift_amount);
+    }
+
+    pub fn macro_mov64_abs(&mut self, dest: Reg, value: u64) {
+        self.movz64(dest, (value >> 0 & 0xFFFF) as u16, 0);
+        self.movk64(dest, (value >> 16 & 0xFFFF) as u16, 16);
+        self.movk64(dest, (value >> 32 & 0xFFFF) as u16, 32);
+        self.movk64(dest, (value >> 48 & 0xFFFF) as u16, 48);
+    }
+
     pub fn bl(&mut self, offset: i32) {
         assert!(offset >= -134217728 && offset <= 134217724 && offset % 4 == 0);
         let imm26 = ((offset / 4) as u32) & 0x03FF_FFFF;
@@ -248,6 +282,16 @@ impl Arm64Encoder {
         instr.push_value_of_size(0x25, 6);
 
         instr.push_value_of_size(imm26, 26);
+
+        self.push(instr);
+    }
+
+    pub fn blr(&mut self, addr: Reg) {
+        let mut instr = InstrEncoder::new();
+
+        instr.push_value_of_size(0x358FC0, 22);
+        instr.push_reg(addr);
+        instr.push_value_of_size(0, 5);
 
         self.push(instr);
     }
