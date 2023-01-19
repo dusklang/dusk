@@ -8,7 +8,7 @@ use index_vec::define_index_type;
 use string_interner::DefaultSymbol as Sym;
 
 use crate::dire::source_info::SourceRange;
-use crate::dire::hir::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, NewNamespaceId, RETURN_VALUE_DECL};
+use crate::dire::ast::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, NewNamespaceId, RETURN_VALUE_DECL};
 use crate::dire::{internal_fields, internal_field_decls, InternalField, InternalFieldDecls, InternalNamespace};
 use crate::dire::ty::Type;
 pub use crate::dire::tir::CompId;
@@ -280,7 +280,7 @@ macro_rules! define_legacy_internal_types_internal {
                         InternalNamespace::$name => {
                             $({
                                 let decl = self.internal_field_decls.$name.$field_name;
-                                let name = self.code.hir.names[decl];
+                                let name = self.code.ast.names[decl];
                                 if self.name_matches(lookup, name) {
                                     overloads.insert(decl);
                                 }   
@@ -303,7 +303,7 @@ pub enum NameLookup {
 impl Driver {
     // See comment about `should_traverse_blanket_uses` later in this file
     fn find_overloads_in_mod(&self, name: &NameLookup, scope: NewNamespaceId, should_traverse_blanket_uses: bool, overloads: &mut HashSet<DeclId>) -> bool {
-        let scope = &self.code.hir.new_namespaces[scope];
+        let scope = &self.code.ast.new_namespaces[scope];
         for decl in &scope.static_decls {
             if self.name_matches(name, decl.name) {
                 overloads.insert(decl.decl);
@@ -320,13 +320,13 @@ impl Driver {
         }
     }
     fn find_overloads_in_new_namespace(&self, name: &NameLookup, id: NewNamespaceId, kind: NewNamespaceRefKind, overloads: &mut HashSet<DeclId>) {
-        let ns = &self.code.hir.new_namespaces[id];
+        let ns = &self.code.ast.new_namespaces[id];
         let decls = match kind {
             NewNamespaceRefKind::Instance => Cow::Borrowed(&ns.instance_decls),
             NewNamespaceRefKind::Static => Cow::Owned(ns.static_decls.iter().map(|decl| decl.decl).collect()),
         };
         for &decl in decls.as_ref() {
-            let decl_name = self.code.hir.names[decl];
+            let decl_name = self.code.ast.names[decl];
             if self.name_matches(name, decl_name) {
                 overloads.insert(decl);
                 return;
@@ -334,10 +334,10 @@ impl Driver {
         }
     }
     fn find_overloads_in_function_parameters(&self, name: &NameLookup, func: DeclId, overloads: &mut HashSet<DeclId>) {
-        match &df!(func.hir) {
-            hir::Decl::Computed { params, .. } => {
+        match &df!(func.ast) {
+            ast::Decl::Computed { params, .. } => {
                 for decl in range_iter(params.clone()) {
-                    let param_name = self.code.hir.names[decl];
+                    let param_name = self.code.ast.names[decl];
                     
                     if self.name_matches(name, param_name) {
                         overloads.insert(decl);
@@ -362,7 +362,7 @@ impl Driver {
             namespace = match ns {
                 Namespace::Imper { scope, end_offset } => {
                     if !started_at_mod_scope {
-                        let namespace = &self.code.hir.imper_ns[scope];
+                        let namespace = &self.code.ast.imper_ns[scope];
                         let result = namespace.decls[..end_offset].iter()
                             .rev()
                             .find(|&decl| self.name_matches(name, decl.name));
@@ -372,14 +372,14 @@ impl Driver {
                         }
                     }
 
-                    self.code.hir.imper_ns[scope].parent
+                    self.code.ast.imper_ns[scope].parent
                 },
                 Namespace::Mod(scope_ns) => {
-                    let scope = self.code.hir.mod_ns[scope_ns].scope;
+                    let scope = self.code.ast.mod_ns[scope_ns].scope;
                     self.find_overloads_in_mod(name, scope, should_traverse_blanket_uses, overloads);
 
                     if root_namespace { started_at_mod_scope = true; }
-                    self.code.hir.mod_ns[scope_ns].parent
+                    self.code.ast.mod_ns[scope_ns].parent
                 },
                 Namespace::MemberRef { base_expr } => {
                     assert!(root_namespace, "member refs currently must be at the root of a namespace hierarchy");
@@ -404,10 +404,10 @@ impl Driver {
                     break;
                 },
                 Namespace::GenericContext(ns_id) => {
-                    let generic_context_ns = &self.code.hir.generic_context_ns[ns_id];
+                    let generic_context_ns = &self.code.ast.generic_context_ns[ns_id];
                     let generic_params = &generic_context_ns.generic_params;
                     for decl in range_iter(generic_params.clone()) {
-                        let param_name = self.code.hir.names[decl];
+                        let param_name = self.code.ast.names[decl];
                         if self.name_matches(name, param_name) {
                             overloads.insert(decl);
                             break 'find_overloads;
@@ -416,14 +416,14 @@ impl Driver {
                     generic_context_ns.parent
                 },
                 Namespace::Requirement(ns_id) => {
-                    let condition_ns = &self.code.hir.condition_ns[ns_id];
+                    let condition_ns = &self.code.ast.condition_ns[ns_id];
                     self.find_overloads_in_function_parameters(name, condition_ns.func, overloads);
                     condition_ns.parent
                 },
                 Namespace::Guarantee(ns_id) => {
-                    let condition_ns = &self.code.hir.condition_ns[ns_id];
+                    let condition_ns = &self.code.ast.condition_ns[ns_id];
                     self.find_overloads_in_function_parameters(name, condition_ns.func, overloads);
-                    if self.name_matches(name, self.hir.known_idents.return_value) && overloads.is_empty() {
+                    if self.name_matches(name, self.ast.known_idents.return_value) && overloads.is_empty() {
                         overloads.insert(RETURN_VALUE_DECL);
                     }
                     condition_ns.parent
@@ -458,29 +458,29 @@ impl Driver {
     fn add_types_2_to_4_deps_to_member_ref(&mut self, id: ItemId, decl_ref_id: DeclRefId) {
         add_eval_dep_injector!(self, add_eval_dep);
 
-        let decl_ref = &self.code.hir.decl_refs[decl_ref_id];
+        let decl_ref = &self.code.ast.decl_refs[decl_ref_id];
         let overloads = self.find_overloads(decl_ref.namespace, &NameLookup::Exact(decl_ref.name)).unwrap_or_default();
         for overload in overloads {
-            match df!(overload.hir) {
-                hir::Decl::Computed { ref param_tys, .. } => {
-                    let ty = self.code.hir.explicit_tys[overload].unwrap_or(hir::VOID_TYPE);
+            match df!(overload.ast) {
+                ast::Decl::Computed { ref param_tys, .. } => {
+                    let ty = self.code.ast.explicit_tys[overload].unwrap_or(ast::VOID_TYPE);
                     add_eval_dep!(id, ty);
                     for &ty in param_tys {
                         add_eval_dep!(id, ty);
                     }
                     self.tir.graph.add_type3_dep(id, df!(overload.item));
                 },
-                hir::Decl::ReturnValue => {
-                    let decl_ref = &self.code.hir.decl_refs[decl_ref_id];
+                ast::Decl::ReturnValue => {
+                    let decl_ref = &self.code.ast.decl_refs[decl_ref_id];
                     match decl_ref.namespace {
                         Namespace::Guarantee(condition_ns_id) => {
-                            let func = self.code.hir.condition_ns[condition_ns_id].func;
+                            let func = self.code.ast.condition_ns[condition_ns_id].func;
                             self.tir.graph.add_type3_dep(id, df!(func.item));
                         },
                         _ => panic!("invalid namespace for `return_value`"),
                     }
                 },
-                hir::Decl::Variant { payload_ty, .. } => {
+                ast::Decl::Variant { payload_ty, .. } => {
                     if let Some(payload_ty) = payload_ty {
                         add_eval_dep!(id, payload_ty);
                     }
@@ -495,15 +495,15 @@ impl Driver {
     /// we will need to bring back the original idea of meta-dependencies:
     /// https://github.com/dusk-lang/dusk/issues/58
     fn add_type3_scope_dep(&mut self, a: ItemId, b: ImperScopeId) {
-        let block = self.code.hir.imper_scopes[b].block;
+        let block = self.code.ast.imper_scopes[b].block;
         for &op in &self.code.blocks[block].ops {
             let op = &self.code.ops[op];
-            let item = op.as_hir_item().unwrap();
+            let item = op.as_ast_item().unwrap();
             match item {
-                Item::Expr(expr) => self.tir.graph.add_type3_dep(a, self.code.hir.expr_to_items[expr]),
-                Item::Decl(decl) => match df!(decl.hir) {
-                    hir::Decl::Stored { .. } => self.tir.graph.add_type3_dep(a, self.code.hir.decl_to_items[decl]),
-                    hir::Decl::Computed { .. } => {},
+                Item::Expr(expr) => self.tir.graph.add_type3_dep(a, self.code.ast.expr_to_items[expr]),
+                Item::Decl(decl) => match df!(decl.ast) {
+                    ast::Decl::Stored { .. } => self.tir.graph.add_type3_dep(a, self.code.ast.decl_to_items[decl]),
+                    ast::Decl::Computed { .. } => {},
                     _ => panic!("Invalid scope item"),
                 },
             }
@@ -513,11 +513,11 @@ impl Driver {
     fn flush_staged_ret_groups(&mut self, sp: &mut Subprogram) {
         let staged_ret_groups = mem::take(&mut self.tir.staged_ret_groups);
         for (decl, exprs) in staged_ret_groups {
-            assert!(matches!(df!(decl.hir), hir::Decl::Computed { .. }));
+            assert!(matches!(df!(decl.ast), ast::Decl::Computed { .. }));
 
-            let ty = self.code.hir.explicit_tys[decl].expect("explicit return statements are not allowed in assigned functions (yet?)");
+            let ty = self.code.ast.explicit_tys[decl].expect("explicit return statements are not allowed in assigned functions (yet?)");
 
-            let item = self.code.hir.decl_to_items[decl];
+            let item = self.code.ast.decl_to_items[decl];
             let unit_id = sp.levels.item_to_units[&item];
             let level = sp.levels.item_to_levels[&item];
             let unit = &mut sp.units[unit_id as usize];
@@ -553,101 +553,101 @@ impl Driver {
                 flat_insert_item!($vec, Expr { id, data: $expr, });
             }}
         }
-        match &ef!(id.hir) {
-            hir::Expr::Void => {},
-            hir::Expr::Error => flat_insert_expr!(error_exprs, ErrorExpr),
-            hir::Expr::IntLit { .. } => flat_insert_expr!(int_lits, IntLit),
-            hir::Expr::DecLit { .. } => flat_insert_expr!(dec_lits, DecLit),
-            hir::Expr::StrLit { .. } => flat_insert_expr!(str_lits, StrLit),
-            hir::Expr::CharLit { .. } => flat_insert_expr!(char_lits, CharLit),
-            hir::Expr::BoolLit { .. } => flat_insert_expr!(bool_lits, BoolLit),
-            hir::Expr::Break(_) => flat_insert_expr!(breaks, Break),
-            hir::Expr::Continue(_) => flat_insert_expr!(continues, Continue),
-            hir::Expr::Const(val) => flat_insert_expr!(consts, ConstExpr(val.ty())),
-            &hir::Expr::AddrOf { expr, is_mut } => insert_expr!(addr_ofs, AddrOf { expr, is_mut }),
-            &hir::Expr::Deref(expr) => insert_expr!(derefs, Dereference { expr }),
-            &hir::Expr::Pointer { expr, .. } => insert_expr!(pointers, Pointer { expr }),
-            &hir::Expr::Cast { expr, ty, cast_id } => insert_expr!(casts, Cast { expr, ty, cast_id }),
-            &hir::Expr::Ret { expr, decl } => {
+        match &ef!(id.ast) {
+            ast::Expr::Void => {},
+            ast::Expr::Error => flat_insert_expr!(error_exprs, ErrorExpr),
+            ast::Expr::IntLit { .. } => flat_insert_expr!(int_lits, IntLit),
+            ast::Expr::DecLit { .. } => flat_insert_expr!(dec_lits, DecLit),
+            ast::Expr::StrLit { .. } => flat_insert_expr!(str_lits, StrLit),
+            ast::Expr::CharLit { .. } => flat_insert_expr!(char_lits, CharLit),
+            ast::Expr::BoolLit { .. } => flat_insert_expr!(bool_lits, BoolLit),
+            ast::Expr::Break(_) => flat_insert_expr!(breaks, Break),
+            ast::Expr::Continue(_) => flat_insert_expr!(continues, Continue),
+            ast::Expr::Const(val) => flat_insert_expr!(consts, ConstExpr(val.ty())),
+            &ast::Expr::AddrOf { expr, is_mut } => insert_expr!(addr_ofs, AddrOf { expr, is_mut }),
+            &ast::Expr::Deref(expr) => insert_expr!(derefs, Dereference { expr }),
+            &ast::Expr::Pointer { expr, .. } => insert_expr!(pointers, Pointer { expr }),
+            &ast::Expr::Cast { expr, ty, cast_id } => insert_expr!(casts, Cast { expr, ty, cast_id }),
+            &ast::Expr::Ret { expr, decl } => {
                 if let Some(decl) = decl {
                     self.tir.staged_ret_groups.entry(decl).or_default().push(expr);
                 }
                 insert_expr!(explicit_rets, ExplicitRet)
             }
-            &hir::Expr::DeclRef { id: decl_ref_id } => insert_expr!(decl_refs, DeclRef { decl_ref_id }),
-            &hir::Expr::Call { callee, ref arguments } => insert_expr!(calls, Call { callee, args: arguments.clone() }),
-            &hir::Expr::FunctionTy { ref param_tys, ret_ty } => insert_expr!(function_tys, FunctionTy { param_tys: param_tys.clone(), ret_ty }),
-            &hir::Expr::Set { lhs, rhs } => insert_expr!(assignments, Assignment { lhs, rhs }),
-            &hir::Expr::Do { scope } => insert_expr!(dos, Do { terminal_expr: self.code.hir.imper_scopes[scope].terminal_expr }),
-            &hir::Expr::If { condition, then_scope, else_scope } => {
-                let then_expr = self.code.hir.imper_scopes[then_scope].terminal_expr;
+            &ast::Expr::DeclRef { id: decl_ref_id } => insert_expr!(decl_refs, DeclRef { decl_ref_id }),
+            &ast::Expr::Call { callee, ref arguments } => insert_expr!(calls, Call { callee, args: arguments.clone() }),
+            &ast::Expr::FunctionTy { ref param_tys, ret_ty } => insert_expr!(function_tys, FunctionTy { param_tys: param_tys.clone(), ret_ty }),
+            &ast::Expr::Set { lhs, rhs } => insert_expr!(assignments, Assignment { lhs, rhs }),
+            &ast::Expr::Do { scope } => insert_expr!(dos, Do { terminal_expr: self.code.ast.imper_scopes[scope].terminal_expr }),
+            &ast::Expr::If { condition, then_scope, else_scope } => {
+                let then_expr = self.code.ast.imper_scopes[then_scope].terminal_expr;
                 let else_expr = if let Some(else_scope) = else_scope {
-                    self.code.hir.imper_scopes[else_scope].terminal_expr
+                    self.code.ast.imper_scopes[else_scope].terminal_expr
                 } else {
-                    hir::VOID_EXPR
+                    ast::VOID_EXPR
                 };
                 insert_expr!(ifs, If { condition, then_expr, else_expr });
             },
-            &hir::Expr::While { condition, .. } => insert_expr!(whiles, While { condition }),
-            &hir::Expr::For { binding, lower_bound, upper_bound, .. } => {
-                let explicit_ty = self.code.hir.explicit_tys[binding];
+            &ast::Expr::While { condition, .. } => insert_expr!(whiles, While { condition }),
+            &ast::Expr::For { binding, lower_bound, upper_bound, .. } => {
+                let explicit_ty = self.code.ast.explicit_tys[binding];
                 insert_expr!(fors, For { binding_decl: binding, binding_explicit_ty: explicit_ty, lower_bound, upper_bound })
             },
-            &hir::Expr::Switch { scrutinee, ref cases, } => {
+            &ast::Expr::Switch { scrutinee, ref cases, } => {
                 let mut tir_cases = Vec::with_capacity(cases.len());
                 for case in cases {
                     let case = SwitchCase {
                         pattern: case.pattern.clone(),
-                        terminal_expr: self.code.hir.imper_scopes[case.scope].terminal_expr,
+                        terminal_expr: self.code.ast.imper_scopes[case.scope].terminal_expr,
                     };
                     tir_cases.push(case);
                 }
                 insert_expr!(switches, Switch { scrutinee, cases: tir_cases })
             },
-            &hir::Expr::Mod { extern_library_path, .. } => insert_expr!(modules, Module { extern_library_path }),
-            &hir::Expr::Struct(struct_id) => {
-                let field_tys = self.code.hir.structs[struct_id].fields.iter().map(|field| field.ty).collect();
+            &ast::Expr::Mod { extern_library_path, .. } => insert_expr!(modules, Module { extern_library_path }),
+            &ast::Expr::Struct(struct_id) => {
+                let field_tys = self.code.ast.structs[struct_id].fields.iter().map(|field| field.ty).collect();
                 insert_expr!(structs, Struct { field_tys })
             },
-            &hir::Expr::Enum(enum_id) => {
+            &ast::Expr::Enum(enum_id) => {
                 let mut variant_payload_tys = SmallVec::new();
-                for variant in &self.code.hir.enums[enum_id].variants {
+                for variant in &self.code.ast.enums[enum_id].variants {
                     if let Some(payload) = variant.payload_ty {
                         variant_payload_tys.push(payload);
                     }
                 }
                 insert_expr!(enums, Enum { variant_payload_tys })
             },
-            &hir::Expr::StructLit { ty, ref fields, id } => {
+            &ast::Expr::StructLit { ty, ref fields, id } => {
                 insert_expr!(struct_lits, StructLit { ty, fields: fields.clone(), struct_lit_id: id })
             }
         }
     }
 
     fn build_tir_decl(&mut self, unit: &mut UnitItems, level: u32, id: DeclId) {
-        match df!(id.hir) {
+        match df!(id.ast) {
             // TODO: Add parameter and field TIR items for (at least) checking that the type of the param is valid
             // LoopBinding doesn't require a TIR decl because it is current checked by its parent `For` expr
-            hir::Decl::Parameter { .. } | hir::Decl::Field { .. } | hir::Decl::Variant { .. } |
-                hir::Decl::ReturnValue | hir::Decl::LegacyIntrinsic { .. } | hir::Decl::Intrinsic(_) | hir::Decl::MethodIntrinsic(_) | hir::Decl::InternalField(_) | hir::Decl::LoopBinding { .. } => {},
-            hir::Decl::GenericParam(_) => {
+            ast::Decl::Parameter { .. } | ast::Decl::Field { .. } | ast::Decl::Variant { .. } |
+                ast::Decl::ReturnValue | ast::Decl::LegacyIntrinsic { .. } | ast::Decl::Intrinsic(_) | ast::Decl::MethodIntrinsic(_) | ast::Decl::InternalField(_) | ast::Decl::LoopBinding { .. } => {},
+            ast::Decl::GenericParam(_) => {
                 assert_eq!(level, 0);
                 unit.generic_params.push(GenericParam { id });
             },
-            hir::Decl::Static(root_expr) | hir::Decl::Const(root_expr) | hir::Decl::Stored { root_expr, .. } => {
-                let explicit_ty = self.code.hir.explicit_tys[id];
+            ast::Decl::Static(root_expr) | ast::Decl::Const(root_expr) | ast::Decl::Stored { root_expr, .. } => {
+                let explicit_ty = self.code.ast.explicit_tys[id];
                 unit.assigned_decls.insert(level, AssignedDecl { explicit_ty, root_expr, decl_id: id });
             },
-            hir::Decl::PatternBinding { id: binding_id, .. } => {
-                let scrutinee = self.code.hir.pattern_binding_decls[binding_id].scrutinee;
+            ast::Decl::PatternBinding { id: binding_id, .. } => {
+                let scrutinee = self.code.ast.pattern_binding_decls[binding_id].scrutinee;
                 unit.pattern_bindings.insert(level, PatternBinding { binding_id, scrutinee, decl_id: id });
             },
-            hir::Decl::Computed { scope, .. } => {
-                let terminal_expr = self.code.hir.imper_scopes[scope].terminal_expr;
+            ast::Decl::Computed { scope, .. } => {
+                let terminal_expr = self.code.ast.imper_scopes[scope].terminal_expr;
                 self.tir.staged_ret_groups.entry(id).or_default().push(terminal_expr);
                 unit.func_decls.push(FunctionDecl { id });
             },
-            hir::Decl::ComputedPrototype { .. } => {
+            ast::Decl::ComputedPrototype { .. } => {
                 unit.func_decls.push(FunctionDecl { id });
             },
         }
@@ -656,13 +656,13 @@ impl Driver {
     pub fn initialize_tir(&mut self, new_code: &NewCode) {
         // Populate `decls`
         for id in range_iter(new_code.decls.clone()) {
-            let decl = &self.code.hir.decls[id];
+            let decl = &self.code.ast.decls[id];
             let mut generic_params = SmallVec::new();
             let (is_mut, param_tys) = match *decl {
-                hir::Decl::Computed { ref param_tys, generic_params: ref og_generic_params, .. } => {
+                ast::Decl::Computed { ref param_tys, generic_params: ref og_generic_params, .. } => {
                     for decl in range_iter(og_generic_params.clone()) {
-                        let generic_param_id = match df!(decl.hir) {
-                            hir::Decl::GenericParam(id) => id,
+                        let generic_param_id = match df!(decl.ast) {
+                            ast::Decl::GenericParam(id) => id,
                             _ => panic!("COMPILER BUG: expected generic parameter"),
                         };
                         generic_params.push(generic_param_id);
@@ -670,47 +670,47 @@ impl Driver {
 
                     (false, param_tys.clone())
                 },
-                hir::Decl::ComputedPrototype { ref param_tys, .. } => (
+                ast::Decl::ComputedPrototype { ref param_tys, .. } => (
                     false,
                     param_tys.clone()
                 ),
-                hir::Decl::Const(_) | hir::Decl::Parameter { .. } | hir::Decl::ReturnValue | hir::Decl::GenericParam(_) => (
+                ast::Decl::Const(_) | ast::Decl::Parameter { .. } | ast::Decl::ReturnValue | ast::Decl::GenericParam(_) => (
                     false,
                     SmallVec::new(),
                 ),
-                hir::Decl::LegacyIntrinsic { ref param_tys, .. } => (
+                ast::Decl::LegacyIntrinsic { ref param_tys, .. } => (
                     false,
                     param_tys.clone(),
                 ),
-                hir::Decl::Intrinsic(id) => {
-                    let param_tys = self.code.hir.intrinsics[id].param_tys.clone();
+                ast::Decl::Intrinsic(id) => {
+                    let param_tys = self.code.ast.intrinsics[id].param_tys.clone();
                     (false, param_tys)
                 },
-                hir::Decl::MethodIntrinsic(id) => {
-                    let param_tys = SmallVec::from(&self.code.hir.intrinsics[id].param_tys[1..]);
+                ast::Decl::MethodIntrinsic(id) => {
+                    let param_tys = SmallVec::from(&self.code.ast.intrinsics[id].param_tys[1..]);
                     (false, param_tys)
                 },
-                hir::Decl::Static(_) => (
+                ast::Decl::Static(_) => (
                     true,
                     SmallVec::new(),
                 ),
-                hir::Decl::Stored { is_mut, .. } | hir::Decl::PatternBinding { is_mut, .. } => (
+                ast::Decl::Stored { is_mut, .. } | ast::Decl::PatternBinding { is_mut, .. } => (
                     is_mut,
                     SmallVec::new(),
                 ),
-                hir::Decl::Field { .. } => (
+                ast::Decl::Field { .. } => (
                     true,
                     SmallVec::new()
                 ),
-                hir::Decl::InternalField(_) => (
+                ast::Decl::InternalField(_) => (
                     false, // TODO: allow this to be changed per-field
                     SmallVec::new()
                 ),
-                hir::Decl::Variant { payload_ty, .. } => (
+                ast::Decl::Variant { payload_ty, .. } => (
                     false,
                     payload_ty.iter().cloned().collect(),
                 ),
-                hir::Decl::LoopBinding { is_mut, .. } => (
+                ast::Decl::LoopBinding { is_mut, .. } => (
                     is_mut,
                     SmallVec::new(),
                 ),
@@ -725,42 +725,42 @@ impl Driver {
         dvd::send(|| DvdMessage::WillAddType1Dependencies);
         for decl_id in range_iter(new_code.decls.clone()) {
             let id = df!(decl_id.item);
-            match df!(decl_id.hir) {
+            match df!(decl_id.ast) {
                 // NOTE: type 1 dependencies are currently added to LoopBinding by its parent `for` loop; see below.
-                hir::Decl::Parameter { .. } | hir::Decl::LegacyIntrinsic { .. } | hir::Decl::Intrinsic(_) | hir::Decl::MethodIntrinsic(_) | hir::Decl::Field { .. } | hir::Decl::ReturnValue | hir::Decl::GenericParam(_) | hir::Decl::Variant { .. } | hir::Decl::ComputedPrototype { .. } | hir::Decl::InternalField(_) | hir::Decl::LoopBinding { .. } => {},
-                hir::Decl::PatternBinding { id: _binding_id, .. } => {
-                    // let scrutinee = self.code.hir.pattern_binding_decls[binding_id].scrutinee;
+                ast::Decl::Parameter { .. } | ast::Decl::LegacyIntrinsic { .. } | ast::Decl::Intrinsic(_) | ast::Decl::MethodIntrinsic(_) | ast::Decl::Field { .. } | ast::Decl::ReturnValue | ast::Decl::GenericParam(_) | ast::Decl::Variant { .. } | ast::Decl::ComputedPrototype { .. } | ast::Decl::InternalField(_) | ast::Decl::LoopBinding { .. } => {},
+                ast::Decl::PatternBinding { id: _binding_id, .. } => {
+                    // let scrutinee = self.code.ast.pattern_binding_decls[binding_id].scrutinee;
 
                     // // TODO: find out why this seems to cause an infinite loop if it's moved to build_more_tir() and changed to a type 2 dependency
                     // self.tir.graph.add_type1_dep(id, ef!(scrutinee.item));
                 },
-                hir::Decl::Static(expr) | hir::Decl::Const(expr) | hir::Decl::Stored { root_expr: expr, .. } => self.tir.graph.add_type1_dep(id, ef!(expr.item)),
-                hir::Decl::Computed { scope, .. } => {
-                    let terminal_expr = self.code.hir.imper_scopes[scope].terminal_expr;
+                ast::Decl::Static(expr) | ast::Decl::Const(expr) | ast::Decl::Stored { root_expr: expr, .. } => self.tir.graph.add_type1_dep(id, ef!(expr.item)),
+                ast::Decl::Computed { scope, .. } => {
+                    let terminal_expr = self.code.ast.imper_scopes[scope].terminal_expr;
                     self.tir.graph.add_type1_dep(id, ef!(terminal_expr.item));
                 },
             }
         }
         for expr_id in range_iter(new_code.exprs.clone()) {
             let id = ef!(expr_id.item);
-            match ef!(expr_id.hir) {
-                hir::Expr::Void | hir::Expr::Error | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
-                    | hir::Expr::CharLit { .. } | hir::Expr::BoolLit { .. } | hir::Expr::Const(_) | hir::Expr::Break(_) | hir::Expr::Continue(_) => {},
-                hir::Expr::Mod { extern_library_path, .. } => {
+            match ef!(expr_id.ast) {
+                ast::Expr::Void | ast::Expr::Error | ast::Expr::IntLit { .. } | ast::Expr::DecLit { .. } | ast::Expr::StrLit { .. }
+                    | ast::Expr::CharLit { .. } | ast::Expr::BoolLit { .. } | ast::Expr::Const(_) | ast::Expr::Break(_) | ast::Expr::Continue(_) => {},
+                ast::Expr::Mod { extern_library_path, .. } => {
                     if let Some(extern_library_path) = extern_library_path {
                         self.tir.graph.add_type1_dep(id, ef!(extern_library_path.item));
                     }
                 },
-                hir::Expr::AddrOf { expr, .. } | hir::Expr::Deref(expr) | hir::Expr::Pointer { expr, .. }
-                    | hir::Expr::Cast { expr, .. } | hir::Expr::Ret { expr, .. } => self.tir.graph.add_type1_dep(id, ef!(expr.item)),
-                hir::Expr::DeclRef { id: decl_ref_id, .. } => {
-                    let decl_ref = &self.code.hir.decl_refs[decl_ref_id];
-                    if let hir::Namespace::MemberRef { base_expr } = decl_ref.namespace {
+                ast::Expr::AddrOf { expr, .. } | ast::Expr::Deref(expr) | ast::Expr::Pointer { expr, .. }
+                    | ast::Expr::Cast { expr, .. } | ast::Expr::Ret { expr, .. } => self.tir.graph.add_type1_dep(id, ef!(expr.item)),
+                ast::Expr::DeclRef { id: decl_ref_id, .. } => {
+                    let decl_ref = &self.code.ast.decl_refs[decl_ref_id];
+                    if let ast::Namespace::MemberRef { base_expr } = decl_ref.namespace {
                         self.tir.graph.add_type1_dep(id, ef!(base_expr.item));
                         self.tir.graph.add_meta_dep(id, ef!(base_expr.item));
                     }
                 },
-                hir::Expr::Call { callee, ref arguments } => {
+                ast::Expr::Call { callee, ref arguments } => {
                     self.tir.graph.add_type1_dep(id, ef!(callee.item));
                     for &arg in arguments {
                         self.tir.graph.add_type1_dep(id, ef!(arg.item));
@@ -772,64 +772,64 @@ impl Driver {
                         self.tir.graph.add_type1_dep(ef!(callee.item), ef!(arg.item));
                     }
                 },
-                hir::Expr::FunctionTy { ref param_tys, ret_ty } => {
+                ast::Expr::FunctionTy { ref param_tys, ret_ty } => {
                     for &param_ty in param_tys {
                         self.tir.graph.add_type1_dep(id, ef!(param_ty.item));
                     }
                     self.tir.graph.add_type1_dep(id, ef!(ret_ty.item));
                 },
-                hir::Expr::Set { lhs, rhs } => {
+                ast::Expr::Set { lhs, rhs } => {
                     self.tir.graph.add_type1_dep(id, ef!(lhs.item));
                     self.tir.graph.add_type1_dep(id, ef!(rhs.item));
                 },
-                hir::Expr::Do { scope } => {
-                    let terminal_expr = self.code.hir.imper_scopes[scope].terminal_expr;
+                ast::Expr::Do { scope } => {
+                    let terminal_expr = self.code.ast.imper_scopes[scope].terminal_expr;
                     self.tir.graph.add_type1_dep(id, ef!(terminal_expr.item));
                 },
-                hir::Expr::If { condition, then_scope, else_scope } => {
+                ast::Expr::If { condition, then_scope, else_scope } => {
                     self.tir.graph.add_type1_dep(id, ef!(condition.item));
-                    let then_expr = self.code.hir.imper_scopes[then_scope].terminal_expr;
+                    let then_expr = self.code.ast.imper_scopes[then_scope].terminal_expr;
                     let else_expr = if let Some(else_scope) = else_scope {
-                        self.code.hir.imper_scopes[else_scope].terminal_expr
+                        self.code.ast.imper_scopes[else_scope].terminal_expr
                     } else {
-                        hir::VOID_EXPR
+                        ast::VOID_EXPR
                     };
                     self.tir.graph.add_type1_dep(id, ef!(then_expr.item));
                     self.tir.graph.add_type1_dep(id, ef!(else_expr.item));
                 },
-                hir::Expr::Switch { scrutinee, ref cases } => {
+                ast::Expr::Switch { scrutinee, ref cases } => {
                     self.tir.graph.add_type1_dep(id, ef!(scrutinee.item));
                     for case in cases.clone() {
-                        let terminal = self.code.hir.imper_scopes[case.scope].terminal_expr;
+                        let terminal = self.code.ast.imper_scopes[case.scope].terminal_expr;
                         self.tir.graph.add_type1_dep(id, ef!(terminal.item));
                     }
                 },
-                hir::Expr::While { condition, scope, .. } => {
+                ast::Expr::While { condition, scope, .. } => {
                     self.tir.graph.add_type1_dep(id, ef!(condition.item));
-                    let terminal_expr = self.code.hir.imper_scopes[scope].terminal_expr;
+                    let terminal_expr = self.code.ast.imper_scopes[scope].terminal_expr;
                     self.tir.graph.add_type1_dep(id, ef!(terminal_expr.item));
                 },
-                hir::Expr::Struct(struct_id) => {
-                    for field in &self.code.hir.structs[struct_id].fields {
+                ast::Expr::Struct(struct_id) => {
+                    for field in &self.code.ast.structs[struct_id].fields {
                         self.tir.graph.add_type1_dep(id, ef!(field.ty.item));
                     }
                 },
-                hir::Expr::Enum(enum_id) => {
-                    for variant in &self.code.hir.enums[enum_id].variants {
+                ast::Expr::Enum(enum_id) => {
+                    for variant in &self.code.ast.enums[enum_id].variants {
                         if let Some(payload_ty) = variant.payload_ty {
                             self.tir.graph.add_type1_dep(id, ef!(payload_ty.item));
                         }
                     }
                 },
-                hir::Expr::StructLit { ref fields, .. } => {
+                ast::Expr::StructLit { ref fields, .. } => {
                     for field in fields {
                         self.tir.graph.add_type1_dep(id, ef!(field.expr.item));
                     }
                 },
-                hir::Expr::For { binding, lower_bound, upper_bound, .. } => {
+                ast::Expr::For { binding, lower_bound, upper_bound, .. } => {
                     self.tir.graph.add_type1_dep(id, df!(binding.item));
 
-                    // THIS IS KIND OF A HACK. The HIR variants for loop binding variables do not currently keep track
+                    // THIS IS KIND OF A HACK. The AST variants for loop binding variables do not currently keep track
                     // of the lower_bound or upper_bound, so I just add the dependencies here.
                     self.tir.graph.add_type1_dep(df!(binding.item), ef!(lower_bound.item));
                     self.tir.graph.add_type1_dep(df!(binding.item), ef!(upper_bound.item));
@@ -841,7 +841,7 @@ impl Driver {
         self.tir.graph.split(new_code);
 
         // TODO: do something better than an array of bools :(
-        self.tir.depended_on.resize_with(self.code.hir.exprs.len(), || false);
+        self.tir.depended_on.resize_with(self.code.ast.exprs.len(), || false);
     }
 
     pub fn build_more_tir(&mut self) -> Result<Option<Units>, TirError> {
@@ -857,106 +857,106 @@ impl Driver {
         let items_that_need_dependencies = self.tir.graph.get_items_that_need_dependencies();
         dvd::send(|| DvdMessage::WillAddTirDependencies { items_that_need_dependencies: items_that_need_dependencies.clone() });
         for id in items_that_need_dependencies {
-            match self.code.hir.items[id] {
-                hir::Item::Decl(decl_id) => {
-                    match df!(decl_id.hir) {
-                        hir::Decl::Parameter { .. } | hir::Decl::Static(_) | hir::Decl::Const(_) | hir::Decl::Stored { .. } | hir::Decl::Field { .. } | hir::Decl::ReturnValue | hir::Decl::InternalField(_) | hir::Decl::LoopBinding { .. } /*  | hir::Decl::PatternBinding { .. }*/ => {},
-                        hir::Decl::PatternBinding { id: binding_id, .. } => {
-                            let scrutinee = self.code.hir.pattern_binding_decls[binding_id].scrutinee;
+            match self.code.ast.items[id] {
+                ast::Item::Decl(decl_id) => {
+                    match df!(decl_id.ast) {
+                        ast::Decl::Parameter { .. } | ast::Decl::Static(_) | ast::Decl::Const(_) | ast::Decl::Stored { .. } | ast::Decl::Field { .. } | ast::Decl::ReturnValue | ast::Decl::InternalField(_) | ast::Decl::LoopBinding { .. } /*  | ast::Decl::PatternBinding { .. }*/ => {},
+                        ast::Decl::PatternBinding { id: binding_id, .. } => {
+                            let scrutinee = self.code.ast.pattern_binding_decls[binding_id].scrutinee;
         
                             // TODO: find out why this seems to cause an infinite loop if it's moved to build_more_tir() and changed to a type 2 dependency
                             self.tir.graph.add_type2_dep(id, ef!(scrutinee.item));
                         },
-                        hir::Decl::GenericParam(_) => {
-                            add_eval_dep!(id, hir::TYPE_TYPE);
+                        ast::Decl::GenericParam(_) => {
+                            add_eval_dep!(id, ast::TYPE_TYPE);
                         },
-                        hir::Decl::LegacyIntrinsic { ref param_tys, .. } => {
+                        ast::Decl::LegacyIntrinsic { ref param_tys, .. } => {
                             for &ty in param_tys {
                                 add_eval_dep!(id, ty);
                             }
                         },
-                        hir::Decl::Intrinsic(intr) | hir::Decl::MethodIntrinsic(intr) => {
-                            let param_tys = self.code.hir.intrinsics[intr].param_tys.clone();
+                        ast::Decl::Intrinsic(intr) | ast::Decl::MethodIntrinsic(intr) => {
+                            let param_tys = self.code.ast.intrinsics[intr].param_tys.clone();
                             for ty in param_tys {
                                 add_eval_dep!(id, ty);
                             }
                         },
-                        hir::Decl::Variant { payload_ty, .. } => {
+                        ast::Decl::Variant { payload_ty, .. } => {
                             if let Some(payload_ty) = payload_ty {
                                 add_eval_dep!(id, payload_ty);
                             }
                         }
-                        hir::Decl::Computed { scope, ref param_tys, .. } => {
+                        ast::Decl::Computed { scope, ref param_tys, .. } => {
                             for &ty in param_tys {
                                 add_eval_dep!(id, ty);
                             }
                             self.add_type3_scope_dep(id, scope);
                             // NOTE: the Some case is handled below this match expression
-                            if self.code.hir.explicit_tys[decl_id].is_none() {
-                                add_eval_dep!(id, hir::VOID_TYPE);
+                            if self.code.ast.explicit_tys[decl_id].is_none() {
+                                add_eval_dep!(id, ast::VOID_TYPE);
                             }
                         },
-                        hir::Decl::ComputedPrototype { ref param_tys, extern_func } => {
+                        ast::Decl::ComputedPrototype { ref param_tys, extern_func } => {
                             for &ty in param_tys {
                                 add_eval_dep!(id, ty);
                             }
                             // NOTE: the Some case is handled below this match expression
-                            if self.code.hir.explicit_tys[decl_id].is_none() {
-                                add_eval_dep!(id, hir::VOID_TYPE);
+                            if self.code.ast.explicit_tys[decl_id].is_none() {
+                                add_eval_dep!(id, ast::VOID_TYPE);
                             }
 
                             if let Some(extern_func) = extern_func {
-                                let extern_library_path = self.code.hir.extern_mods[extern_func.extern_mod].library_path;
+                                let extern_library_path = self.code.ast.extern_mods[extern_func.extern_mod].library_path;
                                 add_eval_dep!(id, extern_library_path);
                             }
                         },
                     }
         
                     // NOTE: The computed decl case in the above match expression depends on this!
-                    if let Some(ty) = self.code.hir.explicit_tys[decl_id] {
+                    if let Some(ty) = self.code.ast.explicit_tys[decl_id] {
                         add_eval_dep!(id, ty);
                     }
                 }
-                hir::Item::Expr(expr_id) => {
-                    match ef!(expr_id.hir) {
-                        hir::Expr::Void | hir::Expr::Error | hir::Expr::IntLit { .. } | hir::Expr::DecLit { .. } | hir::Expr::StrLit { .. }
-                            | hir::Expr::CharLit { .. } | hir::Expr::BoolLit { .. } | hir::Expr::Const(_) | hir::Expr::AddrOf { .. }
-                            | hir::Expr::Deref(_) | hir::Expr::Pointer { .. } | hir::Expr::Set { .. } | hir::Expr::Mod { .. }
-                            | hir::Expr::Struct(_) | hir::Expr::Enum(_) | hir::Expr::Call { .. } | hir::Expr::FunctionTy { .. }
-                            | hir::Expr::Break(_) | hir::Expr::Continue(_) => {},
-                        hir::Expr::Cast { ty, .. } => {
+                ast::Item::Expr(expr_id) => {
+                    match ef!(expr_id.ast) {
+                        ast::Expr::Void | ast::Expr::Error | ast::Expr::IntLit { .. } | ast::Expr::DecLit { .. } | ast::Expr::StrLit { .. }
+                            | ast::Expr::CharLit { .. } | ast::Expr::BoolLit { .. } | ast::Expr::Const(_) | ast::Expr::AddrOf { .. }
+                            | ast::Expr::Deref(_) | ast::Expr::Pointer { .. } | ast::Expr::Set { .. } | ast::Expr::Mod { .. }
+                            | ast::Expr::Struct(_) | ast::Expr::Enum(_) | ast::Expr::Call { .. } | ast::Expr::FunctionTy { .. }
+                            | ast::Expr::Break(_) | ast::Expr::Continue(_) => {},
+                        ast::Expr::Cast { ty, .. } => {
                             add_eval_dep!(id, ty);
                         },
-                        hir::Expr::StructLit { ty, .. } => {
+                        ast::Expr::StructLit { ty, .. } => {
                             add_eval_dep!(id, ty);
                         },
-                        hir::Expr::Ret { decl, .. } => {
+                        ast::Expr::Ret { decl, .. } => {
                             let ty = decl
-                                .and_then(|decl| self.code.hir.explicit_tys[decl])
-                                .unwrap_or(hir::VOID_TYPE);
+                                .and_then(|decl| self.code.ast.explicit_tys[decl])
+                                .unwrap_or(ast::VOID_TYPE);
                             add_eval_dep!(id, ty);
                         }
-                        hir::Expr::DeclRef { id: decl_ref_id, .. } => {
+                        ast::Expr::DeclRef { id: decl_ref_id, .. } => {
                             self.add_types_2_to_4_deps_to_member_ref(id, decl_ref_id);
                         },
-                        hir::Expr::Do { scope } => {
+                        ast::Expr::Do { scope } => {
                             self.add_type3_scope_dep(id, scope);
                         },
-                        hir::Expr::Switch { ref cases, .. } => {
+                        ast::Expr::Switch { ref cases, .. } => {
                             for case in cases.clone() {
                                 self.add_type3_scope_dep(id, case.scope);
                             }
                         },
-                        hir::Expr::If { then_scope, else_scope, .. } => {
+                        ast::Expr::If { then_scope, else_scope, .. } => {
                             self.add_type3_scope_dep(id, then_scope);
                             if let Some(else_scope) = else_scope {
                                 self.add_type3_scope_dep(id, else_scope);
                             }
                         }
-                        hir::Expr::While { scope, .. } => {
+                        ast::Expr::While { scope, .. } => {
                             self.add_type3_scope_dep(id, scope);
                         },
-                        hir::Expr::For { scope, .. } => {
+                        ast::Expr::For { scope, .. } => {
                             self.add_type3_scope_dep(id, scope);
                         },
                     }
@@ -979,15 +979,15 @@ impl Driver {
         let mut sp = Subprogram { units: Vec::new(), mock_units: Vec::new(), levels };
         sp.units.resize_with(sp.levels.units.len(), Default::default);
 
-        // Finally, convert HIR items to TIR and add them to the correct spot
+        // Finally, convert AST items to TIR and add them to the correct spot
         for (unit, levels_unit) in sp.units.iter_mut().zip(&sp.levels.units) {
             for &item_id in &levels_unit.items {
                 let level = sp.levels.item_to_levels[&item_id];
-                match self.code.hir.items[item_id] {
-                    hir::Item::Decl(id) => {
+                match self.code.ast.items[item_id] {
+                    ast::Item::Decl(id) => {
                         self.build_tir_decl(&mut unit.items, level, id);
                     }
-                    hir::Item::Expr(id) => {
+                    ast::Item::Expr(id) => {
                         if self.tir.depended_on[id] { unit.eval_dependees.push(id); }
                         self.build_tir_expr(&mut unit.items, level, id);
                     }
@@ -995,19 +995,19 @@ impl Driver {
             }
         }
         for mock_unit in &sp.levels.mock_units {
-            let main_expr = match self.code.hir.items[mock_unit.item] {
-                hir::Item::Expr(id) => id,
-                hir::Item::Decl(_) => panic!("Can't have metadependency on a declaration!"),
+            let main_expr = match self.code.ast.items[mock_unit.item] {
+                ast::Item::Expr(id) => id,
+                ast::Item::Decl(_) => panic!("Can't have metadependency on a declaration!"),
             };
             let mut items = UnitItems::default();
             self.build_tir_expr(&mut items, mock_unit.item_level, main_expr);
             for &item_id in &mock_unit.deps {
                 let level = sp.levels.item_to_levels[&item_id];
-                match self.code.hir.items[item_id] {
-                    hir::Item::Decl(id) => {
+                match self.code.ast.items[item_id] {
+                    ast::Item::Decl(id) => {
                         self.build_tir_decl(&mut items, level, id);
                     }
-                    hir::Item::Expr(id) => {
+                    ast::Item::Expr(id) => {
                         self.build_tir_expr(&mut items, level, id);
                     }
                 }
@@ -1021,10 +1021,10 @@ impl Driver {
             );
         }
         self.flush_staged_ret_groups(&mut sp);
-        for scope in &self.code.hir.imper_scopes {
+        for scope in &self.code.ast.imper_scopes {
             for &op in &self.code.blocks[scope.block].ops {
                 let op = &self.code.ops[op];
-                let item = op.as_hir_item().unwrap();
+                let item = op.as_ast_item().unwrap();
                 match item {
                     // TODO: This is a horrible hack! Instead of looping through all imperative scopes, I should somehow
                     // associate statements with their unit
@@ -1033,7 +1033,7 @@ impl Driver {
                         let unit = &mut sp.units[unit as usize];
                         unit.items.stmts.push(Stmt { root_expr: expr, has_semicolon });
                     },
-                    Item::Decl(decl) => assert!(matches!(df!(decl.hir), hir::Decl::Stored { .. } | hir::Decl::Computed { .. }), "Invalid scope item"),
+                    Item::Decl(decl) => assert!(matches!(df!(decl.ast), ast::Decl::Stored { .. } | ast::Decl::Computed { .. }), "Invalid scope item"),
                 }
             }
         }

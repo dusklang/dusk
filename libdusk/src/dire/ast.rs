@@ -14,7 +14,7 @@ use crate::dire::source_info::{SourceRange, SourceFileId};
 use crate::dire::BlockId;
 use crate::dire::InternalField;
 
-use crate::hir::Intrinsic;
+use crate::ast::Intrinsic;
 
 define_index_type!(pub struct ExprId = u32;);
 define_index_type!(pub struct DeclRefId = u32;);
@@ -482,7 +482,7 @@ pub struct Attribute {
 }
 
 #[derive(Default)]
-pub struct HirCode {
+pub struct Ast {
     pub items: IndexVec<ItemId, Item>,
     pub exprs: IndexVec<ExprId, Expr>,
     pub source_ranges: IndexVec<ItemId, SourceRange>,

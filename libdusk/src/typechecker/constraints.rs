@@ -3,7 +3,7 @@ use smallvec::{SmallVec, smallvec};
 use std::collections::HashMap;
 
 use crate::dire::ty::{Type, LegacyInternalType, FunctionType, QualType, IntWidth};
-use crate::dire::hir::{GenericParamId, ExprId, GenericCtx, GenericCtxId, BLANK_GENERIC_CTX};
+use crate::dire::ast::{GenericParamId, ExprId, GenericCtx, GenericCtxId, BLANK_GENERIC_CTX};
 
 use crate::driver::Driver;
 use crate::ty::BuiltinTraits;
@@ -286,7 +286,7 @@ impl Driver {
             UnificationType::UnevaluatedType(ty) => {
                 let mut generic_ctx_id = ef!(ty.generic_ctx_id);
                 let generic_params: &[GenericParamId] = loop {
-                    match self.code.hir.generic_ctxs[generic_ctx_id] {
+                    match self.code.ast.generic_ctxs[generic_ctx_id] {
                         GenericCtx::Blank => break &[],
                         GenericCtx::Decl { ref parameters, .. } => {
                             break parameters.as_slice();

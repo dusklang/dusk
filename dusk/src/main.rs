@@ -84,7 +84,7 @@ fn dusk_main(opt: Opt, program_args: &[OsString]) {
     let mut driver = DriverRef::new(&DRIVER);
     *driver.write() = Driver::new(src_map, Arch::X86_64, opt.no_core);
     let before = driver.read().take_snapshot();
-    driver.write().initialize_hir();
+    driver.write().initialize_ast();
 
     if !loaded_file {
         driver.write().diag.report_error_no_range(
@@ -108,14 +108,14 @@ fn dusk_main(opt: Opt, program_args: &[OsString]) {
         flush_diagnostics(&mut driver.write());
         // TODO: still proceed with other phases after some forms of parse error. I had to add this in the short term
         // because after I improved the quality of the parser's error handling, some errors would prevent important data
-        // from being properly initialized (e.g., the two-phase initialization of various HIR data structures), leading to
+        // from being properly initialized (e.g., the two-phase initialization of various AST data structures), leading to
         // failures later in the pipeline.
         driver.read().diag.check_for_failure();
         return;
     };
     let new_code = driver.read().get_new_code_since(before);
 
-    driver.write().finalize_hir();
+    driver.write().finalize_ast();
 
     begin_phase!(Tir);
     dvd_ipc::send(|| DvdMessage::WillInitializeTir);
@@ -131,7 +131,7 @@ fn dusk_main(opt: Opt, program_args: &[OsString]) {
         if let Ok(Some(units)) = driver_write.build_more_tir() {
             drop(driver_write);
             dvd_ipc::send(|| DvdMessage::WillTypeCheckSet);
-            // Typechecking can lead to expressions being evaluated, which in turn can result in new HIR being
+            // Typechecking can lead to expressions being evaluated, which in turn can result in new AST being
             // added. Therefore, we take a snapshot before typechecking.
             let before = driver.read().take_snapshot();
             if driver.type_check(&units, &mut tp, new_code).is_err() {

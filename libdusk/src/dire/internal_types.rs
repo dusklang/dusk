@@ -2,7 +2,7 @@ use std::any::TypeId;
 
 use dusk_proc_macros::DuskBridge;
 
-use crate::dire::hir::NewNamespaceId;
+use crate::dire::ast::NewNamespaceId;
 use crate::dire::ty::Type;
 use crate::driver::Driver;
 use crate::interpreter::Value;
@@ -35,7 +35,7 @@ pub trait DuskBridge: 'static {
     fn to_dusk_type(d: &Driver) -> Type {
         let id = TypeId::of::<Self>();
 
-        d.code.hir.bridged_types[&id].clone()
+        d.code.ast.bridged_types[&id].clone()
     }
     fn register(d: &mut Driver);
     fn bridge_from_dusk(value: &Value, d: &Driver) -> Self;
@@ -44,7 +44,7 @@ pub trait DuskBridge: 'static {
 
 impl DuskBridge for () {
     fn register(d: &mut Driver) {
-        d.code.hir.bridged_types.insert(TypeId::of::<Self>(), Type::Void);
+        d.code.ast.bridged_types.insert(TypeId::of::<Self>(), Type::Void);
     }
 
     fn bridge_from_dusk(_value: &Value, _d: &Driver) -> Self {
@@ -58,7 +58,7 @@ impl DuskBridge for () {
 
 impl DuskBridge for &'static str {
     fn register(d: &mut Driver) {
-        d.code.hir.bridged_types.insert(TypeId::of::<Self>(), Type::i8().ptr());
+        d.code.ast.bridged_types.insert(TypeId::of::<Self>(), Type::i8().ptr());
     }
 
     fn bridge_from_dusk(value: &Value, _d: &Driver) -> Self {
@@ -72,7 +72,7 @@ impl DuskBridge for &'static str {
 
 impl DuskBridge for Module {
     fn register(d: &mut Driver) {
-        d.code.hir.bridged_types.insert(TypeId::of::<Self>(), Type::Mod);
+        d.code.ast.bridged_types.insert(TypeId::of::<Self>(), Type::Mod);
     }
 
     fn bridge_from_dusk(value: &Value, _d: &Driver) -> Self {
@@ -89,7 +89,7 @@ macro_rules! bridge_ints {
         $(
             impl DuskBridge for $int_name {
                 fn register(d: &mut Driver) {
-                    d.code.hir.bridged_types.insert(TypeId::of::<$int_name>(), Type::$int_name());
+                    d.code.ast.bridged_types.insert(TypeId::of::<$int_name>(), Type::$int_name());
                 }
             
                 fn bridge_from_dusk(value: &Value, _d: &Driver) -> Self {
@@ -147,7 +147,7 @@ macro_rules! define_legacy_internal_types_impl {
         }
 
         pub mod internal_field_decls {
-            use crate::dire::hir::DeclId;
+            use crate::dire::ast::DeclId;
             $(
                 #[derive(Debug)]
                 pub struct $name {

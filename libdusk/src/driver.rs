@@ -3,7 +3,7 @@ use std::sync::RwLock;
 use string_interner::StringInterner;
 use lazy_static::lazy_static;
 
-use crate::dire::hir::ExprId;
+use crate::dire::ast::ExprId;
 use crate::dire::mir::Const;
 use crate::dire::arch::Arch;
 use crate::dire::source_info::SourceFileId;
@@ -12,7 +12,7 @@ use crate::dire::InternalFieldDecls;
 
 use crate::source_info::SourceMap;
 use crate::token::TokenVec;
-use crate::hir;
+use crate::ast;
 use crate::tir;
 use crate::error::DiagnosticReporter;
 use crate::mir::{self, FunctionRef};
@@ -28,7 +28,7 @@ pub struct Driver {
     pub src_map: SourceMap,
     pub toks: IndexVec<SourceFileId, TokenVec>,
     pub interner: StringInterner,
-    pub hir: hir::Builder,
+    pub ast: ast::Builder,
     pub tir: tir::Builder,
     pub diag: DiagnosticReporter,
     pub mir: mir::Builder,
@@ -47,7 +47,7 @@ impl Driver {
             src_map,
             toks: IndexVec::new(),
             interner: StringInterner::new(),
-            hir: hir::Builder::default(),
+            ast: ast::Builder::default(),
             tir: tir::Builder::default(),
             diag: Default::default(),
             mir: mir::Builder::new(),

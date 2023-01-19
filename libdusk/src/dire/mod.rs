@@ -1,4 +1,4 @@
-pub mod hir;
+pub mod ast;
 pub mod ty;
 pub mod arch;
 pub mod index_counter;
@@ -13,7 +13,7 @@ pub use internal_types::*;
 use index_vec::{IndexVec, index_vec, define_index_type};
 use display_adapter::display_adapter;
 
-use hir::{HirCode, Item, GenericCtx};
+use ast::{Ast, Item, GenericCtx};
 use mir::{MirCode, Instr, InstrId, VOID_INSTR};
 use source_info::SourceRange;
 use ty::Type;
@@ -23,7 +23,7 @@ define_index_type!(pub struct BlockId = u32;);
 
 #[derive(Clone, Debug)]
 pub enum Op {
-    HirItem { item: Item, has_semicolon: bool },
+    AstItem { item: Item, has_semicolon: bool },
     MirInstr(Instr, InstrId, Type),
 }
 
@@ -60,16 +60,16 @@ impl Op {
         }
     }
 
-    pub fn as_hir_item(&self) -> Option<Item> {
+    pub fn as_ast_item(&self) -> Option<Item> {
         match self {
-            &Op::HirItem { item, .. } => Some(item),
+            &Op::AstItem { item, .. } => Some(item),
             _ => None,
         }
     }
 
     pub fn has_semicolon(&self) -> bool {
         match self {
-            &Op::HirItem { has_semicolon, .. } => has_semicolon,
+            &Op::AstItem { has_semicolon, .. } => has_semicolon,
             _ => false,
         }
     }
@@ -82,7 +82,7 @@ pub struct Block {
 pub struct Code {
     pub blocks: IndexVec<BlockId, Block>,
     pub ops: IndexVec<OpId, Op>,
-    pub hir: HirCode,
+    pub ast: Ast,
     pub mir: MirCode,
 }
 
@@ -91,12 +91,12 @@ impl Default for Code {
         let mut val = Code {
             blocks: IndexVec::default(),
             ops: index_vec![Op::MirInstr(Instr::Void, InstrId::new(0), Type::Void)],
-            hir: HirCode::default(),
+            ast: Ast::default(),
             mir: MirCode::default(),
         };
         val.mir.source_ranges.insert(VOID_INSTR, SourceRange::default());
         val.mir.instr_names.insert(VOID_INSTR, "void".to_string());
-        val.hir.generic_ctxs.push(GenericCtx::Blank);
+        val.ast.generic_ctxs.push(GenericCtx::Blank);
         val
     }
 }
@@ -108,16 +108,16 @@ impl Code {
         for &id in &block.ops {
             write!(w, "    %op{}", id.index())?;
             match self.ops[id] {
-                Op::HirItem { item, .. } => {
+                Op::AstItem { item, .. } => {
                     match item {
                         Item::Expr(expr) => {
-                            write!(w, "(%expr{}) = hir.", expr.index())?;
-                            let expr = &self.hir.exprs[expr];
+                            write!(w, "(%expr{}) = ast.", expr.index())?;
+                            let expr = &self.ast.exprs[expr];
                             writeln!(w, "{:?}", expr)?;
                         },
                         Item::Decl(decl) => {
-                            write!(w, "(%decl{}) = hir.", decl.index())?;
-                            let decl = &self.hir.decls[decl];
+                            write!(w, "(%decl{}) = ast.", decl.index())?;
+                            let decl = &self.ast.decls[decl];
                             writeln!(w, "{:?}", decl)?;
                         }
                     }

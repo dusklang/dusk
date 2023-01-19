@@ -40,7 +40,7 @@ use libdusk::source_info::SourceFileLocation;
 use libdusk::index_vec::*;
 use libdusk::dvd::socket_name;
 use rect_packer::Packer;
-use libdusk::dire::hir::ItemId;
+use libdusk::dire::ast::ItemId;
 
 use libdusk::dvd::{Message, Response, self};
 

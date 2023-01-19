@@ -11,7 +11,7 @@ use std::ops::Range;
 use serde::{Serialize, Deserialize};
 
 use display_adapter::display_adapter;
-use crate::dire::hir::{ExprId, DeclId, ItemId, Item};
+use crate::dire::ast::{ExprId, DeclId, ItemId, Item};
 use crate::dire::OpId;
 use crate::dire::source_info::{SourceRange, SourceFileId};
 
@@ -142,7 +142,7 @@ impl Driver {
 
     #[allow(dead_code)]
     pub fn print_item(&self, item: ItemId) {
-        self.print_range(self.code.hir.source_ranges[item]);
+        self.print_range(self.code.ast.source_ranges[item]);
     }
 
     #[allow(dead_code)]
@@ -152,7 +152,7 @@ impl Driver {
 
     #[allow(dead_code)]
     pub fn print_decl(&self, id: DeclId) {
-        self.print_item(self.code.hir.decl_to_items[id]);
+        self.print_item(self.code.ast.decl_to_items[id]);
     }
 }
 

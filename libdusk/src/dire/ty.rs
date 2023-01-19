@@ -5,7 +5,7 @@ use index_vec::define_index_type;
 use dusk_proc_macros::DuskBridge;
 
 use crate::dire::arch::Arch;
-use crate::dire::hir::{StructId, EnumId, GenericParamId, NewNamespaceId};
+use crate::dire::ast::{StructId, EnumId, GenericParamId, NewNamespaceId};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum IntWidth {

@@ -5,12 +5,12 @@ use smallvec::{SmallVec, smallvec};
 use string_interner::DefaultSymbol as Sym;
 use derivative::Derivative;
 
-use crate::dire::hir::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, LegacyIntrinsic, Attribute, FieldAssignment, Ident, Pattern, PatternKind, SwitchCase, ImperScopedDecl, ExternMod, ERROR_EXPR, ERROR_TYPE, VOID_TYPE};
+use crate::dire::ast::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, LegacyIntrinsic, Attribute, FieldAssignment, Ident, Pattern, PatternKind, SwitchCase, ImperScopedDecl, ExternMod, ERROR_EXPR, ERROR_TYPE, VOID_TYPE};
 use crate::dire::ty::Type;
 use crate::dire::source_info::{self, SourceFileId, SourceRange};
 
 use crate::driver::Driver;
-use crate::hir::{ConditionKind, GenericParamList};
+use crate::ast::{ConditionKind, GenericParamList};
 use crate::token::{TokenKind, Token};
 use crate::builder::{BinOp, UnOp, OpPlacement};
 use crate::error::Error;
@@ -493,7 +493,7 @@ impl Driver {
         self.eat_tok(p, TokenKind::DoubleDot)?;
         let upper_bound = self.parse_non_struct_lit_expr(p);
         let stored_decl_id = self.next_stored_decl();
-        let binding_decl = self.add_decl(hir::Decl::LoopBinding { id: stored_decl_id, is_mut }, var_name.symbol, var_ty, var_name.range);
+        let binding_decl = self.add_decl(ast::Decl::LoopBinding { id: stored_decl_id, is_mut }, var_name.symbol, var_ty, var_name.range);
         let binding_decl = ImperScopedDecl {
             name: var_name.symbol,
             num_params: 0,
@@ -609,7 +609,7 @@ impl Driver {
             TokenKind::Return => {
                 let ret_range = self.cur(p).range;
                 self.next(p);
-                let ret_expr = self.try_parse_expr(p, true).unwrap_or(hir::VOID_EXPR);
+                let ret_expr = self.try_parse_expr(p, true).unwrap_or(ast::VOID_EXPR);
                 let expr_range = self.get_range(ret_expr);
                 Ok(self.ret(ret_expr, source_info::concat(ret_range, expr_range)))
             },
@@ -850,9 +850,9 @@ impl Driver {
             &TokenKind::Ident(sym) => sym,
             _ => panic!("Unexpected token when parsing attribute"),
         };
-        let is_requires = attr == self.hir.known_idents.requires;
-        let is_guarantees = attr == self.hir.known_idents.guarantees;
-        let is_comptime = attr == self.hir.known_idents.comptime;
+        let is_requires = attr == self.ast.known_idents.requires;
+        let is_guarantees = attr == self.ast.known_idents.guarantees;
+        let is_comptime = attr == self.ast.known_idents.comptime;
         let is_condition = is_requires || is_guarantees;
 
         if !is_condition && !is_comptime {
@@ -927,7 +927,7 @@ impl Driver {
             },
             &TokenKind::Ident(name) => {
                 self.next(p);
-                if name == self.hir.known_idents.underscore {
+                if name == self.ast.known_idents.underscore {
                     PatternKind::AnonymousCatchAll(initial_range)
                 } else {
                     let name = Ident { symbol: name, range: initial_range };
@@ -992,7 +992,7 @@ enum AmbiguousGenericListKind {
 /// Through the process of parsing the generic list, we may come across tokens
 /// that make it clear it could only be one of the two possibilities, or we
 /// may not. So, there needs to be a way to store elements of the generic list
-/// without altering the HIR state until we know for sure what kind of list we're
+/// without altering the AST state until we know for sure what kind of list we're
 /// dealing with. Once we do, we need to convert the "ambiguous" elements into the
 /// proper format (either generic parameters or generic arguments).
 #[derive(Debug)]
@@ -1016,10 +1016,10 @@ impl Driver {
 
     fn convert_ambiguous_generic_list_to_params(&mut self, idents: &Vec<Ident>) -> GenericParamList {
         let mut generic_params = GenericParamList::default();
-        generic_params.ids.start = self.hir.generic_params.peek_next_idx();
+        generic_params.ids.start = self.ast.generic_params.peek_next_idx();
         for ident in idents {
             // Claim a GenericParamId for yourself, then set the `end` value to be one past the end
-            let generic_param = self.hir.generic_params.next_idx();
+            let generic_param = self.ast.generic_params.next_idx();
             // Make sure nobody interrupts this loop and creates an unrelated generic param
             debug_assert_eq!(generic_params.ids.end, generic_param);
             generic_params.ids.end = generic_param + 1;
@@ -1146,17 +1146,17 @@ impl Driver {
                     }
                 };
                 if let Some(condition_ns) = condition_ns {
-                    self.code.hir.condition_ns[condition_ns].func = decl;
+                    self.code.ast.condition_ns[condition_ns].func = decl;
                 }
-                if let Some(attr) = attributes.iter().find(|attr| attr.attr == self.hir.known_idents.comptime) {
-                    if !matches!(df!(decl.hir), hir::Decl::Computed { .. }) {
+                if let Some(attr) = attributes.iter().find(|attr| attr.attr == self.ast.known_idents.comptime) {
+                    if !matches!(df!(decl.ast), ast::Decl::Computed { .. }) {
                         self.diag.push(
                             Error::new("unexpected @comptime attribute")
                                 .adding_primary_range(attr.range, "can only be applied to function declarations")
                         );
                     }
                 }
-                self.code.hir.decl_attributes.entry(decl).or_default()
+                self.code.ast.decl_attributes.entry(decl).or_default()
                     .extend(attributes);
                 Ok(Item::Decl(decl))
             },
@@ -1238,7 +1238,7 @@ impl Driver {
         let library_path = self.parse_expr(p).unwrap_or_else(|err| err);
         self.eat_tok(p, TokenKind::RightParen)?;
 
-        let extern_mod = self.code.hir.extern_mods.push(ExternMod::new(library_path));
+        let extern_mod = self.code.ast.extern_mods.push(ExternMod::new(library_path));
 
         let (_module_entry, module) = self.begin_module(Some(extern_mod), mod_range);
         self.eat_tok(p, TokenKind::OpenCurly)?;
@@ -1447,12 +1447,12 @@ impl Driver {
             self.next(p);
             let generic_param_syntax_list = self.begin_list(p, TokenKind::could_begin_generic_parameter, [TokenKind::Comma], Some(TokenKind::CloseSquareBracket));
             if matches!(self.cur(p).kind, TokenKind::Ident(_)) {
-                generic_param_list.ids.start = self.hir.generic_params.peek_next_idx();
+                generic_param_list.ids.start = self.ast.generic_params.peek_next_idx();
                 generic_param_list.ids.end = generic_param_list.ids.start;
                 while let TokenKind::Ident(name) = *self.cur(p).kind {
                     self.start_next_list_item(p, generic_param_syntax_list.id());
                     // Claim a GenericParamId for yourself, then set the `end` value to be one past the end
-                    let generic_param = self.hir.generic_params.next_idx();
+                    let generic_param = self.ast.generic_params.next_idx();
                     // Make sure nobody interrupts this loop and creates an unrelated generic param
                     debug_assert_eq!(generic_param_list.ids.end, generic_param);
                     generic_param_list.ids.end = generic_param + 1;
@@ -1513,12 +1513,12 @@ impl Driver {
                 proto_range = source_info::concat(proto_range, range);
                 ty
             },
-            TokenKind::OpenCurly => hir::VOID_TYPE,
+            TokenKind::OpenCurly => ast::VOID_TYPE,
             _ => {
                 self.check_for_fn_equal(p)?;
                 assert_eq!(generic_param_list.names.len(), 0, "generic parameters on a function prototype are not allowed");
                 drop(ns);
-                return Ok(self.comp_decl_prototype(name, param_tys, param_ranges, hir::VOID_TYPE, proto_range));
+                return Ok(self.comp_decl_prototype(name, param_tys, param_ranges, ast::VOID_TYPE, proto_range));
             },
         };
 

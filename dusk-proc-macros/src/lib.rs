@@ -114,35 +114,35 @@ impl Builder {
         self
     }
 
-    fn hir_code(mut self, driver: impl Into<TokenStream>) -> Self {
+    fn ast_code(mut self, driver: impl Into<TokenStream>) -> Self {
         self.stream.extend(driver.into());
         self
             .field("code")
-            .field("hir")
+            .field("ast")
     }
 
     fn expr_to_item(self, driver: impl Into<TokenStream>, expr_id: impl Into<TokenStream>) -> Self {
-        self.hir_code(driver)
+        self.ast_code(driver)
             .field("expr_to_items")
             .brackets(expr_id.into())
     }
 
     fn decl_to_item(self, driver: impl Into<TokenStream>, expr_id: impl Into<TokenStream>) -> Self {
-        self.hir_code(driver)
+        self.ast_code(driver)
             .field("decl_to_items")
             .brackets(expr_id.into())
     }
 
     fn source_range(self, driver: impl Into<TokenStream>, item_id: impl Into<TokenStream>) -> Self {
         self
-            .hir_code(driver)
+            .ast_code(driver)
             .field("source_ranges")
             .brackets(item_id)
     }
 
     fn generic_ctx_id(self, driver: impl Into<TokenStream>, item_id: impl Into<TokenStream>) -> Self {
         self
-            .hir_code(driver)
+            .ast_code(driver)
             .field("item_generic_ctxs")
             .brackets(item_id)
     }
@@ -184,7 +184,7 @@ pub fn ef(input: TokenStream) -> TokenStream {
                 },
                 "generic_ctx" => {
                     Builder::new()
-                        .hir_code(driver.clone())
+                        .ast_code(driver.clone())
                         .field("generic_ctxs")
                         .brackets(Builder::new().generic_ctx_id_from_expr(driver, base))
                 }
@@ -195,9 +195,9 @@ pub fn ef(input: TokenStream) -> TokenStream {
                             base,
                         )
                 },
-                "hir" => {
+                "ast" => {
                     Builder::new()
-                        .hir_code(driver)
+                        .ast_code(driver)
                         .field("exprs")
                         .brackets(base)
                 },
@@ -234,9 +234,9 @@ pub fn df(input: TokenStream) -> TokenStream {
                         )
                         .stream
                 },
-                "hir" => {
+                "ast" => {
                     Builder::new()
-                        .hir_code(driver)
+                        .ast_code(driver)
                         .field("decls")
                         .brackets(base)
                         .stream
@@ -302,9 +302,9 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
             }
         } else {
             quote! {
-                let namespace = d.code.hir.new_namespaces.push(NewNamespace::default());
+                let namespace = d.code.ast.new_namespaces.push(NewNamespace::default());
                 let internal_type = InternalType { name: String::from(#bridged_name), size: std::mem::size_of::<#decl_name>(), namespace };
-                let type_id = d.code.hir.internal_types.push(internal_type);
+                let type_id = d.code.ast.internal_types.push(internal_type);
                 let ty = Type::Internal(type_id);
             }
         };
@@ -312,7 +312,7 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
             impl crate::dire::internal_types::DuskBridge for #decl_name {
                 fn register(d: &mut crate::driver::Driver) {
                     use std::any::TypeId;
-                    use crate::dire::{hir::*, ty::*, mir::*};
+                    use crate::dire::{ast::*, ty::*, mir::*};
 
                     #get_ty_to_register // defines `ty` variable used below
 
@@ -320,7 +320,7 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
                     let expr = d.add_const_expr(konst);
                     d.add_decl_to_path(#bridged_name, #module, Decl::Const(expr), 0, None);
 
-                    d.code.hir.bridged_types.insert(TypeId::of::<Self>(), ty);
+                    d.code.ast.bridged_types.insert(TypeId::of::<Self>(), ty);
                 }
 
                 fn bridge_from_dusk(value: &crate::interpreter::Value, _d: &crate::driver::Driver) -> Self {
@@ -343,11 +343,11 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
             impl crate::dire::internal_types::DuskBridge for &'static mut #decl_name {
                 fn register(d: &mut crate::driver::Driver) {
                     use std::any::TypeId;
-                    use crate::dire::{hir::*, ty::*, mir::*};
+                    use crate::dire::{ast::*, ty::*, mir::*};
 
-                    let base_ty = d.code.hir.bridged_types.get(&TypeId::of::<#decl_name>()).unwrap().clone();
+                    let base_ty = d.code.ast.bridged_types.get(&TypeId::of::<#decl_name>()).unwrap().clone();
 
-                    d.code.hir.bridged_types.insert(TypeId::of::<Self>(), base_ty.mut_ptr());
+                    d.code.ast.bridged_types.insert(TypeId::of::<Self>(), base_ty.mut_ptr());
                 }
 
                 fn bridge_from_dusk(value: &crate::interpreter::Value, _d: &crate::driver::Driver) -> Self {
@@ -515,7 +515,7 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                                     implementation: thunk,
                                 };
                                 let ret_ty = d.add_const_ty(ret_ty);
-                                let intr_id = d.code.hir.intrinsics.push(intr);
+                                let intr_id = d.code.ast.intrinsics.push(intr);
                                 d.add_decl_to_path(#name, #path, #decl, #num_params, Some(ret_ty));
                             }
                         );
@@ -531,9 +531,9 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         pub fn register_bridged_rust_methods(d: &mut crate::driver::Driver) {
             use crate::dire::internal_types::DuskBridge;
-            use crate::dire::{hir::*, ty::*, mir::*};
+            use crate::dire::{ast::*, ty::*, mir::*};
             use crate::driver::DriverRef;
-            use crate::hir::Intrinsic;
+            use crate::ast::Intrinsic;
             use crate::interpreter::Value;
             use smallvec::smallvec;
 

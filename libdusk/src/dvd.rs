@@ -8,7 +8,7 @@
 #[cfg(feature = "dvd")]
 use serde::{Serialize, Deserialize};
 
-use crate::dire::hir::{ExprId, DeclId, ItemId};
+use crate::dire::ast::{ExprId, DeclId, ItemId};
 use crate::dire::tir::CompId;
 
 /// Messages *from* the compiler *to* the debugger.

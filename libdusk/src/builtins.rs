@@ -7,12 +7,12 @@ use num_bigint::BigInt;
 
 use crate::dire::internal_types;
 use crate::dire::source_info::SourceRange;
-use crate::dire::hir::{ModScopeNs, LegacyIntrinsic, Expr, Decl, VOID_TYPE, ModScopeNsId, NewNamespaceId, EnumId, ExprId, VariantDecl, StaticDecl, NewNamespace, ExternFunctionRef, ExternFunction};
+use crate::dire::ast::{ModScopeNs, LegacyIntrinsic, Expr, Decl, VOID_TYPE, ModScopeNsId, NewNamespaceId, EnumId, ExprId, VariantDecl, StaticDecl, NewNamespace, ExternFunctionRef, ExternFunction};
 use crate::dire::ty::{Type, LegacyInternalType};
 use crate::dire::mir::Const;
 
 use crate::driver::Driver;
-use crate::hir::ScopeState;
+use crate::ast::ScopeState;
 use crate::autopop::AutoPopStackEntry;
 use crate::parser::ParseResult;
 
@@ -24,7 +24,7 @@ use dusk_proc_macros::{ef, df, dusk_bridge};
 impl Driver {
     #[path="compiler.ModuleBuilder"]
     fn new(&mut self) -> ModuleBuilder {
-        let namespace = self.code.hir.new_namespaces.push(NewNamespace::default());
+        let namespace = self.code.ast.new_namespaces.push(NewNamespace::default());
         ModuleBuilder { namespace }
     }
 
@@ -37,12 +37,12 @@ impl Driver {
         let ty = self.add_const_ty(Type::usize());
         let decl_id = self.add_decl(Decl::Const(konst), name, Some(ty), SourceRange::default());
         let static_decl = StaticDecl { name, num_params: 0, decl: decl_id };
-        self.code.hir.new_namespaces[b.namespace].static_decls.push(static_decl);
+        self.code.ast.new_namespaces[b.namespace].static_decls.push(static_decl);
 
         // NOTE: we currently have to do this every time this function is called, to be safe. Once we have proper collection types
         // implemented in the language, the user can just build up an array of decls and add them all at once.
         let new_code = self.get_new_code_since(before);
-        self.finalize_hir();
+        self.finalize_ast();
         self.initialize_tir(&new_code);
     }
 
@@ -65,8 +65,8 @@ impl Driver {
             param_tys: param_tys.iter().cloned().collect(),
             return_ty: ret_ty,
         };
-        let extern_mod = crate::dire::hir::ExternMod { library_path, imported_functions: vec![func] };
-        let extern_mod = self.code.hir.extern_mods.push(extern_mod);
+        let extern_mod = crate::dire::ast::ExternMod { library_path, imported_functions: vec![func] };
+        let extern_mod = self.code.ast.extern_mods.push(extern_mod);
         let extern_func_ref = ExternFunctionRef {
             extern_mod,
             index: 0,
@@ -74,12 +74,12 @@ impl Driver {
         let num_params = param_tys.len();
         let decl_id = self.add_decl(Decl::ComputedPrototype { param_tys, extern_func: Some(extern_func_ref) }, name, Some(ret_ty), SourceRange::default());
         let static_decl = StaticDecl { name, num_params, decl: decl_id };
-        self.code.hir.new_namespaces[b.namespace].static_decls.push(static_decl);
+        self.code.ast.new_namespaces[b.namespace].static_decls.push(static_decl);
 
         // NOTE: we currently have to do this every time this function is called, to be safe. Once we have proper collection types
         // implemented in the language, the user can just build up an array and add them all at once.
         let new_code = self.get_new_code_since(before);
-        self.finalize_hir();
+        self.finalize_ast();
         self.initialize_tir(&new_code);
     }
 
@@ -116,16 +116,16 @@ impl Drop for EnumBuilder {
 
 impl Driver {
     pub fn add_prelude(&mut self) {
-        assert!(self.hir.prelude_namespace.is_none());
-        let prelude_scope = self.code.hir.new_namespaces.push(NewNamespace::default());
-        let prelude_namespace = self.code.hir.mod_ns.push(
+        assert!(self.ast.prelude_namespace.is_none());
+        let prelude_scope = self.code.ast.new_namespaces.push(NewNamespace::default());
+        let prelude_namespace = self.code.ast.mod_ns.push(
             ModScopeNs {
                 scope: prelude_scope,
                 parent: None
             }
         );
         let _prelude_scope = self.push_to_scope_stack(prelude_namespace, ScopeState::Mod { id: prelude_scope, namespace: prelude_namespace, extern_mod: None });
-        self.hir.prelude_namespace = Some(prelude_namespace);
+        self.ast.prelude_namespace = Some(prelude_namespace);
 
         // Add intrinsics to prelude
 
@@ -297,20 +297,20 @@ impl Driver {
         if let Decl::MethodIntrinsic(id) = decl {
             let decl_id = self.add_decl(Decl::Intrinsic(id), name, explicit_ty, SourceRange::default());
             let static_decl = StaticDecl { name, num_params, decl: decl_id };
-            self.code.hir.new_namespaces[scope].static_decls.push(static_decl);
+            self.code.ast.new_namespaces[scope].static_decls.push(static_decl);
 
             let decl_id = self.add_decl(decl, name, explicit_ty, SourceRange::default());
-            self.code.hir.new_namespaces[scope].instance_decls.push(decl_id);
+            self.code.ast.new_namespaces[scope].instance_decls.push(decl_id);
         } else {
             let decl_id = self.add_decl(decl, name, explicit_ty, SourceRange::default());
             let static_decl = StaticDecl { name, num_params, decl: decl_id };
-            self.code.hir.new_namespaces[scope].static_decls.push(static_decl);
+            self.code.ast.new_namespaces[scope].static_decls.push(static_decl);
         }
     }
 
     fn add_module_decl(&mut self, name: &str) -> AutoPopStackEntry<ScopeState, ModScopeNsId> {
-        let scope = self.code.hir.new_namespaces.push(NewNamespace::default());
-        let namespace = self.code.hir.mod_ns.push(
+        let scope = self.code.ast.new_namespaces.push(NewNamespace::default());
+        let namespace = self.code.ast.mod_ns.push(
             ModScopeNs {
                 scope,
 
@@ -335,16 +335,16 @@ impl Driver {
             assert!(!name.is_empty());
 
             let name = self.interner.get_or_intern(name);
-            let matching_decls: Vec<&StaticDecl> = self.code.hir.new_namespaces[ns].static_decls.iter().filter(|decl| decl.name == name).collect();
+            let matching_decls: Vec<&StaticDecl> = self.code.ast.new_namespaces[ns].static_decls.iter().filter(|decl| decl.name == name).collect();
 
             assert!(matching_decls.len() == 1);
             let decl = matching_decls[0];
             assert!(decl.num_params == 0);
-            let Decl::Const(expr) = df!(decl.decl.hir) else { panic!("internal compiler error: expected const decl") };
-            let Expr::Const(konst) = &ef!(expr.hir) else { panic!("internal compiler error: expected const expr") };
+            let Decl::Const(expr) = df!(decl.decl.ast) else { panic!("internal compiler error: expected const decl") };
+            let Expr::Const(konst) = &ef!(expr.ast) else { panic!("internal compiler error: expected const expr") };
             ns = match *konst {
                 Const::Mod(new_ns) => new_ns,
-                Const::Ty(Type::Internal(id)) => self.code.hir.internal_types[id].namespace,
+                Const::Ty(Type::Internal(id)) => self.code.ast.internal_types[id].namespace,
                 _ => panic!("internal compiler error: expected const mod or type"),
             };
         }
@@ -372,7 +372,7 @@ impl Driver {
     fn add_virtual_file_module(&mut self, name: &str, src: &str) -> ParseResult<()>  {
         let file = self.src_map.add_virtual_file(name, src.to_string()).unwrap();
         self.parse_file(file)?;
-        let scope = self.code.hir.global_scopes[&file];
+        let scope = self.code.ast.global_scopes[&file];
         self.add_constant_decl(name, Const::Mod(scope));
         Ok(())
     }

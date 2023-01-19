@@ -21,7 +21,7 @@ use index_vec::IndexVec;
 use lazy_static::lazy_static;
 
 use crate::dire::arch::Arch;
-use crate::dire::hir::{LegacyIntrinsic, EnumId, GenericParamId, ExternFunctionRef, NewNamespaceId};
+use crate::dire::ast::{LegacyIntrinsic, EnumId, GenericParamId, ExternFunctionRef, NewNamespaceId};
 use crate::dire::mir::{Const, Instr, InstrId, FuncId, StaticId, ExternFunction};
 use crate::dire::ty::{Type, FunctionType, QualType, IntWidth, FloatWidth, StructType, LegacyInternalType};
 use crate::dire::{OpId, BlockId, DuskBridge};
@@ -599,7 +599,7 @@ impl Driver {
                 Const::StructLit { fields, id: strukt.identity }
             },
             Type::Enum(enuum) => {
-                let enum_val = &self.code.hir.enums[enuum];
+                let enum_val = &self.code.ast.enums[enuum];
                 let valid = enum_val.variants.iter().map(|variant| variant.payload_ty).all(|ty| ty.is_none());
                 assert!(valid, "In order to output vaue of type {:?} as constant, it must not have any payloads", Type::Enum(enuum));
                 Const::BasicVariant { enuum, index: val.as_enum().discriminant as usize }
@@ -1280,7 +1280,7 @@ impl DriverRef<'_> {
                                 match ty {
                                     Type::Struct(strukt) => {
                                         let layout = self.read().layout_struct(&strukt);
-                                        for (index, field) in self.read().code.hir.structs[strukt.identity].fields.iter().enumerate() {
+                                        for (index, field) in self.read().code.ast.structs[strukt.identity].fields.iter().enumerate() {
                                             if field_name == field.name {
                                                 offset = Some(layout.field_offsets[index]);
                                                 break;
@@ -1319,10 +1319,10 @@ impl DriverRef<'_> {
                             let file = self.write().src_map.add_file_on_disk(path).unwrap();
                             self.write().parse_added_files().unwrap();
                             let new_code = self.read().get_new_code_since(before);
-                            self.write().finalize_hir();
+                            self.write().finalize_ast();
                             self.write().initialize_tir(&new_code);
 
-                            let added_module = self.read().code.hir.global_scopes[&file];
+                            let added_module = self.read().code.ast.global_scopes[&file];
                             Value::from_mod(added_module)
                         },
                         _ => panic!("Call to unimplemented intrinsic {:?}", intr),
@@ -1330,7 +1330,7 @@ impl DriverRef<'_> {
                 },
                 &Instr::Intrinsic { ref arguments, intr } => {
                     let arguments: Vec<&Value> = arguments.iter().map(|&arg| frame.get_val(arg, &d)).collect();
-                    let implementation = d.code.hir.intrinsics[intr].implementation;
+                    let implementation = d.code.ast.intrinsics[intr].implementation;
                     drop(d);
                     implementation(self, arguments)
                 },

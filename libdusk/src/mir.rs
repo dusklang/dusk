@@ -10,7 +10,7 @@ use smallvec::{SmallVec, smallvec};
 use string_interner::DefaultSymbol as Sym;
 use display_adapter::display_adapter;
 
-use crate::dire::hir::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, LegacyIntrinsic, IntrinsicId, Expr, StoredDeclId, GenericParamId, Item, PatternBindingDeclId, ExternModId, ExternFunctionRef, PatternBindingPathComponent, VOID_TYPE, StructId, LoopId};
+use crate::dire::ast::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, LegacyIntrinsic, IntrinsicId, Expr, StoredDeclId, GenericParamId, Item, PatternBindingDeclId, ExternModId, ExternFunctionRef, PatternBindingPathComponent, VOID_TYPE, StructId, LoopId};
 use crate::dire::mir::{FuncId, StaticId, Const, Instr, InstrId, Function, MirCode, StructLayout, EnumLayout, ExternMod, ExternFunction, InstrNamespace, SwitchCase, VOID_INSTR};
 use crate::dire::{Block, BlockId, Op, OpId, InternalField};
 use crate::dire::ty::{Type, LegacyInternalType, FunctionType, FloatWidth, StructType};
@@ -176,7 +176,7 @@ impl Context {
 
 impl Driver {
     fn expr_to_const(&mut self, expr: ExprId, ty: Type) -> Const {
-        match ef!(expr.hir) {
+        match ef!(expr.ast) {
             Expr::IntLit { lit } => {
                 match ty {
                     Type::Int { .. } => Const::Int { lit: BigInt::from(lit), ty },
@@ -274,7 +274,7 @@ impl Driver {
         let arch = self.arch;
         match ty {
             Type::Error | Type::Void | Type::Never | Type::Ty | Type::Mod { .. } | Type::LegacyInternal(_) => 0,
-            &Type::Internal(id) => self.code.hir.internal_types[id].size,
+            &Type::Internal(id) => self.code.ast.internal_types[id].size,
             Type::Int { width, .. } => {
                 let bit_width = width.bit_width(arch);
                 assert_eq!(bit_width % 8, 0, "Unexpected bit width: not a multiple of eight!");
@@ -329,7 +329,7 @@ impl Driver {
             let mut cache = cache.borrow_mut();
             // This is a fast path to avoid hashing the parameter types in the common case, non-generic functions
             if self.mir.struct_was_non_generic[strukt.identity] {
-                cache.fast_struct_layouts.resize(self.code.hir.structs.len(), Default::default());
+                cache.fast_struct_layouts.resize(self.code.ast.structs.len(), Default::default());
                 cache.fast_struct_layouts[strukt.identity].clone()
             } else {
                 cache.struct_layouts.get(strukt).cloned()
@@ -402,7 +402,7 @@ impl DriverRef<'_> {
         // It is important to hold on to the write lock throughout this entire method, maybe
         self.write();
         // Start at 1 to avoid RETURN_VALUE_DECL, which we can't and shouldn't generate code for
-        let range = DeclId::new(1)..self.read().code.hir.decls.next_idx();
+        let range = DeclId::new(1)..self.read().code.ast.decls.next_idx();
         for id in range_iter(range) {
             self.get_decl(id, tp);
         }
@@ -433,7 +433,7 @@ impl Driver {
     fn resolve_extern_mod(&mut self, id: ExternModId, tp: &impl TypeProvider) {
         if self.code.mir.extern_mods.get(&id).is_some() { return; }
 
-        let extern_mod = &self.code.hir.extern_mods[id];
+        let extern_mod = &self.code.ast.extern_mods[id];
         let library_path = extern_mod.library_path.clone();
         let library_path = match *tp.eval_result(library_path) {
             Const::Str { id, .. } => self.code.mir.strings[id].clone(),
@@ -472,8 +472,8 @@ impl DriverRef<'_> {
     fn get_decl(&mut self, id: DeclId, tp: &impl TypeProvider) -> Decl {
         if let Some(decl) = self.read().mir.decls.get(&id) { return decl.clone(); }
         let d = self.read();
-        match df!(d, id.hir) {
-            hir::Decl::Computed { ref params, scope, generic_params: ref generic_params_range, .. } => {
+        match df!(d, id.ast) {
+            ast::Decl::Computed { ref params, scope, generic_params: ref generic_params_range, .. } => {
                 // Add placeholder function to reserve ID ahead of time
                 let params = params.clone();
                 let generic_params_range = generic_params_range.clone();
@@ -488,17 +488,17 @@ impl DriverRef<'_> {
                 generic_params.reserve(generic_params_range.end.index() - generic_params_range.start.index());
                 for id in range_iter(generic_params_range.clone()) {
                     let d = self.read();
-                    let generic_param = match df!(d, id.hir) {
-                        hir::Decl::GenericParam(param) => param,
+                    let generic_param = match df!(d, id.ast) {
+                        ast::Decl::GenericParam(param) => param,
                         _ => panic!("unexpected decl type, expected generic parameter"),
                     };
                     generic_params.push(generic_param);
                 }
 
                 let func_ty = self.read().decl_type(id, tp).as_function().unwrap().clone();
-                let name = self.read().code.hir.names[id];
-                let comptime_sym = self.read().hir.known_idents.comptime;
-                let is_comptime = self.read().code.hir.decl_attributes.get(&id)
+                let name = self.read().code.ast.names[id];
+                let comptime_sym = self.read().ast.known_idents.comptime;
+                let is_comptime = self.read().code.ast.decl_attributes.get(&id)
                     .map(|attrs|
                         attrs.iter()
                             .any(|attr| attr.attr == comptime_sym)
@@ -515,7 +515,7 @@ impl DriverRef<'_> {
                 self.write().code.mir.functions[get] = func;
                 decl
             },
-            hir::Decl::ComputedPrototype { extern_func, .. } => {
+            ast::Decl::ComputedPrototype { extern_func, .. } => {
                 let decl = if let Some(extern_func) = extern_func {
                     drop(d);
                     self.write().resolve_extern_mod(extern_func.extern_mod, tp);
@@ -530,25 +530,25 @@ impl DriverRef<'_> {
                 self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
-            hir::Decl::Stored { id: index, .. } | hir::Decl::LoopBinding { id: index, .. } => {
+            ast::Decl::Stored { id: index, .. } | ast::Decl::LoopBinding { id: index, .. } => {
                 drop(d);
                 let decl = Decl::Stored(index);
                 self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
-            hir::Decl::Parameter { index } => {
+            ast::Decl::Parameter { index } => {
                 drop(d);
                 let decl = Decl::Parameter { index };
                 self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
-            hir::Decl::PatternBinding { id: index, .. } => {
+            ast::Decl::PatternBinding { id: index, .. } => {
                 drop(d);
                 let decl = Decl::PatternBinding { id: index };
                 self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
-            hir::Decl::LegacyIntrinsic { intr, function_like, .. } => {
+            ast::Decl::LegacyIntrinsic { intr, function_like, .. } => {
                 drop(d);
                 let mut ty = self.read().decl_type(id, tp);
                 if function_like {
@@ -558,19 +558,19 @@ impl DriverRef<'_> {
                 self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
-            hir::Decl::Intrinsic(intr) => {
+            ast::Decl::Intrinsic(intr) => {
                 drop(d);
                 let decl = Decl::Intrinsic(intr);
                 self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
-            hir::Decl::MethodIntrinsic(intr) => {
+            ast::Decl::MethodIntrinsic(intr) => {
                 drop(d);
                 let decl = Decl::MethodIntrinsic(intr);
                 self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
-            hir::Decl::Static(expr) => {
+            ast::Decl::Static(expr) => {
                 drop(d);
                 let name = self.read().display_item(id).to_string();
                 let statik = self.read().mir.statics.next_idx();
@@ -585,7 +585,7 @@ impl DriverRef<'_> {
                 );
                 decl
             },
-            hir::Decl::Const(root_expr) => {
+            ast::Decl::Const(root_expr) => {
                 drop(d);
                 let konst = self.eval_expr(root_expr, tp);
 
@@ -594,29 +594,29 @@ impl DriverRef<'_> {
                 self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
-            hir::Decl::Field { index, .. } => {
+            ast::Decl::Field { index, .. } => {
                 drop(d);
                 let decl = Decl::Field { index };
                 self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
-            hir::Decl::InternalField(field) => {
+            ast::Decl::InternalField(field) => {
                 drop(d);
                 let decl = Decl::InternalField(field);
                 self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
-            hir::Decl::Variant { enuum, index, payload_ty } => {
+            ast::Decl::Variant { enuum, index, payload_ty } => {
                 let payload_ty = payload_ty.map(|ty| tp.get_evaluated_type(ty).clone());
                 Decl::Variant { enuum, index, payload_ty }
             },
-            hir::Decl::GenericParam(param) => {
+            ast::Decl::GenericParam(param) => {
                 drop(d);
                 let decl = Decl::GenericParam(param);
                 self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
-            hir::Decl::ReturnValue => panic!("Can't get_decl() the return_value decl"),
+            ast::Decl::ReturnValue => panic!("Can't get_decl() the return_value decl"),
         }
     }
 }
@@ -625,7 +625,7 @@ impl Driver {
     #[allow(dead_code)]
     #[display_adapter]
     fn fmt_variant_name(&self, f: &mut Formatter, enuum: EnumId, index: usize) {
-        let variant = &self.code.hir.enums[enuum].variants[index];
+        let variant = &self.code.ast.enums[enuum].variants[index];
         let name = self.interner.resolve(variant.name).unwrap();
         write!(f, "{}", name)
     }
@@ -702,8 +702,8 @@ impl Driver {
             let item = item.into();
             match item {
                 ToSourceRange::Item(item) => match item {
-                    Item::Decl(decl) => write!(f, "{:?}", df!(decl.hir)),
-                    Item::Expr(expr) => write!(f, "{:?}", ef!(expr.hir)),
+                    Item::Decl(decl) => write!(f, "{:?}", df!(decl.ast)),
+                    Item::Expr(expr) => write!(f, "{:?}", ef!(expr.ast)),
                 },
                 _ => write!(f, "{}", self.substring_from_range(range))
             }
@@ -774,7 +774,7 @@ impl Driver {
                 write_args!(arguments);
             },
             Instr::Intrinsic { arguments, intr, .. } => {
-                write!(f, "%{} = new_style_intrinsic `{}`", self.display_instr_name(op_id), self.code.hir.intrinsics[*intr].name)?;
+                write!(f, "%{} = new_style_intrinsic `{}`", self.display_instr_name(op_id), self.code.ast.intrinsics[*intr].name)?;
                 write_args!(arguments);
             },
             &Instr::Pointer { op, is_mut } => {
@@ -820,7 +820,7 @@ impl Driver {
             &Instr::Enum { ref variants, id } => {
                 write!(f, "%{} = define enum{} {{", self.display_instr_name(op_id), id.index())?;
 
-                for (i, variant) in self.code.hir.enums[id].variants.iter().enumerate() {
+                for (i, variant) in self.code.ast.enums[id].variants.iter().enumerate() {
                     write!(f, "{}", self.interner.resolve(variant.name).unwrap())?;
                     if variant.payload_ty.is_some() {
                         write!(f, "(%{})", self.display_instr_name(variants[i]))?;
@@ -844,7 +844,7 @@ impl Driver {
                 write!(f, " -> {}", self.display_instr_name(ret_ty))?;
             },
             &Instr::Variant { enuum, index, payload } => {
-                let variant = &self.code.hir.enums[enuum].variants[index];
+                let variant = &self.code.ast.enums[enuum].variants[index];
                 let variant_name = variant.name;
                 write!(f, "%{} = %enum{}.{}", self.display_instr_name(op_id), enuum.index(), self.interner.resolve(variant_name).unwrap())?;
                 if variant.payload_ty.is_some() {
@@ -1010,7 +1010,7 @@ impl DriverRef<'_> {
         instrs.next_idx(); // void
         for param in range_iter(params.clone()) {
             let d = self.read();
-            assert!(matches!(df!(d, param.hir), hir::Decl::Parameter { .. }));
+            assert!(matches!(df!(d, param.ast), ast::Decl::Parameter { .. }));
             drop(d);
             let ty = self.read().decl_type(param, tp);
             let instr = Instr::Parameter(ty.clone());
@@ -1550,7 +1550,7 @@ impl Driver {
             &Instr::FunctionRef { func, .. } => Type::Function(b.functions[func].ty.clone()),
             Instr::ExternCall { func, .. } => b.extern_mods[&func.extern_mod].imported_functions[func.index].ty.return_ty.as_ref().clone(),
             Instr::LegacyIntrinsic { ty, .. } => ty.clone(),
-            &Instr::Intrinsic { intr, .. } => self.code.hir.intrinsics[intr].ret_ty.clone(),
+            &Instr::Intrinsic { intr, .. } => self.code.ast.intrinsics[intr].ret_ty.clone(),
             Instr::Reinterpret(_, ty) | Instr::Truncate(_, ty) | Instr::SignExtend(_, ty)
             | Instr::ZeroExtend(_, ty) | Instr::FloatCast(_, ty) | Instr::FloatToInt(_, ty)
             | Instr::IntToFloat(_, ty)
@@ -1619,8 +1619,8 @@ impl DriverRef<'_> {
                 drop(d);
                 self.build_expr(b, expr, Context::new(0, DataDest::Void, ControlDest::Continue), tp);
             },
-            Item::Decl(decl) => match df!(d, decl.hir) {
-                hir::Decl::Stored { id, root_expr, .. } => {
+            Item::Decl(decl) => match df!(d, decl.ast) {
+                ast::Decl::Stored { id, root_expr, .. } => {
                     drop(d);
                     let ty = tp.ty(root_expr).clone();
                     let name = self.read().display_item(decl).to_string();
@@ -1628,7 +1628,7 @@ impl DriverRef<'_> {
                     b.stored_decl_locs.push_at(id, location);
                     self.build_expr(b, root_expr, Context::new(0, DataDest::Store { location }, ControlDest::Continue), tp);
                 },
-                hir::Decl::Computed { .. } => {},
+                ast::Decl::Computed { .. } => {},
                 _ => panic!("Invalid scope item"),
             },
         }
@@ -1636,22 +1636,22 @@ impl DriverRef<'_> {
 
     fn build_scope(&mut self, b: &mut FunctionBuilder, scope: ImperScopeId, ctx: Context, tp: &impl TypeProvider) -> Value {
         self.write();
-        let block = self.read().code.hir.imper_scopes[scope].block;
+        let block = self.read().code.ast.imper_scopes[scope].block;
         let len = self.read().code.blocks[block].ops.len();
         for i in 0..len {
             let op = self.read().code.blocks[block].ops[i];
-            let item = self.read().code.ops[op].as_hir_item().unwrap();
+            let item = self.read().code.ops[op].as_ast_item().unwrap();
             self.build_scope_item(b, item, tp);
         }
-        let terminal_expr = self.read().code.hir.imper_scopes[scope].terminal_expr;
+        let terminal_expr = self.read().code.ast.imper_scopes[scope].terminal_expr;
         self.build_expr(b, terminal_expr, ctx, tp)
     }
 }
 
 impl Driver {
     fn get_base(&self, id: DeclRefId) -> ExprId {
-        match self.code.hir.decl_refs[id].namespace {
-            hir::Namespace::MemberRef { base_expr } => base_expr,
+        match self.code.ast.decl_refs[id].namespace {
+            ast::Namespace::MemberRef { base_expr } => base_expr,
             _ => panic!("Expected member ref expression"),
         }
     }
@@ -1660,7 +1660,7 @@ impl Driver {
 impl DriverRef<'_> {
     fn get_callee_declref(&mut self, b: &mut FunctionBuilder, tp: &impl TypeProvider, callee_id: ExprId) -> DeclRef {
         let d = self.read();
-        let callee = &ef!(d, callee_id.hir);
+        let callee = &ef!(d, callee_id.ast);
         if let &Expr::DeclRef { id, .. } = callee {
             drop(d);
             self.get(b, id, tp)
@@ -1672,7 +1672,7 @@ impl DriverRef<'_> {
     fn get(&mut self, b: &mut FunctionBuilder, decl_ref_id: DeclRefId, tp: &impl TypeProvider) -> DeclRef {
         let id = tp.selected_overload(decl_ref_id).expect("No overload found!");
         let generic_arguments = tp.generic_arguments(decl_ref_id).as_ref().unwrap_or(&Vec::new()).clone();
-        let expr = self.read().code.hir.decl_refs[decl_ref_id].expr;
+        let expr = self.read().code.ast.decl_refs[decl_ref_id].expr;
         let name = self.read().display_item(id).to_string();
         match self.get_decl(id, tp) {
             Decl::Computed { get } => DeclRef::Function { func: get, generic_args: generic_arguments },
@@ -1789,12 +1789,12 @@ impl DriverRef<'_> {
             self.write().start_bb(b, next_bb);
 
             let scope_ctx = ctx.redirect(result_location, Some(post_bb));
-            let terminal_expr = self.read().code.hir.imper_scopes[cur].terminal_expr;
-            let block = self.read().code.hir.imper_scopes[cur].block;
+            let terminal_expr = self.read().code.ast.imper_scopes[cur].terminal_expr;
+            let block = self.read().code.ast.imper_scopes[cur].block;
             // If the current scope consists of a lone if expression
             if self.read().code.blocks[block].ops.is_empty() {
                 let d = self.read();
-                if let Expr::If { condition, then_scope, else_scope } = ef!(d, terminal_expr.hir) {
+                if let Expr::If { condition, then_scope, else_scope } = ef!(d, terminal_expr.ast) {
                     drop(d);
                     let true_bb = self.write().create_bb(b);
                     let false_bb = if else_scope.is_some() {
@@ -1833,7 +1833,7 @@ impl DriverRef<'_> {
         // TODO: in every single case of this match, I have to call drop() on d, otherwise the Ref<Driver> will
         // conflict with mutable uses of self.
         // Fix this, somehow. I don't have the faintest idea how.
-        let val = match ef!(d, expr.hir) {
+        let val = match ef!(d, expr.ast) {
             Expr::Void | Expr::Error => {
                 drop(d);
                 VOID_INSTR.direct()
@@ -2041,13 +2041,13 @@ impl DriverRef<'_> {
                     },
                     DeclRef::MethodIntrinsic(intr) => {
                         let d = self.read();
-                        let Expr::DeclRef { id: decl_ref_id, .. } = ef!(d, callee.hir) else {
+                        let Expr::DeclRef { id: decl_ref_id, .. } = ef!(d, callee.ast) else {
                             panic!("expected declref callee");
                         };
                         drop(d);
                         let base = self.read().get_base(decl_ref_id);
                         let base_ty = tp.ty(base);
-                        let self_ty = self.read().code.hir.intrinsics[intr].param_tys[0];
+                        let self_ty = self.read().code.ast.intrinsics[intr].param_tys[0];
                         let self_ty = tp.get_evaluated_type(self_ty);
                         let indirection = !base_ty.trivially_convertible_to(self_ty) as i8;
                         let base = self.build_expr(b, base, Context::new(indirection, DataDest::Read, ControlDest::Continue), tp);
@@ -2165,9 +2165,9 @@ impl DriverRef<'_> {
             Expr::Struct(id) => {
                 drop(d);
                 let mut fields = SmallVec::new();
-                let len = self.read().code.hir.structs[id].fields.len();
+                let len = self.read().code.ast.structs[id].fields.len();
                 for i in 0..len {
-                    let field_ty = self.read().code.hir.structs[id].fields[i].ty;
+                    let field_ty = self.read().code.ast.structs[id].fields[i].ty;
                     let field = self.build_expr(
                         b,
                         field_ty,
@@ -2182,9 +2182,9 @@ impl DriverRef<'_> {
             Expr::Enum(id) => {
                 drop(d);
                 let mut variants = SmallVec::new();
-                let len = self.read().code.hir.enums[id].variants.len();
+                let len = self.read().code.ast.enums[id].variants.len();
                 for i in 0..len {
-                    let payload_ty = self.read().code.hir.enums[id].variants[i].payload_ty.unwrap_or(VOID_TYPE);
+                    let payload_ty = self.read().code.ast.enums[id].variants[i].payload_ty.unwrap_or(VOID_TYPE);
                     let variant = self.build_expr(
                         b,
                         payload_ty,
@@ -2252,7 +2252,7 @@ impl DriverRef<'_> {
                 let mut mir_cases = Vec::new();
                 let enum_info = match scrutinee_ty {
                     &Type::Enum(id) => {
-                        Some((id, self.read().code.hir.enums[id].variants.clone()))
+                        Some((id, self.read().code.ast.enums[id].variants.clone()))
                     },
                     Type::Int { .. } => None,
                     _ => todo!(),
@@ -2265,7 +2265,7 @@ impl DriverRef<'_> {
                     // I will need some way of detecting aliases and allowing them, but at the same time splitting up the list of bindings when they don't alias, such as in disjuction patterns.
                     assert!(case.pattern.bindings.len() <= 1);
                     for &binding_id in &case.pattern.bindings {
-                        let binding = self.read().code.hir.pattern_binding_decls[binding_id].clone();
+                        let binding = self.read().code.ast.pattern_binding_decls[binding_id].clone();
                         // Can only ever bind one path to a particular binding at a time. Will need some way of splitting these up when I implement disjunction patterns
                         assert_eq!(binding.paths.len(), 1);
                         for path in &binding.paths {
@@ -2284,7 +2284,7 @@ impl DriverRef<'_> {
 
                     self.write().start_bb(b, begin_bb);
                     match case.pattern.kind {
-                        hir::PatternKind::ContextualMember { name, .. } => {
+                        ast::PatternKind::ContextualMember { name, .. } => {
                             let (enum_id, variants) = enum_info.as_ref().expect("found contextual member pattern on non-enum type. typechecker should've caught this.");
                             let mut index = None;
                             for (i, variant) in variants.iter().enumerate() {
@@ -2302,7 +2302,7 @@ impl DriverRef<'_> {
                                 }
                             );
                         },
-                        hir::PatternKind::IntLit { value, .. } => {
+                        ast::PatternKind::IntLit { value, .. } => {
                             mir_cases.push(
                                 SwitchCase {
                                     value: Const::Int { lit: BigInt::from(value), ty: scrutinee_ty.clone() },
@@ -2310,7 +2310,7 @@ impl DriverRef<'_> {
                                 }
                             );
                         }
-                        hir::PatternKind::NamedCatchAll(_) | hir::PatternKind::AnonymousCatchAll(_) => {
+                        ast::PatternKind::NamedCatchAll(_) | ast::PatternKind::AnonymousCatchAll(_) => {
                             catch_all_bb = Some(case_bb);
                         },
                     }
@@ -2371,7 +2371,7 @@ impl DriverRef<'_> {
                 }
             },
             Expr::For { loop_id, binding, lower_bound, upper_bound, scope } => {
-                let hir::Decl::LoopBinding { id: binding_stored_decl_id, .. } = df!(d, binding.hir) else {
+                let ast::Decl::LoopBinding { id: binding_stored_decl_id, .. } = df!(d, binding.ast) else {
                     panic!("incorrect type of decl found in decl binding id");
                 };
                 drop(d);

@@ -10,7 +10,7 @@ use smallvec::{SmallVec, smallvec};
 use string_interner::{DefaultSymbol as Sym, Symbol, StringInterner};
 
 use crate::dire::{Op, Block};
-use crate::dire::hir::*;
+use crate::dire::ast::*;
 use crate::dire::index_counter::IndexCounter;
 use crate::dire::ty::Type;
 use crate::dire::source_info::{SourceFileId, SourceRange};
@@ -52,12 +52,12 @@ impl Driver {
     pub fn create_decls_for_generic_param_list(&mut self, list: &GenericParamList) -> Range<DeclId> {
         assert_eq!(list.names.len(), list.ids.end - list.ids.start);
         assert_eq!(list.names.len(), list.ranges.len());
-        self.code.hir.decls.reserve(list.names.len());
-        let first_generic_param = self.code.hir.decls.next_idx();
+        self.code.ast.decls.reserve(list.names.len());
+        let first_generic_param = self.code.ast.decls.next_idx();
         for ((param, &name), &range) in range_iter(list.ids.clone()).zip(&list.names).zip(&list.ranges) {
             self.add_decl(Decl::GenericParam(param), name, Some(VOID_TYPE), range);
         }
-        let last_generic_param = self.code.hir.decls.next_idx();
+        let last_generic_param = self.code.ast.decls.next_idx();
         first_generic_param..last_generic_param
     }
 }
@@ -174,7 +174,7 @@ impl Default for Builder {
 
             prelude_namespace: None,
 
-            // Gets initialized in Driver::initialize_hir() below
+            // Gets initialized in Driver::initialize_ast() below
             known_idents: KnownIdents::uninit(),
         }
     }
@@ -231,24 +231,24 @@ pub enum ConditionKind {
 }
 
 impl Driver {
-    pub fn initialize_hir(&mut self) {
+    pub fn initialize_ast(&mut self) {
         dvd::send(|| DvdMessage::WillBeginAddingBuiltins);
-        self.hir.generic_ctx_stack.push(BLANK_GENERIC_CTX, BLANK_GENERIC_CTX).make_permanent();
+        self.ast.generic_ctx_stack.push(BLANK_GENERIC_CTX, BLANK_GENERIC_CTX).make_permanent();
         self.add_expr(Expr::Void, SourceRange::default());
         self.add_expr(Expr::Error, SourceRange::default());
         self.add_const_ty(Type::Void);
         self.add_const_ty(Type::Ty);
         self.add_const_ty(Type::Error);
-        assert_eq!(self.code.hir.exprs.len(), 5);
+        assert_eq!(self.code.ast.exprs.len(), 5);
 
-        self.hir.known_idents.init(&mut self.interner);
-        self.add_decl(Decl::ReturnValue, self.hir.known_idents.return_value, None, SourceRange::default());
+        self.ast.known_idents.init(&mut self.interner);
+        self.add_decl(Decl::ReturnValue, self.ast.known_idents.return_value, None, SourceRange::default());
 
         self.register_internal_fields();
         self.add_prelude();
     }
 
-    pub fn finalize_hir(&mut self) {
+    pub fn finalize_ast(&mut self) {
         // In the parser, in between pushing calls and popping calls, it is hypothetically possible to fail in a
         // recoverable way, leaving the generic ctx stack in an invalid state. As long as this assertion passes
         // (and there are no other panics before we even get here), we're fine for now.
@@ -256,37 +256,37 @@ impl Driver {
         //
         // Update as of September 13, 2022: I feel like using AutoPopStack should have fixed this issue, right?
         // I should investigate first to be sure.
-        assert_eq!(self.hir.generic_ctx_stack.stack.lock().unwrap().borrow().len(), 1);
+        assert_eq!(self.ast.generic_ctx_stack.stack.lock().unwrap().borrow().len(), 1);
     }
 
     #[allow(unused)]
     #[display_adapter]
     pub fn dump_scope_stack(&self, w: &mut Formatter) {
-        for scope in self.hir.scope_stack.stack.lock().unwrap().borrow().iter().rev() {
+        for scope in self.ast.scope_stack.stack.lock().unwrap().borrow().iter().rev() {
             writeln!(w, "{:?}", scope)?;
         }
         Ok(())
     }
 
     pub fn debug_mark_expr(&mut self, expr: ExprId) {
-        self.hir.debug_marked_exprs.insert(expr);
+        self.ast.debug_marked_exprs.insert(expr);
     }
 
     #[allow(unused)]
     pub fn expr_is_debug_marked(&self, expr: ExprId) -> bool {
-        self.hir.debug_marked_exprs.contains(&expr)
+        self.ast.debug_marked_exprs.contains(&expr)
     }
 
     fn add_expr(&mut self, expr: Expr, range: SourceRange) -> ExprId {
         // TODO: I used to require callers to explicitly pass in the generic ctx id, but it seems fine to just take it
         // from the top of the stack. Is there some major downside to this approach that I have since forgotten?
         // NOTE: also, see add_decl()
-        let generic_ctx = self.hir.generic_ctx_stack.peek().unwrap();
-        let expr_id = self.code.hir.exprs.push(expr);
-        let item_id = self.code.hir.items.push(Item::Expr(expr_id));
-        self.code.hir.item_generic_ctxs.push_at(item_id, generic_ctx);
-        self.code.hir.expr_to_items.push_at(expr_id, item_id);
-        self.code.hir.source_ranges.push_at(item_id, range);
+        let generic_ctx = self.ast.generic_ctx_stack.peek().unwrap();
+        let expr_id = self.code.ast.exprs.push(expr);
+        let item_id = self.code.ast.items.push(Item::Expr(expr_id));
+        self.code.ast.item_generic_ctxs.push_at(item_id, generic_ctx);
+        self.code.ast.expr_to_items.push_at(expr_id, item_id);
+        self.code.ast.source_ranges.push_at(item_id, range);
 
         dvd::send(|| {
             let text = self.display_item(expr_id).to_string();
@@ -300,16 +300,16 @@ impl Driver {
         // TODO: I used to require callers to explicitly pass in the generic ctx id, but it seems fine to just take it
         // from the top of the stack. Is there some major downside to this approach that I have since forgotten?
         // NOTE: also, see add_expr()
-        let generic_ctx = self.hir.generic_ctx_stack.peek().unwrap();
-        let decl_id = self.code.hir.decls.push(decl);
-        self.code.hir.explicit_tys.push_at(decl_id, explicit_ty);
-        self.code.hir.names.push_at(decl_id, name);
+        let generic_ctx = self.ast.generic_ctx_stack.peek().unwrap();
+        let decl_id = self.code.ast.decls.push(decl);
+        self.code.ast.explicit_tys.push_at(decl_id, explicit_ty);
+        self.code.ast.names.push_at(decl_id, name);
 
-        let item_id = self.code.hir.items.push(Item::Decl(decl_id));
-        self.code.hir.decl_to_items.push_at(decl_id, item_id);
+        let item_id = self.code.ast.items.push(Item::Decl(decl_id));
+        self.code.ast.decl_to_items.push_at(decl_id, item_id);
 
-        self.code.hir.source_ranges.push_at(item_id, range);
-        self.code.hir.item_generic_ctxs.push_at(item_id, generic_ctx);
+        self.code.ast.source_ranges.push_at(item_id, range);
+        self.code.ast.item_generic_ctxs.push_at(item_id, generic_ctx);
 
         dvd::send(|| {
             let text = self.display_item(decl_id).to_string();
@@ -335,15 +335,15 @@ impl Driver {
         self.add_expr(Expr::BoolLit { lit }, range)
     }
     pub fn cast(&mut self, expr: ExprId, ty: ExprId, range: SourceRange) -> ExprId {
-        let cast_id = self.code.hir.cast_counter.next_idx();
+        let cast_id = self.code.ast.cast_counter.next_idx();
         self.add_expr(Expr::Cast { expr, ty, cast_id }, range)
     }
     pub fn next_stored_decl(&mut self) -> StoredDeclId {
         let imper_root = self.get_imper_root().unwrap();
-        self.hir.imper_roots[imper_root].stored_decl_counter.next_idx()
+        self.ast.imper_roots[imper_root].stored_decl_counter.next_idx()
     }
     pub fn is_in_imper_scope(&self) -> bool {
-        for scope in self.hir.scope_stack.stack.lock().unwrap().borrow().iter().rev() {
+        for scope in self.ast.scope_stack.stack.lock().unwrap().borrow().iter().rev() {
             if matches!(scope, ScopeState::Imper { .. }) {
                 return true;
             } else if matches!(scope, ScopeState::Mod { .. }) {
@@ -353,7 +353,7 @@ impl Driver {
         false
     }
     pub fn is_in_mod_scope(&self) -> bool {
-        for scope in self.hir.scope_stack.stack.lock().unwrap().borrow().iter().rev() {
+        for scope in self.ast.scope_stack.stack.lock().unwrap().borrow().iter().rev() {
             if matches!(scope, ScopeState::Mod { .. }) {
                 return true;
             } else if matches!(scope, ScopeState::Imper { .. }) {
@@ -364,7 +364,7 @@ impl Driver {
     }
     pub fn stored_decl(&mut self, name: Sym, _generic_params: GenericParamList, explicit_ty: Option<ExprId>, is_mut: bool, root_expr: ExprId, range: SourceRange) -> DeclId {
         self.flush_stmt_buffer();
-        match self.hir.scope_stack.peek().unwrap() {
+        match self.ast.scope_stack.peek().unwrap() {
             ScopeState::Imper { .. } => {
                 let id = self.next_stored_decl();
 
@@ -403,7 +403,7 @@ impl Driver {
         }
     }
     pub fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
-        let decl = self.hir.comp_decl_stack.last().map(|decl| decl.id);
+        let decl = self.ast.comp_decl_stack.last().map(|decl| decl.id);
         if decl.is_none() {
             self.diag.report_error_no_range_msg("returning outside of a function is invalid", range);
         }
@@ -411,7 +411,7 @@ impl Driver {
     }
     fn lookup_loop_by_label(&mut self, label: Option<Ident>) -> Option<LoopId> {
         let imper_root = self.get_imper_root().unwrap();
-        let loop_stack = self.hir.imper_roots[imper_root].loop_stack.clone();
+        let loop_stack = self.ast.imper_roots[imper_root].loop_stack.clone();
         let loop_stack = loop_stack.stack.lock().unwrap();
         let mut loop_stack = loop_stack.borrow_mut();
         if let Some(label) = label {
@@ -478,7 +478,7 @@ impl Driver {
         VariantDecl { decl, name, enuum, payload_ty }
     }
     pub fn reserve_struct(&mut self) -> (ExprId, StructId) {
-        let strukt = self.code.hir.structs.push(Struct { fields: Vec::new(), namespace: NewNamespaceId::from_raw(u32::MAX) });
+        let strukt = self.code.ast.structs.push(Struct { fields: Vec::new(), namespace: NewNamespaceId::from_raw(u32::MAX) });
         let expr = self.add_expr(Expr::Struct(strukt), Default::default());
         (expr, strukt)
     }
@@ -487,12 +487,12 @@ impl Driver {
             instance_decls: fields.iter().map(|field| field.decl).collect(),
             ..Default::default()
         };
-        let namespace = self.code.hir.new_namespaces.push(namespace);
-        self.code.hir.structs[strukt] = Struct { fields, namespace };
+        let namespace = self.code.ast.new_namespaces.push(namespace);
+        self.code.ast.structs[strukt] = Struct { fields, namespace };
         ef!(expr.range) = range;
     }
     pub fn reserve_enum(&mut self) -> (ExprId, EnumId) {
-        let enuum = self.code.hir.enums.push(Enum { variants: Vec::new(), namespace: NewNamespaceId::from_raw(u32::MAX) });
+        let enuum = self.code.ast.enums.push(Enum { variants: Vec::new(), namespace: NewNamespaceId::from_raw(u32::MAX) });
         let expr = self.add_expr(Expr::Enum(enuum), Default::default());
         (expr, enuum)
     }
@@ -508,12 +508,12 @@ impl Driver {
                 ).collect(),
             ..Default::default()
         };
-        let namespace = self.code.hir.new_namespaces.push(namespace);
-        self.code.hir.enums[enuum] = Enum { variants, namespace };
+        let namespace = self.code.ast.new_namespaces.push(namespace);
+        self.code.ast.enums[enuum] = Enum { variants, namespace };
         ef!(expr.range) = range;
     }
     pub fn struct_lit(&mut self, ty: ExprId, fields: Vec<FieldAssignment>, range: SourceRange) -> ExprId {
-        let id = self.code.hir.struct_lits.next_idx();
+        let id = self.code.ast.struct_lits.next_idx();
         self.add_expr(Expr::StructLit { ty, fields, id }, range)
     }
     pub fn error_expr(&mut self, range: SourceRange) -> ExprId {
@@ -529,7 +529,7 @@ impl Driver {
                     PatternBindingPath::identity()
                 ];
                 let binding_decl = PatternBindingDecl { paths, scrutinee };
-                let id = self.code.hir.pattern_binding_decls.push(binding_decl);
+                let id = self.code.ast.pattern_binding_decls.push(binding_decl);
                 let decl = self.add_decl(Decl::PatternBinding { id, is_mut: false }, name.symbol, None, name.range);
                 let decl = ImperScopedDecl { name: name.symbol, num_params: 0, id: decl };
                 decls.push(decl);
@@ -539,12 +539,12 @@ impl Driver {
         (decls, bindings)
     }
     pub fn push_to_scope_stack<Id: PartialEq<ScopeState> + Debug + Copy>(&mut self, id: Id, state: ScopeState) -> AutoPopStackEntry<ScopeState, Id> {
-        self.hir.scope_stack.push(id, state)
+        self.ast.scope_stack.push(id, state)
     }
     /// unchecked invariant: must call end_loop after this
     pub fn begin_loop(&mut self, name: Option<Ident>) -> AutoPopStackEntry<LoopState, LoopId> {
         let imper_root = self.get_imper_root().unwrap();
-        let imper_root = &mut self.hir.imper_roots[imper_root];
+        let imper_root = &mut self.ast.imper_roots[imper_root];
         let id = imper_root.loop_counter.next_idx();
         let mut loop_stack = imper_root.loop_stack.clone();
         {
@@ -553,7 +553,7 @@ impl Driver {
             if let Some(name) = name {
                 for state in &*loop_stack {
                     if state.name.map(|ident| ident.symbol) == Some(name.symbol) {
-                        // AFAICT this is the first time I have emitted an error from inside the HIR generator instead
+                        // AFAICT this is the first time I have emitted an error from inside the AST generator instead
                         // of the parser. This makes me a little uncomfortable. On the other hand, diagnosing this
                         // inside the parser would require exposing more state to the parser, which I also don't love.
                         let name_str = self.interner.resolve(name.symbol).unwrap();
@@ -585,7 +585,7 @@ impl Driver {
     }
     pub fn create_condition_namespace(&mut self) -> ConditionNsId {
         let parent = self.cur_namespace();
-        self.code.hir.condition_ns.push(ConditionNs { func: DeclId::from_raw(u32::MAX), parent: Some(parent) })
+        self.code.ast.condition_ns.push(ConditionNs { func: DeclId::from_raw(u32::MAX), parent: Some(parent) })
     }
     pub fn enter_condition_namespace(&mut self, ns: ConditionNsId, condition_kind: ConditionKind) -> AutoPopStackEntry<ScopeState, ConditionNsId> {
         // This condition kind is just a placeholder which will be reset by each attribute. It is done this way so I can share a single
@@ -594,26 +594,26 @@ impl Driver {
     }
     pub fn begin_generic_context(&mut self, generic_params: Range<DeclId>) -> AutoPopStackEntry<ScopeState, GenericContextNsId> {
         let parent = self.cur_namespace();
-        let ns = self.code.hir.generic_context_ns.push(GenericContextNs { generic_params, parent: Some(parent) });
+        let ns = self.code.ast.generic_context_ns.push(GenericContextNs { generic_params, parent: Some(parent) });
         self.push_to_scope_stack(ns, ScopeState::GenericContext(ns))
     }
     pub fn begin_module(&mut self, extern_mod: Option<ExternModId>, range: SourceRange) -> (AutoPopStackEntry<ScopeState, ModScopeNsId>, ExprId) {
         let parent = self.cur_namespace();
-        let id = self.code.hir.new_namespaces.push(NewNamespace::default());
-        let namespace = self.code.hir.mod_ns.push(
+        let id = self.code.ast.new_namespaces.push(NewNamespace::default());
+        let namespace = self.code.ast.mod_ns.push(
             ModScopeNs {
                 scope: id, parent: Some(parent)
             }
         );
         let entry = self.push_to_scope_stack(namespace, ScopeState::Mod { id, namespace, extern_mod });
-        let extern_library_path = extern_mod.map(|mawd| self.code.hir.extern_mods[mawd].library_path);
+        let extern_library_path = extern_mod.map(|mawd| self.code.ast.extern_mods[mawd].library_path);
         let expr = self.add_expr(Expr::Mod { id, extern_library_path }, range);
         (entry, expr)
     }
     fn push_generic_ctx(&mut self, ctx: impl FnOnce(GenericCtxId) -> GenericCtx) -> AutoPopStackEntry<GenericCtxId> {
-        let parent = self.hir.generic_ctx_stack.peek().unwrap();
-        let generic_ctx = self.code.hir.generic_ctxs.push(ctx(parent));
-        self.hir.generic_ctx_stack.push(generic_ctx, generic_ctx)
+        let parent = self.ast.generic_ctx_stack.peek().unwrap();
+        let generic_ctx = self.code.ast.generic_ctxs.push(ctx(parent));
+        self.ast.generic_ctx_stack.push(generic_ctx, generic_ctx)
     }
     pub fn begin_computed_decl_generic_ctx(&mut self, generic_param_list: GenericParamList) -> AutoPopStackEntry<GenericCtxId> {
         let generic_param_ids = range_iter(generic_param_list.ids.clone())
@@ -625,8 +625,8 @@ impl Driver {
         let id = self.add_decl(Decl::Const(ExprId::new(u32::MAX as usize)), name, Some(return_ty), proto_range);
 
         assert_eq!(param_names.len(), param_tys.len());
-        self.code.hir.decls.reserve(param_tys.len());
-        let first_param = self.code.hir.decls.next_idx();
+        self.code.ast.decls.reserve(param_tys.len());
+        let first_param = self.code.ast.decls.next_idx();
         param_tys.iter()
             .enumerate()
             .zip(&param_names)
@@ -634,17 +634,17 @@ impl Driver {
             .for_each(|(((index, ty), &name), &range)| {
                 self.add_decl(Decl::Parameter { index }, name, Some(*ty), range);
             });
-        let last_param = self.code.hir.decls.next_idx();
+        let last_param = self.code.ast.decls.next_idx();
         let params = first_param..last_param;
 
         // `end_computed_decl` will attach the real scope to this decl; we don't have it yet
-        df!(id.hir) = Decl::Computed {
+        df!(id.ast) = Decl::Computed {
             param_tys,
             params: params.clone(),
             scope: ImperScopeId::new(u32::MAX as usize),
             generic_params: generic_params.clone(),
         };
-        match self.hir.scope_stack.peek().unwrap() {
+        match self.ast.scope_stack.peek().unwrap() {
             ScopeState::Imper { .. } => {
                 self.flush_stmt_buffer();
                 self.scope_item(Item::Decl(id), false);
@@ -654,7 +654,7 @@ impl Driver {
             },
             ScopeState::Condition { .. } | ScopeState::GenericContext(_) => panic!("Computed decls are not supported in this position"),
         }
-        self.hir.comp_decl_stack.push(
+        self.ast.comp_decl_stack.push(
             CompDeclState {
                 scope: None,
                 params,
@@ -669,9 +669,9 @@ impl Driver {
     pub fn comp_decl_prototype(&mut self, name: Sym, param_tys: SmallVec<[ExprId; 2]>, _param_ranges: SmallVec<[SourceRange; 2]>, return_ty: ExprId, range: SourceRange) -> DeclId {
         // This is a placeholder value that gets replaced once the parameter declarations get allocated.
         let num_params = param_tys.len();
-        let extern_func = match self.hir.scope_stack.peek().unwrap() {
+        let extern_func = match self.ast.scope_stack.peek().unwrap() {
             ScopeState::Mod { extern_mod: Some(extern_mod), .. } => {
-                let funcs = &mut self.code.hir.extern_mods[extern_mod].imported_functions;
+                let funcs = &mut self.code.ast.extern_mods[extern_mod].imported_functions;
                 let index = funcs.len();
                 let name = self.interner.resolve(name).unwrap();
                 funcs.push(ExternFunction { name: name.to_string(), param_tys: param_tys.iter().cloned().collect(), return_ty });
@@ -685,7 +685,7 @@ impl Driver {
             _ => None,
         };
         let id = self.add_decl(Decl::ComputedPrototype { param_tys, extern_func }, name, Some(return_ty), range);
-        match self.hir.scope_stack.peek().unwrap() {
+        match self.ast.scope_stack.peek().unwrap() {
             ScopeState::Imper { .. } => {
                 self.flush_stmt_buffer();
                 self.scope_item(Item::Decl(id), false);
@@ -699,9 +699,9 @@ impl Driver {
         id
     }
     pub fn begin_decl_ref_generic_ctx(&mut self) -> AutoPopStackEntry<GenericCtxId> {
-        let id = self.code.hir.decl_refs.push(
+        let id = self.code.ast.decl_refs.push(
             DeclRef {
-                name: self.hir.known_idents.invalid_declref,
+                name: self.ast.known_idents.invalid_declref,
                 namespace: Namespace::Invalid,
                 expr: ERROR_EXPR,
             }
@@ -715,11 +715,11 @@ impl Driver {
             },
             None => self.cur_namespace(),
         };
-        let GenericCtx::DeclRef { id, .. } = self.code.hir.generic_ctxs[generic_ctx.id()] else {
+        let GenericCtx::DeclRef { id, .. } = self.code.ast.generic_ctxs[generic_ctx.id()] else {
             panic!("Invalid generic context passed in");
         };
         let expr = self.add_expr(Expr::DeclRef { id }, range);
-        self.code.hir.decl_refs[id] = DeclRef {
+        self.code.ast.decl_refs[id] = DeclRef {
             name,
             namespace,
             expr,
@@ -784,24 +784,24 @@ impl Driver {
     pub fn start_new_file(&mut self, file: SourceFileId) -> AutoPopStackEntry<ScopeState, ModScopeNsId> {
         let mut global_scope = NewNamespace::default();
         // Use all of prelude
-        global_scope.blanket_uses.push(Namespace::Mod(self.hir.prelude_namespace.unwrap()));
-        let global_scope = self.code.hir.new_namespaces.push(global_scope);
-        let global_namespace = self.code.hir.mod_ns.push(
+        global_scope.blanket_uses.push(Namespace::Mod(self.ast.prelude_namespace.unwrap()));
+        let global_scope = self.code.ast.new_namespaces.push(global_scope);
+        let global_namespace = self.code.ast.mod_ns.push(
             ModScopeNs {
                 scope: global_scope,
                 parent: None
             }
         );
-        self.code.hir.global_scopes.insert(file, global_scope);
+        self.code.ast.global_scopes.insert(file, global_scope);
         self.push_to_scope_stack(global_namespace, ScopeState::Mod { id: global_scope, namespace: global_namespace, extern_mod: None })
     }
 
     fn flush_stmt_buffer(&mut self) {
-        self.hir.scope_stack.peek_mut(|state| {
+        self.ast.scope_stack.peek_mut(|state| {
             if let Some(ScopeState::Imper { id, stmt_buffer, .. }) = state {
                 if let Some(stmt) = *stmt_buffer {
-                    let block = self.code.hir.imper_scopes[*id].block;
-                    let op = self.code.ops.push(Op::HirItem { item: Item::Expr(stmt.expr), has_semicolon: stmt.has_semicolon });
+                    let block = self.code.ast.imper_scopes[*id].block;
+                    let op = self.code.ops.push(Op::AstItem { item: Item::Expr(stmt.expr), has_semicolon: stmt.has_semicolon });
                     self.code.blocks[block].ops.push(op);
                     *stmt_buffer = None;
                 }
@@ -810,16 +810,16 @@ impl Driver {
     }
 
     fn scope_item(&mut self, item: Item, has_semicolon: bool) {
-        if let ScopeState::Imper { id, .. } = self.hir.scope_stack.peek().unwrap() {
-            let block = self.code.hir.imper_scopes[id].block;
-            let op = self.code.ops.push(Op::HirItem { item, has_semicolon });
+        if let ScopeState::Imper { id, .. } = self.ast.scope_stack.peek().unwrap() {
+            let block = self.code.ast.imper_scopes[id].block;
+            let op = self.code.ops.push(Op::AstItem { item, has_semicolon });
             self.code.blocks[block].ops.push(op);
         }
     }
 
     pub fn imper_scoped_decl(&mut self, decl: ImperScopedDecl) {
-        if let Some(ScopeState::Imper { namespace, .. }) = self.hir.scope_stack.peek() {
-            self.code.hir.imper_ns[namespace].decls.push(decl);
+        if let Some(ScopeState::Imper { namespace, .. }) = self.ast.scope_stack.peek() {
+            self.code.ast.imper_ns[namespace].decls.push(decl);
         } else {
             panic!("tried to add imperative-scoped declaration in a non-imperative scope");
         }
@@ -827,7 +827,7 @@ impl Driver {
 
     // This is a hack to allow intrinsics to be added for comparing enum types
     pub fn find_nearest_mod_scope(&self) -> Option<NewNamespaceId> {
-        for &scope in self.hir.scope_stack.stack.lock().unwrap().borrow().iter().rev() {
+        for &scope in self.ast.scope_stack.stack.lock().unwrap().borrow().iter().rev() {
             match scope {
                 ScopeState::Mod { id, .. } => return Some(id),
                 _ => continue,
@@ -838,12 +838,12 @@ impl Driver {
 
     pub fn mod_scoped_decl(&mut self, decl: StaticDecl) {
         let id = self.find_nearest_mod_scope().expect("tried to add module-scoped declaration where there is no module scope");
-        self.code.hir.new_namespaces[id].static_decls.push(decl);
+        self.code.ast.new_namespaces[id].static_decls.push(decl);
     }
 
     pub fn stmt(&mut self, expr: ExprId, has_semicolon: bool) {
         self.flush_stmt_buffer();
-        self.hir.scope_stack.peek_mut(|state| {
+        self.ast.scope_stack.peek_mut(|state| {
             if let Some(ScopeState::Imper { stmt_buffer, .. }) = state {
                 *stmt_buffer = Some(
                     BufferedStmt {
@@ -861,20 +861,20 @@ impl Driver {
         let parent = self.cur_namespace();
 
         let block = self.code.blocks.push(Block::default());
-        let id = self.code.hir.imper_scopes.push(
+        let id = self.code.ast.imper_scopes.push(
             ImperScope {
                 block,
                 terminal_expr: VOID_EXPR,
             }
         );
-        let namespace = self.code.hir.imper_ns.push(
+        let namespace = self.code.ast.imper_ns.push(
             ImperScopeNs {
                 decls: Vec::new(),
                 parent: Some(parent),
             }
         );
         let root = self.get_imper_root().unwrap_or_else(|| {
-            self.hir.imper_roots.push(Default::default())
+            self.ast.imper_roots.push(Default::default())
         });
         let scope_entry = self.push_to_scope_stack(
             id,
@@ -886,7 +886,7 @@ impl Driver {
             }
         );
         
-        if let Some(comp_decl) = self.hir.comp_decl_stack.last_mut() {
+        if let Some(comp_decl) = self.ast.comp_decl_stack.last_mut() {
             assert!(comp_decl.imper_scope_stack > 0 || comp_decl.scope.is_none(), "Can't add multiple top-level scopes to a computed decl");
             let is_first_scope = comp_decl.imper_scope_stack == 0;
             if is_first_scope {
@@ -895,7 +895,7 @@ impl Driver {
             comp_decl.imper_scope_stack += 1;
 
             if is_first_scope {
-                let name = self.code.hir.names[comp_decl.id];
+                let name = self.code.ast.names[comp_decl.id];
                 let num_params = comp_decl.params.end.index() - comp_decl.params.start.index();
                 let id = comp_decl.id;
     
@@ -915,7 +915,7 @@ impl Driver {
                 for id in range_iter(params.clone()) {
                     self.imper_scoped_decl(
                         ImperScopedDecl {
-                            name: self.code.hir.names[id],
+                            name: self.code.ast.names[id],
                             num_params: 0,
                             id,
                         }
@@ -926,7 +926,7 @@ impl Driver {
                 for id in range_iter(generic_params.clone()) {
                     self.imper_scoped_decl(
                         ImperScopedDecl {
-                            name: self.code.hir.names[id],
+                            name: self.code.ast.names[id],
                             num_params: 0,
                             id,
                         }
@@ -938,27 +938,27 @@ impl Driver {
         scope_entry
     }
     pub fn end_imper_scope(&mut self, _entry: AutoPopStackEntry<ScopeState, ImperScopeId>, has_terminal_expr: bool) {
-        if let Some(ScopeState::Imper { id, stmt_buffer, .. }) = self.hir.scope_stack.peek() {
+        if let Some(ScopeState::Imper { id, stmt_buffer, .. }) = self.ast.scope_stack.peek() {
             if has_terminal_expr {
                 let terminal_expr = stmt_buffer.expect("must pass terminal expression via Builder::stmt()");
-                self.code.hir.imper_scopes[id].terminal_expr = terminal_expr.expr;
+                self.code.ast.imper_scopes[id].terminal_expr = terminal_expr.expr;
             }
         } else {
             panic!("tried to end imperative scope, but the top scope in the stack is not an imperative scope");
         }
     }
     pub fn end_computed_decl(&mut self) {
-        let decl_state = self.hir.comp_decl_stack.pop().unwrap();
-        if let Decl::Computed { ref mut scope, .. } = df!(decl_state.id.hir) {
+        let decl_state = self.ast.comp_decl_stack.pop().unwrap();
+        if let Decl::Computed { ref mut scope, .. } = df!(decl_state.id.ast) {
             *scope = decl_state.scope.unwrap();
         } else {
             panic!("Unexpected decl kind when ending computed decl!");
         }
     }
     fn cur_namespace(&self) -> Namespace {
-        match self.hir.scope_stack.peek().unwrap() {
+        match self.ast.scope_stack.peek().unwrap() {
             ScopeState::Imper { namespace, .. } => {
-                let end_offset = self.code.hir.imper_ns[namespace].decls.len();
+                let end_offset = self.code.ast.imper_ns[namespace].decls.len();
                 Namespace::Imper { scope: namespace, end_offset }
             },
             ScopeState::Mod { namespace, .. } => Namespace::Mod(namespace),
@@ -979,7 +979,7 @@ impl Driver {
     }
 
     fn get_imper_root(&self) -> Option<ImperRootId> {
-        let stack = self.hir.scope_stack.stack.lock().unwrap();
+        let stack = self.ast.scope_stack.stack.lock().unwrap();
         let stack = stack.borrow();
         for scope in stack.iter().rev() {
             match *scope {

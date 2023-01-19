@@ -4,7 +4,7 @@ use std::cmp::max;
 
 use bitflags::bitflags;
 
-use crate::dire::hir::{ItemId, VOID_EXPR_ITEM};
+use crate::dire::ast::{ItemId, VOID_EXPR_ITEM};
 use crate::dire::tir::CompId;
 use crate::dvd::{Message as DvdMessage, self};
 
@@ -579,9 +579,9 @@ impl Driver {
             &mut self.tir.graph.dependers
         ];
         for dep in &mut deps {
-            dep.resize_with(self.code.hir.items.len(), Vec::new);
+            dep.resize_with(self.code.ast.items.len(), Vec::new);
         }
 
-        self.tir.graph.item_to_components.resize_with(self.code.hir.items.len(), || CompId::new(u32::MAX as usize));
+        self.tir.graph.item_to_components.resize_with(self.code.ast.items.len(), || CompId::new(u32::MAX as usize));
     }
 }

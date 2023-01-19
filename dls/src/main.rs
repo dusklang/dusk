@@ -4,7 +4,7 @@ use std::error::Error;
 use std::mem;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use libdusk::dire::hir::{Item, Expr};
+use libdusk::dire::ast::{Item, Expr};
 use libdusk::dire::source_info::{SourceFileId, SourceRange};
 use libdusk::error::DiagnosticKind;
 use libdusk::new_code::NewCode;
@@ -237,22 +237,22 @@ impl Server {
         let pos = lsp_pos_to_dusk_pos(&driver.read(), url, params.text_document_position_params.position);
         // TODO: this is preposterously stupid
         let mut hovered_item = None;
-        for (id, range) in driver.read().code.hir.source_ranges.iter_enumerated() {
+        for (id, range) in driver.read().code.ast.source_ranges.iter_enumerated() {
             if range.contains(pos) {
                 hovered_item = Some(id);
                 break;
             }
         }
         hovered_item.map(|item| {
-            let range = driver.read().code.hir.source_ranges[item];
+            let range = driver.read().code.ast.source_ranges[item];
             let range = dusk_range_to_lsp_range(&driver.read(), range).1;
-            let message = match driver.read().code.hir.items[item] {
+            let message = match driver.read().code.ast.items[item] {
                 Item::Expr(expr) => {
                     let mut message = String::new();
                     let d = driver.read();
-                    match ef!(d, expr.hir) {
+                    match ef!(d, expr.ast) {
                         Expr::DeclRef { id } => {
-                            let name = d.code.hir.decl_refs[id].name;
+                            let name = d.code.ast.decl_refs[id].name;
                             let name = d.interner.resolve(name).unwrap();
                             let mut ty = None;
                             if let Some(tp) = &tp {
@@ -271,14 +271,14 @@ impl Server {
                                 message.push_str("unknown type");
                             }
                         },
-                        _ => message.push_str(&format!("unhandled expression {:?}", ef!(d, expr.hir))),
+                        _ => message.push_str(&format!("unhandled expression {:?}", ef!(d, expr.ast))),
                     }
                     message
                 },
                 Item::Decl(decl) => {
                     let mut message = String::new();
                     let d = driver.read();
-                    let name = d.code.hir.names[decl];
+                    let name = d.code.ast.names[decl];
                     let name = d.interner.resolve(name).unwrap();
                     let mut ty = None;
                     if let Some(tp) = &tp {
@@ -439,12 +439,12 @@ impl Server {
             *driver.write() = Driver::new(src_map, Arch::X86_64, false);
             let before = driver.read().take_snapshot();
     
-            driver.write().initialize_hir();
+            driver.write().initialize_ast();
     
             let fatal_parse_error = driver.write().parse_added_files().is_err();
             salf.flush_diagnostics(&mut driver.write(), path);
             
-            driver.write().finalize_hir();
+            driver.write().finalize_ast();
     
             let new_code = driver.read().get_new_code_since(before);
     
@@ -458,7 +458,7 @@ impl Server {
                     let mut driver_write = driver.write();
                     if let Ok(Some(units)) = driver_write.build_more_tir() {
                         drop(driver_write);
-                        // Typechecking can lead to expressions being evaluated, which in turn can result in new HIR being
+                        // Typechecking can lead to expressions being evaluated, which in turn can result in new AST being
                         // added. Therefore, we take a snapshot before typechecking.
                         let before = driver.read().take_snapshot();
                         if driver.type_check(&units, &mut tp, new_code).is_err() {

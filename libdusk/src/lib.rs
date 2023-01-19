@@ -17,7 +17,7 @@ mod token;
 mod builder;
 mod parser;
 mod tir;
-mod hir;
+mod ast;
 mod ty;
 mod typechecker;
 mod into_bytes;

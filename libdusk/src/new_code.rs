@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::dire::hir::{ExprId, DeclId, ItemId};
+use crate::dire::ast::{ExprId, DeclId, ItemId};
 
 use crate::driver::Driver;
 
@@ -20,9 +20,9 @@ macro_rules! generate_new_code {
         impl Driver {
             pub fn take_snapshot(&self) -> CodeSnapshot {
                 CodeSnapshot {
-                    exprs: self.code.hir.exprs.next_idx(),
-                    decls: self.code.hir.decls.next_idx(),
-                    items: self.code.hir.items.next_idx(),
+                    exprs: self.code.ast.exprs.next_idx(),
+                    decls: self.code.ast.decls.next_idx(),
+                    items: self.code.ast.items.next_idx(),
                 }
             }
 
