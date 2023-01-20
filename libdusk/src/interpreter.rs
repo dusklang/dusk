@@ -837,19 +837,19 @@ unsafe fn free_dylib(dylib: *mut c_void) {
 impl DriverRef<'_> {
     #[cfg(windows)]
     #[cfg(target_arch="x86_64")]
-    fn generate_thunk(&self, func: &ExternFunction, func_address: i64, args: &[Box<[u8]>]) -> region::Allocation {
+    fn generate_thunk(&self, func: &ExternFunction, func_address: i64, num_args: usize) -> region::Allocation {
         let mut thunk = X64Encoder::new();
         thunk.store64(Reg64::Rsp + 16, Reg64::Rdx);
         thunk.store64(Reg64::Rsp + 8, Reg64::Rcx);
 
         let mut extension: i32 = 40;
-        if args.len() > 4 {
-            extension += ((args.len() - 3) / 2 * 16) as i32;
+        if num_args > 4 {
+            extension += ((num_args - 3) / 2 * 16) as i32;
         }
         thunk.sub64_imm(Reg64::Rsp, extension);
 
-        assert_eq!(args.len(), func.ty.param_tys.len());
-        for i in (0..args.len()).rev() {
+        assert_eq!(num_args, func.ty.param_tys.len());
+        for i in (0..num_args).rev() {
             // get pointer to arguments
             thunk.load64(Reg64::Rax, Reg64::Rsp + extension + 8);
 
@@ -921,7 +921,7 @@ impl DriverRef<'_> {
     }
     #[cfg(unix)]
     #[cfg(target_arch="x86_64")]
-    fn generate_thunk(&self, func: &ExternFunction, func_address: i64, args: &[Box<[u8]>]) -> region::Allocation {
+    fn generate_thunk(&self, func: &ExternFunction, func_address: i64, num_args: usize) -> region::Allocation {
         let mut thunk = X64Encoder::new();
         thunk.push64(Reg64::Rbp);
         thunk.mov64(Reg64::Rbp, Reg64::Rsp);
@@ -932,9 +932,9 @@ impl DriverRef<'_> {
         thunk.store64(Reg64::Rbp - 8, Reg64::Rdi);
         thunk.store64(Reg64::Rbp - 16, Reg64::Rsi);
 
-        assert!(args.len() <= 6, "more than 6 arguments are not yet supported on UNIX platforms");
-        assert_eq!(args.len(), func.ty.param_tys.len());
-        for i in 0..args.len() {
+        assert!(num_args <= 6, "more than 6 arguments are not yet supported on x64 UNIX platforms");
+        assert_eq!(num_args, func.ty.param_tys.len());
+        for i in 0..num_args {
             // get pointer to arguments
             thunk.load64(Reg64::Rax, Reg64::Rbp - 8);
 
@@ -990,7 +990,7 @@ impl DriverRef<'_> {
         thunk.allocate()
     }
     #[cfg(all(target_os="macos", target_arch="aarch64"))]
-    fn generate_thunk(&self, func: &ExternFunction, func_address: i64, _args: &[Box<[u8]>]) -> region::Allocation {
+    fn generate_thunk(&self, func: &ExternFunction, func_address: i64, _num_args: usize) -> region::Allocation {
         let mut thunk = Arm64Encoder::new();
 
         // Prologue
@@ -1076,7 +1076,7 @@ impl DriverRef<'_> {
         thunk.allocate()
     }
     #[cfg(all(any(not(any(windows, unix)), not(target_arch="x86_64")), not(all(target_os="macos", target_arch="aarch64"))))]
-    fn generate_thunk(&self, _func: &ExternFunction, _func_address: i64, _args: &[Box<[u8]>]) -> region::Allocation {
+    fn generate_thunk(&self, _func: &ExternFunction, _func_address: i64, _num_args: usize) -> region::Allocation {
         panic!("calling native functions not yet supported on your platform");
     }
 
@@ -1099,7 +1099,7 @@ impl DriverRef<'_> {
         }
         let func_address: i64 = func_ptr as i64;
         
-        let thunk = self.generate_thunk(func, func_address, &args);
+        let thunk = self.generate_thunk(func, func_address, args.len());
         unsafe {
             let thunk_ptr = thunk.as_ptr::<u8>();
             type Thunk = fn(*const *mut u8, *mut u8);
