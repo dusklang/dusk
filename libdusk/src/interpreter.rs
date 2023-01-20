@@ -990,26 +990,87 @@ impl DriverRef<'_> {
         thunk.allocate()
     }
     #[cfg(all(target_os="macos", target_arch="aarch64"))]
-    fn generate_thunk(&self, _func: &ExternFunction, func_address: i64, _args: &[Box<[u8]>]) -> region::Allocation {
+    fn generate_thunk(&self, func: &ExternFunction, func_address: i64, _args: &[Box<[u8]>]) -> region::Allocation {
         let mut thunk = Arm64Encoder::new();
 
-        // This thunk is hardcoded to call putchar, or any other function with the signature `int(int)`.
-        // TODO: handle other signatures.
+        // Prologue
         thunk.sub64_imm(false, Reg::SP, Reg::SP, 32);
         thunk.stp64(Reg::FP, Reg::LR, Reg::SP, 16);
         thunk.add64_imm(false, Reg::FP, Reg::SP, 16);
         thunk.str64(Reg::R0, Reg::SP, 8);
         thunk.str64(Reg::R1, Reg::SP, 0);
+
+        // This is kind of dumb, but whatever.
+        let gprs = [Reg::R0, Reg::R1, Reg::R2, Reg::R3, Reg::R4, Reg::R5, Reg::R6, Reg::R7];
+        let mut next_gpr = 0u32;
+
+        // Pass arguments
+
+        // x8 = addr of arguments array;
         thunk.ldr64(Reg::R8, Reg::SP, 8);
-        thunk.ldr64(Reg::R8, Reg::R8, 0);
-        thunk.ldr32(Reg::R0, Reg::R8, 0);
+        for (i, ty) in func.ty.param_tys.iter().enumerate() {
+            // x9 = addr of current argument;
+            thunk.ldr64(Reg::R9, Reg::R8, (8 as usize * i).try_into().unwrap());
+            match ty {
+                Type::Int { width, .. } => {
+                    // TODO: pass additional arguments on the stack
+                    assert!(next_gpr < 8);
+                    let reg = gprs[next_gpr as usize];
+                    next_gpr += 1;
+                    match width {
+                        IntWidth::Pointer | IntWidth::W64 => {
+                            assert_eq!(self.read().arch.pointer_size(), 64);
+                            thunk.ldr64(reg, Reg::R9, 0);
+                        },
+                        IntWidth::W32 => thunk.ldr32(reg, Reg::R9, 0),
+                        IntWidth::W16 => thunk.ldr16(reg, Reg::R9, 0),
+                        IntWidth::W8 => thunk.ldr8(reg, Reg::R9, 0),
+                    }
+                },
+                Type::Pointer(_) => {
+                    // TODO: pass additional arguments on the stack
+                    assert!(next_gpr < 8);
+                    assert_eq!(self.read().arch.pointer_size(), 64);
+                    let reg = gprs[next_gpr as usize];
+                    next_gpr += 1;
+                    thunk.ldr64(reg, Reg::R9, 0);
+                },
+                _ => todo!(),
+            }
+        }
+
+        // Do the actual call
         thunk.macro_mov64_abs(Reg::R9, func_address as u64);
         thunk.blr(Reg::R9);
-        thunk.ldr64(Reg::R8, Reg::SP, 0);
-        thunk.str32(Reg::R0, Reg::R8, 0);
+
+        // Store the return value, if any
+        match *func.ty.return_ty {
+            Type::Int { width, .. } => {
+                // x8 = addr of return value;
+                thunk.ldr64(Reg::R8, Reg::SP, 0);
+                match width {
+                    IntWidth::Pointer | IntWidth::W64 => {
+                        assert_eq!(self.read().arch.pointer_size(), 64);
+                        thunk.str64(Reg::R0, Reg::R8, 0);
+                    },
+                    IntWidth::W32 => thunk.str32(Reg::R0, Reg::R8, 0),
+                    IntWidth::W16 => thunk.str16(Reg::R0, Reg::R8, 0),
+                    IntWidth::W8 => thunk.str8(Reg::R0, Reg::R8, 0),
+                }
+            },
+            Type::Pointer(_) => {
+                // x8 = addr of return value;
+                thunk.ldr64(Reg::R8, Reg::SP, 0);
+                assert_eq!(self.read().arch.pointer_size(), 64);
+                thunk.str64(Reg::R0, Reg::R8, 0);
+            },
+            Type::Void => {},
+            _ => todo!(),
+        }
+
+        // Epilogue
         thunk.ldp64(Reg::FP, Reg::LR, Reg::SP, 16);
         thunk.add64_imm(false, Reg::SP, Reg::SP, 32);
-
         thunk.ret(Reg::LR);
 
         thunk.allocate()
