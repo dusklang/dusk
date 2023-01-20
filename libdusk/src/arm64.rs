@@ -77,6 +77,15 @@ impl Register for RegOrSp {
     }
 }
 
+#[repr(u32)]
+#[derive(Copy, Clone)]
+enum DataSize {
+    Bits8,
+    Bits16,
+    Bits32,
+    Bits64,
+}
+
 pub struct InstrEncoder {
     val: u32,
     valid_bits: u32,
@@ -188,58 +197,59 @@ impl Arm64Encoder {
         self.access_pair_impl64(true, dest1, dest2, src_addr, imm);
     }
 
-    fn str_impl(&mut self, bits64: bool, src: Reg, dest_addr: impl Into<RegOrSp>, imm12: u16) {
+    // used for str & ldr with unsigned offsets
+    fn mem_access_reg_impl(&mut self, size: DataSize, is_load: bool, reg: Reg, addr: impl Into<RegOrSp>, imm: u16) {
+        let fac = 1u32 << (size as u32);
+        assert!(imm as u32 % fac == 0);
+        let imm12 = imm as u32 / fac;
+        assert!(imm12 <= 4095);
+        
         let mut instr = InstrEncoder::new();
 
-        // size
-        instr.push_value_of_size(2 | (bits64 as u32), 2);
-
-        instr.push_value_of_size(0xE4, 8);
-
+        instr.push_value_of_size(size as u32, 2);
+        instr.push_value_of_size(0x39, 6);
+        instr.push_value_of_size(is_load as u32, 2);
         instr.push_value_of_size(imm12 as u32, 12);
-        instr.push_reg(dest_addr.into());
-        instr.push_reg(src);
+        instr.push_reg(addr.into());
+        instr.push_reg(reg);
 
         self.push(instr);
+    }
+
+    fn str_impl(&mut self, size: DataSize, src: Reg, dest_addr: impl Into<RegOrSp>, imm: u16) {
+        
     }
 
     pub fn str64(&mut self, src: Reg, dest_addr: impl Into<RegOrSp>, imm: u16) {
-        assert!(imm <= 32760 && imm % 8 == 0);
-        let imm12 = imm / 8;
-        self.str_impl(true, src, dest_addr, imm12);
+        self.mem_access_reg_impl(DataSize::Bits64, false, src, dest_addr, imm);
     }
 
     pub fn str32(&mut self, src: Reg, dest_addr: impl Into<RegOrSp>, imm: u16) {
-        assert!(imm <= 16380 && imm % 4 == 0);
-        let imm12 = imm / 8;
-        self.str_impl(false, src, dest_addr, imm12);
+        self.mem_access_reg_impl(DataSize::Bits32, false, src, dest_addr, imm);
     }
 
-    fn ldr_impl(&mut self, bits64: bool, dest: Reg, src_addr: impl Into<RegOrSp>, imm12: u16) {
-        let mut instr = InstrEncoder::new();
+    pub fn str16(&mut self, src: Reg, dest_addr: impl Into<RegOrSp>, imm: u16) {
+        self.mem_access_reg_impl(DataSize::Bits16, false, src, dest_addr, imm);
+    }
 
-        // size
-        instr.push_value_of_size(2 | bits64 as u32, 2);
-
-        instr.push_value_of_size(0xE5, 8);
-
-        instr.push_value_of_size(imm12 as u32, 12);
-        instr.push_reg(src_addr.into());
-        instr.push_reg(dest);
-
-        self.push(instr);
+    pub fn str8(&mut self, src: Reg, dest_addr: impl Into<RegOrSp>, imm: u16) {
+        self.mem_access_reg_impl(DataSize::Bits8, false, src, dest_addr, imm);
     }
 
     pub fn ldr64(&mut self, dest: Reg, src_addr: impl Into<RegOrSp>, imm: u16) {
-        assert!(imm <= 32760 && imm % 8 == 0);
-        let imm12 = imm / 8;
-        self.ldr_impl(true, dest, src_addr, imm12);
+        self.mem_access_reg_impl(DataSize::Bits64, true, dest, src_addr, imm);
     }
 
     pub fn ldr32(&mut self, dest: Reg, src_addr: impl Into<RegOrSp>, imm: u16) {
-        assert!(imm <= 16380 && imm % 4 == 0);
-        let imm12 = imm / 4;
-        self.ldr_impl(false, dest, src_addr, imm12);
+        self.mem_access_reg_impl(DataSize::Bits32, true, dest, src_addr, imm);
+    }
+
+    pub fn ldr16(&mut self, dest: Reg, src_addr: impl Into<RegOrSp>, imm: u16) {
+        self.mem_access_reg_impl(DataSize::Bits16, true, dest, src_addr, imm);
+    }
+
+    pub fn ldr8(&mut self, dest: Reg, src_addr: impl Into<RegOrSp>, imm: u16) {
+        self.mem_access_reg_impl(DataSize::Bits8, true, dest, src_addr, imm);
     }
 
     fn mov_wide64_impl(&mut self, should_keep_other_bits: bool, dest: Reg, imm: u16, shift_amount: u8) {
