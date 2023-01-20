@@ -216,10 +216,6 @@ impl Arm64Encoder {
         self.push(instr);
     }
 
-    fn str_impl(&mut self, size: DataSize, src: Reg, dest_addr: impl Into<RegOrSp>, imm: u16) {
-        
-    }
-
     pub fn str64(&mut self, src: Reg, dest_addr: impl Into<RegOrSp>, imm: u16) {
         self.mem_access_reg_impl(DataSize::Bits64, false, src, dest_addr, imm);
     }
