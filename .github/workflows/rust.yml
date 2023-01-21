@@ -14,23 +14,44 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v3
+        with:
+          repository: dusklang/dusk
+          path: dusk
+      - uses: actions/checkout@v3
+        with:
+          repository: zachwolfe/display_adapter
+          path: dusk
       - name: Build
-        run: cargo build --verbose
+        run: cd dusk && cargo build --verbose
       - name: Run tests
-        run: cargo test --verbose
+        run: cd dusk && cargo test --verbose
   build-windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v3
+        with:
+          repository: dusklang/dusk
+          path: dusk
+      - uses: actions/checkout@v3
+        with:
+          repository: zachwolfe/display_adapter
+          path: dusk
       - name: Build
-        run: cargo build --verbose
+        run: cd dusk && cargo build --verbose
       - name: Run tests
-        run: cargo test --verbose
+        run: cd dusk && cargo test --verbose
   build-ubuntu:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+        with:
+          repository: dusklang/dusk
+          path: dusk
+      - uses: actions/checkout@v3
+        with:
+          repository: zachwolfe/display_adapter
+          path: dusk
       - name: Build
-        run: cargo build --verbose
+        run: cd dusk && cargo build --verbose
       - name: Run tests
-        run: cargo test --verbose
+        run: cd dusk && cargo test --verbose
