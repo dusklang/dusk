@@ -318,7 +318,7 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
 
                     let konst = Const::Ty(ty.clone());
                     let expr = d.add_const_expr(konst);
-                    d.add_decl_to_path(#bridged_name, #module, Decl::Const(expr), 0, None);
+                    d.add_decl_to_path(#bridged_name, #module, Decl::Const(expr), None);
 
                     d.code.ast.bridged_types.insert(TypeId::of::<Self>(), ty);
                 }
@@ -484,8 +484,6 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                         method.sig.ident = mangled_name.clone();
                         method.attrs.extend(new_attrs.attrs);
 
-
-                        let num_params = param_tys.len();
                         let implementation = if has_driver {
                             quote! { d.write().#mangled_name }
                         } else {
@@ -516,7 +514,7 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                                 };
                                 let ret_ty = d.add_const_ty(ret_ty);
                                 let intr_id = d.code.ast.intrinsics.push(intr);
-                                d.add_decl_to_path(#name, #path, #decl, #num_params, Some(ret_ty));
+                                d.add_decl_to_path(#name, #path, #decl, Some(ret_ty));
                             }
                         );
                     },

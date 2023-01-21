@@ -373,7 +373,6 @@ impl Driver {
                 self.imper_scoped_decl(
                     ImperScopedDecl {
                         name,
-                        num_params: 0,
                         id: decl_id,
                     }
                 );
@@ -392,7 +391,6 @@ impl Driver {
                 );
                 self.mod_scoped_decl(
                     StaticDecl {
-                        num_params: 0,
                         name,
                         decl: decl_id
                     }
@@ -502,7 +500,6 @@ impl Driver {
                 .map(|variant|
                     StaticDecl {
                         decl: variant.decl,
-                        num_params: variant.payload_ty.is_some() as usize,
                         name: variant.name
                     }
                 ).collect(),
@@ -531,7 +528,7 @@ impl Driver {
                 let binding_decl = PatternBindingDecl { paths, scrutinee };
                 let id = self.code.ast.pattern_binding_decls.push(binding_decl);
                 let decl = self.add_decl(Decl::PatternBinding { id, is_mut: false }, name.symbol, None, name.range);
-                let decl = ImperScopedDecl { name: name.symbol, num_params: 0, id: decl };
+                let decl = ImperScopedDecl { name: name.symbol, id: decl };
                 decls.push(decl);
                 bindings.push(id);
             },
@@ -650,7 +647,7 @@ impl Driver {
                 self.scope_item(Item::Decl(id), false);
             },
             ScopeState::Mod { .. } => {
-                self.mod_scoped_decl(StaticDecl { num_params: param_names.len(), name, decl: id });
+                self.mod_scoped_decl(StaticDecl { name, decl: id });
             },
             ScopeState::Condition { .. } | ScopeState::GenericContext(_) => panic!("Computed decls are not supported in this position"),
         }
@@ -667,8 +664,6 @@ impl Driver {
         id
     }
     pub fn comp_decl_prototype(&mut self, name: Sym, param_tys: SmallVec<[ExprId; 2]>, _param_ranges: SmallVec<[SourceRange; 2]>, return_ty: ExprId, range: SourceRange) -> DeclId {
-        // This is a placeholder value that gets replaced once the parameter declarations get allocated.
-        let num_params = param_tys.len();
         let extern_func = match self.ast.scope_stack.peek().unwrap() {
             ScopeState::Mod { extern_mod: Some(extern_mod), .. } => {
                 let funcs = &mut self.code.ast.extern_mods[extern_mod].imported_functions;
@@ -691,7 +686,7 @@ impl Driver {
                 self.scope_item(Item::Decl(id), false);
             },
             ScopeState::Mod { .. } => {
-                self.mod_scoped_decl(StaticDecl { num_params, name, decl: id });
+                self.mod_scoped_decl(StaticDecl { name, decl: id });
             },
             ScopeState::Condition { .. } | ScopeState::GenericContext(_) => panic!("Computed decls are not supported in this position"),
         }
@@ -739,10 +734,9 @@ impl Driver {
     }
     pub fn add_intrinsic(&mut self, intrinsic: LegacyIntrinsic, param_tys: SmallVec<[ExprId; 2]>, ret_ty: ExprId, function_like: bool) {
         let name = self.interner.get_or_intern(intrinsic.name());
-        let num_params = param_tys.len();
         let id = self.add_decl(Decl::LegacyIntrinsic { intr: intrinsic, param_tys, function_like }, name, Some(ret_ty), SourceRange::default());
         self.mod_scoped_decl(
-            StaticDecl { num_params, name, decl: id }
+            StaticDecl { name, decl: id }
         );
     }
     pub fn internal_field(&mut self, field: InternalField, name: &str, ty: Type) -> DeclId {
@@ -896,7 +890,6 @@ impl Driver {
 
             if is_first_scope {
                 let name = self.code.ast.names[comp_decl.id];
-                let num_params = comp_decl.params.end.index() - comp_decl.params.start.index();
                 let id = comp_decl.id;
     
                 let params = comp_decl.params.clone();
@@ -906,7 +899,6 @@ impl Driver {
                 self.imper_scoped_decl(
                     ImperScopedDecl {
                         name,
-                        num_params,
                         id
                     }
                 );
@@ -916,7 +908,6 @@ impl Driver {
                     self.imper_scoped_decl(
                         ImperScopedDecl {
                             name: self.code.ast.names[id],
-                            num_params: 0,
                             id,
                         }
                     );
@@ -927,7 +918,6 @@ impl Driver {
                     self.imper_scoped_decl(
                         ImperScopedDecl {
                             name: self.code.ast.names[id],
-                            num_params: 0,
                             id,
                         }
                     );

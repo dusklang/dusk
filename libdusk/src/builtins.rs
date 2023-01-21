@@ -36,7 +36,7 @@ impl Driver {
         let konst = self.add_const_expr(Const::Int { lit: BigInt::from(value), ty: Type::usize() });
         let ty = self.add_const_ty(Type::usize());
         let decl_id = self.add_decl(Decl::Const(konst), name, Some(ty), SourceRange::default());
-        let static_decl = StaticDecl { name, num_params: 0, decl: decl_id };
+        let static_decl = StaticDecl { name, decl: decl_id };
         self.code.ast.new_namespaces[b.namespace].static_decls.push(static_decl);
 
         // NOTE: we currently have to do this every time this function is called, to be safe. Once we have proper collection types
@@ -71,9 +71,8 @@ impl Driver {
             extern_mod,
             index: 0,
         };
-        let num_params = param_tys.len();
         let decl_id = self.add_decl(Decl::ComputedPrototype { param_tys, extern_func: Some(extern_func_ref) }, name, Some(ret_ty), SourceRange::default());
-        let static_decl = StaticDecl { name, num_params, decl: decl_id };
+        let static_decl = StaticDecl { name, decl: decl_id };
         self.code.ast.new_namespaces[b.namespace].static_decls.push(static_decl);
 
         // NOTE: we currently have to do this every time this function is called, to be safe. Once we have proper collection types
@@ -280,7 +279,6 @@ impl Driver {
         let decl = self.add_decl(Decl::Const(expr), name, None, SourceRange::default());
         self.mod_scoped_decl(
             StaticDecl {
-                num_params: 0,
                 name,
                 decl,
             }
@@ -291,19 +289,19 @@ impl Driver {
         self.add_constant_decl(name, Const::Ty(ty));
     }
 
-    pub fn add_decl_to_path(&mut self, name: &str, path: &str, decl: Decl, num_params: usize, explicit_ty: Option<ExprId>) {
+    pub fn add_decl_to_path(&mut self, name: &str, path: &str, decl: Decl, explicit_ty: Option<ExprId>) {
         let scope = self.find_or_build_relative_ns_path(path);
         let name = self.interner.get_or_intern(name);
         if let Decl::MethodIntrinsic(id) = decl {
             let decl_id = self.add_decl(Decl::Intrinsic(id), name, explicit_ty, SourceRange::default());
-            let static_decl = StaticDecl { name, num_params, decl: decl_id };
+            let static_decl = StaticDecl { name, decl: decl_id };
             self.code.ast.new_namespaces[scope].static_decls.push(static_decl);
 
             let decl_id = self.add_decl(decl, name, explicit_ty, SourceRange::default());
             self.code.ast.new_namespaces[scope].instance_decls.push(decl_id);
         } else {
             let decl_id = self.add_decl(decl, name, explicit_ty, SourceRange::default());
-            let static_decl = StaticDecl { name, num_params, decl: decl_id };
+            let static_decl = StaticDecl { name, decl: decl_id };
             self.code.ast.new_namespaces[scope].static_decls.push(static_decl);
         }
     }
@@ -339,7 +337,6 @@ impl Driver {
 
             assert!(matching_decls.len() == 1);
             let decl = matching_decls[0];
-            assert!(decl.num_params == 0);
             let Decl::Const(expr) = df!(decl.decl.ast) else { panic!("internal compiler error: expected const decl") };
             let Expr::Const(konst) = &ef!(expr.ast) else { panic!("internal compiler error: expected const expr") };
             ns = match *konst {

@@ -48,7 +48,6 @@ pub struct FieldAssignment {
 #[derive(Debug, Clone, Copy)]
 pub struct ImperScopedDecl {
     pub name: Sym,
-    pub num_params: usize,
     pub id: DeclId,
 }
 
@@ -89,7 +88,6 @@ pub struct GenericContextNs {
 #[derive(Debug)]
 pub struct StaticDecl {
     pub decl: DeclId,
-    pub num_params: usize,
     pub name: Sym,
 }
 

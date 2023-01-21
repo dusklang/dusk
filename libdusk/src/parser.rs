@@ -496,7 +496,6 @@ impl Driver {
         let binding_decl = self.add_decl(ast::Decl::LoopBinding { id: stored_decl_id, is_mut }, var_name.symbol, var_ty, var_name.range);
         let binding_decl = ImperScopedDecl {
             name: var_name.symbol,
-            num_params: 0,
             id: binding_decl,
         };
         let looop = self.begin_loop(label);
