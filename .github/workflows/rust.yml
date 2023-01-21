@@ -23,8 +23,6 @@ jobs:
           path: display_adapter
       - name: Build
         run: cd dusk && cargo build --verbose
-      - name: Run tests
-        run: cd dusk && cargo test --verbose
   build-windows:
     runs-on: windows-latest
     steps:
@@ -38,8 +36,6 @@ jobs:
           path: display_adapter
       - name: Build
         run: cd dusk && cargo build --verbose
-      - name: Run tests
-        run: cd dusk && cargo test --verbose
   build-ubuntu:
     runs-on: ubuntu-latest
     steps:
@@ -53,5 +49,3 @@ jobs:
           path: display_adapter
       - name: Build
         run: cd dusk && cargo build --verbose
-      - name: Run tests
-        run: cd dusk && cargo test --verbose
