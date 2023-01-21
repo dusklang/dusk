@@ -1562,8 +1562,9 @@ impl Driver {
     pub fn decl_type(&self, id: DeclId, tp: &(impl TypeProvider + ?Sized)) -> Type {
         let explicit_ty = self.code.ast.explicit_tys[id].map(|ty| tp.get_evaluated_type(ty)).unwrap_or(&tp.decl_type(id).ty).clone();
         match &df!(id.ast) {
-            ast::Decl::Computed { param_tys, .. } | ast::Decl::ComputedPrototype { param_tys, .. } | ast::Decl::LegacyIntrinsic { function_like: true, param_tys, .. } =>
+            ast::Decl::Computed { param_tys, .. } | ast::Decl::LegacyIntrinsic { function_like: true, param_tys, .. } =>
                 self.function_decl_type(param_tys, explicit_ty, tp),
+            ast::Decl::ComputedPrototype { param_list, .. } => self.function_decl_type(&param_list.param_tys, explicit_ty, tp),
             &ast::Decl::Intrinsic(intr) => {
                 let param_tys = &self.code.ast.intrinsics[intr].param_tys;
                 self.function_decl_type(param_tys, explicit_ty, tp)

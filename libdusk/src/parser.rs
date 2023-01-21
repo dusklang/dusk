@@ -5,7 +5,7 @@ use smallvec::{SmallVec, smallvec};
 use string_interner::DefaultSymbol as Sym;
 use derivative::Derivative;
 
-use crate::dire::ast::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, LegacyIntrinsic, Attribute, FieldAssignment, Ident, Pattern, PatternKind, SwitchCase, ImperScopedDecl, ExternMod, ERROR_EXPR, ERROR_TYPE, VOID_TYPE};
+use crate::dire::ast::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, LegacyIntrinsic, Attribute, FieldAssignment, Ident, Pattern, PatternKind, SwitchCase, ImperScopedDecl, ExternMod, ERROR_EXPR, ERROR_TYPE, VOID_TYPE, ParamList};
 use crate::dire::ty::Type;
 use crate::dire::source_info::{self, SourceFileId, SourceRange};
 
@@ -1504,6 +1504,8 @@ impl Driver {
             );
         }
 
+        let param_list = ParamList { param_tys };
+
         // Parse ": ty" or "{"
         let ty = match self.cur(p).kind {
             TokenKind::Colon => {
@@ -1517,7 +1519,7 @@ impl Driver {
                 self.check_for_fn_equal(p)?;
                 assert_eq!(generic_param_list.names.len(), 0, "generic parameters on a function prototype are not allowed");
                 drop(ns);
-                return Ok(self.comp_decl_prototype(name, param_tys, param_ranges, ast::VOID_TYPE, proto_range));
+                return Ok(self.comp_decl_prototype(name, param_list, param_ranges, ast::VOID_TYPE, proto_range));
             },
         };
 
@@ -1527,7 +1529,7 @@ impl Driver {
 
         let decl_id = match self.cur(p).kind {
             TokenKind::OpenCurly => {
-                let decl_id = self.begin_computed_decl(name, param_names, param_tys, param_ranges, generic_params, ty, proto_range);
+                let decl_id = self.begin_computed_decl(name, param_names, param_list.param_tys, param_ranges, generic_params, ty, proto_range);
                 self.parse_scope(p, &[])?;
                 self.end_computed_decl();
                 decl_id
@@ -1535,7 +1537,7 @@ impl Driver {
             _ => {
                 self.check_for_fn_equal(p)?;
                 assert_eq!(generic_param_list.names.len(), 0, "generic parameters on a function prototype are not allowed");
-                self.comp_decl_prototype(name, param_tys, param_ranges, ty, proto_range)
+                self.comp_decl_prototype(name, param_list, param_ranges, ty, proto_range)
             }
         };
         drop(generic_ctx); // explicitly pop generic ctx id from the stack

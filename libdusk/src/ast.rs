@@ -663,13 +663,13 @@ impl Driver {
 
         id
     }
-    pub fn comp_decl_prototype(&mut self, name: Sym, param_tys: SmallVec<[ExprId; 2]>, _param_ranges: SmallVec<[SourceRange; 2]>, return_ty: ExprId, range: SourceRange) -> DeclId {
+    pub fn comp_decl_prototype(&mut self, name: Sym, param_list: ParamList, _param_ranges: SmallVec<[SourceRange; 2]>, return_ty: ExprId, range: SourceRange) -> DeclId {
         let extern_func = match self.ast.scope_stack.peek().unwrap() {
             ScopeState::Mod { extern_mod: Some(extern_mod), .. } => {
                 let funcs = &mut self.code.ast.extern_mods[extern_mod].imported_functions;
                 let index = funcs.len();
                 let name = self.interner.resolve(name).unwrap();
-                funcs.push(ExternFunction { name: name.to_string(), param_tys: param_tys.iter().cloned().collect(), return_ty });
+                funcs.push(ExternFunction { name: name.to_string(), param_list: param_list.clone(), return_ty });
                 Some(
                     ExternFunctionRef {
                         extern_mod,
@@ -679,7 +679,7 @@ impl Driver {
             },
             _ => None,
         };
-        let id = self.add_decl(Decl::ComputedPrototype { param_tys, extern_func }, name, Some(return_ty), range);
+        let id = self.add_decl(Decl::ComputedPrototype { param_list, extern_func }, name, Some(return_ty), range);
         match self.ast.scope_stack.peek().unwrap() {
             ScopeState::Imper { .. } => {
                 self.flush_stmt_buffer();

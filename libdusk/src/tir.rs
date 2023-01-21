@@ -670,9 +670,9 @@ impl Driver {
 
                     (false, param_tys.clone())
                 },
-                ast::Decl::ComputedPrototype { ref param_tys, .. } => (
+                ast::Decl::ComputedPrototype { ref param_list, .. } => (
                     false,
-                    param_tys.clone()
+                    param_list.param_tys.clone(),
                 ),
                 ast::Decl::Const(_) | ast::Decl::Parameter { .. } | ast::Decl::ReturnValue | ast::Decl::GenericParam(_) => (
                     false,
@@ -896,8 +896,8 @@ impl Driver {
                                 add_eval_dep!(id, ast::VOID_TYPE);
                             }
                         },
-                        ast::Decl::ComputedPrototype { ref param_tys, extern_func } => {
-                            for &ty in param_tys {
+                        ast::Decl::ComputedPrototype { ref param_list, extern_func } => {
+                            for &ty in &param_list.param_tys {
                                 add_eval_dep!(id, ty);
                             }
                             // NOTE: the Some case is handled below this match expression

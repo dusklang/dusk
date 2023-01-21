@@ -443,7 +443,7 @@ impl Driver {
 
         let mut imported_functions = Vec::with_capacity(extern_mod.imported_functions.len());
         for func in &extern_mod.imported_functions {
-            let param_tys = func.param_tys.iter()
+            let param_tys = func.param_list.param_tys.iter()
                 .map(|&ty| tp.get_evaluated_type(ty))
                 .cloned()
                 .collect();

@@ -154,7 +154,7 @@ impl ExternMod {
 #[derive(Debug)]
 pub struct ExternFunction {
     pub name: String,
-    pub param_tys: Vec<ExprId>,
+    pub param_list: ParamList,
     pub return_ty: ExprId,
 }
 
@@ -259,6 +259,11 @@ pub enum PatternBindingPathComponent {
     VariantPayload(usize),
 }
 
+#[derive(Default, Debug, Clone)]
+pub struct ParamList {
+    pub param_tys: SmallVec<[ExprId; 2]>,
+}
+
 #[derive(Debug)]
 pub enum Decl {
     Computed {
@@ -268,7 +273,7 @@ pub enum Decl {
         generic_params: Range<DeclId>,
     },
     ComputedPrototype {
-        param_tys: SmallVec<[ExprId; 2]>,
+        param_list: ParamList,
         extern_func: Option<ExternFunctionRef>,
     },
     Stored { id: StoredDeclId, is_mut: bool, root_expr: ExprId, },
