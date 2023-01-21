@@ -1504,7 +1504,7 @@ impl Driver {
             );
         }
 
-        let param_list = ParamList { param_tys };
+        let param_list = ParamList { param_tys, has_c_variadic_param: false };
 
         // Parse ": ty" or "{"
         let ty = match self.cur(p).kind {

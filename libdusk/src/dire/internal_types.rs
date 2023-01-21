@@ -26,6 +26,7 @@ pub struct ExternFunctionBuilder {
     pub ret_ty: Type,
     pub lib_name: String,
     pub params: Vec<ExternParam>,
+    pub has_variadic_param: bool,
 }
 
 #[derive(Copy, Clone)]

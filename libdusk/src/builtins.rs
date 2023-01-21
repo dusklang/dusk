@@ -60,7 +60,7 @@ impl Driver {
             param_tys.push(ty);
         }
         let library_path = self.add_const_expr(Const::StrLit(CString::new(func_builder.lib_name).unwrap()));
-        let param_list = ParamList { param_tys: param_tys.clone() };
+        let param_list = ParamList { param_tys: param_tys.clone(), has_c_variadic_param: false };
         let func = ExternFunction {
             name: func_builder.name,
             param_list,
@@ -72,7 +72,7 @@ impl Driver {
             extern_mod,
             index: 0,
         };
-        let param_list = ParamList { param_tys };
+        let param_list = ParamList { param_tys, has_c_variadic_param: func_builder.has_variadic_param };
         let decl_id = self.add_decl(Decl::ComputedPrototype { param_list, extern_func: Some(extern_func_ref) }, name, Some(ret_ty), SourceRange::default());
         let static_decl = StaticDecl { name, decl: decl_id };
         self.code.ast.new_namespaces[b.namespace].static_decls.push(static_decl);
@@ -91,12 +91,19 @@ impl Driver {
 
     #[path="compiler.ExternFunctionBuilder"]
     fn new(&mut self, name: &'static str, ret_ty: Type, lib_name: &'static str) -> ExternFunctionBuilder {
-        ExternFunctionBuilder { name: name.to_string(), ret_ty, lib_name: lib_name.to_string(), params: Default::default(), }
+        ExternFunctionBuilder { name: name.to_string(), ret_ty, lib_name: lib_name.to_string(), params: Default::default(), has_variadic_param: false }
     }
 
     #[path="compiler.ExternFunctionBuilder"]
     fn add_param(&mut self, #[self] b: &mut ExternFunctionBuilder, name: &'static str, ty: Type) {
+        assert!(!b.has_variadic_param, "no parameters can be added after a variadic parameter");
         b.params.push(ExternParam { name: name.to_string(), ty });
+    }
+
+    #[path="compiler.ExternFunctionBuilder"]
+    fn add_variadic_param(&mut self, #[self] b: &mut ExternFunctionBuilder) {
+        assert!(!b.has_variadic_param, "a variadic parameter can only be added once");
+        b.has_variadic_param = true;
     }
 
     fn print_int(&mut self, val: usize) {

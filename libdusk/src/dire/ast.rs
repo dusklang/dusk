@@ -262,6 +262,7 @@ pub enum PatternBindingPathComponent {
 #[derive(Default, Debug, Clone)]
 pub struct ParamList {
     pub param_tys: SmallVec<[ExprId; 2]>,
+    pub has_c_variadic_param: bool,
 }
 
 #[derive(Debug)]

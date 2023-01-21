@@ -668,7 +668,7 @@ impl Driver {
                         generic_params.push(generic_param_id);
                     }
 
-                    (false, ParamList { param_tys: param_tys.clone() })
+                    (false, ParamList { param_tys: param_tys.clone(), has_c_variadic_param: false })
                 },
                 ast::Decl::ComputedPrototype { ref param_list, .. } => (
                     false,
@@ -680,15 +680,15 @@ impl Driver {
                 ),
                 ast::Decl::LegacyIntrinsic { ref param_tys, .. } => (
                     false,
-                    ParamList { param_tys: param_tys.clone() },
+                    ParamList { param_tys: param_tys.clone(), has_c_variadic_param: false },
                 ),
                 ast::Decl::Intrinsic(id) => {
                     let param_tys = &self.code.ast.intrinsics[id].param_tys;
-                    (false, ParamList { param_tys: param_tys.clone() })
+                    (false, ParamList { param_tys: param_tys.clone(), has_c_variadic_param: false })
                 },
                 ast::Decl::MethodIntrinsic(id) => {
                     let param_tys = SmallVec::from(&self.code.ast.intrinsics[id].param_tys[1..]);
-                    (false, ParamList { param_tys })
+                    (false, ParamList { param_tys, has_c_variadic_param: false })
                 },
                 ast::Decl::Static(_) => (
                     true,
@@ -708,7 +708,7 @@ impl Driver {
                 ),
                 ast::Decl::Variant { payload_ty, .. } => (
                     false,
-                    ParamList { param_tys: payload_ty.iter().cloned().collect() },
+                    ParamList { param_tys: payload_ty.iter().cloned().collect(), has_c_variadic_param: false },
                 ),
                 ast::Decl::LoopBinding { is_mut, .. } => (
                     is_mut,

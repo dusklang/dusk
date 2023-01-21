@@ -19,11 +19,14 @@ fn build_mod(): module {
 
     b.add_usize_constant("THE_CONSTANT", 68)
 
-    m := compiler.ExternFunctionBuilder.new("putchar", i32, "libSystem.dylib")
-    m.add_param("char", i32)
-    b.add_extern_function(m)
+    pc := compiler.ExternFunctionBuilder.new("putchar", i32, "libSystem.dylib")
+    pc.add_param("char", i32)
+    b.add_extern_function(pc)
 
-    
+    pf := compiler.ExternFunctionBuilder.new("printf", i32, "libSystem.dylib")
+    pf.add_param("format", i8*)
+    pf.add_variadic_param()
+    b.add_extern_function(pf)
 
     b.build()
 }
