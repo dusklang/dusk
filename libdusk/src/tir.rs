@@ -8,7 +8,7 @@ use index_vec::define_index_type;
 use string_interner::DefaultSymbol as Sym;
 
 use crate::dire::source_info::SourceRange;
-use crate::dire::ast::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, NewNamespaceId, RETURN_VALUE_DECL};
+use crate::dire::ast::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, NewNamespaceId, RETURN_VALUE_DECL, ParamList};
 use crate::dire::{internal_fields, internal_field_decls, InternalField, InternalFieldDecls, InternalNamespace};
 use crate::dire::ty::Type;
 pub use crate::dire::tir::CompId;
@@ -122,7 +122,7 @@ impl<T> DerefMut for Expr<T> {
 
 #[derive(Debug)]
 pub struct Decl {
-    pub param_tys: SmallVec<[ExprId; 2]>,
+    pub param_list: ParamList,
     pub generic_params: SmallVec<[GenericParamId; 1]>,
     pub is_mut: bool,
 }
@@ -658,7 +658,7 @@ impl Driver {
         for id in range_iter(new_code.decls.clone()) {
             let decl = &self.code.ast.decls[id];
             let mut generic_params = SmallVec::new();
-            let (is_mut, param_tys) = match *decl {
+            let (is_mut, param_list) = match *decl {
                 ast::Decl::Computed { ref param_tys, generic_params: ref og_generic_params, .. } => {
                     for decl in range_iter(og_generic_params.clone()) {
                         let generic_param_id = match df!(decl.ast) {
@@ -668,55 +668,55 @@ impl Driver {
                         generic_params.push(generic_param_id);
                     }
 
-                    (false, param_tys.clone())
+                    (false, ParamList { param_tys: param_tys.clone() })
                 },
                 ast::Decl::ComputedPrototype { ref param_list, .. } => (
                     false,
-                    param_list.param_tys.clone(),
+                    param_list.clone(),
                 ),
                 ast::Decl::Const(_) | ast::Decl::Parameter { .. } | ast::Decl::ReturnValue | ast::Decl::GenericParam(_) => (
                     false,
-                    SmallVec::new(),
+                    ParamList::default(),
                 ),
                 ast::Decl::LegacyIntrinsic { ref param_tys, .. } => (
                     false,
-                    param_tys.clone(),
+                    ParamList { param_tys: param_tys.clone() },
                 ),
                 ast::Decl::Intrinsic(id) => {
-                    let param_tys = self.code.ast.intrinsics[id].param_tys.clone();
-                    (false, param_tys)
+                    let param_tys = &self.code.ast.intrinsics[id].param_tys;
+                    (false, ParamList { param_tys: param_tys.clone() })
                 },
                 ast::Decl::MethodIntrinsic(id) => {
                     let param_tys = SmallVec::from(&self.code.ast.intrinsics[id].param_tys[1..]);
-                    (false, param_tys)
+                    (false, ParamList { param_tys })
                 },
                 ast::Decl::Static(_) => (
                     true,
-                    SmallVec::new(),
+                    ParamList::default(),
                 ),
                 ast::Decl::Stored { is_mut, .. } | ast::Decl::PatternBinding { is_mut, .. } => (
                     is_mut,
-                    SmallVec::new(),
+                    ParamList::default(),
                 ),
                 ast::Decl::Field { .. } => (
                     true,
-                    SmallVec::new()
+                    ParamList::default(),
                 ),
                 ast::Decl::InternalField(_) => (
                     false, // TODO: allow this to be changed per-field
-                    SmallVec::new()
+                    ParamList::default(),
                 ),
                 ast::Decl::Variant { payload_ty, .. } => (
                     false,
-                    payload_ty.iter().cloned().collect(),
+                    ParamList { param_tys: payload_ty.iter().cloned().collect() },
                 ),
                 ast::Decl::LoopBinding { is_mut, .. } => (
                     is_mut,
-                    SmallVec::new(),
+                    ParamList::default(),
                 ),
             };
-            dvd::send(|| DvdMessage::DidInitializeTirForDecl { id, is_mut, param_tys: param_tys.iter().cloned().collect() });
-            self.tir.decls.push_at(id, Decl { param_tys, is_mut, generic_params });
+            dvd::send(|| DvdMessage::DidInitializeTirForDecl { id, is_mut, param_tys: param_list.param_tys.iter().cloned().collect() });
+            self.tir.decls.push_at(id, Decl { param_list, is_mut, generic_params });
         }
 
         self.initialize_graph();

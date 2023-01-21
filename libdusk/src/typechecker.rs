@@ -999,7 +999,7 @@ impl tir::Expr<tir::Call> {
         let decls = &driver.tir.decls;
         let callee_one_of = tp.constraints(self.callee).one_of();
         overloads.overloads.retain(|&overload| {
-            if decls[overload].param_tys.len() != self.args.len() {
+            if decls[overload].param_list.param_tys.len() != self.args.len() {
                 overloads.nonviable_overloads.push(overload);
                 i += 1;
                 return false;
@@ -1022,7 +1022,7 @@ impl tir::Expr<tir::Call> {
                 }
             }
 
-            for (arg, ty) in self.args.iter().copied().zip(decls[overload].param_tys.iter().copied()) {
+            for (arg, ty) in self.args.iter().copied().zip(decls[overload].param_list.param_tys.iter().copied()) {
                 if driver.can_unify_to(tp, arg, ty).is_err() {
                     overloads.nonviable_overloads.push(overload);
                     i += 1;
@@ -1044,7 +1044,7 @@ impl tir::Expr<tir::Call> {
             if let Some(ty) = tp.constraints(arg).preferred_type() {
                 for &overload in &overloads.overloads {
                     let decl = &driver.tir.decls[overload];
-                    if ty.ty.trivially_convertible_to(tp.get_evaluated_type(decl.param_tys[i])) {
+                    if ty.ty.trivially_convertible_to(tp.get_evaluated_type(decl.param_list.param_tys[i])) {
                         let ty = tp.fetch_decl_type(driver, overload, None);
                         pref = Some(ty.ty.return_ty().unwrap().into());
                         tp.constraints_mut(self.callee).set_preferred_type(ty);
@@ -1058,7 +1058,7 @@ impl tir::Expr<tir::Call> {
         // TODO: do this for self arguments as well
         for &overload in &overloads.overloads {
             let decl = &decls[overload];
-            for (&param_ty, &arg) in decl.param_tys.iter().zip(&self.args) {
+            for (&param_ty, &arg) in decl.param_list.param_tys.iter().zip(&self.args) {
                 let param_ty = tp.get_evaluated_type(param_ty).clone();
                 let arg_constraints = tp.constraints(arg).clone();
                 let generic_constraints = tp.generic_constraints_mut(decl_ref_id);

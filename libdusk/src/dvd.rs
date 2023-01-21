@@ -39,6 +39,8 @@ pub enum Message {
     DidInitializeTirForDecl {
         id: DeclId,
         is_mut: bool,
+        // TODO: use ParamList here instead of this (requires serde for SmallVec, which probably is available with some
+        // feature flag but I haven't bothered to check)
         param_tys: Vec<ExprId>,
         // TODO: Generic params
     },
