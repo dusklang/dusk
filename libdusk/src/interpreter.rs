@@ -1013,8 +1013,9 @@ impl DriverRef<'_> {
         thunk.sub64_imm(false, Reg::SP, Reg::SP, needed_stack_space);
         thunk.stp64(Reg::FP, Reg::LR, Reg::SP, (needed_stack_space - 16).try_into().unwrap());
         thunk.add64_imm(false, Reg::FP, Reg::SP, needed_stack_space - 16);
-        thunk.str64(Reg::R0, Reg::SP, 8);
-        thunk.str64(Reg::R1, Reg::SP, 0);
+        thunk.str64(Reg::R0, Reg::SP, needed_stack_space - 24);
+        thunk.str64(Reg::R1, Reg::SP, needed_stack_space - 32);
+
 
         // Using an array here is kind of dumb, but whatever.
         let gprs = [Reg::R0, Reg::R1, Reg::R2, Reg::R3, Reg::R4, Reg::R5, Reg::R6, Reg::R7];
@@ -1025,21 +1026,21 @@ impl DriverRef<'_> {
         // Pass arguments
 
         // x8 = addr of arguments array;
-        thunk.ldr64(Reg::R8, Reg::SP, 8);
+        thunk.ldr64(Reg::R8, Reg::SP, needed_stack_space - 24);
         for (i, ty) in arg_tys.iter().enumerate() {
             // x9 = addr of current argument;
             thunk.ldr64(Reg::R9, Reg::R8, (8 as usize * i).try_into().unwrap());
             match ty {
                 Type::Int { width, .. } => {
-                    // TODO: pass additional non-variadic arguments on the stack
                     let reg = if i < func.ty.param_tys.len() {
+                        // TODO: pass additional non-variadic arguments on the stack
                         assert!(next_gpr < 8);
                         let reg = gprs[next_gpr as usize];
                         next_gpr += 1;
                         reg
                     } else {
                         // C variadic argument
-                        Reg::R8
+                        Reg::R9
                     };
                     match width {
                         IntWidth::Pointer | IntWidth::W64 => {
@@ -1057,15 +1058,15 @@ impl DriverRef<'_> {
                 },
                 Type::Pointer(_) => {
                     assert_eq!(self.read().arch.pointer_size(), 64);
-                    // TODO: pass additional non-variadic arguments on the stack
                     let reg = if i < func.ty.param_tys.len() {
+                        // TODO: pass additional non-variadic arguments on the stack
                         assert!(next_gpr < 8);
                         let reg = gprs[next_gpr as usize];
                         next_gpr += 1;
                         reg
                     } else {
                         // C variadic argument
-                        Reg::R8
+                        Reg::R9
                     };
                     thunk.ldr64(reg, Reg::R9, 0);
                     if i >= func.ty.param_tys.len() {
@@ -1085,7 +1086,7 @@ impl DriverRef<'_> {
         match *func.ty.return_ty {
             Type::Int { width, .. } => {
                 // x8 = addr of return value;
-                thunk.ldr64(Reg::R8, Reg::SP, 0);
+                thunk.ldr64(Reg::R8, Reg::SP, needed_stack_space - 32);
                 match width {
                     IntWidth::Pointer | IntWidth::W64 => {
                         assert_eq!(self.read().arch.pointer_size(), 64);
@@ -1098,7 +1099,7 @@ impl DriverRef<'_> {
             },
             Type::Pointer(_) => {
                 // x8 = addr of return value;
-                thunk.ldr64(Reg::R8, Reg::SP, 0);
+                thunk.ldr64(Reg::R8, Reg::SP, needed_stack_space - 32);
                 assert_eq!(self.read().arch.pointer_size(), 64);
                 thunk.str64(Reg::R0, Reg::R8, 0);
             },
@@ -1107,8 +1108,8 @@ impl DriverRef<'_> {
         }
 
         // Epilogue
-        thunk.ldp64(Reg::FP, Reg::LR, Reg::SP, 16);
-        thunk.add64_imm(false, Reg::SP, Reg::SP, 32);
+        thunk.ldp64(Reg::FP, Reg::LR, Reg::SP, (needed_stack_space - 16).try_into().unwrap());
+        thunk.add64_imm(false, Reg::SP, Reg::SP, needed_stack_space);
         thunk.ret(Reg::LR);
 
         thunk.allocate()
