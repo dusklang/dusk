@@ -199,7 +199,7 @@ impl Arm64Encoder {
 
     // used for str & ldr with unsigned offsets
     fn mem_access_reg_impl(&mut self, size: DataSize, is_load: bool, reg: Reg, addr: impl Into<RegOrSp>, imm: u16) {
-        let fac = 1u32 << (size as u32);
+        let fac = 1u32 << (size as u32 + 1);
         assert!(imm as u32 % fac == 0);
         let imm12 = imm as u32 / fac;
         assert!(imm12 <= 4095);

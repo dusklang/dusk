@@ -554,7 +554,7 @@ extern "C" fn interp_ffi_entry_point(func: u32, params: *const *const (), return
 }
 
 // Thank you, Hagen von Eitzen: https://math.stackexchange.com/a/291494
-#[cfg(windows)]
+#[cfg(any(windows, all(target_os="macos", target_arch="aarch64")))]
 fn nearest_multiple_of_16(val: i32) -> i32 { ((val - 1) | 15) + 1 }
 #[cfg(windows)]
 fn nearest_multiple_of_8(val: i32) -> i32 { ((val - 1) | 7) + 1 }
@@ -838,7 +838,7 @@ unsafe fn free_dylib(dylib: *mut c_void) {
 impl DriverRef<'_> {
     #[cfg(windows)]
     #[cfg(target_arch="x86_64")]
-    fn generate_thunk(&self, func: &ExternFunction, func_address: i64, num_args: usize) -> region::Allocation {
+    fn generate_thunk(&self, func: &ExternFunction, func_address: i64, arg_tys: &[Type]) -> region::Allocation {
         assert!(!func.ty.has_c_variadic_param, "C variadic parameters are not yet supported on your platform");
 
         let mut thunk = X64Encoder::new();
@@ -846,13 +846,13 @@ impl DriverRef<'_> {
         thunk.store64(Reg64::Rsp + 8, Reg64::Rcx);
 
         let mut extension: i32 = 40;
-        if num_args > 4 {
-            extension += ((num_args - 3) / 2 * 16) as i32;
+        if arg_tys.len() > 4 {
+            extension += ((arg_tys.len() - 3) / 2 * 16) as i32;
         }
         thunk.sub64_imm(Reg64::Rsp, extension);
 
-        assert_eq!(num_args, func.ty.param_tys.len());
-        for i in (0..num_args).rev() {
+        assert_eq!(arg_tys.len(), func.ty.param_tys.len());
+        for i in (0..arg_tys.len()).rev() {
             // get pointer to arguments
             thunk.load64(Reg64::Rax, Reg64::Rsp + extension + 8);
 
@@ -924,7 +924,7 @@ impl DriverRef<'_> {
     }
     #[cfg(unix)]
     #[cfg(target_arch="x86_64")]
-    fn generate_thunk(&self, func: &ExternFunction, func_address: i64, num_args: usize) -> region::Allocation {
+    fn generate_thunk(&self, func: &ExternFunction, func_address: i64, arg_tys: &[Type]) -> region::Allocation {
         assert!(!func.ty.has_c_variadic_param, "C variadic parameters are not yet supported on your platform");
 
         let mut thunk = X64Encoder::new();
@@ -937,9 +937,9 @@ impl DriverRef<'_> {
         thunk.store64(Reg64::Rbp - 8, Reg64::Rdi);
         thunk.store64(Reg64::Rbp - 16, Reg64::Rsi);
 
-        assert!(num_args <= 6, "more than 6 arguments are not yet supported on x64 UNIX platforms");
-        assert_eq!(num_args, func.ty.param_tys.len());
-        for i in 0..num_args {
+        assert!(arg_tys.len() <= 6, "more than 6 arguments are not yet supported on x64 UNIX platforms");
+        assert_eq!(arg_tys.len(), func.ty.param_tys.len());
+        for i in 0..arg_tys.len() {
             // get pointer to arguments
             thunk.load64(Reg64::Rax, Reg64::Rbp - 8);
 
@@ -995,35 +995,52 @@ impl DriverRef<'_> {
         thunk.allocate()
     }
     #[cfg(all(target_os="macos", target_arch="aarch64"))]
-    fn generate_thunk(&self, func: &ExternFunction, func_address: i64, _num_args: usize) -> region::Allocation {
-        assert!(!func.ty.has_c_variadic_param, "C variadic parameters are not yet supported on your platform");
-
+    fn generate_thunk(&self, func: &ExternFunction, func_address: i64, arg_tys: &[Type]) -> region::Allocation {
         let mut thunk = Arm64Encoder::new();
 
+        let mut needed_stack_space = 32u16; // args (8+8), fp (8), lr (8)
+        if func.ty.has_c_variadic_param {
+            for ty in &arg_tys[func.ty.param_tys.len()..] {
+                match ty {
+                    Type::Int { .. } | Type::Pointer(_) => needed_stack_space += 8,
+                    _ => todo!(),
+                }
+            }
+        }
+        needed_stack_space = nearest_multiple_of_16(needed_stack_space as i32).try_into().unwrap();
+
         // Prologue
-        thunk.sub64_imm(false, Reg::SP, Reg::SP, 32);
-        thunk.stp64(Reg::FP, Reg::LR, Reg::SP, 16);
-        thunk.add64_imm(false, Reg::FP, Reg::SP, 16);
+        thunk.sub64_imm(false, Reg::SP, Reg::SP, needed_stack_space);
+        thunk.stp64(Reg::FP, Reg::LR, Reg::SP, (needed_stack_space - 16).try_into().unwrap());
+        thunk.add64_imm(false, Reg::FP, Reg::SP, needed_stack_space - 16);
         thunk.str64(Reg::R0, Reg::SP, 8);
         thunk.str64(Reg::R1, Reg::SP, 0);
 
-        // This is kind of dumb, but whatever.
+        // Using an array here is kind of dumb, but whatever.
         let gprs = [Reg::R0, Reg::R1, Reg::R2, Reg::R3, Reg::R4, Reg::R5, Reg::R6, Reg::R7];
         let mut next_gpr = 0u32;
+
+        let mut stack_offset = 0u16;
 
         // Pass arguments
 
         // x8 = addr of arguments array;
         thunk.ldr64(Reg::R8, Reg::SP, 8);
-        for (i, ty) in func.ty.param_tys.iter().enumerate() {
+        for (i, ty) in arg_tys.iter().enumerate() {
             // x9 = addr of current argument;
             thunk.ldr64(Reg::R9, Reg::R8, (8 as usize * i).try_into().unwrap());
             match ty {
                 Type::Int { width, .. } => {
-                    // TODO: pass additional arguments on the stack
-                    assert!(next_gpr < 8);
-                    let reg = gprs[next_gpr as usize];
-                    next_gpr += 1;
+                    // TODO: pass additional non-variadic arguments on the stack
+                    let reg = if i < func.ty.param_tys.len() {
+                        assert!(next_gpr < 8);
+                        let reg = gprs[next_gpr as usize];
+                        next_gpr += 1;
+                        reg
+                    } else {
+                        // C variadic argument
+                        Reg::R8
+                    };
                     match width {
                         IntWidth::Pointer | IntWidth::W64 => {
                             assert_eq!(self.read().arch.pointer_size(), 64);
@@ -1033,14 +1050,28 @@ impl DriverRef<'_> {
                         IntWidth::W16 => thunk.ldr16(reg, Reg::R9, 0),
                         IntWidth::W8 => thunk.ldr8(reg, Reg::R9, 0),
                     }
+                    if i >= func.ty.param_tys.len() {
+                        thunk.str64(reg, Reg::SP, stack_offset);
+                        stack_offset += 8;
+                    }
                 },
                 Type::Pointer(_) => {
-                    // TODO: pass additional arguments on the stack
-                    assert!(next_gpr < 8);
                     assert_eq!(self.read().arch.pointer_size(), 64);
-                    let reg = gprs[next_gpr as usize];
-                    next_gpr += 1;
+                    // TODO: pass additional non-variadic arguments on the stack
+                    let reg = if i < func.ty.param_tys.len() {
+                        assert!(next_gpr < 8);
+                        let reg = gprs[next_gpr as usize];
+                        next_gpr += 1;
+                        reg
+                    } else {
+                        // C variadic argument
+                        Reg::R8
+                    };
                     thunk.ldr64(reg, Reg::R9, 0);
+                    if i >= func.ty.param_tys.len() {
+                        thunk.str64(reg, Reg::SP, stack_offset);
+                        stack_offset += 8;
+                    }
                 },
                 _ => todo!(),
             }
@@ -1083,18 +1114,18 @@ impl DriverRef<'_> {
         thunk.allocate()
     }
     #[cfg(all(any(not(any(windows, unix)), not(target_arch="x86_64")), not(all(target_os="macos", target_arch="aarch64"))))]
-    fn generate_thunk(&self, _func: &ExternFunction, _func_address: i64, _num_args: usize) -> region::Allocation {
+    fn generate_thunk(&self, _func: &ExternFunction, _func_address: i64, _arg_tys: &[Type]) -> region::Allocation {
         panic!("calling native functions not yet supported on your platform");
     }
 
-    pub fn extern_call(&self, func_ref: ExternFunctionRef, mut args: Vec<Box<[u8]>>) -> Value {
+    pub fn extern_call(&self, func_ref: ExternFunctionRef, mut args: Vec<Box<[u8]>>, arg_tys: Vec<Type>) -> Value {
         let indirect_args: Vec<*mut u8> = args.iter_mut()
             .map(|arg| arg.as_mut_ptr())
             .collect();
         
         let library = &self.read().code.mir.extern_mods[&func_ref.extern_mod];
         let func = &library.imported_functions[func_ref.index];
-        // TODO: cache library and proc addresses (and thunks, for that matter)
+        // TODO: cache library and proc addresses (and thunks when possible)
         let dylib = unsafe { open_dylib(library.library_path.as_ptr()) };
         if dylib.is_null() {
             panic!("unable to load library {:?}", library.library_path);
@@ -1106,7 +1137,7 @@ impl DriverRef<'_> {
         }
         let func_address: i64 = func_ptr as i64;
         
-        let thunk = self.generate_thunk(func, func_address, args.len());
+        let thunk = self.generate_thunk(func, func_address, &arg_tys);
         unsafe {
             let thunk_ptr = thunk.as_ptr::<u8>();
             type Thunk = fn(*const *mut u8, *mut u8);
@@ -1181,14 +1212,17 @@ impl DriverRef<'_> {
                 &Instr::ExternCall { ref arguments, func } => {
                     let mut copied_args = Vec::new();
                     copied_args.reserve_exact(arguments.len());
+                    let mut arg_tys = Vec::new();
+                    arg_tys.reserve_exact(arguments.len());
                     for &arg in arguments {
                         copied_args.push(frame.get_val(arg, &*self.read()).as_bytes().as_ref().to_owned().into_boxed_slice());
+                        arg_tys.push(d.type_of(arg).clone());
                     }
                     // Stop immutably borrowing the stack, because there may come a time where extern functions can transparently call into the interpreter
                     drop(stack);
                     drop(d);
                     self.read_only();
-                    self.extern_call(func, copied_args)
+                    self.extern_call(func, copied_args, arg_tys)
                 },
                 &Instr::GenericParam(id) => {
                     let ty = Type::GenericParam(id);
