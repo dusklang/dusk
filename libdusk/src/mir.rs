@@ -424,7 +424,7 @@ impl DriverRef<'_> {
 
 impl DriverRef<'_> {
     pub fn build_standalone_expr(&mut self, expr: ExprId, tp: &impl TypeProvider) -> Function {
-        let func_ty = FunctionType { param_tys: Vec::new(), return_ty: Box::new(tp.ty(expr).clone()) };
+        let func_ty = FunctionType { param_tys: Vec::new(), return_ty: Box::new(tp.ty(expr).clone()), has_c_variadic_param: false };
         self.build_function(None, func_ty, FunctionBody::Expr(expr), DeclId::new(0)..DeclId::new(0), Vec::new(), false, tp)
     }
 }
@@ -453,6 +453,7 @@ impl Driver {
                     name: func.name.clone(),
                     ty: FunctionType {
                         param_tys,
+                        has_c_variadic_param: func.param_list.has_c_variadic_param,
                         return_ty: Box::new(return_ty),
                     },
                 }
@@ -833,13 +834,19 @@ impl Driver {
 
                 write!(f, "}}")?;
             },
-            &Instr::FunctionTy { ref param_tys, ret_ty } => {
+            &Instr::FunctionTy { ref param_tys, has_c_variadic_param, ret_ty } => {
                 write!(f, "%{} = fn type (", self.display_instr_name(op_id))?;
                 for (i, &param) in param_tys.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
                     write!(f, "%{}", self.display_instr_name(param))?;
+                }
+                if has_c_variadic_param {
+                    if !param_tys.is_empty() {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "...")?;
                 }
                 write!(f, " -> {}", self.display_instr_name(ret_ty))?;
             },
@@ -1446,7 +1453,7 @@ impl DriverRef<'_> {
                 // probably.
                 if self.instruction_is_nontrivial_const(op) {
                     let ty = self.read().type_of(op).clone();
-                    let func_ty = FunctionType { param_tys: vec![], return_ty: Box::new(ty.clone()) };
+                    let func_ty = FunctionType { param_tys: vec![], has_c_variadic_param: false, return_ty: Box::new(ty.clone()) };
                     let func = self.build_function(func.name, func_ty, FunctionBody::ConstantInstruction(op), DeclId::new(0)..DeclId::new(0), Vec::new(), true, tp);
                     let result = self.call(FunctionRef::Ref(func), Vec::new(), Vec::new());
                     let konst = self.write().value_to_const(result, ty, tp);
@@ -2139,7 +2146,7 @@ impl DriverRef<'_> {
                 let op = self.write().handle_indirection(b, op);
                 self.write().push_instr(b, Instr::Pointer { op, is_mut }, expr).direct()
             },
-            Expr::FunctionTy { ref param_tys, ret_ty } => {
+            Expr::FunctionTy { ref param_tys, has_c_variadic_param, ret_ty } => {
                 let param_tys = param_tys.clone();
                 drop(d);
                 let param_tys: Vec<_> = param_tys.iter()
@@ -2160,7 +2167,7 @@ impl DriverRef<'_> {
                 );
                 let ret_ty = self.write().handle_indirection(b, ret_ty);
 
-                self.write().push_instr(b, Instr::FunctionTy { param_tys, ret_ty }, expr).direct()
+                self.write().push_instr(b, Instr::FunctionTy { param_tys, has_c_variadic_param, ret_ty }, expr).direct()
             }
             Expr::Struct(id) => {
                 drop(d);

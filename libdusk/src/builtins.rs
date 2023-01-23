@@ -60,10 +60,10 @@ impl Driver {
             param_tys.push(ty);
         }
         let library_path = self.add_const_expr(Const::StrLit(CString::new(func_builder.lib_name).unwrap()));
-        let param_list = ParamList { param_tys: param_tys.clone(), has_c_variadic_param: false };
+        let param_list = ParamList { param_tys: param_tys.clone(), has_c_variadic_param: func_builder.has_variadic_param };
         let func = ExternFunction {
             name: func_builder.name,
-            param_list,
+            param_list: param_list.clone(),
             return_ty: ret_ty,
         };
         let extern_mod = crate::dire::ast::ExternMod { library_path, imported_functions: vec![func] };
@@ -72,7 +72,6 @@ impl Driver {
             extern_mod,
             index: 0,
         };
-        let param_list = ParamList { param_tys, has_c_variadic_param: func_builder.has_variadic_param };
         let decl_id = self.add_decl(Decl::ComputedPrototype { param_list, extern_func: Some(extern_func_ref) }, name, Some(ret_ty), SourceRange::default());
         let static_decl = StaticDecl { name, decl: decl_id };
         self.code.ast.new_namespaces[b.namespace].static_decls.push(static_decl);

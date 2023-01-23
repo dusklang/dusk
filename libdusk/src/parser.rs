@@ -654,7 +654,8 @@ impl Driver {
                 } else {
                     VOID_TYPE
                 };
-                Ok(self.fn_type(param_tys, ret_ty, fn_range))
+                // TODO: parse C variadic parameter
+                Ok(self.fn_type(param_tys, false, ret_ty, fn_range))
             },
             x => Err(ParseError::UnexpectedToken(x.clone())),
         }.and_then(|mut expr| {

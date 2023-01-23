@@ -772,8 +772,8 @@ impl Driver {
             },
         }
     }
-    pub fn fn_type(&mut self, param_tys: Vec<ExprId>, ret_ty: ExprId, range: SourceRange) -> ExprId {
-        self.add_expr(Expr::FunctionTy { param_tys, ret_ty }, range)
+    pub fn fn_type(&mut self, param_tys: Vec<ExprId>, has_c_variadic_param: bool, ret_ty: ExprId, range: SourceRange) -> ExprId {
+        self.add_expr(Expr::FunctionTy { param_tys, has_c_variadic_param, ret_ty }, range)
     }
     pub fn start_new_file(&mut self, file: SourceFileId) -> AutoPopStackEntry<ScopeState, ModScopeNsId> {
         let mut global_scope = NewNamespace::default();

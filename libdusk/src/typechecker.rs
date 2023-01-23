@@ -999,7 +999,11 @@ impl tir::Expr<tir::Call> {
         let decls = &driver.tir.decls;
         let callee_one_of = tp.constraints(self.callee).one_of();
         overloads.overloads.retain(|&overload| {
-            if decls[overload].param_list.param_tys.len() != self.args.len() {
+            let param_list = &decls[overload].param_list;
+            if
+                self.args.len() < param_list.param_tys.len() ||
+                (self.args.len() > param_list.param_tys.len() && !param_list.has_c_variadic_param)
+            {
                 overloads.nonviable_overloads.push(overload);
                 i += 1;
                 return false;
@@ -1029,6 +1033,8 @@ impl tir::Expr<tir::Call> {
                     return false;
                 }
             }
+            // TODO: is there anything we should be doing to check C variadic arguments here?
+
             one_of.push(callee_one_of[i].ty.return_ty().unwrap().into());
             i += 1;
             true
@@ -1044,7 +1050,7 @@ impl tir::Expr<tir::Call> {
             if let Some(ty) = tp.constraints(arg).preferred_type() {
                 for &overload in &overloads.overloads {
                     let decl = &driver.tir.decls[overload];
-                    if ty.ty.trivially_convertible_to(tp.get_evaluated_type(decl.param_list.param_tys[i])) {
+                    if i < decl.param_list.param_tys.len() && ty.ty.trivially_convertible_to(tp.get_evaluated_type(decl.param_list.param_tys[i])) {
                         let ty = tp.fetch_decl_type(driver, overload, None);
                         pref = Some(ty.ty.return_ty().unwrap().into());
                         tp.constraints_mut(self.callee).set_preferred_type(ty);
@@ -1114,14 +1120,19 @@ impl tir::Expr<tir::Call> {
             .filter(|pref| callee_one_of.iter().any(|ty| ty.trivially_convertible_to(pref) || pref.trivially_convertible_to(ty)))
             .or_else(|| callee_one_of.iter().next().cloned());
         if let Some(callee_ty) = callee_ty {
-            let param_tys = &callee_ty.ty.as_function().unwrap().param_tys;
-            debug_assert_eq!(param_tys.len(), self.args.len());
+            let func_ty = callee_ty.ty.as_function().unwrap();
             // TODO: do this for self arguments as well
-            for (&arg, param_ty) in self.args.iter().zip(param_tys) {
+            for (&arg, param_ty) in self.args.iter().zip(&func_ty.param_tys) {
                 if let Type::Inout(param_ty) = param_ty {
                     tp.constraints_mut(arg).set_to(QualType { ty: param_ty.as_ref().clone(), is_mut: true });
                 } else {
                     tp.constraints_mut(arg).set_to(param_ty);
+                }
+            }
+            if self.args.len() > func_ty.param_tys.len() {
+                assert!(func_ty.has_c_variadic_param);
+                for &arg in &self.args[func_ty.param_tys.len()..] {
+                    tp.constraints_mut(arg).set_to_c_variadic_compatible_type();
                 }
             }
             tp.constraints_mut(self.callee).set_to(callee_ty);
@@ -1563,26 +1574,27 @@ impl Driver {
         let explicit_ty = self.code.ast.explicit_tys[id].map(|ty| tp.get_evaluated_type(ty)).unwrap_or(&tp.decl_type(id).ty).clone();
         match &df!(id.ast) {
             ast::Decl::Computed { param_tys, .. } | ast::Decl::LegacyIntrinsic { function_like: true, param_tys, .. } =>
-                self.function_decl_type(param_tys, explicit_ty, tp),
-            ast::Decl::ComputedPrototype { param_list, .. } => self.function_decl_type(&param_list.param_tys, explicit_ty, tp),
+                self.function_decl_type(param_tys, false, explicit_ty, tp),
+            ast::Decl::ComputedPrototype { param_list, .. } => self.function_decl_type(&param_list.param_tys, param_list.has_c_variadic_param, explicit_ty, tp),
             &ast::Decl::Intrinsic(intr) => {
                 let param_tys = &self.code.ast.intrinsics[intr].param_tys;
-                self.function_decl_type(param_tys, explicit_ty, tp)
+                self.function_decl_type(param_tys, false, explicit_ty, tp)
             },
             &ast::Decl::MethodIntrinsic(intr) => {
                 let param_tys = &self.code.ast.intrinsics[intr].param_tys[1..];
-                self.function_decl_type(param_tys, explicit_ty, tp)
+                self.function_decl_type(param_tys, false, explicit_ty, tp)
             },
             _ => explicit_ty,
         }
     }
 
-    fn function_decl_type(&self, param_tys: &[ExprId], explicit_ty: Type, tp: &(impl TypeProvider + ?Sized)) -> Type {
+    // TODO: take a &ParamList here, probably.
+    fn function_decl_type(&self, param_tys: &[ExprId], has_c_variadic_param: bool, explicit_ty: Type, tp: &(impl TypeProvider + ?Sized)) -> Type {
         let param_tys: Vec<_> = param_tys.iter().copied()
             .map(|ty| tp.get_evaluated_type(ty).clone())
             .collect();
         let return_ty = Box::new(explicit_ty);
-        Type::Function(FunctionType { param_tys, return_ty })
+        Type::Function(FunctionType { param_tys, has_c_variadic_param, return_ty })
     }
 
     fn run_pass_1(&mut self, unit: &UnitItems, start_level: u32, tp: &mut impl TypeProvider) {

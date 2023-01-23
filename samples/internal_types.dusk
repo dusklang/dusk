@@ -2,7 +2,9 @@ fn main() {
     // Prints 68
     print_int(build_mod().THE_CONSTANT)
 
-    user_space_print("Hello, world!\n")
+    user_space_print("Hello, world #1! (from user_space_print with putchar)\n")
+
+    procedural_mod.printf("Hello, world #%d! (from %s)\n", 2, "printf");
 }
 
 procedural_mod :: build_mod()

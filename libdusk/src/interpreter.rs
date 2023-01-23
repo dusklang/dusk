@@ -361,10 +361,11 @@ impl StackFrame {
                 Type::Pointer(
                     Box::new(QualType { ty: self.canonicalize_type(&pointee.ty), is_mut: pointee.is_mut })
                 ),
-            Type::Function(FunctionType { param_tys, return_ty }) =>
+            &Type::Function(FunctionType { ref param_tys, has_c_variadic_param, ref return_ty }) =>
                 Type::Function(
                     FunctionType {
                         param_tys: param_tys.iter().map(|ty| self.canonicalize_type(ty)).collect(),
+                        has_c_variadic_param,
                         return_ty: Box::new(self.canonicalize_type(return_ty)),
                     }
                 ),
@@ -838,6 +839,8 @@ impl DriverRef<'_> {
     #[cfg(windows)]
     #[cfg(target_arch="x86_64")]
     fn generate_thunk(&self, func: &ExternFunction, func_address: i64, num_args: usize) -> region::Allocation {
+        assert!(!func.ty.has_c_variadic_param, "C variadic parameters are not yet supported on your platform");
+
         let mut thunk = X64Encoder::new();
         thunk.store64(Reg64::Rsp + 16, Reg64::Rdx);
         thunk.store64(Reg64::Rsp + 8, Reg64::Rcx);
@@ -922,6 +925,8 @@ impl DriverRef<'_> {
     #[cfg(unix)]
     #[cfg(target_arch="x86_64")]
     fn generate_thunk(&self, func: &ExternFunction, func_address: i64, num_args: usize) -> region::Allocation {
+        assert!(!func.ty.has_c_variadic_param, "C variadic parameters are not yet supported on your platform");
+
         let mut thunk = X64Encoder::new();
         thunk.push64(Reg64::Rbp);
         thunk.mov64(Reg64::Rbp, Reg64::Rsp);
@@ -991,6 +996,8 @@ impl DriverRef<'_> {
     }
     #[cfg(all(target_os="macos", target_arch="aarch64"))]
     fn generate_thunk(&self, func: &ExternFunction, func_address: i64, _num_args: usize) -> region::Allocation {
+        assert!(!func.ty.has_c_variadic_param, "C variadic parameters are not yet supported on your platform");
+
         let mut thunk = Arm64Encoder::new();
 
         // Prologue
@@ -1540,12 +1547,12 @@ impl DriverRef<'_> {
                     let ty = frame.get_val(op, &*self.read()).as_ty().ptr_with_mut(is_mut);
                     Value::from_new_internal(ty, &d)
                 },
-                &Instr::FunctionTy { ref param_tys, ret_ty } => {
+                &Instr::FunctionTy { ref param_tys, has_c_variadic_param, ret_ty } => {
                     let param_tys = param_tys.iter()
                         .map(|&ty| frame.get_val(ty, &*self.read()).as_ty())
                         .collect();
                     let ret_ty = frame.get_val(ret_ty, &*self.read()).as_ty();
-                    let ty = Type::Function(FunctionType { param_tys, return_ty: Box::new(ret_ty) });
+                    let ty = Type::Function(FunctionType { param_tys, has_c_variadic_param, return_ty: Box::new(ret_ty) });
                     Value::from_new_internal(ty, &d)
                 }
                 &Instr::Struct { ref fields, id } => {

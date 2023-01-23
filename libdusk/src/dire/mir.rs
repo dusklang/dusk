@@ -54,7 +54,7 @@ pub enum Instr {
     Pointer { op: OpId, is_mut: bool },
     Struct { fields: SmallVec<[OpId; 2]>, id: StructId },
     Enum { variants: SmallVec<[OpId; 2]>, id: EnumId },
-    FunctionTy { param_tys: Vec<OpId>, ret_ty: OpId },
+    FunctionTy { param_tys: Vec<OpId>, has_c_variadic_param: bool, ret_ty: OpId },
     StructLit { fields: SmallVec<[OpId; 2]>, id: StructId },
     DirectFieldAccess { val: OpId, index: usize },
     IndirectFieldAccess { val: OpId, index: usize },
@@ -111,7 +111,7 @@ impl Instr {
                 | Instr::LegacyIntrinsic { arguments: ref ops, .. } | Instr::Struct { fields: ref ops, .. }
                 | Instr::Enum { variants: ref ops, .. } | Instr::StructLit { fields: ref ops, .. }
                 | Instr::Intrinsic { arguments: ref ops, .. } => ops.iter().copied().collect(),
-            Instr::FunctionTy { ref param_tys, ret_ty } => param_tys.iter().copied().chain(std::iter::once(ret_ty)).collect(),
+            Instr::FunctionTy { ref param_tys, ret_ty, .. } => param_tys.iter().copied().chain(std::iter::once(ret_ty)).collect(),
         }
     }
 
@@ -147,7 +147,7 @@ impl Instr {
                         replace(op, old, new);
                     }
                 }
-            Instr::FunctionTy { ref mut param_tys, ref mut ret_ty } => {
+            Instr::FunctionTy { ref mut param_tys, ref mut ret_ty, .. } => {
                 for op in param_tys {
                     replace(op, old, new);
                 }

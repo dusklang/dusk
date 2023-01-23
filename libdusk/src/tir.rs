@@ -576,7 +576,7 @@ impl Driver {
             }
             &ast::Expr::DeclRef { id: decl_ref_id } => insert_expr!(decl_refs, DeclRef { decl_ref_id }),
             &ast::Expr::Call { callee, ref arguments } => insert_expr!(calls, Call { callee, args: arguments.clone() }),
-            &ast::Expr::FunctionTy { ref param_tys, ret_ty } => insert_expr!(function_tys, FunctionTy { param_tys: param_tys.clone(), ret_ty }),
+            &ast::Expr::FunctionTy { ref param_tys, ret_ty, .. } => insert_expr!(function_tys, FunctionTy { param_tys: param_tys.clone(), ret_ty }),
             &ast::Expr::Set { lhs, rhs } => insert_expr!(assignments, Assignment { lhs, rhs }),
             &ast::Expr::Do { scope } => insert_expr!(dos, Do { terminal_expr: self.code.ast.imper_scopes[scope].terminal_expr }),
             &ast::Expr::If { condition, then_scope, else_scope } => {
@@ -772,7 +772,7 @@ impl Driver {
                         self.tir.graph.add_type1_dep(ef!(callee.item), ef!(arg.item));
                     }
                 },
-                ast::Expr::FunctionTy { ref param_tys, ret_ty } => {
+                ast::Expr::FunctionTy { ref param_tys, ret_ty, .. } => {
                     for &param_ty in param_tys {
                         self.tir.graph.add_type1_dep(id, ef!(param_ty.item));
                     }

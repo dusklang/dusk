@@ -372,6 +372,13 @@ impl ConstraintList {
         }
     }
 
+    pub fn set_to_c_variadic_compatible_type(&mut self) {
+        // If we're never, we should stay never.
+        if self.is_never() { return; }
+
+        self.one_of = Some([self.solve().unwrap()].into());
+    }
+
     pub fn intersect_with(&self, other: &ConstraintList) -> ConstraintList {
         self.intersect_with_in_generic_context(other, &[])
     }
@@ -545,7 +552,7 @@ fn substitute_generic_args(ty: &mut Type, generic_params: &[GenericParamId], gen
             }
         },
         Type::Pointer(pointee) => substitute_generic_args(&mut pointee.ty, generic_params, generic_args),
-        Type::Function(FunctionType { param_tys, return_ty }) => {
+        Type::Function(FunctionType { param_tys, return_ty, .. }) => {
             substitute_generic_args(return_ty, generic_params, generic_args);
             for param_ty in param_tys {
                 substitute_generic_args(param_ty, generic_params, generic_args);

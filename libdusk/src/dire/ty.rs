@@ -33,6 +33,7 @@ pub enum FloatWidth {
 pub struct FunctionType {
     pub param_tys: Vec<Type>,
     pub return_ty: Box<Type>,
+    pub has_c_variadic_param: bool,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Hash)]
