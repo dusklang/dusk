@@ -31,6 +31,7 @@ enum Decl {
     Stored(StoredDeclId),
     Computed { get: FuncId },
     ExternFunction(ExternFunctionRef),
+    ObjcClassRef { extern_mod: ExternModId, index: usize },
     Parameter { index: usize },
     PatternBinding { id: PatternBindingDeclId },
     LegacyIntrinsic(LegacyIntrinsic, Type),
@@ -531,6 +532,13 @@ impl DriverRef<'_> {
                 self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
+            ast::Decl::ObjcClassRef { extern_mod, index } => {
+                drop(d);
+                self.write().resolve_extern_mod(extern_mod, tp);
+                let decl = Decl::ObjcClassRef { extern_mod, index };
+                self.write().mir.decls.insert(id, decl.clone());
+                decl
+            },
             ast::Decl::Stored { id: index, .. } | ast::Decl::LoopBinding { id: index, .. } => {
                 drop(d);
                 let decl = Decl::Stored(index);
@@ -767,6 +775,13 @@ impl Driver {
                 write_args!(arguments);
                 write!(f, " from {:?}", extern_mod.library_path)?
             },
+            &Instr::ObjcClassRef { extern_mod, index } => write!(
+                f,
+                "%{} = objc_class_ref `{}` from {:?}",
+                self.display_instr_name(op_id),
+                &self.code.ast.extern_mods[extern_mod].objc_class_references[index],
+                self.code.mir.extern_mods[&extern_mod].library_path
+            )?,
             Instr::Const(konst) => {
                 write!(f, "%{} = {}", self.display_instr_name(op_id), self.fmt_const(konst))?;
             },
@@ -973,6 +988,7 @@ enum DeclRef {
     MethodIntrinsic(IntrinsicId),
     Function { func: FuncId, generic_args: Vec<Type> },
     ExternFunction { func: ExternFunctionRef },
+    ObjcClassRef { extern_mod: ExternModId, index: usize },
     #[allow(unused)]
     EnumVariantWithPayload { enuum: EnumId, index: usize, payload_ty: Option<Type> },
     Value(Value),
@@ -1534,6 +1550,7 @@ impl Driver {
         let b = &self.code.mir;
         match instr {
             Instr::Void | Instr::Store { .. } => Type::Void,
+            Instr::ObjcClassRef { .. } => Type::Void.ptr(),
             Instr::Invalid => Type::Error,
             Instr::Pointer { .. } | Instr::Struct { .. } | Instr::GenericParam(_) | Instr::Enum { .. } | Instr::FunctionTy { .. } => Type::Ty,
             &Instr::StructLit { ref fields, id } => {
@@ -1686,6 +1703,9 @@ impl DriverRef<'_> {
             Decl::ExternFunction(func) => {
                 assert!(generic_arguments.is_empty());
                 DeclRef::ExternFunction { func }
+            },
+            Decl::ObjcClassRef { extern_mod, index } => {
+                DeclRef::ObjcClassRef { extern_mod, index }
             },
             Decl::Stored(id) => {
                 DeclRef::Value(b.stored_decl_locs[id].indirect())
@@ -1873,6 +1893,7 @@ impl DriverRef<'_> {
                         self.write().push_instr(b, Instr::LegacyIntrinsic { arguments: SmallVec::new(), ty, intr: intrinsic }, expr).direct()
                     },
                     DeclRef::Value(value) => value,
+                    DeclRef::ObjcClassRef { extern_mod, index } => self.write().push_instr(b, Instr::ObjcClassRef { extern_mod, index }, expr).direct(),
                     other => todo!("referring to {:?} not yet supported", other),
                 }
             },
@@ -2068,6 +2089,7 @@ impl DriverRef<'_> {
                         self.write().push_instr(b, Instr::Variant { enuum, index, payload: arguments[0] }, expr).direct()
                     },
                     DeclRef::Value(_) => todo!("calling function pointers is not yet supported"),
+                    DeclRef::ObjcClassRef { .. } => unimplemented!("can't call obj-c class ref"),
                 }
             },
             Expr::Cast { expr: operand, ty: dest_ty, cast_id } => {

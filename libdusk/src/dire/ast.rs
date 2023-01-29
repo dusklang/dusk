@@ -140,6 +140,7 @@ pub struct DeclRef {
 pub struct ExternMod {
     pub library_path: ExprId,
     pub imported_functions: Vec<ExternFunction>,
+    pub objc_class_references: Vec<String>,
 }
 
 impl ExternMod {
@@ -147,6 +148,7 @@ impl ExternMod {
         Self {
             library_path,
             imported_functions: Vec::new(),
+            objc_class_references: Vec::new(),
         }
     }
 }
@@ -277,6 +279,7 @@ pub enum Decl {
         param_list: ParamList,
         extern_func: Option<ExternFunctionRef>,
     },
+    ObjcClassRef { extern_mod: ExternModId, index: usize },
     Stored { id: StoredDeclId, is_mut: bool, root_expr: ExprId, },
     PatternBinding { id: PatternBindingDeclId, is_mut: bool, },
     LoopBinding { id: StoredDeclId, is_mut: bool }, // The `i` in `for i in 0..100 {}`

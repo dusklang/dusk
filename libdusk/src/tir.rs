@@ -629,7 +629,7 @@ impl Driver {
             // TODO: Add parameter and field TIR items for (at least) checking that the type of the param is valid
             // LoopBinding doesn't require a TIR decl because it is current checked by its parent `For` expr
             ast::Decl::Parameter { .. } | ast::Decl::Field { .. } | ast::Decl::Variant { .. } |
-                ast::Decl::ReturnValue | ast::Decl::LegacyIntrinsic { .. } | ast::Decl::Intrinsic(_) | ast::Decl::MethodIntrinsic(_) | ast::Decl::InternalField(_) | ast::Decl::LoopBinding { .. } => {},
+                ast::Decl::ReturnValue | ast::Decl::LegacyIntrinsic { .. } | ast::Decl::Intrinsic(_) | ast::Decl::MethodIntrinsic(_) | ast::Decl::InternalField(_) | ast::Decl::LoopBinding { .. } | ast::Decl::ObjcClassRef { .. } => {},
             ast::Decl::GenericParam(_) => {
                 assert_eq!(level, 0);
                 unit.generic_params.push(GenericParam { id });
@@ -674,7 +674,7 @@ impl Driver {
                     false,
                     param_list.clone(),
                 ),
-                ast::Decl::Const(_) | ast::Decl::Parameter { .. } | ast::Decl::ReturnValue | ast::Decl::GenericParam(_) => (
+                ast::Decl::Const(_) | ast::Decl::Parameter { .. } | ast::Decl::ReturnValue | ast::Decl::GenericParam(_) | ast::Decl::ObjcClassRef { .. } => (
                     false,
                     ParamList::default(),
                 ),
@@ -727,7 +727,7 @@ impl Driver {
             let id = df!(decl_id.item);
             match df!(decl_id.ast) {
                 // NOTE: type 1 dependencies are currently added to LoopBinding by its parent `for` loop; see below.
-                ast::Decl::Parameter { .. } | ast::Decl::LegacyIntrinsic { .. } | ast::Decl::Intrinsic(_) | ast::Decl::MethodIntrinsic(_) | ast::Decl::Field { .. } | ast::Decl::ReturnValue | ast::Decl::GenericParam(_) | ast::Decl::Variant { .. } | ast::Decl::ComputedPrototype { .. } | ast::Decl::InternalField(_) | ast::Decl::LoopBinding { .. } => {},
+                ast::Decl::Parameter { .. } | ast::Decl::LegacyIntrinsic { .. } | ast::Decl::Intrinsic(_) | ast::Decl::MethodIntrinsic(_) | ast::Decl::Field { .. } | ast::Decl::ReturnValue | ast::Decl::GenericParam(_) | ast::Decl::Variant { .. } | ast::Decl::ComputedPrototype { .. } | ast::Decl::InternalField(_) | ast::Decl::LoopBinding { .. } | ast::Decl::ObjcClassRef { .. } => {},
                 ast::Decl::PatternBinding { id: _binding_id, .. } => {
                     // let scrutinee = self.code.ast.pattern_binding_decls[binding_id].scrutinee;
 
@@ -909,6 +909,10 @@ impl Driver {
                                 let extern_library_path = self.code.ast.extern_mods[extern_func.extern_mod].library_path;
                                 add_eval_dep!(id, extern_library_path);
                             }
+                        },
+                        ast::Decl::ObjcClassRef { extern_mod, .. } => {
+                            let extern_library_path = self.code.ast.extern_mods[extern_mod].library_path;
+                            add_eval_dep!(id, extern_library_path);
                         },
                     }
         

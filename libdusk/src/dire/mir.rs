@@ -38,6 +38,7 @@ pub enum Instr {
     LogicalNot(OpId),
     Call { arguments: SmallVec<[OpId; 2]>, generic_arguments: Vec<Type>, func: FuncId },
     ExternCall { arguments: SmallVec<[OpId; 2]>, func: ExternFunctionRef },
+    ObjcClassRef { extern_mod: ExternModId, index: usize },
     FunctionRef { generic_arguments: Vec<Type>, func: FuncId, },
     LegacyIntrinsic { arguments: SmallVec<[OpId; 2]>, ty: Type, intr: LegacyIntrinsic },
     Intrinsic { arguments: SmallVec<[OpId; 2]>, intr: IntrinsicId },
@@ -98,7 +99,7 @@ impl Instr {
     pub fn referenced_values(&self) -> Vec<OpId> {
         match *self {
             Instr::Void | Instr::Const(_) | Instr::Alloca(_) | Instr::AddressOfStatic(_) | Instr::Br(_)
-                | Instr::GenericParam(_) | Instr::Parameter(_) | Instr::FunctionRef { .. } | Instr::Invalid => vec![],
+                | Instr::GenericParam(_) | Instr::Parameter(_) | Instr::FunctionRef { .. } | Instr::Invalid | Instr::ObjcClassRef { .. } => vec![],
             Instr::LogicalNot(op) | Instr::Reinterpret(op, _) | Instr::Truncate(op, _) | Instr::SignExtend(op, _)
                 | Instr::ZeroExtend(op, _) | Instr::FloatCast(op, _) | Instr::FloatToInt(op, _)
                 | Instr::IntToFloat(op, _) | Instr::Load(op) | Instr::Pointer { op, .. }
@@ -127,7 +128,7 @@ impl Instr {
         }
         match self {
             Instr::Void | Instr::Const(_) | Instr::Alloca(_) | Instr::AddressOfStatic(_) | Instr::Br(_)
-                | Instr::GenericParam(_) | Instr::Parameter(_) | Instr::FunctionRef { .. } | Instr::Invalid => {},
+                | Instr::GenericParam(_) | Instr::Parameter(_) | Instr::FunctionRef { .. } | Instr::Invalid | Instr::ObjcClassRef { .. } => {},
             Instr::LogicalNot(op) | Instr::Reinterpret(op, _) | Instr::Truncate(op, _) | Instr::SignExtend(op, _)
                 | Instr::ZeroExtend(op, _) | Instr::FloatCast(op, _) | Instr::FloatToInt(op, _)
                 | Instr::IntToFloat(op, _) | Instr::Load(op) | Instr::Pointer { op, .. }

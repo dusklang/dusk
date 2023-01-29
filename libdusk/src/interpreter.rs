@@ -21,7 +21,7 @@ use index_vec::IndexVec;
 use lazy_static::lazy_static;
 
 use crate::dire::arch::Arch;
-use crate::dire::ast::{LegacyIntrinsic, EnumId, GenericParamId, ExternFunctionRef, NewNamespaceId};
+use crate::dire::ast::{LegacyIntrinsic, EnumId, GenericParamId, ExternFunctionRef, ExternModId, NewNamespaceId};
 use crate::dire::mir::{Const, Instr, InstrId, FuncId, StaticId, ExternFunction};
 use crate::dire::ty::{Type, FunctionType, QualType, IntWidth, FloatWidth, StructType, LegacyInternalType};
 use crate::dire::{OpId, BlockId, DuskBridge};
@@ -400,12 +400,20 @@ struct Allocation(region::Allocation);
 unsafe impl Sync for Allocation {}
 unsafe impl Send for Allocation {}
 
+struct CachedLib {
+    base: *mut c_void,
+    objc_classes: Vec<*const c_void>,
+}
+unsafe impl Sync for CachedLib {}
+unsafe impl Send for CachedLib {}
+
 pub struct Interpreter {
     statics: HashMap<StaticId, Value>,
     allocations: HashMap<usize, alloc::Layout>,
     switch_cache: HashMap<OpId, HashMap<Box<[u8]>, BlockId>>,
     #[cfg(windows)]
     inverse_thunk_cache: HashMap<FuncId, Allocation>,
+    lib_cache: HashMap<ExternModId, CachedLib>,
     mode: InterpMode,
     command_line_args: Vec<CString>,
 }
@@ -418,6 +426,7 @@ impl Interpreter {
             switch_cache: HashMap::new(),
             #[cfg(windows)]
             inverse_thunk_cache: HashMap::new(),
+            lib_cache: HashMap::new(),
             command_line_args: Vec::new(),
             mode,
         }
@@ -1225,6 +1234,31 @@ impl DriverRef<'_> {
                     self.read_only();
                     self.extern_call(func, copied_args, arg_tys)
                 },
+                #[cfg(target_os = "macos")]
+                &Instr::ObjcClassRef { extern_mod, index } => {
+                    let library = &self.read().code.mir.extern_mods[&extern_mod];
+                    let mut interp = INTERP.write().unwrap();
+                    let cache = interp.lib_cache.entry(extern_mod).or_insert_with(|| {
+                        // TODO: cache library and proc addresses (and thunks when possible)
+                        let base = unsafe { open_dylib(library.library_path.as_ptr()) };
+                        if base.is_null() {
+                            panic!("unable to load library {:?}", library.library_path);
+                        }
+                        let mut objc_classes = Vec::new();
+                        for class_name in &self.read().code.ast.extern_mods[extern_mod].objc_class_references {
+                            let class_name = CString::new(class_name.clone()).unwrap();
+                            let class_ptr = unsafe { objc::runtime::objc_getClass(class_name.as_ptr()) };
+                            objc_classes.push(class_ptr as *const c_void);
+                        }
+                        CachedLib {
+                            base,
+                            objc_classes
+                        }
+                    });
+                    Value::from_usize(cache.objc_classes[index] as usize)
+                },
+                #[cfg(not(target_os = "macos"))]
+                &Instr::ObjcClassRef { .. } => unimplemented!("cannot refer to Objective-C class on a non-macOS platform"),
                 &Instr::GenericParam(id) => {
                     let ty = Type::GenericParam(id);
                     let ty = frame.canonicalize_type(&ty);

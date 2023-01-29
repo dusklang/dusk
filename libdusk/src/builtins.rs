@@ -66,13 +66,33 @@ impl Driver {
             param_list: param_list.clone(),
             return_ty: ret_ty,
         };
-        let extern_mod = crate::dire::ast::ExternMod { library_path, imported_functions: vec![func] };
+        let extern_mod = crate::dire::ast::ExternMod { library_path, imported_functions: vec![func], objc_class_references: Default::default() };
         let extern_mod = self.code.ast.extern_mods.push(extern_mod);
         let extern_func_ref = ExternFunctionRef {
             extern_mod,
             index: 0,
         };
         let decl_id = self.add_decl(Decl::ComputedPrototype { param_list, extern_func: Some(extern_func_ref) }, name, Some(ret_ty), SourceRange::default());
+        let static_decl = StaticDecl { name, decl: decl_id };
+        self.code.ast.new_namespaces[b.namespace].static_decls.push(static_decl);
+
+        // NOTE: we currently have to do this every time this function is called, to be safe. Once we have proper collection types
+        // implemented in the language, the user can just build up an array and add them all at once.
+        let new_code = self.get_new_code_since(before);
+        self.finalize_ast();
+        self.initialize_tir(&new_code);
+    }
+
+    #[path="compiler.ModuleBuilder"]
+    fn add_objc_class_ref(&mut self, #[self] b: ModuleBuilder, class_name: &'static str, lib_name: &'static str) {
+        let before = self.take_snapshot();
+        
+        let name = self.interner.get_or_intern(class_name);
+        let library_path = self.add_const_expr(Const::StrLit(CString::new(lib_name).unwrap()));
+        let extern_mod = crate::dire::ast::ExternMod { library_path, imported_functions: Default::default(), objc_class_references: vec![class_name.to_string()] };
+        let extern_mod = self.code.ast.extern_mods.push(extern_mod);
+        let void_ptr = self.add_const_ty(Type::Void.ptr());
+        let decl_id = self.add_decl(Decl::ObjcClassRef { extern_mod, index: 0 }, name, Some(void_ptr), SourceRange::default());
         let static_decl = StaticDecl { name, decl: decl_id };
         self.code.ast.new_namespaces[b.namespace].static_decls.push(static_decl);
 

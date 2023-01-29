@@ -5,6 +5,8 @@ fn main() {
     user_space_print("Hello, world #1! (from user_space_print with putchar)\n")
 
     procedural_mod.printf("Hello, world #%d! (from %s)\n", 2, "printf");
+
+    procedural_mod.NSLog(&make_nsstring("Hello, there! Here is an argument: %@"), &make_nsstring("hahahahahahahahahahahahaha"))
 }
 
 procedural_mod :: build_mod()
@@ -15,6 +17,23 @@ fn user_space_print(val: i8*) {
         val = (val as usize + 1) as i8*
     }
 }
+
+NSString :: struct {
+    isa: void*
+    flags: u64
+    data: void*
+    len: u64
+}
+
+fn make_nsstring(value: i8*): NSString {
+    NSString {
+        isa: procedural_mod.__NSCFConstantString
+        flags: 1992
+        data: value as void*
+        len: procedural_mod.strlen(value) as u64
+    }
+}
+
 
 fn build_mod(): module {
     b :: compiler.ModuleBuilder.new()
@@ -29,6 +48,17 @@ fn build_mod(): module {
     pf.add_param("format", i8*)
     pf.add_variadic_param()
     b.add_extern_function(pf)
+
+    stl := compiler.ExternFunctionBuilder.new("strlen", i32, "libSystem.dylib")
+    stl.add_param("str", i8*)
+    b.add_extern_function(stl)
+
+    b.add_objc_class_ref("__NSCFConstantString", "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+
+    nsl := compiler.ExternFunctionBuilder.new("NSLog", void, "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation")
+    nsl.add_param("format", NSString*)
+    nsl.add_variadic_param()
+    b.add_extern_function(nsl)
 
     b.build()
 }
