@@ -1695,7 +1695,7 @@ impl DriverRef<'_> {
             for i in 0..unit.eval_dependees.len() {
                 let expr = unit.eval_dependees[i];
                 let val = self.eval_expr(expr, tp);
-                tp.insert_eval_result(expr, val);
+                tp.insert_eval_result(expr, val.into());
             }
         }
 
@@ -1714,7 +1714,10 @@ impl DriverRef<'_> {
                     let ns = match ty {
                         Type::Mod => {
                             self.write().run_pass_2(&unit.items, &mut mock_tp);
-                            let module = self.eval_expr(unit.main_expr, &mock_tp);
+                            let Ok(module) = self.eval_expr(unit.main_expr, &mock_tp) else {
+                                self.write().tir.expr_namespaces.entry(unit.main_expr).or_default().push(ExprNamespace::Error);
+                                continue;
+                            };
                             match module {
                                 Const::Mod(scope) => ExprNamespace::Mod(scope),
                                 _ => panic!("Unexpected const kind, expected module!"),
@@ -1733,7 +1736,10 @@ impl DriverRef<'_> {
                         },
                         Type::Ty => {
                             self.write().run_pass_2(&unit.items, &mut mock_tp);
-                            let ty = self.eval_expr(unit.main_expr, &mock_tp);
+                            let Ok(ty) = self.eval_expr(unit.main_expr, &mock_tp) else {
+                                self.write().tir.expr_namespaces.entry(unit.main_expr).or_default().push(ExprNamespace::Error);
+                                continue;
+                            };
     
                             match ty {
                                 Const::Ty(Type::Struct(ref strukt)) => ExprNamespace::New(self.read().code.ast.structs[strukt.identity].namespace, NewNamespaceRefKind::Static),

@@ -19,6 +19,7 @@ use crate::mir::{self, FunctionRef};
 use crate::type_provider::TypeProvider;
 use crate::index_vec::*;
 use crate::rw_ref::RwRef;
+use crate::interpreter::EvalError;
 
 // This derive is here so that I can initialize the global Driver instance with something. It is *not* recommended that
 // anyone actually uses `Driver` in its default state.
@@ -60,11 +61,11 @@ impl Driver {
     }
 }
 impl DriverRef<'_> {
-    pub fn eval_expr(&mut self, expr: ExprId, tp: &impl TypeProvider) -> Const {
+    pub fn eval_expr(&mut self, expr: ExprId, tp: &impl TypeProvider) -> Result<Const, EvalError> {
         let func = self.build_standalone_expr(expr, tp);
         let function_ref = FunctionRef::Ref(func);
-        let val = self.call(function_ref, Vec::new(), Vec::new());
-        self.write().value_to_const(val, tp.ty(expr).clone(), tp)
+        let val = self.call(function_ref, Vec::new(), Vec::new())?;
+        Ok(self.write().value_to_const(val, tp.ty(expr).clone(), tp))
     }
 }
 

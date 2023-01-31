@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::CString;
 
 use index_vec::{IndexVec, define_index_type};
@@ -15,6 +15,8 @@ use crate::dire::source_info::SourceRange;
 use crate::dire::ast::IntrinsicId;
 
 use crate::dire::ast::NewNamespaceId;
+
+use crate::interpreter::EvalError;
 
 define_index_type!(pub struct FuncId = u32;);
 define_index_type!(pub struct StaticId = u32;);
@@ -172,6 +174,7 @@ pub enum Const {
     BasicVariant { enuum: EnumId, index: usize },
     StructLit { fields: Vec<Const>, id: StructId },
     Void,
+    Invalid,
 }
 
 impl Const {
@@ -190,7 +193,14 @@ impl Const {
                 }
             ),
             Const::Void => Type::Void,
+            Const::Invalid => Type::Error,
         }
+    }
+}
+
+impl From<Result<Const, EvalError>> for Const {
+    fn from(value: Result<Const, EvalError>) -> Self {
+        value.unwrap_or_else(|_| Const::Invalid)
     }
 }
 
@@ -293,6 +303,10 @@ pub struct MirCode {
     pub enums: HashMap<EnumId, EnumLayout>,
     pub source_ranges: HashMap<OpId, SourceRange>,
     pub instr_names: HashMap<OpId, String>,
+
+    // The set of instructions that failed to be const-eval'ed (e.g., due to a panic)
+    pub poisoned_ops: HashSet<OpId>,
+
     block_states: HashMap<BlockId, BlockState>,
 }
 
@@ -317,6 +331,7 @@ impl MirCode {
             enums: HashMap::new(),
             source_ranges: HashMap::new(),
             instr_names: HashMap::new(),
+            poisoned_ops: HashSet::new(),
             block_states: HashMap::new(),
         }
     }

@@ -1,0 +1,16 @@
+fn main() {}
+
+foo :: foobar()
+
+fn foobar() {
+    panic("panicking, but from a constant!")
+}
+
+fn create_module(): module {
+    panic()
+    mod {
+        baz :: 12
+    }
+}
+
+my_module :: create_module()

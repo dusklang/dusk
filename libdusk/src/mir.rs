@@ -416,7 +416,7 @@ impl DriverRef<'_> {
                 id,
                 crate::dire::mir::Static {
                     name: statik.name,
-                    val: konst.clone(),
+                    val: konst.into(),
                 }
             );
         }
@@ -599,7 +599,7 @@ impl DriverRef<'_> {
                 let konst = self.eval_expr(root_expr, tp);
 
                 // TODO: Deal with cycles!
-                let decl = Decl::Const(konst);
+                let decl = Decl::Const(konst.into());
                 self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
@@ -663,6 +663,7 @@ impl Driver {
                 }
                 write!(f, "}}")?;
             },
+            Const::Invalid => write!(f, "INVALID CONST")?,
         }
 
         Ok(())
@@ -688,9 +689,8 @@ impl Driver {
             Const::Mod(id) => write!(f, "mod{}", id.index())?,
             Const::BasicVariant { enuum, index } => write!(f, "enum{}_variant_{}", enuum.index(), self.fmt_variant_name(enuum, index))?,
 
-            Const::StructLit { id, .. } => {
-                write!(f, "const_struct_literal_{}", id.index())?;
-            }
+            Const::StructLit { id, .. } => write!(f, "const_struct_literal_{}", id.index())?,
+            Const::Invalid => write!(f, "INVALID_CONST")?,
         }
 
         Ok(())
@@ -1467,11 +1467,15 @@ impl DriverRef<'_> {
                 // possible to put them all together (or they each need to be returned from the function via tuples or
                 // something). So it's not quite as simple to do this as I had initially thought. But still a good idea
                 // probably.
-                if self.instruction_is_nontrivial_const(op) {
+                if self.instruction_is_nontrivial_const(op) && !self.read().code.mir.poisoned_ops.contains(&op) {
                     let ty = self.read().type_of(op).clone();
                     let func_ty = FunctionType { param_tys: vec![], has_c_variadic_param: false, return_ty: Box::new(ty.clone()) };
                     let func = self.build_function(func.name, func_ty, FunctionBody::ConstantInstruction(op), DeclId::new(0)..DeclId::new(0), Vec::new(), true, tp);
-                    let result = self.call(FunctionRef::Ref(func), Vec::new(), Vec::new());
+                    let Ok(result) = self.call(FunctionRef::Ref(func), Vec::new(), Vec::new()) else {
+                        // Make sure we won't repeatedly try and fail to const-eval this instruction.
+                        self.write().code.mir.poisoned_ops.insert(op);
+                        continue;
+                    };
                     let konst = self.write().value_to_const(result, ty, tp);
                     *self.write().code.ops[op].as_mir_instr_mut().unwrap() = Instr::Const(konst);
                     did_something = true;

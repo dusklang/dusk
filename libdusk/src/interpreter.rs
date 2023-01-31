@@ -284,6 +284,7 @@ impl Value {
                 };
                 driver.eval_struct_lit(&strukt, fields)
             },
+            Const::Invalid => panic!("internal compiler error: should never try to convert invalid constant to interpreter value"),
         }
     }
 
@@ -542,7 +543,22 @@ extern "C" fn interp_ffi_entry_point(func: u32, params: *const *const (), return
         };
         arguments.push(val);
     }
-    let return_value = driver.call(FunctionRef::Id(func_id), arguments, Vec::new());
+
+    let Ok(return_value) = driver.call(FunctionRef::Id(func_id), arguments, Vec::new()) else {
+        // TODO: catch and handle this in a more reasonable way. This is tricky for a few reasons. For one, DLS and the
+        // compiler want different things. DLS would want to gracefully send the error over to the client, while the
+        // compiler would want to print it out. This implies adding some sort of callback or trait object which enables
+        // the libdusk client to define what they want to do with diagnostics like this. However, even if we solved
+        // that issue, we'd still have to deal with the fact that above us on the stack is a native function which
+        // is expecting us to return a value that we don't have. This is all leading me to the mildly unfortunate
+        // conclusion that I'm going to have to move the interpreter to a separate process, and devise some sort of IPC
+        // scheme. If I did that, the interpreter process(es) could panic as much as it wanted, while the main process
+        // is ables to gracefully detect and report said panics. This would also obviate the need for a callback or
+        // trait object.
+        //
+        // See also: https://github.com/dusklang/dusk/issues/124
+        panic!("userspace code failed during call from ffi");
+    };
     macro_rules! set_ret_val {
         ($val:expr) => {
             unsafe {
@@ -668,7 +684,11 @@ impl Driver {
     pub fn stack_trace(&self, stack: &[StackFrame], f: &mut Formatter) {
         for (i, frame) in stack.iter().rev().enumerate() {
             let func = function_by_ref(&self.code.mir, &frame.func_ref);
-            writeln!(f, "{}: {}", i, self.fn_name(func.name))?;
+            write!(f, "{}: {}", i, self.fn_name(func.name))?;
+
+            if i + 1 < stack.len() {
+                writeln!(f)?;
+            }
         }
         Ok(())
     }
@@ -680,15 +700,15 @@ impl DriverRef<'_> {
             CString::new(arg.to_string_lossy().as_bytes()).unwrap()
         }).collect();
     }
-    pub fn call(&mut self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> Value {
+    pub fn call(&mut self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> Result<Value, EvalError> {
         let frame = self.read().new_stack_frame(func_ref, arguments, generic_arguments);
         INTERP_STACK.with(|stack| {
             stack.borrow_mut().push(frame);
             loop {
                 // TODO: I don't love the fact that I repeatedly borrow the RefCell here...
-                if let Some(val) = self.execute_next(stack) {
+                if let Some(val) = self.execute_next(stack)? {
                     stack.borrow_mut().pop().unwrap();
-                    return val;
+                    return Ok(val);
                 }
             }
         })
@@ -1168,7 +1188,7 @@ impl Driver {
     fn panic_message(&self, stack: &[StackFrame], msg: Option<OpId>, f: &mut Formatter) {
         let frame = stack.last().unwrap();
         let msg = msg.map(|msg| frame.get_val(msg, self).as_raw_ptr());
-        write!(f, "Userspace panic")?;
+        write!(f, "compile-time code panicked")?;
         if let Some(mut msg) = msg {
             write!(f, ": ")?;
             unsafe {
@@ -1179,14 +1199,19 @@ impl Driver {
             }
         }
         writeln!(f, "\nStack trace:")?;
-        writeln!(indented(f), "{}", self.stack_trace(stack))?;
+        write!(indented(f), "{}", self.stack_trace(stack))?;
         Ok(())
     }
 }
 
+#[derive(Debug)]
+pub struct EvalError;
+
 impl DriverRef<'_> {
     /// Execute the next instruction. Iff the instruction is a return, this function returns its `Value`. Otherwise, it returns `None`.
-    fn execute_next(&mut self, stack_cell: &RefCell<Vec<StackFrame>>) -> Option<Value> {
+    // NOTE FOR CORRECTNESS: If you return an Err() result, you MUST first report an error! Otherwise
+    // compilation could end up "succeeding", even though compile-time code execution failed.
+    fn execute_next(&mut self, stack_cell: &RefCell<Vec<StackFrame>>) -> Result<Option<Value>, EvalError> {
         let val = {
             let mut stack = stack_cell.borrow_mut();
             let frame = stack.last_mut().unwrap();
@@ -1217,7 +1242,7 @@ impl DriverRef<'_> {
                     // Stop immutably borrowing the stack, so it can be borrowed again in call()
                     drop(stack);
                     drop(d);
-                    self.call(FunctionRef::Id(func), copied_args, generic_arguments)
+                    self.call(FunctionRef::Id(func), copied_args, generic_arguments)?
                 },
                 &Instr::ExternCall { ref arguments, func } => {
                     let mut copied_args = Vec::new();
@@ -1354,7 +1379,10 @@ impl DriverRef<'_> {
                         },
                         LegacyIntrinsic::Panic => {
                             assert!(arguments.len() <= 1);
-                            panic!("{}", self.read().panic_message(&stack, arguments.first().copied()));
+                            let panic_message = self.read().panic_message(&stack, arguments.first().copied()).to_string();
+                            drop(d);
+                            self.write().diag.report_error(panic_message, next_op, "panic occured here");
+                            return Err(EvalError);
                         },
                         LegacyIntrinsic::Print => {
                             let frame = stack.last().unwrap();
@@ -1671,17 +1699,17 @@ impl DriverRef<'_> {
                 },
                 &Instr::Ret(instr) => {
                     let val = frame.get_val(instr, &*self.read()).clone();
-                    return Some(val)
+                    return Ok(Some(val));
                 },
                 &Instr::Br(bb) => {
                     frame.branch_to(bb);
-                    return None
+                    return Ok(None);
                 },
                 &Instr::CondBr { condition, true_bb, false_bb } => {
                     let condition = frame.get_val(condition, &*self.read()).as_bool();
                     let branch = if condition { true_bb } else { false_bb };
                     frame.branch_to(branch);
-                    return None
+                    return Ok(None);
                 },
                 &Instr::SwitchBr { scrutinee, ref cases, catch_all_bb } => {
                     // TODO: this is a very crude (and possibly slow) way of supporting arbitrary integer scrutinees
@@ -1705,7 +1733,7 @@ impl DriverRef<'_> {
 
                     let frame = stack.last_mut().unwrap();
                     frame.branch_to(block);
-                    return None
+                    return Ok(None);
                 },
                 &Instr::Variant { enuum, index, payload } => {
                     let payload = frame.get_val(payload, &*self.read()).clone();
@@ -1762,7 +1790,7 @@ impl DriverRef<'_> {
         let op = self.read().code.blocks[frame.block].ops[frame.pc];
         *frame.get_val_mut(op, &*self.read()) = val;
         frame.pc += 1;
-        None
+        Ok(None)
     }
 }
 

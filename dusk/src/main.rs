@@ -173,7 +173,9 @@ fn dusk_main(opt: Opt, program_args: &[OsString]) {
         println!("Running main in the interpreter:\n");
         restart_interp(InterpMode::RunTime);
         driver.set_command_line_arguments(program_args);
-        driver.call(FunctionRef::Id(FuncId::new(main)), Vec::new(), Vec::new());
+        let _ = driver.call(FunctionRef::Id(FuncId::new(main)), Vec::new(), Vec::new());
+
+        flush_diagnostics(&mut driver.write());
     } else {
         driver.write().diag.report_error_no_range(
             "Couldn't find main function with no parameters and a return type of `void`"
