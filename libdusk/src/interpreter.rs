@@ -401,6 +401,7 @@ struct Allocation(region::Allocation);
 unsafe impl Sync for Allocation {}
 unsafe impl Send for Allocation {}
 
+#[allow(unused)]
 struct CachedLib {
     base: *mut c_void,
     objc_classes: Vec<*const c_void>,
@@ -414,6 +415,7 @@ pub struct Interpreter {
     switch_cache: HashMap<OpId, HashMap<Box<[u8]>, BlockId>>,
     #[cfg(windows)]
     inverse_thunk_cache: HashMap<FuncId, Allocation>,
+    #[allow(unused)]
     lib_cache: HashMap<ExternModId, CachedLib>,
     mode: InterpMode,
     command_line_args: Vec<CString>,
