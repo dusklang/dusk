@@ -706,9 +706,15 @@ impl DriverRef<'_> {
             stack.borrow_mut().push(frame);
             loop {
                 // TODO: I don't love the fact that I repeatedly borrow the RefCell here...
-                if let Some(val) = self.execute_next(stack)? {
-                    stack.borrow_mut().pop().unwrap();
-                    return Ok(val);
+                match self.execute_next(stack) {
+                    Ok(val) => if let Some(val) = val {
+                        stack.borrow_mut().pop().unwrap();
+                        return Ok(val);
+                    },
+                    Err(err) => {
+                        stack.borrow_mut().pop().unwrap();
+                        return Err(err)
+                    },
                 }
             }
         })
