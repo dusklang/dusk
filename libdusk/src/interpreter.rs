@@ -403,6 +403,7 @@ unsafe impl Send for Allocation {}
 
 #[allow(unused)]
 struct CachedLib {
+    #[allow(unused)]
     base: *mut c_void,
     objc_classes: Vec<*const c_void>,
 }

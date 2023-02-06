@@ -1,17 +1,17 @@
 use clap::{Parser, ArgEnum};
 use std::ffi::{OsStr, OsString};
+use std::fs::File;
+use std::io::BufWriter;
 use std::path::PathBuf;
 
 use libdusk::new_code::NewCode;
 use libdusk::dire::ty::Type;
-use libdusk::dire::mir::FuncId;
 use libdusk::dire::arch::Arch;
 use libdusk::driver::{DRIVER, Driver, DriverRef};
 use libdusk::source_info::SourceMap;
-use libdusk::interpreter::{restart_interp, InterpMode};
-use libdusk::mir::FunctionRef;
 use libdusk::error::DiagnosticKind;
 use libdusk::dvd::{Message as DvdMessage, self as dvd_ipc};
+use libdusk::macho::MachOEncoder;
 
 #[cfg(feature = "dvd")]
 mod dvd;
@@ -70,7 +70,7 @@ impl Drop for SendExitMsg {
     }
 }
 
-fn dusk_main(opt: Opt, program_args: &[OsString]) {
+fn dusk_main(opt: Opt, #[allow(unused)] program_args: &[OsString]) {
     #[cfg(feature = "dvd")]
     if opt.dvd {
         dvd_ipc::connect();
@@ -167,15 +167,12 @@ fn dusk_main(opt: Opt, program_args: &[OsString]) {
                 None => false,
             }
         });
-    if let Some(main) = main {
+    if let Some(_main) = main {
         driver.read().diag.print_warnings();
-        #[cfg(debug_assertions)]
-        println!("Running main in the interpreter:\n");
-        restart_interp(InterpMode::RunTime);
-        driver.set_command_line_arguments(program_args);
-        let _ = driver.call(FunctionRef::Id(FuncId::new(main)), Vec::new(), Vec::new());
-
-        flush_diagnostics(&mut driver.write());
+        let file = File::create("a.out").unwrap();
+        let mut w = BufWriter::new(file);
+        let mut encoder = MachOEncoder::new();
+        encoder.write(&mut w).unwrap();
     } else {
         driver.write().diag.report_error_no_range(
             "Couldn't find main function with no parameters and a return type of `void`"

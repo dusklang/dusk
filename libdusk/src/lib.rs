@@ -10,6 +10,7 @@ pub mod error;
 pub mod new_code;
 pub mod type_provider;
 pub mod dvd;
+pub mod macho;
 
 mod dep_vec;
 mod lexer;
