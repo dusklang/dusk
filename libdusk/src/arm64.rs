@@ -130,6 +130,10 @@ impl Arm64Encoder {
         Self::default()
     }
 
+    pub fn get_bytes(self) -> Vec<u8> {
+        self.data
+    }
+
     pub fn push(&mut self, encoder: InstrEncoder) {
         self.data.extend(encoder.get_instr().to_le_bytes());
     }
