@@ -1,5 +1,7 @@
+#[cfg(target_arch="aarch64")]
 use libc::{pthread_jit_write_protect_np, c_void, size_t};
 
+#[cfg(target_arch="aarch64")]
 #[link(name="c")]
 extern {
     fn sys_icache_invalidate(start: *mut c_void, len: size_t);
@@ -315,6 +317,7 @@ impl Arm64Encoder {
         self.push(instr);
     }
 
+    #[cfg(target_arch="aarch64")]
     pub fn allocate(self) -> region::Allocation {
         let mut thunk = region::alloc(self.data.len(), region::Protection::WRITE_EXECUTE).unwrap();
         unsafe {
