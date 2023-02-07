@@ -12,6 +12,8 @@ use libdusk::source_info::SourceMap;
 use libdusk::error::DiagnosticKind;
 use libdusk::dvd::{Message as DvdMessage, self as dvd_ipc};
 use libdusk::macho::MachOEncoder;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 #[cfg(feature = "dvd")]
 mod dvd;
@@ -170,6 +172,11 @@ fn dusk_main(opt: Opt, #[allow(unused)] program_args: &[OsString]) {
     if let Some(_main) = main {
         driver.read().diag.print_warnings();
         let file = File::create("a.out").unwrap();
+        let mut permissions = file.metadata().unwrap().permissions();
+        #[cfg(unix)] {
+            permissions.set_mode(0o777);
+        }
+        file.set_permissions(permissions).unwrap();
         let mut w = BufWriter::new(file);
         let mut encoder = MachOEncoder::new();
         encoder.write(&mut w).unwrap();
