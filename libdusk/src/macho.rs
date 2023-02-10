@@ -23,6 +23,7 @@ const MH_TWOLEVEL: u32 = 0x0000_0080;
 const MH_PIE: u32      = 0x0020_0000;
 
 const LC_SEGMENT_64: u32 = 0x0000_0019;
+const LC_LOAD_DYLIB: u32 = 0x0000_000C;
 
 const VM_PROT_NONE:    u32 = 0x0000_0000;
 const VM_PROT_READ:    u32 = 0x0000_0001;
@@ -63,8 +64,9 @@ impl<T> Ref<T> {
         }
     }
 
+    fn size(self) -> usize { mem::size_of::<T>() }
     fn start(self) -> usize { self.addr }
-    fn end(self) -> usize { self.addr + mem::size_of::<T>() }
+    fn end(self) -> usize { self.addr + self.size() }
 }
 
 #[repr(C, packed)]
@@ -106,6 +108,21 @@ struct Section64 {
     num_relocations: u32,
     flags: SectionFlags,
     reserved: [u32; 3],
+}
+
+#[repr(C, packed)]
+struct Dylib {
+    name_offset: u32,
+    timestamp: u32,
+    current_version: u32,
+    compatibility_version: u32,
+}
+
+#[repr(C, packed)]
+struct DylibCommand {
+    command: u32,
+    command_size: u32,
+    dylib: Dylib,
 }
 
 #[derive(Copy, Clone)]
@@ -169,6 +186,17 @@ impl SegmentBuilder {
     }
 }
 
+struct DylibCommandBuilder {
+    header: Ref<DylibCommand>,
+    additional_size: usize,
+}
+
+impl DylibCommandBuilder {
+    fn size(&self) -> u32 {
+        (self.header.size() + self.additional_size) as u32
+    }
+}
+
 const fn is_power_of_2(num: u64) -> bool {
     if num == 0 { return false; }
     let mut i = 0u64;
@@ -217,6 +245,23 @@ impl MachOEncoder {
         section
     }
 
+    fn alloc_dylib_command(&mut self, name: &str) -> DylibCommandBuilder {
+        let header = self.alloc_cmd::<DylibCommand>();
+        self.data.extend(name.as_bytes());
+        let size = header.size() + name.len();
+
+        // According to https://opensource.apple.com/source/xnu/xnu-7195.81.3/EXTERNAL_HEADERS/mach-o/loader.h.auto.html
+        // we're supposed to pad to the next 4 byte boundary, but the sample files I've examined seem to pad to 8 bytes
+        // (which honestly makes more sense to me anyway, given the presence of 64 bit values in some of the load
+        // commands)
+        let padded_size = nearest_multiple_of!(size + 1, 8);
+        self.pad_with_zeroes(padded_size - size);
+        DylibCommandBuilder {
+            header,
+            additional_size: padded_size - header.size(),
+        }
+    }
+
     #[allow(unused)]
     fn get<T>(&self, addr: Ref<T>) -> &T {
         debug_assert!(addr.addr + mem::size_of::<T>() <= self.data.len());
@@ -248,6 +293,10 @@ impl MachOEncoder {
         let mut text_segment = self.alloc_segment();
         let text_section = self.alloc_section(&mut text_segment);
 
+        let linkedit_segment = self.alloc_segment();
+
+        let load_lib_system = self.alloc_dylib_command("/usr/lib/libSystem.B.dylib");
+
         let lc_end = self.pos();
 
         let mut code = Arm64Encoder::new();
@@ -268,6 +317,8 @@ impl MachOEncoder {
         let padding_size = text_sections_addr - text_addr - lc_end as u64;
         self.pad_with_zeroes(padding_size as usize);
         self.data.extend(&code);
+
+        let dyld_commands_size = 0;
 
         *self.get_mut(mach_header) = MachHeader {
             magic: MH_MAGIC_64,
@@ -318,6 +369,29 @@ impl MachOEncoder {
             num_relocations: 0,
             flags: SectionFlags::new(SectionType::Regular, S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS),
             reserved: [0; 3],
+        };
+        *self.get_mut(linkedit_segment.header) = LcSegment64 {
+            command: LC_SEGMENT_64,
+            command_size: linkedit_segment.size(),
+            name: encode_string_16("__LINKEDIT"),
+            vm_addr: text_end_addr,
+            vm_size: PAGE_SIZE,
+            file_offset: text_segment_size,
+            file_size: dyld_commands_size,
+            max_vm_protection: VM_PROT_READ,
+            initial_vm_protection: VM_PROT_READ,
+            num_sections: 0,
+            flags: 0,
+        };
+        *self.get_mut(load_lib_system.header) = DylibCommand {
+            command: LC_LOAD_DYLIB,
+            command_size: load_lib_system.size(),
+            dylib: Dylib {
+                name_offset: 0x18,
+                timestamp: 2,
+                current_version: 0x05_27_0000,
+                compatibility_version: 0x00_01_0000,
+            },
         };
 
         dest.write_all(&self.data)?;
