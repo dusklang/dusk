@@ -10,6 +10,7 @@ use crate::arm64::{Arm64Encoder, Reg};
 pub struct MachOEncoder {
     data: Vec<u8>, // TODO: support writing directly to a file instead of copying from a byte buffer?
     num_load_commands: u32,
+    num_symbol_table_entries: u32,
 }
 
 const MH_MAGIC_64: u32           = 0xFEED_FACF;
@@ -20,7 +21,10 @@ const MH_EXECUTE: u32            = 0x0000_0002;
 const MH_NOUNDEFS: u32 = 0x0000_0001;
 const MH_DYLDLINK: u32 = 0x0000_0004;
 const MH_TWOLEVEL: u32 = 0x0000_0080;
-const MH_PIE: u32      = 0x0020_0000;
+const MH_PIE:      u32 = 0x0020_0000;
+
+const LC_SYMTAB:   u32 = 0x0000_0002;
+const LC_DYSYMTAB: u32 = 0x0000_000B;
 
 const LC_SEGMENT_64: u32 = 0x0000_0019;
 const LC_LOAD_DYLIB: u32 = 0x0000_000C;
@@ -123,6 +127,25 @@ struct DylibCommand {
     command: u32,
     command_size: u32,
     dylib: Dylib,
+}
+
+#[repr(C, packed)]
+struct SymbolTableCommand {
+    command: u32,
+    command_size: u32,
+    symbol_table_offset: u32,
+    num_symbols: u32,
+    string_table_offset: u32,
+    string_table_size: u32,
+}
+
+#[repr(C, packed)]
+struct SymbolTableEntry {
+    string_table_offset: u32,
+    ty: u8,
+    section_number: u8,
+    desc: u16,
+    value: u64,
 }
 
 #[derive(Copy, Clone)]
@@ -262,6 +285,18 @@ impl MachOEncoder {
         }
     }
 
+    fn alloc_symbol_table_entry(&mut self) -> Ref<SymbolTableEntry> {
+        self.num_symbol_table_entries += 1;
+        self.alloc()
+    }
+
+    fn push_null_terminated_string(&mut self, val: &str) -> usize {
+        let pos = self.pos();
+        self.data.extend(val.as_bytes());
+        self.data.push(0);
+        pos
+    }
+
     #[allow(unused)]
     fn get<T>(&self, addr: Ref<T>) -> &T {
         debug_assert!(addr.addr + mem::size_of::<T>() <= self.data.len());
@@ -293,9 +328,11 @@ impl MachOEncoder {
         let mut text_segment = self.alloc_segment();
         let text_section = self.alloc_section(&mut text_segment);
 
-        let linkedit_segment = self.alloc_segment();
+        let link_edit_segment = self.alloc_segment();
 
         let load_lib_system = self.alloc_dylib_command("/usr/lib/libSystem.B.dylib");
+
+        let symbol_table = self.alloc_cmd::<SymbolTableCommand>();
 
         let lc_end = self.pos();
 
@@ -318,7 +355,36 @@ impl MachOEncoder {
         self.pad_with_zeroes(padding_size as usize);
         self.data.extend(&code);
 
-        let dyld_commands_size = 0;
+        let link_edit_begin = self.pos();
+
+        let symbol_table_begin = self.pos();
+        let mh_execute_header_entry = self.alloc_symbol_table_entry();
+        let main_entry = self.alloc_symbol_table_entry();
+
+        let string_table_begin = self.pos();
+        self.push_null_terminated_string(" ");
+        let mh_execute_header_str_offset = self.push_null_terminated_string("__mh_execute_header");
+        let main_str_offset = self.push_null_terminated_string("_main");
+        let string_table_len_without_padding = self.pos() - string_table_begin;
+        let string_table_len = nearest_multiple_of!(string_table_len_without_padding, 8);
+        self.pad_with_zeroes(string_table_len - string_table_len_without_padding);
+
+        *self.get_mut(mh_execute_header_entry) = SymbolTableEntry {
+            string_table_offset: (mh_execute_header_str_offset - string_table_begin) as u32,
+            ty: 0x0F,
+            section_number: 1,
+            desc: 0x0010,
+            value: text_addr,
+        };
+        *self.get_mut(main_entry) = SymbolTableEntry {
+            string_table_offset: (main_str_offset - string_table_begin) as u32,
+            ty: 0x0F,
+            section_number: 1,
+            desc: 0x0000,
+            value: text_sections_addr,
+        };
+
+        let link_edit_end = self.pos();
 
         *self.get_mut(mach_header) = MachHeader {
             magic: MH_MAGIC_64,
@@ -370,14 +436,14 @@ impl MachOEncoder {
             flags: SectionFlags::new(SectionType::Regular, S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS),
             reserved: [0; 3],
         };
-        *self.get_mut(linkedit_segment.header) = LcSegment64 {
+        *self.get_mut(link_edit_segment.header) = LcSegment64 {
             command: LC_SEGMENT_64,
-            command_size: linkedit_segment.size(),
+            command_size: link_edit_segment.size(),
             name: encode_string_16("__LINKEDIT"),
             vm_addr: text_end_addr,
             vm_size: PAGE_SIZE,
-            file_offset: text_segment_size,
-            file_size: dyld_commands_size,
+            file_offset: link_edit_begin as u64,
+            file_size: (link_edit_end - link_edit_begin) as u64,
             max_vm_protection: VM_PROT_READ,
             initial_vm_protection: VM_PROT_READ,
             num_sections: 0,
@@ -392,6 +458,14 @@ impl MachOEncoder {
                 current_version: 0x05_27_0000,
                 compatibility_version: 0x00_01_0000,
             },
+        };
+        *self.get_mut(symbol_table) = SymbolTableCommand {
+            command: LC_SYMTAB,
+            command_size: symbol_table.size() as u32,
+            symbol_table_offset: symbol_table_begin as u32,
+            num_symbols: self.num_symbol_table_entries,
+            string_table_offset: string_table_begin as u32,
+            string_table_size: string_table_len as u32,
         };
 
         dest.write_all(&self.data)?;
