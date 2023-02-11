@@ -23,11 +23,14 @@ const MH_DYLDLINK: u32 = 0x0000_0004;
 const MH_TWOLEVEL: u32 = 0x0000_0080;
 const MH_PIE:      u32 = 0x0020_0000;
 
+const LC_REQ_DYLD: u32 = 0x8000_0000;
+
 const LC_SYMTAB:        u32 = 0x0000_0002;
 const LC_DYSYMTAB:      u32 = 0x0000_000B;
 const LC_LOAD_DYLINKER: u32 = 0x0000_000E;
 
 const LC_SEGMENT_64: u32 = 0x0000_0019;
+const LC_MAIN: u32 = 0x28 | LC_REQ_DYLD;
 const LC_LOAD_DYLIB: u32 = 0x0000_000C;
 
 const VM_PROT_NONE:    u32 = 0x0000_0000;
@@ -182,8 +185,19 @@ struct DynamicSymbolTableCommand {
     indirect_symbol_table_offset: u32,
     num_indirect_symbol_table_entries: u32,
 
+    extern_relocation_entries_offset: u32,
+    num_extern_relocation_entries: u32,
+
     local_relocation_entries_offset: u32,
     num_local_relocation_entries: u32,
+}
+
+#[repr(C, packed)]
+struct EntryPointCommand {
+    command: u32,
+    command_size: u32,
+    entry_point_file_offset: u64,
+    stack_size: u64,
 }
 
 #[derive(Copy, Clone)]
@@ -378,6 +392,9 @@ impl MachOEncoder {
         self.push_null_terminated_string("/usr/lib/dyld");
         let load_dylinker_size_without_padding = self.pos() - load_dylinker_begin;
         let load_dylinker_size = nearest_multiple_of!(load_dylinker_size_without_padding, 8);
+        self.pad_with_zeroes(load_dylinker_size - load_dylinker_size_without_padding);
+
+        let entry_point = self.alloc_cmd::<EntryPointCommand>();
 
         let lc_end = self.pos();
 
@@ -514,7 +531,7 @@ impl MachOEncoder {
         };
         *self.get_mut(dynamic_symbol_table) = DynamicSymbolTableCommand {
             command: LC_DYSYMTAB,
-            command_size: dynamic_symbol_table.size() as u32,
+            command_size: dbg!(dynamic_symbol_table.size() as u32),
 
             local_symbols_index: 0,
             num_local_symbols: 0,
@@ -537,13 +554,22 @@ impl MachOEncoder {
             indirect_symbol_table_offset: 0,
             num_indirect_symbol_table_entries: 0,
 
+            extern_relocation_entries_offset: 0,
+            num_extern_relocation_entries: 0,
+
             local_relocation_entries_offset: 0,
             num_local_relocation_entries: 0,
         };
         *self.get_mut(load_dylinker) = DylinkerCommand {
             command: LC_LOAD_DYLINKER,
-            command_size: dbg!(load_dylinker_size as u32),
-            name_offset: dbg!(load_dylinker.size() as u32),
+            command_size: load_dylinker_size as u32,
+            name_offset: load_dylinker.size() as u32,
+        };
+        *self.get_mut(entry_point) = EntryPointCommand {
+            command: LC_MAIN,
+            command_size: entry_point.size() as u32,
+            entry_point_file_offset: text_sections_addr - text_addr,
+            stack_size: 0,
         };
 
         dest.write_all(&self.data)?;
