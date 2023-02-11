@@ -381,9 +381,7 @@ impl MachOEncoder {
         let text_section = self.alloc_section(&mut text_segment);
 
         let link_edit_segment = self.alloc_segment();
-
-        let load_lib_system = self.alloc_dylib_command("/usr/lib/libSystem.B.dylib");
-
+        
         let symbol_table = self.alloc_cmd::<SymbolTableCommand>();
         let dynamic_symbol_table = self.alloc_cmd::<DynamicSymbolTableCommand>();
         
@@ -393,8 +391,10 @@ impl MachOEncoder {
         let load_dylinker_size_without_padding = self.pos() - load_dylinker_begin;
         let load_dylinker_size = nearest_multiple_of!(load_dylinker_size_without_padding, 8);
         self.pad_with_zeroes(load_dylinker_size - load_dylinker_size_without_padding);
-
+        
         let entry_point = self.alloc_cmd::<EntryPointCommand>();
+
+        let load_lib_system = self.alloc_dylib_command("/usr/lib/libSystem.B.dylib");
 
         let lc_end = self.pos();
 
@@ -531,7 +531,7 @@ impl MachOEncoder {
         };
         *self.get_mut(dynamic_symbol_table) = DynamicSymbolTableCommand {
             command: LC_DYSYMTAB,
-            command_size: dbg!(dynamic_symbol_table.size() as u32),
+            command_size: dynamic_symbol_table.size() as u32,
 
             local_symbols_index: 0,
             num_local_symbols: 0,
