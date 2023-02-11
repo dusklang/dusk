@@ -23,8 +23,9 @@ const MH_DYLDLINK: u32 = 0x0000_0004;
 const MH_TWOLEVEL: u32 = 0x0000_0080;
 const MH_PIE:      u32 = 0x0020_0000;
 
-const LC_SYMTAB:   u32 = 0x0000_0002;
-const LC_DYSYMTAB: u32 = 0x0000_000B;
+const LC_SYMTAB:        u32 = 0x0000_0002;
+const LC_DYSYMTAB:      u32 = 0x0000_000B;
+const LC_LOAD_DYLINKER: u32 = 0x0000_000E;
 
 const LC_SEGMENT_64: u32 = 0x0000_0019;
 const LC_LOAD_DYLIB: u32 = 0x0000_000C;
@@ -130,6 +131,13 @@ struct DylibCommand {
 }
 
 #[repr(C, packed)]
+struct DylinkerCommand {
+    command: u32,
+    command_size: u32,
+    name_offset: u32,
+}
+
+#[repr(C, packed)]
 struct SymbolTableCommand {
     command: u32,
     command_size: u32,
@@ -146,6 +154,36 @@ struct SymbolTableEntry {
     section_number: u8,
     desc: u16,
     value: u64,
+}
+
+#[repr(C, packed)]
+struct DynamicSymbolTableCommand {
+    command: u32,
+    command_size: u32,
+
+    local_symbols_index: u32,
+    num_local_symbols: u32,
+
+    extern_symbols_index: u32,
+    num_extern_symbols: u32,
+
+    undef_symbols_index: u32,
+    num_undef_symbols: u32,
+
+    toc_offset: u32,
+    num_toc_entries: u32,
+
+    module_table_offset: u32,
+    num_module_table_entries: u32,
+
+    referenced_symbol_table_offset: u32,
+    num_referenced_symbol_table_entries: u32,
+
+    indirect_symbol_table_offset: u32,
+    num_indirect_symbol_table_entries: u32,
+
+    local_relocation_entries_offset: u32,
+    num_local_relocation_entries: u32,
 }
 
 #[derive(Copy, Clone)]
@@ -333,6 +371,13 @@ impl MachOEncoder {
         let load_lib_system = self.alloc_dylib_command("/usr/lib/libSystem.B.dylib");
 
         let symbol_table = self.alloc_cmd::<SymbolTableCommand>();
+        let dynamic_symbol_table = self.alloc_cmd::<DynamicSymbolTableCommand>();
+        
+        let load_dylinker_begin = self.pos();
+        let load_dylinker = self.alloc_cmd::<DylinkerCommand>();
+        self.push_null_terminated_string("/usr/lib/dyld");
+        let load_dylinker_size_without_padding = self.pos() - load_dylinker_begin;
+        let load_dylinker_size = nearest_multiple_of!(load_dylinker_size_without_padding, 8);
 
         let lc_end = self.pos();
 
@@ -466,6 +511,39 @@ impl MachOEncoder {
             num_symbols: self.num_symbol_table_entries,
             string_table_offset: string_table_begin as u32,
             string_table_size: string_table_len as u32,
+        };
+        *self.get_mut(dynamic_symbol_table) = DynamicSymbolTableCommand {
+            command: LC_DYSYMTAB,
+            command_size: dynamic_symbol_table.size() as u32,
+
+            local_symbols_index: 0,
+            num_local_symbols: 0,
+
+            extern_symbols_index: 0,
+            num_extern_symbols: 2,
+
+            undef_symbols_index: 2,
+            num_undef_symbols: 0,
+
+            toc_offset: 0,
+            num_toc_entries: 0,
+
+            module_table_offset: 0,
+            num_module_table_entries: 0,
+
+            referenced_symbol_table_offset: 0,
+            num_referenced_symbol_table_entries: 0,
+
+            indirect_symbol_table_offset: 0,
+            num_indirect_symbol_table_entries: 0,
+
+            local_relocation_entries_offset: 0,
+            num_local_relocation_entries: 0,
+        };
+        *self.get_mut(load_dylinker) = DylinkerCommand {
+            command: LC_LOAD_DYLINKER,
+            command_size: dbg!(load_dylinker_size as u32),
+            name_offset: dbg!(load_dylinker.size() as u32),
         };
 
         dest.write_all(&self.data)?;
