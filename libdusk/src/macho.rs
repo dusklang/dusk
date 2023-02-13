@@ -10,6 +10,7 @@ use crate::arm64::{Arm64Encoder, Reg};
 pub struct MachOEncoder {
     data: Vec<u8>, // TODO: support writing directly to a file instead of copying from a byte buffer?
     num_load_commands: u32,
+    num_segments: u32,
     num_symbol_table_entries: u32,
 }
 
@@ -31,7 +32,11 @@ const LC_LOAD_DYLINKER: u32 = 0x0000_000E;
 
 const LC_SEGMENT_64: u32 = 0x0000_0019;
 const LC_MAIN: u32 = 0x28 | LC_REQ_DYLD;
+const LC_DYLD_EXPORTS_TRIE: u32 = 0x33 | LC_REQ_DYLD;
+const LC_DYLD_CHAINED_FIXUPS: u32 = 0x34 | LC_REQ_DYLD;
 const LC_LOAD_DYLIB: u32 = 0x0000_000C;
+
+const DYLD_CHAINED_IMPORT: u32 = 0x0000_0001;
 
 const VM_PROT_NONE:    u32 = 0x0000_0000;
 const VM_PROT_READ:    u32 = 0x0000_0001;
@@ -272,6 +277,25 @@ impl DylibCommandBuilder {
     }
 }
 
+#[repr(C, packed)]
+struct LinkEditDataCommand {
+    command: u32,
+    command_size: u32,
+    data_offset: u32,
+    data_size: u32,
+}
+
+#[repr(C, packed)]
+struct DyldChainedFixupsHeader {
+    fixups_version: u32, // 0
+    starts_offset: u32,  // offset of DyldChainedStartsInImage in bytes, relative to start of this structure
+    imports_offset: u32, // offset of imports table
+    symbols_offset: u32, // offset of symbol strings
+    imports_count: u32,  // number of imported symbol names
+    imports_format: u32, // DYLD_CHAINED_IMPORT*
+    symbols_format: u32, // 0 => uncompressed, 1 => zlib compressed
+}
+
 const fn is_power_of_2(num: u64) -> bool {
     if num == 0 { return false; }
     let mut i = 0u64;
@@ -286,9 +310,20 @@ const fn is_power_of_2(num: u64) -> bool {
 
 // Thank you, Hagen von Eitzen: https://math.stackexchange.com/a/291494
 macro_rules! nearest_multiple_of {
+    (@unsafe $val:expr, $factor:expr) => {
+        ((($val) - 1) | ($factor - 1)) + 1
+    };
+
     ($val:expr, $factor:expr) => {{
         const _: () = assert!(is_power_of_2($factor));
-        ((($val) - 1) | ($factor - 1)) + 1
+        nearest_multiple_of!(@unsafe $val, $factor)
+    }};
+}
+
+macro_rules! nearest_multiple_of_rt {
+    ($val:expr, $factor:expr) => {{
+        assert!(is_power_of_2($factor));
+        nearest_multiple_of!(@unsafe $val, $factor)
     }};
 }
 
@@ -307,6 +342,7 @@ impl MachOEncoder {
     }
 
     fn alloc_segment(&mut self) -> SegmentBuilder {
+        self.num_segments += 1;
         let header = self.alloc_cmd::<LcSegment64>();
         SegmentBuilder {
             header,
@@ -322,18 +358,19 @@ impl MachOEncoder {
 
     fn alloc_dylib_command(&mut self, name: &str) -> DylibCommandBuilder {
         let header = self.alloc_cmd::<DylibCommand>();
-        self.data.extend(name.as_bytes());
-        let size = header.size() + name.len();
+        let name_begin = self.pos();
+        self.push_null_terminated_string(name);
 
         // According to https://opensource.apple.com/source/xnu/xnu-7195.81.3/EXTERNAL_HEADERS/mach-o/loader.h.auto.html
         // we're supposed to pad to the next 4 byte boundary, but the sample files I've examined seem to pad to 8 bytes
         // (which honestly makes more sense to me anyway, given the presence of 64 bit values in some of the load
         // commands)
-        let padded_size = nearest_multiple_of!(size + 1, 8);
-        self.pad_with_zeroes(padded_size - size);
+        self.pad_to_next_boundary::<8>();
+        let end = self.pos();
+
         DylibCommandBuilder {
             header,
-            additional_size: padded_size - header.size(),
+            additional_size: end - name_begin,
         }
     }
 
@@ -364,10 +401,20 @@ impl MachOEncoder {
         &mut body[0]
     }
 
+    fn push<T>(&mut self, value: T) {
+        let addr = self.alloc();
+        *self.get_mut(addr) = value;
+    }
+
     fn pos(&self) -> usize { self.data.len() }
 
     fn pad_with_zeroes(&mut self, size: usize) {
         self.data.extend(std::iter::repeat(0).take(size as usize));
+    }
+
+    fn pad_to_next_boundary<const B: u64>(&mut self) {
+        let padded_pos = nearest_multiple_of_rt!(self.data.len() as u64, B);
+        self.pad_with_zeroes(padded_pos as usize - self.pos());
     }
 
     pub fn write(&mut self, dest: &mut impl Write) -> io::Result<()> {
@@ -381,6 +428,8 @@ impl MachOEncoder {
         let text_section = self.alloc_section(&mut text_segment);
 
         let link_edit_segment = self.alloc_segment();
+
+        let chained_fixups = self.alloc_cmd::<LinkEditDataCommand>();
         
         let symbol_table = self.alloc_cmd::<SymbolTableCommand>();
         let dynamic_symbol_table = self.alloc_cmd::<DynamicSymbolTableCommand>();
@@ -388,9 +437,9 @@ impl MachOEncoder {
         let load_dylinker_begin = self.pos();
         let load_dylinker = self.alloc_cmd::<DylinkerCommand>();
         self.push_null_terminated_string("/usr/lib/dyld");
-        let load_dylinker_size_without_padding = self.pos() - load_dylinker_begin;
-        let load_dylinker_size = nearest_multiple_of!(load_dylinker_size_without_padding, 8);
-        self.pad_with_zeroes(load_dylinker_size - load_dylinker_size_without_padding);
+
+        self.pad_to_next_boundary::<8>();
+        let load_dylinker_size = self.pos() - load_dylinker_begin;
         
         let entry_point = self.alloc_cmd::<EntryPointCommand>();
 
@@ -419,6 +468,44 @@ impl MachOEncoder {
 
         let link_edit_begin = self.pos();
 
+        let chained_fixups_header = self.alloc::<DyldChainedFixupsHeader>();
+        self.pad_to_next_boundary::<8>();
+        // Push dyld_chained_starts_in_image (a dynamically-sized structure)
+        let chained_starts_offset = self.pos() - chained_fixups_header.start();
+        self.push(self.num_segments as u32);
+        for i in 0..self.num_segments {
+            // AFAICT, the offset is relative to the start of dyld_chained_starts_in_image, which makes any offset less
+            // than 4 + 4 * num_segments invalid, thus 0 should indicate "no starts for this page"
+            self.push(0 as u32); 
+        }
+
+        let imports_count = 0;
+
+        let imports_offset = self.pos() - chained_fixups_header.start();
+        // TODO: create a bitfield data structure for the `dyld_chained_import` struct
+        self.push(0 as u32);
+        self.pad_to_next_boundary::<8>();
+        let import_symbols_offset = if imports_count == 0 {
+            imports_offset
+        } else {
+            self.pos() - chained_fixups_header.start()
+        };
+        // TODO: add symbols
+
+        self.pad_to_next_boundary::<8>();
+        
+        *self.get_mut(chained_fixups_header) = DyldChainedFixupsHeader {
+            fixups_version: 0,
+            starts_offset: chained_starts_offset as u32,
+            imports_offset: imports_offset as u32,
+            symbols_offset: import_symbols_offset as u32,
+            imports_count,
+            imports_format: DYLD_CHAINED_IMPORT,
+            symbols_format: 0, // uncompressed
+        };
+
+        let chained_fixups_data_size = self.pos() - chained_fixups_header.start();
+
         let symbol_table_begin = self.pos();
         let mh_execute_header_entry = self.alloc_symbol_table_entry();
         let main_entry = self.alloc_symbol_table_entry();
@@ -427,9 +514,8 @@ impl MachOEncoder {
         self.push_null_terminated_string(" ");
         let mh_execute_header_str_offset = self.push_null_terminated_string("__mh_execute_header");
         let main_str_offset = self.push_null_terminated_string("_main");
-        let string_table_len_without_padding = self.pos() - string_table_begin;
-        let string_table_len = nearest_multiple_of!(string_table_len_without_padding, 8);
-        self.pad_with_zeroes(string_table_len - string_table_len_without_padding);
+        self.pad_to_next_boundary::<8>();
+        let string_table_len = self.pos() - string_table_begin;
 
         *self.get_mut(mh_execute_header_entry) = SymbolTableEntry {
             string_table_offset: (mh_execute_header_str_offset - string_table_begin) as u32,
@@ -503,13 +589,19 @@ impl MachOEncoder {
             command_size: link_edit_segment.size(),
             name: encode_string_16("__LINKEDIT"),
             vm_addr: text_end_addr,
-            vm_size: PAGE_SIZE,
+            vm_size: PAGE_SIZE, // TODO: increase this size if needed
             file_offset: link_edit_begin as u64,
             file_size: (link_edit_end - link_edit_begin) as u64,
             max_vm_protection: VM_PROT_READ,
             initial_vm_protection: VM_PROT_READ,
             num_sections: 0,
             flags: 0,
+        };
+        *self.get_mut(chained_fixups) = LinkEditDataCommand {
+            command: LC_DYLD_CHAINED_FIXUPS,
+            command_size: chained_fixups.size() as u32,
+            data_offset: chained_fixups_header.start() as u32,
+            data_size: chained_fixups_data_size as u32,
         };
         *self.get_mut(load_lib_system.header) = DylibCommand {
             command: LC_LOAD_DYLIB,
