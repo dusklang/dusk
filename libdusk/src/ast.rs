@@ -15,7 +15,7 @@ use crate::dire::{Op, Block};
 use crate::dire::BlockId;
 use crate::dire::index_counter::IndexCounter;
 use crate::dire::source_info::{SourceFileId, SourceRange};
-use crate::dire::InternalField;
+use crate::internal_types::InternalField;
 
 use crate::ty::{Type, InternalType, InternalTypeId};
 use crate::dvd::{Message as DvdMessage, self};

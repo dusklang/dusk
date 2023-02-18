@@ -8,7 +8,7 @@ use crate::mir::Const;
 use crate::dire::arch::Arch;
 use crate::dire::source_info::SourceFileId;
 use crate::dire::Code;
-use crate::dire::InternalFieldDecls;
+use crate::internal_types::InternalFieldDecls;
 
 use crate::source_info::SourceMap;
 use crate::token::TokenVec;

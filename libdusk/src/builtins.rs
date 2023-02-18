@@ -5,7 +5,7 @@ use internal_types::ExternParam;
 use smallvec::{smallvec, SmallVec};
 use num_bigint::BigInt;
 
-use crate::dire::internal_types;
+use crate::internal_types;
 use crate::dire::source_info::SourceRange;
 use crate::ast::{ModScopeNs, LegacyIntrinsic, Expr, Decl, VOID_TYPE, ModScopeNsId, NewNamespaceId, EnumId, ExprId, VariantDecl, StaticDecl, NewNamespace, ExternFunctionRef, ExternFunction, ParamList};
 use crate::ty::{Type, LegacyInternalType};
@@ -16,7 +16,7 @@ use crate::ast::ScopeState;
 use crate::autopop::AutoPopStackEntry;
 use crate::parser::ParseResult;
 
-use crate::dire::internal_types::{ModuleBuilder, Module, ExternFunctionBuilder};
+use crate::internal_types::{ModuleBuilder, Module, ExternFunctionBuilder};
 
 use dusk_proc_macros::{ef, df, dusk_bridge};
 

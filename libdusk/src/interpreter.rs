@@ -24,8 +24,8 @@ use crate::dire::arch::Arch;
 use crate::ast::{LegacyIntrinsic, EnumId, GenericParamId, ExternFunctionRef, ExternModId, NewNamespaceId};
 use crate::mir::{Const, Instr, InstrId, FuncId, StaticId, ExternFunction};
 use crate::ty::{Type, FunctionType, QualType, IntWidth, FloatWidth, StructType, LegacyInternalType};
-use crate::dire::{OpId, BlockId, DuskBridge};
-use crate::dire::{InternalField, internal_fields};
+use crate::dire::{OpId, BlockId};
+use crate::internal_types::{DuskBridge, InternalField, internal_fields};
 
 use crate::driver::{DRIVER, Driver, DriverRef};
 use crate::mir::{FunctionRef, function_by_ref};

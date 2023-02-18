@@ -12,7 +12,7 @@ use crate::ast::{self, ExprId, DeclId, StructId, PatternKind, GenericParamId, Id
 use crate::mir::Const;
 use crate::ty::{Type, LegacyInternalType, FunctionType, QualType, IntWidth};
 use crate::dire::source_info::SourceRange;
-use crate::dire::InternalNamespace;
+use crate::internal_types::InternalNamespace;
 
 use crate::driver::{Driver, DriverRef};
 use crate::error::Error;

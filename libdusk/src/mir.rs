@@ -11,9 +11,10 @@ use index_vec::{IndexVec, define_index_type};
 use display_adapter::display_adapter;
 
 use crate::dire::index_counter::IndexCounter;
-use crate::dire::{Code, Block, BlockId, Op, OpId, InternalField};
+use crate::dire::{Code, Block, BlockId, Op, OpId};
 use crate::dire::source_info::SourceRange;
 
+use crate::internal_types::InternalField;
 use crate::ast::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, NewNamespaceId, LegacyIntrinsic, IntrinsicId, Expr, StoredDeclId, GenericParamId, Item, PatternBindingDeclId, ExternModId, ExternFunctionRef, PatternBindingPathComponent, VOID_TYPE, StructId, LoopId};
 use crate::ty::{Type, LegacyInternalType, FunctionType, FloatWidth, StructType};
 use crate::driver::{Driver, DriverRef};

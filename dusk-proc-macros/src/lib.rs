@@ -309,7 +309,7 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
             }
         };
         quote! {
-            impl crate::dire::internal_types::DuskBridge for #decl_name {
+            impl crate::internal_types::DuskBridge for #decl_name {
                 fn register(d: &mut crate::driver::Driver) {
                     use std::any::TypeId;
                     use crate::{ast::*, ty::*, mir::*};
@@ -340,7 +340,7 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
                 }
             }
 
-            impl crate::dire::internal_types::DuskBridge for &'static mut #decl_name {
+            impl crate::internal_types::DuskBridge for &'static mut #decl_name {
                 fn register(d: &mut crate::driver::Driver) {
                     use std::any::TypeId;
                     use crate::{ast::*, ty::*, mir::*};
@@ -528,7 +528,7 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
         #item
 
         pub fn register_bridged_rust_methods(d: &mut crate::driver::Driver) {
-            use crate::dire::internal_types::DuskBridge;
+            use crate::internal_types::DuskBridge;
             use crate::{ast::*, ty::*, mir::*};
             use crate::driver::DriverRef;
             use crate::ast::Intrinsic;
