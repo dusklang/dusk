@@ -9,7 +9,7 @@
 use serde::{Serialize, Deserialize};
 
 use crate::ast::{ExprId, DeclId, ItemId};
-use crate::dire::tir::CompId;
+use crate::tir::CompId;
 
 /// Messages *from* the compiler *to* the debugger.
 #[cfg_attr(feature = "dvd", derive(Debug, Serialize, Deserialize, Clone))]

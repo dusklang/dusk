@@ -5,9 +5,9 @@ use lazy_static::lazy_static;
 
 use crate::ast::ExprId;
 use crate::mir::Const;
-use crate::dire::arch::Arch;
-use crate::dire::source_info::SourceFileId;
-use crate::dire::Code;
+use crate::arch::Arch;
+use crate::source_info::SourceFileId;
+use crate::code::Code;
 use crate::internal_types::InternalFieldDecls;
 
 use crate::source_info::SourceMap;

@@ -2,7 +2,7 @@ use std::ffi::CString;
 
 use string_interner::DefaultSymbol as Sym;
 
-use crate::dire::source_info::SourceRange;
+use crate::source_info::SourceRange;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum TokenKind {

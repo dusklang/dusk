@@ -5,7 +5,6 @@ use std::mem;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use libdusk::ast::{Item, Expr};
-use libdusk::dire::source_info::{SourceFileId, SourceRange};
 use libdusk::error::DiagnosticKind;
 use libdusk::new_code::NewCode;
 use libdusk::type_provider::{RealTypeProvider, TypeProvider};
@@ -14,10 +13,10 @@ use lsp_types::notification::{PublishDiagnostics, DidOpenTextDocument, Notificat
 use lsp_types::request::{Completion, ResolveCompletionItem, HoverRequest};
 use lsp_types::{ServerCapabilities, CompletionOptions, WorkspaceServerCapabilities, WorkspaceFoldersServerCapabilities, TextDocumentSyncKind, Diagnostic, Url, DidOpenTextDocumentParams, Position, Range, Location, DiagnosticRelatedInformation, DiagnosticSeverity, PublishDiagnosticsParams, CompletionParams, CompletionItem, Documentation, DidCloseTextDocumentParams, DidChangeTextDocumentParams, CompletionResponse, CompletionItemKind, HoverProviderCapability, HoverParams, Hover, MarkupContent, HoverContents, MarkupKind};
 
-use libdusk::source_info::SourceMap;
+use libdusk::source_info::{SourceFileId, SourceRange, SourceMap};
 use libdusk::driver::{Driver, DRIVER, DriverRef};
 use dusk_proc_macros::ef;
-use libdusk::dire::arch::Arch;
+use libdusk::arch::Arch;
 
 fn break_lines(text: String) -> Vec<String> {
     let mut lines = Vec::new();

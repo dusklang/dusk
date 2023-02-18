@@ -6,7 +6,7 @@ use smallvec::{smallvec, SmallVec};
 use num_bigint::BigInt;
 
 use crate::internal_types;
-use crate::dire::source_info::SourceRange;
+use crate::source_info::SourceRange;
 use crate::ast::{ModScopeNs, LegacyIntrinsic, Expr, Decl, VOID_TYPE, ModScopeNsId, NewNamespaceId, EnumId, ExprId, VariantDecl, StaticDecl, NewNamespace, ExternFunctionRef, ExternFunction, ParamList};
 use crate::ty::{Type, LegacyInternalType};
 use crate::mir::Const;

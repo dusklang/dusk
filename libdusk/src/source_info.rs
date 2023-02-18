@@ -1,27 +1,80 @@
 use std::borrow::Cow;
-use std::cmp::max;
+use std::cmp::{min, max};
 use std::str;
 use std::path::{PathBuf, Path};
 use std::fs;
 use std::io;
 use std::collections::{HashMap, HashSet};
-use std::ops::Range;
+use std::ops::{Add, Range};
 
 #[cfg(feature = "dvd")]
 use serde::{Serialize, Deserialize};
 
 use display_adapter::display_adapter;
 use crate::ast::{ExprId, DeclId, ItemId, Item};
-use crate::dire::OpId;
-use crate::dire::source_info::{SourceRange, SourceFileId};
+use crate::code::OpId;
 
 #[cfg(feature = "dls")]
 use lsp_types::Url;
 
 use crate::driver::Driver;
 use crate::index_vec::*;
+use index_vec::define_index_type;
 
 use dusk_proc_macros::*;
+
+define_index_type!(pub struct SourceFileId = u32;);
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct SourceRange {
+    pub start: usize,
+    pub end: usize,
+}
+
+impl Default for SourceRange {
+    fn default() -> Self {
+        SourceRange {
+            start: usize::MAX,
+            end: usize::MAX,
+        }
+    }
+}
+
+impl SourceRange {
+    pub fn from_single_char(index: usize) -> Self {
+        Self {
+            start: index,
+            end: index+1
+        }
+    }
+
+    pub fn contains(&self, pos: usize) -> bool {
+        self.start <= pos && pos < self.end
+    }
+
+    pub fn first_char_only(&self) -> Self {
+        Self::from_single_char(self.start)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.start >= self.end
+    }
+}
+
+pub fn concat(a: SourceRange, b: SourceRange) -> SourceRange {
+    SourceRange {
+        start: min(a.start, b.start),
+        end:   max(a.end, b.end),
+    }
+}
+
+impl Add<SourceRange> for SourceRange {
+    type Output = SourceRange;
+
+    fn add(self, rhs: SourceRange) -> Self::Output {
+        concat(self, rhs)
+    }
+}
 
 #[derive(Default)]
 pub struct SourceMap {

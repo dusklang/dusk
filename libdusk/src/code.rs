@@ -1,8 +1,3 @@
-pub mod arch;
-pub mod index_counter;
-pub mod source_info;
-pub mod tir;
-
 use index_vec::{IndexVec, index_vec, define_index_type};
 use display_adapter::display_adapter;
 
@@ -10,7 +5,7 @@ use crate::ast::{Ast, Item, GenericCtx};
 use crate::ty::Type;
 use crate::mir::{MirCode, Instr, InstrId, VOID_INSTR};
 
-use source_info::SourceRange;
+use crate::source_info::SourceRange;
 
 define_index_type!(pub struct OpId = u32;);
 define_index_type!(pub struct BlockId = u32;);

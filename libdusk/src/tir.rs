@@ -7,11 +7,10 @@ use smallvec::SmallVec;
 use index_vec::define_index_type;
 use string_interner::DefaultSymbol as Sym;
 
-use crate::dire::source_info::SourceRange;
+use crate::source_info::SourceRange;
 use crate::ast::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, NewNamespaceId, RETURN_VALUE_DECL, ParamList};
 use crate::internal_types::{internal_fields, internal_field_decls, InternalField, InternalFieldDecls, InternalNamespace};
 use crate::ty::Type;
-pub use crate::dire::tir::CompId;
 
 use crate::dvd::{Message as DvdMessage, self};
 
@@ -23,10 +22,10 @@ use crate::new_code::NewCode;
 mod graph;
 use graph::{Graph, Levels};
 
-
 use dusk_proc_macros::*;
 
 define_index_type!(pub struct TreeId = u32;);
+define_index_type!(pub struct CompId = u32;);
 
 #[derive(Debug)]
 pub struct SwitchCase {

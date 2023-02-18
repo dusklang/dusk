@@ -11,10 +11,10 @@ use smallvec::{SmallVec, smallvec};
 use string_interner::{DefaultSymbol as Sym, Symbol, StringInterner};
 
 use crate::mir::Const;
-use crate::dire::{Op, Block};
-use crate::dire::BlockId;
-use crate::dire::index_counter::IndexCounter;
-use crate::dire::source_info::{SourceFileId, SourceRange};
+use crate::code::{Op, Block};
+use crate::code::BlockId;
+use crate::index_counter::IndexCounter;
+use crate::source_info::{SourceFileId, SourceRange};
 use crate::internal_types::InternalField;
 
 use crate::ty::{Type, InternalType, InternalTypeId};
@@ -538,7 +538,6 @@ pub struct Ast {
 define_index_type!(pub struct ImperRootId = u32;);
 
 // TODO: switch to AOS here
-// TODO: move to dire, perhaps
 #[derive(Debug, Clone)]
 pub struct GenericParamList {
     pub names: SmallVec<[Sym; 1]>,

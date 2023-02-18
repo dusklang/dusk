@@ -10,9 +10,9 @@ use string_interner::DefaultSymbol as Sym;
 use index_vec::{IndexVec, define_index_type};
 use display_adapter::display_adapter;
 
-use crate::dire::index_counter::IndexCounter;
-use crate::dire::{Code, Block, BlockId, Op, OpId};
-use crate::dire::source_info::SourceRange;
+use crate::index_counter::IndexCounter;
+use crate::code::{Code, Block, BlockId, Op, OpId};
+use crate::source_info::SourceRange;
 
 use crate::internal_types::InternalField;
 use crate::ast::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, NewNamespaceId, LegacyIntrinsic, IntrinsicId, Expr, StoredDeclId, GenericParamId, Item, PatternBindingDeclId, ExternModId, ExternFunctionRef, PatternBindingPathComponent, VOID_TYPE, StructId, LoopId};

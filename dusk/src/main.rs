@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use libdusk::new_code::NewCode;
 use libdusk::ty::Type;
-use libdusk::dire::arch::Arch;
+use libdusk::arch::Arch;
 use libdusk::driver::{DRIVER, Driver, DriverRef};
 use libdusk::source_info::SourceMap;
 use libdusk::error::DiagnosticKind;

@@ -7,7 +7,7 @@ use derivative::Derivative;
 
 use crate::ast::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, LegacyIntrinsic, Attribute, FieldAssignment, Ident, Pattern, PatternKind, SwitchCase, ImperScopedDecl, ExternMod, ERROR_EXPR, ERROR_TYPE, VOID_TYPE, ParamList};
 use crate::ty::Type;
-use crate::dire::source_info::{self, SourceFileId, SourceRange};
+use crate::source_info::{self, SourceFileId, SourceRange};
 
 use crate::driver::Driver;
 use crate::ast::{ConditionKind, GenericParamList};
