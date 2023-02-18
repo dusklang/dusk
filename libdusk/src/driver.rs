@@ -3,7 +3,7 @@ use std::sync::RwLock;
 use string_interner::StringInterner;
 use lazy_static::lazy_static;
 
-use crate::dire::ast::ExprId;
+use crate::ast::ExprId;
 use crate::dire::mir::Const;
 use crate::dire::arch::Arch;
 use crate::dire::source_info::SourceFileId;

@@ -7,14 +7,14 @@ use string_interner::DefaultSymbol as Sym;
 use display_adapter::display_adapter;
 use num_bigint::BigInt;
 
-use crate::dire::ast::{LegacyIntrinsic, DeclId, StructId, EnumId, ExternModId, ExternFunctionRef, GenericParamId};
+use crate::ast::{LegacyIntrinsic, DeclId, StructId, EnumId, ExternModId, ExternFunctionRef, GenericParamId};
 use crate::ty::{Type, LegacyInternalType, FunctionType, StructType};
 use crate::dire::{Code, BlockId, OpId, InternalField};
 use crate::dire::source_info::SourceRange;
 
-use crate::dire::ast::IntrinsicId;
+use crate::ast::IntrinsicId;
 
-use crate::dire::ast::NewNamespaceId;
+use crate::ast::NewNamespaceId;
 
 use crate::interpreter::EvalError;
 

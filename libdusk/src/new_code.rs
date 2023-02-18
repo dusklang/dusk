@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::dire::ast::{ExprId, DeclId, ItemId};
+use crate::ast::{ExprId, DeclId, ItemId};
 
 use crate::driver::Driver;
 

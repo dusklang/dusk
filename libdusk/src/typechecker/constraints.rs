@@ -3,7 +3,7 @@ use smallvec::{SmallVec, smallvec};
 use std::collections::HashMap;
 
 use crate::ty::{Type, LegacyInternalType, FunctionType, QualType, IntWidth};
-use crate::dire::ast::{GenericParamId, ExprId, GenericCtx, GenericCtxId, BLANK_GENERIC_CTX};
+use crate::ast::{GenericParamId, ExprId, GenericCtx, GenericCtxId, BLANK_GENERIC_CTX};
 
 use crate::driver::Driver;
 use crate::ty::BuiltinTraits;

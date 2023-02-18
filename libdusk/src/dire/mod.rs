@@ -1,4 +1,3 @@
-pub mod ast;
 pub mod arch;
 pub mod index_counter;
 pub mod source_info;
@@ -12,10 +11,11 @@ pub use internal_types::*;
 use index_vec::{IndexVec, index_vec, define_index_type};
 use display_adapter::display_adapter;
 
-use ast::{Ast, Item, GenericCtx};
+use crate::ast::{Ast, Item, GenericCtx};
+use crate::ty::Type;
+
 use mir::{MirCode, Instr, InstrId, VOID_INSTR};
 use source_info::SourceRange;
-use crate::ty::Type;
 
 define_index_type!(pub struct OpId = u32;);
 define_index_type!(pub struct BlockId = u32;);

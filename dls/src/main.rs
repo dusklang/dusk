@@ -4,7 +4,7 @@ use std::error::Error;
 use std::mem;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use libdusk::dire::ast::{Item, Expr};
+use libdusk::ast::{Item, Expr};
 use libdusk::dire::source_info::{SourceFileId, SourceRange};
 use libdusk::error::DiagnosticKind;
 use libdusk::new_code::NewCode;

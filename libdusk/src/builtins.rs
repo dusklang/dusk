@@ -7,7 +7,7 @@ use num_bigint::BigInt;
 
 use crate::dire::internal_types;
 use crate::dire::source_info::SourceRange;
-use crate::dire::ast::{ModScopeNs, LegacyIntrinsic, Expr, Decl, VOID_TYPE, ModScopeNsId, NewNamespaceId, EnumId, ExprId, VariantDecl, StaticDecl, NewNamespace, ExternFunctionRef, ExternFunction, ParamList};
+use crate::ast::{ModScopeNs, LegacyIntrinsic, Expr, Decl, VOID_TYPE, ModScopeNsId, NewNamespaceId, EnumId, ExprId, VariantDecl, StaticDecl, NewNamespace, ExternFunctionRef, ExternFunction, ParamList};
 use crate::ty::{Type, LegacyInternalType};
 use crate::dire::mir::Const;
 
@@ -66,7 +66,7 @@ impl Driver {
             param_list: param_list.clone(),
             return_ty: ret_ty,
         };
-        let extern_mod = crate::dire::ast::ExternMod { library_path, imported_functions: vec![func], objc_class_references: Default::default() };
+        let extern_mod = crate::ast::ExternMod { library_path, imported_functions: vec![func], objc_class_references: Default::default() };
         let extern_mod = self.code.ast.extern_mods.push(extern_mod);
         let extern_func_ref = ExternFunctionRef {
             extern_mod,
@@ -89,7 +89,7 @@ impl Driver {
         
         let name = self.interner.get_or_intern(class_name);
         let library_path = self.add_const_expr(Const::StrLit(CString::new(lib_name).unwrap()));
-        let extern_mod = crate::dire::ast::ExternMod { library_path, imported_functions: Default::default(), objc_class_references: vec![class_name.to_string()] };
+        let extern_mod = crate::ast::ExternMod { library_path, imported_functions: Default::default(), objc_class_references: vec![class_name.to_string()] };
         let extern_mod = self.code.ast.extern_mods.push(extern_mod);
         let void_ptr = self.add_const_ty(Type::Void.ptr());
         let decl_id = self.add_decl(Decl::ObjcClassRef { extern_mod, index: 0 }, name, Some(void_ptr), SourceRange::default());

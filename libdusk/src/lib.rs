@@ -12,6 +12,7 @@ pub mod ty;
 pub mod type_provider;
 pub mod dvd;
 pub mod macho;
+pub mod ast;
 
 mod dep_vec;
 mod lexer;
@@ -19,7 +20,6 @@ mod token;
 mod builder;
 mod parser;
 mod tir;
-mod ast;
 mod typechecker;
 mod into_bytes;
 #[cfg(target_arch="x86_64")]

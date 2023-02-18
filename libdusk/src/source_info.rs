@@ -11,7 +11,7 @@ use std::ops::Range;
 use serde::{Serialize, Deserialize};
 
 use display_adapter::display_adapter;
-use crate::dire::ast::{ExprId, DeclId, ItemId, Item};
+use crate::ast::{ExprId, DeclId, ItemId, Item};
 use crate::dire::OpId;
 use crate::dire::source_info::{SourceRange, SourceFileId};
 

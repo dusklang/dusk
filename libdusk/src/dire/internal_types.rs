@@ -2,7 +2,7 @@ use std::any::TypeId;
 
 use dusk_proc_macros::DuskBridge;
 
-use crate::dire::ast::NewNamespaceId;
+use crate::ast::NewNamespaceId;
 use crate::ty::Type;
 use crate::driver::Driver;
 use crate::interpreter::Value;
@@ -148,7 +148,7 @@ macro_rules! define_legacy_internal_types_impl {
         }
 
         pub mod internal_field_decls {
-            use crate::dire::ast::DeclId;
+            use crate::ast::DeclId;
             $(
                 #[derive(Debug)]
                 pub struct $name {

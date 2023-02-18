@@ -4,7 +4,7 @@ use std::cmp::max;
 
 use bitflags::bitflags;
 
-use crate::dire::ast::{ItemId, VOID_EXPR_ITEM};
+use crate::ast::{ItemId, VOID_EXPR_ITEM};
 use crate::dire::tir::CompId;
 use crate::dvd::{Message as DvdMessage, self};
 
