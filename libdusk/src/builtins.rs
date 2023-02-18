@@ -9,7 +9,7 @@ use crate::dire::internal_types;
 use crate::dire::source_info::SourceRange;
 use crate::ast::{ModScopeNs, LegacyIntrinsic, Expr, Decl, VOID_TYPE, ModScopeNsId, NewNamespaceId, EnumId, ExprId, VariantDecl, StaticDecl, NewNamespace, ExternFunctionRef, ExternFunction, ParamList};
 use crate::ty::{Type, LegacyInternalType};
-use crate::dire::mir::Const;
+use crate::mir::Const;
 
 use crate::driver::Driver;
 use crate::ast::ScopeState;

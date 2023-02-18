@@ -10,7 +10,7 @@ use index_vec::{IndexVec, define_index_type};
 use smallvec::{SmallVec, smallvec};
 use string_interner::{DefaultSymbol as Sym, Symbol, StringInterner};
 
-use crate::dire::mir::Const;
+use crate::mir::Const;
 use crate::dire::{Op, Block};
 use crate::dire::BlockId;
 use crate::dire::index_counter::IndexCounter;

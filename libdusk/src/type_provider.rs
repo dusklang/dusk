@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use paste::paste;
 
 use crate::ast::{ExprId, DeclId, DeclRefId, StructLitId, CastId, Namespace};
-use crate::dire::mir::Const;
+use crate::mir::Const;
 use crate::ty::{Type, QualType};
 
 use crate::typechecker::{CastMethod, StructLit, constraints::ConstraintList, Overloads, GenericConstraints};

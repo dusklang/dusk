@@ -4,7 +4,7 @@ use string_interner::StringInterner;
 use lazy_static::lazy_static;
 
 use crate::ast::ExprId;
-use crate::dire::mir::Const;
+use crate::mir::Const;
 use crate::dire::arch::Arch;
 use crate::dire::source_info::SourceFileId;
 use crate::dire::Code;

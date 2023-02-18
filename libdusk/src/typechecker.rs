@@ -9,7 +9,7 @@ use constraints::*;
 use crate::type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 
 use crate::ast::{self, ExprId, DeclId, StructId, PatternKind, GenericParamId, Ident, VOID_EXPR, GenericCtx, DeclRefId, BLANK_GENERIC_CTX, Decl};
-use crate::dire::mir::Const;
+use crate::mir::Const;
 use crate::ty::{Type, LegacyInternalType, FunctionType, QualType, IntWidth};
 use crate::dire::source_info::SourceRange;
 use crate::dire::InternalNamespace;

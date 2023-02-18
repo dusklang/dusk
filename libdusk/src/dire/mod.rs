@@ -1,7 +1,6 @@
 pub mod arch;
 pub mod index_counter;
 pub mod source_info;
-pub mod mir;
 pub mod tir;
 #[macro_use]
 pub mod internal_types;
@@ -13,8 +12,8 @@ use display_adapter::display_adapter;
 
 use crate::ast::{Ast, Item, GenericCtx};
 use crate::ty::Type;
+use crate::mir::{MirCode, Instr, InstrId, VOID_INSTR};
 
-use mir::{MirCode, Instr, InstrId, VOID_INSTR};
 use source_info::SourceRange;
 
 define_index_type!(pub struct OpId = u32;);
