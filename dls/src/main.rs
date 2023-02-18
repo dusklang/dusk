@@ -15,6 +15,7 @@ use lsp_types::{ServerCapabilities, CompletionOptions, WorkspaceServerCapabiliti
 
 use libdusk::source_info::{SourceFileId, SourceRange, SourceMap};
 use libdusk::driver::{Driver, DRIVER, DriverRef};
+use libdusk::dvm;
 use dusk_proc_macros::ef;
 use libdusk::arch::Arch;
 
@@ -512,6 +513,7 @@ impl Server {
 
 impl Server {
     fn run(&mut self) -> Result<(), Box<dyn Error + Sync + Send>> {
+        dvm::launch_coordinator_thread();
         for msg in &self.connection.receiver {
             match msg {
                 Message::Request(req) => {

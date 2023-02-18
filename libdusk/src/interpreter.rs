@@ -7,7 +7,6 @@ use std::slice;
 use std::fmt::{Write, Debug};
 use std::cell::RefCell;
 use std::sync::RwLock;
-use std::thread;
 use std::borrow::Cow;
 #[cfg(windows)]
 use std::cmp::min;
@@ -23,6 +22,7 @@ use lazy_static::lazy_static;
 
 use crate::arch::Arch;
 use crate::ast::{LegacyIntrinsic, EnumId, GenericParamId, ExternFunctionRef, ExternModId, NewNamespaceId};
+use crate::dvm::{MessageKind, Call, self};
 use crate::mir::{Const, Instr, InstrId, FuncId, StaticId, ExternFunction};
 use crate::ty::{Type, FunctionType, QualType, IntWidth, FloatWidth, StructType, LegacyInternalType};
 use crate::code::{OpId, BlockId};
@@ -35,6 +35,8 @@ use crate::type_provider::TypeProvider;
 use crate::x64::*;
 #[cfg(target_arch="aarch64")]
 use crate::arm64::*;
+
+pub type Result<T> = std::result::Result<T, EvalError>;
 
 #[derive(Debug, Clone)]
 pub enum InternalValue {
@@ -704,14 +706,12 @@ impl DriverRef<'_> {
             CString::new(arg.to_string_lossy().as_bytes()).unwrap()
         }).collect();
     }
-    pub fn call(&self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> Result<Value, EvalError> {
+    pub fn call(&self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> Result<Value> {
         self.unlock();
-        thread::spawn(|| -> Result<Value, EvalError> {
-            let mut driver = DriverRef::new(&DRIVER);
-            driver.call_direct(func_ref, arguments, generic_arguments)
-        }).join().unwrap()
+        let val = dvm::send_message(MessageKind::Call(Call { func_ref, arguments, generic_arguments })).unwrap().0;
+        val
     }
-    fn call_direct(&mut self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> Result<Value, EvalError> {
+    pub fn call_direct(&mut self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> Result<Value> {
         let frame = self.read().new_stack_frame(func_ref, arguments, generic_arguments);
         INTERP_STACK.with(|stack| {
             stack.borrow_mut().push(frame);
@@ -1228,7 +1228,7 @@ impl DriverRef<'_> {
     /// Execute the next instruction. Iff the instruction is a return, this function returns its `Value`. Otherwise, it returns `None`.
     // NOTE FOR CORRECTNESS: If you return an Err() result, you MUST first report an error! Otherwise
     // compilation could end up "succeeding", even though compile-time code execution failed.
-    fn execute_next(&mut self, stack_cell: &RefCell<Vec<StackFrame>>) -> Result<Option<Value>, EvalError> {
+    fn execute_next(&mut self, stack_cell: &RefCell<Vec<StackFrame>>) -> Result<Option<Value>> {
         let val = {
             let mut stack = stack_cell.borrow_mut();
             let frame = stack.last_mut().unwrap();
