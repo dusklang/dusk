@@ -16,6 +16,7 @@ pub mod ast;
 pub mod arch;
 pub mod index_counter;
 pub mod code;
+pub mod dvm;
 
 mod dep_vec;
 mod lexer;

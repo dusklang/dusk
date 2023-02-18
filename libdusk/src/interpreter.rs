@@ -7,6 +7,7 @@ use std::slice;
 use std::fmt::{Write, Debug};
 use std::cell::RefCell;
 use std::sync::RwLock;
+use std::thread;
 use std::borrow::Cow;
 #[cfg(windows)]
 use std::cmp::min;
@@ -547,7 +548,7 @@ extern "C" fn interp_ffi_entry_point(func: u32, params: *const *const (), return
         arguments.push(val);
     }
 
-    let Ok(return_value) = driver.call(FunctionRef::Id(func_id), arguments, Vec::new()) else {
+    let Ok(return_value) = driver.call_direct(FunctionRef::Id(func_id), arguments, Vec::new()) else {
         // TODO: catch and handle this in a more reasonable way. This is tricky for a few reasons. For one, DLS and the
         // compiler want different things. DLS would want to gracefully send the error over to the client, while the
         // compiler would want to print it out. This implies adding some sort of callback or trait object which enables
@@ -556,7 +557,7 @@ extern "C" fn interp_ffi_entry_point(func: u32, params: *const *const (), return
         // is expecting us to return a value that we don't have. This is all leading me to the mildly unfortunate
         // conclusion that I'm going to have to move the interpreter to a separate process, and devise some sort of IPC
         // scheme. If I did that, the interpreter process(es) could panic as much as it wanted, while the main process
-        // is ables to gracefully detect and report said panics. This would also obviate the need for a callback or
+        // is able to gracefully detect and report said panics. This would also obviate the need for a callback or
         // trait object.
         //
         // See also: https://github.com/dusklang/dusk/issues/124
@@ -703,7 +704,14 @@ impl DriverRef<'_> {
             CString::new(arg.to_string_lossy().as_bytes()).unwrap()
         }).collect();
     }
-    pub fn call(&mut self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> Result<Value, EvalError> {
+    pub fn call(&self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> Result<Value, EvalError> {
+        self.unlock();
+        thread::spawn(|| -> Result<Value, EvalError> {
+            let mut driver = DriverRef::new(&DRIVER);
+            driver.call_direct(func_ref, arguments, generic_arguments)
+        }).join().unwrap()
+    }
+    fn call_direct(&mut self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> Result<Value, EvalError> {
         let frame = self.read().new_stack_frame(func_ref, arguments, generic_arguments);
         INTERP_STACK.with(|stack| {
             stack.borrow_mut().push(frame);
@@ -1251,7 +1259,7 @@ impl DriverRef<'_> {
                     // Stop immutably borrowing the stack, so it can be borrowed again in call()
                     drop(stack);
                     drop(d);
-                    self.call(FunctionRef::Id(func), copied_args, generic_arguments)?
+                    self.call_direct(FunctionRef::Id(func), copied_args, generic_arguments)?
                 },
                 &Instr::ExternCall { ref arguments, func } => {
                     let mut copied_args = Vec::new();

@@ -1,4 +1,4 @@
-use std::sync::RwLock;
+use std::sync::{RwLock, Mutex};
 
 use string_interner::StringInterner;
 use lazy_static::lazy_static;
@@ -20,6 +20,7 @@ use crate::type_provider::TypeProvider;
 use crate::index_vec::*;
 use crate::rw_ref::RwRef;
 use crate::interpreter::EvalError;
+use crate::dvm::DvmServerCoordinator;
 
 // This derive is here so that I can initialize the global Driver instance with something. It is *not* recommended that
 // anyone actually uses `Driver` in its default state.
@@ -36,6 +37,9 @@ pub struct Driver {
     pub code: Code,
     pub internal_field_decls: InternalFieldDecls,
     pub no_core: bool,
+
+    // This value should eventually be moved out of `Driver` and into the DVM process. 
+    pub dvm_coordinator: Option<Mutex<DvmServerCoordinator>>,
 
     pub boxed_ints: Vec<usize>,
 }
@@ -55,6 +59,8 @@ impl Driver {
             code: Code::default(),
             internal_field_decls: InternalFieldDecls::default(),
             no_core,
+
+            dvm_coordinator: Some(Mutex::new(DvmServerCoordinator::new().unwrap())),
 
             boxed_ints: Vec::default(),
         }
