@@ -3,7 +3,7 @@ use std::any::TypeId;
 use dusk_proc_macros::DuskBridge;
 
 use crate::dire::ast::NewNamespaceId;
-use crate::dire::ty::Type;
+use crate::ty::Type;
 use crate::driver::Driver;
 use crate::interpreter::Value;
 

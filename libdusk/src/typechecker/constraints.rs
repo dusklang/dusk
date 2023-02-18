@@ -2,7 +2,7 @@ use dusk_proc_macros::ef;
 use smallvec::{SmallVec, smallvec};
 use std::collections::HashMap;
 
-use crate::dire::ty::{Type, LegacyInternalType, FunctionType, QualType, IntWidth};
+use crate::ty::{Type, LegacyInternalType, FunctionType, QualType, IntWidth};
 use crate::dire::ast::{GenericParamId, ExprId, GenericCtx, GenericCtxId, BLANK_GENERIC_CTX};
 
 use crate::driver::Driver;

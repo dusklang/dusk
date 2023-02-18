@@ -1,5 +1,4 @@
 pub mod ast;
-pub mod ty;
 pub mod arch;
 pub mod index_counter;
 pub mod source_info;
@@ -16,7 +15,7 @@ use display_adapter::display_adapter;
 use ast::{Ast, Item, GenericCtx};
 use mir::{MirCode, Instr, InstrId, VOID_INSTR};
 use source_info::SourceRange;
-use ty::Type;
+use crate::ty::Type;
 
 define_index_type!(pub struct OpId = u32;);
 define_index_type!(pub struct BlockId = u32;);

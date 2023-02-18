@@ -8,6 +8,7 @@ pub mod driver;
 pub mod interpreter;
 pub mod error;
 pub mod new_code;
+pub mod ty;
 pub mod type_provider;
 pub mod dvd;
 pub mod macho;
@@ -19,7 +20,6 @@ mod builder;
 mod parser;
 mod tir;
 mod ast;
-mod ty;
 mod typechecker;
 mod into_bytes;
 #[cfg(target_arch="x86_64")]

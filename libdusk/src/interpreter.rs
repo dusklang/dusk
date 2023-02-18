@@ -23,7 +23,7 @@ use lazy_static::lazy_static;
 use crate::dire::arch::Arch;
 use crate::dire::ast::{LegacyIntrinsic, EnumId, GenericParamId, ExternFunctionRef, ExternModId, NewNamespaceId};
 use crate::dire::mir::{Const, Instr, InstrId, FuncId, StaticId, ExternFunction};
-use crate::dire::ty::{Type, FunctionType, QualType, IntWidth, FloatWidth, StructType, LegacyInternalType};
+use crate::ty::{Type, FunctionType, QualType, IntWidth, FloatWidth, StructType, LegacyInternalType};
 use crate::dire::{OpId, BlockId, DuskBridge};
 use crate::dire::{InternalField, internal_fields};
 

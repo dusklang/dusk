@@ -13,7 +13,7 @@ use display_adapter::display_adapter;
 use crate::dire::ast::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, LegacyIntrinsic, IntrinsicId, Expr, StoredDeclId, GenericParamId, Item, PatternBindingDeclId, ExternModId, ExternFunctionRef, PatternBindingPathComponent, VOID_TYPE, StructId, LoopId};
 use crate::dire::mir::{FuncId, StaticId, Const, Instr, InstrId, Function, MirCode, StructLayout, EnumLayout, ExternMod, ExternFunction, InstrNamespace, SwitchCase, VOID_INSTR};
 use crate::dire::{Block, BlockId, Op, OpId, InternalField};
-use crate::dire::ty::{Type, LegacyInternalType, FunctionType, FloatWidth, StructType};
+use crate::ty::{Type, LegacyInternalType, FunctionType, FloatWidth, StructType};
 use crate::dire::source_info::SourceRange;
 
 use crate::driver::{Driver, DriverRef};

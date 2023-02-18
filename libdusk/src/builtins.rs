@@ -8,7 +8,7 @@ use num_bigint::BigInt;
 use crate::dire::internal_types;
 use crate::dire::source_info::SourceRange;
 use crate::dire::ast::{ModScopeNs, LegacyIntrinsic, Expr, Decl, VOID_TYPE, ModScopeNsId, NewNamespaceId, EnumId, ExprId, VariantDecl, StaticDecl, NewNamespace, ExternFunctionRef, ExternFunction, ParamList};
-use crate::dire::ty::{Type, LegacyInternalType};
+use crate::ty::{Type, LegacyInternalType};
 use crate::dire::mir::Const;
 
 use crate::driver::Driver;

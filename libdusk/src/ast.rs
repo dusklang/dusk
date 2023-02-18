@@ -12,7 +12,7 @@ use string_interner::{DefaultSymbol as Sym, Symbol, StringInterner};
 use crate::dire::{Op, Block};
 use crate::dire::ast::*;
 use crate::dire::index_counter::IndexCounter;
-use crate::dire::ty::Type;
+use crate::ty::Type;
 use crate::dire::source_info::{SourceFileId, SourceRange};
 use crate::dire::InternalField;
 

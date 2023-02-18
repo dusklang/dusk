@@ -8,7 +8,7 @@ use display_adapter::display_adapter;
 use num_bigint::BigInt;
 
 use crate::dire::ast::{LegacyIntrinsic, DeclId, StructId, EnumId, ExternModId, ExternFunctionRef, GenericParamId};
-use crate::dire::ty::{Type, LegacyInternalType, FunctionType, StructType};
+use crate::ty::{Type, LegacyInternalType, FunctionType, StructType};
 use crate::dire::{Code, BlockId, OpId, InternalField};
 use crate::dire::source_info::SourceRange;
 

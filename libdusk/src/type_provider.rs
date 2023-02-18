@@ -13,7 +13,7 @@ use paste::paste;
 
 use crate::dire::ast::{ExprId, DeclId, DeclRefId, StructLitId, CastId, Namespace};
 use crate::dire::mir::Const;
-use crate::dire::ty::{Type, QualType};
+use crate::ty::{Type, QualType};
 
 use crate::typechecker::{CastMethod, StructLit, constraints::ConstraintList, Overloads, GenericConstraints};
 use crate::index_vec::*;

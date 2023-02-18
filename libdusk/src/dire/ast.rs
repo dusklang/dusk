@@ -8,7 +8,7 @@ use smallvec::SmallVec;
 use string_interner::DefaultSymbol as Sym;
 
 use crate::dire::mir::Const;
-use crate::dire::ty::{Type, InternalType, InternalTypeId};
+use crate::ty::{Type, InternalType, InternalTypeId};
 use crate::dire::index_counter::IndexCounter;
 use crate::dire::source_info::{SourceRange, SourceFileId};
 use crate::dire::BlockId;
