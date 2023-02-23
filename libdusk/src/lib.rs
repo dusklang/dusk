@@ -18,6 +18,7 @@ pub mod index_counter;
 pub mod code;
 pub mod dvm;
 
+mod display_adapter;
 mod dep_vec;
 mod lexer;
 mod token;
@@ -32,3 +33,5 @@ mod arm64;
 mod rw_ref;
 mod builtins;
 mod autopop;
+
+use display_adapter::display_adapter;

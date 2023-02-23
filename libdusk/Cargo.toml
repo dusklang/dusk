@@ -20,7 +20,6 @@ num-bigint = "0.3"
 index_vec = { version = "0.1.2" }
 indenter = "0.3.2"
 region = { git = "https://github.com/darfink/region-rs", rev = "5087445f08b3f78c481fb8cde18b47bb67d5eb22" }
-display_adapter = { version = "0.1", path = "../../display_adapter/display_adapter" }
 dusk-proc-macros = { version = "0.1", path = "../dusk-proc-macros" }
 lazy_static = "1.4.0"
 derivative = "2.2"

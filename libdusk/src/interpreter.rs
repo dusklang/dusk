@@ -16,7 +16,7 @@ use indenter::indented;
 use smallvec::SmallVec;
 use paste::paste;
 use num_bigint::{BigInt, Sign};
-use display_adapter::display_adapter;
+use crate::display_adapter;
 use index_vec::IndexVec;
 use lazy_static::lazy_static;
 

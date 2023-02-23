@@ -8,7 +8,7 @@ use num_bigint::BigInt;
 use smallvec::{SmallVec, smallvec};
 use string_interner::DefaultSymbol as Sym;
 use index_vec::{IndexVec, define_index_type};
-use display_adapter::display_adapter;
+use crate::display_adapter;
 
 use crate::index_counter::IndexCounter;
 use crate::code::{Code, Block, BlockId, Op, OpId};

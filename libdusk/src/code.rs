@@ -1,5 +1,5 @@
 use index_vec::{IndexVec, index_vec, define_index_type};
-use display_adapter::display_adapter;
+use crate::display_adapter;
 
 use crate::ast::{Ast, Item, GenericCtx};
 use crate::ty::Type;

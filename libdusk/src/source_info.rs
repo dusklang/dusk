@@ -10,7 +10,7 @@ use std::ops::{Add, Range};
 #[cfg(feature = "dvd")]
 use serde::{Serialize, Deserialize};
 
-use display_adapter::display_adapter;
+use crate::display_adapter;
 use crate::ast::{ExprId, DeclId, ItemId, Item};
 use crate::code::OpId;
 

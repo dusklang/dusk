@@ -5,7 +5,7 @@ use std::ops::Range;
 use std::fmt::Debug;
 use std::collections::HashSet;
 
-use display_adapter::display_adapter;
+use crate::display_adapter;
 use index_vec::{IndexVec, define_index_type};
 use smallvec::{SmallVec, smallvec};
 use string_interner::{DefaultSymbol as Sym, Symbol, StringInterner};
