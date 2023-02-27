@@ -4,6 +4,8 @@ use std::io::{self, Write};
 use std::marker::PhantomData;
 use std::mem;
 
+use md5::{Md5, Digest};
+
 use crate::arm64::{Arm64Encoder, Reg};
 
 #[derive(Default)]
@@ -31,8 +33,12 @@ const LC_DYSYMTAB:      u32 = 0x0000_000B;
 const LC_LOAD_DYLINKER: u32 = 0x0000_000E;
 
 const LC_SEGMENT_64: u32 = 0x0000_0019;
+const LC_UUID: u32 = 0x0000_001B;
 const LC_FUNCTION_STARTS: u32 = 0x0000_0026;
+const LC_DATA_IN_CODE: u32 = 0x0000_0029;
+const LC_SOURCE_VERSION: u32 = 0x0000_002A;
 const LC_MAIN: u32 = 0x28 | LC_REQ_DYLD;
+const LC_BUILD_VERSION: u32 = 0x0000_0032;
 const LC_DYLD_EXPORTS_TRIE: u32 = 0x33 | LC_REQ_DYLD;
 const LC_DYLD_CHAINED_FIXUPS: u32 = 0x34 | LC_REQ_DYLD;
 const LC_LOAD_DYLIB: u32 = 0x0000_000C;
@@ -144,6 +150,59 @@ struct DylinkerCommand {
     command: u32,
     command_size: u32,
     name_offset: u32,
+}
+
+#[repr(C, packed)]
+struct UuidCommand {
+    command: u32,
+    command_size: u32,
+    uuid: [u8; 16],
+}
+
+#[derive(Copy, Clone)]
+#[repr(u32)]
+enum Platform {
+    MacOs = 1,
+    Ios,
+    TvOs,
+    WatchOs,
+    BridgeOs,
+    MacCatalyst,
+    IosSimulator,
+    TvOsSimulator,
+    WatchOsSimulator,
+    DriverKit,
+}
+
+#[derive(Copy, Clone)]
+#[repr(u32)]
+enum Tool {
+    Clang = 1,
+    Swift,
+    Ld,
+}
+
+#[repr(C, packed)]
+struct BuildVersionCommand {
+    command: u32,
+    command_size: u32,
+    platform: Platform,
+    min_os: u32,
+    sdk: u32,
+    num_tools: u32,
+}
+
+#[repr(C, packed)]
+struct BuildToolVersion {
+    tool: Tool,
+    version: u32,
+}
+
+#[repr(C, packed)]
+struct SourceVersionCommand {
+    command: u32,
+    command_size: u32,
+    version: u64,
 }
 
 #[repr(C, packed)]
@@ -448,19 +507,27 @@ impl MachOEncoder {
 
         let symbol_table = self.alloc_cmd::<SymbolTableCommand>();
         let dynamic_symbol_table = self.alloc_cmd::<DynamicSymbolTableCommand>();
-        
-        let load_dylinker_begin = self.pos();
+
         let load_dylinker = self.alloc_cmd::<DylinkerCommand>();
         self.push_null_terminated_string("/usr/lib/dyld");
-
         self.pad_to_next_boundary::<8>();
-        let load_dylinker_size = self.pos() - load_dylinker_begin;
+        let load_dylinker_size = self.pos() - load_dylinker.addr;
+
+        let uuid = self.alloc_cmd::<UuidCommand>();
+
+        let build_version = self.alloc_cmd::<BuildVersionCommand>();
+        let ld_tool = self.alloc::<BuildToolVersion>();
+        let build_version_len = self.pos() - build_version.addr;
+
+        let src_version = self.alloc_cmd::<SourceVersionCommand>();
 
         let entry_point = self.alloc_cmd::<EntryPointCommand>();
 
         let load_lib_system = self.alloc_dylib_command("/usr/lib/libSystem.B.dylib");
 
         let function_starts = self.alloc_cmd::<LinkEditDataCommand>();
+
+        let data_in_code = self.alloc_cmd::<LinkEditDataCommand>();
 
         let lc_end = self.pos();
 
@@ -533,6 +600,9 @@ impl MachOEncoder {
         self.push_uleb128((text_sections_addr - text_addr) as u32);
         self.pad_to_next_boundary::<8>();
         let function_starts_len = self.pos() - function_starts_start;
+
+        let data_in_code_start = self.pos();
+        let data_in_code_len = self.pos() - data_in_code_start;
 
         let symbol_table_begin = self.pos();
         let mh_execute_header_entry = self.alloc_symbol_table_entry();
@@ -643,6 +713,29 @@ impl MachOEncoder {
             data_offset: function_starts_start as u32,
             data_size: function_starts_len as u32,
         };
+        *self.get_mut(data_in_code) = LinkEditDataCommand {
+            command: LC_DATA_IN_CODE,
+            command_size: data_in_code.size() as u32,
+            data_offset: data_in_code_start as u32,
+            data_size: data_in_code_len as u32,
+        };
+        *self.get_mut(build_version) = BuildVersionCommand {
+            command: LC_BUILD_VERSION,
+            command_size: build_version_len as u32,
+            platform: Platform::MacOs,
+            min_os: 13 << 16, // 13.0
+            sdk: (13 << 16) | (1 << 8), // 13.1
+            num_tools: 1,
+        };
+        *self.get_mut(ld_tool) = BuildToolVersion {
+            tool: Tool::Ld,
+            version: (820 << 16) | (1 << 8),
+        };
+        *self.get_mut(src_version) = SourceVersionCommand {
+            command: LC_SOURCE_VERSION,
+            command_size: src_version.size() as u32,
+            version: 0,
+        };
         *self.get_mut(load_lib_system.header) = DylibCommand {
             command: LC_LOAD_DYLIB,
             command_size: load_lib_system.size(),
@@ -703,6 +796,15 @@ impl MachOEncoder {
             entry_point_file_offset: text_sections_addr - text_addr,
             stack_size: 0,
         };
+        *self.get_mut(uuid) = UuidCommand {
+            command: LC_UUID,
+            command_size: uuid.size() as u32,
+            uuid: [0; 16], // to be filled in later.
+        };
+
+        let mut hasher = Md5::new();
+        hasher.update(&self.data);
+        self.get_mut(uuid).uuid = hasher.finalize().into();
 
         dest.write_all(&self.data)?;
 
