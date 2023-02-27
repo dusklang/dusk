@@ -31,6 +31,7 @@ const LC_DYSYMTAB:      u32 = 0x0000_000B;
 const LC_LOAD_DYLINKER: u32 = 0x0000_000E;
 
 const LC_SEGMENT_64: u32 = 0x0000_0019;
+const LC_FUNCTION_STARTS: u32 = 0x0000_0026;
 const LC_MAIN: u32 = 0x28 | LC_REQ_DYLD;
 const LC_DYLD_EXPORTS_TRIE: u32 = 0x33 | LC_REQ_DYLD;
 const LC_DYLD_CHAINED_FIXUPS: u32 = 0x34 | LC_REQ_DYLD;
@@ -417,6 +418,19 @@ impl MachOEncoder {
         self.pad_with_zeroes(padded_pos as usize - self.pos());
     }
 
+    fn push_uleb128(&mut self, mut value: u32) {
+        loop {
+            let mut next_byte = (value & 0x7F) as u8;
+            value >>= 7;
+            if value != 0 {
+                next_byte |= 0x80;
+            }
+            self.push(next_byte);
+
+            if value == 0 { break; }
+        }
+    }
+
     pub fn write(&mut self, dest: &mut impl Write) -> io::Result<()> {
         let mach_header = self.alloc::<MachHeader>();
 
@@ -430,7 +444,8 @@ impl MachOEncoder {
         let link_edit_segment = self.alloc_segment();
 
         let chained_fixups = self.alloc_cmd::<LinkEditDataCommand>();
-        
+        let exports_trie = self.alloc_cmd::<LinkEditDataCommand>();
+
         let symbol_table = self.alloc_cmd::<SymbolTableCommand>();
         let dynamic_symbol_table = self.alloc_cmd::<DynamicSymbolTableCommand>();
         
@@ -440,10 +455,12 @@ impl MachOEncoder {
 
         self.pad_to_next_boundary::<8>();
         let load_dylinker_size = self.pos() - load_dylinker_begin;
-        
+
         let entry_point = self.alloc_cmd::<EntryPointCommand>();
 
         let load_lib_system = self.alloc_dylib_command("/usr/lib/libSystem.B.dylib");
+
+        let function_starts = self.alloc_cmd::<LinkEditDataCommand>();
 
         let lc_end = self.pos();
 
@@ -505,6 +522,17 @@ impl MachOEncoder {
         };
 
         let chained_fixups_data_size = self.pos() - chained_fixups_header.start();
+
+        let exports_trie_start = self.pos();
+        self.pad_with_zeroes(8);
+        let exports_trie_len = self.pos() - exports_trie_start;
+
+        let function_starts_start = self.pos();
+        // offset to first function, relative to the beginning of the __TEXT segment.
+        // subsequent functions would be specified relative to the previous one in the list.
+        self.push_uleb128((text_sections_addr - text_addr) as u32);
+        self.pad_to_next_boundary::<8>();
+        let function_starts_len = self.pos() - function_starts_start;
 
         let symbol_table_begin = self.pos();
         let mh_execute_header_entry = self.alloc_symbol_table_entry();
@@ -602,6 +630,18 @@ impl MachOEncoder {
             command_size: chained_fixups.size() as u32,
             data_offset: chained_fixups_header.start() as u32,
             data_size: chained_fixups_data_size as u32,
+        };
+        *self.get_mut(exports_trie) = LinkEditDataCommand {
+            command: LC_DYLD_EXPORTS_TRIE,
+            command_size: exports_trie.size() as u32,
+            data_offset: exports_trie_start as u32,
+            data_size: exports_trie_len as u32,
+        };
+        *self.get_mut(function_starts) = LinkEditDataCommand {
+            command: LC_FUNCTION_STARTS,
+            command_size: function_starts.size() as u32,
+            data_offset: function_starts_start as u32,
+            data_size: function_starts_len as u32,
         };
         *self.get_mut(load_lib_system.header) = DylibCommand {
             command: LC_LOAD_DYLIB,
