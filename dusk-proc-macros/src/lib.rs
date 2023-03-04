@@ -5,7 +5,7 @@ use proc_macro::token_stream::IntoIter as TokenIter;
 
 use quote::{quote, ToTokens};
 use syn::parse::{ParseStream, Parse};
-use syn::{parse_macro_input, parse_quote, Item, Lifetime, Meta, Lit, LitStr, Type, ImplItem, FnArg, ReturnType, Attribute};
+use syn::{parse_macro_input, parse_quote, Item, Lifetime, Meta, Lit, LitStr, Type, ImplItem, FnArg, ReturnType, Attribute, DeriveInput, Data, Fields};
 use syn::spanned::Spanned;
 
 use std::iter::Peekable;
@@ -606,4 +606,38 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
             #({ #registrations })*
         }
     }.into()
+}
+
+// Taken from https://github.com/memflow/memflow/tree/main/memflow-derive out of pure laziness
+#[proc_macro_derive(ByteSwap)]
+pub fn byteswap_derive(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    let name = &input.ident;
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+
+    let mut gen_inner = quote!();
+    match input.data {
+        Data::Struct(data) => match data.fields {
+            Fields::Named(named) => {
+                for field in named.named.iter() {
+                    let name = field.ident.as_ref().unwrap();
+                    gen_inner.extend(quote!(
+                        self.#name.byte_swap();
+                    ));
+                }
+            }
+            _ => unimplemented!(),
+        },
+        _ => unimplemented!(),
+    };
+
+    let gen = quote!(
+        impl #impl_generics crate::macho::ByteSwap for #name #ty_generics #where_clause {
+            fn byte_swap(&mut self) {
+                #gen_inner
+            }
+        }
+    );
+
+    gen.into()
 }

@@ -5,6 +5,41 @@ use std::marker::PhantomData;
 use std::mem;
 
 use md5::{Md5, Digest};
+use dusk_proc_macros::ByteSwap;
+
+trait ByteSwap {
+    fn byte_swap(&mut self);
+}
+
+macro_rules! byte_swap_impl {
+    (@noop: $ty:ty) => {
+        impl ByteSwap for $ty {
+            fn byte_swap(&mut self) {}
+        }
+    };
+    (@num: $ty:ty) => {
+        impl ByteSwap for $ty {
+            fn byte_swap(&mut self) {
+                *self = <$ty>::from_be_bytes(self.to_le_bytes());
+            }
+        }
+    };
+    (noops: $($noop_ty:ty),*;
+     nums: $($num_ty:ty),* $(;)?) => {
+        $(byte_swap_impl!(@noop: $noop_ty);)*
+        $(byte_swap_impl!(@num: $num_ty);)*
+    };
+}
+
+impl<T: ByteSwap, const N: usize> ByteSwap for [T; N] {
+    fn byte_swap(&mut self) {
+        for value in self {
+            value.byte_swap();
+        }
+    }
+}
+
+byte_swap_impl!(noops: u8, i8; nums: u16, u32, u64, usize, i16, i32, i64, isize);
 
 use crate::arm64::{Arm64Encoder, Reg};
 
@@ -61,12 +96,29 @@ const S_ATTR_SOME_INSTRUCTIONS:   u32 = 0x0000_0400;
 const S_ATTR_EXT_RELOC:           u32 = 0x0000_0200;
 const S_ATTR_LOC_RELOC:           u32 = 0x0000_0100;
 
-struct Ref<T> {
+struct Ref<T: ByteSwap, const BIG_ENDIAN: bool = false> {
     addr: usize,
     _phantom: PhantomData<T>,
 }
 
-impl<T> Clone for Ref<T> {
+struct ResolvedRefMut<'a, T: ByteSwap, const BIG_ENDIAN: bool = false> {
+    value: &'a mut T,
+}
+
+impl<'a, T: ByteSwap, const BIG_ENDIAN: bool> ResolvedRefMut<'a, T, BIG_ENDIAN> {
+    fn set(&mut self, new_value: T) {
+        *self.value = new_value;
+        if BIG_ENDIAN != cfg!(target_endian = "big") {
+            self.value.byte_swap();
+        }
+    }
+
+    fn map<U: ByteSwap, M: FnOnce(&'a mut T) -> &mut U>(&'a mut self, mapper: M) -> ResolvedRefMut<'a, U, BIG_ENDIAN> {
+        ResolvedRefMut { value: mapper(self.value) }
+    }
+}
+
+impl<T: ByteSwap, const BIG_ENDIAN: bool> Clone for Ref<T, BIG_ENDIAN> {
     fn clone(&self) -> Self {
         Self {
             addr: self.addr,
@@ -74,9 +126,9 @@ impl<T> Clone for Ref<T> {
         }
     }
 }
-impl<T> Copy for Ref<T> {}
+impl<T: ByteSwap, const BIG_ENDIAN: bool> Copy for Ref<T, BIG_ENDIAN> {}
 
-impl<T> Ref<T> {
+impl<T: ByteSwap, const BIG_ENDIAN: bool> Ref<T, BIG_ENDIAN> {
     fn new(addr: usize) -> Self {
         Self {
             addr,
@@ -89,7 +141,8 @@ impl<T> Ref<T> {
     fn end(self) -> usize { self.addr + self.size() }
 }
 
-#[repr(C, packed)]
+#[repr(C)]
+#[derive(ByteSwap)]
 struct MachHeader {
     magic: u32,
     cpu_type: u32,
@@ -101,7 +154,8 @@ struct MachHeader {
     reserved: u32,
 }
 
-#[repr(C, packed)]
+#[repr(C)]
+#[derive(ByteSwap)]
 struct LcSegment64 {
     command: u32,
     command_size: u32,
@@ -116,7 +170,8 @@ struct LcSegment64 {
     flags: u32,
 }
 
-#[repr(C, packed)]
+#[repr(C)]
+#[derive(ByteSwap)]
 struct Section64 {
     name: [u8; 16],
     segment_name: [u8; 16],
@@ -130,7 +185,8 @@ struct Section64 {
     reserved: [u32; 3],
 }
 
-#[repr(C, packed)]
+#[repr(C)]
+#[derive(ByteSwap)]
 struct Dylib {
     name_offset: u32,
     timestamp: u32,
@@ -138,21 +194,24 @@ struct Dylib {
     compatibility_version: u32,
 }
 
-#[repr(C, packed)]
+#[repr(C)]
+#[derive(ByteSwap)]
 struct DylibCommand {
     command: u32,
     command_size: u32,
     dylib: Dylib,
 }
 
-#[repr(C, packed)]
+#[repr(C)]
+#[derive(ByteSwap)]
 struct DylinkerCommand {
     command: u32,
     command_size: u32,
     name_offset: u32,
 }
 
-#[repr(C, packed)]
+#[repr(C)]
+#[derive(ByteSwap)]
 struct UuidCommand {
     command: u32,
     command_size: u32,
@@ -161,7 +220,7 @@ struct UuidCommand {
 
 #[derive(Copy, Clone)]
 #[repr(u32)]
-enum Platform {
+enum PlatformEnum {
     MacOs = 1,
     Ios,
     TvOs,
@@ -174,15 +233,20 @@ enum Platform {
     DriverKit,
 }
 
+type Platform = u32;
+
 #[derive(Copy, Clone)]
 #[repr(u32)]
-enum Tool {
+enum ToolEnum {
     Clang = 1,
     Swift,
     Ld,
 }
 
-#[repr(C, packed)]
+type Tool = u32;
+
+#[repr(C)]
+#[derive(ByteSwap)]
 struct BuildVersionCommand {
     command: u32,
     command_size: u32,
@@ -192,20 +256,23 @@ struct BuildVersionCommand {
     num_tools: u32,
 }
 
-#[repr(C, packed)]
+#[repr(C)]
+#[derive(ByteSwap)]
 struct BuildToolVersion {
     tool: Tool,
     version: u32,
 }
 
-#[repr(C, packed)]
+#[repr(C)]
+#[derive(ByteSwap)]
 struct SourceVersionCommand {
     command: u32,
     command_size: u32,
     version: u64,
 }
 
-#[repr(C, packed)]
+#[repr(C)]
+#[derive(ByteSwap)]
 struct SymbolTableCommand {
     command: u32,
     command_size: u32,
@@ -215,7 +282,8 @@ struct SymbolTableCommand {
     string_table_size: u32,
 }
 
-#[repr(C, packed)]
+#[repr(C)]
+#[derive(ByteSwap)]
 struct SymbolTableEntry {
     string_table_offset: u32,
     ty: u8,
@@ -224,7 +292,8 @@ struct SymbolTableEntry {
     value: u64,
 }
 
-#[repr(C, packed)]
+#[repr(C)]
+#[derive(ByteSwap)]
 struct DynamicSymbolTableCommand {
     command: u32,
     command_size: u32,
@@ -257,7 +326,8 @@ struct DynamicSymbolTableCommand {
     num_local_relocation_entries: u32,
 }
 
-#[repr(C, packed)]
+#[repr(C)]
+#[derive(ByteSwap)]
 struct EntryPointCommand {
     command: u32,
     command_size: u32,
@@ -295,6 +365,12 @@ enum SectionType {
 
 #[repr(transparent)]
 struct SectionFlags(u32);
+
+impl ByteSwap for SectionFlags {
+    fn byte_swap(&mut self) {
+        self.0.byte_swap();
+    }
+}
 
 impl SectionFlags {
     fn new(ty: SectionType, attributes: u32) -> SectionFlags {
@@ -337,7 +413,8 @@ impl DylibCommandBuilder {
     }
 }
 
-#[repr(C, packed)]
+#[repr(C)]
+#[derive(ByteSwap)]
 struct LinkEditDataCommand {
     command: u32,
     command_size: u32,
@@ -345,7 +422,8 @@ struct LinkEditDataCommand {
     data_size: u32,
 }
 
-#[repr(C, packed)]
+#[repr(C)]
+#[derive(ByteSwap)]
 struct DyldChainedFixupsHeader {
     fixups_version: u32, // 0
     starts_offset: u32,  // offset of DyldChainedStartsInImage in bytes, relative to start of this structure
@@ -390,13 +468,19 @@ macro_rules! nearest_multiple_of_rt {
 impl MachOEncoder {
     pub fn new() -> Self { Self::default() }
 
-    fn alloc<T>(&mut self) -> Ref<T> {
+    fn alloc<T: ByteSwap>(&mut self) -> Ref<T> {
         let reff = Ref::new(self.data.len());
         self.pad_with_zeroes(mem::size_of::<T>());
         reff
     }
 
-    fn alloc_cmd<T>(&mut self) -> Ref<T> {
+    fn alloc_be<T: ByteSwap>(&mut self) -> Ref<T, true> {
+        let reff = Ref::new(self.data.len());
+        self.pad_with_zeroes(mem::size_of::<T>());
+        reff
+    }
+
+    fn alloc_cmd<T: ByteSwap>(&mut self) -> Ref<T> {
         self.num_load_commands += 1;
         self.alloc()
     }
@@ -446,24 +530,23 @@ impl MachOEncoder {
         pos
     }
 
-    #[allow(unused)]
-    fn get<T>(&self, addr: Ref<T>) -> &T {
-        debug_assert!(addr.addr + mem::size_of::<T>() <= self.data.len());
-        let (head, body, _tail) = unsafe { self.data[addr.addr..].align_to::<T>() };
-        assert!(head.is_empty(), "unaligned data");
-        &body[0]
-    }
-
-    fn get_mut<T>(&mut self, addr: Ref<T>) -> &mut T {
+    fn get_mut<'a, T: ByteSwap, const BIG_ENDIAN: bool>(&'a mut self, addr: Ref<T, BIG_ENDIAN>) -> ResolvedRefMut<'a, T, BIG_ENDIAN> {
         debug_assert!(addr.addr + mem::size_of::<T>() <= self.data.len());
         let (head, body, _tail) = unsafe { self.data[addr.addr..].align_to_mut::<T>() };
         assert!(head.is_empty(), "unaligned data");
-        &mut body[0]
+        ResolvedRefMut { value: &mut body[0] }
     }
 
-    fn push<T>(&mut self, value: T) {
+    fn push<T: ByteSwap>(&mut self, value: T) {
         let addr = self.alloc();
-        *self.get_mut(addr) = value;
+        self.get_mut(addr).set(
+            value);
+    }
+
+    fn push_be<T: ByteSwap>(&mut self, value: T) {
+        let addr = self.alloc_be();
+        self.get_mut(addr).set(
+            value);
     }
 
     fn pos(&self) -> usize { self.data.len() }
@@ -578,15 +661,17 @@ impl MachOEncoder {
 
         self.pad_to_next_boundary::<8>();
         
-        *self.get_mut(chained_fixups_header) = DyldChainedFixupsHeader {
-            fixups_version: 0,
-            starts_offset: chained_starts_offset as u32,
-            imports_offset: imports_offset as u32,
-            symbols_offset: import_symbols_offset as u32,
-            imports_count,
-            imports_format: DYLD_CHAINED_IMPORT,
-            symbols_format: 0, // uncompressed
-        };
+        self.get_mut(chained_fixups_header).set(
+            DyldChainedFixupsHeader {
+                fixups_version: 0,
+                starts_offset: chained_starts_offset as u32,
+                imports_offset: imports_offset as u32,
+                symbols_offset: import_symbols_offset as u32,
+                imports_count,
+                imports_format: DYLD_CHAINED_IMPORT,
+                symbols_format: 0, // uncompressed
+            }
+        );
 
         let chained_fixups_data_size = self.pos() - chained_fixups_header.start();
 
@@ -615,196 +700,237 @@ impl MachOEncoder {
         self.pad_to_next_boundary::<8>();
         let string_table_len = self.pos() - string_table_begin;
 
-        *self.get_mut(mh_execute_header_entry) = SymbolTableEntry {
-            string_table_offset: (mh_execute_header_str_offset - string_table_begin) as u32,
-            ty: 0x0F,
-            section_number: 1,
-            desc: 0x0010,
-            value: text_addr,
-        };
-        *self.get_mut(main_entry) = SymbolTableEntry {
-            string_table_offset: (main_str_offset - string_table_begin) as u32,
-            ty: 0x0F,
-            section_number: 1,
-            desc: 0x0000,
-            value: text_sections_addr,
-        };
+        self.get_mut(mh_execute_header_entry).set(
+            SymbolTableEntry {
+                string_table_offset: (mh_execute_header_str_offset - string_table_begin) as u32,
+                ty: 0x0F,
+                section_number: 1,
+                desc: 0x0010,
+                value: text_addr,
+            }
+        );
+        self.get_mut(main_entry).set(
+            SymbolTableEntry {
+                string_table_offset: (main_str_offset - string_table_begin) as u32,
+                ty: 0x0F,
+                section_number: 1,
+                desc: 0x0000,
+                value: text_sections_addr,
+            }
+        );
 
         let link_edit_end = self.pos();
+        let num_commands = self.num_load_commands;
+        self.get_mut(mach_header).set(
+            MachHeader {
+                magic: MH_MAGIC_64,
+                cpu_type: CPU_TYPE_ARM64,
+                cpu_subtype: CPU_SUBTYPE_ARM64_ALL,
+                file_type: MH_EXECUTE,
 
-        *self.get_mut(mach_header) = MachHeader {
-            magic: MH_MAGIC_64,
-            cpu_type: CPU_TYPE_ARM64,
-            cpu_subtype: CPU_SUBTYPE_ARM64_ALL,
-            file_type: MH_EXECUTE,
+                num_commands,
+                size_of_commands: (lc_end - lc_begin) as u32,
 
-            num_commands: self.num_load_commands,
-            size_of_commands: (lc_end - lc_begin) as u32,
+                flags: MH_NOUNDEFS | MH_DYLDLINK | MH_TWOLEVEL | MH_PIE,
+                reserved: 0,
+            }
+        );
+        self.get_mut(page_zero.header).set(
+            LcSegment64 {
+                command: LC_SEGMENT_64,
+                command_size: page_zero.size(),
+                name: encode_string_16("__PAGEZERO"),
+                vm_addr: 0,
+                vm_size: text_addr,
+                file_offset: 0,
+                file_size: 0,
+                max_vm_protection: VM_PROT_NONE,
+                initial_vm_protection: VM_PROT_NONE,
+                num_sections: page_zero.sections.len() as u32,
+                flags: 0,
+            }
+        );
+        self.get_mut(text_segment.header).set(
+            LcSegment64 {
+                command: LC_SEGMENT_64,
+                command_size: text_segment.size(),
+                name: encode_string_16("__TEXT"),
+                vm_addr: text_addr,
+                vm_size: text_segment_size,
+                file_offset: 0,
+                file_size: text_segment_size,
+                max_vm_protection: VM_PROT_READ | VM_PROT_EXECUTE,
+                initial_vm_protection: VM_PROT_READ | VM_PROT_EXECUTE,
+                num_sections: text_segment.sections.len() as u32,
+                flags: 0,
+            }
+        );
+        self.get_mut(text_section).set(
+            Section64 {
+                name: encode_string_16("__text"),
+                segment_name: encode_string_16("__TEXT"),
+                vm_addr: text_sections_addr,
+                vm_size: text_sections_size,
+                file_offset: (text_sections_addr - text_addr) as u32,
+                alignment: 2, // stored as log base 2, so this is actually 4
+                relocations_file_offset: 0,
+                num_relocations: 0,
+                flags: SectionFlags::new(SectionType::Regular, S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS),
+                reserved: [0; 3],
+            }
+        );
+        self.get_mut(link_edit_segment.header).set(
+            LcSegment64 {
+                command: LC_SEGMENT_64,
+                command_size: link_edit_segment.size(),
+                name: encode_string_16("__LINKEDIT"),
+                vm_addr: text_end_addr,
+                vm_size: PAGE_SIZE, // TODO: increase this size if needed
+                file_offset: link_edit_begin as u64,
+                file_size: (link_edit_end - link_edit_begin) as u64,
+                max_vm_protection: VM_PROT_READ,
+                initial_vm_protection: VM_PROT_READ,
+                num_sections: 0,
+                flags: 0,
+            }
+        );
+        self.get_mut(chained_fixups).set(
+            LinkEditDataCommand {
+                command: LC_DYLD_CHAINED_FIXUPS,
+                command_size: chained_fixups.size() as u32,
+                data_offset: chained_fixups_header.start() as u32,
+                data_size: chained_fixups_data_size as u32,
+            }
+        );
+        self.get_mut(exports_trie).set(
+            LinkEditDataCommand {
+                command: LC_DYLD_EXPORTS_TRIE,
+                command_size: exports_trie.size() as u32,
+                data_offset: exports_trie_start as u32,
+                data_size: exports_trie_len as u32,
+            }
+        );
+        self.get_mut(function_starts).set(
+            LinkEditDataCommand {
+                command: LC_FUNCTION_STARTS,
+                command_size: function_starts.size() as u32,
+                data_offset: function_starts_start as u32,
+                data_size: function_starts_len as u32,
+            }
+        );
+        self.get_mut(data_in_code).set(
+            LinkEditDataCommand {
+                command: LC_DATA_IN_CODE,
+                command_size: data_in_code.size() as u32,
+                data_offset: data_in_code_start as u32,
+                data_size: data_in_code_len as u32,
+            }
+        );
+        self.get_mut(build_version).set(
+            BuildVersionCommand {
+                command: LC_BUILD_VERSION,
+                command_size: build_version_len as u32,
+                platform: PlatformEnum::MacOs as u32,
+                min_os: 13 << 16, // 13.0
+                sdk: (13 << 16) | (1 << 8), // 13.1
+                num_tools: 1,
+            }
+        );
+        self.get_mut(ld_tool).set(
+            BuildToolVersion {
+                tool: ToolEnum::Ld as u32,
+                version: (820 << 16) | (1 << 8),
+            }
+        );
+        self.get_mut(src_version).set(
+            SourceVersionCommand {
+                command: LC_SOURCE_VERSION,
+                command_size: src_version.size() as u32,
+                version: 0,
+            }
+        );
+        self.get_mut(load_lib_system.header).set(
+            DylibCommand {
+                command: LC_LOAD_DYLIB,
+                command_size: load_lib_system.size(),
+                dylib: Dylib {
+                    name_offset: 0x18,
+                    timestamp: 2,
+                    current_version: 0x05_27_0000,
+                    compatibility_version: 0x00_01_0000,
+                },
+            }
+        );
+        let num_symbols = self.num_symbol_table_entries;
+        self.get_mut(symbol_table).set(
+            SymbolTableCommand {
+                command: LC_SYMTAB,
+                command_size: symbol_table.size() as u32,
+                symbol_table_offset: symbol_table_begin as u32,
+                num_symbols,
+                string_table_offset: string_table_begin as u32,
+                string_table_size: string_table_len as u32,
+            }
+        );
+        self.get_mut(dynamic_symbol_table).set(
+            DynamicSymbolTableCommand {
+                command: LC_DYSYMTAB,
+                command_size: dynamic_symbol_table.size() as u32,
 
-            flags: MH_NOUNDEFS | MH_DYLDLINK | MH_TWOLEVEL | MH_PIE,
-            reserved: 0,
-        };
-        *self.get_mut(page_zero.header) = LcSegment64 {
-            command: LC_SEGMENT_64,
-            command_size: page_zero.size(),
-            name: encode_string_16("__PAGEZERO"),
-            vm_addr: 0,
-            vm_size: text_addr,
-            file_offset: 0,
-            file_size: 0,
-            max_vm_protection: VM_PROT_NONE,
-            initial_vm_protection: VM_PROT_NONE,
-            num_sections: page_zero.sections.len() as u32,
-            flags: 0,
-        };
-        *self.get_mut(text_segment.header) = LcSegment64 {
-            command: LC_SEGMENT_64,
-            command_size: text_segment.size(),
-            name: encode_string_16("__TEXT"),
-            vm_addr: text_addr,
-            vm_size: text_segment_size,
-            file_offset: 0,
-            file_size: text_segment_size,
-            max_vm_protection: VM_PROT_READ | VM_PROT_EXECUTE,
-            initial_vm_protection: VM_PROT_READ | VM_PROT_EXECUTE,
-            num_sections: text_segment.sections.len() as u32,
-            flags: 0,
-        };
-        *self.get_mut(text_section) = Section64 {
-            name: encode_string_16("__text"),
-            segment_name: encode_string_16("__TEXT"),
-            vm_addr: text_sections_addr,
-            vm_size: text_sections_size,
-            file_offset: (text_sections_addr - text_addr) as u32,
-            alignment: 2, // stored as log base 2, so this is actually 4
-            relocations_file_offset: 0,
-            num_relocations: 0,
-            flags: SectionFlags::new(SectionType::Regular, S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS),
-            reserved: [0; 3],
-        };
-        *self.get_mut(link_edit_segment.header) = LcSegment64 {
-            command: LC_SEGMENT_64,
-            command_size: link_edit_segment.size(),
-            name: encode_string_16("__LINKEDIT"),
-            vm_addr: text_end_addr,
-            vm_size: PAGE_SIZE, // TODO: increase this size if needed
-            file_offset: link_edit_begin as u64,
-            file_size: (link_edit_end - link_edit_begin) as u64,
-            max_vm_protection: VM_PROT_READ,
-            initial_vm_protection: VM_PROT_READ,
-            num_sections: 0,
-            flags: 0,
-        };
-        *self.get_mut(chained_fixups) = LinkEditDataCommand {
-            command: LC_DYLD_CHAINED_FIXUPS,
-            command_size: chained_fixups.size() as u32,
-            data_offset: chained_fixups_header.start() as u32,
-            data_size: chained_fixups_data_size as u32,
-        };
-        *self.get_mut(exports_trie) = LinkEditDataCommand {
-            command: LC_DYLD_EXPORTS_TRIE,
-            command_size: exports_trie.size() as u32,
-            data_offset: exports_trie_start as u32,
-            data_size: exports_trie_len as u32,
-        };
-        *self.get_mut(function_starts) = LinkEditDataCommand {
-            command: LC_FUNCTION_STARTS,
-            command_size: function_starts.size() as u32,
-            data_offset: function_starts_start as u32,
-            data_size: function_starts_len as u32,
-        };
-        *self.get_mut(data_in_code) = LinkEditDataCommand {
-            command: LC_DATA_IN_CODE,
-            command_size: data_in_code.size() as u32,
-            data_offset: data_in_code_start as u32,
-            data_size: data_in_code_len as u32,
-        };
-        *self.get_mut(build_version) = BuildVersionCommand {
-            command: LC_BUILD_VERSION,
-            command_size: build_version_len as u32,
-            platform: Platform::MacOs,
-            min_os: 13 << 16, // 13.0
-            sdk: (13 << 16) | (1 << 8), // 13.1
-            num_tools: 1,
-        };
-        *self.get_mut(ld_tool) = BuildToolVersion {
-            tool: Tool::Ld,
-            version: (820 << 16) | (1 << 8),
-        };
-        *self.get_mut(src_version) = SourceVersionCommand {
-            command: LC_SOURCE_VERSION,
-            command_size: src_version.size() as u32,
-            version: 0,
-        };
-        *self.get_mut(load_lib_system.header) = DylibCommand {
-            command: LC_LOAD_DYLIB,
-            command_size: load_lib_system.size(),
-            dylib: Dylib {
-                name_offset: 0x18,
-                timestamp: 2,
-                current_version: 0x05_27_0000,
-                compatibility_version: 0x00_01_0000,
-            },
-        };
-        *self.get_mut(symbol_table) = SymbolTableCommand {
-            command: LC_SYMTAB,
-            command_size: symbol_table.size() as u32,
-            symbol_table_offset: symbol_table_begin as u32,
-            num_symbols: self.num_symbol_table_entries,
-            string_table_offset: string_table_begin as u32,
-            string_table_size: string_table_len as u32,
-        };
-        *self.get_mut(dynamic_symbol_table) = DynamicSymbolTableCommand {
-            command: LC_DYSYMTAB,
-            command_size: dynamic_symbol_table.size() as u32,
+                local_symbols_index: 0,
+                num_local_symbols: 0,
 
-            local_symbols_index: 0,
-            num_local_symbols: 0,
+                extern_symbols_index: 0,
+                num_extern_symbols: 2,
 
-            extern_symbols_index: 0,
-            num_extern_symbols: 2,
+                undef_symbols_index: 2,
+                num_undef_symbols: 0,
 
-            undef_symbols_index: 2,
-            num_undef_symbols: 0,
+                toc_offset: 0,
+                num_toc_entries: 0,
 
-            toc_offset: 0,
-            num_toc_entries: 0,
+                module_table_offset: 0,
+                num_module_table_entries: 0,
 
-            module_table_offset: 0,
-            num_module_table_entries: 0,
+                referenced_symbol_table_offset: 0,
+                num_referenced_symbol_table_entries: 0,
 
-            referenced_symbol_table_offset: 0,
-            num_referenced_symbol_table_entries: 0,
+                indirect_symbol_table_offset: 0,
+                num_indirect_symbol_table_entries: 0,
 
-            indirect_symbol_table_offset: 0,
-            num_indirect_symbol_table_entries: 0,
+                extern_relocation_entries_offset: 0,
+                num_extern_relocation_entries: 0,
 
-            extern_relocation_entries_offset: 0,
-            num_extern_relocation_entries: 0,
-
-            local_relocation_entries_offset: 0,
-            num_local_relocation_entries: 0,
-        };
-        *self.get_mut(load_dylinker) = DylinkerCommand {
-            command: LC_LOAD_DYLINKER,
-            command_size: load_dylinker_size as u32,
-            name_offset: load_dylinker.size() as u32,
-        };
-        *self.get_mut(entry_point) = EntryPointCommand {
-            command: LC_MAIN,
-            command_size: entry_point.size() as u32,
-            entry_point_file_offset: text_sections_addr - text_addr,
-            stack_size: 0,
-        };
-        *self.get_mut(uuid) = UuidCommand {
-            command: LC_UUID,
-            command_size: uuid.size() as u32,
-            uuid: [0; 16], // to be filled in later.
-        };
+                local_relocation_entries_offset: 0,
+                num_local_relocation_entries: 0,
+            }
+        );
+        self.get_mut(load_dylinker).set(
+            DylinkerCommand {
+                command: LC_LOAD_DYLINKER,
+                command_size: load_dylinker_size as u32,
+                name_offset: load_dylinker.size() as u32,
+            }
+        );
+        self.get_mut(entry_point).set(
+            EntryPointCommand {
+                command: LC_MAIN,
+                command_size: entry_point.size() as u32,
+                entry_point_file_offset: text_sections_addr - text_addr,
+                stack_size: 0,
+            }
+        );
+        self.get_mut(uuid).set(
+            UuidCommand {
+                command: LC_UUID,
+                command_size: uuid.size() as u32,
+                uuid: [0; 16], // to be filled in later.
+            }
+        );
 
         let mut hasher = Md5::new();
         hasher.update(&self.data);
-        self.get_mut(uuid).uuid = hasher.finalize().into();
+        self.get_mut(uuid).map(|uuid| &mut uuid.uuid).set(hasher.finalize().into());
 
         dest.write_all(&self.data)?;
 
