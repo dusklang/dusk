@@ -1,10 +1,14 @@
 #![allow(unused)]
 
+use core::num;
 use std::io::{self, Write};
 use std::marker::PhantomData;
 use std::mem;
 
-use md5::{Md5, Digest};
+use md5::{Md5, Digest as Md5Digest};
+use crypto::digest::Digest;
+use crypto::sha2::Sha256;
+
 use dusk_proc_macros::ByteSwap;
 
 trait ByteSwap {
@@ -69,6 +73,7 @@ const LC_LOAD_DYLINKER: u32 = 0x0000_000E;
 
 const LC_SEGMENT_64: u32 = 0x0000_0019;
 const LC_UUID: u32 = 0x0000_001B;
+const LC_CODE_SIGNATURE: u32 = 0x0000_001D;
 const LC_FUNCTION_STARTS: u32 = 0x0000_0026;
 const LC_DATA_IN_CODE: u32 = 0x0000_0029;
 const LC_SOURCE_VERSION: u32 = 0x0000_002A;
@@ -95,6 +100,16 @@ const S_ATTR_DEBUG:               u32 = 0x0200_0000;
 const S_ATTR_SOME_INSTRUCTIONS:   u32 = 0x0000_0400;
 const S_ATTR_EXT_RELOC:           u32 = 0x0000_0200;
 const S_ATTR_LOC_RELOC:           u32 = 0x0000_0100;
+
+const CSMAGIC_REQUIREMENT: u32 = 0xFADE_0C00;
+const CSMAGIC_REQUIREMENTS: u32 = 0xFADE_0C01;
+const CSMAGIC_CODEDIRECTORY: u32 = 0xFADE_0C02;
+const CSMAGIC_EMBEDDED_SIGNATURE: u32 = 0xFADE_0CC0;
+const CSMAGIC_DETACHED_SIGNATURE: u32 = 0xFADE_0CC1;
+const CSSLOT_CODEDIRECTORY: u32 = 0;
+
+const CD_HASH_TYPE_SHA1: u8 = 1;
+const CD_HASH_TYPE_SHA256: u8 = 2;
 
 struct Ref<T: ByteSwap, const BIG_ENDIAN: bool = false> {
     addr: usize,
@@ -434,6 +449,40 @@ struct DyldChainedFixupsHeader {
     symbols_format: u32, // 0 => uncompressed, 1 => zlib compressed
 }
 
+#[repr(C)]
+#[derive(ByteSwap)]
+struct SuperBlobHeader {
+    magic: u32,
+    length: u32,
+    count: u32,
+}
+
+#[repr(C)]
+#[derive(ByteSwap)]
+struct BlobIndex {
+    ty: u32,
+    offset: u32,
+}
+
+#[repr(C)]
+#[derive(ByteSwap)]
+struct CodeDirectory {
+    magic: u32,
+    length: u32,
+    version: u32,
+    flags: u32,
+    hash_offset: u32,
+    ident_offset: u32,
+    num_special_slots: u32,
+    num_code_slots: u32,
+    code_limit: u32,
+    hash_size: u8,
+    hash_type: u8,
+    spare_1: u8,
+    page_size: u8,
+    spare_2: u32,
+}
+
 const fn is_power_of_2(num: u64) -> bool {
     if num == 0 { return false; }
     let mut i = 0u64;
@@ -612,6 +661,8 @@ impl MachOEncoder {
 
         let data_in_code = self.alloc_cmd::<LinkEditDataCommand>();
 
+        let code_signature = self.alloc_cmd::<LinkEditDataCommand>();
+
         let lc_end = self.pos();
 
         let mut code = Arm64Encoder::new();
@@ -699,6 +750,42 @@ impl MachOEncoder {
         let main_str_offset = self.push_null_terminated_string("_main");
         self.pad_to_next_boundary::<8>();
         let string_table_len = self.pos() - string_table_begin;
+
+        self.pad_to_next_boundary::<16>();
+
+        let code_signature_start = self.pos();
+        let super_blob = self.alloc_be::<SuperBlobHeader>();
+
+        let mut blob_indices = Vec::new();
+
+        let code_directory_index = self.alloc_be::<BlobIndex>();
+
+        let code_directory_offset = self.pos() - code_signature_start;
+        self.get_mut(code_directory_index).set(
+            BlobIndex {
+                ty: 0,
+                offset: code_directory_offset as u32,
+            }
+        );
+        blob_indices.push(code_directory_index);
+
+        let code_directory = self.alloc_be::<CodeDirectory>();
+
+        // I have no idea what the following 4 values mean. They're taken from a sample file compiled with Clang.
+        self.pad_with_zeroes(32);
+        self.push_be(0x4000u32);
+        self.push_be(0u32);
+        self.push_be(1u32);
+
+        let ident_offset = self.pos() - code_directory.start();
+        self.push_null_terminated_string("a.out");
+
+        // TODO: alignment?
+        let hash_offset = self.pos() - code_directory.start();
+
+        let num_code_slots = code_signature_start / 4096 + if code_signature_start % 4096 == 0 { 0 } else { 1 };
+        let code_slots_len = num_code_slots * 32;
+        let code_signature_len = self.pos() + code_slots_len - code_signature_start;
 
         self.get_mut(mh_execute_header_entry).set(
             SymbolTableEntry {
@@ -826,6 +913,14 @@ impl MachOEncoder {
                 data_size: data_in_code_len as u32,
             }
         );
+        self.get_mut(code_signature).set(
+            LinkEditDataCommand {
+                command: LC_CODE_SIGNATURE,
+                command_size: code_signature.size() as u32,
+                data_offset: code_signature_start as u32,
+                data_size: code_signature_len as u32,
+            }
+        );
         self.get_mut(build_version).set(
             BuildVersionCommand {
                 command: LC_BUILD_VERSION,
@@ -861,6 +956,7 @@ impl MachOEncoder {
                 },
             }
         );
+        
         let num_symbols = self.num_symbol_table_entries;
         self.get_mut(symbol_table).set(
             SymbolTableCommand {
@@ -929,8 +1025,58 @@ impl MachOEncoder {
         );
 
         let mut hasher = Md5::new();
-        hasher.update(&self.data);
+        hasher.update(&self.data[..code_signature_start]);
         self.get_mut(uuid).map(|uuid| &mut uuid.uuid).set(hasher.finalize().into());
+
+        let mut sha256 = Sha256::new();
+        let mut i = 0;
+        let mut hash_buf = [0; 32];
+        let mut num_code_slots = 0;
+        while i < code_signature_start {
+            sha256.reset();
+            if code_signature_start - i < 4096 {
+                let mut buffer = [0u8; 4096];
+                buffer[..(self.data.len() - code_directory.start())].copy_from_slice(&self.data[code_directory.start()..]);
+                sha256.input(&buffer);
+            } else {
+                sha256.input(&self.data[i..(i + 4096)]);
+            }
+            sha256.result(&mut hash_buf);
+            self.push(hash_buf);
+            num_code_slots += 1;
+            i += 4096;
+        }
+
+        let code_directory_len = self.pos() - code_directory.start();
+        let real_code_signature_len = self.pos() - code_signature_start;
+        assert_eq!(real_code_signature_len, code_signature_len);
+
+        self.get_mut(code_directory).set(
+            CodeDirectory {
+                magic: CSMAGIC_CODEDIRECTORY,
+                length: code_directory_len as u32,
+                version: (2 << 16) | (4 << 8),
+                flags: 0x0002_0002,
+                hash_offset: hash_offset as u32,
+                ident_offset: ident_offset as u32,
+                num_special_slots: 0,
+                num_code_slots,
+                code_limit: code_signature_start as u32,
+                hash_size: 32, // copied from a sample file compiled with clang
+                hash_type: CD_HASH_TYPE_SHA256,
+                spare_1: 0,
+                page_size: 12, // 2^12 = 4096
+                spare_2: 0,
+            }
+        );
+
+        self.get_mut(super_blob).set(
+            SuperBlobHeader {
+                magic: CSMAGIC_EMBEDDED_SIGNATURE,
+                length: code_signature_len as u32,
+                count: blob_indices.len() as u32,
+            }
+        );
 
         dest.write_all(&self.data)?;
 
