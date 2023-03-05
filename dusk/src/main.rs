@@ -178,7 +178,7 @@ fn dusk_main(opt: Opt, #[allow(unused)] program_args: &[OsString]) {
         let file = File::create("a.out").unwrap();
         let mut permissions = file.metadata().unwrap().permissions();
         #[cfg(unix)] {
-            permissions.set_mode(0o777);
+            permissions.set_mode(0o755);
         }
         file.set_permissions(permissions).unwrap();
         let mut w = BufWriter::new(file);

@@ -478,9 +478,16 @@ struct CodeDirectory {
     code_limit: u32,
     hash_size: u8,
     hash_type: u8,
-    spare_1: u8,
+    platform: u8,
     page_size: u8,
     spare_2: u32,
+    scatter_offset: u32,
+    team_offset: u32,
+    spare_3: u32,
+    code_limit_64: u64,
+    exec_seg_base: u64,
+    exec_seg_limit: u64,
+    exec_seg_flags: u64,
 }
 
 const fn is_power_of_2(num: u64) -> bool {
@@ -581,9 +588,12 @@ impl MachOEncoder {
 
     fn get_mut<'a, T: ByteSwap, const BIG_ENDIAN: bool>(&'a mut self, addr: Ref<T, BIG_ENDIAN>) -> ResolvedRefMut<'a, T, BIG_ENDIAN> {
         debug_assert!(addr.addr + mem::size_of::<T>() <= self.data.len());
-        let (head, body, _tail) = unsafe { self.data[addr.addr..].align_to_mut::<T>() };
-        assert!(head.is_empty(), "unaligned data");
-        ResolvedRefMut { value: &mut body[0] }
+
+        // TODO: don't produce a &mut T at all. I didn't think we would need to support unaligned access, but we do.
+        let region = &mut self.data[addr.addr..];
+        let ptr = region.as_mut_ptr() as *mut T;
+
+        ResolvedRefMut { value: unsafe { &mut *ptr } }
     }
 
     fn push<T: ByteSwap>(&mut self, value: T) {
@@ -771,12 +781,6 @@ impl MachOEncoder {
 
         let code_directory = self.alloc_be::<CodeDirectory>();
 
-        // I have no idea what the following 4 values mean. They're taken from a sample file compiled with Clang.
-        self.pad_with_zeroes(32);
-        self.push_be(0x4000u32);
-        self.push_be(0u32);
-        self.push_be(1u32);
-
         let ident_offset = self.pos() - code_directory.start();
         self.push_null_terminated_string("a.out");
 
@@ -790,7 +794,7 @@ impl MachOEncoder {
         self.get_mut(mh_execute_header_entry).set(
             SymbolTableEntry {
                 string_table_offset: (mh_execute_header_str_offset - string_table_begin) as u32,
-                ty: 0x0F,
+                ty: 0x1E,
                 section_number: 1,
                 desc: 0x0010,
                 value: text_addr,
@@ -799,7 +803,7 @@ impl MachOEncoder {
         self.get_mut(main_entry).set(
             SymbolTableEntry {
                 string_table_offset: (main_str_offset - string_table_begin) as u32,
-                ty: 0x0F,
+                ty: 0x1E,
                 section_number: 1,
                 desc: 0x0000,
                 value: text_sections_addr,
@@ -1035,9 +1039,7 @@ impl MachOEncoder {
         while i < code_signature_start {
             sha256.reset();
             if code_signature_start - i < 4096 {
-                let mut buffer = [0u8; 4096];
-                buffer[..(self.data.len() - code_directory.start())].copy_from_slice(&self.data[code_directory.start()..]);
-                sha256.input(&buffer);
+                sha256.input(&self.data[i..code_signature_start]);
             } else {
                 sha256.input(&self.data[i..(i + 4096)]);
             }
@@ -1064,9 +1066,16 @@ impl MachOEncoder {
                 code_limit: code_signature_start as u32,
                 hash_size: 32, // copied from a sample file compiled with clang
                 hash_type: CD_HASH_TYPE_SHA256,
-                spare_1: 0,
+                platform: 0,
                 page_size: 12, // 2^12 = 4096
                 spare_2: 0,
+                scatter_offset: 0,
+                team_offset: 0,
+                spare_3: 0,
+                code_limit_64: 0,
+                exec_seg_base: 0,
+                exec_seg_limit: 0x4000,
+                exec_seg_flags: 1,
             }
         );
 
