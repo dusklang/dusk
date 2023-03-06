@@ -175,7 +175,9 @@ fn dusk_main(opt: Opt, #[allow(unused)] program_args: &[OsString]) {
         });
     if let Some(_main) = main {
         driver.read().diag.print_warnings();
-        let file = File::create("a.out").unwrap();
+        let path = "a.out";
+        _ = std::fs::remove_file(path);
+        let file = File::create(path).unwrap();
         let mut permissions = file.metadata().unwrap().permissions();
         #[cfg(unix)] {
             permissions.set_mode(0o755);

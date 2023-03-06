@@ -618,7 +618,7 @@ impl MachOEncoder {
         let padded_pos = nearest_multiple_of_rt!(self.data.len() as u64, B);
         self.pad_with_zeroes(padded_pos as usize - self.pos());
     }
-
+    
     fn push_uleb128(&mut self, mut value: u32) {
         loop {
             let mut next_byte = (value & 0x7F) as u8;
@@ -627,75 +627,86 @@ impl MachOEncoder {
                 next_byte |= 0x80;
             }
             self.push(next_byte);
-
+            
             if value == 0 { break; }
         }
     }
-
+    
     pub fn write(&mut self, dest: &mut impl Write) -> io::Result<()> {
         let mach_header = self.alloc::<MachHeader>();
-
+        
         let lc_begin = self.pos();
-
+        
         let page_zero = self.alloc_segment();
-
+        
         let mut text_segment = self.alloc_segment();
         let text_section = self.alloc_section(&mut text_segment);
-
+        let unwind_info_section = self.alloc_section(&mut text_segment);
+        
         let link_edit_segment = self.alloc_segment();
 
         let chained_fixups = self.alloc_cmd::<LinkEditDataCommand>();
         let exports_trie = self.alloc_cmd::<LinkEditDataCommand>();
-
+        
         let symbol_table = self.alloc_cmd::<SymbolTableCommand>();
         let dynamic_symbol_table = self.alloc_cmd::<DynamicSymbolTableCommand>();
-
+        
         let load_dylinker = self.alloc_cmd::<DylinkerCommand>();
         self.push_null_terminated_string("/usr/lib/dyld");
         self.pad_to_next_boundary::<8>();
         let load_dylinker_size = self.pos() - load_dylinker.addr;
-
-        let uuid = self.alloc_cmd::<UuidCommand>();
-
+        
+        // let uuid = self.alloc_cmd::<UuidCommand>();
+        
         let build_version = self.alloc_cmd::<BuildVersionCommand>();
         let ld_tool = self.alloc::<BuildToolVersion>();
         let build_version_len = self.pos() - build_version.addr;
-
+        
         let src_version = self.alloc_cmd::<SourceVersionCommand>();
-
+        
         let entry_point = self.alloc_cmd::<EntryPointCommand>();
-
+        
         let load_lib_system = self.alloc_dylib_command("/usr/lib/libSystem.B.dylib");
-
+        
         let function_starts = self.alloc_cmd::<LinkEditDataCommand>();
-
+        
         let data_in_code = self.alloc_cmd::<LinkEditDataCommand>();
-
+        
         let code_signature = self.alloc_cmd::<LinkEditDataCommand>();
-
+        
         let lc_end = self.pos();
-
+        
         let mut code = Arm64Encoder::new();
+        code.sub64_imm(false, Reg::SP, Reg::SP, 16);
+        code.str32(Reg::ZERO, Reg::SP, 12);
         // TODO: this should actually be a 32-bit move, if we supported that. Not that it matters in this case.
-        code.movz64(Reg::R0, 1, 0);
-        code.ret(Reg::R0);
+        code.movz64(Reg::R0, 56, 0);
+        code.add64_imm(false, Reg::SP, Reg::SP, 16);
+        code.ret(Reg::LR);
         let code = code.get_bytes();
-
-        let text_sections_size: u64 = code.len() as u64;
-
+        
+        let mut unwind_info: [u8; 72] = [0x01, 0x00, 0x00, 0x00, 0x1C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1C, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0xA4, 0x3F, 0x00, 0x00, 0x34, 0x00, 0x00, 0x00, 0x34, 0x00, 0x00, 0x00, 0xB9, 0x3F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x34, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x0C, 0x00, 0x01, 0x00, 0x10, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x02];
+        
+        let text_sections_size: u64 = (code.len() + unwind_info.len()) as u64;
+        
         const PAGE_SIZE: u64 = 0x4000;
-
+        
         let text_addr: u64 = 0x0000_0001_0000_0000;
         let text_end_addr = nearest_multiple_of!(text_addr + lc_end as u64 + text_sections_size, PAGE_SIZE);
         let text_sections_addr = text_end_addr - text_sections_size;
+        
+        let text_section_addr = text_sections_addr;
+        let unwind_info_section_addr = text_sections_addr + code.len() as u64;
+        
         let text_segment_size = text_end_addr - text_addr;
-
+        
         let padding_size = text_sections_addr - text_addr - lc_end as u64;
         self.pad_with_zeroes(padding_size as usize);
         self.data.extend(&code);
-
+        self.data.extend(&unwind_info);
+        
         let link_edit_begin = self.pos();
-
+        
         let chained_fixups_header = self.alloc::<DyldChainedFixupsHeader>();
         self.pad_to_next_boundary::<8>();
         // Push dyld_chained_starts_in_image (a dynamically-sized structure)
@@ -706,9 +717,9 @@ impl MachOEncoder {
             // than 4 + 4 * num_segments invalid, thus 0 should indicate "no starts for this page"
             self.push(0 as u32); 
         }
-
+        
         let imports_count = 0;
-
+        
         let imports_offset = self.pos() - chained_fixups_header.start();
         // TODO: create a bitfield data structure for the `dyld_chained_import` struct
         self.push(0 as u32);
@@ -719,7 +730,7 @@ impl MachOEncoder {
             self.pos() - chained_fixups_header.start()
         };
         // TODO: add symbols
-
+        
         self.pad_to_next_boundary::<8>();
         
         self.get_mut(chained_fixups_header).set(
@@ -733,43 +744,43 @@ impl MachOEncoder {
                 symbols_format: 0, // uncompressed
             }
         );
-
+        
         let chained_fixups_data_size = self.pos() - chained_fixups_header.start();
-
+        
         let exports_trie_start = self.pos();
         self.pad_with_zeroes(8);
         let exports_trie_len = self.pos() - exports_trie_start;
-
+        
         let function_starts_start = self.pos();
         // offset to first function, relative to the beginning of the __TEXT segment.
         // subsequent functions would be specified relative to the previous one in the list.
         self.push_uleb128((text_sections_addr - text_addr) as u32);
         self.pad_to_next_boundary::<8>();
         let function_starts_len = self.pos() - function_starts_start;
-
+        
         let data_in_code_start = self.pos();
         let data_in_code_len = self.pos() - data_in_code_start;
-
+        
         let symbol_table_begin = self.pos();
         let mh_execute_header_entry = self.alloc_symbol_table_entry();
         let main_entry = self.alloc_symbol_table_entry();
-
+        
         let string_table_begin = self.pos();
         self.push_null_terminated_string(" ");
         let mh_execute_header_str_offset = self.push_null_terminated_string("__mh_execute_header");
         let main_str_offset = self.push_null_terminated_string("_main");
         self.pad_to_next_boundary::<8>();
         let string_table_len = self.pos() - string_table_begin;
-
+        
         self.pad_to_next_boundary::<16>();
-
+        
         let code_signature_start = self.pos();
         let super_blob = self.alloc_be::<SuperBlobHeader>();
-
+        
         let mut blob_indices = Vec::new();
-
+        
         let code_directory_index = self.alloc_be::<BlobIndex>();
-
+        
         let code_directory_offset = self.pos() - code_signature_start;
         self.get_mut(code_directory_index).set(
             BlobIndex {
@@ -778,19 +789,19 @@ impl MachOEncoder {
             }
         );
         blob_indices.push(code_directory_index);
-
+        
         let code_directory = self.alloc_be::<CodeDirectory>();
-
+        
         let ident_offset = self.pos() - code_directory.start();
         self.push_null_terminated_string("a.out");
-
+        
         // TODO: alignment?
         let hash_offset = self.pos() - code_directory.start();
-
-        let num_code_slots = code_signature_start / 4096 + if code_signature_start % 4096 == 0 { 0 } else { 1 };
+        
+        let num_code_slots = nearest_multiple_of!(code_signature_start, 4096) / 4096;
         let code_slots_len = num_code_slots * 32;
         let code_signature_len = self.pos() + code_slots_len - code_signature_start;
-
+        
         self.get_mut(mh_execute_header_entry).set(
             SymbolTableEntry {
                 string_table_offset: (mh_execute_header_str_offset - string_table_begin) as u32,
@@ -809,8 +820,8 @@ impl MachOEncoder {
                 value: text_sections_addr,
             }
         );
-
-        let link_edit_end = self.pos();
+        
+        let link_edit_end = self.pos() + code_slots_len;
         let num_commands = self.num_load_commands;
         self.get_mut(mach_header).set(
             MachHeader {
@@ -860,13 +871,27 @@ impl MachOEncoder {
             Section64 {
                 name: encode_string_16("__text"),
                 segment_name: encode_string_16("__TEXT"),
-                vm_addr: text_sections_addr,
-                vm_size: text_sections_size,
-                file_offset: (text_sections_addr - text_addr) as u32,
+                vm_addr: text_section_addr,
+                vm_size: code.len() as u64,
+                file_offset: (text_section_addr - text_addr) as u32,
                 alignment: 2, // stored as log base 2, so this is actually 4
                 relocations_file_offset: 0,
                 num_relocations: 0,
                 flags: SectionFlags::new(SectionType::Regular, S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS),
+                reserved: [0; 3],
+            }
+        );
+        self.get_mut(unwind_info_section).set(
+            Section64 {
+                name: encode_string_16("__unwind_info"),
+                segment_name: encode_string_16("__TEXT"),
+                vm_addr: unwind_info_section_addr,
+                vm_size: unwind_info.len() as u64,
+                file_offset: (unwind_info_section_addr - text_addr) as u32,
+                alignment: 2, // stored as log base 2, so this is actually 4
+                relocations_file_offset: 0,
+                num_relocations: 0,
+                flags: SectionFlags::new(SectionType::Regular, 0),
                 reserved: [0; 3],
             }
         );
@@ -978,10 +1003,10 @@ impl MachOEncoder {
                 command_size: dynamic_symbol_table.size() as u32,
 
                 local_symbols_index: 0,
-                num_local_symbols: 0,
+                num_local_symbols: 2,
 
-                extern_symbols_index: 0,
-                num_extern_symbols: 2,
+                extern_symbols_index: 2,
+                num_extern_symbols: 0,
 
                 undef_symbols_index: 2,
                 num_undef_symbols: 0,
@@ -1020,17 +1045,17 @@ impl MachOEncoder {
                 stack_size: 0,
             }
         );
-        self.get_mut(uuid).set(
-            UuidCommand {
-                command: LC_UUID,
-                command_size: uuid.size() as u32,
-                uuid: [0; 16], // to be filled in later.
-            }
-        );
+        // self.get_mut(uuid).set(
+        //     UuidCommand {
+        //         command: LC_UUID,
+        //         command_size: uuid.size() as u32,
+        //         uuid: [0; 16], // to be filled in later.
+        //     }
+        // );
 
-        let mut hasher = Md5::new();
-        hasher.update(&self.data[..code_signature_start]);
-        self.get_mut(uuid).map(|uuid| &mut uuid.uuid).set(hasher.finalize().into());
+        // let mut hasher = Md5::new();
+        // hasher.update(&self.data[..code_signature_start]);
+        // self.get_mut(uuid).map(|uuid| &mut uuid.uuid).set(hasher.finalize().into());
 
         let mut sha256 = Sha256::new();
         let mut i = 0;
