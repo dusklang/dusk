@@ -984,9 +984,8 @@ impl Driver {
         write!(f, "{}", name)
     }
 
-    #[allow(dead_code)]
     #[display_adapter]
-    fn fmt_const(&self, f: &mut Formatter, konst: &Const) {
+    pub fn display_const(&self, f: &mut Formatter, konst: &Const) {
         match *konst {
             Const::Bool(val) => write!(f, "{}", val)?,
             Const::Float { lit, ref ty } => write!(f, "{} as {:?}", lit, ty)?,
@@ -1000,7 +999,7 @@ impl Driver {
             Const::StructLit { ref fields, id } => {
                 write!(f, "const literal struct{} {{ ", id.index())?;
                 for i in 0..fields.len() {
-                    write!(f, "{}", self.fmt_const(&fields[i]))?;
+                    write!(f, "{}", self.display_const(&fields[i]))?;
                     if i < (fields.len() - 1) {
                         write!(f, ",")?;
                     }
@@ -1100,7 +1099,7 @@ impl Driver {
             &Instr::SwitchBr { scrutinee, ref cases, catch_all_bb } => {
                 write!(f, "switchbr %{} : ", self.display_instr_name(scrutinee))?;
                 for case in cases {
-                    write!(f, "case {} => %bb{}, ", self.fmt_const(&case.value), case.bb.index())?;
+                    write!(f, "case {} => %bb{}, ", self.display_const(&case.value), case.bb.index())?;
                 }
                 write!(f, "else => %bb{}", catch_all_bb.index())?;
             }
@@ -1127,7 +1126,7 @@ impl Driver {
                 self.code.mir.extern_mods[&extern_mod].library_path
             )?,
             Instr::Const(konst) => {
-                write!(f, "%{} = {}", self.display_instr_name(op_id), self.fmt_const(konst))?;
+                write!(f, "%{} = {}", self.display_instr_name(op_id), self.display_const(konst))?;
             },
             Instr::LegacyIntrinsic { arguments, intr, .. } => {
                 write!(f, "%{} = intrinsic `{}`", self.display_instr_name(op_id), intr.name())?;
@@ -1284,7 +1283,7 @@ impl Driver {
     pub fn display_mir(&self, f: &mut Formatter) {
         if !self.code.mir.statics.raw.is_empty() {
             for statik in &self.code.mir.statics {
-                writeln!(f, "%{} = {}", statik.name, self.fmt_const(&statik.val))?;
+                writeln!(f, "%{} = {}", statik.name, self.display_const(&statik.val))?;
             }
             writeln!(f)?;
         }

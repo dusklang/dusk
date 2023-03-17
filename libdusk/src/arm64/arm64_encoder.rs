@@ -158,7 +158,7 @@ impl Arm64Encoder {
     }
 
     pub fn add64_imm(&mut self, l_shift_by_12: bool, dest: impl Into<RegOrSp>, addend1: impl Into<RegOrSp>, addend2: u16) {
-        assert!(addend2 < (1 << 12));
+        assert!(addend2 < (1 << 12), "{}", addend2);
         
         let mut instr = InstrEncoder::new();
 
@@ -172,6 +172,28 @@ impl Arm64Encoder {
         instr.push_reg(dest.into());
 
         self.push(instr);
+    }
+
+    fn adr_impl(&mut self, l_shift_by_12: bool, dest: Reg, imm: i32) {
+        assert!(imm >= -1048576 && imm <= 1048575);
+
+        let mut instr = InstrEncoder::new();
+
+        instr.push_value_of_size(l_shift_by_12 as u32, 1);
+        instr.push_value_of_size((imm & 0b11) as u32, 2);
+        instr.push_value_of_size(0x10, 5);
+        instr.push_value_of_size(((imm >> 2) & 0x0007_FFFF) as u32, 19);
+        instr.push_reg(dest);
+
+        self.push(instr);
+    }
+
+    pub fn adrp(&mut self, dest: Reg, imm: i32) {
+        self.adr_impl(true, dest, imm)
+    }
+
+    pub fn adr(&mut self, dest: Reg, imm: i32) {
+        self.adr_impl(false, dest, imm)
     }
 
     fn access_pair_impl64(&mut self, is_load: bool, val1: Reg, val2: Reg, addr: impl Into<RegOrSp>, imm: i16) {
@@ -315,6 +337,14 @@ impl Arm64Encoder {
         instr.push_value_of_size(0, 5);
 
         self.push(instr);
+    }
+
+    /// Allocate space for `n` instructions. Returns the offset, for convenience. Useful when you need to generate
+    /// instructions with unknown values that need to be filled in later.
+    pub fn allocate_instructions(&mut self, n: usize) -> usize {
+        let offset = self.data.len();
+        self.data.extend(std::iter::repeat(0).take(n * 4));
+        offset
     }
 
     #[cfg(target_arch="aarch64")]

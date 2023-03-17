@@ -634,6 +634,14 @@ impl MachOEncoder {
     }
     
     pub fn write(&mut self, d: &Driver, main_function_index: usize, dest: &mut impl Write) -> io::Result<()> {
+        let (code, string_literals) = d.generate_arm64_func(main_function_index, true);
+        let mut cstrings: Vec<u8> = Vec::new();
+        let mut string_literal_offsets = Vec::new();
+        for lit in &string_literals {
+            string_literal_offsets.push(cstrings.len());
+            cstrings.extend(d.code.mir.strings[lit.id].as_bytes_with_nul());
+        }
+
         let mach_header = self.alloc::<MachHeader>();
         
         let lc_begin = self.pos();
@@ -642,6 +650,7 @@ impl MachOEncoder {
         
         let mut text_segment = self.alloc_segment();
         let text_section = self.alloc_section(&mut text_segment);
+        let cstring_section = (!string_literals.is_empty()).then(|| self.alloc_section(&mut text_segment));
         // let unwind_info_section = self.alloc_section(&mut text_segment);
         
         let link_edit_segment = self.alloc_segment();
@@ -676,13 +685,15 @@ impl MachOEncoder {
         let code_signature = self.alloc_cmd::<LinkEditDataCommand>();
         
         let lc_end = self.pos();
-
-        let code = d.generate_arm64_func(main_function_index, true);
         
         // TODO: generate real unwind info
         let unwind_info = [0u8; 0];
 
-        let text_sections_size: u64 = (code.len() + unwind_info.len()) as u64;
+        let text_sections_size_after_code = cstrings.len() + unwind_info.len();
+
+        let padding_after_code = nearest_multiple_of!(text_sections_size_after_code, 4) - text_sections_size_after_code;
+
+        let text_sections_size: u64 = (code.len() + padding_after_code + text_sections_size_after_code) as u64;
         
         const PAGE_SIZE: u64 = 0x4000;
         
@@ -691,14 +702,36 @@ impl MachOEncoder {
         let text_sections_addr = text_end_addr - text_sections_size;
         
         let text_section_addr = text_sections_addr;
-        let unwind_info_section_addr = text_sections_addr + code.len() as u64;
+        let cstring_section_addr = text_sections_addr + (code.len() + padding_after_code) as u64;
+        let unwind_info_section_addr = cstring_section_addr + cstrings.len() as u64;
         
         let text_segment_size = text_end_addr - text_addr;
         
         let padding_size = text_sections_addr - text_addr - lc_end as u64;
         self.pad_with_zeroes(padding_size as usize);
+        let code_offset = self.pos();
         self.data.extend(&code);
+        self.pad_with_zeroes(padding_after_code);
+        let cstrings_offset = self.pos();
+        self.data.extend(&cstrings);
         self.data.extend(&unwind_info);
+
+        // TODO: move this to arm64 backend
+        for (fixup, &string_offset) in string_literals.iter().zip(&string_literal_offsets) {
+            let code_offset = code_offset + fixup.offset;
+            let string_offset = cstrings_offset + string_offset;
+
+            let page_mask = !0x0FFF;
+
+            // if the code and string are in the same page, we don't need to provide a non-zero offset to `adrp`.
+            // TODO: support case where that is not true.
+            assert_eq!(code_offset & page_mask, string_offset & page_mask);
+
+            let mut fixed_up_code = Arm64Encoder::new();
+            fixed_up_code.adrp(Reg::R0, 0);
+            fixed_up_code.add64_imm(false, Reg::R0, Reg::R0, (string_offset & !page_mask).try_into().unwrap());
+            self.data[code_offset..(code_offset + 8)].copy_from_slice(&fixed_up_code.get_bytes());
+        }
         
         let link_edit_begin = self.pos();
         
@@ -876,6 +909,22 @@ impl MachOEncoder {
                 reserved: [0; 3],
             }
         );
+        if let Some(cstring_section) = cstring_section {
+            self.get_mut(cstring_section).set(
+                Section64 {
+                    name: encode_string_16("__cstring"),
+                    segment_name: encode_string_16("__TEXT"),
+                    vm_addr: cstring_section_addr,
+                    vm_size: cstrings.len() as u64,
+                    file_offset: (cstring_section_addr - text_addr) as u32,
+                    alignment: 0, // stored as log base 2, so this is actually 1
+                    relocations_file_offset: 0,
+                    num_relocations: 0,
+                    flags: SectionFlags::new(SectionType::CStringLiterals, 0),
+                    reserved: [0; 3],
+                }
+            );
+        }
         // self.get_mut(unwind_info_section).set(
         //     Section64 {
         //         name: encode_string_16("__unwind_info"),
