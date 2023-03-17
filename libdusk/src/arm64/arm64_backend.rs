@@ -56,7 +56,7 @@ impl Driver {
                     if is_main {
                         assert_eq!(value, &Instr::Void);
                         // TODO: this should actually be a 32-bit move, if we supported that. Not that it matters in this case.
-                        code.movz64(Reg::R0, 23, 0);
+                        code.movz64(Reg::R0, 0, 0);
                     } else {
                         todo!();
                     }

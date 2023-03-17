@@ -5,9 +5,12 @@ use std::io::{self, Write};
 use std::marker::PhantomData;
 use std::mem;
 
+use index_vec::define_index_type;
 use md5::{Md5, Digest as Md5Digest};
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
+use crate::index_counter::IndexCounter;
+use crate::index_vec::*;
 
 use crate::driver::Driver;
 use dusk_proc_macros::ByteSwap;
@@ -405,9 +408,11 @@ fn encode_string_16(name: &str) -> [u8; 16] {
     out
 }
 
+define_index_type!(struct TextSectionId = u32;);
+
 struct SegmentBuilder {
     header: Ref<LcSegment64>,
-    sections: Vec<Ref<Section64>>,
+    sections: IndexVec<TextSectionId, Ref<Section64>>,
 }
 
 impl SegmentBuilder {
@@ -416,6 +421,29 @@ impl SegmentBuilder {
             .map(|sect| sect.end())
             .unwrap_or(self.header.end()) - self.header.start()) as u32
     }
+}
+
+struct TextSectionAllocationInfo {
+    packed_offset: usize,
+    size: usize,
+    alignment: usize,
+}
+
+struct TextSegmentBuilder {
+    segment_builder: SegmentBuilder,
+    section_data: Vec<u8>,
+    sections: IndexVec<TextSectionId, TextSectionAllocationInfo>,
+}
+
+impl TextSegmentBuilder {
+    fn header_size(&self) -> u32 {
+        self.segment_builder.size()
+    }
+}
+
+struct TextSection {
+    header: Ref<Section64>,
+    id: TextSectionId,
 }
 
 struct DylibCommandBuilder {
@@ -491,7 +519,7 @@ struct CodeDirectory {
     exec_seg_flags: u64,
 }
 
-const fn is_power_of_2(num: u64) -> bool {
+const fn is_power_of_2(num: usize) -> bool {
     if num == 0 { return false; }
     let mut i = 0u64;
     while i < 64 {
@@ -506,7 +534,7 @@ const fn is_power_of_2(num: u64) -> bool {
 // Thank you, Hagen von Eitzen: https://math.stackexchange.com/a/291494
 macro_rules! nearest_multiple_of {
     (@unsafe $val:expr, $factor:expr) => {
-        ((($val) - 1) | ($factor - 1)) + 1
+        (((($val) as usize).wrapping_sub(1)) | ((($factor) as usize).wrapping_sub(1))).wrapping_add(1)
     };
 
     ($val:expr, $factor:expr) => {{
@@ -521,6 +549,9 @@ macro_rules! nearest_multiple_of_rt {
         nearest_multiple_of!(@unsafe $val, $factor)
     }};
 }
+
+const PAGE_SIZE: usize = 0x4000;
+const TEXT_ADDR: u64 = 0x0000_0001_0000_0000;
 
 impl MachOEncoder {
     pub fn new() -> Self { Self::default() }
@@ -555,6 +586,56 @@ impl MachOEncoder {
         let section = self.alloc::<Section64>();
         segment.sections.push(section);
         section
+    }
+
+    fn alloc_text_segment(&mut self) -> TextSegmentBuilder {
+        let segment_builder = self.alloc_segment();
+        TextSegmentBuilder { segment_builder, section_data: Vec::new(), sections: IndexVec::new() }
+    }
+
+    fn alloc_text_section(&mut self, segment: &mut TextSegmentBuilder, data: &[u8], alignment: usize) -> TextSection {
+        let header = self.alloc_section(&mut segment.segment_builder);
+        let offset = segment.section_data.len();
+        let alloc_info = TextSectionAllocationInfo {
+            packed_offset: offset,
+            size: data.len(),
+            alignment,
+        };
+        let id = segment.sections.push(alloc_info);
+        segment.section_data.extend(data);
+        TextSection { header, id }
+    }
+
+    fn push_text_sections(&mut self, segment: &TextSegmentBuilder, lc_end: usize) -> (IndexVec<TextSectionId, usize>, usize) {
+        let mut len = 0usize;
+        let mut offsets_from_end = Vec::with_capacity(segment.sections.len());
+        for alloc_info in segment.sections.iter().rev() {
+            let padding = nearest_multiple_of_rt!(len, alloc_info.alignment) as usize - len;
+            len += alloc_info.size + padding;
+            offsets_from_end.push((len, padding));
+        }
+
+        let text_end_addr = nearest_multiple_of!(TEXT_ADDR + (lc_end + len) as u64, PAGE_SIZE);
+        let text_sections_addr = text_end_addr - len;
+
+        debug_assert_eq!(segment.sections.len(), segment.segment_builder.sections.len());
+        
+        let text_segment_size = text_end_addr - TEXT_ADDR as usize;
+        
+        let padding_size = text_sections_addr - TEXT_ADDR as usize - lc_end;
+        self.pad_with_zeroes(padding_size);
+
+        let mut offsets = IndexVec::with_capacity(segment.sections.len());
+        for ((id, alloc_info), &(offset_from_end, padding)) in segment.sections.iter_enumerated().zip(offsets_from_end.iter().rev()) {
+            let offset = text_segment_size as usize - offset_from_end;
+            offsets.push_at(id, text_segment_size as usize - offset_from_end);
+
+            self.data.extend(&segment.section_data[alloc_info.packed_offset..(alloc_info.packed_offset+alloc_info.size)]);
+            self.pad_with_zeroes(padding);
+        }
+        debug_assert_eq!(text_segment_size, self.pos());
+
+        (offsets, text_segment_size)
     }
 
     fn alloc_dylib_command(&mut self, name: &str) -> DylibCommandBuilder {
@@ -615,8 +696,13 @@ impl MachOEncoder {
         self.data.extend(std::iter::repeat(0).take(size as usize));
     }
 
-    fn pad_to_next_boundary<const B: u64>(&mut self) {
+    fn pad_to_next_boundary<const B: usize>(&mut self) {
         let padded_pos = nearest_multiple_of_rt!(self.data.len() as u64, B);
+        self.pad_with_zeroes(padded_pos as usize - self.pos());
+    }
+
+    fn pad_to_next_boundary_rt(&mut self, alignment: usize) {
+        let padded_pos = nearest_multiple_of_rt!(self.data.len(), alignment);
         self.pad_with_zeroes(padded_pos as usize - self.pos());
     }
     
@@ -648,9 +734,10 @@ impl MachOEncoder {
         
         let page_zero = self.alloc_segment();
         
-        let mut text_segment = self.alloc_segment();
-        let text_section = self.alloc_section(&mut text_segment);
-        let cstring_section = (!string_literals.is_empty()).then(|| self.alloc_section(&mut text_segment));
+        let mut text_segment = self.alloc_text_segment();
+
+        let text_section = self.alloc_text_section(&mut text_segment, &code, 4);
+        let cstring_section = (!string_literals.is_empty()).then(|| self.alloc_text_section(&mut text_segment, &cstrings, 1));
         // let unwind_info_section = self.alloc_section(&mut text_segment);
         
         let link_edit_segment = self.alloc_segment();
@@ -685,52 +772,26 @@ impl MachOEncoder {
         let code_signature = self.alloc_cmd::<LinkEditDataCommand>();
         
         let lc_end = self.pos();
-        
-        // TODO: generate real unwind info
-        let unwind_info = [0u8; 0];
 
-        let text_sections_size_after_code = cstrings.len() + unwind_info.len();
-
-        let padding_after_code = nearest_multiple_of!(text_sections_size_after_code, 4) - text_sections_size_after_code;
-
-        let text_sections_size: u64 = (code.len() + padding_after_code + text_sections_size_after_code) as u64;
-        
-        const PAGE_SIZE: u64 = 0x4000;
-        
-        let text_addr: u64 = 0x0000_0001_0000_0000;
-        let text_end_addr = nearest_multiple_of!(text_addr + lc_end as u64 + text_sections_size, PAGE_SIZE);
-        let text_sections_addr = text_end_addr - text_sections_size;
-        
-        let text_section_addr = text_sections_addr;
-        let cstring_section_addr = text_sections_addr + (code.len() + padding_after_code) as u64;
-        let unwind_info_section_addr = cstring_section_addr + cstrings.len() as u64;
-        
-        let text_segment_size = text_end_addr - text_addr;
-        
-        let padding_size = text_sections_addr - text_addr - lc_end as u64;
-        self.pad_with_zeroes(padding_size as usize);
-        let code_offset = self.pos();
-        self.data.extend(&code);
-        self.pad_with_zeroes(padding_after_code);
-        let cstrings_offset = self.pos();
-        self.data.extend(&cstrings);
-        self.data.extend(&unwind_info);
+        let (text_section_offsets, text_segment_size) = self.push_text_sections(&text_segment, lc_end);
 
         // TODO: move this to arm64 backend
-        for (fixup, &string_offset) in string_literals.iter().zip(&string_literal_offsets) {
-            let code_offset = code_offset + fixup.offset;
-            let string_offset = cstrings_offset + string_offset;
-
-            let page_mask = !0x0FFF;
-
-            // if the code and string are in the same page, we don't need to provide a non-zero offset to `adrp`.
-            // TODO: support case where that is not true.
-            assert_eq!(code_offset & page_mask, string_offset & page_mask);
-
-            let mut fixed_up_code = Arm64Encoder::new();
-            fixed_up_code.adrp(Reg::R0, 0);
-            fixed_up_code.add64_imm(false, Reg::R0, Reg::R0, (string_offset & !page_mask).try_into().unwrap());
-            self.data[code_offset..(code_offset + 8)].copy_from_slice(&fixed_up_code.get_bytes());
+        if let Some(cstring_section) = &cstring_section {
+            for (fixup, &string_offset) in string_literals.iter().zip(&string_literal_offsets) {
+                let code_offset = text_section_offsets[text_section.id] + fixup.offset;
+                let string_offset = text_section_offsets[cstring_section.id] + string_offset;
+    
+                let page_mask = !0x0FFF;
+    
+                // if the code and string are in the same page, we don't need to provide a non-zero offset to `adrp`.
+                // TODO: support case where that is not true.
+                assert_eq!(code_offset & page_mask, string_offset & page_mask);
+    
+                let mut fixed_up_code = Arm64Encoder::new();
+                fixed_up_code.adrp(Reg::R0, 0);
+                fixed_up_code.add64_imm(false, Reg::R0, Reg::R0, (string_offset & !page_mask).try_into().unwrap());
+                self.data[code_offset..(code_offset + 8)].copy_from_slice(&fixed_up_code.get_bytes());
+            }
         }
         
         let link_edit_begin = self.pos();
@@ -780,9 +841,9 @@ impl MachOEncoder {
         let exports_trie_len = self.pos() - exports_trie_start;
         
         let function_starts_start = self.pos();
-        // offset to first function, relative to the beginning of the __TEXT segment.
+        // offset to first function, relative to the beginning of the __TEXT segment (aka, beginning of file).
         // subsequent functions would be specified relative to the previous one in the list.
-        self.push_uleb128((text_sections_addr - text_addr) as u32);
+        self.push_uleb128(text_section_offsets[text_section.id] as u32);
         self.pad_to_next_boundary::<8>();
         let function_starts_len = self.pos() - function_starts_start;
         
@@ -836,7 +897,7 @@ impl MachOEncoder {
                 ty: 0x1E,
                 section_number: 1,
                 desc: 0x0010,
-                value: text_addr,
+                value: TEXT_ADDR,
             }
         );
         self.get_mut(main_entry).set(
@@ -845,7 +906,7 @@ impl MachOEncoder {
                 ty: 0x1E,
                 section_number: 1,
                 desc: 0x0000,
-                value: text_sections_addr,
+                value: TEXT_ADDR + text_section_offsets[text_section.id] as u64,
             }
         );
         
@@ -871,7 +932,7 @@ impl MachOEncoder {
                 command_size: page_zero.size(),
                 name: encode_string_16("__PAGEZERO"),
                 vm_addr: 0,
-                vm_size: text_addr,
+                vm_size: TEXT_ADDR,
                 file_offset: 0,
                 file_size: 0,
                 max_vm_protection: VM_PROT_NONE,
@@ -880,28 +941,28 @@ impl MachOEncoder {
                 flags: 0,
             }
         );
-        self.get_mut(text_segment.header).set(
+        self.get_mut(text_segment.segment_builder.header).set(
             LcSegment64 {
                 command: LC_SEGMENT_64,
-                command_size: text_segment.size(),
+                command_size: text_segment.header_size(),
                 name: encode_string_16("__TEXT"),
-                vm_addr: text_addr,
-                vm_size: text_segment_size,
+                vm_addr: TEXT_ADDR,
+                vm_size: text_segment_size as u64,
                 file_offset: 0,
-                file_size: text_segment_size,
+                file_size: text_segment_size as u64,
                 max_vm_protection: VM_PROT_READ | VM_PROT_EXECUTE,
                 initial_vm_protection: VM_PROT_READ | VM_PROT_EXECUTE,
-                num_sections: text_segment.sections.len() as u32,
+                num_sections: text_segment.segment_builder.sections.len() as u32,
                 flags: 0,
             }
         );
-        self.get_mut(text_section).set(
+        self.get_mut(text_section.header).set(
             Section64 {
                 name: encode_string_16("__text"),
                 segment_name: encode_string_16("__TEXT"),
-                vm_addr: text_section_addr,
+                vm_addr: TEXT_ADDR + text_section_offsets[text_section.id] as u64,
                 vm_size: code.len() as u64,
-                file_offset: (text_section_addr - text_addr) as u32,
+                file_offset: text_section_offsets[text_section.id] as u32,
                 alignment: 2, // stored as log base 2, so this is actually 4
                 relocations_file_offset: 0,
                 num_relocations: 0,
@@ -910,13 +971,13 @@ impl MachOEncoder {
             }
         );
         if let Some(cstring_section) = cstring_section {
-            self.get_mut(cstring_section).set(
+            self.get_mut(cstring_section.header).set(
                 Section64 {
                     name: encode_string_16("__cstring"),
                     segment_name: encode_string_16("__TEXT"),
-                    vm_addr: cstring_section_addr,
+                    vm_addr: TEXT_ADDR + text_section_offsets[cstring_section.id] as u64,
                     vm_size: cstrings.len() as u64,
-                    file_offset: (cstring_section_addr - text_addr) as u32,
+                    file_offset: text_section_offsets[cstring_section.id] as u32,
                     alignment: 0, // stored as log base 2, so this is actually 1
                     relocations_file_offset: 0,
                     num_relocations: 0,
@@ -929,9 +990,9 @@ impl MachOEncoder {
         //     Section64 {
         //         name: encode_string_16("__unwind_info"),
         //         segment_name: encode_string_16("__TEXT"),
-        //         vm_addr: unwind_info_section_addr,
+        //         vm_addr: TEXT_ADDR + text_section_offsets[unwind_info_section.id] as u64,
         //         vm_size: unwind_info.len() as u64,
-        //         file_offset: (unwind_info_section_addr - text_addr) as u32,
+        //         file_offset: text_section_offsets[unwind_info_section.id] as u32,
         //         alignment: 2, // stored as log base 2, so this is actually 4
         //         relocations_file_offset: 0,
         //         num_relocations: 0,
@@ -944,8 +1005,8 @@ impl MachOEncoder {
                 command: LC_SEGMENT_64,
                 command_size: link_edit_segment.size(),
                 name: encode_string_16("__LINKEDIT"),
-                vm_addr: text_end_addr,
-                vm_size: PAGE_SIZE, // TODO: increase this size if needed
+                vm_addr: TEXT_ADDR + link_edit_begin as u64,
+                vm_size: PAGE_SIZE as u64,
                 file_offset: link_edit_begin as u64,
                 file_size: (link_edit_end - link_edit_begin) as u64,
                 max_vm_protection: VM_PROT_READ,
@@ -1085,7 +1146,7 @@ impl MachOEncoder {
             EntryPointCommand {
                 command: LC_MAIN,
                 command_size: entry_point.size() as u32,
-                entry_point_file_offset: text_sections_addr - text_addr,
+                entry_point_file_offset: text_section_offsets[text_section.id] as u64,
                 stack_size: 0,
             }
         );
