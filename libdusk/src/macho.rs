@@ -1,6 +1,6 @@
 #![allow(unused)]
 
-use core::num;
+use std::num;
 use std::io::{self, Write};
 use std::marker::PhantomData;
 use std::mem;
@@ -9,6 +9,7 @@ use md5::{Md5, Digest as Md5Digest};
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
 
+use crate::driver::Driver;
 use dusk_proc_macros::ByteSwap;
 
 trait ByteSwap {
@@ -632,7 +633,7 @@ impl MachOEncoder {
         }
     }
     
-    pub fn write(&mut self, dest: &mut impl Write) -> io::Result<()> {
+    pub fn write(&mut self, d: &Driver, main_function_index: usize, dest: &mut impl Write) -> io::Result<()> {
         let mach_header = self.alloc::<MachHeader>();
         
         let lc_begin = self.pos();
@@ -675,17 +676,10 @@ impl MachOEncoder {
         let code_signature = self.alloc_cmd::<LinkEditDataCommand>();
         
         let lc_end = self.pos();
+
+        let code = d.generate_arm64_func(main_function_index, true);
         
-        let mut code = Arm64Encoder::new();
-        code.sub64_imm(false, Reg::SP, Reg::SP, 16);
-        code.str32(Reg::ZERO, Reg::SP, 12);
-        // TODO: this should actually be a 32-bit move, if we supported that. Not that it matters in this case.
-        code.movz64(Reg::R0, 56, 0);
-        code.add64_imm(false, Reg::SP, Reg::SP, 16);
-        code.ret(Reg::LR);
-        let code = code.get_bytes();
-        
-        // let mut unwind_info: [u8; 72] = [0x01u8, 0x00, 0x00, 0x00, 0x1C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1C, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0xA4, 0x3F, 0x00, 0x00, 0x34, 0x00, 0x00, 0x00, 0x34, 0x00, 0x00, 0x00, 0xB9, 0x3F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x34, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x0C, 0x00, 0x01, 0x00, 0x10, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x02];
+        // TODO: generate real unwind info
         let unwind_info = [0u8; 0];
 
         let text_sections_size: u64 = (code.len() + unwind_info.len()) as u64;

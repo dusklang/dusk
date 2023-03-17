@@ -173,7 +173,7 @@ fn dusk_main(opt: Opt, #[allow(unused)] program_args: &[OsString]) {
                 None => false,
             }
         });
-    if let Some(_main) = main {
+    if let Some(main) = main {
         driver.read().diag.print_warnings();
         let path = "a.out";
         _ = std::fs::remove_file(path);
@@ -185,7 +185,7 @@ fn dusk_main(opt: Opt, #[allow(unused)] program_args: &[OsString]) {
         file.set_permissions(permissions).unwrap();
         let mut w = BufWriter::new(file);
         let mut encoder = MachOEncoder::new();
-        encoder.write(&mut w).unwrap();
+        encoder.write(&driver.read(), main, &mut w).unwrap();
     } else {
         driver.write().diag.report_error_no_range(
             "Couldn't find main function with no parameters and a return type of `void`"

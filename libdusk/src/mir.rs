@@ -1075,7 +1075,6 @@ impl Driver {
     #[display_adapter]
     pub fn display_mir_instr(&self, op_id: OpId, f: &mut Formatter) {
         let instr = self.code.ops[op_id].as_mir_instr().unwrap();
-        write!(f, "    ")?;
         macro_rules! write_args {
             ($args:expr) => {{
                 let mut first = true;
@@ -1246,7 +1245,7 @@ impl Driver {
         }
         
         for &op_id in &block.ops[start..] {
-            writeln!(f, "{}", self.display_mir_instr(op_id))?;
+            writeln!(f, "    {}", self.display_mir_instr(op_id))?;
         }
         Ok(())
     }
