@@ -641,7 +641,7 @@ impl MachOEncoder {
         
         let mut text_segment = self.alloc_segment();
         let text_section = self.alloc_section(&mut text_segment);
-        let unwind_info_section = self.alloc_section(&mut text_segment);
+        // let unwind_info_section = self.alloc_section(&mut text_segment);
         
         let link_edit_segment = self.alloc_segment();
 
@@ -685,8 +685,9 @@ impl MachOEncoder {
         code.ret(Reg::LR);
         let code = code.get_bytes();
         
-        let mut unwind_info: [u8; 72] = [0x01, 0x00, 0x00, 0x00, 0x1C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1C, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0xA4, 0x3F, 0x00, 0x00, 0x34, 0x00, 0x00, 0x00, 0x34, 0x00, 0x00, 0x00, 0xB9, 0x3F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x34, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x0C, 0x00, 0x01, 0x00, 0x10, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x02];
-        
+        // let mut unwind_info: [u8; 72] = [0x01u8, 0x00, 0x00, 0x00, 0x1C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1C, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0xA4, 0x3F, 0x00, 0x00, 0x34, 0x00, 0x00, 0x00, 0x34, 0x00, 0x00, 0x00, 0xB9, 0x3F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x34, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x0C, 0x00, 0x01, 0x00, 0x10, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x02];
+        let unwind_info = [0u8; 0];
+
         let text_sections_size: u64 = (code.len() + unwind_info.len()) as u64;
         
         const PAGE_SIZE: u64 = 0x4000;
@@ -881,20 +882,20 @@ impl MachOEncoder {
                 reserved: [0; 3],
             }
         );
-        self.get_mut(unwind_info_section).set(
-            Section64 {
-                name: encode_string_16("__unwind_info"),
-                segment_name: encode_string_16("__TEXT"),
-                vm_addr: unwind_info_section_addr,
-                vm_size: unwind_info.len() as u64,
-                file_offset: (unwind_info_section_addr - text_addr) as u32,
-                alignment: 2, // stored as log base 2, so this is actually 4
-                relocations_file_offset: 0,
-                num_relocations: 0,
-                flags: SectionFlags::new(SectionType::Regular, 0),
-                reserved: [0; 3],
-            }
-        );
+        // self.get_mut(unwind_info_section).set(
+        //     Section64 {
+        //         name: encode_string_16("__unwind_info"),
+        //         segment_name: encode_string_16("__TEXT"),
+        //         vm_addr: unwind_info_section_addr,
+        //         vm_size: unwind_info.len() as u64,
+        //         file_offset: (unwind_info_section_addr - text_addr) as u32,
+        //         alignment: 2, // stored as log base 2, so this is actually 4
+        //         relocations_file_offset: 0,
+        //         num_relocations: 0,
+        //         flags: SectionFlags::new(SectionType::Regular, 0),
+        //         reserved: [0; 3],
+        //     }
+        // );
         self.get_mut(link_edit_segment.header).set(
             LcSegment64 {
                 command: LC_SEGMENT_64,
