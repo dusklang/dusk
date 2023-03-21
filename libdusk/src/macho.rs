@@ -87,6 +87,8 @@ const LC_DYLD_EXPORTS_TRIE: u32 = 0x33 | LC_REQ_DYLD;
 const LC_DYLD_CHAINED_FIXUPS: u32 = 0x34 | LC_REQ_DYLD;
 const LC_LOAD_DYLIB: u32 = 0x0000_000C;
 
+const DYLD_CHAINED_PTR_64_OFFSET: u16 = 6;
+
 const DYLD_CHAINED_IMPORT: u32 = 0x0000_0001;
 
 const VM_PROT_NONE:    u32 = 0x0000_0000;
@@ -480,6 +482,17 @@ struct DyldChainedFixupsHeader {
 
 #[repr(C)]
 #[derive(ByteSwap)]
+struct DyldChainedStartsInSegment {
+    size: u32, // size of this
+    page_size: u16, // 0x1000 or 0x4000
+    pointer_format: u16, // DYLD_CHAINED_PTR_*
+    segment_offset: u64, // offset in memory to start of segment
+
+    // TODO: The ByteSwap macro doesn't support packed structs, so I need to cut off the end of this struct, for now.
+}
+
+#[repr(C)]
+#[derive(ByteSwap)]
 struct SuperBlobHeader {
     magic: u32,
     length: u32,
@@ -728,6 +741,9 @@ impl MachOEncoder {
             cstrings.extend(d.code.mir.strings[lit.id].as_bytes_with_nul());
         }
 
+        // TODO: make this true sometimes
+        let should_have_data_const_segment = false;
+
         let mach_header = self.alloc::<MachHeader>();
         
         let lc_begin = self.pos();
@@ -739,6 +755,14 @@ impl MachOEncoder {
         let text_section = self.alloc_text_section(&mut text_segment, &code, 4);
         let cstring_section = (!string_literals.is_empty()).then(|| self.alloc_text_section(&mut text_segment, &cstrings, 1));
         // let unwind_info_section = self.alloc_section(&mut text_segment);
+
+
+        let data_const = should_have_data_const_segment.then(|| {
+            let segment_number = self.num_segments;
+            let mut segment = self.alloc_segment();
+            let got_section = self.alloc_section(&mut segment);
+            (segment_number, segment, got_section)
+        });
         
         let link_edit_segment = self.alloc_segment();
 
@@ -799,24 +823,53 @@ impl MachOEncoder {
         let chained_fixups_header = self.alloc::<DyldChainedFixupsHeader>();
         self.pad_to_next_boundary::<8>();
         // Push dyld_chained_starts_in_image (a dynamically-sized structure)
-        let chained_starts_offset = self.pos() - chained_fixups_header.start();
+        let chained_starts_offset = self.pos();
         self.push(self.num_segments as u32);
+        let mut data_const_starts_offset = None;
         for i in 0..self.num_segments {
-            // AFAICT, the offset is relative to the start of dyld_chained_starts_in_image, which makes any offset less
-            // than 4 + 4 * num_segments invalid, thus 0 should indicate "no starts for this page"
-            self.push(0 as u32); 
+            if data_const.as_ref().map(|(num, _, _)| *num) == Some(i) {
+                data_const_starts_offset = Some(self.alloc::<u32>());
+            } else {
+                // AFAICT, the offset is relative to the start of dyld_chained_starts_in_image, which makes any offset less
+                // than 4 + 4 * num_segments invalid, thus 0 should indicate "no starts for this page"
+                self.push(0 as u32);
+            }
+        }
+        if let Some(data_const_starts_offset) = data_const_starts_offset {
+            self.pad_to_next_boundary::<8>();
+            let chained_starts_in_segment_pos = self.pos();
+            self.get_mut(data_const_starts_offset).set((chained_starts_in_segment_pos -  chained_starts_offset) as u32);
+            
+            let chained_starts_in_segment = self.alloc::<DyldChainedStartsInSegment>();
+            // TODO: these should be fields of DyldChainedStartsInSegment, but need to be here instead because packed
+            // structs are not yet supported by our ByteSwap macro.
+            self.push(0 as u32); // max_valid_pointer
+            self.push(0 as u16); // page_count (TODO)
+
+            // TODO: for each page, specify the 16-bit byte offset of the first fixup in the page
+            
+
+            let chained_starts_in_segment_size = self.pos() - chained_starts_in_segment_pos; // TODO
+            self.get_mut(chained_starts_in_segment).set(
+                DyldChainedStartsInSegment {
+                    size: chained_starts_in_segment_size as u32,
+                    page_size: 0x4000,
+                    pointer_format: DYLD_CHAINED_PTR_64_OFFSET,
+                    segment_offset: 0, // TODO
+                }
+            );
         }
         
         let imports_count = 0;
         
-        let imports_offset = self.pos() - chained_fixups_header.start();
+        let imports_offset = self.pos();
         // TODO: create a bitfield data structure for the `dyld_chained_import` struct
         self.push(0 as u32);
         self.pad_to_next_boundary::<8>();
         let import_symbols_offset = if imports_count == 0 {
             imports_offset
         } else {
-            self.pos() - chained_fixups_header.start()
+            self.pos()
         };
         // TODO: add symbols
         
@@ -825,9 +878,9 @@ impl MachOEncoder {
         self.get_mut(chained_fixups_header).set(
             DyldChainedFixupsHeader {
                 fixups_version: 0,
-                starts_offset: chained_starts_offset as u32,
-                imports_offset: imports_offset as u32,
-                symbols_offset: import_symbols_offset as u32,
+                starts_offset: (chained_starts_offset - chained_fixups_header.start()) as u32,
+                imports_offset: (imports_offset - chained_fixups_header.start()) as u32,
+                symbols_offset: (import_symbols_offset - chained_fixups_header.start()) as u32,
                 imports_count,
                 imports_format: DYLD_CHAINED_IMPORT,
                 symbols_format: 0, // uncompressed
