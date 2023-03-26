@@ -510,6 +510,19 @@ struct DyldChainedStartsInSegment {
 
 #[repr(C)]
 #[derive(ByteSwap)]
+struct DyldChainedPtr64(u64);
+
+impl ResolvedRefMut<'_, DyldChainedPtr64> {
+    fn set_next(&mut self, next: u16) {
+        assert!(next <= 0xFFF); // 12 bits
+        let mask = 0xFFF << 51;
+        self.value.0 = self.value.0 & !mask;
+        self.value.0 |= (next as u64) << 51;
+    }
+}
+
+#[repr(C)]
+#[derive(ByteSwap)]
 struct DyldChainedPtr64Bind(u64);
 
 impl DyldChainedPtr64Bind {
@@ -517,6 +530,36 @@ impl DyldChainedPtr64Bind {
         assert!(ordinal <= 0xFFFFFF); // 24 bits
         assert!(next <= 0xFFF); // 12 bits
         Self(ordinal as u64 | (addend as u64) << 24 | (next as u64) << 51 | 1 << 63)
+    }
+}
+
+impl From<Ref<DyldChainedPtr64Bind>> for Ref<DyldChainedPtr64> {
+    fn from(value: Ref<DyldChainedPtr64Bind>) -> Self {
+        Ref {
+            addr: value.addr,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(ByteSwap)]
+struct DyldChainedPtr64Rebase(u64);
+
+impl DyldChainedPtr64Rebase {
+    fn new(target: u64, high8: u8, next: u16) -> Self {
+        assert!(target <= 0xF_FFFF_FFFF); // 36 bits
+        assert!(next <= 0xFFF); // 12 bits
+        Self(target as u64 | (high8 as u64) << 36 | (next as u64) << 51)
+    }
+}
+
+impl From<Ref<DyldChainedPtr64Rebase>> for Ref<DyldChainedPtr64> {
+    fn from(value: Ref<DyldChainedPtr64Rebase>) -> Self {
+        Ref {
+            addr: value.addr,
+            _phantom: PhantomData,
+        }
     }
 }
 
@@ -752,16 +795,16 @@ impl MachOEncoder {
         ResolvedRefMut { value: unsafe { &mut *ptr } }
     }
 
-    fn push<T: ByteSwap>(&mut self, value: T) {
+    fn push<T: ByteSwap>(&mut self, value: T) -> Ref<T> {
         let addr = self.alloc();
-        self.get_mut(addr).set(
-            value);
+        self.get_mut(addr).set(value);
+        addr
     }
 
-    fn push_be<T: ByteSwap>(&mut self, value: T) {
+    fn push_be<T: ByteSwap>(&mut self, value: T) -> Ref<T, true> {
         let addr = self.alloc_be();
-        self.get_mut(addr).set(
-            value);
+        self.get_mut(addr).set(value);
+        addr
     }
 
     fn pos(&self) -> usize { self.data.len() }
@@ -913,9 +956,14 @@ impl MachOEncoder {
         let data_const = data_const.map(|(segment_number, segment, got_section)| {
             let data_const_begin = self.pos();
 
+            let mut prev_ptr: Option<Ref<DyldChainedPtr64>> = None;
             for (i, import) in imports.iter().enumerate() {
-                let next = if i == imports.len() - 1 { 0 } else { 2 };
-                self.push(DyldChainedPtr64Bind::new(i as u32, 0, next));
+                if let Some(prev_ptr) = prev_ptr {
+                    let diff = self.pos() - prev_ptr.addr;
+                    assert!(diff % 4 == 0);
+                    self.get_mut(prev_ptr).set_next((diff / 4) as u16);
+                }
+                prev_ptr = Some(self.push(DyldChainedPtr64Bind::new(i as u32, 0, 0)).into());
             }
 
             let got_size = self.pos() - data_const_begin;
