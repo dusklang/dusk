@@ -96,6 +96,12 @@ const VM_PROT_READ:    u32 = 0x0000_0001;
 const VM_PROT_WRITE:   u32 = 0x0000_0002;
 const VM_PROT_EXECUTE: u32 = 0x0000_0004;
 
+const SG_HIGHVM: u32 = 0x1;
+const SG_FVMLIB: u32 = 0x2;
+const SG_NORELOC: u32 = 0x4;
+const SG_PROTECTED_VERSION_1: u32 = 0x8;
+const SG_READ_ONLY: u32 = 0x10;
+
 const S_ATTR_PURE_INSTRUCTIONS:   u32 = 0x8000_0000;
 const S_ATTR_NO_TOC:              u32 = 0x4000_0000;
 const S_ATTR_STRIP_STATIC_SYMS:   u32 = 0x2000_0000;
@@ -307,10 +313,21 @@ struct SymbolTableCommand {
 #[derive(ByteSwap)]
 struct SymbolTableEntry {
     string_table_offset: u32,
-    ty: u8,
+    ty: SymbolFlags,
     section_number: u8,
-    desc: u16,
+    description: SymbolDescription,
     value: u64,
+}
+
+#[repr(C)]
+#[derive(ByteSwap, Clone, Copy)]
+struct SymbolDescription(u16);
+
+impl SymbolDescription {
+    fn new(reference_type: u8, referenced_dynamically: bool, no_dead_strip: bool, weak_ref: bool, weak_def: bool, library_ordinal: u8) -> Self {
+        assert!(reference_type <= 7);
+        Self(reference_type as u16 | (referenced_dynamically as u16) << 4 | (no_dead_strip as u16) << 5 | (weak_ref as u16) << 6 | (weak_def as u16) << 7 | (library_ordinal as u16) << 7)
+    }
 }
 
 #[repr(C)]
@@ -489,6 +506,50 @@ struct DyldChainedStartsInSegment {
     segment_offset: u64, // offset in memory to start of segment
 
     // TODO: The ByteSwap macro doesn't support packed structs, so I need to cut off the end of this struct, for now.
+}
+
+#[repr(C)]
+#[derive(ByteSwap)]
+struct DyldChainedPtr64Bind(u64);
+
+impl DyldChainedPtr64Bind {
+    fn new(ordinal: u32, addend: u8, next: u16) -> Self {
+        assert!(ordinal <= 0xFFFFFF); // 24 bits
+        assert!(next <= 0xFFF); // 12 bits
+        Self(ordinal as u64 | (addend as u64) << 24 | (next as u64) << 51 | 1 << 63)
+    }
+}
+
+#[repr(C)]
+#[derive(ByteSwap)]
+struct DyldChainedImport(u32);
+
+impl DyldChainedImport {
+    fn new(lib_ordinal: u8, weak_import: bool, name_offset: u32) -> Self {
+        assert!(name_offset <= 0x7F_FFFF);
+        Self(lib_ordinal as u32 | (weak_import as u32) << 8 | name_offset << 9)
+    }
+}
+
+#[derive(Copy, Clone)]
+#[repr(u8)]
+enum SymbolType {
+    Undefined = 0,
+    Absolute = 1,
+    Indirect = 5,
+    PreboundUndefined = 6,
+    DefinedInSectionNumber = 7,
+}
+
+#[repr(C)]
+#[derive(ByteSwap)]
+struct SymbolFlags(u8);
+
+impl SymbolFlags {
+    fn new(external: bool, ty: SymbolType, private_external: bool, stab: u8) -> Self {
+        assert!(stab <= 7);
+        Self(external as u8 | (ty as u8) << 1 | (private_external as u8) << 4 | stab << 5)
+    }
 }
 
 #[repr(C)]
@@ -733,16 +794,14 @@ impl MachOEncoder {
     }
     
     pub fn write(&mut self, d: &Driver, main_function_index: usize, dest: &mut impl Write) -> io::Result<()> {
-        let (code, string_literals) = d.generate_arm64_func(main_function_index, true);
+        let (code, string_literal_fixups, imports, import_fixups) = d.generate_arm64_func(main_function_index, true);
         let mut cstrings: Vec<u8> = Vec::new();
         let mut string_literal_offsets = Vec::new();
-        for lit in &string_literals {
+        for lit in &string_literal_fixups {
             string_literal_offsets.push(cstrings.len());
             cstrings.extend(d.code.mir.strings[lit.id].as_bytes_with_nul());
         }
 
-        // TODO: make this true sometimes
-        let should_have_data_const_segment = false;
 
         let mach_header = self.alloc::<MachHeader>();
         
@@ -753,11 +812,11 @@ impl MachOEncoder {
         let mut text_segment = self.alloc_text_segment();
 
         let text_section = self.alloc_text_section(&mut text_segment, &code, 4);
-        let cstring_section = (!string_literals.is_empty()).then(|| self.alloc_text_section(&mut text_segment, &cstrings, 1));
+        let cstring_section = (!string_literal_fixups.is_empty()).then(|| self.alloc_text_section(&mut text_segment, &cstrings, 1));
         // let unwind_info_section = self.alloc_section(&mut text_segment);
 
 
-        let data_const = should_have_data_const_segment.then(|| {
+        let data_const = (!imports.is_empty()).then(|| {
             let segment_number = self.num_segments;
             let mut segment = self.alloc_segment();
             let got_section = self.alloc_section(&mut segment);
@@ -799,9 +858,42 @@ impl MachOEncoder {
 
         let (text_section_offsets, text_segment_size) = self.push_text_sections(&text_segment, lc_end);
 
+        struct Symbol {
+            symbol: String,
+            internal_address: Option<u64>,
+            description: SymbolDescription,
+        }
+
+        let mut local_symbols = Vec::new();
+        let mut imported_symbols = Vec::new();
+        local_symbols.push(
+            Symbol {
+                symbol: "__mh_execute_header".to_string(),
+                internal_address: Some(TEXT_ADDR),
+                description: SymbolDescription::new(0, true, false, false, false, 0),
+            }
+        );
+        local_symbols.push(
+            Symbol {
+                symbol: "_main".to_string(),
+                internal_address: Some(TEXT_ADDR + text_section_offsets[text_section.id] as u64),
+                description: SymbolDescription::new(0, false, false, false, false, 0),
+            }
+        );
+        for import in &imports {
+            imported_symbols.push(
+                Symbol {
+                    symbol: import.name.clone(),
+                    internal_address: None,
+                    // we only support importing from libSystem for now, which is currently imported at ordinal 1
+                    description: SymbolDescription::new(0, false, false, false, false, 1),
+                }
+            )
+        }
+
         // TODO: move this to arm64 backend
         if let Some(cstring_section) = &cstring_section {
-            for (fixup, &string_offset) in string_literals.iter().zip(&string_literal_offsets) {
+            for (fixup, &string_offset) in string_literal_fixups.iter().zip(&string_literal_offsets) {
                 let code_offset = text_section_offsets[text_section.id] + fixup.offset;
                 let string_offset = text_section_offsets[cstring_section.id] + string_offset;
     
@@ -817,6 +909,21 @@ impl MachOEncoder {
                 self.data[code_offset..(code_offset + 8)].copy_from_slice(&fixed_up_code.get_bytes());
             }
         }
+
+        let data_const = data_const.map(|(segment_number, segment, got_section)| {
+            let data_const_begin = self.pos();
+
+            for (i, import) in imports.iter().enumerate() {
+                let next = if i == imports.len() - 1 { 0 } else { 2 };
+                self.push(DyldChainedPtr64Bind::new(i as u32, 0, next));
+            }
+
+            let got_size = self.pos() - data_const_begin;
+            self.pad_to_next_boundary::<PAGE_SIZE>();
+            let data_const_size = self.pos() - data_const_begin;
+
+            (segment_number, segment, got_section, data_const_begin, data_const_size, got_size)
+        });
         
         let link_edit_begin = self.pos();
         
@@ -827,7 +934,7 @@ impl MachOEncoder {
         self.push(self.num_segments as u32);
         let mut data_const_starts_offset = None;
         for i in 0..self.num_segments {
-            if data_const.as_ref().map(|(num, _, _)| *num) == Some(i) {
+            if data_const.as_ref().map(|(num, ..)| *num) == Some(i) {
                 data_const_starts_offset = Some(self.alloc::<u32>());
             } else {
                 // AFAICT, the offset is relative to the start of dyld_chained_starts_in_image, which makes any offset less
@@ -844,49 +951,63 @@ impl MachOEncoder {
             // TODO: these should be fields of DyldChainedStartsInSegment, but need to be here instead because packed
             // structs are not yet supported by our ByteSwap macro.
             self.push(0 as u32); // max_valid_pointer
-            self.push(0 as u16); // page_count (TODO)
+            let page_count = (imports.len() * 8 - 1) / PAGE_SIZE + 1;
+            self.push(u16::try_from(page_count).unwrap());
 
-            // TODO: for each page, specify the 16-bit byte offset of the first fixup in the page
-            
+            // The first fix-up in each page is at offset 0, because the whole point of the __got section is to provide
+            // fixed up addresses.
+            for _ in 0..page_count {
+                self.push(0 as u16);
+            }
 
-            let chained_starts_in_segment_size = self.pos() - chained_starts_in_segment_pos; // TODO
+            let &(_, _, _, data_const_begin, ..) = data_const.as_ref().unwrap();
+
+            let chained_starts_in_segment_size = self.pos() - chained_starts_in_segment_pos;
             self.get_mut(chained_starts_in_segment).set(
                 DyldChainedStartsInSegment {
                     size: chained_starts_in_segment_size as u32,
                     page_size: 0x4000,
                     pointer_format: DYLD_CHAINED_PTR_64_OFFSET,
-                    segment_offset: 0, // TODO
+                    segment_offset: data_const_begin as u64,
                 }
             );
         }
         
-        let imports_count = 0;
-        
         let imports_offset = self.pos();
-        // TODO: create a bitfield data structure for the `dyld_chained_import` struct
-        self.push(0 as u32);
+        let mut chained_imports = Vec::new();
+        for import in &imports {
+            chained_imports.push(self.alloc::<DyldChainedImport>());
+        }
+        let imported_symbols_offset = self.pos();
+        self.push(0 as u8);
+        for (&import_header, import) in chained_imports.iter().zip(&imports) {
+            let offset = self.pos() - imported_symbols_offset;
+            self.push_null_terminated_string(&import.name);
+            self.get_mut(import_header).set(
+                DyldChainedImport::new(1, false, offset as u32)
+            );
+        }
         self.pad_to_next_boundary::<8>();
-        let import_symbols_offset = if imports_count == 0 {
+        let imported_symbols_offset = if imports.is_empty() {
             imports_offset
         } else {
-            self.pos()
+            imported_symbols_offset
         };
-        // TODO: add symbols
-        
+
         self.pad_to_next_boundary::<8>();
-        
+
         self.get_mut(chained_fixups_header).set(
             DyldChainedFixupsHeader {
                 fixups_version: 0,
                 starts_offset: (chained_starts_offset - chained_fixups_header.start()) as u32,
                 imports_offset: (imports_offset - chained_fixups_header.start()) as u32,
-                symbols_offset: (import_symbols_offset - chained_fixups_header.start()) as u32,
-                imports_count,
+                symbols_offset: (imported_symbols_offset - chained_fixups_header.start()) as u32,
+                imports_count: imports.len() as u32,
                 imports_format: DYLD_CHAINED_IMPORT,
                 symbols_format: 0, // uncompressed
             }
         );
-        
+
         let chained_fixups_data_size = self.pos() - chained_fixups_header.start();
         
         let exports_trie_start = self.pos();
@@ -902,15 +1023,28 @@ impl MachOEncoder {
         
         let data_in_code_start = self.pos();
         let data_in_code_len = self.pos() - data_in_code_start;
-        
+
         let symbol_table_begin = self.pos();
-        let mh_execute_header_entry = self.alloc_symbol_table_entry();
-        let main_entry = self.alloc_symbol_table_entry();
+        let mut symbol_headers = Vec::new();
+        for symbol in local_symbols.iter().chain(&imported_symbols) {
+            symbol_headers.push(self.alloc_symbol_table_entry());
+        }
+
+        let indirect_symbol_table_offset = if imports.is_empty() {
+            0
+        } else {
+            self.pos() as u32
+        };
+        for i in 0..imported_symbols.len() {
+            self.push(i as u32 + local_symbols.len() as u32);
+        }
         
         let string_table_begin = self.pos();
         self.push_null_terminated_string(" ");
-        let mh_execute_header_str_offset = self.push_null_terminated_string("__mh_execute_header");
-        let main_str_offset = self.push_null_terminated_string("_main");
+        let mut symbol_string_offsets = Vec::new();
+        for symbol in local_symbols.iter().chain(&imported_symbols) {
+            symbol_string_offsets.push(self.push_null_terminated_string(&symbol.symbol));
+        }
         self.pad_to_next_boundary::<8>();
         let string_table_len = self.pos() - string_table_begin;
         
@@ -944,25 +1078,45 @@ impl MachOEncoder {
         let code_slots_len = num_code_slots * 32;
         let code_signature_len = self.pos() + code_slots_len - code_signature_start;
         
-        self.get_mut(mh_execute_header_entry).set(
-            SymbolTableEntry {
-                string_table_offset: (mh_execute_header_str_offset - string_table_begin) as u32,
-                ty: 0x1E,
-                section_number: 1,
-                desc: 0x0010,
-                value: TEXT_ADDR,
+        for ((symbol, symbol_header), string_offset) in local_symbols.iter().chain(&imported_symbols).zip(symbol_headers).zip(symbol_string_offsets) {
+            let ty = if symbol.internal_address.is_some() {
+                SymbolFlags::new(false, SymbolType::DefinedInSectionNumber, true, 0)
+            } else {
+                SymbolFlags::new(true, SymbolType::Undefined, false, 0)
+            };
+            let section_number = if symbol.internal_address.is_some() { 
+                1 // ordinal of __text section
+            } else {
+                0
+            };
+            self.get_mut(symbol_header).set(
+                SymbolTableEntry {
+                    string_table_offset: (string_offset - string_table_begin) as u32,
+                    ty,
+                    section_number,
+                    description: symbol.description,
+                    value: symbol.internal_address.unwrap_or(0),
+                }
+            )
+        }
+
+
+        if let Some((segment_number, segment, got_section, data_const_begin, data_const_size, got_size)) = &data_const {
+            for (i, fixup) in import_fixups.iter().enumerate() {
+                let symbol_offset = data_const_begin + fixup.id.raw() as usize * 8;
+                let code_offset = text_section_offsets[text_section.id] + fixup.offset;
+    
+                let page_mask = 0x0FFF;
+                let page_offset = (symbol_offset >> 12) as i32 - (code_offset >> 12) as i32;
+    
+                let mut fixed_up_code = Arm64Encoder::new();
+                fixed_up_code.adrp(Reg::R16, page_offset);
+                fixed_up_code.ldr64(Reg::R16, Reg::R16, (symbol_offset & page_mask).try_into().unwrap());
+                self.data[code_offset..(code_offset + 8)].copy_from_slice(&fixed_up_code.get_bytes());
             }
-        );
-        self.get_mut(main_entry).set(
-            SymbolTableEntry {
-                string_table_offset: (main_str_offset - string_table_begin) as u32,
-                ty: 0x1E,
-                section_number: 1,
-                desc: 0x0000,
-                value: TEXT_ADDR + text_section_offsets[text_section.id] as u64,
-            }
-        );
-        
+        }
+
+
         let link_edit_end = self.pos() + code_slots_len;
         let num_commands = self.num_load_commands;
         self.get_mut(mach_header).set(
@@ -1053,6 +1207,38 @@ impl MachOEncoder {
         //         reserved: [0; 3],
         //     }
         // );
+
+        if let Some((segment_number, segment, got_section, data_const_begin, data_const_size, got_size)) = data_const {
+            self.get_mut(segment.header).set(
+                LcSegment64 {
+                    command: LC_SEGMENT_64,
+                    command_size: segment.size(),
+                    name: encode_string_16("__DATA_CONST"),
+                    vm_addr: TEXT_ADDR + data_const_begin as u64,
+                    vm_size: data_const_size as u64,
+                    file_offset: data_const_begin as u64,
+                    file_size: data_const_size as u64,
+                    max_vm_protection: VM_PROT_READ | VM_PROT_WRITE,
+                    initial_vm_protection: VM_PROT_READ | VM_PROT_WRITE,
+                    num_sections: 1,
+                    flags: SG_READ_ONLY,
+                }
+            );
+            self.get_mut(got_section).set(
+                Section64 {
+                    name: encode_string_16("__got"),
+                    segment_name: encode_string_16("__DATA_CONST"),
+                    vm_addr: TEXT_ADDR + data_const_begin as u64,
+                    vm_size: got_size as u64,
+                    file_offset: data_const_begin as u32,
+                    alignment: 3, // stored as log base 2, so this is actually 8
+                    relocations_file_offset: 0,
+                    num_relocations: 0,
+                    flags: SectionFlags::new(SectionType::NonLazySymbolPointers, 0),
+                    reserved: [0; 3], // reserved[0] is the first offset into the indirect symbol table
+                }
+            );
+        };
         self.get_mut(link_edit_segment.header).set(
             LcSegment64 {
                 command: LC_SEGMENT_64,
@@ -1161,13 +1347,13 @@ impl MachOEncoder {
                 command_size: dynamic_symbol_table.size() as u32,
 
                 local_symbols_index: 0,
-                num_local_symbols: 2,
+                num_local_symbols: local_symbols.len() as u32,
 
-                extern_symbols_index: 2,
-                num_extern_symbols: 0,
+                extern_symbols_index: local_symbols.len() as u32,
+                num_extern_symbols: imported_symbols.len() as u32,
 
-                undef_symbols_index: 2,
-                num_undef_symbols: 0,
+                undef_symbols_index: local_symbols.len() as u32,
+                num_undef_symbols: imported_symbols.len() as u32,
 
                 toc_offset: 0,
                 num_toc_entries: 0,
@@ -1178,8 +1364,8 @@ impl MachOEncoder {
                 referenced_symbol_table_offset: 0,
                 num_referenced_symbol_table_entries: 0,
 
-                indirect_symbol_table_offset: 0,
-                num_indirect_symbol_table_entries: 0,
+                indirect_symbol_table_offset,
+                num_indirect_symbol_table_entries: imported_symbols.len() as u32,
 
                 extern_relocation_entries_offset: 0,
                 num_extern_relocation_entries: 0,

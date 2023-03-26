@@ -1,3 +1,5 @@
+use index_vec::*;
+
 use crate::arm64::*;
 use crate::ast::LegacyIntrinsic;
 use crate::driver::Driver;
@@ -14,18 +16,35 @@ pub struct StringLiteralFixup {
     pub id: StrId,
 }
 
+define_index_type!(pub struct SymbolImportId = u32;);
+
+pub struct SymbolImport {
+    pub name: String,
+    // library: LibraryImportId,
+}
+
+// This is almost the same as a string literal fixup, except an `ldr` instruction is used in place of the `add`.
+pub struct ImportFixup {
+    pub offset: usize,
+    pub id: SymbolImportId,
+}
+
 impl Driver {
-    pub fn generate_arm64_func(&self, func_index: usize, is_main: bool) -> (Vec<u8>, Vec<StringLiteralFixup>) {
+    pub fn generate_arm64_func(&self, func_index: usize, is_main: bool) -> (Vec<u8>, Vec<StringLiteralFixup>, IndexVec<SymbolImportId, SymbolImport>, Vec<ImportFixup>) {
         let func = &self.code.mir.functions[func_index];
         assert_eq!(func.blocks.len(), 1);
         assert_eq!(self.code.num_parameters(func), 0);
 
-        let mut fixups = Vec::new();
+        let mut string_literal_fixups = Vec::new();
+        let mut imports = IndexVec::new();
+        let mut import_fixups = Vec::new();
+
+        let mut puts_id = None;
 
         let mut code = Arm64Encoder::new();
         let frame_size = 16;
+        code.stp64(Reg::FP, Reg::LR, Reg::SP, -16);
         code.sub64_imm(false, Reg::SP, Reg::SP, frame_size);
-        code.str32(Reg::ZERO, Reg::SP, 12);
         for &op in &self.code.blocks[func.blocks[0]].ops {
             let instr = self.code.ops[op].as_mir_instr().unwrap();
             match instr {
@@ -34,10 +53,10 @@ impl Driver {
                         &Const::Str { id, .. } => {
                             let fixup = StringLiteralFixup {
                                 id,
-                                // adrp + add
+                                // adrp + add x0, x0, offset
                                 offset: code.allocate_instructions(2),
                             };
-                            fixups.push(fixup);
+                            string_literal_fixups.push(fixup);
 
                             // TODO: move to stack
                         },
@@ -46,7 +65,24 @@ impl Driver {
                 },
                 Instr::LegacyIntrinsic { intr, .. } => {
                     match intr {
-                        LegacyIntrinsic::Print => {},
+                        LegacyIntrinsic::Print => {
+                            let puts_id = if let Some(puts_id) = puts_id {
+                                puts_id
+                            } else {
+                                let id = imports.push(SymbolImport { name: "_puts".to_string() });
+                                puts_id = Some(id);
+                                id
+                            };
+                            let puts_fixup = ImportFixup {
+                                // adrp + ldr x16, [x16+offset]
+                                offset: code.allocate_instructions(2),
+                                id: puts_id,
+                            };
+                            import_fixups.push(puts_fixup);
+
+                            // TODO: make sure argument is in x0 (currently assumed because of how string literals are implemented)
+                            code.blr(Reg::R16);
+                        },
                         _ => todo!("{}", self.display_mir_instr(op)),
                     }
                 },
@@ -65,7 +101,8 @@ impl Driver {
             }
         }
         code.add64_imm(false, Reg::SP, Reg::SP, frame_size);
+        code.ldp64(Reg::FP, Reg::LR, Reg::SP, -16);
         code.ret(Reg::LR);
-        (code.get_bytes(), fixups)
+        (code.get_bytes(), string_literal_fixups, imports, import_fixups)
     }
 }
