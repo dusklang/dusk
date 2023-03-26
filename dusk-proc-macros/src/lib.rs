@@ -619,13 +619,20 @@ pub fn byteswap_derive(input: TokenStream) -> TokenStream {
     match input.data {
         Data::Struct(data) => match data.fields {
             Fields::Named(named) => {
-                for field in named.named.iter() {
+                for field in &named.named {
                     let name = field.ident.as_ref().unwrap();
                     gen_inner.extend(quote!(
                         self.#name.byte_swap();
                     ));
                 }
-            }
+            },
+            Fields::Unnamed(unnamed) => {
+                for i in (0..unnamed.unnamed.len()).map(syn::Index::from) {
+                    gen_inner.extend(quote! {
+                        self.#i.byte_swap();
+                    })
+                }
+            },
             _ => unimplemented!(),
         },
         _ => unimplemented!(),
