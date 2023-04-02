@@ -1,31 +1,24 @@
-use index_vec::*;
+use std::ffi::CStr;
 
-use crate::mir::StrId;
+use index_vec::*;
 
 define_index_type!(pub struct DylibId = u32;);
 define_index_type!(pub struct ImportedSymbolId = u32;);
+define_index_type!(pub struct FixupLocationId = u32;);
 
-/// String literals are currently always implemented on arm64 with two instructions: first, an `adrp` instruction to
-/// get the start of the page that the literal happens to be on, then an `add` instruction to get the address of the
-/// actual literal. Since we have no way of knowing where the literals will be until we have generated all the code, we
-/// must perform a "fixup" pass later to fill in the instructions with the appropriate offset.
-/// This struct stores the offset in bytes of what will become the `adrp` instruction, relative to the beginning of the
-/// code.
-pub struct CStringFixup {
+pub struct Fixup {
     pub offset: usize,
-
-    // TODO: intern into a cstring section and make this an offset into it
-    pub id: StrId,
-}
-
-// This is almost the same as a string literal fixup, except an `ldr` instruction is used in place of the `add`.
-pub struct ImportFixup {
-    pub offset: usize,
-    pub id: ImportedSymbolId,
+    pub id: FixupLocationId,
 }
 
 pub trait Exe {
+    #[doc(hidden)]
     fn import_symbol_impl(&mut self, dylib: DylibId, name: String) -> ImportedSymbolId;
+
+    fn use_imported_symbol(&mut self, symbol: ImportedSymbolId) -> FixupLocationId;
+
+    // TODO: perhaps we should have separate methods to intern and use C strings?
+    fn use_cstring(&mut self, string: &CStr) -> FixupLocationId;
 }
 
 pub trait ExeExt: Exe {

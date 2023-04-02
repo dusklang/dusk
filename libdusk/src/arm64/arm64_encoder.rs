@@ -1,7 +1,9 @@
+use std::ffi::CStr;
+
 #[cfg(target_arch="aarch64")]
 use libc::{pthread_jit_write_protect_np, c_void, size_t};
 
-use crate::{exe::{ImportFixup, ImportedSymbolId, CStringFixup}, mir::StrId};
+use crate::exe::{Fixup, ImportedSymbolId, Exe, FixupLocationId};
 
 #[cfg(target_arch="aarch64")]
 #[link(name="c")]
@@ -9,26 +11,13 @@ extern {
     fn sys_icache_invalidate(start: *mut c_void, len: size_t);
 }
 
-pub struct Arm64ImportFixup {
-    pub fixup: ImportFixup,
+pub struct Arm64Fixup {
+    pub fixup: Fixup,
     pub dest: Reg,
 }
 
-impl std::ops::Deref for Arm64ImportFixup {
-    type Target = ImportFixup;
-
-    fn deref(&self) -> &Self::Target {
-        &self.fixup
-    }
-}
-
-pub struct Arm64CStringFixup {
-    pub fixup: CStringFixup,
-    pub dest: Reg,
-}
-
-impl std::ops::Deref for Arm64CStringFixup {
-    type Target = CStringFixup;
+impl std::ops::Deref for Arm64Fixup {
+    type Target = Fixup;
 
     fn deref(&self) -> &Self::Target {
         &self.fixup
@@ -38,8 +27,7 @@ impl std::ops::Deref for Arm64CStringFixup {
 #[derive(Default)]
 pub struct Arm64Encoder {
     data: Vec<u8>,
-    pub import_fixups: Vec<Arm64ImportFixup>,
-    pub cstring_fixups: Vec<Arm64CStringFixup>,
+    pub fixups: Vec<Arm64Fixup>,
 }
 
 #[repr(u32)]
@@ -154,6 +142,11 @@ impl Drop for InstrEncoder {
     fn drop(&mut self) {
         panic!("must call Instr::get_instr()")
     }
+}
+
+pub enum Indirection {
+    Direct,
+    Indirect,
 }
 
 #[allow(unused)]
@@ -377,30 +370,50 @@ impl Arm64Encoder {
         offset
     }
 
-    pub fn load_symbol(&mut self, dest: Reg, id: ImportedSymbolId) {
-        let fixup = ImportFixup {
+    pub fn load_symbol(&mut self, dest: Reg, id: ImportedSymbolId, exe: &mut dyn Exe) {
+        let id = exe.use_imported_symbol(id);
+        let fixup = Fixup {
             // adrp + ldr dest, [dest+offset]
             offset: self.allocate_instructions(2),
             id,
         };
-        let fixup = Arm64ImportFixup {
+        let fixup = Arm64Fixup {
             fixup,
             dest,
         };
-        self.import_fixups.push(fixup);
+        self.fixups.push(fixup);
     }
 
-    pub fn load_cstring_address(&mut self, dest: Reg, id: StrId) {
-        let fixup = CStringFixup {
+    pub fn load_cstring_address(&mut self, dest: Reg, string: &CStr, exe: &mut dyn Exe) {
+        let id = exe.use_cstring(string);
+        let fixup = Fixup {
             id,
             // adrp + add dest, dest, offset
             offset: self.allocate_instructions(2),
         };
-        let fixup = Arm64CStringFixup {
+        let fixup = Arm64Fixup {
             fixup,
             dest,
         };
-        self.cstring_fixups.push(fixup);
+        self.fixups.push(fixup);
+    }
+
+    pub fn perform_fixups(&mut self, code_addr: usize, mut get_fixup_addr: impl FnMut(FixupLocationId) -> (usize, Indirection)) {
+        for fixup in &self.fixups {
+            let (fixup_addr, indirection) = get_fixup_addr(fixup.id);
+            let code_addr = code_addr + fixup.offset;
+
+            let page_mask = 0x0FFF;
+            let page_offset = (fixup_addr >> 12) as i64 - (code_addr >> 12) as i64;
+
+            let mut fixed_up_code = Arm64Encoder::new();
+            fixed_up_code.adrp(fixup.dest, page_offset.try_into().unwrap());
+            match indirection {
+                Indirection::Direct => fixed_up_code.ldr64(fixup.dest, fixup.dest, (fixup_addr & page_mask).try_into().unwrap()),
+                Indirection::Indirect => fixed_up_code.add64_imm(false, fixup.dest, fixup.dest, (fixup_addr & page_mask).try_into().unwrap()),
+            }
+            self.data[fixup.offset..(fixup.offset + 8)].copy_from_slice(&fixed_up_code.get_bytes());
+        }
     }
 
     #[cfg(target_arch="aarch64")]

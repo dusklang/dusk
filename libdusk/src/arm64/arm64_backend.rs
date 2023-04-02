@@ -19,7 +19,7 @@ impl Driver {
                 Instr::Const(konst) => {
                     match konst {
                         &Const::Str { id, .. } => {
-                            code.load_cstring_address(Reg::R0, id);
+                            code.load_cstring_address(Reg::R0, &self.code.mir.strings[id], exe);
 
                             // TODO: move to stack
                         },
@@ -30,7 +30,7 @@ impl Driver {
                     match intr {
                         LegacyIntrinsic::Print => {
                             let puts = exe.import_symbol(lib_system, "_puts");
-                            code.load_symbol(Reg::R16, puts);
+                            code.load_symbol(Reg::R16, puts, exe);
 
                             // TODO: make sure argument is in x0 (currently assumed because of how string literals are implemented)
                             code.blr(Reg::R16);
