@@ -1,15 +1,14 @@
 #![allow(unused)]
 
-use std::num;
+use std::collections::HashMap;
+use std::hash::Hash;
 use std::io::{self, Write};
 use std::marker::PhantomData;
 use std::mem;
 
 use index_vec::define_index_type;
-use md5::{Md5, Digest as Md5Digest};
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
-use crate::index_counter::IndexCounter;
 use crate::index_vec::*;
 
 use crate::driver::Driver;
@@ -837,6 +836,10 @@ impl MachOEncoder {
     }
     
     pub fn write(&mut self, d: &Driver, main_function_index: usize, dest: &mut impl Write) -> io::Result<()> {
+        let mut exe = MachOExe::new();
+        let lib_system = exe.load_dylib("/usr/lib/libSystem.B.dylib", 2, 0x05_27_0000, 0x00_01_0000);
+
+
         let (code, string_literal_fixups, imports, import_fixups) = d.generate_arm64_func(main_function_index, true);
         let mut cstrings: Vec<u8> = Vec::new();
         let mut string_literal_offsets = Vec::new();
@@ -888,8 +891,10 @@ impl MachOEncoder {
         let src_version = self.alloc_cmd::<SourceVersionCommand>();
         
         let entry_point = self.alloc_cmd::<EntryPointCommand>();
-        
-        let load_lib_system = self.alloc_dylib_command("/usr/lib/libSystem.B.dylib");
+
+        let dylib_load_commands: Vec<_> = exe.dylibs.iter()
+            .map(|dylib| self.alloc_dylib_command(&dylib.name))
+            .collect();
         
         let function_starts = self.alloc_cmd::<LinkEditDataCommand>();
         
@@ -1365,18 +1370,20 @@ impl MachOEncoder {
                 version: 0,
             }
         );
-        self.get_mut(load_lib_system.header).set(
-            DylibCommand {
-                command: LC_LOAD_DYLIB,
-                command_size: load_lib_system.size(),
-                dylib: Dylib {
-                    name_offset: 0x18,
-                    timestamp: 2,
-                    current_version: 0x05_27_0000,
-                    compatibility_version: 0x00_01_0000,
-                },
-            }
-        );
+        for (dylib, command) in exe.dylibs.iter().zip(&dylib_load_commands) {
+            self.get_mut(command.header).set(
+                DylibCommand {
+                    command: LC_LOAD_DYLIB,
+                    command_size: command.size(),
+                    dylib: Dylib {
+                        name_offset: 0x18, // size of this DylibCommand structure
+                        timestamp: dylib.timestamp,
+                        current_version: dylib.current_version,
+                        compatibility_version: dylib.compatibility_version,
+                    },
+                }
+            );
+        }
         
         let num_symbols = self.num_symbol_table_entries;
         self.get_mut(symbol_table).set(
@@ -1507,5 +1514,74 @@ impl MachOEncoder {
         dest.write_all(&self.data)?;
 
         Ok(())
+    }
+}
+
+define_index_type!(struct DylibId = u32;);
+define_index_type!(struct ImportedSymbolId = u32;);
+
+struct MachODylib {
+    name: String,
+    timestamp: u32,
+    current_version: u32,
+    compatibility_version: u32,
+}
+
+struct MachOImportedSymbol {
+    dylib: DylibId,
+    name: String,
+}
+
+struct MachOExe {
+    dylibs: IndexVec<DylibId, MachODylib>,
+    dylib_map: HashMap<String, DylibId>,
+
+    imported_symbols: IndexVec<ImportedSymbolId, MachOImportedSymbol>,
+    imported_symbol_map: HashMap<String, ImportedSymbolId>,
+}
+
+impl MachOExe {
+    fn new() -> Self {
+        Self {
+            dylibs: Default::default(),
+            dylib_map: Default::default(),
+
+            imported_symbols: Default::default(),
+            imported_symbol_map: Default::default(),
+        }
+    }
+
+    fn load_dylib(&mut self, name: impl Into<String> + AsRef<str>, timestamp: u32, current_version: u32, compatibility_version: u32) -> DylibId {
+        if let Some(&id) = self.dylib_map.get(name.as_ref()) {
+            return id;
+        } else {
+            let name = name.into();
+            let id = self.dylibs.push(
+                MachODylib {
+                    name: name.clone(),
+                    timestamp,
+                    current_version,
+                    compatibility_version
+                }
+            );
+            self.dylib_map.insert(name, id);
+            id
+        }
+    }
+
+    fn import_symbol(&mut self, dylib: DylibId, name: impl Into<String> + AsRef<str>) -> ImportedSymbolId {
+        if let Some(&id) = self.imported_symbol_map.get(name.as_ref()) {
+            return id;
+        } else {
+            let name = name.into();
+            let id = self.imported_symbols.push(
+                MachOImportedSymbol {
+                    dylib,
+                    name: name.clone(),
+                }
+            );
+            self.imported_symbol_map.insert(name, id);
+            id
+        }
     }
 }
