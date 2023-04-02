@@ -1,15 +1,45 @@
 #[cfg(target_arch="aarch64")]
 use libc::{pthread_jit_write_protect_np, c_void, size_t};
 
+use crate::{exe::{ImportFixup, ImportedSymbolId, CStringFixup}, mir::StrId};
+
 #[cfg(target_arch="aarch64")]
 #[link(name="c")]
 extern {
     fn sys_icache_invalidate(start: *mut c_void, len: size_t);
 }
 
+pub struct Arm64ImportFixup {
+    pub fixup: ImportFixup,
+    pub dest: Reg,
+}
+
+impl std::ops::Deref for Arm64ImportFixup {
+    type Target = ImportFixup;
+
+    fn deref(&self) -> &Self::Target {
+        &self.fixup
+    }
+}
+
+pub struct Arm64CStringFixup {
+    pub fixup: CStringFixup,
+    pub dest: Reg,
+}
+
+impl std::ops::Deref for Arm64CStringFixup {
+    type Target = CStringFixup;
+
+    fn deref(&self) -> &Self::Target {
+        &self.fixup
+    }
+}
+
 #[derive(Default)]
 pub struct Arm64Encoder {
     data: Vec<u8>,
+    pub import_fixups: Vec<Arm64ImportFixup>,
+    pub cstring_fixups: Vec<Arm64CStringFixup>,
 }
 
 #[repr(u32)]
@@ -132,8 +162,8 @@ impl Arm64Encoder {
         Self::default()
     }
 
-    pub fn get_bytes(self) -> Vec<u8> {
-        self.data
+    pub fn get_bytes(&self) -> &[u8] {
+        &self.data
     }
 
     pub fn push(&mut self, encoder: InstrEncoder) {
@@ -345,6 +375,32 @@ impl Arm64Encoder {
         let offset = self.data.len();
         self.data.extend(std::iter::repeat(0).take(n * 4));
         offset
+    }
+
+    pub fn load_symbol(&mut self, dest: Reg, id: ImportedSymbolId) {
+        let fixup = ImportFixup {
+            // adrp + ldr dest, [dest+offset]
+            offset: self.allocate_instructions(2),
+            id,
+        };
+        let fixup = Arm64ImportFixup {
+            fixup,
+            dest,
+        };
+        self.import_fixups.push(fixup);
+    }
+
+    pub fn load_cstring_address(&mut self, dest: Reg, id: StrId) {
+        let fixup = CStringFixup {
+            id,
+            // adrp + add dest, dest, offset
+            offset: self.allocate_instructions(2),
+        };
+        let fixup = Arm64CStringFixup {
+            fixup,
+            dest,
+        };
+        self.cstring_fixups.push(fixup);
     }
 
     #[cfg(target_arch="aarch64")]

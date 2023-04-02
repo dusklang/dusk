@@ -33,5 +33,6 @@ mod arm64;
 mod rw_ref;
 mod builtins;
 mod autopop;
+mod exe;
 
 use display_adapter::display_adapter;

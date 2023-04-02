@@ -6,10 +6,11 @@ use std::io::{self, Write};
 use std::marker::PhantomData;
 use std::mem;
 
-use index_vec::define_index_type;
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
+use crate::exe::*;
 use crate::index_vec::*;
+use index_vec::define_index_type;
 
 use crate::driver::Driver;
 use dusk_proc_macros::ByteSwap;
@@ -839,15 +840,16 @@ impl MachOEncoder {
         let mut exe = MachOExe::new();
         let lib_system = exe.load_dylib("/usr/lib/libSystem.B.dylib", 2, 0x05_27_0000, 0x00_01_0000);
 
+        let mut code = Arm64Encoder::new();
+        d.generate_arm64_func(&mut code, main_function_index, true, &mut exe, lib_system);
 
-        let (code, string_literal_fixups, imports, import_fixups) = d.generate_arm64_func(main_function_index, true);
+        // TODO: instead of deriving strings from the fixups, string data should be interned on the fly by MachOExe.
         let mut cstrings: Vec<u8> = Vec::new();
         let mut string_literal_offsets = Vec::new();
-        for lit in &string_literal_fixups {
+        for fixup in &code.cstring_fixups {
             string_literal_offsets.push(cstrings.len());
-            cstrings.extend(d.code.mir.strings[lit.id].as_bytes_with_nul());
+            cstrings.extend(d.code.mir.strings[fixup.id].as_bytes_with_nul());
         }
-
 
         let mach_header = self.alloc::<MachHeader>();
         
@@ -857,12 +859,12 @@ impl MachOEncoder {
         
         let mut text_segment = self.alloc_text_segment();
 
-        let text_section = self.alloc_text_section(&mut text_segment, &code, 4);
-        let cstring_section = (!string_literal_fixups.is_empty()).then(|| self.alloc_text_section(&mut text_segment, &cstrings, 1));
+        let text_section = self.alloc_text_section(&mut text_segment, code.get_bytes(), 4);
+        let cstring_section = (!code.cstring_fixups.is_empty()).then(|| self.alloc_text_section(&mut text_segment, &cstrings, 1));
         // let unwind_info_section = self.alloc_section(&mut text_segment);
 
 
-        let data_const = (!imports.is_empty()).then(|| {
+        let data_const = (!exe.imported_symbols.is_empty()).then(|| {
             let segment_number = self.num_segments;
             let mut segment = self.alloc_segment();
             let got_section = self.alloc_section(&mut segment);
@@ -928,7 +930,7 @@ impl MachOEncoder {
                 description: SymbolDescription::new(0, false, false, false, false, 0),
             }
         );
-        for import in &imports {
+        for import in &exe.imported_symbols {
             imported_symbols.push(
                 Symbol {
                     symbol: import.name.clone(),
@@ -941,19 +943,16 @@ impl MachOEncoder {
 
         // TODO: move this to arm64 backend
         if let Some(cstring_section) = &cstring_section {
-            for (fixup, &string_offset) in string_literal_fixups.iter().zip(&string_literal_offsets) {
+            for (fixup, &string_offset) in code.cstring_fixups.iter().zip(&string_literal_offsets) {
                 let code_offset = text_section_offsets[text_section.id] + fixup.offset;
                 let string_offset = text_section_offsets[cstring_section.id] + string_offset;
-    
-                let page_mask = !0x0FFF;
-    
-                // if the code and string are in the same page, we don't need to provide a non-zero offset to `adrp`.
-                // TODO: support case where that is not true.
-                assert_eq!(code_offset & page_mask, string_offset & page_mask);
+
+                let page_mask = 0x0FFF;
+                let page_offset = (string_offset >> 12) as i32 - (code_offset >> 12) as i32;
     
                 let mut fixed_up_code = Arm64Encoder::new();
-                fixed_up_code.adrp(Reg::R0, 0);
-                fixed_up_code.add64_imm(false, Reg::R0, Reg::R0, (string_offset & !page_mask).try_into().unwrap());
+                fixed_up_code.adrp(fixup.dest, page_offset);
+                fixed_up_code.add64_imm(false, fixup.dest, fixup.dest, (string_offset & page_mask).try_into().unwrap());
                 self.data[code_offset..(code_offset + 8)].copy_from_slice(&fixed_up_code.get_bytes());
             }
         }
@@ -962,7 +961,7 @@ impl MachOEncoder {
             let data_const_begin = self.pos();
 
             let mut prev_ptr: Option<Ref<DyldChainedPtr64>> = None;
-            for (i, import) in imports.iter().enumerate() {
+            for (i, import) in exe.imported_symbols.iter().enumerate() {
                 if let Some(prev_ptr) = prev_ptr {
                     let diff = self.pos() - prev_ptr.addr;
                     assert!(diff % 4 == 0);
@@ -1004,7 +1003,7 @@ impl MachOEncoder {
             // TODO: these should be fields of DyldChainedStartsInSegment, but need to be here instead because packed
             // structs are not yet supported by our ByteSwap macro.
             self.push(0 as u32); // max_valid_pointer
-            let page_count = (imports.len() * 8 - 1) / PAGE_SIZE + 1;
+            let page_count = (exe.imported_symbols.len() * 8 - 1) / PAGE_SIZE + 1;
             self.push(u16::try_from(page_count).unwrap());
 
             // The first fix-up in each page is at offset 0, because the whole point of the __got section is to provide
@@ -1028,20 +1027,20 @@ impl MachOEncoder {
         
         let imports_offset = self.pos();
         let mut chained_imports = Vec::new();
-        for import in &imports {
+        for import in &exe.imported_symbols {
             chained_imports.push(self.alloc::<DyldChainedImport>());
         }
         let imported_symbols_offset = self.pos();
         self.push(0 as u8);
-        for (&import_header, import) in chained_imports.iter().zip(&imports) {
+        for (&import_header, import) in chained_imports.iter().zip(&exe.imported_symbols) {
             let offset = self.pos() - imported_symbols_offset;
             self.push_null_terminated_string(&import.name);
             self.get_mut(import_header).set(
-                DyldChainedImport::new(1, false, offset as u32)
+                DyldChainedImport::new((import.dylib.index() + 1).try_into().unwrap(), false, offset as u32)
             );
         }
         self.pad_to_next_boundary::<8>();
-        let imported_symbols_offset = if imports.is_empty() {
+        let imported_symbols_offset = if exe.imported_symbols.is_empty() {
             imports_offset
         } else {
             imported_symbols_offset
@@ -1055,7 +1054,7 @@ impl MachOEncoder {
                 starts_offset: (chained_starts_offset - chained_fixups_header.start()) as u32,
                 imports_offset: (imports_offset - chained_fixups_header.start()) as u32,
                 symbols_offset: (imported_symbols_offset - chained_fixups_header.start()) as u32,
-                imports_count: imports.len() as u32,
+                imports_count: exe.imported_symbols.len() as u32,
                 imports_format: DYLD_CHAINED_IMPORT,
                 symbols_format: 0, // uncompressed
             }
@@ -1083,7 +1082,7 @@ impl MachOEncoder {
             symbol_headers.push(self.alloc_symbol_table_entry());
         }
 
-        let indirect_symbol_table_offset = if imports.is_empty() {
+        let indirect_symbol_table_offset = if exe.imported_symbols.is_empty() {
             0
         } else {
             self.pos() as u32
@@ -1155,7 +1154,7 @@ impl MachOEncoder {
 
 
         if let Some((segment_number, segment, got_section, data_const_begin, data_const_size, got_size)) = &data_const {
-            for (i, fixup) in import_fixups.iter().enumerate() {
+            for fixup in &code.import_fixups {
                 let symbol_offset = data_const_begin + fixup.id.raw() as usize * 8;
                 let code_offset = text_section_offsets[text_section.id] + fixup.offset;
     
@@ -1163,8 +1162,8 @@ impl MachOEncoder {
                 let page_offset = (symbol_offset >> 12) as i32 - (code_offset >> 12) as i32;
     
                 let mut fixed_up_code = Arm64Encoder::new();
-                fixed_up_code.adrp(Reg::R16, page_offset);
-                fixed_up_code.ldr64(Reg::R16, Reg::R16, (symbol_offset & page_mask).try_into().unwrap());
+                fixed_up_code.adrp(fixup.dest, page_offset);
+                fixed_up_code.ldr64(fixup.dest, fixup.dest, (symbol_offset & page_mask).try_into().unwrap());
                 self.data[code_offset..(code_offset + 8)].copy_from_slice(&fixed_up_code.get_bytes());
             }
         }
@@ -1221,7 +1220,7 @@ impl MachOEncoder {
                 name: encode_string_16("__text"),
                 segment_name: encode_string_16("__TEXT"),
                 vm_addr: TEXT_ADDR + text_section_offsets[text_section.id] as u64,
-                vm_size: code.len() as u64,
+                vm_size: code.get_bytes().len() as u64,
                 file_offset: text_section_offsets[text_section.id] as u32,
                 alignment: 2, // stored as log base 2, so this is actually 4
                 relocations_file_offset: 0,
@@ -1517,9 +1516,6 @@ impl MachOEncoder {
     }
 }
 
-define_index_type!(struct DylibId = u32;);
-define_index_type!(struct ImportedSymbolId = u32;);
-
 struct MachODylib {
     name: String,
     timestamp: u32,
@@ -1527,6 +1523,7 @@ struct MachODylib {
     compatibility_version: u32,
 }
 
+#[derive(Clone, Hash, PartialEq, Eq)]
 struct MachOImportedSymbol {
     dylib: DylibId,
     name: String,
@@ -1537,7 +1534,7 @@ struct MachOExe {
     dylib_map: HashMap<String, DylibId>,
 
     imported_symbols: IndexVec<ImportedSymbolId, MachOImportedSymbol>,
-    imported_symbol_map: HashMap<String, ImportedSymbolId>,
+    imported_symbol_map: HashMap<MachOImportedSymbol, ImportedSymbolId>,
 }
 
 impl MachOExe {
@@ -1568,19 +1565,16 @@ impl MachOExe {
             id
         }
     }
+}
 
-    fn import_symbol(&mut self, dylib: DylibId, name: impl Into<String> + AsRef<str>) -> ImportedSymbolId {
-        if let Some(&id) = self.imported_symbol_map.get(name.as_ref()) {
+impl Exe for MachOExe {
+    fn import_symbol_impl(&mut self, dylib: DylibId, name: String) -> ImportedSymbolId {
+        let symbol = MachOImportedSymbol { dylib, name };
+        if let Some(&id) = self.imported_symbol_map.get(&symbol) {
             return id;
         } else {
-            let name = name.into();
-            let id = self.imported_symbols.push(
-                MachOImportedSymbol {
-                    dylib,
-                    name: name.clone(),
-                }
-            );
-            self.imported_symbol_map.insert(name, id);
+            let id = self.imported_symbols.push(symbol.clone());
+            self.imported_symbol_map.insert(symbol, id);
             id
         }
     }
