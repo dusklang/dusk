@@ -1,9 +1,7 @@
-use std::ffi::CStr;
-
 #[cfg(target_arch="aarch64")]
 use libc::{pthread_jit_write_protect_np, c_void, size_t};
 
-use crate::exe::{Fixup, ImportedSymbolId, Exe, FixupLocationId};
+use crate::exe::{Fixup, FixupLocationId};
 
 #[cfg(target_arch="aarch64")]
 #[link(name="c")]
@@ -370,26 +368,10 @@ impl Arm64Encoder {
         offset
     }
 
-    pub fn load_symbol(&mut self, dest: Reg, id: ImportedSymbolId, exe: &mut dyn Exe) {
-        let id = exe.use_imported_symbol(id);
+    pub fn load_fixed_up_address(&mut self, dest: Reg, id: FixupLocationId) {
         let fixup = Fixup {
-            // adrp + ldr dest, [dest+offset]
             offset: self.allocate_instructions(2),
             id,
-        };
-        let fixup = Arm64Fixup {
-            fixup,
-            dest,
-        };
-        self.fixups.push(fixup);
-    }
-
-    pub fn load_cstring_address(&mut self, dest: Reg, string: &CStr, exe: &mut dyn Exe) {
-        let id = exe.use_cstring(string);
-        let fixup = Fixup {
-            id,
-            // adrp + add dest, dest, offset
-            offset: self.allocate_instructions(2),
         };
         let fixup = Arm64Fixup {
             fixup,

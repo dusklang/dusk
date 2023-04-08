@@ -1,7 +1,7 @@
 #![allow(unused)]
 
 use std::collections::HashMap;
-use std::ffi::CStr;
+use std::ffi::{CString, CStr};
 use std::hash::Hash;
 use std::io::{self, Write};
 use std::marker::PhantomData;
@@ -834,10 +834,24 @@ impl MachOEncoder {
             if value == 0 { break; }
         }
     }
+
+    fn push_chained_fixup<T>(&mut self, prev_ptr: &mut Option<Ref<DyldChainedPtr64>>, fixup: T)
+    where
+        T: ByteSwap,
+        Ref<T>: Into<Ref<DyldChainedPtr64>>
+    {
+        // TODO: handle page boundaries, also perhaps automatically generate first fixup per-page here
+        if let Some(prev_ptr) = prev_ptr {
+            let diff = self.pos() - prev_ptr.addr;
+            assert_eq!(diff % 4, 0);
+            self.get_mut(*prev_ptr).set_next((diff / 4) as u16);
+        }
+        *prev_ptr = Some(self.push(fixup).into());
+    }
     
     pub fn write(&mut self, d: &Driver, main_function_index: usize, dest: &mut impl Write) -> io::Result<()> {
         let mut exe = MachOExe::new();
-        let lib_system = exe.load_dylib("usr/lib/libSystem");
+        let lib_system = exe.import_dylib("libSystem");
 
         let mut code = Arm64Encoder::new();
         d.generate_arm64_func(&mut code, main_function_index, true, &mut exe, lib_system);
@@ -855,12 +869,22 @@ impl MachOEncoder {
         // let unwind_info_section = self.alloc_section(&mut text_segment);
 
 
-        let data_const = (!exe.got_entries.is_empty()).then(|| {
+        let (data_const, got_section, cfstring_section) = if !exe.got_entries.is_empty() || !exe.constant_nsstrings.is_empty() {
             let segment_number = self.num_segments;
             let mut segment = self.alloc_segment();
-            let got_section = self.alloc_section(&mut segment);
-            (segment_number, segment, got_section)
-        });
+
+            let got_section = (!exe.got_entries.is_empty()).then(|| {
+                self.alloc_section(&mut segment)
+            });
+
+            let cfstring_section = (!exe.constant_nsstrings.is_empty()).then(|| {
+                self.alloc_section(&mut segment)
+            });
+
+            (Some((segment_number, segment)), got_section, cfstring_section)
+        } else {
+            (None, None, None)
+        };
         
         let link_edit_segment = self.alloc_segment();
 
@@ -929,30 +953,53 @@ impl MachOEncoder {
                 Symbol {
                     symbol: import.name.clone(),
                     internal_address: None,
-                    // we only support importing from libSystem for now, which is currently imported at ordinal 1
-                    description: SymbolDescription::new(0, false, false, false, false, 1),
+                    description: SymbolDescription::new(0, false, false, false, false, import.dylib.index() as u8 + 1),
                 }
             )
         }
 
         let data_const_begin = self.pos();
+        let mut got_begin = self.pos();
+        let mut cfstrings_begin = self.pos();
+        let mut got_size = 0;
+        let mut cfstrings_size = 0;
+        let mut data_const_size = 0;
 
-        let data_const = data_const.map(|(segment_number, segment, got_section)| {
+        let data_const = data_const.map(|(segment_number, segment)| {
             let mut prev_ptr: Option<Ref<DyldChainedPtr64>> = None;
-            for &import in &exe.got_entries {
-                if let Some(prev_ptr) = prev_ptr {
-                    let diff = self.pos() - prev_ptr.addr;
-                    assert!(diff % 4 == 0);
-                    self.get_mut(prev_ptr).set_next((diff / 4) as u16);
+
+            if got_section.is_some() {
+                got_begin = self.pos();
+                for &import in &exe.got_entries {
+                    self.push_chained_fixup(&mut prev_ptr, DyldChainedPtr64Bind::new(import.index() as u32, 0, 0));
                 }
-                prev_ptr = Some(self.push(DyldChainedPtr64Bind::new(import.index() as u32, 0, 0)).into());
+                got_size = self.pos() - got_begin;
             }
 
-            let got_size = self.pos() - data_const_begin;
-            self.pad_to_next_boundary::<PAGE_SIZE>();
-            let data_const_size = self.pos() - data_const_begin;
+            if cfstring_section.is_some() {
+                let cf_constant_string_class_reference_import = exe.cf_constant_string_class_reference_import.unwrap();
+                cfstrings_begin = self.pos();
+                for str in &exe.constant_nsstrings {
+                    // TODO: handle crossing page boundaries (e.g., I'm assuming we don't want to put half of the
+                    // CFString's fields on a new page)
+                    
+                    let (offset, flags) = match str.location {
+                        ConstantNSStringLocation::CStringSectionOffset(offset) => (text_segment.sections[cstring_section.as_ref().unwrap().id].offset + offset, 0x7C8 as u64),
+                        // TODO: UTF-16 strings
+                        // ConstantNSStringLocation::UStringSectionOffset(offset) => (text_segment.sections[ustring_section.as_ref().unwrap().id].offset + offset, 0x7D0 as u64),
+                    };
+                    self.push_chained_fixup(&mut prev_ptr, DyldChainedPtr64Bind::new(cf_constant_string_class_reference_import.index() as u32, 0, 0));
+                    self.push(flags);
+                    self.push_chained_fixup(&mut prev_ptr, DyldChainedPtr64Rebase::new(offset as u64, 0, 0));
+                    self.push(dbg!(str.size));
+                }
+                cfstrings_size = self.pos() - cfstrings_begin;
+            }
 
-            (segment_number, segment, got_section, data_const_size, got_size)
+            self.pad_to_next_boundary::<PAGE_SIZE>();
+            data_const_size = self.pos() - data_const_begin;
+
+            (segment_number, segment)
         });
         
         let link_edit_begin = self.pos();
@@ -1130,7 +1177,8 @@ impl MachOEncoder {
 
         code.perform_fixups(text_segment.sections[text_section.id].offset, |fixup| {
             match exe.fixup_locations[fixup] {
-                MachOFixupLocation::GotEntry(got_entry_id) => (data_const_begin + got_entry_id.index() * 8, Indirection::Direct),
+                MachOFixupLocation::GotEntry(got_entry_id) => (got_begin + got_entry_id.index() * 8, Indirection::Direct),
+                MachOFixupLocation::ConstantNSStringId(id) => (cfstrings_begin + id.index() * 32, Indirection::Indirect),
                 MachOFixupLocation::CStringSectionOffset(offset) => (text_segment.sections[cstring_section.as_ref().unwrap().id].offset + offset, Indirection::Indirect),
             }
         });
@@ -1229,7 +1277,7 @@ impl MachOEncoder {
         //     }
         // );
 
-        if let Some((segment_number, segment, got_section, data_const_size, got_size)) = data_const {
+        if let Some((segment_number, segment)) = data_const {
             self.get_mut(segment.header).set(
                 LcSegment64 {
                     command: LC_SEGMENT_64,
@@ -1241,17 +1289,19 @@ impl MachOEncoder {
                     file_size: data_const_size as u64,
                     max_vm_protection: VM_PROT_READ | VM_PROT_WRITE,
                     initial_vm_protection: VM_PROT_READ | VM_PROT_WRITE,
-                    num_sections: 1,
+                    num_sections: segment.sections.len() as u32,
                     flags: SG_READ_ONLY,
                 }
             );
+        };
+        if let Some(got_section) = got_section {
             self.get_mut(got_section).set(
                 Section64 {
                     name: encode_string_16("__got"),
                     segment_name: encode_string_16("__DATA_CONST"),
-                    vm_addr: TEXT_ADDR + data_const_begin as u64,
+                    vm_addr: TEXT_ADDR + got_begin as u64,
                     vm_size: got_size as u64,
-                    file_offset: data_const_begin as u32,
+                    file_offset: got_begin as u32,
                     alignment: 3, // stored as log base 2, so this is actually 8
                     relocations_file_offset: 0,
                     num_relocations: 0,
@@ -1259,7 +1309,23 @@ impl MachOEncoder {
                     reserved: [0; 3], // reserved[0] is the first offset into the indirect symbol table
                 }
             );
-        };
+        }
+        if let Some(cfstring_section) = cfstring_section {
+            self.get_mut(cfstring_section).set(
+                Section64 {
+                    name: encode_string_16("__cfstring"),
+                    segment_name: encode_string_16("__DATA_CONST"),
+                    vm_addr: TEXT_ADDR + cfstrings_begin as u64,
+                    vm_size: cfstrings_size as u64,
+                    file_offset: cfstrings_begin as u32,
+                    alignment: 3, // stored as log base 2, so this is actually 8
+                    relocations_file_offset: 0,
+                    num_relocations: 0,
+                    flags: SectionFlags::new(SectionType::Regular, 0),
+                    reserved: [0; 3],
+                }
+            );
+        }
         self.get_mut(link_edit_segment.header).set(
             LcSegment64 {
                 command: LC_SEGMENT_64,
@@ -1486,6 +1552,7 @@ impl MachOEncoder {
 }
 
 define_index_type!(struct GotEntryId = u32;);
+define_index_type!(struct ConstantNSStringId = u32;);
 
 struct MachODylib {
     name: String,
@@ -1500,15 +1567,28 @@ struct MachOImportedSymbol {
     name: String,
 }
 
+struct ConstantNSString {
+    location: ConstantNSStringLocation,
+    size: usize,
+}
+
+#[derive(Hash, PartialEq, Eq)]
+enum ConstantNSStringLocation {
+    CStringSectionOffset(usize),
+    // TODO: UTF-16 strings
+    //UStringSectionOffset(usize),
+}
+
 enum MachOFixupLocation {
     GotEntry(GotEntryId),
     CStringSectionOffset(usize),
+    ConstantNSStringId(ConstantNSStringId),
 }
 
 #[derive(Default)]
 struct MachOExe {
     dylibs: IndexVec<DylibId, MachODylib>,
-    dylib_map: HashMap<String, DylibId>,
+    dylib_map: HashMap<PathBuf, DylibId>,
 
     imported_symbols: IndexVec<ImportedSymbolId, MachOImportedSymbol>,
     imported_symbol_map: HashMap<MachOImportedSymbol, ImportedSymbolId>,
@@ -1516,6 +1596,11 @@ struct MachOExe {
     fixup_locations: IndexVec<FixupLocationId, MachOFixupLocation>,
 
     cstrings: Vec<u8>,
+    cstring_map: HashMap<CString, usize>,
+
+    constant_nsstrings: IndexVec<ConstantNSStringId, ConstantNSString>,
+    constant_nsstring_map: HashMap<ConstantNSStringLocation, ConstantNSStringId>,
+    cf_constant_string_class_reference_import: Option<ImportedSymbolId>,
     
     got_entries: IndexVec<GotEntryId, ImportedSymbolId>,
     got_map: HashMap<ImportedSymbolId, GotEntryId>,
@@ -1529,14 +1614,10 @@ impl MachOExe {
         Default::default()
     }
 
-    fn load_dylib(&mut self, name: impl Into<String>) -> DylibId {
-        let name = name.into();
-        *self.dylib_map.entry(name.clone()).or_insert_with(|| {
-            let mut path = PathBuf::from(SDK_ROOT);
-            path.push(&name);
-            path.set_extension("tbd");
+    fn import_dylib_impl(&mut self, tbd_path: PathBuf) -> DylibId {
+        *self.dylib_map.entry(tbd_path.clone()).or_insert_with(|| {
             // TODO: error handling
-            let tbd = parse_tbd(&path).unwrap();
+            let tbd = parse_tbd(&tbd_path).unwrap();
             self.dylibs.push(
                 MachODylib {
                     name: tbd.name,
@@ -1548,6 +1629,15 @@ impl MachOExe {
         })
     }
 
+    #[doc(hidden)]
+    fn intern_cstring(&mut self, string: &CStr) -> usize {
+        *self.cstring_map.entry(string.to_owned()).or_insert_with(|| {
+            let offset = self.cstrings.len();
+            self.cstrings.extend(string.to_bytes_with_nul());
+            offset
+        })
+    }
+
     fn add_got_entry(&mut self, symbol: ImportedSymbolId) -> GotEntryId {
         *self.got_map.entry(symbol).or_insert_with(|| {
             self.got_entries.push(symbol)
@@ -1556,7 +1646,22 @@ impl MachOExe {
 }
 
 impl Exe for MachOExe {
-    fn import_symbol_impl(&mut self, dylib: DylibId, name: String) -> ImportedSymbolId {
+    fn import_dylib(&mut self, name: &str) -> DylibId {
+        let mut path = PathBuf::from(SDK_ROOT);
+        path.push("usr/lib/");
+        path.push(&name);
+        path.set_extension("tbd");
+        self.import_dylib_impl(path)
+    }
+
+    fn import_framework(&mut self, name: &str) -> DylibId {
+        let mut path = PathBuf::from(SDK_ROOT);
+        path.push(format!("System/Library/Frameworks/{}.framework/{}", name, name));
+        path.set_extension("tbd");
+        self.import_dylib_impl(path)
+    }
+
+    fn import_symbol(&mut self, dylib: DylibId, name: String) -> ImportedSymbolId {
         let symbol = MachOImportedSymbol { dylib, name };
         *self.imported_symbol_map.entry(symbol.clone()).or_insert_with(|| {
             self.imported_symbols.push(symbol.clone())
@@ -1569,9 +1674,25 @@ impl Exe for MachOExe {
     }
 
     fn use_cstring(&mut self, string: &CStr) -> FixupLocationId {
-        // TODO: intern strings
-        let offset = self.cstrings.len();
-        self.cstrings.extend(string.to_bytes_with_nul());
+        let offset = self.intern_cstring(string);
         self.fixup_locations.push(MachOFixupLocation::CStringSectionOffset(offset))
+    }
+
+    fn use_constant_nsstring(&mut self, string: &CStr) -> FixupLocationId {
+        if self.cf_constant_string_class_reference_import.is_none() {
+            let foundation = self.import_framework("Foundation");
+            let sym = self.import_symbol(foundation, "___CFConstantStringClassReference".to_string());
+            self.cf_constant_string_class_reference_import = Some(sym);
+        }
+        let offset = self.intern_cstring(string);
+        let location = ConstantNSStringLocation::CStringSectionOffset(offset);
+        let id = *self.constant_nsstring_map.entry(location).or_insert_with(|| {
+            let str = ConstantNSString {
+                location: ConstantNSStringLocation::CStringSectionOffset(offset),
+                size: string.to_bytes().len(),
+            };
+            self.constant_nsstrings.push(str)
+        });
+        self.fixup_locations.push(MachOFixupLocation::ConstantNSStringId(id))
     }
 }

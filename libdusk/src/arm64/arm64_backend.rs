@@ -19,7 +19,8 @@ impl Driver {
                 Instr::Const(konst) => {
                     match konst {
                         &Const::Str { id, .. } => {
-                            code.load_cstring_address(Reg::R0, &self.code.mir.strings[id], exe);
+                            let cfstring = exe.use_constant_nsstring(&self.code.mir.strings[id]);
+                            code.load_fixed_up_address(Reg::R0, cfstring);
 
                             // TODO: move to stack
                         },
@@ -29,8 +30,10 @@ impl Driver {
                 Instr::LegacyIntrinsic { intr, .. } => {
                     match intr {
                         LegacyIntrinsic::Print => {
-                            let puts = exe.import_symbol(lib_system, "_puts");
-                            code.load_symbol(Reg::R16, puts, exe);
+                            let foundation = exe.import_framework("Foundation");
+                            let puts = exe.import_symbol(foundation, "_NSLog".to_string());
+                            let puts = exe.use_imported_symbol(puts);
+                            code.load_fixed_up_address(Reg::R16, puts);
 
                             // TODO: make sure argument is in x0 (currently assumed because of how string literals are implemented)
                             code.blr(Reg::R16);
