@@ -6,12 +6,14 @@ use std::hash::Hash;
 use std::io::{self, Write};
 use std::marker::PhantomData;
 use std::mem;
+use std::path::{PathBuf, Path};
 
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
 use crate::exe::*;
 use crate::index_vec::*;
 use crate::mir::StrId;
+use crate::tbd_parser::{TbdError, parse_tbd};
 use index_vec::define_index_type;
 
 use crate::driver::Driver;
@@ -835,7 +837,7 @@ impl MachOEncoder {
     
     pub fn write(&mut self, d: &Driver, main_function_index: usize, dest: &mut impl Write) -> io::Result<()> {
         let mut exe = MachOExe::new();
-        let lib_system = exe.load_dylib("/usr/lib/libSystem.B.dylib", 2, 0x05_27_0000, 0x00_01_0000);
+        let lib_system = exe.load_dylib("usr/lib/libSystem");
 
         let mut code = Arm64Encoder::new();
         d.generate_arm64_func(&mut code, main_function_index, true, &mut exe, lib_system);
@@ -1519,20 +1521,28 @@ struct MachOExe {
     got_map: HashMap<ImportedSymbolId, GotEntryId>,
 }
 
+// TODO: don't hardcode this
+const SDK_ROOT: &'static str = "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk";
+
 impl MachOExe {
     fn new() -> Self {
         Default::default()
     }
 
-    fn load_dylib(&mut self, name: impl Into<String>, timestamp: u32, current_version: u32, compatibility_version: u32) -> DylibId {
+    fn load_dylib(&mut self, name: impl Into<String>) -> DylibId {
         let name = name.into();
         *self.dylib_map.entry(name.clone()).or_insert_with(|| {
+            let mut path = PathBuf::from(SDK_ROOT);
+            path.push(&name);
+            path.set_extension("tbd");
+            // TODO: error handling
+            let tbd = parse_tbd(&path).unwrap();
             self.dylibs.push(
                 MachODylib {
-                    name,
-                    timestamp,
-                    current_version,
-                    compatibility_version
+                    name: tbd.name,
+                    timestamp: 2,
+                    current_version: tbd.current_version,
+                    compatibility_version: tbd.compatibility_version,
                 }
             )
         })

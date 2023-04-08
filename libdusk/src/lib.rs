@@ -34,5 +34,6 @@ mod rw_ref;
 mod builtins;
 mod autopop;
 mod exe;
+mod tbd_parser;
 
 use display_adapter::display_adapter;
