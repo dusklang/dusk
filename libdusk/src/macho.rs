@@ -870,7 +870,7 @@ impl MachOEncoder {
         // let unwind_info_section = self.alloc_section(&mut text_segment);
 
 
-        let (data_const, got_section, cfstring_section) = if !exe.got_entries.is_empty() || !exe.constant_nsstrings.is_empty() {
+        let (data_const, got_section, cfstring_section, objc_imageinfo_section) = if !exe.got_entries.is_empty() || !exe.constant_nsstrings.is_empty() {
             let segment_number = self.num_segments;
             let mut segment = self.alloc_segment();
 
@@ -882,9 +882,11 @@ impl MachOEncoder {
                 self.alloc_section(&mut segment)
             });
 
-            (Some((segment_number, segment)), got_section, cfstring_section)
+            let objc_imageinfo_section = self.alloc_section(&mut segment);
+
+            (Some((segment_number, segment)), got_section, cfstring_section, Some(objc_imageinfo_section))
         } else {
-            (None, None, None)
+            (None, None, None, None)
         };
 
         let (data_segment, objc_selrefs_section) = if !exe.objc_selectors.is_empty() {
@@ -978,9 +980,12 @@ impl MachOEncoder {
         let data_const_begin = self.pos();
         let mut got_begin = self.pos();
         let mut cfstrings_begin = self.pos();
+        let mut objc_imageinfo_begin = self.pos();
+
+        let mut data_const_size = 0;
         let mut got_size = 0;
         let mut cfstrings_size = 0;
-        let mut data_const_size = 0;
+        let mut objc_imageinfo_size = 0;
 
         if data_const.is_some() {
             let mut prev_ptr: Option<Ref<DyldChainedPtr64>> = None;
@@ -1012,6 +1017,10 @@ impl MachOEncoder {
                 }
                 cfstrings_size = self.pos() - cfstrings_begin;
             }
+
+            objc_imageinfo_begin = self.pos();
+            self.push([0u8, 0, 0, 0, 4, 0, 0, 0]);
+            objc_imageinfo_size = self.pos() - objc_imageinfo_begin;
 
             self.pad_to_next_boundary::<PAGE_SIZE>();
             data_const_size = self.pos() - data_const_begin;
@@ -1405,6 +1414,22 @@ impl MachOEncoder {
                     vm_size: cfstrings_size as u64,
                     file_offset: cfstrings_begin as u32,
                     alignment: 3, // stored as log base 2, so this is actually 8
+                    relocations_file_offset: 0,
+                    num_relocations: 0,
+                    flags: SectionFlags::new(SectionType::Regular, 0),
+                    reserved: [0; 3],
+                }
+            );
+        }
+        if let Some(objc_imageinfo_section) = objc_imageinfo_section {
+            self.get_mut(objc_imageinfo_section).set(
+                Section64 {
+                    name: encode_string_16("__objc_imageinfo"),
+                    segment_name: encode_string_16("__DATA_CONST"),
+                    vm_addr: TEXT_ADDR + objc_imageinfo_begin as u64,
+                    vm_size: objc_imageinfo_size as u64,
+                    file_offset: objc_imageinfo_begin as u32,
+                    alignment: 2, // stored as log base 2, so this is actually 4
                     relocations_file_offset: 0,
                     num_relocations: 0,
                     flags: SectionFlags::new(SectionType::Regular, 0),
