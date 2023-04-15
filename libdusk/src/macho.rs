@@ -891,6 +891,19 @@ impl MachOEncoder {
         } else {
             (None, None, None)
         };
+
+        let (data_segment, objc_selrefs_section) = if !exe.objc_selectors.is_empty() {
+            let segment_number = self.num_segments;
+            let mut segment = self.alloc_segment();
+
+            let objc_selrefs_section = (!exe.objc_selectors.is_empty()).then(|| {
+                self.alloc_section(&mut segment)
+            });
+
+            (Some((segment_number, segment)), objc_selrefs_section)
+        } else {
+            (None, None)
+        };
         
         let link_edit_segment = self.alloc_segment();
 
@@ -974,7 +987,7 @@ impl MachOEncoder {
         let mut cfstrings_size = 0;
         let mut data_const_size = 0;
 
-        let data_const = data_const.map(|(segment_number, segment)| {
+        if data_const.is_some() {
             let mut prev_ptr: Option<Ref<DyldChainedPtr64>> = None;
 
             if got_section.is_some() {
@@ -1007,9 +1020,27 @@ impl MachOEncoder {
 
             self.pad_to_next_boundary::<PAGE_SIZE>();
             data_const_size = self.pos() - data_const_begin;
+        }
 
-            (segment_number, segment)
-        });
+        let data_segment_begin = self.pos();
+        let mut data_segment_size = self.pos();
+        let mut objc_selrefs_begin = self.pos();
+        let mut objc_selrefs_size = 0;
+        if data_segment.is_some() {
+            let mut prev_ptr: Option<Ref<DyldChainedPtr64>> = None;
+
+            if objc_selrefs_section.is_some() {
+                objc_selrefs_begin = self.pos();
+                for &selector in &exe.objc_selectors {
+                    let offset = text_segment.sections[objc_methname_section.as_ref().unwrap().id].offset + selector.offset;
+                    self.push_chained_fixup(&mut prev_ptr, DyldChainedPtr64Rebase::new(offset as u64, 0, 0));
+                }
+                objc_selrefs_size = self.pos() - objc_selrefs_begin;
+            }
+
+            self.pad_to_next_boundary::<PAGE_SIZE>();
+            data_segment_size = self.pos() - data_segment_begin;
+        }
         
         let link_edit_begin = self.pos();
         
@@ -1019,15 +1050,20 @@ impl MachOEncoder {
         let chained_starts_offset = self.pos();
         self.push(self.num_segments as u32);
         let mut data_const_starts_offset = None;
+        let mut data_segment_starts_offset = None;
         for i in 0..self.num_segments {
             if data_const.as_ref().map(|(num, ..)| *num) == Some(i) {
                 data_const_starts_offset = Some(self.alloc::<u32>());
+            } else if data_segment.as_ref().map(|(num, ..)| *num) == Some(i) {
+                data_segment_starts_offset = Some(self.alloc::<u32>());
             } else {
                 // AFAICT, the offset is relative to the start of dyld_chained_starts_in_image, which makes any offset less
                 // than 4 + 4 * num_segments invalid, thus 0 should indicate "no starts for this page"
                 self.push(0 as u32);
             }
         }
+
+        // TODO: reduce code duplication between __DATA and __DATA_CONST.
         if let Some(data_const_starts_offset) = data_const_starts_offset {
             self.pad_to_next_boundary::<8>();
             let chained_starts_in_segment_pos = self.pos();
@@ -1037,11 +1073,11 @@ impl MachOEncoder {
             // TODO: these should be fields of DyldChainedStartsInSegment, but need to be here instead because packed
             // structs are not yet supported by our ByteSwap macro.
             self.push(0 as u32); // max_valid_pointer
-            let page_count = (exe.got_entries.len() * 8 - 1) / PAGE_SIZE + 1;
+            let page_count = (data_const_size - 1) / PAGE_SIZE + 1;
             self.push(u16::try_from(page_count).unwrap());
 
             // The first fix-up in each page is at offset 0, because the whole point of the __got section is to provide
-            // fixed up addresses.
+            // fixed up addresses, and __cfstring values also begin with a fix-up.
             for _ in 0..page_count {
                 self.push(0 as u16);
             }
@@ -1053,6 +1089,35 @@ impl MachOEncoder {
                     page_size: 0x4000,
                     pointer_format: DYLD_CHAINED_PTR_64_OFFSET,
                     segment_offset: data_const_begin as u64,
+                }
+            );
+        }
+
+        if let Some(data_segment_starts_offset) = data_segment_starts_offset {
+            self.pad_to_next_boundary::<8>();
+            let chained_starts_in_segment_pos = self.pos();
+            self.get_mut(data_segment_starts_offset).set((chained_starts_in_segment_pos - chained_starts_offset) as u32);
+            
+            let chained_starts_in_segment = self.alloc::<DyldChainedStartsInSegment>();
+            // TODO: these should be fields of DyldChainedStartsInSegment, but need to be here instead because packed
+            // structs are not yet supported by our ByteSwap macro.
+            self.push(0 as u32); // max_valid_pointer
+            let page_count = (data_segment_size - 1) / PAGE_SIZE + 1;
+            self.push(u16::try_from(page_count).unwrap());
+
+            // The first fix-up in each page is at offset 0, because the whole point of the __objc_selrefs and
+            // __objc_classrefs sections is to provide fixed up addresses.
+            for _ in 0..page_count {
+                self.push(0 as u16);
+            }
+
+            let chained_starts_in_segment_size = self.pos() - chained_starts_in_segment_pos;
+            self.get_mut(chained_starts_in_segment).set(
+                DyldChainedStartsInSegment {
+                    size: chained_starts_in_segment_size as u32,
+                    page_size: 0x4000,
+                    pointer_format: DYLD_CHAINED_PTR_64_OFFSET,
+                    segment_offset: data_segment_begin as u64,
                 }
             );
         }
@@ -1187,6 +1252,7 @@ impl MachOEncoder {
         code.perform_fixups(text_segment.sections[text_section.id].offset, |fixup| {
             match exe.fixup_locations[fixup] {
                 MachOFixupLocation::GotEntry(got_entry_id) => (got_begin + got_entry_id.index() * 8, Indirection::Direct),
+                MachOFixupLocation::ObjcSelectorId(id) => (objc_selrefs_begin + id.index() * 8, Indirection::Direct),
                 MachOFixupLocation::ConstantNSStringId(id) => (cfstrings_begin + id.index() * 32, Indirection::Indirect),
                 MachOFixupLocation::CStringSectionOffset(offset) => (text_segment.sections[cstring_section.as_ref().unwrap().id].offset + offset, Indirection::Indirect),
             }
@@ -1348,6 +1414,39 @@ impl MachOEncoder {
                     num_relocations: 0,
                     flags: SectionFlags::new(SectionType::Regular, 0),
                     reserved: [0; 3],
+                }
+            );
+        }
+        if let Some((segment_number, segment)) = data_segment {
+            self.get_mut(segment.header).set(
+                LcSegment64 {
+                    command: LC_SEGMENT_64,
+                    command_size: segment.size(),
+                    name: encode_string_16("__DATA"),
+                    vm_addr: TEXT_ADDR + data_segment_begin as u64,
+                    vm_size: data_segment_size as u64,
+                    file_offset: data_segment_begin as u64,
+                    file_size: data_segment_size as u64,
+                    max_vm_protection: VM_PROT_READ | VM_PROT_WRITE,
+                    initial_vm_protection: VM_PROT_READ | VM_PROT_WRITE,
+                    num_sections: segment.sections.len() as u32,
+                    flags: 0,
+                }
+            );
+        };
+        if let Some(objc_selrefs_section) = objc_selrefs_section {
+            self.get_mut(objc_selrefs_section).set(
+                Section64 {
+                    name: encode_string_16("__objc_selrefs"),
+                    segment_name: encode_string_16("__DATA"),
+                    vm_addr: TEXT_ADDR + objc_selrefs_begin as u64,
+                    vm_size: objc_selrefs_size as u64,
+                    file_offset: objc_selrefs_begin as u32,
+                    alignment: 3, // stored as log base 2, so this is actually 8
+                    relocations_file_offset: 0,
+                    num_relocations: 0,
+                    flags: SectionFlags::new(SectionType::LiteralPointers, S_ATTR_NO_DEAD_STRIP),
+                    reserved: [0; 3], // reserved[0] is the first offset into the indirect symbol table
                 }
             );
         }
@@ -1578,6 +1677,7 @@ impl MachOEncoder {
 
 define_index_type!(struct GotEntryId = u32;);
 define_index_type!(struct ConstantNSStringId = u32;);
+define_index_type!(struct ObjcSelectorId = u32;);
 
 struct MachODylib {
     name: String,
@@ -1606,8 +1706,15 @@ enum ConstantNSStringLocation {
 
 enum MachOFixupLocation {
     GotEntry(GotEntryId),
+    ObjcSelectorId(ObjcSelectorId),
     CStringSectionOffset(usize),
     ConstantNSStringId(ConstantNSStringId),
+}
+
+#[derive(Clone, Copy)]
+struct ObjcSelector {
+    // byte offset into __objc_methname string table
+    offset: usize,
 }
 
 #[derive(Default)]
@@ -1626,7 +1733,8 @@ struct MachOExe {
     objc_method_names: Vec<u8>,
     objc_method_names_map: HashMap<CString, usize>,
 
-    objc_selectors: Vec<()>,
+    objc_selectors: IndexVec<ObjcSelectorId, ObjcSelector>,
+    objc_selector_map: HashMap<usize, ObjcSelectorId>,
 
     constant_nsstrings: IndexVec<ConstantNSStringId, ConstantNSString>,
     constant_nsstring_map: HashMap<ConstantNSStringLocation, ConstantNSStringId>,
@@ -1736,5 +1844,16 @@ impl Exe for MachOExe {
             self.constant_nsstrings.push(str)
         });
         self.fixup_locations.push(MachOFixupLocation::ConstantNSStringId(id))
+    }
+
+    fn use_objc_selector(&mut self, name: &CStr) -> FixupLocationId {
+        let offset = self.intern_objc_method_name(name);
+        let id = *self.objc_selector_map.entry(offset).or_insert_with(|| {
+            let selector = ObjcSelector {
+                offset,
+            };
+            self.objc_selectors.push(selector)
+        });
+        self.fixup_locations.push(MachOFixupLocation::ObjcSelectorId(id))
     }
 }

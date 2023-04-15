@@ -1,3 +1,5 @@
+use std::ffi::CString;
+
 use crate::arm64::*;
 use crate::ast::LegacyIntrinsic;
 use crate::driver::Driver;
@@ -9,6 +11,8 @@ impl Driver {
         let func = &self.code.mir.functions[func_index];
         assert_eq!(func.blocks.len(), 1);
         assert_eq!(self.code.num_parameters(func), 0);
+
+        exe.use_objc_selector(&CString::new("hello").unwrap());
 
         let frame_size = 16;
         code.stp64(Reg::FP, Reg::LR, Reg::SP, -16);

@@ -21,5 +21,9 @@ pub trait Exe {
 
     // TODO: perhaps we should have separate methods to intern and use C strings?
     fn use_cstring(&mut self, string: &CStr) -> FixupLocationId;
+
+    // TODO: perhaps these should be Mach-O specific somehow? Or maybe they just panic when targeting non-Apple
+    // platforms.
     fn use_constant_nsstring(&mut self, string: &CStr) -> FixupLocationId;
+    fn use_objc_selector(&mut self, name: &CStr) -> FixupLocationId;
 }
