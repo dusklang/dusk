@@ -853,6 +853,11 @@ impl MachOEncoder {
         let mut exe = MachOExe::new();
         let lib_system = exe.import_dylib("libSystem");
 
+        exe.intern_objc_method_name(&CString::new("stringByAppendingString:").unwrap());
+        exe.intern_objc_method_name(&CString::new("run").unwrap());
+        exe.intern_objc_method_name(&CString::new("stringByAppendingString:").unwrap());
+        exe.intern_objc_method_name(&CString::new("stringByAppendingString:").unwrap());
+
         let mut code = Arm64Encoder::new();
         d.generate_arm64_func(&mut code, main_function_index, true, &mut exe, lib_system);
 
@@ -866,6 +871,7 @@ impl MachOEncoder {
 
         let text_section = self.reserve_text_section(&mut text_segment, code.get_bytes().len(), 4);
         let cstring_section = (!exe.cstrings.is_empty()).then(|| self.reserve_text_section(&mut text_segment, exe.cstrings.len(), 1));
+        let objc_methname_section = (!exe.objc_method_names.is_empty()).then(|| self.reserve_text_section(&mut text_segment, exe.objc_method_names.len(), 2));
         // let unwind_info_section = self.alloc_section(&mut text_segment);
 
 
@@ -924,6 +930,9 @@ impl MachOEncoder {
         self.layout_text_sections(&mut text_segment, lc_end);
         if let Some(cstring_section) = &cstring_section {
             self.fill_text_section(&text_segment, cstring_section, &exe.cstrings);
+        }
+        if let Some(objc_methname_section) = &objc_methname_section {
+            self.fill_text_section(&text_segment, objc_methname_section, &exe.objc_method_names);
         }
 
         struct Symbol {
@@ -991,7 +1000,7 @@ impl MachOEncoder {
                     self.push_chained_fixup(&mut prev_ptr, DyldChainedPtr64Bind::new(cf_constant_string_class_reference_import.index() as u32, 0, 0));
                     self.push(flags);
                     self.push_chained_fixup(&mut prev_ptr, DyldChainedPtr64Rebase::new(offset as u64, 0, 0));
-                    self.push(dbg!(str.size));
+                    self.push(str.size);
                 }
                 cfstrings_size = self.pos() - cfstrings_begin;
             }
@@ -1255,6 +1264,22 @@ impl MachOEncoder {
                     vm_size: exe.cstrings.len() as u64,
                     file_offset: text_segment.sections[cstring_section.id].offset as u32,
                     alignment: 0, // stored as log base 2, so this is actually 1
+                    relocations_file_offset: 0,
+                    num_relocations: 0,
+                    flags: SectionFlags::new(SectionType::CStringLiterals, 0),
+                    reserved: [0; 3],
+                }
+            );
+        }
+        if let Some(objc_methname_section) = objc_methname_section {
+            self.get_mut(objc_methname_section.header).set(
+                Section64 {
+                    name: encode_string_16("__objc_methname"),
+                    segment_name: encode_string_16("__TEXT"),
+                    vm_addr: TEXT_ADDR + text_segment.sections[objc_methname_section.id].offset as u64,
+                    vm_size: exe.objc_method_names.len() as u64,
+                    file_offset: text_segment.sections[objc_methname_section.id].offset as u32,
+                    alignment: 1, // stored as log base 2, so this is actually 2
                     relocations_file_offset: 0,
                     num_relocations: 0,
                     flags: SectionFlags::new(SectionType::CStringLiterals, 0),
@@ -1598,6 +1623,11 @@ struct MachOExe {
     cstrings: Vec<u8>,
     cstring_map: HashMap<CString, usize>,
 
+    objc_method_names: Vec<u8>,
+    objc_method_names_map: HashMap<CString, usize>,
+
+    objc_selectors: Vec<()>,
+
     constant_nsstrings: IndexVec<ConstantNSStringId, ConstantNSString>,
     constant_nsstring_map: HashMap<ConstantNSStringLocation, ConstantNSStringId>,
     cf_constant_string_class_reference_import: Option<ImportedSymbolId>,
@@ -1634,6 +1664,18 @@ impl MachOExe {
         *self.cstring_map.entry(string.to_owned()).or_insert_with(|| {
             let offset = self.cstrings.len();
             self.cstrings.extend(string.to_bytes_with_nul());
+            offset
+        })
+    }
+
+    #[doc(hidden)]
+    fn intern_objc_method_name(&mut self, name: &CStr) -> usize {
+        *self.objc_method_names_map.entry(name.to_owned()).or_insert_with(|| {
+            if self.objc_method_names.len() % 2 != 0 {
+                self.objc_method_names.push(0); // Align to an even boundary. Not sure if necessary, but this what Clang does.
+            }
+            let offset = self.objc_method_names.len();
+            self.objc_method_names.extend(name.to_bytes_with_nul());
             offset
         })
     }
