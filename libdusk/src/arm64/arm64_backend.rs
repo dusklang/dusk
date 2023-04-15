@@ -12,8 +12,6 @@ impl Driver {
         assert_eq!(func.blocks.len(), 1);
         assert_eq!(self.code.num_parameters(func), 0);
 
-        exe.use_objc_selector(&CString::new("hello").unwrap());
-
         let frame_size = 16;
         code.stp64(Reg::FP, Reg::LR, Reg::SP, -16);
         code.sub64_imm(false, Reg::SP, Reg::SP, frame_size);
@@ -23,10 +21,23 @@ impl Driver {
                 Instr::Const(konst) => {
                     match konst {
                         &Const::Str { id, .. } => {
+                            let libobjc = exe.import_dylib("libobjc");
+                            let objc_msg_send = exe.import_symbol(libobjc, "_objc_msgSend".to_string());
+                            let objc_msg_send = exe.use_imported_symbol(objc_msg_send);
+                            code.load_fixed_up_address(Reg::R16, objc_msg_send);
+
                             let cfstring = exe.use_constant_nsstring(&self.code.mir.strings[id]);
                             code.load_fixed_up_address(Reg::R0, cfstring);
 
-                            // TODO: move to stack
+                            let string_by_appending_string = exe.use_objc_selector(&CString::new("stringByAppendingString:").unwrap());
+                            code.load_fixed_up_address(Reg::R1, string_by_appending_string);
+
+                            let cfstring_to_append = exe.use_constant_nsstring(&CString::new(" LOLOLOLOLOLOL YOU'VE BEEN Appended To").unwrap());
+                            code.load_fixed_up_address(Reg::R2, cfstring_to_append);
+
+                            code.blr(Reg::R16);
+
+                            // TODO: move string to stack, also maybe don't append another string to the end.
                         },
                         _ => todo!("{}", self.display_const(konst)),
                     }

@@ -853,11 +853,6 @@ impl MachOEncoder {
         let mut exe = MachOExe::new();
         let lib_system = exe.import_dylib("libSystem");
 
-        exe.intern_objc_method_name(&CString::new("stringByAppendingString:").unwrap());
-        exe.intern_objc_method_name(&CString::new("run").unwrap());
-        exe.intern_objc_method_name(&CString::new("stringByAppendingString:").unwrap());
-        exe.intern_objc_method_name(&CString::new("stringByAppendingString:").unwrap());
-
         let mut code = Arm64Encoder::new();
         d.generate_arm64_func(&mut code, main_function_index, true, &mut exe, lib_system);
 
