@@ -406,6 +406,7 @@ enum SectionType {
     InitFuncOffsets,
 }
 
+#[derive(Clone, Copy)]
 #[repr(transparent)]
 struct SectionFlags(u32);
 
@@ -432,11 +433,11 @@ fn encode_string_16(name: &str) -> [u8; 16] {
     out
 }
 
-define_index_type!(struct TextSectionId = u32;);
+define_index_type!(struct SectionId = u32;);
 
 struct SegmentBuilder {
     header: Ref<LcSegment64>,
-    sections: IndexVec<TextSectionId, Ref<Section64>>,
+    sections: IndexVec<SectionId, Ref<Section64>>,
 }
 
 impl SegmentBuilder {
@@ -447,27 +448,14 @@ impl SegmentBuilder {
     }
 }
 
-struct TextSectionAllocationInfo {
-    size: usize,
-    alignment: usize,
-    offset: usize,
-}
-
 struct TextSegmentBuilder {
-    segment_builder: SegmentBuilder,
-    sections: IndexVec<TextSectionId, TextSectionAllocationInfo>,
-    size: usize,
-}
-
-impl TextSegmentBuilder {
-    fn header_size(&self) -> u32 {
-        self.segment_builder.size()
-    }
+    segment: DeferredSegmentId,
+    sections: Vec<TextSection>,
 }
 
 struct TextSection {
-    header: Ref<Section64>,
-    id: TextSectionId,
+    size: usize,
+    id: DeferredSectionId,
 }
 
 struct DylibCommandBuilder {
@@ -737,6 +725,7 @@ impl From<usize> for DeferredSize {
     }
 }
 
+#[derive(Clone, Copy)]
 struct DeferredSectionInfo {
     offset: usize,
     size: usize,
@@ -819,8 +808,8 @@ impl MachOEncoder {
 
     fn fill_deferred_headers(&mut self) {
         let deferred_segments = std::mem::take(&mut self.deferred_segments);
-        for segment in deferred_segments {
-            let info = segment.info.expect(&format!("no info found for segment '{}'", segment.name));
+        for segment in &deferred_segments {
+            let info = segment.info.as_ref().expect(&format!("no info found for segment '{}'", segment.name));
             let vm_addr = match info.offset {
                 DeferredOffset::PageZero => 0,
                 DeferredOffset::FileOffset(offset) => TEXT_ADDR + offset as u64,
@@ -849,8 +838,8 @@ impl MachOEncoder {
                 }
             );
 
-            for section in segment.sections {
-                let info = section.info.unwrap();
+            for section in &segment.sections {
+                let info = section.info.as_ref().unwrap();
                 let mut val = section.alignment;
                 
                 self.get_mut(section.header).set(
@@ -869,6 +858,7 @@ impl MachOEncoder {
                 );
             }
         }
+        self.deferred_segments = deferred_segments;
     }
 
     fn alloc_segment(&mut self) -> SegmentBuilder {
@@ -887,48 +877,54 @@ impl MachOEncoder {
     }
 
     fn alloc_text_segment(&mut self) -> TextSegmentBuilder {
-        let segment_builder = self.alloc_segment();
-        TextSegmentBuilder { segment_builder, sections: IndexVec::new(), size: usize::MAX }
+        let segment = self.alloc_deferred_segment("__TEXT", VM_PROT_READ | VM_PROT_EXECUTE, 0);
+        TextSegmentBuilder { segment, sections: Vec::new() }
     }
 
-    fn reserve_text_section(&mut self, segment: &mut TextSegmentBuilder, size: usize, alignment: usize) -> TextSection {
-        let header = self.alloc_section(&mut segment.segment_builder);
-        let alloc_info = TextSectionAllocationInfo {
-            size,
-            alignment,
-            offset: usize::MAX,
-        };
-        let id = segment.sections.push(alloc_info);
-        TextSection { header, id }
+    fn reserve_text_section(&mut self, segment: &mut TextSegmentBuilder, name: &'static str, size: usize, alignment: usize, flags: SectionFlags) -> DeferredSectionId {
+        let id = self.alloc_deferred_section(segment.segment, name, alignment, flags);
+        segment.sections.push(
+            TextSection { size, id }
+        );
+        id
     }
 
-    fn layout_text_sections(&mut self, segment: &mut TextSegmentBuilder, lc_end: usize) {
+    fn layout_text_sections(&mut self, segment: &TextSegmentBuilder, lc_end: usize) {
         let mut len = 0usize;
         let mut offsets_from_end = Vec::with_capacity(segment.sections.len());
-        for alloc_info in segment.sections.iter().rev() {
-            let padding = nearest_multiple_of_rt!(len, alloc_info.alignment) as usize - len;
-            len += alloc_info.size + padding;
+        let sections = &self.deferred_segments[segment.segment].sections;
+        debug_assert_eq!(segment.sections.len(), sections.len());
+        for (text_section, section) in segment.sections.iter().zip(sections).rev() {
+            let padding = nearest_multiple_of_rt!(len, section.alignment) as usize - len;
+            len += text_section.size + padding;
             offsets_from_end.push(len);
         }
 
         let text_end_addr = nearest_multiple_of!(TEXT_ADDR + (lc_end + len) as u64, PAGE_SIZE);
         let text_sections_addr = text_end_addr - len;
-
-        debug_assert_eq!(segment.sections.len(), segment.segment_builder.sections.len());
         
         let text_segment_size = text_end_addr - TEXT_ADDR as usize;
-        for (section, &offset_from_end) in segment.sections.iter_mut().zip(offsets_from_end.iter().rev()) {
-            section.offset = text_segment_size as usize - offset_from_end;
+
+        for (i, (section, &offset_from_end)) in segment.sections.iter().zip(offsets_from_end.iter().rev()).enumerate() {
+            self.add_info_to_deferred_section((segment.segment, i), text_segment_size as usize - offset_from_end, section.size);
         }
 
-        segment.size = text_segment_size;
+        self.add_info_to_deferred_segment(segment.segment, 0, text_segment_size);
 
         self.pad_with_zeroes(text_segment_size - self.pos());
     }
 
-    fn fill_text_section(&mut self, segment: &TextSegmentBuilder, section: &TextSection, data: &[u8]) {
-        let section = &segment.sections[section.id];
-        self.data[section.offset..(section.offset + section.size)].copy_from_slice(data);
+    fn fill_text_section(&mut self, segment: &TextSegmentBuilder, section: DeferredSectionId, data: &[u8]) {
+        assert_eq!(segment.sections[section.1].id, section);
+        assert_eq!(segment.segment, section.0);
+        let size = segment.sections[section.1].size;
+        let offset = self.deferred_segments[segment.segment].sections[section.1].info.unwrap().offset;
+        self.data[offset..(offset + size)].copy_from_slice(data);
+    }
+
+    fn get_section_offset(&self, section: DeferredSectionId) -> usize {
+        let segment = &self.deferred_segments[section.0];
+        segment.sections[section.1].info.unwrap().offset
     }
 
     fn alloc_dylib_command(&mut self, name: &str) -> DylibCommandBuilder {
@@ -1036,16 +1032,14 @@ impl MachOEncoder {
         let mach_header = self.alloc::<MachHeader>();
         
         let lc_begin = self.pos();
-        
-        let page_zero = self.alloc_segment();
+
+        let page_zero = self.alloc_deferred_segment("__PAGEZERO", VM_PROT_NONE, 0);
+        self.add_info_to_deferred_segment(page_zero, DeferredOffset::PageZero, DeferredSize::Different { vm_size: TEXT_ADDR as usize, file_size: 0 });
         
         let mut text_segment = self.alloc_text_segment();
-
-        let text_section = self.reserve_text_section(&mut text_segment, code.get_bytes().len(), 4);
-        let cstring_section = (!exe.cstrings.is_empty()).then(|| self.reserve_text_section(&mut text_segment, exe.cstrings.len(), 1));
-        let objc_methname_section = (!exe.objc_method_names.is_empty()).then(|| self.reserve_text_section(&mut text_segment, exe.objc_method_names.len(), 2));
-        // let unwind_info_section = self.alloc_section(&mut text_segment);
-
+        let text_section = self.reserve_text_section(&mut text_segment, "__text", code.get_bytes().len(), 4, SectionFlags::new(SectionType::Regular, S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS));
+        let cstring_section = (!exe.cstrings.is_empty()).then(|| self.reserve_text_section(&mut text_segment, "__cstring", exe.cstrings.len(), 1, SectionFlags::new(SectionType::CStringLiterals, 0)));
+        let objc_methname_section = (!exe.objc_method_names.is_empty()).then(|| self.reserve_text_section(&mut text_segment, "__objc_methname", exe.objc_method_names.len(), 2, SectionFlags::new(SectionType::CStringLiterals, 0)));
 
         let (data_const, got_section, cfstring_section, objc_imageinfo_section) = if !exe.got_entries.is_empty() || !exe.constant_nsstrings.is_empty() {
             let segment_number = self.num_segments;
@@ -1078,8 +1072,8 @@ impl MachOEncoder {
         } else {
             (None, None)
         };
-        
-        let link_edit_segment = self.alloc_segment();
+
+        let link_edit_segment = self.alloc_deferred_segment("__LINKEDIT", VM_PROT_READ, 0);
 
         let chained_fixups = self.alloc_cmd::<LinkEditDataCommand>();
         let exports_trie = self.alloc_cmd::<LinkEditDataCommand>();
@@ -1114,11 +1108,11 @@ impl MachOEncoder {
         
         let lc_end = self.pos();
 
-        self.layout_text_sections(&mut text_segment, lc_end);
-        if let Some(cstring_section) = &cstring_section {
+        self.layout_text_sections(&text_segment, lc_end);
+        if let Some(cstring_section) = cstring_section {
             self.fill_text_section(&text_segment, cstring_section, &exe.cstrings);
         }
-        if let Some(objc_methname_section) = &objc_methname_section {
+        if let Some(objc_methname_section) = objc_methname_section {
             self.fill_text_section(&text_segment, objc_methname_section, &exe.objc_method_names);
         }
 
@@ -1137,10 +1131,11 @@ impl MachOEncoder {
                 description: SymbolDescription::new(0, true, false, false, false, 0),
             }
         );
+        let text_section_offset = self.get_section_offset(text_section);
         local_symbols.push(
             Symbol {
                 symbol: "_main".to_string(),
-                internal_address: Some(TEXT_ADDR + text_segment.sections[text_section.id].offset as u64),
+                internal_address: Some(TEXT_ADDR + text_section_offset as u64),
                 description: SymbolDescription::new(0, false, false, false, false, 0),
             }
         );
@@ -1179,9 +1174,9 @@ impl MachOEncoder {
                 for str in &exe.constant_nsstrings {
                     // TODO: handle crossing page boundaries (e.g., I'm assuming we don't want to put half of the
                     // CFString's fields on a new page)
-                    
+                    let cstring_section_offset = cstring_section.map(|section| self.get_section_offset(section));
                     let (offset, flags) = match str.location {
-                        ConstantNSStringLocation::CStringSectionOffset(offset) => (text_segment.sections[cstring_section.as_ref().unwrap().id].offset + offset, 0x7C8 as u64),
+                        ConstantNSStringLocation::CStringSectionOffset(offset) => (cstring_section_offset.unwrap() + offset, 0x7C8 as u64),
                         // TODO: UTF-16 strings
                         // ConstantNSStringLocation::UStringSectionOffset(offset) => (text_segment.sections[ustring_section.as_ref().unwrap().id].offset + offset, 0x7D0 as u64),
                     };
@@ -1211,9 +1206,10 @@ impl MachOEncoder {
             let mut prev_ptr: Option<Ref<DyldChainedPtr64>> = None;
 
             if let Some(section) = objc_selrefs_section {
+                let objc_methname_section_offset = objc_methname_section.map(|section| self.get_section_offset(section));
                 objc_selrefs_begin = self.pos();
                 for &selector in &exe.objc_selectors {
-                    let offset = text_segment.sections[objc_methname_section.as_ref().unwrap().id].offset + selector.offset;
+                    let offset = objc_methname_section_offset.unwrap() + selector.offset;
                     self.push_chained_fixup(&mut prev_ptr, DyldChainedPtr64Rebase::new(offset as u64, 0, 0));
                 }
                 let objc_selrefs_size = self.pos() - objc_selrefs_begin;
@@ -1349,7 +1345,8 @@ impl MachOEncoder {
         let function_starts_start = self.pos();
         // offset to first function, relative to the beginning of the __TEXT segment (aka, beginning of file).
         // subsequent functions would be specified relative to the previous one in the list.
-        self.push_uleb128(text_segment.sections[text_section.id].offset as u32);
+        let text_section_offset = self.get_section_offset(text_section);
+        self.push_uleb128(text_section_offset as u32);
         self.pad_to_next_boundary::<8>();
         let function_starts_len = self.pos() - function_starts_start;
         
@@ -1432,19 +1429,24 @@ impl MachOEncoder {
             )
         }
 
-        code.perform_fixups(text_segment.sections[text_section.id].offset, |fixup| {
+        let cstring_section_offset = cstring_section.map(|section| self.get_section_offset(section));
+        code.perform_fixups(self.get_section_offset(text_section), |fixup| {
             match exe.fixup_locations[fixup] {
                 MachOFixupLocation::GotEntry(got_entry_id) => (got_begin + got_entry_id.index() * 8, Indirection::Direct),
                 MachOFixupLocation::ObjcSelectorId(id) => (objc_selrefs_begin + id.index() * 8, Indirection::Direct),
                 MachOFixupLocation::ConstantNSStringId(id) => (cfstrings_begin + id.index() * 32, Indirection::Indirect),
-                MachOFixupLocation::CStringSectionOffset(offset) => (text_segment.sections[cstring_section.as_ref().unwrap().id].offset + offset, Indirection::Indirect),
+                MachOFixupLocation::CStringSectionOffset(offset) => (cstring_section_offset.unwrap() + offset, Indirection::Indirect),
             }
         });
 
-        self.fill_text_section(&text_segment, &text_section, code.get_bytes());
+        self.fill_text_section(&text_segment, text_section, code.get_bytes());
 
 
         let link_edit_end = self.pos() + code_slots_len;
+
+        let link_edit_size = link_edit_end - link_edit_begin;
+        self.add_info_to_deferred_segment(link_edit_segment, link_edit_begin, DeferredSize::Different { vm_size: nearest_multiple_of!(link_edit_size, PAGE_SIZE), file_size: link_edit_size });
+
         let num_commands = self.num_load_commands;
         self.get_mut(mach_header).set(
             MachHeader {
@@ -1460,115 +1462,9 @@ impl MachOEncoder {
                 reserved: 0,
             }
         );
-        self.get_mut(page_zero.header).set(
-            LcSegment64 {
-                command: LC_SEGMENT_64,
-                command_size: page_zero.size(),
-                name: encode_string_16("__PAGEZERO"),
-                vm_addr: 0,
-                vm_size: TEXT_ADDR,
-                file_offset: 0,
-                file_size: 0,
-                max_vm_protection: VM_PROT_NONE,
-                initial_vm_protection: VM_PROT_NONE,
-                num_sections: page_zero.sections.len() as u32,
-                flags: 0,
-            }
-        );
-        self.get_mut(text_segment.segment_builder.header).set(
-            LcSegment64 {
-                command: LC_SEGMENT_64,
-                command_size: text_segment.header_size(),
-                name: encode_string_16("__TEXT"),
-                vm_addr: TEXT_ADDR,
-                vm_size: text_segment.size as u64,
-                file_offset: 0,
-                file_size: text_segment.size as u64,
-                max_vm_protection: VM_PROT_READ | VM_PROT_EXECUTE,
-                initial_vm_protection: VM_PROT_READ | VM_PROT_EXECUTE,
-                num_sections: text_segment.segment_builder.sections.len() as u32,
-                flags: 0,
-            }
-        );
-        self.get_mut(text_section.header).set(
-            Section64 {
-                name: encode_string_16("__text"),
-                segment_name: encode_string_16("__TEXT"),
-                vm_addr: TEXT_ADDR + text_segment.sections[text_section.id].offset as u64,
-                vm_size: code.get_bytes().len() as u64,
-                file_offset: text_segment.sections[text_section.id].offset as u32,
-                alignment: 2, // stored as log base 2, so this is actually 4
-                relocations_file_offset: 0,
-                num_relocations: 0,
-                flags: SectionFlags::new(SectionType::Regular, S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS),
-                reserved: [0; 3],
-            }
-        );
-        if let Some(cstring_section) = cstring_section {
-            self.get_mut(cstring_section.header).set(
-                Section64 {
-                    name: encode_string_16("__cstring"),
-                    segment_name: encode_string_16("__TEXT"),
-                    vm_addr: TEXT_ADDR + text_segment.sections[cstring_section.id].offset as u64,
-                    vm_size: exe.cstrings.len() as u64,
-                    file_offset: text_segment.sections[cstring_section.id].offset as u32,
-                    alignment: 0, // stored as log base 2, so this is actually 1
-                    relocations_file_offset: 0,
-                    num_relocations: 0,
-                    flags: SectionFlags::new(SectionType::CStringLiterals, 0),
-                    reserved: [0; 3],
-                }
-            );
-        }
-        if let Some(objc_methname_section) = objc_methname_section {
-            self.get_mut(objc_methname_section.header).set(
-                Section64 {
-                    name: encode_string_16("__objc_methname"),
-                    segment_name: encode_string_16("__TEXT"),
-                    vm_addr: TEXT_ADDR + text_segment.sections[objc_methname_section.id].offset as u64,
-                    vm_size: exe.objc_method_names.len() as u64,
-                    file_offset: text_segment.sections[objc_methname_section.id].offset as u32,
-                    alignment: 1, // stored as log base 2, so this is actually 2
-                    relocations_file_offset: 0,
-                    num_relocations: 0,
-                    flags: SectionFlags::new(SectionType::CStringLiterals, 0),
-                    reserved: [0; 3],
-                }
-            );
-        }
-        // self.get_mut(unwind_info_section).set(
-        //     Section64 {
-        //         name: encode_string_16("__unwind_info"),
-        //         segment_name: encode_string_16("__TEXT"),
-        //         vm_addr: TEXT_ADDR + text_segment.sections[unwind_info_section.id].offset as u64,
-        //         vm_size: unwind_info.len() as u64,
-        //         file_offset: text_segment.sections[unwind_info_section.id].offset as u32,
-        //         alignment: 2, // stored as log base 2, so this is actually 4
-        //         relocations_file_offset: 0,
-        //         num_relocations: 0,
-        //         flags: SectionFlags::new(SectionType::Regular, 0),
-        //         reserved: [0; 3],
-        //     }
-        // );
 
         self.fill_deferred_headers();
 
-
-        self.get_mut(link_edit_segment.header).set(
-            LcSegment64 {
-                command: LC_SEGMENT_64,
-                command_size: link_edit_segment.size(),
-                name: encode_string_16("__LINKEDIT"),
-                vm_addr: TEXT_ADDR + link_edit_begin as u64,
-                vm_size: PAGE_SIZE as u64,
-                file_offset: link_edit_begin as u64,
-                file_size: (link_edit_end - link_edit_begin) as u64,
-                max_vm_protection: VM_PROT_READ,
-                initial_vm_protection: VM_PROT_READ,
-                num_sections: 0,
-                flags: 0,
-            }
-        );
         self.get_mut(chained_fixups).set(
             LinkEditDataCommand {
                 command: LC_DYLD_CHAINED_FIXUPS,
@@ -1698,11 +1594,12 @@ impl MachOEncoder {
                 name_offset: load_dylinker.size() as u32,
             }
         );
+        let entry_point_file_offset = self.get_section_offset(text_section);
         self.get_mut(entry_point).set(
             EntryPointCommand {
                 command: LC_MAIN,
                 command_size: entry_point.size() as u32,
-                entry_point_file_offset: text_segment.sections[text_section.id].offset as u64,
+                entry_point_file_offset: entry_point_file_offset as u64,
                 stack_size: 0,
             }
         );
