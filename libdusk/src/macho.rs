@@ -61,6 +61,7 @@ pub struct MachOEncoder {
     num_load_commands: u32,
     num_segments: u32,
     num_symbol_table_entries: u32,
+    deferred_segments: IndexVec<DeferredSegmentId, DeferredSegment>,
 }
 
 const MH_MAGIC_64: u32           = 0xFEED_FACF;
@@ -671,8 +672,75 @@ macro_rules! nearest_multiple_of_rt {
     }};
 }
 
+fn log_base_2(mut num: usize) -> usize {
+    assert!(is_power_of_2(num));
+    let mut ret_val = 0;
+    while num > 1 {
+        num >>= 1;
+        ret_val += 1;
+    }
+    ret_val
+}
+
 const PAGE_SIZE: usize = 0x4000;
 const TEXT_ADDR: u64 = 0x0000_0001_0000_0000;
+
+// TODO: try to unify the multiple different segment/section representations somewhat
+define_index_type!(struct DeferredSegmentId = u32;);
+type DeferredSectionId = (DeferredSegmentId, usize);
+struct DeferredSegment {
+    sections: Vec<DeferredSection>,
+    segment_builder: SegmentBuilder,
+
+    name: &'static str,
+    vm_protection: u32,
+    flags: u32,
+    info: Option<DeferredSegmentInfo>,
+}
+
+struct DeferredSection {
+    header: Ref<Section64>,
+
+    name: &'static str,
+    alignment: usize,
+    flags: SectionFlags,
+    info: Option<DeferredSectionInfo>,
+}
+
+struct DeferredSegmentInfo {
+    offset: DeferredOffset,
+    size: DeferredSize,
+}
+
+enum DeferredOffset {
+    PageZero,
+    FileOffset(usize),
+}
+
+impl From<usize> for DeferredOffset {
+    fn from(value: usize) -> Self {
+        Self::FileOffset(value)
+    }
+}
+
+enum DeferredSize {
+    Same(usize),
+    Different {
+        vm_size: usize,
+        file_size: usize,
+    }
+}
+
+impl From<usize> for DeferredSize {
+    fn from(value: usize) -> Self {
+        Self::Same(value)
+    }
+}
+
+struct DeferredSectionInfo {
+    offset: usize,
+    size: usize,
+}
 
 impl MachOEncoder {
     pub fn new() -> Self { Self::default() }
@@ -692,6 +760,115 @@ impl MachOEncoder {
     fn alloc_cmd<T: ByteSwap>(&mut self) -> Ref<T> {
         self.num_load_commands += 1;
         self.alloc()
+    }
+
+    fn alloc_deferred_segment(&mut self, name: &'static str, vm_protection: u32, flags: u32) -> DeferredSegmentId {
+        let segment_builder = self.alloc_segment();
+        self.deferred_segments.push(
+            DeferredSegment {
+                sections: Default::default(),
+                segment_builder,
+
+                name,
+                vm_protection,
+                flags,
+                info: None,
+            }
+        )
+    }
+
+    fn add_info_to_deferred_segment(&mut self, segment: DeferredSegmentId, offset: impl Into<DeferredOffset>, size: impl Into<DeferredSize>) {
+        self.deferred_segments[segment].info = Some(
+            DeferredSegmentInfo {
+                offset: offset.into(),
+                size: size.into()
+            }
+        )
+    }
+
+    fn alloc_deferred_section(&mut self, segment_id: DeferredSegmentId, name: &'static str, alignment: usize, flags: SectionFlags) -> DeferredSectionId {
+        let invalid_segment_builder = SegmentBuilder {
+            header: Ref { addr: 0, _phantom: PhantomData },
+            sections: Default::default(),
+        };
+        let mut segment_builder = std::mem::replace(&mut self.deferred_segments[segment_id].segment_builder, invalid_segment_builder);
+        let header = self.alloc_section(&mut segment_builder);
+        let segment = &mut self.deferred_segments[segment_id];
+        segment.segment_builder = segment_builder;
+        let index = segment.sections.len();
+        segment.sections.push(
+            DeferredSection {
+                header,
+                name,
+                alignment,
+                flags,
+                info: None,
+            }
+        );
+        (segment_id, index)
+    }
+
+    fn add_info_to_deferred_section(&mut self, (segment, section): DeferredSectionId, offset: usize, size: usize) {
+        self.deferred_segments[segment].sections[section].info = Some(
+            DeferredSectionInfo {
+                offset,
+                size,
+            }
+        )
+    }
+
+    fn fill_deferred_headers(&mut self) {
+        let deferred_segments = std::mem::take(&mut self.deferred_segments);
+        for segment in deferred_segments {
+            let info = segment.info.expect(&format!("no info found for segment '{}'", segment.name));
+            let vm_addr = match info.offset {
+                DeferredOffset::PageZero => 0,
+                DeferredOffset::FileOffset(offset) => TEXT_ADDR + offset as u64,
+            };
+            let file_offset = match info.offset {
+                DeferredOffset::PageZero => 0,
+                DeferredOffset::FileOffset(offset) => offset as u64,
+            };
+            let (vm_size, file_size) = match info.size {
+                DeferredSize::Same(size) => (size as u64, size as u64),
+                DeferredSize::Different { vm_size, file_size } => (vm_size as u64, file_size as u64),
+            };
+            self.get_mut(segment.segment_builder.header).set(
+                LcSegment64 {
+                    command: LC_SEGMENT_64,
+                    command_size: segment.segment_builder.size(),
+                    name: encode_string_16(segment.name),
+                    vm_addr,
+                    vm_size,
+                    file_offset,
+                    file_size,
+                    max_vm_protection: segment.vm_protection,
+                    initial_vm_protection: segment.vm_protection,
+                    num_sections: segment.sections.len() as u32,
+                    flags: segment.flags,
+                }
+            );
+
+            for section in segment.sections {
+                let info = section.info.unwrap();
+                let mut val = section.alignment;
+                
+                self.get_mut(section.header).set(
+                    Section64 {
+                        name: encode_string_16(section.name),
+                        segment_name: encode_string_16(segment.name),
+                        vm_addr: TEXT_ADDR + info.offset as u64,
+                        vm_size: info.size as u64,
+                        file_offset: info.offset as u32,
+                        alignment: log_base_2(section.alignment) as u32,
+                        relocations_file_offset: 0,
+                        num_relocations: 0,
+                        flags: section.flags,
+                        reserved: [0; 3],
+                    }
+                );
+            }
+        }
     }
 
     fn alloc_segment(&mut self) -> SegmentBuilder {
@@ -872,17 +1049,17 @@ impl MachOEncoder {
 
         let (data_const, got_section, cfstring_section, objc_imageinfo_section) = if !exe.got_entries.is_empty() || !exe.constant_nsstrings.is_empty() {
             let segment_number = self.num_segments;
-            let mut segment = self.alloc_segment();
+            let mut segment = self.alloc_deferred_segment("__DATA_CONST", VM_PROT_READ | VM_PROT_WRITE, SG_READ_ONLY);
 
             let got_section = (!exe.got_entries.is_empty()).then(|| {
-                self.alloc_section(&mut segment)
+                self.alloc_deferred_section(segment, "__got", 8, SectionFlags::new(SectionType::NonLazySymbolPointers, 0))
             });
 
             let cfstring_section = (!exe.constant_nsstrings.is_empty()).then(|| {
-                self.alloc_section(&mut segment)
+                self.alloc_deferred_section(segment, "__cfstring", 8, SectionFlags::new(SectionType::Regular, 0))
             });
 
-            let objc_imageinfo_section = self.alloc_section(&mut segment);
+            let objc_imageinfo_section = self.alloc_deferred_section(segment, "__objc_imageinfo", 4, SectionFlags::new(SectionType::Regular, 0));
 
             (Some((segment_number, segment)), got_section, cfstring_section, Some(objc_imageinfo_section))
         } else {
@@ -891,10 +1068,10 @@ impl MachOEncoder {
 
         let (data_segment, objc_selrefs_section) = if !exe.objc_selectors.is_empty() {
             let segment_number = self.num_segments;
-            let mut segment = self.alloc_segment();
+            let mut segment = self.alloc_deferred_segment("__DATA", VM_PROT_READ | VM_PROT_WRITE, 0);
 
             let objc_selrefs_section = (!exe.objc_selectors.is_empty()).then(|| {
-                self.alloc_section(&mut segment)
+                self.alloc_deferred_section(segment, "__objc_selrefs", 8, SectionFlags::new(SectionType::LiteralPointers, S_ATTR_NO_DEAD_STRIP))
             });
 
             (Some((segment_number, segment)), objc_selrefs_section)
@@ -983,22 +1160,20 @@ impl MachOEncoder {
         let mut objc_imageinfo_begin = self.pos();
 
         let mut data_const_size = 0;
-        let mut got_size = 0;
-        let mut cfstrings_size = 0;
-        let mut objc_imageinfo_size = 0;
 
-        if data_const.is_some() {
+        if let Some((_, segment)) = data_const {
             let mut prev_ptr: Option<Ref<DyldChainedPtr64>> = None;
 
-            if got_section.is_some() {
+            if let Some(section) = got_section {
                 got_begin = self.pos();
                 for &import in &exe.got_entries {
                     self.push_chained_fixup(&mut prev_ptr, DyldChainedPtr64Bind::new(import.index() as u32, 0, 0));
                 }
-                got_size = self.pos() - got_begin;
+                let got_size = self.pos() - got_begin;
+                self.add_info_to_deferred_section(section, got_begin, got_size);
             }
 
-            if cfstring_section.is_some() {
+            if let Some(section) = cfstring_section {
                 let cf_constant_string_class_reference_import = exe.cf_constant_string_class_reference_import.unwrap();
                 cfstrings_begin = self.pos();
                 for str in &exe.constant_nsstrings {
@@ -1015,35 +1190,39 @@ impl MachOEncoder {
                     self.push_chained_fixup(&mut prev_ptr, DyldChainedPtr64Rebase::new(offset as u64, 0, 0));
                     self.push(str.size);
                 }
-                cfstrings_size = self.pos() - cfstrings_begin;
+                let cfstrings_size = self.pos() - cfstrings_begin;
+                self.add_info_to_deferred_section(section, cfstrings_begin, cfstrings_size);
             }
 
             objc_imageinfo_begin = self.pos();
             self.push([0u8, 0, 0, 0, 4, 0, 0, 0]);
-            objc_imageinfo_size = self.pos() - objc_imageinfo_begin;
+            let objc_imageinfo_size = self.pos() - objc_imageinfo_begin;
+            self.add_info_to_deferred_section(objc_imageinfo_section.unwrap(), objc_imageinfo_begin, objc_imageinfo_size);
 
             self.pad_to_next_boundary::<PAGE_SIZE>();
             data_const_size = self.pos() - data_const_begin;
+            self.add_info_to_deferred_segment(segment, data_const_begin, data_const_size);
         }
 
         let data_segment_begin = self.pos();
         let mut data_segment_size = self.pos();
         let mut objc_selrefs_begin = self.pos();
-        let mut objc_selrefs_size = 0;
-        if data_segment.is_some() {
+        if let Some((_, segment)) = data_segment {
             let mut prev_ptr: Option<Ref<DyldChainedPtr64>> = None;
 
-            if objc_selrefs_section.is_some() {
+            if let Some(section) = objc_selrefs_section {
                 objc_selrefs_begin = self.pos();
                 for &selector in &exe.objc_selectors {
                     let offset = text_segment.sections[objc_methname_section.as_ref().unwrap().id].offset + selector.offset;
                     self.push_chained_fixup(&mut prev_ptr, DyldChainedPtr64Rebase::new(offset as u64, 0, 0));
                 }
-                objc_selrefs_size = self.pos() - objc_selrefs_begin;
+                let objc_selrefs_size = self.pos() - objc_selrefs_begin;
+                self.add_info_to_deferred_section(section, objc_selrefs_begin, objc_selrefs_size);
             }
 
             self.pad_to_next_boundary::<PAGE_SIZE>();
             data_segment_size = self.pos() - data_segment_begin;
+            self.add_info_to_deferred_segment(segment, data_segment_begin, data_segment_size);
         }
         
         let link_edit_begin = self.pos();
@@ -1372,104 +1551,9 @@ impl MachOEncoder {
         //     }
         // );
 
-        if let Some((segment_number, segment)) = data_const {
-            self.get_mut(segment.header).set(
-                LcSegment64 {
-                    command: LC_SEGMENT_64,
-                    command_size: segment.size(),
-                    name: encode_string_16("__DATA_CONST"),
-                    vm_addr: TEXT_ADDR + data_const_begin as u64,
-                    vm_size: data_const_size as u64,
-                    file_offset: data_const_begin as u64,
-                    file_size: data_const_size as u64,
-                    max_vm_protection: VM_PROT_READ | VM_PROT_WRITE,
-                    initial_vm_protection: VM_PROT_READ | VM_PROT_WRITE,
-                    num_sections: segment.sections.len() as u32,
-                    flags: SG_READ_ONLY,
-                }
-            );
-        };
-        if let Some(got_section) = got_section {
-            self.get_mut(got_section).set(
-                Section64 {
-                    name: encode_string_16("__got"),
-                    segment_name: encode_string_16("__DATA_CONST"),
-                    vm_addr: TEXT_ADDR + got_begin as u64,
-                    vm_size: got_size as u64,
-                    file_offset: got_begin as u32,
-                    alignment: 3, // stored as log base 2, so this is actually 8
-                    relocations_file_offset: 0,
-                    num_relocations: 0,
-                    flags: SectionFlags::new(SectionType::NonLazySymbolPointers, 0),
-                    reserved: [0; 3], // reserved[0] is the first offset into the indirect symbol table
-                }
-            );
-        }
-        if let Some(cfstring_section) = cfstring_section {
-            self.get_mut(cfstring_section).set(
-                Section64 {
-                    name: encode_string_16("__cfstring"),
-                    segment_name: encode_string_16("__DATA_CONST"),
-                    vm_addr: TEXT_ADDR + cfstrings_begin as u64,
-                    vm_size: cfstrings_size as u64,
-                    file_offset: cfstrings_begin as u32,
-                    alignment: 3, // stored as log base 2, so this is actually 8
-                    relocations_file_offset: 0,
-                    num_relocations: 0,
-                    flags: SectionFlags::new(SectionType::Regular, 0),
-                    reserved: [0; 3],
-                }
-            );
-        }
-        if let Some(objc_imageinfo_section) = objc_imageinfo_section {
-            self.get_mut(objc_imageinfo_section).set(
-                Section64 {
-                    name: encode_string_16("__objc_imageinfo"),
-                    segment_name: encode_string_16("__DATA_CONST"),
-                    vm_addr: TEXT_ADDR + objc_imageinfo_begin as u64,
-                    vm_size: objc_imageinfo_size as u64,
-                    file_offset: objc_imageinfo_begin as u32,
-                    alignment: 2, // stored as log base 2, so this is actually 4
-                    relocations_file_offset: 0,
-                    num_relocations: 0,
-                    flags: SectionFlags::new(SectionType::Regular, 0),
-                    reserved: [0; 3],
-                }
-            );
-        }
-        if let Some((segment_number, segment)) = data_segment {
-            self.get_mut(segment.header).set(
-                LcSegment64 {
-                    command: LC_SEGMENT_64,
-                    command_size: segment.size(),
-                    name: encode_string_16("__DATA"),
-                    vm_addr: TEXT_ADDR + data_segment_begin as u64,
-                    vm_size: data_segment_size as u64,
-                    file_offset: data_segment_begin as u64,
-                    file_size: data_segment_size as u64,
-                    max_vm_protection: VM_PROT_READ | VM_PROT_WRITE,
-                    initial_vm_protection: VM_PROT_READ | VM_PROT_WRITE,
-                    num_sections: segment.sections.len() as u32,
-                    flags: 0,
-                }
-            );
-        };
-        if let Some(objc_selrefs_section) = objc_selrefs_section {
-            self.get_mut(objc_selrefs_section).set(
-                Section64 {
-                    name: encode_string_16("__objc_selrefs"),
-                    segment_name: encode_string_16("__DATA"),
-                    vm_addr: TEXT_ADDR + objc_selrefs_begin as u64,
-                    vm_size: objc_selrefs_size as u64,
-                    file_offset: objc_selrefs_begin as u32,
-                    alignment: 3, // stored as log base 2, so this is actually 8
-                    relocations_file_offset: 0,
-                    num_relocations: 0,
-                    flags: SectionFlags::new(SectionType::LiteralPointers, S_ATTR_NO_DEAD_STRIP),
-                    reserved: [0; 3], // reserved[0] is the first offset into the indirect symbol table
-                }
-            );
-        }
+        self.fill_deferred_headers();
+
+
         self.get_mut(link_edit_segment.header).set(
             LcSegment64 {
                 command: LC_SEGMENT_64,
