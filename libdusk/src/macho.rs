@@ -6,14 +6,13 @@ use std::hash::Hash;
 use std::io::{self, Write};
 use std::marker::PhantomData;
 use std::mem;
-use std::path::{PathBuf, Path};
+use std::path::PathBuf;
 
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
 use crate::exe::*;
 use crate::index_vec::*;
-use crate::mir::StrId;
-use crate::tbd_parser::{TbdError, parse_tbd};
+use crate::tbd_parser::parse_tbd;
 use index_vec::define_index_type;
 
 use crate::driver::Driver;
@@ -53,15 +52,14 @@ impl<T: ByteSwap, const N: usize> ByteSwap for [T; N] {
 
 byte_swap_impl!(noops: u8, i8; nums: u16, u32, u64, usize, i16, i32, i64, isize);
 
-use crate::arm64::{Arm64Encoder, Reg, Indirection};
+use crate::arm64::{Arm64Encoder, Indirection};
 
 #[derive(Default)]
 pub struct MachOEncoder {
     data: Vec<u8>, // TODO: support writing directly to a file instead of copying from a byte buffer?
     num_load_commands: u32,
-    num_segments: u32,
     num_symbol_table_entries: u32,
-    deferred_segments: IndexVec<DeferredSegmentId, DeferredSegment>,
+    segments: IndexVec<SegmentId, SegmentBuilder>,
 }
 
 const MH_MAGIC_64: u32           = 0xFEED_FACF;
@@ -433,29 +431,14 @@ fn encode_string_16(name: &str) -> [u8; 16] {
     out
 }
 
-define_index_type!(struct SectionId = u32;);
-
-struct SegmentBuilder {
-    header: Ref<LcSegment64>,
-    sections: IndexVec<SectionId, Ref<Section64>>,
-}
-
-impl SegmentBuilder {
-    fn size(&self) -> u32 {
-        (self.sections.last()
-            .map(|sect| sect.end())
-            .unwrap_or(self.header.end()) - self.header.start()) as u32
-    }
-}
-
 struct TextSegmentBuilder {
-    segment: DeferredSegmentId,
+    segment: SegmentId,
     sections: Vec<TextSection>,
 }
 
 struct TextSection {
     size: usize,
-    id: DeferredSectionId,
+    id: SectionId,
 }
 
 struct DylibCommandBuilder {
@@ -674,44 +657,44 @@ const PAGE_SIZE: usize = 0x4000;
 const TEXT_ADDR: u64 = 0x0000_0001_0000_0000;
 
 // TODO: try to unify the multiple different segment/section representations somewhat
-define_index_type!(struct DeferredSegmentId = u32;);
-type DeferredSectionId = (DeferredSegmentId, usize);
-struct DeferredSegment {
-    sections: Vec<DeferredSection>,
-    segment_builder: SegmentBuilder,
+define_index_type!(struct SegmentId = u32;);
+type SectionId = (SegmentId, usize);
+struct SegmentBuilder {
+    sections: Vec<SectionBuilder>,
+    header: Ref<LcSegment64>,
 
     name: &'static str,
     vm_protection: u32,
     flags: u32,
-    info: Option<DeferredSegmentInfo>,
+    info: Option<SegmentInfo>,
 }
 
-struct DeferredSection {
+struct SectionBuilder {
     header: Ref<Section64>,
 
     name: &'static str,
     alignment: usize,
     flags: SectionFlags,
-    info: Option<DeferredSectionInfo>,
+    info: Option<SectionInfo>,
 }
 
-struct DeferredSegmentInfo {
-    offset: DeferredOffset,
-    size: DeferredSize,
+struct SegmentInfo {
+    offset: SegmentOffset,
+    size: SegmentSize,
 }
 
-enum DeferredOffset {
+enum SegmentOffset {
     PageZero,
     FileOffset(usize),
 }
 
-impl From<usize> for DeferredOffset {
+impl From<usize> for SegmentOffset {
     fn from(value: usize) -> Self {
         Self::FileOffset(value)
     }
 }
 
-enum DeferredSize {
+enum SegmentSize {
     Same(usize),
     Different {
         vm_size: usize,
@@ -719,14 +702,14 @@ enum DeferredSize {
     }
 }
 
-impl From<usize> for DeferredSize {
+impl From<usize> for SegmentSize {
     fn from(value: usize) -> Self {
         Self::Same(value)
     }
 }
 
 #[derive(Clone, Copy)]
-struct DeferredSectionInfo {
+struct SectionInfo {
     offset: usize,
     size: usize,
 }
@@ -751,12 +734,12 @@ impl MachOEncoder {
         self.alloc()
     }
 
-    fn alloc_deferred_segment(&mut self, name: &'static str, vm_protection: u32, flags: u32) -> DeferredSegmentId {
-        let segment_builder = self.alloc_segment();
-        self.deferred_segments.push(
-            DeferredSegment {
+    fn alloc_segment(&mut self, name: &'static str, vm_protection: u32, flags: u32) -> SegmentId {
+        let header = self.alloc_cmd::<LcSegment64>();
+        self.segments.push(
+            SegmentBuilder {
                 sections: Default::default(),
-                segment_builder,
+                header,
 
                 name,
                 vm_protection,
@@ -766,27 +749,21 @@ impl MachOEncoder {
         )
     }
 
-    fn add_info_to_deferred_segment(&mut self, segment: DeferredSegmentId, offset: impl Into<DeferredOffset>, size: impl Into<DeferredSize>) {
-        self.deferred_segments[segment].info = Some(
-            DeferredSegmentInfo {
+    fn add_info_to_segment(&mut self, segment: SegmentId, offset: impl Into<SegmentOffset>, size: impl Into<SegmentSize>) {
+        self.segments[segment].info = Some(
+            SegmentInfo {
                 offset: offset.into(),
                 size: size.into()
             }
         )
     }
 
-    fn alloc_deferred_section(&mut self, segment_id: DeferredSegmentId, name: &'static str, alignment: usize, flags: SectionFlags) -> DeferredSectionId {
-        let invalid_segment_builder = SegmentBuilder {
-            header: Ref { addr: 0, _phantom: PhantomData },
-            sections: Default::default(),
-        };
-        let mut segment_builder = std::mem::replace(&mut self.deferred_segments[segment_id].segment_builder, invalid_segment_builder);
-        let header = self.alloc_section(&mut segment_builder);
-        let segment = &mut self.deferred_segments[segment_id];
-        segment.segment_builder = segment_builder;
+    fn alloc_section(&mut self, segment_id: SegmentId, name: &'static str, alignment: usize, flags: SectionFlags) -> SectionId {
+        let header = self.alloc::<Section64>();
+        let segment = &mut self.segments[segment_id];
         let index = segment.sections.len();
         segment.sections.push(
-            DeferredSection {
+            SectionBuilder {
                 header,
                 name,
                 alignment,
@@ -797,35 +774,38 @@ impl MachOEncoder {
         (segment_id, index)
     }
 
-    fn add_info_to_deferred_section(&mut self, (segment, section): DeferredSectionId, offset: usize, size: usize) {
-        self.deferred_segments[segment].sections[section].info = Some(
-            DeferredSectionInfo {
+    fn add_info_to_section(&mut self, (segment, section): SectionId, offset: usize, size: usize) {
+        self.segments[segment].sections[section].info = Some(
+            SectionInfo {
                 offset,
                 size,
             }
         )
     }
 
-    fn fill_deferred_headers(&mut self) {
-        let deferred_segments = std::mem::take(&mut self.deferred_segments);
-        for segment in &deferred_segments {
+    fn fill_segment_headers(&mut self) {
+        let segments = std::mem::take(&mut self.segments);
+        for segment in &segments {
             let info = segment.info.as_ref().expect(&format!("no info found for segment '{}'", segment.name));
             let vm_addr = match info.offset {
-                DeferredOffset::PageZero => 0,
-                DeferredOffset::FileOffset(offset) => TEXT_ADDR + offset as u64,
+                SegmentOffset::PageZero => 0,
+                SegmentOffset::FileOffset(offset) => TEXT_ADDR + offset as u64,
             };
             let file_offset = match info.offset {
-                DeferredOffset::PageZero => 0,
-                DeferredOffset::FileOffset(offset) => offset as u64,
+                SegmentOffset::PageZero => 0,
+                SegmentOffset::FileOffset(offset) => offset as u64,
             };
             let (vm_size, file_size) = match info.size {
-                DeferredSize::Same(size) => (size as u64, size as u64),
-                DeferredSize::Different { vm_size, file_size } => (vm_size as u64, file_size as u64),
+                SegmentSize::Same(size) => (size as u64, size as u64),
+                SegmentSize::Different { vm_size, file_size } => (vm_size as u64, file_size as u64),
             };
-            self.get_mut(segment.segment_builder.header).set(
+            let command_size = (segment.sections.last()
+                .map(|sect| sect.header.end())
+                .unwrap_or(segment.header.end()) - segment.header.start()) as u32;
+            self.get_mut(segment.header).set(
                 LcSegment64 {
                     command: LC_SEGMENT_64,
-                    command_size: segment.segment_builder.size(),
+                    command_size,
                     name: encode_string_16(segment.name),
                     vm_addr,
                     vm_size,
@@ -840,8 +820,6 @@ impl MachOEncoder {
 
             for section in &segment.sections {
                 let info = section.info.as_ref().unwrap();
-                let mut val = section.alignment;
-                
                 self.get_mut(section.header).set(
                     Section64 {
                         name: encode_string_16(section.name),
@@ -858,31 +836,16 @@ impl MachOEncoder {
                 );
             }
         }
-        self.deferred_segments = deferred_segments;
-    }
-
-    fn alloc_segment(&mut self) -> SegmentBuilder {
-        self.num_segments += 1;
-        let header = self.alloc_cmd::<LcSegment64>();
-        SegmentBuilder {
-            header,
-            sections: Default::default(),
-        }
-    }
-
-    fn alloc_section(&mut self, segment: &mut SegmentBuilder) -> Ref<Section64> {
-        let section = self.alloc::<Section64>();
-        segment.sections.push(section);
-        section
+        self.segments = segments;
     }
 
     fn alloc_text_segment(&mut self) -> TextSegmentBuilder {
-        let segment = self.alloc_deferred_segment("__TEXT", VM_PROT_READ | VM_PROT_EXECUTE, 0);
+        let segment = self.alloc_segment("__TEXT", VM_PROT_READ | VM_PROT_EXECUTE, 0);
         TextSegmentBuilder { segment, sections: Vec::new() }
     }
 
-    fn reserve_text_section(&mut self, segment: &mut TextSegmentBuilder, name: &'static str, size: usize, alignment: usize, flags: SectionFlags) -> DeferredSectionId {
-        let id = self.alloc_deferred_section(segment.segment, name, alignment, flags);
+    fn reserve_text_section(&mut self, segment: &mut TextSegmentBuilder, name: &'static str, size: usize, alignment: usize, flags: SectionFlags) -> SectionId {
+        let id = self.alloc_section(segment.segment, name, alignment, flags);
         segment.sections.push(
             TextSection { size, id }
         );
@@ -892,7 +855,7 @@ impl MachOEncoder {
     fn layout_text_sections(&mut self, segment: &TextSegmentBuilder, lc_end: usize) {
         let mut len = 0usize;
         let mut offsets_from_end = Vec::with_capacity(segment.sections.len());
-        let sections = &self.deferred_segments[segment.segment].sections;
+        let sections = &self.segments[segment.segment].sections;
         debug_assert_eq!(segment.sections.len(), sections.len());
         for (text_section, section) in segment.sections.iter().zip(sections).rev() {
             let padding = nearest_multiple_of_rt!(len, section.alignment) as usize - len;
@@ -901,29 +864,27 @@ impl MachOEncoder {
         }
 
         let text_end_addr = nearest_multiple_of!(TEXT_ADDR + (lc_end + len) as u64, PAGE_SIZE);
-        let text_sections_addr = text_end_addr - len;
-        
         let text_segment_size = text_end_addr - TEXT_ADDR as usize;
 
         for (i, (section, &offset_from_end)) in segment.sections.iter().zip(offsets_from_end.iter().rev()).enumerate() {
-            self.add_info_to_deferred_section((segment.segment, i), text_segment_size as usize - offset_from_end, section.size);
+            self.add_info_to_section((segment.segment, i), text_segment_size as usize - offset_from_end, section.size);
         }
 
-        self.add_info_to_deferred_segment(segment.segment, 0, text_segment_size);
+        self.add_info_to_segment(segment.segment, 0, text_segment_size);
 
         self.pad_with_zeroes(text_segment_size - self.pos());
     }
 
-    fn fill_text_section(&mut self, segment: &TextSegmentBuilder, section: DeferredSectionId, data: &[u8]) {
+    fn fill_text_section(&mut self, segment: &TextSegmentBuilder, section: SectionId, data: &[u8]) {
         assert_eq!(segment.sections[section.1].id, section);
         assert_eq!(segment.segment, section.0);
         let size = segment.sections[section.1].size;
-        let offset = self.deferred_segments[segment.segment].sections[section.1].info.unwrap().offset;
+        let offset = self.segments[segment.segment].sections[section.1].info.unwrap().offset;
         self.data[offset..(offset + size)].copy_from_slice(data);
     }
 
-    fn get_section_offset(&self, section: DeferredSectionId) -> usize {
-        let segment = &self.deferred_segments[section.0];
+    fn get_section_offset(&self, section: SectionId) -> usize {
+        let segment = &self.segments[section.0];
         segment.sections[section.1].info.unwrap().offset
     }
 
@@ -1033,8 +994,8 @@ impl MachOEncoder {
         
         let lc_begin = self.pos();
 
-        let page_zero = self.alloc_deferred_segment("__PAGEZERO", VM_PROT_NONE, 0);
-        self.add_info_to_deferred_segment(page_zero, DeferredOffset::PageZero, DeferredSize::Different { vm_size: TEXT_ADDR as usize, file_size: 0 });
+        let page_zero = self.alloc_segment("__PAGEZERO", VM_PROT_NONE, 0);
+        self.add_info_to_segment(page_zero, SegmentOffset::PageZero, SegmentSize::Different { vm_size: TEXT_ADDR as usize, file_size: 0 });
         
         let mut text_segment = self.alloc_text_segment();
         let text_section = self.reserve_text_section(&mut text_segment, "__text", code.get_bytes().len(), 4, SectionFlags::new(SectionType::Regular, S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS));
@@ -1042,38 +1003,36 @@ impl MachOEncoder {
         let objc_methname_section = (!exe.objc_method_names.is_empty()).then(|| self.reserve_text_section(&mut text_segment, "__objc_methname", exe.objc_method_names.len(), 2, SectionFlags::new(SectionType::CStringLiterals, 0)));
 
         let (data_const, got_section, cfstring_section, objc_imageinfo_section) = if !exe.got_entries.is_empty() || !exe.constant_nsstrings.is_empty() {
-            let segment_number = self.num_segments;
-            let mut segment = self.alloc_deferred_segment("__DATA_CONST", VM_PROT_READ | VM_PROT_WRITE, SG_READ_ONLY);
+            let segment = self.alloc_segment("__DATA_CONST", VM_PROT_READ | VM_PROT_WRITE, SG_READ_ONLY);
 
             let got_section = (!exe.got_entries.is_empty()).then(|| {
-                self.alloc_deferred_section(segment, "__got", 8, SectionFlags::new(SectionType::NonLazySymbolPointers, 0))
+                self.alloc_section(segment, "__got", 8, SectionFlags::new(SectionType::NonLazySymbolPointers, 0))
             });
 
             let cfstring_section = (!exe.constant_nsstrings.is_empty()).then(|| {
-                self.alloc_deferred_section(segment, "__cfstring", 8, SectionFlags::new(SectionType::Regular, 0))
+                self.alloc_section(segment, "__cfstring", 8, SectionFlags::new(SectionType::Regular, 0))
             });
 
-            let objc_imageinfo_section = self.alloc_deferred_section(segment, "__objc_imageinfo", 4, SectionFlags::new(SectionType::Regular, 0));
+            let objc_imageinfo_section = self.alloc_section(segment, "__objc_imageinfo", 4, SectionFlags::new(SectionType::Regular, 0));
 
-            (Some((segment_number, segment)), got_section, cfstring_section, Some(objc_imageinfo_section))
+            (Some(segment), got_section, cfstring_section, Some(objc_imageinfo_section))
         } else {
             (None, None, None, None)
         };
 
         let (data_segment, objc_selrefs_section) = if !exe.objc_selectors.is_empty() {
-            let segment_number = self.num_segments;
-            let mut segment = self.alloc_deferred_segment("__DATA", VM_PROT_READ | VM_PROT_WRITE, 0);
+            let segment = self.alloc_segment("__DATA", VM_PROT_READ | VM_PROT_WRITE, 0);
 
             let objc_selrefs_section = (!exe.objc_selectors.is_empty()).then(|| {
-                self.alloc_deferred_section(segment, "__objc_selrefs", 8, SectionFlags::new(SectionType::LiteralPointers, S_ATTR_NO_DEAD_STRIP))
+                self.alloc_section(segment, "__objc_selrefs", 8, SectionFlags::new(SectionType::LiteralPointers, S_ATTR_NO_DEAD_STRIP))
             });
 
-            (Some((segment_number, segment)), objc_selrefs_section)
+            (Some(segment), objc_selrefs_section)
         } else {
             (None, None)
         };
 
-        let link_edit_segment = self.alloc_deferred_segment("__LINKEDIT", VM_PROT_READ, 0);
+        let link_edit_segment = self.alloc_segment("__LINKEDIT", VM_PROT_READ, 0);
 
         let chained_fixups = self.alloc_cmd::<LinkEditDataCommand>();
         let exports_trie = self.alloc_cmd::<LinkEditDataCommand>();
@@ -1152,11 +1111,10 @@ impl MachOEncoder {
         let data_const_begin = self.pos();
         let mut got_begin = self.pos();
         let mut cfstrings_begin = self.pos();
-        let mut objc_imageinfo_begin = self.pos();
 
         let mut data_const_size = 0;
 
-        if let Some((_, segment)) = data_const {
+        if let Some(segment) = data_const {
             let mut prev_ptr: Option<Ref<DyldChainedPtr64>> = None;
 
             if let Some(section) = got_section {
@@ -1165,7 +1123,7 @@ impl MachOEncoder {
                     self.push_chained_fixup(&mut prev_ptr, DyldChainedPtr64Bind::new(import.index() as u32, 0, 0));
                 }
                 let got_size = self.pos() - got_begin;
-                self.add_info_to_deferred_section(section, got_begin, got_size);
+                self.add_info_to_section(section, got_begin, got_size);
             }
 
             if let Some(section) = cfstring_section {
@@ -1186,23 +1144,23 @@ impl MachOEncoder {
                     self.push(str.size);
                 }
                 let cfstrings_size = self.pos() - cfstrings_begin;
-                self.add_info_to_deferred_section(section, cfstrings_begin, cfstrings_size);
+                self.add_info_to_section(section, cfstrings_begin, cfstrings_size);
             }
 
-            objc_imageinfo_begin = self.pos();
+            let objc_imageinfo_begin = self.pos();
             self.push([0u8, 0, 0, 0, 4, 0, 0, 0]);
             let objc_imageinfo_size = self.pos() - objc_imageinfo_begin;
-            self.add_info_to_deferred_section(objc_imageinfo_section.unwrap(), objc_imageinfo_begin, objc_imageinfo_size);
+            self.add_info_to_section(objc_imageinfo_section.unwrap(), objc_imageinfo_begin, objc_imageinfo_size);
 
             self.pad_to_next_boundary::<PAGE_SIZE>();
             data_const_size = self.pos() - data_const_begin;
-            self.add_info_to_deferred_segment(segment, data_const_begin, data_const_size);
+            self.add_info_to_segment(segment, data_const_begin, data_const_size);
         }
 
         let data_segment_begin = self.pos();
         let mut data_segment_size = self.pos();
         let mut objc_selrefs_begin = self.pos();
-        if let Some((_, segment)) = data_segment {
+        if let Some(segment) = data_segment {
             let mut prev_ptr: Option<Ref<DyldChainedPtr64>> = None;
 
             if let Some(section) = objc_selrefs_section {
@@ -1213,12 +1171,12 @@ impl MachOEncoder {
                     self.push_chained_fixup(&mut prev_ptr, DyldChainedPtr64Rebase::new(offset as u64, 0, 0));
                 }
                 let objc_selrefs_size = self.pos() - objc_selrefs_begin;
-                self.add_info_to_deferred_section(section, objc_selrefs_begin, objc_selrefs_size);
+                self.add_info_to_section(section, objc_selrefs_begin, objc_selrefs_size);
             }
 
             self.pad_to_next_boundary::<PAGE_SIZE>();
             data_segment_size = self.pos() - data_segment_begin;
-            self.add_info_to_deferred_segment(segment, data_segment_begin, data_segment_size);
+            self.add_info_to_segment(segment, data_segment_begin, data_segment_size);
         }
         
         let link_edit_begin = self.pos();
@@ -1227,13 +1185,14 @@ impl MachOEncoder {
         self.pad_to_next_boundary::<8>();
         // Push dyld_chained_starts_in_image (a dynamically-sized structure)
         let chained_starts_offset = self.pos();
-        self.push(self.num_segments as u32);
+        let num_segments = self.segments.len() as u32;
+        self.push(num_segments as u32);
         let mut data_const_starts_offset = None;
         let mut data_segment_starts_offset = None;
-        for i in 0..self.num_segments {
-            if data_const.as_ref().map(|(num, ..)| *num) == Some(i) {
+        for i in self.segments.indices() {
+            if data_const == Some(i) {
                 data_const_starts_offset = Some(self.alloc::<u32>());
-            } else if data_segment.as_ref().map(|(num, ..)| *num) == Some(i) {
+            } else if data_segment == Some(i) {
                 data_segment_starts_offset = Some(self.alloc::<u32>());
             } else {
                 // AFAICT, the offset is relative to the start of dyld_chained_starts_in_image, which makes any offset less
@@ -1355,7 +1314,7 @@ impl MachOEncoder {
 
         let symbol_table_begin = self.pos();
         let mut symbol_headers = Vec::new();
-        for symbol in local_symbols.iter().chain(&imported_symbols) {
+        for _ in local_symbols.iter().chain(&imported_symbols) {
             symbol_headers.push(self.alloc_symbol_table_entry());
         }
 
@@ -1445,7 +1404,7 @@ impl MachOEncoder {
         let link_edit_end = self.pos() + code_slots_len;
 
         let link_edit_size = link_edit_end - link_edit_begin;
-        self.add_info_to_deferred_segment(link_edit_segment, link_edit_begin, DeferredSize::Different { vm_size: nearest_multiple_of!(link_edit_size, PAGE_SIZE), file_size: link_edit_size });
+        self.add_info_to_segment(link_edit_segment, link_edit_begin, SegmentSize::Different { vm_size: nearest_multiple_of!(link_edit_size, PAGE_SIZE), file_size: link_edit_size });
 
         let num_commands = self.num_load_commands;
         self.get_mut(mach_header).set(
@@ -1463,7 +1422,7 @@ impl MachOEncoder {
             }
         );
 
-        self.fill_deferred_headers();
+        self.fill_segment_headers();
 
         self.get_mut(chained_fixups).set(
             LinkEditDataCommand {
