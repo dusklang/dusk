@@ -1,4 +1,3 @@
-
 use std::cmp::max;
 use std::collections::HashMap;
 use std::ffi::CString;
@@ -499,8 +498,10 @@ impl Driver {
                 CloseCurly          b"}"
                 OpenSquareBracket   b"["
                 CloseSquareBracket  b"]"
+                OpenGenerics        b"<|"
+                CloseGenerics       b"|>"
                 ReturnArrow         b"->"
-                
+
                 Tilde               b"~"
                 AddAssign           b"+="
                 SubAssign           b"-="

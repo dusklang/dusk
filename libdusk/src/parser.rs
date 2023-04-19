@@ -400,15 +400,15 @@ impl Driver {
     fn parse_decl_ref(&mut self, p: &mut Parser, base_expr: Option<ExprId>, name: Sym) -> ParseResult<ExprId> {
         let name_range = self.cur(p).range;
         self.next(p);
-        if !self.has_implicit_separator(p) && matches!(self.cur(p).kind, TokenKind::OpenSquareBracket) {
+        if !self.has_implicit_separator(p) && matches!(self.cur(p).kind, TokenKind::OpenGenerics) {
             let open_square_bracket_range = self.cur(p).range;
             self.next(p);
-            let generic_arg_list = self.begin_list(p, TokenKind::could_begin_expression, [TokenKind::Comma], Some(TokenKind::CloseSquareBracket));
+            let generic_arg_list = self.begin_list(p, TokenKind::could_begin_expression, [TokenKind::Comma], Some(TokenKind::CloseGenerics));
             let mut args = Vec::new();
             loop {
                 let kind = self.cur(p).kind;
                 match kind {
-                    TokenKind::CloseSquareBracket => {
+                    TokenKind::CloseGenerics => {
                         self.next(p);
                         break;
                     }
@@ -672,7 +672,7 @@ impl Driver {
                     let dot_range = self.cur(p).range;
                     let name = match self.next(p).kind {
                         &TokenKind::Ident(name) => name,
-                        TokenKind::CloseSquareBracket | TokenKind::CloseCurly | TokenKind::RightParen | TokenKind::Comma => {
+                        TokenKind::CloseGenerics | TokenKind::CloseCurly | TokenKind::RightParen | TokenKind::Comma => {
                             let range = self.cur(p).range;
                             self.diag.report_error("expected identifier after '.'", dot_range, "'.' here")
                                 .adding_secondary_range_with_msg(range, "note: found this instead");
@@ -1032,7 +1032,7 @@ impl Driver {
     }
 
     fn parse_ambiguous_generic_list(&mut self, p: &mut Parser) -> ParseResult<AmbiguousGenericList> {
-        let open_square_bracket_range = self.eat_tok(p, TokenKind::OpenSquareBracket)?;
+        let open_square_bracket_range = self.eat_tok(p, TokenKind::OpenGenerics)?;
         let mut list = AmbiguousGenericList {
             kind: AmbiguousGenericListKind::Ambiguous(Vec::new()),
             range: open_square_bracket_range
@@ -1042,7 +1042,7 @@ impl Driver {
             match &mut list.kind {
                 AmbiguousGenericListKind::Ambiguous(idents) => {
                     if let &TokenKind::Ident(symbol) = self.cur(p).kind {
-                        if matches!(self.peek_next(p).kind, TokenKind::Comma) || matches!(self.peek_next(p).kind, TokenKind::CloseSquareBracket) {
+                        if matches!(self.peek_next(p).kind, TokenKind::Comma) || matches!(self.peek_next(p).kind, TokenKind::CloseGenerics) {
                             // Still ambiguous; just an identifier
                             let range = self.cur(p).range;
                             idents.push(Ident { symbol, range  });
@@ -1052,7 +1052,7 @@ impl Driver {
                                 list.range = source_info::concat(list.range, self.cur(p).range);
                                 self.next(p);
                             }
-                            if let TokenKind::CloseSquareBracket = self.cur(p).kind {
+                            if let TokenKind::CloseGenerics = self.cur(p).kind {
                                 break;
                             }
                         } else {
@@ -1073,14 +1073,14 @@ impl Driver {
                         list.range = source_info::concat(list.range, self.cur(p).range);
                         self.next(p);
                     }
-                    if let TokenKind::CloseSquareBracket = self.cur(p).kind {
+                    if let TokenKind::CloseGenerics = self.cur(p).kind {
                         break;
                     }
                 }
             }
         }
 
-        let bracket_range = self.eat_tok(p, TokenKind::CloseSquareBracket)?;
+        let bracket_range = self.eat_tok(p, TokenKind::CloseGenerics)?;
         list.range = source_info::concat(list.range, bracket_range);
 
         Ok(list)
@@ -1094,7 +1094,7 @@ impl Driver {
                 if self.next_tok_has_implicit_separator(p) {
                     let expr = self.parse_expr(p).unwrap_or_else(|err| err);
                     Ok(Item::Expr(expr))
-                } else if let TokenKind::OpenSquareBracket = self.peek_next(p).kind {
+                } else if let TokenKind::OpenGenerics = self.peek_next(p).kind {
                     self.next(p);
                     let list = self.parse_ambiguous_generic_list(p)?;
                     if self.next_tok_has_implicit_separator(p) {
@@ -1442,10 +1442,10 @@ impl Driver {
 
         // Parse optional [T, U, V, ...]
         let mut generic_param_list = GenericParamList::default();
-        if let TokenKind::OpenSquareBracket = self.next(p).kind {
+        if let TokenKind::OpenGenerics = self.next(p).kind {
             let open_square_bracket_range = self.cur(p).range;
             self.next(p);
-            let generic_param_syntax_list = self.begin_list(p, TokenKind::could_begin_generic_parameter, [TokenKind::Comma], Some(TokenKind::CloseSquareBracket));
+            let generic_param_syntax_list = self.begin_list(p, TokenKind::could_begin_generic_parameter, [TokenKind::Comma], Some(TokenKind::CloseGenerics));
             if matches!(self.cur(p).kind, TokenKind::Ident(_)) {
                 generic_param_list.ids.start = self.ast.generic_params.peek_next_idx();
                 generic_param_list.ids.end = generic_param_list.ids.start;
@@ -1466,7 +1466,7 @@ impl Driver {
             } else {
                 self.diag.report_error("expected at least one parameter in generic parameter list", open_square_bracket_range, "list starts here");
             }
-            let bracket_range = self.eat_tok(p, TokenKind::CloseSquareBracket)?;
+            let bracket_range = self.eat_tok(p, TokenKind::CloseGenerics)?;
             proto_range = source_info::concat(proto_range, bracket_range);
         }
 

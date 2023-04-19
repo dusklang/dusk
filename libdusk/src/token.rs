@@ -54,6 +54,8 @@ pub enum TokenKind {
     CloseCurly,
     OpenSquareBracket,
     CloseSquareBracket,
+    OpenGenerics,
+    CloseGenerics,
     AtSign,
     ReturnArrow,
 
@@ -147,7 +149,7 @@ impl TokenKind {
             Mut | Comma | RightParen | OpenCurly | CloseCurly | AddAssign | SubAssign |
             MultAssign | DivAssign | ModAssign | BitwiseOrAssign | BitwiseAndAssign |
             Div | Mod | Equal | NotEqual | Lte | Lt | Gte | GT | LogicalOr | LogicalAnd | Assign |
-            Pipe | OpenSquareBracket | CloseSquareBracket
+            Pipe | OpenSquareBracket | CloseSquareBracket | OpenGenerics | CloseGenerics
         )
     }
 
