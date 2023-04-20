@@ -225,7 +225,7 @@ fn read_u32(slice: ByteSlice, index: u32): u32 {
 }
 
 // TODO: This function doesn't work yet, unfortunately
-fn read_as[T](slice: ByteSlice, index: u32): T {
+fn read_as<|T|>(slice: ByteSlice, index: u32): T {
     if index as usize + size_of(T) > slice.size {
         panic("index off the end")
     }

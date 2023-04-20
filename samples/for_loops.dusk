@@ -1,4 +1,4 @@
-fn type_of[T](val: T): type {
+fn type_of<|T|>(val: T): type {
     T
 }
 

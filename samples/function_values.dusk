@@ -1,4 +1,4 @@
-fn type_of[T](value: T): type { T }
+fn type_of<|T|>(value: T): type { T }
 
 fn hello(a: u32, b: u32) {
 

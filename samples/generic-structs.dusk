@@ -1,9 +1,9 @@
-MyGenericType[T] :: struct {
+MyGenericType<|T|> :: struct {
     non_generic_member: u32
     generic_member: T
 }
 
-DeGenericized :: MyGenericType[u64]
+DeGenericized :: MyGenericType<|u64|>
 
 fn main() {
     hello :: DeGenericized {

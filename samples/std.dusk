@@ -2,7 +2,7 @@ fn assert(condition: bool) {
     if !condition { panic("assertion failed") }
 }
 
-fn memcpy[T](dest: T *mut, src: T*, count: usize) {
+fn memcpy<|T|>(dest: T *mut, src: T*, count: usize) {
     cur_dest := dest
     end_dest :: (dest as usize + size_of(T) * count) as T *mut
 

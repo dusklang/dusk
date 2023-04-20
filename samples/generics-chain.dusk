@@ -1,4 +1,4 @@
-fn swiitch[T](condition: bool, a: T, b: T): T {
+fn swiitch<|T|>(condition: bool, a: T, b: T): T {
     if condition {
         a
     } else {

@@ -1,4 +1,4 @@
-fn memset[T](dest: T *mut, src: T, count: usize) {
+fn memset<|T|>(dest: T *mut, src: T, count: usize) {
     cur := dest
     end :: (dest as usize + size_of(T) * count) as T *mut
     while cur as usize != end as usize {
@@ -12,7 +12,7 @@ fn main() {
     foo(*buffer)
     memset(buffer, 34, 24)
     // Top-level generic function calls are not yet parsed, so assign to a temporary
-    _ :: memset[u8](buffer, 34, 24)
+    _ :: memset<|u8|>(buffer, 34, 24)
 }
 
-fn foo[T](arg: T) {}
+fn foo<|T|>(arg: T) {}
