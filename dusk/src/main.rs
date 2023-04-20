@@ -1,4 +1,6 @@
 use clap::{Parser, ArgEnum};
+use libdusk::interpreter::{InterpMode, restart_interp};
+use libdusk::mir::{FunctionRef, FuncId};
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io::BufWriter;
@@ -75,14 +77,15 @@ impl Drop for SendExitMsg {
     }
 }
 
-fn dusk_main(opt: Opt, #[allow(unused)] program_args: &[OsString]) {
+// If `program_args` is `Some`, we will run the `main` function in the interpreter.
+// Otherwise, we will build the program.
+fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
     #[cfg(feature = "dvd")]
     if opt.dvd {
         dvd_ipc::connect();
     }
     dvd_ipc::send(|| DvdMessage::WillBegin);
     let _exit_handler = SendExitMsg;
-
 
     dvm::launch_coordinator_thread();
     let mut src_map = SourceMap::new();
@@ -175,17 +178,27 @@ fn dusk_main(opt: Opt, #[allow(unused)] program_args: &[OsString]) {
         });
     if let Some(main) = main {
         driver.read().diag.print_warnings();
-        let path = "a.out";
-        _ = std::fs::remove_file(path);
-        let file = File::create(path).unwrap();
-        let mut permissions = file.metadata().unwrap().permissions();
-        #[cfg(unix)] {
-            permissions.set_mode(0o755);
+        if let Some(program_args) = program_args {
+            #[cfg(debug_assertions)]
+            println!("Running main in the interpreter:\n");
+            restart_interp(InterpMode::RunTime);
+            driver.set_command_line_arguments(program_args);
+            let _ = driver.call(FunctionRef::Id(FuncId::new(main)), Vec::new(), Vec::new());
+
+            flush_diagnostics(&mut driver.write());
+        } else {
+            let path = "a.out";
+            _ = std::fs::remove_file(path);
+            let file = File::create(path).unwrap();
+            let mut permissions = file.metadata().unwrap().permissions();
+            #[cfg(unix)] {
+                permissions.set_mode(0o755);
+            }
+            file.set_permissions(permissions).unwrap();
+            let mut w = BufWriter::new(file);
+            let mut encoder = MachOEncoder::new();
+            encoder.write(&driver.read(), main, &mut w).unwrap();
         }
-        file.set_permissions(permissions).unwrap();
-        let mut w = BufWriter::new(file);
-        let mut encoder = MachOEncoder::new();
-        encoder.write(&driver.read(), main, &mut w).unwrap();
     } else {
         driver.write().diag.report_error_no_range(
             "Couldn't find main function with no parameters and a return type of `void`"
@@ -197,18 +210,17 @@ fn dusk_main(opt: Opt, #[allow(unused)] program_args: &[OsString]) {
 
 fn main() {
     let args: Vec<_> = std::env::args_os().collect();
-    // What I really wanted here was a clap subcommand, with the default being set to "run" or "compile" or something.
-    // But Clap doesn't support default subcommands :( https://github.com/clap-rs/clap/issues/975
-    #[cfg(feature = "dvd")]
-    if args.iter().nth(1).map(|arg| arg.as_os_str()) == Some(OsStr::new("internal-launch-dvd")) {
-        dvd::dvd_main();
-        return;
+    match args.iter().nth(1).map(|arg| arg.as_os_str()) {
+        #[cfg(feature = "dvd")]
+        Some(OsStr::new("internal-launch-dvd")) => dvd::dvd_main(),
+        Some(val) if val == OsStr::new("run") => {
+            let mut split = args.split(|arg| arg == OsStr::new("--"));
+            let clap_args = &split.next().unwrap()[1..]; // ignore 0th argument, which we know is "run"
+            let program_args = split.next().unwrap_or(&[]);
+            let opt = Opt::parse_from(clap_args);
+
+            dusk_main(opt, Some(program_args));
+        },
+        _ => dusk_main(Opt::parse_from(args), None),
     }
-
-    let mut split = args.split(|arg| arg == OsStr::new("--"));
-    let clap_args = split.next().unwrap();
-    let program_args = split.next().unwrap_or(&[]);
-    let opt = Opt::parse_from(clap_args);
-
-    dusk_main(opt, program_args);
 }
