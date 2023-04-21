@@ -20,7 +20,7 @@ pub struct ConstraintList {
     trait_impls: BuiltinTraits,
     one_of: Option<SmallVec<[QualType; 1]>>,
     preferred_type: Option<QualType>,
-    generic_ctx: GenericCtxId,
+    pub generic_ctx: GenericCtxId,
     is_error: bool,
 }
 
@@ -41,10 +41,6 @@ pub enum SolveError<'a> {
 impl ConstraintList {
     pub fn new(trait_impls: BuiltinTraits, one_of: Option<SmallVec<[QualType; 1]>>, preferred_type: Option<QualType>, generic_ctx: GenericCtxId) -> Self {
         Self { trait_impls, one_of: one_of.map(|one_of| one_of.into()), preferred_type, generic_ctx, is_error: false }
-    }
-
-    pub fn set_generic_ctx(&mut self, generic_ctx: GenericCtxId) {
-        self.generic_ctx = generic_ctx;
     }
 
     pub fn one_of(&self) -> &[QualType] {
@@ -197,7 +193,8 @@ fn implements_traits(ty: &Type, traits: BuiltinTraits) -> Result<(), BuiltinTrai
 }
 
 fn implements_traits_in_generic_context(ty: &Type, traits: BuiltinTraits, generic_params: Range<GenericParamId>) -> Result<SmallVec<[ConstraintList; 1]>, BuiltinTraits> {
-    let mut constraints: SmallVec<_> = range_iter(generic_params.clone()).map(|_| ConstraintList::new(BuiltinTraits::empty(), None, None, BLANK_GENERIC_CTX)).collect();
+    let mut constraints: SmallVec<_> = range_iter(generic_params.clone())
+        .map(|_| ConstraintList::new(BuiltinTraits::empty(), None, None, BLANK_GENERIC_CTX)).collect();
 
     let mut not_implemented = BuiltinTraits::empty();
     fn expressible_by_str_lit(ty: &Type) -> bool {
@@ -295,8 +292,7 @@ impl Driver {
                         GenericCtx::Decl { ref parameters, .. } => {
                             break parameters.clone();
                         },
-                        GenericCtx::DeclRef { id, parent, .. } => {
-                            let generic_constraints = tp.generic_constraints(id);
+                        GenericCtx::DeclRef { parent, .. } => {
                             generic_ctx_id = parent;
                         }
                     }

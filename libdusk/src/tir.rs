@@ -11,6 +11,7 @@ use crate::source_info::SourceRange;
 use crate::ast::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, NewNamespaceId, RETURN_VALUE_DECL, ParamList};
 use crate::internal_types::{internal_fields, internal_field_decls, InternalField, InternalFieldDecls, InternalNamespace};
 use crate::ty::Type;
+use crate::ty::StructType;
 
 use crate::dvd::{Message as DvdMessage, self};
 
@@ -231,10 +232,18 @@ pub enum ExprNamespace {
     Error,
 }
 
+#[derive(Debug)]
+pub enum ExprMacroInfo {
+    Struct(StructType),
+}
+
 #[derive(Debug, Default)]
 pub struct Builder {
     pub decls: IndexVec<DeclId, Decl>,
     pub expr_namespaces: HashMap<ExprId, Vec<ExprNamespace>>,
+    // E.g., in `expr { }`, maps `expr` to the possible "macros" it might refer to. Currently this only works with
+    // struct literals, but could be expanded to support arbitrary procedural macros in the future.
+    pub expr_macro_info: HashMap<ExprId, Vec<ExprMacroInfo>>,
     graph: Graph,
     depended_on: IndexVec<ExprId, bool>,
 
@@ -500,9 +509,9 @@ impl Driver {
     /// MIR for and then call the function in the interpreter, it's important for us to have already typechecked all of
     /// the items in its scope. The reason this is overly conservative is we might not need to call the function at
     /// compile-time at all, and even if we do, there is no reason to defer typechecking of the function declaration
-    /// until after its items. I believe this could also be a cause for some of the mysterious dependency cycles that
-    /// have plagued the compiler for some time (though I don't have a good reason to think that; it's just wishful
-    /// thinking).
+    /// until after its items. In other words, the call is what truly depends on the items having been typechecked; not
+    /// the function itself. I think/hope this could also be a cause for some of the mysterious dependency cycles
+    /// that have plagued the compiler for some time (though frankly I don't have a good reason to think that).
     fn add_type3_scope_dep(&mut self, a: ItemId, b: ImperScopeId) {
         let block = self.code.ast.imper_scopes[b].block;
         for &op in &self.code.blocks[block].ops {
@@ -831,7 +840,9 @@ impl Driver {
                         }
                     }
                 },
-                ast::Expr::StructLit { ref fields, .. } => {
+                ast::Expr::StructLit { ref fields, ty, .. } => {
+                    self.tir.graph.add_type1_dep(id, ef!(ty.item));
+                    self.tir.graph.add_meta_dep(id, ef!(ty.item));
                     for field in fields {
                         self.tir.graph.add_type1_dep(id, ef!(field.expr.item));
                     }
@@ -937,11 +948,8 @@ impl Driver {
                             | ast::Expr::CharLit { .. } | ast::Expr::BoolLit { .. } | ast::Expr::Const(_) | ast::Expr::AddrOf { .. }
                             | ast::Expr::Deref(_) | ast::Expr::Pointer { .. } | ast::Expr::Set { .. } | ast::Expr::Mod { .. }
                             | ast::Expr::Struct(_) | ast::Expr::Enum(_) | ast::Expr::Call { .. } | ast::Expr::FunctionTy { .. }
-                            | ast::Expr::Break(_) | ast::Expr::Continue(_) => {},
+                            | ast::Expr::Break(_) | ast::Expr::Continue(_) | ast::Expr::StructLit { .. } => {},
                         ast::Expr::Cast { ty, .. } => {
-                            add_eval_dep!(id, ty);
-                        },
-                        ast::Expr::StructLit { ty, .. } => {
                             add_eval_dep!(id, ty);
                         },
                         ast::Expr::Ret { decl, .. } => {

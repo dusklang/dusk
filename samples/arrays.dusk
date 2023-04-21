@@ -1,12 +1,84 @@
 Array<|T|> :: struct {
-    val: T
+    data: T *mut
+    length: usize
+    capacity: usize
 }
 
-Foo :: struct {
+// This sample element is necessary for now in order for the program to typecheck
+fn new_array<|T|>(sample_element: T): Array<|T|> {
+    // TODO: don't allocate anything upfront
+    capacity: usize: 1
+    Array {
+        data: malloc(size_of(T) * capacity) as T *mut
+        length: 0
+        capacity: capacity
+    }
+}
 
+fn push<|T|>(self: Array<|T|> *mut, value: T) {
+    // TODO: I'd prefer to put this in a separate method `ensure_capacity()`, but when I tried to do that I ran into a large swath of compiler bugs :(
+    if self.capacity < self.length + 1 {
+        self.capacity = self.capacity * 2
+        old_data :: self.data as T *mut
+        self.data = malloc(size_of(T) * self.capacity) as T *mut
+
+        // TODO: the code below would also be better as its own separate method (e.g., copy_elements()), but that doesn't work due to compiler bugs.
+        cur_dest := self.data
+        end_dest :: (self.data as usize + size_of(T) * self.length) as T *mut
+
+        // TODO: `as T*` should not be necessary here
+        cur_src := old_data as T*
+        while cur_dest as usize != end_dest as usize {
+            *cur_dest = *cur_src
+            cur_dest = (cur_dest as usize + size_of(T)) as T *mut
+            cur_src = (cur_src as usize + size_of(T)) as T*
+        }
+        free(old_data as void *mut)
+    }
+
+    ptr :: (self.data as usize + size_of(T) * self.length) as T *mut
+    *ptr = value
+    self.length += 1
+}
+
+fn print_num(num: i32) {
+    num := num
+    if num < 0 {
+        print("-")
+        num = -num
+    }
+    if num >= 10 {
+        print_num(num / 10)
+    }
+    print((num % 10) as u8 + "0")
+}
+
+// This sample element is necessary for now in order for the program to typecheck
+fn index<|T|>(self: Array<|T|>*, index: usize, sample_element: T): T {
+    if index >= self.length {
+        panic("attempted to read past the bounds of the array")
+    }
+    *((self.data as usize + size_of(T) * index) as T*)
+}
+
+// This function is necessary for now because the compiler doesn't understand that the return type of index() is equal to the outer T passed as a generic arg.
+fn index_i32(self: Array<|i32|>*, index: usize): i32 {
+    if index >= self.length {
+        panic("attempted to read past the bounds of the array")
+    }
+    *((self.data as usize + size_of(i32) * index) as i32*)
 }
 
 fn main() {
-    foo :: Foo {}
-    array :: Array { val: 1 }
+    array := new_array<|i32|>(0)
+
+    len :: 25
+    for i in 0..len {
+        push(&mut array, i * 2 + 1)
+    }
+
+    for i in 0..len {
+        val :: index_i32(&array as Array<|i32|>*, i as usize)
+        print("Element #"); print_num(i); print(": "); print_num(val); print("\n")
+    }
 }

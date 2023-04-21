@@ -19,7 +19,7 @@ use crate::driver::{Driver, DriverRef};
 use crate::error::Error;
 use crate::new_code::NewCode;
 use crate::ty::BuiltinTraits;
-use crate::tir::{Units, UnitItems, ExprNamespace, self, NameLookup, NewNamespaceRefKind};
+use crate::tir::{Units, UnitItems, ExprNamespace, self, NameLookup, NewNamespaceRefKind, ExprMacroInfo};
 
 use dusk_proc_macros::*;
 
@@ -879,7 +879,7 @@ impl tir::Expr<tir::DeclRef> {
             let mut constraints = GenericContext::new();
             for param in range_iter(decl.generic_params.clone()) {
                 let mut constraint_list = ConstraintList::default();
-                constraint_list.set_generic_ctx(df!(driver, overload.generic_ctx_id));
+                constraint_list.generic_ctx = df!(driver, overload.generic_ctx_id);
                 constraints.insert(param, constraint_list);
             }
             one_of.push(QualType { ty, is_mut });
@@ -935,19 +935,23 @@ impl tir::Expr<tir::DeclRef> {
             // TODO: probably rename this from ret_ty.
             let ret_ty = tp.fetch_decl_type(driver, overload, Some(self.decl_ref_id));
             let mut ret_ty_constraints = ConstraintList::default();
-            ret_ty_constraints.set_generic_ctx(df!(driver, overload.generic_ctx_id));
+            ret_ty_constraints.generic_ctx = df!(driver, overload.generic_ctx_id);
             ret_ty_constraints.set_to(ret_ty.clone());
             let mut generic_args = Vec::new();
 
             // Infer constraints on generic arguments based on type (or return type) of decl
             let generic_constraints = tp.generic_constraints_mut(self.decl_ref_id);
             for generic_param in range_iter(decl.generic_params.clone()) {
-                dbg!(&ret_ty.ty);
                 let implied_constraints = ret_ty_constraints.get_implied_generic_constraints(generic_param, &ret_ty.ty);
-                let generic_param_constraints = generic_constraints.get_mut(&generic_param).unwrap();
+                let Some(generic_param_constraints) = generic_constraints.get_mut(&generic_param) else {
+                    // If this generic declref is being used as the main expr in a mock unit, it will likely not have
+                    // any constraints added to its generic arguments. So just continue without it and hope for the
+                    // best, I guess.
+                    break;
+                };
                 *generic_param_constraints = generic_param_constraints.intersect_with(&implied_constraints);
                 let generic_arg = generic_param_constraints.solve().unwrap().ty;
-                generic_args.push(dbg!(generic_arg));
+                generic_args.push(generic_arg);
             }
             for expr in tp.generic_substitution_list(self.decl_ref_id).clone() {
                 tp.constraints_mut(expr).substitute_generic_args(decl.generic_params.clone(), &generic_args);
@@ -1312,142 +1316,141 @@ impl tir::Expr<tir::Struct> {
 
 impl tir::Expr<tir::StructLit> {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        let ty = if let Some(err) = driver.can_unify_to(tp, self.ty, &Type::Ty.into()).err() {
+        if let Some(err) = driver.can_unify_to(tp, self.ty, &Type::Ty.into()).err() {
             let mut error = Error::new("Expected struct type");
             let range = driver.get_range(self.ty);
             match err {
                 UnificationError::InvalidChoice(choices)
-                    => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
                 UnificationError::Trait(not_implemented)
-                    => error.add_secondary_range(
-                        range,
-                        format!(
-                            "note: couldn't unify because expression requires implementations of {:?}",
-                            not_implemented.names(),
-                        ),
+                => error.add_secondary_range(
+                    range,
+                    format!(
+                        "note: couldn't unify because expression requires implementations of {:?}",
+                        not_implemented.names(),
                     ),
+                ),
             }
             driver.diag.push(error);
-            Type::Error
+            tp.constraints_mut(self.id).set_to(Type::Error);
         } else {
-            let ty = tp.get_evaluated_type(self.ty).clone();
-            match &ty {
-                Type::Struct(strukt) => {
-                    let struct_fields = &driver.code.ast.structs[strukt.identity].fields;
-                    let mut matches = Vec::new();
-                    matches.resize(struct_fields.len(), ExprId::new(u32::MAX as usize));
+            if let Some(macro_options) = driver.tir.expr_macro_info.get(&self.ty) {
+                let mut one_of = SmallVec::<[QualType; 1]>::new();
+                for option in macro_options {
+                    match option {
+                        ExprMacroInfo::Struct(strukt) => {
+                            let struct_fields = &driver.code.ast.structs[strukt.identity].fields;
+                            let mut matches = Vec::new();
+                            matches.resize(struct_fields.len(), ExprId::new(u32::MAX as usize));
 
-                    let mut successful = true;
+                            let mut successful = true;
 
-                    // Find matches for each field in the literal
-                    'lit_fields: for lit_field in &self.fields {
-                        for (i, struct_field) in struct_fields.iter().enumerate() {
-                            if struct_field.name == lit_field.name {
-                                matches[i] = lit_field.expr;
-                                continue 'lit_fields;
+                            // Find matches for each field in the literal
+                            'lit_fields: for lit_field in &self.fields {
+                                for (i, struct_field) in struct_fields.iter().enumerate() {
+                                    if struct_field.name == lit_field.name {
+                                        matches[i] = lit_field.expr;
+                                        continue 'lit_fields;
+                                    }
+                                }
+
+                                // We can assume there is no match for this field at this point; if we had found one, we
+                                // would've already continued to the next field.
+                                successful = false;
+                                
+                                // TODO: Use range of the field identifier, which we don't have fine-grained access to yet
+                                let range = driver.get_range(self.id);
+                                driver.diag.push(
+                                    Error::new(format!("Unknown field {} in struct literal", driver.interner.resolve(lit_field.name).unwrap()))
+                                        .adding_primary_range(range, "")
+                                );
                             }
+
+                            let generic_ctx_id = ef!(driver, self.ty.generic_ctx_id);
+                            let generic_ctx = &driver.code.ast.generic_ctxs[generic_ctx_id];
+                            // Infer generic constraints from the field expressions
+                            // TODO: don't rely on accessing a decl ref and its overloads here. Instead, perhaps I could store
+                            // a `GenericCtxId` in `tir::StructLit` (and then traverse it to get at the generic parameters, if
+                            // any)?
+                            if let GenericCtx::DeclRef { id: decl_ref_id, .. } = *generic_ctx {
+                                for (param_ty, &arg) in strukt.field_tys.iter().zip(&matches) {
+                                    if arg == ExprId::new(u32::MAX as usize) {
+                                        continue;
+                                    }
+                                    
+                                    let overloads = &tp.overloads(decl_ref_id).overloads;
+                                    assert_eq!(overloads.len(), 1);
+                                    let decl = overloads[0];
+                                    let decl = &driver.tir.decls[decl];
+                                    
+                                    let arg_constraints = tp.constraints(arg).clone();
+                                    let generic_constraints = tp.generic_constraints_mut(decl_ref_id);
+                                    for generic_param in range_iter(decl.generic_params.clone()) {
+                                        let constraints = arg_constraints.get_implied_generic_constraints(generic_param, &param_ty);
+                                        let generic_param_constraints = generic_constraints.entry(generic_param).or_default();
+                                        *generic_param_constraints = generic_param_constraints.intersect_with_in_generic_context(&constraints, decl.generic_params.clone());
+                                    }
+                                }
+                            }
+
+                            let lit_range = driver.get_range(self.id);
+                            // Make sure each field in the struct has a match in the literal
+                            for (i, &maatch) in matches.iter().enumerate() {
+                                let field = &struct_fields[i];
+                                if maatch == ExprId::new(u32::MAX as usize) {
+                                    successful = false;
+
+                                    driver.diag.push(
+                                        Error::new(format!("Field {} not included in struct literal", driver.interner.resolve(field.name).unwrap()))
+                                            .adding_primary_range(lit_range, "")
+                                            .adding_secondary_range(field.decl, "field declared here")
+                                    );
+                                } else if let Some(err) = driver.can_unify_to(tp, maatch, field.ty).err() {
+                                    successful = false;
+                                    let range = driver.get_range(maatch);
+                                    let field_ty = tp.get_evaluated_type(field.ty).clone();
+                                    let mut error = Error::new("Invalid struct field type")
+                                        .adding_primary_range(range, format!("expected {:?}", field_ty));
+                                    match err {
+                                        UnificationError::InvalidChoice(choices)
+                                            => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                                        UnificationError::Trait(not_implemented)
+                                            => error.add_secondary_range(
+                                                range,
+                                                format!(
+                                                    "note: couldn't unify because expression requires implementations of {:?}",
+                                                    not_implemented.names(),
+                                                ),
+                                            ),
+                                    }
+                                    driver.diag.push(error);
+                                }
+                            }
+
+                            if successful {
+                                *tp.struct_lit_mut(self.struct_lit_id) = Some(
+                                    StructLit { strukt: strukt.identity, fields: matches }
+                                );
+                            }
+
+                            one_of.push(Type::Struct(strukt.clone()).into());
                         }
-
-                        // We can assume there is no match for this field at this point; if we had found one, we
-                        // would've already continued to the next field.
-                        successful = false;
-                        
-                        // TODO: Use range of the field identifier, which we don't have fine-grained access to yet
-                        let range = driver.get_range(self.id);
-                        driver.diag.push(
-                            Error::new(format!("Unknown field {} in struct literal", driver.interner.resolve(lit_field.name).unwrap()))
-                                .adding_primary_range(range, "")
-                        );
                     }
-
-                    let generic_ctx_id = ef!(driver, self.ty.generic_ctx_id);
-                    let generic_ctx = &driver.code.ast.generic_ctxs[generic_ctx_id];
-                    // Infer generic constraints from the field expressions
-                    // TODO: don't rely on accessing a decl ref and its overloads here. Instead, perhaps I could store
-                    // a `GenericCtxId` in `tir::StructLit` (and then traverse it to get at the generic parameters, if
-                    // any)?
-                    if let GenericCtx::DeclRef { id: decl_ref_id, .. } = *generic_ctx {
-                        let is_array = driver.display_item(self.ty).to_string().as_str() == "Array";
-                        if is_array { dbg!(&strukt.field_tys, &matches); }
-                        for (param_ty, &arg) in strukt.field_tys.iter().zip(&matches) {
-                            if arg == ExprId::new(u32::MAX as usize) {
-                                continue;
-                            }
-                            
-                            let overloads = &tp.overloads(decl_ref_id).overloads;
-                            assert_eq!(overloads.len(), 1);
-                            let decl = overloads[0];
-                            let decl = &driver.tir.decls[decl];
-                            
-                            let arg_constraints = tp.constraints(arg).clone();
-                            let generic_constraints = tp.generic_constraints_mut(decl_ref_id);
-                            if is_array {
-                                dbg!(&arg_constraints, &generic_constraints, &decl.generic_params.clone(), decl_ref_id);
-                            }
-                            for generic_param in range_iter(decl.generic_params.clone()) {
-                                let constraints = arg_constraints.get_implied_generic_constraints(generic_param, &param_ty);
-                                let generic_param_constraints = generic_constraints.entry(generic_param).or_default();
-                                *generic_param_constraints = generic_param_constraints.intersect_with_in_generic_context(&constraints, decl.generic_params.clone());
-                            }
-                        }
-                        if is_array {
-                            println!("generic constraints: {:?}", tp.generic_constraints(decl_ref_id));
-                        }
-                    }
-
-                    let lit_range = driver.get_range(self.id);
-                    // Make sure each field in the struct has a match in the literal
-                    for (i, &maatch) in matches.iter().enumerate() {
-                        let field = &struct_fields[i];
-                        if maatch == ExprId::new(u32::MAX as usize) {
-                            successful = false;
-
-                            driver.diag.push(
-                                Error::new(format!("Field {} not included in struct literal", driver.interner.resolve(field.name).unwrap()))
-                                    .adding_primary_range(lit_range, "")
-                                    .adding_secondary_range(field.decl, "field declared here")
-                            );
-                        } else if let Some(err) = driver.can_unify_to(tp, maatch, field.ty).err() {
-                            successful = false;
-                            let range = driver.get_range(maatch);
-                            let field_ty = tp.get_evaluated_type(field.ty).clone();
-                            let mut error = Error::new("Invalid struct field type")
-                                .adding_primary_range(range, format!("expected {:?}", field_ty));
-                            match err {
-                                UnificationError::InvalidChoice(choices)
-                                    => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
-                                UnificationError::Trait(not_implemented)
-                                    => error.add_secondary_range(
-                                        range,
-                                        format!(
-                                            "note: couldn't unify because expression requires implementations of {:?}",
-                                            not_implemented.names(),
-                                        ),
-                                    ),
-                            }
-                            driver.diag.push(error);
-                        }
-                    }
-
-                    if successful {
-                        *tp.struct_lit_mut(self.struct_lit_id) = Some(
-                            StructLit { strukt: strukt.identity, fields: matches }
-                        );
-                    }
-                },
-                other => {
-                    let range = driver.get_range(self.ty);
-                    driver.diag.push(
-                        Error::new(format!("Expected struct type in literal, found {:?}", *other))
-                            .adding_primary_range(range, "")
-                    );
-                },
+                }
+                tp.constraints_mut(self.id).set_one_of(one_of);
+            } else {
+                // TODO: Is this error message necessary or is this case covered elsewhere?
+                let range = driver.get_range(self.ty);
+                driver.diag.push(
+                    Error::new("Expected struct type in literal")
+                        .adding_primary_range(range, "")
+                );
+                tp.constraints_mut(self.id).set_to(Type::Error);
             }
+
             
-            ty
         };
 
-        tp.constraints_mut(self.id).set_to(ty);
     }
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
@@ -1463,11 +1466,31 @@ impl tir::Expr<tir::StructLit> {
 
             debug_assert_eq!(lit.fields.len(), fields.len());
 
+            let generic_ctx_id = ef!(driver, self.ty.generic_ctx_id);
+            let generic_ctx = &driver.code.ast.generic_ctxs[generic_ctx_id];
+
             for (i, field) in fields.iter().enumerate() {
                 let field = field.decl;
                 let field_ty = tp.fetch_decl_type(driver, field, None).ty;
 
                 tp.constraints_mut(lit.fields[i]).set_to(field_ty);
+
+                // TODO: Don't rely on this being a decl ref
+                if let GenericCtx::DeclRef { id: decl_ref_id, .. } = *generic_ctx {
+                    // TODO: this is a horrible, horrible hack and WILL NOT work in many cases!!!
+                    // TODO: actually use the correct overload somehow, or find a way to refactor so that it's not
+                    // necessary.
+                    let overload = *tp.overloads(decl_ref_id).overloads.first().unwrap();
+
+                    let decl = &driver.tir.decls[overload];
+                    let mut generic_args = Vec::new();
+                    let generic_constraints = tp.generic_constraints_mut(decl_ref_id);
+                    for generic_param in range_iter(decl.generic_params.clone()) {
+                        let generic_arg = generic_constraints.get(&generic_param).unwrap().solve().unwrap().ty;
+                        generic_args.push(generic_arg);
+                    }
+                    tp.constraints_mut(lit.fields[i]).substitute_generic_args(decl.generic_params.clone(), &generic_args)
+                }
             }
         }
     }
@@ -1747,7 +1770,11 @@ impl DriverRef<'_> {
             if constraints.is_error() {
                 self.write().tir.expr_namespaces.entry(unit.main_expr).or_default().push(ExprNamespace::Error);
             } else {
+                // TODO: we currently write to both `tir.expr_namespaces` and `tir.macro_info`, but we will only ever
+                // actually read the value inserted into one or the other. We should specify which one we care about
+                // with the mock unit, probably.
                 for ty in one_of {
+                    let mut macro_info = None;
                     let ns = match ty {
                         Type::Mod => {
                             self.write().run_pass_2(&unit.items, &mut mock_tp);
@@ -1760,7 +1787,9 @@ impl DriverRef<'_> {
                                 _ => panic!("Unexpected const kind, expected module!"),
                             }
                         },
-                        Type::Struct(strukt) => ExprNamespace::New(self.read().code.ast.structs[strukt.identity].namespace, NewNamespaceRefKind::Instance),
+                        Type::Struct(strukt) => {
+                            ExprNamespace::New(self.read().code.ast.structs[strukt.identity].namespace, NewNamespaceRefKind::Instance)
+                        },
                         Type::Enum(id) => ExprNamespace::New(self.read().code.ast.enums[id].namespace, NewNamespaceRefKind::Instance),
                         Type::Internal(id) => ExprNamespace::New(self.read().code.ast.internal_types[id].namespace, NewNamespaceRefKind::Instance),
                         Type::Pointer(ref pointee) => {
@@ -1779,7 +1808,10 @@ impl DriverRef<'_> {
                             };
     
                             match ty {
-                                Const::Ty(Type::Struct(ref strukt)) => ExprNamespace::New(self.read().code.ast.structs[strukt.identity].namespace, NewNamespaceRefKind::Static),
+                                Const::Ty(Type::Struct(ref strukt)) => {
+                                    macro_info = Some(ExprMacroInfo::Struct(strukt.clone()));
+                                    ExprNamespace::New(self.read().code.ast.structs[strukt.identity].namespace, NewNamespaceRefKind::Static)
+                                },
                                 Const::Ty(Type::Enum(id)) => ExprNamespace::New(self.read().code.ast.enums[id].namespace, NewNamespaceRefKind::Static),
                                 Const::Ty(Type::Internal(id)) => ExprNamespace::New(self.read().code.ast.internal_types[id].namespace, NewNamespaceRefKind::Static),
                                 _ => panic!("Unexpected const kind, expected enum!"),
@@ -1792,6 +1824,9 @@ impl DriverRef<'_> {
                         _ => continue,
                     };
                     self.write().tir.expr_namespaces.entry(unit.main_expr).or_default().push(ns);
+                    if let Some(macro_info) = macro_info {
+                        self.write().tir.expr_macro_info.entry(unit.main_expr).or_default().push(macro_info);
+                    }
                 }
             }
         }
