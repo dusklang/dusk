@@ -492,7 +492,17 @@ impl Driver {
 
     /// IMPORTANT NOTE: When/if we stop adding type3 deps to all items in a function's scope,
     /// we will need to bring back the original idea of meta-dependencies:
-    /// https://github.com/dusk-lang/dusk/issues/58
+    /// https://github.com/dusklang/dusk/issues/58
+    /// 
+    /// Update on Apr. 20, 2023: I feel like we already have the "original idea of meta-dependencies", and I don't
+    /// see how they help in this case? The actual issue (as I understand it now, years later) is that we currently
+    /// conservatively add type3 deps from each function decl to all items in its scope, because if we need to generate
+    /// MIR for and then call the function in the interpreter, it's important for us to have already typechecked all of
+    /// the items in its scope. The reason this is overly conservative is we might not need to call the function at
+    /// compile-time at all, and even if we do, there is no reason to defer typechecking of the function declaration
+    /// until after its items. I believe this could also be a cause for some of the mysterious dependency cycles that
+    /// have plagued the compiler for some time (though I don't have a good reason to think that; it's just wishful
+    /// thinking).
     fn add_type3_scope_dep(&mut self, a: ItemId, b: ImperScopeId) {
         let block = self.code.ast.imper_scopes[b].block;
         for &op in &self.code.blocks[block].ops {
