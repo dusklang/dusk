@@ -381,12 +381,13 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
                 fn register(d: &mut crate::driver::Driver) {
                     use std::any::TypeId;
                     use crate::{ast::*, ty::*, mir::*};
+                    use crate::index_vec::empty_range;
 
                     #get_ty_to_register // defines `ty` variable used below
 
                     let konst = Const::Ty(ty.clone());
                     let expr = d.add_const_expr(konst);
-                    d.add_decl_to_path(#bridged_name, #module, Decl::Const(expr), None);
+                    d.add_decl_to_path(#bridged_name, #module, Decl::Const { assigned_expr: expr, generic_params: empty_range() }, None);
 
                     d.code.ast.bridged_types.insert(TypeId::of::<Self>(), ty);
                 }

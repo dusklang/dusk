@@ -1,7 +1,11 @@
-use dusk_proc_macros::ef;
-use smallvec::{SmallVec, smallvec};
+use std::ops::Range;
 use std::collections::HashMap;
 
+use smallvec::{SmallVec, smallvec};
+
+use dusk_proc_macros::ef;
+
+use crate::index_vec::{empty_range, range_iter};
 use crate::ty::{Type, LegacyInternalType, FunctionType, QualType, IntWidth};
 use crate::ast::{GenericParamId, ExprId, GenericCtx, GenericCtxId, BLANK_GENERIC_CTX};
 
@@ -36,7 +40,7 @@ pub enum SolveError<'a> {
 
 impl ConstraintList {
     pub fn new(trait_impls: BuiltinTraits, one_of: Option<SmallVec<[QualType; 1]>>, preferred_type: Option<QualType>, generic_ctx: GenericCtxId) -> Self {
-        Self { trait_impls, one_of: one_of.map(|one_of| one_of.into()), preferred_type, generic_ctx: generic_ctx, is_error: false }
+        Self { trait_impls, one_of: one_of.map(|one_of| one_of.into()), preferred_type, generic_ctx, is_error: false }
     }
 
     pub fn set_generic_ctx(&mut self, generic_ctx: GenericCtxId) {
@@ -158,9 +162,9 @@ impl ConstraintList {
     }
 }
 
-fn generic_constraints_mut<'a>(constraints: &'a mut [ConstraintList], generic_params: &[GenericParamId], id: GenericParamId) -> Option<&'a mut ConstraintList> {
-    generic_params.iter().enumerate()
-        .find(|(_, &oid)| oid == id)
+fn generic_constraints_mut<'a>(constraints: &'a mut [ConstraintList], generic_params: Range<GenericParamId>, id: GenericParamId) -> Option<&'a mut ConstraintList> {
+    range_iter(generic_params).enumerate()
+        .find(|(_, oid)| *oid == id)
         .map(|(i, _)| &mut constraints[i])
 }
 
@@ -192,8 +196,8 @@ fn implements_traits(ty: &Type, traits: BuiltinTraits) -> Result<(), BuiltinTrai
     }
 }
 
-fn implements_traits_in_generic_context(ty: &Type, traits: BuiltinTraits, generic_params: &[GenericParamId]) -> Result<SmallVec<[ConstraintList; 1]>, BuiltinTraits> {
-    let mut constraints: SmallVec<_> = generic_params.iter().map(|_| ConstraintList::new(BuiltinTraits::empty(), None, None, BLANK_GENERIC_CTX)).collect();
+fn implements_traits_in_generic_context(ty: &Type, traits: BuiltinTraits, generic_params: Range<GenericParamId>) -> Result<SmallVec<[ConstraintList; 1]>, BuiltinTraits> {
+    let mut constraints: SmallVec<_> = range_iter(generic_params.clone()).map(|_| ConstraintList::new(BuiltinTraits::empty(), None, None, BLANK_GENERIC_CTX)).collect();
 
     let mut not_implemented = BuiltinTraits::empty();
     fn expressible_by_str_lit(ty: &Type) -> bool {
@@ -217,7 +221,7 @@ fn implements_traits_in_generic_context(ty: &Type, traits: BuiltinTraits, generi
 
     match ty {
         &Type::GenericParam(id) => {
-            let constraints = generic_constraints_mut(&mut constraints, generic_params, id).unwrap();
+            let constraints = generic_constraints_mut(&mut constraints, generic_params.clone(), id).unwrap();
             constraints.trait_impls = not_implemented;
             not_implemented = BuiltinTraits::empty();
         },
@@ -240,10 +244,10 @@ fn implements_traits_in_generic_context(ty: &Type, traits: BuiltinTraits, generi
 }
 
 pub fn can_unify_to<'a>(constraints: &'a ConstraintList, ty: &QualType) -> Result<(), UnificationError<'a>> {
-    can_unify_to_in_generic_context(constraints, ty, &[])
+    can_unify_to_in_generic_context(constraints, ty, empty_range())
 }
 
-fn contains_any_of_generic_params(ty: &Type, generic_params: &[GenericParamId]) -> bool {
+fn contains_any_of_generic_params(ty: &Type, generic_params: Range<GenericParamId>) -> bool {
     match ty {
         Type::GenericParam(id) => generic_params.contains(id),
         Type::Pointer(pointee) => contains_any_of_generic_params(&pointee.ty, generic_params),
@@ -254,7 +258,7 @@ fn contains_any_of_generic_params(ty: &Type, generic_params: &[GenericParamId]) 
 pub enum UnificationType<'a> {
     QualType(&'a QualType),
     // TODO: get rid of this
-    QualTypeWithOldSchoolGenericContext(&'a QualType, &'a [GenericParamId]),
+    QualTypeWithOldSchoolGenericContext(&'a QualType, Range<GenericParamId>),
     UnevaluatedType(ExprId),
 }
 
@@ -285,13 +289,14 @@ impl Driver {
         let (ty, generic_params) = match ty {
             UnificationType::UnevaluatedType(ty) => {
                 let mut generic_ctx_id = ef!(ty.generic_ctx_id);
-                let generic_params: &[GenericParamId] = loop {
+                let generic_params: Range<GenericParamId> = loop {
                     match self.code.ast.generic_ctxs[generic_ctx_id] {
-                        GenericCtx::Blank => break &[],
+                        GenericCtx::Blank => break empty_range(),
                         GenericCtx::Decl { ref parameters, .. } => {
-                            break parameters.as_slice();
+                            break parameters.clone();
                         },
-                        GenericCtx::DeclRef { parent, .. } => {
+                        GenericCtx::DeclRef { id, parent, .. } => {
+                            let generic_constraints = tp.generic_constraints(id);
                             generic_ctx_id = parent;
                         }
                     }
@@ -301,7 +306,7 @@ impl Driver {
             },
             UnificationType::QualTypeWithOldSchoolGenericContext(ty, generic_params) => (ty.clone(), generic_params),
             UnificationType::QualType(ty) => {
-                let generic_params: &[GenericParamId] = &[];
+                let generic_params: Range<GenericParamId> = empty_range();
                 (ty.clone(), generic_params)
             },
         };
@@ -328,7 +333,7 @@ impl Driver {
         Ok(())
     }
 }
-pub fn can_unify_to_in_generic_context<'a>(constraints: &'a ConstraintList, ty: &QualType, generic_params: &[GenericParamId]) -> Result<(), UnificationError<'a>> {
+pub fn can_unify_to_in_generic_context<'a>(constraints: &'a ConstraintList, ty: &QualType, generic_params: Range<GenericParamId>) -> Result<(), UnificationError<'a>> {
     // Never is the "bottom type", so it unifies to anything.
     if constraints.one_of_exists(|ty| ty.ty == Type::Never) { return Ok(()); }
 
@@ -380,10 +385,10 @@ impl ConstraintList {
     }
 
     pub fn intersect_with(&self, other: &ConstraintList) -> ConstraintList {
-        self.intersect_with_in_generic_context(other, &[])
+        self.intersect_with_in_generic_context(other, empty_range())
     }
 
-    pub fn intersect_with_in_generic_context(&self, other: &ConstraintList, generic_params: &[GenericParamId]) -> ConstraintList {
+    pub fn intersect_with_in_generic_context(&self, other: &ConstraintList, generic_params: Range<GenericParamId>) -> ConstraintList {
         if self.is_never() {
             return other.clone();
         } else if other.is_never() {
@@ -398,10 +403,10 @@ impl ConstraintList {
             (Some(lhs), Some(rhs)) => {
                 let mut one_of = SmallVec::new();
                 for lty in lhs.iter() {
-                    if implements_traits_in_generic_context(&lty.ty, trait_impls, generic_params).is_err() { continue; }
+                    if implements_traits_in_generic_context(&lty.ty, trait_impls, generic_params.clone()).is_err() { continue; }
 
                     for rty in rhs.iter() {
-                        if implements_traits_in_generic_context(&rty.ty, trait_impls, generic_params).is_err() { continue; }
+                        if implements_traits_in_generic_context(&rty.ty, trait_impls, generic_params.clone()).is_err() { continue; }
 
                         // TODO: would it be ok to break from this loop after finding a match here?
                         if lty.trivially_convertible_to(rty) {
@@ -419,11 +424,11 @@ impl ConstraintList {
             self.preferred_type.clone()
         } else {
             let mut pref = None;
-            for (a, b) in &[(self, other), (other, self)] {
+            for (a, b) in [(self, other), (other, self)] {
                 if let Some(preferred_type) = &a.preferred_type {
                     // I don't actually know if it's possible for an expression to not be able to unify to its preferred type?
                     // assert!(can_unify_to(a, preferred_type).is_ok());
-                    if can_unify_to_in_generic_context(b, preferred_type, generic_params).is_ok() {
+                    if can_unify_to_in_generic_context(b, preferred_type, generic_params.clone()).is_ok() {
                         pref = Some(preferred_type.clone());
                     }
                 }
@@ -537,12 +542,12 @@ fn contains_generic_param(ty: &Type, generic_param: GenericParamId) -> bool {
     }
 }
 
-fn substitute_generic_args(ty: &mut Type, generic_params: &[GenericParamId], generic_args: &[Type]) {
+fn substitute_generic_args(ty: &mut Type, generic_params: Range<GenericParamId>, generic_args: &[Type]) {
     match ty {
         Type::GenericParam(generic_param) => {
             let mut replacement = None;
-            for (param, arg) in generic_params.iter().zip(generic_args) {
-                if generic_param == param {
+            for (param, arg) in range_iter(generic_params).zip(generic_args) {
+                if *generic_param == param {
                     replacement = Some(arg.clone());
                     break;
                 }
@@ -553,9 +558,9 @@ fn substitute_generic_args(ty: &mut Type, generic_params: &[GenericParamId], gen
         },
         Type::Pointer(pointee) => substitute_generic_args(&mut pointee.ty, generic_params, generic_args),
         Type::Function(FunctionType { param_tys, return_ty, .. }) => {
-            substitute_generic_args(return_ty, generic_params, generic_args);
+            substitute_generic_args(return_ty, generic_params.clone(), generic_args);
             for param_ty in param_tys {
-                substitute_generic_args(param_ty, generic_params, generic_args);
+                substitute_generic_args(param_ty, generic_params.clone(), generic_args);
             }
         },
         _ => {},
@@ -597,11 +602,11 @@ impl ConstraintList {
         constraints
     }
 
-    pub fn substitute_generic_args(&mut self, generic_params: &[GenericParamId], generic_args: &[Type]) {
-        assert_eq!(generic_params.len(), generic_args.len());
+    pub fn substitute_generic_args(&mut self, generic_params: Range<GenericParamId>, generic_args: &[Type]) {
+        assert_eq!(generic_params.end - generic_params.start, generic_args.len());
         if let Some(one_of) = &mut self.one_of {
             for ty in one_of {
-                substitute_generic_args(&mut ty.ty, generic_params, generic_args);
+                substitute_generic_args(&mut ty.ty, generic_params.clone(), generic_args);
             }
         }
 

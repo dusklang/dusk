@@ -1,0 +1,12 @@
+Array<|T|> :: struct {
+    val: T
+}
+
+Foo :: struct {
+
+}
+
+fn main() {
+    foo :: Foo {}
+    array :: Array { val: 1 }
+}

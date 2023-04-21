@@ -44,3 +44,7 @@ impl<I: Idx, T> IndexVecExt for IndexVec<I, T> {
 pub fn range_iter<Id: Idx>(range: Range<Id>) -> impl Iterator<Item=Id> {
     range.into_range().map(Id::from_usize)
 }
+
+pub fn empty_range<Id: Idx>() -> Range<Id> {
+    Id::from_usize(0)..Id::from_usize(0)
+}

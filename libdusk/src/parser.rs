@@ -1194,7 +1194,10 @@ impl Driver {
         }
 
         let generic_params = self.create_decls_for_generic_param_list(&generic_param_list);
+        let generic_ctx = self.begin_decl_generic_ctx(generic_param_list.clone());
         let ns = self.begin_generic_context(generic_params);
+        
+        
         // If this is a module-scoped decl, we should add an imperative scope to the assigned expression, in order to
         // support manipulation of `ImperRoot` state.
         let imper_scope = self.is_in_mod_scope().then(|| {
@@ -1203,6 +1206,7 @@ impl Driver {
         let root = self.parse_expr(p).unwrap_or_else(|err| err);
         drop(imper_scope);
         drop(ns);
+        drop(generic_ctx);
         Ok(self.stored_decl(name.symbol, generic_param_list, explicit_ty, is_mut, root, name.range))
     }
 
@@ -1471,13 +1475,13 @@ impl Driver {
         }
 
         let generic_params = self.create_decls_for_generic_param_list(&generic_param_list);
-        let generic_ctx = self.begin_computed_decl_generic_ctx(generic_param_list.clone());
+        let generic_ctx = self.begin_decl_generic_ctx(generic_param_list.clone());
+        let ns = self.begin_generic_context(generic_params.clone());
 
         // Parse (param_name: param_ty, param2_name: param2_ty, ...)
         let mut param_names = SmallVec::new();
         let mut param_tys = SmallVec::new();
         let mut param_ranges = SmallVec::new();
-        let ns = self.begin_generic_context(generic_params.clone());
         if let TokenKind::LeftParen = self.cur(p).kind {
             self.next(p);
             let parameter_list = self.begin_list(p, TokenKind::could_begin_parameter, [TokenKind::Comma], Some(TokenKind::RightParen));
@@ -1530,7 +1534,7 @@ impl Driver {
 
         let decl_id = match self.cur(p).kind {
             TokenKind::OpenCurly => {
-                let decl_id = self.begin_computed_decl(name, param_names, param_list.param_tys, param_ranges, generic_params, ty, proto_range);
+                let decl_id = self.begin_computed_decl(name, param_names, param_list.param_tys, param_ranges, generic_param_list.ids.clone(), generic_params, ty, proto_range);
                 self.parse_scope(p, &[])?;
                 self.end_computed_decl();
                 decl_id

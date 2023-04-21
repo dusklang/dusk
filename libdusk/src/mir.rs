@@ -231,7 +231,7 @@ impl InstrNamespace {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct Function {
     pub name: Option<Sym>,
     pub ty: FunctionType,
@@ -241,9 +241,24 @@ pub struct Function {
     pub decl: Option<DeclId>,
     // Note: Is a Vec, not a Range, because generic params might not always be contiguous in
     // GenericParamId space
-    pub generic_params: Vec<GenericParamId>,
+    pub generic_params: Range<GenericParamId>,
     pub instr_namespace: InstrNamespace,
     pub is_comptime: bool,
+}
+
+impl Default for Function {
+    fn default() -> Self {
+        Self {
+            name: Default::default(),
+            ty: Default::default(),
+            num_instrs: Default::default(),
+            blocks: Default::default(),
+            decl: Default::default(),
+            generic_params: empty_range(),
+            instr_namespace: Default::default(),
+            is_comptime: Default::default(),
+        }
+    }
 }
 
 impl Code {
@@ -772,7 +787,7 @@ impl DriverRef<'_> {
 impl DriverRef<'_> {
     pub fn build_standalone_expr(&mut self, expr: ExprId, tp: &impl TypeProvider) -> Function {
         let func_ty = FunctionType { param_tys: Vec::new(), return_ty: Box::new(tp.ty(expr).clone()), has_c_variadic_param: false };
-        self.build_function(None, func_ty, FunctionBody::Expr(expr), DeclId::new(0)..DeclId::new(0), Vec::new(), false, tp)
+        self.build_function(None, func_ty, FunctionBody::Expr(expr), empty_range(), empty_range(), false, tp)
     }
 }
 
@@ -821,27 +836,14 @@ impl DriverRef<'_> {
         if let Some(decl) = self.read().mir.decls.get(&id) { return decl.clone(); }
         let d = self.read();
         match df!(d, id.ast) {
-            ast::Decl::Computed { ref params, scope, generic_params: ref generic_params_range, .. } => {
+            ast::Decl::Computed { ref params, scope, ref generic_params, .. } => {
                 // Add placeholder function to reserve ID ahead of time
                 let params = params.clone();
-                let generic_params_range = generic_params_range.clone();
+                let generic_params = generic_params.clone();
                 drop(d);
                 let get = self.write().code.mir.functions.push(Function::default());
                 let decl = Decl::Computed { get };
                 self.write().mir.decls.insert(id, decl.clone());
-
-                // Convert DeclIds to GenericParamIds
-                // TODO: don't require this?
-                let mut generic_params = Vec::new();
-                generic_params.reserve(generic_params_range.end.index() - generic_params_range.start.index());
-                for id in range_iter(generic_params_range.clone()) {
-                    let d = self.read();
-                    let generic_param = match df!(d, id.ast) {
-                        ast::Decl::GenericParam(param) => param,
-                        _ => panic!("unexpected decl type, expected generic parameter"),
-                    };
-                    generic_params.push(generic_param);
-                }
 
                 let func_ty = self.read().decl_type(id, tp).as_function().unwrap().clone();
                 let name = self.read().code.ast.names[id];
@@ -939,7 +941,7 @@ impl DriverRef<'_> {
                 self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
-            ast::Decl::Const(root_expr) => {
+            ast::Decl::Const { assigned_expr: root_expr, .. } => {
                 drop(d);
                 let konst = self.eval_expr(root_expr, tp);
 
@@ -1367,7 +1369,7 @@ impl Driver {
 }
 
 impl DriverRef<'_> {
-    fn build_function(&mut self, name: Option<Sym>, func_ty: FunctionType, body: FunctionBody, params: Range<DeclId>, generic_params: Vec<GenericParamId>, is_comptime: bool, tp: &impl TypeProvider) -> Function {
+    fn build_function(&mut self, name: Option<Sym>, func_ty: FunctionType, body: FunctionBody, params: Range<DeclId>, generic_params: Range<GenericParamId>, is_comptime: bool, tp: &impl TypeProvider) -> Function {
         debug_assert_ne!(func_ty.return_ty.as_ref(), &Type::Error, "can't build MIR function with Error return type");
 
         let mut entry = Block::default();
@@ -1813,7 +1815,7 @@ impl DriverRef<'_> {
                 if self.instruction_is_nontrivial_const(op) && !self.read().code.mir.poisoned_ops.contains(&op) {
                     let ty = self.read().type_of(op).clone();
                     let func_ty = FunctionType { param_tys: vec![], has_c_variadic_param: false, return_ty: Box::new(ty.clone()) };
-                    let func = self.build_function(func.name, func_ty, FunctionBody::ConstantInstruction(op), DeclId::new(0)..DeclId::new(0), Vec::new(), true, tp);
+                    let func = self.build_function(func.name, func_ty, FunctionBody::ConstantInstruction(op), empty_range(), empty_range(), true, tp);
                     let Ok(result) = self.call(FunctionRef::Ref(func), Vec::new(), Vec::new()) else {
                         // Make sure we won't repeatedly try and fail to const-eval this instruction.
                         self.write().code.mir.poisoned_ops.insert(op);

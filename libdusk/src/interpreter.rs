@@ -17,6 +17,7 @@ use smallvec::SmallVec;
 use paste::paste;
 use num_bigint::{BigInt, Sign};
 use crate::display_adapter;
+use crate::index_vec::range_iter;
 use index_vec::IndexVec;
 use lazy_static::lazy_static;
 
@@ -672,8 +673,8 @@ impl Driver {
         results.resize_with(func.num_instrs, || Value::Nothing);
 
         let mut generic_ctx = HashMap::new();
-        assert_eq!(func.generic_params.len(), generic_arguments.len());
-        for (&generic_param, generic_argument) in func.generic_params.iter().zip(generic_arguments) {
+        assert_eq!(func.generic_params.end - func.generic_params.start, generic_arguments.len());
+        for (generic_param, generic_argument) in range_iter(func.generic_params.clone()).zip(generic_arguments) {
             generic_ctx.insert(generic_param, generic_argument);
         }
 

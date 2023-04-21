@@ -184,7 +184,7 @@ pub struct ExternFunctionRef {
 pub enum GenericCtx {
     Blank,
     Decl {
-        parameters: Vec<GenericParamId>,
+        parameters: Range<GenericParamId>,
         parent: GenericCtxId,
     },
     DeclRef {
@@ -287,7 +287,7 @@ pub enum Decl {
         param_tys: SmallVec<[ExprId; 2]>,
         params: Range<DeclId>,
         scope: ImperScopeId,
-        generic_params: Range<DeclId>,
+        generic_params: Range<GenericParamId>,
     },
     ComputedPrototype {
         param_list: ParamList,
@@ -305,7 +305,10 @@ pub enum Decl {
     Intrinsic(IntrinsicId),
     MethodIntrinsic(IntrinsicId),
     Static(ExprId),
-    Const(ExprId),
+    Const {
+        assigned_expr: ExprId,
+        generic_params: Range<GenericParamId>,
+    },
     Field { strukt: StructId, index: usize },
     InternalField(InternalField),
     Variant { enuum: EnumId, index: usize, payload_ty: Option<ExprId>, },
@@ -572,7 +575,7 @@ impl Default for GenericParamList {
     fn default() -> Self {
         Self {
             names: SmallVec::new(),
-            ids: GenericParamId::new(0)..GenericParamId::new(0),
+            ids: empty_range(),
             ranges: SmallVec::new(),
         }
     }
@@ -868,7 +871,7 @@ impl Driver {
         }
         false
     }
-    pub fn stored_decl(&mut self, name: Sym, _generic_params: GenericParamList, explicit_ty: Option<ExprId>, is_mut: bool, root_expr: ExprId, range: SourceRange) -> DeclId {
+    pub fn stored_decl(&mut self, name: Sym, generic_params: GenericParamList, explicit_ty: Option<ExprId>, is_mut: bool, root_expr: ExprId, range: SourceRange) -> DeclId {
         self.flush_stmt_buffer();
         match self.ast.scope_stack.peek().unwrap() {
             ScopeState::Imper { .. } => {
@@ -889,7 +892,7 @@ impl Driver {
                     if is_mut {
                         Decl::Static(root_expr)
                     } else {
-                        Decl::Const(root_expr)
+                        Decl::Const { assigned_expr: root_expr, generic_params: generic_params.ids.clone() }
                     },
                     name,
                     explicit_ty,
@@ -1118,14 +1121,12 @@ impl Driver {
         let generic_ctx = self.code.ast.generic_ctxs.push(ctx(parent));
         self.ast.generic_ctx_stack.push(generic_ctx, generic_ctx)
     }
-    pub fn begin_computed_decl_generic_ctx(&mut self, generic_param_list: GenericParamList) -> AutoPopStackEntry<GenericCtxId> {
-        let generic_param_ids = range_iter(generic_param_list.ids.clone())
-            .collect();
-        self.push_generic_ctx(|parent| GenericCtx::Decl { parameters: generic_param_ids, parent })
+    pub fn begin_decl_generic_ctx(&mut self, generic_param_list: GenericParamList) -> AutoPopStackEntry<GenericCtxId> {
+        self.push_generic_ctx(|parent| GenericCtx::Decl { parameters: generic_param_list.ids, parent })
     }
-    pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, generic_params: Range<DeclId>, return_ty: ExprId, proto_range: SourceRange) -> DeclId {
+    pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, generic_params: Range<GenericParamId>, generic_param_decls: Range<DeclId>, return_ty: ExprId, proto_range: SourceRange) -> DeclId {
         // This is a placeholder value that gets replaced once the parameter declarations get allocated.
-        let id = self.add_decl(Decl::Const(ExprId::new(u32::MAX as usize)), name, Some(return_ty), proto_range);
+        let id = self.add_decl(Decl::Static(ExprId::new(u32::MAX as usize)), name, Some(return_ty), proto_range);
 
         assert_eq!(param_names.len(), param_tys.len());
         self.code.ast.decls.reserve(param_tys.len());
@@ -1161,7 +1162,7 @@ impl Driver {
             CompDeclState {
                 scope: None,
                 params,
-                generic_params,
+                generic_params: generic_param_decls,
                 id,
                 imper_scope_stack: 0,
             }

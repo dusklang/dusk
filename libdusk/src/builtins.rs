@@ -5,6 +5,7 @@ use internal_types::ExternParam;
 use smallvec::{smallvec, SmallVec};
 use num_bigint::BigInt;
 
+use crate::index_vec::empty_range;
 use crate::internal_types;
 use crate::source_info::SourceRange;
 use crate::ast::{ModScopeNs, LegacyIntrinsic, Expr, Decl, VOID_TYPE, ModScopeNsId, NewNamespaceId, EnumId, ExprId, VariantDecl, StaticDecl, NewNamespace, ExternFunctionRef, ExternFunction, ParamList};
@@ -35,7 +36,7 @@ impl Driver {
         let name = self.interner.get_or_intern(name);
         let konst = self.add_const_expr(Const::Int { lit: BigInt::from(value), ty: Type::usize() });
         let ty = self.add_const_ty(Type::usize());
-        let decl_id = self.add_decl(Decl::Const(konst), name, Some(ty), SourceRange::default());
+        let decl_id = self.add_decl(Decl::Const { assigned_expr: konst, generic_params: empty_range() }, name, Some(ty), SourceRange::default());
         let static_decl = StaticDecl { name, decl: decl_id };
         self.code.ast.new_namespaces[b.namespace].static_decls.push(static_decl);
 
@@ -304,7 +305,7 @@ impl Driver {
     fn add_constant_decl(&mut self, name: &str, value: Const) {
         let expr = self.add_const_expr(value);
         let name = self.interner.get_or_intern(name);
-        let decl = self.add_decl(Decl::Const(expr), name, None, SourceRange::default());
+        let decl = self.add_decl(Decl::Const { assigned_expr: expr, generic_params: empty_range() }, name, None, SourceRange::default());
         self.mod_scoped_decl(
             StaticDecl {
                 name,
@@ -365,7 +366,7 @@ impl Driver {
 
             assert!(matching_decls.len() == 1);
             let decl = matching_decls[0];
-            let Decl::Const(expr) = df!(decl.decl.ast) else { panic!("internal compiler error: expected const decl") };
+            let Decl::Const { assigned_expr: expr, .. } = df!(decl.decl.ast) else { panic!("internal compiler error: expected const decl") };
             let Expr::Const(konst) = &ef!(expr.ast) else { panic!("internal compiler error: expected const expr") };
             ns = match *konst {
                 Const::Mod(new_ns) => new_ns,

@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::ops::{Deref, DerefMut};
+use std::ops::{Range, Deref, DerefMut};
 use std::collections::{HashMap, HashSet};
 use std::mem;
 
@@ -122,7 +122,7 @@ impl<T> DerefMut for Expr<T> {
 #[derive(Debug)]
 pub struct Decl {
     pub param_list: ParamList,
-    pub generic_params: SmallVec<[GenericParamId; 1]>,
+    pub generic_params: Range<GenericParamId>,
     pub is_mut: bool,
 }
 
@@ -633,7 +633,7 @@ impl Driver {
                 assert_eq!(level, 0);
                 unit.generic_params.push(GenericParam { id });
             },
-            ast::Decl::Static(root_expr) | ast::Decl::Const(root_expr) | ast::Decl::Stored { root_expr, .. } => {
+            ast::Decl::Static(root_expr) | ast::Decl::Const { assigned_expr: root_expr, .. } | ast::Decl::Stored { root_expr, .. } => {
                 let explicit_ty = self.code.ast.explicit_tys[id];
                 unit.assigned_decls.insert(level, AssignedDecl { explicit_ty, root_expr, decl_id: id });
             },
@@ -656,24 +656,25 @@ impl Driver {
         // Populate `decls`
         for id in range_iter(new_code.decls.clone()) {
             let decl = &self.code.ast.decls[id];
-            let mut generic_params = SmallVec::new();
+            let mut generic_params = empty_range();
             let (is_mut, param_list) = match *decl {
                 ast::Decl::Computed { ref param_tys, generic_params: ref og_generic_params, .. } => {
-                    for decl in range_iter(og_generic_params.clone()) {
-                        let generic_param_id = match df!(decl.ast) {
-                            ast::Decl::GenericParam(id) => id,
-                            _ => panic!("COMPILER BUG: expected generic parameter"),
-                        };
-                        generic_params.push(generic_param_id);
-                    }
+                    generic_params = og_generic_params.clone();
 
                     (false, ParamList { param_tys: param_tys.clone(), has_c_variadic_param: false })
+                },
+                ast::Decl::Const { generic_params: ref og_generic_params, .. } => {
+                    generic_params = og_generic_params.clone();
+                    (
+                        false,
+                        ParamList::default(),
+                    )
                 },
                 ast::Decl::ComputedPrototype { ref param_list, .. } => (
                     false,
                     param_list.clone(),
                 ),
-                ast::Decl::Const(_) | ast::Decl::Parameter { .. } | ast::Decl::ReturnValue | ast::Decl::GenericParam(_) | ast::Decl::ObjcClassRef { .. } => (
+                ast::Decl::Parameter { .. } | ast::Decl::ReturnValue | ast::Decl::GenericParam(_) | ast::Decl::ObjcClassRef { .. } => (
                     false,
                     ParamList::default(),
                 ),
@@ -733,7 +734,7 @@ impl Driver {
                     // // TODO: find out why this seems to cause an infinite loop if it's moved to build_more_tir() and changed to a type 2 dependency
                     // self.tir.graph.add_type1_dep(id, ef!(scrutinee.item));
                 },
-                ast::Decl::Static(expr) | ast::Decl::Const(expr) | ast::Decl::Stored { root_expr: expr, .. } => self.tir.graph.add_type1_dep(id, ef!(expr.item)),
+                ast::Decl::Static(expr) | ast::Decl::Const { assigned_expr: expr, .. } | ast::Decl::Stored { root_expr: expr, .. } => self.tir.graph.add_type1_dep(id, ef!(expr.item)),
                 ast::Decl::Computed { scope, .. } => {
                     let terminal_expr = self.code.ast.imper_scopes[scope].terminal_expr;
                     self.tir.graph.add_type1_dep(id, ef!(terminal_expr.item));
@@ -859,7 +860,7 @@ impl Driver {
             match self.code.ast.items[id] {
                 ast::Item::Decl(decl_id) => {
                     match df!(decl_id.ast) {
-                        ast::Decl::Parameter { .. } | ast::Decl::Static(_) | ast::Decl::Const(_) | ast::Decl::Stored { .. } | ast::Decl::Field { .. } | ast::Decl::ReturnValue | ast::Decl::InternalField(_) | ast::Decl::LoopBinding { .. } /*  | ast::Decl::PatternBinding { .. }*/ => {},
+                        ast::Decl::Parameter { .. } | ast::Decl::Static(_) | ast::Decl::Const { .. } | ast::Decl::Stored { .. } | ast::Decl::Field { .. } | ast::Decl::ReturnValue | ast::Decl::InternalField(_) | ast::Decl::LoopBinding { .. } /*  | ast::Decl::PatternBinding { .. }*/ => {},
                         ast::Decl::PatternBinding { id: binding_id, .. } => {
                             let scrutinee = self.code.ast.pattern_binding_decls[binding_id].scrutinee;
         
