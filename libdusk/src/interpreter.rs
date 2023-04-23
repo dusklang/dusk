@@ -22,7 +22,7 @@ use index_vec::IndexVec;
 use lazy_static::lazy_static;
 
 use crate::arch::Arch;
-use crate::ast::{LegacyIntrinsic, EnumId, GenericParamId, ExternFunctionRef, ExternModId, NewNamespaceId};
+use crate::ast::{LegacyIntrinsic, EnumId, TypeVarId, ExternFunctionRef, ExternModId, NewNamespaceId};
 use crate::dvm::{MessageKind, Call, self};
 use crate::mir::{Const, Instr, InstrId, FuncId, StaticId, ExternFunction};
 use crate::ty::{Type, FunctionType, QualType, IntWidth, FloatWidth, StructType, LegacyInternalType};
@@ -344,7 +344,7 @@ pub struct StackFrame {
     block: BlockId,
     pc: usize,
     results: IndexVec<InstrId, Value>,
-    generic_ctx: HashMap<GenericParamId, Type>,
+    generic_ctx: HashMap<TypeVarId, Type>,
 }
 
 impl StackFrame {

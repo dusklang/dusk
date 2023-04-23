@@ -9,7 +9,7 @@ use constraints::*;
 use crate::index_vec::range_iter;
 use crate::type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 
-use crate::ast::{self, ExprId, DeclId, StructId, PatternKind, GenericParamId, Ident, VOID_EXPR, GenericCtx, DeclRefId, BLANK_GENERIC_CTX, Decl};
+use crate::ast::{self, ExprId, DeclId, StructId, PatternKind, TypeVarId, Ident, VOID_EXPR, GenericCtx, DeclRefId, BLANK_GENERIC_CTX, Decl};
 use crate::mir::Const;
 use crate::ty::{Type, LegacyInternalType, FunctionType, QualType, IntWidth};
 use crate::source_info::SourceRange;
@@ -52,7 +52,7 @@ pub struct Overloads {
     pub nonviable_overloads: Vec<DeclId>,
 }
 
-pub type GenericConstraints = HashMap<GenericParamId, ConstraintList>;
+pub type GenericConstraints = HashMap<TypeVarId, ConstraintList>;
 
 impl tir::Expr<tir::IntLit> {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {

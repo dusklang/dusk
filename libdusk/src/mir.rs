@@ -15,7 +15,7 @@ use crate::code::{Code, Block, BlockId, Op, OpId};
 use crate::source_info::SourceRange;
 
 use crate::internal_types::InternalField;
-use crate::ast::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, NewNamespaceId, LegacyIntrinsic, IntrinsicId, Expr, StoredDeclId, GenericParamId, Item, PatternBindingDeclId, ExternModId, ExternFunctionRef, PatternBindingPathComponent, VOID_TYPE, StructId, LoopId};
+use crate::ast::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, NewNamespaceId, LegacyIntrinsic, IntrinsicId, Expr, StoredDeclId, TypeVarId, Item, PatternBindingDeclId, ExternModId, ExternFunctionRef, PatternBindingPathComponent, VOID_TYPE, StructId, LoopId};
 use crate::ty::{Type, LegacyInternalType, FunctionType, FloatWidth, StructType};
 use crate::driver::{Driver, DriverRef};
 use crate::typechecker as tc;
@@ -78,7 +78,9 @@ pub enum Instr {
     Br(BlockId),
     CondBr { condition: OpId, true_bb: BlockId, false_bb: BlockId },
     SwitchBr { scrutinee: OpId, cases: Vec<SwitchCase>, catch_all_bb: BlockId },
-    GenericParam(GenericParamId),
+    /// This variant currently exists (rather than just stuffing a constant `Type` into `Instr::Const()`) so that we
+    /// know to lookup the generic param instead of preserving it as-is.
+    GenericParam(TypeVarId),
     /// Only valid at the beginning of a function, right after the void instruction
     // TODO: Get rid of the type here! It is no longer required because instruction types are now stored on each Op
     Parameter(Type),
@@ -240,8 +242,8 @@ pub struct Function {
     pub blocks: Vec<BlockId>,
     pub decl: Option<DeclId>,
     // Note: Is a Vec, not a Range, because generic params might not always be contiguous in
-    // GenericParamId space
-    pub generic_params: Range<GenericParamId>,
+    // TypeVarId space
+    pub generic_params: Range<TypeVarId>,
     pub instr_namespace: InstrNamespace,
     pub is_comptime: bool,
 }
@@ -423,7 +425,7 @@ enum Decl {
     Field { index: usize },
     InternalField(InternalField),
     Variant { enuum: EnumId, index: usize, payload_ty: Option<Type> },
-    GenericParam(GenericParamId),
+    GenericParam(TypeVarId),
 
     Invalid,
 }
@@ -1369,7 +1371,7 @@ impl Driver {
 }
 
 impl DriverRef<'_> {
-    fn build_function(&mut self, name: Option<Sym>, func_ty: FunctionType, body: FunctionBody, params: Range<DeclId>, generic_params: Range<GenericParamId>, is_comptime: bool, tp: &impl TypeProvider) -> Function {
+    fn build_function(&mut self, name: Option<Sym>, func_ty: FunctionType, body: FunctionBody, params: Range<DeclId>, generic_params: Range<TypeVarId>, is_comptime: bool, tp: &impl TypeProvider) -> Function {
         debug_assert_ne!(func_ty.return_ty.as_ref(), &Type::Error, "can't build MIR function with Error return type");
 
         let mut entry = Block::default();

@@ -46,7 +46,7 @@ define_index_type!(pub struct ImperScopeNsId = u32;);
 define_index_type!(pub struct ModScopeNsId = u32;);
 define_index_type!(pub struct ConditionNsId = u32;);
 define_index_type!(pub struct GenericContextNsId = u32;);
-define_index_type!(pub struct GenericParamId = u32;);
+define_index_type!(pub struct TypeVarId = u32;);
 define_index_type!(pub struct ExternModId = u32;);
 define_index_type!(pub struct GenericCtxId = u32;);
 define_index_type!(pub struct LoopId = u32;);
@@ -184,7 +184,7 @@ pub struct ExternFunctionRef {
 pub enum GenericCtx {
     Blank,
     Decl {
-        parameters: Range<GenericParamId>,
+        parameters: Range<TypeVarId>,
         parent: GenericCtxId,
     },
     DeclRef {
@@ -287,7 +287,7 @@ pub enum Decl {
         param_tys: SmallVec<[ExprId; 2]>,
         params: Range<DeclId>,
         scope: ImperScopeId,
-        generic_params: Range<GenericParamId>,
+        generic_params: Range<TypeVarId>,
     },
     ComputedPrototype {
         param_list: ParamList,
@@ -307,14 +307,14 @@ pub enum Decl {
     Static(ExprId),
     Const {
         assigned_expr: ExprId,
-        generic_params: Range<GenericParamId>,
+        generic_params: Range<TypeVarId>,
     },
     Field { strukt: StructId, index: usize },
     InternalField(InternalField),
     Variant { enuum: EnumId, index: usize, payload_ty: Option<ExprId>, },
     /// The magic `return_value` declaration, for use in `@guarantees` attributes
     ReturnValue,
-    GenericParam(GenericParamId),
+    GenericParam(TypeVarId),
 }
 
 #[derive(Debug)]
@@ -544,7 +544,7 @@ define_index_type!(pub struct ImperRootId = u32;);
 #[derive(Debug, Clone)]
 pub struct GenericParamList {
     pub names: SmallVec<[Sym; 1]>,
-    pub ids: Range<GenericParamId>,
+    pub ids: Range<TypeVarId>,
     pub ranges: SmallVec<[SourceRange; 1]>,
 }
 
@@ -633,7 +633,7 @@ pub struct Builder {
     imper_roots: IndexVec<ImperRootId, ImperRoot>,
 
     pub prelude_namespace: Option<ModScopeNsId>,
-    pub generic_params: IndexCounter<GenericParamId>,
+    pub generic_params: IndexCounter<TypeVarId>,
 
     pub known_idents: KnownIdents,
 }
@@ -1124,7 +1124,7 @@ impl Driver {
     pub fn begin_decl_generic_ctx(&mut self, generic_param_list: GenericParamList) -> AutoPopStackEntry<GenericCtxId> {
         self.push_generic_ctx(|parent| GenericCtx::Decl { parameters: generic_param_list.ids, parent })
     }
-    pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, generic_params: Range<GenericParamId>, generic_param_decls: Range<DeclId>, return_ty: ExprId, proto_range: SourceRange) -> DeclId {
+    pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, generic_params: Range<TypeVarId>, generic_param_decls: Range<DeclId>, return_ty: ExprId, proto_range: SourceRange) -> DeclId {
         // This is a placeholder value that gets replaced once the parameter declarations get allocated.
         let id = self.add_decl(Decl::Static(ExprId::new(u32::MAX as usize)), name, Some(return_ty), proto_range);
 
