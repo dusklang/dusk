@@ -5,7 +5,7 @@
 //! making changes to the values in the type provider, which we don't want to do. So we have two kinds of type
 //! providers, abstracted by the [TypeProvider] trait: [real](RealTypeProvider) and [mock](MockTypeProvider). There is
 //! only one real type provider, which stores the real answers. A mock type provider wraps the real type provider and
-//! provides a safe sandbox to temporarily make modifications to, then throw away.
+//! provides a safe sandbox to temporarily make modifications that will soon be thrown away.
 
 use std::collections::HashMap;
 
@@ -161,6 +161,7 @@ macro_rules! declare_tp {
                 $field_name: IndexVec<$id_ty, $payload_ty>,
             )*
             eval_results: HashMap<ExprId, Const>,
+            
         }
         
         impl RealTypeProvider {

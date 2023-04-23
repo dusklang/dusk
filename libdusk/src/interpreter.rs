@@ -22,10 +22,10 @@ use index_vec::IndexVec;
 use lazy_static::lazy_static;
 
 use crate::arch::Arch;
-use crate::ast::{LegacyIntrinsic, EnumId, TypeVarId, ExternFunctionRef, ExternModId, NewNamespaceId};
+use crate::ast::{LegacyIntrinsic, EnumId, GenericParamId, ExternFunctionRef, ExternModId, NewNamespaceId};
 use crate::dvm::{MessageKind, Call, self};
 use crate::mir::{Const, Instr, InstrId, FuncId, StaticId, ExternFunction};
-use crate::ty::{Type, FunctionType, QualType, IntWidth, FloatWidth, StructType, LegacyInternalType};
+use crate::ty::{Type, FunctionType, QualType, IntWidth, FloatWidth, StructType, LegacyInternalType, TypeVar};
 use crate::code::{OpId, BlockId};
 use crate::internal_types::{DuskBridge, InternalField, internal_fields};
 
@@ -344,7 +344,7 @@ pub struct StackFrame {
     block: BlockId,
     pc: usize,
     results: IndexVec<InstrId, Value>,
-    generic_ctx: HashMap<TypeVarId, Type>,
+    generic_ctx: HashMap<GenericParamId, Type>,
 }
 
 impl StackFrame {
@@ -355,12 +355,16 @@ impl StackFrame {
 
     fn canonicalize_type(&self, ty: &Type) -> Type {
         match ty {
-            &Type::GenericParam(id) => {
-                if let Some(result) = self.generic_ctx.get(&id) {
-                    result.clone()
-                } else {
-                    ty.clone()
+            Type::TypeVar(var) => {
+                match var {
+                    &TypeVar::GenericParamDecl(id) => if let Some(result) = self.generic_ctx.get(&id) {
+                        result.clone()
+                    } else {
+                        ty.clone()
+                    },
+                    TypeVar::GenericArg { .. } => panic!("this should be impossible"),
                 }
+                
             },
             Type::Pointer(pointee) =>
                 Type::Pointer(
@@ -1303,7 +1307,7 @@ impl DriverRef<'_> {
                 #[cfg(not(target_os = "macos"))]
                 &Instr::ObjcClassRef { .. } => unimplemented!("cannot refer to Objective-C class on a non-macOS platform"),
                 &Instr::GenericParam(id) => {
-                    let ty = Type::GenericParam(id);
+                    let ty = Type::TypeVar(TypeVar::GenericParamDecl(id));
                     let ty = frame.canonicalize_type(&ty);
                     Value::from_new_internal(ty, &d)
                 },

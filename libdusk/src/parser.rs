@@ -1018,7 +1018,7 @@ impl Driver {
         let mut generic_params = GenericParamList::default();
         generic_params.ids.start = self.ast.generic_params.peek_next_idx();
         for ident in idents {
-            // Claim a TypeVarId for yourself, then set the `end` value to be one past the end
+            // Claim a GenericParamId for yourself, then set the `end` value to be one past the end
             let generic_param = self.ast.generic_params.next_idx();
             // Make sure nobody interrupts this loop and creates an unrelated generic param
             debug_assert_eq!(generic_params.ids.end, generic_param);
@@ -1455,7 +1455,7 @@ impl Driver {
                 generic_param_list.ids.end = generic_param_list.ids.start;
                 while let TokenKind::Ident(name) = *self.cur(p).kind {
                     self.start_next_list_item(p, generic_param_syntax_list.id());
-                    // Claim a TypeVarId for yourself, then set the `end` value to be one past the end
+                    // Claim a GenericParamId for yourself, then set the `end` value to be one past the end
                     let generic_param = self.ast.generic_params.next_idx();
                     // Make sure nobody interrupts this loop and creates an unrelated generic param
                     debug_assert_eq!(generic_param_list.ids.end, generic_param);

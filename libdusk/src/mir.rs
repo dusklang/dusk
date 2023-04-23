@@ -15,7 +15,7 @@ use crate::code::{Code, Block, BlockId, Op, OpId};
 use crate::source_info::SourceRange;
 
 use crate::internal_types::InternalField;
-use crate::ast::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, NewNamespaceId, LegacyIntrinsic, IntrinsicId, Expr, StoredDeclId, TypeVarId, Item, PatternBindingDeclId, ExternModId, ExternFunctionRef, PatternBindingPathComponent, VOID_TYPE, StructId, LoopId};
+use crate::ast::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, NewNamespaceId, LegacyIntrinsic, IntrinsicId, Expr, StoredDeclId, GenericParamId, Item, PatternBindingDeclId, ExternModId, ExternFunctionRef, PatternBindingPathComponent, VOID_TYPE, StructId, LoopId};
 use crate::ty::{Type, LegacyInternalType, FunctionType, FloatWidth, StructType};
 use crate::driver::{Driver, DriverRef};
 use crate::typechecker as tc;
@@ -80,7 +80,7 @@ pub enum Instr {
     SwitchBr { scrutinee: OpId, cases: Vec<SwitchCase>, catch_all_bb: BlockId },
     /// This variant currently exists (rather than just stuffing a constant `Type` into `Instr::Const()`) so that we
     /// know to lookup the generic param instead of preserving it as-is.
-    GenericParam(TypeVarId),
+    GenericParam(GenericParamId),
     /// Only valid at the beginning of a function, right after the void instruction
     // TODO: Get rid of the type here! It is no longer required because instruction types are now stored on each Op
     Parameter(Type),
@@ -242,8 +242,8 @@ pub struct Function {
     pub blocks: Vec<BlockId>,
     pub decl: Option<DeclId>,
     // Note: Is a Vec, not a Range, because generic params might not always be contiguous in
-    // TypeVarId space
-    pub generic_params: Range<TypeVarId>,
+    // GenericParamId space
+    pub generic_params: Range<GenericParamId>,
     pub instr_namespace: InstrNamespace,
     pub is_comptime: bool,
 }
@@ -425,7 +425,7 @@ enum Decl {
     Field { index: usize },
     InternalField(InternalField),
     Variant { enuum: EnumId, index: usize, payload_ty: Option<Type> },
-    GenericParam(TypeVarId),
+    GenericParam(GenericParamId),
 
     Invalid,
 }
@@ -602,7 +602,6 @@ pub enum FunctionRef {
 #[derive(Default)]
 pub struct Builder {
     decls: HashMap<DeclId, Decl>,
-    pub struct_was_non_generic: IndexVec<StructId, bool>,
 }
 
 impl Builder {
@@ -669,7 +668,7 @@ impl Driver {
             Type::Bool => 1,
             Type::Struct(strukt) => self.layout_struct(strukt).size,
             &Type::Enum(_id) => 4,
-            Type::GenericParam(_) => panic!("can't get size of generic parameter without more context"),
+            Type::TypeVar(_) => panic!("can't get size of generic type without more context"),
             Type::Inout(_) => panic!("can't get size of inout parameter type"),
         }
     }
@@ -703,14 +702,7 @@ impl Driver {
     /// Compute the layout (field offsets, alignment, size, and stride) for a struct
     pub fn layout_struct(&self, strukt: &StructType) -> StructLayout {
         let cached_layout = LAYOUT_CACHE.with(|cache| {
-            let mut cache = cache.borrow_mut();
-            // This is a fast path to avoid hashing the parameter types in the common case, non-generic functions
-            if self.mir.struct_was_non_generic[strukt.identity] {
-                cache.fast_struct_layouts.resize(self.code.ast.structs.len(), Default::default());
-                cache.fast_struct_layouts[strukt.identity].clone()
-            } else {
-                cache.struct_layouts.get(strukt).cloned()
-            }
+            cache.borrow_mut().struct_layouts.get(strukt).cloned()
         });
         if let Some(layout) = cached_layout {
             return layout;
@@ -742,11 +734,7 @@ impl Driver {
         let layout = StructLayout { field_offsets, alignment, size, stride };
         LAYOUT_CACHE.with(|cache| {
             let mut cache = cache.borrow_mut();
-            if self.mir.struct_was_non_generic[strukt.identity] {
-                cache.fast_struct_layouts[strukt.identity] = Some(layout.clone());
-            } else {
-                cache.struct_layouts.insert(strukt.clone(), layout.clone());
-            }
+            cache.struct_layouts.insert(strukt.clone(), layout.clone());
         });
         
         layout
@@ -1371,7 +1359,7 @@ impl Driver {
 }
 
 impl DriverRef<'_> {
-    fn build_function(&mut self, name: Option<Sym>, func_ty: FunctionType, body: FunctionBody, params: Range<DeclId>, generic_params: Range<TypeVarId>, is_comptime: bool, tp: &impl TypeProvider) -> Function {
+    fn build_function(&mut self, name: Option<Sym>, func_ty: FunctionType, body: FunctionBody, params: Range<DeclId>, generic_params: Range<GenericParamId>, is_comptime: bool, tp: &impl TypeProvider) -> Function {
         debug_assert_ne!(func_ty.return_ty.as_ref(), &Type::Error, "can't build MIR function with Error return type");
 
         let mut entry = Block::default();
@@ -2956,7 +2944,7 @@ impl DriverRef<'_> {
 #[derive(Default)]
 struct LayoutCache {
     struct_layouts: HashMap<StructType, StructLayout>,
-    fast_struct_layouts: IndexVec<StructId, Option<StructLayout>>,
+    // TODO: we used to have a fast path for non-generic structs and should add it back eventually
 }
 
 thread_local! {

@@ -9,7 +9,7 @@ use constraints::*;
 use crate::index_vec::range_iter;
 use crate::type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 
-use crate::ast::{self, ExprId, DeclId, StructId, PatternKind, TypeVarId, Ident, VOID_EXPR, GenericCtx, DeclRefId, BLANK_GENERIC_CTX, Decl};
+use crate::ast::{self, ExprId, DeclId, StructId, PatternKind, GenericParamId, Ident, VOID_EXPR, GenericCtx, DeclRefId, BLANK_GENERIC_CTX, Decl};
 use crate::mir::Const;
 use crate::ty::{Type, LegacyInternalType, FunctionType, QualType, IntWidth};
 use crate::source_info::SourceRange;
@@ -52,7 +52,7 @@ pub struct Overloads {
     pub nonviable_overloads: Vec<DeclId>,
 }
 
-pub type GenericConstraints = HashMap<TypeVarId, ConstraintList>;
+pub type GenericConstraints = HashMap<GenericParamId, ConstraintList>;
 
 impl tir::Expr<tir::IntLit> {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
@@ -1460,9 +1460,6 @@ impl tir::Expr<tir::StructLit> {
         // Yay borrow checker:
         if let Some(lit) = tp.struct_lit(self.struct_lit_id).clone() {
             let fields = &driver.code.ast.structs[lit.strukt].fields;
-            let is_generic = fields.iter()
-                .any(|field| tp.get_evaluated_type(field.ty).has_generic_parameters());
-            driver.mir.struct_was_non_generic[lit.strukt] = !is_generic;
 
             debug_assert_eq!(lit.fields.len(), fields.len());
 
@@ -1738,9 +1735,6 @@ impl Driver {
 impl DriverRef<'_> {
     pub fn type_check(&mut self, units: &Units, tp: &mut RealTypeProvider, new_code: NewCode) -> Result<(), ()> {
         tp.resize(&self.read(), new_code);
-        // depended on by StructLit
-        let num_structs = self.read().code.ast.structs.len();
-        self.write().mir.struct_was_non_generic.resize(num_structs, false);
         for unit in &units.units {
             // Pass 1: propagate info down from leaves to roots
             self.write().run_pass_1(&unit.items, 0, tp);

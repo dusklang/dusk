@@ -8,7 +8,7 @@ use index_vec::define_index_type;
 use dusk_proc_macros::DuskBridge;
 
 use crate::arch::Arch;
-use crate::ast::{StructId, EnumId, TypeVarId, NewNamespaceId};
+use crate::ast::{StructId, EnumId, GenericParamId, NewNamespaceId, DeclRefId, DeclId};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum IntWidth {
@@ -80,6 +80,15 @@ impl From<InternalTypeId> for Type {
     }
 }
 
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub enum TypeVar {
+    GenericParamDecl(GenericParamId),
+    GenericArg {
+        decl_ref: DeclRefId,
+        overload: DeclId,
+        generic_param_index: usize,
+    },
+}
 
 #[derive(DuskBridge, Clone, PartialEq, Eq, Hash)]
 #[module = ""]
@@ -106,30 +115,12 @@ pub enum Type {
     Void,
     Mod,
     Ty,
-    GenericParam(TypeVarId),
+    TypeVar(TypeVar),
     Never,
 }
 
 
 impl Type {
-    pub fn has_generic_parameters(&self) -> bool {
-        use Type::*;
-        match self {
-            Error | Int { .. } | Float(_) | LegacyInternal(_) | Internal(_) | Bool | Void | Mod | Ty | Never => false,
-            // TODO: Eliminate this separate heap allocation by interning all types into an IndexVec
-            Pointer(ty) => ty.ty.has_generic_parameters(),
-            Inout(ty) => ty.has_generic_parameters(),
-            Function(ty) => {
-                ty.return_ty.has_generic_parameters() || ty.param_tys.iter().any(|ty| ty.has_generic_parameters())
-            },
-            Struct(ty) => ty.field_tys.iter().any(|ty| ty.has_generic_parameters()),
-            // TODO: this `true` is here because I don't have the necessary context to lookup whether the enum actually
-            // does have generic parameters. I should fix this, by moving the enum structure inline.
-            Enum(_) => true,
-            GenericParam(_) => true,
-        }
-    }
-
     pub fn ptr(self) -> Self {
         self.ptr_with_mut(false)
     }
@@ -219,8 +210,9 @@ impl Type {
     pub fn trivially_convertible_to(&self, other: &Type) -> bool {
         match (self, other) {
             (Type::Never, _other) => true,
+            // TODO: this is a hack!
+            (_, Type::TypeVar(TypeVar::GenericParamDecl(_))) => true,
             (Type::Pointer(a), Type::Pointer(b)) => a.trivially_convertible_to(b),
-            (_self, Type::GenericParam(_)) => true,
             (a, b) => a == b,
         }
     }
@@ -288,8 +280,11 @@ impl fmt::Debug for Type {
             &Type::Enum(id) => {
                 write!(f, "enum{}", id.index())
             }
-            &Type::GenericParam(id) => {
-                write!(f, "generic_param{}", id.index())
+            Type::TypeVar(var) => match var {
+                &TypeVar::GenericParamDecl(id) => {
+                    write!(f, "generic_param{}", id.index())
+                },
+                TypeVar::GenericArg { .. } => panic!("should be impossible"),
             },
             Type::LegacyInternal(internal) => write!(f, "{}", internal.name()),
             &Type::Internal(id) => write!(f, "internal_type{}", id.index()),
