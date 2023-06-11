@@ -284,7 +284,10 @@ impl fmt::Debug for Type {
                 &TypeVar::GenericParamDecl(id) => {
                     write!(f, "generic_param{}", id.index())
                 },
-                TypeVar::GenericArg { .. } => panic!("should be impossible"),
+                TypeVar::GenericArg { decl_ref, overload, generic_param_index } => {
+                    write!(f, "generic_arg(decl_ref: {}, overload: {}, generic_param_index: {}", decl_ref.index(), overload.index(), generic_param_index)
+                },
+                // TypeVar::GenericArg { .. } => panic!("should be impossible"),
             },
             Type::LegacyInternal(internal) => write!(f, "{}", internal.name()),
             &Type::Internal(id) => write!(f, "internal_type{}", id.index()),

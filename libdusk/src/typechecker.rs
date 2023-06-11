@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ops::Range;
 
 use smallvec::{SmallVec, smallvec};
 use num_bigint::BigUint;
@@ -11,7 +12,7 @@ use crate::type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 
 use crate::ast::{self, ExprId, DeclId, StructId, PatternKind, GenericParamId, Ident, VOID_EXPR, GenericCtx, DeclRefId, BLANK_GENERIC_CTX, Decl};
 use crate::mir::Const;
-use crate::ty::{Type, LegacyInternalType, FunctionType, QualType, IntWidth};
+use crate::ty::{Type, LegacyInternalType, FunctionType, QualType, IntWidth, TypeVar};
 use crate::source_info::SourceRange;
 use crate::internal_types::InternalNamespace;
 
@@ -861,7 +862,7 @@ impl tir::Expr<tir::DeclRef> {
         let mut one_of = SmallVec::new();
         one_of.reserve(overloads.len());
         for &overload in &overloads {
-            let ty = tp.fetch_decl_type(driver, overload, Some(self.decl_ref_id)).ty;
+            let mut ty = tp.fetch_decl_type(driver, overload, Some(self.decl_ref_id)).ty;
             let decl = &driver.tir.decls[overload];
             let mut is_mut = decl.is_mut;
             if let ast::Namespace::MemberRef { base_expr } = driver.code.ast.decl_refs[self.decl_ref_id].namespace {
@@ -882,11 +883,46 @@ impl tir::Expr<tir::DeclRef> {
                 constraint_list.generic_ctx = df!(driver, overload.generic_ctx_id);
                 constraints.insert(param, constraint_list);
             }
+            self.substitute_generic_params(&mut ty, overload, decl.generic_params.clone());
+
             one_of.push(QualType { ty, is_mut });
         }
+        dbg!(&one_of);
 
         *tp.constraints_mut(self.id) = ConstraintList::new(BuiltinTraits::empty(), Some(one_of), None, ef!(driver, self.id.generic_ctx_id));
         *tp.overloads_mut(self.decl_ref_id) = Overloads { overloads, nonviable_overloads: Default::default() };
+    }
+
+    fn substitute_generic_params(&self, ty: &mut Type, overload: DeclId, generic_params: Range<GenericParamId>) {
+        match ty {
+            Type::TypeVar(var) => {
+                if let TypeVar::GenericParamDecl(id) = *var {
+                    if generic_params.contains(&id) {
+                        *var = TypeVar::GenericArg {
+                            decl_ref: self.decl_ref_id,
+                            overload,
+                            generic_param_index: id.index() - generic_params.start.index()
+                        }
+                    }
+                }
+            },
+            Type::Pointer(pointee) => {
+                self.substitute_generic_params(&mut pointee.ty, overload, generic_params);
+            },
+            Type::Struct(strukt) => {
+                for field_ty in &mut strukt.field_tys {
+                    self.substitute_generic_params(field_ty, overload, generic_params.clone());
+                }
+            },
+            // TODO: enums
+            Type::Function(func) => {
+                for param_ty in &mut func.param_tys {
+                    self.substitute_generic_params(param_ty, overload, generic_params.clone());
+                }
+                self.substitute_generic_params(&mut *func.return_ty, overload, generic_params);
+            }
+            _ => {},
+        }
     }
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
