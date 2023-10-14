@@ -228,7 +228,7 @@ macro_rules! get_constraints {
 
 macro_rules! get_constraints_mut {
     ($tp:expr, $haver:expr) => {
-        match $haver.clone().into() {
+        match $haver.into() {
             MutConstraintHaver::ConstraintListMut(constraints) => constraints,
             MutConstraintHaver::Expr(expr) => $tp.expr_constraints_mut(expr),
         }
@@ -363,12 +363,12 @@ impl Driver {
                     is_mut: true,
                 };
                 if self.can_unify_to(tp, constraint_haver.clone().into(), &preferred_type).is_ok() {
-                    get_constraints_mut!(tp, constraint_haver).preferred_type = Some(preferred_type);
+                    get_constraints_mut!(tp, constraint_haver.clone()).preferred_type = Some(preferred_type);
                 } else {
-                    let other = get_constraints_mut!(tp, other_haver);
+                    let other = get_constraints_mut!(tp, other_haver.clone());
                     other.preferred_type = None;
                     if other.one_of.is_none() {
-                        let constraints = get_constraints_mut!(tp, constraint_haver);
+                        let constraints = get_constraints_mut!(tp, constraint_haver.clone());
                         if let Some(one_of) = constraints.one_of.clone() {
                             let mut rhs_one_of = SmallVec::new();
                             for ty in one_of.iter() {
@@ -378,9 +378,9 @@ impl Driver {
                                 }
                             }
 
-                            get_constraints_mut!(tp, other_haver).one_of = Some(rhs_one_of);
+                            get_constraints_mut!(tp, other_haver.clone()).one_of = Some(rhs_one_of);
                         } else {
-                            get_constraints_mut!(tp, other_haver).one_of = None;
+                            get_constraints_mut!(tp, other_haver.clone()).one_of = None;
                         }
                     }
                 }
@@ -390,9 +390,9 @@ impl Driver {
                 assert!(self.can_unify_to(tp, constraint_haver.clone().into(), &preferred_type).is_ok());
                 let preferred_type = QualType::from(preferred_type.ty.clone());
                 if self.can_unify_to(tp, other_haver.clone().into(), &preferred_type).is_ok() {
-                    get_constraints_mut!(tp, other_haver).preferred_type = Some(preferred_type);
+                    get_constraints_mut!(tp, other_haver.clone()).preferred_type = Some(preferred_type);
                 } else {
-                    get_constraints_mut!(tp, constraint_haver).preferred_type = None;
+                    get_constraints_mut!(tp, constraint_haver.clone()).preferred_type = None;
                 }
             }
         }
@@ -455,5 +455,15 @@ impl ConstraintList {
             }
             self.one_of = Some([ty].into());
         }
+    }
+}
+
+impl Driver {
+    pub fn get_constraints<'a>(&self, tp: &'a impl TypeProvider, constraint_haver: impl Into<ConstraintHaver<'a>>) -> &'a ConstraintList {
+        get_constraints!(tp, constraint_haver)
+    }
+
+    pub fn get_constraints_mut<'a>(&self, tp: &'a mut impl TypeProvider, constraint_haver: impl Into<MutConstraintHaver<'a>>) -> &'a mut ConstraintList {
+        get_constraints_mut!(tp, constraint_haver)
     }
 }
