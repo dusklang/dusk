@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 use paste::paste;
 
-use crate::ast::{ExprId, DeclId, DeclRefId, StructLitId, CastId, Namespace};
+use crate::ast::{ExprId, DeclId, DeclRefId, StructLitId, TypeVarId, CastId, Namespace};
 use crate::mir::Const;
 use crate::ty::{Type, QualType};
 
@@ -43,8 +43,13 @@ macro_rules! declare_tp_fields {
             cast_methods cast_method: CastId -> CastMethod,
             /// The type of each expression
             types ty: ExprId -> Type,
+            /// The constraints on each type variable
+            constraints constraints: TypeVarId -> ConstraintList,
             /// The constraints on each expression's type
-            constraints constraints: ExprId -> ConstraintList,
+            /// TODO: delete this in favour of the field above (by assigning a type variable to
+            /// each expression). This is complicated by the fact that the mapping from ExprId -> TypeVarId
+            /// needs AST access, which we don't have here.
+            expr_constraints expr_constraints: ExprId -> ConstraintList,
             decl_types decl_type: DeclId -> QualType,
         }
     }
@@ -118,11 +123,11 @@ macro_rules! declare_tp {
             fn multi_constraints_mut<'a>(&'a mut self, a: ExprId, b: ExprId) -> (&'a mut ConstraintList, &'a mut ConstraintList) {
                 assert_ne!(a, b, "`a` ({:?}) must not equal `b` ({:?})", a, b);
                 // Ensure both exist, in the case of MockTypeProvider
-                self.constraints_mut(a);
-                self.constraints_mut(b);
+                self.expr_constraints_mut(a);
+                self.expr_constraints_mut(b);
                 unsafe {
-                    let a = self.constraints_mut(a) as *mut _;
-                    let b = self.constraints_mut(b) as *mut _;
+                    let a = self.expr_constraints_mut(a) as *mut _;
+                    let b = self.expr_constraints_mut(b) as *mut _;
                     (&mut *a, &mut *b)
                 }
             }
@@ -180,6 +185,9 @@ macro_rules! declare_tp {
                     };
                     ($fname:ident, ExprId) => {
                         self.$fname.resize_with(d.code.ast.exprs.len(), Default::default);
+                    };
+                    ($fname:ident, TypeVarId) => {
+                        self.$fname.resize_with(d.code.ast.type_vars.len(), Default::default);
                     };
                     ($fname:ident, DeclId) => {
                         self.$fname.resize_with(d.code.ast.decls.len(), Default::default);

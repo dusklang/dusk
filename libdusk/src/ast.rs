@@ -47,6 +47,7 @@ define_index_type!(pub struct ModScopeNsId = u32;);
 define_index_type!(pub struct ConditionNsId = u32;);
 define_index_type!(pub struct GenericContextNsId = u32;);
 define_index_type!(pub struct GenericParamId = u32;);
+define_index_type!(pub struct TypeVarId = u32;);
 define_index_type!(pub struct ExternModId = u32;);
 define_index_type!(pub struct GenericCtxId = u32;);
 define_index_type!(pub struct LoopId = u32;);
@@ -533,6 +534,7 @@ pub struct Ast {
     pub enums: IndexVec<EnumId, Enum>,
     pub extern_mods: IndexVec<ExternModId, ExternMod>,
     pub struct_lits: IndexCounter<StructLitId>,
+    pub type_vars: IndexCounter<TypeVarId>,
     pub generic_ctxs: IndexVec<GenericCtxId, GenericCtx>,
     pub item_generic_ctxs: IndexVec<ItemId, GenericCtxId>,
 }

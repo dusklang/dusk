@@ -197,7 +197,7 @@ impl From<ExprId> for UnificationType<'static> {
 
 impl Driver {
     pub fn can_unify_to<'a, 'b: 'a>(&'a self, tp: &'a impl TypeProvider, expr: ExprId, ty: impl Into<UnificationType<'b>>) -> Result<(), UnificationError<'a>> {
-        let constraints = tp.constraints(expr);
+        let constraints = tp.expr_constraints(expr);
         // Never is the "bottom type", so it unifies to anything.
         if constraints.one_of_exists(|ty| ty.ty == Type::Never) { return Ok(()); }
 
