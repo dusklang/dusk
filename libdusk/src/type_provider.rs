@@ -15,7 +15,7 @@ use crate::ast::{ExprId, DeclId, DeclRefId, StructLitId, CastId, Namespace};
 use crate::mir::Const;
 use crate::ty::{Type, QualType};
 
-use crate::typechecker::{CastMethod, StructLit, constraints::ConstraintList, Overloads, GenericConstraints};
+use crate::typechecker::{CastMethod, StructLit, constraints::ConstraintList, Overloads};
 use crate::index_vec::*;
 use crate::driver::Driver;
 use crate::new_code::NewCode;
@@ -34,12 +34,9 @@ macro_rules! declare_tp_fields {
             decl_ref_has_error decl_ref_has_error: DeclRefId -> bool,
             /// The selected overload for each decl ref
             selected_overloads selected_overload: DeclRefId -> Option<DeclId>,
-            // The list of expressions that the given declref must iterate through to substitute its generic arguments into their types
-            generic_substitution_list generic_substitution_list: DeclRefId -> Vec<ExprId>,
             /// The generic arguments for each decl ref
             generic_arguments generic_arguments: DeclRefId -> Option<Vec<Type>>,
-            /// The constraints on all generic arguments that might get passed by each declref
-            generic_constraints generic_constraints: DeclRefId -> GenericConstraints,
+
             /// Each struct literal matched to a structure
             struct_lits struct_lit: StructLitId -> Option<StructLit>,
             /// The cast method for each cast expression
