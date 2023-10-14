@@ -1,7 +1,7 @@
 use smallvec::SmallVec;
 
 use crate::ty::{Type, LegacyInternalType, QualType, IntWidth};
-use crate::ast::{ExprId, GenericCtxId};
+use crate::ast::ExprId;
 
 use crate::driver::Driver;
 use crate::ty::BuiltinTraits;
@@ -12,7 +12,6 @@ pub struct ConstraintList {
     trait_impls: BuiltinTraits,
     one_of: Option<SmallVec<[QualType; 1]>>,
     preferred_type: Option<QualType>,
-    pub generic_ctx: GenericCtxId,
     is_error: bool,
 }
 
@@ -31,8 +30,8 @@ pub enum SolveError<'a> {
 }
 
 impl ConstraintList {
-    pub fn new(trait_impls: BuiltinTraits, one_of: Option<SmallVec<[QualType; 1]>>, preferred_type: Option<QualType>, generic_ctx: GenericCtxId) -> Self {
-        Self { trait_impls, one_of: one_of.map(|one_of| one_of.into()), preferred_type, generic_ctx, is_error: false }
+    pub fn new(trait_impls: BuiltinTraits, one_of: Option<SmallVec<[QualType; 1]>>, preferred_type: Option<QualType>) -> Self {
+        Self { trait_impls, one_of: one_of.map(|one_of| one_of.into()), preferred_type, is_error: false }
     }
 
     pub fn one_of(&self) -> &[QualType] {
@@ -40,27 +39,6 @@ impl ConstraintList {
             one_of
         } else {
             &[]
-        }
-    }
-
-    pub fn solve(&self) -> Result<QualType, SolveError> {
-        if let Some(one_of) = &self.one_of {
-            if one_of.len() == 1 {
-                return Ok(one_of[0].clone())
-            } else if one_of.is_empty() {
-                return Err(SolveError::NoValidChoices)
-            }
-        }
-        
-        match self.preferred_type {
-            Some(ref pref) => if can_unify_to(self, pref).is_ok() {
-                Ok(pref.clone())
-            } else if let Some(one_of) = &self.one_of {
-                Err(SolveError::Ambiguous { choices: &one_of })
-            } else {
-                Err(SolveError::CantUnifyToPreferredType)
-            },
-            None => Err(SolveError::NoValidChoices),
         }
     }
 
@@ -96,7 +74,6 @@ impl ConstraintList {
             BuiltinTraits::empty(),
             self.one_of.as_ref().map(|one_of| -> SmallVec<[QualType; 1]> { one_of.iter().filter_map(type_map).collect() }),
             self.preferred_type().and_then(type_map),
-            self.generic_ctx,
         )
     }
 
@@ -195,9 +172,76 @@ impl From<ExprId> for UnificationType<'static> {
     }
 }
 
+#[derive(Copy, Clone)]
+pub enum ConstraintHaver<'a> {
+    Expr(ExprId),
+    ConstraintList(&'a ConstraintList),
+}
+
+impl From<ExprId> for ConstraintHaver<'_> {
+    fn from(value: ExprId) -> Self {
+        ConstraintHaver::Expr(value)
+    }
+}
+
+impl<'a> From<&'a ConstraintList> for ConstraintHaver<'a> {
+    fn from(value: &'a ConstraintList) -> Self {
+        ConstraintHaver::ConstraintList(value)
+    }
+}
+
+
+pub enum MutConstraintHaver<'a> {
+    Expr(ExprId),
+    ConstraintListMut(&'a mut ConstraintList),
+}
+
+impl From<ExprId> for MutConstraintHaver<'_> {
+    fn from(value: ExprId) -> Self {
+        MutConstraintHaver::Expr(value)
+    }
+}
+
+impl<'a> From<&'a mut ConstraintList> for MutConstraintHaver<'a> {
+    fn from(value: &'a mut ConstraintList) -> Self {
+        MutConstraintHaver::ConstraintListMut(value)
+    }
+}
+
+impl<'a> From<MutConstraintHaver<'a>> for ConstraintHaver<'a> {
+    fn from(value: MutConstraintHaver<'a>) -> Self {
+        match value {
+            MutConstraintHaver::ConstraintListMut(constraints) => ConstraintHaver::ConstraintList(constraints),
+            MutConstraintHaver::Expr(expr) => ConstraintHaver::Expr(expr),
+        }
+    }
+}
+
+macro_rules! get_constraints {
+    ($tp:expr, $haver:expr) => {
+        match $haver.into() {
+            ConstraintHaver::ConstraintList(constraints) => constraints,
+            ConstraintHaver::Expr(expr) => $tp.expr_constraints(expr),
+        }
+    };
+}
+
+macro_rules! get_constraints_mut {
+    ($tp:expr, $haver:expr) => {
+        match $haver.clone().into() {
+            MutConstraintHaver::ConstraintListMut(constraints) => constraints,
+            MutConstraintHaver::Expr(expr) => $tp.expr_constraints_mut(expr),
+        }
+    };
+}
+
+
 impl Driver {
-    pub fn can_unify_to<'a, 'b: 'a>(&'a self, tp: &'a impl TypeProvider, expr: ExprId, ty: impl Into<UnificationType<'b>>) -> Result<(), UnificationError<'a>> {
-        let constraints = tp.expr_constraints(expr);
+    pub fn can_unify_to<'a, 'b: 'a>(&'a self, tp: &'a impl TypeProvider, constraint_haver: impl Into<ConstraintHaver<'a>>, ty: impl Into<UnificationType<'b>>) -> Result<(), UnificationError<'a>> {
+        let constraints = match constraint_haver.into() {
+            ConstraintHaver::Expr(expr) => tp.expr_constraints(expr),
+            ConstraintHaver::ConstraintList(constraints) => constraints,
+        };
         // Never is the "bottom type", so it unifies to anything.
         if constraints.one_of_exists(|ty| ty.ty == Type::Never) { return Ok(()); }
 
@@ -226,64 +270,19 @@ impl Driver {
 
         Ok(())
     }
-}
-pub fn can_unify_to<'a>(constraints: &'a ConstraintList, ty: &QualType) -> Result<(), UnificationError<'a>> {
-    // Never is the "bottom type", so it unifies to anything.
-    if constraints.one_of_exists(|ty| ty.ty == Type::Never) { return Ok(()); }
 
-    // If this value is already an error, just say it unifies to anything
-    if constraints.is_error() { return Ok(()); }
-
-    use UnificationError::*;
-    if let Some(not_implemented) = implements_traits(&ty.ty, constraints.trait_impls).err() {
-        return Err(Trait(not_implemented));
-    }
-    if let Some(one_of) = &constraints.one_of {
-        for oty in one_of {
-            if oty.trivially_convertible_to(ty) {
-                return Ok(());
-            }
-        }
-        return Err(InvalidChoice(&one_of));
-    }
-
-    Ok(())
-}
-
-impl ConstraintList {
-    pub fn set_to(&mut self, ty: impl Into<QualType>) {
-        let ty = ty.into();
-        // If we're never, we should stay never.
-        // If the passed in type is Error, we should stay whatever we are.
-        // (this second clause is experimental and may not turn out to be a good idea. reevaluate later.)
-        if !self.is_never() && !ty.ty.is_error() {
-            // Preserve generic constraints if possible. TODO: efficiency! The caller should pass in this information
-            // instead so we don't have to iterate.
-            if let Some(one_of) = &mut self.one_of {
-                one_of.retain(|other| other == &ty);
-                if !one_of.is_empty() { return; }
-            }
-            self.one_of = Some([ty].into());
-        }
-    }
-
-    pub fn set_to_c_variadic_compatible_type(&mut self) {
-        // If we're never, we should stay never.
-        if self.is_never() { return; }
-
-        self.one_of = Some([self.solve().unwrap()].into());
-    }
-
-    pub fn intersect_with(&self, other: &ConstraintList) -> ConstraintList {
-        if self.is_never() {
+    pub fn intersect_constraints<'a>(&self, tp: &impl TypeProvider, constraints: impl Into<ConstraintHaver<'a>> + Clone, other: impl Into<ConstraintHaver<'a>> + Clone) -> ConstraintList {
+        let constraints = get_constraints!(tp, constraints);
+        let other = get_constraints!(tp, other);
+        if constraints.is_never() {
             return other.clone();
         } else if other.is_never() {
-            return self.clone();
+            return constraints.clone();
         }
 
-        let trait_impls = self.trait_impls | other.trait_impls;
+        let trait_impls = constraints.trait_impls | other.trait_impls;
 
-        let one_of = match (&self.one_of, &other.one_of) {
+        let one_of = match (&constraints.one_of, &other.one_of) {
             (None, None) => None,
             (Some(one_of), None) | (None, Some(one_of)) => Some(one_of.clone()),
             (Some(lhs), Some(rhs)) => {
@@ -306,15 +305,14 @@ impl ConstraintList {
             }
         };
 
-        let preferred_type = if self.preferred_type == other.preferred_type {
-            self.preferred_type.clone()
+        let preferred_type = if constraints.preferred_type == other.preferred_type {
+            constraints.preferred_type.clone()
         } else {
             let mut pref = None;
-            for (a, b) in [(self, other), (other, self)] {
+            for (a, b) in [(constraints, other), (other, constraints)] {
                 if let Some(preferred_type) = &a.preferred_type {
                     // I don't actually know if it's possible for an expression to not be able to unify to its preferred type?
-                    // assert!(can_unify_to(a, preferred_type).is_ok());
-                    if can_unify_to(b, preferred_type).is_ok() {
+                    if self.can_unify_to(tp, b, preferred_type).is_ok() {
                         pref = Some(preferred_type.clone());
                     }
                 }
@@ -322,12 +320,118 @@ impl ConstraintList {
             pref
         };
 
-        // Apparently the generic contexts are not guaranteed to match; yuck.
-        // On second thought, this makes perfect sense.
-        // TODO: I probably need something a little more complex than a single GenericCtxId per ConstraintList (but
-        // hopefully something not too much more complex)
-        //   assert_eq!(self.generic_ctx, other.generic_ctx, "this might fail...");
-        Self::new(trait_impls, one_of, preferred_type, self.generic_ctx)
+        ConstraintList::new(trait_impls, one_of, preferred_type)
+    }
+
+    // Same as intersect_constraints, but: 
+    //  - mutates `self` and `other` in-place instead of creating a new `ConstraintList`
+    //  - evaluates mutability independently between the arguments, with precedence given to self
+    //  - is literally just used for assignment expressions
+    //  - is a terrible abstraction :(
+    pub fn intersect_constraints_lopsided<'a>(&self, tp: &mut impl TypeProvider, constraint_haver: impl Into<MutConstraintHaver<'a>> + Clone, other_haver: impl Into<MutConstraintHaver<'a>> + Clone) -> Result<(), AssignmentError> {
+        let (constraints, other) = match (constraint_haver.clone().into(), other_haver.clone().into()) {
+            (MutConstraintHaver::Expr(expr1), MutConstraintHaver::Expr(expr2)) => tp.multi_constraints_mut(expr1, expr2),
+            (MutConstraintHaver::Expr(expr), MutConstraintHaver::ConstraintListMut(constraints)) => (tp.expr_constraints_mut(expr), constraints),
+            (MutConstraintHaver::ConstraintListMut(constraints), MutConstraintHaver::Expr(expr)) => (constraints, tp.expr_constraints_mut(expr)),
+            (MutConstraintHaver::ConstraintListMut(constraints), MutConstraintHaver::ConstraintListMut(other)) => (constraints, other),
+        };
+        let trait_impls = constraints.trait_impls | other.trait_impls;
+        constraints.trait_impls = trait_impls;
+        other.trait_impls = trait_impls;
+
+        if !constraints.is_never() && !other.is_never() {
+            let lhs = constraints.one_of.as_mut().expect("can't assign to expression without a one-of constraint");
+            lhs.retain(|lty| implements_traits(&lty.ty, trait_impls).is_ok());
+            if other.one_of.is_some() {
+                lhs.retain(|lty|
+                    other.one_of_exists(|rty| rty.ty.trivially_convertible_to(&lty.ty))
+                );
+
+                let rhs = other.one_of.as_mut().unwrap();
+                rhs.retain(|rty|
+                    implements_traits(&rty.ty, trait_impls).is_ok() && constraints.one_of_exists(|lty| rty.ty.trivially_convertible_to(&lty.ty))
+                );
+            }
+        }
+
+        if constraints.preferred_type.as_ref().map(|ty| &ty.ty) != other.preferred_type.as_ref().map(|ty| &ty.ty) {
+            if let Some(preferred_type) = other.preferred_type.clone() {
+                // I don't actually know if it's possible for an expression to not be able to unify to its preferred type?
+                assert!(self.can_unify_to(tp, other_haver.clone().into(), &preferred_type).is_ok());
+                let preferred_type = QualType {
+                    ty: preferred_type.ty.clone(),
+                    is_mut: true,
+                };
+                if self.can_unify_to(tp, constraint_haver.clone().into(), &preferred_type).is_ok() {
+                    get_constraints_mut!(tp, constraint_haver).preferred_type = Some(preferred_type);
+                } else {
+                    let other = get_constraints_mut!(tp, other_haver);
+                    other.preferred_type = None;
+                    if other.one_of.is_none() {
+                        let constraints = get_constraints_mut!(tp, constraint_haver);
+                        if let Some(one_of) = constraints.one_of.clone() {
+                            let mut rhs_one_of = SmallVec::new();
+                            for ty in one_of.iter() {
+                                let ty = ty.ty.clone().into();
+                                if self.can_unify_to(tp, other_haver.clone().into(), &ty).is_ok() {
+                                    rhs_one_of.push(ty);
+                                }
+                            }
+
+                            get_constraints_mut!(tp, other_haver).one_of = Some(rhs_one_of);
+                        } else {
+                            get_constraints_mut!(tp, other_haver).one_of = None;
+                        }
+                    }
+                }
+            }
+            if let Some(preferred_type) = get_constraints_mut!(tp, constraint_haver.clone()).preferred_type.clone() {
+                // I don't actually know if it's possible for an expression to not be able to unify to its preferred type?
+                assert!(self.can_unify_to(tp, constraint_haver.clone().into(), &preferred_type).is_ok());
+                let preferred_type = QualType::from(preferred_type.ty.clone());
+                if self.can_unify_to(tp, other_haver.clone().into(), &preferred_type).is_ok() {
+                    get_constraints_mut!(tp, other_haver).preferred_type = Some(preferred_type);
+                } else {
+                    get_constraints_mut!(tp, constraint_haver).preferred_type = None;
+                }
+            }
+        }
+        let constraints = get_constraints_mut!(tp, constraint_haver);
+        if !constraints.one_of.as_ref().unwrap().is_empty() && !constraints.is_error() && !constraints.one_of_exists(|ty| ty.is_mut) {
+            return Err(AssignmentError::Immutable);
+        }
+        Ok(())
+    }
+
+    pub fn solve_constraints<'a>(&self, tp: &'a impl TypeProvider, constraints: impl Into<ConstraintHaver<'a>>) -> Result<QualType, SolveError<'a>> {
+        let constraints = get_constraints!(tp, constraints);
+
+        if let Some(one_of) = &constraints.one_of {
+            if one_of.len() == 1 {
+                return Ok(one_of[0].clone())
+            } else if one_of.is_empty() {
+                return Err(SolveError::NoValidChoices)
+            }
+        }
+        
+        match constraints.preferred_type {
+            Some(ref pref) => if self.can_unify_to(tp, constraints, pref).is_ok() {
+                Ok(pref.clone())
+            } else if let Some(one_of) = &constraints.one_of {
+                Err(SolveError::Ambiguous { choices: &one_of })
+            } else {
+                Err(SolveError::CantUnifyToPreferredType)
+            },
+            None => Err(SolveError::NoValidChoices),
+        }
+    }
+
+    pub fn set_constraints_to_c_variadic_compatible_type<'a>(&self, tp: &mut impl TypeProvider, constraints: impl Into<MutConstraintHaver<'a>> + Clone) {
+        // If we're never, we should stay never.
+        if get_constraints_mut!(tp, constraints.clone()).is_never() { return; }
+
+        let solution = Some([self.solve_constraints(tp, constraints.clone().into()).unwrap()].into());
+        get_constraints_mut!(tp, constraints).one_of = solution;
     }
 }
 
@@ -337,73 +441,19 @@ pub enum AssignmentError {
 }
 
 impl ConstraintList {
-    // Same as intersect_with, but: 
-    //  - mutates `self` and `other` in-place instead of creating a new `ConstraintList`
-    //  - evaluates mutability independently between the arguments, with precedence given to self
-    //  - is literally just used for assignment expressions
-    //  - is a terrible abstraction :(
-    pub fn lopsided_intersect_with(&mut self, other: &mut ConstraintList) -> Result<(), AssignmentError> {
-        let trait_impls = self.trait_impls | other.trait_impls;
-        self.trait_impls = trait_impls;
-        other.trait_impls = trait_impls;
-
-        if !self.is_never() && !other.is_never() {
-            let lhs = self.one_of.as_mut().expect("can't assign to expression without a one-of constraint");
-            lhs.retain(|lty| implements_traits(&lty.ty, trait_impls).is_ok());
-            if other.one_of.is_some() {
-                lhs.retain(|lty|
-                    other.one_of_exists(|rty| rty.ty.trivially_convertible_to(&lty.ty))
-                );
-
-                let rhs = other.one_of.as_mut().unwrap();
-                rhs.retain(|rty|
-                    implements_traits(&rty.ty, trait_impls).is_ok() && self.one_of_exists(|lty| rty.ty.trivially_convertible_to(&lty.ty))
-                );
+    pub fn set_to(&mut self, ty: impl Into<QualType>) {
+        let ty = ty.into();
+        // If we're never, we should stay never.
+        // If the passed in type is Error, we should stay whatever we are.
+        // (this second clause is experimental and may not turn out to be a good idea. reevaluate later.)
+        if !self.is_never() && !ty.ty.is_error() {
+            // Preserve generic constraints if possible. TODO: efficiency! The caller should pass in this information
+            // instead so we don't have to iterate.
+            if let Some(one_of) = &mut self.one_of {
+                one_of.retain(|other| other == &ty);
+                if !one_of.is_empty() { return; }
             }
+            self.one_of = Some([ty].into());
         }
-
-        if self.preferred_type.as_ref().map(|ty| &ty.ty) != other.preferred_type.as_ref().map(|ty| &ty.ty) {
-            if let Some(preferred_type) = &other.preferred_type {
-                // I don't actually know if it's possible for an expression to not be able to unify to its preferred type?
-                assert!(can_unify_to(other, preferred_type).is_ok());
-                let preferred_type = QualType {
-                    ty: preferred_type.ty.clone(),
-                    is_mut: true,
-                };
-                if can_unify_to(self, &preferred_type).is_ok() {
-                    self.preferred_type = Some(preferred_type);
-                } else {
-                    other.preferred_type = None;
-                    if other.one_of.is_none() {
-                        if let Some(one_of) = &self.one_of {
-                            let mut rhs_one_of = SmallVec::new();
-                            for ty in one_of.iter() {
-                                let ty = ty.ty.clone().into();
-                                if can_unify_to(other, &ty).is_ok() {
-                                    rhs_one_of.push(ty);
-                                }
-                            }
-                            other.one_of = Some(rhs_one_of);
-                        } else {
-                            other.one_of = None;
-                        }
-                    }
-                }
-            }
-            if let Some(preferred_type) = &self.preferred_type {
-                // I don't actually know if it's possible for an expression to not be able to unify to its preferred type?
-                assert!(can_unify_to(self, preferred_type).is_ok());
-                let preferred_type = QualType::from(preferred_type.ty.clone());
-                if can_unify_to(other, &preferred_type).is_ok() {
-                    other.preferred_type = Some(preferred_type);
-                } else {
-                    self.preferred_type = None;
-                }
-            }
-        }
-        if !self.one_of.as_ref().unwrap().is_empty() && !self.is_error() && !self.one_of_exists(|ty| ty.is_mut) {
-            return Err(AssignmentError::Immutable);
-        }
-        Ok(())
     }
 }
