@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt;
 
 use arrayvec::ArrayVec;
@@ -8,7 +9,7 @@ use index_vec::define_index_type;
 use dusk_proc_macros::DuskBridge;
 
 use crate::arch::Arch;
-use crate::ast::{StructId, EnumId, GenericParamId, NewNamespaceId, DeclRefId, DeclId};
+use crate::ast::{StructId, EnumId, GenericParamId, NewNamespaceId, TypeVarId};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum IntWidth {
@@ -80,16 +81,6 @@ impl From<InternalTypeId> for Type {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
-pub enum TypeVar {
-    GenericParamDecl(GenericParamId),
-    GenericArg {
-        decl_ref: DeclRefId,
-        overload: DeclId,
-        generic_param_index: usize,
-    },
-}
-
 #[derive(DuskBridge, Clone, PartialEq, Eq, Hash)]
 #[module = ""]
 #[name = "type"]
@@ -115,7 +106,8 @@ pub enum Type {
     Void,
     Mod,
     Ty,
-    TypeVar(TypeVar),
+    GenericParam(GenericParamId),
+    TypeVar(TypeVarId),
     Never,
 }
 
@@ -210,11 +202,40 @@ impl Type {
     pub fn trivially_convertible_to(&self, other: &Type) -> bool {
         match (self, other) {
             (Type::Never, _other) => true,
-            // TODO: this is a hack!
-            (_, Type::TypeVar(TypeVar::GenericParamDecl(_))) => true,
             (Type::Pointer(a), Type::Pointer(b)) => a.trivially_convertible_to(b),
             (a, b) => a == b,
         }
+    }
+
+    pub fn replace_generic_params(&mut self, replacements: &HashMap<GenericParamId, Type>) {
+        match self {
+            Type::Error | Type::Int { .. } | Type::Float(_) | Type::LegacyInternal(_) | Type::Internal(_) | Type::Bool | Type::Void | Type::Mod | Type::Ty | Type::TypeVar(_) | Type::Never => {},
+            
+            // TODO: restructure enum types such that it is possible to call `replace_generic_params` on enum variants' types
+            Type::Enum(_) => {},
+            
+            Type::Pointer(pointee) => pointee.ty.replace_generic_params(replacements),
+            Type::Inout(pointee) => pointee.replace_generic_params(replacements),
+            Type::Function(func) => {
+                func.return_ty.replace_generic_params(replacements);
+                for param in &mut func.param_tys {
+                    param.replace_generic_params(replacements);
+                }
+            },
+            Type::Struct(strukt) => {
+                for field_ty in &mut strukt.field_tys {
+                    field_ty.replace_generic_params(replacements);
+                }
+            },
+            Type::GenericParam(id) => if let Some(replacement) = replacements.get(&*id) {
+                *self = replacement.clone();
+            },
+        }
+    }
+
+    pub fn replacing_generic_params(mut self, replacements: &HashMap<GenericParamId, Type>) -> Type {
+        self.replace_generic_params(replacements);
+        self
     }
 
     pub fn is_error(&self) -> bool { matches!(self, Type::Error) }
@@ -280,14 +301,11 @@ impl fmt::Debug for Type {
             &Type::Enum(id) => {
                 write!(f, "enum{}", id.index())
             }
-            Type::TypeVar(var) => match var {
-                &TypeVar::GenericParamDecl(id) => {
-                    write!(f, "generic_param{}", id.index())
-                },
-                TypeVar::GenericArg { decl_ref, overload, generic_param_index } => {
-                    write!(f, "generic_arg(decl_ref: {}, overload: {}, generic_param_index: {}", decl_ref.index(), overload.index(), generic_param_index)
-                },
-                // TypeVar::GenericArg { .. } => panic!("should be impossible"),
+            Type::GenericParam(id) => {
+                write!(f, "generic_param{}", id.index())
+            },
+            Type::TypeVar(id) => {
+                write!(f, "type_var{}", id.index())
             },
             Type::LegacyInternal(internal) => write!(f, "{}", internal.name()),
             &Type::Internal(id) => write!(f, "internal_type{}", id.index()),

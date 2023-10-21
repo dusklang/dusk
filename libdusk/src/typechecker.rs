@@ -852,7 +852,7 @@ impl tir::Expr<tir::DeclRef> {
         let mut one_of = SmallVec::new();
         one_of.reserve(overloads.len());
         for &overload in &overloads {
-            let ty = tp.fetch_decl_type(driver, overload, Some(self.decl_ref_id)).ty;
+            let mut ty = tp.fetch_decl_type(driver, overload, Some(self.decl_ref_id)).ty;
             let decl = &driver.tir.decls[overload];
             let mut is_mut = decl.is_mut;
             if let ast::Namespace::MemberRef { base_expr } = driver.code.ast.decl_refs[self.decl_ref_id].namespace {
@@ -867,6 +867,10 @@ impl tir::Expr<tir::DeclRef> {
                     };
                 }
             }
+
+            println!("{}", driver.display_item(self.id));
+
+            ty = driver.register_type_variables_for_decl_ref(self.decl_ref_id, overload, ty);
 
             one_of.push(QualType { ty, is_mut });
         }
@@ -1536,6 +1540,22 @@ impl tir::FunctionDecl {
 }
 
 impl Driver {
+    pub fn register_type_variables_for_decl_ref(&mut self, decl_ref: DeclRefId, overload: DeclId, ty: Type) -> Type {
+        let decl = &self.tir.decls[overload];
+        if decl.generic_params.is_empty() {
+            return ty;
+        }
+
+        let mut generic_param_substitutions = HashMap::new();
+        for generic_param in range_iter(decl.generic_params.clone()) {
+            let type_var = *self.code.ast.generic_arg_type_variables.entry((decl_ref, generic_param))
+                .or_insert_with(|| self.code.ast.type_vars.next_idx());
+            generic_param_substitutions.insert(generic_param, Type::TypeVar(type_var));
+        }
+
+        ty.replacing_generic_params(&generic_param_substitutions)
+    }
+
     pub fn decl_type(&self, id: DeclId, tp: &(impl TypeProvider + ?Sized)) -> Type {
         let explicit_ty = self.code.ast.explicit_tys[id].map(|ty| tp.get_evaluated_type(ty)).unwrap_or(&tp.decl_type(id).ty).clone();
         match &df!(id.ast) {

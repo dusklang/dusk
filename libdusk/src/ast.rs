@@ -538,6 +538,7 @@ pub struct Ast {
     pub expr_to_type_vars: IndexVec<ExprId, TypeVarId>,
     pub generic_ctxs: IndexVec<GenericCtxId, GenericCtx>,
     pub item_generic_ctxs: IndexVec<ItemId, GenericCtxId>,
+    pub generic_arg_type_variables: HashMap<(DeclRefId, GenericParamId), TypeVarId>,
 }
 
 

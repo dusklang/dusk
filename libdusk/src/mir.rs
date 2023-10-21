@@ -668,7 +668,8 @@ impl Driver {
             Type::Bool => 1,
             Type::Struct(strukt) => self.layout_struct(strukt).size,
             &Type::Enum(_id) => 4,
-            Type::TypeVar(_) => panic!("can't get size of generic type without more context"),
+            Type::GenericParam(_) => panic!("can't get size of generic type without more context"),
+            Type::TypeVar(_) => panic!("can't get size of type variable without more context"),
             Type::Inout(_) => panic!("can't get size of inout parameter type"),
         }
     }
