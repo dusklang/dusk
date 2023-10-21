@@ -218,19 +218,25 @@ impl<'a> From<MutConstraintHaver<'a>> for ConstraintHaver<'a> {
 }
 
 macro_rules! get_constraints {
-    ($tp:expr, $haver:expr) => {
+    ($driver:expr, $tp:expr, $haver:expr) => {
         match $haver.into() {
             ConstraintHaver::ConstraintList(constraints) => constraints,
-            ConstraintHaver::Expr(expr) => $tp.expr_constraints(expr),
+            ConstraintHaver::Expr(expr) => {
+                let type_var_id = $driver.code.ast.expr_to_type_vars[expr];
+                $tp.constraints(type_var_id)
+            },
         }
     };
 }
 
 macro_rules! get_constraints_mut {
-    ($tp:expr, $haver:expr) => {
+    ($driver:expr, $tp:expr, $haver:expr) => {
         match $haver.into() {
             MutConstraintHaver::ConstraintListMut(constraints) => constraints,
-            MutConstraintHaver::Expr(expr) => $tp.expr_constraints_mut(expr),
+            MutConstraintHaver::Expr(expr) => {
+                let type_var_id = $driver.code.ast.expr_to_type_vars[expr];
+                $tp.constraints_mut(type_var_id)
+            },
         }
     };
 }
@@ -239,7 +245,7 @@ macro_rules! get_constraints_mut {
 impl Driver {
     pub fn can_unify_to<'a, 'b: 'a>(&'a self, tp: &'a impl TypeProvider, constraint_haver: impl Into<ConstraintHaver<'a>>, ty: impl Into<UnificationType<'b>>) -> Result<(), UnificationError<'a>> {
         let constraints = match constraint_haver.into() {
-            ConstraintHaver::Expr(expr) => tp.expr_constraints(expr),
+            ConstraintHaver::Expr(expr) => self.get_constraints(tp, expr),
             ConstraintHaver::ConstraintList(constraints) => constraints,
         };
         // Never is the "bottom type", so it unifies to anything.
@@ -272,8 +278,8 @@ impl Driver {
     }
 
     pub fn intersect_constraints<'a>(&self, tp: &impl TypeProvider, constraints: impl Into<ConstraintHaver<'a>> + Clone, other: impl Into<ConstraintHaver<'a>> + Clone) -> ConstraintList {
-        let constraints = get_constraints!(tp, constraints);
-        let other = get_constraints!(tp, other);
+        let constraints = get_constraints!(self, tp, constraints);
+        let other = get_constraints!(self, tp, other);
         if constraints.is_never() {
             return other.clone();
         } else if other.is_never() {
@@ -330,9 +336,9 @@ impl Driver {
     //  - is a terrible abstraction :(
     pub fn intersect_constraints_lopsided<'a>(&self, tp: &mut impl TypeProvider, constraint_haver: impl Into<MutConstraintHaver<'a>> + Clone, other_haver: impl Into<MutConstraintHaver<'a>> + Clone) -> Result<(), AssignmentError> {
         let (constraints, other) = match (constraint_haver.clone().into(), other_haver.clone().into()) {
-            (MutConstraintHaver::Expr(expr1), MutConstraintHaver::Expr(expr2)) => tp.multi_constraints_mut(expr1, expr2),
-            (MutConstraintHaver::Expr(expr), MutConstraintHaver::ConstraintListMut(constraints)) => (tp.expr_constraints_mut(expr), constraints),
-            (MutConstraintHaver::ConstraintListMut(constraints), MutConstraintHaver::Expr(expr)) => (constraints, tp.expr_constraints_mut(expr)),
+            (MutConstraintHaver::Expr(expr1), MutConstraintHaver::Expr(expr2)) => self.get_multi_constraints_mut(tp, expr1, expr2),
+            (MutConstraintHaver::Expr(expr), MutConstraintHaver::ConstraintListMut(constraints)) => (self.get_constraints_mut(tp, expr), constraints),
+            (MutConstraintHaver::ConstraintListMut(constraints), MutConstraintHaver::Expr(expr)) => (constraints, self.get_constraints_mut(tp, expr)),
             (MutConstraintHaver::ConstraintListMut(constraints), MutConstraintHaver::ConstraintListMut(other)) => (constraints, other),
         };
         let trait_impls = constraints.trait_impls | other.trait_impls;
@@ -363,12 +369,12 @@ impl Driver {
                     is_mut: true,
                 };
                 if self.can_unify_to(tp, constraint_haver.clone().into(), &preferred_type).is_ok() {
-                    get_constraints_mut!(tp, constraint_haver.clone()).preferred_type = Some(preferred_type);
+                    get_constraints_mut!(self, tp, constraint_haver.clone()).preferred_type = Some(preferred_type);
                 } else {
-                    let other = get_constraints_mut!(tp, other_haver.clone());
+                    let other = get_constraints_mut!(self, tp, other_haver.clone());
                     other.preferred_type = None;
                     if other.one_of.is_none() {
-                        let constraints = get_constraints_mut!(tp, constraint_haver.clone());
+                        let constraints = get_constraints_mut!(self, tp, constraint_haver.clone());
                         if let Some(one_of) = constraints.one_of.clone() {
                             let mut rhs_one_of = SmallVec::new();
                             for ty in one_of.iter() {
@@ -378,25 +384,25 @@ impl Driver {
                                 }
                             }
 
-                            get_constraints_mut!(tp, other_haver.clone()).one_of = Some(rhs_one_of);
+                            get_constraints_mut!(self, tp, other_haver.clone()).one_of = Some(rhs_one_of);
                         } else {
-                            get_constraints_mut!(tp, other_haver.clone()).one_of = None;
+                            get_constraints_mut!(self, tp, other_haver.clone()).one_of = None;
                         }
                     }
                 }
             }
-            if let Some(preferred_type) = get_constraints_mut!(tp, constraint_haver.clone()).preferred_type.clone() {
+            if let Some(preferred_type) = get_constraints_mut!(self, tp, constraint_haver.clone()).preferred_type.clone() {
                 // I don't actually know if it's possible for an expression to not be able to unify to its preferred type?
                 assert!(self.can_unify_to(tp, constraint_haver.clone().into(), &preferred_type).is_ok());
                 let preferred_type = QualType::from(preferred_type.ty.clone());
                 if self.can_unify_to(tp, other_haver.clone().into(), &preferred_type).is_ok() {
-                    get_constraints_mut!(tp, other_haver.clone()).preferred_type = Some(preferred_type);
+                    get_constraints_mut!(self, tp, other_haver.clone()).preferred_type = Some(preferred_type);
                 } else {
-                    get_constraints_mut!(tp, constraint_haver.clone()).preferred_type = None;
+                    get_constraints_mut!(self, tp, constraint_haver.clone()).preferred_type = None;
                 }
             }
         }
-        let constraints = get_constraints_mut!(tp, constraint_haver);
+        let constraints = get_constraints_mut!(self, tp, constraint_haver);
         if !constraints.one_of.as_ref().unwrap().is_empty() && !constraints.is_error() && !constraints.one_of_exists(|ty| ty.is_mut) {
             return Err(AssignmentError::Immutable);
         }
@@ -404,7 +410,7 @@ impl Driver {
     }
 
     pub fn solve_constraints<'a>(&self, tp: &'a impl TypeProvider, constraints: impl Into<ConstraintHaver<'a>>) -> Result<QualType, SolveError<'a>> {
-        let constraints = get_constraints!(tp, constraints);
+        let constraints = get_constraints!(self, tp, constraints);
 
         if let Some(one_of) = &constraints.one_of {
             if one_of.len() == 1 {
@@ -428,10 +434,10 @@ impl Driver {
 
     pub fn set_constraints_to_c_variadic_compatible_type<'a>(&self, tp: &mut impl TypeProvider, constraints: impl Into<MutConstraintHaver<'a>> + Clone) {
         // If we're never, we should stay never.
-        if get_constraints_mut!(tp, constraints.clone()).is_never() { return; }
+        if get_constraints_mut!(self, tp, constraints.clone()).is_never() { return; }
 
         let solution = Some([self.solve_constraints(tp, constraints.clone().into()).unwrap()].into());
-        get_constraints_mut!(tp, constraints).one_of = solution;
+        get_constraints_mut!(self, tp, constraints).one_of = solution;
     }
 }
 
@@ -460,10 +466,27 @@ impl ConstraintList {
 
 impl Driver {
     pub fn get_constraints<'a>(&self, tp: &'a impl TypeProvider, constraint_haver: impl Into<ConstraintHaver<'a>>) -> &'a ConstraintList {
-        get_constraints!(tp, constraint_haver)
+        get_constraints!(self, tp, constraint_haver)
     }
 
     pub fn get_constraints_mut<'a>(&self, tp: &'a mut impl TypeProvider, constraint_haver: impl Into<MutConstraintHaver<'a>>) -> &'a mut ConstraintList {
-        get_constraints_mut!(tp, constraint_haver)
+        get_constraints_mut!(self, tp, constraint_haver)
+    }
+
+    pub fn get_multi_constraints_mut<'a>(&self, tp: &'a mut impl TypeProvider, a: ExprId, b: ExprId) -> (&'a mut ConstraintList, &'a mut ConstraintList) {
+        assert_ne!(a, b, "`a` ({:?}) must not equal `b` ({:?})", a, b);
+
+        let a = self.code.ast.expr_to_type_vars[a];
+        let b = self.code.ast.expr_to_type_vars[b];
+
+        // Ensure both exist, in the case of MockTypeProvider
+        tp.constraints_mut(a);
+        tp.constraints_mut(b);
+
+        unsafe {
+            let a = tp.constraints_mut(a) as *mut _;
+            let b = tp.constraints_mut(b) as *mut _;
+            (&mut *a, &mut *b)
+        }
     }
 }

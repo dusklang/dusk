@@ -45,11 +45,6 @@ macro_rules! declare_tp_fields {
             types ty: ExprId -> Type,
             /// The constraints on each type variable
             constraints constraints: TypeVarId -> ConstraintList,
-            /// The constraints on each expression's type
-            /// TODO: delete this in favour of the field above (by assigning a type variable to
-            /// each expression). This is complicated by the fact that the mapping from ExprId -> TypeVarId
-            /// needs AST access, which we don't have here.
-            expr_constraints expr_constraints: ExprId -> ConstraintList,
             decl_types decl_type: DeclId -> QualType,
         }
     }
@@ -118,17 +113,6 @@ macro_rules! declare_tp {
                 match self.eval_result(id) {
                     Const::Ty(ty) => ty,
                     x => panic!("Expected type! Found {:?}", x),
-                }
-            }
-            fn multi_constraints_mut<'a>(&'a mut self, a: ExprId, b: ExprId) -> (&'a mut ConstraintList, &'a mut ConstraintList) {
-                assert_ne!(a, b, "`a` ({:?}) must not equal `b` ({:?})", a, b);
-                // Ensure both exist, in the case of MockTypeProvider
-                self.expr_constraints_mut(a);
-                self.expr_constraints_mut(b);
-                unsafe {
-                    let a = self.expr_constraints_mut(a) as *mut _;
-                    let b = self.expr_constraints_mut(b) as *mut _;
-                    (&mut *a, &mut *b)
                 }
             }
             fn fetch_decl_type(&mut self, d: &Driver, id: DeclId, decl_ref: Option<DeclRefId>) -> QualType {

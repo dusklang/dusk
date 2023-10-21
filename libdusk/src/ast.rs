@@ -535,6 +535,7 @@ pub struct Ast {
     pub extern_mods: IndexVec<ExternModId, ExternMod>,
     pub struct_lits: IndexCounter<StructLitId>,
     pub type_vars: IndexCounter<TypeVarId>,
+    pub expr_to_type_vars: IndexVec<ExprId, TypeVarId>,
     pub generic_ctxs: IndexVec<GenericCtxId, GenericCtx>,
     pub item_generic_ctxs: IndexVec<ItemId, GenericCtxId>,
 }
@@ -794,9 +795,11 @@ impl Driver {
         // NOTE: also, see add_decl()
         let generic_ctx = self.ast.generic_ctx_stack.peek().unwrap();
         let expr_id = self.code.ast.exprs.push(expr);
+        let type_var_id = self.code.ast.type_vars.next_idx();
         let item_id = self.code.ast.items.push(Item::Expr(expr_id));
         self.code.ast.item_generic_ctxs.push_at(item_id, generic_ctx);
         self.code.ast.expr_to_items.push_at(expr_id, item_id);
+        self.code.ast.expr_to_type_vars.push_at(expr_id, type_var_id);
         self.code.ast.source_ranges.push_at(item_id, range);
 
         dvd::send(|| {
