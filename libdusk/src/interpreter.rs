@@ -1270,7 +1270,6 @@ impl DriverRef<'_> {
                         copied_args.push(frame.get_val(arg, &*self.read()).as_bytes().as_ref().to_owned().into_boxed_slice());
                         arg_tys.push(d.type_of(arg).clone());
                     }
-                    // Stop immutably borrowing the stack, because there may come a time where extern functions can transparently call into the interpreter
                     drop(stack);
                     drop(d);
                     self.read_only();
