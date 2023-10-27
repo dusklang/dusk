@@ -1,4 +1,4 @@
-use smallvec::SmallVec;
+use smallvec::{SmallVec, smallvec};
 
 use crate::ty::{Type, LegacyInternalType, QualType, IntWidth};
 use crate::ast::ExprId;
@@ -30,8 +30,31 @@ pub enum SolveError<'a> {
 }
 
 impl ConstraintList {
-    pub fn new(trait_impls: BuiltinTraits, one_of: Option<SmallVec<[QualType; 1]>>, preferred_type: Option<QualType>) -> Self {
-        Self { trait_impls, one_of: one_of.map(|one_of| one_of.into()), preferred_type, is_error: false }
+    pub fn new() -> Self { Default::default() }
+
+    pub fn with_trait_impls(mut self, trait_impls: BuiltinTraits) -> Self {
+        self.trait_impls = trait_impls;
+        self
+    }
+
+    pub fn with_one_of(mut self, one_of: SmallVec<[QualType; 1]>) -> Self {
+        self.one_of = Some(one_of);
+        self
+    }
+
+    pub fn with_type(mut self, ty: impl Into<QualType>) -> Self {
+        self.one_of = Some(smallvec![ty.into()]);
+        self
+    }
+
+    pub fn with_preferred_type(mut self, preferred_type: impl Into<QualType>) -> Self {
+        self.preferred_type = Some(preferred_type.into());
+        self
+    }
+
+    pub fn with_maybe_preferred_type(mut self, preferred_type: Option<QualType>) -> Self {
+        self.preferred_type = preferred_type;
+        self
     }
 
     pub fn one_of(&self) -> &[QualType] {
@@ -70,11 +93,12 @@ impl ConstraintList {
     }
 
     pub fn filter_map(&self, type_map: impl FnMut(&QualType) -> Option<QualType> + Copy) -> Self {
-        Self::new(
-            BuiltinTraits::empty(),
-            self.one_of.as_ref().map(|one_of| -> SmallVec<[QualType; 1]> { one_of.iter().filter_map(type_map).collect() }),
-            self.preferred_type().and_then(type_map),
-        )
+        Self {
+            trait_impls: BuiltinTraits::empty(),
+            one_of: self.one_of.as_ref().map(|one_of| -> SmallVec<[QualType; 1]> { one_of.iter().filter_map(type_map).collect() }),
+            preferred_type: self.preferred_type().and_then(type_map),
+            is_error: self.is_error,
+        }
     }
 
     pub fn one_of_exists(&self, mut condition: impl FnMut(&QualType) -> bool) -> bool {
@@ -326,7 +350,7 @@ impl Driver {
             pref
         };
 
-        ConstraintList::new(trait_impls, one_of, preferred_type)
+        ConstraintList { trait_impls, one_of, preferred_type, is_error: false }
     }
 
     // Same as intersect_constraints, but: 
@@ -453,12 +477,6 @@ impl ConstraintList {
         // If the passed in type is Error, we should stay whatever we are.
         // (this second clause is experimental and may not turn out to be a good idea. reevaluate later.)
         if !self.is_never() && !ty.ty.is_error() {
-            // Preserve generic constraints if possible. TODO: efficiency! The caller should pass in this information
-            // instead so we don't have to iterate.
-            if let Some(one_of) = &mut self.one_of {
-                one_of.retain(|other| other == &ty);
-                if !one_of.is_empty() { return; }
-            }
             self.one_of = Some([ty].into());
         }
     }
