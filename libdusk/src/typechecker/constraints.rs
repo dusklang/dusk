@@ -1,7 +1,7 @@
 use smallvec::{SmallVec, smallvec};
 
 use crate::ty::{Type, LegacyInternalType, QualType, IntWidth};
-use crate::ast::ExprId;
+use crate::ast::{ExprId, DeclId};
 
 use crate::driver::Driver;
 use crate::ty::BuiltinTraits;
@@ -10,9 +10,76 @@ use crate::type_provider::TypeProvider;
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ConstraintList {
     trait_impls: BuiltinTraits,
-    one_of: Option<SmallVec<[QualType; 1]>>,
+    one_of: Option<OneOfConstraint>,
     preferred_type: Option<QualType>,
     is_error: bool,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct OneOfConstraint {
+    types: SmallVec<[QualType; 1]>,
+    decls: SmallVec<[DeclId; 1]>,
+}
+
+impl OneOfConstraint {
+    pub fn new() -> Self { Default::default() }
+
+    pub fn push(&mut self, ty: impl Into<QualType>) {
+        assert!(self.decls.is_empty());
+        self.types.push(ty.into());
+    }
+
+    pub fn push_with_decl(&mut self, ty: impl Into<QualType>, decl: DeclId) {
+        assert_eq!(self.types.len(), self.decls.len());
+        self.types.push(ty.into());
+        self.decls.push(decl);
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.types.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.types.len()
+    }
+
+    pub fn retain(&mut self, mut f: impl FnMut(&mut QualType) -> bool) {
+        if self.decls.is_empty() {
+            self.types.retain(f);
+        } else {
+            let len = self.types.len();
+            assert_eq!(len, self.decls.len());
+            let mut num_deleted = 0;
+            for i in 0..len {
+                if !f(&mut self.types[i]) {
+                    num_deleted += 1;
+                } else if num_deleted > 0 {
+                    self.types.swap(i - num_deleted, i);
+                    self.decls.swap(i - num_deleted, i);
+                }
+            }
+            self.types.truncate(len - num_deleted);
+            self.decls.truncate(len - num_deleted);
+        }
+    }
+}
+
+impl From<SmallVec<[QualType; 1]>> for OneOfConstraint {
+    fn from(types: SmallVec<[QualType; 1]>) -> Self {
+        Self {
+            types: types.into(),
+            decls: Default::default(),
+        }
+    }
+}
+
+impl<const N: usize> From<[QualType; N]> for OneOfConstraint {
+    fn from(types: [QualType; N]) -> Self {
+        Self {
+            types: SmallVec::from_iter(types),
+            decls: Default::default(),
+        }
+    }
 }
 
 pub enum UnificationError<'a> {
@@ -20,6 +87,22 @@ pub enum UnificationError<'a> {
     Trait(BuiltinTraits),
     /// The expression didn't have the requested type in its list of type choices
     InvalidChoice(&'a [QualType]),
+}
+
+pub enum UnificationSuccess {
+    IsError,
+    IsNever,
+    HasTypeInOneOf(Option<DeclId>),
+    TraitsImplementedByType,
+}
+
+impl UnificationSuccess {
+    pub fn get_decl(&self) -> Option<DeclId> {
+        match self {
+            UnificationSuccess::HasTypeInOneOf(decl) => *decl,
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -37,14 +120,13 @@ impl ConstraintList {
         self
     }
 
-    pub fn with_one_of(mut self, one_of: SmallVec<[QualType; 1]>) -> Self {
-        self.one_of = Some(one_of);
+    pub fn with_one_of(mut self, one_of: impl Into<OneOfConstraint>) -> Self {
+        self.one_of = Some(one_of.into());
         self
     }
 
-    pub fn with_type(mut self, ty: impl Into<QualType>) -> Self {
-        self.one_of = Some(smallvec![ty.into()]);
-        self
+    pub fn with_type(self, ty: impl Into<QualType>) -> Self {
+        self.with_one_of(smallvec![ty.into()])
     }
 
     pub fn with_preferred_type(mut self, preferred_type: impl Into<QualType>) -> Self {
@@ -59,7 +141,7 @@ impl ConstraintList {
 
     pub fn one_of(&self) -> &[QualType] {
         if let Some(one_of) = &self.one_of {
-            one_of
+            &one_of.types
         } else {
             &[]
         }
@@ -83,7 +165,7 @@ impl ConstraintList {
             .as_ref()
             .map(|one_of|
                 one_of.is_empty() ||
-                one_of
+                one_of.types
                     .iter()
                     .any(|ty|
                         ty.ty == Type::Error
@@ -92,10 +174,19 @@ impl ConstraintList {
             .unwrap_or(false)
     }
 
-    pub fn filter_map(&self, type_map: impl FnMut(&QualType) -> Option<QualType> + Copy) -> Self {
+    pub fn filter_map(&self, mut type_map: impl FnMut(&QualType) -> Option<QualType> + Copy) -> Self {
         Self {
             trait_impls: BuiltinTraits::empty(),
-            one_of: self.one_of.as_ref().map(|one_of| -> SmallVec<[QualType; 1]> { one_of.iter().filter_map(type_map).collect() }),
+            one_of: self.one_of.as_ref().map(|one_of| -> OneOfConstraint {
+                let mut one_of = one_of.clone();
+                one_of.retain(|ty| if let Some(new_ty) = type_map(&*ty) {
+                    *ty = new_ty;
+                    true
+                } else {
+                    false
+                });
+                one_of
+            }),
             preferred_type: self.preferred_type().and_then(type_map),
             is_error: self.is_error,
         }
@@ -103,7 +194,7 @@ impl ConstraintList {
 
     pub fn one_of_exists(&self, mut condition: impl FnMut(&QualType) -> bool) -> bool {
         if let Some(one_of) = &self.one_of {
-            for ty in one_of {
+            for ty in &one_of.types {
                 if condition(ty) { return true; }
             }
         }
@@ -111,7 +202,7 @@ impl ConstraintList {
     }
 
     pub fn set_one_of(&mut self, one_of: impl Into<SmallVec<[QualType; 1]>>) {
-        self.one_of = Some(one_of.into());
+        self.one_of = Some(one_of.into().into());
     }
 
     pub fn max_ranked_type_with_assoc_data<T: Clone>(&self, mut rank: impl FnMut(&QualType) -> (usize, T)) -> Result<(&QualType, T), Vec<(&QualType, T)>> {
@@ -120,7 +211,7 @@ impl ConstraintList {
             Some(ref one_of) => one_of,
         };
         let mut ranks = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
-        for ty in one_of {
+        for ty in &one_of.types {
             let (rank, assoc_data) = rank(ty);
             if rank > 0 {
                 ranks[rank - 1].push((ty, assoc_data));
@@ -146,7 +237,7 @@ impl ConstraintList {
         match self.one_of {
             None => false,
             Some(ref one_of) => one_of.len() == 1 
-                && one_of.first().unwrap().ty == Type::Never,
+                && one_of.types.first().unwrap().ty == Type::Never,
         }
     }
 }
@@ -267,16 +358,16 @@ macro_rules! get_constraints_mut {
 
 
 impl Driver {
-    pub fn can_unify_to<'a, 'b: 'a>(&'a self, tp: &'a impl TypeProvider, constraint_haver: impl Into<ConstraintHaver<'a>>, ty: impl Into<UnificationType<'b>>) -> Result<(), UnificationError<'a>> {
+    pub fn can_unify_to<'a, 'b: 'a>(&'a self, tp: &'a impl TypeProvider, constraint_haver: impl Into<ConstraintHaver<'a>>, ty: impl Into<UnificationType<'b>>) -> Result<UnificationSuccess, UnificationError<'a>> {
         let constraints = match constraint_haver.into() {
             ConstraintHaver::Expr(expr) => self.get_constraints(tp, expr),
             ConstraintHaver::ConstraintList(constraints) => constraints,
         };
         // Never is the "bottom type", so it unifies to anything.
-        if constraints.one_of_exists(|ty| ty.ty == Type::Never) { return Ok(()); }
+        if constraints.one_of_exists(|ty| ty.ty == Type::Never) { return Ok(UnificationSuccess::IsNever); }
 
         // If this value is already an error, just say it unifies to anything
-        if constraints.is_error() { return Ok(()); }
+        if constraints.is_error() { return Ok(UnificationSuccess::IsError); }
 
         // TODO: more robust logic that looks at the current constraints of generic types
         let ty = ty.into();
@@ -290,15 +381,17 @@ impl Driver {
             return Err(Trait(not_implemented));
         }
         if let Some(one_of) = &constraints.one_of {
-            for oty in one_of {
+            for i in 0..one_of.types.len() {
+                let oty = &one_of.types[i];
                 if oty.trivially_convertible_to(&ty) {
-                    return Ok(());
+                    let decl = (!one_of.decls.is_empty()).then(|| one_of.decls[i]);
+                    return Ok(UnificationSuccess::HasTypeInOneOf(decl));
                 }
             }
-            return Err(InvalidChoice(&one_of));
+            return Err(InvalidChoice(&one_of.types));
         }
 
-        Ok(())
+        Ok(UnificationSuccess::TraitsImplementedByType)
     }
 
     pub fn intersect_constraints<'a>(&self, tp: &impl TypeProvider, constraints: impl Into<ConstraintHaver<'a>> + Clone, other: impl Into<ConstraintHaver<'a>> + Clone) -> ConstraintList {
@@ -317,10 +410,10 @@ impl Driver {
             (Some(one_of), None) | (None, Some(one_of)) => Some(one_of.clone()),
             (Some(lhs), Some(rhs)) => {
                 let mut one_of = SmallVec::new();
-                for lty in lhs.iter() {
+                for lty in &lhs.types {
                     if implements_traits(&lty.ty, trait_impls).is_err() { continue; }
 
-                    for rty in rhs.iter() {
+                    for rty in &rhs.types {
                         if implements_traits(&rty.ty, trait_impls).is_err() { continue; }
 
                         // TODO: would it be ok to break from this loop after finding a match here?
@@ -331,7 +424,7 @@ impl Driver {
                         }
                     }
                 }
-                Some(one_of)
+                Some(one_of.into())
             }
         };
 
@@ -400,11 +493,15 @@ impl Driver {
                     if other.one_of.is_none() {
                         let constraints = get_constraints_mut!(self, tp, constraint_haver.clone());
                         if let Some(one_of) = constraints.one_of.clone() {
-                            let mut rhs_one_of = SmallVec::new();
-                            for ty in one_of.iter() {
-                                let ty = ty.ty.clone().into();
-                                if self.can_unify_to(tp, other_haver.clone().into(), &ty).is_ok() {
-                                    rhs_one_of.push(ty);
+                            let mut rhs_one_of = OneOfConstraint::new();
+                            for ty in &one_of.types {
+                                let ty: QualType = ty.ty.clone().into();
+                                if let Ok(success) = self.can_unify_to(tp, other_haver.clone().into(), &ty) {
+                                    if let Some(decl) = success.get_decl() {
+                                        rhs_one_of.push_with_decl(ty, decl);
+                                    } else {
+                                        rhs_one_of.push(ty);
+                                    }
                                 }
                             }
 
@@ -438,7 +535,7 @@ impl Driver {
 
         if let Some(one_of) = &constraints.one_of {
             if one_of.len() == 1 {
-                return Ok(one_of[0].clone())
+                return Ok(one_of.types[0].clone())
             } else if one_of.is_empty() {
                 return Err(SolveError::NoValidChoices)
             }
@@ -448,7 +545,7 @@ impl Driver {
             Some(ref pref) => if self.can_unify_to(tp, constraints, pref).is_ok() {
                 Ok(pref.clone())
             } else if let Some(one_of) = &constraints.one_of {
-                Err(SolveError::Ambiguous { choices: &one_of })
+                Err(SolveError::Ambiguous { choices: &one_of.types })
             } else {
                 Err(SolveError::CantUnifyToPreferredType)
             },
@@ -477,6 +574,9 @@ impl ConstraintList {
         // If the passed in type is Error, we should stay whatever we are.
         // (this second clause is experimental and may not turn out to be a good idea. reevaluate later.)
         if !self.is_never() && !ty.ty.is_error() {
+            if let Some(one_of) = &self.one_of {
+                assert!(one_of.decls.is_empty(), "attempted to remove decl id from one_of");
+            }
             self.one_of = Some([ty].into());
         }
     }
