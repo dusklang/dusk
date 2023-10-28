@@ -203,7 +203,10 @@ impl tir::AssignedDecl {
         let decl_id = self.decl_id;
         let root_expr = self.root_expr;
         let ty = tp.fetch_decl_type(driver, decl_id, None).ty;
-        let unification = driver.can_unify_to(tp, root_expr, &ty.clone().into()).unwrap();
+        let unification = match driver.can_unify_to(tp, root_expr, &ty.clone().into()) {
+            Ok(unification) => unification,
+            Err(_) => panic!("unable to unify {:?} to {:?}", driver.get_constraints(tp, root_expr), ty),
+        };
         driver.get_constraints_mut(tp, root_expr).set_to(ConstraintSolution::new(ty).with_decl_maybe(unification.get_decl()));
     }
 }
@@ -1060,6 +1063,7 @@ impl tir::Expr<tir::Call> {
             .unwrap_or(ConstraintSolution::error())
             .make_immutable();
         *tp.ty_mut(self.id) = ty.qual_ty.ty.clone();
+        println!("THE TYPE IS {:?}", ty.qual_ty);
 
         // TODO: there might be a bug here if there is no one-of constraint on the callee.
         let mut callee_one_of = driver.get_constraints_mut(tp, self.callee).one_of().cloned().unwrap_or_default();
@@ -1460,8 +1464,10 @@ impl tir::Expr<tir::If> {
         // If the if branches can't unify, it will be diagnosed above. So just propagate the error.
         let ty = driver.solve_constraints(tp, self.id).unwrap_or(ConstraintSolution::error());
         *tp.ty_mut(self.id) = ty.qual_ty.ty.clone();
-        driver.get_constraints_mut(tp, self.then_expr).set_to(ty.clone());
-        driver.get_constraints_mut(tp, self.else_expr).set_to(ty);
+        let then_succ = driver.can_unify_to(tp, self.then_expr, &ty.qual_ty).unwrap();
+        let else_succ = driver.can_unify_to(tp, self.else_expr, &ty.qual_ty).unwrap();
+        driver.get_constraints_mut(tp, self.then_expr).set_to(ty.clone().with_decl_maybe(then_succ.get_decl()));
+        driver.get_constraints_mut(tp, self.else_expr).set_to(ty.with_decl_maybe(else_succ.get_decl()));
     }
 }
 

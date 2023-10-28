@@ -583,8 +583,9 @@ impl Driver {
     }
 
     fn ty_is_trivially_convertible_to_adding_constraints(&self, tp: &mut impl TypeProvider, a: &Type, b: &Type) -> bool {
-        // TODO: we currently only check the right hand side for type variables. Should we also check the left hand side?
-        match (a, b) {
+        let mut a = a.clone();
+        self.canonicalize_type(tp, &mut a);
+        match (&a, b) {
             (Type::Never, _b) => true,
             (Type::Pointer(a), Type::Pointer(b)) => self.qual_ty_is_trivially_convertible_to_adding_constraints(tp, a, b),
             (a, &Type::TypeVar(type_var)) => {
@@ -615,8 +616,9 @@ impl Driver {
     }
 
     fn ty_is_trivially_convertible_to(&self, tp: &impl TypeProvider, a: &Type, b: &Type) -> bool {
-        // TODO: we currently only check the right hand side for type variables. Should we also check the left hand side?
-        match (a, b) {
+        let mut a = a.clone();
+        self.canonicalize_type(tp, &mut a);
+        match (&a, b) {
             (Type::Never, _b) => true,
             (Type::Pointer(a), Type::Pointer(b)) => self.qual_ty_is_trivially_convertible_to(tp, a, b),
             (a, &Type::TypeVar(type_var)) => self.can_unify_to(tp, type_var, &a.into()).is_ok(),
@@ -763,7 +765,7 @@ impl Driver {
         Ok(())
     }
 
-    pub fn solve_constraints<'a>(&self, tp: &'a impl TypeProvider, constraints: impl Into<ConstraintHaver<'a>>) -> Result<ConstraintSolution, SolveError<'a>> {
+    fn solve_constraints_impl<'a>(&self, tp: &'a impl TypeProvider, constraints: impl Into<ConstraintHaver<'a>>) -> Result<ConstraintSolution, SolveError<'a>> {
         let constraints = get_constraints!(self, tp, constraints);
 
         if let Some(one_of) = &constraints.one_of {
@@ -785,6 +787,45 @@ impl Driver {
             },
             None => Err(SolveError::NoValidChoices),
         }
+    }
+
+    pub fn solve_constraints<'a>(&self, tp: &'a impl TypeProvider, constraints: impl Into<ConstraintHaver<'a>>) -> Result<ConstraintSolution, SolveError<'a>> {
+        self.solve_constraints_impl(tp, constraints).map(|mut solution| {
+            self.canonicalize_type(tp, &mut solution.qual_ty.ty);
+            solution
+        })
+    }
+
+    fn canonicalize_type(&self, tp: &impl TypeProvider, ty: &mut Type) {
+        match ty {
+            Type::Error | Type::Int { .. } | Type::Float(_) | Type::LegacyInternal(_) | Type::Internal(_) | Type::Bool | Type::Void | Type::Mod | Type::Ty | Type::GenericParam(_) | Type::Never => {},
+
+            // TODO: restructure enum types such that it is possible to call `canonicalize_type` on enum variants' types
+            Type::Enum(_) => {},
+
+            Type::Pointer(pointee) => self.canonicalize_type(tp, &mut pointee.ty),
+            Type::Inout(pointee) => self.canonicalize_type(tp, pointee),
+            Type::Function(func) => {
+                self.canonicalize_type(tp, &mut func.return_ty);
+                for arg in &mut func.param_tys {
+                    self.canonicalize_type(tp, arg);
+                }
+            },
+            Type::Struct(strukt) => {
+                for field_ty in &mut strukt.field_tys {
+                    self.canonicalize_type(tp, field_ty);
+                }
+            },
+            Type::TypeVar(type_var) => {
+                *ty = self.solve_constraints(tp, *type_var).unwrap().qual_ty.ty;
+            }
+        }
+    }
+
+    pub fn get_canonical_type(&self, tp: &impl TypeProvider, expr: ExprId) -> Type {
+        let mut ty = tp.ty(expr).clone();
+        self.canonicalize_type(tp, &mut ty);
+        ty
     }
 
     pub fn set_constraints_to_c_variadic_compatible_type<'a>(&self, tp: &mut impl TypeProvider, constraints: impl Into<MutConstraintHaver<'a>> + Clone) {

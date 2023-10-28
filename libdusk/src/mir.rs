@@ -1910,7 +1910,15 @@ impl Driver {
             Instr::Const(konst) => konst.ty(),
             Instr::Alloca(ty) => ty.clone().mut_ptr(),
             Instr::LogicalNot(_) => Type::Bool,
-            &Instr::Call { func, .. } => b.functions[func].ty.return_ty.as_ref().clone(),
+            &Instr::Call { func, ref generic_arguments, .. } => {
+                let func = &b.functions[func];
+                let mut replacements = HashMap::new();
+                for (param, arg) in range_iter(func.generic_params.clone()).zip(generic_arguments) {
+                    replacements.insert(param, arg.clone());
+                }
+
+                func.ty.return_ty.as_ref().clone().replacing_generic_params(&replacements)
+            },
             &Instr::FunctionRef { func, .. } => Type::Function(b.functions[func].ty.clone()),
             Instr::ExternCall { func, .. } => b.extern_mods[&func.extern_mod].imported_functions[func.index].ty.return_ty.as_ref().clone(),
             Instr::LegacyIntrinsic { ty, .. } => ty.clone(),
@@ -2194,40 +2202,8 @@ impl DriverRef<'_> {
         }
     }
 
-    // TODO: move the elsewhere probably
-    fn canonicalize_type(&self, tp: &impl TypeProvider, ty: &mut Type) {
-        match ty {
-            Type::Error | Type::Int { .. } | Type::Float(_) | Type::LegacyInternal(_) | Type::Internal(_) | Type::Bool | Type::Void | Type::Mod | Type::Ty | Type::GenericParam(_) | Type::Never => {},
-
-            // TODO: restructure enum types such that it is possible to call `canonicalize_type` on enum variants' types
-            Type::Enum(_) => {},
-
-            Type::Pointer(pointee) => self.canonicalize_type(tp, &mut pointee.ty),
-            Type::Inout(pointee) => self.canonicalize_type(tp, pointee),
-            Type::Function(func) => {
-                self.canonicalize_type(tp, &mut func.return_ty);
-                for arg in &mut func.param_tys {
-                    self.canonicalize_type(tp, arg);
-                }
-            },
-            Type::Struct(strukt) => {
-                for field_ty in &mut strukt.field_tys {
-                    self.canonicalize_type(tp, field_ty);
-                }
-            },
-            Type::TypeVar(type_var) => {
-                *ty = self.read().solve_constraints(tp, *type_var).unwrap().qual_ty.ty;
-            }
-        }
-    }
-    fn get_canonical_type(&self, tp: &impl TypeProvider, expr: ExprId) -> Type {
-        let mut ty = tp.ty(expr).clone();
-        self.canonicalize_type(tp, &mut ty);
-        ty
-    }
-
     fn build_expr(&mut self, b: &mut FunctionBuilder, expr: ExprId, ctx: Context, tp: &impl TypeProvider) -> Value {
-        let ty = self.get_canonical_type(tp, expr);
+        let ty = self.read().get_canonical_type(tp, expr);
         let d = self.read();
         // TODO: in every single case of this match, I have to call drop() on d, otherwise the Ref<Driver> will
         // conflict with mutable uses of self.
