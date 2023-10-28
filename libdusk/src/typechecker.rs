@@ -899,16 +899,9 @@ impl tir::Expr<tir::DeclRef> {
             }
         });
 
-        overloads.overloads.retain(|&overload| {
-            let overload_ty = tp.fetch_decl_type(driver, overload, Some(self.decl_ref_id));
-
-            if overload_ty.trivially_convertible_to(&ty.qual_ty) {
-                true
-            } else {
-                overloads.nonviable_overloads.push(overload);
-                false
-            }
-        });
+        // NOTE: I used to do a second call to overloads.overloads.retain() here, where I checked
+        // that tp.fetch_decl_type() for the overload was trivially convertible to ty.qual_ty.
+        // However, I don't think this is necessary. Could be wrong.
 
         let pref = driver.get_constraints(tp, self.id)
             .preferred_type()
@@ -1008,13 +1001,17 @@ impl tir::Expr<tir::Call> {
                 }
             }
             
-            // Check that arguments can unify to their corresponding parameter types.
+            // Check that arguments can unify to their corresponding parameter types, and apply constraints to generic type parameters in the process
             for (arg, ty) in self.args.iter().copied().zip(func.param_tys.iter()) {
                 if driver.can_unify_argument_to(tp, arg, UnificationType::QualType(&ty.clone().into())).is_err() {
-                    println!("ARGUMENT {} CANNOT UNIFY TO {:?}", driver.display_item(arg), ty);
                     return false;
-                } else {
-                    println!("ARGUMENT {} CAN UNIFY TO {:?}", driver.display_item(arg), ty);
+                }
+            }
+
+            // Check that arguments can still unify to their parameter types, after the new generic constraints were added.
+            for (arg, ty) in self.args.iter().copied().zip(func.param_tys.iter()) {
+                if driver.can_unify_to(tp, arg, UnificationType::QualType(&ty.clone().into())).is_err() {
+                    return false;
                 }
             }
             // TODO: is there anything we should be doing to check C variadic arguments here?
@@ -1414,8 +1411,8 @@ impl tir::Expr<tir::StructLit> {
                 let field = field.decl;
                 let field_ty = tp.fetch_decl_type(driver, field, None).ty;
 
-                // TODO: this will probably get rid of DeclId info
-                driver.get_constraints_mut(tp, lit.fields[i]).set_to(ConstraintSolution::new(field_ty));
+                let success = driver.can_unify_to(tp, lit.fields[i], &field_ty.clone().into()).unwrap();
+                driver.get_constraints_mut(tp, lit.fields[i]).set_to(ConstraintSolution::new(field_ty).with_decl_maybe(success.get_decl()));
             }
         }
     }

@@ -270,16 +270,14 @@ impl ConstraintList {
         }
     }
 
-    pub fn one_of_exists(&self, mut condition: impl FnMut(&QualType) -> bool) -> bool {
+    pub fn one_of_exists(&self, condition: impl FnMut(&QualType) -> bool) -> bool {
         if let Some(one_of) = &self.one_of {
-            for ty in &one_of.types {
-                if condition(ty) { return true; }
-            }
+            return one_of.types.iter().any(condition);
         }
         false
     }
 
-    pub fn set_one_of(&mut self, one_of: impl Into<SmallVec<[QualType; 1]>>) {
+    pub fn set_one_of(&mut self, one_of: impl Into<OneOfConstraint>) {
         self.one_of = Some(one_of.into().into());
     }
 
@@ -321,32 +319,103 @@ impl ConstraintList {
     }
 }
 
-// TODO: look at constraints of embedded type variables to determine whether or not a type implements a trait
-fn implements_traits(ty: &Type, traits: BuiltinTraits) -> Result<(), BuiltinTraits> {
-    let mut not_implemented = BuiltinTraits::empty();
-    fn expressible_by_str_lit(ty: &Type) -> bool {
-        match ty {
-            Type::Pointer(pointee) => matches!(pointee.ty, Type::Int { width: IntWidth::W8, .. }) && !pointee.is_mut,
-            Type::LegacyInternal(LegacyInternalType::StringLiteral) => true,
-            _ => false,
-        }
-    }
-    let mut check_implements = |trayt: BuiltinTraits, check: fn(&Type) -> bool| {
-        if traits.contains(trayt) && !check(ty) {
-            not_implemented |= trayt;
+macro_rules! get_constraints {
+    ($driver:expr, $tp:expr, $haver:expr) => {
+        match $haver.into() {
+            ConstraintHaver::Expr(expr) => {
+                let type_var = $driver.code.ast.expr_to_type_vars[expr];
+                $tp.constraints(type_var)
+            },
+            ConstraintHaver::TypeVar(type_var) => $tp.constraints(type_var),
+            ConstraintHaver::ConstraintList(constraints) => constraints,
         }
     };
-    check_implements(BuiltinTraits::INT, |ty| matches!(ty, Type::Int { .. } | Type::Float(_)));
-    check_implements(BuiltinTraits::DEC, |ty| matches!(ty, Type::Float(_)));
-    check_implements(BuiltinTraits::CHAR, |ty| {
-        matches!(ty, Type::Int { width: IntWidth::W8, .. }) || expressible_by_str_lit(ty)
-    });
-    check_implements(BuiltinTraits::STR, expressible_by_str_lit);
+}
 
-    if not_implemented.is_empty() {
-        Ok(())
-    } else {
-        Err(not_implemented)
+macro_rules! get_constraints_mut {
+    ($driver:expr, $tp:expr, $haver:expr) => {
+        match $haver.into() {
+            MutConstraintHaver::Expr(expr) => {
+                let type_var = $driver.code.ast.expr_to_type_vars[expr];
+                $tp.constraints_mut(type_var)
+            },
+            MutConstraintHaver::TypeVar(type_var) => $tp.constraints_mut(type_var),
+            MutConstraintHaver::ConstraintListMut(constraints) => constraints,
+        }
+    };
+}
+
+macro_rules! get_multi_constraints_mut {
+    ($driver:expr, $tp:expr, $a:expr, $b:expr) => {
+        'get_multi_constraints: {
+            let (a, b) = match ($a.clone().into(), $b.clone().into()) {
+                (MutConstraintHaver::ConstraintListMut(a), b) => break 'get_multi_constraints (a, get_constraints_mut!($driver, $tp, b)),
+                (a, MutConstraintHaver::ConstraintListMut(b)) => break 'get_multi_constraints (get_constraints_mut!($driver, $tp, a), b),
+                (a, b) => ($driver.to_type_var(a).unwrap(), $driver.to_type_var(b).unwrap()),
+            };
+    
+            assert_ne!(a, b, "`a` ({:?}) must not equal `b` ({:?})", a, b);
+    
+            // Ensure both exist, in the case of MockTypeProvider
+            $tp.constraints_mut(a);
+            $tp.constraints_mut(b);
+    
+            unsafe {
+                let a = $tp.constraints_mut(a) as *mut _;
+                let b = $tp.constraints_mut(b) as *mut _;
+                (&mut *a, &mut *b)
+            }
+        }
+    }
+}
+
+impl Driver {
+    fn type_implements_traits(&self, tp: &impl TypeProvider, ty: &Type, traits: BuiltinTraits) -> Result<(), BuiltinTraits> {
+        if let Type::TypeVar(type_var) = *ty {
+            // TODO: handle more type variable cases.
+            let not_implemented = traits.difference(get_constraints!(self, tp, type_var).trait_impls);
+            if not_implemented.is_empty() {
+                Ok(())
+            } else {
+                Err(not_implemented)
+            }
+        } else {
+            let mut not_implemented = BuiltinTraits::empty();
+            fn expressible_by_str_lit(ty: &Type) -> bool {
+                match ty {
+                    Type::Pointer(pointee) => matches!(pointee.ty, Type::Int { width: IntWidth::W8, .. }) && !pointee.is_mut,
+                    Type::LegacyInternal(LegacyInternalType::StringLiteral) => true,
+                    _ => false,
+                }
+            }
+            let mut check_implements = |trayt: BuiltinTraits, check: fn(&Type) -> bool| {
+                if traits.contains(trayt) && !check(ty) {
+                    not_implemented |= trayt;
+                }
+            };
+            check_implements(BuiltinTraits::INT, |ty| matches!(ty, Type::Int { .. } | Type::Float(_)));
+            check_implements(BuiltinTraits::DEC, |ty| matches!(ty, Type::Float(_)));
+            check_implements(BuiltinTraits::CHAR, |ty| {
+                matches!(ty, Type::Int { width: IntWidth::W8, .. }) || expressible_by_str_lit(ty)
+            });
+            check_implements(BuiltinTraits::STR, expressible_by_str_lit);
+
+            if not_implemented.is_empty() {
+                Ok(())
+            } else {
+                Err(not_implemented)
+            }
+        }
+    }
+
+    fn type_implements_traits_adding_constraints(&self, tp: &mut impl TypeProvider, ty: &Type, traits: BuiltinTraits) -> Result<(), BuiltinTraits> {
+        if let Type::TypeVar(type_var) = *ty {
+            // TODO: handle more type variable cases.
+            get_constraints_mut!(self, tp, type_var).trait_impls |= traits;
+            Ok(())
+        } else {
+            self.type_implements_traits(tp, ty, traits)
+        }
     }
 }
 
@@ -427,56 +496,6 @@ impl<'a> From<MutConstraintHaver<'a>> for ConstraintHaver<'a> {
     }
 }
 
-macro_rules! get_constraints {
-    ($driver:expr, $tp:expr, $haver:expr) => {
-        match $haver.into() {
-            ConstraintHaver::Expr(expr) => {
-                let type_var = $driver.code.ast.expr_to_type_vars[expr];
-                $tp.constraints(type_var)
-            },
-            ConstraintHaver::TypeVar(type_var) => $tp.constraints(type_var),
-            ConstraintHaver::ConstraintList(constraints) => constraints,
-        }
-    };
-}
-
-macro_rules! get_constraints_mut {
-    ($driver:expr, $tp:expr, $haver:expr) => {
-        match $haver.into() {
-            MutConstraintHaver::Expr(expr) => {
-                let type_var = $driver.code.ast.expr_to_type_vars[expr];
-                $tp.constraints_mut(type_var)
-            },
-            MutConstraintHaver::TypeVar(type_var) => $tp.constraints_mut(type_var),
-            MutConstraintHaver::ConstraintListMut(constraints) => constraints,
-        }
-    };
-}
-
-macro_rules! get_multi_constraints_mut {
-    ($driver:expr, $tp:expr, $a:expr, $b:expr) => {
-        'get_multi_constraints: {
-            let (a, b) = match ($a.clone().into(), $b.clone().into()) {
-                (MutConstraintHaver::ConstraintListMut(a), b) => break 'get_multi_constraints (a, get_constraints_mut!($driver, $tp, b)),
-                (a, MutConstraintHaver::ConstraintListMut(b)) => break 'get_multi_constraints (get_constraints_mut!($driver, $tp, a), b),
-                (a, b) => ($driver.to_type_var(a).unwrap(), $driver.to_type_var(b).unwrap()),
-            };
-    
-            assert_ne!(a, b, "`a` ({:?}) must not equal `b` ({:?})", a, b);
-    
-            // Ensure both exist, in the case of MockTypeProvider
-            $tp.constraints_mut(a);
-            $tp.constraints_mut(b);
-    
-            unsafe {
-                let a = $tp.constraints_mut(a) as *mut _;
-                let b = $tp.constraints_mut(b) as *mut _;
-                (&mut *a, &mut *b)
-            }
-        }
-    }
-}
-
 
 impl Driver {
     pub fn can_unify_to<'a, 'b: 'a>(&'a self, tp: &'a impl TypeProvider, constraint_haver: impl Into<ConstraintHaver<'a>>, ty: impl Into<UnificationType<'b>>) -> Result<UnificationSuccess, UnificationError<'a>> {
@@ -499,7 +518,7 @@ impl Driver {
         };
 
         use UnificationError::*;
-        if let Some(not_implemented) = implements_traits(&ty.ty, constraints.trait_impls).err() {
+        if let Some(not_implemented) = self.type_implements_traits(tp, &ty.ty, constraints.trait_impls).err() {
             return Err(Trait(not_implemented));
         }
         if let Some(one_of) = &constraints.one_of {
@@ -518,7 +537,7 @@ impl Driver {
     // This differs from `can_unify_to` above in that it modifies constraint of type variables embedded in `ty`.
     // TODO: it would be nice to...unify this implementation with `can_unify_to`, since they are 99.9% identical.
     pub fn can_unify_argument_to<'a, 'b: 'a>(&'a self, tp: &'a mut impl TypeProvider, constraint_haver: impl Into<ConstraintHaver<'a>> + Clone, ty: impl Into<UnificationType<'b>>) -> Result<UnificationSuccess, UnificationError<'a>> {
-        let constraints = get_constraints!(self, tp, constraint_haver.clone());
+        let constraints = get_constraints!(self, tp, constraint_haver.clone()).clone();
         // Never is the "bottom type", so it unifies to anything.
         if constraints.one_of_exists(|ty| ty.ty == Type::Never) { return Ok(UnificationSuccess::IsNever); }
 
@@ -532,7 +551,7 @@ impl Driver {
         };
 
         use UnificationError::*;
-        if let Some(not_implemented) = implements_traits(&ty.ty, constraints.trait_impls).err() {
+        if let Some(not_implemented) = self.type_implements_traits_adding_constraints(tp, &ty.ty, constraints.trait_impls).err() {
             return Err(Trait(not_implemented));
         }
         if let Some(one_of) = constraints.one_of.to_owned() {
@@ -600,12 +619,7 @@ impl Driver {
         match (a, b) {
             (Type::Never, _b) => true,
             (Type::Pointer(a), Type::Pointer(b)) => self.qual_ty_is_trivially_convertible_to(tp, a, b),
-            (a, &Type::TypeVar(type_var)) => {
-                match self.can_unify_to(tp, type_var, &a.into()) {
-                    Ok(success) => true,
-                    Err(_) => false,
-                }
-            },
+            (a, &Type::TypeVar(type_var)) => self.can_unify_to(tp, type_var, &a.into()).is_ok(),
             (a, b) => a == b,
         }
     }
@@ -627,10 +641,10 @@ impl Driver {
             (Some(lhs), Some(rhs)) => {
                 let mut one_of = SmallVec::new();
                 for lty in &lhs.types {
-                    if implements_traits(&lty.ty, trait_impls).is_err() { continue; }
+                    if self.type_implements_traits(tp, &lty.ty, trait_impls).is_err() { continue; }
 
                     for rty in &rhs.types {
-                        if implements_traits(&rty.ty, trait_impls).is_err() { continue; }
+                        if self.type_implements_traits(tp, &rty.ty, trait_impls).is_err() { continue; }
 
                         // TODO: would it be ok to break from this loop after finding a match here?
                         if lty.trivially_convertible_to(rty) {
@@ -682,20 +696,24 @@ impl Driver {
         other.trait_impls = trait_impls;
 
         if !constraints.is_never() && !other.is_never() {
-            let lhs = constraints.one_of.as_mut().expect("can't assign to expression without a one-of constraint");
-            lhs.retain(|lty| implements_traits(&lty.ty, trait_impls).is_ok());
-            if other.one_of.is_some() {
+            let mut lhs = constraints.one_of().expect("can't assign to expression without a one-of constraint").clone();
+            let rhs = other.one_of().cloned();
+            lhs.retain(|lty| self.type_implements_traits(tp, &lty.ty, trait_impls).is_ok());
+            if let Some(mut rhs) = rhs {
                 lhs.retain(|lty|
-                    other.one_of_exists(|rty| rty.ty.trivially_convertible_to(&lty.ty))
+                    rhs.types().iter().any(|rty| rty.ty.trivially_convertible_to(&lty.ty))
                 );
 
-                let rhs = other.one_of.as_mut().unwrap();
                 rhs.retain(|rty|
-                    implements_traits(&rty.ty, trait_impls).is_ok() && constraints.one_of_exists(|lty| rty.ty.trivially_convertible_to(&lty.ty))
+                    self.type_implements_traits(tp, &rty.ty, trait_impls).is_ok() && lhs.types().iter().any(|lty| rty.ty.trivially_convertible_to(&lty.ty))
                 );
+                get_constraints_mut!(self, tp, other_haver.clone()).set_one_of(rhs);
             }
+
+            get_constraints_mut!(self, tp, constraint_haver.clone()).set_one_of(lhs);
         }
 
+        let (constraints, other) = get_multi_constraints_mut!(self, tp, constraint_haver.clone(), other_haver.clone());
         if constraints.preferred_type.as_ref().map(|ty| &ty.ty) != other.preferred_type.as_ref().map(|ty| &ty.ty) {
             if let Some(preferred_type) = other.preferred_type.clone() {
                 // I don't actually know if it's possible for an expression to not be able to unify to its preferred type?

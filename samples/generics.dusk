@@ -2,17 +2,31 @@ fn memset<|T|>(dest: T *mut, src: T, count: usize) {
     cur := dest
     end :: (dest as usize + size_of(T) * count) as T *mut
     while cur as usize != end as usize {
-        *dest = src
+        *cur = src
         cur = (cur as usize + size_of(T)) as T *mut
     }
 }
 
 fn main() {
     buffer :: malloc(24) as u8 *mut
+
+    // This call should print "u8" (the type of *buffer)
     foo(*buffer)
-    memset(buffer, 34, 24)
+    memset(buffer, "H", 24)
+
+    // This loop should print 24 of the character "H".
+    for i in 0..24 {
+        cur_ptr :: (buffer as usize + i as usize) as u8*
+        print(*buffer)
+    }
+    print("\n")
+
     // Top-level generic function calls are not yet parsed, so assign to a temporary
     _ :: memset<|u8|>(buffer, 34, 24)
 }
 
-fn foo<|T|>(arg: T) {}
+fn foo<|T|>(arg: T) {
+    print_type(type_of(arg))
+}
+
+fn type_of<|T|>(arg: T): type { T }

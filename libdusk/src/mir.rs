@@ -2194,8 +2194,40 @@ impl DriverRef<'_> {
         }
     }
 
+    // TODO: move the elsewhere probably
+    fn canonicalize_type(&self, tp: &impl TypeProvider, ty: &mut Type) {
+        match ty {
+            Type::Error | Type::Int { .. } | Type::Float(_) | Type::LegacyInternal(_) | Type::Internal(_) | Type::Bool | Type::Void | Type::Mod | Type::Ty | Type::GenericParam(_) | Type::Never => {},
+
+            // TODO: restructure enum types such that it is possible to call `canonicalize_type` on enum variants' types
+            Type::Enum(_) => {},
+
+            Type::Pointer(pointee) => self.canonicalize_type(tp, &mut pointee.ty),
+            Type::Inout(pointee) => self.canonicalize_type(tp, pointee),
+            Type::Function(func) => {
+                self.canonicalize_type(tp, &mut func.return_ty);
+                for arg in &mut func.param_tys {
+                    self.canonicalize_type(tp, arg);
+                }
+            },
+            Type::Struct(strukt) => {
+                for field_ty in &mut strukt.field_tys {
+                    self.canonicalize_type(tp, field_ty);
+                }
+            },
+            Type::TypeVar(type_var) => {
+                *ty = self.read().solve_constraints(tp, *type_var).unwrap().qual_ty.ty;
+            }
+        }
+    }
+    fn get_canonical_type(&self, tp: &impl TypeProvider, expr: ExprId) -> Type {
+        let mut ty = tp.ty(expr).clone();
+        self.canonicalize_type(tp, &mut ty);
+        ty
+    }
+
     fn build_expr(&mut self, b: &mut FunctionBuilder, expr: ExprId, ctx: Context, tp: &impl TypeProvider) -> Value {
-        let ty = tp.ty(expr).clone();
+        let ty = self.get_canonical_type(tp, expr);
         let d = self.read();
         // TODO: in every single case of this match, I have to call drop() on d, otherwise the Ref<Driver> will
         // conflict with mutable uses of self.

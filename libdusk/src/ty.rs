@@ -238,6 +238,37 @@ impl Type {
         self
     }
 
+    pub fn replace_type_vars(&mut self, replacements: &HashMap<TypeVarId, Type>) {
+        match self {
+            Type::Error | Type::Int { .. } | Type::Float(_) | Type::LegacyInternal(_) | Type::Internal(_) | Type::Bool | Type::Void | Type::Mod | Type::Ty | Type::GenericParam(_) | Type::Never => {},
+            
+            // TODO: restructure enum types such that it is possible to call `replace_type_vars` on enum variants' types
+            Type::Enum(_) => {},
+            
+            Type::Pointer(pointee) => pointee.ty.replace_type_vars(replacements),
+            Type::Inout(pointee) => pointee.replace_type_vars(replacements),
+            Type::Function(func) => {
+                func.return_ty.replace_type_vars(replacements);
+                for param in &mut func.param_tys {
+                    param.replace_type_vars(replacements);
+                }
+            },
+            Type::Struct(strukt) => {
+                for field_ty in &mut strukt.field_tys {
+                    field_ty.replace_type_vars(replacements);
+                }
+            },
+            Type::TypeVar(id) => if let Some(replacement) = replacements.get(&*id) {
+                *self = replacement.clone();
+            },
+        }
+    }
+    
+    pub fn replacing_type_vars(mut self, replacements: &HashMap<TypeVarId, Type>) -> Self {
+        self.replace_type_vars(replacements);
+        self
+    }
+
     pub fn is_error(&self) -> bool { matches!(self, Type::Error) }
     pub fn is_int(&self) -> bool { matches!(self, Type::Int { .. }) }
 }
