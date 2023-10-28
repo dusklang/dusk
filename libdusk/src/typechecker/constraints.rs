@@ -1,7 +1,7 @@
 use smallvec::{SmallVec, smallvec};
 
 use crate::ty::{Type, LegacyInternalType, QualType, IntWidth};
-use crate::ast::{ExprId, DeclId};
+use crate::ast::{ExprId, DeclId, TypeVarId};
 
 use crate::driver::Driver;
 use crate::ty::BuiltinTraits;
@@ -369,12 +369,19 @@ impl From<ExprId> for UnificationType<'static> {
 #[derive(Copy, Clone)]
 pub enum ConstraintHaver<'a> {
     Expr(ExprId),
+    TypeVar(TypeVarId),
     ConstraintList(&'a ConstraintList),
 }
 
 impl From<ExprId> for ConstraintHaver<'_> {
     fn from(value: ExprId) -> Self {
         ConstraintHaver::Expr(value)
+    }
+}
+
+impl From<TypeVarId> for ConstraintHaver<'_> {
+    fn from(value: TypeVarId) -> Self {
+        ConstraintHaver::TypeVar(value)
     }
 }
 
@@ -387,12 +394,19 @@ impl<'a> From<&'a ConstraintList> for ConstraintHaver<'a> {
 
 pub enum MutConstraintHaver<'a> {
     Expr(ExprId),
+    TypeVar(TypeVarId),
     ConstraintListMut(&'a mut ConstraintList),
 }
 
 impl From<ExprId> for MutConstraintHaver<'_> {
     fn from(value: ExprId) -> Self {
         MutConstraintHaver::Expr(value)
+    }
+}
+
+impl From<TypeVarId> for MutConstraintHaver<'_> {
+    fn from(value: TypeVarId) -> Self {
+        MutConstraintHaver::TypeVar(value)
     }
 }
 
@@ -405,8 +419,9 @@ impl<'a> From<&'a mut ConstraintList> for MutConstraintHaver<'a> {
 impl<'a> From<MutConstraintHaver<'a>> for ConstraintHaver<'a> {
     fn from(value: MutConstraintHaver<'a>) -> Self {
         match value {
-            MutConstraintHaver::ConstraintListMut(constraints) => ConstraintHaver::ConstraintList(constraints),
             MutConstraintHaver::Expr(expr) => ConstraintHaver::Expr(expr),
+            MutConstraintHaver::TypeVar(type_var) => ConstraintHaver::TypeVar(type_var),
+            MutConstraintHaver::ConstraintListMut(constraints) => ConstraintHaver::ConstraintList(constraints),
         }
     }
 }
@@ -414,11 +429,12 @@ impl<'a> From<MutConstraintHaver<'a>> for ConstraintHaver<'a> {
 macro_rules! get_constraints {
     ($driver:expr, $tp:expr, $haver:expr) => {
         match $haver.into() {
-            ConstraintHaver::ConstraintList(constraints) => constraints,
             ConstraintHaver::Expr(expr) => {
-                let type_var_id = $driver.code.ast.expr_to_type_vars[expr];
-                $tp.constraints(type_var_id)
+                let type_var = $driver.code.ast.expr_to_type_vars[expr];
+                $tp.constraints(type_var)
             },
+            ConstraintHaver::TypeVar(type_var) => $tp.constraints(type_var),
+            ConstraintHaver::ConstraintList(constraints) => constraints,
         }
     };
 }
@@ -426,13 +442,38 @@ macro_rules! get_constraints {
 macro_rules! get_constraints_mut {
     ($driver:expr, $tp:expr, $haver:expr) => {
         match $haver.into() {
-            MutConstraintHaver::ConstraintListMut(constraints) => constraints,
             MutConstraintHaver::Expr(expr) => {
-                let type_var_id = $driver.code.ast.expr_to_type_vars[expr];
-                $tp.constraints_mut(type_var_id)
+                let type_var = $driver.code.ast.expr_to_type_vars[expr];
+                $tp.constraints_mut(type_var)
             },
+            MutConstraintHaver::TypeVar(type_var) => $tp.constraints_mut(type_var),
+            MutConstraintHaver::ConstraintListMut(constraints) => constraints,
         }
     };
+}
+
+macro_rules! get_multi_constraints_mut {
+    ($driver:expr, $tp:expr, $a:expr, $b:expr) => {
+        'get_multi_constraints: {
+            let (a, b) = match ($a.clone().into(), $b.clone().into()) {
+                (MutConstraintHaver::ConstraintListMut(a), b) => break 'get_multi_constraints (a, get_constraints_mut!($driver, $tp, b)),
+                (a, MutConstraintHaver::ConstraintListMut(b)) => break 'get_multi_constraints (get_constraints_mut!($driver, $tp, a), b),
+                (a, b) => ($driver.to_type_var(a).unwrap(), $driver.to_type_var(b).unwrap()),
+            };
+    
+            assert_ne!(a, b, "`a` ({:?}) must not equal `b` ({:?})", a, b);
+    
+            // Ensure both exist, in the case of MockTypeProvider
+            $tp.constraints_mut(a);
+            $tp.constraints_mut(b);
+    
+            unsafe {
+                let a = $tp.constraints_mut(a) as *mut _;
+                let b = $tp.constraints_mut(b) as *mut _;
+                (&mut *a, &mut *b)
+            }
+        }
+    }
 }
 
 
@@ -440,6 +481,7 @@ impl Driver {
     pub fn can_unify_to<'a, 'b: 'a>(&'a self, tp: &'a impl TypeProvider, constraint_haver: impl Into<ConstraintHaver<'a>>, ty: impl Into<UnificationType<'b>>) -> Result<UnificationSuccess, UnificationError<'a>> {
         let constraints = match constraint_haver.into() {
             ConstraintHaver::Expr(expr) => self.get_constraints(tp, expr),
+            ConstraintHaver::TypeVar(type_var) => self.get_constraints(tp, type_var),
             ConstraintHaver::ConstraintList(constraints) => constraints,
         };
         // Never is the "bottom type", so it unifies to anything.
@@ -524,18 +566,21 @@ impl Driver {
         ConstraintList { trait_impls, one_of, preferred_type, is_error: false }
     }
 
+    fn to_type_var<'a>(&self, constraint_haver: impl Into<ConstraintHaver<'a>>) -> Option<TypeVarId> {
+        match constraint_haver.into() {
+            ConstraintHaver::Expr(expr) => Some(self.code.ast.expr_to_type_vars[expr]),
+            ConstraintHaver::TypeVar(type_var) => Some(type_var),
+            ConstraintHaver::ConstraintList(_) => None,
+        }
+    }
+
     // Same as intersect_constraints, but: 
     //  - mutates `self` and `other` in-place instead of creating a new `ConstraintList`
     //  - evaluates mutability independently between the arguments, with precedence given to self
     //  - is literally just used for assignment expressions
     //  - is a terrible abstraction :(
-    pub fn intersect_constraints_lopsided<'a>(&self, tp: &mut impl TypeProvider, constraint_haver: impl Into<MutConstraintHaver<'a>> + Clone, other_haver: impl Into<MutConstraintHaver<'a>> + Clone) -> Result<(), AssignmentError> {
-        let (constraints, other) = match (constraint_haver.clone().into(), other_haver.clone().into()) {
-            (MutConstraintHaver::Expr(expr1), MutConstraintHaver::Expr(expr2)) => self.get_multi_constraints_mut(tp, expr1, expr2),
-            (MutConstraintHaver::Expr(expr), MutConstraintHaver::ConstraintListMut(constraints)) => (self.get_constraints_mut(tp, expr), constraints),
-            (MutConstraintHaver::ConstraintListMut(constraints), MutConstraintHaver::Expr(expr)) => (constraints, self.get_constraints_mut(tp, expr)),
-            (MutConstraintHaver::ConstraintListMut(constraints), MutConstraintHaver::ConstraintListMut(other)) => (constraints, other),
-        };
+    pub fn intersect_constraints_lopsided<'a>(&self, tp: &'a mut impl TypeProvider, constraint_haver: impl Into<MutConstraintHaver<'a>> + Clone, other_haver: impl Into<MutConstraintHaver<'a>> + Clone) -> Result<(), AssignmentError> {
+        let (constraints, other) = get_multi_constraints_mut!(self, tp, constraint_haver.clone(), other_haver.clone());
         let trait_impls = constraints.trait_impls | other.trait_impls;
         constraints.trait_impls = trait_impls;
         other.trait_impls = trait_impls;
@@ -667,20 +712,7 @@ impl Driver {
         get_constraints_mut!(self, tp, constraint_haver)
     }
 
-    pub fn get_multi_constraints_mut<'a>(&self, tp: &'a mut impl TypeProvider, a: ExprId, b: ExprId) -> (&'a mut ConstraintList, &'a mut ConstraintList) {
-        assert_ne!(a, b, "`a` ({:?}) must not equal `b` ({:?})", a, b);
-
-        let a = self.code.ast.expr_to_type_vars[a];
-        let b = self.code.ast.expr_to_type_vars[b];
-
-        // Ensure both exist, in the case of MockTypeProvider
-        tp.constraints_mut(a);
-        tp.constraints_mut(b);
-
-        unsafe {
-            let a = tp.constraints_mut(a) as *mut _;
-            let b = tp.constraints_mut(b) as *mut _;
-            (&mut *a, &mut *b)
-        }
+    pub fn get_multi_constraints_mut<'a>(&self, tp: &'a mut impl TypeProvider, a: impl Into<MutConstraintHaver<'a>> + Clone, b: impl Into<MutConstraintHaver<'a>> + Clone) -> (&'a mut ConstraintList, &'a mut ConstraintList) {
+        get_multi_constraints_mut!(self, tp, a, b)
     }
 }
