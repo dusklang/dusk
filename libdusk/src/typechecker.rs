@@ -926,11 +926,13 @@ impl tir::Expr<tir::DeclRef> {
                 .filter(|overload| overloads.overloads.contains(overload))
                 .unwrap_or_else(|| overloads.overloads[0]);
             let decl = &driver.tir.decls[overload];
-            let mut generic_args = Vec::new();
 
-            // TODO: Infer constraints on generic arguments based on type (or return type) of decl
-            for _ in range_iter(decl.generic_params.clone()) {
-                generic_args.push(Type::Error);
+            let mut generic_args = Vec::new();
+            for generic_param in range_iter(decl.generic_params.clone()) {
+                let type_var = driver.code.ast.generic_arg_type_variables.get(&(self.decl_ref_id, generic_param)).cloned().unwrap();
+                // TODO: error message probably
+                let solution = driver.solve_constraints(tp, type_var).unwrap();
+                generic_args.push(solution.qual_ty.ty);
             }
             (Some(overload), Some(generic_args))
         } else if !*tp.decl_ref_has_error(self.decl_ref_id) {
