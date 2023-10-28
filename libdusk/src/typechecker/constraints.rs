@@ -18,11 +18,21 @@ pub struct ConstraintList {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct OneOfConstraint {
     types: SmallVec<[QualType; 1]>,
+
+    // For DeclRefs, this field stores overload decls that the types in the one-of list correspond to.
+    // There are also some places where I may allow the decl ids from a DeclRef to trickle up the tree, just
+    // out of convenience.
+    // It must either be empty, or exactly the same size as `types` above.
     decls: SmallVec<[DeclId; 1]>,
 }
 
 impl OneOfConstraint {
     pub fn new() -> Self { Default::default() }
+
+    pub fn reserve(&mut self, additional: usize) {
+        self.types.reserve(additional);
+        self.decls.reserve(additional);
+    }
 
     pub fn push(&mut self, ty: impl Into<QualType>) {
         assert!(self.decls.is_empty());
@@ -35,6 +45,32 @@ impl OneOfConstraint {
         self.decls.push(decl);
     }
 
+    pub fn push_with_decl_maybe(&mut self, ty: impl Into<QualType>, decl: Option<DeclId>) {
+        if let Some(decl) = decl {
+            self.push_with_decl(ty, decl);
+        } else {
+            self.push(ty);
+        }
+    }
+
+    pub fn get(&self, index: usize) -> (&QualType, Option<DeclId>) {
+        (&self.types[index], (!self.decls.is_empty()).then(|| self.decls[index]))
+    }
+
+    pub fn first(&self) -> Option<(&QualType, Option<DeclId>)> {
+        (!self.types.is_empty()).then(|| self.get(0))
+    }
+
+    pub fn types(&self) -> &[QualType] {
+        &self.types
+    }
+
+    pub fn decls(&self) -> &[DeclId] {
+        assert!(self.types.is_empty() || !self.decls.is_empty());
+
+        &self.decls
+    }
+
     pub fn is_empty(&self) -> bool {
         self.types.is_empty()
     }
@@ -43,15 +79,15 @@ impl OneOfConstraint {
         self.types.len()
     }
 
-    pub fn retain(&mut self, mut f: impl FnMut(&mut QualType) -> bool) {
+    pub fn retain_with_decl_ids(&mut self, mut f: impl FnMut(&mut QualType, Option<DeclId>) -> bool) {
         if self.decls.is_empty() {
-            self.types.retain(f);
+            self.types.retain(|ty| f(ty, None));
         } else {
             let len = self.types.len();
             assert_eq!(len, self.decls.len());
             let mut num_deleted = 0;
             for i in 0..len {
-                if !f(&mut self.types[i]) {
+                if !f(&mut self.types[i], Some(self.decls[i])) {
                     num_deleted += 1;
                 } else if num_deleted > 0 {
                     self.types.swap(i - num_deleted, i);
@@ -61,6 +97,10 @@ impl OneOfConstraint {
             self.types.truncate(len - num_deleted);
             self.decls.truncate(len - num_deleted);
         }
+    }
+
+    pub fn retain(&mut self, mut f: impl FnMut(&mut QualType) -> bool) {
+        self.retain_with_decl_ids(|ty, _| f(ty));
     }
 }
 
@@ -82,6 +122,7 @@ impl<const N: usize> From<[QualType; N]> for OneOfConstraint {
     }
 }
 
+#[derive(Debug)]
 pub enum UnificationError<'a> {
     /// The expression was constrained to implement a trait that the requested type doesn't implement
     Trait(BuiltinTraits),
@@ -112,6 +153,37 @@ pub enum SolveError<'a> {
     Ambiguous { choices: &'a [QualType] }
 }
 
+#[derive(Clone)]
+pub struct ConstraintSolution {
+    pub qual_ty: QualType,
+    pub decl: Option<DeclId>,
+}
+
+impl ConstraintSolution {
+    pub fn new(ty: impl Into<QualType>) -> Self {
+        ConstraintSolution { qual_ty: ty.into(), decl: None }
+    }
+
+    pub fn error() -> Self {
+        Self::new(Type::Error)
+    }
+
+    pub fn with_decl(mut self, decl: DeclId) -> Self {
+        self.decl = Some(decl);
+        self
+    }
+
+    pub fn with_decl_maybe(mut self, decl: Option<DeclId>) -> Self {
+        self.decl = decl;
+        self
+    }
+
+    pub fn make_immutable(mut self) -> Self {
+        self.qual_ty.is_mut = false;
+        self
+    }
+}
+
 impl ConstraintList {
     pub fn new() -> Self { Default::default() }
 
@@ -139,11 +211,11 @@ impl ConstraintList {
         self
     }
 
-    pub fn one_of(&self) -> &[QualType] {
+    pub fn one_of(&self) -> Option<&OneOfConstraint> {
         if let Some(one_of) = &self.one_of {
-            &one_of.types
+            Some(&one_of)
         } else {
-            &[]
+            None
         }
     }
 
@@ -192,6 +264,12 @@ impl ConstraintList {
         }
     }
 
+    pub fn retain_in_one_of(&mut self, f: impl FnMut(&mut QualType, Option<DeclId>) -> bool) {
+        if let Some(one_of) = &mut self.one_of {
+            one_of.retain_with_decl_ids(f);
+        }
+    }
+
     pub fn one_of_exists(&self, mut condition: impl FnMut(&QualType) -> bool) -> bool {
         if let Some(one_of) = &self.one_of {
             for ty in &one_of.types {
@@ -205,16 +283,17 @@ impl ConstraintList {
         self.one_of = Some(one_of.into().into());
     }
 
-    pub fn max_ranked_type_with_assoc_data<T: Clone>(&self, mut rank: impl FnMut(&QualType) -> (usize, T)) -> Result<(&QualType, T), Vec<(&QualType, T)>> {
+    pub fn max_ranked_type_with_assoc_data<T: Clone>(&self, mut rank: impl FnMut(&QualType) -> (usize, T)) -> Result<(&QualType, Option<DeclId>, T), Vec<(&QualType, Option<DeclId>, T)>> {
         let one_of = match self.one_of {
             None => return Err(Vec::new()),
             Some(ref one_of) => one_of,
         };
         let mut ranks = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
-        for ty in &one_of.types {
+        for i in 0..one_of.len() {
+            let (ty, decl) = one_of.get(i);
             let (rank, assoc_data) = rank(ty);
             if rank > 0 {
-                ranks[rank - 1].push((ty, assoc_data));
+                ranks[rank - 1].push((ty, decl, assoc_data));
             }
         }
         for (i, rank) in ranks.iter().enumerate().rev() {
@@ -227,10 +306,10 @@ impl ConstraintList {
         Err(Vec::new())
     }
 
-    pub fn max_ranked_type(&self, mut rank: impl FnMut(&QualType) -> usize) -> Result<&QualType, Vec<&QualType>> {
+    pub fn max_ranked_type(&self, mut rank: impl FnMut(&QualType) -> usize) -> Result<(&QualType, Option<DeclId>), Vec<(&QualType, Option<DeclId>)>> {
         self.max_ranked_type_with_assoc_data(|ty| (rank(ty), ()))
-            .map(|(ty, _)| ty)
-            .map_err(|tys| tys.iter().map(|(ty, _)| *ty).collect())
+            .map(|(ty, decl, _)| (ty, decl))
+            .map_err(|tys| tys.iter().map(|(ty, decl, _)| (*ty, *decl)).collect())
     }
 
     fn is_never(&self) -> bool {
@@ -382,9 +461,8 @@ impl Driver {
         }
         if let Some(one_of) = &constraints.one_of {
             for i in 0..one_of.types.len() {
-                let oty = &one_of.types[i];
+                let (oty, decl) = one_of.get(i);
                 if oty.trivially_convertible_to(&ty) {
-                    let decl = (!one_of.decls.is_empty()).then(|| one_of.decls[i]);
                     return Ok(UnificationSuccess::HasTypeInOneOf(decl));
                 }
             }
@@ -497,11 +575,7 @@ impl Driver {
                             for ty in &one_of.types {
                                 let ty: QualType = ty.ty.clone().into();
                                 if let Ok(success) = self.can_unify_to(tp, other_haver.clone().into(), &ty) {
-                                    if let Some(decl) = success.get_decl() {
-                                        rhs_one_of.push_with_decl(ty, decl);
-                                    } else {
-                                        rhs_one_of.push(ty);
-                                    }
+                                    rhs_one_of.push_with_decl_maybe(ty, success.get_decl());
                                 }
                             }
 
@@ -530,20 +604,21 @@ impl Driver {
         Ok(())
     }
 
-    pub fn solve_constraints<'a>(&self, tp: &'a impl TypeProvider, constraints: impl Into<ConstraintHaver<'a>>) -> Result<QualType, SolveError<'a>> {
+    pub fn solve_constraints<'a>(&self, tp: &'a impl TypeProvider, constraints: impl Into<ConstraintHaver<'a>>) -> Result<ConstraintSolution, SolveError<'a>> {
         let constraints = get_constraints!(self, tp, constraints);
 
         if let Some(one_of) = &constraints.one_of {
             if one_of.len() == 1 {
-                return Ok(one_of.types[0].clone())
+                let (ty, decl) = one_of.get(0);
+                return Ok(ConstraintSolution { qual_ty: ty.clone(), decl })
             } else if one_of.is_empty() {
                 return Err(SolveError::NoValidChoices)
             }
         }
         
         match constraints.preferred_type {
-            Some(ref pref) => if self.can_unify_to(tp, constraints, pref).is_ok() {
-                Ok(pref.clone())
+            Some(ref pref) => if let Ok(success) = self.can_unify_to(tp, constraints, pref) {
+                Ok(ConstraintSolution { qual_ty: pref.clone(), decl: success.get_decl() })
             } else if let Some(one_of) = &constraints.one_of {
                 Err(SolveError::Ambiguous { choices: &one_of.types })
             } else {
@@ -557,8 +632,8 @@ impl Driver {
         // If we're never, we should stay never.
         if get_constraints_mut!(self, tp, constraints.clone()).is_never() { return; }
 
-        let solution = Some([self.solve_constraints(tp, constraints.clone().into()).unwrap()].into());
-        get_constraints_mut!(self, tp, constraints).one_of = solution;
+        let solution = self.solve_constraints(tp, constraints.clone().into()).unwrap();
+        get_constraints_mut!(self, tp, constraints).set_to(solution);
     }
 }
 
@@ -568,16 +643,17 @@ pub enum AssignmentError {
 }
 
 impl ConstraintList {
-    pub fn set_to(&mut self, ty: impl Into<QualType>) {
-        let ty = ty.into();
+    pub fn set_to(&mut self, solution: ConstraintSolution) {
         // If we're never, we should stay never.
         // If the passed in type is Error, we should stay whatever we are.
         // (this second clause is experimental and may not turn out to be a good idea. reevaluate later.)
-        if !self.is_never() && !ty.ty.is_error() {
+        if !self.is_never() && !solution.qual_ty.ty.is_error() {
             if let Some(one_of) = &self.one_of {
-                assert!(one_of.decls.is_empty(), "attempted to remove decl id from one_of");
+                assert!(one_of.decls.is_empty() || solution.decl.is_some(), "attempted to remove decl id from one_of");
             }
-            self.one_of = Some([ty].into());
+            let mut one_of = OneOfConstraint::new();
+            one_of.push_with_decl_maybe(solution.qual_ty, solution.decl);
+            self.one_of = Some(one_of);
         }
     }
 }

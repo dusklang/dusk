@@ -60,7 +60,7 @@ impl tir::Expr<tir::IntLit> {
     }
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        *tp.ty_mut(self.id) = driver.solve_constraints(tp, self.id).expect("Ambiguous type for integer literal").ty;
+        *tp.ty_mut(self.id) = driver.solve_constraints(tp, self.id).expect("Ambiguous type for integer literal").qual_ty.ty;
     }
 }
 
@@ -72,7 +72,7 @@ impl tir::Expr<tir::DecLit> {
     }
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        *tp.ty_mut(self.id) = driver.solve_constraints(tp, self.id).expect("Ambiguous type for decimal literal").ty;
+        *tp.ty_mut(self.id) = driver.solve_constraints(tp, self.id).expect("Ambiguous type for decimal literal").qual_ty.ty;
     }
 }
 
@@ -84,7 +84,7 @@ impl tir::Expr<tir::StrLit> {
     }
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        *tp.ty_mut(self.id) = driver.solve_constraints(tp, self.id).expect("Ambiguous type for string literal").ty;
+        *tp.ty_mut(self.id) = driver.solve_constraints(tp, self.id).expect("Ambiguous type for string literal").qual_ty.ty;
     }
 }
 
@@ -96,7 +96,7 @@ impl tir::Expr<tir::CharLit> {
     }
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        *tp.ty_mut(self.id) = driver.solve_constraints(tp, self.id).expect("Ambiguous type for character literal").ty;
+        *tp.ty_mut(self.id) = driver.solve_constraints(tp, self.id).expect("Ambiguous type for character literal").qual_ty.ty;
     }
 }
 impl tir::Expr<tir::BoolLit> {
@@ -183,7 +183,7 @@ impl tir::AssignedDecl {
             }
             explicit_ty
         } else if let Ok(ty) = driver.solve_constraints(tp, self.root_expr) {
-            ty.ty
+            ty.qual_ty.ty
         } else if driver.get_constraints(tp, self.root_expr).is_error() {
             // We should've already reported this error, so don't add to the noise.
             Type::Error
@@ -203,14 +203,15 @@ impl tir::AssignedDecl {
         let decl_id = self.decl_id;
         let root_expr = self.root_expr;
         let ty = tp.fetch_decl_type(driver, decl_id, None).ty;
-        driver.get_constraints_mut(tp, root_expr).set_to(ty);
+        let unification = driver.can_unify_to(tp, root_expr, &ty.clone().into()).unwrap();
+        driver.get_constraints_mut(tp, root_expr).set_to(ConstraintSolution::new(ty).with_decl_maybe(unification.get_decl()));
     }
 }
 
 impl tir::PatternBinding {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         let constraints = driver.get_constraints(tp, self.scrutinee);
-        let scrutinee_ty = driver.solve_constraints(tp, constraints).expect("Ambiguous type for assigned declaration").ty;
+        let scrutinee_ty = driver.solve_constraints(tp, constraints).expect("Ambiguous type for assigned declaration").qual_ty.ty;
         let mut binding_ty = None;
         let binding = &driver.code.ast.pattern_binding_decls[self.binding_id];
         // Note: no need to worry about mutability matching because that can be handled in the parser
@@ -245,7 +246,7 @@ impl tir::PatternBinding {
 
 impl tir::Expr<tir::Assignment> {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        driver.get_constraints_mut(tp, self.id).set_to(Type::Void);
+        driver.get_constraints_mut(tp, self.id).set_to(ConstraintSolution::new(Type::Void));
         *tp.ty_mut(self.id) = Type::Void;
     }
 
@@ -272,8 +273,8 @@ impl tir::Expr<tir::Cast> {
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         let ty = tp.get_evaluated_type(self.ty).clone();
         // TODO: pass `self.ty` directly to can_unify_to() once its support for generics is more robust
-        let ty_and_method: Result<(Type, CastMethod), Vec<QualType>> = if driver.can_unify_to(tp, self.expr, &QualType::from(&ty)).is_ok() {
-            Ok((ty, CastMethod::Noop))
+        let ty_and_method: Result<(Type, Option<DeclId>, CastMethod), Vec<QualType>> = if let Ok(success) = driver.can_unify_to(tp, self.expr, &QualType::from(&ty)) {
+            Ok((ty, success.get_decl(), CastMethod::Noop))
         } else if let Type::Pointer(dest_pointee_ty) = ty {
             let constraints = driver.get_constraints_mut(tp, self.expr);
             let dest_pointee_ty = dest_pointee_ty.as_ref();
@@ -291,7 +292,7 @@ impl tir::Expr<tir::Cast> {
                     _ => 0,
                 }
             })
-                .map(|src_ty| (src_ty.ty.clone(), CastMethod::Reinterpret))
+                .map(|(src_ty, decl)| (src_ty.ty.clone(), decl, CastMethod::Reinterpret))
                 .map_err(|_| Vec::new())
         } else if let Type::Int { width, .. } = ty {
             let constraints = driver.get_constraints_mut(tp, self.expr);
@@ -303,8 +304,8 @@ impl tir::Expr<tir::Cast> {
                     _ => (0, CastMethod::Noop),
                 }
             )
-                .map(|(ty, method)| (ty.ty.clone(), method))
-                .map_err(|options| options.iter().map(|(ty, _)| ty.to_owned().to_owned()).collect())
+                .map(|(ty, decl, method)| (ty.ty.clone(), decl, method))
+                .map_err(|options| options.iter().map(|(ty, _, _)| ty.to_owned().to_owned()).collect())
         } else if let Type::Float { .. } = ty {
             let constraints = driver.get_constraints_mut(tp, self.expr);
             constraints.max_ranked_type_with_assoc_data(|ty|
@@ -314,20 +315,20 @@ impl tir::Expr<tir::Cast> {
                     _ => (0, CastMethod::Noop),
                 }
             )
-                .map(|(ty, method)| (ty.ty.clone(), method))
-                .map_err(|options| options.iter().map(|(ty, _)| ty.to_owned().to_owned()).collect())
+                .map(|(ty, decl, method)| (ty.ty.clone(), decl, method))
+                .map_err(|options| options.iter().map(|(ty, _, _)| ty.to_owned().to_owned()).collect())
         } else {
             Err(Vec::new())
         };
         let constraints = driver.get_constraints_mut(tp, self.expr);
         match ty_and_method {
-            Ok((ty, method)) => {
-                constraints.set_to(ty);
+            Ok((ty, decl, method)) => {
+                constraints.set_to(ConstraintSolution::new(ty).with_decl_maybe(decl));
                 *tp.cast_method_mut(self.cast_id) = method;
             },
             Err(_) => {
                 driver.diag.push(Error::new("Invalid cast").adding_primary_range(driver.get_range(self.id), "cast here"));
-                constraints.set_to(Type::Error);
+                constraints.make_error();
                 *tp.cast_method_mut(self.cast_id) = CastMethod::Invalid;
             }
         }
@@ -341,10 +342,9 @@ impl tir::Expr<tir::While> {
     }
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        if driver.can_unify_to(tp, self.condition, &Type::Bool.into()).is_ok() {
-            driver.get_constraints_mut(tp, self.condition).set_to(Type::Bool);
-        } else {
-            panic!("Expected boolean condition in while expression");
+        match driver.can_unify_to(tp, self.condition, &Type::Bool.into()) {
+            Ok(success) => driver.get_constraints_mut(tp, self.condition).set_to(ConstraintSolution::new(Type::Bool).with_decl_maybe(success.get_decl())),
+            Err(_) => panic!("Expected boolean condition in while expression"),
         }
     }
 }
@@ -410,7 +410,7 @@ impl tir::Expr<tir::For> {
             let loop_binding_constraints = driver.intersect_constraints(tp, self.lower_bound, self.upper_bound);
             
             let ty = match driver.solve_constraints(tp, &loop_binding_constraints) {
-                Ok(ty) => ty.ty,
+                Ok(ty) => ty.qual_ty.ty,
                 Err(_) => {
                     // TODO: better error message, probably
                     driver.diag.push(
@@ -437,8 +437,10 @@ impl tir::Expr<tir::For> {
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         let ty = tp.fetch_decl_type(driver, self.binding_decl, None).ty;
-        driver.get_constraints_mut(tp, self.lower_bound).set_to(ty.clone());
-        driver.get_constraints_mut(tp, self.upper_bound).set_to(ty);
+        let lower_bound_decl = driver.can_unify_to(tp, self.lower_bound, &ty.clone().into()).unwrap().get_decl();
+        let upper_bound_decl = driver.can_unify_to(tp, self.upper_bound, &ty.clone().into()).unwrap().get_decl();
+        driver.get_constraints_mut(tp, self.lower_bound).set_to(ConstraintSolution::new(ty.clone()).with_decl_maybe(lower_bound_decl));
+        driver.get_constraints_mut(tp, self.upper_bound).set_to(ConstraintSolution::new(ty).with_decl_maybe(upper_bound_decl));
     }
 }
 
@@ -542,7 +544,7 @@ impl Exhaustion {
 
 impl tir::Expr<tir::Switch> {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        let scrutinee_ty = driver.solve_constraints(tp, self.scrutinee).expect("Ambiguous type for scrutinee in switch expression").ty;
+        let scrutinee_ty = driver.solve_constraints(tp, self.scrutinee).expect("Ambiguous type for scrutinee in switch expression").qual_ty.ty;
         match scrutinee_ty {
             Type::Enum(id) => {
                 // Make sure each switch case matches a variant name in the scrutinized enum, and
@@ -732,10 +734,12 @@ impl tir::Expr<tir::Switch> {
     }
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        let scrutinee_ty = driver.solve_constraints(tp, self.scrutinee).map(|ty| ty.ty).unwrap_or(Type::Error);
+        let scrutinee_ty = driver.solve_constraints(tp, self.scrutinee)
+            .unwrap_or(ConstraintSolution::error())
+            .make_immutable();
         driver.get_constraints_mut(tp, self.scrutinee).set_to(scrutinee_ty);
         let ty = driver.solve_constraints(tp, self.id).expect("ambiguous type for switch expression");
-        *tp.ty_mut(self.id) = ty.ty.clone();
+        *tp.ty_mut(self.id) = ty.qual_ty.ty.clone();
         for case in &self.cases {
             driver.get_constraints_mut(tp, case.terminal_expr).set_to(ty.clone());
         }
@@ -771,10 +775,14 @@ impl tir::Expr<tir::Module> {
     }
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
+        // Set the type of the extern library path string
         if let Some(extern_library_path) = self.extern_library_path {
             let selected_type = string_types().into_iter()
-                .find(|ty| driver.can_unify_to(tp, extern_library_path, &ty.into()).is_ok());
-            driver.get_constraints_mut(tp, extern_library_path).set_to(selected_type.unwrap_or_else(|| Type::Error));
+                .filter_map(|ty| driver.can_unify_to(tp, extern_library_path, &ty.clone().into()).ok().map(|success| (ty, success.get_decl())))
+                .next();
+
+            let (ty, decl) = selected_type.unwrap_or_else(|| (Type::Error, None));
+            driver.get_constraints_mut(tp, extern_library_path).set_to(ConstraintSolution::new(ty).with_decl_maybe(decl));
         }
     }
 }
@@ -802,17 +810,19 @@ impl tir::Expr<tir::Enum> {
                 driver.diag.push(error);
             }
         }
-        driver.get_constraints_mut(tp, self.id).set_to(Type::Ty);
+        driver.get_constraints_mut(tp, self.id).set_to(ConstraintSolution::new(Type::Ty));
     }
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         for &variant_ty in &self.variant_payload_tys {
-            let field_type = driver.solve_constraints(tp, variant_ty).map(|ty| ty.ty).unwrap_or(Type::Error);
+            let field_type = driver.solve_constraints(tp, variant_ty)
+                .unwrap_or(ConstraintSolution::error())
+                .make_immutable();
             // Don't bother checking if it's a type, because we already did that in pass 1
             driver.get_constraints_mut(tp, variant_ty).set_to(field_type);
         }
         let ty = driver.solve_constraints(tp, self.id).expect("Ambiguous type for enum expression");
-        debug_assert_eq!(ty.ty, Type::Ty);
+        debug_assert_eq!(ty.qual_ty.ty, Type::Ty);
     }
 }
 
@@ -841,7 +851,7 @@ impl tir::Expr<tir::DeclRef> {
         }
 
         // Find type possibilities
-        let mut one_of = SmallVec::new();
+        let mut one_of = OneOfConstraint::new();
         one_of.reserve(overloads.len());
         for &overload in &overloads {
             let mut ty = tp.fetch_decl_type(driver, overload, Some(self.decl_ref_id)).ty;
@@ -852,10 +862,10 @@ impl tir::Expr<tir::DeclRef> {
                 if driver.can_unify_to(tp, base_expr, &Type::Ty.into()).is_err() && driver.can_unify_to(tp, base_expr, &Type::Mod.into()).is_err() {
                     let base_ty = driver.solve_constraints(tp, base_expr).unwrap();
                     // Handle member refs with pointers to structs
-                    is_mut &= if let Type::Pointer(pointee) = &base_ty.ty {
+                    is_mut &= if let Type::Pointer(pointee) = &base_ty.qual_ty.ty {
                         pointee.is_mut
                     } else {
-                        base_ty.is_mut
+                        base_ty.qual_ty.is_mut
                     };
                 }
             }
@@ -864,7 +874,7 @@ impl tir::Expr<tir::DeclRef> {
 
             ty = driver.register_type_variables_for_decl_ref(self.decl_ref_id, overload, ty);
 
-            one_of.push(QualType { ty, is_mut });
+            one_of.push_with_decl(QualType { ty, is_mut }, overload);
         }
         dbg!(&one_of);
 
@@ -873,14 +883,15 @@ impl tir::Expr<tir::DeclRef> {
     }
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        let ty = driver.solve_constraints(tp, self.id).unwrap_or(Type::Error.into());
-        *tp.ty_mut(self.id) = ty.ty.clone();
+        let ty = driver.solve_constraints(tp, self.id).unwrap_or(ConstraintSolution::error());
+        *tp.ty_mut(self.id) = ty.qual_ty.ty.clone();
 
         let mut overloads = tp.overloads(self.decl_ref_id).clone();
-        let one_of = driver.get_constraints(tp, self.id).one_of().to_owned();
+
+        // TODO: there might be a bug here, if we have no existing one-of constraint.
+        let one_of = driver.get_constraints(tp, self.id).one_of().cloned().unwrap_or_default();
         overloads.overloads.retain(|&overload| {
-            let overload_ty = tp.fetch_decl_type(driver, overload, Some(self.decl_ref_id));
-            if one_of.iter().any(|ty| overload_ty.trivially_convertible_to(ty)) {
+            if one_of.decls().iter().any(|&decl| overload == decl) {
                 true
             } else {
                 overloads.nonviable_overloads.push(overload);
@@ -891,7 +902,7 @@ impl tir::Expr<tir::DeclRef> {
         overloads.overloads.retain(|&overload| {
             let overload_ty = tp.fetch_decl_type(driver, overload, Some(self.decl_ref_id));
 
-            if overload_ty.trivially_convertible_to(&ty) {
+            if overload_ty.trivially_convertible_to(&ty.qual_ty) {
                 true
             } else {
                 overloads.nonviable_overloads.push(overload);
@@ -915,13 +926,9 @@ impl tir::Expr<tir::DeclRef> {
                 .filter(|overload| overloads.overloads.contains(overload))
                 .unwrap_or_else(|| overloads.overloads[0]);
             let decl = &driver.tir.decls[overload];
-            // TODO: probably rename this from ret_ty.
-            let ret_ty = tp.fetch_decl_type(driver, overload, Some(self.decl_ref_id));
-            let mut ret_ty_constraints = ConstraintList::default();
-            ret_ty_constraints.set_to(ret_ty.clone());
             let mut generic_args = Vec::new();
 
-            // Infer constraints on generic arguments based on type (or return type) of decl
+            // TODO: Infer constraints on generic arguments based on type (or return type) of decl
             for _ in range_iter(decl.generic_params.clone()) {
                 generic_args.push(Type::Error);
             }
@@ -967,69 +974,68 @@ impl tir::Expr<tir::Call> {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         let decl_ref_id = self.decl_ref_id(driver);
 
-        // TODO: maybe mem::take() here instead of cloning? As the overloads in the type provider will just be overwritten later anyway.
-        let mut overloads = tp.overloads(decl_ref_id).clone();
-        // Rule out overloads that don't match the arguments
-        let mut i = 0usize;
+        // Rule out function types that don't match the arguments
         let mut one_of: SmallVec<[QualType; 1]> = SmallVec::new();
-        let decls = &driver.tir.decls;
-        let callee_one_of = driver.get_constraints(tp, self.callee).one_of();
-        overloads.overloads.retain(|&overload| {
-            let param_list = &decls[overload].param_list;
+        let mut callee_constraints = driver.get_constraints(tp, self.callee).clone();
+        callee_constraints.retain_in_one_of(|ty, overload| {
+            let Type::Function(func) = &mut ty.ty else {
+                return false;
+            };
+
             if
-                self.args.len() < param_list.param_tys.len() ||
-                (self.args.len() > param_list.param_tys.len() && !param_list.has_c_variadic_param)
+                self.args.len() < func.param_tys.len() ||
+                (self.args.len() > func.param_tys.len() && !func.has_c_variadic_param)
             {
-                overloads.nonviable_overloads.push(overload);
-                i += 1;
                 return false;
             }
-
-            if let Decl::MethodIntrinsic(intr) = df!(driver, overload.ast) {
-                let self_ty = driver.code.ast.intrinsics[intr].param_tys[0];
-                let self_ty = tp.get_evaluated_type(self_ty);
-                let ast::Namespace::MemberRef { base_expr } = driver.code.ast.decl_refs[decl_ref_id].namespace else {
-                    panic!("expected MemberRef as base of method intrinsic call");
-                };
-                if driver.can_unify_to(tp, base_expr, &QualType::from(self_ty.clone())).is_err() {
-                    if let Some(pointee_ty) = self_ty.deref() {
-                        if driver.can_unify_to(tp, base_expr, pointee_ty).is_err() {
-                            overloads.nonviable_overloads.push(overload);
-                            i += 1;
-                            return false;
+            
+            if let Some(overload) = overload {
+                if let Decl::MethodIntrinsic(intr) = df!(driver, overload.ast) {
+                    let self_ty = driver.code.ast.intrinsics[intr].param_tys[0];
+                    let self_ty = tp.get_evaluated_type(self_ty);
+                    let ast::Namespace::MemberRef { base_expr } = driver.code.ast.decl_refs[decl_ref_id].namespace else {
+                        panic!("expected MemberRef as base of method intrinsic call");
+                    };
+                    if driver.can_unify_to(tp, base_expr, &QualType::from(self_ty.clone())).is_err() {
+                        if let Some(pointee_ty) = self_ty.deref() {
+                            if driver.can_unify_to(tp, base_expr, pointee_ty).is_err() {
+                                return false;
+                            }
                         }
                     }
                 }
             }
-
-            for (arg, ty) in self.args.iter().copied().zip(decls[overload].param_list.param_tys.iter().copied()) {
-                if driver.can_unify_to(tp, arg, ty).is_err() {
-                    overloads.nonviable_overloads.push(overload);
-                    i += 1;
+            
+            // Check that arguments can unify to their corresponding parameter types.
+            for (arg, ty) in self.args.iter().copied().zip(func.param_tys.iter()) {
+                if driver.can_unify_to(tp, arg, UnificationType::QualType(&ty.clone().into())).is_err() {
                     return false;
                 }
             }
             // TODO: is there anything we should be doing to check C variadic arguments here?
-
-            one_of.push(callee_one_of[i].ty.return_ty().unwrap().into());
-            i += 1;
+            
+            one_of.push(func.return_ty.as_ref().clone().into());
             true
         });
-
+        *driver.get_constraints_mut(tp, self.callee) = callee_constraints;
+        
         // Find preferred type
         // TODO: this logic seems so broken it should never have worked at all?!?!
-        // I apparently just choose the first (argument, overload) pair such that
+        // I apparently just choose the first (argument, function type) pair such that
         //   - argument has a preferred type, and
-        //   - that preferred type is trivially convertible to overload's parameter type at that position
+        //   - that preferred type is trivially convertible to function's parameter type at that position
+        let callee_one_of = driver.get_constraints(tp, self.callee).one_of().cloned().unwrap_or_default();
         let mut pref = None;
         'find_preference: for (i, &arg) in self.args.iter().enumerate() {
-            if let Some(ty) = driver.get_constraints(tp, arg).preferred_type() {
-                for &overload in &overloads.overloads {
-                    let decl = &driver.tir.decls[overload];
-                    if i < decl.param_list.param_tys.len() && ty.ty.trivially_convertible_to(tp.get_evaluated_type(decl.param_list.param_tys[i])) {
-                        let ty = tp.fetch_decl_type(driver, overload, None);
-                        pref = Some(ty.ty.return_ty().unwrap().into());
-                        driver.get_constraints_mut(tp, self.callee).set_preferred_type(ty);
+            if let Some(arg_pref_ty) = driver.get_constraints(tp, arg).preferred_type() {
+                for ty in callee_one_of.types() {
+                    let Type::Function(func) = &ty.ty else {
+                        continue;
+                    };
+
+                    if i < func.param_tys.len() && arg_pref_ty.ty.trivially_convertible_to(&func.param_tys[i]) {
+                        pref = Some(func.return_ty.as_ref().clone().into());
+                        driver.get_constraints_mut(tp, self.callee).set_preferred_type(ty.clone());
                         break 'find_preference;
                     }
                 }
@@ -1045,50 +1051,47 @@ impl tir::Expr<tir::Call> {
         *driver.get_constraints_mut(tp, self.id) = ConstraintList::new()
             .with_one_of(one_of)
             .with_maybe_preferred_type(pref);
-        *tp.overloads_mut(decl_ref_id) = overloads;
     }
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        let decl_ref_id = self.decl_ref_id(driver);
+        let ty = driver.solve_constraints(tp, self.id)
+            .unwrap_or(ConstraintSolution::error())
+            .make_immutable();
+        *tp.ty_mut(self.id) = ty.qual_ty.ty.clone();
 
-        let ty = driver.solve_constraints(tp, self.id).unwrap_or(Type::Error.into());
-        *tp.ty_mut(self.id) = ty.ty.clone();
-
-        let mut callee_one_of: SmallVec<[QualType; 1]> = driver.get_constraints_mut(tp, self.callee).one_of().iter().cloned().collect();
+        // TODO: there might be a bug here if there is no one-of constraint on the callee.
+        let mut callee_one_of = driver.get_constraints_mut(tp, self.callee).one_of().cloned().unwrap_or_default();
         callee_one_of.retain(|callee_ty| {
+            // NOTE: we used to check that arguments could unify to their parameter types here, but
+            // I'm pretty sure that is not necessary because we already check during pass 1.
             let return_ty: QualType = callee_ty.ty.return_ty().unwrap().clone().into();
-            // TODO: this is a temporary hack that should be removed.
-            let overload_decl = tp.overloads(decl_ref_id).overloads.iter().copied()
-                .find(|&decl| tp.decl_type(decl).trivially_convertible_to(callee_ty));
-            if let Some(_overload_decl) = overload_decl {
-                if let Some(fun) = callee_ty.ty.as_function() {
-                    // TODO: do this for self arguments as well
-                    for (arg, param) in self.args.iter().copied().zip(&fun.param_tys) {
-                        if driver.can_unify_to(tp, arg, UnificationType::QualType(&param.into())).is_err() {
-                            return false;
-                        }
-                    }
-                }
-                return_ty.trivially_convertible_to(&ty)
-            } else {
-                false
-            }
+            return_ty.trivially_convertible_to(&ty.qual_ty)
         });
 
         let pref = driver.get_constraints(tp, self.callee).preferred_type().cloned();
         
         // Select callee function type.
-        let callee_ty = pref.as_ref().cloned()
-            .filter(|pref| callee_one_of.iter().any(|ty| ty.trivially_convertible_to(pref) || pref.trivially_convertible_to(ty)))
-            .or_else(|| callee_one_of.iter().next().cloned());
-        if let Some(callee_ty) = callee_ty {
+        let callee_ty = pref.as_ref().cloned().and_then(|pref| {
+            let mut callee_ty = None;
+            for i in 0..callee_one_of.len() {
+                let (ty, decl) = callee_one_of.get(i);
+                if ty.trivially_convertible_to(&pref) || pref.trivially_convertible_to(ty) {
+                    callee_ty = Some((pref, decl));
+                    break;
+                }
+            }
+            callee_ty
+        }).or_else(|| callee_one_of.first().map(|(ty, decl)| (ty.clone(), decl)));
+
+        if let Some((callee_ty, callee_decl)) = callee_ty {
             let func_ty = callee_ty.ty.as_function().unwrap();
             // TODO: do this for self arguments as well
             for (&arg, param_ty) in self.args.iter().zip(&func_ty.param_tys) {
+                let decl = driver.can_unify_to(tp, arg, &param_ty.clone().into()).unwrap().get_decl();
                 if let Type::Inout(param_ty) = param_ty {
-                    driver.get_constraints_mut(tp, arg).set_to(QualType { ty: param_ty.as_ref().clone(), is_mut: true });
+                    driver.get_constraints_mut(tp, arg).set_to(ConstraintSolution::new(QualType { ty: param_ty.as_ref().clone(), is_mut: true }).with_decl_maybe(decl));
                 } else {
-                    driver.get_constraints_mut(tp, arg).set_to(param_ty);
+                    driver.get_constraints_mut(tp, arg).set_to(ConstraintSolution::new(param_ty).with_decl_maybe(decl));
                 }
             }
             if self.args.len() > func_ty.param_tys.len() {
@@ -1097,10 +1100,10 @@ impl tir::Expr<tir::Call> {
                     driver.set_constraints_to_c_variadic_compatible_type(tp, arg);
                 }
             }
-            driver.get_constraints_mut(tp, self.callee).set_to(callee_ty);
+            driver.get_constraints_mut(tp, self.callee).set_to(ConstraintSolution::new(callee_ty).with_decl_maybe(callee_decl));
         } else {
             // TODO: maybe push an error here? Right now I don't bother because DeclRef does it for me.
-            driver.get_constraints_mut(tp, self.callee).set_to(Type::Error);
+            driver.get_constraints_mut(tp, self.callee).make_error();
         }
 
         if let Some(pref) = pref {
@@ -1124,15 +1127,17 @@ impl tir::Expr<tir::AddrOf> {
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         let pointer_ty = driver.solve_constraints(tp, self.id)
-            .map(|ty| ty.ty)
-            .unwrap_or(Type::Error);
-        let pointee_ty = match pointer_ty {
+            .unwrap_or(ConstraintSolution::error())
+            .make_immutable();
+
+        let mut pointee_ty = pointer_ty.clone();
+        pointee_ty.qual_ty = match pointer_ty.qual_ty.ty {
             Type::Pointer(ref pointee) => pointee.as_ref().clone(),
             Type::Error => Type::Error.into(),
             _ => panic!("unexpected non-pointer, non-error type for addr of expression"),
         };
         driver.get_constraints_mut(tp, self.expr).set_to(pointee_ty);
-        *tp.ty_mut(self.id) = pointer_ty;
+        *tp.ty_mut(self.id) = pointer_ty.qual_ty.ty;
     }
 }
 
@@ -1145,11 +1150,11 @@ impl tir::Expr<tir::Dereference> {
     }
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        let mut ty = driver.solve_constraints(tp, self.id).unwrap_or(Type::Error.into());
-        *tp.ty_mut(self.id) = ty.ty.clone();
+        let mut ty = driver.solve_constraints(tp, self.id).unwrap_or(ConstraintSolution::error());
+        *tp.ty_mut(self.id) = ty.qual_ty.ty.clone();
 
-        if ty.ty != Type::Error {
-            ty = ty.ptr().into();
+        if ty.qual_ty.ty != Type::Error {
+            ty.qual_ty = ty.qual_ty.ptr().into();
         }
         driver.get_constraints_mut(tp, self.expr).set_to(ty);
     }
@@ -1157,32 +1162,40 @@ impl tir::Expr<tir::Dereference> {
 
 impl tir::Expr<tir::Pointer> {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        if let Some(err) = driver.can_unify_to(tp, self.expr, &Type::Ty.into()).err() {
-            let mut error = Error::new("Expected type operand to pointer operator");
-            let range = driver.get_range(self.expr);
-            match err {
-                UnificationError::InvalidChoice(choices)
-                    => error.add_primary_range(range, format!("expression could've unified to any of {:?}", choices)),
-                UnificationError::Trait(not_implemented)
-                    => error.add_primary_range(
-                        range,
-                        format!(
-                            "couldn't unify because expression requires implementations of {:?}",
-                            not_implemented.names(),
+        match driver.can_unify_to(tp, self.expr, &Type::Ty.into()) {
+            Ok(success) => {
+                driver.get_constraints_mut(tp, self.id).set_to(ConstraintSolution::new(Type::Ty).with_decl_maybe(success.get_decl()));
+            },
+            Err(err) => {
+                let mut error = Error::new("Expected type operand to pointer operator");
+                let range = driver.get_range(self.expr);
+                match err {
+                    UnificationError::InvalidChoice(choices)
+                        => error.add_primary_range(range, format!("expression could've unified to any of {:?}", choices)),
+                    UnificationError::Trait(not_implemented)
+                        => error.add_primary_range(
+                            range,
+                            format!(
+                                "couldn't unify because expression requires implementations of {:?}",
+                                not_implemented.names(),
+                            ),
                         ),
-                    ),
+                }
+                driver.diag.push(error);
+                driver.get_constraints_mut(tp, self.id).make_error();
             }
-            driver.diag.push(error);
         }
-        driver.get_constraints_mut(tp, self.id).set_to(Type::Ty);
+        
     }
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        let expr_ty = driver.solve_constraints(tp, self.expr).map(|ty| ty.ty).unwrap_or(Type::Error);
-        // Don't bother checking if it's a type, because we already did that in pass 1
+        let expr_ty = driver.solve_constraints(tp, self.expr)
+            .unwrap_or(ConstraintSolution::error())
+            .make_immutable();
+        // Don't bother checking if the type is `type`, because we already did that in pass 1
         driver.get_constraints_mut(tp, self.expr).set_to(expr_ty);
         let ty = driver.solve_constraints(tp, self.id).expect("Ambiguous type for pointer expression");
-        debug_assert_eq!(ty.ty, Type::Ty);
+        debug_assert_eq!(ty.qual_ty.ty, Type::Ty);
         *tp.ty_mut(self.id) = Type::Ty;
     }
 }
@@ -1212,12 +1225,14 @@ impl tir::Expr<tir::FunctionTy> {
             check_type(driver, tp, param_ty);
         }
         check_type(driver, tp, self.ret_ty);
-        driver.get_constraints_mut(tp, self.id).set_to(Type::Ty);
+        driver.get_constraints_mut(tp, self.id).set_to(ConstraintSolution::new(Type::Ty));
     }
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         fn solve_ty(driver: &Driver, tp: &mut impl TypeProvider, ty: ExprId) {
-            let expr_ty = driver.solve_constraints(tp, ty).map(|ty| ty.ty).unwrap_or(Type::Error);
+            let expr_ty = driver.solve_constraints(tp, ty)
+                .unwrap_or(ConstraintSolution::error())
+                .make_immutable();
             // Don't bother checking if it's a type, because we already did that in pass 1
             driver.get_constraints_mut(tp, ty).set_to(expr_ty);
         }
@@ -1227,7 +1242,7 @@ impl tir::Expr<tir::FunctionTy> {
         solve_ty(driver, tp, self.ret_ty);
 
         let ty = driver.solve_constraints(tp, self.id).expect("Ambiguous type for function type expression");
-        debug_assert_eq!(ty.ty, Type::Ty);
+        debug_assert_eq!(ty.qual_ty.ty, Type::Ty);
         *tp.ty_mut(self.id) = Type::Ty;
     }
 }
@@ -1253,17 +1268,19 @@ impl tir::Expr<tir::Struct> {
                 driver.diag.push(error);
             }
         }
-        driver.get_constraints_mut(tp, self.id).set_to(Type::Ty);
+        driver.get_constraints_mut(tp, self.id).set_to(ConstraintSolution::new(Type::Ty));
     }
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         for &field_ty in &self.field_tys {
-            let field_type = driver.solve_constraints(tp, field_ty).map(|ty| ty.ty).unwrap_or(Type::Error);
+            let field_type = driver.solve_constraints(tp, field_ty)
+                .unwrap_or(ConstraintSolution::error())
+                .make_immutable();
             // Don't bother checking if it's a type, because we already did that in pass 1
             driver.get_constraints_mut(tp, field_ty).set_to(field_type);
         }
         let ty = driver.solve_constraints(tp, self.id).expect("Ambiguous type for struct expression");
-        debug_assert_eq!(ty.ty, Type::Ty);
+        debug_assert_eq!(ty.qual_ty.ty, Type::Ty);
         *tp.ty_mut(self.id) = Type::Ty;
     }
 }
@@ -1286,7 +1303,7 @@ impl tir::Expr<tir::StructLit> {
                 ),
             }
             driver.diag.push(error);
-            driver.get_constraints_mut(tp, self.id).set_to(Type::Error);
+            driver.get_constraints_mut(tp, self.id).make_error();
         } else {
             if let Some(macro_options) = driver.tir.expr_macro_info.get(&self.ty) {
                 let mut one_of = SmallVec::<[QualType; 1]>::new();
@@ -1372,17 +1389,15 @@ impl tir::Expr<tir::StructLit> {
                     Error::new("Expected struct type in literal")
                         .adding_primary_range(range, "")
                 );
-                driver.get_constraints_mut(tp, self.id).set_to(Type::Error);
+                driver.get_constraints_mut(tp, self.id).make_error();
             }
-
-            
         };
 
     }
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         let ty = driver.solve_constraints(tp, self.id).unwrap();
-        *tp.ty_mut(self.id) = ty.ty;
+        *tp.ty_mut(self.id) = ty.qual_ty.ty;
 
         // Yay borrow checker:
         if let Some(lit) = tp.struct_lit(self.struct_lit_id).clone() {
@@ -1394,7 +1409,8 @@ impl tir::Expr<tir::StructLit> {
                 let field = field.decl;
                 let field_ty = tp.fetch_decl_type(driver, field, None).ty;
 
-                driver.get_constraints_mut(tp, lit.fields[i]).set_to(field_ty);
+                // TODO: this will probably get rid of DeclId info
+                driver.get_constraints_mut(tp, lit.fields[i]).set_to(ConstraintSolution::new(field_ty));
             }
         }
     }
@@ -1433,12 +1449,15 @@ impl tir::Expr<tir::If> {
     }
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        let condition_ty = driver.solve_constraints(tp, self.condition).map(|ty| ty.ty).unwrap_or(Type::Error);
+        let condition_ty = driver.solve_constraints(tp, self.condition)
+            .unwrap_or(ConstraintSolution::error())
+            .make_immutable();
+
         // Don't bother checking if bool, because we already did that in pass 1
         driver.get_constraints_mut(tp, self.condition).set_to(condition_ty);
         // If the if branches can't unify, it will be diagnosed above. So just propagate the error.
-        let ty = driver.solve_constraints(tp, self.id).unwrap_or_else(|_| Type::Error.into());
-        *tp.ty_mut(self.id) = ty.ty.clone();
+        let ty = driver.solve_constraints(tp, self.id).unwrap_or(ConstraintSolution::error());
+        *tp.ty_mut(self.id) = ty.qual_ty.ty.clone();
         driver.get_constraints_mut(tp, self.then_expr).set_to(ty.clone());
         driver.get_constraints_mut(tp, self.else_expr).set_to(ty);
     }
@@ -1450,36 +1469,39 @@ impl tir::Expr<tir::Do> {
     }
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        let ty = driver.solve_constraints(tp, self.id).expect("Ambiguous type for do expression");
-        *tp.ty_mut(self.id) = ty.ty.clone();
-        driver.get_constraints_mut(tp, self.terminal_expr).set_to(ty);
+        let solution = driver.solve_constraints(tp, self.id).expect("Ambiguous type for do expression");
+        *tp.ty_mut(self.id) = solution.qual_ty.ty.clone();
+        driver.get_constraints_mut(tp, self.terminal_expr).set_to(solution);
     }
 }
 
 impl tir::Stmt {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        if let Some(err) = driver.can_unify_to(tp, self.root_expr, &Type::Void.into()).err() {
-            if self.has_semicolon {
-                return;
-            }
-            let mut error = Error::new("statements must return void")
-                .adding_primary_range(self.root_expr, "to ignore the result, try adding ';' at the end of this statement");
-            match err {
-                UnificationError::InvalidChoice(choices)
-                => error.add_secondary_range(self.root_expr, format!("note: expression could've unified to any of {:?}", choices)),
-                UnificationError::Trait(not_implemented)
-                => error.add_secondary_range(
-                    self.root_expr,
-                    format!(
-                        "note: couldn't unify because expression requires implementations of {:?}",
-                        not_implemented.names(),
+        match driver.can_unify_to(tp, self.root_expr, &Type::Void.into()) {
+            Ok(success) => {
+                let constraints = driver.get_constraints_mut(tp, self.root_expr);
+                constraints.set_to(ConstraintSolution::new(Type::Void).with_decl_maybe(success.get_decl()));
+            },
+            Err(err) => {
+                if self.has_semicolon {
+                    return;
+                }
+                let mut error = Error::new("statements must return void")
+                    .adding_primary_range(self.root_expr, "to ignore the result, try adding ';' at the end of this statement");
+                match err {
+                    UnificationError::InvalidChoice(choices)
+                    => error.add_secondary_range(self.root_expr, format!("note: expression could've unified to any of {:?}", choices)),
+                    UnificationError::Trait(not_implemented)
+                    => error.add_secondary_range(
+                        self.root_expr,
+                        format!(
+                            "note: couldn't unify because expression requires implementations of {:?}",
+                            not_implemented.names(),
+                        ),
                     ),
-                ),
+                }
+                driver.diag.push(error);
             }
-            driver.diag.push(error);
-        } else {
-            let constraints = driver.get_constraints_mut(tp, self.root_expr);
-            constraints.set_to(Type::Void);
         }
     }
 
@@ -1493,34 +1515,38 @@ impl tir::RetGroup {
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         let ty = tp.get_evaluated_type(self.ty).clone();
         for &expr in &self.exprs {
-            if let Some(err) = driver.can_unify_to(tp, expr, &QualType::from(&ty)).err() {
-                let range = driver.get_range(expr);
-                let error = if expr == VOID_EXPR {
-                    Error::new(format!("expected return value of type `{:?}`, found nothing instead", ty))
-                        .adding_primary_range(self.decl_range, "declaration here")
-                } else {
-                    let mut error = Error::new(format!("can't unify expression to return type `{:?}`", ty))
-                        .adding_primary_range(self.decl_range, "declaration here")
-                        .adding_primary_range(range, "expression here");
-                    match err {
-                        UnificationError::InvalidChoice(choices)
-                            => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
-                        UnificationError::Trait(not_implemented)
-                            => error.add_secondary_range(
-                                range,
-                                format!(
-                                    "note: couldn't unify because expression requires implementations of {:?}",
-                                    not_implemented.names(),
+            match driver.can_unify_to(tp, expr, &QualType::from(&ty)) {
+                Ok(success) => {
+                    driver.get_constraints_mut(tp, expr).set_to(ConstraintSolution::new(ty.clone()).with_decl_maybe(success.get_decl()));
+                },
+                Err(err) => {
+                    let range = driver.get_range(expr);
+                    let error = if expr == VOID_EXPR {
+                        Error::new(format!("expected return value of type `{:?}`, found nothing instead", ty))
+                            .adding_primary_range(self.decl_range, "declaration here")
+                    } else {
+                        let mut error = Error::new(format!("can't unify expression to return type `{:?}`", ty))
+                            .adding_primary_range(self.decl_range, "declaration here")
+                            .adding_primary_range(range, "expression here");
+                        match err {
+                            UnificationError::InvalidChoice(choices)
+                                => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                            UnificationError::Trait(not_implemented)
+                                => error.add_secondary_range(
+                                    range,
+                                    format!(
+                                        "note: couldn't unify because expression requires implementations of {:?}",
+                                        not_implemented.names(),
+                                    ),
                                 ),
-                            ),
-                    }
-                    error
-                };
-                driver.diag.push(error);
+                        }
+                        error
+                    };
+                    driver.diag.push(error);
+                    driver.get_constraints_mut(tp, expr).set_to(ConstraintSolution::error());
+                    driver.get_constraints_mut(tp, expr).make_error();
+                },
             }
-
-            // Assume we panic above unless the returned expr can unify to the return type
-            driver.get_constraints_mut(tp, expr).set_to(ty.clone());
         }
     }
 }
@@ -1681,7 +1707,10 @@ impl DriverRef<'_> {
             self.write().run_pass_1(&unit.items, 0, &mut mock_tp);
             let constraints = self.read().get_constraints(&mock_tp, unit.main_expr);
             let one_of = constraints
-                .one_of().iter()
+                .one_of()
+                .map(|one_of| one_of.types())
+                .unwrap_or(&[])
+                .iter()
                 .map(|ty| ty.ty.clone())
                 .collect::<Vec<_>>();
             if constraints.is_error() {
