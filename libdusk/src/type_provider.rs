@@ -53,14 +53,14 @@ macro_rules! forward_mock {
     ($($doc:literal)* $field_name:ident, $fw_name:ident, $id_ty:ty, $val_ty:ty) => {
         $(#[doc=$doc])*
         fn $fw_name(&self, id: $id_ty) -> &$val_ty {
-            let base = self.base;
+            let base = &*self.base;
             let val = self.$field_name.get(&id).map(|val| val).unwrap_or_else(|| base.$fw_name(id));
             val
         }
         $(#[doc=$doc])*
         paste! {
             fn [<$fw_name _mut>](&mut self, id: $id_ty) -> &mut $val_ty {
-                let base = self.base;
+                let base = &*self.base;
                 self.$field_name.entry(id).or_insert_with(|| base.$fw_name(id).clone())
             }
         }
@@ -102,6 +102,8 @@ macro_rules! declare_tp {
     ) => {
         pub trait TypeProvider: private::Sealed {
             fn insert_eval_result(&mut self, expr: ExprId, result: Const);
+
+            fn resize(&mut self, d: &Driver, new_code: NewCode);
 
             $(
                 forward_trait!($($doc)* $field_name, $fn_name, $id_ty, $payload_ty);
@@ -195,10 +197,6 @@ macro_rules! declare_tp {
                     ty.is_mut = d.tir.decls[decl].is_mut;
                 }
             }
-
-            pub fn resize(&mut self, d: &Driver, new_code: NewCode) {
-                self.resize_impl(d, new_code.decls.start);
-            }
         }
         
         impl private::Sealed for RealTypeProvider {}
@@ -206,6 +204,10 @@ macro_rules! declare_tp {
         impl TypeProvider for RealTypeProvider {
             fn insert_eval_result(&mut self, expr: ExprId, result: Const) {
                 self.eval_results.insert(expr, result);
+            }
+
+            fn resize(&mut self, d: &Driver, new_code: NewCode) {
+                self.resize_impl(d, new_code.decls.start);
             }
 
             $(
@@ -221,7 +223,7 @@ macro_rules! declare_tp {
         }
         
         pub struct MockTypeProvider<'base> {
-            base: &'base dyn TypeProvider,
+            base: &'base mut dyn TypeProvider,
 
             $(
                 $(#[doc = $doc])*
@@ -232,7 +234,8 @@ macro_rules! declare_tp {
         }
 
         impl<'base> MockTypeProvider<'base> {
-            pub fn new(base: &'base dyn TypeProvider) -> Self {
+            // base must ONLY be mutated in a resize operation
+            pub fn new(base: &'base mut dyn TypeProvider) -> Self {
                 MockTypeProvider {
                     base,
                     $($field_name: HashMap::new(),)*
@@ -246,6 +249,10 @@ macro_rules! declare_tp {
         impl<'base> TypeProvider for MockTypeProvider<'base> {
             fn insert_eval_result(&mut self, expr: ExprId, result: Const) {
                 self.eval_results.insert(expr, result);
+            }
+
+            fn resize(&mut self, d: &Driver, new_code: NewCode) {
+                self.base.resize(d, new_code);
             }
 
             $(

@@ -321,6 +321,7 @@ impl ConstraintList {
     }
 }
 
+// TODO: look at constraints of embedded type variables to determine whether or not a type implements a trait
 fn implements_traits(ty: &Type, traits: BuiltinTraits) -> Result<(), BuiltinTraits> {
     let mut not_implemented = BuiltinTraits::empty();
     fn expressible_by_str_lit(ty: &Type) -> bool {
@@ -504,7 +505,7 @@ impl Driver {
         if let Some(one_of) = &constraints.one_of {
             for i in 0..one_of.types.len() {
                 let (oty, decl) = one_of.get(i);
-                if oty.trivially_convertible_to(&ty) {
+                if self.qual_ty_is_trivially_convertible_to(tp, oty, &ty) {
                     return Ok(UnificationSuccess::HasTypeInOneOf(decl));
                 }
             }
@@ -512,6 +513,101 @@ impl Driver {
         }
 
         Ok(UnificationSuccess::TraitsImplementedByType)
+    }
+
+    // This differs from `can_unify_to` above in that it modifies constraint of type variables embedded in `ty`.
+    // TODO: it would be nice to...unify this implementation with `can_unify_to`, since they are 99.9% identical.
+    pub fn can_unify_argument_to<'a, 'b: 'a>(&'a self, tp: &'a mut impl TypeProvider, constraint_haver: impl Into<ConstraintHaver<'a>> + Clone, ty: impl Into<UnificationType<'b>>) -> Result<UnificationSuccess, UnificationError<'a>> {
+        let constraints = get_constraints!(self, tp, constraint_haver.clone());
+        // Never is the "bottom type", so it unifies to anything.
+        if constraints.one_of_exists(|ty| ty.ty == Type::Never) { return Ok(UnificationSuccess::IsNever); }
+
+        // If this value is already an error, just say it unifies to anything
+        if constraints.is_error() { return Ok(UnificationSuccess::IsError); }
+
+        let ty = ty.into();
+        let ty = match ty {
+            UnificationType::UnevaluatedType(ty) => tp.get_evaluated_type(ty).clone().into(),
+            UnificationType::QualType(ty) => ty.clone(),
+        };
+
+        use UnificationError::*;
+        if let Some(not_implemented) = implements_traits(&ty.ty, constraints.trait_impls).err() {
+            return Err(Trait(not_implemented));
+        }
+        if let Some(one_of) = constraints.one_of.to_owned() {
+            for i in 0..one_of.types.len() {
+                let (oty, decl) = one_of.get(i);
+                if self.qual_ty_is_trivially_convertible_to_adding_constraints(tp, oty, &ty) {
+                    return Ok(UnificationSuccess::HasTypeInOneOf(decl));
+                }
+            }
+            let constraints = get_constraints!(self, tp, constraint_haver.clone());
+            return Err(InvalidChoice(&constraints.one_of().unwrap().types));
+        }
+
+        Ok(UnificationSuccess::TraitsImplementedByType)
+    }
+
+    fn qual_ty_is_trivially_convertible_to_adding_constraints(&self, tp: &mut impl TypeProvider, a: &QualType, b: &QualType) -> bool {
+        if let Type::Inout(ty) = &b.ty {
+            if !a.is_mut {
+                return false;
+            } else {
+                return self.ty_is_trivially_convertible_to_adding_constraints(tp, &a.ty, ty);
+            }
+        }
+        if !a.is_mut && b.is_mut {
+            return false;
+        }
+        self.ty_is_trivially_convertible_to_adding_constraints(tp, &a.ty, &b.ty)
+    }
+
+    fn ty_is_trivially_convertible_to_adding_constraints(&self, tp: &mut impl TypeProvider, a: &Type, b: &Type) -> bool {
+        // TODO: we currently only check the right hand side for type variables. Should we also check the left hand side?
+        match (a, b) {
+            (Type::Never, _b) => true,
+            (Type::Pointer(a), Type::Pointer(b)) => self.qual_ty_is_trivially_convertible_to_adding_constraints(tp, a, b),
+            (a, &Type::TypeVar(type_var)) => {
+                match self.can_unify_to(tp, type_var, &a.into()) {
+                    Ok(success) => {
+                        self.get_constraints_mut(tp, type_var).set_to(ConstraintSolution::new(a).with_decl_maybe(success.get_decl()));
+                        true
+                    },
+                    Err(_) => false,
+                }
+            },
+            (a, b) => a == b,
+        }
+    }
+
+    fn qual_ty_is_trivially_convertible_to(&self, tp: &impl TypeProvider, a: &QualType, b: &QualType) -> bool {
+        if let Type::Inout(ty) = &b.ty {
+            if !a.is_mut {
+                return false;
+            } else {
+                return self.ty_is_trivially_convertible_to(tp, &a.ty, ty);
+            }
+        }
+        if !a.is_mut && b.is_mut {
+            return false;
+        }
+        self.ty_is_trivially_convertible_to(tp, &a.ty, &b.ty)
+    }
+
+    fn ty_is_trivially_convertible_to(&self, tp: &impl TypeProvider, a: &Type, b: &Type) -> bool {
+        // TODO: we currently only check the right hand side for type variables. Should we also check the left hand side?
+        match (a, b) {
+            (Type::Never, _b) => true,
+            (Type::Pointer(a), Type::Pointer(b)) => self.qual_ty_is_trivially_convertible_to(tp, a, b),
+            (a, &Type::TypeVar(type_var)) => {
+                match self.can_unify_to(tp, type_var, &a.into()) {
+                    Ok(success) => true,
+                    Err(_) => false,
+                }
+            },
+            (a, b) => a == b,
+        }
     }
 
     pub fn intersect_constraints<'a>(&self, tp: &impl TypeProvider, constraints: impl Into<ConstraintHaver<'a>> + Clone, other: impl Into<ConstraintHaver<'a>> + Clone) -> ConstraintList {

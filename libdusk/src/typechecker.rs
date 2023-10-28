@@ -870,13 +870,13 @@ impl tir::Expr<tir::DeclRef> {
                 }
             }
 
-            println!("{}", driver.display_item(self.id));
-
+            let before = driver.take_snapshot();
             ty = driver.register_type_variables_for_decl_ref(self.decl_ref_id, overload, ty);
+            let new_code = driver.get_new_code_since(before);
+            tp.resize(driver, new_code);
 
             one_of.push_with_decl(QualType { ty, is_mut }, overload);
         }
-        dbg!(&one_of);
 
         *driver.get_constraints_mut(tp, self.id) = ConstraintList::new().with_one_of(one_of);
         *tp.overloads_mut(self.decl_ref_id) = Overloads { overloads, nonviable_overloads: Default::default() };
@@ -1010,8 +1010,11 @@ impl tir::Expr<tir::Call> {
             
             // Check that arguments can unify to their corresponding parameter types.
             for (arg, ty) in self.args.iter().copied().zip(func.param_tys.iter()) {
-                if driver.can_unify_to(tp, arg, UnificationType::QualType(&ty.clone().into())).is_err() {
+                if driver.can_unify_argument_to(tp, arg, UnificationType::QualType(&ty.clone().into())).is_err() {
+                    println!("ARGUMENT {} CANNOT UNIFY TO {:?}", driver.display_item(arg), ty);
                     return false;
+                } else {
+                    println!("ARGUMENT {} CAN UNIFY TO {:?}", driver.display_item(arg), ty);
                 }
             }
             // TODO: is there anything we should be doing to check C variadic arguments here?
