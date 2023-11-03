@@ -203,11 +203,7 @@ impl tir::AssignedDecl {
         let decl_id = self.decl_id;
         let root_expr = self.root_expr;
         let ty = tp.fetch_decl_type(driver, decl_id, None).ty;
-        let unification = match driver.can_unify_to(tp, root_expr, &ty.clone().into()) {
-            Ok(unification) => unification,
-            Err(_) => panic!("unable to unify {:?} to {:?}", driver.get_constraints(tp, root_expr), ty),
-        };
-        driver.get_constraints_mut(tp, root_expr).set_to(ConstraintSolution::new(ty).with_decl_maybe(unification.get_decl()));
+        driver.set_type(tp, root_expr, ty).unwrap();
     }
 }
 
@@ -249,7 +245,7 @@ impl tir::PatternBinding {
 
 impl tir::Expr<tir::Assignment> {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        driver.get_constraints_mut(tp, self.id).set_to(ConstraintSolution::new(Type::Void));
+        driver.set_type(tp, self.id, Type::Void).unwrap();
         *tp.ty_mut(self.id) = Type::Void;
     }
 
@@ -345,9 +341,8 @@ impl tir::Expr<tir::While> {
     }
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        match driver.can_unify_to(tp, self.condition, &Type::Bool.into()) {
-            Ok(success) => driver.get_constraints_mut(tp, self.condition).set_to(ConstraintSolution::new(Type::Bool).with_decl_maybe(success.get_decl())),
-            Err(_) => panic!("Expected boolean condition in while expression"),
+        if driver.set_type(tp, self.condition, Type::Bool).is_err() {
+            panic!("Expected boolean condition in while expression");
         }
     }
 }
@@ -440,10 +435,8 @@ impl tir::Expr<tir::For> {
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         let ty = tp.fetch_decl_type(driver, self.binding_decl, None).ty;
-        let lower_bound_decl = driver.can_unify_to(tp, self.lower_bound, &ty.clone().into()).unwrap().get_decl();
-        let upper_bound_decl = driver.can_unify_to(tp, self.upper_bound, &ty.clone().into()).unwrap().get_decl();
-        driver.get_constraints_mut(tp, self.lower_bound).set_to(ConstraintSolution::new(ty.clone()).with_decl_maybe(lower_bound_decl));
-        driver.get_constraints_mut(tp, self.upper_bound).set_to(ConstraintSolution::new(ty).with_decl_maybe(upper_bound_decl));
+        driver.set_type(tp, self.lower_bound, ty.clone()).unwrap();
+        driver.set_type(tp, self.upper_bound, ty).unwrap();
     }
 }
 
@@ -813,7 +806,7 @@ impl tir::Expr<tir::Enum> {
                 driver.diag.push(error);
             }
         }
-        driver.get_constraints_mut(tp, self.id).set_to(ConstraintSolution::new(Type::Ty));
+        driver.set_type(tp, self.id, Type::Ty).unwrap();
     }
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
@@ -927,7 +920,11 @@ impl tir::Expr<tir::DeclRef> {
             for generic_param in range_iter(decl.generic_params.clone()) {
                 let type_var = driver.code.ast.generic_arg_type_variables.get(&(self.decl_ref_id, generic_param)).cloned().unwrap();
                 // TODO: error message probably
-                let solution = driver.solve_constraints(tp, type_var).unwrap();
+                let poop = driver.solve_constraints(tp, type_var);
+                if poop.is_err() {
+                    println!("{}", driver.display_item(self.id));
+                }
+                let solution = poop.unwrap();
                 generic_args.push(solution.qual_ty.ty);
             }
             (Some(overload), Some(generic_args))
@@ -1093,11 +1090,10 @@ impl tir::Expr<tir::Call> {
             let func_ty = callee_ty.ty.as_function().unwrap();
             // TODO: do this for self arguments as well
             for (&arg, param_ty) in self.args.iter().zip(&func_ty.param_tys) {
-                let decl = driver.can_unify_to(tp, arg, &param_ty.clone().into()).unwrap().get_decl();
                 if let Type::Inout(param_ty) = param_ty {
-                    driver.get_constraints_mut(tp, arg).set_to(ConstraintSolution::new(QualType { ty: param_ty.as_ref().clone(), is_mut: true }).with_decl_maybe(decl));
+                    driver.set_type(tp, arg, QualType { ty: param_ty.as_ref().clone(), is_mut: true }).unwrap();
                 } else {
-                    driver.get_constraints_mut(tp, arg).set_to(ConstraintSolution::new(param_ty).with_decl_maybe(decl));
+                    driver.set_type(tp, arg, param_ty).unwrap();
                 }
             }
             if self.args.len() > func_ty.param_tys.len() {
@@ -1168,28 +1164,23 @@ impl tir::Expr<tir::Dereference> {
 
 impl tir::Expr<tir::Pointer> {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        match driver.can_unify_to(tp, self.expr, &Type::Ty.into()) {
-            Ok(success) => {
-                driver.get_constraints_mut(tp, self.id).set_to(ConstraintSolution::new(Type::Ty).with_decl_maybe(success.get_decl()));
-            },
-            Err(err) => {
-                let mut error = Error::new("Expected type operand to pointer operator");
-                let range = driver.get_range(self.expr);
-                match err {
-                    UnificationError::InvalidChoice(choices)
-                        => error.add_primary_range(range, format!("expression could've unified to any of {:?}", choices)),
-                    UnificationError::Trait(not_implemented)
-                        => error.add_primary_range(
-                            range,
-                            format!(
-                                "couldn't unify because expression requires implementations of {:?}",
-                                not_implemented.names(),
-                            ),
+        if let Err(err) = driver.set_type(tp, self.id, Type::Ty) {
+            let mut error = Error::new("Expected type operand to pointer operator");
+            let range = driver.get_range(self.expr);
+            match err {
+                UnificationError::InvalidChoice(choices)
+                    => error.add_primary_range(range, format!("expression could've unified to any of {:?}", choices)),
+                UnificationError::Trait(not_implemented)
+                    => error.add_primary_range(
+                        range,
+                        format!(
+                            "couldn't unify because expression requires implementations of {:?}",
+                            not_implemented.names(),
                         ),
-                }
-                driver.diag.push(error);
-                driver.get_constraints_mut(tp, self.id).make_error();
+                    ),
             }
+            driver.diag.push(error);
+            driver.get_constraints_mut(tp, self.id).make_error();
         }
         
     }
@@ -1231,7 +1222,7 @@ impl tir::Expr<tir::FunctionTy> {
             check_type(driver, tp, param_ty);
         }
         check_type(driver, tp, self.ret_ty);
-        driver.get_constraints_mut(tp, self.id).set_to(ConstraintSolution::new(Type::Ty));
+        driver.set_type(tp, self.id, Type::Ty).unwrap();
     }
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
@@ -1274,7 +1265,7 @@ impl tir::Expr<tir::Struct> {
                 driver.diag.push(error);
             }
         }
-        driver.get_constraints_mut(tp, self.id).set_to(ConstraintSolution::new(Type::Ty));
+        driver.set_type(tp, self.id, Type::Ty).unwrap();
     }
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
@@ -1415,8 +1406,7 @@ impl tir::Expr<tir::StructLit> {
                 let field = field.decl;
                 let field_ty = tp.fetch_decl_type(driver, field, None).ty;
 
-                let success = driver.can_unify_to(tp, lit.fields[i], &field_ty.clone().into()).unwrap();
-                driver.get_constraints_mut(tp, lit.fields[i]).set_to(ConstraintSolution::new(field_ty).with_decl_maybe(success.get_decl()));
+                driver.set_type(tp, lit.fields[i], field_ty).unwrap();
             }
         }
     }
@@ -1464,10 +1454,8 @@ impl tir::Expr<tir::If> {
         // If the if branches can't unify, it will be diagnosed above. So just propagate the error.
         let ty = driver.solve_constraints(tp, self.id).unwrap_or(ConstraintSolution::error());
         *tp.ty_mut(self.id) = ty.qual_ty.ty.clone();
-        let then_succ = driver.can_unify_to(tp, self.then_expr, &ty.qual_ty).unwrap();
-        let else_succ = driver.can_unify_to(tp, self.else_expr, &ty.qual_ty).unwrap();
-        driver.get_constraints_mut(tp, self.then_expr).set_to(ty.clone().with_decl_maybe(then_succ.get_decl()));
-        driver.get_constraints_mut(tp, self.else_expr).set_to(ty.with_decl_maybe(else_succ.get_decl()));
+        driver.set_type(tp, self.then_expr, ty.qual_ty.clone()).unwrap();
+        driver.set_type(tp, self.else_expr, ty.qual_ty.clone()).unwrap();
     }
 }
 
@@ -1485,31 +1473,25 @@ impl tir::Expr<tir::Do> {
 
 impl tir::Stmt {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
-        match driver.can_unify_to(tp, self.root_expr, &Type::Void.into()) {
-            Ok(success) => {
-                let constraints = driver.get_constraints_mut(tp, self.root_expr);
-                constraints.set_to(ConstraintSolution::new(Type::Void).with_decl_maybe(success.get_decl()));
-            },
-            Err(err) => {
-                if self.has_semicolon {
-                    return;
-                }
-                let mut error = Error::new("statements must return void")
-                    .adding_primary_range(self.root_expr, "to ignore the result, try adding ';' at the end of this statement");
-                match err {
-                    UnificationError::InvalidChoice(choices)
-                    => error.add_secondary_range(self.root_expr, format!("note: expression could've unified to any of {:?}", choices)),
-                    UnificationError::Trait(not_implemented)
-                    => error.add_secondary_range(
-                        self.root_expr,
-                        format!(
-                            "note: couldn't unify because expression requires implementations of {:?}",
-                            not_implemented.names(),
-                        ),
-                    ),
-                }
-                driver.diag.push(error);
+        if let Err(err) = driver.set_type(tp, self.root_expr, Type::Void) {
+            if self.has_semicolon {
+                return;
             }
+            let mut error = Error::new("statements must return void")
+                .adding_primary_range(self.root_expr, "to ignore the result, try adding ';' at the end of this statement");
+            match err {
+                UnificationError::InvalidChoice(choices)
+                => error.add_secondary_range(self.root_expr, format!("note: expression could've unified to any of {:?}", choices)),
+                UnificationError::Trait(not_implemented)
+                => error.add_secondary_range(
+                    self.root_expr,
+                    format!(
+                        "note: couldn't unify because expression requires implementations of {:?}",
+                        not_implemented.names(),
+                    ),
+                ),
+            }
+            driver.diag.push(error);
         }
     }
 
@@ -1523,37 +1505,32 @@ impl tir::RetGroup {
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         let ty = tp.get_evaluated_type(self.ty).clone();
         for &expr in &self.exprs {
-            match driver.can_unify_to(tp, expr, &QualType::from(&ty)) {
-                Ok(success) => {
-                    driver.get_constraints_mut(tp, expr).set_to(ConstraintSolution::new(ty.clone()).with_decl_maybe(success.get_decl()));
-                },
-                Err(err) => {
-                    let range = driver.get_range(expr);
-                    let error = if expr == VOID_EXPR {
-                        Error::new(format!("expected return value of type `{:?}`, found nothing instead", ty))
-                            .adding_primary_range(self.decl_range, "declaration here")
-                    } else {
-                        let mut error = Error::new(format!("can't unify expression to return type `{:?}`", ty))
-                            .adding_primary_range(self.decl_range, "declaration here")
-                            .adding_primary_range(range, "expression here");
-                        match err {
-                            UnificationError::InvalidChoice(choices)
-                                => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
-                            UnificationError::Trait(not_implemented)
-                                => error.add_secondary_range(
-                                    range,
-                                    format!(
-                                        "note: couldn't unify because expression requires implementations of {:?}",
-                                        not_implemented.names(),
-                                    ),
+            if let Err(err) = driver.set_type(tp, expr, ty.clone()) {
+                let range = driver.get_range(expr);
+                let error = if expr == VOID_EXPR {
+                    Error::new(format!("expected return value of type `{:?}`, found nothing instead", ty))
+                        .adding_primary_range(self.decl_range, "declaration here")
+                } else {
+                    let mut error = Error::new(format!("can't unify expression to return type `{:?}`", ty))
+                        .adding_primary_range(self.decl_range, "declaration here")
+                        .adding_primary_range(range, "expression here");
+                    match err {
+                        UnificationError::InvalidChoice(choices)
+                            => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                        UnificationError::Trait(not_implemented)
+                            => error.add_secondary_range(
+                                range,
+                                format!(
+                                    "note: couldn't unify because expression requires implementations of {:?}",
+                                    not_implemented.names(),
                                 ),
-                        }
-                        error
-                    };
-                    driver.diag.push(error);
-                    driver.get_constraints_mut(tp, expr).set_to(ConstraintSolution::error());
-                    driver.get_constraints_mut(tp, expr).make_error();
-                },
+                            ),
+                    }
+                    error
+                };
+                driver.diag.push(error);
+                driver.get_constraints_mut(tp, expr).set_to(ConstraintSolution::error());
+                driver.get_constraints_mut(tp, expr).make_error();
             }
         }
     }

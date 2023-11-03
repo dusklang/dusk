@@ -123,11 +123,11 @@ impl<const N: usize> From<[QualType; N]> for OneOfConstraint {
 }
 
 #[derive(Debug)]
-pub enum UnificationError<'a> {
+pub enum UnificationError {
     /// The expression was constrained to implement a trait that the requested type doesn't implement
     Trait(BuiltinTraits),
     /// The expression didn't have the requested type in its list of type choices
-    InvalidChoice(&'a [QualType]),
+    InvalidChoice(Vec<QualType>),
 }
 
 pub enum UnificationSuccess {
@@ -498,7 +498,7 @@ impl<'a> From<MutConstraintHaver<'a>> for ConstraintHaver<'a> {
 
 
 impl Driver {
-    pub fn can_unify_to<'a, 'b: 'a>(&'a self, tp: &'a impl TypeProvider, constraint_haver: impl Into<ConstraintHaver<'a>>, ty: impl Into<UnificationType<'b>>) -> Result<UnificationSuccess, UnificationError<'a>> {
+    pub fn can_unify_to<'a>(&self, tp: &impl TypeProvider, constraint_haver: impl Into<ConstraintHaver<'a>>, ty: impl Into<UnificationType<'a>>) -> Result<UnificationSuccess, UnificationError> {
         let constraints = match constraint_haver.into() {
             ConstraintHaver::Expr(expr) => self.get_constraints(tp, expr),
             ConstraintHaver::TypeVar(type_var) => self.get_constraints(tp, type_var),
@@ -528,7 +528,7 @@ impl Driver {
                     return Ok(UnificationSuccess::HasTypeInOneOf(decl));
                 }
             }
-            return Err(InvalidChoice(&one_of.types));
+            return Err(InvalidChoice(one_of.types().to_owned()));
         }
 
         Ok(UnificationSuccess::TraitsImplementedByType)
@@ -536,7 +536,7 @@ impl Driver {
 
     // This differs from `can_unify_to` above in that it modifies constraint of type variables embedded in `ty`.
     // TODO: it would be nice to...unify this implementation with `can_unify_to`, since they are 99.9% identical.
-    pub fn can_unify_argument_to<'a, 'b: 'a>(&'a self, tp: &'a mut impl TypeProvider, constraint_haver: impl Into<ConstraintHaver<'a>> + Clone, ty: impl Into<UnificationType<'b>>) -> Result<UnificationSuccess, UnificationError<'a>> {
+    pub fn can_unify_argument_to<'a>(&self, tp: &mut impl TypeProvider, constraint_haver: impl Into<ConstraintHaver<'a>> + Clone, ty: impl Into<UnificationType<'a>>) -> Result<UnificationSuccess, UnificationError> {
         let constraints = get_constraints!(self, tp, constraint_haver.clone()).clone();
         // Never is the "bottom type", so it unifies to anything.
         if constraints.one_of_exists(|ty| ty.ty == Type::Never) { return Ok(UnificationSuccess::IsNever); }
@@ -562,7 +562,7 @@ impl Driver {
                 }
             }
             let constraints = get_constraints!(self, tp, constraint_haver.clone());
-            return Err(InvalidChoice(&constraints.one_of().unwrap().types));
+            return Err(InvalidChoice(constraints.one_of().unwrap().types().to_owned()));
         }
 
         Ok(UnificationSuccess::TraitsImplementedByType)
@@ -835,11 +835,21 @@ impl Driver {
         let solution = self.solve_constraints(tp, constraints.clone().into()).unwrap();
         get_constraints_mut!(self, tp, constraints).set_to(solution);
     }
-}
 
-#[derive(Debug)]
-pub enum AssignmentError {
-    Immutable,
+    pub fn set_type<'a>(&self, tp: &mut impl TypeProvider, constraint_haver: impl Into<MutConstraintHaver<'a>> + Clone, ty: impl Into<QualType>) -> Result<(), UnificationError> {
+        let constraints = get_constraints!(self, tp, constraint_haver.clone().into());
+        let ty = ty.into();
+
+        // If we're never, we should stay never.
+        // If the passed in type is Error, we should stay whatever we are.
+        // (this second clause is experimental and may not turn out to be a good idea. reevaluate later.)
+        if !constraints.is_never() && !ty.ty.is_error() {
+            let decl = self.can_unify_to(tp, constraint_haver.clone().into(), &ty)?.get_decl();
+            get_constraints_mut!(self, tp, constraint_haver).set_to(ConstraintSolution::new(ty).with_decl_maybe(decl));
+        }
+
+        Ok(())
+    }
 }
 
 impl ConstraintList {
@@ -856,6 +866,11 @@ impl ConstraintList {
             self.one_of = Some(one_of);
         }
     }
+}
+
+#[derive(Debug)]
+pub enum AssignmentError {
+    Immutable,
 }
 
 impl Driver {
