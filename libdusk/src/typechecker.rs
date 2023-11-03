@@ -1681,9 +1681,17 @@ impl DriverRef<'_> {
             }
 
             for i in 0..unit.eval_dependees.len() {
-                let expr = unit.eval_dependees[i];
-                let val = self.eval_expr(expr, tp);
-                tp.insert_eval_result(expr, val.into());
+                let mut stack = vec![unit.eval_dependees[i]];
+                while !stack.is_empty() {
+                    let expr = stack.pop().unwrap();
+                    let val = self.eval_expr(expr, tp);
+                    tp.insert_eval_result(expr, val.into());
+
+                    let d = self.read();
+                    if let ast::Expr::DeclRef { generic_args, .. } = &ef!(d, expr.ast) {
+                        stack.extend_from_slice(generic_args);
+                    }
+                }
             }
         }
 

@@ -399,12 +399,12 @@ impl Driver {
 
     fn parse_decl_ref(&mut self, p: &mut Parser, base_expr: Option<ExprId>, name: Sym) -> ParseResult<ExprId> {
         let name_range = self.cur(p).range;
+        let mut generic_args = Vec::new();
         self.next(p);
         if !self.has_implicit_separator(p) && matches!(self.cur(p).kind, TokenKind::OpenGenerics) {
             let open_square_bracket_range = self.cur(p).range;
             self.next(p);
             let generic_arg_list = self.begin_list(p, TokenKind::could_begin_expression, [TokenKind::Comma], Some(TokenKind::CloseGenerics));
-            let mut args = Vec::new();
             loop {
                 let kind = self.cur(p).kind;
                 match kind {
@@ -422,7 +422,7 @@ impl Driver {
                     _ => {
                         self.start_next_list_item(p, generic_arg_list.id());
                         if let Ok(arg) = self.parse_expr(p) {
-                            args.push(arg);
+                            generic_args.push(arg);
                             self.eat_separators(p);
                         }
                     }
@@ -459,6 +459,7 @@ impl Driver {
             self.decl_ref(
                 base_expr,
                 name,
+                generic_args,
                 args,
                 has_parens,
                 name_range,
@@ -1008,7 +1009,7 @@ impl Driver {
         let mut arguments = Vec::new();
         for ident in idents {
             let generic_ctx = self.begin_decl_ref_generic_ctx();
-            let ty = self.decl_ref(None, ident.symbol, SmallVec::new(), false, ident.range, generic_ctx);
+            let ty = self.decl_ref(None, ident.symbol, Vec::new(), SmallVec::new(), false, ident.range, generic_ctx);
             arguments.push(ty);
         }
         arguments

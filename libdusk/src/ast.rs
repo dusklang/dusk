@@ -204,7 +204,7 @@ pub enum Expr {
     CharLit { lit: i8 },
     BoolLit { lit: bool },
     Const(Const),
-    DeclRef { id: DeclRefId },
+    DeclRef { id: DeclRefId, generic_args: Vec<ExprId> },
     Call { callee: ExprId, arguments: SmallVec<[ExprId; 2]> },
     AddrOf { expr: ExprId, is_mut: bool },
     /// Transforms type into pointer type
@@ -1216,7 +1216,7 @@ impl Driver {
         );
         self.push_generic_ctx(|parent| GenericCtx::DeclRef { id, parent })
     }
-    pub fn decl_ref(&mut self, base_expr: Option<ExprId>, name: Sym, arguments: SmallVec<[ExprId; 2]>, has_parens: bool, range: SourceRange, generic_ctx: AutoPopStackEntry<GenericCtxId>) -> ExprId {
+    pub fn decl_ref(&mut self, base_expr: Option<ExprId>, name: Sym, generic_args: Vec<ExprId>, arguments: SmallVec<[ExprId; 2]>, has_parens: bool, range: SourceRange, generic_ctx: AutoPopStackEntry<GenericCtxId>) -> ExprId {
         let namespace = match base_expr {
             Some(base_expr) => {
                 Namespace::MemberRef { base_expr }
@@ -1226,7 +1226,7 @@ impl Driver {
         let GenericCtx::DeclRef { id, .. } = self.code.ast.generic_ctxs[generic_ctx.id()] else {
             panic!("Invalid generic context passed in");
         };
-        let expr = self.add_expr(Expr::DeclRef { id }, range);
+        let expr = self.add_expr(Expr::DeclRef { id, generic_args: generic_args.clone() }, range);
         self.code.ast.decl_refs[id] = DeclRef {
             name,
             namespace,
@@ -1266,7 +1266,7 @@ impl Driver {
                 let name = self.interner.get_or_intern(op.symbol());
                 // TODO: create generic context before parsing operands
                 let generic_ctx = self.begin_decl_ref_generic_ctx();
-                self.decl_ref(None, name, smallvec![lhs, rhs], true, range, generic_ctx)
+                self.decl_ref(None, name, Vec::new(), smallvec![lhs, rhs], true, range, generic_ctx)
             }
         }
     }
@@ -1281,7 +1281,7 @@ impl Driver {
                 let name = self.interner.get_or_intern(op.symbol());
                 // TODO: create generic context before parsing operand
                 let generic_ctx = self.begin_decl_ref_generic_ctx();
-                self.decl_ref(None, name, smallvec![expr], true, range, generic_ctx)
+                self.decl_ref(None, name, Vec::new(), smallvec![expr], true, range, generic_ctx)
             },
         }
     }
