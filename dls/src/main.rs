@@ -251,7 +251,7 @@ impl Server {
                     let mut message = String::new();
                     let d = driver.read();
                     match ef!(d, expr.ast) {
-                        Expr::DeclRef { id } => {
+                        Expr::DeclRef { id, .. } => {
                             let name = d.code.ast.decl_refs[id].name;
                             let name = d.interner.resolve(name).unwrap();
                             let mut ty = None;

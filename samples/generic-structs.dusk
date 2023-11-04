@@ -3,11 +3,25 @@ MyGenericType<|T|> :: struct {
     generic_member: T
 }
 
-DeGenericized :: MyGenericType<|u64|>
+DeGenericized :: MyGenericType<|i64|>
 
 fn main() {
-    hello :: DeGenericized {
+    hello :: MyGenericType<|i64|> {
         non_generic_member: 54
-        generic_member: 67
+        generic_member: 4
     }
+
+    hello :: MyGenericType {
+        non_generic_member: 54
+        generic_member: 4 as u32
+    }
+
+    //None of these things work yet:
+    // hello.generic_member += 5
+    // hello :: DeGenericized { non_generic_member: 54, generic_member: 4 }
+    // print_type_of(hello.generic_member)
+}
+
+fn print_type_of<|T|>(val: T) {
+    print_type(T)
 }

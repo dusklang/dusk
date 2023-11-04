@@ -53,7 +53,7 @@ define_index_type!(pub struct GenericCtxId = u32;);
 define_index_type!(pub struct LoopId = u32;);
 define_index_type!(pub struct IntrinsicId = u32;);
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct FieldAssignment {
     pub name: Sym,
     pub expr: ExprId,

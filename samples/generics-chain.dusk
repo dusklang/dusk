@@ -9,5 +9,8 @@ fn swiitch<|T|>(condition: bool, a: T, b: T): T {
 fn main() {
     val :: swiitch(false, "Hi!" as u8*, "yo")
     val :: swiitch(true, "Hi!", swiitch(false, "yo" as u8*, "bye"))
+
+    // This doesn't work yet. :(
+    // val: u8: swiitch(true, 0 as u8, 1)
     print(val)
 }

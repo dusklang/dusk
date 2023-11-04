@@ -2577,10 +2577,10 @@ impl DriverRef<'_> {
                 drop(d);
                 let lit = tp.struct_lit(id).as_ref().unwrap();
                 let mut fields = SmallVec::new();
-                for &field in &lit.fields {
+                for field in &lit.fields {
                     let field = self.build_expr(
                         b,
-                        field,
+                        field.expr,
                         Context::default(),
                         tp,
                     );

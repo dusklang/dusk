@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 use paste::paste;
 
-use crate::ast::{ExprId, DeclId, DeclRefId, StructLitId, TypeVarId, CastId, Namespace};
+use crate::ast::{ExprId, DeclId, DeclRefId, StructLitId, GenericParamId, TypeVarId, CastId, Namespace};
 use crate::mir::Const;
 use crate::ty::{Type, QualType};
 
@@ -36,6 +36,10 @@ macro_rules! declare_tp_fields {
             selected_overloads selected_overload: DeclRefId -> Option<DeclId>,
             /// The generic arguments for each decl ref
             generic_arguments generic_arguments: DeclRefId -> Option<Vec<Type>>,
+
+            /// For each expression, a list of substitutions from generic params to type variable type.
+            /// Currently only set on decl refs.
+            generic_param_substitutions generic_param_substitutions: ExprId -> Option<HashMap<GenericParamId, Type>>,
 
             /// Each struct literal matched to a structure
             struct_lits struct_lit: StructLitId -> Option<StructLit>,
@@ -141,6 +145,8 @@ macro_rules! declare_tp {
                 let ty = d.decl_type(id, self);
                 self.decl_type_mut(id).ty = ty;
             }
+
+            fn is_mock(&self) -> bool;
         }
         
         pub struct RealTypeProvider {
@@ -149,7 +155,6 @@ macro_rules! declare_tp {
                 $field_name: IndexVec<$id_ty, $payload_ty>,
             )*
             eval_results: HashMap<ExprId, Const>,
-            
         }
         
         impl RealTypeProvider {
@@ -220,6 +225,8 @@ macro_rules! declare_tp {
             fn eval_result_mut(&mut self, id: ExprId) -> &mut Const {
                 self.eval_results.get_mut(&id).unwrap()
             }
+
+            fn is_mock(&self) -> bool { false }
         }
         
         pub struct MockTypeProvider<'base> {
@@ -254,6 +261,8 @@ macro_rules! declare_tp {
             fn resize(&mut self, d: &Driver, new_code: NewCode) {
                 self.base.resize(d, new_code);
             }
+
+            fn is_mock(&self) -> bool { true }
 
             $(
                 forward_mock!($field_name, $fn_name, $id_ty, $payload_ty);

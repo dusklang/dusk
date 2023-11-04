@@ -43,7 +43,13 @@ impl Default for CastMethod {
 #[derive(Clone, Debug)]
 pub struct StructLit {
     pub strukt: StructId,
-    pub fields: Vec<ExprId>,
+    pub fields: Vec<MatchedField>,
+}
+
+#[derive(Clone, Debug)]
+pub struct MatchedField {
+    pub expr: ExprId,
+    pub ty: Type,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -865,7 +871,7 @@ impl tir::Expr<tir::DeclRef> {
             }
 
             let before = driver.take_snapshot();
-            ty = driver.register_type_variables_for_decl_ref(self.decl_ref_id, overload, ty);
+            ty = driver.register_type_variables_for_decl_ref(tp, self.id, self.decl_ref_id, overload, ty);
             let new_code = driver.get_new_code_since(before);
             tp.resize(driver, new_code);
 
@@ -930,17 +936,24 @@ impl tir::Expr<tir::DeclRef> {
                 .unwrap_or_else(|| overloads.overloads[0]);
             let decl = &driver.tir.decls[overload];
 
-            let mut generic_args = Vec::new();
-            for generic_param in range_iter(decl.generic_params.clone()) {
-                let type_var = driver.code.ast.generic_arg_type_variables.get(&(self.decl_ref_id, generic_param)).cloned().unwrap();
-                // TODO: error message probably
-                let poop = driver.solve_constraints(tp, type_var);
-                if poop.is_err() {
-                    println!("{}", driver.display_item(self.id));
+            let generic_args = if tp.is_mock() {
+                range_iter(driver.tir.decls[overload].generic_params.clone()).map(|param| Type::GenericParam(param)).collect()
+            } else {
+                let mut generic_args = Vec::new();
+                for generic_param in range_iter(decl.generic_params.clone()) {
+                    let type_var = driver.code.ast.generic_arg_type_variables.get(&(self.decl_ref_id, generic_param)).cloned().unwrap();
+                    // TODO: error message probably
+                    let poop = driver.solve_constraints(tp, type_var);
+                    if poop.is_err() {
+                        println!("{}", driver.display_item(self.id));
+                        dbg!(driver.get_constraints(tp, type_var));
+                    }
+                    let solution = poop.unwrap();
+                    generic_args.push(solution.qual_ty.ty);
                 }
-                let solution = poop.unwrap();
-                generic_args.push(solution.qual_ty.ty);
-            }
+                generic_args
+            };
+            
             (Some(overload), Some(generic_args))
         } else if !*tp.decl_ref_has_error(self.decl_ref_id) {
             let name = driver.code.ast.decl_refs[self.decl_ref_id].name;
@@ -1074,7 +1087,6 @@ impl tir::Expr<tir::Call> {
             .unwrap_or(ConstraintSolution::error())
             .make_immutable();
         *tp.ty_mut(self.id) = ty.qual_ty.ty.clone();
-        println!("THE TYPE IS {:?}", ty.qual_ty);
 
         // TODO: there might be a bug here if there is no one-of constraint on the callee.
         let mut callee_one_of = driver.get_constraints_mut(tp, self.callee).one_of().cloned().unwrap_or_default();
@@ -1322,16 +1334,16 @@ impl tir::Expr<tir::StructLit> {
                     match option {
                         ExprMacroInfo::Struct(strukt) => {
                             let struct_fields = &driver.code.ast.structs[strukt.identity].fields;
-                            let mut matches = Vec::new();
-                            matches.resize(struct_fields.len(), ExprId::new(u32::MAX as usize));
+                            let mut matched_fields = Vec::new();
+                            matched_fields.resize_with(struct_fields.len(), || MatchedField { expr: ExprId::new(u32::MAX as usize), ty: Type::Error });
 
                             let mut successful = true;
 
                             // Find matches for each field in the literal
                             'lit_fields: for lit_field in &self.fields {
-                                for (i, struct_field) in struct_fields.iter().enumerate() {
+                                for (i, (struct_field, field_ty)) in struct_fields.iter().zip(&strukt.field_tys).enumerate() {
                                     if struct_field.name == lit_field.name {
-                                        matches[i] = lit_field.expr;
+                                        matched_fields[i] = MatchedField { expr: lit_field.expr, ty: field_ty.clone() };
                                         continue 'lit_fields;
                                     }
                                 }
@@ -1350,9 +1362,13 @@ impl tir::Expr<tir::StructLit> {
 
                             let lit_range = driver.get_range(self.id);
                             // Make sure each field in the struct has a match in the literal
-                            for (i, &maatch) in matches.iter().enumerate() {
+                            for (i, matched_field) in matched_fields.iter_mut().enumerate() {
                                 let field = &struct_fields[i];
-                                if maatch == ExprId::new(u32::MAX as usize) {
+                                if let Some(substitutions) = tp.generic_param_substitutions(self.ty) {
+                                    matched_field.ty.replace_generic_params(substitutions);
+                                }
+
+                                if matched_field.expr == ExprId::new(u32::MAX as usize) {
                                     successful = false;
 
                                     driver.diag.push(
@@ -1360,12 +1376,11 @@ impl tir::Expr<tir::StructLit> {
                                             .adding_primary_range(lit_range, "")
                                             .adding_secondary_range(field.decl, "field declared here")
                                     );
-                                } else if let Some(err) = driver.can_unify_to(tp, maatch, field.ty).err() {
+                                } else if let Some(err) = driver.can_unify_argument_to(tp, matched_field.expr, &matched_field.ty.clone().into()).err() {
                                     successful = false;
-                                    let range = driver.get_range(maatch);
-                                    let field_ty = tp.get_evaluated_type(field.ty).clone();
+                                    let range = driver.get_range(matched_field.expr);
                                     let mut error = Error::new("Invalid struct field type")
-                                        .adding_primary_range(range, format!("expected {:?}", field_ty));
+                                        .adding_primary_range(range, format!("expected {:?}", matched_field.ty));
                                     match err {
                                         UnificationError::InvalidChoice(choices)
                                             => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
@@ -1384,7 +1399,7 @@ impl tir::Expr<tir::StructLit> {
 
                             if successful {
                                 *tp.struct_lit_mut(self.struct_lit_id) = Some(
-                                    StructLit { strukt: strukt.identity, fields: matches }
+                                    StructLit { strukt: strukt.identity, fields: matched_fields }
                                 );
                             }
 
@@ -1412,15 +1427,8 @@ impl tir::Expr<tir::StructLit> {
 
         // Yay borrow checker:
         if let Some(lit) = tp.struct_lit(self.struct_lit_id).clone() {
-            let fields = &driver.code.ast.structs[lit.strukt].fields;
-
-            debug_assert_eq!(lit.fields.len(), fields.len());
-
-            for (i, field) in fields.iter().enumerate() {
-                let field = field.decl;
-                let field_ty = tp.fetch_decl_type(driver, field, None).ty;
-
-                driver.set_type(tp, lit.fields[i], field_ty).unwrap();
+            for field in lit.fields {
+                driver.set_type(tp, field.expr, field.ty).unwrap();
             }
         }
     }
@@ -1559,7 +1567,7 @@ impl tir::FunctionDecl {
 }
 
 impl Driver {
-    pub fn register_type_variables_for_decl_ref(&mut self, decl_ref: DeclRefId, overload: DeclId, ty: Type) -> Type {
+    pub fn register_type_variables_for_decl_ref(&mut self, tp: &mut impl TypeProvider, expr: ExprId, decl_ref: DeclRefId, overload: DeclId, ty: Type) -> Type {
         let decl = &self.tir.decls[overload];
         if decl.generic_params.is_empty() {
             return ty;
@@ -1572,7 +1580,11 @@ impl Driver {
             generic_param_substitutions.insert(generic_param, Type::TypeVar(type_var));
         }
 
-        ty.replacing_generic_params(&generic_param_substitutions)
+        let ty = ty.replacing_generic_params(&generic_param_substitutions);
+
+        *tp.generic_param_substitutions_mut(expr) = Some(generic_param_substitutions);
+
+        ty
     }
 
     pub fn decl_type(&self, id: DeclId, tp: &(impl TypeProvider + ?Sized)) -> Type {

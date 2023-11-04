@@ -35,7 +35,6 @@ pub struct SwitchCase {
     pub terminal_expr: ExprId,
 }
 
-
 #[derive(Debug)]
 pub struct RetGroup { pub ty: ExprId, pub exprs: SmallVec<[ExprId; 1]>, pub decl_range: SourceRange }
 #[derive(Debug)]
