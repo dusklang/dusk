@@ -61,7 +61,7 @@ pub struct For { pub binding_decl: DeclId, pub binding_explicit_ty: Option<ExprI
 #[derive(Debug)]
 pub struct Assignment { pub lhs: ExprId, pub rhs: ExprId }
 #[derive(Debug)]
-pub struct DeclRef { pub decl_ref_id: DeclRefId, pub generic_args: Vec<ExprId> }
+pub struct DeclRef { pub decl_ref_id: DeclRefId, pub explicit_generic_args: Option<Vec<ExprId>> }
 #[derive(Debug)]
 pub struct Call { pub callee: ExprId, pub args: SmallVec<[ExprId; 2]> }
 #[derive(Debug)]
@@ -592,7 +592,7 @@ impl Driver {
                 }
                 insert_expr!(explicit_rets, ExplicitRet)
             }
-            &ast::Expr::DeclRef { id: decl_ref_id, ref generic_args } => insert_expr!(decl_refs, DeclRef { decl_ref_id, generic_args: generic_args.clone() }),
+            &ast::Expr::DeclRef { id: decl_ref_id, ref explicit_generic_args } => insert_expr!(decl_refs, DeclRef { decl_ref_id, explicit_generic_args: explicit_generic_args.clone() }),
             &ast::Expr::Call { callee, ref arguments } => insert_expr!(calls, Call { callee, args: arguments.clone() }),
             &ast::Expr::FunctionTy { ref param_tys, ret_ty, .. } => insert_expr!(function_tys, FunctionTy { param_tys: param_tys.clone(), ret_ty }),
             &ast::Expr::Set { lhs, rhs } => insert_expr!(assignments, Assignment { lhs, rhs }),
@@ -772,11 +772,7 @@ impl Driver {
                 },
                 ast::Expr::AddrOf { expr, .. } | ast::Expr::Deref(expr) | ast::Expr::Pointer { expr, .. }
                     | ast::Expr::Cast { expr, .. } | ast::Expr::Ret { expr, .. } => self.tir.graph.add_type1_dep(id, ef!(expr.item)),
-                ast::Expr::DeclRef { id: decl_ref_id, ref generic_args, .. } => {
-                    for &arg in generic_args {
-                        self.tir.graph.add_type1_dep(id, ef!(arg.item));
-                    }
-
+                ast::Expr::DeclRef { id: decl_ref_id, .. } => {
                     let decl_ref = &self.code.ast.decl_refs[decl_ref_id];
                     if let ast::Namespace::MemberRef { base_expr } = decl_ref.namespace {
                         self.tir.graph.add_type1_dep(id, ef!(base_expr.item));
@@ -962,7 +958,12 @@ impl Driver {
                                 .unwrap_or(ast::VOID_TYPE);
                             add_eval_dep!(id, ty);
                         }
-                        ast::Expr::DeclRef { id: decl_ref_id, .. } => {
+                        ast::Expr::DeclRef { id: decl_ref_id, ref explicit_generic_args, .. } => {
+                            if let Some(generic_args) = explicit_generic_args {
+                                for &arg in generic_args {
+                                    add_eval_dep!(id, arg);
+                                }
+                            }
                             self.add_types_2_to_4_deps_to_member_ref(id, decl_ref_id);
                         },
                         ast::Expr::Do { scope } => {

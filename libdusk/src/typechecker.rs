@@ -842,14 +842,12 @@ impl tir::Expr<tir::DeclRef> {
             },
         };
         let mut overloads = Vec::new();
-        for &overload_decl in &overload_decls {
-            overloads.push(overload_decl);
-        }
 
         // Find type possibilities
         let mut one_of = OneOfConstraint::new();
         one_of.reserve(overloads.len());
-        for &overload in &overloads {
+        let mut nonviable_overloads = Vec::new();
+        for &overload in &overload_decls {
             let mut ty = tp.fetch_decl_type(driver, overload, Some(self.decl_ref_id)).ty;
             let decl = &driver.tir.decls[overload];
             let mut is_mut = decl.is_mut;
@@ -871,11 +869,27 @@ impl tir::Expr<tir::DeclRef> {
             let new_code = driver.get_new_code_since(before);
             tp.resize(driver, new_code);
 
+            if let Some(generic_args) = &self.explicit_generic_args {
+                let generic_params = driver.tir.decls[overload].generic_params.clone();
+                if generic_args.len() != generic_params.end - generic_params.start {
+                    nonviable_overloads.push(overload);
+                    break;
+                }
+
+                for (&generic_arg, generic_param) in generic_args.iter().zip(range_iter(generic_params)) {
+                    let type_var = driver.code.ast.generic_arg_type_variables.get(&(self.decl_ref_id, generic_param)).cloned().unwrap();
+                    let ty = tp.get_evaluated_type(generic_arg).clone();
+
+                    driver.set_type(tp, type_var, ty).unwrap();
+                }
+            }
+
             one_of.push_with_decl(QualType { ty, is_mut }, overload);
+            overloads.push(overload);
         }
 
         *driver.get_constraints_mut(tp, self.id) = ConstraintList::new().with_one_of(one_of);
-        *tp.overloads_mut(self.decl_ref_id) = Overloads { overloads, nonviable_overloads: Default::default() };
+        *tp.overloads_mut(self.decl_ref_id) = Overloads { overloads, nonviable_overloads };
     }
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
@@ -1688,8 +1702,10 @@ impl DriverRef<'_> {
                     tp.insert_eval_result(expr, val.into());
 
                     let d = self.read();
-                    if let ast::Expr::DeclRef { generic_args, .. } = &ef!(d, expr.ast) {
-                        stack.extend_from_slice(generic_args);
+                    if let ast::Expr::DeclRef { explicit_generic_args, .. } = &ef!(d, expr.ast) {
+                        if let Some(generic_args) = explicit_generic_args {
+                            stack.extend_from_slice(generic_args);
+                        }
                     }
                 }
             }
