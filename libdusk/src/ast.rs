@@ -101,6 +101,18 @@ pub struct GenericContextNs {
 }
 
 #[derive(Debug)]
+pub struct FieldInfo {
+    pub struct_id: StructId,
+    pub field_index: usize,
+}
+
+#[derive(Debug)]
+pub struct InstanceDecl {
+    pub decl: DeclId,
+    pub field_info: Option<FieldInfo>,
+}
+
+#[derive(Debug)]
 pub struct StaticDecl {
     pub decl: DeclId,
     pub name: Sym,
@@ -111,7 +123,7 @@ pub struct NewNamespace {
     // TODO: store decls as groups of overloads, which is probably more efficient
 
     // For fields & instance methods
-    pub instance_decls: Vec<DeclId>,
+    pub instance_decls: Vec<InstanceDecl>,
     // For enum variants, static methods and mod-scoped decls
     pub static_decls: Vec<StaticDecl>,
 
@@ -997,7 +1009,7 @@ impl Driver {
     }
     pub fn finish_struct(&mut self, fields: Vec<FieldDecl>, range: SourceRange, expr: ExprId, strukt: StructId) {
         let namespace = NewNamespace {
-            instance_decls: fields.iter().map(|field| field.decl).collect(),
+            instance_decls: fields.iter().enumerate().map(|(i, field)| InstanceDecl { decl: field.decl, field_info: Some(FieldInfo { struct_id: strukt, field_index: i }) }).collect(),
             ..Default::default()
         };
         let namespace = self.code.ast.new_namespaces.push(namespace);

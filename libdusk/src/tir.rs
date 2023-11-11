@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::ops::{Range, Deref, DerefMut};
 use std::collections::{HashMap, HashSet};
 use std::mem;
@@ -8,7 +7,7 @@ use index_vec::define_index_type;
 use string_interner::DefaultSymbol as Sym;
 
 use crate::source_info::SourceRange;
-use crate::ast::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, NewNamespaceId, RETURN_VALUE_DECL, ParamList};
+use crate::ast::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, NewNamespaceId, RETURN_VALUE_DECL, ParamList, StructId};
 use crate::internal_types::{internal_fields, internal_field_decls, InternalField, InternalFieldDecls, InternalNamespace};
 use crate::ty::Type;
 use crate::ty::StructType;
@@ -281,7 +280,7 @@ macro_rules! define_legacy_internal_types_internal {
                     ),*  
                 };
             }
-            fn find_overloads_in_internal(&self, lookup: &NameLookup, ns: InternalNamespace, overloads: &mut HashSet<DeclId>) {
+            fn find_overloads_in_internal(&self, lookup: &NameLookup, ns: InternalNamespace, overloads: &mut HashSet<FoundOverload>) {
                 match ns {
                     $(
                         InternalNamespace::$name => {
@@ -289,7 +288,7 @@ macro_rules! define_legacy_internal_types_internal {
                                 let decl = self.internal_field_decls.$name.$field_name;
                                 let name = self.code.ast.names[decl];
                                 if self.name_matches(lookup, name) {
-                                    overloads.insert(decl);
+                                    overloads.insert(decl.into());
                                 }   
                             })*
                         }
@@ -307,13 +306,33 @@ pub enum NameLookup {
     Beginning(String),
 }
 
+#[derive(Hash, PartialEq, Eq)]
+pub enum OverloadScope {
+    Normal,
+
+    Member { base: ExprId },
+    Field { base: ExprId, struct_id: StructId, field_index: usize },
+}
+
+#[derive(Hash, PartialEq, Eq)]
+pub struct FoundOverload {
+    pub decl: DeclId,
+    pub scope: OverloadScope,
+}
+
+impl From<DeclId> for FoundOverload {
+    fn from(value: DeclId) -> Self {
+        Self { decl: value, scope: OverloadScope::Normal }
+    }
+}
+
 impl Driver {
     // See comment about `should_traverse_blanket_uses` later in this file
-    fn find_overloads_in_mod(&self, name: &NameLookup, scope: NewNamespaceId, should_traverse_blanket_uses: bool, overloads: &mut HashSet<DeclId>) -> bool {
+    fn find_overloads_in_mod(&self, name: &NameLookup, scope: NewNamespaceId, should_traverse_blanket_uses: bool, overloads: &mut HashSet<FoundOverload>) -> bool {
         let scope = &self.code.ast.new_namespaces[scope];
         for decl in &scope.static_decls {
             if self.name_matches(name, decl.name) {
-                overloads.insert(decl.decl);
+                overloads.insert(decl.decl.into());
             }
         }
         if should_traverse_blanket_uses {
@@ -326,28 +345,43 @@ impl Driver {
             true
         }
     }
-    fn find_overloads_in_new_namespace(&self, name: &NameLookup, id: NewNamespaceId, kind: NewNamespaceRefKind, overloads: &mut HashSet<DeclId>) {
+    fn find_overloads_in_new_namespace(&self, name: &NameLookup, base: ExprId, id: NewNamespaceId, kind: NewNamespaceRefKind, overloads: &mut HashSet<FoundOverload>) {
         let ns = &self.code.ast.new_namespaces[id];
-        let decls = match kind {
-            NewNamespaceRefKind::Instance => Cow::Borrowed(&ns.instance_decls),
-            NewNamespaceRefKind::Static => Cow::Owned(ns.static_decls.iter().map(|decl| decl.decl).collect()),
-        };
-        for &decl in decls.as_ref() {
-            let decl_name = self.code.ast.names[decl];
-            if self.name_matches(name, decl_name) {
-                overloads.insert(decl);
-                return;
+        
+        match kind {
+            NewNamespaceRefKind::Instance => for decl in &ns.instance_decls {
+                let decl_name = self.code.ast.names[decl.decl];
+                if self.name_matches(name, decl_name) {
+                    let scope = if let Some(field_info) = &decl.field_info {
+                        OverloadScope::Field { base, struct_id: field_info.struct_id, field_index: field_info.field_index }
+                    } else {
+                        OverloadScope::Member { base }
+                    };
+                    let overload = FoundOverload {
+                        decl: decl.decl,
+                        scope,
+                    };
+                    overloads.insert(overload);
+                    return;
+                }
+            },
+            NewNamespaceRefKind::Static => for decl in &ns.static_decls {
+                let decl_name = self.code.ast.names[decl.decl];
+                if self.name_matches(name, decl_name) {
+                    overloads.insert(decl.decl.into());
+                    return;
+                }
             }
-        }
+        };
     }
-    fn find_overloads_in_function_parameters(&self, name: &NameLookup, func: DeclId, overloads: &mut HashSet<DeclId>) {
+    fn find_overloads_in_function_parameters(&self, name: &NameLookup, func: DeclId, overloads: &mut HashSet<FoundOverload>) {
         match &df!(func.ast) {
             ast::Decl::Computed { params, .. } => {
                 for decl in range_iter(params.clone()) {
                     let param_name = self.code.ast.names[decl];
                     
                     if self.name_matches(name, param_name) {
-                        overloads.insert(decl);
+                        overloads.insert(decl.into());
                     }
                 }
             },
@@ -361,7 +395,7 @@ impl Driver {
     // code outside module X does *not* want to see items from the prelude re-exported. E.g. mod{}.print("Hello, world")
     //
     // TODO: more robust support for access control
-    fn find_overloads_in_namespace(&self, name: &NameLookup, namespace: Namespace, mut should_traverse_blanket_uses: bool, overloads: &mut HashSet<DeclId>) -> bool {
+    fn find_overloads_in_namespace(&self, name: &NameLookup, namespace: Namespace, mut should_traverse_blanket_uses: bool, overloads: &mut HashSet<FoundOverload>) -> bool {
         let mut started_at_mod_scope = false;
         let mut root_namespace = true;
         let mut namespace = Some(namespace);
@@ -374,7 +408,7 @@ impl Driver {
                             .rev()
                             .find(|&decl| self.name_matches(name, decl.name));
                         if let Some(decl) = result {
-                            overloads.insert(decl.id);
+                            overloads.insert(decl.id.into());
                             break;
                         }
                     }
@@ -402,7 +436,7 @@ impl Driver {
                                     }
                                 },
                                 ExprNamespace::Internal(internal) => self.find_overloads_in_internal(name, internal, overloads),
-                                ExprNamespace::New(id, kind) => self.find_overloads_in_new_namespace(name, id, kind, overloads),
+                                ExprNamespace::New(id, kind) => self.find_overloads_in_new_namespace(name, base_expr, id, kind, overloads),
                                 ExprNamespace::Error => return false,
                             }
                         }
@@ -416,7 +450,7 @@ impl Driver {
                     for decl in range_iter(generic_params.clone()) {
                         let param_name = self.code.ast.names[decl];
                         if self.name_matches(name, param_name) {
-                            overloads.insert(decl);
+                            overloads.insert(decl.into());
                             break 'find_overloads;
                         }
                     }
@@ -431,7 +465,7 @@ impl Driver {
                     let condition_ns = &self.code.ast.condition_ns[ns_id];
                     self.find_overloads_in_function_parameters(name, condition_ns.func, overloads);
                     if self.name_matches(name, self.ast.known_idents.return_value) && overloads.is_empty() {
-                        overloads.insert(RETURN_VALUE_DECL);
+                        overloads.insert(RETURN_VALUE_DECL.into());
                     }
                     condition_ns.parent
                 },
@@ -456,7 +490,7 @@ impl Driver {
 
     /// Returns the overloads for a name in a namespace, if they are known (they won't be if it's an unresolved member ref)
     /// Returns None if the namespace comes from a memberref AND the memberref base expression has an error (e.g., invalid variable reference)
-    pub fn find_overloads(&self, namespace: Namespace, name: &NameLookup) -> Option<Vec<DeclId>> {
+    pub fn find_overloads(&self, namespace: Namespace, name: &NameLookup) -> Option<Vec<FoundOverload>> {
         let mut overloads = HashSet::new();
         self.find_overloads_in_namespace(name, namespace, true, &mut overloads)
             .then(|| overloads.into_iter().collect())
@@ -468,14 +502,14 @@ impl Driver {
         let decl_ref = &self.code.ast.decl_refs[decl_ref_id];
         let overloads = self.find_overloads(decl_ref.namespace, &NameLookup::Exact(decl_ref.name)).unwrap_or_default();
         for overload in overloads {
-            match df!(overload.ast) {
+            match df!(overload.decl.ast) {
                 ast::Decl::Computed { ref param_tys, .. } => {
-                    let ty = self.code.ast.explicit_tys[overload].unwrap_or(ast::VOID_TYPE);
+                    let ty = self.code.ast.explicit_tys[overload.decl].unwrap_or(ast::VOID_TYPE);
                     add_eval_dep!(id, ty);
                     for &ty in param_tys {
                         add_eval_dep!(id, ty);
                     }
-                    self.tir.graph.add_type3_dep(id, df!(overload.item));
+                    self.tir.graph.add_type3_dep(id, df!(overload.decl.item));
                 },
                 ast::Decl::ReturnValue => {
                     let decl_ref = &self.code.ast.decl_refs[decl_ref_id];
@@ -491,9 +525,9 @@ impl Driver {
                     if let Some(payload_ty) = payload_ty {
                         add_eval_dep!(id, payload_ty);
                     }
-                    self.tir.graph.add_type3_dep(id, df!(overload.item));
+                    self.tir.graph.add_type3_dep(id, df!(overload.decl.item));
                 },
-                _ => self.tir.graph.add_type2_dep(id, df!(overload.item)),
+                _ => self.tir.graph.add_type2_dep(id, df!(overload.decl.item)),
             }
         }
     }

@@ -11,13 +11,19 @@ fn main() {
         generic_member: 4
     }
 
+    hello.generic_member += 76
+
     hello :: MyGenericType {
         non_generic_member: 54
         generic_member: 4 as u32
     }
 
+    hello.generic_member *= 8
+
+    
+
     //None of these things work yet:
-    // hello.generic_member += 5
+    
     // hello :: DeGenericized { non_generic_member: 54, generic_member: 4 }
     // print_type_of(hello.generic_member)
 }

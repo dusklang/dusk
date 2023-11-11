@@ -8,7 +8,7 @@ use num_bigint::BigInt;
 use crate::index_vec::empty_range;
 use crate::internal_types;
 use crate::source_info::SourceRange;
-use crate::ast::{ModScopeNs, LegacyIntrinsic, Expr, Decl, VOID_TYPE, ModScopeNsId, NewNamespaceId, EnumId, ExprId, VariantDecl, StaticDecl, NewNamespace, ExternFunctionRef, ExternFunction, ParamList};
+use crate::ast::{ModScopeNs, LegacyIntrinsic, Expr, Decl, VOID_TYPE, ModScopeNsId, NewNamespaceId, EnumId, ExprId, VariantDecl, StaticDecl, InstanceDecl, NewNamespace, ExternFunctionRef, ExternFunction, ParamList};
 use crate::ty::{Type, LegacyInternalType};
 use crate::mir::Const;
 
@@ -327,7 +327,7 @@ impl Driver {
             self.code.ast.new_namespaces[scope].static_decls.push(static_decl);
 
             let decl_id = self.add_decl(decl, name, explicit_ty, SourceRange::default());
-            self.code.ast.new_namespaces[scope].instance_decls.push(decl_id);
+            self.code.ast.new_namespaces[scope].instance_decls.push(InstanceDecl { decl: decl_id, field_info: None });
         } else {
             let decl_id = self.add_decl(decl, name, explicit_ty, SourceRange::default());
             let static_decl = StaticDecl { name, decl: decl_id };

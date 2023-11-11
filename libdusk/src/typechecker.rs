@@ -19,7 +19,7 @@ use crate::driver::{Driver, DriverRef};
 use crate::error::Error;
 use crate::new_code::NewCode;
 use crate::ty::BuiltinTraits;
-use crate::tir::{Units, UnitItems, ExprNamespace, self, NameLookup, NewNamespaceRefKind, ExprMacroInfo};
+use crate::tir::{Units, UnitItems, ExprNamespace, self, NameLookup, NewNamespaceRefKind, ExprMacroInfo, OverloadScope};
 
 use dusk_proc_macros::*;
 
@@ -853,14 +853,30 @@ impl tir::Expr<tir::DeclRef> {
         let mut one_of = OneOfConstraint::new();
         one_of.reserve(overloads.len());
         let mut nonviable_overloads = Vec::new();
-        for &overload in &overload_decls {
-            let mut ty = tp.fetch_decl_type(driver, overload, Some(self.decl_ref_id)).ty;
-            let decl = &driver.tir.decls[overload];
+        for overload in &overload_decls {
+            // This is kind of a hack, but I'm not sure what a better way to go about this would be.
+            let mut ty = if let OverloadScope::Field { base, struct_id, field_index } = overload.scope {
+                // TODO: gracefully handle the error here. also, support multiple base type overloads.
+                let base_ty = driver.solve_constraints(tp, base).unwrap();
+                let strukt = match base_ty.qual_ty.ty {
+                    Type::Struct(strukt) => strukt,
+                    Type::Pointer(pointee) => match pointee.ty {
+                        Type::Struct(strukt) => strukt,
+                        _ => panic!("expected struct type"),
+                    },
+                    _ => panic!("expected struct type"),
+                };
+                assert_eq!(struct_id, strukt.identity);
+                strukt.field_tys[field_index].clone()
+            } else {
+                tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id)).ty
+            };
+            let decl = &driver.tir.decls[overload.decl];
             let mut is_mut = decl.is_mut;
-            if let ast::Namespace::MemberRef { base_expr } = driver.code.ast.decl_refs[self.decl_ref_id].namespace {
+            if let OverloadScope::Member { base } = overload.scope {
                 // TODO: Robustness! Base_expr could be an overload set with these types, but also include struct types
-                if driver.can_unify_to(tp, base_expr, &Type::Ty.into()).is_err() && driver.can_unify_to(tp, base_expr, &Type::Mod.into()).is_err() {
-                    let base_ty = driver.solve_constraints(tp, base_expr).unwrap();
+                if driver.can_unify_to(tp, base, &Type::Ty.into()).is_err() && driver.can_unify_to(tp, base, &Type::Mod.into()).is_err() {
+                    let base_ty = driver.solve_constraints(tp, base).unwrap();
                     // Handle member refs with pointers to structs
                     is_mut &= if let Type::Pointer(pointee) = &base_ty.qual_ty.ty {
                         pointee.is_mut
@@ -871,14 +887,14 @@ impl tir::Expr<tir::DeclRef> {
             }
 
             let before = driver.take_snapshot();
-            ty = driver.register_type_variables_for_decl_ref(tp, self.id, self.decl_ref_id, overload, ty);
+            ty = driver.register_type_variables_for_decl_ref(tp, self.id, self.decl_ref_id, overload.decl, ty);
             let new_code = driver.get_new_code_since(before);
             tp.resize(driver, new_code);
 
             if let Some(generic_args) = &self.explicit_generic_args {
-                let generic_params = driver.tir.decls[overload].generic_params.clone();
+                let generic_params = driver.tir.decls[overload.decl].generic_params.clone();
                 if generic_args.len() != generic_params.end - generic_params.start {
-                    nonviable_overloads.push(overload);
+                    nonviable_overloads.push(overload.decl);
                     break;
                 }
 
@@ -890,8 +906,8 @@ impl tir::Expr<tir::DeclRef> {
                 }
             }
 
-            one_of.push_with_decl(QualType { ty, is_mut }, overload);
-            overloads.push(overload);
+            one_of.push_with_decl(QualType { ty, is_mut }, overload.decl);
+            overloads.push(overload.decl);
         }
 
         *driver.get_constraints_mut(tp, self.id) = ConstraintList::new().with_one_of(one_of);
@@ -943,12 +959,7 @@ impl tir::Expr<tir::DeclRef> {
                 for generic_param in range_iter(decl.generic_params.clone()) {
                     let type_var = driver.code.ast.generic_arg_type_variables.get(&(self.decl_ref_id, generic_param)).cloned().unwrap();
                     // TODO: error message probably
-                    let poop = driver.solve_constraints(tp, type_var);
-                    if poop.is_err() {
-                        println!("{}", driver.display_item(self.id));
-                        dbg!(driver.get_constraints(tp, type_var));
-                    }
-                    let solution = poop.unwrap();
+                    let solution = driver.solve_constraints(tp, type_var).unwrap();
                     generic_args.push(solution.qual_ty.ty);
                 }
                 generic_args
@@ -1403,7 +1414,11 @@ impl tir::Expr<tir::StructLit> {
                                 );
                             }
 
-                            one_of.push(Type::Struct(strukt.clone()).into());
+                            let mut strukt_ty = Type::Struct(strukt.clone());
+                            if let Some(substitutions) = tp.generic_param_substitutions(self.ty) {
+                                strukt_ty.replace_generic_params(substitutions);
+                            }
+                            one_of.push(strukt_ty.into());
                         }
                     }
                 }
@@ -1423,6 +1438,7 @@ impl tir::Expr<tir::StructLit> {
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut impl TypeProvider) {
         let ty = driver.solve_constraints(tp, self.id).unwrap();
+
         *tp.ty_mut(self.id) = ty.qual_ty.ty;
 
         // Yay borrow checker:

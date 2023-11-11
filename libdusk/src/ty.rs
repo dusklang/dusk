@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use arrayvec::ArrayVec;
@@ -236,6 +236,36 @@ impl Type {
     pub fn replacing_generic_params(mut self, replacements: &HashMap<GenericParamId, Type>) -> Type {
         self.replace_generic_params(replacements);
         self
+    }
+
+    fn add_embedded_type_vars(&self, type_vars: &mut HashSet<TypeVarId>) {
+        match self {
+            Type::Error | Type::Int { .. } | Type::Float(_) | Type::LegacyInternal(_) | Type::Internal(_) | Type::Bool | Type::Void | Type::Mod | Type::Ty | Type::GenericParam(_) | Type::Never => {},
+            
+            // TODO: restructure enum types such that it is possible to call `replace_type_vars` on enum variants' types
+            Type::Enum(_) => {},
+            
+            Type::Pointer(pointee) => pointee.ty.add_embedded_type_vars(type_vars),
+            Type::Inout(pointee) => pointee.add_embedded_type_vars(type_vars),
+            Type::Function(func) => {
+                func.return_ty.add_embedded_type_vars(type_vars);
+                for param in &func.param_tys {
+                    param.add_embedded_type_vars(type_vars);
+                }
+            },
+            Type::Struct(strukt) => {
+                for field_ty in &strukt.field_tys {
+                    field_ty.add_embedded_type_vars(type_vars);
+                }
+            },
+            &Type::TypeVar(id) => { type_vars.insert(id); },
+        }
+    }
+
+    pub fn get_embedded_type_vars(&self) -> HashSet<TypeVarId> {
+        let mut type_vars = HashSet::new();
+        self.add_embedded_type_vars(&mut type_vars);
+        type_vars
     }
 
     pub fn replace_type_vars(&mut self, replacements: &HashMap<TypeVarId, Type>) {
