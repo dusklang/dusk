@@ -1,0 +1,30 @@
+Array<|T|> :: struct {
+    data: T *mut
+    count: usize
+    capacity: usize
+}
+
+// TODO: support passing generic structs to functions :(
+// fn make_array<|T|>(): Array<|T|> {
+//     Array {
+//         data: 0 as usize as T *mut
+//         count: 0
+//         capacity: 0
+//     }
+// }
+
+// TODO: support passing generic structs to functions :(
+fn add<|T|>(array: Array<|T|> *mut, element: T) {
+
+}
+
+fn main() {
+    // numbers := make_array<|i32|>()
+    numbers := Array<|i32|> {
+        data: 0 as usize as i32 *mut
+        count: 0
+        capacity: 0
+    }
+
+    // add(&mut numbers, 42)
+}
