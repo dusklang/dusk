@@ -985,12 +985,12 @@ enum AmbiguousGenericListKind {
 /// 
 /// There's no way to tell if it is the start of a generic constant, like this:
 /// ```dusk
-///     Array[Element] :: struct { ... }
+///     Array<|Element|> :: struct { ... }
 /// ```
 /// 
 /// Or the start of a generic decl ref with explicit arguments, like this:
 /// ```dusk
-///     Array[u8]
+///     Array<|u8|>
 /// ```
 /// 
 /// Through the process of parsing the generic list, we may come across tokens
