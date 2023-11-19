@@ -4,6 +4,8 @@ Array<|T|> :: struct {
     capacity: usize
 }
 
+INITIAL_NONZERO_CAPACITY: usize : 4
+
 Alias :: Array<|i32|>
 
 fn make_array<|T|>(): Array<|T|> {
@@ -15,17 +17,82 @@ fn make_array<|T|>(): Array<|T|> {
 }
 
 // TODO: support passing generic structs to functions :(
-fn add<|T|>(array: Array<|T|> *mut, element: T) {
+//fn add<|T|>(self: Array<|T|> *mut, element: T) {
+//
+//}
 
+// But for now, let's just implement Array in terms of i32.
+fn add(self: Array<|i32|> *mut, element: i32) {
+    if self.count == self.capacity {
+        ensure_capacity(self, self.count + 1)
+    }
+    *((self.data as usize + size_of(i32) * self.count) as i32 *mut) = element
+    self.count += 1
+}
+
+fn get(self: Array<|i32|>*, index: usize): i32 {
+    core.assert(index < self.count)
+    *((self.data as usize + size_of(i32) * index) as i32*)
+}
+
+fn set(self: Array<|i32|> *mut, index: usize, value: i32) {
+    core.assert(index < self.count)
+    *((self.data as usize + size_of(i32) * index) as i32 *mut) = value
+}
+
+fn ensure_capacity(self: Array<|i32|> *mut, new_capacity: usize) {
+    // TODO: the more natural way (for me) to write this function would be to use an early return,
+    // but that leads to a "no entry found for key" panic related to ret groups not being assigned
+    // TIR units early enough.
+    if new_capacity <= self.capacity {
+        // this line intentionally left blank.
+    } else if self.capacity == 0 as usize {
+        self.data = malloc(size_of(i32) * INITIAL_NONZERO_CAPACITY) as i32 *mut
+        self.capacity = INITIAL_NONZERO_CAPACITY
+    } else {
+        while self.capacity < new_capacity {
+            self.capacity *= 2
+        }
+        new_data :: malloc(size_of(i32) * self.capacity) as i32 *mut
+        memcpy(new_data, self.data, self.count)
+        free(self.data as void *mut)
+        self.data = new_data
+    }
+}
+
+// TODO: I tried adding this to core.dusk and got a parser error??
+fn memcpy<|T|>(dest: T *mut, src: T*, count: usize) {
+    cur_dest := dest
+    end_dest :: (dest as usize + size_of(T) * count) as T *mut
+
+    cur_src := src
+    while cur_dest as usize != end_dest as usize {
+        *cur_dest = *cur_src
+        cur_dest = (cur_dest as usize + size_of(T)) as T *mut
+        cur_src = (cur_src as usize + size_of(T)) as T*
+    }
+}
+
+// The builtin print_int doesn't work right now
+fn print_int(val: i32) {
+    print(val as u8 + "0")
+    print("\n")
 }
 
 fn main() {
-    numbers := make_array<|i32|>()
     numbers := Alias {
         data: 0 as usize as i32 *mut
         count: 0
         capacity: 0
     }
 
-    //add(&mut numbers, 42)
+    numbers := make_array<|i32|>()    
+
+    for i in 0..10 {
+        add(&mut numbers, i)
+    }
+
+    for i in 0..numbers.count {
+        print_int(get(&numbers, i))
+    }
 }
