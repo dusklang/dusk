@@ -1069,18 +1069,17 @@ impl Driver {
         let instr = self.code.ops[op_id].as_mir_instr().unwrap();
         macro_rules! write_args {
             ($args:expr) => {{
+                write!(f, "(")?;
                 let mut first = true;
                 for &arg in $args {
                     if first {
-                        write!(f, "(")?;
                         first = false;
                     } else {
                         write!(f, ", ")?;
                     }
                     write!(f, "%{}", self.display_instr_name(arg))?;
                 }
-                if !first {
-                    write!(f, ")")?;
+                write!(f, ")")?;
                 }
             }}
         }
