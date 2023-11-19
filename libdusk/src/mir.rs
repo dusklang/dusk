@@ -1080,6 +1080,22 @@ impl Driver {
                     write!(f, "%{}", self.display_instr_name(arg))?;
                 }
                 write!(f, ")")?;
+            }}
+        }
+        macro_rules! write_generic_args {
+            ($args:expr) => {{
+                if !$args.is_empty() {
+                    write!(f, "<|")?;
+                    let mut first = true;
+                    for arg in $args {
+                        if first {
+                            first = false;
+                        } else {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{:?}", arg)?;
+                    }
+                    write!(f, "|>")?;
                 }
             }}
         }
@@ -1095,13 +1111,14 @@ impl Driver {
                 }
                 write!(f, "else => %bb{}", catch_all_bb.index())?;
             }
-            // TODO: print generic arguments
-            &Instr::Call { ref arguments, func: callee, .. } => {
+            &Instr::Call { ref arguments, func: callee, ref generic_arguments } => {
                 write!(f, "%{} = call `{}`", self.display_instr_name(op_id), self.fn_name(self.code.mir.functions[callee].name))?;
+                write_generic_args!(generic_arguments);
                 write_args!(arguments);
             },
-            &Instr::FunctionRef { func: callee, .. } => {
-                write!(f, "%{} = function_ref `{}`", self.display_instr_name(op_id), self.fn_name(self.code.mir.functions[callee].name))?
+            &Instr::FunctionRef { func: callee, ref generic_arguments } => {
+                write!(f, "%{} = function_ref `{}`", self.display_instr_name(op_id), self.fn_name(self.code.mir.functions[callee].name))?;
+                write_generic_args!(generic_arguments);
             },
             &Instr::ExternCall { ref arguments, func: callee, .. } => {
                 let extern_mod = &self.code.mir.extern_mods[&callee.extern_mod];
