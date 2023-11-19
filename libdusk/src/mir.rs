@@ -1265,7 +1265,21 @@ impl Driver {
         if func.is_comptime {
             write!(f, "@comptime ")?;
         }
-        write!(f, "fn {}(", self.fn_name(func.name))?;
+        write!(f, "fn {}", self.fn_name(func.name))?;
+        if !func.generic_params.is_empty() {
+            write!(f, "<|")?;
+            let mut first = true;
+            for generic_param in range_iter(func.generic_params.clone()) {
+                if first {
+                    first = false;
+                } else {
+                    write!(f, ", ")?;
+                }
+                write!(f, "generic_param{}", generic_param.index())?;
+            }
+            write!(f, "|>")?;
+        }
+        write!(f, "(")?;
         let entry_block = &self.code.blocks[func.blocks[0]];
         let mut first = true;
         for &op in &entry_block.ops {
