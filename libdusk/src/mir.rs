@@ -2074,7 +2074,9 @@ impl DriverRef<'_> {
 
     fn get(&mut self, b: &mut FunctionBuilder, decl_ref_id: DeclRefId, tp: &impl TypeProvider) -> DeclRef {
         let id = tp.selected_overload(decl_ref_id).expect("No overload found!");
+        let generic_params = self.read().tir.decls[id].generic_params.clone();
         let generic_arguments = tp.generic_arguments(decl_ref_id).as_ref().unwrap_or(&Vec::new()).clone();
+        assert_eq!(generic_params.end - generic_params.start, generic_arguments.len());
         let expr = self.read().code.ast.decl_refs[decl_ref_id].expr;
         let name = self.read().display_item(id).to_string();
         match self.get_decl(id, tp) {
@@ -2107,7 +2109,15 @@ impl DriverRef<'_> {
             Decl::Intrinsic(id) => DeclRef::Intrinsic(id),
             Decl::MethodIntrinsic(id) => DeclRef::MethodIntrinsic(id),
             Decl::Const(ref konst) => {
-                let konst = konst.clone();
+                let mut generic_replacements = HashMap::new();
+                for (param, arg) in range_iter(generic_params).zip(generic_arguments) {
+                    generic_replacements.insert(param, arg);
+                }
+                let konst = match konst.clone() {
+                    Const::Ty(ty) => Const::Ty(ty.replacing_generic_params(&generic_replacements)),
+                    other => other,
+                };
+                
                 DeclRef::Value(self.write().push_instr_with_name(b, Instr::Const(konst), expr, name).direct())
             },
             Decl::Static(statik) => {
