@@ -16,44 +16,38 @@ fn make_array<|T|>(): Array<|T|> {
     }
 }
 
-// TODO: support passing generic structs to functions :(
-//fn add<|T|>(self: Array<|T|> *mut, element: T) {
-//
-//}
-
-// But for now, let's just implement Array in terms of i32.
-fn add(self: Array<|i32|> *mut, element: i32) {
+fn add<|T|>(self: Array<|T|> *mut, element: T) {
     if self.count == self.capacity {
         ensure_capacity(self, self.count + 1)
     }
-    *((self.data as usize + size_of(i32) * self.count) as i32 *mut) = element
+    *((self.data as usize + size_of(T) * self.count) as T *mut) = element
     self.count += 1
 }
 
-fn get(self: Array<|i32|>*, index: usize): i32 {
+fn get<|T|>(self: Array<|T|>*, index: usize): T {
     core.assert(index < self.count)
-    *((self.data as usize + size_of(i32) * index) as i32*)
+    *((self.data as usize + size_of(T) * index) as T*)
 }
 
-fn set(self: Array<|i32|> *mut, index: usize, value: i32) {
+fn set<|T|>(self: Array<|T|> *mut, index: usize, value: T) {
     core.assert(index < self.count)
-    *((self.data as usize + size_of(i32) * index) as i32 *mut) = value
+    *((self.data as usize + size_of(T) * index) as T *mut) = value
 }
 
-fn ensure_capacity(self: Array<|i32|> *mut, new_capacity: usize) {
+fn ensure_capacity<|T|>(self: Array<|T|> *mut, new_capacity: usize) {
     // TODO: the more natural way (for me) to write this function would be to use an early return,
     // but that leads to a "no entry found for key" panic related to ret groups not being assigned
     // TIR units early enough.
     if new_capacity <= self.capacity {
         // this line intentionally left blank.
     } else if self.capacity == 0 as usize {
-        self.data = malloc(size_of(i32) * INITIAL_NONZERO_CAPACITY) as i32 *mut
+        self.data = malloc(size_of(T) * INITIAL_NONZERO_CAPACITY) as T *mut
         self.capacity = INITIAL_NONZERO_CAPACITY
     } else {
         while self.capacity < new_capacity {
             self.capacity *= 2
         }
-        new_data :: malloc(size_of(i32) * self.capacity) as i32 *mut
+        new_data :: malloc(size_of(T) * self.capacity) as T *mut
         memcpy(new_data, self.data, self.count)
         free(self.data as void *mut)
         self.data = new_data
@@ -80,12 +74,14 @@ fn print_int(val: i32) {
 }
 
 fn main() {
+    // Demonstration that type aliases to generic types work:
     numbers := Alias {
         data: 0 as usize as i32 *mut
         count: 0
         capacity: 0
     }
 
+    // And here are the actual generic calls:
     numbers := make_array<|i32|>()    
 
     for i in 0..10 {
