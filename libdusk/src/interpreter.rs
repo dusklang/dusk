@@ -1466,6 +1466,7 @@ impl DriverRef<'_> {
                             assert_eq!(arguments.len(), 1);
                             let ty = frame.get_val(arguments[0], &*self.read()).as_ty();
                             let ty = frame.canonicalize_type(&ty);
+
                             Value::from_usize(self.read().size_of(&ty))
                         },
                         LegacyIntrinsic::OffsetOf => {
