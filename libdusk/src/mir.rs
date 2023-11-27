@@ -2117,7 +2117,8 @@ impl DriverRef<'_> {
                     Const::Ty(ty) => Const::Ty(ty.replacing_generic_params(&generic_replacements)),
                     other => other,
                 };
-                
+
+                let name = self.read().fmt_const_for_instr_name(&konst).to_string();
                 DeclRef::Value(self.write().push_instr_with_name(b, Instr::Const(konst), expr, name).direct())
             },
             Decl::Static(statik) => {
@@ -2148,7 +2149,9 @@ impl DriverRef<'_> {
                 if payload_ty.is_some() {
                     DeclRef::EnumVariantWithPayload { enuum, index, payload_ty }
                 } else {
-                    DeclRef::Value(self.write().push_instr_with_name(b, Instr::Const(Const::BasicVariant { enuum, index }), expr, name).direct())
+                    let konst = Const::BasicVariant { enuum, index };
+                    let name = self.read().fmt_const_for_instr_name(&konst).to_string();
+                    DeclRef::Value(self.write().push_instr_with_name(b, Instr::Const(konst), expr, name).direct())
                 }
             },
             Decl::Invalid => panic!("INVALID DECL"),
