@@ -1255,7 +1255,9 @@ impl DriverRef<'_> {
                     for &arg in arguments {
                         copied_args.push(frame.get_val(arg, &*self.read()).clone());
                     }
-                    let generic_arguments = generic_arguments.clone();
+                    let generic_arguments = generic_arguments.iter()
+                        .map(|arg| frame.canonicalize_type(arg))
+                        .collect();
                     // Stop immutably borrowing the stack, so it can be borrowed again in call()
                     drop(stack);
                     drop(d);
