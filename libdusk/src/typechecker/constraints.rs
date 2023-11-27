@@ -588,6 +588,10 @@ impl Driver {
         match (&a, b) {
             (Type::Never, _b) => true,
             (Type::Pointer(a), Type::Pointer(b)) => self.qual_ty_is_trivially_convertible_to_adding_constraints(tp, a, b),
+            (Type::Struct(a), Type::Struct(b)) => {
+                a.identity == b.identity &&
+                    a.field_tys.iter().zip(&b.field_tys).all(|(a, b)| self.ty_is_trivially_convertible_to_adding_constraints(tp, a, b))
+            },
             (a, &Type::TypeVar(type_var)) => {
                 match self.can_unify_to(tp, type_var, &a.into()) {
                     Ok(success) => {
@@ -621,6 +625,10 @@ impl Driver {
         match (&a, b) {
             (Type::Never, _b) => true,
             (Type::Pointer(a), Type::Pointer(b)) => self.qual_ty_is_trivially_convertible_to(tp, a, b),
+            (Type::Struct(a), Type::Struct(b)) => {
+                a.identity == b.identity &&
+                    a.field_tys.iter().zip(&b.field_tys).all(|(a, b)| self.ty_is_trivially_convertible_to(tp, a, b))
+            },
             (a, &Type::TypeVar(type_var)) => self.can_unify_to(tp, type_var, &a.into()).is_ok(),
             (a, b) => a == b,
         }
