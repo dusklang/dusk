@@ -138,7 +138,8 @@ impl Graph {
         dvd::send(|| DvdMessage::DidAddTirType4Dependency { depender: a, dependee: b });
     }
 
-    /// in order to add the type 2-4 dependencies of a, we need to know all possible members of b
+    /// in order to add the type 2-4 dependencies of a, we need to be able to mock-typecheck, and
+    /// possibly even mock-evaluate b.
     ///
     /// NOTE: An item meta-depending on another does not imply anything about their relative units
     ///       or levels. For this reason, I'm pretty sure that a meta-dependency should always
@@ -150,6 +151,15 @@ impl Graph {
         self.global_meta_dependees.insert(b);
 
         dvd::send(|| DvdMessage::DidAddTirMetaDependency { depender: a, dependee: b });
+    }
+
+    /// in order to add the type 2-4 dependencies of just about anything, we need to be able to
+    /// mock-typecheck, and possibly even mock-evaluate b. I say "just about" because b might have
+    /// its own dependencies of types 1-4 or meta. In such cases, there is no option but to
+    /// typecheck/evaluate those dependees first. Furthermore, SUHMM deps (for short) added at the
+    /// same time are allowed to be typechecked independently of one another.
+    pub fn add_super_ultra_hyper_mega_meta_dep(&mut self, b: ItemId) {
+        todo!("actually do something here.");
     }
 
     fn find_subcomponent(&mut self, item: ItemId, cur_component: &mut Component) {

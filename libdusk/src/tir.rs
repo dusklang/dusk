@@ -75,6 +75,8 @@ pub struct Struct { pub field_tys: SmallVec<[ExprId; 2]>, }
 #[derive(Debug)]
 pub struct StructLit { pub ty: ExprId, pub fields: Vec<FieldAssignment>, pub struct_lit_id: StructLitId, }
 #[derive(Debug)]
+pub struct ExtendBlock { pub extendee: ExprId }
+#[derive(Debug)]
 pub struct Enum { pub variant_payload_tys: SmallVec<[ExprId; 2]> }
 #[derive(Debug)]
 pub struct ExplicitRet;
@@ -170,6 +172,7 @@ pub struct UnitItems {
     pub switches: DepVec<Expr<Switch>>,
     pub structs: DepVec<Expr<Struct>>,
     pub struct_lits: DepVec<Expr<StructLit>>,
+    pub extend_blocks: DepVec<Expr<ExtendBlock>>,
     pub enums: DepVec<Expr<Enum>>,
 }
 impl UnitItems {
@@ -671,7 +674,10 @@ impl Driver {
             },
             &ast::Expr::StructLit { ty, ref fields, id } => {
                 insert_expr!(struct_lits, StructLit { ty, fields: fields.clone(), struct_lit_id: id })
-            }
+            },
+            &ast::Expr::ExtendBlock { extendee, .. } => {
+                insert_expr!(extend_blocks, ExtendBlock { extendee });
+            },
         }
     }
 
@@ -888,6 +894,10 @@ impl Driver {
                     self.tir.graph.add_type1_dep(df!(binding.item), ef!(lower_bound.item));
                     self.tir.graph.add_type1_dep(df!(binding.item), ef!(upper_bound.item));
                 },
+                ast::Expr::ExtendBlock { extendee, .. } => {
+                    self.tir.graph.add_super_ultra_hyper_mega_meta_dep(ef!(extendee.item));
+                    self.tir.graph.add_type1_dep(id, ef!(extendee.item));
+                },
             }
         }
 
@@ -981,7 +991,7 @@ impl Driver {
                             | ast::Expr::CharLit { .. } | ast::Expr::BoolLit { .. } | ast::Expr::Const(_) | ast::Expr::AddrOf { .. }
                             | ast::Expr::Deref(_) | ast::Expr::Pointer { .. } | ast::Expr::Set { .. } | ast::Expr::Mod { .. }
                             | ast::Expr::Struct(_) | ast::Expr::Enum(_) | ast::Expr::Call { .. } | ast::Expr::FunctionTy { .. }
-                            | ast::Expr::Break(_) | ast::Expr::Continue(_) | ast::Expr::StructLit { .. } => {},
+                            | ast::Expr::Break(_) | ast::Expr::Continue(_) | ast::Expr::StructLit { .. } | ast::Expr::ExtendBlock { .. } => {},
                         ast::Expr::Cast { ty, .. } => {
                             add_eval_dep!(id, ty);
                         },

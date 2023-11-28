@@ -244,6 +244,7 @@ pub enum Expr {
         fields: Vec<FieldAssignment>,
         id: StructLitId,
     },
+    ExtendBlock { extendee: ExprId, methods: Vec<DeclId> },
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -1039,6 +1040,9 @@ impl Driver {
     pub fn struct_lit(&mut self, ty: ExprId, fields: Vec<FieldAssignment>, range: SourceRange) -> ExprId {
         let id = self.code.ast.struct_lits.next_idx();
         self.add_expr(Expr::StructLit { ty, fields, id }, range)
+    }
+    pub fn extend_block(&mut self, extendee: ExprId, methods: Vec<DeclId>, range: SourceRange) -> ExprId {
+        self.add_expr(Expr::ExtendBlock { extendee, methods }, range)
     }
     pub fn error_expr(&mut self, range: SourceRange) -> ExprId {
         self.add_expr(Expr::Error, range)

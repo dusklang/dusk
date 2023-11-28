@@ -2253,7 +2253,7 @@ impl DriverRef<'_> {
         // conflict with mutable uses of self.
         // Fix this, somehow. I don't have the faintest idea how.
         let val = match ef!(d, expr.ast) {
-            Expr::Void | Expr::Error => {
+            Expr::Void | Expr::Error | Expr::ExtendBlock { .. } => {
                 drop(d);
                 VOID_INSTR.direct()
             },

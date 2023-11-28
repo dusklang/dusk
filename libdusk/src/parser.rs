@@ -1602,8 +1602,7 @@ impl Driver {
             }
         };
 
-        todo!("Hey. We parsed an extend block. The extendee is '{}' and there are {} method(s).", self.display_item(extendee), methods.len());
-
+        Ok(self.extend_block(extendee, methods, extend_range))
     }
 
     fn try_parse_type(&mut self, p: &mut Parser) -> Option<(ExprId, SourceRange)> {
