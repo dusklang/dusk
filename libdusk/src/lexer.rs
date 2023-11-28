@@ -368,6 +368,7 @@ impl Driver {
                 "do" => Do,
                 "mut" => Mut,
                 "mod" => Module,
+                "extend" => Extend,
                 "extern_mod" => ExternModule,
                 "_debug_mark" => DebugMark,
                 _ => {

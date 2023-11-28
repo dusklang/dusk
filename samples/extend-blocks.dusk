@@ -1,0 +1,15 @@
+MyStruct :: struct {}
+
+extend MyStruct {
+    fn new(): MyStruct {
+        MyStruct {}
+    }
+
+    fn do_something_truly_amazing(self) {
+
+    }
+}
+
+fn main() {
+    
+}

@@ -635,6 +635,7 @@ impl Driver {
                 Ok(self.continue_expr(range, label))
             },
             TokenKind::Fn => {
+                // Parse function types
                 let fn_range = self.cur(p).range;
                 self.next(p);
                 self.eat_tok(p, TokenKind::LeftParen)?;
@@ -1131,6 +1132,10 @@ impl Driver {
                     Ok(Item::Expr(expr))
                 }
             },
+            TokenKind::Extend => {
+                let expr = self.parse_extend_block(p)?;
+                Ok(Item::Expr(expr))
+            },
             TokenKind::Fn => {
                 let decl = self.parse_comp_decl(p)?;
                 Ok(Item::Decl(decl))
@@ -1552,6 +1557,53 @@ impl Driver {
         drop(generic_ctx); // explicitly pop generic ctx id from the stack
 
         Ok(decl_id)
+    }
+
+    fn parse_extend_block(&mut self, p: &mut Parser) -> ParseResult<ExprId> {
+        let extend_range = self.eat_tok(p, TokenKind::Extend)?;
+
+        let (extendee, _extendee_range) = self.parse_type(p);
+
+        self.eat_tok(p, TokenKind::OpenCurly)?;
+        let decl_list = self.begin_list(p, TokenKind::could_begin_statement, [TokenKind::Semicolon], Some(TokenKind::CloseCurly));
+
+        let mut methods = Vec::new();
+        let close_curly_range = loop {
+            match self.cur(p).kind {
+                TokenKind::Eof => {
+                    self.diag.report_error("Unexpected end of file while parsing `extend` body", extend_range, "`extend` started here");
+                    return Err(ParseError::Eof);
+                },
+                TokenKind::CloseCurly => {
+                    let close_curly_range = self.cur(p).range;
+                    self.next(p);
+                    break close_curly_range;
+                },
+                _ => {
+                    self.start_next_list_item(p, decl_list.id());
+                    match self.parse_item(p) {
+                        Ok(Item::Decl(decl)) => {
+                            let range = self.get_range(decl);
+                            let ast::Decl::Computed { .. } = &df!(decl.ast) else {
+                                self.diag.report_error("unexpected type of declaration", range, "expected a method declaration");
+                                self.eat_separators(p);
+                                continue;
+                            };
+
+                            methods.push(decl);
+                        },
+                        Ok(Item::Expr(expr)) => {
+                            let range = self.get_range(expr);
+                            self.diag.report_error("unexpected expression", range, "expected a method declaration");
+                        },
+                        Err(_) => {},
+                    }
+                }
+            }
+        };
+
+        todo!("Hey. We parsed an extend block. The extendee is '{}' and there are {} method(s).", self.display_item(extendee), methods.len());
+
     }
 
     fn try_parse_type(&mut self, p: &mut Parser) -> Option<(ExprId, SourceRange)> {
