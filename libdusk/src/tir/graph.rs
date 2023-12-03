@@ -26,6 +26,9 @@ pub struct Graph {
     /// Set of all meta-dependees that are not yet ready to be added to a normal unit
     global_meta_dependees: HashSet<ItemId>,
 
+    /// Set of all super ultra hyper mega meta dependencies that are not yet ready to be added to a normal unit.
+    suhmm_dependees: HashSet<ItemId>,
+
     /// Map from all meta-dependers to their dependees that are not yet ready to be added to a normal unit
     meta_dependees: HashMap<ItemId, HashSet<ItemId>>,
 
@@ -156,7 +159,7 @@ impl Graph {
     /// typecheck/evaluate those dependees first. Furthermore, SUHMM deps (for short) added at the
     /// same time are allowed to be typechecked independently of one another.
     pub fn add_super_ultra_hyper_mega_meta_dep(&mut self, b: ItemId) {
-        todo!("actually do something here.");
+        self.suhmm_dependees.insert(b);
     }
 
     fn find_subcomponent(&mut self, item: ItemId, cur_component: &mut Component) {
@@ -336,7 +339,6 @@ impl Graph {
             if has_meta_dep {
                 meta_dep_components.insert(comp);
             }
-
         }
 
         // Get the components that depend (either directly or indirectly) on components with meta-dependees in them 
