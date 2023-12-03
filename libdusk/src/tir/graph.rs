@@ -90,10 +90,7 @@ impl Default for ComponentRelation {
 #[derive(Debug, Default)]
 struct Component {
     items: Vec<ItemId>,
-
     deps: HashMap<CompId, ComponentRelation>,
-
-    has_meta_dep: bool,
 }
 
 #[derive(Debug, Default)]
@@ -331,20 +328,15 @@ impl Graph {
             DvdMessage::WillSolveTirGraph { outstanding_components }
         });
 
-
-        // Set the has_meta_dep field of all outstanding components
+        // Get the outstanding components with meta-dependees in them
+        let mut meta_dep_components = HashSet::<CompId>::new();
         for &comp in &self.outstanding_components {
             let has_meta_dep = self.components[comp].items.iter()
                 .any(|item| self.global_meta_dependees.contains(item));
-            self.components[comp].has_meta_dep = has_meta_dep;
-        }
-
-        // Get the outstanding components with meta-dependees in them
-        let mut meta_dep_components = HashSet::<CompId>::new();
-        for &id in &self.outstanding_components {
-            if self.components[id].has_meta_dep {
-                meta_dep_components.insert(id);
+            if has_meta_dep {
+                meta_dep_components.insert(comp);
             }
+
         }
 
         // Get the components that depend (either directly or indirectly) on components with meta-dependees in them 
