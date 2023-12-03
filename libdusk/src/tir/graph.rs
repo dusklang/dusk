@@ -101,6 +101,21 @@ struct InternalUnit {
     components: HashSet<CompId>,
 }
 
+impl Driver {
+    pub fn initialize_graph(&mut self) {
+        let mut deps = [
+            &mut self.tir.graph.dependees,
+            &mut self.tir.graph.t2_dependees,
+            &mut self.tir.graph.dependers
+        ];
+        for dep in &mut deps {
+            dep.resize_with(self.code.ast.items.len(), Vec::new);
+        }
+
+        self.tir.graph.item_to_components.resize_with(self.code.ast.items.len(), || CompId::new(u32::MAX as usize));
+    }
+}
+
 impl Graph {
     /// a and b must be in the *same* unit, and a must have a higher level than b
     pub fn add_type1_dep(&mut self, a: ItemId, b: ItemId) {
@@ -573,19 +588,4 @@ pub struct MockUnit {
     /// A collection of every item in this mock unit
     pub deps: Vec<ItemId>,
 
-}
-
-impl Driver {
-    pub fn initialize_graph(&mut self) {
-        let mut deps = [
-            &mut self.tir.graph.dependees,
-            &mut self.tir.graph.t2_dependees,
-            &mut self.tir.graph.dependers
-        ];
-        for dep in &mut deps {
-            dep.resize_with(self.code.ast.items.len(), Vec::new);
-        }
-
-        self.tir.graph.item_to_components.resize_with(self.code.ast.items.len(), || CompId::new(u32::MAX as usize));
-    }
 }
