@@ -27,7 +27,6 @@ mod dvd;
 #[derive(ArgEnum, Copy, Clone, Debug)]
 enum StopPhase {
     Parse,
-    Tir,
     Typecheck,
     Mir,
     Interp,
@@ -92,7 +91,6 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
     let loaded_file = src_map.add_file_on_disk(&opt.input).is_ok();
     let mut driver = DriverRef::new(&DRIVER);
     *driver.write() = Driver::new(src_map, Arch::X86_64, opt.no_core);
-    let before = driver.read().take_snapshot();
     driver.write().initialize_ast();
 
     if !loaded_file {
@@ -122,18 +120,10 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
         driver.read().diag.check_for_failure();
         return;
     };
-    let new_code = driver.read().get_new_code_since(before);
-
-    driver.write().finalize_ast();
-
-    begin_phase!(Tir);
-    dvd_ipc::send(|| DvdMessage::WillInitializeTir);
-    driver.write().initialize_tir(&new_code);
-    dvd_ipc::send(|| DvdMessage::DidInitializeTir);
-
 
     begin_phase!(Typecheck);
-    let mut tp = driver.read().get_real_type_provider();
+    driver.write().initialize_tir();
+    let mut tp = driver.read().make_real_type_provider();
     let mut new_code = NewCode::placeholder();
     loop {
         let mut driver_write = driver.write();

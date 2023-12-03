@@ -437,22 +437,18 @@ impl Server {
             **file_id_ref = Some(file);
             let mut driver = DriverRef::new(&DRIVER);
             *driver.write() = Driver::new(src_map, Arch::X86_64, false);
-            let before = driver.read().take_snapshot();
     
             driver.write().initialize_ast();
     
             let fatal_parse_error = driver.write().parse_added_files().is_err();
             salf.flush_diagnostics(&mut driver.write(), path);
-            
-            driver.write().finalize_ast();
-    
-            let new_code = driver.read().get_new_code_since(before);
     
             let tp = (!fatal_parse_error).then(|| {
-                driver.write().initialize_tir(&new_code);
                 salf.flush_diagnostics(&mut driver.write(), path);
+
+                driver.write().initialize_tir();
         
-                let mut tp = driver.read().get_real_type_provider();
+                let mut tp = driver.read().make_real_type_provider();
                 let mut new_code = NewCode::placeholder();
                 loop {
                     let mut driver_write = driver.write();

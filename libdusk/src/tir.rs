@@ -17,7 +17,7 @@ use crate::dvd::{Message as DvdMessage, self};
 use crate::driver::Driver;
 use crate::dep_vec::{self, DepVec, AnyDepVec};
 use crate::index_vec::*;
-use crate::new_code::NewCode;
+use crate::new_code::{NewCode, CodeSnapshot};
 
 mod graph;
 use graph::{Graph, Levels};
@@ -249,6 +249,8 @@ pub struct Builder {
     depended_on: IndexVec<ExprId, bool>,
 
     staged_ret_groups: HashMap<DeclId, SmallVec<[ExprId; 1]>>,
+
+    last_snapshot: CodeSnapshot,
 }
 
 macro_rules! add_eval_dep_injector {
@@ -710,7 +712,7 @@ impl Driver {
         }
     }
 
-    pub fn initialize_tir(&mut self, new_code: &NewCode) {
+    fn initialize_tir_impl(&mut self, new_code: &NewCode) {
         // Populate `decls`
         for id in range_iter(new_code.decls.clone()) {
             let decl = &self.code.ast.decls[id];
@@ -908,7 +910,19 @@ impl Driver {
         self.tir.depended_on.resize_with(self.code.ast.exprs.len(), || false);
     }
 
+    pub fn initialize_tir(&mut self) {
+        let new_snapshot = self.take_snapshot();
+        let last_snapshot = mem::replace(&mut self.tir.last_snapshot, new_snapshot);
+        let new_code = self.get_new_code_since(last_snapshot);
+
+        dvd::send(|| DvdMessage::WillInitializeTir);
+        self.initialize_tir_impl(&new_code);
+        dvd::send(|| DvdMessage::DidInitializeTir);
+    }
+
     pub fn build_more_tir(&mut self) -> Result<Option<Units>, TirError> {
+        self.initialize_tir();
+
         dvd::send(|| DvdMessage::WillBuildMoreTir);
         if !self.tir.graph.has_outstanding_components() {
             dvd::send(|| DvdMessage::DidBuildMoreTir { no_outstanding_components: true });

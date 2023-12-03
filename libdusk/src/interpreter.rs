@@ -1516,12 +1516,8 @@ impl DriverRef<'_> {
                                 .map(|base| base.parent().unwrap().join(path))
                                 .unwrap_or_else(|| path.into());
                             drop(d);
-                            let before = self.read().take_snapshot();
                             let file = self.write().src_map.add_file_on_disk(path).unwrap();
                             self.write().parse_added_files().unwrap();
-                            let new_code = self.read().get_new_code_since(before);
-                            self.write().finalize_ast();
-                            self.write().initialize_tir(&new_code);
 
                             let added_module = self.read().code.ast.global_scopes[&file];
                             Value::from_mod(added_module)

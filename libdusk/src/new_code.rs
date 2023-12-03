@@ -13,8 +13,17 @@ macro_rules! generate_new_code {
             $(pub $field_name: Range<$id_ty>),*,
         }
 
+        #[derive(Debug)]
         pub struct CodeSnapshot {
             $($field_name: $id_ty),*,
+        }
+
+        impl Default for CodeSnapshot {
+            fn default() -> Self {
+                Self {
+                    $($field_name: <$id_ty>::new(0)),*,
+                }
+            }
         }
 
         impl Driver {

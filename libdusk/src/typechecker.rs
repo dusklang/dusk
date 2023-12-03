@@ -1700,8 +1700,7 @@ impl Driver {
         *tp.ty_mut(ast::ERROR_EXPR) = Type::Error;
     }
 
-    pub fn get_real_type_provider(&self) -> RealTypeProvider {
-        // Assign the type of the void expression to be void.
+    pub fn make_real_type_provider(&self) -> RealTypeProvider {
         let mut tp = RealTypeProvider::new(self);
         self.initialize_global_expressions(&mut tp);
         tp
