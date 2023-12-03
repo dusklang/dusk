@@ -154,8 +154,8 @@ impl Graph {
     }
 
     /// in order to add the type 2-4 dependencies of just about anything, we need to be able to
-    /// mock-typecheck, and possibly even mock-evaluate b. I say "just about" because b might have
-    /// its own dependencies of types 1-4 or meta. In such cases, there is no option but to
+    /// typecheck, and possibly even evaluate b. I say "just about" because b might have its own
+    /// dependencies of types 1-4 or meta. In such cases, there is no option but to
     /// typecheck/evaluate those dependees first. Furthermore, SUHMM deps (for short) added at the
     /// same time are allowed to be typechecked independently of one another.
     pub fn add_super_ultra_hyper_mega_meta_dep(&mut self, b: ItemId) {
