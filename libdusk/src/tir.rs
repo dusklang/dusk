@@ -24,6 +24,8 @@ use graph::{Graph, Levels};
 
 use dusk_proc_macros::*;
 
+pub use self::graph::MockStateCommand;
+
 define_index_type!(pub struct TreeId = u32;);
 define_index_type!(pub struct CompId = u32;);
 
@@ -138,6 +140,8 @@ impl Subprogram {
         Units {
             units: self.units,
             mock_units: self.mock_units,
+            is_suhmm: self.levels.is_suhmm,
+            commands: self.levels.commands,
         }
     }
 }
@@ -221,6 +225,8 @@ pub struct MockUnit {
 pub struct Units {
     pub units: Vec<Unit>,
     pub mock_units: Vec<MockUnit>,
+    pub commands: Vec<MockStateCommand>,
+    pub is_suhmm: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -929,7 +935,7 @@ impl Driver {
         dvd::send(|| DvdMessage::DidInitializeTir);
     }
 
-    pub fn build_more_tir(&mut self) -> Result<Option<Units>, TirError> {
+    pub fn build_more_tir(&mut self, last_typecheck_succeeded: bool) -> Result<Option<Units>, TirError> {
         self.initialize_tir();
 
         dvd::send(|| DvdMessage::WillBuildMoreTir);
@@ -1059,7 +1065,7 @@ impl Driver {
         dvd::send(|| DvdMessage::DidAddTirDependencies);
 
         // Solve for the unit and level of each item
-        let levels = self.tir.graph.solve().map_err(|err| {
+        let levels = self.tir.graph.solve(last_typecheck_succeeded).map_err(|err| {
             match err {
                 TirError::DependencyCycle => {
                     self.diag.report_error_no_range("dependency cycle found. this is most likely a Dusk compiler bug.");

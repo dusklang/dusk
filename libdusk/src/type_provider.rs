@@ -19,6 +19,7 @@ use crate::typechecker::{CastMethod, StructLit, constraints::ConstraintList, Ove
 use crate::index_vec::*;
 use crate::driver::Driver;
 use crate::new_code::NewCode;
+pub use crate::tir::MockStateCommand;
 
 /// The body of this macro defines the fields of the type provider. Each one maps to all of the following:
 /// - A field of type [`IndexVec<IdType, ValueType>`] in [RealTypeProvider]

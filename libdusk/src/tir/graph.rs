@@ -26,8 +26,14 @@ pub struct Graph {
     /// Set of all meta-dependees that are not yet ready to be added to a normal unit
     global_meta_dependees: HashSet<ItemId>,
 
-    /// Set of all super ultra hyper mega meta dependencies that are not yet ready to be added to a normal unit.
+    // Note: all suhmm dependees must be in exactly one of these three places: `suhmm_dependees`,
+    // `typechecked_suhmm_dependees`, or `state.TypecheckingSuhmmDependees.current_dependees` below
+
+    /// Set of all super ultra hyper mega meta dependees that have not yet been typechecked.
     suhmm_dependees: HashSet<ItemId>,
+
+    /// Set of all super ultra hyper mega meta dependees that have been typechecked.
+    typechecked_suhmm_dependees: HashSet<ItemId>,
 
     /// Map from all meta-dependers to their dependees that are not yet ready to be added to a normal unit
     meta_dependees: HashMap<ItemId, HashSet<ItemId>>,
@@ -45,6 +51,73 @@ pub struct Graph {
 
     components: IndexVec<CompId, Component>,
 
+    graph_state: GraphState,
+
+    component_state: ComponentState,
+
+    saved_component_state: Option<ComponentState>,
+}
+
+/// A command passed along to the typechecker, indicating what to do with current typechecking state.
+#[derive(Debug)]
+pub enum MockStateCommand {
+    /// Save the mock type provider results with the real type provider, and destroy the mock type provider.
+    Save,
+    /// Discard the mock type provider results, and destroy the mock type provider
+    Discard,
+    /// Create a new mock type provider wrapping the base-level "real" type provider
+    Mock,
+}
+
+#[derive(Debug, Default)]
+enum GraphState {
+    #[default]
+    Initial,
+    TypecheckingSuhmmDependees(SuhmmState),
+    TypecheckingRestOfProgram,
+}
+
+#[derive(Debug, Default)]
+struct SuhmmState {
+    current_dependees: Vec<ItemId>,
+    dependees_to_remove: Vec<usize>,
+    current_index: usize,
+    num_succeeded: usize,
+}
+
+impl SuhmmState {
+    fn next_dep(&mut self, succeeded: bool) -> bool {
+        self.num_succeeded += succeeded as usize;
+        if self.current_index + 1 >= self.current_dependees.len() {
+            if self.num_succeeded == 0 || self.num_succeeded == self.current_dependees.len() {
+                return false;
+            } else {
+                self.current_index = 0;
+                self.num_succeeded = 0;
+                self.dependees_to_remove.sort();
+                for &index in self.dependees_to_remove.iter().rev() {
+                    self.current_dependees.remove(index);
+                }
+                self.dependees_to_remove.clear();
+                if self.current_dependees.is_empty() {
+                    return false;
+                }
+            }
+        } else {
+            self.current_index += 1;
+        }
+        true
+    }
+
+    fn remove_current_dep(&mut self) {
+        self.dependees_to_remove.push(self.current_index);
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct ComponentState {
+    // note: every component in the `components` field of should always be in exactly one of the following places:
+
     /// Components that have not yet been added to a unit, or a mock unit
     outstanding_components: HashSet<CompId>,
 
@@ -56,7 +129,7 @@ pub struct Graph {
     included_components: HashSet<CompId>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct CompStageState {
     /// Each element of this Vec is a Vec of meta-dependees that can form independent mock units with no dependencies on each other.
     /// Each call to `solve()` pops another Vec off the end of the outer Vec, and adds them as mock units to the next set. When the
@@ -246,17 +319,17 @@ impl Graph {
         }
 
         let after_components = self.components.next_idx();
-        self.outstanding_components.extend(
+        self.component_state.outstanding_components.extend(
             range_iter(before_components..after_components)
         );
     }
 
-    pub fn has_outstanding_components(&self) -> bool { !self.outstanding_components.is_empty() }
+    pub fn has_outstanding_components(&self) -> bool { !self.component_state.outstanding_components.is_empty() }
 
     fn find_comps_without_outstanding_type_4_deps(&self, comps: &HashSet<CompId>, output: &mut HashSet<CompId>) {
         'comps: for &comp_id in comps {
             for (&dependee, &relation) in &self.components[comp_id].deps {
-                if relation == ComponentRelation::BEFORE && !self.included_components.contains(&dependee) {
+                if relation == ComponentRelation::BEFORE && !self.component_state.included_components.contains(&dependee) {
                     // Found a type 4 dependency, so we wont add this component. Continue to the next component.
                     continue 'comps;
                 }
@@ -275,7 +348,7 @@ impl Graph {
                     if
                         relation == ComponentRelation::TYPE_2_3_FORWARD &&
                         !in_current_unit &&
-                        !self.included_components.contains(&dependee)
+                        !self.component_state.included_components.contains(&dependee)
                     {
                         return false;
                     }
@@ -309,7 +382,7 @@ impl Graph {
             }
 
             let state = CompStageState { meta_deps };
-            let old_val = self.staged_components.insert(comp, state);
+            let old_val = self.component_state.staged_components.insert(comp, state);
             assert!(old_val.is_none());
         }
     }
@@ -321,7 +394,7 @@ impl Graph {
     }
 
     pub fn get_items_that_need_dependencies(&mut self) -> Vec<ItemId> {
-        let items: Vec<ItemId> = self.outstanding_components.iter()
+        let items: Vec<ItemId> = self.component_state.outstanding_components.iter()
             .flat_map(|&comp| &self.components[comp].items)
             .copied()
             .filter(|item| !self.dependencies_added.contains(item))
@@ -356,16 +429,84 @@ impl Graph {
         }
     }
 
-    pub fn solve(&mut self) -> Result<Levels, TirError> {
+    fn save_component_state(&mut self) {
+        self.saved_component_state = Some(self.component_state.clone());
+    }
+
+    fn restore_component_state(&mut self) {
+        if let Some(state) = mem::take(&mut self.saved_component_state) {
+            self.component_state = state;
+        }
+    }
+
+    fn check_for_new_suhmm_dependees(&mut self) -> Vec<MockStateCommand> {
+        if !self.suhmm_dependees.is_empty() {
+            let current_dependees = mem::take(&mut self.suhmm_dependees).into_iter().collect();
+            let suhmm_state = SuhmmState {
+                current_dependees,
+                dependees_to_remove: Vec::new(),
+                current_index: 0,
+                num_succeeded: 0,
+            };
+            self.graph_state = GraphState::TypecheckingSuhmmDependees(suhmm_state);
+            self.save_component_state();
+            vec![MockStateCommand::Mock]
+        } else {
+            self.graph_state = GraphState::TypecheckingRestOfProgram;
+            vec![]
+        }
+    }
+
+    fn update_graph_state(&mut self, succeeded: bool) -> Vec<MockStateCommand> {
+        match &mut self.graph_state {
+            GraphState::Initial | GraphState::TypecheckingRestOfProgram => {
+                self.check_for_new_suhmm_dependees()
+            },
+            GraphState::TypecheckingSuhmmDependees(suhmm_state) => {
+                let current_dep = suhmm_state.current_dependees[suhmm_state.current_index];
+                let current_dep_comp = self.item_to_components[current_dep];
+                let finished_current_dep = self.component_state.included_components.contains(&current_dep_comp);
+                let mut commands = Vec::new();
+                if !succeeded || finished_current_dep {
+                    if succeeded {
+                        commands.push(MockStateCommand::Save);
+                        suhmm_state.remove_current_dep();
+                        self.typechecked_suhmm_dependees.insert(current_dep);
+                    } else {
+                        commands.push(MockStateCommand::Discard);
+                    }
+                    
+                    if suhmm_state.next_dep(succeeded) {
+                        commands.push(MockStateCommand::Mock);
+                    } else {
+                        self.typechecked_suhmm_dependees.extend(suhmm_state.current_dependees.clone());
+                        commands.extend(self.check_for_new_suhmm_dependees());
+                    }
+
+                    if succeeded {
+                        self.saved_component_state = None;
+                    } else {
+                        self.restore_component_state();
+                        self.save_component_state();
+                    }
+                }
+                commands
+            },
+        }
+    }
+
+    pub fn solve(&mut self, succeeded: bool) -> Result<Levels, TirError> {
+        let commands = self.update_graph_state(succeeded);
+
         dvd::send(|| {
-            let mut outstanding_components: Vec<_> = self.outstanding_components.iter().copied().collect();
+            let mut outstanding_components: Vec<_> = self.component_state.outstanding_components.iter().copied().collect();
             outstanding_components.sort();
             DvdMessage::WillSolveTirGraph { outstanding_components }
         });
 
         // Get the outstanding components with meta-dependees in them
         let mut meta_dep_components = HashSet::<CompId>::new();
-        for &comp in &self.outstanding_components {
+        for &comp in &self.component_state.outstanding_components {
             let has_meta_dep = self.components[comp].items.iter()
                 .any(|item| self.global_meta_dependees.contains(item));
             if has_meta_dep {
@@ -376,10 +517,10 @@ impl Graph {
         // Get the components that depend (either directly or indirectly) on components with meta-dependees in them 
         let excluded_components = {
             let mut excluded_components = HashSet::new();
-            let mut potentially_excluded_components: HashSet<CompId> = self.outstanding_components
+            let mut potentially_excluded_components: HashSet<CompId> = self.component_state.outstanding_components
                 .difference(&meta_dep_components)
                 .copied()
-                .filter(|comp| !self.staged_components.contains_key(comp))
+                .filter(|comp| !self.component_state.staged_components.contains_key(comp))
                 .collect();
             let mut added_to_excluded_set = true;
             while added_to_excluded_set {
@@ -387,7 +528,7 @@ impl Graph {
                 potentially_excluded_components.retain(|&comp_id| {
                     let comp = &self.components[comp_id];
                     for (dep, &relation) in &comp.deps {
-                        if !relation.contains(ComponentRelation::AFTER) && (meta_dep_components.contains(dep) || self.staged_components.contains_key(dep) || excluded_components.contains(dep)) {
+                        if !relation.contains(ComponentRelation::AFTER) && (meta_dep_components.contains(dep) || self.component_state.staged_components.contains_key(dep) || excluded_components.contains(dep)) {
                             excluded_components.insert(comp_id);
                             added_to_excluded_set = true;
                             return false;
@@ -407,16 +548,16 @@ impl Graph {
         });
 
         // Temporarily remove all excluded components. Those that don't get staged will be added back after finding the units
-        self.outstanding_components.retain(|comp| !meta_dep_components.contains(comp) && !excluded_components.contains(comp));
-        if self.outstanding_components.is_empty() {
+        self.component_state.outstanding_components.retain(|comp| !meta_dep_components.contains(comp) && !excluded_components.contains(comp));
+        if self.component_state.outstanding_components.is_empty() {
             return Err(TirError::DependencyCycle);
         }
 
         let mut units = Vec::<InternalUnit>::new();
-        while !self.outstanding_components.is_empty() {
+        while !self.component_state.outstanding_components.is_empty() {
             // Get all components that have no type 4 dependencies on outstanding components
             let mut cur_unit_comps = HashSet::<CompId>::new();
-            self.find_comps_without_outstanding_type_4_deps(&self.outstanding_components, &mut cur_unit_comps);
+            self.find_comps_without_outstanding_type_4_deps(&self.component_state.outstanding_components, &mut cur_unit_comps);
             // Whittle down the components to only those that have type 2 or 3 dependencies on each other, or included components
             // (and not other outstanding components)
             self.remove_comps_with_outstanding_deps(&mut cur_unit_comps);
@@ -438,8 +579,8 @@ impl Graph {
                         }
                     }
                 }
-                self.included_components.insert(comp);
-                self.outstanding_components.remove(&comp);
+                self.component_state.included_components.insert(comp);
+                self.component_state.outstanding_components.remove(&comp);
             }
             units.push(cur_unit);
         }
@@ -458,7 +599,7 @@ impl Graph {
             let all_excluded = meta_dep_components
                 .difference(&comps_to_stage)
                 .chain(&excluded_components);
-            self.outstanding_components.extend(all_excluded);
+            self.component_state.outstanding_components.extend(all_excluded);
 
             self.stage_components(comps_to_stage.into_iter());
         }
@@ -482,7 +623,7 @@ impl Graph {
 
         let mut mock_units = Vec::new();
         // TODO: Borrow checker :(
-        let staged_comps_keys: Vec<_> = self.staged_components.keys().copied().collect();
+        let staged_comps_keys: Vec<_> = self.component_state.staged_components.keys().copied().collect();
         'mock_staged_comps: for comp_id in staged_comps_keys {
             // Check dependencies of the component before adding it to a mock unit. This is necessary because:
             //   - Meta-dependers can add dependencies to themselves after a meta-dependee is mocked
@@ -493,12 +634,12 @@ impl Graph {
             //     meta-depender's dependencies before we can mock it
             let comp = &self.components[comp_id];
             for (dep, &relation) in &comp.deps {
-                if !relation.contains(ComponentRelation::AFTER) && !self.included_components.contains(dep) {
+                if !relation.contains(ComponentRelation::AFTER) && !self.component_state.included_components.contains(dep) {
                     continue 'mock_staged_comps;
                 }
             }
 
-            let meta_deps = self.staged_components.get_mut(&comp_id).unwrap().meta_deps.pop().unwrap();
+            let meta_deps = self.component_state.staged_components.get_mut(&comp_id).unwrap().meta_deps.pop().unwrap();
             for dep in meta_deps {
                 let mut item_to_levels: HashMap<ItemId, u32> = HashMap::new();
 
@@ -522,11 +663,11 @@ impl Graph {
                 mock_units.push(mock_unit);
             }
 
-            if self.staged_components[&comp_id].meta_deps.is_empty() {
-                self.staged_components.remove(&comp_id);
+            if self.component_state.staged_components[&comp_id].meta_deps.is_empty() {
+                self.component_state.staged_components.remove(&comp_id);
 
                 // Re-register the component for being added to a unit
-                self.outstanding_components.insert(comp_id);
+                self.component_state.outstanding_components.insert(comp_id);
 
                 // Update state to reflect the fact that the component no longer has meta-dependees
                 for i in 0..comp.items.len() {
@@ -550,6 +691,8 @@ impl Graph {
                     Unit { items }
                 }).collect::<Vec<Unit>>(),
             mock_units,
+            commands,
+            is_suhmm: matches!(self.graph_state, GraphState::TypecheckingSuhmmDependees(_)),
         };
 
         Ok(
@@ -572,6 +715,8 @@ pub struct Levels {
     pub item_to_units: HashMap<ItemId, u32>,
     pub units: Vec<Unit>,
     pub mock_units: Vec<MockUnit>,
+    pub commands: Vec<MockStateCommand>,
+    pub is_suhmm: bool,
 }
 
 #[derive(Default, Debug)]
