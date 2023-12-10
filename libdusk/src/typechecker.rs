@@ -19,7 +19,7 @@ use crate::driver::{Driver, DriverRef};
 use crate::error::Error;
 use crate::new_code::NewCode;
 use crate::ty::BuiltinTraits;
-use crate::tir::{UnitItems, ExprNamespace, self, NameLookup, NewNamespaceRefKind, ExprMacroInfo, OverloadScope, AllUnits};
+use crate::tir::{UnitItems, ExprNamespace, self, NameLookup, NewNamespaceRefKind, ExprMacroInfo, OverloadScope, Units};
 
 use dusk_proc_macros::*;
 
@@ -1708,10 +1708,7 @@ impl Driver {
 }
 
 impl DriverRef<'_> {
-    pub fn type_check(&mut self, units: &AllUnits, tp: &mut RealTypeProvider, new_code: NewCode) -> Result<(), ()> {
-        // TODO: look at SUHMM units as well
-        let units = &units.main_units;
-
+    pub fn type_check(&mut self, units: &Units, tp: &mut dyn TypeProvider, new_code: NewCode) -> Result<(), ()> {
         tp.resize(&self.read(), new_code);
         for unit in &units.units {
             // Pass 1: propagate info down from leaves to roots

@@ -217,18 +217,6 @@ pub struct MockUnit {
     pub items: UnitItems,
 }
 
-#[derive(Debug)]
-pub struct SuhmmUnits {
-    pub item: ItemId,
-    pub units: Units,
-}
-
-#[derive(Debug)]
-pub struct AllUnits {
-    pub suhmm_units: Vec<SuhmmUnits>,
-    pub main_units: Units,
-}
-
 #[derive(Debug, Default)]
 pub struct Units {
     pub units: Vec<Unit>,
@@ -941,7 +929,7 @@ impl Driver {
         dvd::send(|| DvdMessage::DidInitializeTir);
     }
 
-    pub fn build_more_tir(&mut self) -> Result<Option<AllUnits>, TirError> {
+    pub fn build_more_tir(&mut self) -> Result<Option<Units>, TirError> {
         self.initialize_tir();
 
         dvd::send(|| DvdMessage::WillBuildMoreTir);
@@ -1081,23 +1069,13 @@ impl Driver {
             err
         })?;
 
-        let mut suhmm_units = Vec::new();
-        for levels in levels.suhmm_dependees {
-            let mut sp = Subprogram { units: Vec::new(), mock_units: Vec::new(), levels: levels.levels };
-            self.actually_build_tir(&mut sp);
-            suhmm_units.push(SuhmmUnits { item: levels.item, units: sp.to_units() });
-        }
-
-        let mut main_sp = Subprogram { units: Vec::new(), mock_units: Vec::new(), levels: levels.main_levels };
+        let mut main_sp = Subprogram { units: Vec::new(), mock_units: Vec::new(), levels };
         self.actually_build_tir(&mut main_sp);
 
         dvd::send(|| DvdMessage::DidBuildMoreTir { no_outstanding_components: false });
         Ok(
             Some(
-                AllUnits {
-                    suhmm_units,
-                    main_units: main_sp.to_units(),
-                }
+                main_sp.to_units()
             )
         )
     }

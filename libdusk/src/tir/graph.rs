@@ -254,7 +254,7 @@ impl Graph {
         items
     }
 
-    pub fn solve(&mut self) -> Result<AllLevels, TirError> {
+    pub fn solve(&mut self) -> Result<Levels, TirError> {
         let item_to_levels = HashMap::new();
         let item_to_units = HashMap::new();
         let units = Vec::<InternalUnit>::new();
@@ -281,10 +281,7 @@ impl Graph {
         };
 
         Ok(
-            AllLevels {
-                suhmm_dependees: Vec::new(),
-                main_levels,
-            }
+            main_levels
         )
     }
 }
@@ -295,19 +292,6 @@ impl Graph {
 #[derive(Debug, Default)]
 struct InternalUnit {
     components: HashSet<CompId>,
-}
-
-#[derive(Default, Debug)]
-pub struct AllLevels {
-    pub suhmm_dependees: Vec<SuhmmLevels>,
-    pub main_levels: Levels,
-}
-
-#[derive(Debug)]
-pub struct SuhmmLevels {
-    // The item id of the suhmm dependee
-    pub item: ItemId,
-    pub levels: Levels,
 }
 
 #[derive(Default, Debug)]
