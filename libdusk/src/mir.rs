@@ -764,7 +764,7 @@ impl Driver {
 }
 
 impl DriverRef<'_> {
-    pub fn build_mir(&mut self, tp: &impl TypeProvider) {
+    pub fn build_mir(&mut self, tp: &dyn TypeProvider) {
         // It is important to hold on to the write lock throughout this entire method, maybe
         self.write();
         // Start at 1 to avoid RETURN_VALUE_DECL, which we can't and shouldn't generate code for
@@ -776,14 +776,14 @@ impl DriverRef<'_> {
 }
 
 impl DriverRef<'_> {
-    pub fn build_standalone_expr(&mut self, expr: ExprId, tp: &impl TypeProvider) -> Function {
+    pub fn build_standalone_expr(&mut self, expr: ExprId, tp: &dyn TypeProvider) -> Function {
         let func_ty = FunctionType { param_tys: Vec::new(), return_ty: Box::new(tp.ty(expr).clone()), has_c_variadic_param: false };
         self.build_function(None, func_ty, FunctionBody::Expr(expr), empty_range(), empty_range(), false, tp)
     }
 }
 
 impl Driver {
-    fn resolve_extern_mod(&mut self, id: ExternModId, tp: &impl TypeProvider) {
+    fn resolve_extern_mod(&mut self, id: ExternModId, tp: &dyn TypeProvider) {
         if self.code.mir.extern_mods.get(&id).is_some() { return; }
 
         let extern_mod = &self.code.ast.extern_mods[id];
@@ -823,7 +823,7 @@ impl Driver {
 }
 
 impl DriverRef<'_> {
-    fn get_decl(&mut self, id: DeclId, tp: &impl TypeProvider) -> Decl {
+    fn get_decl(&mut self, id: DeclId, tp: &dyn TypeProvider) -> Decl {
         if let Some(decl) = self.read().mir.decls.get(&id) { return decl.clone(); }
         let d = self.read();
         match df!(d, id.ast) {
@@ -1391,7 +1391,7 @@ impl Driver {
 }
 
 impl DriverRef<'_> {
-    fn build_function(&mut self, name: Option<Sym>, func_ty: FunctionType, body: FunctionBody, params: Range<DeclId>, generic_params: Range<GenericParamId>, is_comptime: bool, tp: &impl TypeProvider) -> Function {
+    fn build_function(&mut self, name: Option<Sym>, func_ty: FunctionType, body: FunctionBody, params: Range<DeclId>, generic_params: Range<GenericParamId>, is_comptime: bool, tp: &dyn TypeProvider) -> Function {
         debug_assert_ne!(func_ty.return_ty.as_ref(), &Type::Error, "can't build MIR function with Error return type");
 
         let mut entry = Block::default();
@@ -1818,7 +1818,7 @@ impl DriverRef<'_> {
         }
     }
 
-    fn eval_constants(&mut self, func: &mut Function, tp: &impl TypeProvider) -> bool {
+    fn eval_constants(&mut self, func: &mut Function, tp: &dyn TypeProvider) -> bool {
         let mut did_something = false;
         self.write();
         for &block in &func.blocks {
@@ -1852,7 +1852,7 @@ impl DriverRef<'_> {
         did_something
     }
 
-    fn optimize_function(&mut self, func: &mut Function, should_eval_constants: bool, tp: &impl TypeProvider) {
+    fn optimize_function(&mut self, func: &mut Function, should_eval_constants: bool, tp: &dyn TypeProvider) {
         // Get rid of empty blocks
         // TODO: get rid of unreachable blocks instead. Otherwise we might accidentally remove an
         // empty, reachable block and fail silently (at MIR generation time).
@@ -2015,7 +2015,7 @@ impl Driver {
 }
 
 impl DriverRef<'_> {
-    fn build_scope_item(&mut self, b: &mut FunctionBuilder, item: Item, tp: &impl TypeProvider) {
+    fn build_scope_item(&mut self, b: &mut FunctionBuilder, item: Item, tp: &dyn TypeProvider) {
         let d = self.read();
         match item {
             Item::Expr(expr) => {
@@ -2037,7 +2037,7 @@ impl DriverRef<'_> {
         }
     }
 
-    fn build_scope(&mut self, b: &mut FunctionBuilder, scope: ImperScopeId, ctx: Context, tp: &impl TypeProvider) -> Value {
+    fn build_scope(&mut self, b: &mut FunctionBuilder, scope: ImperScopeId, ctx: Context, tp: &dyn TypeProvider) -> Value {
         self.write();
         let block = self.read().code.ast.imper_scopes[scope].block;
         let len = self.read().code.blocks[block].ops.len();
@@ -2061,7 +2061,7 @@ impl Driver {
 }
 
 impl DriverRef<'_> {
-    fn get_callee_declref(&mut self, b: &mut FunctionBuilder, tp: &impl TypeProvider, callee_id: ExprId) -> DeclRef {
+    fn get_callee_declref(&mut self, b: &mut FunctionBuilder, tp: &dyn TypeProvider, callee_id: ExprId) -> DeclRef {
         let d = self.read();
         let callee = &ef!(d, callee_id.ast);
         if let &Expr::DeclRef { id, .. } = callee {
@@ -2072,7 +2072,7 @@ impl DriverRef<'_> {
         }
     }
 
-    fn get(&mut self, b: &mut FunctionBuilder, decl_ref_id: DeclRefId, tp: &impl TypeProvider) -> DeclRef {
+    fn get(&mut self, b: &mut FunctionBuilder, decl_ref_id: DeclRefId, tp: &dyn TypeProvider) -> DeclRef {
         let id = tp.selected_overload(decl_ref_id).expect("No overload found!");
         let generic_params = self.read().tir.decls[id].generic_params.clone();
         let generic_arguments = tp.generic_arguments(decl_ref_id).as_ref().unwrap_or(&Vec::new()).clone();
@@ -2158,7 +2158,7 @@ impl DriverRef<'_> {
         }
     }
 
-    fn build_if_expr_recurse(&mut self, b: &mut FunctionBuilder, condition: ExprId, then_scope: ImperScopeId, result_location: Option<OpId>, true_bb: BlockId, false_bb: BlockId, post_bb: BlockId, ctx: Context, tp: &impl TypeProvider) {
+    fn build_if_expr_recurse(&mut self, b: &mut FunctionBuilder, condition: ExprId, then_scope: ImperScopeId, result_location: Option<OpId>, true_bb: BlockId, false_bb: BlockId, post_bb: BlockId, ctx: Context, tp: &dyn TypeProvider) {
         self.build_expr(
             b,
             condition,
@@ -2172,7 +2172,7 @@ impl DriverRef<'_> {
 }
 
 impl DriverRef<'_> {
-    fn build_if_expr(&mut self, b: &mut FunctionBuilder, expr: ExprId, ty: Type, condition: ExprId, then_scope: ImperScopeId, else_scope: Option<ImperScopeId>, ctx: Context, tp: &impl TypeProvider) -> Value {
+    fn build_if_expr(&mut self, b: &mut FunctionBuilder, expr: ExprId, ty: Type, condition: ExprId, then_scope: ImperScopeId, else_scope: Option<ImperScopeId>, ctx: Context, tp: &dyn TypeProvider) -> Value {
         // Create a location on the stack to store the result of the if, if necessary
         let result_location = match (&ctx.data, else_scope) {
             (DataDest::Read, Some(_)) => Some(
@@ -2246,7 +2246,7 @@ impl DriverRef<'_> {
         }
     }
 
-    fn build_expr(&mut self, b: &mut FunctionBuilder, expr: ExprId, ctx: Context, tp: &impl TypeProvider) -> Value {
+    fn build_expr(&mut self, b: &mut FunctionBuilder, expr: ExprId, ctx: Context, tp: &dyn TypeProvider) -> Value {
         let ty = self.read().get_canonical_type(tp, expr);
         let d = self.read();
         // TODO: in every single case of this match, I have to call drop() on d, otherwise the Ref<Driver> will
@@ -2294,7 +2294,7 @@ impl DriverRef<'_> {
                 drop(d);
                 let decl_ref = self.get_callee_declref(b, tp, callee);
 
-                fn get_args(d: &mut DriverRef, b: &mut FunctionBuilder, tp: &impl TypeProvider, arguments: &[ExprId]) -> SmallVec<[OpId; 2]> {
+                fn get_args(d: &mut DriverRef, b: &mut FunctionBuilder, tp: &dyn TypeProvider, arguments: &[ExprId]) -> SmallVec<[OpId; 2]> {
                     arguments.iter().map(|&argument| {
                         let val = d.build_expr(b, argument, Context::default(), tp);
                         d.write().handle_indirection(b, val)
@@ -2946,7 +2946,7 @@ impl Driver {
 }
 
 impl DriverRef<'_> {
-    fn handle_context(&mut self, b: &mut FunctionBuilder, mut val: Value, ctx: Context, tp: &impl TypeProvider) -> Value {
+    fn handle_context(&mut self, b: &mut FunctionBuilder, mut val: Value, ctx: Context, tp: &dyn TypeProvider) -> Value {
         val = val.adjusted(ctx.indirection);
         match ctx.data {
             DataDest::Read => return val,

@@ -254,24 +254,36 @@ impl Graph {
         items
     }
 
-    pub fn solve(&mut self) -> Result<Levels, TirError> {
+    pub fn solve(&mut self) -> Result<AllLevels, TirError> {
         let item_to_levels = HashMap::new();
         let item_to_units = HashMap::new();
         let units = Vec::<InternalUnit>::new();
         let mock_units = Vec::new();
         let components = &self.components;
+
+        // TODO: handle SUHMM dependencies
+
+        // TODO: handle components that don't depend on the mock results of unmocked meta-dependencies
+
+        // TODO: handle meta-dependencies, add mock units
+
+        let main_levels = Levels {
+            item_to_levels,
+            item_to_units,
+            units: units.into_iter()
+                .map(|unit| {
+                    let items = unit.components.iter()
+                        .flat_map(|&comp| components[comp].items.iter().copied())
+                        .collect();
+                    Unit { items }
+                }).collect::<Vec<Unit>>(),
+            mock_units,
+        };
+
         Ok(
-            Levels {
-                item_to_levels,
-                item_to_units,
-                units: units.into_iter()
-                    .map(|unit| {
-                        let items = unit.components.iter()
-                            .flat_map(|&comp| components[comp].items.iter().copied())
-                            .collect();
-                        Unit { items }
-                    }).collect::<Vec<Unit>>(),
-                mock_units,
+            AllLevels {
+                suhmm_dependees: Vec::new(),
+                main_levels,
             }
         )
     }
@@ -286,8 +298,16 @@ struct InternalUnit {
 }
 
 #[derive(Default, Debug)]
-pub struct Unit {
-    pub items: Vec<ItemId>,
+pub struct AllLevels {
+    pub suhmm_dependees: Vec<SuhmmLevels>,
+    pub main_levels: Levels,
+}
+
+#[derive(Debug)]
+pub struct SuhmmLevels {
+    // The item id of the suhmm dependee
+    pub item: ItemId,
+    pub levels: Levels,
 }
 
 #[derive(Default, Debug)]
@@ -296,6 +316,11 @@ pub struct Levels {
     pub item_to_units: HashMap<ItemId, u32>,
     pub units: Vec<Unit>,
     pub mock_units: Vec<MockUnit>,
+}
+
+#[derive(Default, Debug)]
+pub struct Unit {
+    pub items: Vec<ItemId>,
 }
 
 #[derive(Debug,)]
@@ -310,5 +335,4 @@ pub struct MockUnit {
 
     /// A collection of every item in this mock unit
     pub deps: Vec<ItemId>,
-
 }

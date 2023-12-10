@@ -133,6 +133,15 @@ struct Subprogram {
     levels: Levels,
 }
 
+impl Subprogram {
+    fn to_units(self) -> Units {
+        Units {
+            units: self.units,
+            mock_units: self.mock_units,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum TirError {
     DependencyCycle,
@@ -206,6 +215,18 @@ pub struct Unit {
 pub struct MockUnit {
     pub main_expr: ExprId,
     pub items: UnitItems,
+}
+
+#[derive(Debug)]
+pub struct SuhmmUnits {
+    pub item: ItemId,
+    pub units: Units,
+}
+
+#[derive(Debug)]
+pub struct AllUnits {
+    pub suhmm_units: Vec<SuhmmUnits>,
+    pub main_units: Units,
 }
 
 #[derive(Debug, Default)]
@@ -920,7 +941,7 @@ impl Driver {
         dvd::send(|| DvdMessage::DidInitializeTir);
     }
 
-    pub fn build_more_tir(&mut self) -> Result<Option<Units>, TirError> {
+    pub fn build_more_tir(&mut self) -> Result<Option<AllUnits>, TirError> {
         self.initialize_tir();
 
         dvd::send(|| DvdMessage::WillBuildMoreTir);
@@ -1060,7 +1081,28 @@ impl Driver {
             err
         })?;
 
-        let mut sp = Subprogram { units: Vec::new(), mock_units: Vec::new(), levels };
+        let mut suhmm_units = Vec::new();
+        for levels in levels.suhmm_dependees {
+            let mut sp = Subprogram { units: Vec::new(), mock_units: Vec::new(), levels: levels.levels };
+            self.actually_build_tir(&mut sp);
+            suhmm_units.push(SuhmmUnits { item: levels.item, units: sp.to_units() });
+        }
+
+        let mut main_sp = Subprogram { units: Vec::new(), mock_units: Vec::new(), levels: levels.main_levels };
+        self.actually_build_tir(&mut main_sp);
+
+        dvd::send(|| DvdMessage::DidBuildMoreTir { no_outstanding_components: false });
+        Ok(
+            Some(
+                AllUnits {
+                    suhmm_units,
+                    main_units: main_sp.to_units(),
+                }
+            )
+        )
+    }
+
+    fn actually_build_tir(&mut self, sp: &mut Subprogram) {
         sp.units.resize_with(sp.levels.units.len(), Default::default);
 
         // Finally, convert AST items to TIR and add them to the correct spot
@@ -1104,7 +1146,7 @@ impl Driver {
                 },
             );
         }
-        self.flush_staged_ret_groups(&mut sp);
+        self.flush_staged_ret_groups(sp);
         for scope in &self.code.ast.imper_scopes {
             for &op in &self.code.blocks[scope.block].ops {
                 let op = &self.code.ops[op];
@@ -1125,12 +1167,5 @@ impl Driver {
         for unit in &mut sp.units {
             unit.items.unify_sizes();
         }
-
-        dvd::send(|| DvdMessage::DidBuildMoreTir { no_outstanding_components: false });
-        Ok(
-            Some(
-                Units { units: sp.units, mock_units: sp.mock_units }
-            )
-        )
     }
 }
