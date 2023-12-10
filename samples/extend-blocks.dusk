@@ -11,5 +11,6 @@ extend MyStruct {
 }
 
 fn main() {
-    
+    value :: MyStruct.new()
+    value.do_something_truly_amazing()
 }
