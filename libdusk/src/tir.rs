@@ -213,6 +213,9 @@ pub struct Unit {
 
     /// The expressions in this unit that later units have eval dependencies on
     pub eval_dependees: Vec<ExprId>,
+
+    /// The expressions in this unit that come from `extend` blocks
+    pub extendees: Vec<ExprId>,
 }
 
 #[derive(Debug)]
@@ -262,6 +265,7 @@ pub struct Builder {
     pub expr_macro_info: HashMap<ExprId, Vec<ExprMacroInfo>>,
     graph: Graph,
     depended_on: IndexVec<ExprId, bool>,
+    extendees: HashSet<ExprId>,
 
     staged_ret_groups: HashMap<DeclId, SmallVec<[ExprId; 1]>>,
 
@@ -912,6 +916,7 @@ impl Driver {
                     self.tir.graph.add_type1_dep(df!(binding.item), ef!(upper_bound.item));
                 },
                 ast::Expr::ExtendBlock { extendee, .. } => {
+                    self.tir.extendees.insert(extendee);
                     self.tir.graph.add_super_ultra_hyper_mega_meta_dep(ef!(extendee.item));
                     self.tir.graph.add_type1_dep(id, ef!(extendee.item));
                 },
@@ -1098,7 +1103,9 @@ impl Driver {
                         self.build_tir_decl(&mut unit.items, level, id);
                     }
                     ast::Item::Expr(id) => {
+                        if self.tir.extendees.contains(&id) { unit.extendees.push(id); }
                         if self.tir.depended_on[id] { unit.eval_dependees.push(id); }
+
                         self.build_tir_expr(&mut unit.items, level, id);
                     }
                 }

@@ -1721,11 +1721,30 @@ impl DriverRef<'_> {
                 return Err(());
             }
 
+            // Handle eval dependencies
             for i in 0..unit.eval_dependees.len() {
                 let mut stack = vec![unit.eval_dependees[i]];
                 while !stack.is_empty() {
                     let expr = stack.pop().unwrap();
                     let val = self.eval_expr(expr, tp);
+                    tp.insert_eval_result(expr, val.into());
+
+                    let d = self.read();
+                    if let ast::Expr::DeclRef { explicit_generic_args, .. } = &ef!(d, expr.ast) {
+                        if let Some(generic_args) = explicit_generic_args {
+                            stack.extend_from_slice(generic_args);
+                        }
+                    }
+                }
+            }
+
+            // Associate methods in `extend` blocks with their extendees
+            // TODO: reduce duplicated code with eval dependencies
+            for i in 0..unit.extendees.len() {
+                let mut stack = vec![unit.extendees[i]];
+                while !stack.is_empty() {
+                    let expr = stack.pop().unwrap();
+                    let val = dbg!(self.eval_expr(expr, tp));
                     tp.insert_eval_result(expr, val.into());
 
                     let d = self.read();
