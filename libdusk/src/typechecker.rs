@@ -9,9 +9,9 @@ use constraints::*;
 use crate::index_vec::range_iter;
 use crate::type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 
-use crate::ast::{self, ExprId, DeclId, StructId, PatternKind, Ident, VOID_EXPR, GenericCtx, DeclRefId, Decl};
+use crate::ast::{self, ExprId, DeclId, StructId, PatternKind, Ident, VOID_EXPR, GenericCtx, DeclRefId, Decl, NewNamespaceId, StaticDecl};
 use crate::mir::Const;
-use crate::ty::{Type, LegacyInternalType, FunctionType, QualType, IntWidth};
+use crate::ty::{Type, LegacyInternalType, FunctionType, QualType, IntWidth, StructType};
 use crate::source_info::SourceRange;
 use crate::internal_types::InternalNamespace;
 
@@ -1740,11 +1740,12 @@ impl DriverRef<'_> {
 
             // Associate methods in `extend` blocks with their extendees
             // TODO: reduce duplicated code with eval dependencies
-            for i in 0..unit.extendees.len() {
-                let mut stack = vec![unit.extendees[i]];
+            for i in 0..unit.extend_blocks.len() {
+                let block_id = unit.extend_blocks[i];
+                let mut stack = vec![self.read().code.ast.extend_blocks[block_id].extendee];
                 while !stack.is_empty() {
                     let expr = stack.pop().unwrap();
-                    let val = dbg!(self.eval_expr(expr, tp));
+                    let val = self.eval_expr(expr, tp);
                     tp.insert_eval_result(expr, val.into());
 
                     let d = self.read();
@@ -1753,6 +1754,19 @@ impl DriverRef<'_> {
                             stack.extend_from_slice(generic_args);
                         }
                     }
+                }
+
+                let block = self.read().code.ast.extend_blocks[block_id].clone();
+                let extendee_ty = tp.get_evaluated_type(block.extendee);
+                let ns = self.read().find_namespace_for_type(extendee_ty);
+                for method in block.methods {
+                    let name = self.read().code.ast.names[method];
+                    self.write().code.ast.new_namespaces[ns].static_decls.push(
+                        StaticDecl {
+                            name,
+                            decl: method,
+                        }
+                    );
                 }
             }
         }
@@ -1832,5 +1846,15 @@ impl DriverRef<'_> {
             }
         }
         Ok(())
+    }
+}
+
+impl Driver {
+    fn find_namespace_for_type(&self, ty: &Type) -> NewNamespaceId {
+        match ty {
+            &Type::Struct(StructType { identity, .. }) => self.code.ast.structs[identity].namespace,
+            &Type::Enum(enuum) => self.code.ast.enums[enuum].namespace,
+            _ => todo!("find namespace for type {:?}", ty),
+        }
     }
 }

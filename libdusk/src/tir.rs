@@ -7,7 +7,7 @@ use index_vec::define_index_type;
 use string_interner::DefaultSymbol as Sym;
 
 use crate::source_info::SourceRange;
-use crate::ast::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, NewNamespaceId, RETURN_VALUE_DECL, ParamList, StructId};
+use crate::ast::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, NewNamespaceId, RETURN_VALUE_DECL, ParamList, StructId, ExtendBlockId};
 use crate::internal_types::{internal_fields, internal_field_decls, InternalField, InternalFieldDecls, InternalNamespace};
 use crate::ty::Type;
 use crate::ty::StructType;
@@ -214,8 +214,8 @@ pub struct Unit {
     /// The expressions in this unit that later units have eval dependencies on
     pub eval_dependees: Vec<ExprId>,
 
-    /// The expressions in this unit that come from `extend` blocks
-    pub extendees: Vec<ExprId>,
+    /// The extend blocks whose extendees are in this unit
+    pub extend_blocks: Vec<ExtendBlockId>,
 }
 
 #[derive(Debug)]
@@ -265,7 +265,7 @@ pub struct Builder {
     pub expr_macro_info: HashMap<ExprId, Vec<ExprMacroInfo>>,
     graph: Graph,
     depended_on: IndexVec<ExprId, bool>,
-    extendees: HashSet<ExprId>,
+    extend_blocks: HashMap<ExprId, ExtendBlockId>,
 
     staged_ret_groups: HashMap<DeclId, SmallVec<[ExprId; 1]>>,
 
@@ -915,8 +915,8 @@ impl Driver {
                     self.tir.graph.add_type1_dep(df!(binding.item), ef!(lower_bound.item));
                     self.tir.graph.add_type1_dep(df!(binding.item), ef!(upper_bound.item));
                 },
-                ast::Expr::ExtendBlock { extendee, .. } => {
-                    self.tir.extendees.insert(extendee);
+                ast::Expr::ExtendBlock { extendee, id: extend_block_id } => {
+                    self.tir.extend_blocks.insert(extendee, extend_block_id);
                     self.tir.graph.add_super_ultra_hyper_mega_meta_dep(ef!(extendee.item));
                     self.tir.graph.add_type1_dep(id, ef!(extendee.item));
                 },
@@ -1103,7 +1103,9 @@ impl Driver {
                         self.build_tir_decl(&mut unit.items, level, id);
                     }
                     ast::Item::Expr(id) => {
-                        if self.tir.extendees.contains(&id) { unit.extendees.push(id); }
+                        if let Some(&extend_block) = self.tir.extend_blocks.get(&id) {
+                            unit.extend_blocks.push(extend_block);
+                        }
                         if self.tir.depended_on[id] { unit.eval_dependees.push(id); }
 
                         self.build_tir_expr(&mut unit.items, level, id);
