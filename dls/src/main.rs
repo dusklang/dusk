@@ -468,7 +468,8 @@ impl Server {
                                     suhmm_tp = None;
                                 },
                                 MockStateCommand::Save => {
-                                    todo!("saving mock type provider results is not yet supported");
+                                    let suhmm_tp = suhmm_tp.as_mut().expect("expected suhmm tp after receiving \"save\" command");
+                                    suhmm_tp.save();
                                 }
 
                             }
