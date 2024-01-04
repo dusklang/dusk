@@ -493,12 +493,12 @@ impl Server {
                     }
                 }
         
+                drop(tp_ref);
                 salf.flush_diagnostics(&mut driver.write(), path);
                 if !driver.read().diag.has_failed() {
                     driver.build_mir(&*tp.borrow());
                     salf.flush_diagnostics(&mut driver.write(), path);
                 }
-                drop(tp_ref);
                 tp.into_inner()
             });
     
