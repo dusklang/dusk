@@ -61,7 +61,7 @@ impl Driver {
     }
 }
 impl DriverRef<'_> {
-    pub fn eval_expr(&mut self, expr: ExprId, tp: &impl TypeProvider) -> Result<Const, EvalError> {
+    pub fn eval_expr(&mut self, expr: ExprId, tp: &dyn TypeProvider) -> Result<Const, EvalError> {
         let func = self.build_standalone_expr(expr, tp);
         let function_ref = FunctionRef::Ref(func);
         let val = self.call(function_ref, Vec::new(), Vec::new())?;

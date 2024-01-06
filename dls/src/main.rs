@@ -7,7 +7,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use libdusk::ast::{Item, Expr};
 use libdusk::error::DiagnosticKind;
 use libdusk::new_code::NewCode;
-use libdusk::type_provider::{RealTypeProvider, TypeProvider};
+use libdusk::type_provider::{RealTypeProvider, TypeProvider, MockStateCommand, MockTypeProvider};
 use lsp_server::{Connection, Message, Request, RequestId, ExtractError, Notification, Response};
 use lsp_types::notification::{PublishDiagnostics, DidOpenTextDocument, Notification as NotificationTrait, DidChangeTextDocument, DidCloseTextDocument};
 use lsp_types::request::{Completion, ResolveCompletionItem, HoverRequest};
@@ -448,16 +448,41 @@ impl Server {
 
                 driver.write().initialize_tir();
         
-                let mut tp = driver.read().make_real_type_provider();
+                let tp = RefCell::new(driver.read().make_real_type_provider());
+                let mut tp_ref = tp.borrow_mut();
+                let mut suhmm_tp = None;
                 let mut new_code = NewCode::placeholder();
+                let mut last_typecheck_succeeded = true;
                 loop {
                     let mut driver_write = driver.write();
-                    if let Ok(Some(units)) = driver_write.build_more_tir() {
+                    if let Ok(Some(units)) = driver_write.build_more_tir(last_typecheck_succeeded) {
                         drop(driver_write);
+                        for command in &units.commands {
+                            match command {
+                                MockStateCommand::Mock => {
+                                    assert!(suhmm_tp.is_none());
+                                    drop(suhmm_tp);
+                                    suhmm_tp = Some(MockTypeProvider::new(&mut *tp_ref));
+                                },
+                                MockStateCommand::Discard => {
+                                    suhmm_tp = None;
+                                },
+                                MockStateCommand::Save => {
+                                    let tp = suhmm_tp.as_mut().expect("expected suhmm tp after receiving \"save\" command");
+                                    tp.save();
+                                    suhmm_tp = None;
+                                }
+                            }
+                        }
+                        let tp: &mut dyn TypeProvider = if let Some(tp) = &mut suhmm_tp { tp } else {
+                            suhmm_tp = None;
+                            &mut *tp_ref
+                        };
                         // Typechecking can lead to expressions being evaluated, which in turn can result in new AST being
                         // added. Therefore, we take a snapshot before typechecking.
                         let before = driver.read().take_snapshot();
-                        if driver.type_check(&units, &mut tp, new_code).is_err() {
+                        last_typecheck_succeeded = !driver.type_check(&units, tp, new_code).is_err();
+                        if !last_typecheck_succeeded && !units.is_suhmm {
                             break;
                         }
                         new_code = driver.read().get_new_code_since(before);
@@ -468,12 +493,13 @@ impl Server {
                     }
                 }
         
+                drop(tp_ref);
                 salf.flush_diagnostics(&mut driver.write(), path);
                 if !driver.read().diag.has_failed() {
-                    driver.build_mir(&tp);
+                    driver.build_mir(&*tp.borrow());
                     salf.flush_diagnostics(&mut driver.write(), path);
                 }
-                tp
+                tp.into_inner()
             });
     
             tp

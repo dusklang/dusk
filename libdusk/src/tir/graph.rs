@@ -26,8 +26,14 @@ pub struct Graph {
     /// Set of all meta-dependees that are not yet ready to be added to a normal unit
     global_meta_dependees: HashSet<ItemId>,
 
-    /// Set of all super ultra hyper mega meta dependencies that are not yet ready to be added to a normal unit.
+    // Note: all suhmm dependees must be in exactly one of these three places: `suhmm_dependees`,
+    // `typechecked_suhmm_dependees`, or `state.TypecheckingSuhmmDependees.current_dependees` below
+
+    /// Set of all super ultra hyper mega meta dependees that have not yet been typechecked.
     suhmm_dependees: HashSet<ItemId>,
+
+    /// Set of all super ultra hyper mega meta dependees that have been typechecked.
+    typechecked_suhmm_dependees: HashSet<ItemId>,
 
     /// Map from all meta-dependers to their dependees that are not yet ready to be added to a normal unit
     meta_dependees: HashMap<ItemId, HashSet<ItemId>>,
@@ -45,6 +51,73 @@ pub struct Graph {
 
     components: IndexVec<CompId, Component>,
 
+    graph_state: GraphState,
+
+    component_state: ComponentState,
+
+    saved_component_state: Option<ComponentState>,
+}
+
+/// A command passed along to the typechecker, indicating what to do with current typechecking state.
+#[derive(Debug)]
+pub enum MockStateCommand {
+    /// Save the mock type provider results with the real type provider, and destroy the mock type provider.
+    Save,
+    /// Discard the mock type provider results, and destroy the mock type provider
+    Discard,
+    /// Create a new mock type provider wrapping the base-level "real" type provider
+    Mock,
+}
+
+#[derive(Debug, Default)]
+enum GraphState {
+    #[default]
+    Initial,
+    TypecheckingSuhmmDependees(SuhmmState),
+    TypecheckingRestOfProgram,
+}
+
+#[derive(Debug, Default)]
+struct SuhmmState {
+    current_dependees: Vec<ItemId>,
+    dependees_to_remove: Vec<usize>,
+    current_index: usize,
+    num_succeeded: usize,
+}
+
+impl SuhmmState {
+    fn next_dep(&mut self, succeeded: bool) -> bool {
+        self.num_succeeded += succeeded as usize;
+        if self.current_index + 1 >= self.current_dependees.len() {
+            if self.num_succeeded == 0 || self.num_succeeded == self.current_dependees.len() {
+                return false;
+            } else {
+                self.current_index = 0;
+                self.num_succeeded = 0;
+                self.dependees_to_remove.sort();
+                for &index in self.dependees_to_remove.iter().rev() {
+                    self.current_dependees.remove(index);
+                }
+                self.dependees_to_remove.clear();
+                if self.current_dependees.is_empty() {
+                    return false;
+                }
+            }
+        } else {
+            self.current_index += 1;
+        }
+        true
+    }
+
+    fn remove_current_dep(&mut self) {
+        self.dependees_to_remove.push(self.current_index);
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct ComponentState {
+    // note: every component in the `components` field of should always be in exactly one of the following places:
+
     /// Components that have not yet been added to a unit, or a mock unit
     outstanding_components: HashSet<CompId>,
 
@@ -56,7 +129,7 @@ pub struct Graph {
     included_components: HashSet<CompId>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct CompStageState {
     /// Each element of this Vec is a Vec of meta-dependees that can form independent mock units with no dependencies on each other.
     /// Each call to `solve()` pops another Vec off the end of the outer Vec, and adds them as mock units to the next set. When the
@@ -96,9 +169,19 @@ struct Component {
     deps: HashMap<CompId, ComponentRelation>,
 }
 
-#[derive(Debug, Default)]
-struct InternalUnit {
-    components: HashSet<CompId>,
+impl Driver {
+    pub fn initialize_graph(&mut self) {
+        let mut deps = [
+            &mut self.tir.graph.dependees,
+            &mut self.tir.graph.t2_dependees,
+            &mut self.tir.graph.dependers
+        ];
+        for dep in &mut deps {
+            dep.resize_with(self.code.ast.items.len(), Vec::new);
+        }
+
+        self.tir.graph.item_to_components.resize_with(self.code.ast.items.len(), || CompId::new(u32::MAX as usize));
+    }
 }
 
 impl Graph {
@@ -236,18 +319,17 @@ impl Graph {
         }
 
         let after_components = self.components.next_idx();
-        self.outstanding_components.extend(
+        self.component_state.outstanding_components.extend(
             range_iter(before_components..after_components)
         );
     }
 
-    pub fn has_outstanding_components(&self) -> bool { !self.outstanding_components.is_empty() }
-
+    pub fn has_outstanding_components(&self) -> bool { !self.component_state.outstanding_components.is_empty() }
 
     fn find_comps_without_outstanding_type_4_deps(&self, comps: &HashSet<CompId>, output: &mut HashSet<CompId>) {
         'comps: for &comp_id in comps {
             for (&dependee, &relation) in &self.components[comp_id].deps {
-                if relation == ComponentRelation::BEFORE && !self.included_components.contains(&dependee) {
+                if relation == ComponentRelation::BEFORE && !self.component_state.included_components.contains(&dependee) {
                     // Found a type 4 dependency, so we wont add this component. Continue to the next component.
                     continue 'comps;
                 }
@@ -266,7 +348,7 @@ impl Graph {
                     if
                         relation == ComponentRelation::TYPE_2_3_FORWARD &&
                         !in_current_unit &&
-                        !self.included_components.contains(&dependee)
+                        !self.component_state.included_components.contains(&dependee)
                     {
                         return false;
                     }
@@ -288,10 +370,10 @@ impl Graph {
                 let level = self.find_level(item, &mut levels, |item| self.global_meta_dependees.contains(&item));
                 max_level = max(max_level, level);
             }
-    
+
             let mut meta_deps = Vec::<Vec<ItemId>>::new();
             meta_deps.resize_with(max_level as usize + 1, Default::default);
-    
+
             for &item in items {
                 if !self.global_meta_dependees.contains(&item) { continue; }
                 // Invert the level so that lower levels can be popped off the end of the array
@@ -300,7 +382,7 @@ impl Graph {
             }
 
             let state = CompStageState { meta_deps };
-            let old_val = self.staged_components.insert(comp, state);
+            let old_val = self.component_state.staged_components.insert(comp, state);
             assert!(old_val.is_none());
         }
     }
@@ -312,7 +394,7 @@ impl Graph {
     }
 
     pub fn get_items_that_need_dependencies(&mut self) -> Vec<ItemId> {
-        let items: Vec<ItemId> = self.outstanding_components.iter()
+        let items: Vec<ItemId> = self.component_state.outstanding_components.iter()
             .flat_map(|&comp| &self.components[comp].items)
             .copied()
             .filter(|item| !self.dependencies_added.contains(item))
@@ -322,205 +404,6 @@ impl Graph {
         self.dependencies_added.extend(&items);
 
         items
-    }
-
-    pub fn solve(&mut self) -> Result<Levels, TirError> {
-        dvd::send(|| {
-            let mut outstanding_components: Vec<_> = self.outstanding_components.iter().copied().collect();
-            outstanding_components.sort();
-            DvdMessage::WillSolveTirGraph { outstanding_components }
-        });
-
-        // Get the outstanding components with meta-dependees in them
-        let mut meta_dep_components = HashSet::<CompId>::new();
-        for &comp in &self.outstanding_components {
-            let has_meta_dep = self.components[comp].items.iter()
-                .any(|item| self.global_meta_dependees.contains(item));
-            if has_meta_dep {
-                meta_dep_components.insert(comp);
-            }
-        }
-
-        // Get the components that depend (either directly or indirectly) on components with meta-dependees in them 
-        let excluded_components = {
-            let mut excluded_components = HashSet::new();
-            let mut potentially_excluded_components: HashSet<CompId> = self.outstanding_components
-                .difference(&meta_dep_components)
-                .copied()
-                .filter(|comp| !self.staged_components.contains_key(comp))
-                .collect();
-            let mut added_to_excluded_set = true;
-            while added_to_excluded_set {
-                added_to_excluded_set = false;
-                potentially_excluded_components.retain(|&comp_id| {
-                    let comp = &self.components[comp_id];
-                    for (dep, &relation) in &comp.deps {
-                        if !relation.contains(ComponentRelation::AFTER) && (meta_dep_components.contains(dep) || self.staged_components.contains_key(dep) || excluded_components.contains(dep)) {
-                            excluded_components.insert(comp_id);
-                            added_to_excluded_set = true;
-                            return false;
-                        }
-                    }
-                    true
-                });
-            }
-
-            excluded_components
-        };
-
-        dvd::send(|| {
-            let mut excluded_components: Vec<_> = meta_dep_components.union(&excluded_components).copied().collect();
-            excluded_components.sort();
-            DvdMessage::DidExcludeTirComponentsFromSubprogram(excluded_components)
-        });
-
-        // Temporarily remove all excluded components. Those that don't get staged will be added back after finding the units
-        self.outstanding_components.retain(|comp| !meta_dep_components.contains(comp) && !excluded_components.contains(comp));
-        if self.outstanding_components.is_empty() {
-            return Err(TirError::DependencyCycle);
-        }
-
-        let mut units = Vec::<InternalUnit>::new();
-        while !self.outstanding_components.is_empty() {
-            // Get all components that have no type 4 dependencies on outstanding components
-            let mut cur_unit_comps = HashSet::<CompId>::new();
-            self.find_comps_without_outstanding_type_4_deps(&self.outstanding_components, &mut cur_unit_comps);
-            // Whittle down the components to only those that have type 2 or 3 dependencies on each other, or included components
-            // (and not other outstanding components)
-            self.remove_comps_with_outstanding_deps(&mut cur_unit_comps);
-            assert!(!cur_unit_comps.is_empty(), "no viable components to add to TIR graph :( {:?}", units);
-            let mut cur_unit = InternalUnit::default();
-            cur_unit.components.extend(cur_unit_comps.iter());
-            for &comp in &cur_unit.components {
-                // Add intra-unit type 2 dependencies as type 1 dependencies, because they are equivalent after resolving units
-                let component = &self.components[comp];
-                for &item in &component.items {
-                    for &dep in &self.t2_dependees[item] {
-                        if cur_unit_comps.contains(&self.item_to_components[dep]) {
-                            self.dependees[item].push(dep);
-
-                            // NOTE: Adding to `dependers` here isn't required for ordinary operation
-                            // of the compiler, but it is used by the graph output code to decide
-                            // which items to cull.
-                            self.dependers[dep].push(item);
-                        }
-                    }
-                }
-                self.included_components.insert(comp);
-                self.outstanding_components.remove(&comp);
-            }
-            units.push(cur_unit);
-        }
-
-        // Stage viable components
-        {
-            // Get all meta-dep components that have no type 4 dependencies on outstanding components
-            let mut comps_to_stage = HashSet::<CompId>::new();
-            self.find_comps_without_outstanding_type_4_deps(&meta_dep_components, &mut comps_to_stage);
-
-            // Whittle down the components to only those that have type 2 or 3 dependencies on included components
-            // (and not other outstanding components, or each other)
-            self.remove_comps_with_outstanding_deps(&mut comps_to_stage);
-
-            // Add excluded components back to `outstanding_components`.
-            let all_excluded = meta_dep_components
-                .difference(&comps_to_stage)
-                .chain(&excluded_components);
-            self.outstanding_components.extend(all_excluded);
-
-            self.stage_components(comps_to_stage.into_iter());
-        }
-
-        let mut item_to_levels = HashMap::<ItemId, u32>::new();
-
-        for id in self.dependees.indices() {
-            self.find_level(id, &mut item_to_levels, |_| true);
-        }
-
-        let mut item_to_units = HashMap::<ItemId, u32>::new();
-
-        for (i, unit) in units.iter().enumerate() {
-            for &comp in &unit.components {
-                let components = &self.components[comp];
-                for &item in &components.items {
-                    item_to_units.insert(item, i as u32);
-                }
-            }
-        }
-
-        let mut mock_units = Vec::new();
-        // TODO: Borrow checker :(
-        let staged_comps_keys: Vec<_> = self.staged_components.keys().copied().collect();
-        'mock_staged_comps: for comp_id in staged_comps_keys {
-            // Check dependencies of the component before adding it to a mock unit. This is necessary because:
-            //   - Meta-dependers can add dependencies to themselves after a meta-dependee is mocked
-            //     (in fact, that's the whole point of all this)
-            //   - Meta-dependers can be in the same component as their meta-dependee
-            //   - Within a component, a second meta-dependee might exist that depends on the meta-depender (indeed,
-            //     the meta-depender itself might also be a meta-dependee). Therefore, we need to typecheck the
-            //     meta-depender's dependencies before we can mock it
-            let comp = &self.components[comp_id];
-            for (dep, &relation) in &comp.deps {
-                if !relation.contains(ComponentRelation::AFTER) && !self.included_components.contains(dep) {
-                    continue 'mock_staged_comps;
-                }
-            }
-
-            let meta_deps = self.staged_components.get_mut(&comp_id).unwrap().meta_deps.pop().unwrap();
-            for dep in meta_deps {
-                let mut item_to_levels: HashMap<ItemId, u32> = HashMap::new();
-
-                // Note: This will end up finding the levels of all items in the mock unit, because
-                // `dep` is the root of the tree, and there's only one component (therefore, all
-                // dependencies will be found)
-                let item_level = self.find_level(dep, &mut item_to_levels, |_| true);
-
-                let mut deps = HashSet::new();
-                self.get_deps(dep, &mut deps);
-
-                let mock_unit = MockUnit {
-                    item: dep,
-                    item_level,
-                    item_to_levels,
-
-                    // TODO: Remove this conversion; just make a Vec from the get-go (but first,
-                    //       find out if safe)
-                    deps: deps.into_iter().collect(),
-                };
-                mock_units.push(mock_unit);
-            }
-
-            if self.staged_components[&comp_id].meta_deps.is_empty() {
-                self.staged_components.remove(&comp_id);
-
-                // Re-register the component for being added to a unit
-                self.outstanding_components.insert(comp_id);
-
-                // Update state to reflect the fact that the component no longer has meta-dependees
-                for i in 0..comp.items.len() {
-                    let comp = &self.components[comp_id];
-                    let item = comp.items[i];
-                    self.remove_meta_dep_status(item);
-                }
-            }
-        }
-
-        dvd::send(|| DvdMessage::DidSolveTirGraph);
-        let components = &self.components;
-        Ok(
-            Levels {
-                item_to_levels: item_to_levels.clone(),
-                item_to_units,
-                units: units.into_iter()
-                    .map(|unit| {
-                        let items = unit.components.iter()
-                            .flat_map(|&comp| components[comp].items.iter().copied())
-                            .collect();
-                        Unit { items }
-                    }).collect::<Vec<Unit>>(),
-                mock_units,
-            }
-        )
     }
 
     fn get_deps(&self, item: ItemId, out: &mut HashSet<ItemId>) {
@@ -545,11 +428,313 @@ impl Graph {
             self.remove_meta_dep_status(item);
         }
     }
+
+    fn save_component_state(&mut self) {
+        self.saved_component_state = Some(self.component_state.clone());
+    }
+
+    fn restore_component_state(&mut self) {
+        if let Some(state) = mem::take(&mut self.saved_component_state) {
+            self.component_state = state;
+        }
+    }
+
+    fn check_for_new_suhmm_dependees(&mut self) -> Vec<MockStateCommand> {
+        if !self.suhmm_dependees.is_empty() {
+            let current_dependees = mem::take(&mut self.suhmm_dependees).into_iter().collect();
+            let suhmm_state = SuhmmState {
+                current_dependees,
+                dependees_to_remove: Vec::new(),
+                current_index: 0,
+                num_succeeded: 0,
+            };
+            self.graph_state = GraphState::TypecheckingSuhmmDependees(suhmm_state);
+            self.save_component_state();
+            vec![MockStateCommand::Mock]
+        } else {
+            self.graph_state = GraphState::TypecheckingRestOfProgram;
+            vec![]
+        }
+    }
+
+    fn update_graph_state(&mut self, succeeded: bool) -> Vec<MockStateCommand> {
+        match &mut self.graph_state {
+            GraphState::Initial | GraphState::TypecheckingRestOfProgram => {
+                self.check_for_new_suhmm_dependees()
+            },
+            GraphState::TypecheckingSuhmmDependees(suhmm_state) => {
+                let current_dep = suhmm_state.current_dependees[suhmm_state.current_index];
+                let current_dep_comp = self.item_to_components[current_dep];
+                let finished_current_dep = self.component_state.included_components.contains(&current_dep_comp);
+                let mut commands = Vec::new();
+                if !succeeded || finished_current_dep {
+                    if succeeded {
+                        commands.push(MockStateCommand::Save);
+                        suhmm_state.remove_current_dep();
+                        self.typechecked_suhmm_dependees.insert(current_dep);
+                    } else {
+                        commands.push(MockStateCommand::Discard);
+                    }
+                    
+                    if suhmm_state.next_dep(succeeded) {
+                        commands.push(MockStateCommand::Mock);
+                    } else {
+                        self.typechecked_suhmm_dependees.extend(suhmm_state.current_dependees.clone());
+                        commands.extend(self.check_for_new_suhmm_dependees());
+                    }
+
+                    if succeeded {
+                        self.saved_component_state = None;
+                    } else {
+                        self.restore_component_state();
+                        self.save_component_state();
+                    }
+                }
+                commands
+            },
+        }
+    }
+
+    pub fn solve(&mut self, succeeded: bool) -> Result<Levels, TirError> {
+        let commands = self.update_graph_state(succeeded);
+
+        // If we are currently typechecking a SUHMM dependee, we should only consider outstanding components that are either directly or indirectly depended on by said SUHMM dependee.
+        let mut outstanding_components = if let GraphState::TypecheckingSuhmmDependees(suhmm_state) = &self.graph_state {
+            let current_dep = suhmm_state.current_dependees[suhmm_state.current_index];
+            let current_dep_comp = self.item_to_components[current_dep];
+
+            let mut component_stack = vec![current_dep_comp];
+            let mut outstanding_components = HashSet::new();
+            while let Some(comp) = component_stack.pop() {
+                if outstanding_components.contains(&comp) || !self.component_state.outstanding_components.contains(&comp) {
+                    continue;
+                }
+                outstanding_components.insert(comp);
+
+                for (&dep, relation) in &self.components[comp].deps {
+                    if relation.contains(ComponentRelation::BEFORE) {
+                        if !outstanding_components.contains(&dep) {
+                            component_stack.push(dep);
+                        }
+                    }
+                }
+            }
+            outstanding_components
+        } else {
+            self.component_state.outstanding_components.clone()
+        };
+
+        dvd::send(|| {
+            let mut outstanding_components: Vec<_> = outstanding_components.iter().copied().collect();
+            outstanding_components.sort();
+            DvdMessage::WillSolveTirGraph { outstanding_components }
+        });
+
+        // Get the outstanding components with meta-dependees in them
+        let mut meta_dep_components = HashSet::<CompId>::new();
+        for &comp in &outstanding_components {
+            let has_meta_dep = self.components[comp].items.iter()
+                .any(|item| self.global_meta_dependees.contains(item));
+            if has_meta_dep {
+                meta_dep_components.insert(comp);
+            }
+        }
+
+        // Get the components that depend (either directly or indirectly) on components with meta-dependees in them 
+        let excluded_components = {
+            let mut excluded_components = HashSet::new();
+            let mut potentially_excluded_components: HashSet<CompId> = outstanding_components
+                .difference(&meta_dep_components)
+                .copied()
+                .filter(|comp| !self.component_state.staged_components.contains_key(comp))
+                .collect();
+            let mut added_to_excluded_set = true;
+            while added_to_excluded_set {
+                added_to_excluded_set = false;
+                potentially_excluded_components.retain(|&comp_id| {
+                    let comp = &self.components[comp_id];
+                    for (dep, &relation) in &comp.deps {
+                        if !relation.contains(ComponentRelation::AFTER) && (meta_dep_components.contains(dep) || self.component_state.staged_components.contains_key(dep) || excluded_components.contains(dep)) {
+                            excluded_components.insert(comp_id);
+                            added_to_excluded_set = true;
+                            return false;
+                        }
+                    }
+                    true
+                });
+            }
+
+            excluded_components
+        };
+
+        dvd::send(|| {
+            let mut excluded_components: Vec<_> = meta_dep_components.union(&excluded_components).copied().collect();
+            excluded_components.sort();
+            DvdMessage::DidExcludeTirComponentsFromSubprogram(excluded_components)
+        });
+
+        // Remove all excluded components from our local copy of `outstanding_components`.
+        outstanding_components.retain(|comp| !meta_dep_components.contains(comp) && !excluded_components.contains(comp));
+        if outstanding_components.is_empty() {
+            return Err(TirError::DependencyCycle);
+        }
+
+        let mut units = Vec::<InternalUnit>::new();
+        while !outstanding_components.is_empty() {
+            // Get all components that have no type 4 dependencies on outstanding components
+            let mut cur_unit_comps = HashSet::<CompId>::new();
+            self.find_comps_without_outstanding_type_4_deps(&outstanding_components, &mut cur_unit_comps);
+            // Whittle down the components to only those that have type 2 or 3 dependencies on each other, or included components
+            // (and not other outstanding components)
+            self.remove_comps_with_outstanding_deps(&mut cur_unit_comps);
+            assert!(!cur_unit_comps.is_empty(), "no viable components to add to TIR graph :( {:?}", units);
+            let mut cur_unit = InternalUnit::default();
+            cur_unit.components.extend(cur_unit_comps.iter());
+            for &comp in &cur_unit.components {
+                // Add intra-unit type 2 dependencies as type 1 dependencies, because they are equivalent after resolving units
+                let component = &self.components[comp];
+                for &item in &component.items {
+                    for &dep in &self.t2_dependees[item] {
+                        if cur_unit_comps.contains(&self.item_to_components[dep]) {
+                            self.dependees[item].push(dep);
+
+                            // NOTE: Adding to `dependers` here isn't required for ordinary operation
+                            // of the compiler, but it is used by the graph output code to decide
+                            // which items to cull.
+                            self.dependers[dep].push(item);
+                        }
+                    }
+                }
+                self.component_state.included_components.insert(comp);
+                outstanding_components.remove(&comp);
+            }
+            units.push(cur_unit);
+        }
+
+        // Stage viable components
+        {
+            // Get all meta-dep components that have no type 4 dependencies on outstanding components
+            let mut comps_to_stage = HashSet::<CompId>::new();
+            self.find_comps_without_outstanding_type_4_deps(&meta_dep_components, &mut comps_to_stage);
+
+            // Whittle down the components to only those that have type 2 or 3 dependencies on included components
+            // (and not other outstanding components, or each other)
+            self.remove_comps_with_outstanding_deps(&mut comps_to_stage);
+
+            self.stage_components(comps_to_stage.into_iter());
+        }
+
+        let mut item_to_levels = HashMap::<ItemId, u32>::new();
+
+        for id in self.dependees.indices() {
+            self.find_level(id, &mut item_to_levels, |_| true);
+        }
+
+        let mut item_to_units = HashMap::<ItemId, u32>::new();
+
+        for (i, unit) in units.iter().enumerate() {
+            for &comp in &unit.components {
+                let components = &self.components[comp];
+                for &item in &components.items {
+                    item_to_units.insert(item, i as u32);
+                }
+            }
+        }
+
+        let mut mock_units = Vec::new();
+        // TODO: Borrow checker :(
+        let staged_comps_keys: Vec<_> = self.component_state.staged_components.keys().copied().collect();
+        'mock_staged_comps: for comp_id in staged_comps_keys {
+            // Check dependencies of the component before adding it to a mock unit. This is necessary because:
+            //   - Meta-dependers can add dependencies to themselves after a meta-dependee is mocked
+            //     (in fact, that's the whole point of all this)
+            //   - Meta-dependers can be in the same component as their meta-dependee
+            //   - Within a component, a second meta-dependee might exist that depends on the meta-depender (indeed,
+            //     the meta-depender itself might also be a meta-dependee). Therefore, we need to typecheck the
+            //     meta-depender's dependencies before we can mock it
+            let comp = &self.components[comp_id];
+            for (dep, &relation) in &comp.deps {
+                if !relation.contains(ComponentRelation::AFTER) && !self.component_state.included_components.contains(dep) {
+                    continue 'mock_staged_comps;
+                }
+            }
+
+            let meta_deps = self.component_state.staged_components.get_mut(&comp_id).unwrap().meta_deps.pop().unwrap();
+            for dep in meta_deps {
+                let mut item_to_levels: HashMap<ItemId, u32> = HashMap::new();
+
+                // Note: This will end up finding the levels of all items in the mock unit, because
+                // `dep` is the root of the tree, and there's only one component (therefore, all
+                // dependencies will be found)
+                let item_level = self.find_level(dep, &mut item_to_levels, |_| true);
+
+                let mut deps = HashSet::new();
+                self.get_deps(dep, &mut deps);
+
+                let mock_unit = MockUnit {
+                    item: dep,
+                    item_level,
+                    item_to_levels,
+
+                    // TODO: Remove this conversion; just make a Vec from the get-go (but first,
+                    //       find out if safe)
+                    deps: deps.into_iter().collect(),
+                };
+                mock_units.push(mock_unit);
+            }
+
+            if self.component_state.staged_components[&comp_id].meta_deps.is_empty() {
+                self.component_state.staged_components.remove(&comp_id);
+
+                // Re-register the component for being added to a unit
+                // Note that inserting to the real `outstanding_components` here instead of our local copy is intentional.
+                // Otherwise, previously-staged components would not be added properly.
+                self.component_state.outstanding_components.insert(comp_id);
+
+                // Update state to reflect the fact that the component no longer has meta-dependees
+                for i in 0..comp.items.len() {
+                    let comp = &self.components[comp_id];
+                    let item = comp.items[i];
+                    self.remove_meta_dep_status(item);
+                }
+            }
+        }
+
+        // Update the real `outstanding_components`.
+        self.component_state.outstanding_components.retain(|comp|
+            !self.component_state.staged_components.contains_key(&comp) &&
+            !self.component_state.included_components.contains(&comp)
+        );
+
+        dvd::send(|| DvdMessage::DidSolveTirGraph);
+
+        let main_levels = Levels {
+            item_to_levels,
+            item_to_units,
+            units: units.into_iter()
+                .map(|unit| {
+                    let items = unit.components.iter()
+                        .flat_map(|&comp| self.components[comp].items.iter().copied())
+                        .collect();
+                    Unit { items }
+                }).collect::<Vec<Unit>>(),
+            mock_units,
+            commands,
+            is_suhmm: matches!(self.graph_state, GraphState::TypecheckingSuhmmDependees(_)),
+        };
+
+        Ok(
+            main_levels
+        )
+    }
 }
 
-#[derive(Default, Debug)]
-pub struct Unit {
-    pub items: Vec<ItemId>,
+/// As the name implies, this representation of a unit is used internally in the graph
+/// implementation, to keep track of the components in a unit. It is later converted to a normal
+/// `Unit`.
+#[derive(Debug, Default)]
+struct InternalUnit {
+    components: HashSet<CompId>,
 }
 
 #[derive(Default, Debug)]
@@ -558,6 +743,13 @@ pub struct Levels {
     pub item_to_units: HashMap<ItemId, u32>,
     pub units: Vec<Unit>,
     pub mock_units: Vec<MockUnit>,
+    pub commands: Vec<MockStateCommand>,
+    pub is_suhmm: bool,
+}
+
+#[derive(Default, Debug)]
+pub struct Unit {
+    pub items: Vec<ItemId>,
 }
 
 #[derive(Debug,)]
@@ -572,20 +764,4 @@ pub struct MockUnit {
 
     /// A collection of every item in this mock unit
     pub deps: Vec<ItemId>,
-
-}
-
-impl Driver {
-    pub fn initialize_graph(&mut self) {
-        let mut deps = [
-            &mut self.tir.graph.dependees,
-            &mut self.tir.graph.t2_dependees,
-            &mut self.tir.graph.dependers
-        ];
-        for dep in &mut deps {
-            dep.resize_with(self.code.ast.items.len(), Vec::new);
-        }
-
-        self.tir.graph.item_to_components.resize_with(self.code.ast.items.len(), || CompId::new(u32::MAX as usize));
-    }
 }

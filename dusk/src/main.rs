@@ -1,6 +1,8 @@
 use clap::{Parser, ArgEnum};
 use libdusk::interpreter::{InterpMode, restart_interp};
 use libdusk::mir::{FunctionRef, FuncId};
+use libdusk::type_provider::{MockStateCommand, MockTypeProvider, TypeProvider};
+use std::cell::RefCell;
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io::BufWriter;
@@ -123,19 +125,49 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
 
     begin_phase!(Typecheck);
     driver.write().initialize_tir();
-    let mut tp = driver.read().make_real_type_provider();
+    let tp = RefCell::new(driver.read().make_real_type_provider());
+    let mut tp_ref = tp.borrow_mut();
+    let mut suhmm_tp = None;
     let mut new_code = NewCode::placeholder();
+    let mut last_typecheck_succeeded = true;
     loop {
         let mut driver_write = driver.write();
-        if let Ok(Some(units)) = driver_write.build_more_tir() {
+        if let Ok(Some(units)) = driver_write.build_more_tir(last_typecheck_succeeded) {
             drop(driver_write);
+
+            for command in &units.commands {
+                match command {
+                    MockStateCommand::Mock => {
+                        assert!(suhmm_tp.is_none());
+                        drop(suhmm_tp);
+                        suhmm_tp = Some(MockTypeProvider::new(&mut *tp_ref));
+                    },
+                    MockStateCommand::Discard => {
+                        suhmm_tp = None;
+                    },
+                    MockStateCommand::Save => {
+                        let tp = suhmm_tp.as_mut().expect("expected suhmm tp after receiving \"save\" command");
+                        tp.save();
+                        suhmm_tp = None;
+                    }
+                }
+            }
+            let tp: &mut dyn TypeProvider = if let Some(tp) = &mut suhmm_tp { tp } else {
+                suhmm_tp = None;
+                &mut *tp_ref
+            };
+
             dvd_ipc::send(|| DvdMessage::WillTypeCheckSet);
+
             // Typechecking can lead to expressions being evaluated, which in turn can result in new AST being
             // added. Therefore, we take a snapshot before typechecking.
             let before = driver.read().take_snapshot();
-            if driver.type_check(&units, &mut tp, new_code).is_err() {
+            last_typecheck_succeeded = !driver.type_check(&units, tp, new_code).is_err();
+            if !last_typecheck_succeeded && !units.is_suhmm {
                 break;
             }
+
+
             new_code = driver.read().get_new_code_since(before);
             dvd_ipc::send(|| DvdMessage::DidTypeCheckSet);
             // { flush_diagnostics(&mut driver.write()); }
@@ -143,6 +175,9 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
             break;
         }
     }
+
+    drop(tp_ref);
+    let tp = tp.into_inner();
 
     flush_diagnostics(&mut driver.write());
     if driver.read().diag.check_for_failure() { return; }

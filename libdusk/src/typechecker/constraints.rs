@@ -370,7 +370,7 @@ macro_rules! get_multi_constraints_mut {
 }
 
 impl Driver {
-    fn type_implements_traits(&self, tp: &impl TypeProvider, ty: &Type, traits: BuiltinTraits) -> Result<(), BuiltinTraits> {
+    fn type_implements_traits(&self, tp: &dyn TypeProvider, ty: &Type, traits: BuiltinTraits) -> Result<(), BuiltinTraits> {
         if let Type::TypeVar(type_var) = *ty {
             // TODO: handle more type variable cases.
             let not_implemented = traits.difference(get_constraints!(self, tp, type_var).trait_impls);
@@ -408,7 +408,7 @@ impl Driver {
         }
     }
 
-    fn type_implements_traits_adding_constraints(&self, tp: &mut impl TypeProvider, ty: &Type, traits: BuiltinTraits) -> Result<(), BuiltinTraits> {
+    fn type_implements_traits_adding_constraints(&self, tp: &mut dyn TypeProvider, ty: &Type, traits: BuiltinTraits) -> Result<(), BuiltinTraits> {
         if let Type::TypeVar(type_var) = *ty {
             // TODO: handle more type variable cases.
             get_constraints_mut!(self, tp, type_var).trait_impls |= traits;
@@ -498,7 +498,7 @@ impl<'a> From<MutConstraintHaver<'a>> for ConstraintHaver<'a> {
 
 
 impl Driver {
-    pub fn can_unify_to<'a>(&self, tp: &impl TypeProvider, constraint_haver: impl Into<ConstraintHaver<'a>>, ty: impl Into<UnificationType<'a>>) -> Result<UnificationSuccess, UnificationError> {
+    pub fn can_unify_to<'a>(&self, tp: &dyn TypeProvider, constraint_haver: impl Into<ConstraintHaver<'a>>, ty: impl Into<UnificationType<'a>>) -> Result<UnificationSuccess, UnificationError> {
         let constraints = match constraint_haver.into() {
             ConstraintHaver::Expr(expr) => self.get_constraints(tp, expr),
             ConstraintHaver::TypeVar(type_var) => self.get_constraints(tp, type_var),
@@ -536,7 +536,7 @@ impl Driver {
 
     // This differs from `can_unify_to` above in that it modifies constraint of type variables embedded in `ty`.
     // TODO: it would be nice to...unify this implementation with `can_unify_to`, since they are 99.9% identical.
-    pub fn can_unify_argument_to<'a>(&self, tp: &mut impl TypeProvider, constraint_haver: impl Into<ConstraintHaver<'a>> + Clone, ty: impl Into<UnificationType<'a>>) -> Result<UnificationSuccess, UnificationError> {
+    pub fn can_unify_argument_to<'a>(&self, tp: &mut dyn TypeProvider, constraint_haver: impl Into<ConstraintHaver<'a>> + Clone, ty: impl Into<UnificationType<'a>>) -> Result<UnificationSuccess, UnificationError> {
         let constraints = get_constraints!(self, tp, constraint_haver.clone()).clone();
         // Never is the "bottom type", so it unifies to anything.
         if constraints.one_of_exists(|ty| ty.ty == Type::Never) { return Ok(UnificationSuccess::IsNever); }
@@ -568,7 +568,7 @@ impl Driver {
         Ok(UnificationSuccess::TraitsImplementedByType)
     }
 
-    fn qual_ty_is_trivially_convertible_to_adding_constraints(&self, tp: &mut impl TypeProvider, a: &QualType, b: &QualType) -> bool {
+    fn qual_ty_is_trivially_convertible_to_adding_constraints(&self, tp: &mut dyn TypeProvider, a: &QualType, b: &QualType) -> bool {
         if let Type::Inout(ty) = &b.ty {
             if !a.is_mut {
                 return false;
@@ -582,7 +582,7 @@ impl Driver {
         self.ty_is_trivially_convertible_to_adding_constraints(tp, &a.ty, &b.ty)
     }
 
-    fn ty_is_trivially_convertible_to_adding_constraints(&self, tp: &mut impl TypeProvider, a: &Type, b: &Type) -> bool {
+    fn ty_is_trivially_convertible_to_adding_constraints(&self, tp: &mut dyn TypeProvider, a: &Type, b: &Type) -> bool {
         let mut a = a.clone();
         self.canonicalize_type(tp, &mut a);
         match (&a, b) {
@@ -605,7 +605,7 @@ impl Driver {
         }
     }
 
-    fn qual_ty_is_trivially_convertible_to(&self, tp: &impl TypeProvider, a: &QualType, b: &QualType) -> bool {
+    fn qual_ty_is_trivially_convertible_to(&self, tp: &dyn TypeProvider, a: &QualType, b: &QualType) -> bool {
         if let Type::Inout(ty) = &b.ty {
             if !a.is_mut {
                 return false;
@@ -619,7 +619,7 @@ impl Driver {
         self.ty_is_trivially_convertible_to(tp, &a.ty, &b.ty)
     }
 
-    fn ty_is_trivially_convertible_to(&self, tp: &impl TypeProvider, a: &Type, b: &Type) -> bool {
+    fn ty_is_trivially_convertible_to(&self, tp: &dyn TypeProvider, a: &Type, b: &Type) -> bool {
         let mut a = a.clone();
         self.canonicalize_type(tp, &mut a);
         match (&a, b) {
@@ -634,7 +634,7 @@ impl Driver {
         }
     }
 
-    pub fn intersect_constraints<'a>(&self, tp: &impl TypeProvider, constraints: impl Into<ConstraintHaver<'a>> + Clone, other: impl Into<ConstraintHaver<'a>> + Clone) -> ConstraintList {
+    pub fn intersect_constraints<'a>(&self, tp: &dyn TypeProvider, constraints: impl Into<ConstraintHaver<'a>> + Clone, other: impl Into<ConstraintHaver<'a>> + Clone) -> ConstraintList {
         let constraints = get_constraints!(self, tp, constraints);
         let other = get_constraints!(self, tp, other);
         if constraints.is_never() {
@@ -699,7 +699,7 @@ impl Driver {
     //  - evaluates mutability independently between the arguments, with precedence given to self
     //  - is literally just used for assignment expressions
     //  - is a terrible abstraction :(
-    pub fn intersect_constraints_lopsided<'a>(&self, tp: &'a mut impl TypeProvider, constraint_haver: impl Into<MutConstraintHaver<'a>> + Clone, other_haver: impl Into<MutConstraintHaver<'a>> + Clone) -> Result<(), AssignmentError> {
+    pub fn intersect_constraints_lopsided<'a>(&self, tp: &'a mut dyn TypeProvider, constraint_haver: impl Into<MutConstraintHaver<'a>> + Clone, other_haver: impl Into<MutConstraintHaver<'a>> + Clone) -> Result<(), AssignmentError> {
         let (constraints, other) = get_multi_constraints_mut!(self, tp, constraint_haver.clone(), other_haver.clone());
         let trait_impls = constraints.trait_impls | other.trait_impls;
         constraints.trait_impls = trait_impls;
@@ -773,7 +773,7 @@ impl Driver {
         Ok(())
     }
 
-    fn solve_constraints_impl<'a>(&self, tp: &'a impl TypeProvider, constraints: impl Into<ConstraintHaver<'a>>) -> Result<ConstraintSolution, SolveError<'a>> {
+    fn solve_constraints_impl<'a>(&self, tp: &'a dyn TypeProvider, constraints: impl Into<ConstraintHaver<'a>>) -> Result<ConstraintSolution, SolveError<'a>> {
         let constraints = get_constraints!(self, tp, constraints);
 
         if let Some(one_of) = &constraints.one_of {
@@ -797,14 +797,14 @@ impl Driver {
         }
     }
 
-    pub fn solve_constraints<'a>(&self, tp: &'a impl TypeProvider, constraints: impl Into<ConstraintHaver<'a>>) -> Result<ConstraintSolution, SolveError<'a>> {
+    pub fn solve_constraints<'a>(&self, tp: &'a dyn TypeProvider, constraints: impl Into<ConstraintHaver<'a>>) -> Result<ConstraintSolution, SolveError<'a>> {
         self.solve_constraints_impl(tp, constraints).map(|mut solution| {
             self.canonicalize_type(tp, &mut solution.qual_ty.ty);
             solution
         })
     }
 
-    fn canonicalize_type(&self, tp: &impl TypeProvider, ty: &mut Type) {
+    fn canonicalize_type(&self, tp: &dyn TypeProvider, ty: &mut Type) {
         match ty {
             Type::Error | Type::Int { .. } | Type::Float(_) | Type::LegacyInternal(_) | Type::Internal(_) | Type::Bool | Type::Void | Type::Mod | Type::Ty | Type::GenericParam(_) | Type::Never => {},
 
@@ -830,13 +830,13 @@ impl Driver {
         }
     }
 
-    pub fn get_canonical_type(&self, tp: &impl TypeProvider, expr: ExprId) -> Type {
+    pub fn get_canonical_type(&self, tp: &dyn TypeProvider, expr: ExprId) -> Type {
         let mut ty = tp.ty(expr).clone();
         self.canonicalize_type(tp, &mut ty);
         ty
     }
 
-    pub fn set_constraints_to_c_variadic_compatible_type<'a>(&self, tp: &mut impl TypeProvider, constraints: impl Into<MutConstraintHaver<'a>> + Clone) {
+    pub fn set_constraints_to_c_variadic_compatible_type<'a>(&self, tp: &mut dyn TypeProvider, constraints: impl Into<MutConstraintHaver<'a>> + Clone) {
         // If we're never, we should stay never.
         if get_constraints_mut!(self, tp, constraints.clone()).is_never() { return; }
 
@@ -844,7 +844,7 @@ impl Driver {
         get_constraints_mut!(self, tp, constraints).set_to(solution);
     }
 
-    pub fn set_type<'a>(&self, tp: &mut impl TypeProvider, constraint_haver: impl Into<MutConstraintHaver<'a>> + Clone, ty: impl Into<QualType>) -> Result<(), UnificationError> {
+    pub fn set_type<'a>(&self, tp: &mut dyn TypeProvider, constraint_haver: impl Into<MutConstraintHaver<'a>> + Clone, ty: impl Into<QualType>) -> Result<(), UnificationError> {
         let constraints = get_constraints!(self, tp, constraint_haver.clone().into());
         let ty = ty.into();
 
@@ -882,15 +882,15 @@ pub enum AssignmentError {
 }
 
 impl Driver {
-    pub fn get_constraints<'a>(&self, tp: &'a impl TypeProvider, constraint_haver: impl Into<ConstraintHaver<'a>>) -> &'a ConstraintList {
+    pub fn get_constraints<'a>(&self, tp: &'a dyn TypeProvider, constraint_haver: impl Into<ConstraintHaver<'a>>) -> &'a ConstraintList {
         get_constraints!(self, tp, constraint_haver)
     }
 
-    pub fn get_constraints_mut<'a>(&self, tp: &'a mut impl TypeProvider, constraint_haver: impl Into<MutConstraintHaver<'a>>) -> &'a mut ConstraintList {
+    pub fn get_constraints_mut<'a>(&self, tp: &'a mut dyn TypeProvider, constraint_haver: impl Into<MutConstraintHaver<'a>>) -> &'a mut ConstraintList {
         get_constraints_mut!(self, tp, constraint_haver)
     }
 
-    pub fn get_multi_constraints_mut<'a>(&self, tp: &'a mut impl TypeProvider, a: impl Into<MutConstraintHaver<'a>> + Clone, b: impl Into<MutConstraintHaver<'a>> + Clone) -> (&'a mut ConstraintList, &'a mut ConstraintList) {
+    pub fn get_multi_constraints_mut<'a>(&self, tp: &'a mut dyn TypeProvider, a: impl Into<MutConstraintHaver<'a>> + Clone, b: impl Into<MutConstraintHaver<'a>> + Clone) -> (&'a mut ConstraintList, &'a mut ConstraintList) {
         get_multi_constraints_mut!(self, tp, a, b)
     }
 }

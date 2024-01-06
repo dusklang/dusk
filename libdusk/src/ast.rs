@@ -49,6 +49,7 @@ define_index_type!(pub struct GenericContextNsId = u32;);
 define_index_type!(pub struct GenericParamId = u32;);
 define_index_type!(pub struct TypeVarId = u32;);
 define_index_type!(pub struct ExternModId = u32;);
+define_index_type!(pub struct ExtendBlockId = u32;);
 define_index_type!(pub struct GenericCtxId = u32;);
 define_index_type!(pub struct LoopId = u32;);
 define_index_type!(pub struct IntrinsicId = u32;);
@@ -163,6 +164,12 @@ pub struct DeclRef {
     pub expr: ExprId,
 }
 
+#[derive(Debug, Clone)]
+pub struct ExtendBlock {
+    pub extendee: ExprId,
+    pub methods: Vec<DeclId>,
+}
+
 #[derive(Debug)]
 pub struct ExternMod {
     pub library_path: ExprId,
@@ -244,7 +251,7 @@ pub enum Expr {
         fields: Vec<FieldAssignment>,
         id: StructLitId,
     },
-    ExtendBlock { extendee: ExprId, methods: Vec<DeclId> },
+    ExtendBlock { extendee: ExprId, id: ExtendBlockId },
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -546,6 +553,7 @@ pub struct Ast {
     pub structs: IndexVec<StructId, Struct>,
     pub enums: IndexVec<EnumId, Enum>,
     pub extern_mods: IndexVec<ExternModId, ExternMod>,
+    pub extend_blocks: IndexVec<ExtendBlockId, ExtendBlock>,
     pub struct_lits: IndexCounter<StructLitId>,
     pub type_vars: IndexCounter<TypeVarId>,
     pub expr_to_type_vars: IndexVec<ExprId, TypeVarId>,
@@ -1031,7 +1039,8 @@ impl Driver {
         self.add_expr(Expr::StructLit { ty, fields, id }, range)
     }
     pub fn extend_block(&mut self, extendee: ExprId, methods: Vec<DeclId>, range: SourceRange) -> ExprId {
-        self.add_expr(Expr::ExtendBlock { extendee, methods }, range)
+        let id = self.code.ast.extend_blocks.push(ExtendBlock { extendee, methods });
+        self.add_expr(Expr::ExtendBlock { extendee, id }, range)
     }
     pub fn error_expr(&mut self, range: SourceRange) -> ExprId {
         self.add_expr(Expr::Error, range)

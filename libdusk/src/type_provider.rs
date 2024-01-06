@@ -5,8 +5,10 @@
 //! making changes to the values in the type provider, which we don't want to do. So we have two kinds of type
 //! providers, abstracted by the [TypeProvider] trait: [real](RealTypeProvider) and [mock](MockTypeProvider). There is
 //! only one real type provider, which stores the real answers. A mock type provider wraps the real type provider and
-//! provides a safe sandbox to temporarily make modifications that will soon be thrown away.
+//! provides a safe sandbox to temporarily make modifications that will soon be either thrown away, or in some cases
+//! saved to the underlying type provider.
 
+use std::mem;
 use std::collections::HashMap;
 
 use paste::paste;
@@ -19,6 +21,7 @@ use crate::typechecker::{CastMethod, StructLit, constraints::ConstraintList, Ove
 use crate::index_vec::*;
 use crate::driver::Driver;
 use crate::new_code::NewCode;
+pub use crate::tir::MockStateCommand;
 
 /// The body of this macro defines the fields of the type provider. Each one maps to all of the following:
 /// - A field of type [`IndexVec<IdType, ValueType>`] in [RealTypeProvider]
@@ -69,6 +72,15 @@ macro_rules! forward_mock {
             }
         }
     };
+}
+macro_rules! forward_save {
+    ($salf:expr, $($doc:literal)* $field_name:ident, $fw_name:ident, $id_ty:ty, $val_ty:ty) => {{
+        paste! {
+            for (key, value) in mem::take(&mut $salf.$field_name) {
+                *$salf.base.[<$fw_name _mut>](key) = value;
+            }
+        }
+    }};
 }
 macro_rules! forward_real {
     ($($doc:literal)* $field_name:ident, $fw_name:ident, $id_ty:ty, $val_ty:ty) => {
@@ -147,6 +159,8 @@ macro_rules! declare_tp {
             }
 
             fn is_mock(&self) -> bool;
+
+            fn save(&mut self);
         }
         
         pub struct RealTypeProvider {
@@ -227,6 +241,8 @@ macro_rules! declare_tp {
             }
 
             fn is_mock(&self) -> bool { false }
+
+            fn save(&mut self) {}
         }
         
         pub struct MockTypeProvider<'base> {
@@ -241,7 +257,7 @@ macro_rules! declare_tp {
         }
 
         impl<'base> MockTypeProvider<'base> {
-            // base must ONLY be mutated in a resize operation
+            // base must ONLY be mutated in a resize or save operation
             pub fn new(base: &'base mut dyn TypeProvider) -> Self {
                 MockTypeProvider {
                     base,
@@ -268,6 +284,15 @@ macro_rules! declare_tp {
                 forward_mock!($field_name, $fn_name, $id_ty, $payload_ty);
             )*
             forward_mock!(eval_results, eval_result, ExprId, Const);
+
+            fn save(&mut self) {
+                $(
+                    forward_save!(self, $field_name, $fn_name, $id_ty, $payload_ty);
+                )*
+                for (key, value) in mem::take(&mut self.eval_results) {
+                    self.base.insert_eval_result(key, value);
+                }
+            }
         }
 
     }

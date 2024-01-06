@@ -7,7 +7,7 @@ use index_vec::define_index_type;
 use string_interner::DefaultSymbol as Sym;
 
 use crate::source_info::SourceRange;
-use crate::ast::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, NewNamespaceId, RETURN_VALUE_DECL, ParamList, StructId};
+use crate::ast::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, NewNamespaceId, RETURN_VALUE_DECL, ParamList, StructId, ExtendBlockId};
 use crate::internal_types::{internal_fields, internal_field_decls, InternalField, InternalFieldDecls, InternalNamespace};
 use crate::ty::Type;
 use crate::ty::StructType;
@@ -23,6 +23,8 @@ mod graph;
 use graph::{Graph, Levels};
 
 use dusk_proc_macros::*;
+
+pub use self::graph::MockStateCommand;
 
 define_index_type!(pub struct TreeId = u32;);
 define_index_type!(pub struct CompId = u32;);
@@ -133,6 +135,17 @@ struct Subprogram {
     levels: Levels,
 }
 
+impl Subprogram {
+    fn to_units(self) -> Units {
+        Units {
+            units: self.units,
+            mock_units: self.mock_units,
+            is_suhmm: self.levels.is_suhmm,
+            commands: self.levels.commands,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum TirError {
     DependencyCycle,
@@ -200,6 +213,9 @@ pub struct Unit {
 
     /// The expressions in this unit that later units have eval dependencies on
     pub eval_dependees: Vec<ExprId>,
+
+    /// The extend blocks whose extendees are in this unit
+    pub extend_blocks: Vec<ExtendBlockId>,
 }
 
 #[derive(Debug)]
@@ -212,6 +228,8 @@ pub struct MockUnit {
 pub struct Units {
     pub units: Vec<Unit>,
     pub mock_units: Vec<MockUnit>,
+    pub commands: Vec<MockStateCommand>,
+    pub is_suhmm: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -247,6 +265,7 @@ pub struct Builder {
     pub expr_macro_info: HashMap<ExprId, Vec<ExprMacroInfo>>,
     graph: Graph,
     depended_on: IndexVec<ExprId, bool>,
+    extend_blocks: HashMap<ExprId, ExtendBlockId>,
 
     staged_ret_groups: HashMap<DeclId, SmallVec<[ExprId; 1]>>,
 
@@ -896,7 +915,8 @@ impl Driver {
                     self.tir.graph.add_type1_dep(df!(binding.item), ef!(lower_bound.item));
                     self.tir.graph.add_type1_dep(df!(binding.item), ef!(upper_bound.item));
                 },
-                ast::Expr::ExtendBlock { extendee, .. } => {
+                ast::Expr::ExtendBlock { extendee, id: extend_block_id } => {
+                    self.tir.extend_blocks.insert(extendee, extend_block_id);
                     self.tir.graph.add_super_ultra_hyper_mega_meta_dep(ef!(extendee.item));
                     self.tir.graph.add_type1_dep(id, ef!(extendee.item));
                 },
@@ -920,7 +940,7 @@ impl Driver {
         dvd::send(|| DvdMessage::DidInitializeTir);
     }
 
-    pub fn build_more_tir(&mut self) -> Result<Option<Units>, TirError> {
+    pub fn build_more_tir(&mut self, last_typecheck_succeeded: bool) -> Result<Option<Units>, TirError> {
         self.initialize_tir();
 
         dvd::send(|| DvdMessage::WillBuildMoreTir);
@@ -1050,7 +1070,7 @@ impl Driver {
         dvd::send(|| DvdMessage::DidAddTirDependencies);
 
         // Solve for the unit and level of each item
-        let levels = self.tir.graph.solve().map_err(|err| {
+        let levels = self.tir.graph.solve(last_typecheck_succeeded).map_err(|err| {
             match err {
                 TirError::DependencyCycle => {
                     self.diag.report_error_no_range("dependency cycle found. this is most likely a Dusk compiler bug.");
@@ -1060,7 +1080,18 @@ impl Driver {
             err
         })?;
 
-        let mut sp = Subprogram { units: Vec::new(), mock_units: Vec::new(), levels };
+        let mut main_sp = Subprogram { units: Vec::new(), mock_units: Vec::new(), levels };
+        self.actually_build_tir(&mut main_sp);
+
+        dvd::send(|| DvdMessage::DidBuildMoreTir { no_outstanding_components: false });
+        Ok(
+            Some(
+                main_sp.to_units()
+            )
+        )
+    }
+
+    fn actually_build_tir(&mut self, sp: &mut Subprogram) {
         sp.units.resize_with(sp.levels.units.len(), Default::default);
 
         // Finally, convert AST items to TIR and add them to the correct spot
@@ -1072,7 +1103,11 @@ impl Driver {
                         self.build_tir_decl(&mut unit.items, level, id);
                     }
                     ast::Item::Expr(id) => {
+                        if let Some(&extend_block) = self.tir.extend_blocks.get(&id) {
+                            unit.extend_blocks.push(extend_block);
+                        }
                         if self.tir.depended_on[id] { unit.eval_dependees.push(id); }
+
                         self.build_tir_expr(&mut unit.items, level, id);
                     }
                 }
@@ -1104,7 +1139,7 @@ impl Driver {
                 },
             );
         }
-        self.flush_staged_ret_groups(&mut sp);
+        self.flush_staged_ret_groups(sp);
         for scope in &self.code.ast.imper_scopes {
             for &op in &self.code.blocks[scope.block].ops {
                 let op = &self.code.ops[op];
@@ -1125,12 +1160,5 @@ impl Driver {
         for unit in &mut sp.units {
             unit.items.unify_sizes();
         }
-
-        dvd::send(|| DvdMessage::DidBuildMoreTir { no_outstanding_components: false });
-        Ok(
-            Some(
-                Units { units: sp.units, mock_units: sp.mock_units }
-            )
-        )
     }
 }

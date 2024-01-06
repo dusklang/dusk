@@ -1025,8 +1025,6 @@ impl Driver {
         for ident in idents {
             // Claim a GenericParamId for yourself, then set the `end` value to be one past the end
             let generic_param = self.ast.generic_params.next_idx();
-            // Make sure nobody interrupts this loop and creates an unrelated generic param
-            debug_assert_eq!(generic_params.ids.end, generic_param);
             generic_params.ids.end = generic_param + 1;
 
             generic_params.names.push(ident.symbol);
@@ -1568,7 +1566,7 @@ impl Driver {
         let decl_list = self.begin_list(p, TokenKind::could_begin_statement, [TokenKind::Semicolon], Some(TokenKind::CloseCurly));
 
         let mut methods = Vec::new();
-        let close_curly_range = loop {
+        let _close_curly_range = loop {
             match self.cur(p).kind {
                 TokenKind::Eof => {
                     self.diag.report_error("Unexpected end of file while parsing `extend` body", extend_range, "`extend` started here");
