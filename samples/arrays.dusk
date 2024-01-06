@@ -16,8 +16,15 @@ fn new_array<|T|>(sample_element: T): Array<|T|> {
 }
 
 fn push<|T|>(self: Array<|T|> *mut, value: T) {
-    // TODO: I'd prefer to put this in a separate method `ensure_capacity()`, but when I tried to do that I ran into a large swath of compiler bugs :(
-    if self.capacity < self.length + 1 {
+    ensure_capacity(self, self.length + 1)
+
+    ptr :: (self.data as usize + size_of(T) * self.length) as T *mut
+    *ptr = value
+    self.length += 1
+}
+
+fn ensure_capacity<|T|>(self: Array<|T|> *mut, new_len: usize) {
+    if self.capacity < new_len {
         self.capacity = self.capacity * 2
         old_data :: self.data as T *mut
         self.data = malloc(size_of(T) * self.capacity) as T *mut
@@ -35,10 +42,6 @@ fn push<|T|>(self: Array<|T|> *mut, value: T) {
         }
         free(old_data as void *mut)
     }
-
-    ptr :: (self.data as usize + size_of(T) * self.length) as T *mut
-    *ptr = value
-    self.length += 1
 }
 
 fn print_num(num: i32) {
@@ -53,20 +56,11 @@ fn print_num(num: i32) {
     print((num % 10) as u8 + "0")
 }
 
-// This sample element is necessary for now in order for the program to typecheck
-fn index<|T|>(self: Array<|T|>*, index: usize, sample_element: T): T {
+fn index<|T|>(self: Array<|T|>*, index: usize): T {
     if index >= self.length {
         panic("attempted to read past the bounds of the array")
     }
     *((self.data as usize + size_of(T) * index) as T*)
-}
-
-// This function is necessary for now because the compiler doesn't understand that the return type of index() is equal to the outer T passed as a generic arg.
-fn index_i32(self: Array<|i32|>*, index: usize): i32 {
-    if index >= self.length {
-        panic("attempted to read past the bounds of the array")
-    }
-    *((self.data as usize + size_of(i32) * index) as i32*)
 }
 
 fn main() {
@@ -78,7 +72,7 @@ fn main() {
     }
 
     for i in 0..len {
-        val :: index_i32(&array as Array<|i32|>*, i as usize)
+        val :: index(&array, i as usize)
         print("Element #"); print_num(i); print(": "); print_num(val); print("\n")
     }
 }
