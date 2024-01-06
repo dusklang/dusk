@@ -686,6 +686,11 @@ impl Graph {
             if self.component_state.staged_components[&comp_id].meta_deps.is_empty() {
                 self.component_state.staged_components.remove(&comp_id);
 
+                // Re-register the component for being added to a unit
+                // Note that inserting to the real `outstanding_components` here instead of our local copy is intentional.
+                // Otherwise, previously-staged components would not be added properly.
+                self.component_state.outstanding_components.insert(comp_id);
+
                 // Update state to reflect the fact that the component no longer has meta-dependees
                 for i in 0..comp.items.len() {
                     let comp = &self.components[comp_id];
