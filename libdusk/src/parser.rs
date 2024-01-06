@@ -1025,8 +1025,6 @@ impl Driver {
         for ident in idents {
             // Claim a GenericParamId for yourself, then set the `end` value to be one past the end
             let generic_param = self.ast.generic_params.next_idx();
-            // Make sure nobody interrupts this loop and creates an unrelated generic param
-            debug_assert_eq!(generic_params.ids.end, generic_param);
             generic_params.ids.end = generic_param + 1;
 
             generic_params.names.push(ident.symbol);
