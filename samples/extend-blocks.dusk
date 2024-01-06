@@ -1,24 +1,24 @@
 MyStruct :: struct {}
 
 extend MyStruct {
-    // fn new(): MyStruct {
-    //     MyStruct {}
-    // }
+    fn new(): MyStruct {
+        MyStruct {}
+    }
 
     // TODO: add support for `self`, `self*` and `self *mut`, with no explicit type, as the first parameter
-    // fn do_something_truly_amazing(self: MyStruct) {
-    // }
+    fn do_something_truly_amazing(self: MyStruct) {
+    }
 
-    // fn do_something_normal_and_not_amazing() {
-    //     print("Doing something really normal")
-    // }
+    fn do_something_normal_and_not_amazing_at_all() {
+        print("Doing something really normal\n")
+    }
 }
 
 fn main() {
-    // value :: MyStruct.new()
-    // MyStruct.do_something_truly_amazing(value)
+    MyStruct.do_something_normal_and_not_amazing_at_all()
 
-
+    value :: MyStruct.new()
+    MyStruct.do_something_truly_amazing(value)
 
     // TODO: support calling instance methods:
     // value.do_something_truly_amazing()
