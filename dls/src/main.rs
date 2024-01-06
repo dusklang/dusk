@@ -468,10 +468,10 @@ impl Server {
                                     suhmm_tp = None;
                                 },
                                 MockStateCommand::Save => {
-                                    let suhmm_tp = suhmm_tp.as_mut().expect("expected suhmm tp after receiving \"save\" command");
-                                    suhmm_tp.save();
+                                    let tp = suhmm_tp.as_mut().expect("expected suhmm tp after receiving \"save\" command");
+                                    tp.save();
+                                    suhmm_tp = None;
                                 }
-
                             }
                         }
                         let tp: &mut dyn TypeProvider = if let Some(tp) = &mut suhmm_tp { tp } else {
