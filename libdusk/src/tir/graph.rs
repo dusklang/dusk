@@ -498,15 +498,41 @@ impl Graph {
     pub fn solve(&mut self, succeeded: bool) -> Result<Levels, TirError> {
         let commands = self.update_graph_state(succeeded);
 
+        // If we are currently typechecking a SUHMM dependee, we should only consider outstanding components that are either directly or indirectly depended on by said SUHMM dependee.
+        let mut outstanding_components = if let GraphState::TypecheckingSuhmmDependees(suhmm_state) = &self.graph_state {
+            let current_dep = suhmm_state.current_dependees[suhmm_state.current_index];
+            let current_dep_comp = self.item_to_components[current_dep];
+
+            let mut component_stack = vec![current_dep_comp];
+            let mut outstanding_components = HashSet::new();
+            while let Some(comp) = component_stack.pop() {
+                if outstanding_components.contains(&comp) || !self.component_state.outstanding_components.contains(&comp) {
+                    continue;
+                }
+                outstanding_components.insert(comp);
+
+                for (&dep, relation) in &self.components[comp].deps {
+                    if relation.contains(ComponentRelation::BEFORE) {
+                        if !outstanding_components.contains(&dep) {
+                            component_stack.push(dep);
+                        }
+                    }
+                }
+            }
+            outstanding_components
+        } else {
+            self.component_state.outstanding_components.clone()
+        };
+
         dvd::send(|| {
-            let mut outstanding_components: Vec<_> = self.component_state.outstanding_components.iter().copied().collect();
+            let mut outstanding_components: Vec<_> = outstanding_components.iter().copied().collect();
             outstanding_components.sort();
             DvdMessage::WillSolveTirGraph { outstanding_components }
         });
 
         // Get the outstanding components with meta-dependees in them
         let mut meta_dep_components = HashSet::<CompId>::new();
-        for &comp in &self.component_state.outstanding_components {
+        for &comp in &outstanding_components {
             let has_meta_dep = self.components[comp].items.iter()
                 .any(|item| self.global_meta_dependees.contains(item));
             if has_meta_dep {
@@ -517,7 +543,7 @@ impl Graph {
         // Get the components that depend (either directly or indirectly) on components with meta-dependees in them 
         let excluded_components = {
             let mut excluded_components = HashSet::new();
-            let mut potentially_excluded_components: HashSet<CompId> = self.component_state.outstanding_components
+            let mut potentially_excluded_components: HashSet<CompId> = outstanding_components
                 .difference(&meta_dep_components)
                 .copied()
                 .filter(|comp| !self.component_state.staged_components.contains_key(comp))
@@ -547,17 +573,17 @@ impl Graph {
             DvdMessage::DidExcludeTirComponentsFromSubprogram(excluded_components)
         });
 
-        // Temporarily remove all excluded components. Those that don't get staged will be added back after finding the units
-        self.component_state.outstanding_components.retain(|comp| !meta_dep_components.contains(comp) && !excluded_components.contains(comp));
-        if self.component_state.outstanding_components.is_empty() {
+        // Remove all excluded components from our local copy of `outstanding_components`.
+        outstanding_components.retain(|comp| !meta_dep_components.contains(comp) && !excluded_components.contains(comp));
+        if outstanding_components.is_empty() {
             return Err(TirError::DependencyCycle);
         }
 
         let mut units = Vec::<InternalUnit>::new();
-        while !self.component_state.outstanding_components.is_empty() {
+        while !outstanding_components.is_empty() {
             // Get all components that have no type 4 dependencies on outstanding components
             let mut cur_unit_comps = HashSet::<CompId>::new();
-            self.find_comps_without_outstanding_type_4_deps(&self.component_state.outstanding_components, &mut cur_unit_comps);
+            self.find_comps_without_outstanding_type_4_deps(&outstanding_components, &mut cur_unit_comps);
             // Whittle down the components to only those that have type 2 or 3 dependencies on each other, or included components
             // (and not other outstanding components)
             self.remove_comps_with_outstanding_deps(&mut cur_unit_comps);
@@ -580,7 +606,7 @@ impl Graph {
                     }
                 }
                 self.component_state.included_components.insert(comp);
-                self.component_state.outstanding_components.remove(&comp);
+                outstanding_components.remove(&comp);
             }
             units.push(cur_unit);
         }
@@ -594,12 +620,6 @@ impl Graph {
             // Whittle down the components to only those that have type 2 or 3 dependencies on included components
             // (and not other outstanding components, or each other)
             self.remove_comps_with_outstanding_deps(&mut comps_to_stage);
-
-            // Add excluded components back to `outstanding_components`.
-            let all_excluded = meta_dep_components
-                .difference(&comps_to_stage)
-                .chain(&excluded_components);
-            self.component_state.outstanding_components.extend(all_excluded);
 
             self.stage_components(comps_to_stage.into_iter());
         }
@@ -666,9 +686,6 @@ impl Graph {
             if self.component_state.staged_components[&comp_id].meta_deps.is_empty() {
                 self.component_state.staged_components.remove(&comp_id);
 
-                // Re-register the component for being added to a unit
-                self.component_state.outstanding_components.insert(comp_id);
-
                 // Update state to reflect the fact that the component no longer has meta-dependees
                 for i in 0..comp.items.len() {
                     let comp = &self.components[comp_id];
@@ -677,6 +694,12 @@ impl Graph {
                 }
             }
         }
+
+        // Update the real `outstanding_components`.
+        self.component_state.outstanding_components.retain(|comp|
+            !self.component_state.staged_components.contains_key(&comp) &&
+            !self.component_state.included_components.contains(&comp)
+        );
 
         dvd::send(|| DvdMessage::DidSolveTirGraph);
 
