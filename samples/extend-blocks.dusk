@@ -6,7 +6,7 @@ extend MyStruct {
     }
 
     // TODO: add support for `self`, `self*` and `self *mut`, with no explicit type, as the first parameter
-    fn do_something_truly_amazing(self: MyStruct) {
+    fn do_something_truly_amazing(self) {
     }
 
     fn do_something_normal_and_not_amazing_at_all() {

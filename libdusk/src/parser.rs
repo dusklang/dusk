@@ -1498,12 +1498,26 @@ impl Driver {
                 param_names.push(name);
                 self.next(p);
 
-                if name == self.ast.known_idents.salf {
-                    todo!("we need to get the extend block extendee here.");
-                }
+                let ty = 'blk: {
+                    // Handle `self` parameters.
+                    if name == self.ast.known_idents.salf {
+                        if *self.cur(p).kind != TokenKind::Colon {
+                            let ty = self.parse_self_parameter(p, param_range);
+                            // `parse_self_parameter` will return ERROR_TYPE in the case where this self parameter is inside a free function's parameter list.
+                            // In that case, we shouldn't diagnose diagnose the fact that it doesn't come first in the parameter list, because it shouldn't be there at all.
+                            // Hence the check for `ty != ERROR_TYPE` below.
+                            if param_names.len() > 1 && ty != ERROR_TYPE {
+                                self.diag.report_error_no_range_msg("`self` must come first in parameter list", param_range);
+                            }
+                            break 'blk ty;
+                        }
+                    }
 
-                self.eat_tok(p, TokenKind::Colon)?;
-                let (ty, _ty_range) = self.parse_type(p);
+                    self.eat_tok(p, TokenKind::Colon)?;
+                    let (ty, _ty_range) = self.parse_type(p);
+                    break 'blk ty;
+                };
+
                 param_ranges.push(param_range);
                 param_tys.push(ty);
                 self.eat_separators(p);
@@ -1560,6 +1574,15 @@ impl Driver {
         drop(generic_ctx); // explicitly pop generic ctx id from the stack
 
         Ok(decl_id)
+    }
+
+    fn parse_self_parameter(&mut self, p: &mut Parser, range: SourceRange) -> ExprId {
+        if let Some(extendee) = self.is_in_extend_block_scope() {
+            extendee
+        } else {
+            self.diag.report_error_no_range_msg("free functions cannot have self parameters", range);
+            ERROR_TYPE
+        }
     }
 
     fn parse_extend_block(&mut self, p: &mut Parser) -> ParseResult<ExprId> {

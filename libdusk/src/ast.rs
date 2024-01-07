@@ -892,7 +892,7 @@ impl Driver {
         for scope in self.ast.scope_stack.stack.lock().unwrap().borrow().iter().rev() {
             if matches!(scope, ScopeState::Imper { .. }) {
                 return true;
-            } else if matches!(scope, ScopeState::Mod { .. }) {
+            } else if matches!(scope, ScopeState::Mod { .. } | ScopeState::ExtendBlock { .. }) {
                 break;
             }
         }
@@ -902,11 +902,22 @@ impl Driver {
         for scope in self.ast.scope_stack.stack.lock().unwrap().borrow().iter().rev() {
             if matches!(scope, ScopeState::Mod { .. }) {
                 return true;
-            } else if matches!(scope, ScopeState::Imper { .. }) {
+            } else if matches!(scope, ScopeState::Imper { .. } | ScopeState::ExtendBlock { .. }) {
                 break;
             }
         }
         false
+    }
+    // Returns extendee, not the extend block expression itself
+    pub fn is_in_extend_block_scope(&self) -> Option<ExprId> {
+        for scope in self.ast.scope_stack.stack.lock().unwrap().borrow().iter().rev() {
+            if let &ScopeState::ExtendBlock { extendee, .. } = scope {
+                return Some(extendee);
+            } else if matches!(scope, ScopeState::Imper { .. } | ScopeState::Mod { .. }) {
+                break;
+            }
+        }
+        None
     }
     pub fn stored_decl(&mut self, name: Sym, generic_params: GenericParamList, explicit_ty: Option<ExprId>, is_mut: bool, root_expr: ExprId, range: SourceRange) -> DeclId {
         self.flush_stmt_buffer();
