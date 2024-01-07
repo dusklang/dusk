@@ -650,10 +650,17 @@ struct FnDeclState {
 }
 
 #[derive(Debug)]
+pub struct ExtendBlockState {
+    id: ExtendBlockId,
+    extendee: ExprId,
+}
+
+#[derive(Debug)]
 pub struct Builder {
     fn_decl_stack: Vec<FnDeclState>,
     scope_stack: AutoPopStack<ScopeState>,
     generic_ctx_stack: AutoPopStack<GenericCtxId>,
+    extend_block_stack: AutoPopStack<ExtendBlockState>,
     debug_marked_exprs: HashSet<ExprId>,
     imper_roots: IndexVec<ImperRootId, ImperRoot>,
 
@@ -701,6 +708,7 @@ impl Default for Builder {
             fn_decl_stack: Default::default(),
             scope_stack: Default::default(),
             generic_ctx_stack: Default::default(),
+            extend_block_stack: Default::default(),
             debug_marked_exprs: Default::default(),
             imper_roots: Default::default(),
 
@@ -755,6 +763,11 @@ impl PartialEq<ScopeState> for ImperScopeId {
 }
 impl PartialEq<LoopState> for LoopId {
     fn eq(&self, other: &LoopState) -> bool {
+        other.id == *self
+    }
+}
+impl PartialEq<ExtendBlockState> for ExtendBlockId {
+    fn eq(&self, other: &ExtendBlockState) -> bool {
         other.id == *self
     }
 }
@@ -1038,9 +1051,14 @@ impl Driver {
         let id = self.code.ast.struct_lits.next_idx();
         self.add_expr(Expr::StructLit { ty, fields, id }, range)
     }
-    pub fn extend_block(&mut self, extendee: ExprId, methods: Vec<DeclId>, range: SourceRange) -> ExprId {
-        let id = self.code.ast.extend_blocks.push(ExtendBlock { extendee, methods });
-        self.add_expr(Expr::ExtendBlock { extendee, id }, range)
+    pub fn begin_extend_block(&mut self, extendee: ExprId, range: SourceRange) -> (AutoPopStackEntry<ExtendBlockState, ExtendBlockId>, ExprId) {
+        let id = self.code.ast.extend_blocks.push(ExtendBlock { extendee, methods: Vec::new() });
+        let expr = self.add_expr(Expr::ExtendBlock { extendee, id }, range);
+        let entry = self.ast.extend_block_stack.push(id, ExtendBlockState { id, extendee });
+        (entry, expr)
+    }
+    pub fn end_extend_block(&mut self, entry: AutoPopStackEntry<ExtendBlockState, ExtendBlockId>, methods: Vec<DeclId>) {
+        self.code.ast.extend_blocks[entry.id()].methods = methods;
     }
     pub fn error_expr(&mut self, range: SourceRange) -> ExprId {
         self.add_expr(Expr::Error, range)
@@ -1302,7 +1320,7 @@ impl Driver {
     pub fn fn_type(&mut self, param_tys: Vec<ExprId>, has_c_variadic_param: bool, ret_ty: ExprId, range: SourceRange) -> ExprId {
         self.add_expr(Expr::FunctionTy { param_tys, has_c_variadic_param, ret_ty }, range)
     }
-    pub fn start_new_file(&mut self, file: SourceFileId) -> AutoPopStackEntry<ScopeState, ModScopeNsId> {
+    pub fn begin_new_file(&mut self, file: SourceFileId) -> AutoPopStackEntry<ScopeState, ModScopeNsId> {
         let mut global_scope = NewNamespace::default();
         // Use all of prelude
         global_scope.blanket_uses.push(Namespace::Mod(self.ast.prelude_namespace.unwrap()));

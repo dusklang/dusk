@@ -226,7 +226,7 @@ impl Driver {
         assert!(file_was_unparsed);
 
         self.lex(file).map_err(|_| ParseError::UnableToLex)?;
-        let _new_file = self.start_new_file(file);
+        let _new_file = self.begin_new_file(file);
         let mut p = Parser { file, cur: 0, list_stack: Default::default(), list_counter: 0 };
 
         self.skip_whitespace(&mut p);
@@ -1485,7 +1485,7 @@ impl Driver {
         let generic_ctx = self.begin_decl_generic_ctx(generic_param_list.clone());
         let ns = self.begin_generic_context(generic_params.clone());
 
-        // Parse (param_name: param_ty, param2_name: param2_ty, ...)
+        // Parse ([self [*[mut]],] param_name: param_ty, param2_name: param2_ty, ...)
         let mut param_names = SmallVec::new();
         let mut param_tys = SmallVec::new();
         let mut param_ranges = SmallVec::new();
@@ -1497,6 +1497,10 @@ impl Driver {
                 let param_range = self.cur(p).range;
                 param_names.push(name);
                 self.next(p);
+
+                if name == self.ast.known_idents.salf {
+                    todo!("we need to get the extend block extendee here.");
+                }
 
                 self.eat_tok(p, TokenKind::Colon)?;
                 let (ty, _ty_range) = self.parse_type(p);
@@ -1563,6 +1567,8 @@ impl Driver {
 
         let (extendee, _extendee_range) = self.parse_type(p);
 
+        let (entry, expr) = self.begin_extend_block(extendee, extend_range);
+
         self.eat_tok(p, TokenKind::OpenCurly)?;
         let decl_list = self.begin_list(p, TokenKind::could_begin_statement, [TokenKind::Semicolon], Some(TokenKind::CloseCurly));
 
@@ -1601,7 +1607,9 @@ impl Driver {
             }
         };
 
-        Ok(self.extend_block(extendee, methods, extend_range))
+        self.end_extend_block(entry, methods);
+
+        Ok(expr)
     }
 
     fn try_parse_type(&mut self, p: &mut Parser) -> Option<(ExprId, SourceRange)> {
