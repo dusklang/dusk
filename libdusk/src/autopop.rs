@@ -42,7 +42,7 @@ impl<T: Debug + Clone> AutoPopStack<T> {
 /// Because parser methods often exit early on failure, it previously would've been possible to push to the stack, exit
 /// due to an error, and never end up popping. This type prevents that scenario from happening, by automatically
 /// popping on drop, and checking that the expected value has been popped.
-/// TODO: this problem almost certainly exists right now for comp_decl_stack, so
+/// TODO: this problem almost certainly exists right now for fn_decl_stack, so
 /// I should use it there as well.
 #[must_use]
 pub struct AutoPopStackEntry<T: Debug, Id=T> where Id: PartialEq<T> + Debug + Copy {

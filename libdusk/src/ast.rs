@@ -88,8 +88,8 @@ pub struct ConditionNs {
 }
 
 #[derive(Debug)]
-pub struct CompDeclParamsNs {
-    /// The computed decl that this comp decl params namespace refers to
+pub struct FnDeclParamsNs {
+    /// The function decl that this function decl params namespace refers to
     /// NOTE: updated to the correct value after parsing the function
     pub func: DeclId,
     pub parent: Option<Namespace>,
@@ -304,13 +304,13 @@ pub struct ParamList {
 
 #[derive(Debug)]
 pub enum Decl {
-    Computed {
+    Function {
         param_tys: SmallVec<[ExprId; 2]>,
         params: Range<DeclId>,
         scope: ImperScopeId,
         generic_params: Range<GenericParamId>,
     },
-    ComputedPrototype {
+    FunctionPrototype {
         param_list: ParamList,
         extern_func: Option<ExternFunctionRef>,
     },
@@ -641,7 +641,7 @@ struct ImperRoot {
 }
 
 #[derive(Debug)]
-struct CompDeclState {
+struct FnDeclState {
     scope: Option<ImperScopeId>,
     params: Range<DeclId>,
     generic_params: Range<DeclId>,
@@ -651,7 +651,7 @@ struct CompDeclState {
 
 #[derive(Debug)]
 pub struct Builder {
-    comp_decl_stack: Vec<CompDeclState>,
+    fn_decl_stack: Vec<FnDeclState>,
     scope_stack: AutoPopStack<ScopeState>,
     generic_ctx_stack: AutoPopStack<GenericCtxId>,
     debug_marked_exprs: HashSet<ExprId>,
@@ -698,7 +698,7 @@ declare_known_idents!(requires, guarantees, comptime, return_value, invalid_decl
 impl Default for Builder {
     fn default() -> Self {
         Builder {
-            comp_decl_stack: Default::default(),
+            fn_decl_stack: Default::default(),
             scope_stack: Default::default(),
             generic_ctx_stack: Default::default(),
             debug_marked_exprs: Default::default(),
@@ -926,7 +926,7 @@ impl Driver {
         }
     }
     pub fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
-        let decl = self.ast.comp_decl_stack.last().map(|decl| decl.id);
+        let decl = self.ast.fn_decl_stack.last().map(|decl| decl.id);
         if decl.is_none() {
             self.diag.report_error_no_range_msg("returning outside of a function is invalid", range);
         }
@@ -1144,7 +1144,7 @@ impl Driver {
     pub fn begin_decl_generic_ctx(&mut self, generic_param_list: GenericParamList) -> AutoPopStackEntry<GenericCtxId> {
         self.push_generic_ctx(|parent| GenericCtx::Decl { parameters: generic_param_list.ids, parent })
     }
-    pub fn begin_computed_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, generic_params: Range<GenericParamId>, generic_param_decls: Range<DeclId>, return_ty: ExprId, proto_range: SourceRange) -> DeclId {
+    pub fn begin_fn_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, generic_params: Range<GenericParamId>, generic_param_decls: Range<DeclId>, return_ty: ExprId, proto_range: SourceRange) -> DeclId {
         // This is a placeholder value that gets replaced once the parameter declarations get allocated.
         let id = self.add_decl(Decl::Static(ExprId::new(u32::MAX as usize)), name, Some(return_ty), proto_range);
 
@@ -1161,8 +1161,8 @@ impl Driver {
         let last_param = self.code.ast.decls.next_idx();
         let params = first_param..last_param;
 
-        // `end_computed_decl` will attach the real scope to this decl; we don't have it yet
-        df!(id.ast) = Decl::Computed {
+        // `end_fn_decl` will attach the real scope to this decl; we don't have it yet
+        df!(id.ast) = Decl::Function {
             param_tys,
             params: params.clone(),
             scope: ImperScopeId::new(u32::MAX as usize),
@@ -1176,10 +1176,10 @@ impl Driver {
             ScopeState::Mod { .. } => {
                 self.mod_scoped_decl(StaticDecl { name, decl: id });
             },
-            ScopeState::Condition { .. } | ScopeState::GenericContext(_) => panic!("Computed decls are not supported in this position"),
+            ScopeState::Condition { .. } | ScopeState::GenericContext(_) => panic!("Function decls are not supported in this position"),
         }
-        self.ast.comp_decl_stack.push(
-            CompDeclState {
+        self.ast.fn_decl_stack.push(
+            FnDeclState {
                 scope: None,
                 params,
                 generic_params: generic_param_decls,
@@ -1190,7 +1190,7 @@ impl Driver {
 
         id
     }
-    pub fn comp_decl_prototype(&mut self, name: Sym, param_list: ParamList, _param_ranges: SmallVec<[SourceRange; 2]>, return_ty: ExprId, range: SourceRange) -> DeclId {
+    pub fn fn_prototype(&mut self, name: Sym, param_list: ParamList, _param_ranges: SmallVec<[SourceRange; 2]>, return_ty: ExprId, range: SourceRange) -> DeclId {
         let extern_func = match self.ast.scope_stack.peek().unwrap() {
             ScopeState::Mod { extern_mod: Some(extern_mod), .. } => {
                 let funcs = &mut self.code.ast.extern_mods[extern_mod].imported_functions;
@@ -1206,7 +1206,7 @@ impl Driver {
             },
             _ => None,
         };
-        let id = self.add_decl(Decl::ComputedPrototype { param_list, extern_func }, name, Some(return_ty), range);
+        let id = self.add_decl(Decl::FunctionPrototype { param_list, extern_func }, name, Some(return_ty), range);
         match self.ast.scope_stack.peek().unwrap() {
             ScopeState::Imper { .. } => {
                 self.flush_stmt_buffer();
@@ -1215,7 +1215,7 @@ impl Driver {
             ScopeState::Mod { .. } => {
                 self.mod_scoped_decl(StaticDecl { name, decl: id });
             },
-            ScopeState::Condition { .. } | ScopeState::GenericContext(_) => panic!("Computed decls are not supported in this position"),
+            ScopeState::Condition { .. } | ScopeState::GenericContext(_) => panic!("Function decls are not supported in this position"),
         }
 
         id
@@ -1407,20 +1407,20 @@ impl Driver {
             }
         );
         
-        if let Some(comp_decl) = self.ast.comp_decl_stack.last_mut() {
-            assert!(comp_decl.imper_scope_stack > 0 || comp_decl.scope.is_none(), "Can't add multiple top-level scopes to a computed decl");
-            let is_first_scope = comp_decl.imper_scope_stack == 0;
+        if let Some(func) = self.ast.fn_decl_stack.last_mut() {
+            assert!(func.imper_scope_stack > 0 || func.scope.is_none(), "Can't add multiple top-level scopes to a function decl");
+            let is_first_scope = func.imper_scope_stack == 0;
             if is_first_scope {
-                comp_decl.scope = Some(id);
+                func.scope = Some(id);
             }
-            comp_decl.imper_scope_stack += 1;
+            func.imper_scope_stack += 1;
 
             if is_first_scope {
-                let name = self.code.ast.names[comp_decl.id];
-                let id = comp_decl.id;
+                let name = self.code.ast.names[func.id];
+                let id = func.id;
     
-                let params = comp_decl.params.clone();
-                let generic_params = comp_decl.generic_params.clone();
+                let params = func.params.clone();
+                let generic_params = func.generic_params.clone();
     
                 // Add the current comp decl to the decl scope, to enable recursion
                 self.imper_scoped_decl(
@@ -1464,12 +1464,12 @@ impl Driver {
             panic!("tried to end imperative scope, but the top scope in the stack is not an imperative scope");
         }
     }
-    pub fn end_computed_decl(&mut self) {
-        let decl_state = self.ast.comp_decl_stack.pop().unwrap();
-        if let Decl::Computed { ref mut scope, .. } = df!(decl_state.id.ast) {
+    pub fn end_fn_decl(&mut self) {
+        let decl_state = self.ast.fn_decl_stack.pop().unwrap();
+        if let Decl::Function { ref mut scope, .. } = df!(decl_state.id.ast) {
             *scope = decl_state.scope.unwrap();
         } else {
-            panic!("Unexpected decl kind when ending computed decl!");
+            panic!("Unexpected decl kind when ending function decl!");
         }
     }
     fn cur_namespace(&self) -> Namespace {

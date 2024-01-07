@@ -400,7 +400,7 @@ impl Driver {
     }
     fn find_overloads_in_function_parameters(&self, name: &NameLookup, func: DeclId, overloads: &mut HashSet<FoundOverload>) {
         match &df!(func.ast) {
-            ast::Decl::Computed { params, .. } => {
+            ast::Decl::Function { params, .. } => {
                 for decl in range_iter(params.clone()) {
                     let param_name = self.code.ast.names[decl];
                     
@@ -409,7 +409,7 @@ impl Driver {
                     }
                 }
             },
-            _ => panic!("Can only have requirements clause on computed decls"),
+            _ => panic!("Can only have requirements clause on function decls"),
         }
     }
 
@@ -527,7 +527,7 @@ impl Driver {
         let overloads = self.find_overloads(decl_ref.namespace, &NameLookup::Exact(decl_ref.name)).unwrap_or_default();
         for overload in overloads {
             match df!(overload.decl.ast) {
-                ast::Decl::Computed { ref param_tys, .. } => {
+                ast::Decl::Function { ref param_tys, .. } => {
                     let ty = self.code.ast.explicit_tys[overload.decl].unwrap_or(ast::VOID_TYPE);
                     add_eval_dep!(id, ty);
                     for &ty in param_tys {
@@ -578,7 +578,7 @@ impl Driver {
                 Item::Expr(expr) => self.tir.graph.add_type3_dep(a, self.code.ast.expr_to_items[expr]),
                 Item::Decl(decl) => match df!(decl.ast) {
                     ast::Decl::Stored { .. } => self.tir.graph.add_type3_dep(a, self.code.ast.decl_to_items[decl]),
-                    ast::Decl::Computed { .. } => {},
+                    ast::Decl::Function { .. } => {},
                     _ => panic!("Invalid scope item"),
                 },
             }
@@ -588,7 +588,7 @@ impl Driver {
     fn flush_staged_ret_groups(&mut self, sp: &mut Subprogram) {
         let staged_ret_groups = mem::take(&mut self.tir.staged_ret_groups);
         for (decl, exprs) in staged_ret_groups {
-            assert!(matches!(df!(decl.ast), ast::Decl::Computed { .. }));
+            assert!(matches!(df!(decl.ast), ast::Decl::Function { .. }));
 
             let ty = self.code.ast.explicit_tys[decl].expect("explicit return statements are not allowed in assigned functions (yet?)");
 
@@ -720,12 +720,12 @@ impl Driver {
                 let scrutinee = self.code.ast.pattern_binding_decls[binding_id].scrutinee;
                 unit.pattern_bindings.insert(level, PatternBinding { binding_id, scrutinee, decl_id: id });
             },
-            ast::Decl::Computed { scope, .. } => {
+            ast::Decl::Function { scope, .. } => {
                 let terminal_expr = self.code.ast.imper_scopes[scope].terminal_expr;
                 self.tir.staged_ret_groups.entry(id).or_default().push(terminal_expr);
                 unit.func_decls.push(FunctionDecl { id });
             },
-            ast::Decl::ComputedPrototype { .. } => {
+            ast::Decl::FunctionPrototype { .. } => {
                 unit.func_decls.push(FunctionDecl { id });
             },
         }
@@ -737,7 +737,7 @@ impl Driver {
             let decl = &self.code.ast.decls[id];
             let mut generic_params = empty_range();
             let (is_mut, param_list) = match *decl {
-                ast::Decl::Computed { ref param_tys, generic_params: ref og_generic_params, .. } => {
+                ast::Decl::Function { ref param_tys, generic_params: ref og_generic_params, .. } => {
                     generic_params = og_generic_params.clone();
 
                     (false, ParamList { param_tys: param_tys.clone(), has_c_variadic_param: false })
@@ -749,7 +749,7 @@ impl Driver {
                         ParamList::default(),
                     )
                 },
-                ast::Decl::ComputedPrototype { ref param_list, .. } => (
+                ast::Decl::FunctionPrototype { ref param_list, .. } => (
                     false,
                     param_list.clone(),
                 ),
@@ -806,7 +806,7 @@ impl Driver {
             let id = df!(decl_id.item);
             match df!(decl_id.ast) {
                 // NOTE: type 1 dependencies are currently added to LoopBinding by its parent `for` loop; see below.
-                ast::Decl::Parameter { .. } | ast::Decl::LegacyIntrinsic { .. } | ast::Decl::Intrinsic(_) | ast::Decl::MethodIntrinsic(_) | ast::Decl::Field { .. } | ast::Decl::ReturnValue | ast::Decl::GenericParam(_) | ast::Decl::Variant { .. } | ast::Decl::ComputedPrototype { .. } | ast::Decl::InternalField(_) | ast::Decl::LoopBinding { .. } | ast::Decl::ObjcClassRef { .. } => {},
+                ast::Decl::Parameter { .. } | ast::Decl::LegacyIntrinsic { .. } | ast::Decl::Intrinsic(_) | ast::Decl::MethodIntrinsic(_) | ast::Decl::Field { .. } | ast::Decl::ReturnValue | ast::Decl::GenericParam(_) | ast::Decl::Variant { .. } | ast::Decl::FunctionPrototype { .. } | ast::Decl::InternalField(_) | ast::Decl::LoopBinding { .. } | ast::Decl::ObjcClassRef { .. } => {},
                 ast::Decl::PatternBinding { id: _binding_id, .. } => {
                     // let scrutinee = self.code.ast.pattern_binding_decls[binding_id].scrutinee;
 
@@ -814,7 +814,7 @@ impl Driver {
                     // self.tir.graph.add_type1_dep(id, ef!(scrutinee.item));
                 },
                 ast::Decl::Static(expr) | ast::Decl::Const { assigned_expr: expr, .. } | ast::Decl::Stored { root_expr: expr, .. } => self.tir.graph.add_type1_dep(id, ef!(expr.item)),
-                ast::Decl::Computed { scope, .. } => {
+                ast::Decl::Function { scope, .. } => {
                     let terminal_expr = self.code.ast.imper_scopes[scope].terminal_expr;
                     self.tir.graph.add_type1_dep(id, ef!(terminal_expr.item));
                 },
@@ -984,7 +984,7 @@ impl Driver {
                                 add_eval_dep!(id, payload_ty);
                             }
                         }
-                        ast::Decl::Computed { scope, ref param_tys, .. } => {
+                        ast::Decl::Function { scope, ref param_tys, .. } => {
                             for &ty in param_tys {
                                 add_eval_dep!(id, ty);
                             }
@@ -994,7 +994,7 @@ impl Driver {
                                 add_eval_dep!(id, ast::VOID_TYPE);
                             }
                         },
-                        ast::Decl::ComputedPrototype { ref param_list, extern_func } => {
+                        ast::Decl::FunctionPrototype { ref param_list, extern_func } => {
                             for &ty in &param_list.param_tys {
                                 add_eval_dep!(id, ty);
                             }
@@ -1014,7 +1014,7 @@ impl Driver {
                         },
                     }
         
-                    // NOTE: The computed decl case in the above match expression depends on this!
+                    // NOTE: The function decl case in the above match expression depends on this!
                     if let Some(ty) = self.code.ast.explicit_tys[decl_id] {
                         add_eval_dep!(id, ty);
                     }
@@ -1152,7 +1152,7 @@ impl Driver {
                         let unit = &mut sp.units[unit as usize];
                         unit.items.stmts.push(Stmt { root_expr: expr, has_semicolon });
                     },
-                    Item::Decl(decl) => assert!(matches!(df!(decl.ast), ast::Decl::Stored { .. } | ast::Decl::Computed { .. }), "Invalid scope item"),
+                    Item::Decl(decl) => assert!(matches!(df!(decl.ast), ast::Decl::Stored { .. } | ast::Decl::Function { .. }), "Invalid scope item"),
                 }
             }
         }

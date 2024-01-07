@@ -1089,7 +1089,7 @@ impl Driver {
         Ok(list)
     }
 
-    /// Parses any item. Used at the top-level, in modules, and within computed declaration scopes.
+    /// Parses any item. Used at the top-level, in modules, and within function declaration scopes.
     fn parse_item(&mut self, p: &mut Parser) -> ParseResult<Item> {
         match self.cur(p).kind {
             &TokenKind::Ident(name) => {
@@ -1135,7 +1135,7 @@ impl Driver {
                 Ok(Item::Expr(expr))
             },
             TokenKind::Fn => {
-                let decl = self.parse_comp_decl(p)?;
+                let decl = self.parse_fn(p)?;
                 Ok(Item::Decl(decl))
             },
             TokenKind::AtSign => {
@@ -1156,7 +1156,7 @@ impl Driver {
                     self.code.ast.condition_ns[condition_ns].func = decl;
                 }
                 if let Some(attr) = attributes.iter().find(|attr| attr.attr == self.ast.known_idents.comptime) {
-                    if !matches!(df!(decl.ast), ast::Decl::Computed { .. }) {
+                    if !matches!(df!(decl.ast), ast::Decl::Function { .. }) {
                         self.diag.push(
                             Error::new("unexpected @comptime attribute")
                                 .adding_primary_range(attr.range, "can only be applied to function declarations")
@@ -1437,7 +1437,7 @@ impl Driver {
         }
     }
 
-    fn parse_comp_decl(&mut self, p: &mut Parser) -> ParseResult<DeclId> {
+    fn parse_fn(&mut self, p: &mut Parser) -> ParseResult<DeclId> {
         // Parse fn {name}
         let mut proto_range = self.eat_tok(p, TokenKind::Fn)?;
         let TokenKind::Ident(name) = *self.cur(p).kind else {
@@ -1531,7 +1531,7 @@ impl Driver {
                 self.check_for_fn_equal(p)?;
                 assert_eq!(generic_param_list.names.len(), 0, "generic parameters on a function prototype are not allowed");
                 drop(ns);
-                return Ok(self.comp_decl_prototype(name, param_list, param_ranges, ast::VOID_TYPE, proto_range));
+                return Ok(self.fn_prototype(name, param_list, param_ranges, ast::VOID_TYPE, proto_range));
             },
         };
 
@@ -1541,15 +1541,15 @@ impl Driver {
 
         let decl_id = match self.cur(p).kind {
             TokenKind::OpenCurly => {
-                let decl_id = self.begin_computed_decl(name, param_names, param_list.param_tys, param_ranges, generic_param_list.ids.clone(), generic_params, ty, proto_range);
+                let decl_id = self.begin_fn_decl(name, param_names, param_list.param_tys, param_ranges, generic_param_list.ids.clone(), generic_params, ty, proto_range);
                 self.parse_scope(p, &[])?;
-                self.end_computed_decl();
+                self.end_fn_decl();
                 decl_id
             },
             _ => {
                 self.check_for_fn_equal(p)?;
                 assert_eq!(generic_param_list.names.len(), 0, "generic parameters on a function prototype are not allowed");
-                self.comp_decl_prototype(name, param_list, param_ranges, ty, proto_range)
+                self.fn_prototype(name, param_list, param_ranges, ty, proto_range)
             }
         };
         drop(generic_ctx); // explicitly pop generic ctx id from the stack
@@ -1582,7 +1582,7 @@ impl Driver {
                     match self.parse_item(p) {
                         Ok(Item::Decl(decl)) => {
                             let range = self.get_range(decl);
-                            let ast::Decl::Computed { .. } = &df!(decl.ast) else {
+                            let ast::Decl::Function { .. } = &df!(decl.ast) else {
                                 self.diag.report_error("unexpected type of declaration", range, "expected a method declaration");
                                 self.eat_separators(p);
                                 continue;

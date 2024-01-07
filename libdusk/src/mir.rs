@@ -412,7 +412,7 @@ impl Default for MirCode {
 #[derive(Clone, Debug)]
 enum Decl {
     Stored(StoredDeclId),
-    Computed { get: FuncId },
+    Function { get: FuncId },
     ExternFunction(ExternFunctionRef),
     ObjcClassRef { extern_mod: ExternModId, index: usize },
     Parameter { index: usize },
@@ -827,13 +827,13 @@ impl DriverRef<'_> {
         if let Some(decl) = self.read().mir.decls.get(&id) { return decl.clone(); }
         let d = self.read();
         match df!(d, id.ast) {
-            ast::Decl::Computed { ref params, scope, ref generic_params, .. } => {
+            ast::Decl::Function { ref params, scope, ref generic_params, .. } => {
                 // Add placeholder function to reserve ID ahead of time
                 let params = params.clone();
                 let generic_params = generic_params.clone();
                 drop(d);
                 let get = self.write().code.mir.functions.push(Function::default());
-                let decl = Decl::Computed { get };
+                let decl = Decl::Function { get };
                 self.write().mir.decls.insert(id, decl.clone());
 
                 let func_ty = self.read().decl_type(id, tp).as_function().unwrap().clone();
@@ -856,7 +856,7 @@ impl DriverRef<'_> {
                 self.write().code.mir.functions[get] = func;
                 decl
             },
-            ast::Decl::ComputedPrototype { extern_func, .. } => {
+            ast::Decl::FunctionPrototype { extern_func, .. } => {
                 let decl = if let Some(extern_func) = extern_func {
                     drop(d);
                     self.write().resolve_extern_mod(extern_func.extern_mod, tp);
@@ -2031,7 +2031,7 @@ impl DriverRef<'_> {
                     b.stored_decl_locs.push_at(id, location);
                     self.build_expr(b, root_expr, Context::new(0, DataDest::Store { location }, ControlDest::Continue), tp);
                 },
-                ast::Decl::Computed { .. } => {},
+                ast::Decl::Function { .. } => {},
                 _ => panic!("Invalid scope item"),
             },
         }
@@ -2080,7 +2080,7 @@ impl DriverRef<'_> {
         let expr = self.read().code.ast.decl_refs[decl_ref_id].expr;
         let name = self.read().display_item(id).to_string();
         match self.get_decl(id, tp) {
-            Decl::Computed { get } => DeclRef::Function { func: get, generic_args: generic_arguments },
+            Decl::Function { get } => DeclRef::Function { func: get, generic_args: generic_arguments },
             Decl::ExternFunction(func) => {
                 assert!(generic_arguments.is_empty());
                 DeclRef::ExternFunction { func }

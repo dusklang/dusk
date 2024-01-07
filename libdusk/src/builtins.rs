@@ -63,7 +63,7 @@ impl Driver {
             extern_mod,
             index: 0,
         };
-        let decl_id = self.add_decl(Decl::ComputedPrototype { param_list, extern_func: Some(extern_func_ref) }, name, Some(ret_ty), SourceRange::default());
+        let decl_id = self.add_decl(Decl::FunctionPrototype { param_list, extern_func: Some(extern_func_ref) }, name, Some(ret_ty), SourceRange::default());
         let static_decl = StaticDecl { name, decl: decl_id };
         self.code.ast.new_namespaces[b.namespace].static_decls.push(static_decl);
     }
