@@ -1607,7 +1607,7 @@ impl Driver {
             }
         };
 
-        self.end_extend_block(entry, methods);
+        drop(entry);
 
         Ok(expr)
     }

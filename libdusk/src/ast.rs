@@ -44,6 +44,7 @@ define_index_type!(pub struct StoredDeclId = u32;);
 define_index_type!(pub struct PatternBindingDeclId = u32;);
 define_index_type!(pub struct ImperScopeNsId = u32;);
 define_index_type!(pub struct ModScopeNsId = u32;);
+define_index_type!(pub struct ExtendBlockNsId = u32;);
 define_index_type!(pub struct ConditionNsId = u32;);
 define_index_type!(pub struct GenericContextNsId = u32;);
 define_index_type!(pub struct GenericParamId = u32;);
@@ -76,6 +77,11 @@ pub struct ImperScopeNs {
 #[derive(Debug)]
 pub struct ModScopeNs {
     pub scope: NewNamespaceId,
+    pub parent: Option<Namespace>,
+}
+
+#[derive(Debug)]
+pub struct ExtendBlockNs {
     pub parent: Option<Namespace>,
 }
 
@@ -147,6 +153,7 @@ pub struct ImperScope {
 pub enum Namespace {
     Imper { scope: ImperScopeNsId, end_offset: usize },
     Mod(ModScopeNsId),
+    ExtendBlock(ExtendBlockNsId),
     MemberRef { base_expr: ExprId, },
     GenericContext(GenericContextNsId),
 
@@ -544,6 +551,7 @@ pub struct Ast {
     pub imper_scopes: IndexVec<ImperScopeId, ImperScope>,
     pub imper_ns: IndexVec<ImperScopeNsId, ImperScopeNs>,
     pub mod_ns: IndexVec<ModScopeNsId, ModScopeNs>,
+    pub extend_block_ns: IndexVec<ExtendBlockNsId, ExtendBlockNs>,
     pub condition_ns: IndexVec<ConditionNsId, ConditionNs>,
     pub generic_context_ns: IndexVec<GenericContextNsId, GenericContextNs>,
     pub new_namespaces: IndexVec<NewNamespaceId, NewNamespace>,
@@ -626,6 +634,11 @@ pub enum ScopeState {
         namespace: ModScopeNsId,
         extern_mod: Option<ExternModId>,
     },
+    ExtendBlock {
+        namespace: ExtendBlockNsId,
+        id: ExtendBlockId,
+        extendee: ExprId,
+    },
     GenericContext(GenericContextNsId),
     Condition {
         ns: ConditionNsId,
@@ -650,17 +663,10 @@ struct FnDeclState {
 }
 
 #[derive(Debug)]
-pub struct ExtendBlockState {
-    id: ExtendBlockId,
-    extendee: ExprId,
-}
-
-#[derive(Debug)]
 pub struct Builder {
     fn_decl_stack: Vec<FnDeclState>,
     scope_stack: AutoPopStack<ScopeState>,
     generic_ctx_stack: AutoPopStack<GenericCtxId>,
-    extend_block_stack: AutoPopStack<ExtendBlockState>,
     debug_marked_exprs: HashSet<ExprId>,
     imper_roots: IndexVec<ImperRootId, ImperRoot>,
 
@@ -708,7 +714,6 @@ impl Default for Builder {
             fn_decl_stack: Default::default(),
             scope_stack: Default::default(),
             generic_ctx_stack: Default::default(),
-            extend_block_stack: Default::default(),
             debug_marked_exprs: Default::default(),
             imper_roots: Default::default(),
 
@@ -761,13 +766,16 @@ impl PartialEq<ScopeState> for ImperScopeId {
         }
     }
 }
-impl PartialEq<LoopState> for LoopId {
-    fn eq(&self, other: &LoopState) -> bool {
-        other.id == *self
+impl PartialEq<ScopeState> for ExtendBlockId {
+    fn eq(&self, other: &ScopeState) -> bool {
+        match other {
+            ScopeState::ExtendBlock { id, .. } => id == self,
+            _ => false,
+        }
     }
 }
-impl PartialEq<ExtendBlockState> for ExtendBlockId {
-    fn eq(&self, other: &ExtendBlockState) -> bool {
+impl PartialEq<LoopState> for LoopId {
+    fn eq(&self, other: &LoopState) -> bool {
         other.id == *self
     }
 }
@@ -935,7 +943,7 @@ impl Driver {
                 );
                 decl_id
             },
-            ScopeState::Condition { .. } | ScopeState::GenericContext(_) => panic!("Stored decl unsupported in this position"),
+            ScopeState::Condition { .. } | ScopeState::GenericContext(_) | ScopeState::ExtendBlock { .. } => panic!("Stored decl unsupported in this position"),
         }
     }
     pub fn ret(&mut self, expr: ExprId, range: SourceRange) -> ExprId {
@@ -1051,14 +1059,13 @@ impl Driver {
         let id = self.code.ast.struct_lits.next_idx();
         self.add_expr(Expr::StructLit { ty, fields, id }, range)
     }
-    pub fn begin_extend_block(&mut self, extendee: ExprId, range: SourceRange) -> (AutoPopStackEntry<ExtendBlockState, ExtendBlockId>, ExprId) {
+    pub fn begin_extend_block(&mut self, extendee: ExprId, range: SourceRange) -> (AutoPopStackEntry<ScopeState, ExtendBlockId>, ExprId) {
         let id = self.code.ast.extend_blocks.push(ExtendBlock { extendee, methods: Vec::new() });
         let expr = self.add_expr(Expr::ExtendBlock { extendee, id }, range);
-        let entry = self.ast.extend_block_stack.push(id, ExtendBlockState { id, extendee });
+        let parent = self.cur_namespace();
+        let namespace = self.code.ast.extend_block_ns.push(ExtendBlockNs { parent: Some(parent) });
+        let entry = self.push_to_scope_stack(id, ScopeState::ExtendBlock { namespace, id, extendee });
         (entry, expr)
-    }
-    pub fn end_extend_block(&mut self, entry: AutoPopStackEntry<ExtendBlockState, ExtendBlockId>, methods: Vec<DeclId>) {
-        self.code.ast.extend_blocks[entry.id()].methods = methods;
     }
     pub fn error_expr(&mut self, range: SourceRange) -> ExprId {
         self.add_expr(Expr::Error, range)
@@ -1194,6 +1201,9 @@ impl Driver {
             ScopeState::Mod { .. } => {
                 self.mod_scoped_decl(StaticDecl { name, decl: id });
             },
+            ScopeState::ExtendBlock { id: extend_block_id, .. } => {
+                self.code.ast.extend_blocks[extend_block_id].methods.push(id);
+            },
             ScopeState::Condition { .. } | ScopeState::GenericContext(_) => panic!("Function decls are not supported in this position"),
         }
         self.ast.fn_decl_stack.push(
@@ -1233,6 +1243,7 @@ impl Driver {
             ScopeState::Mod { .. } => {
                 self.mod_scoped_decl(StaticDecl { name, decl: id });
             },
+            ScopeState::ExtendBlock { id: extend_block_id, .. } => panic!("Function prototypes are not supported in this position"),
             ScopeState::Condition { .. } | ScopeState::GenericContext(_) => panic!("Function decls are not supported in this position"),
         }
 
@@ -1497,6 +1508,7 @@ impl Driver {
                 Namespace::Imper { scope: namespace, end_offset }
             },
             ScopeState::Mod { namespace, .. } => Namespace::Mod(namespace),
+            ScopeState::ExtendBlock { namespace, .. } => Namespace::ExtendBlock(namespace),
             ScopeState::GenericContext(ns) => Namespace::GenericContext(ns),
             ScopeState::Condition { ns, condition_kind: ConditionKind::Requirement } => Namespace::Requirement(ns),
             ScopeState::Condition { ns, condition_kind: ConditionKind::Guarantee } => Namespace::Guarantee(ns),
@@ -1519,7 +1531,7 @@ impl Driver {
         for scope in stack.iter().rev() {
             match *scope {
                 ScopeState::Imper { root, .. } => return Some(root),
-                ScopeState::Mod { .. } => break,
+                ScopeState::Mod { .. } | ScopeState::ExtendBlock { .. } => break,
                 ScopeState::Condition { .. } | ScopeState::GenericContext(_) => continue,
             }
         }

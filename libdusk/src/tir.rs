@@ -493,9 +493,10 @@ impl Driver {
                     }
                     condition_ns.parent
                 },
+                Namespace::ExtendBlock(ns_id) => self.code.ast.extend_block_ns[ns_id].parent,
                 Namespace::Invalid => {
                     panic!("internal compiler error: invalid namespace");
-                }
+                },
             };
 
             root_namespace = false;
