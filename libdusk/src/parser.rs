@@ -1577,8 +1577,23 @@ impl Driver {
     }
 
     fn parse_self_parameter(&mut self, p: &mut Parser, range: SourceRange) -> ExprId {
+        let op = if *self.cur(p).kind == TokenKind::Asterisk {
+            self.next(p);
+            if *self.cur(p).kind == TokenKind::Mut {
+                self.next(p);
+                Some(UnOp::PointerMut)
+            } else {
+                Some(UnOp::Pointer)
+            }
+        } else {
+            None
+        };
         if let Some(extendee) = self.is_in_extend_block_scope() {
-            extendee
+            if let Some(op) = op {
+                self.un_op(op, extendee, range)
+            } else {
+                extendee
+            }
         } else {
             self.diag.report_error_no_range_msg("free functions cannot have self parameters", range);
             ERROR_TYPE

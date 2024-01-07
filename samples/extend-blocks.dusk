@@ -5,8 +5,16 @@ extend MyStruct {
         MyStruct {}
     }
 
-    // TODO: add support for `self`, `self*` and `self *mut`, with no explicit type, as the first parameter
-    fn do_something_truly_amazing(self) {
+    fn do_something_truly_amazing_with_copy(self) {
+        print("Doing something amazing with a copy of self\n")
+    }
+
+    fn do_something_truly_amazing_with_immutable_pointer(self*) {
+        print("Doing something amazing with an immutable pointer to self\n")
+    }
+
+    fn do_something_truly_amazing_with_mutable_pointer(self *mut) {
+        print("Doing something amazing with a mutable pointer to self\n")
     }
 
     fn do_something_normal_and_not_amazing_at_all() {
@@ -17,9 +25,13 @@ extend MyStruct {
 fn main() {
     MyStruct.do_something_normal_and_not_amazing_at_all()
 
-    value :: MyStruct.new()
-    MyStruct.do_something_truly_amazing(value)
+    value := MyStruct.new()
+    MyStruct.do_something_truly_amazing_with_copy(value)
+    MyStruct.do_something_truly_amazing_with_immutable_pointer(&value)
+    MyStruct.do_something_truly_amazing_with_mutable_pointer(&mut value)
 
     // TODO: support calling instance methods:
-    // value.do_something_truly_amazing()
+    // value.do_something_truly_amazing_with_copy()
+    // value.do_something_truly_amazing_with_immutable_pointer()
+    // value.do_something_truly_amazing_with_mutable_pointer()
 }
