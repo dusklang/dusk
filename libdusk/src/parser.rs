@@ -1451,7 +1451,7 @@ impl Driver {
         let name_range = self.cur(p).range;
         proto_range = source_info::concat(proto_range, name_range);
 
-        // Parse optional [T, U, V, ...]
+        // Parse optional <|T, U, V, ...|>
         let mut generic_param_list = GenericParamList::default();
         if let TokenKind::OpenGenerics = self.next(p).kind {
             let open_square_bracket_range = self.cur(p).range;
@@ -1497,6 +1497,7 @@ impl Driver {
                 let param_range = self.cur(p).range;
                 param_names.push(name);
                 self.next(p);
+
                 self.eat_tok(p, TokenKind::Colon)?;
                 let (ty, _ty_range) = self.parse_type(p);
                 param_ranges.push(param_range);
