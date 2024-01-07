@@ -693,7 +693,7 @@ macro_rules! declare_known_idents {
         $interner.get_or_intern(stringify!($name))
     };
 }
-declare_known_idents!(requires, guarantees, comptime, return_value, invalid_declref, underscore = "_");
+declare_known_idents!(requires, guarantees, comptime, return_value, invalid_declref, salf = "self", capital_self = "Self", underscore = "_");
 
 impl Default for Builder {
     fn default() -> Self {
