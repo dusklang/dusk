@@ -5,7 +5,7 @@ use smallvec::{SmallVec, smallvec};
 use string_interner::DefaultSymbol as Sym;
 use derivative::Derivative;
 
-use crate::ast::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, LegacyIntrinsic, Attribute, FieldAssignment, Ident, Pattern, PatternKind, SwitchCase, ImperScopedDecl, ExternMod, ERROR_EXPR, ERROR_TYPE, VOID_TYPE, ParamList};
+use crate::ast::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, LegacyIntrinsic, Attribute, FieldAssignment, Ident, Pattern, PatternKind, SwitchCase, ImperScopedDecl, ExternMod, ERROR_EXPR, ERROR_TYPE, VOID_TYPE, ParamList, SelfParameter, SelfParameterKind};
 use crate::ty::Type;
 use crate::source_info::{self, SourceFileId, SourceRange};
 
@@ -1489,6 +1489,7 @@ impl Driver {
         let mut param_names = SmallVec::new();
         let mut param_tys = SmallVec::new();
         let mut param_ranges = SmallVec::new();
+        let mut self_parameter = None;
         if let TokenKind::LeftParen = self.cur(p).kind {
             self.next(p);
             let parameter_list = self.begin_list(p, TokenKind::could_begin_parameter, [TokenKind::Comma], Some(TokenKind::RightParen));
@@ -1502,13 +1503,22 @@ impl Driver {
                     // Handle `self` parameters.
                     if name == self.ast.known_idents.salf {
                         if *self.cur(p).kind != TokenKind::Colon {
-                            let ty = self.parse_self_parameter(p, param_range);
-                            // `parse_self_parameter` will return ERROR_TYPE in the case where this self parameter is inside a free function's parameter list.
-                            // In that case, we shouldn't diagnose diagnose the fact that it doesn't come first in the parameter list, because it shouldn't be there at all.
-                            // Hence the check for `ty != ERROR_TYPE` below.
-                            if param_names.len() > 1 && ty != ERROR_TYPE {
-                                self.diag.report_error_no_range_msg("`self` must come first in parameter list", param_range);
+                            let self_param = self.parse_self_parameter(p, param_range);
+                            if param_names.len() > 1 {
+                                // `parse_self_parameter` will return ERROR_TYPE as the self type in the case where this self parameter is inside a free function's parameter list.
+                                // In that case, we shouldn't diagnose diagnose the fact that it doesn't come first in the parameter list, because it shouldn't be there at all.
+                                // Hence the check for `ty != ERROR_TYPE` below.
+                                if self_param.self_ty != ERROR_TYPE {
+                                    self.diag.report_error_no_range_msg("`self` must come first in parameter list", param_range);
+                                }
+                            } else {
+                                self_parameter = Some(self_param);
                             }
+                            let ty = match self_param.kind {
+                                SelfParameterKind::Owned => self_param.self_ty,
+                                SelfParameterKind::Ptr => self.un_op(UnOp::Pointer, self_param.self_ty, param_range),
+                                SelfParameterKind::MutPtr => self.un_op(UnOp::PointerMut, self_param.self_ty, param_range),
+                            };
                             break 'blk ty;
                         }
                     }
@@ -1560,7 +1570,7 @@ impl Driver {
 
         let decl_id = match self.cur(p).kind {
             TokenKind::OpenCurly => {
-                let decl_id = self.begin_fn_decl(name, param_names, param_list.param_tys, param_ranges, generic_param_list.ids.clone(), generic_params, ty, proto_range);
+                let decl_id = self.begin_fn_decl(name, param_names, param_list.param_tys, param_ranges, self_parameter, generic_param_list.ids.clone(), generic_params, ty, proto_range);
                 self.parse_scope(p, &[])?;
                 self.end_fn_decl();
                 decl_id
@@ -1576,28 +1586,27 @@ impl Driver {
         Ok(decl_id)
     }
 
-    fn parse_self_parameter(&mut self, p: &mut Parser, range: SourceRange) -> ExprId {
-        let op = if *self.cur(p).kind == TokenKind::Asterisk {
+    fn parse_self_parameter(&mut self, p: &mut Parser, range: SourceRange) -> SelfParameter {
+        let kind = if *self.cur(p).kind == TokenKind::Asterisk {
             self.next(p);
             if *self.cur(p).kind == TokenKind::Mut {
                 self.next(p);
-                Some(UnOp::PointerMut)
+                SelfParameterKind::MutPtr
             } else {
-                Some(UnOp::Pointer)
+                SelfParameterKind::Ptr
             }
         } else {
-            None
+            SelfParameterKind::Owned
         };
-        if let Some(extendee) = self.is_in_extend_block_scope() {
-            if let Some(op) = op {
-                self.un_op(op, extendee, range)
-            } else {
-                extendee
-            }
+
+        let self_ty = if let Some(extendee) = self.is_in_extend_block_scope() {
+            extendee
         } else {
             self.diag.report_error_no_range_msg("free functions cannot have self parameters", range);
             ERROR_TYPE
-        }
+        };
+
+        SelfParameter { kind, self_ty }
     }
 
     fn parse_extend_block(&mut self, p: &mut Parser) -> ParseResult<ExprId> {

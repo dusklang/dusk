@@ -9,7 +9,7 @@ use constraints::*;
 use crate::index_vec::range_iter;
 use crate::type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 
-use crate::ast::{self, ExprId, DeclId, StructId, PatternKind, Ident, VOID_EXPR, GenericCtx, DeclRefId, Decl, NewNamespaceId, StaticDecl};
+use crate::ast::{self, ExprId, DeclId, StructId, PatternKind, Ident, VOID_EXPR, GenericCtx, DeclRefId, Decl, NewNamespaceId, StaticDecl, InstanceDecl, SelfParameterKind};
 use crate::mir::Const;
 use crate::ty::{Type, LegacyInternalType, FunctionType, QualType, IntWidth, StructType};
 use crate::source_info::SourceRange;
@@ -1036,6 +1036,33 @@ impl tir::Expr<tir::Call> {
                             }
                         }
                     }
+                } else if let Some(self_param) = driver.code.ast.decl_self_parameters[overload] {
+                    let self_ty = tp.get_evaluated_type(self_param.self_ty);
+                    let ast::Namespace::MemberRef { base_expr } = driver.code.ast.decl_refs[decl_ref_id].namespace else {
+                        panic!("expected MemberRef as base of method intrinsic call");
+                    };
+                    // TODO: distinguish between method calls on an instance, and UFCS method calls on the type
+                    // TODO: handle more cases of differing indirection
+                    // maybe TODO: assign ranks to overloads based on how closely they match in terms of indirection
+                    match self_param.kind {
+                        SelfParameterKind::Owned => {
+                            if driver.can_unify_to(tp, base_expr, &QualType::from(self_ty.clone())).is_err() {
+                                return false;
+                            }
+                        },
+                        SelfParameterKind::Ptr => {
+                            if driver.can_unify_to(tp, base_expr, &QualType::from(self_ty.clone())).is_err() &&
+                                driver.can_unify_to(tp, base_expr, &QualType::from(self_ty.clone().ptr())).is_err() {
+                                return false;
+                            }
+                        },
+                        SelfParameterKind::MutPtr => {
+                            if driver.can_unify_to(tp, base_expr, &QualType { ty: self_ty.clone(), is_mut: true }).is_err() &&
+                                driver.can_unify_to(tp, base_expr, &QualType::from(self_ty.clone().mut_ptr())).is_err() {
+                                return false;
+                            }
+                        },
+                    }
                 }
             }
             
@@ -1759,7 +1786,25 @@ impl DriverRef<'_> {
                 let block = self.read().code.ast.extend_blocks[block_id].clone();
                 let extendee_ty = tp.get_evaluated_type(block.extendee);
                 let ns = self.read().find_namespace_for_type(extendee_ty);
-                for method in block.methods {
+                for method in block.static_methods {
+                    let name = self.read().code.ast.names[method];
+                    self.write().code.ast.new_namespaces[ns].static_decls.push(
+                        StaticDecl {
+                            name,
+                            decl: method,
+                        }
+                    );
+                }
+
+                for method in block.instance_methods {
+                    self.write().code.ast.new_namespaces[ns].instance_decls.push(
+                        InstanceDecl {
+                            decl: method,
+                            field_info: None,
+                        }
+                    );
+
+                    // Add to static decls as well, so we can call it using UFCS style.
                     let name = self.read().code.ast.names[method];
                     self.write().code.ast.new_namespaces[ns].static_decls.push(
                         StaticDecl {

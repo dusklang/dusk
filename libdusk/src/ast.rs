@@ -174,7 +174,18 @@ pub struct DeclRef {
 #[derive(Debug, Clone)]
 pub struct ExtendBlock {
     pub extendee: ExprId,
-    pub methods: Vec<DeclId>,
+    pub static_methods: Vec<DeclId>,
+    pub instance_methods: Vec<DeclId>,
+}
+
+impl ExtendBlock {
+    fn new(extendee: ExprId) -> Self {
+        Self {
+            extendee,
+            static_methods: Default::default(),
+            instance_methods: Default::default(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -533,6 +544,19 @@ pub struct Attribute {
     pub range: SourceRange,
 }
 
+#[derive(Clone, Copy)]
+pub enum SelfParameterKind {
+    Owned,
+    Ptr,
+    MutPtr,
+}
+
+#[derive(Clone, Copy)]
+pub struct SelfParameter {
+    pub kind: SelfParameterKind,
+    pub self_ty: ExprId,
+}
+
 #[derive(Default)]
 pub struct Ast {
     pub items: IndexVec<ItemId, Item>,
@@ -542,6 +566,7 @@ pub struct Ast {
     pub decls: IndexVec<DeclId, Decl>,
     pub pattern_binding_decls: IndexVec<PatternBindingDeclId, PatternBindingDecl>,
     pub decl_attributes: HashMap<DeclId, Vec<Attribute>>,
+    pub decl_self_parameters: IndexVec<DeclId, Option<SelfParameter>>,
     pub expr_to_items: IndexVec<ExprId, ItemId>,
     pub decl_to_items: IndexVec<DeclId, ItemId>,
     pub names: IndexVec<DeclId, Sym>,
@@ -842,7 +867,7 @@ impl Driver {
         expr_id
     }
 
-    pub fn add_decl(&mut self, decl: Decl, name: Sym, explicit_ty: Option<ExprId>, range: SourceRange) -> DeclId {
+    pub fn add_decl_with_self_parameter(&mut self, decl: Decl, name: Sym, explicit_ty: Option<ExprId>, range: SourceRange, self_parameter: Option<SelfParameter>) -> DeclId {
         // TODO: I used to require callers to explicitly pass in the generic ctx id, but it seems fine to just take it
         // from the top of the stack. Is there some major downside to this approach that I have since forgotten?
         // NOTE: also, see add_expr()
@@ -850,6 +875,7 @@ impl Driver {
         let decl_id = self.code.ast.decls.push(decl);
         self.code.ast.explicit_tys.push_at(decl_id, explicit_ty);
         self.code.ast.names.push_at(decl_id, name);
+        self.code.ast.decl_self_parameters.push_at(decl_id, self_parameter);
 
         let item_id = self.code.ast.items.push(Item::Decl(decl_id));
         self.code.ast.decl_to_items.push_at(decl_id, item_id);
@@ -863,6 +889,10 @@ impl Driver {
         });
 
         decl_id
+    }
+
+    pub fn add_decl(&mut self, decl: Decl, name: Sym, explicit_ty: Option<ExprId>, range: SourceRange) -> DeclId {
+        self.add_decl_with_self_parameter(decl, name, explicit_ty, range, None)
     }
 
     pub fn int_lit(&mut self, lit: u64, range: SourceRange) -> ExprId {
@@ -1071,7 +1101,7 @@ impl Driver {
         self.add_expr(Expr::StructLit { ty, fields, id }, range)
     }
     pub fn begin_extend_block(&mut self, extendee: ExprId, range: SourceRange) -> (AutoPopStackEntry<ScopeState, ExtendBlockId>, ExprId) {
-        let id = self.code.ast.extend_blocks.push(ExtendBlock { extendee, methods: Vec::new() });
+        let id = self.code.ast.extend_blocks.push(ExtendBlock::new(extendee));
         let expr = self.add_expr(Expr::ExtendBlock { extendee, id }, range);
         let parent = self.cur_namespace();
         let namespace = self.code.ast.extend_block_ns.push(ExtendBlockNs { parent: Some(parent) });
@@ -1180,9 +1210,9 @@ impl Driver {
     pub fn begin_decl_generic_ctx(&mut self, generic_param_list: GenericParamList) -> AutoPopStackEntry<GenericCtxId> {
         self.push_generic_ctx(|parent| GenericCtx::Decl { parameters: generic_param_list.ids, parent })
     }
-    pub fn begin_fn_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, generic_params: Range<GenericParamId>, generic_param_decls: Range<DeclId>, return_ty: ExprId, proto_range: SourceRange) -> DeclId {
+    pub fn begin_fn_decl(&mut self, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, self_parameter: Option<SelfParameter>, generic_params: Range<GenericParamId>, generic_param_decls: Range<DeclId>, return_ty: ExprId, proto_range: SourceRange) -> DeclId {
         // This is a placeholder value that gets replaced once the parameter declarations get allocated.
-        let id = self.add_decl(Decl::Static(ExprId::new(u32::MAX as usize)), name, Some(return_ty), proto_range);
+        let id = self.add_decl_with_self_parameter(Decl::Static(ExprId::new(u32::MAX as usize)), name, Some(return_ty), proto_range, self_parameter);
 
         assert_eq!(param_names.len(), param_tys.len());
         self.code.ast.decls.reserve(param_tys.len());
@@ -1213,7 +1243,11 @@ impl Driver {
                 self.mod_scoped_decl(StaticDecl { name, decl: id });
             },
             ScopeState::ExtendBlock { id: extend_block_id, .. } => {
-                self.code.ast.extend_blocks[extend_block_id].methods.push(id);
+                if self_parameter.is_some() {
+                    self.code.ast.extend_blocks[extend_block_id].instance_methods.push(id);
+                } else {
+                    self.code.ast.extend_blocks[extend_block_id].static_methods.push(id);
+                }
             },
             ScopeState::Condition { .. } | ScopeState::GenericContext(_) => panic!("Function decls are not supported in this position"),
         }
@@ -1254,7 +1288,7 @@ impl Driver {
             ScopeState::Mod { .. } => {
                 self.mod_scoped_decl(StaticDecl { name, decl: id });
             },
-            ScopeState::ExtendBlock { id: extend_block_id, .. } => panic!("Function prototypes are not supported in this position"),
+            ScopeState::ExtendBlock { .. } => panic!("Function prototypes are not supported in this position"),
             ScopeState::Condition { .. } | ScopeState::GenericContext(_) => panic!("Function decls are not supported in this position"),
         }
 
