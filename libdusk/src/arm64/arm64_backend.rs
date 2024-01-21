@@ -7,7 +7,7 @@ use crate::mir::{Instr, Const};
 use crate::exe::*;
 
 impl Driver {
-    pub fn generate_arm64_func(&self, code: &mut Arm64Encoder, func_index: usize, is_main: bool, exe: &mut dyn Exe, lib_system: DylibId) {
+    pub fn generate_arm64_func(&self, code: &mut Arm64Encoder, func_index: usize, is_main: bool, exe: &mut dyn Exe, _lib_system: DylibId) {
         let func = &self.code.mir.functions[func_index];
         assert_eq!(func.blocks.len(), 1);
         assert_eq!(self.code.num_parameters(func), 0);
