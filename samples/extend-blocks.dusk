@@ -30,8 +30,7 @@ fn main() {
     MyStruct.do_something_truly_amazing_with_immutable_pointer(&value)
     MyStruct.do_something_truly_amazing_with_mutable_pointer(&mut value)
 
-    // TODO: support calling instance methods:
     value.do_something_truly_amazing_with_copy()
-    // value.do_something_truly_amazing_with_immutable_pointer()
-    // value.do_something_truly_amazing_with_mutable_pointer()
+    value.do_something_truly_amazing_with_immutable_pointer()
+    value.do_something_truly_amazing_with_mutable_pointer()
 }

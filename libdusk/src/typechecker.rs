@@ -1015,13 +1015,7 @@ impl tir::Expr<tir::Call> {
                 return false;
             };
 
-            if
-                self.args.len() < func.param_tys.len() ||
-                (self.args.len() > func.param_tys.len() && !func.has_c_variadic_param)
-            {
-                return false;
-            }
-            
+            let mut num_args = self.args.len();
             if let Some(overload) = overload {
                 if let Decl::MethodIntrinsic(intr) = df!(driver, overload.ast) {
                     let self_ty = driver.code.ast.intrinsics[intr].param_tys[0];
@@ -1039,31 +1033,53 @@ impl tir::Expr<tir::Call> {
                 } else if let Some(self_param) = driver.code.ast.decl_self_parameters[overload] {
                     let self_ty = tp.get_evaluated_type(self_param.self_ty);
                     let ast::Namespace::MemberRef { base_expr } = driver.code.ast.decl_refs[decl_ref_id].namespace else {
-                        panic!("expected MemberRef as base of method intrinsic call");
+                        panic!("expected MemberRef as base of method call");
                     };
-                    // TODO: distinguish between method calls on an instance, and UFCS method calls on the type
-                    // TODO: handle more cases of differing indirection
-                    // maybe TODO: assign ranks to overloads based on how closely they match in terms of indirection
-                    match self_param.kind {
-                        SelfParameterKind::Owned => {
-                            if driver.can_unify_to(tp, base_expr, &QualType::from(self_ty.clone())).is_err() {
-                                return false;
-                            }
-                        },
-                        SelfParameterKind::Ptr => {
-                            if driver.can_unify_to(tp, base_expr, &QualType::from(self_ty.clone())).is_err() &&
-                                driver.can_unify_to(tp, base_expr, &QualType::from(self_ty.clone().ptr())).is_err() {
-                                return false;
-                            }
-                        },
-                        SelfParameterKind::MutPtr => {
-                            if driver.can_unify_to(tp, base_expr, &QualType { ty: self_ty.clone(), is_mut: true }).is_err() &&
-                                driver.can_unify_to(tp, base_expr, &QualType::from(self_ty.clone().mut_ptr())).is_err() {
-                                return false;
-                            }
-                        },
+
+                    let expr_namespaces = &driver.tir.expr_namespaces[&base_expr];
+
+                    let is_instance = expr_namespaces.iter().any(|ns| {
+                        let ExprNamespace::New(_, kind) = ns else {
+                            return false;
+                        };
+
+                        matches!(kind, NewNamespaceRefKind::Instance)
+                    });
+
+                    if is_instance {
+                        num_args += 1;
+
+                        // TODO: distinguish between method calls on an instance, and UFCS method calls on the type
+                        // TODO: handle more cases of differing indirection
+                        // maybe TODO: assign ranks to overloads based on how closely they match in terms of indirection
+                        match self_param.kind {
+                            SelfParameterKind::Owned => {
+                                if driver.can_unify_to(tp, base_expr, &QualType::from(self_ty.clone())).is_err() {
+                                    return false;
+                                }
+                            },
+                            SelfParameterKind::Ptr => {
+                                if driver.can_unify_to(tp, base_expr, &QualType::from(self_ty.clone())).is_err() &&
+                                    driver.can_unify_to(tp, base_expr, &QualType::from(self_ty.clone().ptr())).is_err() {
+                                    return false;
+                                }
+                            },
+                            SelfParameterKind::MutPtr => {
+                                if driver.can_unify_to(tp, base_expr, &QualType { ty: self_ty.clone(), is_mut: true }).is_err() &&
+                                    driver.can_unify_to(tp, base_expr, &QualType::from(self_ty.clone().mut_ptr())).is_err() {
+                                    return false;
+                                }
+                            },
+                        }
                     }
                 }
+            }
+
+            if
+                num_args < func.param_tys.len() ||
+                (num_args > func.param_tys.len() && !func.has_c_variadic_param)
+            {
+                return false;
             }
             
             // Check that arguments can unify to their corresponding parameter types, and apply constraints to generic type parameters in the process

@@ -330,7 +330,7 @@ pub enum NameLookup {
     Beginning(String),
 }
 
-#[derive(Hash, PartialEq, Eq)]
+#[derive(Hash, PartialEq, Eq, Debug)]
 pub enum OverloadScope {
     Normal,
 
