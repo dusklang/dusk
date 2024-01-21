@@ -1049,8 +1049,7 @@ impl tir::Expr<tir::Call> {
                     if is_instance {
                         num_args += 1;
 
-                        // TODO: distinguish between method calls on an instance, and UFCS method calls on the type
-                        // TODO: handle more cases of differing indirection
+                        // TODO: handle at least a few more cases of differing indirection
                         // maybe TODO: assign ranks to overloads based on how closely they match in terms of indirection
                         match self_param.kind {
                             SelfParameterKind::Owned => {
