@@ -264,12 +264,20 @@ impl Default for Function {
 }
 
 impl Code {
-    pub fn num_parameters(&self, func: &Function) -> usize {
+    pub fn parameter_tys(&self, func: &Function) -> impl Iterator<Item=&Type> {
         let entry = func.blocks[0];
         let block = &self.blocks[entry];
         block.ops.iter()
-            .filter(|&&op| matches!(self.ops[op].as_mir_instr().unwrap(), Instr::Parameter(_)))
-            .count()
+            .filter_map(|&op| {
+                match self.ops[op].as_mir_instr().unwrap() {
+                    Instr::Parameter(ty) => Some(ty),
+                    _ => None,
+                }
+            })
+    }
+
+    pub fn num_parameters(&self, func: &Function) -> usize {
+        self.parameter_tys(func).count()
     }
 
     #[display_adapter]
@@ -2303,7 +2311,29 @@ impl DriverRef<'_> {
 
                 match decl_ref {
                     DeclRef::Function { func, generic_args } => {
-                        let arguments = get_args(self, b, tp, &arguments);
+                        let d = self.read();
+                        let Expr::DeclRef { id: decl_ref_id, .. } = ef!(d, callee.ast) else {
+                            panic!("expected declref callee");
+                        };
+                        drop(d);
+                        let mut arguments = get_args(self, b, tp, &arguments);
+                        let d = self.read();
+                        // Handle method calls.
+                        // TODO: comparing the number of arguments to the number of parameters to determine whether this is a method call is kind of a horrible hack
+                        // TODO: unify code here with the near-identical `DeclRef::MethodIntrinsic` case
+                        if arguments.len() != d.code.num_parameters(&d.code.mir.functions[func]) {
+                            let base = d.get_base(decl_ref_id);
+                            drop(d);
+                            let base_ty = tp.ty(base);
+                            let self_ty = self.read().code.parameter_tys(&self.read().code.mir.functions[func]).next().unwrap().clone();
+                            let indirection = !base_ty.trivially_convertible_to(&self_ty) as i8;
+                            let base = self.build_expr(b, base, Context::new(indirection, DataDest::Read, ControlDest::Continue), tp);
+                            let base = self.write().handle_indirection(b, base);
+
+                            arguments.insert(0, base);
+                        } else {
+                            drop(d);
+                        }
                         self.write().push_instr(b, Instr::Call { func, arguments, generic_arguments: generic_args }, expr).direct()
                     },
                     DeclRef::ExternFunction { func } => {
