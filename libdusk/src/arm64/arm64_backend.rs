@@ -7,7 +7,7 @@ use crate::mir::{Instr, Const};
 use crate::exe::*;
 
 impl Driver {
-    pub fn generate_arm64_func(&self, code: &mut Arm64Encoder, func_index: usize, is_main: bool, exe: &mut dyn Exe, _lib_system: DylibId) {
+    pub fn generate_arm64_func(&self, code: &mut Arm64Encoder, func_index: usize, is_main: bool, exe: &mut dyn Exe, _lib_system: DynLibId) {
         let func = &self.code.mir.functions[func_index];
         assert_eq!(func.blocks.len(), 1);
         assert_eq!(self.code.num_parameters(func), 0);
@@ -21,7 +21,7 @@ impl Driver {
                 Instr::Const(konst) => {
                     match konst {
                         &Const::Str { id, .. } => {
-                            let libobjc = exe.import_dylib("libobjc");
+                            let libobjc = exe.import_dynamic_library(DynamicLibrarySource::Name("libobjc"));
                             let objc_msg_send = exe.import_symbol(libobjc, "_objc_msgSend".to_string());
                             let objc_msg_send = exe.use_imported_symbol(objc_msg_send);
                             code.load_fixed_up_address(Reg::R16, objc_msg_send);
@@ -45,7 +45,7 @@ impl Driver {
                 Instr::LegacyIntrinsic { intr, .. } => {
                     match intr {
                         LegacyIntrinsic::Print => {
-                            let foundation = exe.import_framework("Foundation");
+                            let foundation = exe.import_dynamic_library(DynamicLibrarySource::FrameworkName("Foundation"));
                             let puts = exe.import_symbol(foundation, "_NSLog".to_string());
                             let puts = exe.use_imported_symbol(puts);
                             code.load_fixed_up_address(Reg::R16, puts);

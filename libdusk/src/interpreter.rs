@@ -857,28 +857,28 @@ impl Driver {
 }
 
 #[cfg(windows)]
-unsafe fn open_dylib(path: *const i8) -> *mut c_void {
+unsafe fn open_dyn_lib(path: *const i8) -> *mut c_void {
     winapi::um::libloaderapi::LoadLibraryA(path) as *mut _
 }
 #[cfg(not(windows))]
-unsafe fn open_dylib(path: *const i8) -> *mut c_void {
+unsafe fn open_dyn_lib(path: *const i8) -> *mut c_void {
     libc::dlopen(path, libc::RTLD_LAZY)
 }
 #[cfg(windows)]
-unsafe fn get_dylib_symbol(dylib: *mut c_void, name: *const i8) -> *const c_void {
-    winapi::um::libloaderapi::GetProcAddress(dylib as *mut _, name) as *const _
+unsafe fn get_dyn_lib_symbol(dyn_lib: *mut c_void, name: *const i8) -> *const c_void {
+    winapi::um::libloaderapi::GetProcAddress(dyn_lib as *mut _, name) as *const _
 }
 #[cfg(not(windows))]
-unsafe fn get_dylib_symbol(dylib: *mut c_void, name: *const i8) -> *const c_void {
-    libc::dlsym(dylib, name)
+unsafe fn get_dyn_lib_symbol(dyn_lib: *mut c_void, name: *const i8) -> *const c_void {
+    libc::dlsym(dyn_lib, name)
 }
 #[cfg(windows)]
-unsafe fn free_dylib(dylib: *mut c_void) {
-    winapi::um::libloaderapi::FreeLibrary(dylib as *mut _);
+unsafe fn free_dyn_lib(dyn_lib: *mut c_void) {
+    winapi::um::libloaderapi::FreeLibrary(dyn_lib as *mut _);
 }
 #[cfg(not(windows))]
-unsafe fn free_dylib(dylib: *mut c_void) {
-    libc::dlclose(dylib);
+unsafe fn free_dyn_lib(dyn_lib: *mut c_void) {
+    libc::dlclose(dyn_lib);
 }
 
 impl DriverRef<'_> {
@@ -1173,12 +1173,12 @@ impl DriverRef<'_> {
         let library = &self.read().code.mir.extern_mods[&func_ref.extern_mod];
         let func = &library.imported_functions[func_ref.index];
         // TODO: cache library and proc addresses (and thunks when possible)
-        let dylib = unsafe { open_dylib(library.library_path.as_ptr()) };
-        if dylib.is_null() {
+        let dyn_lib = unsafe { open_dyn_lib(library.library_path.as_ptr()) };
+        if dyn_lib.is_null() {
             panic!("unable to load library {:?}", library.library_path);
         }
         let func_name = CString::new(func.name.clone()).unwrap();
-        let func_ptr = unsafe { get_dylib_symbol(dylib, func_name.as_ptr()) };
+        let func_ptr = unsafe { get_dyn_lib_symbol(dyn_lib, func_name.as_ptr()) };
         if func_ptr.is_null() {
             panic!("unable to load function {:?} from library {:?}", func_name, library.library_path);
         }
@@ -1193,7 +1193,7 @@ impl DriverRef<'_> {
             return_val_storage.resize(self.read().size_of(&func.ty.return_ty), 0);
             thunk(indirect_args.as_ptr(), return_val_storage.as_mut_ptr());
 
-            free_dylib(dylib);
+            free_dyn_lib(dyn_lib);
 
             Value::Inline(return_val_storage)
         }
@@ -1283,7 +1283,7 @@ impl DriverRef<'_> {
                     let mut interp = INTERP.write().unwrap();
                     let cache = interp.lib_cache.entry(extern_mod).or_insert_with(|| {
                         // TODO: cache library and proc addresses (and thunks when possible)
-                        let base = unsafe { open_dylib(library.library_path.as_ptr()) };
+                        let base = unsafe { open_dyn_lib(library.library_path.as_ptr()) };
                         if base.is_null() {
                             panic!("unable to load library {:?}", library.library_path);
                         }

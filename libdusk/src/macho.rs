@@ -985,7 +985,7 @@ impl MachOEncoder {
     
     pub fn write(&mut self, d: &Driver, main_function_index: usize, dest: &mut impl Write) -> io::Result<()> {
         let mut exe = MachOExe::new();
-        let lib_system = exe.import_dylib("libSystem");
+        let lib_system = exe.import_dynamic_library(DynamicLibrarySource::Name("libSystem"));
 
         let mut code = Arm64Encoder::new();
         d.generate_arm64_func(&mut code, main_function_index, true, &mut exe, lib_system);
@@ -1648,7 +1648,7 @@ struct MachODylib {
 
 #[derive(Clone, Hash, PartialEq, Eq)]
 struct MachOImportedSymbol {
-    dylib: DylibId,
+    dylib: DynLibId,
     name: String,
 }
 
@@ -1679,8 +1679,8 @@ struct ObjcSelector {
 
 #[derive(Default)]
 struct MachOExe {
-    dylibs: IndexVec<DylibId, MachODylib>,
-    dylib_map: HashMap<PathBuf, DylibId>,
+    dylibs: IndexVec<DynLibId, MachODylib>,
+    dylib_map: HashMap<PathBuf, DynLibId>,
 
     imported_symbols: IndexVec<ImportedSymbolId, MachOImportedSymbol>,
     imported_symbol_map: HashMap<MachOImportedSymbol, ImportedSymbolId>,
@@ -1712,21 +1712,6 @@ impl MachOExe {
         Default::default()
     }
 
-    fn import_dylib_impl(&mut self, tbd_path: PathBuf) -> DylibId {
-        *self.dylib_map.entry(tbd_path.clone()).or_insert_with(|| {
-            // TODO: error handling
-            let tbd = parse_tbd(&tbd_path).unwrap();
-            self.dylibs.push(
-                MachODylib {
-                    name: tbd.name,
-                    timestamp: 2,
-                    current_version: tbd.current_version,
-                    compatibility_version: tbd.compatibility_version,
-                }
-            )
-        })
-    }
-
     #[doc(hidden)]
     fn intern_cstring(&mut self, string: &CStr) -> usize {
         *self.cstring_map.entry(string.to_owned()).or_insert_with(|| {
@@ -1756,22 +1741,29 @@ impl MachOExe {
 }
 
 impl Exe for MachOExe {
-    fn import_dylib(&mut self, name: &str) -> DylibId {
-        let mut path = PathBuf::from(SDK_ROOT);
-        path.push("usr/lib/");
-        path.push(&name);
-        path.set_extension("tbd");
-        self.import_dylib_impl(path)
+    fn import_dynamic_library(&mut self, source: DynamicLibrarySource) -> DynLibId {
+        let mut tbd_path = PathBuf::from(SDK_ROOT);
+        match source {
+            DynamicLibrarySource::Name(name) => tbd_path.push(format!("usr/lib/{}", name)),
+            DynamicLibrarySource::FrameworkName(name) => tbd_path.push(format!("System/Library/Frameworks/{}.framework/{}", name, name)),
+        }
+        tbd_path.set_extension("tbd");
+
+        *self.dylib_map.entry(tbd_path.clone()).or_insert_with(|| {
+            // TODO: error handling
+            let tbd = parse_tbd(&tbd_path).unwrap();
+            self.dylibs.push(
+                MachODylib {
+                    name: tbd.name,
+                    timestamp: 2,
+                    current_version: tbd.current_version,
+                    compatibility_version: tbd.compatibility_version,
+                }
+            )
+        })
     }
 
-    fn import_framework(&mut self, name: &str) -> DylibId {
-        let mut path = PathBuf::from(SDK_ROOT);
-        path.push(format!("System/Library/Frameworks/{}.framework/{}", name, name));
-        path.set_extension("tbd");
-        self.import_dylib_impl(path)
-    }
-
-    fn import_symbol(&mut self, dylib: DylibId, name: String) -> ImportedSymbolId {
+    fn import_symbol(&mut self, dylib: DynLibId, name: String) -> ImportedSymbolId {
         let symbol = MachOImportedSymbol { dylib, name };
         *self.imported_symbol_map.entry(symbol.clone()).or_insert_with(|| {
             self.imported_symbols.push(symbol.clone())
@@ -1790,7 +1782,7 @@ impl Exe for MachOExe {
 
     fn use_constant_nsstring(&mut self, string: &CStr) -> FixupLocationId {
         if self.cf_constant_string_class_reference_import.is_none() {
-            let foundation = self.import_framework("Foundation");
+            let foundation = self.import_dynamic_library(DynamicLibrarySource::FrameworkName("Foundation"));
             let sym = self.import_symbol(foundation, "___CFConstantStringClassReference".to_string());
             self.cf_constant_string_class_reference_import = Some(sym);
         }
