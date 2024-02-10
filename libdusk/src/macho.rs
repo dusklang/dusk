@@ -10,6 +10,8 @@ use std::path::PathBuf;
 
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
+use crate::backend::arm64::Arm64Encoder;
+use crate::backend::{Indirection, CodeBlob, CodeBlobExt};
 use crate::exe::*;
 use crate::index_vec::*;
 use crate::tbd_parser::parse_tbd;
@@ -51,8 +53,6 @@ impl<T: ByteSwap, const N: usize> ByteSwap for [T; N] {
 }
 
 byte_swap_impl!(noops: u8, i8; nums: u16, u32, u64, usize, i16, i32, i64, isize);
-
-use crate::arm64::{Arm64Encoder, Indirection};
 
 #[derive(Default)]
 pub struct MachOEncoder {
@@ -987,18 +987,17 @@ impl MachOEncoder {
         let mut exe = MachOExe::new();
         let lib_system = exe.import_dynamic_library(DynamicLibrarySource::Name("libSystem"));
 
-        let mut code = Arm64Encoder::new();
-        d.generate_arm64_func(&mut code, main_function_index, true, &mut exe, lib_system);
+        let mut code = d.generate_arm64_func(main_function_index, true, &mut exe);
 
         let mach_header = self.alloc::<MachHeader>();
-        
+
         let lc_begin = self.pos();
 
         let page_zero = self.alloc_segment("__PAGEZERO", VM_PROT_NONE, 0);
         self.add_info_to_segment(page_zero, SegmentOffset::PageZero, SegmentSize::Different { vm_size: TEXT_ADDR as usize, file_size: 0 });
         
         let mut text_segment = self.alloc_text_segment();
-        let text_section = self.reserve_text_section(&mut text_segment, "__text", code.get_bytes().len(), 4, SectionFlags::new(SectionType::Regular, S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS));
+        let text_section = self.reserve_text_section(&mut text_segment, "__text", code.len(), 4, SectionFlags::new(SectionType::Regular, S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS));
         let cstring_section = (!exe.cstrings.is_empty()).then(|| self.reserve_text_section(&mut text_segment, "__cstring", exe.cstrings.len(), 1, SectionFlags::new(SectionType::CStringLiterals, 0)));
         let objc_methname_section = (!exe.objc_method_names.is_empty()).then(|| self.reserve_text_section(&mut text_segment, "__objc_methname", exe.objc_method_names.len(), 2, SectionFlags::new(SectionType::CStringLiterals, 0)));
 
@@ -1389,7 +1388,7 @@ impl MachOEncoder {
         }
 
         let cstring_section_offset = cstring_section.map(|section| self.get_section_offset(section));
-        code.perform_fixups(self.get_section_offset(text_section), |fixup| {
+        let final_code = code.perform_fixups(self.get_section_offset(text_section), |fixup| {
             match exe.fixup_locations[fixup] {
                 MachOFixupLocation::GotEntry(got_entry_id) => (got_begin + got_entry_id.index() * 8, Indirection::Direct),
                 MachOFixupLocation::ObjcSelectorId(id) => (objc_selrefs_begin + id.index() * 8, Indirection::Direct),
@@ -1398,7 +1397,7 @@ impl MachOEncoder {
             }
         });
 
-        self.fill_text_section(&text_segment, text_section, code.get_bytes());
+        self.fill_text_section(&text_segment, text_section, final_code);
 
 
         let link_edit_end = self.pos() + code_slots_len;

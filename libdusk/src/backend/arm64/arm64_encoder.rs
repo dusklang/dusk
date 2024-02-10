@@ -1,6 +1,7 @@
 #[cfg(target_arch="aarch64")]
 use libc::{pthread_jit_write_protect_np, c_void, size_t};
 
+use crate::backend::{CodeBlob, Indirection};
 use crate::exe::{Fixup, FixupLocationId};
 
 #[cfg(target_arch="aarch64")]
@@ -140,11 +141,6 @@ impl Drop for InstrEncoder {
     fn drop(&mut self) {
         panic!("must call Instr::get_instr()")
     }
-}
-
-pub enum Indirection {
-    Direct,
-    Indirect,
 }
 
 #[allow(unused)]
@@ -380,7 +376,26 @@ impl Arm64Encoder {
         self.fixups.push(fixup);
     }
 
-    pub fn perform_fixups(&mut self, code_addr: usize, mut get_fixup_addr: impl FnMut(FixupLocationId) -> (usize, Indirection)) {
+    #[cfg(target_arch="aarch64")]
+    pub fn allocate(self) -> region::Allocation {
+        let mut thunk = region::alloc(self.data.len(), region::Protection::WRITE_EXECUTE).unwrap();
+        unsafe {
+            pthread_jit_write_protect_np(0);
+            let thunk_ptr = thunk.as_mut_ptr::<u8>();
+            thunk_ptr.copy_from(self.data.as_ptr(), self.data.len());
+            pthread_jit_write_protect_np(1);
+            sys_icache_invalidate(thunk_ptr as *mut _, self.data.len());
+        }
+        thunk
+    }
+}
+
+impl CodeBlob for Arm64Encoder {
+    fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    fn perform_fixups_impl<'a>(&'a mut self, code_addr: usize, mut get_fixup_addr: Box<dyn FnMut(FixupLocationId) -> (usize, Indirection) + 'a>) -> &'a [u8] {
         for fixup in &self.fixups {
             let (fixup_addr, indirection) = get_fixup_addr(fixup.id);
             let code_addr = code_addr + fixup.offset;
@@ -396,18 +411,7 @@ impl Arm64Encoder {
             }
             self.data[fixup.offset..(fixup.offset + 8)].copy_from_slice(&fixed_up_code.get_bytes());
         }
-    }
 
-    #[cfg(target_arch="aarch64")]
-    pub fn allocate(self) -> region::Allocation {
-        let mut thunk = region::alloc(self.data.len(), region::Protection::WRITE_EXECUTE).unwrap();
-        unsafe {
-            pthread_jit_write_protect_np(0);
-            let thunk_ptr = thunk.as_mut_ptr::<u8>();
-            thunk_ptr.copy_from(self.data.as_ptr(), self.data.len());
-            pthread_jit_write_protect_np(1);
-            sys_icache_invalidate(thunk_ptr as *mut _, self.data.len());
-        }
-        thunk
+        &self.data
     }
 }

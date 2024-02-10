@@ -1,13 +1,15 @@
 use std::ffi::CString;
 
-use crate::arm64::*;
+use crate::backend::{arm64::*, CodeBlob};
 use crate::ast::LegacyIntrinsic;
 use crate::driver::Driver;
 use crate::mir::{Instr, Const};
 use crate::exe::*;
 
 impl Driver {
-    pub fn generate_arm64_func(&self, code: &mut Arm64Encoder, func_index: usize, is_main: bool, exe: &mut dyn Exe, _lib_system: DynLibId) {
+    pub fn generate_arm64_func(&self, func_index: usize, is_main: bool, exe: &mut dyn Exe) -> Box<dyn CodeBlob> {
+        let mut code = Arm64Encoder::new();
+
         let func = &self.code.mir.functions[func_index];
         assert_eq!(func.blocks.len(), 1);
         assert_eq!(self.code.num_parameters(func), 0);
@@ -73,5 +75,7 @@ impl Driver {
         code.add64_imm(false, Reg::SP, Reg::SP, frame_size);
         code.ldp64(Reg::FP, Reg::LR, Reg::SP, -16);
         code.ret(Reg::LR);
+
+        Box::new(code)
     }
 }

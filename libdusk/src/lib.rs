@@ -27,9 +27,7 @@ mod parser;
 mod tir;
 mod typechecker;
 mod into_bytes;
-#[cfg(target_arch="x86_64")]
-mod x64;
-mod arm64;
+mod backend;
 mod rw_ref;
 mod builtins;
 mod autopop;

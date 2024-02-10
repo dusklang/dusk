@@ -33,9 +33,9 @@ use crate::driver::{DRIVER, Driver, DriverRef};
 use crate::mir::{FunctionRef, function_by_ref};
 use crate::type_provider::TypeProvider;
 #[cfg(target_arch="x86_64")]
-use crate::x64::*;
+use crate::backend::x64::*;
 #[cfg(target_arch="aarch64")]
-use crate::arm64::*;
+use crate::backend::arm64::*;
 
 pub type Result<T> = std::result::Result<T, EvalError>;
 
