@@ -13,12 +13,11 @@ use std::os::unix::fs::PermissionsExt;
 
 use libdusk::new_code::NewCode;
 use libdusk::ty::Type;
-use libdusk::arch::Arch;
+use libdusk::target::{Arch, OperatingSystem};
 use libdusk::driver::{DRIVER, Driver, DriverRef};
 use libdusk::source_info::SourceMap;
 use libdusk::error::DiagnosticKind;
 use libdusk::dvd::{Message as DvdMessage, self as dvd_ipc};
-use libdusk::macho::MachOEncoder;
 
 use libdusk::dvm;
 
@@ -92,7 +91,8 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
     let mut src_map = SourceMap::new();
     let loaded_file = src_map.add_file_on_disk(&opt.input).is_ok();
     let mut driver = DriverRef::new(&DRIVER);
-    *driver.write() = Driver::new(src_map, Arch::X86_64, opt.no_core);
+    // TODO: don't hardcode the operating system (use OperatingSystem::default() and support overriding with a flag on the command line and/or in build scripts)
+    *driver.write() = Driver::new(src_map, Arch::default(), OperatingSystem::Windows, opt.no_core);
     driver.write().initialize_ast();
 
     if !loaded_file {
@@ -200,7 +200,7 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
                 Some(name) => name == main_sym && *func.ty.return_ty == Type::Void && driver.read().code.num_parameters(func) == 0,
                 None => false,
             }
-        });
+        }).map(FuncId::new);
     if let Some(main) = main {
         driver.read().diag.print_warnings();
         if let Some(program_args) = program_args {
@@ -208,21 +208,26 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
             println!("Running main in the interpreter:\n");
             restart_interp(InterpMode::RunTime);
             driver.set_command_line_arguments(program_args);
-            let _ = driver.call(FunctionRef::Id(FuncId::new(main)), Vec::new(), Vec::new());
+            let _ = driver.call(FunctionRef::Id(main), Vec::new(), Vec::new());
 
             flush_diagnostics(&mut driver.write());
         } else {
-            let path = "a.out";
+            let path = if matches!(driver.read().os, OperatingSystem::Windows) {
+                "a.exe"
+            } else {
+                "a.out"
+            };
             _ = std::fs::remove_file(path);
             let file = File::create(path).unwrap();
-            let mut permissions = file.metadata().unwrap().permissions();
-            #[cfg(unix)] {
+            #[cfg(unix)] if !matches!(driver.read().os, OperatingSystem::Windows) {
+                let mut permissions = file.metadata().unwrap().permissions();
                 permissions.set_mode(0o755);
+                file.set_permissions(permissions).unwrap();
             }
-            file.set_permissions(permissions).unwrap();
             let mut w = BufWriter::new(file);
-            let mut encoder = MachOEncoder::new();
-            encoder.write(&driver.read(), main, &mut w).unwrap();
+
+            let mut linker = driver.read().create_linker();
+            linker.write(&driver.read(), main, &mut w).unwrap();
         }
     } else {
         driver.write().diag.report_error_no_range(

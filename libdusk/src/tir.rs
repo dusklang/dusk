@@ -24,7 +24,7 @@ use graph::{Graph, Levels};
 
 use dusk_proc_macros::*;
 
-pub use self::graph::MockStateCommand;
+pub use crate::tir::graph::MockStateCommand;
 
 define_index_type!(pub struct TreeId = u32;);
 define_index_type!(pub struct CompId = u32;);

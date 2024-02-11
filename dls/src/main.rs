@@ -17,7 +17,7 @@ use libdusk::source_info::{SourceFileId, SourceRange, SourceMap};
 use libdusk::driver::{Driver, DRIVER, DriverRef};
 use libdusk::dvm;
 use dusk_proc_macros::ef;
-use libdusk::arch::Arch;
+use libdusk::target::{Arch, OperatingSystem};
 
 fn break_lines(text: String) -> Vec<String> {
     let mut lines = Vec::new();
@@ -436,7 +436,7 @@ impl Server {
             let file = src_map.add_file_in_memory(path, src).unwrap();
             **file_id_ref = Some(file);
             let mut driver = DriverRef::new(&DRIVER);
-            *driver.write() = Driver::new(src_map, Arch::X86_64, false);
+            *driver.write() = Driver::new(src_map, Arch::default(), OperatingSystem::default(), false);
     
             driver.write().initialize_ast();
     

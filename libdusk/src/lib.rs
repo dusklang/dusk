@@ -11,12 +11,12 @@ pub mod new_code;
 pub mod ty;
 pub mod type_provider;
 pub mod dvd;
-pub mod macho;
+pub mod linker;
 pub mod ast;
-pub mod arch;
 pub mod index_counter;
 pub mod code;
 pub mod dvm;
+pub mod target;
 
 mod display_adapter;
 mod dep_vec;
@@ -31,7 +31,6 @@ mod backend;
 mod rw_ref;
 mod builtins;
 mod autopop;
-mod exe;
 mod tbd_parser;
 
 use display_adapter::display_adapter;

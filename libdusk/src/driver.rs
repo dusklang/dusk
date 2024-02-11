@@ -5,11 +5,10 @@ use lazy_static::lazy_static;
 
 use crate::ast::ExprId;
 use crate::mir::Const;
-use crate::arch::Arch;
+use crate::target::{Arch, OperatingSystem};
 use crate::source_info::SourceFileId;
 use crate::code::Code;
 use crate::internal_types::InternalFieldDecls;
-
 use crate::source_info::SourceMap;
 use crate::token::TokenVec;
 use crate::ast;
@@ -26,6 +25,7 @@ use crate::interpreter::EvalError;
 #[derive(Default)]
 pub struct Driver {
     pub arch: Arch,
+    pub os: OperatingSystem,
     pub src_map: SourceMap,
     pub toks: IndexVec<SourceFileId, TokenVec>,
     pub interner: StringInterner,
@@ -42,9 +42,10 @@ pub struct Driver {
 pub type DriverRef<'l> = RwRef<'l, Driver>;
 
 impl Driver {
-    pub fn new(src_map: SourceMap, arch: Arch, no_core: bool) -> Self {
+    pub fn new(src_map: SourceMap, arch: Arch, os: OperatingSystem, no_core: bool) -> Self {
         Self {
             arch,
+            os,
             src_map,
             toks: IndexVec::new(),
             interner: StringInterner::new(),

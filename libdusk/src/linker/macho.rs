@@ -12,13 +12,16 @@ use crypto::digest::Digest;
 use crypto::sha2::Sha256;
 use crate::backend::arm64::Arm64Encoder;
 use crate::backend::{Indirection, CodeBlob, CodeBlobExt};
-use crate::exe::*;
+use crate::linker::exe::*;
+use crate::linker::Linker;
 use crate::index_vec::*;
+use crate::mir::FuncId;
 use crate::tbd_parser::parse_tbd;
 use index_vec::define_index_type;
 
 use crate::driver::Driver;
 use dusk_proc_macros::ByteSwap;
+
 
 trait ByteSwap {
     fn byte_swap(&mut self);
@@ -55,7 +58,7 @@ impl<T: ByteSwap, const N: usize> ByteSwap for [T; N] {
 byte_swap_impl!(noops: u8, i8; nums: u16, u32, u64, usize, i16, i32, i64, isize);
 
 #[derive(Default)]
-pub struct MachOEncoder {
+pub struct MachOLinker {
     data: Vec<u8>, // TODO: support writing directly to a file instead of copying from a byte buffer?
     num_load_commands: u32,
     num_symbol_table_entries: u32,
@@ -714,276 +717,12 @@ struct SectionInfo {
     size: usize,
 }
 
-impl MachOEncoder {
+impl MachOLinker {
     pub fn new() -> Self { Self::default() }
+}
 
-    fn alloc<T: ByteSwap>(&mut self) -> Ref<T> {
-        let reff = Ref::new(self.data.len());
-        self.pad_with_zeroes(mem::size_of::<T>());
-        reff
-    }
-
-    fn alloc_be<T: ByteSwap>(&mut self) -> Ref<T, true> {
-        let reff = Ref::new(self.data.len());
-        self.pad_with_zeroes(mem::size_of::<T>());
-        reff
-    }
-
-    fn alloc_cmd<T: ByteSwap>(&mut self) -> Ref<T> {
-        self.num_load_commands += 1;
-        self.alloc()
-    }
-
-    fn alloc_segment(&mut self, name: &'static str, vm_protection: u32, flags: u32) -> SegmentId {
-        let header = self.alloc_cmd::<LcSegment64>();
-        self.segments.push(
-            SegmentBuilder {
-                sections: Default::default(),
-                header,
-
-                name,
-                vm_protection,
-                flags,
-                info: None,
-            }
-        )
-    }
-
-    fn add_info_to_segment(&mut self, segment: SegmentId, offset: impl Into<SegmentOffset>, size: impl Into<SegmentSize>) {
-        self.segments[segment].info = Some(
-            SegmentInfo {
-                offset: offset.into(),
-                size: size.into()
-            }
-        )
-    }
-
-    fn alloc_section(&mut self, segment_id: SegmentId, name: &'static str, alignment: usize, flags: SectionFlags) -> SectionId {
-        let header = self.alloc::<Section64>();
-        let segment = &mut self.segments[segment_id];
-        let index = segment.sections.len();
-        segment.sections.push(
-            SectionBuilder {
-                header,
-                name,
-                alignment,
-                flags,
-                info: None,
-            }
-        );
-        (segment_id, index)
-    }
-
-    fn add_info_to_section(&mut self, (segment, section): SectionId, offset: usize, size: usize) {
-        self.segments[segment].sections[section].info = Some(
-            SectionInfo {
-                offset,
-                size,
-            }
-        )
-    }
-
-    fn fill_segment_headers(&mut self) {
-        let segments = std::mem::take(&mut self.segments);
-        for segment in &segments {
-            let info = segment.info.as_ref().expect(&format!("no info found for segment '{}'", segment.name));
-            let vm_addr = match info.offset {
-                SegmentOffset::PageZero => 0,
-                SegmentOffset::FileOffset(offset) => TEXT_ADDR + offset as u64,
-            };
-            let file_offset = match info.offset {
-                SegmentOffset::PageZero => 0,
-                SegmentOffset::FileOffset(offset) => offset as u64,
-            };
-            let (vm_size, file_size) = match info.size {
-                SegmentSize::Same(size) => (size as u64, size as u64),
-                SegmentSize::Different { vm_size, file_size } => (vm_size as u64, file_size as u64),
-            };
-            let command_size = (segment.sections.last()
-                .map(|sect| sect.header.end())
-                .unwrap_or(segment.header.end()) - segment.header.start()) as u32;
-            self.get_mut(segment.header).set(
-                LcSegment64 {
-                    command: LC_SEGMENT_64,
-                    command_size,
-                    name: encode_string_16(segment.name),
-                    vm_addr,
-                    vm_size,
-                    file_offset,
-                    file_size,
-                    max_vm_protection: segment.vm_protection,
-                    initial_vm_protection: segment.vm_protection,
-                    num_sections: segment.sections.len() as u32,
-                    flags: segment.flags,
-                }
-            );
-
-            for section in &segment.sections {
-                let info = section.info.as_ref().unwrap();
-                self.get_mut(section.header).set(
-                    Section64 {
-                        name: encode_string_16(section.name),
-                        segment_name: encode_string_16(segment.name),
-                        vm_addr: TEXT_ADDR + info.offset as u64,
-                        vm_size: info.size as u64,
-                        file_offset: info.offset as u32,
-                        alignment: log_base_2(section.alignment) as u32,
-                        relocations_file_offset: 0,
-                        num_relocations: 0,
-                        flags: section.flags,
-                        reserved: [0; 3],
-                    }
-                );
-            }
-        }
-        self.segments = segments;
-    }
-
-    fn alloc_text_segment(&mut self) -> TextSegmentBuilder {
-        let segment = self.alloc_segment("__TEXT", VM_PROT_READ | VM_PROT_EXECUTE, 0);
-        TextSegmentBuilder { segment, sections: Vec::new() }
-    }
-
-    fn reserve_text_section(&mut self, segment: &mut TextSegmentBuilder, name: &'static str, size: usize, alignment: usize, flags: SectionFlags) -> SectionId {
-        let id = self.alloc_section(segment.segment, name, alignment, flags);
-        segment.sections.push(
-            TextSection { size, id }
-        );
-        id
-    }
-
-    fn layout_text_sections(&mut self, segment: &TextSegmentBuilder, lc_end: usize) {
-        let mut len = 0usize;
-        let mut offsets_from_end = Vec::with_capacity(segment.sections.len());
-        let sections = &self.segments[segment.segment].sections;
-        debug_assert_eq!(segment.sections.len(), sections.len());
-        for (text_section, section) in segment.sections.iter().zip(sections).rev() {
-            let padding = nearest_multiple_of_rt!(len, section.alignment) as usize - len;
-            len += text_section.size + padding;
-            offsets_from_end.push(len);
-        }
-
-        let text_end_addr = nearest_multiple_of!(TEXT_ADDR + (lc_end + len) as u64, PAGE_SIZE);
-        let text_segment_size = text_end_addr - TEXT_ADDR as usize;
-
-        for (i, (section, &offset_from_end)) in segment.sections.iter().zip(offsets_from_end.iter().rev()).enumerate() {
-            self.add_info_to_section((segment.segment, i), text_segment_size as usize - offset_from_end, section.size);
-        }
-
-        self.add_info_to_segment(segment.segment, 0, text_segment_size);
-
-        self.pad_with_zeroes(text_segment_size - self.pos());
-    }
-
-    fn fill_text_section(&mut self, segment: &TextSegmentBuilder, section: SectionId, data: &[u8]) {
-        assert_eq!(segment.sections[section.1].id, section);
-        assert_eq!(segment.segment, section.0);
-        let size = segment.sections[section.1].size;
-        let offset = self.segments[segment.segment].sections[section.1].info.unwrap().offset;
-        self.data[offset..(offset + size)].copy_from_slice(data);
-    }
-
-    fn get_section_offset(&self, section: SectionId) -> usize {
-        let segment = &self.segments[section.0];
-        segment.sections[section.1].info.unwrap().offset
-    }
-
-    fn alloc_dylib_command(&mut self, name: &str) -> DylibCommandBuilder {
-        let header = self.alloc_cmd::<DylibCommand>();
-        let name_begin = self.pos();
-        self.push_null_terminated_string(name);
-
-        // According to https://opensource.apple.com/source/xnu/xnu-7195.81.3/EXTERNAL_HEADERS/mach-o/loader.h.auto.html
-        // we're supposed to pad to the next 4 byte boundary, but the sample files I've examined seem to pad to 8 bytes
-        // (which honestly makes more sense to me anyway, given the presence of 64 bit values in some of the load
-        // commands)
-        self.pad_to_next_boundary::<8>();
-        let end = self.pos();
-
-        DylibCommandBuilder {
-            header,
-            additional_size: end - name_begin,
-        }
-    }
-
-    fn alloc_symbol_table_entry(&mut self) -> Ref<SymbolTableEntry> {
-        self.num_symbol_table_entries += 1;
-        self.alloc()
-    }
-
-    fn push_null_terminated_string(&mut self, val: &str) -> usize {
-        let pos = self.pos();
-        self.data.extend(val.as_bytes());
-        self.data.push(0);
-        pos
-    }
-
-    fn get_mut<'a, T: ByteSwap, const BIG_ENDIAN: bool>(&'a mut self, addr: Ref<T, BIG_ENDIAN>) -> ResolvedRefMut<'a, T, BIG_ENDIAN> {
-        debug_assert!(addr.addr + mem::size_of::<T>() <= self.data.len());
-
-        // TODO: don't produce a &mut T at all. I didn't think we would need to support unaligned access, but we do.
-        let region = &mut self.data[addr.addr..];
-        let ptr = region.as_mut_ptr() as *mut T;
-
-        ResolvedRefMut { value: unsafe { &mut *ptr } }
-    }
-
-    fn push<T: ByteSwap>(&mut self, value: T) -> Ref<T> {
-        let addr = self.alloc();
-        self.get_mut(addr).set(value);
-        addr
-    }
-
-    fn push_be<T: ByteSwap>(&mut self, value: T) -> Ref<T, true> {
-        let addr = self.alloc_be();
-        self.get_mut(addr).set(value);
-        addr
-    }
-
-    fn pos(&self) -> usize { self.data.len() }
-
-    fn pad_with_zeroes(&mut self, size: usize) {
-        self.data.extend(std::iter::repeat(0).take(size as usize));
-    }
-
-    fn pad_to_next_boundary<const B: usize>(&mut self) {
-        let padded_pos = nearest_multiple_of_rt!(self.data.len() as u64, B);
-        self.pad_with_zeroes(padded_pos as usize - self.pos());
-    }
-
-    fn pad_to_next_boundary_rt(&mut self, alignment: usize) {
-        let padded_pos = nearest_multiple_of_rt!(self.data.len(), alignment);
-        self.pad_with_zeroes(padded_pos as usize - self.pos());
-    }
-    
-    fn push_uleb128(&mut self, mut value: u32) {
-        loop {
-            let mut next_byte = (value & 0x7F) as u8;
-            value >>= 7;
-            if value != 0 {
-                next_byte |= 0x80;
-            }
-            self.push(next_byte);
-            
-            if value == 0 { break; }
-        }
-    }
-
-    fn push_chained_fixup<T>(&mut self, prev_ptr: &mut Option<Ref<DyldChainedPtr64>>, fixup: T)
-    where
-        T: ByteSwap,
-        Ref<T>: Into<Ref<DyldChainedPtr64>>
-    {
-        // TODO: handle page boundaries, also perhaps automatically generate first fixup per-page here
-        if let Some(prev_ptr) = prev_ptr {
-            let diff = self.pos() - prev_ptr.addr;
-            assert_eq!(diff % 4, 0);
-            self.get_mut(*prev_ptr).set_next((diff / 4) as u16);
-        }
-        *prev_ptr = Some(self.push(fixup).into());
-    }
-    
-    pub fn write(&mut self, d: &Driver, main_function_index: usize, dest: &mut impl Write) -> io::Result<()> {
+impl Linker for MachOLinker {
+    fn write(&mut self, d: &Driver, main_function_index: FuncId, dest: &mut dyn Write) -> io::Result<()> {
         let mut exe = MachOExe::new();
         let lib_system = exe.import_dynamic_library(DynamicLibrarySource::Name("libSystem"));
 
@@ -1631,6 +1370,274 @@ impl MachOEncoder {
         dest.write_all(&self.data)?;
 
         Ok(())
+    }
+}
+
+impl MachOLinker {
+    fn alloc<T: ByteSwap>(&mut self) -> Ref<T> {
+        let reff = Ref::new(self.data.len());
+        self.pad_with_zeroes(mem::size_of::<T>());
+        reff
+    }
+
+    fn alloc_be<T: ByteSwap>(&mut self) -> Ref<T, true> {
+        let reff = Ref::new(self.data.len());
+        self.pad_with_zeroes(mem::size_of::<T>());
+        reff
+    }
+
+    fn alloc_cmd<T: ByteSwap>(&mut self) -> Ref<T> {
+        self.num_load_commands += 1;
+        self.alloc()
+    }
+
+    fn alloc_segment(&mut self, name: &'static str, vm_protection: u32, flags: u32) -> SegmentId {
+        let header = self.alloc_cmd::<LcSegment64>();
+        self.segments.push(
+            SegmentBuilder {
+                sections: Default::default(),
+                header,
+
+                name,
+                vm_protection,
+                flags,
+                info: None,
+            }
+        )
+    }
+
+    fn add_info_to_segment(&mut self, segment: SegmentId, offset: impl Into<SegmentOffset>, size: impl Into<SegmentSize>) {
+        self.segments[segment].info = Some(
+            SegmentInfo {
+                offset: offset.into(),
+                size: size.into()
+            }
+        )
+    }
+
+    fn alloc_section(&mut self, segment_id: SegmentId, name: &'static str, alignment: usize, flags: SectionFlags) -> SectionId {
+        let header = self.alloc::<Section64>();
+        let segment = &mut self.segments[segment_id];
+        let index = segment.sections.len();
+        segment.sections.push(
+            SectionBuilder {
+                header,
+                name,
+                alignment,
+                flags,
+                info: None,
+            }
+        );
+        (segment_id, index)
+    }
+
+    fn add_info_to_section(&mut self, (segment, section): SectionId, offset: usize, size: usize) {
+        self.segments[segment].sections[section].info = Some(
+            SectionInfo {
+                offset,
+                size,
+            }
+        )
+    }
+
+    fn fill_segment_headers(&mut self) {
+        let segments = std::mem::take(&mut self.segments);
+        for segment in &segments {
+            let info = segment.info.as_ref().expect(&format!("no info found for segment '{}'", segment.name));
+            let vm_addr = match info.offset {
+                SegmentOffset::PageZero => 0,
+                SegmentOffset::FileOffset(offset) => TEXT_ADDR + offset as u64,
+            };
+            let file_offset = match info.offset {
+                SegmentOffset::PageZero => 0,
+                SegmentOffset::FileOffset(offset) => offset as u64,
+            };
+            let (vm_size, file_size) = match info.size {
+                SegmentSize::Same(size) => (size as u64, size as u64),
+                SegmentSize::Different { vm_size, file_size } => (vm_size as u64, file_size as u64),
+            };
+            let command_size = (segment.sections.last()
+                .map(|sect| sect.header.end())
+                .unwrap_or(segment.header.end()) - segment.header.start()) as u32;
+            self.get_mut(segment.header).set(
+                LcSegment64 {
+                    command: LC_SEGMENT_64,
+                    command_size,
+                    name: encode_string_16(segment.name),
+                    vm_addr,
+                    vm_size,
+                    file_offset,
+                    file_size,
+                    max_vm_protection: segment.vm_protection,
+                    initial_vm_protection: segment.vm_protection,
+                    num_sections: segment.sections.len() as u32,
+                    flags: segment.flags,
+                }
+            );
+
+            for section in &segment.sections {
+                let info = section.info.as_ref().unwrap();
+                self.get_mut(section.header).set(
+                    Section64 {
+                        name: encode_string_16(section.name),
+                        segment_name: encode_string_16(segment.name),
+                        vm_addr: TEXT_ADDR + info.offset as u64,
+                        vm_size: info.size as u64,
+                        file_offset: info.offset as u32,
+                        alignment: log_base_2(section.alignment) as u32,
+                        relocations_file_offset: 0,
+                        num_relocations: 0,
+                        flags: section.flags,
+                        reserved: [0; 3],
+                    }
+                );
+            }
+        }
+        self.segments = segments;
+    }
+
+    fn alloc_text_segment(&mut self) -> TextSegmentBuilder {
+        let segment = self.alloc_segment("__TEXT", VM_PROT_READ | VM_PROT_EXECUTE, 0);
+        TextSegmentBuilder { segment, sections: Vec::new() }
+    }
+
+    fn reserve_text_section(&mut self, segment: &mut TextSegmentBuilder, name: &'static str, size: usize, alignment: usize, flags: SectionFlags) -> SectionId {
+        let id = self.alloc_section(segment.segment, name, alignment, flags);
+        segment.sections.push(
+            TextSection { size, id }
+        );
+        id
+    }
+
+    fn layout_text_sections(&mut self, segment: &TextSegmentBuilder, lc_end: usize) {
+        let mut len = 0usize;
+        let mut offsets_from_end = Vec::with_capacity(segment.sections.len());
+        let sections = &self.segments[segment.segment].sections;
+        debug_assert_eq!(segment.sections.len(), sections.len());
+        for (text_section, section) in segment.sections.iter().zip(sections).rev() {
+            let padding = nearest_multiple_of_rt!(len, section.alignment) as usize - len;
+            len += text_section.size + padding;
+            offsets_from_end.push(len);
+        }
+
+        let text_end_addr = nearest_multiple_of!(TEXT_ADDR + (lc_end + len) as u64, PAGE_SIZE);
+        let text_segment_size = text_end_addr - TEXT_ADDR as usize;
+
+        for (i, (section, &offset_from_end)) in segment.sections.iter().zip(offsets_from_end.iter().rev()).enumerate() {
+            self.add_info_to_section((segment.segment, i), text_segment_size as usize - offset_from_end, section.size);
+        }
+
+        self.add_info_to_segment(segment.segment, 0, text_segment_size);
+
+        self.pad_with_zeroes(text_segment_size - self.pos());
+    }
+
+    fn fill_text_section(&mut self, segment: &TextSegmentBuilder, section: SectionId, data: &[u8]) {
+        assert_eq!(segment.sections[section.1].id, section);
+        assert_eq!(segment.segment, section.0);
+        let size = segment.sections[section.1].size;
+        let offset = self.segments[segment.segment].sections[section.1].info.unwrap().offset;
+        self.data[offset..(offset + size)].copy_from_slice(data);
+    }
+
+    fn get_section_offset(&self, section: SectionId) -> usize {
+        let segment = &self.segments[section.0];
+        segment.sections[section.1].info.unwrap().offset
+    }
+
+    fn alloc_dylib_command(&mut self, name: &str) -> DylibCommandBuilder {
+        let header = self.alloc_cmd::<DylibCommand>();
+        let name_begin = self.pos();
+        self.push_null_terminated_string(name);
+
+        // According to https://opensource.apple.com/source/xnu/xnu-7195.81.3/EXTERNAL_HEADERS/mach-o/loader.h.auto.html
+        // we're supposed to pad to the next 4 byte boundary, but the sample files I've examined seem to pad to 8 bytes
+        // (which honestly makes more sense to me anyway, given the presence of 64 bit values in some of the load
+        // commands)
+        self.pad_to_next_boundary::<8>();
+        let end = self.pos();
+
+        DylibCommandBuilder {
+            header,
+            additional_size: end - name_begin,
+        }
+    }
+
+    fn alloc_symbol_table_entry(&mut self) -> Ref<SymbolTableEntry> {
+        self.num_symbol_table_entries += 1;
+        self.alloc()
+    }
+
+    fn push_null_terminated_string(&mut self, val: &str) -> usize {
+        let pos = self.pos();
+        self.data.extend(val.as_bytes());
+        self.data.push(0);
+        pos
+    }
+
+    fn get_mut<'a, T: ByteSwap, const BIG_ENDIAN: bool>(&'a mut self, addr: Ref<T, BIG_ENDIAN>) -> ResolvedRefMut<'a, T, BIG_ENDIAN> {
+        debug_assert!(addr.addr + mem::size_of::<T>() <= self.data.len());
+
+        // TODO: don't produce a &mut T at all. I didn't think we would need to support unaligned access, but we do.
+        let region = &mut self.data[addr.addr..];
+        let ptr = region.as_mut_ptr() as *mut T;
+
+        ResolvedRefMut { value: unsafe { &mut *ptr } }
+    }
+
+    fn push<T: ByteSwap>(&mut self, value: T) -> Ref<T> {
+        let addr = self.alloc();
+        self.get_mut(addr).set(value);
+        addr
+    }
+
+    fn push_be<T: ByteSwap>(&mut self, value: T) -> Ref<T, true> {
+        let addr = self.alloc_be();
+        self.get_mut(addr).set(value);
+        addr
+    }
+
+    fn pos(&self) -> usize { self.data.len() }
+
+    fn pad_with_zeroes(&mut self, size: usize) {
+        self.data.extend(std::iter::repeat(0).take(size as usize));
+    }
+
+    fn pad_to_next_boundary<const B: usize>(&mut self) {
+        let padded_pos = nearest_multiple_of_rt!(self.data.len() as u64, B);
+        self.pad_with_zeroes(padded_pos as usize - self.pos());
+    }
+
+    fn pad_to_next_boundary_rt(&mut self, alignment: usize) {
+        let padded_pos = nearest_multiple_of_rt!(self.data.len(), alignment);
+        self.pad_with_zeroes(padded_pos as usize - self.pos());
+    }
+    
+    fn push_uleb128(&mut self, mut value: u32) {
+        loop {
+            let mut next_byte = (value & 0x7F) as u8;
+            value >>= 7;
+            if value != 0 {
+                next_byte |= 0x80;
+            }
+            self.push(next_byte);
+            
+            if value == 0 { break; }
+        }
+    }
+
+    fn push_chained_fixup<T>(&mut self, prev_ptr: &mut Option<Ref<DyldChainedPtr64>>, fixup: T)
+    where
+        T: ByteSwap,
+        Ref<T>: Into<Ref<DyldChainedPtr64>>
+    {
+        // TODO: handle page boundaries, also perhaps automatically generate first fixup per-page here
+        if let Some(prev_ptr) = prev_ptr {
+            let diff = self.pos() - prev_ptr.addr;
+            assert_eq!(diff % 4, 0);
+            self.get_mut(*prev_ptr).set_next((diff / 4) as u16);
+        }
+        *prev_ptr = Some(self.push(fixup).into());
     }
 }
 

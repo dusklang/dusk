@@ -8,7 +8,7 @@ use index_vec::define_index_type;
 
 use dusk_proc_macros::DuskBridge;
 
-use crate::arch::Arch;
+use crate::target::Arch;
 use crate::ast::{StructId, EnumId, GenericParamId, NewNamespaceId, TypeVarId};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]

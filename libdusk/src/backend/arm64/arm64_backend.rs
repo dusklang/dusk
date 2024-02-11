@@ -3,11 +3,11 @@ use std::ffi::CString;
 use crate::backend::{arm64::*, CodeBlob};
 use crate::ast::LegacyIntrinsic;
 use crate::driver::Driver;
-use crate::mir::{Instr, Const};
-use crate::exe::*;
+use crate::mir::{Const, FuncId, Instr};
+use crate::linker::exe::*;
 
 impl Driver {
-    pub fn generate_arm64_func(&self, func_index: usize, is_main: bool, exe: &mut dyn Exe) -> Box<dyn CodeBlob> {
+    pub fn generate_arm64_func(&self, func_index: FuncId, is_main: bool, exe: &mut dyn Exe) -> Box<dyn CodeBlob> {
         let mut code = Arm64Encoder::new();
 
         let func = &self.code.mir.functions[func_index];

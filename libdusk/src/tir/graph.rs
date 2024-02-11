@@ -12,7 +12,7 @@ use crate::index_vec::*;
 use crate::driver::Driver;
 use crate::new_code::NewCode;
 
-use super::TirError;
+use crate::tir::TirError;
 
 #[derive(Debug, Default)]
 pub struct Graph {

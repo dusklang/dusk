@@ -21,7 +21,7 @@ use crate::index_vec::range_iter;
 use index_vec::IndexVec;
 use lazy_static::lazy_static;
 
-use crate::arch::Arch;
+use crate::target::Arch;
 use crate::ast::{LegacyIntrinsic, EnumId, GenericParamId, ExternFunctionRef, ExternModId, NewNamespaceId};
 use crate::dvm::{MessageKind, Call, self};
 use crate::mir::{Const, Instr, InstrId, FuncId, StaticId, ExternFunction};

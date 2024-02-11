@@ -2,7 +2,7 @@
 use libc::{pthread_jit_write_protect_np, c_void, size_t};
 
 use crate::backend::{CodeBlob, Indirection};
-use crate::exe::{Fixup, FixupLocationId};
+use crate::linker::exe::{Fixup, FixupLocationId};
 
 #[cfg(target_arch="aarch64")]
 #[link(name="c")]

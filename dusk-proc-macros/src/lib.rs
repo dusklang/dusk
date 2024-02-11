@@ -640,7 +640,7 @@ pub fn byteswap_derive(input: TokenStream) -> TokenStream {
     };
 
     let gen = quote!(
-        impl #impl_generics crate::macho::ByteSwap for #name #ty_generics #where_clause {
+        impl #impl_generics crate::linker::macho::ByteSwap for #name #ty_generics #where_clause {
             fn byte_swap(&mut self) {
                 #gen_inner
             }

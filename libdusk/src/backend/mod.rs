@@ -1,4 +1,4 @@
-use crate::exe::FixupLocationId;
+use crate::linker::exe::FixupLocationId;
 
 #[cfg(target_arch="x86_64")]
 pub mod x64;
