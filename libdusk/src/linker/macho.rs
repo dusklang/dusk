@@ -5,14 +5,13 @@ use std::ffi::{CString, CStr};
 use std::hash::Hash;
 use std::io::{self, Write};
 use std::marker::PhantomData;
-use std::mem;
 use std::path::PathBuf;
 
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
-use crate::backend::arm64::Arm64Encoder;
-use crate::backend::{Indirection, CodeBlob, CodeBlobExt};
+use crate::backend::{Indirection, CodeBlobExt};
 use crate::linker::exe::*;
+use crate::linker::byte_swap::*;
 use crate::linker::Linker;
 use crate::index_vec::*;
 use crate::mir::FuncId;
@@ -22,44 +21,9 @@ use index_vec::define_index_type;
 use crate::driver::Driver;
 use dusk_proc_macros::ByteSwap;
 
-
-trait ByteSwap {
-    fn byte_swap(&mut self);
-}
-
-macro_rules! byte_swap_impl {
-    (@noop: $ty:ty) => {
-        impl ByteSwap for $ty {
-            fn byte_swap(&mut self) {}
-        }
-    };
-    (@num: $ty:ty) => {
-        impl ByteSwap for $ty {
-            fn byte_swap(&mut self) {
-                *self = <$ty>::from_be_bytes(self.to_le_bytes());
-            }
-        }
-    };
-    (noops: $($noop_ty:ty),*;
-     nums: $($num_ty:ty),* $(;)?) => {
-        $(byte_swap_impl!(@noop: $noop_ty);)*
-        $(byte_swap_impl!(@num: $num_ty);)*
-    };
-}
-
-impl<T: ByteSwap, const N: usize> ByteSwap for [T; N] {
-    fn byte_swap(&mut self) {
-        for value in self {
-            value.byte_swap();
-        }
-    }
-}
-
-byte_swap_impl!(noops: u8, i8; nums: u16, u32, u64, usize, i16, i32, i64, isize);
-
 #[derive(Default)]
 pub struct MachOLinker {
-    data: Vec<u8>, // TODO: support writing directly to a file instead of copying from a byte buffer?
+    buf: Buffer,
     num_load_commands: u32,
     num_symbol_table_entries: u32,
     segments: IndexVec<SegmentId, SegmentBuilder>,
@@ -128,51 +92,6 @@ const CSSLOT_CODEDIRECTORY: u32 = 0;
 
 const CD_HASH_TYPE_SHA1: u8 = 1;
 const CD_HASH_TYPE_SHA256: u8 = 2;
-
-struct Ref<T: ByteSwap, const BIG_ENDIAN: bool = false> {
-    addr: usize,
-    _phantom: PhantomData<T>,
-}
-
-struct ResolvedRefMut<'a, T: ByteSwap, const BIG_ENDIAN: bool = false> {
-    value: &'a mut T,
-}
-
-impl<'a, T: ByteSwap, const BIG_ENDIAN: bool> ResolvedRefMut<'a, T, BIG_ENDIAN> {
-    fn set(&mut self, new_value: T) {
-        *self.value = new_value;
-        if BIG_ENDIAN != cfg!(target_endian = "big") {
-            self.value.byte_swap();
-        }
-    }
-
-    fn map<U: ByteSwap, M: FnOnce(&'a mut T) -> &mut U>(&'a mut self, mapper: M) -> ResolvedRefMut<'a, U, BIG_ENDIAN> {
-        ResolvedRefMut { value: mapper(self.value) }
-    }
-}
-
-impl<T: ByteSwap, const BIG_ENDIAN: bool> Clone for Ref<T, BIG_ENDIAN> {
-    fn clone(&self) -> Self {
-        Self {
-            addr: self.addr,
-            _phantom: PhantomData,
-        }
-    }
-}
-impl<T: ByteSwap, const BIG_ENDIAN: bool> Copy for Ref<T, BIG_ENDIAN> {}
-
-impl<T: ByteSwap, const BIG_ENDIAN: bool> Ref<T, BIG_ENDIAN> {
-    fn new(addr: usize) -> Self {
-        Self {
-            addr,
-            _phantom: PhantomData,
-        }
-    }
-
-    fn size(self) -> usize { mem::size_of::<T>() }
-    fn start(self) -> usize { self.addr }
-    fn end(self) -> usize { self.addr + self.size() }
-}
 
 #[repr(C)]
 #[derive(ByteSwap)]
@@ -495,8 +414,9 @@ impl ResolvedRefMut<'_, DyldChainedPtr64> {
     fn set_next(&mut self, next: u16) {
         assert!(next <= 0xFFF); // 12 bits
         let mask = 0xFFF << 51;
-        self.value.0 = self.value.0 & !mask;
-        self.value.0 |= (next as u64) << 51;
+        let value = unsafe { self.get_value() };
+        value.0 = value.0 & !mask;
+        value.0 |= (next as u64) << 51;
     }
 }
 
@@ -535,10 +455,7 @@ impl DyldChainedPtr64Rebase {
 
 impl From<Ref<DyldChainedPtr64Rebase>> for Ref<DyldChainedPtr64> {
     fn from(value: Ref<DyldChainedPtr64Rebase>) -> Self {
-        Ref {
-            addr: value.addr,
-            _phantom: PhantomData,
-        }
+        Ref::new(value.addr)
     }
 }
 
@@ -613,37 +530,6 @@ struct CodeDirectory {
     exec_seg_base: u64,
     exec_seg_limit: u64,
     exec_seg_flags: u64,
-}
-
-const fn is_power_of_2(num: usize) -> bool {
-    if num == 0 { return false; }
-    let mut i = 0u64;
-    while i < 64 {
-        if (1 << i) & num == num {
-            return true;
-        }
-        i += 1;
-    }
-    false
-}
-
-// Thank you, Hagen von Eitzen: https://math.stackexchange.com/a/291494
-macro_rules! nearest_multiple_of {
-    (@unsafe $val:expr, $factor:expr) => {
-        (((($val) as usize).wrapping_sub(1)) | ((($factor) as usize).wrapping_sub(1))).wrapping_add(1)
-    };
-
-    ($val:expr, $factor:expr) => {{
-        const _: () = assert!(is_power_of_2($factor));
-        nearest_multiple_of!(@unsafe $val, $factor)
-    }};
-}
-
-macro_rules! nearest_multiple_of_rt {
-    ($val:expr, $factor:expr) => {{
-        assert!(is_power_of_2($factor));
-        nearest_multiple_of!(@unsafe $val, $factor)
-    }};
 }
 
 fn log_base_2(mut num: usize) -> usize {
@@ -724,13 +610,13 @@ impl MachOLinker {
 impl Linker for MachOLinker {
     fn write(&mut self, d: &Driver, main_function_index: FuncId, dest: &mut dyn Write) -> io::Result<()> {
         let mut exe = MachOExe::new();
-        let lib_system = exe.import_dynamic_library(DynamicLibrarySource::Name("libSystem"));
+        let _lib_system = exe.import_dynamic_library(DynamicLibrarySource::Name("libSystem"));
 
         let mut code = d.generate_arm64_func(main_function_index, true, &mut exe);
 
-        let mach_header = self.alloc::<MachHeader>();
+        let mach_header = self.buf.alloc::<MachHeader>();
 
-        let lc_begin = self.pos();
+        let lc_begin = self.buf.pos();
 
         let page_zero = self.alloc_segment("__PAGEZERO", VM_PROT_NONE, 0);
         self.add_info_to_segment(page_zero, SegmentOffset::PageZero, SegmentSize::Different { vm_size: TEXT_ADDR as usize, file_size: 0 });
@@ -779,15 +665,15 @@ impl Linker for MachOLinker {
         let dynamic_symbol_table = self.alloc_cmd::<DynamicSymbolTableCommand>();
         
         let load_dylinker = self.alloc_cmd::<DylinkerCommand>();
-        self.push_null_terminated_string("/usr/lib/dyld");
-        self.pad_to_next_boundary::<8>();
-        let load_dylinker_size = self.pos() - load_dylinker.addr;
+        self.buf.push_null_terminated_string("/usr/lib/dyld");
+        self.buf.pad_to_next_boundary::<8>();
+        let load_dylinker_size = self.buf.pos() - load_dylinker.addr;
         
         // let uuid = self.alloc_cmd::<UuidCommand>();
         
         let build_version = self.alloc_cmd::<BuildVersionCommand>();
-        let ld_tool = self.alloc::<BuildToolVersion>();
-        let build_version_len = self.pos() - build_version.addr;
+        let ld_tool = self.buf.alloc::<BuildToolVersion>();
+        let build_version_len = self.buf.pos() - build_version.addr;
         
         let src_version = self.alloc_cmd::<SourceVersionCommand>();
         
@@ -803,7 +689,7 @@ impl Linker for MachOLinker {
         
         let code_signature = self.alloc_cmd::<LinkEditDataCommand>();
         
-        let lc_end = self.pos();
+        let lc_end = self.buf.pos();
 
         self.layout_text_sections(&text_segment, lc_end);
         if let Some(cstring_section) = cstring_section {
@@ -846,9 +732,9 @@ impl Linker for MachOLinker {
             )
         }
 
-        let data_const_begin = self.pos();
-        let mut got_begin = self.pos();
-        let mut cfstrings_begin = self.pos();
+        let data_const_begin = self.buf.pos();
+        let mut got_begin = self.buf.pos();
+        let mut cfstrings_begin = self.buf.pos();
 
         let mut data_const_size = 0;
 
@@ -856,17 +742,17 @@ impl Linker for MachOLinker {
             let mut prev_ptr: Option<Ref<DyldChainedPtr64>> = None;
 
             if let Some(section) = got_section {
-                got_begin = self.pos();
+                got_begin = self.buf.pos();
                 for &import in &exe.got_entries {
                     self.push_chained_fixup(&mut prev_ptr, DyldChainedPtr64Bind::new(import.index() as u32, 0, 0));
                 }
-                let got_size = self.pos() - got_begin;
+                let got_size = self.buf.pos() - got_begin;
                 self.add_info_to_section(section, got_begin, got_size);
             }
 
             if let Some(section) = cfstring_section {
                 let cf_constant_string_class_reference_import = exe.cf_constant_string_class_reference_import.unwrap();
-                cfstrings_begin = self.pos();
+                cfstrings_begin = self.buf.pos();
                 for str in &exe.constant_nsstrings {
                     // TODO: handle crossing page boundaries (e.g., I'm assuming we don't want to put half of the
                     // CFString's fields on a new page)
@@ -877,89 +763,89 @@ impl Linker for MachOLinker {
                         // ConstantNSStringLocation::UStringSectionOffset(offset) => (text_segment.sections[ustring_section.as_ref().unwrap().id].offset + offset, 0x7D0 as u64),
                     };
                     self.push_chained_fixup(&mut prev_ptr, DyldChainedPtr64Bind::new(cf_constant_string_class_reference_import.index() as u32, 0, 0));
-                    self.push(flags);
+                    self.buf.push(flags);
                     self.push_chained_fixup(&mut prev_ptr, DyldChainedPtr64Rebase::new(offset as u64, 0, 0));
-                    self.push(str.size);
+                    self.buf.push(str.size);
                 }
-                let cfstrings_size = self.pos() - cfstrings_begin;
+                let cfstrings_size = self.buf.pos() - cfstrings_begin;
                 self.add_info_to_section(section, cfstrings_begin, cfstrings_size);
             }
 
-            let objc_imageinfo_begin = self.pos();
-            self.push([0u8, 0, 0, 0, 4, 0, 0, 0]);
-            let objc_imageinfo_size = self.pos() - objc_imageinfo_begin;
+            let objc_imageinfo_begin = self.buf.pos();
+            self.buf.push([0u8, 0, 0, 0, 4, 0, 0, 0]);
+            let objc_imageinfo_size = self.buf.pos() - objc_imageinfo_begin;
             self.add_info_to_section(objc_imageinfo_section.unwrap(), objc_imageinfo_begin, objc_imageinfo_size);
 
-            self.pad_to_next_boundary::<PAGE_SIZE>();
-            data_const_size = self.pos() - data_const_begin;
+            self.buf.pad_to_next_boundary::<PAGE_SIZE>();
+            data_const_size = self.buf.pos() - data_const_begin;
             self.add_info_to_segment(segment, data_const_begin, data_const_size);
         }
 
-        let data_segment_begin = self.pos();
-        let mut data_segment_size = self.pos();
-        let mut objc_selrefs_begin = self.pos();
+        let data_segment_begin = self.buf.pos();
+        let mut data_segment_size = self.buf.pos();
+        let mut objc_selrefs_begin = self.buf.pos();
         if let Some(segment) = data_segment {
             let mut prev_ptr: Option<Ref<DyldChainedPtr64>> = None;
 
             if let Some(section) = objc_selrefs_section {
                 let objc_methname_section_offset = objc_methname_section.map(|section| self.get_section_offset(section));
-                objc_selrefs_begin = self.pos();
+                objc_selrefs_begin = self.buf.pos();
                 for &selector in &exe.objc_selectors {
                     let offset = objc_methname_section_offset.unwrap() + selector.offset;
                     self.push_chained_fixup(&mut prev_ptr, DyldChainedPtr64Rebase::new(offset as u64, 0, 0));
                 }
-                let objc_selrefs_size = self.pos() - objc_selrefs_begin;
+                let objc_selrefs_size = self.buf.pos() - objc_selrefs_begin;
                 self.add_info_to_section(section, objc_selrefs_begin, objc_selrefs_size);
             }
 
-            self.pad_to_next_boundary::<PAGE_SIZE>();
-            data_segment_size = self.pos() - data_segment_begin;
+            self.buf.pad_to_next_boundary::<PAGE_SIZE>();
+            data_segment_size = self.buf.pos() - data_segment_begin;
             self.add_info_to_segment(segment, data_segment_begin, data_segment_size);
         }
         
-        let link_edit_begin = self.pos();
+        let link_edit_begin = self.buf.pos();
         
-        let chained_fixups_header = self.alloc::<DyldChainedFixupsHeader>();
-        self.pad_to_next_boundary::<8>();
+        let chained_fixups_header = self.buf.alloc::<DyldChainedFixupsHeader>();
+        self.buf.pad_to_next_boundary::<8>();
         // Push dyld_chained_starts_in_image (a dynamically-sized structure)
-        let chained_starts_offset = self.pos();
+        let chained_starts_offset = self.buf.pos();
         let num_segments = self.segments.len() as u32;
-        self.push(num_segments as u32);
+        self.buf.push(num_segments as u32);
         let mut data_const_starts_offset = None;
         let mut data_segment_starts_offset = None;
         for i in self.segments.indices() {
             if data_const == Some(i) {
-                data_const_starts_offset = Some(self.alloc::<u32>());
+                data_const_starts_offset = Some(self.buf.alloc::<u32>());
             } else if data_segment == Some(i) {
-                data_segment_starts_offset = Some(self.alloc::<u32>());
+                data_segment_starts_offset = Some(self.buf.alloc::<u32>());
             } else {
                 // AFAICT, the offset is relative to the start of dyld_chained_starts_in_image, which makes any offset less
                 // than 4 + 4 * num_segments invalid, thus 0 should indicate "no starts for this page"
-                self.push(0 as u32);
+                self.buf.push(0 as u32);
             }
         }
 
         // TODO: reduce code duplication between __DATA and __DATA_CONST.
         if let Some(data_const_starts_offset) = data_const_starts_offset {
-            self.pad_to_next_boundary::<8>();
-            let chained_starts_in_segment_pos = self.pos();
-            self.get_mut(data_const_starts_offset).set((chained_starts_in_segment_pos -  chained_starts_offset) as u32);
+            self.buf.pad_to_next_boundary::<8>();
+            let chained_starts_in_segment_pos = self.buf.pos();
+            self.buf.get_mut(data_const_starts_offset).set((chained_starts_in_segment_pos -  chained_starts_offset) as u32);
             
-            let chained_starts_in_segment = self.alloc::<DyldChainedStartsInSegment>();
+            let chained_starts_in_segment = self.buf.alloc::<DyldChainedStartsInSegment>();
             // TODO: these should be fields of DyldChainedStartsInSegment, but need to be here instead because packed
             // structs are not yet supported by our ByteSwap macro.
-            self.push(0 as u32); // max_valid_pointer
+            self.buf.push(0 as u32); // max_valid_pointer
             let page_count = (data_const_size - 1) / PAGE_SIZE + 1;
-            self.push(u16::try_from(page_count).unwrap());
+            self.buf.push(u16::try_from(page_count).unwrap());
 
             // The first fix-up in each page is at offset 0, because the whole point of the __got section is to provide
             // fixed up addresses, and __cfstring values also begin with a fix-up.
             for _ in 0..page_count {
-                self.push(0 as u16);
+                self.buf.push(0 as u16);
             }
 
-            let chained_starts_in_segment_size = self.pos() - chained_starts_in_segment_pos;
-            self.get_mut(chained_starts_in_segment).set(
+            let chained_starts_in_segment_size = self.buf.pos() - chained_starts_in_segment_pos;
+            self.buf.get_mut(chained_starts_in_segment).set(
                 DyldChainedStartsInSegment {
                     size: chained_starts_in_segment_size as u32,
                     page_size: 0x4000,
@@ -970,25 +856,25 @@ impl Linker for MachOLinker {
         }
 
         if let Some(data_segment_starts_offset) = data_segment_starts_offset {
-            self.pad_to_next_boundary::<8>();
-            let chained_starts_in_segment_pos = self.pos();
-            self.get_mut(data_segment_starts_offset).set((chained_starts_in_segment_pos - chained_starts_offset) as u32);
+            self.buf.pad_to_next_boundary::<8>();
+            let chained_starts_in_segment_pos = self.buf.pos();
+            self.buf.get_mut(data_segment_starts_offset).set((chained_starts_in_segment_pos - chained_starts_offset) as u32);
             
-            let chained_starts_in_segment = self.alloc::<DyldChainedStartsInSegment>();
+            let chained_starts_in_segment = self.buf.alloc::<DyldChainedStartsInSegment>();
             // TODO: these should be fields of DyldChainedStartsInSegment, but need to be here instead because packed
             // structs are not yet supported by our ByteSwap macro.
-            self.push(0 as u32); // max_valid_pointer
+            self.buf.push(0 as u32); // max_valid_pointer
             let page_count = (data_segment_size - 1) / PAGE_SIZE + 1;
-            self.push(u16::try_from(page_count).unwrap());
+            self.buf.push(u16::try_from(page_count).unwrap());
 
             // The first fix-up in each page is at offset 0, because the whole point of the __objc_selrefs and
             // __objc_classrefs sections is to provide fixed up addresses.
             for _ in 0..page_count {
-                self.push(0 as u16);
+                self.buf.push(0 as u16);
             }
 
-            let chained_starts_in_segment_size = self.pos() - chained_starts_in_segment_pos;
-            self.get_mut(chained_starts_in_segment).set(
+            let chained_starts_in_segment_size = self.buf.pos() - chained_starts_in_segment_pos;
+            self.buf.get_mut(chained_starts_in_segment).set(
                 DyldChainedStartsInSegment {
                     size: chained_starts_in_segment_size as u32,
                     page_size: 0x4000,
@@ -998,30 +884,30 @@ impl Linker for MachOLinker {
             );
         }
         
-        let imports_offset = self.pos();
+        let imports_offset = self.buf.pos();
         let mut chained_imports = Vec::new();
         for _ in &exe.imported_symbols {
-            chained_imports.push(self.alloc::<DyldChainedImport>());
+            chained_imports.push(self.buf.alloc::<DyldChainedImport>());
         }
-        let imported_symbols_offset = self.pos();
-        self.push(0 as u8);
+        let imported_symbols_offset = self.buf.pos();
+        self.buf.push(0 as u8);
         for (&import_header, import) in chained_imports.iter().zip(&exe.imported_symbols) {
-            let offset = self.pos() - imported_symbols_offset;
-            self.push_null_terminated_string(&import.name);
-            self.get_mut(import_header).set(
+            let offset = self.buf.pos() - imported_symbols_offset;
+            self.buf.push_null_terminated_string(&import.name);
+            self.buf.get_mut(import_header).set(
                 DyldChainedImport::new((import.dylib.index() + 1).try_into().unwrap(), false, offset as u32)
             );
         }
-        self.pad_to_next_boundary::<8>();
+        self.buf.pad_to_next_boundary::<8>();
         let imported_symbols_offset = if exe.got_entries.is_empty() {
             imports_offset
         } else {
             imported_symbols_offset
         };
 
-        self.pad_to_next_boundary::<8>();
+        self.buf.pad_to_next_boundary::<8>();
 
-        self.get_mut(chained_fixups_header).set(
+        self.buf.get_mut(chained_fixups_header).set(
             DyldChainedFixupsHeader {
                 fixups_version: 0,
                 starts_offset: (chained_starts_offset - chained_fixups_header.start()) as u32,
@@ -1033,24 +919,24 @@ impl Linker for MachOLinker {
             }
         );
 
-        let chained_fixups_data_size = self.pos() - chained_fixups_header.start();
+        let chained_fixups_data_size = self.buf.pos() - chained_fixups_header.start();
         
-        let exports_trie_start = self.pos();
-        self.pad_with_zeroes(8);
-        let exports_trie_len = self.pos() - exports_trie_start;
+        let exports_trie_start = self.buf.pos();
+        self.buf.pad_with_zeroes(8);
+        let exports_trie_len = self.buf.pos() - exports_trie_start;
         
-        let function_starts_start = self.pos();
+        let function_starts_start = self.buf.pos();
         // offset to first function, relative to the beginning of the __TEXT segment (aka, beginning of file).
         // subsequent functions would be specified relative to the previous one in the list.
         let text_section_offset = self.get_section_offset(text_section);
-        self.push_uleb128(text_section_offset as u32);
-        self.pad_to_next_boundary::<8>();
-        let function_starts_len = self.pos() - function_starts_start;
+        self.buf.push_uleb128(text_section_offset as u32);
+        self.buf.pad_to_next_boundary::<8>();
+        let function_starts_len = self.buf.pos() - function_starts_start;
         
-        let data_in_code_start = self.pos();
-        let data_in_code_len = self.pos() - data_in_code_start;
+        let data_in_code_start = self.buf.pos();
+        let data_in_code_len = self.buf.pos() - data_in_code_start;
 
-        let symbol_table_begin = self.pos();
+        let symbol_table_begin = self.buf.pos();
         let mut symbol_headers = Vec::new();
         for _ in local_symbols.iter().chain(&imported_symbols) {
             symbol_headers.push(self.alloc_symbol_table_entry());
@@ -1059,32 +945,32 @@ impl Linker for MachOLinker {
         let indirect_symbol_table_offset = if exe.imported_symbols.is_empty() {
             0
         } else {
-            self.pos() as u32
+            self.buf.pos() as u32
         };
         for i in 0..imported_symbols.len() {
-            self.push(i as u32 + local_symbols.len() as u32);
+            self.buf.push(i as u32 + local_symbols.len() as u32);
         }
         
-        let string_table_begin = self.pos();
-        self.push_null_terminated_string(" ");
+        let string_table_begin = self.buf.pos();
+        self.buf.push_null_terminated_string(" ");
         let mut symbol_string_offsets = Vec::new();
         for symbol in local_symbols.iter().chain(&imported_symbols) {
-            symbol_string_offsets.push(self.push_null_terminated_string(&symbol.symbol));
+            symbol_string_offsets.push(self.buf.push_null_terminated_string(&symbol.symbol));
         }
-        self.pad_to_next_boundary::<8>();
-        let string_table_len = self.pos() - string_table_begin;
+        self.buf.pad_to_next_boundary::<8>();
+        let string_table_len = self.buf.pos() - string_table_begin;
         
-        self.pad_to_next_boundary::<16>();
+        self.buf.pad_to_next_boundary::<16>();
         
-        let code_signature_start = self.pos();
-        let super_blob = self.alloc_be::<SuperBlobHeader>();
+        let code_signature_start = self.buf.pos();
+        let super_blob = self.buf.alloc_be::<SuperBlobHeader>();
         
         let mut blob_indices = Vec::new();
         
-        let code_directory_index = self.alloc_be::<BlobIndex>();
+        let code_directory_index = self.buf.alloc_be::<BlobIndex>();
         
-        let code_directory_offset = self.pos() - code_signature_start;
-        self.get_mut(code_directory_index).set(
+        let code_directory_offset = self.buf.pos() - code_signature_start;
+        self.buf.get_mut(code_directory_index).set(
             BlobIndex {
                 ty: 0,
                 offset: code_directory_offset as u32,
@@ -1092,17 +978,17 @@ impl Linker for MachOLinker {
         );
         blob_indices.push(code_directory_index);
         
-        let code_directory = self.alloc_be::<CodeDirectory>();
+        let code_directory = self.buf.alloc_be::<CodeDirectory>();
         
-        let ident_offset = self.pos() - code_directory.start();
-        self.push_null_terminated_string("a.out");
+        let ident_offset = self.buf.pos() - code_directory.start();
+        self.buf.push_null_terminated_string("a.out");
         
         // TODO: alignment?
-        let hash_offset = self.pos() - code_directory.start();
+        let hash_offset = self.buf.pos() - code_directory.start();
         
         let num_code_slots = nearest_multiple_of!(code_signature_start, 4096) / 4096;
         let code_slots_len = num_code_slots * 32;
-        let code_signature_len = self.pos() + code_slots_len - code_signature_start;
+        let code_signature_len = self.buf.pos() + code_slots_len - code_signature_start;
         
         for ((symbol, symbol_header), string_offset) in local_symbols.iter().chain(&imported_symbols).zip(symbol_headers).zip(symbol_string_offsets) {
             let ty = if symbol.internal_address.is_some() {
@@ -1115,7 +1001,7 @@ impl Linker for MachOLinker {
             } else {
                 0
             };
-            self.get_mut(symbol_header).set(
+            self.buf.get_mut(symbol_header).set(
                 SymbolTableEntry {
                     string_table_offset: (string_offset - string_table_begin) as u32,
                     ty,
@@ -1139,13 +1025,13 @@ impl Linker for MachOLinker {
         self.fill_text_section(&text_segment, text_section, final_code);
 
 
-        let link_edit_end = self.pos() + code_slots_len;
+        let link_edit_end = self.buf.pos() + code_slots_len;
 
         let link_edit_size = link_edit_end - link_edit_begin;
         self.add_info_to_segment(link_edit_segment, link_edit_begin, SegmentSize::Different { vm_size: nearest_multiple_of!(link_edit_size, PAGE_SIZE), file_size: link_edit_size });
 
         let num_commands = self.num_load_commands;
-        self.get_mut(mach_header).set(
+        self.buf.get_mut(mach_header).set(
             MachHeader {
                 magic: MH_MAGIC_64,
                 cpu_type: CPU_TYPE_ARM64,
@@ -1162,7 +1048,7 @@ impl Linker for MachOLinker {
 
         self.fill_segment_headers();
 
-        self.get_mut(chained_fixups).set(
+        self.buf.get_mut(chained_fixups).set(
             LinkEditDataCommand {
                 command: LC_DYLD_CHAINED_FIXUPS,
                 command_size: chained_fixups.size() as u32,
@@ -1170,7 +1056,7 @@ impl Linker for MachOLinker {
                 data_size: chained_fixups_data_size as u32,
             }
         );
-        self.get_mut(exports_trie).set(
+        self.buf.get_mut(exports_trie).set(
             LinkEditDataCommand {
                 command: LC_DYLD_EXPORTS_TRIE,
                 command_size: exports_trie.size() as u32,
@@ -1178,7 +1064,7 @@ impl Linker for MachOLinker {
                 data_size: exports_trie_len as u32,
             }
         );
-        self.get_mut(function_starts).set(
+        self.buf.get_mut(function_starts).set(
             LinkEditDataCommand {
                 command: LC_FUNCTION_STARTS,
                 command_size: function_starts.size() as u32,
@@ -1186,7 +1072,7 @@ impl Linker for MachOLinker {
                 data_size: function_starts_len as u32,
             }
         );
-        self.get_mut(data_in_code).set(
+        self.buf.get_mut(data_in_code).set(
             LinkEditDataCommand {
                 command: LC_DATA_IN_CODE,
                 command_size: data_in_code.size() as u32,
@@ -1194,7 +1080,7 @@ impl Linker for MachOLinker {
                 data_size: data_in_code_len as u32,
             }
         );
-        self.get_mut(code_signature).set(
+        self.buf.get_mut(code_signature).set(
             LinkEditDataCommand {
                 command: LC_CODE_SIGNATURE,
                 command_size: code_signature.size() as u32,
@@ -1202,7 +1088,7 @@ impl Linker for MachOLinker {
                 data_size: code_signature_len as u32,
             }
         );
-        self.get_mut(build_version).set(
+        self.buf.get_mut(build_version).set(
             BuildVersionCommand {
                 command: LC_BUILD_VERSION,
                 command_size: build_version_len as u32,
@@ -1212,13 +1098,13 @@ impl Linker for MachOLinker {
                 num_tools: 1,
             }
         );
-        self.get_mut(ld_tool).set(
+        self.buf.get_mut(ld_tool).set(
             BuildToolVersion {
                 tool: ToolEnum::Ld as u32,
                 version: (820 << 16) | (1 << 8),
             }
         );
-        self.get_mut(src_version).set(
+        self.buf.get_mut(src_version).set(
             SourceVersionCommand {
                 command: LC_SOURCE_VERSION,
                 command_size: src_version.size() as u32,
@@ -1226,7 +1112,7 @@ impl Linker for MachOLinker {
             }
         );
         for (dylib, command) in exe.dylibs.iter().zip(&dylib_load_commands) {
-            self.get_mut(command.header).set(
+            self.buf.get_mut(command.header).set(
                 DylibCommand {
                     command: LC_LOAD_DYLIB,
                     command_size: command.size(),
@@ -1241,7 +1127,7 @@ impl Linker for MachOLinker {
         }
         
         let num_symbols = self.num_symbol_table_entries;
-        self.get_mut(symbol_table).set(
+        self.buf.get_mut(symbol_table).set(
             SymbolTableCommand {
                 command: LC_SYMTAB,
                 command_size: symbol_table.size() as u32,
@@ -1251,7 +1137,7 @@ impl Linker for MachOLinker {
                 string_table_size: string_table_len as u32,
             }
         );
-        self.get_mut(dynamic_symbol_table).set(
+        self.buf.get_mut(dynamic_symbol_table).set(
             DynamicSymbolTableCommand {
                 command: LC_DYSYMTAB,
                 command_size: dynamic_symbol_table.size() as u32,
@@ -1284,7 +1170,7 @@ impl Linker for MachOLinker {
                 num_local_relocation_entries: 0,
             }
         );
-        self.get_mut(load_dylinker).set(
+        self.buf.get_mut(load_dylinker).set(
             DylinkerCommand {
                 command: LC_LOAD_DYLINKER,
                 command_size: load_dylinker_size as u32,
@@ -1292,7 +1178,7 @@ impl Linker for MachOLinker {
             }
         );
         let entry_point_file_offset = self.get_section_offset(text_section);
-        self.get_mut(entry_point).set(
+        self.buf.get_mut(entry_point).set(
             EntryPointCommand {
                 command: LC_MAIN,
                 command_size: entry_point.size() as u32,
@@ -1300,7 +1186,7 @@ impl Linker for MachOLinker {
                 stack_size: 0,
             }
         );
-        // self.get_mut(uuid).set(
+        // self.buf.get_mut(uuid).set(
         //     UuidCommand {
         //         command: LC_UUID,
         //         command_size: uuid.size() as u32,
@@ -1310,7 +1196,7 @@ impl Linker for MachOLinker {
 
         // let mut hasher = Md5::new();
         // hasher.update(&self.data[..code_signature_start]);
-        // self.get_mut(uuid).map(|uuid| &mut uuid.uuid).set(hasher.finalize().into());
+        // self.buf.get_mut(uuid).map(|uuid| &mut uuid.uuid).set(hasher.finalize().into());
 
         let mut sha256 = Sha256::new();
         let mut i = 0;
@@ -1319,21 +1205,21 @@ impl Linker for MachOLinker {
         while i < code_signature_start {
             sha256.reset();
             if code_signature_start - i < 4096 {
-                sha256.input(&self.data[i..code_signature_start]);
+                sha256.input(&self.buf.data[i..code_signature_start]);
             } else {
-                sha256.input(&self.data[i..(i + 4096)]);
+                sha256.input(&self.buf.data[i..(i + 4096)]);
             }
             sha256.result(&mut hash_buf);
-            self.push(hash_buf);
+            self.buf.push(hash_buf);
             num_code_slots += 1;
             i += 4096;
         }
 
-        let code_directory_len = self.pos() - code_directory.start();
-        let real_code_signature_len = self.pos() - code_signature_start;
+        let code_directory_len = self.buf.pos() - code_directory.start();
+        let real_code_signature_len = self.buf.pos() - code_signature_start;
         assert_eq!(real_code_signature_len, code_signature_len);
 
-        self.get_mut(code_directory).set(
+        self.buf.get_mut(code_directory).set(
             CodeDirectory {
                 magic: CSMAGIC_CODEDIRECTORY,
                 length: code_directory_len as u32,
@@ -1359,7 +1245,7 @@ impl Linker for MachOLinker {
             }
         );
 
-        self.get_mut(super_blob).set(
+        self.buf.get_mut(super_blob).set(
             SuperBlobHeader {
                 magic: CSMAGIC_EMBEDDED_SIGNATURE,
                 length: code_signature_len as u32,
@@ -1367,30 +1253,13 @@ impl Linker for MachOLinker {
             }
         );
 
-        dest.write_all(&self.data)?;
+        dest.write_all(&self.buf.data)?;
 
         Ok(())
     }
 }
 
 impl MachOLinker {
-    fn alloc<T: ByteSwap>(&mut self) -> Ref<T> {
-        let reff = Ref::new(self.data.len());
-        self.pad_with_zeroes(mem::size_of::<T>());
-        reff
-    }
-
-    fn alloc_be<T: ByteSwap>(&mut self) -> Ref<T, true> {
-        let reff = Ref::new(self.data.len());
-        self.pad_with_zeroes(mem::size_of::<T>());
-        reff
-    }
-
-    fn alloc_cmd<T: ByteSwap>(&mut self) -> Ref<T> {
-        self.num_load_commands += 1;
-        self.alloc()
-    }
-
     fn alloc_segment(&mut self, name: &'static str, vm_protection: u32, flags: u32) -> SegmentId {
         let header = self.alloc_cmd::<LcSegment64>();
         self.segments.push(
@@ -1416,7 +1285,7 @@ impl MachOLinker {
     }
 
     fn alloc_section(&mut self, segment_id: SegmentId, name: &'static str, alignment: usize, flags: SectionFlags) -> SectionId {
-        let header = self.alloc::<Section64>();
+        let header = self.buf.alloc::<Section64>();
         let segment = &mut self.segments[segment_id];
         let index = segment.sections.len();
         segment.sections.push(
@@ -1459,7 +1328,7 @@ impl MachOLinker {
             let command_size = (segment.sections.last()
                 .map(|sect| sect.header.end())
                 .unwrap_or(segment.header.end()) - segment.header.start()) as u32;
-            self.get_mut(segment.header).set(
+            self.buf.get_mut(segment.header).set(
                 LcSegment64 {
                     command: LC_SEGMENT_64,
                     command_size,
@@ -1477,7 +1346,7 @@ impl MachOLinker {
 
             for section in &segment.sections {
                 let info = section.info.as_ref().unwrap();
-                self.get_mut(section.header).set(
+                self.buf.get_mut(section.header).set(
                     Section64 {
                         name: encode_string_16(section.name),
                         segment_name: encode_string_16(segment.name),
@@ -1529,7 +1398,7 @@ impl MachOLinker {
 
         self.add_info_to_segment(segment.segment, 0, text_segment_size);
 
-        self.pad_with_zeroes(text_segment_size - self.pos());
+        self.buf.pad_with_zeroes(text_segment_size - self.buf.pos());
     }
 
     fn fill_text_section(&mut self, segment: &TextSegmentBuilder, section: SectionId, data: &[u8]) {
@@ -1537,7 +1406,7 @@ impl MachOLinker {
         assert_eq!(segment.segment, section.0);
         let size = segment.sections[section.1].size;
         let offset = self.segments[segment.segment].sections[section.1].info.unwrap().offset;
-        self.data[offset..(offset + size)].copy_from_slice(data);
+        self.buf.data[offset..(offset + size)].copy_from_slice(data);
     }
 
     fn get_section_offset(&self, section: SectionId) -> usize {
@@ -1547,15 +1416,15 @@ impl MachOLinker {
 
     fn alloc_dylib_command(&mut self, name: &str) -> DylibCommandBuilder {
         let header = self.alloc_cmd::<DylibCommand>();
-        let name_begin = self.pos();
-        self.push_null_terminated_string(name);
+        let name_begin = self.buf.pos();
+        self.buf.push_null_terminated_string(name);
 
         // According to https://opensource.apple.com/source/xnu/xnu-7195.81.3/EXTERNAL_HEADERS/mach-o/loader.h.auto.html
         // we're supposed to pad to the next 4 byte boundary, but the sample files I've examined seem to pad to 8 bytes
         // (which honestly makes more sense to me anyway, given the presence of 64 bit values in some of the load
         // commands)
-        self.pad_to_next_boundary::<8>();
-        let end = self.pos();
+        self.buf.pad_to_next_boundary::<8>();
+        let end = self.buf.pos();
 
         DylibCommandBuilder {
             header,
@@ -1565,65 +1434,12 @@ impl MachOLinker {
 
     fn alloc_symbol_table_entry(&mut self) -> Ref<SymbolTableEntry> {
         self.num_symbol_table_entries += 1;
-        self.alloc()
+        self.buf.alloc()
     }
 
-    fn push_null_terminated_string(&mut self, val: &str) -> usize {
-        let pos = self.pos();
-        self.data.extend(val.as_bytes());
-        self.data.push(0);
-        pos
-    }
-
-    fn get_mut<'a, T: ByteSwap, const BIG_ENDIAN: bool>(&'a mut self, addr: Ref<T, BIG_ENDIAN>) -> ResolvedRefMut<'a, T, BIG_ENDIAN> {
-        debug_assert!(addr.addr + mem::size_of::<T>() <= self.data.len());
-
-        // TODO: don't produce a &mut T at all. I didn't think we would need to support unaligned access, but we do.
-        let region = &mut self.data[addr.addr..];
-        let ptr = region.as_mut_ptr() as *mut T;
-
-        ResolvedRefMut { value: unsafe { &mut *ptr } }
-    }
-
-    fn push<T: ByteSwap>(&mut self, value: T) -> Ref<T> {
-        let addr = self.alloc();
-        self.get_mut(addr).set(value);
-        addr
-    }
-
-    fn push_be<T: ByteSwap>(&mut self, value: T) -> Ref<T, true> {
-        let addr = self.alloc_be();
-        self.get_mut(addr).set(value);
-        addr
-    }
-
-    fn pos(&self) -> usize { self.data.len() }
-
-    fn pad_with_zeroes(&mut self, size: usize) {
-        self.data.extend(std::iter::repeat(0).take(size as usize));
-    }
-
-    fn pad_to_next_boundary<const B: usize>(&mut self) {
-        let padded_pos = nearest_multiple_of_rt!(self.data.len() as u64, B);
-        self.pad_with_zeroes(padded_pos as usize - self.pos());
-    }
-
-    fn pad_to_next_boundary_rt(&mut self, alignment: usize) {
-        let padded_pos = nearest_multiple_of_rt!(self.data.len(), alignment);
-        self.pad_with_zeroes(padded_pos as usize - self.pos());
-    }
-    
-    fn push_uleb128(&mut self, mut value: u32) {
-        loop {
-            let mut next_byte = (value & 0x7F) as u8;
-            value >>= 7;
-            if value != 0 {
-                next_byte |= 0x80;
-            }
-            self.push(next_byte);
-            
-            if value == 0 { break; }
-        }
+    fn alloc_cmd<T: ByteSwap>(&mut self) -> Ref<T> {
+        self.num_load_commands += 1;
+        self.buf.alloc()
     }
 
     fn push_chained_fixup<T>(&mut self, prev_ptr: &mut Option<Ref<DyldChainedPtr64>>, fixup: T)
@@ -1633,11 +1449,11 @@ impl MachOLinker {
     {
         // TODO: handle page boundaries, also perhaps automatically generate first fixup per-page here
         if let Some(prev_ptr) = prev_ptr {
-            let diff = self.pos() - prev_ptr.addr;
+            let diff = self.buf.pos() - prev_ptr.addr;
             assert_eq!(diff % 4, 0);
-            self.get_mut(*prev_ptr).set_next((diff / 4) as u16);
+            self.buf.get_mut(*prev_ptr).set_next((diff / 4) as u16);
         }
-        *prev_ptr = Some(self.push(fixup).into());
+        *prev_ptr = Some(self.buf.push(fixup).into());
     }
 }
 

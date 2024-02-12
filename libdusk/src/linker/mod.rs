@@ -6,8 +6,10 @@ use crate::target::OperatingSystem;
 use crate::linker::macho::MachOLinker;
 use crate::linker::pe32::PE32Linker;
 
-mod macho;
+#[macro_use]
+mod byte_swap;
 mod pe32;
+mod macho;
 
 pub mod exe;
 
