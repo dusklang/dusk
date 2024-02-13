@@ -436,6 +436,7 @@ impl From<Ref<DyldChainedPtr64Bind>> for Ref<DyldChainedPtr64> {
     fn from(value: Ref<DyldChainedPtr64Bind>) -> Self {
         Ref {
             addr: value.addr,
+            rva: value.rva,
             _phantom: PhantomData,
         }
     }
@@ -455,7 +456,7 @@ impl DyldChainedPtr64Rebase {
 
 impl From<Ref<DyldChainedPtr64Rebase>> for Ref<DyldChainedPtr64> {
     fn from(value: Ref<DyldChainedPtr64Rebase>) -> Self {
-        Ref::new(value.addr)
+        Ref::new(value.addr, value.rva)
     }
 }
 
@@ -666,7 +667,7 @@ impl Linker for MachOLinker {
         
         let load_dylinker = self.alloc_cmd::<DylinkerCommand>();
         self.buf.push_null_terminated_string("/usr/lib/dyld");
-        self.buf.pad_to_next_boundary::<8>();
+        self.buf.pad_to_next_boundary(8);
         let load_dylinker_size = self.buf.pos() - load_dylinker.addr;
         
         // let uuid = self.alloc_cmd::<UuidCommand>();
@@ -776,7 +777,7 @@ impl Linker for MachOLinker {
             let objc_imageinfo_size = self.buf.pos() - objc_imageinfo_begin;
             self.add_info_to_section(objc_imageinfo_section.unwrap(), objc_imageinfo_begin, objc_imageinfo_size);
 
-            self.buf.pad_to_next_boundary::<PAGE_SIZE>();
+            self.buf.pad_to_next_boundary(PAGE_SIZE);
             data_const_size = self.buf.pos() - data_const_begin;
             self.add_info_to_segment(segment, data_const_begin, data_const_size);
         }
@@ -798,7 +799,7 @@ impl Linker for MachOLinker {
                 self.add_info_to_section(section, objc_selrefs_begin, objc_selrefs_size);
             }
 
-            self.buf.pad_to_next_boundary::<PAGE_SIZE>();
+            self.buf.pad_to_next_boundary(PAGE_SIZE);
             data_segment_size = self.buf.pos() - data_segment_begin;
             self.add_info_to_segment(segment, data_segment_begin, data_segment_size);
         }
@@ -806,7 +807,7 @@ impl Linker for MachOLinker {
         let link_edit_begin = self.buf.pos();
         
         let chained_fixups_header = self.buf.alloc::<DyldChainedFixupsHeader>();
-        self.buf.pad_to_next_boundary::<8>();
+        self.buf.pad_to_next_boundary(8);
         // Push dyld_chained_starts_in_image (a dynamically-sized structure)
         let chained_starts_offset = self.buf.pos();
         let num_segments = self.segments.len() as u32;
@@ -827,7 +828,7 @@ impl Linker for MachOLinker {
 
         // TODO: reduce code duplication between __DATA and __DATA_CONST.
         if let Some(data_const_starts_offset) = data_const_starts_offset {
-            self.buf.pad_to_next_boundary::<8>();
+            self.buf.pad_to_next_boundary(8);
             let chained_starts_in_segment_pos = self.buf.pos();
             self.buf.get_mut(data_const_starts_offset).set((chained_starts_in_segment_pos -  chained_starts_offset) as u32);
             
@@ -856,7 +857,7 @@ impl Linker for MachOLinker {
         }
 
         if let Some(data_segment_starts_offset) = data_segment_starts_offset {
-            self.buf.pad_to_next_boundary::<8>();
+            self.buf.pad_to_next_boundary(8);
             let chained_starts_in_segment_pos = self.buf.pos();
             self.buf.get_mut(data_segment_starts_offset).set((chained_starts_in_segment_pos - chained_starts_offset) as u32);
             
@@ -898,14 +899,14 @@ impl Linker for MachOLinker {
                 DyldChainedImport::new((import.dylib.index() + 1).try_into().unwrap(), false, offset as u32)
             );
         }
-        self.buf.pad_to_next_boundary::<8>();
+        self.buf.pad_to_next_boundary(8);
         let imported_symbols_offset = if exe.got_entries.is_empty() {
             imports_offset
         } else {
             imported_symbols_offset
         };
 
-        self.buf.pad_to_next_boundary::<8>();
+        self.buf.pad_to_next_boundary(8);
 
         self.buf.get_mut(chained_fixups_header).set(
             DyldChainedFixupsHeader {
@@ -930,7 +931,7 @@ impl Linker for MachOLinker {
         // subsequent functions would be specified relative to the previous one in the list.
         let text_section_offset = self.get_section_offset(text_section);
         self.buf.push_uleb128(text_section_offset as u32);
-        self.buf.pad_to_next_boundary::<8>();
+        self.buf.pad_to_next_boundary(8);
         let function_starts_len = self.buf.pos() - function_starts_start;
         
         let data_in_code_start = self.buf.pos();
@@ -957,10 +958,10 @@ impl Linker for MachOLinker {
         for symbol in local_symbols.iter().chain(&imported_symbols) {
             symbol_string_offsets.push(self.buf.push_null_terminated_string(&symbol.symbol));
         }
-        self.buf.pad_to_next_boundary::<8>();
+        self.buf.pad_to_next_boundary(8);
         let string_table_len = self.buf.pos() - string_table_begin;
         
-        self.buf.pad_to_next_boundary::<16>();
+        self.buf.pad_to_next_boundary(16);
         
         let code_signature_start = self.buf.pos();
         let super_blob = self.buf.alloc_be::<SuperBlobHeader>();
@@ -1423,7 +1424,7 @@ impl MachOLinker {
         // we're supposed to pad to the next 4 byte boundary, but the sample files I've examined seem to pad to 8 bytes
         // (which honestly makes more sense to me anyway, given the presence of 64 bit values in some of the load
         // commands)
-        self.buf.pad_to_next_boundary::<8>();
+        self.buf.pad_to_next_boundary(8);
         let end = self.buf.pos();
 
         DylibCommandBuilder {

@@ -66,10 +66,15 @@ impl<T: ByteSwap, const N: usize> ByteSwap for [T; N] {
     }
 }
 
+impl ByteSwap for &[u8] {
+    fn byte_swap(&mut self) {}
+}
+
 byte_swap_impl!(noops: u8, i8; nums: u16, u32, u64, usize, i16, i32, i64, isize);
 
 pub struct Ref<T: ByteSwap, const BIG_ENDIAN: bool = false> {
     pub addr: usize,
+    pub rva: usize,
     pub _phantom: PhantomData<T>,
 }
 
@@ -98,6 +103,7 @@ impl<T: ByteSwap, const BIG_ENDIAN: bool> Clone for Ref<T, BIG_ENDIAN> {
     fn clone(&self) -> Self {
         Self {
             addr: self.addr,
+            rva: self.rva,
             _phantom: PhantomData,
         }
     }
@@ -105,9 +111,10 @@ impl<T: ByteSwap, const BIG_ENDIAN: bool> Clone for Ref<T, BIG_ENDIAN> {
 impl<T: ByteSwap, const BIG_ENDIAN: bool> Copy for Ref<T, BIG_ENDIAN> {}
 
 impl<T: ByteSwap, const BIG_ENDIAN: bool> Ref<T, BIG_ENDIAN> {
-    pub fn new(addr: usize) -> Self {
+    pub fn new(addr: usize, rva: usize) -> Self {
         Self {
             addr,
+            rva,
             _phantom: PhantomData,
         }
     }
@@ -120,19 +127,29 @@ impl<T: ByteSwap, const BIG_ENDIAN: bool> Ref<T, BIG_ENDIAN> {
 #[derive(Default)]
 pub struct Buffer {
     pub data: Vec<u8>,
+
+    // currently only used by PE linker
+    rva: usize,
 }
 
 impl Buffer {
     pub fn pos(&self) -> usize { self.data.len() }
 
+    pub fn rva(&self) -> usize { self.rva }
+
+    pub fn jump_to_rva(&mut self, new_rva: usize) {
+        assert!(new_rva >= self.rva);
+        self.rva = new_rva;
+    }
+
     pub fn alloc<T: ByteSwap>(&mut self) -> Ref<T> {
-        let reff = Ref::new(self.data.len());
+        let reff = Ref::new(self.data.len(), self.rva);
         self.pad_with_zeroes(mem::size_of::<T>());
         reff
     }
 
     pub fn alloc_be<T: ByteSwap>(&mut self) -> Ref<T, true> {
-        let reff = Ref::new(self.data.len());
+        let reff = Ref::new(self.data.len(), self.rva);
         self.pad_with_zeroes(mem::size_of::<T>());
         reff
     }
@@ -149,18 +166,24 @@ impl Buffer {
         addr
     }
 
+    pub fn extend(&mut self, bytes: &[u8]) {
+        self.data.extend(bytes);
+        self.rva += bytes.len();
+    }
+
     pub fn pad_with_zeroes(&mut self, size: usize) {
         self.data.extend(std::iter::repeat(0).take(size as usize));
+        self.rva += size;
     }
 
-    pub fn pad_to_next_boundary<const B: usize>(&mut self) {
-        let padded_pos = nearest_multiple_of_rt!(self.data.len() as u64, B);
-        self.pad_with_zeroes(padded_pos as usize - self.pos());
-    }
-
-    pub fn pad_to_next_boundary_rt(&mut self, alignment: usize) {
+    pub fn pad_to_next_boundary(&mut self, alignment: usize) {
         let padded_pos = nearest_multiple_of_rt!(self.data.len(), alignment);
-        self.pad_with_zeroes(padded_pos as usize - self.pos());
+        let amount_to_add = padded_pos as usize - self.pos();
+        self.data.extend(std::iter::repeat(0).take(amount_to_add as usize));
+    }
+
+    pub fn pad_rva_to_next_boundary(&mut self, alignment: usize) {
+        self.rva = nearest_multiple_of_rt!(self.rva, alignment);
     }
     
     pub fn push_uleb128(&mut self, mut value: u32) {
@@ -180,6 +203,7 @@ impl Buffer {
         let pos = self.pos();
         self.data.extend(val.as_bytes());
         self.data.push(0);
+        self.rva += val.len() + 1;
         pos
     }
 

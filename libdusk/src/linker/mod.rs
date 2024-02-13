@@ -4,11 +4,11 @@ use crate::mir::FuncId;
 use crate::target::OperatingSystem;
 
 use crate::linker::macho::MachOLinker;
-use crate::linker::pe32::PE32Linker;
+use crate::linker::pe::PELinker;
 
 #[macro_use]
 mod byte_swap;
-mod pe32;
+mod pe;
 mod macho;
 
 pub mod exe;
@@ -21,7 +21,7 @@ impl Driver {
     pub fn create_linker(&self) -> Box<dyn Linker> {
         match self.os {
             OperatingSystem::MacOS => Box::new(MachOLinker::new()),
-            OperatingSystem::Windows => Box::new(PE32Linker::new()),
+            OperatingSystem::Windows => Box::new(PELinker::new()),
         }
     }
 }
