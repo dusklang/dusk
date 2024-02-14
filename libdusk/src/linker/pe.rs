@@ -8,6 +8,7 @@ use std::mem;
 use bitflags::bitflags;
 use index_vec::IndexVec;
 
+use crate::backend::{CodeBlobExt, Indirection};
 use crate::linker::Linker;
 use crate::linker::exe::{DynLibId, DynamicLibrarySource, Exe, ImportedSymbolId, FixupLocationId};
 use crate::mir::FuncId;
@@ -272,6 +273,7 @@ impl Pe32PlusImportLookupTableEntry {
     }
 }
 
+#[derive(Copy, Clone)]
 struct SectionRef {
     rva: usize,
     address: usize,
@@ -295,7 +297,7 @@ const FILE_ALIGNMENT: usize = 0x200;
 const SECTION_ALIGNMENT: usize = 0x1000;
 
 impl Linker for PELinker {
-    fn write(&mut self, _d: &Driver, _main_function_index: FuncId, dest: &mut dyn Write) -> io::Result<()> {
+    fn write(&mut self, d: &Driver, main_function_index: FuncId, dest: &mut dyn Write) -> io::Result<()> {
         let mut exe = PEExe::new();
 
         self.buf.push(*b"MZ");
@@ -319,72 +321,14 @@ impl Linker for PELinker {
 
         let text_section = self.begin_section(b".text\0\0\0", SectionCharacteristics::CNT_CODE | SectionCharacteristics::MEM_EXECUTE | SectionCharacteristics::MEM_READ);
 
-        let return_val: u32 = 0;
-
-        let mut fixups = Vec::new();
-
-        let kernel32 = exe.import_dynamic_library(DynamicLibrarySource::Name("KERNEL32.dll"));
-        let exit_process = exe.import_symbol(kernel32, "ExitProcess".to_string());
-        let get_std_handle = exe.import_symbol(kernel32, "GetStdHandle".to_string());
-        let write_console = exe.import_symbol(kernel32, "WriteConsoleA".to_string());
-
         let address_of_entry_point = self.buf.rva();
 
-        // sub rsp, 72
-        self.buf.push([0x48u8, 0x83, 0xec, 0x48]);
-        
-        // mov ecx, -11
-        self.buf.push([0xb9u8, 0xf5, 0xff, 0xff, 0xff]);
-
-        // call GetStdHandle
-        let fixup = exe.use_imported_symbol(get_std_handle);
-        self.buf.push([0xffu8, 0x15]);
-        let rip_offset = self.buf.alloc::<u32>();
-        fixups.push((rip_offset, self.buf.rva(), fixup));
-
-        // mov QWORD PTR [rsp+48], rax
-        self.buf.push([0x48u8, 0x89, 0x44, 0x24, 0x30]);
-        
-        // mov QWORD PTR [rsp+32], 0
-        self.buf.push([0x48u8, 0xc7, 0x44, 0x24, 0x20, 0x00, 0x00, 0x00, 0x00]);
-        
-        // xor r9d, r9d
-        self.buf.push([0x45u8, 0x31, 0xc9]);
-        
-        let string_to_print = "Hello, world!\n";
-        // mov r8d, string_to_print.len()
-        self.buf.push([0x41u8, 0xb8]);
-        self.buf.push(string_to_print.len() as u32);
-
-        // lea rdx, string_to_print
-        let fixup = exe.use_cstring(&CString::new(string_to_print).unwrap());
-        self.buf.push([0x48u8, 0x8d, 0x15]);
-        let rip_offset = self.buf.alloc::<u32>();
-        fixups.push((rip_offset, self.buf.rva(), fixup));
-
-        // mov rcx, QWORD PTR [rsp+48]
-        self.buf.push([0x48u8, 0x8b, 0x4c, 0x24, 0x30]);
-
-        // call WriteConsoleA
-        let fixup = exe.use_imported_symbol(write_console);
-        self.buf.push([0xffu8, 0x15]);
-        let rip_offset = self.buf.alloc::<u32>();
-        fixups.push((rip_offset, self.buf.rva(), fixup));
-
-        // mov ecx, return_val
-        self.buf.push([0xb9u8]);
-        self.buf.push(return_val);
-
-        // call ExitProcess
-        let fixup = exe.use_imported_symbol(exit_process);
-        self.buf.push([0xffu8, 0x15]);
-        let rip_offset = self.buf.alloc::<u32>();
-        fixups.push((rip_offset, self.buf.rva(), fixup));
+        let mut code = d.generate_x64_func(main_function_index, true, &mut exe);
+        self.buf.pad_with_zeroes(code.len());
 
         let size_of_code = self.end_section(text_section, text_header);
 
         let rdata_section = self.begin_section(b".rdata\0\0", SectionCharacteristics::MEM_READ);
-        let rdata_rva = rdata_section.rva;
         self.buf.extend(&exe.cstrings);
         self.end_section(rdata_section, rdata_header);
 
@@ -458,21 +402,22 @@ impl Linker for PELinker {
             }
         );
 
-        for (rip_relative_offset, rva, fixup) in fixups {
-            match exe.fixup_locations[fixup] {
+        let code = code.perform_fixups(text_section.rva, |fixup| {
+            let offset = match exe.fixup_locations[fixup] {
                 PEFixupLocation::ImportedProc(proc) => {
                     let proc = &exe.procs[proc];
                     let dll = proc.dll;
                     let index = proc.proc_index;
-                    let offset = dll_import_info[dll].address_entries[index].rva - rva;
-                    self.buf.get_mut(rip_relative_offset).set(offset as u32);
+                    dll_import_info[dll].address_entries[index].rva
                 },
                 PEFixupLocation::RDataSectionOffset(offset) => {
-                    let offset = rdata_rva + offset - rva;
-                    self.buf.get_mut(rip_relative_offset).set(offset as u32);
+                    rdata_section.rva + offset
                 }
-            }
-        }
+            };
+            (offset, Indirection::dont_care())
+        });
+
+        self.buf.data[text_section.address..(text_section.address + code.len())].copy_from_slice(code);
 
         dest.write_all(&self.buf.data)?;
         Ok(())

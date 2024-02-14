@@ -1,5 +1,7 @@
 use std::fmt::Display;
 
+use crate::backend::{CodeBlob, Indirection};
+use crate::linker::exe::{FixupLocationId, Fixup};
 use crate::into_bytes::*;
 
 trait Register {
@@ -160,29 +162,39 @@ impl IntoBytes for RexBuilder {
 #[derive(Default)]
 pub struct X64Encoder {
     data: Vec<u8>,
+    fixups: Vec<Fixup>,
 
     // TODO: use cfg attributes to disable this field and all associated code in a release build
     debug: bool,
 }
 
-#[derive(Debug)]
-pub struct MemoryLoc64 {
-    base: Reg64,
-    offset: i32,
+#[derive(Debug, Copy, Clone)]
+pub enum MemoryLoc64 {
+    BasePlusOffset { base: Reg64, offset: i32 },
+    #[allow(unused)]
+    RipRelative { offset: i32 },
+    RipRelativeFixup { id: FixupLocationId },
 }
 
 impl Display for MemoryLoc64 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{}", self.base)?;
-        if self.offset > 0 {
-            write!(f, "+{}", self.offset)?;
-        } else if self.offset < 0 {
-            write!(f, "{}", self.offset)?;
+        let (base, offset) = match *self {
+            MemoryLoc64::BasePlusOffset { base, offset } => (base.to_string(), offset.to_string()),
+            MemoryLoc64::RipRelative { offset } => ("rip".to_string(), offset.to_string()),
+            MemoryLoc64::RipRelativeFixup { id } => ("rip".to_string(), format!("fixup{}", id.index())),
+        };
+
+        write!(f, "[{}", base)?;
+        if offset.starts_with("-") {
+            write!(f, "{offset}")?;
+        } else if offset != "0" {
+            write!(f, "+{offset}")?;
         }
         write!(f, "]")
     }
 }
 
+#[allow(unused)]
 impl X64Encoder {
     pub fn new() -> Self {
         Self::default()
@@ -234,56 +246,80 @@ impl X64Encoder {
 
     // Handles several variants of 16-bit, 32-bit and 64-bit MOV and LEA instructions.
     fn addr32_64_impl(&mut self, bit64: bool, opcode: u8, reg: impl Register, loc: MemoryLoc64) {
-        if bit64 || reg.ext() || loc.base.ext() {
-            self.push_any(RexBuilder::new32().w_bit(bit64).r_bit(reg.ext()).b_bit(loc.base.ext()));
+        let base_ext = match loc {
+            MemoryLoc64::BasePlusOffset { base, .. } => base.ext(),
+            MemoryLoc64::RipRelative { .. } | MemoryLoc64::RipRelativeFixup { .. } => false,
+        };
+        if bit64 || reg.ext() || base_ext {
+            self.push_any(RexBuilder::new32().w_bit(bit64).r_bit(reg.ext()).b_bit(base_ext));
         }
         self.push(opcode);
-        if loc.offset == 0 {
-            match loc.base.main_bits() {
-                // BP and R13 both have the main bits 101, which is interpreted as a special value for IP-relative
-                // addressing. The upshot is to actually encode these registers in the normal way, you need a different
-                // mod field, plus a zero immediate offset.
-                0b101 => {
-                    self.push(build_modrm(0b01, reg.main_bits(), loc.base.main_bits()));
-                    self.push(0);
-                },
-                // SP and R12 both have the main bits 100, which is interpreted as a special value meaning the SIB byte
-                // is present. This enables a wide variety of more advanced addressing modes. The upshot is to actually
-                // encode these registers in the normal way, you need an SIB byte.
-                0b100 => {
-                    self.push(build_modrm(0b00, reg.main_bits(), loc.base.main_bits()));
-                    self.push(build_sib(0, 0b100, loc.base.main_bits()));
-                },
-                _ => self.push(build_modrm(0b00, reg.main_bits(), loc.base.main_bits())),
-            }
-        } else if let Ok(offset) = TryInto::<i8>::try_into(loc.offset) {
-            match loc.base.main_bits() {
-                // SP and R12 both have the main bits 100, which is interpreted as a special value meaning the SIB byte
-                // is present. This enables a wide variety of more advanced addressing modes. The upshot is to actually
-                // encode these registers in the normal way, you need an SIB byte.
-                0b100 => {
-                    self.push(build_modrm(0b01, reg.main_bits(), loc.base.main_bits()));
-                    self.push(build_sib(0, 0b100, loc.base.main_bits()));
-                },
-                _ => {
-                    self.push(build_modrm(0b01, reg.main_bits(), loc.base.main_bits()));
+        match loc {
+            MemoryLoc64::BasePlusOffset { base, offset } => {
+                if offset == 0 {
+                    match base.main_bits() {
+                        // BP and R13 both have the main bits 101, which is interpreted as a special value for IP-relative
+                        // addressing. The upshot is to actually encode these registers in the normal way, you need a different
+                        // mod field, plus a zero immediate offset.
+                        0b101 => {
+                            self.push(build_modrm(0b01, reg.main_bits(), base.main_bits()));
+                            self.push(0);
+                        },
+                        // SP and R12 both have the main bits 100, which is interpreted as a special value meaning the SIB byte
+                        // is present. This enables a wide variety of more advanced addressing modes. The upshot is to actually
+                        // encode these registers in the normal way, you need an SIB byte.
+                        0b100 => {
+                            self.push(build_modrm(0b00, reg.main_bits(), base.main_bits()));
+                            self.push(build_sib(0, 0b100, base.main_bits()));
+                        },
+                        _ => self.push(build_modrm(0b00, reg.main_bits(), base.main_bits())),
+                    }
+                } else if let Ok(offset) = TryInto::<i8>::try_into(offset) {
+                    match base.main_bits() {
+                        // SP and R12 both have the main bits 100, which is interpreted as a special value meaning the SIB byte
+                        // is present. This enables a wide variety of more advanced addressing modes. The upshot is to actually
+                        // encode these registers in the normal way, you need an SIB byte.
+                        0b100 => {
+                            self.push(build_modrm(0b01, reg.main_bits(), base.main_bits()));
+                            self.push(build_sib(0, 0b100, base.main_bits()));
+                        },
+                        _ => {
+                            self.push(build_modrm(0b01, reg.main_bits(), base.main_bits()));
+                        }
+                    }
+                    self.push_any(offset);
+                } else {
+                    match base.main_bits() {
+                        // SP and R12 both have the main bits 100, which is interpreted as a special value meaning the SIB byte
+                        // is present. This enables a wide variety of more advanced addressing modes. The upshot is to actually
+                        // encode these registers in the normal way, you need an SIB byte.
+                        0b100 => {
+                            self.push(build_modrm(0b10, reg.main_bits(), base.main_bits()));
+                            self.push(build_sib(0b00, 0b100, base.main_bits()));
+                        },
+                        _ => {
+                            self.push(build_modrm(0b10, reg.main_bits(), base.main_bits()));
+                        }
+                    }
+                    self.push_any(offset);
                 }
-            }
-            self.push_any(offset);
-        } else {
-            match loc.base.main_bits() {
-                // SP and R12 both have the main bits 100, which is interpreted as a special value meaning the SIB byte
-                // is present. This enables a wide variety of more advanced addressing modes. The upshot is to actually
-                // encode these registers in the normal way, you need an SIB byte.
-                0b100 => {
-                    self.push(build_modrm(0b10, reg.main_bits(), loc.base.main_bits()));
-                    self.push(build_sib(0b00, 0b100, loc.base.main_bits()));
-                },
-                _ => {
-                    self.push(build_modrm(0b10, reg.main_bits(), loc.base.main_bits()));
-                }
-            }
-            self.push_any(loc.offset);
+            },
+            MemoryLoc64::RipRelative { offset } => {
+                // This is the special IP-relative addressing mode referred to above.
+                self.push(build_modrm(0b00, reg.main_bits(), 0b101));
+                self.push_any(offset);
+            },
+            MemoryLoc64::RipRelativeFixup { id } => {
+                // This is the special IP-relative addressing mode referred to above.
+                self.push(build_modrm(0b00, reg.main_bits(), 0b101));
+                let offset = self.data.len();
+                self.push_any(0i32);
+                let fixup = Fixup {
+                    offset,
+                    id,
+                };
+                self.fixups.push(fixup);
+            },
         }
     }
 
@@ -389,6 +425,21 @@ impl X64Encoder {
         self.push(build_modrm(0b11, 0b010, func.main_bits()));
     }
 
+    pub fn call(&mut self, rip_offset: FixupLocationId) {
+        self.data.extend([0xff, 0x15]);
+        let fixup = Fixup {
+            offset: self.data.len(),
+            id: rip_offset,
+        };
+        self.fixups.push(fixup);
+        self.data.extend(std::iter::repeat(0).take(4));
+    }
+
+    // this method should be removed when all the instructions I use in the backend have encoder implementations.
+    pub fn tmp_extend(&mut self, bytes: &[u8]) {
+        self.data.extend(bytes);
+    }
+
     pub fn ret(&mut self) {
         self.begin_instr_no_operands("ret");
         self.push(0xc3);
@@ -408,32 +459,41 @@ impl std::ops::Add<i32> for Reg64 {
     type Output = MemoryLoc64;
 
     fn add(self, rhs: i32) -> Self::Output {
-        MemoryLoc64 { base: self, offset: rhs }
-    }
-}
-impl std::ops::Add<i32> for MemoryLoc64 {
-    type Output = MemoryLoc64;
-
-    fn add(mut self, rhs: i32) -> Self::Output {
-        self.offset += rhs;
-        self
+        MemoryLoc64::BasePlusOffset { base: self, offset: rhs }
     }
 }
 impl std::ops::Sub<i32> for Reg64 {
     type Output = MemoryLoc64;
 
     fn sub(self, rhs: i32) -> Self::Output {
-        MemoryLoc64 { base: self, offset: -rhs }
-    }
-}
-impl std::ops::Sub<i32> for MemoryLoc64 {
-    type Output = MemoryLoc64;
-
-    fn sub(mut self, rhs: i32) -> Self::Output {
-        self.offset -= rhs;
-        self
+        MemoryLoc64::BasePlusOffset { base: self, offset: -rhs }
     }
 }
 impl From<Reg64> for MemoryLoc64 {
-    fn from(base: Reg64) -> Self { Self { base, offset: 0 } }
+    fn from(base: Reg64) -> Self { Self::BasePlusOffset { base, offset: 0 } }
+}
+
+impl From<FixupLocationId> for MemoryLoc64 {
+    fn from(id: FixupLocationId) -> Self {
+        MemoryLoc64::RipRelativeFixup { id }
+    }
+}
+
+impl CodeBlob for X64Encoder {
+    fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    fn perform_fixups_impl<'a>(&'a mut self, code_addr: usize, mut get_fixup_addr: Box<dyn FnMut(FixupLocationId) -> (usize, Indirection) + 'a>) -> &'a [u8] {
+        for fixup in &self.fixups {
+            let (fixup_addr, _indirection) = get_fixup_addr(fixup.id);
+            let code_addr = code_addr + fixup.offset;
+            let next_instr_addr = code_addr + 4;
+            let rip_offset = (fixup_addr as isize - next_instr_addr as isize) as i32;
+
+            self.data[fixup.offset..(fixup.offset + 4)].copy_from_slice(&rip_offset.to_le_bytes());
+        }
+
+        &self.data
+    }
 }

@@ -1,12 +1,17 @@
 use crate::linker::exe::FixupLocationId;
 
-#[cfg(target_arch="x86_64")]
 pub mod x64;
 pub mod arm64;
 
 pub enum Indirection {
     Direct,
     Indirect,
+}
+
+impl Indirection {
+    pub fn dont_care() -> Self {
+        Indirection::Direct
+    }
 }
 
 pub trait CodeBlob {
