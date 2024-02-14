@@ -2,8 +2,6 @@
 pub enum Arch {
     X86_64,
     Arm64,
-    /// Gameboy
-    SharpLR35902,
 }
 
 impl Arch {
@@ -11,7 +9,6 @@ impl Arch {
     pub fn pointer_size(self) -> usize {
         match self {
             Arch::X86_64 | Arch::Arm64 => 64,
-            Arch::SharpLR35902 => 16,
         }
     }
 }

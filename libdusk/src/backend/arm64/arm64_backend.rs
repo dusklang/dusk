@@ -1,24 +1,33 @@
 use std::ffi::CString;
 
-use crate::backend::{arm64::*, CodeBlob};
+use crate::backend::arm64::*;
+use crate::backend::{Backend, CodeBlob};
 use crate::ast::LegacyIntrinsic;
 use crate::driver::Driver;
 use crate::mir::{Const, FuncId, Instr};
 use crate::linker::exe::*;
 
-impl Driver {
-    pub fn generate_arm64_func(&self, func_index: FuncId, is_main: bool, exe: &mut dyn Exe) -> Box<dyn CodeBlob> {
+pub struct Arm64Backend;
+
+impl Arm64Backend {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Backend for Arm64Backend {
+    fn generate_func(&self, d: &Driver, func_index: FuncId, is_main: bool, exe: &mut dyn Exe) -> Box<dyn CodeBlob> {
         let mut code = Arm64Encoder::new();
 
-        let func = &self.code.mir.functions[func_index];
+        let func = &d.code.mir.functions[func_index];
         assert_eq!(func.blocks.len(), 1);
-        assert_eq!(self.code.num_parameters(func), 0);
+        assert_eq!(d.code.num_parameters(func), 0);
 
         let frame_size = 16;
         code.stp64(Reg::FP, Reg::LR, Reg::SP, -16);
         code.sub64_imm(false, Reg::SP, Reg::SP, frame_size);
-        for &op in &self.code.blocks[func.blocks[0]].ops {
-            let instr = self.code.ops[op].as_mir_instr().unwrap();
+        for &op in &d.code.blocks[func.blocks[0]].ops {
+            let instr = d.code.ops[op].as_mir_instr().unwrap();
             match instr {
                 Instr::Const(konst) => {
                     match konst {
@@ -28,7 +37,7 @@ impl Driver {
                             let objc_msg_send = exe.use_imported_symbol(objc_msg_send);
                             code.load_fixed_up_address(Reg::R16, objc_msg_send);
 
-                            let cfstring = exe.use_constant_nsstring(&self.code.mir.strings[id]);
+                            let cfstring = exe.use_constant_nsstring(&d.code.mir.strings[id]);
                             code.load_fixed_up_address(Reg::R0, cfstring);
 
                             let string_by_appending_string = exe.use_objc_selector(&CString::new("stringByAppendingString:").unwrap());
@@ -41,7 +50,7 @@ impl Driver {
 
                             // TODO: move string to stack, also maybe don't append another string to the end.
                         },
-                        _ => todo!("{}", self.display_const(konst)),
+                        _ => todo!("{}", d.display_const(konst)),
                     }
                 },
                 Instr::LegacyIntrinsic { intr, .. } => {
@@ -55,11 +64,11 @@ impl Driver {
                             // TODO: make sure argument is in x0 (currently assumed because of how string literals are implemented)
                             code.blr(Reg::R16);
                         },
-                        _ => todo!("{}", self.display_mir_instr(op)),
+                        _ => todo!("{}", d.display_mir_instr(op)),
                     }
                 },
                 &Instr::Ret(value) => {
-                    let value = self.code.ops[value].as_mir_instr().unwrap();
+                    let value = d.code.ops[value].as_mir_instr().unwrap();
                     // If this is the main function, we should return 0 despite the high-level return type being `void`.
                     if is_main {
                         assert_eq!(value, &Instr::Void);
@@ -69,7 +78,7 @@ impl Driver {
                         todo!();
                     }
                 },
-                _ => todo!("{}", self.display_mir_instr(op)),
+                _ => todo!("{}", d.display_mir_instr(op)),
             }
         }
         code.add64_imm(false, Reg::SP, Reg::SP, frame_size);

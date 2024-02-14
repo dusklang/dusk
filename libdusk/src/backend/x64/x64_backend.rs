@@ -3,11 +3,19 @@ use std::ffi::CString;
 use crate::driver::Driver;
 use crate::mir::FuncId;
 use crate::linker::exe::{Exe, DynamicLibrarySource};
-use crate::backend::CodeBlob;
-use crate::backend::x64::{X64Encoder, Reg32, Reg64};
+use crate::backend::x64::*;
+use crate::backend::{Backend, CodeBlob};
 
-impl Driver {
-    pub fn generate_x64_func(&self, _func_index: FuncId, _is_main: bool, exe: &mut dyn Exe) -> Box<dyn CodeBlob> {
+pub struct X64Backend;
+
+impl X64Backend {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Backend for X64Backend {
+    fn generate_func(&self, _d: &Driver, _func_index: FuncId, _is_main: bool, exe: &mut dyn Exe) -> Box<dyn CodeBlob> {
         let mut code = X64Encoder::new();
 
         let kernel32 = exe.import_dynamic_library(DynamicLibrarySource::Name("KERNEL32.dll"));

@@ -1,7 +1,27 @@
-use crate::linker::exe::FixupLocationId;
+use crate::linker::exe::{Exe, FixupLocationId};
+use crate::mir::FuncId;
+use crate::driver::Driver;
+use crate::target::Arch;
+
+use crate::backend::arm64::Arm64Backend;
+use crate::backend::x64::X64Backend;
 
 pub mod x64;
 pub mod arm64;
+
+pub trait Backend {
+    fn generate_func(&self, d: &Driver, func_index: FuncId, is_main: bool, exe: &mut dyn Exe) -> Box<dyn CodeBlob>;
+}
+
+impl Driver {
+    pub fn create_backend(&self) -> Box<dyn Backend> {
+        match self.arch {
+            Arch::X86_64 => Box::new(X64Backend::new()),
+            Arch::Arm64 => Box::new(Arm64Backend::new()),
+        }
+    }
+}
+
 
 pub enum Indirection {
     Direct,

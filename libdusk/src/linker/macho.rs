@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
-use crate::backend::{Indirection, CodeBlobExt};
+use crate::backend::{Backend, Indirection, CodeBlobExt};
 use crate::linker::exe::*;
 use crate::linker::byte_swap::*;
 use crate::linker::Linker;
@@ -609,11 +609,11 @@ impl MachOLinker {
 }
 
 impl Linker for MachOLinker {
-    fn write(&mut self, d: &Driver, main_function_index: FuncId, dest: &mut dyn Write) -> io::Result<()> {
+    fn write(&mut self, d: &Driver, main_function_index: FuncId, backend: &mut dyn Backend, dest: &mut dyn Write) -> io::Result<()> {
         let mut exe = MachOExe::new();
         let _lib_system = exe.import_dynamic_library(DynamicLibrarySource::Name("libSystem"));
 
-        let mut code = d.generate_arm64_func(main_function_index, true, &mut exe);
+        let mut code = backend.generate_func(d, main_function_index, true, &mut exe);
 
         let mach_header = self.buf.alloc::<MachHeader>();
 

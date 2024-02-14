@@ -2,7 +2,7 @@ use std::io::{self, Write};
 use crate::driver::Driver;
 use crate::mir::FuncId;
 use crate::target::OperatingSystem;
-
+use crate::backend::Backend;
 use crate::linker::macho::MachOLinker;
 use crate::linker::pe::PELinker;
 
@@ -14,7 +14,7 @@ mod macho;
 pub mod exe;
 
 pub trait Linker {
-    fn write(&mut self, d: &Driver, main_function_index: FuncId, dest: &mut dyn Write) -> io::Result<()>;
+    fn write(&mut self, d: &Driver, main_function_index: FuncId, backend: &mut dyn Backend, dest: &mut dyn Write) -> io::Result<()>;
 }
 
 impl Driver {
