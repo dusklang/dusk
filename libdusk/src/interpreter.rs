@@ -809,12 +809,12 @@ impl Driver {
             if self.size_of(param_ty) > 8 {
                 // If the value is larger than 64 bits, it was passed by address. Therefore, we should load this
                 // address from shadow space directly, instead of loading the address of the address.
-                thunk.load64(Reg64::Rax, Reg64::Rsp + shadow_offset + rsp_offset)
+                thunk.load64(Reg64::Rax, Reg64::Rsp + (shadow_offset + rsp_offset))
             } else {
-                thunk.lea64(Reg64::Rax, Reg64::Rsp + shadow_offset + rsp_offset);
+                thunk.lea64(Reg64::Rax, Reg64::Rsp + (shadow_offset + rsp_offset));
             }
             // Store the address in the array.
-            thunk.store64(Reg64::Rsp + param_address_array_offset + rsp_offset, Reg64::Rax);
+            thunk.store64(Reg64::Rsp + (param_address_array_offset + rsp_offset), Reg64::Rax);
         }
 
         // Pass arguments to interpreter entry point
@@ -900,7 +900,7 @@ impl DriverRef<'_> {
         assert_eq!(arg_tys.len(), func.ty.param_tys.len());
         for i in (0..arg_tys.len()).rev() {
             // get pointer to arguments
-            thunk.load64(Reg64::Rax, Reg64::Rsp + extension + 8);
+            thunk.load64(Reg64::Rax, Reg64::Rsp + (extension + 8));
 
             // get pointer to i'th argument
             thunk.load64(Reg64::Rax, Reg64::Rax + (i as i32 * 8));
@@ -949,7 +949,7 @@ impl DriverRef<'_> {
         thunk.call_direct(Reg64::R10);
 
         // get pointer to return value
-        thunk.load64(Reg64::Rcx, Reg64::Rsp + extension + 16);
+        thunk.load64(Reg64::Rcx, Reg64::Rsp + (extension + 16));
 
         // TODO: large values require passing a pointer as the first parameter
         // copy return value to the passed in location
