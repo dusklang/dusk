@@ -24,7 +24,7 @@ dusk-proc-macros = { version = "0.1", path = "../dusk-proc-macros" }
 lazy_static = "1.4.0"
 derivative = "2.2"
 md-5 = "0.10.0"
-rust-crypto = "0.2.36"
+sha2 = "0.10.8"
 yaml-rust = "0.4.5"
 
 # LSP-related dependencies

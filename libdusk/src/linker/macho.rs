@@ -7,8 +7,7 @@ use std::io::{self, Write};
 use std::marker::PhantomData;
 use std::path::PathBuf;
 
-use crypto::digest::Digest;
-use crypto::sha2::Sha256;
+use sha2::{Sha256, Digest};
 use crate::backend::{Backend, Indirection, CodeBlobExt};
 use crate::linker::exe::*;
 use crate::linker::byte_swap::*;
@@ -1199,18 +1198,17 @@ impl Linker for MachOLinker {
         // hasher.update(&self.data[..code_signature_start]);
         // self.buf.get_mut(uuid).map(|uuid| &mut uuid.uuid).set(hasher.finalize().into());
 
-        let mut sha256 = Sha256::new();
         let mut i = 0;
         let mut hash_buf = [0; 32];
         let mut num_code_slots = 0;
         while i < code_signature_start {
-            sha256.reset();
+            let mut sha256 = Sha256::new();
             if code_signature_start - i < 4096 {
-                sha256.input(&self.buf.data[i..code_signature_start]);
+                sha256.update(&self.buf.data[i..code_signature_start]);
             } else {
-                sha256.input(&self.buf.data[i..(i + 4096)]);
+                sha256.update(&self.buf.data[i..(i + 4096)]);
             }
-            sha256.result(&mut hash_buf);
+            hash_buf = sha256.finalize().into();
             self.buf.push(hash_buf);
             num_code_slots += 1;
             i += 4096;
