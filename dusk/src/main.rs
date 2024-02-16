@@ -1,4 +1,4 @@
-use clap::{Parser, ArgEnum};
+use clap::{ValueEnum, Parser};
 use libdusk::interpreter::{InterpMode, restart_interp};
 use libdusk::mir::{FunctionRef, FuncId};
 use libdusk::type_provider::{MockStateCommand, MockTypeProvider, TypeProvider};
@@ -21,7 +21,7 @@ use libdusk::error::DiagnosticKind;
 use libdusk::dvm;
 
 #[repr(u8)]
-#[derive(ArgEnum, Copy, Clone, Debug)]
+#[derive(ValueEnum, Copy, Clone, Debug)]
 enum StopPhase {
     Parse,
     Typecheck,
@@ -33,19 +33,18 @@ enum StopPhase {
 #[clap(name = "dusk")]
 struct Opt {
     /// Output MIR in textual format
-    #[clap(short='m', long)]
+    #[arg(short='m', long)]
     output_mir: bool,
 
     /// Do not make the core library available to your program
-    #[clap(long)]
+    #[arg(long)]
     no_core: bool,
 
     /// The phase to stop the compiler at
-    #[clap(arg_enum, short='s', long, default_value="interp", ignore_case = true)]
+    #[arg(value_enum, short='s', long, default_value="interp", ignore_case = true)]
     stop_phase: StopPhase,
 
     /// Input file
-    #[clap(parse(from_os_str))]
     input: PathBuf,
 }
 

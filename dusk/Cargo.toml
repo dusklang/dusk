@@ -11,7 +11,7 @@ homepage = "https://dusklang.org/"
 readme = "../README.md"
 
 [dependencies]
-clap = { version = "3.0", features = ["derive"] }
+clap = { version = "4.5", features = ["derive"] }
 libdusk = { version = "0.1", path = "../libdusk" }
 
 [[bin]]

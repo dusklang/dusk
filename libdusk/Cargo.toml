@@ -14,7 +14,6 @@ string-interner = "0.12.1"
 bitflags = "1.2.1"
 smallvec = { version = "1.6.1", features = ["const_generics"] }
 arrayvec = "0.7.0"
-clap = { version = "3.0", features = ["derive"] }
 paste = "1.0.0"
 num-bigint = "0.3"
 index_vec = { version = "0.1.2" }
