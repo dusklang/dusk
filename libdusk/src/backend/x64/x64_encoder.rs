@@ -1,3 +1,5 @@
+// https://wiki.osdev.org/X86-64_Instruction_Encoding
+
 use std::fmt::Display;
 
 use crate::backend::{CodeBlob, Indirection};
@@ -333,6 +335,15 @@ impl X64Encoder {
         let dest = dest.into();
         self.begin_instr("mov", &dest, &src);
         self.addr32_64_impl(true, 0x89, src, dest);
+    }
+
+    pub fn store64_imm(&mut self, dest: impl Into<MemoryLoc64>, src: i32) {
+        let dest = dest.into();
+        self.begin_instr("mov", &dest, &src);
+
+        // This is kind of a hack.
+        self.addr32_64_impl(true, 0xc7, Reg64::Rax, dest);
+        self.push_any(src);
     }
 
     #[allow(unused)]

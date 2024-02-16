@@ -27,10 +27,7 @@ impl Backend for X64Backend {
         code.mov32_imm(Reg32::Ecx, -11);
         code.call(exe.use_imported_symbol(get_std_handle));
         code.store64(Reg64::Rsp + 48, Reg64::Rax);
-
-        // mov QWORD PTR [rsp+32], 0
-        code.tmp_extend(&[0x48, 0xc7, 0x44, 0x24, 0x20, 0x00, 0x00, 0x00, 0x00]);
-
+        code.store64_imm(Reg64::Rsp + 32, 0);
         // xor r9d, r9d
         code.tmp_extend(&[0x45u8, 0x31, 0xc9]);
 
