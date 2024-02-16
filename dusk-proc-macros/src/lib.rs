@@ -649,3 +649,35 @@ pub fn byteswap_derive(input: TokenStream) -> TokenStream {
 
     gen.into()
 }
+
+#[proc_macro_derive(ByteSwapBitflags)]
+pub fn byteswap_bitflags_derive(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    let name = &input.ident;
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+
+    let mut gen_inner = quote!();
+    match input.data {
+        Data::Struct(data) => match data.fields {
+            Fields::Unnamed(unnamed) => {
+                for i in (0..unnamed.unnamed.len()).map(syn::Index::from) {
+                    gen_inner.extend(quote! {
+                        self.#i.bits().byte_swap();
+                    })
+                }
+            },
+            _ => unimplemented!(),
+        },
+        _ => unimplemented!(),
+    };
+
+    let gen = quote!(
+        impl #impl_generics crate::linker::byte_swap::ByteSwap for #name #ty_generics #where_clause {
+            fn byte_swap(&mut self) {
+                #gen_inner
+            }
+        }
+    );
+
+    gen.into()
+}

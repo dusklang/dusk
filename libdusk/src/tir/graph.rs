@@ -140,6 +140,7 @@ struct CompStageState {
 }
 
 bitflags! {
+    #[derive(Clone, Copy, Debug, PartialEq)]
     struct ComponentRelation: u8 {
         const BEFORE  = 1 << 0;
         const SAME    = 1 << 1;
@@ -150,10 +151,10 @@ bitflags! {
         const CYCLE = 0;
 
         // At the component level, the difference between type 2 and 3 dependencies doesn't matter
-        const TYPE_2_3_FORWARD  = Self::BEFORE.bits | Self::SAME.bits;
-        const TYPE_2_3_BACKWARD = Self::SAME.bits   | Self::AFTER.bits;
+        const TYPE_2_3_FORWARD  = Self::BEFORE.bits() | Self::SAME.bits();
+        const TYPE_2_3_BACKWARD = Self::SAME.bits()   | Self::AFTER.bits();
 
-        const ALL = Self::BEFORE.bits | Self::SAME.bits | Self::AFTER.bits;
+        const ALL = Self::BEFORE.bits() | Self::SAME.bits() | Self::AFTER.bits();
     }
 }
 

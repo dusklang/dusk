@@ -10,15 +10,15 @@ homepage = "https://dusklang.org/"
 
 [dependencies]
 unicode-segmentation = "1.9"
-string-interner = "0.12.1"
-bitflags = "1.2.1"
+string-interner = "0.15"
+bitflags = "2.4"
 smallvec = { version = "1.6.1", features = ["const_generics"] }
 arrayvec = "0.7.0"
 paste = "1.0.0"
-num-bigint = "0.3"
+num-bigint = "0.4"
 index_vec = { version = "0.1.2" }
 indenter = "0.3.2"
-region = { git = "https://github.com/darfink/region-rs", rev = "5087445f08b3f78c481fb8cde18b47bb67d5eb22" }
+region = "3.0"
 dusk-proc-macros = { version = "0.1", path = "../dusk-proc-macros" }
 lazy_static = "1.4.0"
 derivative = "2.2"
@@ -27,7 +27,7 @@ sha2 = "0.10.8"
 yaml-rust = "0.4.5"
 
 # LSP-related dependencies
-lsp-types = { version = "0.93", optional = true }
+lsp-types = { version = "0.95", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"
@@ -40,4 +40,4 @@ winapi = { version = "0.3.9", features = ["libloaderapi"] }
 
 [target.'cfg(not(windows))'.dependencies]
 # This version is only locked in order to fix a clash with another crate which also depends on libc.
-libc = "=0.2.107"
+libc = "=0.2"

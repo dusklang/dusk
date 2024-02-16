@@ -14,7 +14,7 @@ use crate::linker::exe::{DynLibId, DynamicLibrarySource, Exe, ImportedSymbolId, 
 use crate::mir::FuncId;
 
 use crate::driver::Driver;
-use dusk_proc_macros::ByteSwap;
+use dusk_proc_macros::{ByteSwap, ByteSwapBitflags};
 
 use crate::linker::byte_swap::*;
 
@@ -51,7 +51,7 @@ pub enum Machine {
 }
 
 bitflags! {
-    #[derive(ByteSwap)]
+    #[derive(ByteSwapBitflags)]
     pub struct Characteristics: u16 {
         const RELOCS_STRIPPED = 0x0001;
         const EXECUTABLE_IMAGE = 0x0002;
@@ -96,7 +96,7 @@ pub enum Subsystem {
 
 bitflags! {
     // Deprecated fields are included but commented out
-    #[derive(ByteSwap)]
+    #[derive(ByteSwapBitflags)]
     pub struct DllCharacteristics: u16 {
         const DYNAMIC_BASE = 0x0040;
         const NX_COMPAT = 0x0100;
@@ -196,7 +196,7 @@ pub struct SectionHeader {
 
 bitflags! {
     // Deprecated fields are included but commented out
-    #[derive(ByteSwap)]
+    #[derive(ByteSwapBitflags, Clone, Copy)]
     pub struct SectionCharacteristics: u32 {
         const CNT_CODE = 0x00000020;
         const CNT_INITIALIZED_DATA = 0x00000040;

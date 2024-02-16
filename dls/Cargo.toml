@@ -9,7 +9,7 @@ homepage = "https://dusklang.org/"
 [dependencies]
 libdusk = { version = "0.1", path = "../libdusk", features = ["dls"] }
 dusk-proc-macros = { version = "0.1", path = "../dusk-proc-macros" }
-lsp-server = "0.6"
-lsp-types = "0.93"
+lsp-server = "0.7"
+lsp-types = "0.95"
 serde_json = "1.0"
 serde = "1.0"

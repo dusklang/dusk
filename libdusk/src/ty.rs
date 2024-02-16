@@ -429,7 +429,7 @@ impl<'a> From<&Type> for QualType {
 }
 
 bitflags! {
-    #[derive(Default)]
+    #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
     pub struct BuiltinTraits: u8 {
         const INT  = 0b0000_0001;
         // ExpressibleByDecimalLiteral inherits from ExpressibleByIntegerLiteral

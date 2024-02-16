@@ -1,6 +1,6 @@
 use std::sync::RwLock;
 
-use string_interner::StringInterner;
+use string_interner::DefaultStringInterner as StringInterner;
 use lazy_static::lazy_static;
 
 use crate::ast::ExprId;

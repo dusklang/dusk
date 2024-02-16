@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use crate::display_adapter;
 use index_vec::{IndexVec, define_index_type};
 use smallvec::{SmallVec, smallvec};
-use string_interner::{DefaultSymbol as Sym, Symbol, StringInterner};
+use string_interner::{DefaultStringInterner as StringInterner, DefaultSymbol as Sym, Symbol};
 
 use crate::mir::Const;
 use crate::code::{Op, Block};
