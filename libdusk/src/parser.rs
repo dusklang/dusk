@@ -15,7 +15,6 @@ use crate::token::{TokenKind, Token};
 use crate::builder::{BinOp, UnOp, OpPlacement};
 use crate::error::Error;
 use crate::autopop::{AutoPopStack, AutoPopStackEntry};
-use crate::dvd::{self, Message as DvdMessage};
 
 use dusk_proc_macros::*;
 
@@ -221,7 +220,6 @@ impl Driver {
     /// Parses the given file.
     /// Panics if `file` has already been parsed.
     pub fn parse_file(&mut self, file: SourceFileId) -> ParseResult<()> {
-        dvd::send(|| DvdMessage::WillBeginParsingInputFile(self.src_map.files[file].location.clone()));
         let file_was_unparsed = self.src_map.unparsed_files.remove(&file);
         assert!(file_was_unparsed);
 

@@ -7,9 +7,6 @@ use std::io;
 use std::collections::{HashMap, HashSet};
 use std::ops::{Add, Range};
 
-#[cfg(feature = "dvd")]
-use serde::{Serialize, Deserialize};
-
 use crate::display_adapter;
 use crate::ast::{ExprId, DeclId, ItemId, Item};
 use crate::code::OpId;
@@ -101,7 +98,6 @@ struct LineRangeGroup {
     file: SourceFileId,
 }
 
-#[cfg_attr(feature = "dvd", derive(Debug, Serialize, Deserialize))]
 #[derive(Clone, Hash, PartialEq, Eq)]
 pub enum SourceFileLocation {
     /// A file loaded from disk.

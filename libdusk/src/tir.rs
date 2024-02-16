@@ -12,8 +12,6 @@ use crate::internal_types::{internal_fields, internal_field_decls, InternalField
 use crate::ty::Type;
 use crate::ty::StructType;
 
-use crate::dvd::{Message as DvdMessage, self};
-
 use crate::driver::Driver;
 use crate::dep_vec::{self, DepVec, AnyDepVec};
 use crate::index_vec::*;
@@ -795,14 +793,12 @@ impl Driver {
                     ParamList::default(),
                 ),
             };
-            dvd::send(|| DvdMessage::DidInitializeTirForDecl { id, is_mut, param_tys: param_list.param_tys.iter().cloned().collect() });
             self.tir.decls.push_at(id, Decl { param_list, is_mut, generic_params });
         }
 
         self.initialize_graph();
 
         // Add type 1 dependencies and meta-dependencies to the graph
-        dvd::send(|| DvdMessage::WillAddType1Dependencies);
         for decl_id in range_iter(new_code.decls.clone()) {
             let id = df!(decl_id.item);
             match df!(decl_id.ast) {
@@ -935,18 +931,13 @@ impl Driver {
         let new_snapshot = self.take_snapshot();
         let last_snapshot = mem::replace(&mut self.tir.last_snapshot, new_snapshot);
         let new_code = self.get_new_code_since(last_snapshot);
-
-        dvd::send(|| DvdMessage::WillInitializeTir);
         self.initialize_tir_impl(&new_code);
-        dvd::send(|| DvdMessage::DidInitializeTir);
     }
 
     pub fn build_more_tir(&mut self, last_typecheck_succeeded: bool) -> Result<Option<Units>, TirError> {
         self.initialize_tir();
 
-        dvd::send(|| DvdMessage::WillBuildMoreTir);
         if !self.tir.graph.has_outstanding_components() {
-            dvd::send(|| DvdMessage::DidBuildMoreTir { no_outstanding_components: true });
             return Ok(None);
         }
 
@@ -954,7 +945,6 @@ impl Driver {
 
         // Add types 2-4 dependencies
         let items_that_need_dependencies = self.tir.graph.get_items_that_need_dependencies();
-        dvd::send(|| DvdMessage::WillAddTirDependencies { items_that_need_dependencies: items_that_need_dependencies.clone() });
         for id in items_that_need_dependencies {
             match self.code.ast.items[id] {
                 ast::Item::Decl(decl_id) => {
@@ -1068,7 +1058,6 @@ impl Driver {
                 }
             }
         }
-        dvd::send(|| DvdMessage::DidAddTirDependencies);
 
         // Solve for the unit and level of each item
         let levels = self.tir.graph.solve(last_typecheck_succeeded).map_err(|err| {
@@ -1077,14 +1066,12 @@ impl Driver {
                     self.diag.report_error_no_range("dependency cycle found. this is most likely a Dusk compiler bug.");
                 }
             }
-            dvd::send(|| DvdMessage::DidBuildMoreTir { no_outstanding_components: false });
             err
         })?;
 
         let mut main_sp = Subprogram { units: Vec::new(), mock_units: Vec::new(), levels };
         self.actually_build_tir(&mut main_sp);
 
-        dvd::send(|| DvdMessage::DidBuildMoreTir { no_outstanding_components: false });
         Ok(
             Some(
                 main_sp.to_units()

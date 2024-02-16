@@ -6,7 +6,6 @@ use bitflags::bitflags;
 
 use crate::ast::{ItemId, VOID_EXPR_ITEM};
 use crate::tir::CompId;
-use crate::dvd::{Message as DvdMessage, self};
 
 use crate::index_vec::*;
 use crate::driver::Driver;
@@ -192,8 +191,6 @@ impl Graph {
         
         self.dependees[a].push(b);
         self.dependers[b].push(a);
-
-        dvd::send(|| DvdMessage::DidAddTirType1Dependency { depender: a, dependee: b });
     }
 
     /// a must either be in the same unit as b or a later unit, but if they are in the same unit, a must have a higher level than b
@@ -201,24 +198,18 @@ impl Graph {
         self.t2_dependees[a].push(b);
         let a_comp = self.item_to_components[a];
         self.transfer_item_dep_to_component(a_comp, b, ComponentRelation::TYPE_2_3_FORWARD, ComponentRelation::TYPE_2_3_BACKWARD);
-
-        dvd::send(|| DvdMessage::DidAddTirType2Dependency { depender: a, dependee: b });
     }
 
     /// a must either be in the same unit as b or a later unit, but their levels are independent
     pub fn add_type3_dep(&mut self, a: ItemId, b: ItemId) {
         let a_comp = self.item_to_components[a];
         self.transfer_item_dep_to_component(a_comp, b, ComponentRelation::TYPE_2_3_FORWARD, ComponentRelation::TYPE_2_3_BACKWARD);
-
-        dvd::send(|| DvdMessage::DidAddTirType3Dependency { depender: a, dependee: b });
     }
 
     /// a must be in an later unit than b, but their levels are independent
     pub fn add_type4_dep(&mut self, a: ItemId, b: ItemId) {
         let a_comp = self.item_to_components[a];
         self.transfer_item_dep_to_component(a_comp, b, ComponentRelation::BEFORE, ComponentRelation::AFTER);
-
-        dvd::send(|| DvdMessage::DidAddTirType4Dependency { depender: a, dependee: b });
     }
 
     /// in order to add the type 2-4 dependencies of a, we need to be able to mock-typecheck, and
@@ -232,8 +223,6 @@ impl Graph {
         self.meta_dependees.entry(a).or_default().insert(b);
         self.meta_dependers.entry(b).or_default().push(a);
         self.global_meta_dependees.insert(b);
-
-        dvd::send(|| DvdMessage::DidAddTirMetaDependency { depender: a, dependee: b });
     }
 
     /// in order to add the type 2-4 dependencies of just about anything, we need to be able to
@@ -250,7 +239,6 @@ impl Graph {
         cur_component.items.push(item);
         let component = self.components.next_idx();
         self.item_to_components[item] = component;
-        dvd::send(|| DvdMessage::DidAddItemToTirComponent { component, item });
         macro_rules! find_subcomponents {
             ($item_array:ident) => {{
                 for i in 0..self.$item_array[item].len() {
@@ -267,8 +255,7 @@ impl Graph {
         if self.visited[item] { return; }
         self.find_subcomponent(item, cur_component);
         let new_component = mem::take(cur_component);
-        let component = self.components.push(new_component);
-        dvd::send(|| DvdMessage::DidFinishTirComponent(component));
+        self.components.push(new_component);
     }
 
     fn transfer_item_dep_to_component(
@@ -524,12 +511,6 @@ impl Graph {
             self.component_state.outstanding_components.clone()
         };
 
-        dvd::send(|| {
-            let mut outstanding_components: Vec<_> = outstanding_components.iter().copied().collect();
-            outstanding_components.sort();
-            DvdMessage::WillSolveTirGraph { outstanding_components }
-        });
-
         // Get the outstanding components with meta-dependees in them
         let mut meta_dep_components = HashSet::<CompId>::new();
         for &comp in &outstanding_components {
@@ -566,12 +547,6 @@ impl Graph {
 
             excluded_components
         };
-
-        dvd::send(|| {
-            let mut excluded_components: Vec<_> = meta_dep_components.union(&excluded_components).copied().collect();
-            excluded_components.sort();
-            DvdMessage::DidExcludeTirComponentsFromSubprogram(excluded_components)
-        });
 
         // Remove all excluded components from our local copy of `outstanding_components`.
         outstanding_components.retain(|comp| !meta_dep_components.contains(comp) && !excluded_components.contains(comp));
@@ -705,8 +680,6 @@ impl Graph {
             !self.component_state.staged_components.contains_key(&comp) &&
             !self.component_state.included_components.contains(&comp)
         );
-
-        dvd::send(|| DvdMessage::DidSolveTirGraph);
 
         let main_levels = Levels {
             item_to_levels,

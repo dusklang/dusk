@@ -18,7 +18,6 @@ use crate::source_info::{SourceFileId, SourceRange};
 use crate::internal_types::InternalField;
 
 use crate::ty::{Type, InternalType, InternalTypeId};
-use crate::dvd::{Message as DvdMessage, self};
 use crate::autopop::{AutoPopStack, AutoPopStackEntry};
 use crate::driver::Driver;
 use crate::error::Error;
@@ -812,7 +811,6 @@ pub enum ConditionKind {
 
 impl Driver {
     pub fn initialize_ast(&mut self) {
-        dvd::send(|| DvdMessage::WillBeginAddingBuiltins);
         self.ast.generic_ctx_stack.push(BLANK_GENERIC_CTX, BLANK_GENERIC_CTX).make_permanent();
         self.add_expr(Expr::Void, SourceRange::default());
         self.add_expr(Expr::Error, SourceRange::default());
@@ -859,11 +857,6 @@ impl Driver {
         self.code.ast.expr_to_type_vars.push_at(expr_id, type_var_id);
         self.code.ast.source_ranges.push_at(item_id, range);
 
-        dvd::send(|| {
-            let text = self.display_item(expr_id).to_string();
-            DvdMessage::DidAddExpr { id: expr_id, item_id, text }
-        });
-
         expr_id
     }
 
@@ -882,11 +875,6 @@ impl Driver {
 
         self.code.ast.source_ranges.push_at(item_id, range);
         self.code.ast.item_generic_ctxs.push_at(item_id, generic_ctx);
-
-        dvd::send(|| {
-            let text = self.display_item(decl_id).to_string();
-            DvdMessage::DidAddDecl { id: decl_id, item_id, text }
-        });
 
         decl_id
     }

@@ -17,12 +17,8 @@ use libdusk::target::{Arch, OperatingSystem};
 use libdusk::driver::{DRIVER, Driver, DriverRef};
 use libdusk::source_info::SourceMap;
 use libdusk::error::DiagnosticKind;
-use libdusk::dvd::{Message as DvdMessage, self as dvd_ipc};
 
 use libdusk::dvm;
-
-#[cfg(feature = "dvd")]
-mod dvd;
 
 #[repr(u8)]
 #[derive(ArgEnum, Copy, Clone, Debug)]
@@ -39,11 +35,6 @@ struct Opt {
     /// Output MIR in textual format
     #[clap(short='m', long)]
     output_mir: bool,
-
-    /// Run the Dusk Visual Debugger (DVD)
-    #[cfg(feature = "dvd")]
-    #[clap(long)]
-    dvd: bool,
 
     /// Do not make the core library available to your program
     #[clap(long)]
@@ -70,23 +61,9 @@ fn flush_diagnostics(driver: &mut Driver) {
     }
 }
 
-struct SendExitMsg;
-impl Drop for SendExitMsg {
-    fn drop(&mut self) {
-        dvd_ipc::send(|| DvdMessage::WillExit);
-    }
-}
-
 // If `program_args` is `Some`, we will run the `main` function in the interpreter.
 // Otherwise, we will build the program.
 fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
-    #[cfg(feature = "dvd")]
-    if opt.dvd {
-        dvd_ipc::connect();
-    }
-    dvd_ipc::send(|| DvdMessage::WillBegin);
-    let _exit_handler = SendExitMsg;
-
     dvm::launch_coordinator_thread();
     let mut src_map = SourceMap::new();
     let loaded_file = src_map.add_file_on_disk(&opt.input).is_ok();
@@ -157,8 +134,6 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
                 &mut *tp_ref
             };
 
-            dvd_ipc::send(|| DvdMessage::WillTypeCheckSet);
-
             // Typechecking can lead to expressions being evaluated, which in turn can result in new AST being
             // added. Therefore, we take a snapshot before typechecking.
             let before = driver.read().take_snapshot();
@@ -169,7 +144,6 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
 
 
             new_code = driver.read().get_new_code_since(before);
-            dvd_ipc::send(|| DvdMessage::DidTypeCheckSet);
             // { flush_diagnostics(&mut driver.write()); }
         } else {
             break;
@@ -242,8 +216,6 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
 fn main() {
     let args: Vec<_> = std::env::args_os().collect();
     match args.iter().nth(1).map(|arg| arg.as_os_str()) {
-        #[cfg(feature = "dvd")]
-        Some(OsStr::new("internal-launch-dvd")) => dvd::dvd_main(),
         Some(val) if val == OsStr::new("run") => {
             let mut split = args.split(|arg| arg == OsStr::new("--"));
             let clap_args = &split.next().unwrap()[1..]; // ignore 0th argument, which we know is "run"

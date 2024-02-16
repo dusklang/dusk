@@ -30,17 +30,11 @@ yaml-rust = "0.4.5"
 # LSP-related dependencies
 lsp-types = { version = "0.93", optional = true }
 
-# DVD-related dependencies
-interprocess = { version = "1.1.1", optional = true }
-serde = { version = "1.0", features = ["derive"], optional = true }
-serde_json = { version = "1.0", optional = true }
-
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"
 
 [features]
 dls = ["dep:lsp-types"]
-dvd = ["dep:interprocess", "dep:serde", "dep:serde_json", "index_vec/serde"]
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3.9", features = ["libloaderapi"] }

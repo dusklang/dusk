@@ -10,7 +10,6 @@ pub mod error;
 pub mod new_code;
 pub mod ty;
 pub mod type_provider;
-pub mod dvd;
 pub mod linker;
 pub mod ast;
 pub mod index_counter;
