@@ -28,8 +28,7 @@ impl Backend for X64Backend {
         code.call(exe.use_imported_symbol(get_std_handle));
         code.store64(Reg64::Rsp + 48, Reg64::Rax);
         code.store64_imm(Reg64::Rsp + 32, 0);
-        // xor r9d, r9d
-        code.tmp_extend(&[0x45u8, 0x31, 0xc9]);
+        code.xor32(Reg32::R9d, Reg32::R9d);
 
         let string_to_print = CString::new("Hello, world!").unwrap();
 

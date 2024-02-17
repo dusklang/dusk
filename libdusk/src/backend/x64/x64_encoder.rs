@@ -196,6 +196,12 @@ impl Display for MemoryLoc64 {
     }
 }
 
+enum AddrInstructionOpSize {
+    _16,
+    _32,
+    _64,
+}
+
 #[allow(unused)]
 impl X64Encoder {
     pub fn new() -> Self {
@@ -246,14 +252,35 @@ impl X64Encoder {
         self.push_any::<i8>(imm.try_into().unwrap());
     }
 
+    pub fn xor32(&mut self, a: Reg32, b: Reg32) {
+        self.begin_instr("xor", &a, &b);
+        self.arithmetic_impl(0x31, false, a, b);
+    }
+
+    pub fn xor64(&mut self, a: Reg32, b: Reg32) {
+        self.begin_instr("xor", &a, &b);
+        self.arithmetic_impl(0x31, true, a, b);
+    }
+
+    fn arithmetic_impl(&mut self, opcode: u8, bits64: bool, a: impl Register, b: impl Register) {
+        self.push_any(RexBuilder::new32().w_bit(bits64).r_bit(b.ext()).b_bit(a.ext()));
+        self.push(opcode);
+        self.push(build_modrm(0b11, b.main_bits(), a.main_bits()));
+    }
+
     // Handles several variants of 16-bit, 32-bit and 64-bit MOV and LEA instructions.
-    fn addr32_64_impl(&mut self, bit64: bool, opcode: u8, reg: impl Register, loc: MemoryLoc64) {
+    fn addr_impl(&mut self, size: AddrInstructionOpSize, opcode: u8, reg: impl Register, loc: MemoryLoc64) {
         let base_ext = match loc {
             MemoryLoc64::BasePlusOffset { base, .. } => base.ext(),
             MemoryLoc64::RipRelative { .. } | MemoryLoc64::RipRelativeFixup { .. } => false,
         };
-        if bit64 || reg.ext() || base_ext {
-            self.push_any(RexBuilder::new32().w_bit(bit64).r_bit(reg.ext()).b_bit(base_ext));
+        if matches!(size, AddrInstructionOpSize::_16) {
+            // operand size override prefix
+            self.push(0x66);
+        }
+        let bits64 = matches!(size, AddrInstructionOpSize::_64);
+        if bits64 || reg.ext() || base_ext {
+            self.push_any(RexBuilder::new32().w_bit(bits64).r_bit(reg.ext()).b_bit(base_ext));
         }
         self.push(opcode);
         match loc {
@@ -328,13 +355,13 @@ impl X64Encoder {
     pub fn load64(&mut self, dest: Reg64, src: impl Into<MemoryLoc64>) {
         let src = src.into();
         self.begin_instr("mov", &dest, &src);
-        self.addr32_64_impl(true, 0x8b, dest, src);
+        self.addr_impl(AddrInstructionOpSize::_64, 0x8b, dest, src);
     }
 
     pub fn store64(&mut self, dest: impl Into<MemoryLoc64>, src: Reg64) {
         let dest = dest.into();
         self.begin_instr("mov", &dest, &src);
-        self.addr32_64_impl(true, 0x89, src, dest);
+        self.addr_impl(AddrInstructionOpSize::_64, 0x89, src, dest);
     }
 
     pub fn store64_imm(&mut self, dest: impl Into<MemoryLoc64>, src: i32) {
@@ -342,7 +369,7 @@ impl X64Encoder {
         self.begin_instr("mov", &dest, &src);
 
         // This is kind of a hack.
-        self.addr32_64_impl(true, 0xc7, Reg64::Rax, dest);
+        self.addr_impl(AddrInstructionOpSize::_64, 0xc7, Reg64::Rax, dest);
         self.push_any(src);
     }
 
@@ -377,36 +404,32 @@ impl X64Encoder {
     pub fn load32(&mut self, dest: Reg32, src: impl Into<MemoryLoc64>) {
         let src = src.into();
         self.begin_instr("mov", &dest, &src);
-        self.addr32_64_impl(false, 0x8b, dest, src);
+        self.addr_impl(AddrInstructionOpSize::_32, 0x8b, dest, src);
     }
 
     pub fn store32(&mut self, dest: impl Into<MemoryLoc64>, src: Reg32) {
         let dest = dest.into();
         self.begin_instr("mov", &dest, &src);
-        self.addr32_64_impl(false, 0x89, src, dest);
+        self.addr_impl(AddrInstructionOpSize::_32, 0x89, src, dest);
     }
 
     pub fn load16(&mut self, dest: Reg16, src: impl Into<MemoryLoc64>) {
         let src = src.into();
         self.begin_instr("mov", &dest, &src);
-        // operand size override prefix
-        self.push(0x66);
-        self.addr32_64_impl(false, 0x8b, dest, src);
+        self.addr_impl(AddrInstructionOpSize::_16, 0x8b, dest, src);
     }
 
     pub fn store16(&mut self, dest: impl Into<MemoryLoc64>, src: Reg16) {
         let dest = dest.into();
         self.begin_instr("mov", &dest, &src);
-        // operand size override prefix
-        self.push(0x66);
-        self.addr32_64_impl(false, 0x89, src, dest);
+        self.addr_impl(AddrInstructionOpSize::_16, 0x89, src, dest);
     }
 
     #[allow(unused)]
     pub fn lea64(&mut self, dest: Reg64, src: impl Into<MemoryLoc64>) {
         let src = src.into();
         self.begin_instr("lea", &dest, &src);
-        self.addr32_64_impl(true, 0x8d, dest, src);
+        self.addr_impl(AddrInstructionOpSize::_64, 0x8d, dest, src);
     }
 
     #[allow(unused)]
@@ -444,11 +467,6 @@ impl X64Encoder {
         };
         self.fixups.push(fixup);
         self.data.extend(std::iter::repeat(0).take(4));
-    }
-
-    // this method should be removed when all the instructions I use in the backend have encoder implementations.
-    pub fn tmp_extend(&mut self, bytes: &[u8]) {
-        self.data.extend(bytes);
     }
 
     pub fn ret(&mut self) {
