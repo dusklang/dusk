@@ -2,7 +2,12 @@
 [Dusk](https://dusklang.org/) is a work-in-progress systems programming language.
 
 ## Status
-Pre-pre-alpha. Barely usable for anything. There is a working interpreter and a VSCode plugin, and work has started on arm64 and x86 backends for macOS and Windows. But fundamental aspects of the language are still missing.
+Pre-pre-alpha. Barely usable for anything. There is a working interpreter and a VSCode plugin, and work has started on a few backends, as shown in the table below. But fundamental aspects of the language are still missing.
+
+| Platform | x86-64 | arm64 |
+|----------|--------|-------|
+| Windows  | ⋯      |       |
+| macOS    |        | ⋯     |
 
 ## Goals
 - General-purpose and scalable: should be well-suited to a wide variety of domains, including kernels, game engines, and high-level GUI applications
