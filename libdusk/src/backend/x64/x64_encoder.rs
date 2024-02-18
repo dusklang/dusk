@@ -393,10 +393,16 @@ impl X64Encoder {
         self.push(0x58 | reg.main_bits());
     }
 
-    #[allow(unused)]
     pub fn mov64(&mut self, dest: Reg64, src: Reg64) {
         self.begin_instr("mov", &dest, &src);
         self.push_any(RexBuilder::new().r_bit(src.ext()).b_bit(dest.ext()));
+        self.push(0x89);
+        self.push(build_modrm(0b11, src.main_bits(), dest.main_bits()));
+    }
+
+    pub fn mov32(&mut self, dest: Reg32, src: Reg32) {
+        self.begin_instr("mov", &dest, &src);
+        self.push_any(RexBuilder::new32().r_bit(src.ext()).b_bit(dest.ext()));
         self.push(0x89);
         self.push(build_modrm(0b11, src.main_bits(), dest.main_bits()));
     }
