@@ -4,6 +4,7 @@ use crate::mir::{FuncId, Instr, Const};
 use crate::linker::exe::{Exe, DynamicLibrarySource};
 use crate::backend::x64::*;
 use crate::backend::{Backend, CodeBlob};
+use crate::target::Arch;
 
 pub struct X64Backend;
 
@@ -14,6 +15,10 @@ impl X64Backend {
 }
 
 impl Backend for X64Backend {
+    fn arch(&self) -> Arch {
+        Arch::X86_64
+    }
+
     fn generate_func(&self, d: &Driver, func_index: FuncId, is_main: bool, exe: &mut dyn Exe) -> Box<dyn CodeBlob> {
         let mut code = X64Encoder::new();
 

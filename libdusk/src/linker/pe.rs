@@ -12,8 +12,9 @@ use crate::backend::{Backend, CodeBlobExt, Indirection};
 use crate::linker::Linker;
 use crate::linker::exe::{DynLibId, DynamicLibrarySource, Exe, ImportedSymbolId, FixupLocationId};
 use crate::mir::FuncId;
-
 use crate::driver::Driver;
+use crate::target::Arch;
+
 use dusk_proc_macros::{ByteSwap, ByteSwapBitflags};
 
 use crate::linker::byte_swap::*;
@@ -337,9 +338,13 @@ impl Linker for PELinker {
         // This is done so that size_of_image below will be aligned to the section_alignment
         self.buf.pad_rva_to_next_boundary(SECTION_ALIGNMENT);
 
+        let machine = match backend.arch() {
+            Arch::Arm64 => Machine::Arm64,
+            Arch::X86_64 => Machine::Amd64,
+        };
         self.buf.get_mut(coff_header).set(
             CoffHeader {
-                machine: Machine::Amd64 as u16,
+                machine: machine as u16,
                 number_of_sections: self.num_sections as u16,
                 time_date_stamp: 0, // should be set to a meaningful timestamp, I guess
                 pointer_to_symbol_table: 0xfaceface,
@@ -361,7 +366,7 @@ impl Linker for PELinker {
                 address_of_entry_point: address_of_entry_point as u32,
                 base_of_code: base_of_code as u32,
     
-                image_base: 0x0000000100000000,
+                image_base: 0x0000000140000000,
                 section_alignment: SECTION_ALIGNMENT as u32,
                 file_alignment: FILE_ALIGNMENT as u32,
                 major_operating_system_version: 0xface,
@@ -375,7 +380,7 @@ impl Linker for PELinker {
                 size_of_headers: size_of_headers as u32,
                 check_sum: 0xfaceface,
                 subsystem: Subsystem::WindowsCui as u16,
-                dll_characteristics: 0,
+                dll_characteristics: DllCharacteristics::NX_COMPAT.bits() | DllCharacteristics::DYNAMIC_BASE.bits(),
                 size_of_stack_reserve: 0x00ceface,
                 size_of_stack_commit: 0x00ceface,
                 size_of_heap_reserve: 0x00ceface,
@@ -403,18 +408,17 @@ impl Linker for PELinker {
         );
 
         let code = code.perform_fixups(text_section.rva, |fixup| {
-            let offset = match exe.fixup_locations[fixup] {
+            match exe.fixup_locations[fixup] {
                 PEFixupLocation::ImportedProc(proc) => {
                     let proc = &exe.procs[proc];
                     let dll = proc.dll;
                     let index = proc.proc_index;
-                    dll_import_info[dll].address_entries[index].rva
+                    (dll_import_info[dll].address_entries[index].rva, Indirection::Direct)
                 },
                 PEFixupLocation::RDataSectionOffset(offset) => {
-                    rdata_section.rva + offset
-                }
-            };
-            (offset, Indirection::dont_care())
+                    (rdata_section.rva + offset, Indirection::Indirect)
+                },
+            }
         });
 
         self.buf.data[text_section.address..(text_section.address + code.len())].copy_from_slice(code);

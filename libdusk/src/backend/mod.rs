@@ -10,6 +10,7 @@ pub mod x64;
 pub mod arm64;
 
 pub trait Backend {
+    fn arch(&self) -> Arch;
     fn generate_func(&self, d: &Driver, func_index: FuncId, is_main: bool, exe: &mut dyn Exe) -> Box<dyn CodeBlob>;
 }
 

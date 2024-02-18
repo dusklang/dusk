@@ -175,18 +175,25 @@ impl Arm64Encoder {
     }
 
     pub fn add64_imm(&mut self, l_shift_by_12: bool, dest: impl Into<RegOrSp>, addend1: impl Into<RegOrSp>, addend2: u16) {
+        self.add_imm_impl(true, l_shift_by_12, dest.into(), addend1.into(), addend2);
+    }
+
+    pub fn add32_imm(&mut self, l_shift_by_12: bool, dest: impl Into<RegOrSp>, addend1: impl Into<RegOrSp>, addend2: u16) {
+        self.add_imm_impl(false, l_shift_by_12, dest.into(), addend1.into(), addend2);
+    }
+
+    fn add_imm_impl(&mut self, bits64: bool, l_shift_by_12: bool, dest: RegOrSp, addend1: RegOrSp, addend2: u16) {
         assert!(addend2 < (1 << 12), "{}", addend2);
         
         let mut instr = InstrEncoder::new();
 
-        // 64-bit
-        instr.push_value_of_size(1, 1);
+        instr.push_value_of_size(bits64 as u32, 1);
 
         instr.push_value_of_size(0x22, 8);
         instr.push_value_of_size(l_shift_by_12 as u32, 1);
         instr.push_value_of_size(addend2 as u32, 12);
-        instr.push_reg(addend1.into());
-        instr.push_reg(dest.into());
+        instr.push_reg(addend1);
+        instr.push_reg(dest);
 
         self.push(instr);
     }
@@ -323,6 +330,33 @@ impl Arm64Encoder {
         self.movk64(dest, (value >> 16 & 0xFFFF) as u16, 16);
         self.movk64(dest, (value >> 32 & 0xFFFF) as u16, 32);
         self.movk64(dest, (value >> 48 & 0xFFFF) as u16, 48);
+    }
+
+    // TODO: this should also handle sp as a destination, and zero as a source.
+    fn mov_reg_impl(&mut self, bits64: bool, dest: Reg, src: RegOrSp) {
+        if matches!(src, RegOrSp::Sp) {
+            self.add_imm_impl(bits64, false, dest.into(), src, 0);
+        } else {
+            // TODO: this instruction is actually just an alias of ORR. I should implement that instruction
+            // and call the implementation here.
+            // See also: https://developer.arm.com/documentation/ddi0602/2023-12/Base-Instructions/MOV--register---Move--register---an-alias-of-ORR--shifted-register--
+            let mut instr = InstrEncoder::new();
+            instr.push_value_of_size(bits64 as u32, 1);
+            instr.push_value_of_size(0x150, 10);
+            instr.push_reg(src);
+            instr.push_value_of_size(0x1F, 11);
+            instr.push_reg(dest);
+
+            self.push(instr);
+        }
+    }
+
+    pub fn mov64(&mut self, dest: Reg, src: impl Into<RegOrSp>) {
+        self.mov_reg_impl(true, dest, src.into());
+    }
+
+    pub fn mov32(&mut self, dest: Reg, src: impl Into<RegOrSp>) {
+        self.mov_reg_impl(false, dest, src.into());
     }
 
     pub fn bl(&mut self, offset: i32) {
