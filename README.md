@@ -4,11 +4,17 @@
 ## Status
 Pre-pre-alpha. Barely usable for anything. There is a working interpreter and a VSCode plugin, and some early work has been done on a small number of backends, as shown in the table below. But fundamental aspects of the language are still missing.
 
-| Platform | x86-64 | arm64 | Dalvik bytecode |
-|----------|--------|-------|-----------------|
-| Windows  | ⋯      | ⋯     |                 |
-| macOS    |        | ⋯     |                 |
-| Android  |        |       | ...             |
+| Platform | x86-64 | arm64 | Dalvik bytecode | WASM | JavaScript |
+|----------|--------|-------|-----------------|------|------------|
+| Windows  | 🚧     | 🚧     |                 |      |            |
+| macOS    | ⋯      | 🚧    |                 |      |            |
+| Android  |        | ⋯     | 🚧              |      |            |
+| Linux    | ⋯      | ⋯     |                 |      |            |
+| Web      |        |       |                 | ⋯    | ⋯          |
+
+#### Legend
+- ⋯ - planned
+- 🚧 - more than zero work has been done
 
 ## Goals
 - General-purpose and scalable: should be well-suited to a wide variety of domains, including kernels, game engines, and high-level GUI applications
