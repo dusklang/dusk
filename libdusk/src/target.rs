@@ -2,6 +2,7 @@
 pub enum Arch {
     X86_64,
     Arm64,
+    Dex,
 }
 
 impl Arch {
@@ -9,6 +10,7 @@ impl Arch {
     pub fn pointer_size(self) -> usize {
         match self {
             Arch::X86_64 | Arch::Arm64 => 64,
+            Arch::Dex => 32,
         }
     }
 }
@@ -27,6 +29,7 @@ impl Default for Arch {
 pub enum OperatingSystem {
     Windows,
     MacOS,
+    Android,
 }
 
 impl Default for OperatingSystem {

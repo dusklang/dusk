@@ -163,6 +163,7 @@ impl Backend for Arm64Backend {
                 code.ldp64(Reg::FP, Reg::LR, Reg::SP, frame_size);
                 code.ret(Reg::LR);
             },
+            OperatingSystem::Android => todo!(),
         }
 
         Box::new(code)

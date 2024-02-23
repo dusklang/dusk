@@ -5,9 +5,11 @@ use crate::target::Arch;
 
 use crate::backend::arm64::Arm64Backend;
 use crate::backend::x64::X64Backend;
+use crate::backend::dex::DexBackend;
 
 pub mod x64;
 pub mod arm64;
+pub mod dex;
 
 pub trait Backend {
     fn arch(&self) -> Arch;
@@ -19,6 +21,7 @@ impl Driver {
         match self.arch {
             Arch::X86_64 => Box::new(X64Backend::new()),
             Arch::Arm64 => Box::new(Arm64Backend::new()),
+            Arch::Dex => Box::new(DexBackend),
         }
     }
 }

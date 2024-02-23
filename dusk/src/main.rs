@@ -68,7 +68,7 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
     let loaded_file = src_map.add_file_on_disk(&opt.input).is_ok();
     let mut driver = DriverRef::new(&DRIVER);
     // TODO: don't hardcode the operating system (use OperatingSystem::default() and support overriding with a flag on the command line and/or in build scripts)
-    *driver.write() = Driver::new(src_map, Arch::Arm64, OperatingSystem::Windows, opt.no_core);
+    *driver.write() = Driver::new(src_map, Arch::Dex, OperatingSystem::Android, opt.no_core);
     driver.write().initialize_ast();
 
     if !loaded_file {
@@ -185,10 +185,10 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
 
             flush_diagnostics(&mut driver.write());
         } else {
-            let path = if matches!(driver.read().os, OperatingSystem::Windows) {
-                "a.exe"
-            } else {
-                "a.out"
+            let path = match driver.read().os {
+                OperatingSystem::Windows => "a.exe",
+                OperatingSystem::MacOS   => "a.out",
+                OperatingSystem::Android => "classes.dex",
             };
             _ = std::fs::remove_file(path);
             let file = File::create(path).unwrap();

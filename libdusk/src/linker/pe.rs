@@ -341,6 +341,7 @@ impl Linker for PELinker {
         let machine = match backend.arch() {
             Arch::Arm64 => Machine::Arm64,
             Arch::X86_64 => Machine::Amd64,
+            Arch::Dex => unimplemented!(),
         };
         self.buf.get_mut(coff_header).set(
             CoffHeader {

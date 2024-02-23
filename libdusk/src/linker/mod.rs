@@ -5,11 +5,13 @@ use crate::target::OperatingSystem;
 use crate::backend::Backend;
 use crate::linker::macho::MachOLinker;
 use crate::linker::pe::PELinker;
+use crate::linker::dex::DexLinker;
 
 #[macro_use]
-mod byte_swap;
+pub mod byte_swap;
 mod pe;
 mod macho;
+mod dex;
 
 pub mod exe;
 
@@ -22,6 +24,7 @@ impl Driver {
         match self.os {
             OperatingSystem::MacOS => Box::new(MachOLinker::new()),
             OperatingSystem::Windows => Box::new(PELinker::new()),
+            OperatingSystem::Android => Box::new(DexLinker::new()),
         }
     }
 }
