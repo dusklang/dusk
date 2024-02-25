@@ -22,6 +22,7 @@ define_index_type!(pub struct ProtoId = u32;);
 define_index_type!(#[derive(ByteSwap)] pub struct PhysicalProtoId = u32;);
 define_index_type!(pub struct FieldId = u32;);
 define_index_type!(pub struct MethodId = u32;);
+define_index_type!(#[derive(ByteSwap)] pub struct PhysicalMethodId = u32;);
 define_index_type!(pub struct ClassDefId = u32;);
 
 // Unlike the ID types above, this one does not correspond to a type of index in the Dalvik executable docs
@@ -54,6 +55,20 @@ pub struct PhysicalProto {
     pub parameters: Option<PhysicalTypeListId>,
 }
 
+#[derive(Copy, Clone, Hash, PartialEq, Eq)]
+pub struct Method {
+    pub class_idx: TypeId,
+    pub proto_idx: ProtoId,
+    pub name_idx: StringId,
+}
+
+#[derive(Copy, Clone, Hash, PartialEq, Eq)]
+pub struct PhysicalMethod {
+    pub class_idx: PhysicalTypeId,
+    pub proto_idx: PhysicalProtoId,
+    pub name_idx: PhysicalStringId,
+}
+
 #[derive(Default)]
 pub struct DexEncoder {
     buf: Buffer,
@@ -75,6 +90,11 @@ pub struct DexEncoder {
     proto_map: HashMap<Proto, ProtoId>,
     pub physical_protos: IndexVec<PhysicalProtoId, PhysicalProto>,
     pub physical_proto_map: IndexVec<ProtoId, PhysicalProtoId>,
+
+    methods: IndexVec<MethodId, Method>,
+    method_map: HashMap<Method, MethodId>,
+    pub physical_methods: IndexVec<PhysicalMethodId, PhysicalMethod>,
+    pub physical_method_map: IndexVec<MethodId, PhysicalMethodId>,
 
     pub class_defs: IndexVec<ClassDefId, ClassDef>,
 
@@ -184,6 +204,19 @@ impl DexEncoder {
         })
     }
 
+    pub fn add_method(&mut self, class_idx: TypeId, name: impl AsRef<str>, return_type: impl AsRef<str>, parameters: &[&str]) -> MethodId {
+        let proto_idx = self.add_proto(return_type, parameters);
+        let name_idx = self.add_string(name);
+        let method = Method {
+            class_idx,
+            proto_idx,
+            name_idx,
+        };
+        *self.method_map.entry(method).or_insert_with(|| {
+            self.methods.push(method)
+        })
+    }
+
     pub fn sort_strings(&mut self) {
         // Build `physical_strings`, `physical_string_map`
         convert_to_physical(&mut self.strings, &mut self.string_map, &mut self.physical_strings, &mut self.physical_string_map, identity, Ord::cmp);
@@ -200,6 +233,13 @@ impl DexEncoder {
             return_type_idx: self.physical_type_map[proto.return_type_idx],
             parameters: proto.parameters.map(|parameters| self.physical_type_list_map[parameters]),
         }, |a, b| (a.return_type_idx, a.parameters).cmp(&(b.return_type_idx, b.parameters)));
+
+        // Build `physical_methods`, `physical_method_map`
+        convert_to_physical(&mut self.methods, &mut self.method_map, &mut self.physical_methods, &mut self.physical_method_map, |method| PhysicalMethod {
+            class_idx: self.physical_type_map[method.class_idx],
+            proto_idx: self.physical_proto_map[method.proto_idx],
+            name_idx: self.physical_string_map[method.name_idx],
+        }, |a, b| (a.class_idx, a.name_idx, a.proto_idx).cmp(&(b.class_idx, b.name_idx, b.proto_idx)));
     }
 
     pub fn get_offset(&self, count: usize) -> usize {

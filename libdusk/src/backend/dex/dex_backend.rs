@@ -119,9 +119,16 @@ pub struct ClassDefItem {
 
 #[derive(ByteSwap, Copy, Clone)]
 pub struct ProtoIdItem {
-    pub shorty_idx: PhysicalStringId,
-    pub return_type_idx: PhysicalTypeId,
-    pub parameters_off: u32,
+    shorty_idx: PhysicalStringId,
+    return_type_idx: PhysicalTypeId,
+    parameters_off: u32,
+}
+
+#[derive(ByteSwap, Copy, Clone)]
+pub struct MethodIdItem {
+    class_idx: u16,
+    proto_idx: u16,
+    name_idx: PhysicalStringId,
 }
 
 pub struct DexBackend;
@@ -146,10 +153,10 @@ impl Backend for DexBackend {
         code.add_string("Hi");
         code.add_type("Z");
         code.add_type("C");
-        let _my_class = code.add_class_def("Lcom/example/MyClass;", AccessFlags::PUBLIC, None, None);
-        let _empty_type_list = code.add_type_list(&[]);
-        let _other_type_list = code.add_type_list(&[]);
+        let my_class = code.add_class_def("Lcom/example/MyClass;", AccessFlags::PUBLIC, None, None);
+        let class_idx = code.class_defs[my_class].class_idx;
         let _method_proto = code.add_proto("V", &["Z", "B", "S", "C", "I", "J", "F", "D", "Lcom/example/MyClass;", "[Lcom/example/MyClass;"]);
+        let _method = code.add_method(class_idx, "firstMethod", "V", &[]);
 
         code.sort_strings();
 
@@ -209,8 +216,26 @@ impl Backend for DexBackend {
         }
 
         // TODO: field_ids
+        let method_ids_off = code.get_offset(code.physical_methods.len());
+        for method in code.physical_methods.clone() {
+            let off = code.pos();
+            code.push(
+                MethodIdItem {
+                    class_idx: method.class_idx.index().try_into().unwrap(),
+                    proto_idx: method.proto_idx.index().try_into().unwrap(),
+                    name_idx: method.name_idx,
+                }
+            );
 
-        // TODO: method_ids
+            map_list.push(
+                MapItem {
+                    ty: MapItemType::MethodIdItem as u16,
+                    unused: 0,
+                    size: mem::size_of::<MethodIdItem>() as u32,
+                    offset: off as u32,
+                }
+            );
+        }
 
         let class_defs_off = code.get_offset(code.class_defs.len());
         for class_def in code.class_defs.clone() {
@@ -326,8 +351,8 @@ impl Backend for DexBackend {
             proto_ids_off: proto_ids_off as u32,
             field_ids_size: 0,
             field_ids_off: 0,
-            method_ids_size: 0,
-            method_ids_off: 0,
+            method_ids_size: code.physical_methods.len() as u32,
+            method_ids_off: method_ids_off as u32,
             class_defs_size: code.class_defs.len() as u32,
             class_defs_off: class_defs_off as u32,
             data_size: data_size as u32,
