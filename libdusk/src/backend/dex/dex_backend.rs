@@ -9,13 +9,11 @@ use crate::target::Arch;
 use crate::driver::Driver;
 use crate::mir::FuncId;
 use crate::linker::exe::Exe;
-use crate::backend::dex::PhysicalStringId;
+use crate::backend::dex::{PhysicalStringId, PhysicalTypeId, PhysicalTypeListId};
 use crate::backend::{Backend, CodeBlob};
 use crate::backend::dex::dex_encoder::DexEncoder;
 use crate::index_vec::*;
 use crate::linker::byte_swap::Ref;
-
-use super::PhysicalTypeId;
 
 #[derive(ByteSwap, Copy, Clone)]
 struct HeaderItem {
@@ -119,6 +117,12 @@ pub struct ClassDefItem {
     static_values_off: u32,
 }
 
+#[derive(ByteSwap, Copy, Clone)]
+pub struct ProtoIdItem {
+    pub shorty_idx: PhysicalStringId,
+    pub return_type_idx: PhysicalTypeId,
+    pub parameters_off: u32,
+}
 
 pub struct DexBackend;
 
@@ -144,7 +148,8 @@ impl Backend for DexBackend {
         code.add_type("C");
         let _my_class = code.add_class_def("Lcom/example/MyClass;", AccessFlags::PUBLIC, None, None);
         let _empty_type_list = code.add_type_list(&[]);
-        let _other_type_list = code.add_type_list(&["Z", "B", "S", "C", "I", "J", "F", "D", "Lcom/example/MyClass;", "[Lcom/example/MyClass;"]);
+        let _other_type_list = code.add_type_list(&[]);
+        let _method_proto = code.add_proto("V", &["Z", "B", "S", "C", "I", "J", "F", "D", "Lcom/example/MyClass;", "[Lcom/example/MyClass;"]);
 
         code.sort_strings();
 
@@ -180,7 +185,28 @@ impl Backend for DexBackend {
             );
         }
 
-        // TODO: proto_ids
+        let mut proto_id_refs = Vec::new();
+        let proto_ids_off = code.get_offset(code.physical_protos.len());
+        for proto in code.physical_protos.clone() {
+            let off = code.pos();
+            let proto_id_ref = code.push(
+                ProtoIdItem {
+                    shorty_idx: proto.shorty_idx,
+                    return_type_idx: proto.return_type_idx,
+                    parameters_off: 0, // filled in later
+                }
+            );
+            proto_id_refs.push(proto_id_ref);
+
+            map_list.push(
+                MapItem {
+                    ty: MapItemType::ProtoIdItem as u16,
+                    unused: 0,
+                    size: mem::size_of::<ProtoIdItem>() as u32,
+                    offset: off as u32,
+                }
+            );
+        }
 
         // TODO: field_ids
 
@@ -214,7 +240,6 @@ impl Backend for DexBackend {
             );
         }
 
-
         let data_begin = code.pos();
         for (str, string_id) in mem::take(&mut code.physical_strings).iter().zip(string_id_refs) {
             let off = code.pos();
@@ -231,6 +256,7 @@ impl Backend for DexBackend {
         }
         code.pad_to_next_boundary(4);
 
+        let mut type_list_offsets: IndexVec<PhysicalTypeListId, u32> = IndexVec::new();
         for type_list in mem::take(&mut code.physical_type_lists) {
             code.pad_to_next_boundary(4);
 
@@ -244,10 +270,19 @@ impl Backend for DexBackend {
                 }
             );
 
+            type_list_offsets.push(off as u32);
+
             code.push(type_list.len() as u32);
             for entry in type_list {
                 let entry: u16 = entry.index().try_into().unwrap();
                 code.push(entry);
+            }
+        }
+
+        // Assign correct offsets to proto_id_items.parameters_off
+        for (proto, proto_id_ref) in code.physical_protos.clone().iter().zip(proto_id_refs) {
+            if let Some(parameters) = proto.parameters {
+                code.get_mut(proto_id_ref).modify(|proto| proto.parameters_off = type_list_offsets[parameters]);
             }
         }
 
@@ -269,7 +304,11 @@ impl Backend for DexBackend {
         let data_size = code.pos() - data_begin;
         let file_size = code.len();
 
-        let mut header_item_data = HeaderItem {
+        // even though these values are stored as u32s, they must not exceed 65535
+        let type_ids_size: u16 = code.physical_types.len().try_into().unwrap();
+        let proto_ids_size: u16 = code.physical_protos.len().try_into().unwrap();
+
+        let header_item_data = HeaderItem {
             magic: *b"dex\n039\0",
             checksum: 0,
             signature: [0; 20],
@@ -281,10 +320,10 @@ impl Backend for DexBackend {
             map_off: map_off as u32,
             string_ids_size: code.physical_strings.len() as u32,
             string_ids_off: string_ids_off as u32,
-            type_ids_size: code.physical_types.len() as u32,
+            type_ids_size: type_ids_size as u32,
             type_ids_off: type_ids_off as u32,
-            proto_ids_size: 0,
-            proto_ids_off: 0,
+            proto_ids_size: proto_ids_size as u32,
+            proto_ids_off: proto_ids_off as u32,
             field_ids_size: 0,
             field_ids_off: 0,
             method_ids_size: 0,
@@ -296,19 +335,19 @@ impl Backend for DexBackend {
         };
         code.get_mut(header_item).set(header_item_data); // set everything except for the checksum and SHA-1 hash
 
+        // set the SHA-1 hash
         let mut sha1 = Sha1::new();
         sha1.update(&code.data[32..]);
-        header_item_data.signature = sha1.finalize().into();
-        code.get_mut(header_item).set(header_item_data); // set the SHA-1 hash
+        code.get_mut(header_item).modify(|header| header.signature = sha1.finalize().into());
 
+        // Set the adler32 checksum
         let mut a = 1u32;
         let mut b = 0u32;
         for i in 12..code.len() {
             a = (a + code.data[i] as u32) % 65521;
             b = (b + a) % 65521;
         }
-        header_item_data.checksum = (b << 16) | a;
-        code.get_mut(header_item).set(header_item_data); // set the checksum
+        code.get_mut(header_item).modify(|header| header.checksum = (b << 16) | a);
 
         Box::new(code)
     }

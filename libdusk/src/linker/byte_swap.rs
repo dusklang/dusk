@@ -94,6 +94,16 @@ impl<'a, T: ByteSwap, const BIG_ENDIAN: bool> ResolvedRefMut<'a, T, BIG_ENDIAN> 
         }
     }
 
+    pub fn modify(&mut self, modifier: impl FnOnce(&mut T)) {
+        if BIG_ENDIAN != cfg!(target_endian = "big") {
+            self.value.byte_swap();
+        }
+        modifier(self.value);
+        if BIG_ENDIAN != cfg!(target_endian = "big") {
+            self.value.byte_swap();
+        }
+    }
+
     pub fn map<U: ByteSwap, M: FnOnce(&'a mut T) -> &mut U>(&'a mut self, mapper: M) -> ResolvedRefMut<'a, U, BIG_ENDIAN> {
         ResolvedRefMut { value: mapper(self.value) }
     }

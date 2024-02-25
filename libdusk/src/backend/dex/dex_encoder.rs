@@ -40,18 +40,18 @@ pub struct ClassDef {
     // pub static_values_off: u32,
 }
 
-#[derive(Copy, Clone, Hash)]
-pub struct ProtoIdItem {
+#[derive(Copy, Clone, Hash, PartialEq, Eq)]
+pub struct Proto {
     pub shorty_idx: StringId,
     pub return_type_idx: TypeId,
-    pub parameters: TypeListId,
+    pub parameters: Option<TypeListId>,
 }
 
 #[derive(Copy, Clone)]
-pub struct PhysicalProtoIdItem {
+pub struct PhysicalProto {
     pub shorty_idx: PhysicalStringId,
     pub return_type_idx: PhysicalTypeId,
-    pub parameters: PhysicalTypeListId,
+    pub parameters: Option<PhysicalTypeListId>,
 }
 
 #[derive(Default)]
@@ -71,9 +71,10 @@ pub struct DexEncoder {
     pub physical_types: IndexVec<PhysicalTypeId, PhysicalStringId>,
     pub physical_type_map: IndexVec<TypeId, PhysicalTypeId>,
 
-    protos: IndexVec<ProtoId, ProtoIdItem>,
-    proto_map: HashMap<ProtoIdItem, ProtoId>,
-    pub physical_protos: IndexVec<PhysicalProtoId, PhysicalProtoIdItem>,
+    protos: IndexVec<ProtoId, Proto>,
+    proto_map: HashMap<Proto, ProtoId>,
+    pub physical_protos: IndexVec<PhysicalProtoId, PhysicalProto>,
+    pub physical_proto_map: IndexVec<ProtoId, PhysicalProtoId>,
 
     pub class_defs: IndexVec<ClassDefId, ClassDef>,
 
@@ -162,8 +163,25 @@ impl DexEncoder {
         })
     }
 
-    pub fn add_proto(&mut self) {
-        
+    pub fn add_proto(&mut self, return_type: impl AsRef<str>, parameters: &[&str]) -> ProtoId {
+        let return_type = return_type.as_ref();
+        let mut shorty = String::new();
+        shorty.push_str(make_shorty(return_type));
+        for parameter in parameters {
+            shorty.push_str(make_shorty(parameter));
+        }
+        let proto = Proto {
+            shorty_idx: self.add_string(shorty),
+            return_type_idx: self.add_type(return_type),
+            parameters: if parameters.is_empty() {
+                None
+            } else {
+                Some(self.add_type_list(parameters))
+            },
+        };
+        *self.proto_map.entry(proto).or_insert_with(|| {
+            self.protos.push(proto)
+        })
     }
 
     pub fn sort_strings(&mut self) {
@@ -175,6 +193,13 @@ impl DexEncoder {
 
         // Build `physical_type_list_map`, `physical_type_lists`
         convert_to_physical(&mut self.type_lists, &mut self.type_list_map, &mut self.physical_type_lists, &mut self.physical_type_list_map, |list| list.iter().map(|&ty| self.physical_type_map[ty]).collect(), Ord::cmp);
+
+        // Build `physical_protos`, `physical_proto_map`
+        convert_to_physical(&mut self.protos, &mut self.proto_map, &mut self.physical_protos, &mut self.physical_proto_map, |proto| PhysicalProto {
+            shorty_idx: self.physical_string_map[proto.shorty_idx],
+            return_type_idx: self.physical_type_map[proto.return_type_idx],
+            parameters: proto.parameters.map(|parameters| self.physical_type_list_map[parameters]),
+        }, |a, b| (a.return_type_idx, a.parameters).cmp(&(b.return_type_idx, b.parameters)));
     }
 
     pub fn get_offset(&self, count: usize) -> usize {
@@ -184,6 +209,15 @@ impl DexEncoder {
             self.pos()
         }
     }
+}
+
+fn make_shorty(ty: &str) -> &str {
+    for (i, char) in ty.bytes().enumerate() {
+        if char == b'L' {
+            return &ty[..=i];
+        }
+    }
+    ty
 }
 
 fn convert_to_physical<LogicalId: Idx, LogicalItem, LogicalMapKey: Hash, PhysicalId: Idx, PhysicalItem>(logical_list: &mut IndexVec<LogicalId, LogicalItem>, logical_map: &mut HashMap<LogicalMapKey, LogicalId>, physical_list: &mut IndexVec<PhysicalId, PhysicalItem>, physical_map: &mut IndexVec<LogicalId, PhysicalId>, mut to_physical_item: impl FnMut(LogicalItem) -> PhysicalItem, mut ordering: impl FnMut(&PhysicalItem, &PhysicalItem) -> Ordering) {
