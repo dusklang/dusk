@@ -15,6 +15,7 @@ use crate::backend::dex::dex_encoder::DexEncoder;
 use crate::index_vec::*;
 use crate::linker::byte_swap::Ref;
 
+#[repr(C)]
 #[derive(ByteSwap, Copy, Clone)]
 struct HeaderItem {
     magic: [u8; 8],
@@ -43,10 +44,14 @@ struct HeaderItem {
 }
 
 #[derive(ByteSwap)]
+#[repr(C)]
 struct MapItem {
     ty: u16,
     unused: u16,
-    size: u32,
+
+    // This field is called `size` in the dex documentation, but I prefer `count` because it doesn't
+    // imply the incorrect meaning "number of bytes" as much.
+    count: u32,
     offset: u32,
 }
 
@@ -105,6 +110,7 @@ pub fn no_index<T: Idx>() -> T {
     T::from_usize(0xffff_ffff)
 }
 
+#[repr(C)]
 #[derive(ByteSwap, Copy, Clone)]
 pub struct ClassDefItem {
     class_idx: PhysicalTypeId,
@@ -117,6 +123,7 @@ pub struct ClassDefItem {
     static_values_off: u32,
 }
 
+#[repr(C)]
 #[derive(ByteSwap, Copy, Clone)]
 pub struct ProtoIdItem {
     shorty_idx: PhysicalStringId,
@@ -124,6 +131,7 @@ pub struct ProtoIdItem {
     parameters_off: u32,
 }
 
+#[repr(C)]
 #[derive(ByteSwap, Copy, Clone)]
 pub struct MethodIdItem {
     class_idx: u16,
@@ -146,7 +154,7 @@ impl Backend for DexBackend {
             MapItem {
                 ty: MapItemType::HeaderItem as u16,
                 unused: 0,
-                size: mem::size_of::<HeaderItem>() as u32,
+                count: 1,
                 offset: 0,
             }
         );
@@ -155,8 +163,11 @@ impl Backend for DexBackend {
         code.add_type("C");
         let my_class = code.add_class_def("Lcom/example/MyClass;", AccessFlags::PUBLIC, None, None);
         let class_idx = code.class_defs[my_class].class_idx;
-        let _method_proto = code.add_proto("V", &["Z", "B", "S", "C", "I", "J", "F", "D", "Lcom/example/MyClass;", "[Lcom/example/MyClass;"]);
-        let _method = code.add_method(class_idx, "firstMethod", "V", &[]);
+        code.add_method(class_idx, "firstMethod", "V", &[]);
+        code.add_method(class_idx, "secondMethod", "V", &["Z", "B", "S", "C", "I", "J", "F", "D", "Lcom/example/MyClass;", "[Lcom/example/MyClass;"]);
+
+        let string_class = code.add_type("Ljava/lang/String;");
+        code.add_method(string_class, "charAt", "C", &["Ljava/lang/String;"]);
 
         code.sort_strings();
 
@@ -166,28 +177,30 @@ impl Backend for DexBackend {
         let string_ids_off = code.get_offset(code.physical_strings.len());
         let mut string_id_refs = IndexVec::<PhysicalStringId, Ref<u32>>::new();
         for _ in 0..code.physical_strings.len() {
-            let off = code.pos();
             string_id_refs.push(code.alloc::<u32>());
+        }
+        if !code.physical_strings.is_empty() {
             map_list.push(
                 MapItem {
                     ty: MapItemType::StringIdItem as u16,
                     unused: 0,
-                    size: 4,
-                    offset: off as u32,
+                    count: code.physical_strings.len() as u32,
+                    offset: string_ids_off as u32,
                 }
             );
         }
 
         let type_ids_off = code.get_offset(code.physical_types.len());
         for ty in code.physical_types.clone() {
-            let off = code.pos();
             code.push(ty.index() as u32);
+        }
+        if !code.physical_types.is_empty() {
             map_list.push(
                 MapItem {
                     ty: MapItemType::TypeIdItem as u16,
                     unused: 0,
-                    size: 4,
-                    offset: off as u32,
+                    count: code.physical_types.len() as u32,
+                    offset: type_ids_off as u32,
                 }
             );
         }
@@ -195,7 +208,6 @@ impl Backend for DexBackend {
         let mut proto_id_refs = Vec::new();
         let proto_ids_off = code.get_offset(code.physical_protos.len());
         for proto in code.physical_protos.clone() {
-            let off = code.pos();
             let proto_id_ref = code.push(
                 ProtoIdItem {
                     shorty_idx: proto.shorty_idx,
@@ -204,21 +216,22 @@ impl Backend for DexBackend {
                 }
             );
             proto_id_refs.push(proto_id_ref);
-
+        }
+        if !code.physical_protos.is_empty() {
             map_list.push(
                 MapItem {
                     ty: MapItemType::ProtoIdItem as u16,
                     unused: 0,
-                    size: mem::size_of::<ProtoIdItem>() as u32,
-                    offset: off as u32,
+                    count: code.physical_protos.len() as u32,
+                    offset: proto_ids_off as u32,
                 }
             );
         }
 
         // TODO: field_ids
+
         let method_ids_off = code.get_offset(code.physical_methods.len());
         for method in code.physical_methods.clone() {
-            let off = code.pos();
             code.push(
                 MethodIdItem {
                     class_idx: method.class_idx.index().try_into().unwrap(),
@@ -226,13 +239,14 @@ impl Backend for DexBackend {
                     name_idx: method.name_idx,
                 }
             );
-
+        }
+        if !code.physical_methods.is_empty() {
             map_list.push(
                 MapItem {
                     ty: MapItemType::MethodIdItem as u16,
                     unused: 0,
-                    size: mem::size_of::<MethodIdItem>() as u32,
-                    offset: off as u32,
+                    count: code.physical_methods.len() as u32,
+                    offset: method_ids_off as u32,
                 }
             );
         }
@@ -253,47 +267,56 @@ impl Backend for DexBackend {
                 class_data_off: 0,
                 static_values_off: 0,
             };
-            let off = code.pos();
             code.push(item);
+        }
+        if !code.class_defs.is_empty() {
             map_list.push(
                 MapItem {
                     ty: MapItemType::ClassDefItem as u16,
                     unused: 0,
-                    size: mem::size_of::<ClassDefItem>() as u32,
-                    offset: off as u32,
+                    count: code.class_defs.len() as u32,
+                    offset: class_defs_off as u32,
                 }
             );
         }
 
         let data_begin = code.pos();
+
+        let string_data_off = code.pos();
+        let num_strings = code.physical_strings.len();
         for (str, string_id) in mem::take(&mut code.physical_strings).iter().zip(string_id_refs) {
+            if str.is_empty() {
+                // Don't bother writing the empty string; set its offset to zero instead.
+                code.get_mut(string_id).set(0);
+                continue;
+            }
+
             let off = code.pos();
             code.get_mut(string_id).set(off as u32);
             code.encode_mutf8_string(str);
+            
+        }
+        if num_strings > 0 {
             map_list.push(
                 MapItem {
                     ty: MapItemType::StringDataItem as u16,
                     unused: 0,
-                    size: (code.pos() - off) as u32,
-                    offset: off as u32,
+                    count: num_strings as u32,
+                    offset: string_data_off as u32,
                 }
             );
         }
+
         code.pad_to_next_boundary(4);
 
+        let type_lists_off = code.pos();
         let mut type_list_offsets: IndexVec<PhysicalTypeListId, u32> = IndexVec::new();
+        let num_type_lists = code.physical_type_lists.len();
         for type_list in mem::take(&mut code.physical_type_lists) {
             code.pad_to_next_boundary(4);
 
             let off = code.pos();
-            map_list.push(
-                MapItem {
-                    ty: MapItemType::TypeList as u16,
-                    unused: 0,
-                    size: 4 + 2 * type_list.len() as u32,
-                    offset: off as u32,
-                }
-            );
+            
 
             type_list_offsets.push(off as u32);
 
@@ -302,6 +325,16 @@ impl Backend for DexBackend {
                 let entry: u16 = entry.index().try_into().unwrap();
                 code.push(entry);
             }
+        }
+        if num_type_lists > 0 {
+            map_list.push(
+                MapItem {
+                    ty: MapItemType::TypeList as u16,
+                    unused: 0,
+                    count: num_type_lists as u32,
+                    offset: type_lists_off as u32,
+                }
+            );
         }
 
         // Assign correct offsets to proto_id_items.parameters_off
@@ -312,16 +345,15 @@ impl Backend for DexBackend {
         }
 
         let map_off = code.pos();
-        let map_list_size = 4 + 12 * (map_list.len() + 1);
         map_list.push(
             MapItem {
                 ty: MapItemType::MapList as u16,
                 unused: 0,
-                size: map_list_size as u32,
+                count: 1,
                 offset: map_off as u32,
             }
         );
-        code.push(map_list.len());
+        code.push(map_list.len() as u32);
         for map_item in map_list {
             code.push(map_item);
         }
@@ -343,7 +375,7 @@ impl Backend for DexBackend {
             link_size: 0,
             link_off: 0,
             map_off: map_off as u32,
-            string_ids_size: code.physical_strings.len() as u32,
+            string_ids_size: num_strings as u32,
             string_ids_off: string_ids_off as u32,
             type_ids_size: type_ids_size as u32,
             type_ids_off: type_ids_off as u32,

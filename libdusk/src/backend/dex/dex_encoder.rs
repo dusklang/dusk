@@ -186,9 +186,9 @@ impl DexEncoder {
     pub fn add_proto(&mut self, return_type: impl AsRef<str>, parameters: &[&str]) -> ProtoId {
         let return_type = return_type.as_ref();
         let mut shorty = String::new();
-        shorty.push_str(make_shorty(return_type));
+        shorty.push(make_shorty(return_type));
         for parameter in parameters {
-            shorty.push_str(make_shorty(parameter));
+            shorty.push(make_shorty(parameter));
         }
         let proto = Proto {
             shorty_idx: self.add_string(shorty),
@@ -251,13 +251,14 @@ impl DexEncoder {
     }
 }
 
-fn make_shorty(ty: &str) -> &str {
-    for (i, char) in ty.bytes().enumerate() {
-        if char == b'L' {
-            return &ty[..=i];
+fn make_shorty(ty: &str) -> char {
+    match ty.chars().next().unwrap() {
+        'L' | '[' => 'L',
+        other => {
+            assert_eq!(ty.len(), 1, "invalid type");
+            other
         }
     }
-    ty
 }
 
 fn convert_to_physical<LogicalId: Idx, LogicalItem, LogicalMapKey: Hash, PhysicalId: Idx, PhysicalItem>(logical_list: &mut IndexVec<LogicalId, LogicalItem>, logical_map: &mut HashMap<LogicalMapKey, LogicalId>, physical_list: &mut IndexVec<PhysicalId, PhysicalItem>, physical_map: &mut IndexVec<LogicalId, PhysicalId>, mut to_physical_item: impl FnMut(LogicalItem) -> PhysicalItem, mut ordering: impl FnMut(&PhysicalItem, &PhysicalItem) -> Ordering) {
