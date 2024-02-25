@@ -163,9 +163,10 @@ impl Backend for DexBackend {
         code.add_type("Z");
         code.add_type("C");
         let my_class = code.add_class_def("Lcom/example/MyClass;", AccessFlags::PUBLIC, None, None);
-        let class_idx = code.class_defs[my_class].class_idx;
-        code.add_method(class_idx, "firstMethod", "V", &[]);
-        code.add_method(class_idx, "secondMethod", "V", &["Z", "B", "S", "C", "I", "J", "F", "D", "Lcom/example/MyClass;", "[Lcom/example/MyClass;"]);
+        let my_class_id = code.class_defs[my_class].class_idx;
+        let _other_class = code.add_class_def("Lcom/example/MyClass2;", AccessFlags::PUBLIC, Some(my_class_id), None);
+        code.add_method(my_class_id, "firstMethod", "V", &[]);
+        code.add_method(my_class_id, "secondMethod", "V", &["Z", "B", "S", "C", "I", "J", "F", "D", "Lcom/example/MyClass;", "[Lcom/example/MyClass;"]);
 
         let string_class = code.add_type("Ljava/lang/String;");
         code.add_method(string_class, "charAt", "C", &["Ljava/lang/String;"]);
@@ -252,30 +253,28 @@ impl Backend for DexBackend {
             );
         }
 
-        let class_defs_off = code.get_offset(code.class_defs.len());
-        for class_def in code.class_defs.clone() {
+        let class_defs_off = code.get_offset(code.physical_class_defs.len());
+        let mut class_def_refs = Vec::new();
+        for class_def in code.physical_class_defs.clone() {
             let item = ClassDefItem {
-                class_idx: code.physical_type_map[class_def.class_idx],
+                class_idx: class_def.class_idx,
                 access_flags: class_def.access_flags,
-                superclass_idx: class_def.superclass_idx
-                    .map(|idx| code.physical_type_map[idx])
-                    .unwrap_or(no_index()),
+                superclass_idx: class_def.superclass_idx.unwrap_or(no_index()),
                 interfaces_off: 0,
-                source_file_idx: class_def.source_file_idx
-                    .map(|idx| code.physical_string_map[idx])
-                    .unwrap_or(no_index()),
+                source_file_idx: class_def.source_file_idx.unwrap_or(no_index()),
                 annotations_off: 0,
                 class_data_off: 0,
                 static_values_off: 0,
             };
-            code.push(item);
+            let class_def_ref = code.push(item); // offsets above to be filled in later
+            class_def_refs.push(class_def_ref);
         }
-        if !code.class_defs.is_empty() {
+        if !code.physical_class_defs.is_empty() {
             map_list.push(
                 MapItem {
                     ty: MapItemType::ClassDefItem as u16,
                     unused: 0,
-                    count: code.class_defs.len() as u32,
+                    count: code.physical_class_defs.len() as u32,
                     offset: class_defs_off as u32,
                 }
             );
@@ -310,10 +309,7 @@ impl Backend for DexBackend {
         for type_list in mem::take(&mut code.physical_type_lists) {
             code.pad_to_next_boundary(4);
 
-            let off = code.pos();
-            
-
-            type_list_offsets.push(off as u32);
+            type_list_offsets.push(code.pos() as u32);
 
             code.push(type_list.len() as u32);
             for entry in type_list {
@@ -339,6 +335,7 @@ impl Backend for DexBackend {
             }
         }
 
+        code.pad_to_next_boundary(4);
         let map_off = code.pos();
         map_list.push(
             MapItem {
@@ -380,7 +377,7 @@ impl Backend for DexBackend {
             field_ids_off: 0,
             method_ids_size: code.physical_methods.len() as u32,
             method_ids_off: method_ids_off as u32,
-            class_defs_size: code.class_defs.len() as u32,
+            class_defs_size: code.physical_class_defs.len() as u32,
             class_defs_off: class_defs_off as u32,
             data_size: data_size as u32,
             data_off: data_begin as u32,

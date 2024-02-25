@@ -24,12 +24,14 @@ define_index_type!(pub struct FieldId = u32;);
 define_index_type!(pub struct MethodId = u32;);
 define_index_type!(#[derive(ByteSwap)] pub struct PhysicalMethodId = u32;);
 define_index_type!(pub struct ClassDefId = u32;);
+define_index_type!(#[derive(ByteSwap)] pub struct PhysicalClassDefId = u32;);
 
-// Unlike the ID types above, this one does not correspond to a type of index in the Dalvik executable docs
+// Unlike the ID types above, these do not correspond to a type of index in the Dalvik executable docs
 define_index_type!(pub struct TypeListId = u32;);
 define_index_type!(pub struct PhysicalTypeListId = u32;);
+define_index_type!(pub struct CodeItemId = u32;);
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 pub struct ClassDef {
     pub class_idx: TypeId,
     pub access_flags: AccessFlags,
@@ -37,8 +39,61 @@ pub struct ClassDef {
     // pub interfaces_off: u32,
     pub source_file_idx: Option<StringId>,
     // pub annotations_off: u32,
-    // pub class_data_off: u32,
+    pub class_data: Option<ClassData>,
     // pub static_values_off: u32,
+}
+
+#[derive(Clone)]
+pub struct PhysicalClassDef {
+    pub class_idx: PhysicalTypeId,
+    pub access_flags: AccessFlags,
+    pub superclass_idx: Option<PhysicalTypeId>,
+    // pub interfaces_off: u32,
+    pub source_file_idx: Option<PhysicalStringId>,
+    // pub annotations_off: u32,
+    pub class_data: Option<PhysicalClassData>,
+    // pub static_values_off: u32,
+}
+
+impl ClassDef {
+    fn ensure_class_data(&mut self) -> &mut ClassData {
+        if self.class_data.is_none() {
+            self.class_data = Some(ClassData::default());
+        }
+        self.class_data.as_mut().unwrap()
+    }
+}
+
+#[derive(Default, Clone)]
+pub struct ClassData {
+    // These fields are actually called xxx_size in the dex docs, but I prefer num_xxx
+    num_static_fields: u32,
+    num_instance_fields: u32,
+    direct_methods: Vec<EncodedMethod>,
+    virtual_methods: Vec<EncodedMethod>,
+}
+
+#[derive(Default, Clone)]
+pub struct PhysicalClassData {
+    // These fields are actually called xxx_size in the dex docs, but I prefer num_xxx
+    num_static_fields: u32,
+    num_instance_fields: u32,
+    direct_methods: Vec<PhysicalEncodedMethod>,
+    virtual_methods: Vec<PhysicalEncodedMethod>,
+}
+
+#[derive(Clone)]
+pub struct EncodedMethod {
+    method_idx: MethodId,
+    access_flags: AccessFlags,
+    code: Option<CodeItemId>,
+}
+
+#[derive(Clone)]
+pub struct PhysicalEncodedMethod {
+    method_idx: PhysicalMethodId,
+    access_flags: AccessFlags,
+    code: Option<CodeItemId>,
 }
 
 #[derive(Copy, Clone, Hash, PartialEq, Eq)]
@@ -97,6 +152,7 @@ pub struct DexEncoder {
     pub physical_method_map: IndexVec<MethodId, PhysicalMethodId>,
 
     pub class_defs: IndexVec<ClassDefId, ClassDef>,
+    pub physical_class_defs: IndexVec<PhysicalClassDefId, PhysicalClassDef>,
 
     type_lists: IndexVec<TypeListId, Vec<TypeId>>,
     type_list_map: HashMap<Vec<TypeId>, TypeListId>,
@@ -172,6 +228,7 @@ impl DexEncoder {
                 access_flags,
                 superclass_idx,
                 source_file_idx,
+                class_data: None,
             }
         )
     }
@@ -240,6 +297,56 @@ impl DexEncoder {
             proto_idx: self.physical_proto_map[method.proto_idx],
             name_idx: self.physical_string_map[method.name_idx],
         }, |a, b| (a.class_idx, a.name_idx, a.proto_idx).cmp(&(b.class_idx, b.name_idx, b.proto_idx)));
+
+        // Build `physical_class_defs`
+        self.physical_class_defs.reserve(self.class_defs.len());
+        for class_def in mem::take(&mut self.class_defs) {
+            self.physical_class_defs.push(
+                PhysicalClassDef {
+                    class_idx: self.physical_type_map[class_def.class_idx],
+                    access_flags: class_def.access_flags,
+                    superclass_idx: class_def.superclass_idx.map(|idx| self.physical_type_map[idx]),
+                    source_file_idx: class_def.source_file_idx.map(|idx| self.physical_string_map[idx]),
+                    class_data: class_def.class_data.map(|class_data| {
+                        let mut class_data = PhysicalClassData {
+                            num_static_fields: class_data.num_static_fields,
+                            num_instance_fields: class_data.num_static_fields,
+                            direct_methods: class_data.direct_methods.into_iter().map(|method| {
+                                PhysicalEncodedMethod {
+                                    method_idx: self.physical_method_map[method.method_idx],
+                                    access_flags: method.access_flags,
+                                    code: method.code,
+                                }
+                            }).collect(),
+                            virtual_methods: class_data.virtual_methods.into_iter().map(|method| {
+                                PhysicalEncodedMethod {
+                                    method_idx: self.physical_method_map[method.method_idx],
+                                    access_flags: method.access_flags,
+                                    code: method.code,
+                                }
+                            }).collect(),
+                        };
+                        class_data.direct_methods.sort_by_key(|method| method.method_idx);
+                        class_data.virtual_methods.sort_by_key(|method| method.method_idx);
+                        class_data
+                    })
+                }
+            );
+        }
+
+        // Sort `physical_class_defs` to follow the rule that a class's superclass must come before it.
+        // There is probably a better way to do this, but I chose to do a very similar thing as I did when creating TIR units:
+        // assign an integer "level" value to each class according to its depth in the hierarchy, then sort according to level.
+        // TODO: also handle implemented interfaces
+        let mut class_map = HashMap::new();
+        for (def_id, class_def) in self.physical_class_defs.iter_enumerated() {
+            class_map.insert(class_def.class_idx, def_id);
+        }
+        let mut levels = HashMap::new();
+        for class_def in &self.physical_class_defs {
+            get_level(class_def, &self.physical_class_defs, &class_map, &mut levels);
+        }
+        self.physical_class_defs.sort_by_cached_key(|class_def| levels[&class_def.class_idx]);
     }
 
     pub fn get_offset(&self, count: usize) -> usize {
@@ -259,6 +366,25 @@ fn make_shorty(ty: &str) -> char {
             other
         }
     }
+}
+
+fn get_level(class_def: &PhysicalClassDef, class_defs: &IndexVec<PhysicalClassDefId, PhysicalClassDef>, class_map: &HashMap<PhysicalTypeId, PhysicalClassDefId>, levels: &mut HashMap<PhysicalTypeId, usize>) -> usize {
+    if let Some(&level) = levels.get(&class_def.class_idx) {
+        assert_ne!(level, usize::MAX, "cycle detected in Dalvik class list");
+        return level;
+    }
+
+    // Add a fake value for now, to detect cycles
+    levels.insert(class_def.class_idx, usize::MAX);
+    
+    let level = if let Some(parent) = class_def.superclass_idx.map(|parent| class_map.get(&parent).copied()).flatten() {
+        get_level(&class_defs[parent], class_defs, class_map, levels) + 1
+    } else {
+        0
+    };
+
+    levels.insert(class_def.class_idx, level);
+    level
 }
 
 fn convert_to_physical<LogicalId: Idx, LogicalItem, LogicalMapKey: Hash, PhysicalId: Idx, PhysicalItem>(logical_list: &mut IndexVec<LogicalId, LogicalItem>, logical_map: &mut HashMap<LogicalMapKey, LogicalId>, physical_list: &mut IndexVec<PhysicalId, PhysicalItem>, physical_map: &mut IndexVec<LogicalId, PhysicalId>, mut to_physical_item: impl FnMut(LogicalItem) -> PhysicalItem, mut ordering: impl FnMut(&PhysicalItem, &PhysicalItem) -> Ordering) {
