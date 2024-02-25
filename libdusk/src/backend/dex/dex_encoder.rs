@@ -76,10 +76,10 @@ pub struct ClassData {
 #[derive(Default, Clone)]
 pub struct PhysicalClassData {
     // These fields are actually called xxx_size in the dex docs, but I prefer num_xxx
-    num_static_fields: u32,
-    num_instance_fields: u32,
-    direct_methods: Vec<PhysicalEncodedMethod>,
-    virtual_methods: Vec<PhysicalEncodedMethod>,
+    pub num_static_fields: u32,
+    pub num_instance_fields: u32,
+    pub direct_methods: Vec<PhysicalEncodedMethod>,
+    pub virtual_methods: Vec<PhysicalEncodedMethod>,
 }
 
 #[derive(Clone)]
@@ -91,9 +91,9 @@ pub struct EncodedMethod {
 
 #[derive(Clone)]
 pub struct PhysicalEncodedMethod {
-    method_idx: PhysicalMethodId,
-    access_flags: AccessFlags,
-    code: Option<CodeItemId>,
+    pub method_idx: PhysicalMethodId,
+    pub access_flags: AccessFlags,
+    pub code: Option<CodeItemId>,
 }
 
 #[derive(Copy, Clone, Hash, PartialEq, Eq)]
@@ -272,6 +272,29 @@ impl DexEncoder {
         *self.method_map.entry(method).or_insert_with(|| {
             self.methods.push(method)
         })
+    }
+
+    fn add_method_impl(&mut self, class_def: ClassDefId, name: impl AsRef<str>, return_type: impl AsRef<str>, parameters: &[&str], access_flags: AccessFlags, method_list: fn(&mut ClassData) -> &mut Vec<EncodedMethod>) -> MethodId {
+        let class_idx = self.class_defs[class_def].class_idx;
+        let method_idx = self.add_method(class_idx, name, return_type, parameters);
+        let class_data = self.class_defs[class_def].ensure_class_data();
+
+        let encoded_method = EncodedMethod {
+            method_idx,
+            access_flags,
+            code: None,
+        };
+        method_list(class_data).push(encoded_method);
+
+        method_idx
+    }
+
+    pub fn add_direct_method(&mut self, class_def: ClassDefId, name: impl AsRef<str>, return_type: impl AsRef<str>, parameters: &[&str], access_flags: AccessFlags) -> MethodId {
+        self.add_method_impl(class_def, name, return_type, parameters, access_flags, |class_data| &mut class_data.direct_methods)
+    }
+
+    pub fn add_virtual_method(&mut self, class_def: ClassDefId, name: impl AsRef<str>, return_type: impl AsRef<str>, parameters: &[&str], access_flags: AccessFlags) -> MethodId {
+        self.add_method_impl(class_def, name, return_type, parameters, access_flags, |class_data| &mut class_data.virtual_methods)
     }
 
     pub fn sort_strings(&mut self) {

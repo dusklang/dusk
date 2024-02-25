@@ -165,7 +165,7 @@ impl Backend for DexBackend {
         let my_class = code.add_class_def("Lcom/example/MyClass;", AccessFlags::PUBLIC, None, None);
         let my_class_id = code.class_defs[my_class].class_idx;
         let _other_class = code.add_class_def("Lcom/example/MyClass2;", AccessFlags::PUBLIC, Some(my_class_id), None);
-        code.add_method(my_class_id, "firstMethod", "V", &[]);
+        code.add_virtual_method(my_class, "firstMethod", "V", &["Lcom/example/MyClass;"], AccessFlags::PUBLIC);
         code.add_method(my_class_id, "secondMethod", "V", &["Z", "B", "S", "C", "I", "J", "F", "D", "Lcom/example/MyClass;", "[Lcom/example/MyClass;"]);
 
         let string_class = code.add_type("Ljava/lang/String;");
@@ -333,6 +333,63 @@ impl Backend for DexBackend {
             if let Some(parameters) = proto.parameters {
                 code.get_mut(proto_id_ref).modify(|proto| proto.parameters_off = type_list_offsets[parameters]);
             }
+        }
+
+        let class_data_off = code.pos();
+        let mut num_class_data = 032;
+        for (class_def, class_def_ref) in code.physical_class_defs.clone().iter().zip(class_def_refs) {
+            let Some(class_data) = &class_def.class_data else {
+                continue
+            };
+
+            num_class_data += 1;
+
+            let off = code.pos();
+
+            code.push_uleb128(class_data.num_static_fields);
+            code.push_uleb128(class_data.num_instance_fields);
+            code.push_uleb128(class_data.direct_methods.len() as u32);
+            code.push_uleb128(class_data.virtual_methods.len() as u32);
+
+            // TODO: fields
+            assert_eq!(class_data.num_static_fields, 0);
+            assert_eq!(class_data.num_instance_fields, 0);
+
+            let mut prev_method_id = 0 as u32;
+            for method in &class_data.direct_methods {
+                let method_idx = method.method_idx.index() as u32;
+
+                code.push_uleb128(method_idx - prev_method_id);
+                code.push_uleb128(method.access_flags.bits());
+                code.push_uleb128(0); // code_off
+
+
+                prev_method_id = method_idx as u32;
+            }
+
+            let mut prev_method_id = 0 as u32;
+            for method in &class_data.virtual_methods {
+                let method_idx = method.method_idx.index() as u32;
+
+                code.push_uleb128(method_idx - prev_method_id);
+                code.push_uleb128(method.access_flags.bits());
+                code.push_uleb128(0); // code_off
+
+
+                prev_method_id = method_idx;
+            }
+
+            code.get_mut(class_def_ref).modify(|class_def| class_def.class_data_off = off as u32);
+        }
+        if num_class_data > 0 {
+            map_list.push(
+                MapItem {
+                    ty: MapItemType::ClassDataItem as u16,
+                    unused: 0,
+                    count: num_class_data,
+                    offset: class_data_off as u32,
+                }
+            );
         }
 
         code.pad_to_next_boundary(4);
