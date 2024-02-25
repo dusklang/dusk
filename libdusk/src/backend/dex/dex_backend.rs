@@ -142,8 +142,9 @@ impl Backend for DexBackend {
         code.add_string("Hi");
         code.add_type("Z");
         code.add_type("C");
-        let muh_class = code.add_class_def("Lcom/example/MyClass;", AccessFlags::PUBLIC, None, None);
-
+        let _my_class = code.add_class_def("Lcom/example/MyClass;", AccessFlags::PUBLIC, None, None);
+        let _empty_type_list = code.add_type_list(&[]);
+        let _other_type_list = code.add_type_list(&["Z", "B", "S", "C", "I", "J", "F", "D", "Lcom/example/MyClass;", "[Lcom/example/MyClass;"]);
 
         code.sort_strings();
 
@@ -229,6 +230,26 @@ impl Backend for DexBackend {
             );
         }
         code.pad_to_next_boundary(4);
+
+        for type_list in mem::take(&mut code.physical_type_lists) {
+            code.pad_to_next_boundary(4);
+
+            let off = code.pos();
+            map_list.push(
+                MapItem {
+                    ty: MapItemType::TypeList as u16,
+                    unused: 0,
+                    size: 4 + 2 * type_list.len() as u32,
+                    offset: off as u32,
+                }
+            );
+
+            code.push(type_list.len() as u32);
+            for entry in type_list {
+                let entry: u16 = entry.index().try_into().unwrap();
+                code.push(entry);
+            }
+        }
 
         let map_off = code.pos();
         let map_list_size = 4 + 12 * (map_list.len() + 1);
