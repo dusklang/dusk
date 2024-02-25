@@ -158,6 +158,7 @@ impl Backend for DexBackend {
                 offset: 0,
             }
         );
+        code.add_string("");
         code.add_string("Hi");
         code.add_type("Z");
         code.add_type("C");
@@ -285,12 +286,6 @@ impl Backend for DexBackend {
         let string_data_off = code.pos();
         let num_strings = code.physical_strings.len();
         for (str, string_id) in mem::take(&mut code.physical_strings).iter().zip(string_id_refs) {
-            if str.is_empty() {
-                // Don't bother writing the empty string; set its offset to zero instead.
-                code.get_mut(string_id).set(0);
-                continue;
-            }
-
             let off = code.pos();
             code.get_mut(string_id).set(off as u32);
             code.encode_mutf8_string(str);
