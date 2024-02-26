@@ -274,6 +274,7 @@ impl Backend for DexBackend {
             );
         }
 
+        code.pad_to_next_boundary(4);
         let class_defs_off = code.get_offset(code.physical_class_defs.len());
         let mut class_def_refs = Vec::new();
         for class_def in code.physical_class_defs.clone() {
@@ -356,7 +357,8 @@ impl Backend for DexBackend {
             }
         }
 
-        let code_item_off = code.pos();
+        code.pad_to_next_boundary(4);
+        let code_items_off = code.pos();
         let mut code_item_offs = IndexVec::<CodeItemId, u32>::new();
         for code_item in code.code_items.clone() {
             let off = code.pos() as u32;
@@ -380,14 +382,14 @@ impl Backend for DexBackend {
                     ty: MapItemType::CodeItem as u16,
                     unused: 0,
                     count: code.code_items.len() as u32,
-                    offset: code_item_off as u32,
+                    offset: code_items_off as u32,
                 }
             );
         }
 
         code.pad_to_next_boundary(4);
         let class_data_off = code.pos();
-        let mut num_class_data = 032;
+        let mut num_class_data = 0u32;
         for (class_def, class_def_ref) in code.physical_class_defs.clone().iter().zip(class_def_refs) {
             let Some(class_data) = &class_def.class_data else {
                 continue
@@ -406,27 +408,26 @@ impl Backend for DexBackend {
             assert_eq!(class_data.num_static_fields, 0);
             assert_eq!(class_data.num_instance_fields, 0);
 
-            let mut prev_method_id = 0 as u32;
+            let mut prev_method_idx = 0 as u32;
             for method in &class_data.direct_methods {
                 let method_idx = method.method_idx.index() as u32;
 
-                code.push_uleb128(method_idx - prev_method_id);
+                code.push_uleb128(method_idx - prev_method_idx);
                 code.push_uleb128(method.access_flags.bits());
                 code.push_uleb128(method.code.map(|code| code_item_offs[code]).unwrap_or(0));
 
-                prev_method_id = method_idx as u32;
+                prev_method_idx = method_idx as u32;
             }
 
-            let mut prev_method_id = 0 as u32;
+            let mut prev_method_idx = 0 as u32;
             for method in &class_data.virtual_methods {
                 let method_idx = method.method_idx.index() as u32;
 
-                code.push_uleb128(method_idx - prev_method_id);
+                code.push_uleb128(method_idx - prev_method_idx);
                 code.push_uleb128(method.access_flags.bits());
                 code.push_uleb128(method.code.map(|code| code_item_offs[code]).unwrap_or(0));
 
-
-                prev_method_id = method_idx;
+                prev_method_idx = method_idx;
             }
 
             code.get_mut(class_def_ref).modify(|class_def| class_def.class_data_off = off as u32);

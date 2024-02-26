@@ -301,7 +301,7 @@ impl DexEncoder {
         let encoded_method = EncodedMethod {
             method_idx,
             access_flags,
-            code: None,
+            code: code_item.map(|code_item| self.code_items.push(code_item)),
         };
         method_list(class_data).push(encoded_method);
 
