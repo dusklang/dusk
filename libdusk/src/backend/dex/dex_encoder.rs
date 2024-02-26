@@ -124,6 +124,19 @@ pub struct PhysicalMethod {
     pub name_idx: PhysicalStringId,
 }
 
+#[derive(Clone)]
+pub struct CodeItem {
+    pub num_registers: u16,
+    /// "the number of words of incoming arguments to the method that this code is for"
+    pub num_words_of_ins: u16,
+    // "the number of words of outgoing argument space required by this code for method invocation"
+    pub num_words_of_outs: u16,
+    pub num_try_items: u16,
+    pub debug_info_off: u32,
+    pub insns: Vec<u16>,
+    // TODO: try items, handlers
+}
+
 #[derive(Default)]
 pub struct DexEncoder {
     buf: Buffer,
@@ -153,6 +166,8 @@ pub struct DexEncoder {
 
     pub class_defs: IndexVec<ClassDefId, ClassDef>,
     pub physical_class_defs: IndexVec<PhysicalClassDefId, PhysicalClassDef>,
+
+    pub code_items: IndexVec<CodeItemId, CodeItem>,
 
     type_lists: IndexVec<TypeListId, Vec<TypeId>>,
     type_list_map: HashMap<Vec<TypeId>, TypeListId>,
@@ -274,10 +289,14 @@ impl DexEncoder {
         })
     }
 
-    fn add_method_impl(&mut self, class_def: ClassDefId, name: impl AsRef<str>, return_type: impl AsRef<str>, parameters: &[&str], access_flags: AccessFlags, method_list: fn(&mut ClassData) -> &mut Vec<EncodedMethod>) -> MethodId {
+    fn add_method_impl(&mut self, class_def: ClassDefId, name: impl AsRef<str>, return_type: impl AsRef<str>, parameters: &[&str], access_flags: AccessFlags, code_item: Option<CodeItem>, method_list: fn(&mut ClassData) -> &mut Vec<EncodedMethod>) -> MethodId {
         let class_idx = self.class_defs[class_def].class_idx;
         let method_idx = self.add_method(class_idx, name, return_type, parameters);
         let class_data = self.class_defs[class_def].ensure_class_data();
+
+        if code_item.is_none() && !access_flags.contains(AccessFlags::ABSTRACT) && !access_flags.contains(AccessFlags::NATIVE) {
+            panic!("must have code item for non-abstract, non-native method");
+        }
 
         let encoded_method = EncodedMethod {
             method_idx,
@@ -289,12 +308,12 @@ impl DexEncoder {
         method_idx
     }
 
-    pub fn add_direct_method(&mut self, class_def: ClassDefId, name: impl AsRef<str>, return_type: impl AsRef<str>, parameters: &[&str], access_flags: AccessFlags) -> MethodId {
-        self.add_method_impl(class_def, name, return_type, parameters, access_flags, |class_data| &mut class_data.direct_methods)
+    pub fn add_direct_method(&mut self, class_def: ClassDefId, name: impl AsRef<str>, return_type: impl AsRef<str>, parameters: &[&str], access_flags: AccessFlags, code_item: Option<CodeItem>) -> MethodId {
+        self.add_method_impl(class_def, name, return_type, parameters, access_flags, code_item, |class_data| &mut class_data.direct_methods)
     }
 
-    pub fn add_virtual_method(&mut self, class_def: ClassDefId, name: impl AsRef<str>, return_type: impl AsRef<str>, parameters: &[&str], access_flags: AccessFlags) -> MethodId {
-        self.add_method_impl(class_def, name, return_type, parameters, access_flags, |class_data| &mut class_data.virtual_methods)
+    pub fn add_virtual_method(&mut self, class_def: ClassDefId, name: impl AsRef<str>, return_type: impl AsRef<str>, parameters: &[&str], access_flags: AccessFlags, code_item: Option<CodeItem>) -> MethodId {
+        self.add_method_impl(class_def, name, return_type, parameters, access_flags, code_item, |class_data| &mut class_data.virtual_methods)
     }
 
     pub fn sort_strings(&mut self) {
@@ -333,7 +352,7 @@ impl DexEncoder {
                     class_data: class_def.class_data.map(|class_data| {
                         let mut class_data = PhysicalClassData {
                             num_static_fields: class_data.num_static_fields,
-                            num_instance_fields: class_data.num_static_fields,
+                            num_instance_fields: class_data.num_instance_fields,
                             direct_methods: class_data.direct_methods.into_iter().map(|method| {
                                 PhysicalEncodedMethod {
                                     method_idx: self.physical_method_map[method.method_idx],

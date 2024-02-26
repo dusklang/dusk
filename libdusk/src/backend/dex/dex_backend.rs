@@ -9,7 +9,7 @@ use crate::target::Arch;
 use crate::driver::Driver;
 use crate::mir::FuncId;
 use crate::linker::exe::Exe;
-use crate::backend::dex::{PhysicalStringId, PhysicalTypeId, PhysicalTypeListId};
+use crate::backend::dex::{PhysicalStringId, PhysicalTypeId, PhysicalTypeListId, CodeItemId, CodeItem};
 use crate::backend::{Backend, CodeBlob};
 use crate::backend::dex::dex_encoder::DexEncoder;
 use crate::index_vec::*;
@@ -139,6 +139,19 @@ pub struct MethodIdItem {
     name_idx: PhysicalStringId,
 }
 
+#[repr(C)]
+#[derive(ByteSwap, Copy, Clone)]
+pub struct CodeItemHeader {
+    num_registers: u16,
+    /// "the number of words of incoming arguments to the method that this code is for"
+    num_words_of_ins: u16,
+    // "the number of words of outgoing argument space required by this code for method invocation"
+    num_words_of_outs: u16,
+    num_try_items: u16,
+    debug_info_off: u32,
+    insns_size: u32,
+}
+
 pub struct DexBackend;
 
 impl Backend for DexBackend {
@@ -165,7 +178,15 @@ impl Backend for DexBackend {
         let my_class = code.add_class_def("Lcom/example/MyClass;", AccessFlags::PUBLIC, None, None);
         let my_class_id = code.class_defs[my_class].class_idx;
         let _other_class = code.add_class_def("Lcom/example/MyClass2;", AccessFlags::PUBLIC, Some(my_class_id), None);
-        code.add_virtual_method(my_class, "firstMethod", "V", &["Lcom/example/MyClass;"], AccessFlags::PUBLIC);
+        let first_method_code_item = CodeItem {
+            num_registers: 0,
+            num_words_of_ins: 0,
+            num_words_of_outs: 0,
+            num_try_items: 0,
+            debug_info_off: 0,
+            insns: Vec::new(),
+        };
+        code.add_virtual_method(my_class, "firstMethod", "V", &["Lcom/example/MyClass;"], AccessFlags::PUBLIC, Some(first_method_code_item));
         code.add_method(my_class_id, "secondMethod", "V", &["Z", "B", "S", "C", "I", "J", "F", "D", "Lcom/example/MyClass;", "[Lcom/example/MyClass;"]);
 
         let string_class = code.add_type("Ljava/lang/String;");
@@ -335,6 +356,36 @@ impl Backend for DexBackend {
             }
         }
 
+        let code_item_off = code.pos();
+        let mut code_item_offs = IndexVec::<CodeItemId, u32>::new();
+        for code_item in code.code_items.clone() {
+            let off = code.pos() as u32;
+            code.push(
+                CodeItemHeader {
+                    num_registers: code_item.num_registers,
+                    num_words_of_ins: code_item.num_words_of_ins,
+                    num_words_of_outs: code_item.num_words_of_outs,
+                    num_try_items: code_item.num_try_items,
+                    debug_info_off: code_item.debug_info_off,
+                    insns_size: code_item.insns.len() as u32,
+                }
+            );
+            code.push(code_item.insns);
+
+            code_item_offs.push(off);
+        }
+        if !code.code_items.is_empty() {
+            map_list.push(
+                MapItem {
+                    ty: MapItemType::CodeItem as u16,
+                    unused: 0,
+                    count: code.code_items.len() as u32,
+                    offset: code_item_off as u32,
+                }
+            );
+        }
+
+        code.pad_to_next_boundary(4);
         let class_data_off = code.pos();
         let mut num_class_data = 032;
         for (class_def, class_def_ref) in code.physical_class_defs.clone().iter().zip(class_def_refs) {
@@ -361,8 +412,7 @@ impl Backend for DexBackend {
 
                 code.push_uleb128(method_idx - prev_method_id);
                 code.push_uleb128(method.access_flags.bits());
-                code.push_uleb128(0); // code_off
-
+                code.push_uleb128(method.code.map(|code| code_item_offs[code]).unwrap_or(0));
 
                 prev_method_id = method_idx as u32;
             }
@@ -373,7 +423,7 @@ impl Backend for DexBackend {
 
                 code.push_uleb128(method_idx - prev_method_id);
                 code.push_uleb128(method.access_flags.bits());
-                code.push_uleb128(0); // code_off
+                code.push_uleb128(method.code.map(|code| code_item_offs[code]).unwrap_or(0));
 
 
                 prev_method_id = method_idx;

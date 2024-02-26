@@ -70,6 +70,14 @@ impl ByteSwap for &[u8] {
     fn byte_swap(&mut self) {}
 }
 
+impl ByteSwap for Vec<u16> {
+    fn byte_swap(&mut self) {
+        for val in self {
+            val.byte_swap();
+        }
+    }
+}
+
 byte_swap_impl!(noops: u8, i8; nums: u16, u32, u64, usize, i16, i32, i64, isize);
 
 pub struct Ref<T: ByteSwap, const BIG_ENDIAN: bool = false> {
