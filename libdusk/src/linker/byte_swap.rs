@@ -70,14 +70,6 @@ impl ByteSwap for &[u8] {
     fn byte_swap(&mut self) {}
 }
 
-impl ByteSwap for Vec<u16> {
-    fn byte_swap(&mut self) {
-        for val in self {
-            val.byte_swap();
-        }
-    }
-}
-
 byte_swap_impl!(noops: u8, i8; nums: u16, u32, u64, usize, i16, i32, i64, isize);
 
 pub struct Ref<T: ByteSwap, const BIG_ENDIAN: bool = false> {
@@ -184,9 +176,13 @@ impl Buffer {
         addr
     }
 
-    pub fn extend(&mut self, bytes: &[u8]) {
-        self.data.extend(bytes);
-        self.rva += bytes.len();
+    pub fn extend<T: ByteSwap + Copy>(&mut self, values: &[T]) {
+        let size = mem::size_of::<T>() * values.len();
+        self.data.reserve(size);
+        for &value in values {
+            self.push(value);
+        }
+        self.rva += size;
     }
 
     pub fn pad_with_zeroes(&mut self, size: usize) {

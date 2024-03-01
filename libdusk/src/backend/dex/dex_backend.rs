@@ -197,6 +197,7 @@ impl Backend for DexBackend {
         let header_item = code.alloc::<HeaderItem>();
         assert_eq!(mem::size_of::<HeaderItem>(), 0x70);
 
+        code.pad_to_next_boundary(4);
         let string_ids_off = code.get_offset(code.physical_strings.len());
         let mut string_id_refs = IndexVec::<PhysicalStringId, Ref<u32>>::new();
         for _ in 0..code.physical_strings.len() {
@@ -213,6 +214,7 @@ impl Backend for DexBackend {
             );
         }
 
+        code.pad_to_next_boundary(4);
         let type_ids_off = code.get_offset(code.physical_types.len());
         for ty in code.physical_types.clone() {
             code.push(ty.index() as u32);
@@ -228,6 +230,7 @@ impl Backend for DexBackend {
             );
         }
 
+        code.pad_to_next_boundary(4);
         let mut proto_id_refs = Vec::new();
         let proto_ids_off = code.get_offset(code.physical_protos.len());
         for proto in code.physical_protos.clone() {
@@ -253,6 +256,7 @@ impl Backend for DexBackend {
 
         // TODO: field_ids
 
+        code.pad_to_next_boundary(4);
         let method_ids_off = code.get_offset(code.physical_methods.len());
         for method in code.physical_methods.clone() {
             code.push(
@@ -361,6 +365,7 @@ impl Backend for DexBackend {
         let code_items_off = code.pos();
         let mut code_item_offs = IndexVec::<CodeItemId, u32>::new();
         for code_item in code.code_items.clone() {
+            code.pad_to_next_boundary(4);
             let off = code.pos() as u32;
             code.push(
                 CodeItemHeader {
@@ -372,7 +377,7 @@ impl Backend for DexBackend {
                     insns_size: code_item.insns.len() as u32,
                 }
             );
-            code.push(code_item.insns);
+            code.extend(&code_item.insns);
 
             code_item_offs.push(off);
         }
