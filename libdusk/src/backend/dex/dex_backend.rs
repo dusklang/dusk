@@ -2,17 +2,15 @@ use std::mem;
 use std::ops::{Deref, DerefMut};
 
 use sha1::{Sha1, Digest};
-use bitflags::bitflags;
 
-use dusk_proc_macros::{ByteSwap, ByteSwapBitflags};
+use dusk_proc_macros::ByteSwap;
 
 use crate::target::Arch;
 use crate::driver::Driver;
 use crate::mir::FuncId;
 use crate::linker::exe::Exe;
-use crate::backend::dex::{PhysicalStringId, PhysicalTypeId, PhysicalTypeListId, CodeItemId, CodeItem};
+use crate::linker::dex::{PhysicalStringId, PhysicalTypeId, PhysicalTypeListId, CodeItemId, CodeItem, AccessFlags};
 use crate::backend::{Backend, CodeBlob};
-use crate::backend::dex::dex_encoder::DexExe;
 use crate::index_vec::*;
 use crate::linker::byte_swap::{Buffer, Ref};
 
@@ -80,31 +78,6 @@ enum MapItemType {
     EncodedArrayItem = 0x2005,
     AnnotationsDirectoryItem = 0x2006,
     HiddenApiClassDataItem = 0xF000,
-}
-
-bitflags! {
-    #[derive(ByteSwapBitflags, Copy, Clone)]
-    pub struct AccessFlags: u32 {
-        const PUBLIC = 0x1;
-        const PRIVATE = 0x2;
-        const PROTECTED = 0x4;
-        const STATIC = 0x8;
-        const FINAL = 0x10;
-        const SYNCHRONIZED = 0x20;
-        const VOLATILE = 0x40;
-        const BRIDGE = 0x40;
-        const TRANSIENT = 0x80;
-        const VARARGS = 0x80; // note: intentionally the same as TRANSIENT
-        const NATIVE = 0x100;
-        const INTERFACE = 0x200;
-        const ABSTRACT = 0x400;
-        const STRICT = 0x800;
-        const SYNTHETIC = 0x1000;
-        const ANNOTATION = 0x2000;
-        const ENUM = 0x4000;
-        const CONSTRUCTOR = 0x10000;
-        const DECLARED_SYNCHRONIZED = 0x20000;
-    }
 }
 
 pub fn no_index<T: Idx>() -> T {
@@ -225,10 +198,8 @@ impl Backend for DexBackend {
         Arch::Dex
     }
 
-    
-
     fn generate_func(&self, d: &Driver, func_index: FuncId, is_main: bool, exe: &mut dyn Exe) -> Box<dyn CodeBlob> {
-        let mut exe = DexExe::new();
+        let exe = exe.as_dex_exe().expect("dex backend only supports writing code into dex files");
 
         let mut map_list = Vec::new();
         map_list.push(

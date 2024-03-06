@@ -635,8 +635,4 @@ impl Exe for PEExe {
         let offset = self.intern_cstring(string);
         self.fixup_locations.push(PEFixupLocation::RDataSectionOffset(offset))
     }
-
-    fn as_objc_exe(&mut self) -> Option<&mut dyn ObjCExe> {
-        None
-    }
 }

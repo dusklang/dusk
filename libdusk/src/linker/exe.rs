@@ -2,6 +2,8 @@ use std::ffi::CStr;
 
 use index_vec::*;
 
+use crate::linker::dex::DexExe;
+
 define_index_type!(pub struct DynLibId = u32;);
 define_index_type!(pub struct ImportedSymbolId = u32;);
 define_index_type!(pub struct FixupLocationId = u32;);
@@ -18,10 +20,12 @@ pub trait Exe {
 
     fn use_imported_symbol(&mut self, symbol: ImportedSymbolId) -> FixupLocationId;
 
-    // TODO: perhaps we should have separate methods to intern and use C strings?
+    // TODO: as a performance optimization, perhaps we should have separate methods to intern and use C strings?
     fn use_cstring(&mut self, string: &CStr) -> FixupLocationId;
 
-    fn as_objc_exe(&mut self) -> Option<&mut dyn ObjCExe>;
+    // Platform or runtime-specific extensions (a bit hacky, but also kind of unavoidable I think)
+    fn as_objc_exe(&mut self) -> Option<&mut dyn ObjCExe> { None }
+    fn as_dex_exe(&mut self) -> Option<&mut DexExe> { None }
 }
 
 /// Implemented by an executable format that supports Objective-C interop. In theory, we could support Objective-C interop on any platform or executable format.

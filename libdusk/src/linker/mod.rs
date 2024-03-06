@@ -11,7 +11,7 @@ use crate::linker::dex::DexLinker;
 pub mod byte_swap;
 mod pe;
 mod macho;
-mod dex;
+pub mod dex;
 
 pub mod exe;
 
