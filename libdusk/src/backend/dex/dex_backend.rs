@@ -36,8 +36,6 @@ impl Backend for DexBackend {
         let string_class = exe.add_type("Ljava/lang/String;");
         exe.add_method(string_class, "charAt", "C", &["Ljava/lang/String;"]);
 
-        exe.sort_strings();
-
         // TODO: generate an actual dex method (or multiple) here.
     }
 }
