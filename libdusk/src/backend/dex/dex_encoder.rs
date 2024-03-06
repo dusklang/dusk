@@ -1,7 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::convert::identity;
-use std::ops::{Deref, DerefMut};
 use std::{mem, iter};
 use std::hash::Hash;
 
@@ -9,9 +8,6 @@ use dusk_proc_macros::ByteSwap;
 use index_vec::define_index_type;
 
 use crate::backend::dex::dex_backend::AccessFlags;
-use crate::backend::{CodeBlob, Indirection};
-use crate::linker::exe::FixupLocationId;
-use crate::linker::byte_swap::Buffer;
 use crate::index_vec::*;
 
 define_index_type!(pub struct StringId = u32;);
@@ -138,9 +134,7 @@ pub struct CodeItem {
 }
 
 #[derive(Default)]
-pub struct DexEncoder {
-    buf: Buffer,
-
+pub struct DexExe {
     strings: IndexVec<StringId, Vec<u16>>,
     string_map: HashMap<String, StringId>,
     /// Provides the sorted list of strings, as they should end up in the file.
@@ -175,47 +169,9 @@ pub struct DexEncoder {
     pub physical_type_lists: IndexVec<PhysicalTypeListId, Vec<PhysicalTypeId>>,
 }
 
-impl CodeBlob for DexEncoder {
-    fn len(&self) -> usize {
-        self.buf.data.len()
-    }
-
-    fn perform_fixups_impl<'a>(&'a mut self, _code_addr: usize, _get_fixup_addr: Box<dyn FnMut(FixupLocationId) -> (usize, Indirection) + 'a>) -> &'a [u8] {
-        &self.buf.data
-    }
-}
-
-impl DexEncoder {
+impl DexExe {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub fn encode_uleb128(&mut self, mut val: u32) {
-        while val > 0x7F {
-            self.push(0x80u8 | (val & 0x7f) as u8);
-            val >>= 7;
-        }
-        self.push((val & 0x7f) as u8);
-    }
-
-    pub fn encode_mutf8_string(&mut self, str: &[u16]) {
-        self.encode_uleb128(str.len().try_into().unwrap());
-
-        for &char in str {
-            if char == 0 {
-                self.push([0xc0u8, 0x80]);
-            } else if char < 128 {
-                self.push(char as u8);
-            } else if char < 2048 {
-                self.push(0xc0u8 | (char >> 6) as u8);
-                self.push(0x80u8 | (char & 0x3f) as u8);
-            } else {
-                self.push(0xe0u8 | (char >> 12) as u8);
-                self.push(0x80u8 | ((char >> 6) & 0x3f) as u8);
-                self.push(0x80u8 | (char & 0x3f) as u8);
-            }
-        }
-        self.push(0u8); // null terminator
     }
 
     pub fn add_string(&mut self, str: impl AsRef<str>) -> StringId {
@@ -390,14 +346,6 @@ impl DexEncoder {
         }
         self.physical_class_defs.sort_by_cached_key(|class_def| levels[&class_def.class_idx]);
     }
-
-    pub fn get_offset(&self, count: usize) -> usize {
-        if count == 0 {
-            0
-        } else {
-            self.pos()
-        }
-    }
 }
 
 fn make_shorty(ty: &str) -> char {
@@ -443,18 +391,4 @@ fn convert_to_physical<LogicalId: Idx, LogicalItem, LogicalMapKey: Hash, Physica
     *physical_list = combined.into_iter().map(|(_, item)| item).collect();
 
     mem::take(logical_map);
-}
-
-impl Deref for DexEncoder {
-    type Target = Buffer;
-
-    fn deref(&self) -> &Self::Target {
-        &self.buf
-    }
-}
-
-impl DerefMut for DexEncoder {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.buf
-    }
 }

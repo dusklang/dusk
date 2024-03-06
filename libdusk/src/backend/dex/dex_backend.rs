@@ -1,4 +1,5 @@
 use std::mem;
+use std::ops::{Deref, DerefMut};
 
 use sha1::{Sha1, Digest};
 use bitflags::bitflags;
@@ -11,9 +12,9 @@ use crate::mir::FuncId;
 use crate::linker::exe::Exe;
 use crate::backend::dex::{PhysicalStringId, PhysicalTypeId, PhysicalTypeListId, CodeItemId, CodeItem};
 use crate::backend::{Backend, CodeBlob};
-use crate::backend::dex::dex_encoder::DexEncoder;
+use crate::backend::dex::dex_encoder::DexExe;
 use crate::index_vec::*;
-use crate::linker::byte_swap::Ref;
+use crate::linker::byte_swap::{Buffer, Ref};
 
 #[repr(C)]
 #[derive(ByteSwap, Copy, Clone)]
@@ -154,13 +155,80 @@ pub struct CodeItemHeader {
 
 pub struct DexBackend;
 
+#[derive(Default)]
+struct DexEncoder(Buffer);
+
+impl Deref for DexEncoder {
+    type Target = Buffer;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for DexEncoder {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl DexEncoder {
+    fn get_offset(&self, count: usize) -> usize {
+        if count == 0 {
+            0
+        } else {
+            self.pos()
+        }
+    }
+
+    fn encode_uleb128(&mut self, mut val: u32) {
+        while val > 0x7F {
+            self.push(0x80u8 | (val & 0x7f) as u8);
+            val >>= 7;
+        }
+        self.push((val & 0x7f) as u8);
+    }
+
+    fn encode_mutf8_string(&mut self, str: &[u16]) {
+        self.encode_uleb128(str.len().try_into().unwrap());
+
+        for &char in str {
+            if char == 0 {
+                self.push([0xc0u8, 0x80]);
+            } else if char < 128 {
+                self.push(char as u8);
+            } else if char < 2048 {
+                self.push(0xc0u8 | (char >> 6) as u8);
+                self.push(0x80u8 | (char & 0x3f) as u8);
+            } else {
+                self.push(0xe0u8 | (char >> 12) as u8);
+                self.push(0x80u8 | ((char >> 6) & 0x3f) as u8);
+                self.push(0x80u8 | (char & 0x3f) as u8);
+            }
+        }
+        self.push(0u8); // null terminator
+    }
+}
+
+impl CodeBlob for DexEncoder {
+    fn len(&self) -> usize {
+        self.0.data.len()
+    }
+
+    fn perform_fixups_impl<'a>(&'a mut self, code_addr: usize, get_fixup_addr: Box<dyn FnMut(crate::linker::exe::FixupLocationId) -> (usize, crate::backend::Indirection) + 'a>) -> &'a [u8] {
+        &self.0.data
+    }
+}
+
 impl Backend for DexBackend {
     fn arch(&self) -> Arch {
         Arch::Dex
     }
 
+    
+
     fn generate_func(&self, d: &Driver, func_index: FuncId, is_main: bool, exe: &mut dyn Exe) -> Box<dyn CodeBlob> {
-        let mut code = DexEncoder::new();
+        let mut exe = DexExe::new();
 
         let mut map_list = Vec::new();
         map_list.push(
@@ -171,13 +239,13 @@ impl Backend for DexBackend {
                 offset: 0,
             }
         );
-        code.add_string("");
-        code.add_string("Hi");
-        code.add_type("Z");
-        code.add_type("C");
-        let my_class = code.add_class_def("Lcom/example/MyClass;", AccessFlags::PUBLIC, None, None);
-        let my_class_id = code.class_defs[my_class].class_idx;
-        let _other_class = code.add_class_def("Lcom/example/MyClass2;", AccessFlags::PUBLIC, Some(my_class_id), None);
+        exe.add_string("");
+        exe.add_string("Hi");
+        exe.add_type("Z");
+        exe.add_type("C");
+        let my_class = exe.add_class_def("Lcom/example/MyClass;", AccessFlags::PUBLIC, None, None);
+        let my_class_id = exe.class_defs[my_class].class_idx;
+        let _other_class = exe.add_class_def("Lcom/example/MyClass2;", AccessFlags::PUBLIC, Some(my_class_id), None);
         let first_method_code_item = CodeItem {
             num_registers: 0,
             num_words_of_ins: 0,
@@ -186,45 +254,47 @@ impl Backend for DexBackend {
             debug_info_off: 0,
             insns: Vec::new(),
         };
-        code.add_virtual_method(my_class, "firstMethod", "V", &["Lcom/example/MyClass;"], AccessFlags::PUBLIC, Some(first_method_code_item));
-        code.add_method(my_class_id, "secondMethod", "V", &["Z", "B", "S", "C", "I", "J", "F", "D", "Lcom/example/MyClass;", "[Lcom/example/MyClass;"]);
+        exe.add_virtual_method(my_class, "firstMethod", "V", &["Lcom/example/MyClass;"], AccessFlags::PUBLIC, Some(first_method_code_item));
+        exe.add_method(my_class_id, "secondMethod", "V", &["Z", "B", "S", "C", "I", "J", "F", "D", "Lcom/example/MyClass;", "[Lcom/example/MyClass;"]);
 
-        let string_class = code.add_type("Ljava/lang/String;");
-        code.add_method(string_class, "charAt", "C", &["Ljava/lang/String;"]);
+        let string_class = exe.add_type("Ljava/lang/String;");
+        exe.add_method(string_class, "charAt", "C", &["Ljava/lang/String;"]);
 
-        code.sort_strings();
+        exe.sort_strings();
+
+        let mut code = DexEncoder::default();
 
         let header_item = code.alloc::<HeaderItem>();
         assert_eq!(mem::size_of::<HeaderItem>(), 0x70);
 
         code.pad_to_next_boundary(4);
-        let string_ids_off = code.get_offset(code.physical_strings.len());
+        let string_ids_off = code.get_offset(exe.physical_strings.len());
         let mut string_id_refs = IndexVec::<PhysicalStringId, Ref<u32>>::new();
-        for _ in 0..code.physical_strings.len() {
+        for _ in 0..exe.physical_strings.len() {
             string_id_refs.push(code.alloc::<u32>());
         }
-        if !code.physical_strings.is_empty() {
+        if !exe.physical_strings.is_empty() {
             map_list.push(
                 MapItem {
                     ty: MapItemType::StringIdItem as u16,
                     unused: 0,
-                    count: code.physical_strings.len() as u32,
+                    count: exe.physical_strings.len() as u32,
                     offset: string_ids_off as u32,
                 }
             );
         }
 
         code.pad_to_next_boundary(4);
-        let type_ids_off = code.get_offset(code.physical_types.len());
-        for ty in code.physical_types.clone() {
+        let type_ids_off = code.get_offset(exe.physical_types.len());
+        for ty in exe.physical_types.clone() {
             code.push(ty.index() as u32);
         }
-        if !code.physical_types.is_empty() {
+        if !exe.physical_types.is_empty() {
             map_list.push(
                 MapItem {
                     ty: MapItemType::TypeIdItem as u16,
                     unused: 0,
-                    count: code.physical_types.len() as u32,
+                    count: exe.physical_types.len() as u32,
                     offset: type_ids_off as u32,
                 }
             );
@@ -232,8 +302,8 @@ impl Backend for DexBackend {
 
         code.pad_to_next_boundary(4);
         let mut proto_id_refs = Vec::new();
-        let proto_ids_off = code.get_offset(code.physical_protos.len());
-        for proto in code.physical_protos.clone() {
+        let proto_ids_off = code.get_offset(exe.physical_protos.len());
+        for proto in exe.physical_protos.clone() {
             let proto_id_ref = code.push(
                 ProtoIdItem {
                     shorty_idx: proto.shorty_idx,
@@ -243,12 +313,12 @@ impl Backend for DexBackend {
             );
             proto_id_refs.push(proto_id_ref);
         }
-        if !code.physical_protos.is_empty() {
+        if !exe.physical_protos.is_empty() {
             map_list.push(
                 MapItem {
                     ty: MapItemType::ProtoIdItem as u16,
                     unused: 0,
-                    count: code.physical_protos.len() as u32,
+                    count: exe.physical_protos.len() as u32,
                     offset: proto_ids_off as u32,
                 }
             );
@@ -257,8 +327,8 @@ impl Backend for DexBackend {
         // TODO: field_ids
 
         code.pad_to_next_boundary(4);
-        let method_ids_off = code.get_offset(code.physical_methods.len());
-        for method in code.physical_methods.clone() {
+        let method_ids_off = code.get_offset(exe.physical_methods.len());
+        for method in exe.physical_methods.clone() {
             code.push(
                 MethodIdItem {
                     class_idx: method.class_idx.index().try_into().unwrap(),
@@ -267,21 +337,21 @@ impl Backend for DexBackend {
                 }
             );
         }
-        if !code.physical_methods.is_empty() {
+        if !exe.physical_methods.is_empty() {
             map_list.push(
                 MapItem {
                     ty: MapItemType::MethodIdItem as u16,
                     unused: 0,
-                    count: code.physical_methods.len() as u32,
+                    count: exe.physical_methods.len() as u32,
                     offset: method_ids_off as u32,
                 }
             );
         }
 
         code.pad_to_next_boundary(4);
-        let class_defs_off = code.get_offset(code.physical_class_defs.len());
+        let class_defs_off = code.get_offset(exe.physical_class_defs.len());
         let mut class_def_refs = Vec::new();
-        for class_def in code.physical_class_defs.clone() {
+        for class_def in exe.physical_class_defs.clone() {
             let item = ClassDefItem {
                 class_idx: class_def.class_idx,
                 access_flags: class_def.access_flags,
@@ -295,12 +365,12 @@ impl Backend for DexBackend {
             let class_def_ref = code.push(item); // offsets above to be filled in later
             class_def_refs.push(class_def_ref);
         }
-        if !code.physical_class_defs.is_empty() {
+        if !exe.physical_class_defs.is_empty() {
             map_list.push(
                 MapItem {
                     ty: MapItemType::ClassDefItem as u16,
                     unused: 0,
-                    count: code.physical_class_defs.len() as u32,
+                    count: exe.physical_class_defs.len() as u32,
                     offset: class_defs_off as u32,
                 }
             );
@@ -309,12 +379,11 @@ impl Backend for DexBackend {
         let data_begin = code.pos();
 
         let string_data_off = code.pos();
-        let num_strings = code.physical_strings.len();
-        for (str, string_id) in mem::take(&mut code.physical_strings).iter().zip(string_id_refs) {
+        let num_strings = exe.physical_strings.len();
+        for (str, string_id) in mem::take(&mut exe.physical_strings).iter().zip(string_id_refs) {
             let off = code.pos();
             code.get_mut(string_id).set(off as u32);
             code.encode_mutf8_string(str);
-            
         }
         if num_strings > 0 {
             map_list.push(
@@ -331,8 +400,8 @@ impl Backend for DexBackend {
 
         let type_lists_off = code.pos();
         let mut type_list_offsets: IndexVec<PhysicalTypeListId, u32> = IndexVec::new();
-        let num_type_lists = code.physical_type_lists.len();
-        for type_list in mem::take(&mut code.physical_type_lists) {
+        let num_type_lists = exe.physical_type_lists.len();
+        for type_list in mem::take(&mut exe.physical_type_lists) {
             code.pad_to_next_boundary(4);
 
             type_list_offsets.push(code.pos() as u32);
@@ -355,7 +424,7 @@ impl Backend for DexBackend {
         }
 
         // Assign correct offsets to proto_id_items.parameters_off
-        for (proto, proto_id_ref) in code.physical_protos.clone().iter().zip(proto_id_refs) {
+        for (proto, proto_id_ref) in exe.physical_protos.clone().iter().zip(proto_id_refs) {
             if let Some(parameters) = proto.parameters {
                 code.get_mut(proto_id_ref).modify(|proto| proto.parameters_off = type_list_offsets[parameters]);
             }
@@ -364,7 +433,7 @@ impl Backend for DexBackend {
         code.pad_to_next_boundary(4);
         let code_items_off = code.pos();
         let mut code_item_offs = IndexVec::<CodeItemId, u32>::new();
-        for code_item in code.code_items.clone() {
+        for code_item in exe.code_items.clone() {
             code.pad_to_next_boundary(4);
             let off = code.pos() as u32;
             code.push(
@@ -381,12 +450,12 @@ impl Backend for DexBackend {
 
             code_item_offs.push(off);
         }
-        if !code.code_items.is_empty() {
+        if !exe.code_items.is_empty() {
             map_list.push(
                 MapItem {
                     ty: MapItemType::CodeItem as u16,
                     unused: 0,
-                    count: code.code_items.len() as u32,
+                    count: exe.code_items.len() as u32,
                     offset: code_items_off as u32,
                 }
             );
@@ -395,7 +464,7 @@ impl Backend for DexBackend {
         code.pad_to_next_boundary(4);
         let class_data_off = code.pos();
         let mut num_class_data = 0u32;
-        for (class_def, class_def_ref) in code.physical_class_defs.clone().iter().zip(class_def_refs) {
+        for (class_def, class_def_ref) in exe.physical_class_defs.clone().iter().zip(class_def_refs) {
             let Some(class_data) = &class_def.class_data else {
                 continue
             };
@@ -467,8 +536,8 @@ impl Backend for DexBackend {
         let file_size = code.len();
 
         // even though these values are stored as u32s, they must not exceed 65535
-        let type_ids_size: u16 = code.physical_types.len().try_into().unwrap();
-        let proto_ids_size: u16 = code.physical_protos.len().try_into().unwrap();
+        let type_ids_size: u16 = exe.physical_types.len().try_into().unwrap();
+        let proto_ids_size: u16 = exe.physical_protos.len().try_into().unwrap();
 
         let header_item_data = HeaderItem {
             magic: *b"dex\n039\0",
@@ -488,9 +557,9 @@ impl Backend for DexBackend {
             proto_ids_off: proto_ids_off as u32,
             field_ids_size: 0,
             field_ids_off: 0,
-            method_ids_size: code.physical_methods.len() as u32,
+            method_ids_size: exe.physical_methods.len() as u32,
             method_ids_off: method_ids_off as u32,
-            class_defs_size: code.physical_class_defs.len() as u32,
+            class_defs_size: exe.physical_class_defs.len() as u32,
             class_defs_off: class_defs_off as u32,
             data_size: data_size as u32,
             data_off: data_begin as u32,
