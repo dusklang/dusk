@@ -485,7 +485,7 @@ struct HeaderItem {
     data_off: u32,
 }
 
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Copy, Clone)]
 #[repr(C)]
 struct MapItem {
     ty: u16,
@@ -572,6 +572,7 @@ pub struct CodeItemHeader {
 #[derive(Default)]
 pub struct DexLinker {
     buf: Buffer,
+    map_list: Vec<MapItem>,
 }
 
 impl Linker for DexLinker {
@@ -582,8 +583,7 @@ impl Linker for DexLinker {
 
         exe.sort_strings();
 
-        let mut map_list = Vec::new();
-        map_list.push(
+        self.map_list.push(
             MapItem {
                 ty: MapItemType::HeaderItem as u16,
                 unused: 0,
@@ -601,7 +601,7 @@ impl Linker for DexLinker {
             string_id_refs.push(self.buf.alloc::<u32>());
         }
         if !exe.physical_strings.is_empty() {
-            map_list.push(
+            self.map_list.push(
                 MapItem {
                     ty: MapItemType::StringIdItem as u16,
                     unused: 0,
@@ -617,7 +617,7 @@ impl Linker for DexLinker {
             self.buf.push(ty.index() as u32);
         }
         if !exe.physical_types.is_empty() {
-            map_list.push(
+            self.map_list.push(
                 MapItem {
                     ty: MapItemType::TypeIdItem as u16,
                     unused: 0,
@@ -641,7 +641,7 @@ impl Linker for DexLinker {
             proto_id_refs.push(proto_id_ref);
         }
         if !exe.physical_protos.is_empty() {
-            map_list.push(
+            self.map_list.push(
                 MapItem {
                     ty: MapItemType::ProtoIdItem as u16,
                     unused: 0,
@@ -665,7 +665,7 @@ impl Linker for DexLinker {
             );
         }
         if !exe.physical_methods.is_empty() {
-            map_list.push(
+            self.map_list.push(
                 MapItem {
                     ty: MapItemType::MethodIdItem as u16,
                     unused: 0,
@@ -693,7 +693,7 @@ impl Linker for DexLinker {
             class_def_refs.push(class_def_ref);
         }
         if !exe.physical_class_defs.is_empty() {
-            map_list.push(
+            self.map_list.push(
                 MapItem {
                     ty: MapItemType::ClassDefItem as u16,
                     unused: 0,
@@ -713,7 +713,7 @@ impl Linker for DexLinker {
             self.push_mutf8_string(str);
         }
         if num_strings > 0 {
-            map_list.push(
+            self.map_list.push(
                 MapItem {
                     ty: MapItemType::StringDataItem as u16,
                     unused: 0,
@@ -740,7 +740,7 @@ impl Linker for DexLinker {
             }
         }
         if num_type_lists > 0 {
-            map_list.push(
+            self.map_list.push(
                 MapItem {
                     ty: MapItemType::TypeList as u16,
                     unused: 0,
@@ -778,7 +778,7 @@ impl Linker for DexLinker {
             code_item_offs.push(off);
         }
         if !exe.code_items.is_empty() {
-            map_list.push(
+            self.map_list.push(
                 MapItem {
                     ty: MapItemType::CodeItem as u16,
                     unused: 0,
@@ -834,7 +834,7 @@ impl Linker for DexLinker {
             self.buf.get_mut(class_def_ref).modify(|class_def| class_def.class_data_off = off as u32);
         }
         if num_class_data > 0 {
-            map_list.push(
+            self.map_list.push(
                 MapItem {
                     ty: MapItemType::ClassDataItem as u16,
                     unused: 0,
@@ -846,7 +846,7 @@ impl Linker for DexLinker {
 
         self.buf.pad_to_next_boundary(4);
         let map_off = self.buf.pos();
-        map_list.push(
+        self.map_list.push(
             MapItem {
                 ty: MapItemType::MapList as u16,
                 unused: 0,
@@ -854,8 +854,8 @@ impl Linker for DexLinker {
                 offset: map_off as u32,
             }
         );
-        self.buf.push(map_list.len() as u32);
-        for map_item in map_list {
+        self.buf.push(self.map_list.len() as u32);
+        for map_item in self.map_list.iter().copied() {
             self.buf.push(map_item);
         }
 
