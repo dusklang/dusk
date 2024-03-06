@@ -13,7 +13,7 @@ pub mod dex;
 
 pub trait Backend {
     fn arch(&self) -> Arch;
-    fn generate_func(&self, d: &Driver, func_index: FuncId, is_main: bool, exe: &mut dyn Exe) -> Box<dyn CodeBlob>;
+    fn generate_func(&self, d: &Driver, func_index: FuncId, is_main: bool, exe: &mut dyn Exe);
 }
 
 impl Driver {

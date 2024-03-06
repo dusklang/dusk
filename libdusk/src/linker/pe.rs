@@ -8,7 +8,7 @@ use std::mem;
 use bitflags::bitflags;
 use index_vec::IndexVec;
 
-use crate::backend::{Backend, CodeBlobExt, Indirection};
+use crate::backend::{Backend, CodeBlob, CodeBlobExt, Indirection};
 use crate::linker::Linker;
 use crate::linker::exe::*;
 use crate::mir::FuncId;
@@ -324,7 +324,8 @@ impl Linker for PELinker {
 
         let address_of_entry_point = self.buf.rva();
 
-        let mut code = backend.generate_func(d, main_function_index, true, &mut exe);
+        backend.generate_func(d, main_function_index, true, &mut exe);
+        let mut code = mem::take(&mut exe.code_blob).expect("generate_func must generate a code blob");
         self.buf.pad_with_zeroes(code.len());
 
         let size_of_code = self.end_section(text_section, text_header);
@@ -590,6 +591,8 @@ struct PEExe {
 
     cstrings: Vec<u8>,
     cstring_map: HashMap<CString, usize>,
+
+    code_blob: Option<Box<dyn CodeBlob>>,
 }
 
 impl PEExe {
@@ -634,5 +637,10 @@ impl Exe for PEExe {
     fn use_cstring(&mut self, string: &CStr) -> FixupLocationId {
         let offset = self.intern_cstring(string);
         self.fixup_locations.push(PEFixupLocation::RDataSectionOffset(offset))
+    }
+
+    fn add_code_blob(&mut self, blob: Box<dyn CodeBlob>) {
+        assert!(self.code_blob.is_none());
+        self.code_blob = Some(blob);
     }
 }

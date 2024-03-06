@@ -3,7 +3,7 @@ use crate::ast::LegacyIntrinsic;
 use crate::mir::{FuncId, Instr, Const};
 use crate::linker::exe::*;
 use crate::backend::x64::*;
-use crate::backend::{Backend, CodeBlob};
+use crate::backend::Backend;
 use crate::target::Arch;
 
 pub struct X64Backend;
@@ -19,7 +19,7 @@ impl Backend for X64Backend {
         Arch::X86_64
     }
 
-    fn generate_func(&self, d: &Driver, func_index: FuncId, is_main: bool, exe: &mut dyn Exe) -> Box<dyn CodeBlob> {
+    fn generate_func(&self, d: &Driver, func_index: FuncId, is_main: bool, exe: &mut dyn Exe) {
         let mut code = X64Encoder::new();
 
         let func = &d.code.mir.functions[func_index];
@@ -86,6 +86,6 @@ impl Backend for X64Backend {
             }
         }
 
-        Box::new(code)
+        exe.add_code_blob(Box::new(code));
     }
 }

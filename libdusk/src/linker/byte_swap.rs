@@ -200,17 +200,12 @@ impl Buffer {
         self.rva = nearest_multiple_of_rt!(self.rva, alignment);
     }
     
-    pub fn push_uleb128(&mut self, mut value: u32) {
-        loop {
-            let mut next_byte = (value & 0x7F) as u8;
-            value >>= 7;
-            if value != 0 {
-                next_byte |= 0x80;
-            }
-            self.push(next_byte);
-            
-            if value == 0 { break; }
+    pub fn push_uleb128(&mut self, mut val: u32) {
+        while val > 0x7F {
+            self.push(0x80u8 | (val & 0x7f) as u8);
+            val >>= 7;
         }
+        self.push((val & 0x7f) as u8);
     }
 
     pub fn push_null_terminated_string(&mut self, val: &str) -> usize {

@@ -6,19 +6,21 @@ use std::hash::Hash;
 use std::io::{self, Write};
 use std::marker::PhantomData;
 use std::path::PathBuf;
+use std::mem;
 
 use sha2::{Sha256, Digest};
-use crate::backend::{Backend, Indirection, CodeBlobExt};
+use index_vec::define_index_type;
+
+use dusk_proc_macros::ByteSwap;
+
+use crate::backend::{Backend, CodeBlob, CodeBlobExt, Indirection};
 use crate::linker::exe::*;
 use crate::linker::byte_swap::*;
 use crate::linker::Linker;
 use crate::index_vec::*;
 use crate::mir::FuncId;
 use crate::tbd_parser::parse_tbd;
-use index_vec::define_index_type;
-
 use crate::driver::Driver;
-use dusk_proc_macros::ByteSwap;
 
 #[derive(Default)]
 pub struct MachOLinker {
@@ -612,7 +614,8 @@ impl Linker for MachOLinker {
         let mut exe = MachOExe::new();
         let _lib_system = exe.import_dynamic_library("libSystem");
 
-        let mut code = backend.generate_func(d, main_function_index, true, &mut exe);
+        backend.generate_func(d, main_function_index, true, &mut exe);
+        let mut code = mem::take(&mut exe.code_blob).expect("generate_func must generate a code blob");
 
         let mach_header = self.buf.alloc::<MachHeader>();
 
@@ -1523,6 +1526,8 @@ struct MachOExe {
     
     got_entries: IndexVec<GotEntryId, ImportedSymbolId>,
     got_map: HashMap<ImportedSymbolId, GotEntryId>,
+
+    code_blob: Option<Box<dyn CodeBlob>>,
 }
 
 // TODO: don't hardcode this
@@ -1600,6 +1605,11 @@ impl Exe for MachOExe {
     fn use_cstring(&mut self, string: &CStr) -> FixupLocationId {
         let offset = self.intern_cstring(string);
         self.fixup_locations.push(MachOFixupLocation::CStringSectionOffset(offset))
+    }
+
+    fn add_code_blob(&mut self, blob: Box<dyn CodeBlob>) {
+        assert!(self.code_blob.is_none());
+        self.code_blob = Some(blob);
     }
 
     fn as_objc_exe(&mut self) -> Option<&mut dyn ObjCExe> {

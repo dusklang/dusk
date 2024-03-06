@@ -1,7 +1,7 @@
 use std::ffi::CString;
 
 use crate::backend::arm64::*;
-use crate::backend::{Backend, CodeBlob};
+use crate::backend::Backend;
 use crate::ast::LegacyIntrinsic;
 use crate::driver::Driver;
 use crate::mir::{Const, FuncId, Instr};
@@ -21,7 +21,7 @@ impl Backend for Arm64Backend {
         Arch::Arm64
     }
 
-    fn generate_func(&self, d: &Driver, func_index: FuncId, is_main: bool, exe: &mut dyn Exe) -> Box<dyn CodeBlob> {
+    fn generate_func(&self, d: &Driver, func_index: FuncId, is_main: bool, exe: &mut dyn Exe) {
         let mut code = Arm64Encoder::new();
 
         let func = &d.code.mir.functions[func_index];
@@ -167,6 +167,6 @@ impl Backend for Arm64Backend {
             OperatingSystem::Android => todo!(),
         }
 
-        Box::new(code)
+        exe.add_code_blob(Box::new(code));
     }
 }
