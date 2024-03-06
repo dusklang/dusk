@@ -610,7 +610,7 @@ impl MachOLinker {
 impl Linker for MachOLinker {
     fn write(&mut self, d: &Driver, main_function_index: FuncId, backend: &mut dyn Backend, dest: &mut dyn Write) -> io::Result<()> {
         let mut exe = MachOExe::new();
-        let _lib_system = exe.import_dynamic_library(DynamicLibrarySource::Name("libSystem"));
+        let _lib_system = exe.import_dynamic_library("libSystem");
 
         let mut code = backend.generate_func(d, main_function_index, true, &mut exe);
 
@@ -1559,15 +1559,10 @@ impl MachOExe {
             self.got_entries.push(symbol)
         })
     }
-}
 
-impl Exe for MachOExe {
-    fn import_dynamic_library(&mut self, source: DynamicLibrarySource) -> DynLibId {
+    fn import_dynamic_library_impl(&mut self, offset: String) -> DynLibId {
         let mut tbd_path = PathBuf::from(SDK_ROOT);
-        match source {
-            DynamicLibrarySource::Name(name) => tbd_path.push(format!("usr/lib/{}", name)),
-            DynamicLibrarySource::FrameworkName(name) => tbd_path.push(format!("System/Library/Frameworks/{}.framework/{}", name, name)),
-        }
+        tbd_path.push(offset);
         tbd_path.set_extension("tbd");
 
         *self.dylib_map.entry(tbd_path.clone()).or_insert_with(|| {
@@ -1582,6 +1577,12 @@ impl Exe for MachOExe {
                 }
             )
         })
+    }
+}
+
+impl Exe for MachOExe {
+    fn import_dynamic_library(&mut self, name: &str) -> DynLibId {
+        self.import_dynamic_library_impl(format!("usr/lib/{}", name))
     }
 
     fn import_symbol(&mut self, dylib: DynLibId, name: String) -> ImportedSymbolId {
@@ -1601,9 +1602,19 @@ impl Exe for MachOExe {
         self.fixup_locations.push(MachOFixupLocation::CStringSectionOffset(offset))
     }
 
+    fn as_objc_exe(&mut self) -> Option<&mut dyn ObjCExe> {
+        Some(self)
+    }
+}
+
+impl ObjCExe for MachOExe {
+    fn import_framework(&mut self, name: &str) -> DynLibId {
+        self.import_dynamic_library_impl(format!("System/Library/Frameworks/{}.framework/{}", name, name))
+    }
+
     fn use_constant_nsstring(&mut self, string: &CStr) -> FixupLocationId {
         if self.cf_constant_string_class_reference_import.is_none() {
-            let foundation = self.import_dynamic_library(DynamicLibrarySource::FrameworkName("Foundation"));
+            let foundation = self.import_framework("Foundation");
             let sym = self.import_symbol(foundation, "___CFConstantStringClassReference".to_string());
             self.cf_constant_string_class_reference_import = Some(sym);
         }

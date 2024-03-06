@@ -1,7 +1,7 @@
 use crate::driver::Driver;
 use crate::ast::LegacyIntrinsic;
 use crate::mir::{FuncId, Instr, Const};
-use crate::linker::exe::{Exe, DynamicLibrarySource};
+use crate::linker::exe::*;
 use crate::backend::x64::*;
 use crate::backend::{Backend, CodeBlob};
 use crate::target::Arch;
@@ -26,7 +26,7 @@ impl Backend for X64Backend {
         assert_eq!(func.blocks.len(), 1);
         assert_eq!(d.code.num_parameters(func), 0);
 
-        let kernel32 = exe.import_dynamic_library(DynamicLibrarySource::Name("KERNEL32.dll"));
+        let kernel32 = exe.import_dynamic_library("KERNEL32.dll");
         let get_std_handle = exe.import_symbol(kernel32, "GetStdHandle".to_string());
         let write_console = exe.import_symbol(kernel32, "WriteConsoleA".to_string());
         let exit_process = exe.import_symbol(kernel32, "ExitProcess".to_string());

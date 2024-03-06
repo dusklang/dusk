@@ -11,7 +11,7 @@ use crate::linker::exe::*;
 pub struct DexExe;
 
 impl Exe for DexExe {
-    fn import_dynamic_library(&mut self, source: DynamicLibrarySource) -> DynLibId {
+    fn import_dynamic_library(&mut self, name: &str) -> DynLibId {
         todo!()
     }
 
@@ -27,12 +27,8 @@ impl Exe for DexExe {
         todo!()
     }
 
-    fn use_constant_nsstring(&mut self, string: &CStr) -> FixupLocationId {
-        todo!()
-    }
-
-    fn use_objc_selector(&mut self, name: &CStr) -> FixupLocationId {
-        todo!()
+    fn as_objc_exe(&mut self) -> Option<&mut dyn ObjCExe> {
+        None
     }
 }
 

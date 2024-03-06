@@ -33,13 +33,14 @@ impl Backend for Arm64Backend {
                 let frame_size = 16;
                 code.stp64(Reg::FP, Reg::LR, Reg::SP, -16);
                 code.sub64_imm(false, Reg::SP, Reg::SP, frame_size);
+                let exe = exe.as_objc_exe().expect("Objective-C features unimplemented for current executable format, but are required on macOS");
                 for &op in &d.code.blocks[func.blocks[0]].ops {
                     let instr = d.code.ops[op].as_mir_instr().unwrap();
                     match instr {
                         Instr::Const(konst) => {
                             match konst {
                                 &Const::Str { id, .. } => {
-                                    let libobjc = exe.import_dynamic_library(DynamicLibrarySource::Name("libobjc"));
+                                    let libobjc = exe.import_dynamic_library("libobjc");
                                     let objc_msg_send = exe.import_symbol(libobjc, "_objc_msgSend".to_string());
                                     let objc_msg_send = exe.use_imported_symbol(objc_msg_send);
                                     code.load_fixed_up_address(Reg::R16, objc_msg_send);
@@ -63,7 +64,7 @@ impl Backend for Arm64Backend {
                         Instr::LegacyIntrinsic { intr, .. } => {
                             match intr {
                                 LegacyIntrinsic::Print => {
-                                    let foundation = exe.import_dynamic_library(DynamicLibrarySource::FrameworkName("Foundation"));
+                                    let foundation = exe.import_framework("Foundation");
                                     let puts = exe.import_symbol(foundation, "_NSLog".to_string());
                                     let puts = exe.use_imported_symbol(puts);
                                     code.load_fixed_up_address(Reg::R16, puts);
@@ -93,7 +94,7 @@ impl Backend for Arm64Backend {
                 code.ret(Reg::LR);
             },
             OperatingSystem::Windows => {
-                let kernel32 = exe.import_dynamic_library(DynamicLibrarySource::Name("KERNEL32.dll"));
+                let kernel32 = exe.import_dynamic_library("KERNEL32.dll");
                 let get_std_handle = exe.import_symbol(kernel32, "GetStdHandle".to_string());
                 let write_console = exe.import_symbol(kernel32, "WriteConsoleA".to_string());
                 let exit_process = exe.import_symbol(kernel32, "ExitProcess".to_string());

@@ -11,13 +11,8 @@ pub struct Fixup {
     pub id: FixupLocationId,
 }
 
-pub enum DynamicLibrarySource<'a> {
-    Name(&'a str),
-    FrameworkName(&'a str),
-}
-
 pub trait Exe {
-    fn import_dynamic_library(&mut self, source: DynamicLibrarySource) -> DynLibId;
+    fn import_dynamic_library(&mut self, name: &str) -> DynLibId;
 
     fn import_symbol(&mut self, dyn_lib: DynLibId, name: String) -> ImportedSymbolId;
 
@@ -26,8 +21,13 @@ pub trait Exe {
     // TODO: perhaps we should have separate methods to intern and use C strings?
     fn use_cstring(&mut self, string: &CStr) -> FixupLocationId;
 
-    // TODO: perhaps these should be Mach-O specific somehow? Or maybe they just panic when targeting non-Apple
-    // platforms.
+    fn as_objc_exe(&mut self) -> Option<&mut dyn ObjCExe>;
+}
+
+/// Implemented by an executable format that supports Objective-C interop. In theory, we could support Objective-C interop on any platform or executable format.
+/// In practice, this is synonymous with Mach-O.
+pub trait ObjCExe: Exe {
+    fn import_framework(&mut self, name: &str) -> DynLibId;
     fn use_constant_nsstring(&mut self, string: &CStr) -> FixupLocationId;
     fn use_objc_selector(&mut self, name: &CStr) -> FixupLocationId;
 }

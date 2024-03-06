@@ -10,7 +10,7 @@ use index_vec::IndexVec;
 
 use crate::backend::{Backend, CodeBlobExt, Indirection};
 use crate::linker::Linker;
-use crate::linker::exe::{DynLibId, DynamicLibrarySource, Exe, ImportedSymbolId, FixupLocationId};
+use crate::linker::exe::*;
 use crate::mir::FuncId;
 use crate::driver::Driver;
 use crate::target::Arch;
@@ -611,18 +611,13 @@ impl PEExe {
 }
 
 impl Exe for PEExe {
-    fn import_dynamic_library(&mut self, source: DynamicLibrarySource) -> DynLibId {
-        match source {
-            DynamicLibrarySource::Name(name) => {
-                self.dll_imports.push(
-                    DllImport {
-                        name: String::from(name),
-                        procs: Vec::new(),
-                    }
-                )
-            },
-            DynamicLibrarySource::FrameworkName(_) => unimplemented!(),
-        }
+    fn import_dynamic_library(&mut self, name: &str) -> DynLibId {
+        self.dll_imports.push(
+            DllImport {
+                name: String::from(name),
+                procs: Vec::new(),
+            }
+        )
     }
 
     fn import_symbol(&mut self, dll: DynLibId, name: String) -> ImportedSymbolId {
@@ -641,11 +636,7 @@ impl Exe for PEExe {
         self.fixup_locations.push(PEFixupLocation::RDataSectionOffset(offset))
     }
 
-    fn use_constant_nsstring(&mut self, string: &CStr) -> FixupLocationId {
-        todo!()
-    }
-
-    fn use_objc_selector(&mut self, name: &CStr) -> FixupLocationId {
-        todo!()
+    fn as_objc_exe(&mut self) -> Option<&mut dyn ObjCExe> {
+        None
     }
 }
