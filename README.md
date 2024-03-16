@@ -22,11 +22,11 @@ Pre-pre-alpha. Barely usable for anything. There is a working interpreter and a 
 | ELF    | ⋯      |
 
 #### Legend
-| Symbol | Meaning                          |
-|--------|----------------------------------|
-| ⋯      | Planned                          |
-| 🚧     | More than zero work has been done |
-| ✅     | Usable in practice                |
+| Symbol | Meaning                              |
+|--------|--------------------------------------|
+| ⋯      | Planned                              |
+| 🚧     | Functioning artifacts can be created |
+| ✅     | Usable in practice                   |
 
 ## Goals
 - General-purpose and scalable: should be well-suited to a wide variety of domains, including kernels, game engines, and high-level GUI applications
