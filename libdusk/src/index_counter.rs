@@ -26,6 +26,12 @@ impl<I: Idx + AddAssign<usize>> IndexCounter<I> {
     pub fn is_empty(&self) -> bool { self.len() == 0 }
 }
 
+impl<I: Idx + AddAssign<usize>> AddAssign<usize> for IndexCounter<I> {
+    fn add_assign(&mut self, rhs: usize) {
+        self.next_id += rhs;
+    }
+}
+
 impl<I: Idx + AddAssign<usize>> Default for IndexCounter<I> {
     fn default() -> Self {
         IndexCounter::new()

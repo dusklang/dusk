@@ -13,14 +13,13 @@ use std::cmp::max;
 use crate::index_vec::*;
 use crate::index_counter::IndexCounter;
 use index_vec::define_index_type;
-use crate::linker::dex::{MethodId, PhysicalMethodId};
+use crate::linker::dex::{StringId, PhysicalStringId, TypeId, PhysicalTypeId, MethodId, PhysicalMethodId};
 
 define_index_type!(pub struct RegisterId = u16;);
 define_index_type!(pub struct InId = u16;);
 
 #[derive(Clone, Default)]
 pub struct DexEncoder {
-    pub num_registers: u16,
     pub num_outs: u16,
     pub code: Vec<u16>,
     next_unit: u16,
@@ -38,14 +37,27 @@ pub struct DexEncoder {
 pub enum DexFixup {
     MethodIdFixup {
         code_offset: usize,
-        method: MethodId,
+        id: MethodId,
     },
-    InIdFixup {
+    TypeIdFixup {
+        code_offset: usize,
+        id: TypeId,
+    },
+    StringIdFixup {
+        code_offset: usize,
+        id: StringId,
+    },
+    InId4Fixup {
         code_offset: usize,
         bit_offset: usize,
         in_id: InId,
     },
-    BigInIdFixup {
+    InId8Fixup {
+        code_offset: usize,
+        bit_offset: usize,
+        in_id: InId,
+    },
+    InId16Fixup {
         code_offset: usize,
         in_id: InId,
     },
@@ -74,27 +86,50 @@ impl DexEncoder {
         self.ins.len() as u16
     }
 
-    fn reference_method(&mut self, method: MethodId) {
-        self.fixups.push(DexFixup::MethodIdFixup { code_offset: self.code.len(), method });
+    pub fn num_registers(&self) -> u16 {
+        self.registers.len() as u16
+    }
+
+    fn reference_method(&mut self, id: MethodId) {
+        self.fixups.push(DexFixup::MethodIdFixup { code_offset: self.code.len(), id });
         self.push(0);
     }
 
+    fn reference_type(&mut self, id: TypeId) {
+        self.fixups.push(DexFixup::TypeIdFixup { code_offset: self.code.len(), id });
+        self.push(0);
+    }
 
-    fn reference_register(&mut self, reg: Register) {
+    fn reference_string(&mut self, id: StringId) {
+        self.fixups.push(DexFixup::StringIdFixup { code_offset: self.code.len(), id });
+        self.push(0);
+    }
+
+    fn reference_register_4(&mut self, reg: Register) {
         match reg {
             Register::KnownRegister(reg) => self.push_nibble(reg.index() as u16),
             Register::In(in_id) => {
-                self.fixups.push(DexFixup::InIdFixup { code_offset: self.code.len(), bit_offset: self.bit_offset, in_id });
+                self.fixups.push(DexFixup::InId4Fixup { code_offset: self.code.len(), bit_offset: self.bit_offset, in_id });
                 self.push_nibble(0);
             },
         }
     }
 
-    fn reference_big_register(&mut self, reg: Register) {
+    fn reference_register_8(&mut self, reg: Register) {
+        match reg {
+            Register::KnownRegister(reg) => self.push_byte(reg.index().try_into().unwrap()),
+            Register::In(in_id) => {
+                self.fixups.push(DexFixup::InId8Fixup { code_offset: self.code.len(), bit_offset: self.bit_offset, in_id });
+                self.push_byte(0);
+            },
+        }
+    }
+
+    fn reference_register_16(&mut self, reg: Register) {
         match reg {
             Register::KnownRegister(reg) => self.push(reg.index() as u16),
             Register::In(in_id) => {
-                self.fixups.push(DexFixup::BigInIdFixup { code_offset: self.code.len(), in_id });
+                self.fixups.push(DexFixup::InId16Fixup { code_offset: self.code.len(), in_id });
                 self.push(0);
             },
         }
@@ -146,7 +181,7 @@ impl DexEncoder {
 
     fn reference_register_if_exists(&mut self, registers: &[Register], index: usize) {
         if registers.len() > index {
-            self.reference_register(registers[index]);
+            self.reference_register_4(registers[index]);
         } else {
             self.push_nibble(0);
         }
@@ -188,7 +223,7 @@ impl DexEncoder {
         self.push_byte(num_arguments);
         self.push_byte(0x74 + kind as u8); // opcode
         self.reference_method(method);
-        self.reference_big_register(first_argument);
+        self.reference_register_16(first_argument);
         self.num_outs = max(self.num_outs, num_outs);
     }
     
@@ -208,28 +243,52 @@ impl DexEncoder {
         self.invoke_range_impl(InvokeKind::Interface, num_arguments, first_argument, method)
     }
 
+    pub fn new_instance(&mut self, destination: Register, ty: TypeId) {
+        self.reference_register_8(destination);
+        self.push_byte(0x22); // opcode
+        self.reference_type(ty);
+    }
+
+    pub fn const_string(&mut self, destination: Register, string: StringId) {
+        self.reference_register_8(destination);
+        self.push_byte(0x1a); // opcode
+        self.reference_string(string);
+    }
+
     pub fn ret_void(&mut self) {
         self.push(0x0e);
     }
 
-    pub fn perform_fixups(&mut self, phys_method_ids: &IndexVec<MethodId, PhysicalMethodId>) {
+    pub fn perform_fixups(&mut self, phys_method_ids: &IndexVec<MethodId, PhysicalMethodId>, phys_type_ids: &IndexVec<TypeId, PhysicalTypeId>, phys_string_ids: &IndexVec<StringId, PhysicalStringId>) {
         self.ensure_at_end_of_unit();
 
-        let in_offset = self.num_registers;
-        self.num_registers += self.num_ins();
+        let in_offset = self.num_registers();
+        self.registers += self.num_ins() as usize;
 
         for fixup in mem::take(&mut self.fixups) {
             match fixup {
-                DexFixup::MethodIdFixup { code_offset, method } => {
-                    self.code[code_offset] = phys_method_ids[method].index().try_into().unwrap();
+                DexFixup::MethodIdFixup { code_offset, id } => {
+                    self.code[code_offset] = phys_method_ids[id].index().try_into().unwrap();
                 },
-                DexFixup::InIdFixup { code_offset, bit_offset, in_id } => {
+                DexFixup::TypeIdFixup { code_offset, id } => {
+                    self.code[code_offset] = phys_type_ids[id].index().try_into().unwrap();
+                },
+                DexFixup::StringIdFixup { code_offset, id } => {
+                    self.code[code_offset] = phys_string_ids[id].index().try_into().unwrap();
+                },
+                DexFixup::InId4Fixup { code_offset, bit_offset, in_id } => {
                     let reg_id = in_id.index() as u16 + in_offset;
                     assert!(reg_id <= 0xF);
                     assert_eq!(self.code[code_offset] & (0xF << 12 - bit_offset), 0);
                     self.code[code_offset] |= reg_id << (12 - bit_offset);
                 },
-                DexFixup::BigInIdFixup { code_offset, in_id } => {
+                DexFixup::InId8Fixup { code_offset, bit_offset, in_id } => {
+                    let reg_id = in_id.index() as u16 + in_offset;
+                    assert!(reg_id <= 0xFF);
+                    assert_eq!(self.code[code_offset] & (0xFF << 8 - bit_offset), 0);
+                    self.code[code_offset] |= reg_id << (8 - bit_offset);
+                },
+                DexFixup::InId16Fixup { code_offset, in_id } => {
                     let reg_id = in_id.index() as u16 + in_offset;
                     self.code[code_offset] = reg_id;
                 },

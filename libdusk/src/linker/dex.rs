@@ -542,7 +542,7 @@ impl DexExe {
 
         // Fixup code items
         for code_item in &mut self.code_items {
-            code_item.perform_fixups(&self.physical_method_map);
+            code_item.perform_fixups(&self.physical_method_map, &self.physical_type_map, &self.physical_string_map);
         }
     }
 }
@@ -917,7 +917,7 @@ impl Linker for DexLinker {
             let off = self.buf.pos() as u32;
             self.buf.push(
                 CodeItemHeader {
-                    num_registers: code_item.num_registers,
+                    num_registers: code_item.num_registers(),
                     num_words_of_ins: code_item.num_ins(),
                     num_words_of_outs: code_item.num_outs,
                     num_try_items: code_item.num_try_items,
