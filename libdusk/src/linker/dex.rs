@@ -1,4 +1,6 @@
-use std::io::{self, Write};
+use std::borrow::Cow;
+use std::io;
+use std::fmt::Write;
 use std::ffi::CStr;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -13,6 +15,7 @@ use sha1::{Sha1, Digest};
 
 use dusk_proc_macros::{ByteSwap, ByteSwapBitflags};
 
+use crate::display_adapter;
 use crate::linker::Linker;
 use crate::linker::exe::Exe;
 use crate::driver::Driver;
@@ -205,6 +208,167 @@ pub struct DexExe {
     pub physical_type_lists: IndexVec<PhysicalTypeListId, Vec<PhysicalTypeId>>,
 }
 
+#[derive(Clone)]
+pub enum DexReturnType<'a> {
+    Void,
+    Boolean,
+    Byte,
+    Short,
+    Char,
+    Int,
+    Long,
+    Float,
+    Double,
+    #[doc(hidden)]
+    _Class(Cow<'a, str>),
+}
+
+#[derive(Clone)]
+pub enum DexType<'a> {
+    Boolean,
+    Byte,
+    Short,
+    Char,
+    Int,
+    Long,
+    Float,
+    Double,
+    #[doc(hidden)]
+    _Class(Cow<'a, str>),
+}
+
+impl<'a> DexType<'a> {
+    #[allow(non_snake_case)]
+    pub fn Class(name: impl Into<Cow<'a, str>>) -> Self {
+        DexType::_Class(name.into())
+    }
+
+    #[allow(non_snake_case)]
+    pub fn Array(ty: impl Into<DexTypeImpl<'a>>) -> DexTypeImpl<'a> {
+        let mut ty = ty.into();
+        ty.array_dimensions += 1;
+        ty
+    }
+}
+
+
+impl<'a> From<DexType<'a>> for DexReturnType<'a> {
+    fn from(value: DexType<'a>) -> Self {
+        match value {
+            DexType::Boolean => DexReturnType::Boolean,
+            DexType::Byte => DexReturnType::Byte,
+            DexType::Short => DexReturnType::Short,
+            DexType::Char => DexReturnType::Char,
+            DexType::Int => DexReturnType::Int,
+            DexType::Long => DexReturnType::Long,
+            DexType::Float => DexReturnType::Float,
+            DexType::Double => DexReturnType::Double,
+            DexType::_Class(name) => DexReturnType::_Class(name),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct DexReturnTypeImpl<'a> {
+    ty: DexReturnType<'a>,
+    array_dimensions: u8,
+}
+
+impl<'a> From<DexReturnType<'a>> for DexReturnTypeImpl<'a> {
+    fn from(value: DexReturnType<'a>) -> Self {
+        Self {
+            ty: value,
+            array_dimensions: 0,
+        }
+    }
+}
+
+impl<'a> From<DexType<'a>> for DexReturnTypeImpl<'a> {
+    fn from(value: DexType<'a>) -> Self {
+        Self {
+            ty: value.into(),
+            array_dimensions: 0,
+        }
+    }
+}
+
+impl<'a> From<DexTypeImpl<'a>> for DexReturnTypeImpl<'a> {
+    fn from(value: DexTypeImpl<'a>) -> Self {
+        Self {
+            ty: value.ty.into(),
+            array_dimensions: value.array_dimensions,
+        }
+    }
+}
+
+impl<'a> DexReturnTypeImpl<'a> {
+    #[display_adapter]
+    pub fn to_descriptor(&self, w: &mut Formatter) {
+        for _ in 0..self.array_dimensions {
+            write!(w, "[")?;
+        }
+        match &self.ty {
+            DexReturnType::Void => write!(w, "V"),
+            DexReturnType::Boolean => write!(w, "Z"),
+            DexReturnType::Byte => write!(w, "B"),
+            DexReturnType::Short => write!(w, "S"),
+            DexReturnType::Char => write!(w, "C"),
+            DexReturnType::Int => write!(w, "I"),
+            DexReturnType::Long => write!(w, "J"),
+            DexReturnType::Float => write!(w, "F"),
+            DexReturnType::Double => write!(w, "D"),
+            DexReturnType::_Class(name) => write!(w, "L{};", name.replace(".", "/")),
+        }
+    }
+
+    #[display_adapter]
+    pub fn to_shorty_descriptor(&self, w: &mut Formatter) {
+        if self.array_dimensions > 0 {
+            write!(w, "L")
+        } else {
+            match &self.ty {
+                DexReturnType::Void => write!(w, "V"),
+                DexReturnType::Boolean => write!(w, "Z"),
+                DexReturnType::Byte => write!(w, "B"),
+                DexReturnType::Short => write!(w, "S"),
+                DexReturnType::Char => write!(w, "C"),
+                DexReturnType::Int => write!(w, "I"),
+                DexReturnType::Long => write!(w, "J"),
+                DexReturnType::Float => write!(w, "F"),
+                DexReturnType::Double => write!(w, "D"),
+                DexReturnType::_Class(_) => write!(w, "L"),
+            }
+        }
+    }
+}
+
+impl<'a> DexTypeImpl<'a> {
+    #[display_adapter]
+    pub fn to_descriptor(&self, w: &mut Formatter) {
+        write!(w, "{}", DexReturnTypeImpl::from(self.clone()).to_descriptor())
+    }
+
+    #[display_adapter]
+    pub fn to_shorty_descriptor(&self, w: &mut Formatter) {
+        write!(w, "{}", DexReturnTypeImpl::from(self.clone()).to_shorty_descriptor())
+    }
+}
+
+#[derive(Clone)]
+pub struct DexTypeImpl<'a> {
+    ty: DexType<'a>,
+    array_dimensions: u8,
+}
+
+impl<'a> From<DexType<'a>> for DexTypeImpl<'a> {
+    fn from(value: DexType<'a>) -> Self {
+        Self {
+            ty: value,
+            array_dimensions: 0,
+        }
+    }
+}
+
 impl DexExe {
     pub fn new() -> Self {
         Self::default()
@@ -218,16 +382,19 @@ impl DexExe {
         })
     }
 
-    // TODO: possibly add higher-level abstraction for types
-    pub fn add_type(&mut self, str: impl AsRef<str>) -> TypeId {
+    pub fn add_type_str(&mut self, str: impl AsRef<str>) -> TypeId {
         let string_index = self.add_string(str);
         *self.type_map.entry(string_index).or_insert_with(|| {
             self.types.push(string_index)
         })
     }
 
+    pub fn add_type<'a>(&mut self, ty: impl Into<DexReturnTypeImpl<'a>>) -> TypeId {
+        self.add_type_str(ty.into().to_descriptor().to_string())
+    }
+
     pub fn add_class_def(&mut self, name: impl AsRef<str>, access_flags: AccessFlags, superclass_idx: Option<TypeId>, source_file: Option<&str>) -> ClassDefId {
-        let class_idx = self.add_type(name);
+        let class_idx = self.add_type(DexType::Class(name.as_ref()));
         let source_file_idx = source_file.map(|str| self.add_string(str));
         self.class_defs.push(
             ClassDef {
@@ -240,19 +407,19 @@ impl DexExe {
         )
     }
 
-    pub fn add_type_list(&mut self, types: &[&str]) -> TypeListId {
-        let types: Vec<TypeId> = types.iter().map(|ty| self.add_type(ty)).collect();
+    pub fn add_type_list(&mut self, types: &[DexTypeImpl]) -> TypeListId {
+        let types: Vec<TypeId> = types.iter().map(|ty| self.add_type(ty.clone())).collect();
         *self.type_list_map.entry(types.clone()).or_insert_with(|| {
             self.type_lists.push(types)
         })
     }
 
-    pub fn add_proto(&mut self, return_type: impl AsRef<str>, parameters: &[&str]) -> ProtoId {
-        let return_type = return_type.as_ref();
+    pub fn add_proto<'a>(&mut self, return_type: impl Into<DexReturnTypeImpl<'a>>, parameters: &[DexTypeImpl]) -> ProtoId {
+        let return_type = return_type.into();
         let mut shorty = String::new();
-        shorty.push(make_shorty(return_type));
+        write!(shorty, "{}", return_type.to_shorty_descriptor()).unwrap();
         for parameter in parameters {
-            shorty.push(make_shorty(parameter));
+            write!(shorty, "{}", parameter.to_shorty_descriptor()).unwrap();
         }
         let proto = Proto {
             shorty_idx: self.add_string(shorty),
@@ -268,7 +435,7 @@ impl DexExe {
         })
     }
 
-    pub fn add_method(&mut self, class_idx: TypeId, name: impl AsRef<str>, return_type: impl AsRef<str>, parameters: &[&str]) -> MethodId {
+    pub fn add_method<'a>(&mut self, class_idx: TypeId, name: impl AsRef<str>, return_type: impl Into<DexReturnTypeImpl<'a>>, parameters: &[DexTypeImpl]) -> MethodId {
         let proto_idx = self.add_proto(return_type, parameters);
         let name_idx = self.add_string(name);
         let method = Method {
@@ -281,7 +448,7 @@ impl DexExe {
         })
     }
 
-    fn add_method_impl(&mut self, class_def: ClassDefId, name: impl AsRef<str>, return_type: impl AsRef<str>, parameters: &[&str], access_flags: AccessFlags, code_item: Option<CodeItem>, method_list: fn(&mut ClassData) -> &mut Vec<EncodedMethod>) -> MethodId {
+    fn add_method_impl<'a>(&mut self, class_def: ClassDefId, name: impl AsRef<str>, return_type: impl Into<DexReturnTypeImpl<'a>>, parameters: &[DexTypeImpl], access_flags: AccessFlags, code_item: Option<CodeItem>, method_list: fn(&mut ClassData) -> &mut Vec<EncodedMethod>) -> MethodId {
         let class_idx = self.class_defs[class_def].class_idx;
         let method_idx = self.add_method(class_idx, name, return_type, parameters);
         let class_data = self.class_defs[class_def].ensure_class_data();
@@ -300,11 +467,11 @@ impl DexExe {
         method_idx
     }
 
-    pub fn add_direct_method(&mut self, class_def: ClassDefId, name: impl AsRef<str>, return_type: impl AsRef<str>, parameters: &[&str], access_flags: AccessFlags, code_item: Option<CodeItem>) -> MethodId {
+    pub fn add_direct_method<'a>(&mut self, class_def: ClassDefId, name: impl AsRef<str>, return_type: impl Into<DexReturnTypeImpl<'a>>, parameters: &[DexTypeImpl], access_flags: AccessFlags, code_item: Option<CodeItem>) -> MethodId {
         self.add_method_impl(class_def, name, return_type, parameters, access_flags, code_item, |class_data| &mut class_data.direct_methods)
     }
 
-    pub fn add_virtual_method(&mut self, class_def: ClassDefId, name: impl AsRef<str>, return_type: impl AsRef<str>, parameters: &[&str], access_flags: AccessFlags, code_item: Option<CodeItem>) -> MethodId {
+    pub fn add_virtual_method<'a>(&mut self, class_def: ClassDefId, name: impl AsRef<str>, return_type: impl Into<DexReturnTypeImpl<'a>>, parameters: &[DexTypeImpl], access_flags: AccessFlags, code_item: Option<CodeItem>) -> MethodId {
         self.add_method_impl(class_def, name, return_type, parameters, access_flags, code_item, |class_data| &mut class_data.virtual_methods)
     }
 
@@ -408,16 +575,6 @@ impl Exe for DexExe {
 
     fn as_dex_exe(&mut self) -> Option<&mut DexExe> {
         Some(self)
-    }
-}
-
-fn make_shorty(ty: &str) -> char {
-    match ty.chars().next().unwrap() {
-        'L' | '[' => 'L',
-        other => {
-            assert_eq!(ty.len(), 1, "invalid type");
-            other
-        }
     }
 }
 
@@ -576,7 +733,7 @@ pub struct DexLinker {
 }
 
 impl Linker for DexLinker {
-    fn write(&mut self, d: &Driver, main_function_index: FuncId, backend: &mut dyn Backend, dest: &mut dyn Write) -> io::Result<()> {
+    fn write(&mut self, d: &Driver, main_function_index: FuncId, backend: &mut dyn Backend, dest: &mut dyn io::Write) -> io::Result<()> {
         let mut exe = DexExe::new();
 
         backend.generate_func(d, main_function_index, true, &mut exe);

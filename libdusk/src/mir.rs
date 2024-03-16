@@ -1049,7 +1049,7 @@ impl Driver {
     }
 
     // TODO: Move this out of MIR
-    #[display_adapter]
+    #[display_adapter('a)]
     pub fn display_item(&'a self, item: impl Into<ToSourceRange> + Copy + 'a, f: &mut Formatter) {
         let range = self.get_range(item);
         if range.is_empty() {

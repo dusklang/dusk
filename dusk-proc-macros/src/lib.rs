@@ -12,7 +12,12 @@ use std::iter::Peekable;
 
 #[proc_macro_attribute]
 pub fn display_adapter(attr: TokenStream, item: TokenStream) -> TokenStream {
-    assert!(attr.is_empty());
+    let lifetime = if attr.is_empty() {
+        parse_quote! { 'display_adapter_lifetime }
+    } else {
+        parse_macro_input!(attr as Lifetime)
+    };
+
     let item = parse_macro_input!(item as Item);
     let func = match item {
         Item::Fn(func) => func,
@@ -25,7 +30,6 @@ pub fn display_adapter(attr: TokenStream, item: TokenStream) -> TokenStream {
     let vis = func.vis;
     let mut sig = func.sig;
     assert!(sig.generics.lt_token.is_none(), "generics not supported yet");
-    let lifetime: Lifetime = parse_quote! { 'a };
     sig.generics = parse_quote! { <#lifetime> };
     let mut w_ident: Option<syn::Ident> = None;
     let mut inputs = Default::default();
