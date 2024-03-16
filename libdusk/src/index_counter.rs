@@ -2,7 +2,7 @@ use std::ops::AddAssign;
 
 use index_vec::Idx;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IndexCounter<I: Idx + AddAssign<usize>> {
     next_id: I,
 }

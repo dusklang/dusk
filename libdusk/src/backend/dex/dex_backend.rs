@@ -20,8 +20,9 @@ impl Backend for DexBackend {
         let main_activity = exe.add_class_def("com.example.minimal.MainActivity", AccessFlags::PUBLIC, Some(android_activity), None);
 
         let super_constructor = exe.add_method(android_activity, "<init>", DexReturnType::Void, &[]);
-        let mut constructor = DexEncoder::new(1);
-        constructor.invoke_direct(super_constructor);
+        let mut constructor = DexEncoder::new();
+        let this = constructor.alloc_input_register();
+        constructor.invoke_direct(&[this], super_constructor);
         constructor.ret_void();
         exe.add_direct_method(main_activity, "<init>", DexReturnType::Void, &[], AccessFlags::PUBLIC | AccessFlags::CONSTRUCTOR, Some(constructor));
     }

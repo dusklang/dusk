@@ -918,7 +918,7 @@ impl Linker for DexLinker {
             self.buf.push(
                 CodeItemHeader {
                     num_registers: code_item.num_registers,
-                    num_words_of_ins: code_item.num_ins,
+                    num_words_of_ins: code_item.num_ins(),
                     num_words_of_outs: code_item.num_outs,
                     num_try_items: code_item.num_try_items,
                     debug_info_off: code_item.debug_info_off,
