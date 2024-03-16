@@ -9,6 +9,7 @@ use std::{mem, iter};
 use std::hash::Hash;
 
 use index_vec::define_index_type;
+use crate::backend::dex::DexEncoder;
 use crate::index_vec::*;
 use bitflags::bitflags;
 use sha1::{Sha1, Digest};
@@ -159,18 +160,7 @@ pub struct PhysicalMethod {
     pub name_idx: PhysicalStringId,
 }
 
-#[derive(Clone)]
-pub struct CodeItem {
-    pub num_registers: u16,
-    /// "the number of words of incoming arguments to the method that this code is for"
-    pub num_words_of_ins: u16,
-    // "the number of words of outgoing argument space required by this code for method invocation"
-    pub num_words_of_outs: u16,
-    pub num_try_items: u16,
-    pub debug_info_off: u32,
-    pub insns: Vec<u16>,
-    // TODO: try items, handlers
-}
+type CodeItem = DexEncoder;
 
 #[derive(Default)]
 pub struct DexExe {
@@ -549,6 +539,11 @@ impl DexExe {
             get_level(class_def, &self.physical_class_defs, &class_map, &mut levels);
         }
         self.physical_class_defs.sort_by_cached_key(|class_def| levels[&class_def.class_idx]);
+
+        // Fixup code items
+        for code_item in &mut self.code_items {
+            code_item.perform_fixups(&self.physical_method_map);
+        }
     }
 }
 
@@ -923,14 +918,14 @@ impl Linker for DexLinker {
             self.buf.push(
                 CodeItemHeader {
                     num_registers: code_item.num_registers,
-                    num_words_of_ins: code_item.num_words_of_ins,
-                    num_words_of_outs: code_item.num_words_of_outs,
+                    num_words_of_ins: code_item.num_ins,
+                    num_words_of_outs: code_item.num_outs,
                     num_try_items: code_item.num_try_items,
                     debug_info_off: code_item.debug_info_off,
-                    insns_size: code_item.insns.len() as u32,
+                    insns_size: code_item.code.len() as u32,
                 }
             );
-            self.buf.extend(&code_item.insns);
+            self.buf.extend(&code_item.code);
 
             code_item_offs.push(off);
         }
