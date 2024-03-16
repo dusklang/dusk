@@ -57,6 +57,16 @@ pub enum Register {
     In(InId),
 }
 
+#[repr(u8)]
+enum InvokeKind {
+    // The order is significant here
+    Virtual,
+    Super,
+    Direct,
+    Static,
+    Interface,
+}
+
 impl DexEncoder {
     pub fn new() -> Self { Default::default() }
 
@@ -142,15 +152,13 @@ impl DexEncoder {
         }
     }
 
-    pub fn invoke_direct(&mut self, arguments: &[Register], method: MethodId) {
-        // TODO: handle variant with more than 5 arguments
+    fn invoke_impl(&mut self, kind: InvokeKind, arguments: &[Register], method: MethodId) {
         assert!(arguments.len() <= 5);
 
-        // TODO: generalize to all invoke-xxx instructions, which have very similar representations
         let num_outs = arguments.len().try_into().unwrap();
         self.push_nibble(num_outs); // number of arguments to method (maximum for this opcode is 5)
         self.reference_register_if_exists(arguments, 4);
-        self.push_byte(0x70);       // opcode
+        self.push_byte(0x6e + kind as u8);       // opcode
         self.reference_method(method);
         self.reference_register_if_exists(arguments, 3);
         self.reference_register_if_exists(arguments, 2);
@@ -159,14 +167,45 @@ impl DexEncoder {
         self.num_outs = max(self.num_outs, num_outs);
     }
 
-    pub fn invoke_direct_range(&mut self, num_arguments: u8, first_argument: Register, method: MethodId) {
-        // TODO: generalize to all invoke-xxx/range instructions, which have very similar representations
+    pub fn invoke_virtual(&mut self, arguments: &[Register], method: MethodId) {
+        self.invoke_impl(InvokeKind::Virtual, arguments, method);
+    }
+    pub fn invoke_super(&mut self, arguments: &[Register], method: MethodId) {
+        self.invoke_impl(InvokeKind::Super, arguments, method);
+    }
+    pub fn invoke_direct(&mut self, arguments: &[Register], method: MethodId) {
+        self.invoke_impl(InvokeKind::Direct, arguments, method);
+    }
+    pub fn invoke_static(&mut self, arguments: &[Register], method: MethodId) {
+        self.invoke_impl(InvokeKind::Static, arguments, method);
+    }
+    pub fn invoke_interface(&mut self, arguments: &[Register], method: MethodId) {
+        self.invoke_impl(InvokeKind::Interface, arguments, method);
+    }
+
+    fn invoke_range_impl(&mut self, kind: InvokeKind, num_arguments: u8, first_argument: Register, method: MethodId) {
         let num_outs = num_arguments as u16;
         self.push_byte(num_arguments);
-        self.push_byte(0x76); // opcode
+        self.push_byte(0x74 + kind as u8); // opcode
         self.reference_method(method);
         self.reference_big_register(first_argument);
         self.num_outs = max(self.num_outs, num_outs);
+    }
+    
+    pub fn invoke_virtual_range(&mut self, num_arguments: u8, first_argument: Register, method: MethodId) {
+        self.invoke_range_impl(InvokeKind::Virtual, num_arguments, first_argument, method)
+    }
+    pub fn invoke_super_range(&mut self, num_arguments: u8, first_argument: Register, method: MethodId) {
+        self.invoke_range_impl(InvokeKind::Super, num_arguments, first_argument, method)
+    }
+    pub fn invoke_direct_range(&mut self, num_arguments: u8, first_argument: Register, method: MethodId) {
+        self.invoke_range_impl(InvokeKind::Direct, num_arguments, first_argument, method)
+    }
+    pub fn invoke_static_range(&mut self, num_arguments: u8, first_argument: Register, method: MethodId) {
+        self.invoke_range_impl(InvokeKind::Static, num_arguments, first_argument, method)
+    }
+    pub fn invoke_interface_range(&mut self, num_arguments: u8, first_argument: Register, method: MethodId) {
+        self.invoke_range_impl(InvokeKind::Interface, num_arguments, first_argument, method)
     }
 
     pub fn ret_void(&mut self) {
