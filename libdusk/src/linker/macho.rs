@@ -8,7 +8,7 @@ use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::mem;
 
-use sha2::{Sha256, Digest};
+use rsa::sha2::{Sha256, Digest};
 use index_vec::define_index_type;
 
 use dusk_proc_macros::ByteSwap;

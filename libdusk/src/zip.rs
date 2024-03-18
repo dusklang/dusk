@@ -1,8 +1,9 @@
-use std::io::{self, Write};
-
 use dusk_proc_macros::ByteSwap;
 
 use crate::linker::byte_swap::Buffer;
+
+const CD_SIG: u32 = 0x02014b50;
+const EOCD_SIG: u32 = 0x06054b50;
 
 #[derive(Default)]
 pub struct ZipBuilder {
@@ -74,6 +75,14 @@ struct EndOfCentralDirectoryRecord {
     // comment_length: u16,
 }
 
+pub struct ZipFile {
+    pub data: Vec<u8>,
+
+    pub local_entries_offset: usize,
+    pub central_directory_offset: usize,
+    pub eocd_offset: usize,
+}
+
 impl ZipBuilder {
     pub fn new() -> Self { Default::default() }
 
@@ -88,7 +97,7 @@ impl ZipBuilder {
         self.entries.push(entry);
     }
 
-    pub fn write(&self, dest: &mut dyn Write) -> io::Result<()> {
+    pub fn build(self) -> ZipFile {
         let mut buf = Buffer::new();
 
         let mut local_offsets = Vec::new();
@@ -120,7 +129,7 @@ impl ZipBuilder {
         let central_directory_offset = buf.pos();
         for (file, local_header_offset) in self.entries.iter().zip(local_offsets) {
             let central_header = CentralDirectoryFileHeader {
-                sig: 0x02014b50,
+                sig: CD_SIG,
                 made_version: 0,
                 extract_version: 0,
                 flags: 0,
@@ -145,8 +154,9 @@ impl ZipBuilder {
         }
         let central_directory_size = buf.pos() - central_directory_offset;
 
+        let eocd_offset = buf.pos();
         let eocd = EndOfCentralDirectoryRecord {
-            sig: 0x06054b50,
+            sig: EOCD_SIG,
             disk_number: 0,
             central_directory_start_disk: 0,
             disk_num_central_directory_records: self.entries.len() as u16,
@@ -157,6 +167,11 @@ impl ZipBuilder {
         buf.push(eocd);
         buf.push(0u16); // EOCD.comment_length
 
-        dest.write_all(&buf.data)
+        ZipFile {
+            data: buf.data,
+            local_entries_offset: 0,
+            central_directory_offset,
+            eocd_offset,
+        }
     }
 }
