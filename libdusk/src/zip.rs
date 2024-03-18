@@ -12,8 +12,17 @@ pub struct ZipBuilder {
 
 struct FileEntry {
     file_name: String,
+    alignment: u32,
     file_contents: Vec<u8>,
     checksum: u32,
+}
+
+pub struct ZipFile {
+    pub data: Vec<u8>,
+
+    pub local_entries_offset: usize,
+    pub central_directory_offset: usize,
+    pub eocd_offset: usize,
 }
 
 // NOTE: my current system for copying Rust structs into a buffer does not handle unaligned fields, so I have
@@ -75,22 +84,16 @@ struct EndOfCentralDirectoryRecord {
     // comment_length: u16,
 }
 
-pub struct ZipFile {
-    pub data: Vec<u8>,
-
-    pub local_entries_offset: usize,
-    pub central_directory_offset: usize,
-    pub eocd_offset: usize,
-}
-
 impl ZipBuilder {
     pub fn new() -> Self { Default::default() }
 
-    pub fn add(&mut self, file_name: impl Into<String>, file_contents: impl Into<Vec<u8>>) {
+    pub fn add(&mut self, file_name: impl Into<String>, alignment: u32, file_contents: impl Into<Vec<u8>>) {
         let file_contents = file_contents.into();
         let checksum = crc32fast::hash(&file_contents);
+        assert!(alignment <= 0x10000);
         let entry = FileEntry {
             file_name: file_name.into(),
+            alignment,
             file_contents,
             checksum,
         };
@@ -121,8 +124,12 @@ impl ZipBuilder {
             };
             buf.push(local_header_1);
             buf.push(modification_date);
-            buf.push(local_header_2);
+            let local_header_2 = buf.push(local_header_2);
             buf.extend(file.file_name.as_bytes());
+            let extra_field_offset = buf.pos();
+            buf.pad_to_next_boundary(file.alignment as usize);
+            let extra_field_length = buf.pos() - extra_field_offset;
+            buf.get_mut(local_header_2).modify(|header| header.extra_field_length = extra_field_length.try_into().unwrap());
             buf.extend(&file.file_contents);
         }
 
