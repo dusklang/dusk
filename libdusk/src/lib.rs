@@ -27,9 +27,11 @@ mod tir;
 mod typechecker;
 mod into_bytes;
 mod backend;
+mod bundler;
 mod rw_ref;
 mod builtins;
 mod autopop;
 mod tbd_parser;
+mod zip;
 
 use display_adapter::display_adapter;

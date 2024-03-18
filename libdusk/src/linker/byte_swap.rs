@@ -143,6 +143,8 @@ pub struct Buffer {
 }
 
 impl Buffer {
+    pub fn new() -> Self { Default::default() }
+
     pub fn pos(&self) -> usize { self.data.len() }
 
     pub fn rva(&self) -> usize { self.rva }

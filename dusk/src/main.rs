@@ -188,7 +188,7 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
             let path = match driver.read().os {
                 OperatingSystem::Windows => "a.exe",
                 OperatingSystem::MacOS   => "a.out",
-                OperatingSystem::Android => "classes.dex",
+                OperatingSystem::Android => "a.apk",
             };
             _ = std::fs::remove_file(path);
             let file = File::create(path).unwrap();
@@ -201,7 +201,8 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
 
             let mut linker = driver.read().create_linker();
             let mut backend = driver.read().create_backend();
-            linker.write(&driver.read(), main, &mut *backend, &mut w).unwrap();
+            let mut bundler = driver.read().create_bundler();
+            bundler.write(&driver.read(), main, &mut *linker, &mut *backend, &mut w).unwrap();
         }
     } else {
         driver.write().diag.report_error_no_range(
