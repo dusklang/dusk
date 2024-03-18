@@ -187,6 +187,11 @@ impl Buffer {
         self.rva += size;
     }
 
+    pub fn erase_last(&mut self, n: usize) {
+        self.data.truncate(self.data.len() - n);
+        self.rva -= n;
+    }
+
     pub fn pad_with_zeroes(&mut self, size: usize) {
         self.data.extend(std::iter::repeat(0).take(size as usize));
         self.rva += size;

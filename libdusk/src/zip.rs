@@ -5,9 +5,9 @@ use crate::linker::byte_swap::Buffer;
 const CD_SIG: u32 = 0x02014b50;
 const EOCD_SIG: u32 = 0x06054b50;
 
-#[derive(Default)]
 pub struct ZipBuilder {
     entries: Vec<FileEntry>,
+    pub central_directory_alignment: usize,
 }
 
 struct FileEntry {
@@ -85,7 +85,12 @@ struct EndOfCentralDirectoryRecord {
 }
 
 impl ZipBuilder {
-    pub fn new() -> Self { Default::default() }
+    pub fn new(central_directory_alignment: usize) -> Self {
+        ZipBuilder {
+            entries: Default::default(),
+            central_directory_alignment,
+        }
+    }
 
     pub fn add(&mut self, file_name: impl Into<String>, alignment: u32, file_contents: impl Into<Vec<u8>>) {
         let file_contents = file_contents.into();
@@ -133,6 +138,7 @@ impl ZipBuilder {
             buf.extend(&file.file_contents);
         }
 
+        buf.pad_to_next_boundary(self.central_directory_alignment);
         let central_directory_offset = buf.pos();
         for (file, local_header_offset) in self.entries.iter().zip(local_offsets) {
             let central_header = CentralDirectoryFileHeader {

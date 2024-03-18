@@ -47,7 +47,7 @@ impl Bundler for ApkBundler {
         let mut classes_dex = Vec::new();
         linker.write(d, main_function_index, backend, &mut classes_dex)?;
 
-        let mut archive = ZipBuilder::new();
+        let mut archive = ZipBuilder::new(PAGE_ALIGNMENT);
         archive.add("classes.dex", 4, classes_dex);
         // TODO: generate a binary-encoded AndroidManifest.xml instead of hardcoding this one.
         archive.add("AndroidManifest.xml", 4, include_bytes!("../../files/AndroidManifest.xml"));
@@ -170,12 +170,14 @@ impl Bundler for ApkBundler {
                 signing_block.get_mut(scheme_v2_block_length).set(block_length as u64);
             }
 
-            let length_without_padding = signing_block.pos() - first_length_of_signing_block.addr + 24;
+            let length_without_padding = signing_block.pos() + 24;
             if length_without_padding % PAGE_ALIGNMENT != 0 {
                 let padding_block_length_ref = signing_block.alloc::<u64>();
                 let padding_block_begin = signing_block.pos();
                 signing_block.push(PADDING_BLOCK_ID);
+                signing_block.pad_with_zeroes(24); // make room for second length field and APK_SIGNING_BLOCK_MAGIC (will be erased soon)
                 signing_block.pad_to_next_boundary(PAGE_ALIGNMENT);
+                signing_block.erase_last(24);
                 let padding_block_length = signing_block.pos() - padding_block_begin;
                 signing_block.get_mut(padding_block_length_ref).set(padding_block_length as u64);
             }
