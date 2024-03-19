@@ -264,12 +264,13 @@ impl ZipBuilder {
         let central_directory_size = buf.pos() - central_directory_offset;
 
         let eocd_offset = buf.pos();
+        let total_num_entries = self.entries.len() + self.central_directory_aligned_entries.len();
         let eocd = EndOfCentralDirectoryRecord {
             sig: EOCD_SIG,
             disk_number: 0,
             central_directory_start_disk: 0,
-            disk_num_central_directory_records: self.entries.len() as u16,
-            total_num_central_directory_records: self.entries.len() as u16,
+            disk_num_central_directory_records: total_num_entries as u16,
+            total_num_central_directory_records: total_num_entries as u16,
             central_directory_size: central_directory_size as u32,
             central_directory_offset: central_directory_offset as u32,
         };

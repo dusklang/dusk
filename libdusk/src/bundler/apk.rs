@@ -1,11 +1,16 @@
 use std::io::{self, Write};
 use std::ops::Range;
-use std::cmp::min;
+use std::cmp::{min, Ord};
 
+use cryptographic_message_syntax::SignerBuilder;
 use rcgen::{Certificate, CertificateParams, DistinguishedName, DnType, KeyPair};
 use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey};
 use rsa::{Pkcs1v15Sign, RsaPrivateKey};
 use rsa::sha2::{Sha256, Digest};
+use base64::prelude::*;
+use x509_certificate::InMemorySigningKeyPair;
+use x509_certificate::certificate::CapturedX509Certificate;
+use cryptographic_message_syntax::SignedDataBuilder;
 
 use crate::driver::Driver;
 use crate::linker::byte_swap::{Buffer, Ref};
@@ -42,16 +47,24 @@ fn chunkify(buf: &[u8], range: Range<usize>, chunks: &mut Vec<Vec<u8>>) {
     }
 }
 
+struct FileToAdd<'a> {
+    name: &'a str,
+    alignment: u32,
+    should_compress: bool,
+    data: &'a [u8],
+}
+
+fn base64_of_sha256(input: &[u8]) -> String {
+    let mut sha256 = Sha256::new();
+    sha256.update(input);
+    let digest: [u8; 32] = sha256.finalize().into();
+    BASE64_STANDARD.encode(digest)
+}
+
 impl Bundler for ApkBundler {
     fn write(&mut self, d: &Driver, main_function_index: FuncId, linker: &mut dyn Linker, backend: &mut dyn Backend, dest: &mut dyn Write) -> io::Result<()> {
         let mut classes_dex = Vec::new();
         linker.write(d, main_function_index, backend, &mut classes_dex)?;
-
-        let mut archive = ZipBuilder::new(PAGE_ALIGNMENT);
-        archive.add("classes.dex", 4, true, classes_dex);
-        // TODO: generate a binary-encoded AndroidManifest.xml instead of hardcoding this one.
-        archive.add("AndroidManifest.xml", 4, true, include_bytes!("../../files/AndroidManifest.xml"));
-        let archive = archive.build();
 
         // TODO: maybe cache the generated key pair somewhere, and/or allow the user to pass one in?
 
@@ -67,6 +80,75 @@ impl Bundler for ApkBundler {
         cert_params.distinguished_name = DistinguishedName::new();
         cert_params.distinguished_name.push(DnType::CommonName, "Dusk self-signed certificate");
         let cert = Certificate::from_params(cert_params).unwrap();
+        let serialized_cert = cert.serialize_der().unwrap();
+
+        let mut archive = ZipBuilder::new(PAGE_ALIGNMENT);
+        let mut files = Vec::new();
+
+        files.push(
+            FileToAdd {
+                name: "classes.dex",
+                alignment: 4,
+                should_compress: true,
+                data: &classes_dex,
+            }
+        );
+        files.push(
+            FileToAdd {
+                name: "AndroidManifest.xml",
+                alignment: 4,
+                should_compress: true,
+                // TODO: generate a binary-encoded AndroidManifest.xml instead of hardcoding this one.
+                data: include_bytes!("../../files/AndroidManifest.xml"),
+            }
+        );
+
+        let mut manifest_entries = Vec::new();
+        manifest_entries.reserve(files.len());
+        for file in &files {
+            let digest = base64_of_sha256(&file.data);
+            manifest_entries.push((file.name.to_owned(), format!("Name: {}\r\nSHA-256-Digest: {}\r\n\r\n", file.name, digest)));
+        }
+        manifest_entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+        let mut manifest_file = String::from("Manifest-Version: 1.0\r\n\r\n");
+        for (_, entry) in &manifest_entries {
+            manifest_file += entry;
+        }
+        let manifest_digest = base64_of_sha256(manifest_file.as_bytes());
+        
+        let mut signature_file = String::from("Signature-Version: 1.0\r\n");
+        signature_file += "Created-By: 1.0 (Android)\r\n";
+        signature_file += &format!("SHA-256-Digest-Manifest: {}\r\n", manifest_digest);
+        signature_file += "X-Android-APK-Signed: 2\r\n\r\n";
+        
+        for (file_name, entry) in &manifest_entries {
+            let digest = base64_of_sha256(entry.as_bytes());
+            signature_file += &format!("Name: {}\r\nSHA-256-Digest: {}\r\n\r\n", file_name, digest);
+        }
+        let mut sha256 = Sha256::new();
+        sha256.update(signature_file.as_bytes());
+        let signature_file_digest: [u8; 32] = sha256.finalize().into();
+        let signed_digest = priv_key.sign(Pkcs1v15Sign::new::<Sha256>(), &signature_file_digest).unwrap();
+
+        let cms_key_pair = InMemorySigningKeyPair::from_pkcs8_der(priv_key.to_pkcs8_der().unwrap().as_bytes()).unwrap();
+        let cms_cert = CapturedX509Certificate::from_der(serialized_cert.clone()).unwrap();
+        let signed_data = SignedDataBuilder::default()
+            .content_inline(signed_digest)
+            .certificate(cms_cert.clone())
+            .signer(SignerBuilder::new(&cms_key_pair, cms_cert))
+            .build_der()
+            .unwrap();
+
+        for file in files {
+            archive.add(file.name, file.alignment, file.should_compress, file.data);
+        }
+
+        archive.add_aligned_to_central_directory("META-INF/APP.SF", 4, true, signature_file.into_bytes());
+        archive.add_aligned_to_central_directory("META-INF/APP.RSA", 4, true, signed_data);
+        archive.add_aligned_to_central_directory("META-INF/MANIFEST.MF", 4, true, manifest_file.into_bytes());
+
+        let archive = archive.build();
 
         let mut chunks = Vec::new();
         chunkify(&archive.data, 0..archive.central_directory_offset, &mut chunks);
@@ -124,7 +206,6 @@ impl Bundler for ApkBundler {
     
                             let certificates_length = signing_block.alloc::<u32>();
                             {
-                                let serialized_cert = cert.serialize_der().unwrap();
                                 signing_block.push(serialized_cert.len() as u32);
                                 signing_block.extend(&serialized_cert);
                             }
