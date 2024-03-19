@@ -29,6 +29,7 @@ crc32fast = "1.4"
 rcgen = "0.12"
 rand = "0.8"
 rsa = { version = "0.9", features = ["sha2"] }
+deflate = "1.0"
 
 # LSP-related dependencies
 lsp-types = { version = "0.95", optional = true }

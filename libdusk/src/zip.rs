@@ -16,9 +16,11 @@ pub struct ZipBuilder {
 }
 
 struct FileEntry {
-    file_name: String,
+    name: String,
     alignment: u32,
-    file_contents: Vec<u8>,
+    contents: Vec<u8>,
+    compression_method: u16,
+    uncompressed_size: usize,
     checksum: u32,
 }
 
@@ -94,26 +96,26 @@ fn push_entry(buf: &mut Buffer, file: &FileEntry) {
         sig: 0x04034b50,
         version: 0,
         flags: 0,
-        compression_method: 0,
+        compression_method: file.compression_method,
         modification_time: 0,
     };
     let modification_date = 0u16;
     let local_header_2 = LocalFileHeader2 {
         checksum: file.checksum,
-        compressed_size: file.file_contents.len() as u32,
-        uncompressed_size: file.file_contents.len() as u32,
-        file_name_length: file.file_name.len() as u16,
+        compressed_size: file.contents.len() as u32,
+        uncompressed_size: file.uncompressed_size as u32,
+        file_name_length: file.name.len() as u16,
         extra_field_length: 0,
     };
     buf.push(local_header_1);
     buf.push(modification_date);
     let local_header_2 = buf.push(local_header_2);
-    buf.extend(file.file_name.as_bytes());
+    buf.extend(file.name.as_bytes());
     let extra_field_offset = buf.pos();
     buf.pad_to_next_boundary(file.alignment as usize);
     let extra_field_length = buf.pos() - extra_field_offset;
     buf.get_mut(local_header_2).modify(|header| header.extra_field_length = extra_field_length.try_into().unwrap());
-    buf.extend(&file.file_contents);
+    buf.extend(&file.contents);
 }
 
 // TODO: I feel like I had to solve a similar problem to this somewhere in the Mach-O linker? Maybe I should apply this solution there if possible.
@@ -150,13 +152,25 @@ impl ReverseLayoutManager {
     }
 }
 
-fn process_entry(file_name: String, alignment: u32, file_contents: Vec<u8>) -> FileEntry {
+fn process_entry(name: String, alignment: u32, should_compress: bool, file_contents: Vec<u8>) -> FileEntry {
     let checksum = crc32fast::hash(&file_contents);
     assert!(alignment <= 0x10000);
+    let uncompressed_size = file_contents.len();
+    let mut contents = file_contents;
+    let mut compression_method = 0;
+    if should_compress {
+        let deflated = deflate::deflate_bytes(&contents);
+        if deflated.len() < contents.len() {
+            contents = deflated;
+            compression_method = 8;
+        }
+    }
     FileEntry {
-        file_name: file_name.into(),
+        name,
         alignment,
-        file_contents,
+        contents,
+        compression_method,
+        uncompressed_size,
         checksum,
     }
 }
@@ -170,13 +184,13 @@ impl ZipBuilder {
         }
     }
 
-    pub fn add(&mut self, file_name: impl Into<String>, alignment: u32, file_contents: impl Into<Vec<u8>>) {
-        let entry = process_entry(file_name.into(), alignment, file_contents.into());
+    pub fn add(&mut self, file_name: impl Into<String>, alignment: u32, should_compress: bool, file_contents: impl Into<Vec<u8>>) {
+        let entry = process_entry(file_name.into(), alignment, should_compress, file_contents.into());
         self.entries.push(entry);
     }
 
-    pub fn add_aligned_to_central_directory(&mut self, file_name: impl Into<String>, alignment: u32, file_contents: impl Into<Vec<u8>>) {
-        let entry = process_entry(file_name.into(), alignment, file_contents.into());
+    pub fn add_aligned_to_central_directory(&mut self, file_name: impl Into<String>, alignment: u32, should_compress: bool, file_contents: impl Into<Vec<u8>>) {
+        let entry = process_entry(file_name.into(), alignment, should_compress, file_contents.into());
         self.central_directory_aligned_entries.push(entry);
     }
 
@@ -194,8 +208,8 @@ impl ZipBuilder {
         loop {
             let initial_cursor = layout_manager.cursor;
             for file in self.central_directory_aligned_entries.iter().rev() {
-                layout_manager.alloc_aligned(file.file_contents.len(), file.alignment as usize);
-                layout_manager.alloc(file.file_name.len());
+                layout_manager.alloc_aligned(file.contents.len(), file.alignment as usize);
+                layout_manager.alloc(file.name.len());
                 layout_manager.alloc(mem::size_of::<LocalFileHeader2>());
                 layout_manager.alloc(mem::size_of::<u16>());
                 layout_manager.alloc(mem::size_of::<LocalFileHeader1>());
@@ -228,13 +242,13 @@ impl ZipBuilder {
                 made_version: 0,
                 extract_version: 0,
                 flags: 0,
-                compression_method: 0,
+                compression_method: file.compression_method,
                 modification_time: 0,
                 modification_date: 0,
                 checksum: file.checksum,
-                compressed_size: file.file_contents.len() as u32,
-                uncompressed_size: file.file_contents.len() as u32,
-                file_name_length: file.file_name.len() as u16,
+                compressed_size: file.contents.len() as u32,
+                uncompressed_size: file.uncompressed_size as u32,
+                file_name_length: file.name.len() as u16,
                 extra_field_length: 0,
                 file_comment_length: 0,
                 file_start_disk_number: 0,
@@ -245,7 +259,7 @@ impl ZipBuilder {
             buf.push(internal_file_attributes);
             buf.push(external_file_attributes);
             buf.push(local_header_offset as u32);
-            buf.extend(file.file_name.as_bytes());
+            buf.extend(file.name.as_bytes());
         }
         let central_directory_size = buf.pos() - central_directory_offset;
 

@@ -48,9 +48,9 @@ impl Bundler for ApkBundler {
         linker.write(d, main_function_index, backend, &mut classes_dex)?;
 
         let mut archive = ZipBuilder::new(PAGE_ALIGNMENT);
-        archive.add("classes.dex", 4, classes_dex);
+        archive.add("classes.dex", 4, true, classes_dex);
         // TODO: generate a binary-encoded AndroidManifest.xml instead of hardcoding this one.
-        archive.add("AndroidManifest.xml", 4, include_bytes!("../../files/AndroidManifest.xml"));
+        archive.add("AndroidManifest.xml", 4, true, include_bytes!("../../files/AndroidManifest.xml"));
         let archive = archive.build();
 
         // TODO: maybe cache the generated key pair somewhere, and/or allow the user to pass one in?
