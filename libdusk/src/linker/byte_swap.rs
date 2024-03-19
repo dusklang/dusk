@@ -10,14 +10,14 @@ macro_rules! nearest_multiple_of {
     };
 
     ($val:expr, $factor:expr) => {{
-        const _: () = assert!(is_power_of_2($factor));
+        const _: () = assert!(crate::linker::byte_swap::is_power_of_2($factor));
         nearest_multiple_of!(@unsafe $val, $factor)
     }};
 }
 
 macro_rules! nearest_multiple_of_rt {
     ($val:expr, $factor:expr) => {{
-        assert!(is_power_of_2($factor));
+        assert!(crate::linker::byte_swap::is_power_of_2($factor));
         nearest_multiple_of!(@unsafe $val, $factor)
     }};
 }

@@ -10,6 +10,7 @@ pub mod error;
 pub mod new_code;
 pub mod ty;
 pub mod type_provider;
+#[macro_use]
 pub mod linker;
 pub mod ast;
 pub mod index_counter;
