@@ -21,6 +21,12 @@ Pre-pre-alpha. Barely usable for anything. There is a working interpreter and a 
 | DEX    | 🚧     |
 | ELF    | ⋯      |
 
+### Bundlers
+| Format            | Status |
+|-------------------|--------|
+| APK               | 🚧     |
+| macOS app bundles | ⋯      |
+
 #### Legend
 | Symbol | Meaning                              |
 |--------|--------------------------------------|
