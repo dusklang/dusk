@@ -637,7 +637,7 @@ impl tir::Expr<tir::Switch> {
                         err_msg.push_str(&format!("Variant `{}` is ", driver.interner.resolve(unmatched_variants[0]).unwrap()));
                     } else {
                         err_msg.push_str("Variants ");
-                        for (i, &variant) in unmatched_variants[0..(unmatched_variants.len() - 1)].iter().enumerate() {
+                        for (i, &variant) in unmatched_variants[..unmatched_variants.len() - 1].iter().enumerate() {
                             if i != 0 {
                                 err_msg.push_str(", ");
                             }

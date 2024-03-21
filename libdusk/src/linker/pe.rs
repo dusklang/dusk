@@ -423,7 +423,7 @@ impl Linker for PELinker {
             }
         });
 
-        self.buf.data[text_section.address..(text_section.address + code.len())].copy_from_slice(code);
+        self.buf.data[text_section.address..][..code.len()].copy_from_slice(code);
 
         dest.write_all(&self.buf.data)?;
         Ok(())

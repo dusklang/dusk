@@ -443,7 +443,7 @@ impl CodeBlob for Arm64Encoder {
                 Indirection::Direct => fixed_up_code.ldr64(fixup.dest, fixup.dest, (fixup_addr & page_mask).try_into().unwrap()),
                 Indirection::Indirect => fixed_up_code.add64_imm(false, fixup.dest, fixup.dest, (fixup_addr & page_mask).try_into().unwrap()),
             }
-            self.data[fixup.offset..(fixup.offset + 8)].copy_from_slice(&fixed_up_code.get_bytes());
+            self.data[fixup.offset..][..8].copy_from_slice(&fixed_up_code.get_bytes());
         }
 
         &self.data

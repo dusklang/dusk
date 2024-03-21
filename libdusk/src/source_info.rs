@@ -269,7 +269,7 @@ impl Driver {
             if end >= range.end {
                 let i = i.saturating_sub(1);
                 let start = self.src_map.file_ends[i];
-                let adjusted_range = (range.start-start)..(range.end-start);
+                let adjusted_range = (range.start - start)..(range.end - start);
                 return (SourceFileId::new(i), adjusted_range);
             }
         }

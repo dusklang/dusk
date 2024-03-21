@@ -99,7 +99,7 @@ impl Driver {
             let ty = &strukt.field_tys[i];
             let size = self.size_of(ty);
             let val = field.as_bytes_with_driver(self);
-            buf[offset..(offset + size)].copy_from_slice(&val);
+            buf[offset..][..size].copy_from_slice(&val);
         }
         Value::Inline(buf)
     }
@@ -627,7 +627,7 @@ impl Driver {
                     let offset = layout.field_offsets[i];
                     let ty = strukt.field_tys[i].clone();
                     let size = self.size_of(&ty);
-                    let val = Value::from_bytes(&buf[offset..(offset+size)]);
+                    let val = Value::from_bytes(&buf[offset..][..size]);
                     let konst = self.value_to_const(val, ty.clone(), tp);
                     fields.push(konst);
                 }
@@ -1771,7 +1771,7 @@ impl DriverRef<'_> {
                     let layout = self.read().layout_struct(strukt);
                     let size = self.read().size_of(&strukt.field_tys[index]);
                     let offset = layout.field_offsets[index];
-                    Value::from_bytes(&bytes[offset..(offset + size)])
+                    Value::from_bytes(&bytes[offset..][..size])
                 },
                 &Instr::IndirectFieldAccess { val, index } => {
                     let addr = frame.get_val(val, &*self.read()).as_usize();

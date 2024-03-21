@@ -1209,7 +1209,7 @@ impl Linker for MachOLinker {
             if code_signature_start - i < 4096 {
                 sha256.update(&self.buf.data[i..code_signature_start]);
             } else {
-                sha256.update(&self.buf.data[i..(i + 4096)]);
+                sha256.update(&self.buf.data[i..][..4096]);
             }
             hash_buf = sha256.finalize().into();
             self.buf.push(hash_buf);
@@ -1408,7 +1408,7 @@ impl MachOLinker {
         assert_eq!(segment.segment, section.0);
         let size = segment.sections[section.1].size;
         let offset = self.segments[segment.segment].sections[section.1].info.unwrap().offset;
-        self.buf.data[offset..(offset + size)].copy_from_slice(data);
+        self.buf.data[offset..][..size].copy_from_slice(data);
     }
 
     fn get_section_offset(&self, section: SectionId) -> usize {

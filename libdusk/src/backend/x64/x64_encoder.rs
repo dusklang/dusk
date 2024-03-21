@@ -526,7 +526,7 @@ impl CodeBlob for X64Encoder {
             let next_instr_addr = code_addr + 4;
             let rip_offset = (fixup_addr as isize - next_instr_addr as isize) as i32;
 
-            self.data[fixup.offset..(fixup.offset + 4)].copy_from_slice(&rip_offset.to_le_bytes());
+            self.data[fixup.offset..][..4].copy_from_slice(&rip_offset.to_le_bytes());
         }
 
         &self.data
