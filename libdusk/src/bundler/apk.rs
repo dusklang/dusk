@@ -1,4 +1,5 @@
 use std::io::{self, Write};
+use std::mem::offset_of;
 use std::ops::Range;
 use std::cmp::{min, Ord};
 
@@ -18,7 +19,7 @@ use crate::mir::FuncId;
 use crate::linker::Linker;
 use crate::backend::Backend;
 use crate::bundler::Bundler;
-use crate::zip::ZipBuilder;
+use crate::zip::{EndOfCentralDirectoryRecord, ZipBuilder};
 
 const PAGE_ALIGNMENT: usize = 4096;
 
@@ -271,7 +272,7 @@ impl Bundler for ApkBundler {
         }
         let mut data = archive.data;
         let new_central_directory_offset = (archive.central_directory_offset + signing_block.data.len()) as u32;
-        data[(archive.eocd_offset + 16)..(archive.eocd_offset + 20)].copy_from_slice(&new_central_directory_offset.to_le_bytes());
+        data[(archive.eocd_offset + offset_of!(EndOfCentralDirectoryRecord, central_directory_offset))..][..4].copy_from_slice(&new_central_directory_offset.to_le_bytes());
         data.reserve(signing_block.data.len());
         let mut central_directory = data.split_off(archive.central_directory_offset);
         data.extend_from_slice(&signing_block.data);

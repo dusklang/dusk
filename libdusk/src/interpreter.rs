@@ -400,8 +400,11 @@ pub enum InterpMode {
     RunTime,
 }
 
+#[cfg(windows)]
 struct Allocation(region::Allocation);
+#[cfg(windows)]
 unsafe impl Sync for Allocation {}
+#[cfg(windows)]
 unsafe impl Send for Allocation {}
 
 #[allow(unused)]

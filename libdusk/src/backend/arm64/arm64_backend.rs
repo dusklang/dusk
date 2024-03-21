@@ -1,5 +1,3 @@
-use std::ffi::CString;
-
 use crate::backend::arm64::*;
 use crate::backend::Backend;
 use crate::ast::LegacyIntrinsic;
@@ -48,10 +46,10 @@ impl Backend for Arm64Backend {
                                     let cfstring = exe.use_constant_nsstring(&d.code.mir.strings[id]);
                                     code.load_fixed_up_address(Reg::R0, cfstring);
 
-                                    let string_by_appending_string = exe.use_objc_selector(&CString::new("stringByAppendingString:").unwrap());
+                                    let string_by_appending_string = exe.use_objc_selector(c"stringByAppendingString:");
                                     code.load_fixed_up_address(Reg::R1, string_by_appending_string);
 
-                                    let cfstring_to_append = exe.use_constant_nsstring(&CString::new(" LOLOLOLOLOLOL YOU'VE BEEN Appended To").unwrap());
+                                    let cfstring_to_append = exe.use_constant_nsstring(c" LOLOLOLOLOLOL YOU'VE BEEN Appended To");
                                     code.load_fixed_up_address(Reg::R2, cfstring_to_append);
 
                                     code.blr(Reg::R16);

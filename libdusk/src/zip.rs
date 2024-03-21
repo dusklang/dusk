@@ -80,15 +80,15 @@ struct CentralDirectoryFileHeader {
 
 #[repr(C)]
 #[derive(ByteSwap)]
-struct EndOfCentralDirectoryRecord {
-    sig: u32,
-    disk_number: u16,
-    central_directory_start_disk: u16,
-    disk_num_central_directory_records: u16,
-    total_num_central_directory_records: u16,
-    central_directory_size: u32,
-    central_directory_offset: u32,
-    // comment_length: u16,
+pub struct EndOfCentralDirectoryRecord {
+    pub sig: u32,
+    pub disk_number: u16,
+    pub central_directory_start_disk: u16,
+    pub disk_num_central_directory_records: u16,
+    pub total_num_central_directory_records: u16,
+    pub central_directory_size: u32,
+    pub central_directory_offset: u32,
+    // pub comment_length: u16,
 }
 
 fn push_entry(buf: &mut Buffer, file: &FileEntry) {
