@@ -22,7 +22,7 @@ jobs:
           repository: zachwolfe/display_adapter
           path: display_adapter
       - name: Build
-        run: cd dusk && cargo build --verbose
+        run: rustup update && cd dusk && cargo build --verbose
   build-windows:
     runs-on: windows-latest
     steps:
@@ -35,7 +35,7 @@ jobs:
           repository: zachwolfe/display_adapter
           path: display_adapter
       - name: Build
-        run: cd dusk && cargo build --verbose
+        run: rustup update && cd dusk && cargo build --verbose
   build-ubuntu:
     runs-on: ubuntu-latest
     steps:
@@ -48,4 +48,4 @@ jobs:
           repository: zachwolfe/display_adapter
           path: display_adapter
       - name: Build
-        run: cd dusk && cargo build --verbose
+        run: rustup update && cd dusk && cargo build --verbose
