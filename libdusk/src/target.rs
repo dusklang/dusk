@@ -30,12 +30,15 @@ pub enum OperatingSystem {
     Windows,
     MacOS,
     Android,
+    Linux,
 }
 
 impl Default for OperatingSystem {
     fn default() -> Self {
         if cfg!(windows) {
             OperatingSystem::Windows
+        } else if cfg!(target_os = "linux") {
+            OperatingSystem::Linux
         } else {
             OperatingSystem::MacOS
         }

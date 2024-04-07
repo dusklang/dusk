@@ -19,7 +19,7 @@ impl Driver {
     pub fn create_bundler(&self) -> Box<dyn Bundler> {
         match self.os {
             // TODO: support macOS app bundles, and more. The former of which will require changing the Bundler trait's interface since it only supports outputting a single file.
-            OperatingSystem::MacOS | OperatingSystem::Windows => Box::new(NullBundler::new()),
+            OperatingSystem::MacOS | OperatingSystem::Windows | OperatingSystem::Linux => Box::new(NullBundler::new()),
             OperatingSystem::Android => Box::new(ApkBundler::new()),
         }
     }

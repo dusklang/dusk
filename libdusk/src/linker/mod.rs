@@ -6,11 +6,13 @@ use crate::backend::Backend;
 use crate::linker::macho::MachOLinker;
 use crate::linker::pe::PELinker;
 use crate::linker::dex::DexLinker;
+use crate::linker::elf::ElfLinker;
 
 #[macro_use]
 pub mod byte_swap;
 mod pe;
 mod macho;
+mod elf;
 pub mod dex;
 
 pub mod exe;
@@ -25,6 +27,7 @@ impl Driver {
             OperatingSystem::MacOS => Box::new(MachOLinker::new()),
             OperatingSystem::Windows => Box::new(PELinker::new()),
             OperatingSystem::Android => Box::new(DexLinker::new()),
+            OperatingSystem::Linux => Box::new(ElfLinker::new()),
         }
     }
 }
