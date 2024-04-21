@@ -1,15 +1,21 @@
+use std::collections::HashMap;
 use std::io::{Write, Result as IoResult};
 use std::mem;
+use std::ffi::{CString, CStr};
 
 use bitflags::bitflags;
 use dusk_proc_macros::{ByteSwap, ByteSwapBitflags};
+use index_vec::{define_index_type, IndexVec};
 
 use crate::driver::Driver;
 use crate::mir::FuncId;
 use crate::linker::Linker;
-use crate::backend::Backend;
+use crate::backend::{Backend, CodeBlob};
+use crate::linker::exe::{Exe, DynLibId, ImportedSymbolId, FixupLocationId};
 use crate::linker::byte_swap::Buffer;
 use crate::target::Arch;
+
+define_index_type!(struct ProgramHeaderEntryId = u32;);
 
 #[repr(u8)]
 enum OsAbi {
@@ -175,6 +181,62 @@ impl ElfLinker {
     }
 }
 
+enum ElfFixupLocation {
+    CStringSectionOffset(usize),
+}
+
+#[derive(Default)]
+struct ElfExe {
+    cstrings: Vec<u8>,
+    cstring_map: HashMap<CString, usize>,
+
+    fixup_locations: IndexVec<FixupLocationId, ElfFixupLocation>,
+
+    code_blob: Option<Box<dyn CodeBlob>>,
+}
+
+impl ElfExe {
+    #[doc(hidden)]
+    fn intern_cstring(&mut self, string: &CStr) -> usize {
+        *self.cstring_map.entry(string.to_owned()).or_insert_with(|| {
+            let offset = self.cstrings.len();
+            self.cstrings.extend(string.to_bytes_with_nul());
+            offset
+        })
+    }
+}
+
+impl Exe for ElfExe {
+    fn import_dynamic_library(&mut self, name: &str) -> DynLibId {
+        todo!("dynamic library import")
+        // self.import_dynamic_library_impl(format!("usr/lib/{}", name))
+    }
+
+    fn import_symbol(&mut self, dylib: DynLibId, name: String) -> ImportedSymbolId {
+        todo!("symbol import")
+        // let symbol = MachOImportedSymbol { dylib, name };
+        // *self.imported_symbol_map.entry(symbol.clone()).or_insert_with(|| {
+        //     self.imported_symbols.push(symbol.clone())
+        // })
+    }
+
+    fn use_imported_symbol(&mut self, symbol: ImportedSymbolId) -> FixupLocationId {
+        todo!("symbol import usage")
+        // let got_entry = self.add_got_entry(symbol);
+        // self.fixup_locations.push(MachOFixupLocation::GotEntry(got_entry))
+    }
+
+    fn use_cstring(&mut self, string: &CStr) -> FixupLocationId {
+        let offset = self.intern_cstring(string);
+        self.fixup_locations.push(ElfFixupLocation::CStringSectionOffset(offset))
+    }
+
+    fn add_code_blob(&mut self, blob: Box<dyn CodeBlob>) {
+        assert!(self.code_blob.is_none());
+        self.code_blob = Some(blob);
+    }
+}
+
 impl Linker for ElfLinker {
     fn write(&mut self, d: &Driver, main_function_index: FuncId, backend: &mut dyn Backend, dest: &mut dyn Write) -> IoResult<()> {
         let elf_header = self.buf.push(
@@ -184,7 +246,7 @@ impl Linker for ElfLinker {
                 endianness: 1, // little endian
                 version_1: 1,
                 os_abi: OsAbi::SystemV as u8,
-                // TODO: pick the right value here. Dynamic libraries
+                // TODO: pick the right value here. Dynamic libraries apparently use this as the ABI version of the dynamic linker.
                 abi_version: 0,
                 padding: [0; 7],
                 ty: ObjectFileType::Dynamic as u16,
@@ -208,6 +270,23 @@ impl Linker for ElfLinker {
                 name_section_header_table_entry_index: 0,
             }
         );
+
+        self.buf.push(
+            ProgramHeaderTableEntry64 {
+                segment_type: SegmentType::Loadable as u32,
+                segment_flags: SegmentFlags::READABLE | SegmentFlags::EXECUTABLE,
+                segment_offset: 0,
+                segment_vaddr: 0,
+                segment_paddr: 0,
+                segment_file_size: 0, // To be filled in later
+                segment_memory_size: 0, // To be filled in later
+                segment_alignment: 65536,
+            }
+        );
+
+        let mut exe = ElfExe::default();
+
+        backend.generate_func(d, main_function_index, true, &mut exe);
         
         dest.write_all(&self.buf.data)?;
         Ok(())
