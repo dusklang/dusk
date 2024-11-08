@@ -324,7 +324,7 @@ impl Value {
     }
 
     pub unsafe fn from_arbitrary_value<T>(val: T) -> Value {
-        let addr = &val as *const T as *const u8;
+        let addr = &raw const val as *const u8;
         let bytes = unsafe {
             slice::from_raw_parts(addr, mem::size_of::<T>())
         };
