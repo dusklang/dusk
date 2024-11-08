@@ -1,7 +1,5 @@
-use std::sync::RwLock;
-
+use std::sync::{RwLock, LazyLock};
 use string_interner::DefaultStringInterner as StringInterner;
-use lazy_static::lazy_static;
 
 use crate::ast::ExprId;
 use crate::mir::Const;
@@ -70,6 +68,4 @@ impl DriverRef<'_> {
     }
 }
 
-lazy_static! {
-    pub static ref DRIVER: RwLock<Driver> = RwLock::new(Driver::default());
-}
+pub static DRIVER: LazyLock<RwLock<Driver>> = LazyLock::new(|| RwLock::new(Driver::default()));

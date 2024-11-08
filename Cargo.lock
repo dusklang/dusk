@@ -747,7 +747,6 @@ dependencies = [
  "dusk-proc-macros",
  "indenter",
  "index_vec",
- "lazy_static",
  "libc",
  "lsp-types",
  "md-5",

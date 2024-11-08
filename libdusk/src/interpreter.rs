@@ -6,7 +6,7 @@ use std::mem;
 use std::slice;
 use std::fmt::{Write, Debug};
 use std::cell::RefCell;
-use std::sync::RwLock;
+use std::sync::{RwLock, LazyLock};
 use std::borrow::Cow;
 #[cfg(windows)]
 use std::cmp::min;
@@ -19,7 +19,6 @@ use num_bigint::{BigInt, Sign};
 use crate::display_adapter;
 use crate::index_vec::range_iter;
 use index_vec::IndexVec;
-use lazy_static::lazy_static;
 
 use crate::target::Arch;
 use crate::ast::{LegacyIntrinsic, EnumId, GenericParamId, ExternFunctionRef, ExternModId, NewNamespaceId};
@@ -1812,9 +1811,8 @@ impl DriverRef<'_> {
     }
 }
 
-lazy_static! {
-    static ref INTERP: RwLock<Interpreter> = RwLock::new(Interpreter::new(InterpMode::CompileTime));
-}
+static INTERP: LazyLock<RwLock<Interpreter>> = LazyLock::new(|| RwLock::new(Interpreter::new(InterpMode::CompileTime)));
+
 thread_local! {
     static INTERP_STACK: RefCell<Vec<StackFrame>> = RefCell::new(Vec::new());
 }

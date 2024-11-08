@@ -20,7 +20,6 @@ index_vec = { version = "0.1.2" }
 indenter = "0.3.2"
 region = "3.0"
 dusk-proc-macros = { version = "0.1", path = "../dusk-proc-macros" }
-lazy_static = "1.4.0"
 derivative = "2.2"
 md-5 = "0.10.0"
 yaml-rust = "0.4.5"

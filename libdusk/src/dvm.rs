@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 use std::sync::mpsc;
 use std::thread::{self, ThreadId};
-use std::sync::Mutex;
-
-use lazy_static::lazy_static;
+use std::sync::{Mutex, LazyLock};
 use std::thread_local;
 
 use crate::driver::{DriverRef, DRIVER};
@@ -156,6 +154,4 @@ thread_local! {
     static SERVER: DvmServer = DvmServer::new().unwrap();
 }
 
-lazy_static! {
-    static ref SHARED_SENDER: Mutex<Option<mpsc::Sender<Message>>> = Mutex::new(None);
-}
+static SHARED_SENDER: LazyLock<Mutex<Option<mpsc::Sender<Message>>>> = LazyLock::new(|| Mutex::new(None));
