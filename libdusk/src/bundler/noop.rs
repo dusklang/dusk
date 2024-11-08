@@ -6,13 +6,13 @@ use crate::linker::Linker;
 use crate::backend::Backend;
 use crate::bundler::Bundler;
 
-pub struct NullBundler;
+pub struct NoOpBundler;
 
-impl NullBundler {
+impl NoOpBundler {
     pub fn new() -> Self { Self }
 }
 
-impl Bundler for NullBundler {
+impl Bundler for NoOpBundler {
     fn write(&mut self, d: &Driver, main_function_index: FuncId, linker: &mut dyn Linker, backend: &mut dyn Backend, dest: &mut dyn Write) -> io::Result<()> {
         linker.write(d, main_function_index, backend, dest)
     }
