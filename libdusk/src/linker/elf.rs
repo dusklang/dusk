@@ -287,6 +287,8 @@ impl Linker for ElfLinker {
             }
         );
 
+        // ============== Program headers (segments, added to the buffer immediately) ==============
+
         let program_header_table_offset = self.buf.pos() as u64;
         let program_header_table_header = self.add_program_header(
             ProgramHeaderTableEntry64 {
@@ -300,9 +302,18 @@ impl Linker for ElfLinker {
                 segment_alignment: 8,
             }
         );
-
-        // TODO: INTERP segment
-
+        let interp_segment_header = self.add_program_header(
+            ProgramHeaderTableEntry64 {
+                segment_type: SegmentType::Interpreter as u32,
+                segment_flags: SegmentFlags::READABLE,
+                segment_offset: 0, // To be filled in later,
+                segment_vaddr: 0, // To be filled in later
+                segment_paddr: 0, // To be filled in later
+                segment_file_size: 0, // To be filled in later
+                segment_memory_size: 0, // To be filled in later
+                segment_alignment: 1,
+            }
+        );
         let read_exec_segment_header = self.add_program_header(
             ProgramHeaderTableEntry64 {
                 segment_type: SegmentType::Loadable as u32,
@@ -316,32 +327,7 @@ impl Linker for ElfLinker {
             }
         );
 
-        // TODO: read/write LOAD segment
-        // TODO: DYNAMIC segment
-        // TODO: NOTE segment
-        // TODO: maybe GNU_EH_FRAME, GNU_STACK, GNU_RELRO
-
-        let program_header_table_size = self.buf.pos() as u64 - program_header_table_offset;
-        self.buf.get_mut(program_header_table_header).modify(|header| {
-            header.segment_file_size = program_header_table_size;
-            header.segment_memory_size = program_header_table_size;
-        });
-
-        self.buf.get_mut(elf_header).modify(|header| {
-            header.program_header_table_offset = program_header_table_offset;
-            header.num_program_header_table_entries = self.program_headers.len() as u16;
-        });
-
-        let mut exe = ElfExe::default();
-
-        backend.generate_func(d, main_function_index, true, &mut exe);
-        // TODO: write the code to the executable
-
-        let read_exec_segment_size = self.buf.pos() as u64;
-        self.buf.get_mut(read_exec_segment_header).modify(|header| {
-            header.segment_file_size = read_exec_segment_size;
-            header.segment_memory_size = read_exec_segment_size;
-        });
+        // ============== Section headers (not added to the buffer until later) ==============
 
         self.add_section_header(
             "",
@@ -355,6 +341,21 @@ impl Linker for ElfLinker {
                 linked_section_index: 0,
                 section_info: 0,
                 section_alignment: 0,
+                section_entry_size: 0,
+            }
+        );
+        let interp_section = self.add_section_header(
+            ".interp",
+            SectionHeaderTableEntry64 {
+                section_name_offset: 0,
+                section_type: SectionType::ProgramData as u32,
+                section_flags: SectionFlags64::ALLOC,
+                section_vaddr: 0, // To be filled in later
+                section_file_offset: 0, // To be filled in later
+                section_file_size: 0, // To be filled in later
+                linked_section_index: 0,
+                section_info: 0,
+                section_alignment: 1,
                 section_entry_size: 0,
             }
         );
@@ -373,6 +374,46 @@ impl Linker for ElfLinker {
                 section_entry_size: 0,
             }
         );
+
+        // TODO: read/write LOAD segment
+        // TODO: DYNAMIC segment
+        // TODO: NOTE segment
+        // TODO: maybe GNU_EH_FRAME, GNU_STACK, GNU_RELRO
+
+        let program_header_table_size = self.buf.pos() as u64 - program_header_table_offset;
+        self.buf.get_mut(program_header_table_header).modify(|header| {
+            header.segment_file_size = program_header_table_size;
+            header.segment_memory_size = program_header_table_size;
+        });
+        self.buf.get_mut(elf_header).modify(|header| {
+            header.program_header_table_offset = program_header_table_offset;
+            header.num_program_header_table_entries = self.program_headers.len() as u16;
+        });
+
+        let interp_offset = self.buf.pos() as u64;
+        self.buf.push_null_terminated_string("/lib/ld-linux-aarch64.so.1");
+        let interp_size = self.buf.pos() as u64 - interp_offset;
+        self.buf.get_mut(interp_segment_header).modify(|header| {
+            header.segment_offset = interp_offset;
+            header.segment_vaddr = interp_offset;
+            header.segment_paddr = interp_offset;
+            header.segment_file_size = interp_size;
+            header.segment_memory_size = interp_size;
+        });
+        self.section_headers[interp_section].1.section_vaddr = interp_offset;
+        self.section_headers[interp_section].1.section_file_offset = interp_offset;
+        self.section_headers[interp_section].1.section_file_size = interp_size;
+
+        let mut exe = ElfExe::default();
+
+        backend.generate_func(d, main_function_index, true, &mut exe);
+        // TODO: write the code to the executable
+
+        let read_exec_segment_size = self.buf.pos() as u64;
+        self.buf.get_mut(read_exec_segment_header).modify(|header| {
+            header.segment_file_size = read_exec_segment_size;
+            header.segment_memory_size = read_exec_segment_size;
+        });
 
         let section_name_string_table_offset = self.buf.pos() as u64;
         let mut section_name_string_table_offsets = IndexVec::<SectionIndex, u32>::new();
