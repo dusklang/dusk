@@ -6,16 +6,18 @@ use std::ffi::{CString, CStr};
 use bitflags::bitflags;
 use dusk_proc_macros::{ByteSwap, ByteSwapBitflags};
 use index_vec::{define_index_type, IndexVec};
+use crate::index_vec::IndexVecExt;
 
 use crate::driver::Driver;
 use crate::mir::FuncId;
 use crate::linker::Linker;
 use crate::backend::{Backend, CodeBlob};
 use crate::linker::exe::{Exe, DynLibId, ImportedSymbolId, FixupLocationId};
-use crate::linker::byte_swap::Buffer;
+use crate::linker::byte_swap::{Buffer, Ref};
 use crate::target::Arch;
 
 define_index_type!(struct ProgramHeaderEntryId = u32;);
+define_index_type!(struct SectionIndex = u32;);
 
 #[repr(u8)]
 enum OsAbi {
@@ -173,6 +175,8 @@ struct SectionHeaderTableEntry64 {
 #[derive(Default)]
 pub struct ElfLinker {
     buf: Buffer,
+    program_headers: Vec<Ref<ProgramHeaderTableEntry64>>,
+    section_headers: IndexVec<SectionIndex, (String, SectionHeaderTableEntry64)>,
 }
 
 impl ElfLinker {
@@ -237,6 +241,18 @@ impl Exe for ElfExe {
     }
 }
 
+impl ElfLinker {
+    fn add_program_header(&mut self, header: ProgramHeaderTableEntry64) -> Ref<ProgramHeaderTableEntry64> {
+        let header = self.buf.push(header);
+        self.program_headers.push(header);
+        header
+    }
+
+    fn add_section_header(&mut self, name: impl Into<String>, header: SectionHeaderTableEntry64) -> SectionIndex {
+        self.section_headers.push((name.into(), header))
+    }
+}
+
 impl Linker for ElfLinker {
     fn write(&mut self, d: &Driver, main_function_index: FuncId, backend: &mut dyn Backend, dest: &mut dyn Write) -> IoResult<()> {
         let elf_header = self.buf.push(
@@ -271,23 +287,117 @@ impl Linker for ElfLinker {
             }
         );
 
-        self.buf.push(
+        let program_header_table_offset = self.buf.pos() as u64;
+        let program_header_table_header = self.add_program_header(
+            ProgramHeaderTableEntry64 {
+                segment_type: SegmentType::ProgramHeaderTable as u32,
+                segment_flags: SegmentFlags::READABLE,
+                segment_offset: program_header_table_offset,
+                segment_vaddr: program_header_table_offset,
+                segment_paddr: program_header_table_offset,
+                segment_file_size: 0, // To be filled in later
+                segment_memory_size: 0, // To be filled in later
+                segment_alignment: 8,
+            }
+        );
+
+        // TODO: INTERP segment
+
+        let read_exec_segment_header = self.add_program_header(
             ProgramHeaderTableEntry64 {
                 segment_type: SegmentType::Loadable as u32,
                 segment_flags: SegmentFlags::READABLE | SegmentFlags::EXECUTABLE,
                 segment_offset: 0,
                 segment_vaddr: 0,
-                segment_paddr: 0,
+                segment_paddr: program_header_table_offset,
                 segment_file_size: 0, // To be filled in later
                 segment_memory_size: 0, // To be filled in later
-                segment_alignment: 65536,
+                segment_alignment: 0x10000,
             }
         );
+
+        // TODO: read/write LOAD segment
+        // TODO: DYNAMIC segment
+        // TODO: NOTE segment
+        // TODO: maybe GNU_EH_FRAME, GNU_STACK, GNU_RELRO
+
+        let program_header_table_size = self.buf.pos() as u64 - program_header_table_offset;
+        self.buf.get_mut(program_header_table_header).modify(|header| {
+            header.segment_file_size = program_header_table_size;
+            header.segment_memory_size = program_header_table_size;
+        });
+
+        self.buf.get_mut(elf_header).modify(|header| {
+            header.program_header_table_offset = program_header_table_offset;
+            header.num_program_header_table_entries = self.program_headers.len() as u16;
+        });
 
         let mut exe = ElfExe::default();
 
         backend.generate_func(d, main_function_index, true, &mut exe);
-        
+        // TODO: write the code to the executable
+
+        let read_exec_segment_size = self.buf.pos() as u64;
+        self.buf.get_mut(read_exec_segment_header).modify(|header| {
+            header.segment_file_size = read_exec_segment_size;
+            header.segment_memory_size = read_exec_segment_size;
+        });
+
+        self.add_section_header(
+            "",
+            SectionHeaderTableEntry64 {
+                section_name_offset: 0,
+                section_type: SectionType::Null as u32,
+                section_flags: SectionFlags64::empty(),
+                section_vaddr: 0,
+                section_file_offset: 0,
+                section_file_size: 0,
+                linked_section_index: 0,
+                section_info: 0,
+                section_alignment: 0,
+                section_entry_size: 0,
+            }
+        );
+        let section_names_section_header = self.add_section_header(
+            ".shstrtab",
+            SectionHeaderTableEntry64 {
+                section_name_offset: 0,
+                section_type: SectionType::StringTable as u32,
+                section_flags: SectionFlags64::empty(),
+                section_vaddr: 0,
+                section_file_offset: 0,  // to be filled in later
+                section_file_size: 0,    // to be filled in later
+                linked_section_index: 0,
+                section_info: 0,
+                section_alignment: 1,
+                section_entry_size: 0,
+            }
+        );
+
+        let section_name_string_table_offset = self.buf.pos() as u64;
+        let mut section_name_string_table_offsets = IndexVec::<SectionIndex, u32>::new();
+        for (section, (name, _)) in self.section_headers.iter_enumerated() {
+            let offset = self.buf.pos() as u64 - section_name_string_table_offset;
+            section_name_string_table_offsets.push_at(section, offset as u32);
+            self.buf.push_null_terminated_string(name);
+        }
+
+        self.section_headers[section_names_section_header].1.section_file_offset = section_name_string_table_offset;
+        self.section_headers[section_names_section_header].1.section_file_size = self.buf.pos() as u64 - section_name_string_table_offset;
+
+        let section_header_table_offset = self.buf.pos() as u64;
+        let num_section_headers = self.section_headers.len();
+        for (section, (_, mut section_header)) in std::mem::take(&mut self.section_headers).into_iter_enumerated() {
+            section_header.section_name_offset = section_name_string_table_offsets[section];
+            self.buf.push(section_header);
+        }
+
+        self.buf.get_mut(elf_header).modify(|header| {
+            header.section_header_table_offset = section_header_table_offset;
+            header.num_section_header_table_entries = num_section_headers as u16;
+            header.name_section_header_table_entry_index = section_names_section_header.index() as u16;
+        });
+
         dest.write_all(&self.buf.data)?;
         Ok(())
     }
