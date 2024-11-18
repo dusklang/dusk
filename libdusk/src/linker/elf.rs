@@ -119,6 +119,77 @@ struct ProgramHeaderTableEntry64 {
     segment_alignment: u64,
 }
 
+#[repr(C)]
+#[derive(ByteSwap)]
+struct DynamicSectionEntry64 {
+    tag: i64,
+    value: u64,
+}
+
+#[repr(i64)]
+enum DynamicSectionEntryTag {
+    Null,
+    Needed,
+    PltRelocSize,
+    PltGot,
+    Hash,
+    StrTab,
+    SymTab,
+    Rela,
+    RelaSize,
+    RelaEntrySize,
+    StrSize,
+    SymEntrySize,
+    Init,
+    Fini,
+    SoName,
+    Rpath, // deprecated
+    Symbolic,
+    Rel,
+    RelSize,
+    RelEntrySize,
+    PltRelType,
+    Debug,
+    TextRel,
+    JmpRel,
+    BindNow,
+    InitArray,
+    FiniArray,
+    InitArraySize,
+    FiniArraySize,
+    RunPath,
+    Flags,
+    PreInitArray = 0x20,
+    PreInitArraySize,
+    SymTabShndx,
+    Num,
+
+    Flags1 = 0x6ffffffb,
+}
+
+bitflags! {
+    #[derive(ByteSwapBitflags, Copy, Clone)]
+    struct DynamicSectionEntryFlags: u64 {
+        const ORIGIN   = 0x0000_0001;
+        const SYMBOLIC = 0x0000_0002;
+        const TEXT_RELOCATIONS = 0x0000_0004;
+        const BIND_NOW = 0x0000_0008;
+        // TODO: add more
+    }
+}
+
+bitflags! {
+    #[derive(ByteSwapBitflags, Copy, Clone)]
+    struct DynamicSectionEntryFlags1: u64 {
+        const NOW       = 0x0000_0001;
+        const GLOBAL    = 0x0000_0002;
+        const GROUP     = 0x0000_0004;
+        const NO_DELETE = 0x0000_0008;
+        const PIE       = 0x0800_0000;
+        // TODO: add more
+    }
+}
+
 #[repr(u32)]
 enum SectionType {
     Null = 0x00,
@@ -165,7 +236,7 @@ struct SectionHeaderTableEntry64 {
     section_flags: SectionFlags64,
     section_vaddr: u64,
     section_file_offset: u64,
-    section_file_size: u64,
+    section_size: u64,
     linked_section_index: u32,
     section_info: u32,
     section_alignment: u64,
@@ -255,6 +326,8 @@ impl ElfLinker {
 
 impl Linker for ElfLinker {
     fn write(&mut self, d: &Driver, main_function_index: FuncId, backend: &mut dyn Backend, dest: &mut dyn Write) -> IoResult<()> {
+        let bss_size = 8 as u64; // TODO: don't hardcode this.
+
         let elf_header = self.buf.push(
             ElfHeader64 {
                 magic: [0x7F, b'E', b'L', b'F'],
@@ -320,12 +393,38 @@ impl Linker for ElfLinker {
                 segment_flags: SegmentFlags::READABLE | SegmentFlags::EXECUTABLE,
                 segment_offset: 0,
                 segment_vaddr: 0,
-                segment_paddr: program_header_table_offset,
+                segment_paddr: 0,
                 segment_file_size: 0, // To be filled in later
                 segment_memory_size: 0, // To be filled in later
                 segment_alignment: 0x10000,
             }
         );
+        let read_write_segment_header = self.add_program_header(
+            ProgramHeaderTableEntry64 {
+                segment_type: SegmentType::Loadable as u32,
+                segment_flags: SegmentFlags::READABLE | SegmentFlags::WRITEABLE,
+                segment_offset: 0,      // To be filled in later
+                segment_vaddr: 0,       // To be filled in later
+                segment_paddr: 0,       // To be filled in later
+                segment_file_size: 0,   // To be filled in later
+                segment_memory_size: 0, // To be filled in later
+                segment_alignment: 0x10000,
+            }
+        );
+        let dynamic_segment_header = self.add_program_header(
+            ProgramHeaderTableEntry64 {
+                segment_type: SegmentType::Dynamic as u32,
+                segment_flags: SegmentFlags::READABLE | SegmentFlags::WRITEABLE,
+                segment_offset: 0,      // To be filled in later
+                segment_vaddr: 0,       // To be filled in later
+                segment_paddr: 0,       // To be filled in later
+                segment_file_size: 0,   // To be filled in later
+                segment_memory_size: 0, // To be filled in later
+                segment_alignment: 8,
+            }
+        );
+        // TODO: NOTE segment
+        // TODO: maybe GNU_EH_FRAME, GNU_STACK, GNU_RELRO
 
         // ============== Section headers (not added to the buffer until later) ==============
 
@@ -337,7 +436,7 @@ impl Linker for ElfLinker {
                 section_flags: SectionFlags64::empty(),
                 section_vaddr: 0,
                 section_file_offset: 0,
-                section_file_size: 0,
+                section_size: 0,
                 linked_section_index: 0,
                 section_info: 0,
                 section_alignment: 0,
@@ -352,13 +451,58 @@ impl Linker for ElfLinker {
                 section_flags: SectionFlags64::ALLOC,
                 section_vaddr: 0, // To be filled in later
                 section_file_offset: 0, // To be filled in later
-                section_file_size: 0, // To be filled in later
+                section_size: 0, // To be filled in later
                 linked_section_index: 0,
                 section_info: 0,
                 section_alignment: 1,
                 section_entry_size: 0,
             }
         );
+        let dynamic_str_section = self.add_section_header(
+            ".dynstr",
+            SectionHeaderTableEntry64 {
+                section_name_offset: 0,
+                section_type: SectionType::StringTable as u32,
+                section_flags: SectionFlags64::ALLOC,
+                section_vaddr: 0, // To be filled in later
+                section_file_offset: 0, // To be filled in later
+                section_size: 0, // To be filled in later
+                linked_section_index: 0,
+                section_info: 0,
+                section_alignment: 1,
+                section_entry_size: 0,
+            }
+        );
+        let dynamic_section = self.add_section_header(
+            ".dynamic",
+            SectionHeaderTableEntry64 {
+                section_name_offset: 0,
+                section_type: SectionType::Dynamic as u32,
+                section_flags: SectionFlags64::WRITEABLE | SectionFlags64::ALLOC,
+                section_vaddr: 0, // To be filled in later
+                section_file_offset: 0, // To be filled in later
+                section_size: 0, // To be filled in later
+                linked_section_index: dynamic_str_section.raw(),
+                section_info: 0,
+                section_alignment: 8,
+                section_entry_size: 16,
+            }
+        );
+        let bss_section = (bss_size > 0).then(|| self.add_section_header(
+            ".bss",
+            SectionHeaderTableEntry64 {
+                section_name_offset: 0,
+                section_type: SectionType::NoData as u32,
+                section_flags: SectionFlags64::WRITEABLE | SectionFlags64::ALLOC,
+                section_vaddr: 0, // To be filled in later
+                section_file_offset: 0, // To be filled in later
+                section_size: 0, // To be filled in later
+                linked_section_index: 0,
+                section_info: 0,
+                section_alignment: 1,
+                section_entry_size: 0,
+            }
+        ));
         let section_names_section_header = self.add_section_header(
             ".shstrtab",
             SectionHeaderTableEntry64 {
@@ -367,18 +511,13 @@ impl Linker for ElfLinker {
                 section_flags: SectionFlags64::empty(),
                 section_vaddr: 0,
                 section_file_offset: 0,  // to be filled in later
-                section_file_size: 0,    // to be filled in later
+                section_size: 0,    // to be filled in later
                 linked_section_index: 0,
                 section_info: 0,
                 section_alignment: 1,
                 section_entry_size: 0,
             }
         );
-
-        // TODO: read/write LOAD segment
-        // TODO: DYNAMIC segment
-        // TODO: NOTE segment
-        // TODO: maybe GNU_EH_FRAME, GNU_STACK, GNU_RELRO
 
         let program_header_table_size = self.buf.pos() as u64 - program_header_table_offset;
         self.buf.get_mut(program_header_table_header).modify(|header| {
@@ -402,18 +541,83 @@ impl Linker for ElfLinker {
         });
         self.section_headers[interp_section].1.section_vaddr = interp_offset;
         self.section_headers[interp_section].1.section_file_offset = interp_offset;
-        self.section_headers[interp_section].1.section_file_size = interp_size;
+        self.section_headers[interp_section].1.section_size = interp_size;
+
+        let dynamic_str_section_pos = self.buf.pos() as u64;
+        // TODO: add dynamic string table entries
+        let dynamic_str_section_size = self.buf.pos() as u64 - dynamic_str_section_pos;
+
+        self.section_headers[dynamic_str_section].1.section_vaddr = dynamic_str_section_pos;
+        self.section_headers[dynamic_str_section].1.section_file_offset = dynamic_str_section_pos;
+        self.section_headers[dynamic_str_section].1.section_size = dynamic_str_section_size;
 
         let mut exe = ElfExe::default();
 
         backend.generate_func(d, main_function_index, true, &mut exe);
-        // TODO: write the code to the executable
+        // TODO: write the code to the executable (in .text section, most likely?)
 
         let read_exec_segment_size = self.buf.pos() as u64;
         self.buf.get_mut(read_exec_segment_header).modify(|header| {
             header.segment_file_size = read_exec_segment_size;
             header.segment_memory_size = read_exec_segment_size;
         });
+
+        self.buf.jump_to_rva(self.buf.rva() + 0x10000);
+        let read_write_segment_rva = self.buf.rva() as u64;
+        let read_write_segment_pos = self.buf.pos() as u64;
+
+        let (dynamic_section_pos, dynamic_section_rva) = (self.buf.pos() as u64, self.buf.rva() as u64);
+        self.buf.push(
+            DynamicSectionEntry64 {
+                tag: DynamicSectionEntryTag::Flags as i64,
+                value: DynamicSectionEntryFlags::BIND_NOW.bits(),
+            }
+        );
+        self.buf.push(
+            DynamicSectionEntry64 {
+                tag: DynamicSectionEntryTag::Flags1 as i64,
+                value: (DynamicSectionEntryFlags1::NOW | DynamicSectionEntryFlags1::PIE).bits(),
+            }
+        );
+        self.buf.push(
+            DynamicSectionEntry64 {
+                tag: DynamicSectionEntryTag::Null as i64,
+                value: 0,
+            }
+        );
+        let dynamic_section_size = self.buf.pos() as u64 - dynamic_section_pos;
+        self.buf.get_mut(dynamic_segment_header).modify(|header| {
+            header.segment_offset = dynamic_section_pos;
+            header.segment_vaddr = dynamic_section_rva;
+            header.segment_paddr = dynamic_section_rva;
+            header.segment_file_size = dynamic_section_size;
+            header.segment_memory_size = dynamic_section_size;
+        });
+
+        self.section_headers[dynamic_section].1.section_vaddr = dynamic_section_rva;
+        self.section_headers[dynamic_section].1.section_file_offset = dynamic_section_pos;
+        self.section_headers[dynamic_section].1.section_size = dynamic_section_size;
+
+        if let Some(bss_section) = bss_section {
+            let bss_pos = self.buf.pos() as u64;
+            let bss_rva = self.buf.rva() as u64;
+            self.buf.jump_to_rva(self.buf.rva() + bss_size as usize);
+
+            self.section_headers[bss_section].1.section_vaddr = bss_rva;
+            self.section_headers[bss_section].1.section_file_offset = bss_pos;
+            self.section_headers[bss_section].1.section_size = bss_size;
+        }
+
+        let read_write_segment_file_size = self.buf.pos() as u64 - read_write_segment_pos;
+        let read_write_segment_memory_size = read_write_segment_file_size + bss_size;
+        self.buf.get_mut(read_write_segment_header).modify(|header| {
+            header.segment_offset = read_write_segment_pos;
+            header.segment_vaddr = read_write_segment_rva;
+            header.segment_paddr = read_write_segment_rva;
+            header.segment_file_size = read_write_segment_file_size;
+            header.segment_memory_size = read_write_segment_memory_size;
+        });
+
 
         let section_name_string_table_offset = self.buf.pos() as u64;
         let mut section_name_string_table_offsets = IndexVec::<SectionIndex, u32>::new();
@@ -424,7 +628,7 @@ impl Linker for ElfLinker {
         }
 
         self.section_headers[section_names_section_header].1.section_file_offset = section_name_string_table_offset;
-        self.section_headers[section_names_section_header].1.section_file_size = self.buf.pos() as u64 - section_name_string_table_offset;
+        self.section_headers[section_names_section_header].1.section_size = self.buf.pos() as u64 - section_name_string_table_offset;
 
         let section_header_table_offset = self.buf.pos() as u64;
         let num_section_headers = self.section_headers.len();
