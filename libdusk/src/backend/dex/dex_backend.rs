@@ -30,7 +30,7 @@ impl Backend for DexBackend {
         let mut on_create = DexEncoder::new();
         let this = on_create.alloc_input_register();
         let saved_instance_state = on_create.alloc_input_register();
-        
+
         // super.onCreate(saved_instance_state)
         let super_on_create = exe.add_method(android_activity, "onCreate", DexReturnType::Void, &[DexType::Class("android.os.Bundle").into()]);
         on_create.invoke_super(&[this, saved_instance_state], super_on_create);

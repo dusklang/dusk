@@ -115,7 +115,7 @@ impl Backend for Arm64Backend {
                         Instr::LegacyIntrinsic { intr, .. } => {
                             match intr {
                                 LegacyIntrinsic::Print => {
-                                    // Store string address in x19 (assuming it's already in rax for now, which is obviously dumb)
+                                    // Store string address in x19 (assuming it's already in x0 for now, which is obviously dumb)
                                     code.mov64(Reg::R19, Reg::R0);
 
                                     // Store stdout handle in x20
@@ -163,7 +163,7 @@ impl Backend for Arm64Backend {
                 code.ret(Reg::LR);
             },
             OperatingSystem::Linux => {
-                
+
             },
             OperatingSystem::Android => todo!(),
         }
