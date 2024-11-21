@@ -842,7 +842,7 @@ impl Driver {
 
         // Return the stack to its previous state
         thunk.add64_imm(Reg64::Rsp, total_stack_allocation);
-        
+
         // Return
         thunk.ret();
 
@@ -1059,7 +1059,7 @@ impl DriverRef<'_> {
 
         // Prologue
         thunk.sub64_imm(false, Reg::SP, Reg::SP, needed_stack_space);
-        thunk.stp64(Reg::FP, Reg::LR, Reg::SP, (needed_stack_space - 16).try_into().unwrap());
+        thunk.stp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, (needed_stack_space - 16).try_into().unwrap());
         thunk.add64_imm(false, Reg::FP, Reg::SP, needed_stack_space - 16);
         thunk.str64(Reg::R0, Reg::SP, needed_stack_space - 24);
         thunk.str64(Reg::R1, Reg::SP, needed_stack_space - 32);
@@ -1156,7 +1156,7 @@ impl DriverRef<'_> {
         }
 
         // Epilogue
-        thunk.ldp64(Reg::FP, Reg::LR, Reg::SP, (needed_stack_space - 16).try_into().unwrap());
+        thunk.ldp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, (needed_stack_space - 16).try_into().unwrap());
         thunk.add64_imm(false, Reg::SP, Reg::SP, needed_stack_space);
         thunk.ret(Reg::LR);
 
@@ -1171,7 +1171,7 @@ impl DriverRef<'_> {
         let indirect_args: Vec<*mut u8> = args.iter_mut()
             .map(|arg| arg.as_mut_ptr())
             .collect();
-        
+
         let library = &self.read().code.mir.extern_mods[&func_ref.extern_mod];
         let func = &library.imported_functions[func_ref.index];
         // TODO: cache library and proc addresses (and thunks when possible)
@@ -1185,7 +1185,7 @@ impl DriverRef<'_> {
             panic!("unable to load function {:?} from library {:?}", func_name, library.library_path);
         }
         let func_address: i64 = func_ptr as i64;
-        
+
         let thunk = self.generate_thunk(func, func_address, &arg_tys);
         unsafe {
             let thunk_ptr = thunk.as_ptr::<u8>();
@@ -1422,7 +1422,7 @@ impl DriverRef<'_> {
                                 _ => panic!("Unexpected type passed to `print`: {:?}", ty),
                             }
                             std::io::stdout().flush().unwrap();
-                            Value::Nothing 
+                            Value::Nothing
                         },
                         LegacyIntrinsic::Malloc => {
                             assert_eq!(arguments.len(), 1);
@@ -1509,7 +1509,7 @@ impl DriverRef<'_> {
                             assert_eq!(arguments.len(), 1);
                             let val = frame.get_val(arguments[0], &*self.read());
                             let ptr = val.as_raw_ptr();
-                            
+
                             let str = unsafe { CStr::from_ptr(ptr as _) };
                             let path = str.to_str().unwrap();
                             let (file, _) = d.lookup_file(next_op);

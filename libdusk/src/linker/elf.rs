@@ -11,7 +11,7 @@ use crate::index_vec::IndexVecExt;
 use crate::driver::Driver;
 use crate::mir::FuncId;
 use crate::linker::Linker;
-use crate::backend::{Backend, CodeBlob};
+use crate::backend::{Backend, CodeBlob, CodeBlobExt};
 use crate::linker::exe::{Exe, DynLibId, ImportedSymbolId, FixupLocationId};
 use crate::linker::byte_swap::{Buffer, Ref};
 use crate::target::Arch;
@@ -473,6 +473,21 @@ impl Linker for ElfLinker {
                 section_entry_size: 0,
             }
         );
+        let text_section = self.add_section_header(
+            ".text",
+            SectionHeaderTableEntry64 {
+                section_name_offset: 0,
+                section_type: SectionType::ProgramData as u32,
+                section_flags: SectionFlags64::ALLOC | SectionFlags64::EXECUTABLE,
+                section_vaddr: 0, // To be filled in later
+                section_file_offset: 0, // To be filled in later
+                section_size: 0, // To be filled in later
+                linked_section_index: dynamic_str_section.raw(),
+                section_info: 0,
+                section_alignment: 4,
+                section_entry_size: 0,
+            }
+        );
         let dynamic_section = self.add_section_header(
             ".dynamic",
             SectionHeaderTableEntry64 {
@@ -551,10 +566,18 @@ impl Linker for ElfLinker {
         self.section_headers[dynamic_str_section].1.section_file_offset = dynamic_str_section_pos;
         self.section_headers[dynamic_str_section].1.section_size = dynamic_str_section_size;
 
+        self.buf.pad_to_next_boundary(4);
+        let text_section_pos = self.buf.pos() as u64;
         let mut exe = ElfExe::default();
-
         backend.generate_func(d, main_function_index, true, &mut exe);
-        // TODO: write the code to the executable (in .text section, most likely?)
+        let mut code = mem::take(&mut exe.code_blob).expect("generate_func must generate a code blob");
+        self.buf.pad_with_zeroes(code.len());
+
+        let text_section_size = self.buf.pos() as u64 - text_section_pos;
+
+        self.section_headers[text_section].1.section_vaddr = text_section_pos;
+        self.section_headers[text_section].1.section_file_offset = text_section_pos;
+        self.section_headers[text_section].1.section_size = text_section_size;
 
         let read_exec_segment_size = self.buf.pos() as u64;
         self.buf.get_mut(read_exec_segment_header).modify(|header| {
@@ -562,6 +585,7 @@ impl Linker for ElfLinker {
             header.segment_memory_size = read_exec_segment_size;
         });
 
+        self.buf.pad_to_next_boundary(8);
         self.buf.jump_to_rva(self.buf.rva() + 0x10000);
         let read_write_segment_rva = self.buf.rva() as u64;
         let read_write_segment_pos = self.buf.pos() as u64;
@@ -641,7 +665,14 @@ impl Linker for ElfLinker {
             header.section_header_table_offset = section_header_table_offset;
             header.num_section_header_table_entries = num_section_headers as u16;
             header.name_section_header_table_entry_index = section_names_section_header.index() as u16;
+            header.entry_point_addr = text_section_pos;
         });
+
+        let code = code.perform_fixups(text_section_pos as usize, |fixup| {
+            todo!()
+        });
+
+        self.buf.data[text_section_pos as usize..][..code.len()].copy_from_slice(code);
 
         dest.write_all(&self.buf.data)?;
         Ok(())

@@ -29,7 +29,7 @@ impl Backend for Arm64Backend {
         match d.os {
             OperatingSystem::MacOS => {
                 let frame_size = 16;
-                code.stp64(Reg::FP, Reg::LR, Reg::SP, -16);
+                code.stp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, -16);
                 code.sub64_imm(false, Reg::SP, Reg::SP, frame_size);
                 let exe = exe.as_objc_exe().expect("Objective-C features unimplemented for current executable format, but are required on macOS");
                 for &op in &d.code.blocks[func.blocks[0]].ops {
@@ -88,7 +88,7 @@ impl Backend for Arm64Backend {
                     }
                 }
                 code.add64_imm(false, Reg::SP, Reg::SP, frame_size);
-                code.ldp64(Reg::FP, Reg::LR, Reg::SP, -16);
+                code.ldp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, -16);
                 code.ret(Reg::LR);
             },
             OperatingSystem::Windows => {
@@ -99,7 +99,7 @@ impl Backend for Arm64Backend {
                 let lstrlen = exe.import_symbol(kernel32, "lstrlenA".to_string());
 
                 let frame_size = 16;
-                code.stp64(Reg::FP, Reg::LR, Reg::SP, -frame_size);
+                code.stp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, -frame_size);
                 code.mov64(Reg::FP, Reg::SP);
                 for &op in &d.code.blocks[func.blocks[0]].ops {
                     let instr = d.code.ops[op].as_mir_instr().unwrap();
@@ -159,11 +159,37 @@ impl Backend for Arm64Backend {
                         _ => todo!("{}", d.display_mir_instr(op)),
                     }
                 }
-                code.ldp64(Reg::FP, Reg::LR, Reg::SP, frame_size);
+                code.ldp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, frame_size);
                 code.ret(Reg::LR);
             },
             OperatingSystem::Linux => {
+                code.stp64(PairAddressMode::PreIndex, Reg::R29, Reg::R30, Reg::SP, -16);
+                code.mov64(Reg::R29, Reg::SP);
 
+                for &op in &d.code.blocks[func.blocks[0]].ops {
+                    let instr = d.code.ops[op].as_mir_instr().unwrap();
+                    match instr {
+                        &Instr::Ret(value) => {
+                            let value = d.code.ops[value].as_mir_instr().unwrap();
+                            // If this is the main function, we should call exit().
+                            if is_main {
+                                assert_eq!(value, &Instr::Void);
+                                // exit code
+                                code.movz64(Reg::R0, 7, 0);
+                                // syscall number
+                                code.movz64(Reg::R8, 93, 0);
+                                // syscall
+                                code.svc(0);
+                                code.nop();
+                            } else {
+                                todo!();
+                            }
+                        },
+                        _ => todo!("{}", d.display_mir_instr(op)),
+                    }
+                }
+                code.ldp64(PairAddressMode::PostIndex, Reg::R29, Reg::R30, Reg::SP, 16);
+                code.ret(Reg::LR);
             },
             OperatingSystem::Android => todo!(),
         }

@@ -143,6 +143,16 @@ impl Drop for InstrEncoder {
     }
 }
 
+#[repr(u32)]
+pub enum PairAddressMode {
+    /// `<STP|LDP> <Rt1>, <Rt2>, [<Rn|SP>], #<imm>`
+    PostIndex = 1,
+    /// `<STP|LDP> <Rt1>, <Rt2>, [<Rn|SP>{, #<imm>}]`
+    SignedOffset,
+    /// `<STP|LDP> <Rt1>, <Rt2>, [<Rn|SP>, #<imm>]!`
+    PreIndex,
+}
+
 #[allow(unused)]
 impl Arm64Encoder {
     pub fn new() -> Self {
@@ -159,7 +169,7 @@ impl Arm64Encoder {
 
     pub fn sub64_imm(&mut self, l_shift_by_12: bool, dest: impl Into<RegOrSp>, minuend: impl Into<RegOrSp>, subtrahend: u16) {
         assert!(subtrahend < (1 << 12));
-        
+
         let mut instr = InstrEncoder::new();
 
         // 64-bit
@@ -184,7 +194,7 @@ impl Arm64Encoder {
 
     fn add_imm_impl(&mut self, bits64: bool, l_shift_by_12: bool, dest: RegOrSp, addend1: RegOrSp, addend2: u16) {
         assert!(addend2 < (1 << 12), "{}", addend2);
-        
+
         let mut instr = InstrEncoder::new();
 
         instr.push_value_of_size(bits64 as u32, 1);
@@ -220,19 +230,17 @@ impl Arm64Encoder {
         self.adr_impl(false, dest, imm)
     }
 
-    fn access_pair_impl64(&mut self, is_load: bool, val1: Reg, val2: Reg, addr: impl Into<RegOrSp>, imm: i16) {
+    fn access_pair_impl64(&mut self, bits64: bool, mode: PairAddressMode, is_load: bool, val1: Reg, val2: Reg, addr: impl Into<RegOrSp>, imm: i16) {
         assert!(imm >= -512 && imm <= 504 && imm % 8 == 0);
         let imm7 = imm / 8;
 
         let mut instr = InstrEncoder::new();
 
         // 64-bit
-        instr.push_value_of_size(1, 1);
-
-        instr.push_value_of_size(0x52, 8);
-
+        instr.push_value_of_size(bits64 as u32, 1);
+        instr.push_value_of_size(10, 5);
+        instr.push_value_of_size(mode as u32, 3);
         instr.push_value_of_size(is_load as u32, 1);
-
         instr.push_value_of_size((imm7 as u16 & 0x7f) as u32, 7);
         instr.push_reg(val2);
         instr.push_reg(addr.into());
@@ -241,12 +249,12 @@ impl Arm64Encoder {
         self.push(instr);
     }
 
-    pub fn stp64(&mut self, src1: Reg, src2: Reg, dest_addr: impl Into<RegOrSp>, imm: i16) {
-        self.access_pair_impl64(false, src1, src2, dest_addr, imm);
+    pub fn stp64(&mut self, mode: PairAddressMode, src1: Reg, src2: Reg, dest_addr: impl Into<RegOrSp>, imm: i16) {
+        self.access_pair_impl64(true, mode, false, src1, src2, dest_addr, imm);
     }
 
-    pub fn ldp64(&mut self, dest1: Reg, dest2: Reg, src_addr: impl Into<RegOrSp>, imm: i16) {
-        self.access_pair_impl64(true, dest1, dest2, src_addr, imm);
+    pub fn ldp64(&mut self, mode: PairAddressMode, dest1: Reg, dest2: Reg, src_addr: impl Into<RegOrSp>, imm: i16) {
+        self.access_pair_impl64(true, mode, true, dest1, dest2, src_addr, imm);
     }
 
     // used for str & ldr with unsigned offsets
@@ -255,7 +263,7 @@ impl Arm64Encoder {
         assert!(imm as u32 % fac == 0);
         let imm12 = imm as u32 / fac;
         assert!(imm12 <= 4095);
-        
+
         let mut instr = InstrEncoder::new();
 
         instr.push_value_of_size(size as u32, 2);
@@ -381,6 +389,14 @@ impl Arm64Encoder {
         self.push(instr);
     }
 
+    pub fn svc(&mut self, imm: u16) {
+        let mut instr = InstrEncoder::new();
+        instr.push_value_of_size(0x6a0, 11);
+        instr.push_value_of_size(imm as u32, 16);
+        instr.push_value_of_size(1, 5);
+        self.push(instr);
+    }
+
     pub fn ret(&mut self, return_addr: Reg) {
         let mut instr = InstrEncoder::new();
         instr.push_value_of_size(0x35_97c0, 22);
@@ -388,6 +404,10 @@ impl Arm64Encoder {
         instr.push_value_of_size(0, 5);
 
         self.push(instr);
+    }
+
+    pub fn nop(&mut self) {
+        self.data.extend(0xd503201fu32.to_le_bytes());
     }
 
     /// Allocate space for `n` instructions. Returns the offset, for convenience. Useful when you need to generate
