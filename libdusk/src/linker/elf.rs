@@ -243,6 +243,65 @@ struct SectionHeaderTableEntry64 {
     section_entry_size: u64,
 }
 
+#[repr(C)]
+#[derive(ByteSwap)]
+struct SymbolTableEntry64 {
+    name: u32,
+    info: u8,
+    other: u8,
+    section_header_table_index: u16,
+    value: u64,
+    size: u64,
+}
+
+impl SymbolTableEntry64 {
+    fn undefined() -> Self {
+        Self {
+            name: 0,
+            info: 0,
+            other: 0,
+            section_header_table_index: SHN_UNDEF,
+            value: 0,
+            size: 0,
+        }
+    }
+}
+
+#[repr(u8)]
+enum SymbolType {
+    NoType,
+    Object,
+    Func,
+    Section,
+    File,
+    Common,
+}
+
+#[repr(u8)]
+enum SymbolBinding {
+    Local,
+    Global,
+    Weak,
+}
+
+fn symbol_info(ty: SymbolType, binding: SymbolBinding) -> u8 {
+    (binding as u8) << 4 + (ty as u8) & 0xf
+}
+
+#[repr(u8)]
+enum SymbolVisibility {
+    Default,
+    Internal,
+    Hidden,
+    Protected
+}
+
+const SHN_UNDEF:  u16 = 0;
+const SHN_BEFORE: u16 = 0xff00;
+const SHN_AFTER:  u16 = 0xff01;
+const SNH_ABS:    u16 = 0xfff1;
+const SNH_COMMON: u16 = 0xfff2;
+
 #[derive(Default)]
 pub struct ElfLinker {
     buf: Buffer,
@@ -458,6 +517,21 @@ impl Linker for ElfLinker {
                 section_entry_size: 0,
             }
         );
+        let dynamic_symbol_section = self.add_section_header(
+            ".dynsym",
+            SectionHeaderTableEntry64 {
+                section_name_offset: 0,
+                section_type: SectionType::DynamicSymbolTable as u32,
+                section_flags: SectionFlags64::ALLOC,
+                section_vaddr: 0, // To be filled in later
+                section_file_offset: 0, // To be filled in later
+                section_size: 0, // To be filled in later
+                linked_section_index: 0, // To be filled in almost immediately
+                section_info: interp_section.raw(),
+                section_alignment: 8,
+                section_entry_size: 24,
+            }
+        );
         let dynamic_str_section = self.add_section_header(
             ".dynstr",
             SectionHeaderTableEntry64 {
@@ -473,6 +547,7 @@ impl Linker for ElfLinker {
                 section_entry_size: 0,
             }
         );
+        self.section_headers[dynamic_symbol_section].1.linked_section_index = dynamic_str_section.raw();
         let text_section = self.add_section_header(
             ".text",
             SectionHeaderTableEntry64 {
@@ -558,7 +633,16 @@ impl Linker for ElfLinker {
         self.section_headers[interp_section].1.section_file_offset = interp_offset;
         self.section_headers[interp_section].1.section_size = interp_size;
 
+        self.buf.pad_to_next_boundary(8);
+        let dynamic_symbol_section_pos = self.buf.pos() as u64;
+        self.buf.push(SymbolTableEntry64::undefined());
+        let dynamic_symbol_section_size = self.buf.pos() as u64 - dynamic_symbol_section_pos;
+        self.section_headers[dynamic_symbol_section].1.section_vaddr = dynamic_symbol_section_pos;
+        self.section_headers[dynamic_symbol_section].1.section_file_offset = dynamic_symbol_section_pos;
+        self.section_headers[dynamic_symbol_section].1.section_size = dynamic_symbol_section_size;
+
         let dynamic_str_section_pos = self.buf.pos() as u64;
+        self.buf.push(0u8);
         // TODO: add dynamic string table entries
         let dynamic_str_section_size = self.buf.pos() as u64 - dynamic_str_section_pos;
 
@@ -591,6 +675,30 @@ impl Linker for ElfLinker {
         let read_write_segment_pos = self.buf.pos() as u64;
 
         let (dynamic_section_pos, dynamic_section_rva) = (self.buf.pos() as u64, self.buf.rva() as u64);
+        self.buf.push(
+            DynamicSectionEntry64 {
+                tag: DynamicSectionEntryTag::StrTab as i64,
+                value: dynamic_str_section_pos,
+            }
+        );
+        self.buf.push(
+            DynamicSectionEntry64 {
+                tag: DynamicSectionEntryTag::SymTab as i64,
+                value: dynamic_symbol_section_pos,
+            }
+        );
+        self.buf.push(
+            DynamicSectionEntry64 {
+                tag: DynamicSectionEntryTag::StrSize as i64,
+                value: dynamic_str_section_size,
+            }
+        );
+        self.buf.push(
+            DynamicSectionEntry64 {
+                tag: DynamicSectionEntryTag::SymEntrySize as i64,
+                value: 24,
+            }
+        );
         self.buf.push(
             DynamicSectionEntry64 {
                 tag: DynamicSectionEntryTag::Flags as i64,
@@ -654,6 +762,7 @@ impl Linker for ElfLinker {
         self.section_headers[section_names_section_header].1.section_file_offset = section_name_string_table_offset;
         self.section_headers[section_names_section_header].1.section_size = self.buf.pos() as u64 - section_name_string_table_offset;
 
+        self.buf.pad_to_next_boundary(8);
         let section_header_table_offset = self.buf.pos() as u64;
         let num_section_headers = self.section_headers.len();
         for (section, (_, mut section_header)) in std::mem::take(&mut self.section_headers).into_iter_enumerated() {
