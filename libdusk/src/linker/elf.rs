@@ -269,6 +269,7 @@ impl SymbolTableEntry64 {
 }
 
 #[repr(u8)]
+#[derive(Copy, Clone)]
 enum SymbolType {
     NoType,
     Object,
@@ -278,6 +279,7 @@ enum SymbolType {
     Common,
 }
 
+#[derive(PartialEq, Copy, Clone)]
 #[repr(u8)]
 enum SymbolBinding {
     Local,
@@ -286,7 +288,7 @@ enum SymbolBinding {
 }
 
 fn symbol_info(ty: SymbolType, binding: SymbolBinding) -> u8 {
-    (binding as u8) << 4 + (ty as u8) & 0xf
+    ((binding as u8) << 4) + ((ty as u8) & 0xf)
 }
 
 #[repr(u8)]
@@ -307,6 +309,7 @@ struct SymbolTableBuilder {
     entries: IndexVec<SymbolTableEntryIndex, SymbolTableEntry64>,
     entry_refs: IndexVec<SymbolTableEntryIndex, Ref<SymbolTableEntry64>>,
     string_table: Buffer,
+    first_non_local_entry: Option<u32>,
 }
 
 impl SymbolTableBuilder {
@@ -315,6 +318,7 @@ impl SymbolTableBuilder {
             entries: IndexVec::new(),
             entry_refs: IndexVec::new(),
             string_table: Buffer::new(),
+            first_non_local_entry: None,
         };
 
         salf.add_entry("", SymbolType::NoType, SymbolBinding::Local, SymbolVisibility::Default, SHN_UNDEF, 0, 0);
@@ -323,6 +327,13 @@ impl SymbolTableBuilder {
 
     fn add_entry(&mut self, name: &str, ty: SymbolType, binding: SymbolBinding, visibility: SymbolVisibility, section_header_table_index: u16, value: u64, size: u64) -> SymbolTableEntryIndex {
         assert!(self.entry_refs.is_empty());
+        if binding == SymbolBinding::Local {
+            assert!(self.first_non_local_entry.is_none());
+        } else {
+            if self.first_non_local_entry.is_none() {
+                self.first_non_local_entry = Some(self.entries.len() as u32);
+            }
+        }
         let entry = self.entries.push(
             SymbolTableEntry64 {
                 name: self.string_table.pos() as u32,
@@ -351,6 +362,10 @@ impl SymbolTableBuilder {
 
     fn get_string_table(&self) -> &[u8] {
         &self.string_table.data
+    }
+
+    fn first_non_local_entry(&self) -> u32 {
+        self.first_non_local_entry.unwrap_or(self.entries.len() as u32)
     }
 }
 
@@ -439,7 +454,12 @@ impl Linker for ElfLinker {
     fn write(&mut self, d: &Driver, main_function_index: FuncId, backend: &mut dyn Backend, dest: &mut dyn Write) -> IoResult<()> {
         let bss_size = 8 as u64; // TODO: don't hardcode this.
 
+        let mut exe = ElfExe::default();
+        backend.generate_func(d, main_function_index, true, &mut exe);
+        let mut code = mem::take(&mut exe.code_blob).expect("generate_func must generate a code blob");
+
         let mut dynamic_symbol_table = SymbolTableBuilder::new();
+        let mut normal_symbol_table = SymbolTableBuilder::new();
 
         let elf_header = self.buf.push(
             ElfHeader64 {
@@ -581,7 +601,7 @@ impl Linker for ElfLinker {
                 section_file_offset: 0, // To be filled in later
                 section_size: 0, // To be filled in later
                 linked_section_index: 0, // To be filled in almost immediately
-                section_info: interp_section.raw(),
+                section_info: dynamic_symbol_table.first_non_local_entry(),
                 section_alignment: 8,
                 section_entry_size: 24,
             }
@@ -632,6 +652,14 @@ impl Linker for ElfLinker {
                 section_entry_size: 16,
             }
         );
+
+        let mut section_symbol_table_indices = HashMap::<SectionIndex, SymbolTableEntryIndex>::new();
+        for (section_index, (section_name, _)) in self.section_headers.iter_enumerated().skip(1) {
+            let symbol = normal_symbol_table.add_entry(section_name, SymbolType::Section, SymbolBinding::Local, SymbolVisibility::Default, section_index.raw() as u16, 0, 0);
+            section_symbol_table_indices.insert(section_index, symbol);
+        }
+        let func_symbol = normal_symbol_table.add_entry("start", SymbolType::Func, SymbolBinding::Global, SymbolVisibility::Default, text_section.raw() as u16, 0, code.len() as u64);
+
         let bss_section = (bss_size > 0).then(|| self.add_section_header(
             ".bss",
             SectionHeaderTableEntry64 {
@@ -647,6 +675,37 @@ impl Linker for ElfLinker {
                 section_entry_size: 0,
             }
         ));
+        let symbol_table_section = self.add_section_header(
+            ".symtab",
+            SectionHeaderTableEntry64 {
+                section_name_offset: 0,
+                section_type: SectionType::SymbolTable as u32,
+                section_flags: SectionFlags64::empty(),
+                section_vaddr: 0,
+                section_file_offset: 0, // To be filled in later
+                section_size: 0, // To be filled in later
+                linked_section_index: 0, // To be filled in almost immediately
+                section_info: normal_symbol_table.first_non_local_entry(),
+                section_alignment: 8,
+                section_entry_size: 24,
+            }
+        );
+        let string_table_section = self.add_section_header(
+            ".strtab",
+            SectionHeaderTableEntry64 {
+                section_name_offset: 0,
+                section_type: SectionType::StringTable as u32,
+                section_flags: SectionFlags64::empty(),
+                section_vaddr: 0,
+                section_file_offset: 0, // To be filled in later
+                section_size: 0, // To be filled in later
+                linked_section_index: 0,
+                section_info: 0,
+                section_alignment: 1,
+                section_entry_size: 0,
+            }
+        );
+        self.section_headers[symbol_table_section].1.linked_section_index = string_table_section.raw();
         let section_names_section_header = self.add_section_header(
             ".shstrtab",
             SectionHeaderTableEntry64 {
@@ -706,9 +765,6 @@ impl Linker for ElfLinker {
 
         self.buf.pad_to_next_boundary(4);
         let text_section_pos = self.buf.pos() as u64;
-        let mut exe = ElfExe::default();
-        backend.generate_func(d, main_function_index, true, &mut exe);
-        let mut code = mem::take(&mut exe.code_blob).expect("generate_func must generate a code blob");
         self.buf.pad_with_zeroes(code.len());
 
         let text_section_size = self.buf.pos() as u64 - text_section_pos;
@@ -716,6 +772,8 @@ impl Linker for ElfLinker {
         self.section_headers[text_section].1.section_vaddr = text_section_pos;
         self.section_headers[text_section].1.section_file_offset = text_section_pos;
         self.section_headers[text_section].1.section_size = text_section_size;
+
+        normal_symbol_table.entries[func_symbol].value = text_section_pos;
 
         let read_exec_segment_size = self.buf.pos() as u64;
         self.buf.get_mut(read_exec_segment_header).modify(|header| {
@@ -751,6 +809,12 @@ impl Linker for ElfLinker {
             DynamicSectionEntry64 {
                 tag: DynamicSectionEntryTag::SymEntrySize as i64,
                 value: 24,
+            }
+        );
+        self.buf.push(
+            DynamicSectionEntry64 {
+                tag: DynamicSectionEntryTag::Debug as i64,
+                value: 0,
             }
         );
         self.buf.push(
@@ -804,6 +868,18 @@ impl Linker for ElfLinker {
             header.segment_memory_size = read_write_segment_memory_size;
         });
 
+        self.buf.pad_to_next_boundary(8);
+        let symbol_table_pos = self.buf.pos() as u64;
+        normal_symbol_table.alloc_in(&mut self.buf);
+        let symbol_table_size = self.buf.pos() as u64 - symbol_table_pos;
+        self.section_headers[symbol_table_section].1.section_file_offset = symbol_table_pos;
+        self.section_headers[symbol_table_section].1.section_size = symbol_table_size;
+
+        let string_table_pos = self.buf.pos() as u64;
+        self.buf.extend(normal_symbol_table.get_string_table());
+        let string_table_size = self.buf.pos() as u64 - string_table_pos;
+        self.section_headers[string_table_section].1.section_file_offset = string_table_pos;
+        self.section_headers[string_table_section].1.section_size = string_table_size;
 
         let section_name_string_table_offset = self.buf.pos() as u64;
         let mut section_name_string_table_offsets = IndexVec::<SectionIndex, u32>::new();
@@ -815,6 +891,10 @@ impl Linker for ElfLinker {
 
         self.section_headers[section_names_section_header].1.section_file_offset = section_name_string_table_offset;
         self.section_headers[section_names_section_header].1.section_size = self.buf.pos() as u64 - section_name_string_table_offset;
+
+        for (section_index, symbol_index) in section_symbol_table_indices {
+            normal_symbol_table.entries[symbol_index].value = self.section_headers[section_index].1.section_vaddr;
+        }
 
         self.buf.pad_to_next_boundary(8);
         let section_header_table_offset = self.buf.pos() as u64;
@@ -838,6 +918,7 @@ impl Linker for ElfLinker {
         self.buf.data[text_section_pos as usize..][..code.len()].copy_from_slice(code);
 
         dynamic_symbol_table.write_to(&mut self.buf);
+        normal_symbol_table.write_to(&mut self.buf);
 
         dest.write_all(&self.buf.data)?;
         Ok(())
