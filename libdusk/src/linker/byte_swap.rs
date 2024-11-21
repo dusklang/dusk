@@ -206,7 +206,12 @@ impl Buffer {
     pub fn pad_rva_to_next_boundary(&mut self, alignment: usize) {
         self.rva = nearest_multiple_of_rt!(self.rva, alignment);
     }
-    
+
+    pub fn pad_both_to_next_boundary(&mut self, alignment: usize) {
+        self.pad_to_next_boundary(alignment);
+        self.pad_rva_to_next_boundary(alignment);
+    }
+
     pub fn push_uleb128(&mut self, mut val: u32) {
         while val > 0x7F {
             self.push(0x80u8 | (val & 0x7f) as u8);

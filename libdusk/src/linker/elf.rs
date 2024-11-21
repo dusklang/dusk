@@ -746,7 +746,7 @@ impl Linker for ElfLinker {
         self.section_headers[interp_section].1.section_file_offset = interp_offset;
         self.section_headers[interp_section].1.section_size = interp_size;
 
-        self.buf.pad_to_next_boundary(8);
+        self.buf.pad_both_to_next_boundary(8);
         let dynamic_symbol_section_pos = self.buf.pos() as u64;
         dynamic_symbol_table.alloc_in(&mut self.buf);
         let dynamic_symbol_section_size = self.buf.pos() as u64 - dynamic_symbol_section_pos;
@@ -763,7 +763,7 @@ impl Linker for ElfLinker {
         self.section_headers[dynamic_str_section].1.section_file_offset = dynamic_str_section_pos;
         self.section_headers[dynamic_str_section].1.section_size = dynamic_str_section_size;
 
-        self.buf.pad_to_next_boundary(4);
+        self.buf.pad_both_to_next_boundary(4);
         let text_section_pos = self.buf.pos() as u64;
         self.buf.pad_with_zeroes(code.len());
 
@@ -781,8 +781,8 @@ impl Linker for ElfLinker {
             header.segment_memory_size = read_exec_segment_size;
         });
 
-        self.buf.pad_to_next_boundary(8);
         self.buf.jump_to_rva(self.buf.rva() + 0x10000);
+        self.buf.pad_both_to_next_boundary(8);
         let read_write_segment_rva = self.buf.rva() as u64;
         let read_write_segment_pos = self.buf.pos() as u64;
 
@@ -868,7 +868,7 @@ impl Linker for ElfLinker {
             header.segment_memory_size = read_write_segment_memory_size;
         });
 
-        self.buf.pad_to_next_boundary(8);
+        self.buf.pad_both_to_next_boundary(8);
         let symbol_table_pos = self.buf.pos() as u64;
         normal_symbol_table.alloc_in(&mut self.buf);
         let symbol_table_size = self.buf.pos() as u64 - symbol_table_pos;
@@ -896,7 +896,7 @@ impl Linker for ElfLinker {
             normal_symbol_table.entries[symbol_index].value = self.section_headers[section_index].1.section_vaddr;
         }
 
-        self.buf.pad_to_next_boundary(8);
+        self.buf.pad_both_to_next_boundary(8);
         let section_header_table_offset = self.buf.pos() as u64;
         let num_section_headers = self.section_headers.len();
         for (section, (_, mut section_header)) in std::mem::take(&mut self.section_headers).into_iter_enumerated() {
