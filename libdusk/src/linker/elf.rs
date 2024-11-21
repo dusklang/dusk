@@ -18,6 +18,7 @@ use crate::target::Arch;
 
 define_index_type!(struct ProgramHeaderEntryId = u32;);
 define_index_type!(struct SectionIndex = u32;);
+define_index_type!(struct SymbolTableEntryIndex = u32;);
 
 #[repr(u8)]
 enum OsAbi {
@@ -302,6 +303,57 @@ const SHN_AFTER:  u16 = 0xff01;
 const SNH_ABS:    u16 = 0xfff1;
 const SNH_COMMON: u16 = 0xfff2;
 
+struct SymbolTableBuilder {
+    entries: IndexVec<SymbolTableEntryIndex, SymbolTableEntry64>,
+    entry_refs: IndexVec<SymbolTableEntryIndex, Ref<SymbolTableEntry64>>,
+    string_table: Buffer,
+}
+
+impl SymbolTableBuilder {
+    fn new() -> Self {
+        let mut salf = Self {
+            entries: IndexVec::new(),
+            entry_refs: IndexVec::new(),
+            string_table: Buffer::new(),
+        };
+
+        salf.add_entry("", SymbolType::NoType, SymbolBinding::Local, SymbolVisibility::Default, SHN_UNDEF, 0, 0);
+        salf
+    }
+
+    fn add_entry(&mut self, name: &str, ty: SymbolType, binding: SymbolBinding, visibility: SymbolVisibility, section_header_table_index: u16, value: u64, size: u64) -> SymbolTableEntryIndex {
+        assert!(self.entry_refs.is_empty());
+        let entry = self.entries.push(
+            SymbolTableEntry64 {
+                name: self.string_table.pos() as u32,
+                info: symbol_info(ty, binding),
+                other: visibility as u8,
+                section_header_table_index,
+                value,
+                size,
+            }
+        );
+        self.string_table.push_null_terminated_string(name);
+        entry
+    }
+
+    fn alloc_in(&mut self, buf: &mut Buffer) {
+        for entry in self.entries.indices() {
+            self.entry_refs.push_at(entry, buf.alloc());
+        }
+    }
+
+    fn write_to(&mut self, buf: &mut Buffer) {
+        for (entry, entry_ref) in mem::take(&mut self.entries).into_iter().zip(mem::take(&mut self.entry_refs)) {
+            buf.get_mut(entry_ref).set(entry);
+        }
+    }
+
+    fn get_string_table(&self) -> &[u8] {
+        &self.string_table.data
+    }
+}
+
 #[derive(Default)]
 pub struct ElfLinker {
     buf: Buffer,
@@ -386,6 +438,8 @@ impl ElfLinker {
 impl Linker for ElfLinker {
     fn write(&mut self, d: &Driver, main_function_index: FuncId, backend: &mut dyn Backend, dest: &mut dyn Write) -> IoResult<()> {
         let bss_size = 8 as u64; // TODO: don't hardcode this.
+
+        let mut dynamic_symbol_table = SymbolTableBuilder::new();
 
         let elf_header = self.buf.push(
             ElfHeader64 {
@@ -635,14 +689,14 @@ impl Linker for ElfLinker {
 
         self.buf.pad_to_next_boundary(8);
         let dynamic_symbol_section_pos = self.buf.pos() as u64;
-        self.buf.push(SymbolTableEntry64::undefined());
+        dynamic_symbol_table.alloc_in(&mut self.buf);
         let dynamic_symbol_section_size = self.buf.pos() as u64 - dynamic_symbol_section_pos;
         self.section_headers[dynamic_symbol_section].1.section_vaddr = dynamic_symbol_section_pos;
         self.section_headers[dynamic_symbol_section].1.section_file_offset = dynamic_symbol_section_pos;
         self.section_headers[dynamic_symbol_section].1.section_size = dynamic_symbol_section_size;
 
         let dynamic_str_section_pos = self.buf.pos() as u64;
-        self.buf.push(0u8);
+        self.buf.extend(dynamic_symbol_table.get_string_table());
         // TODO: add dynamic string table entries
         let dynamic_str_section_size = self.buf.pos() as u64 - dynamic_str_section_pos;
 
@@ -782,6 +836,8 @@ impl Linker for ElfLinker {
         });
 
         self.buf.data[text_section_pos as usize..][..code.len()].copy_from_slice(code);
+
+        dynamic_symbol_table.write_to(&mut self.buf);
 
         dest.write_all(&self.buf.data)?;
         Ok(())
