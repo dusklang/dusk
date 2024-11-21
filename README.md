@@ -4,13 +4,20 @@
 ## Status
 Pre-pre-alpha. Barely usable for anything. There is a working interpreter and a VSCode plugin, and some early work has been done on a few backends and linkers, as shown in the tables below. But fundamental aspects of the language are still missing.
 
+#### Legend
+| Symbol | Meaning                                      |
+|--------|----------------------------------------------|
+| ⋯      | Planned                                      |
+| 🚧     | Minimal functioning artifacts can be created |
+| ✅     | Usable with real code                        |
+
 ### Backends
 | Platform | x86-64 | arm64 | Dalvik bytecode | WASM | JavaScript |
 |----------|--------|-------|-----------------|------|------------|
 | Windows  | 🚧     | 🚧     |                 |      |            |
 | macOS    | ⋯      | 🚧    |                 |      |            |
 | Android  |        | ⋯     | 🚧              |      |            |
-| Linux    | ⋯      | ⋯     |                 |      |            |
+| Linux    | ⋯      | 🚧    |                 |      |            |
 | Web      |        |       |                 | ⋯    | ⋯          |
 
 ### Linkers
@@ -26,13 +33,6 @@ Pre-pre-alpha. Barely usable for anything. There is a working interpreter and a 
 |-------------------|--------|
 | APK               | 🚧     |
 | macOS app bundles | ⋯      |
-
-#### Legend
-| Symbol | Meaning                              |
-|--------|--------------------------------------|
-| ⋯      | Planned                              |
-| 🚧     | Functioning artifacts can be created |
-| ✅     | Usable in practice                   |
 
 ## Goals
 - General-purpose and scalable: should be well-suited to a wide variety of domains, including kernels, game engines, and high-level GUI applications
