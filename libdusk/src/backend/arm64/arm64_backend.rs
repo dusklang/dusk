@@ -169,6 +169,36 @@ impl Backend for Arm64Backend {
                 for &op in &d.code.blocks[func.blocks[0]].ops {
                     let instr = d.code.ops[op].as_mir_instr().unwrap();
                     match instr {
+                        Instr::Const(konst) => {
+                            match konst {
+                                &Const::Str { id, .. } => {
+                                    code.load_fixed_up_address(Reg::R0, exe.use_cstring(&d.code.mir.strings[id]));
+                                },
+                                _ => todo!("{}", d.display_const(konst)),
+                            }
+                        },
+                        Instr::LegacyIntrinsic { intr, .. } => {
+                            match intr {
+                                LegacyIntrinsic::Print => {
+                                    // String address (assuming it's already in x0 for now, which is obviously dumb)
+                                    code.mov64(Reg::R1, Reg::R0);
+
+                                    // stdout fd
+                                    code.movz64(Reg::R0, 1, 0);
+
+                                    // string length
+                                    // TODO: don't hardcode this! (obviously)
+                                    code.movz64(Reg::R2, 14, 0);
+
+                                    // syscall number
+                                    code.movz64(Reg::R8, 0x40, 0);
+
+                                    // syscall
+                                    code.svc(0);
+                                },
+                                _ => todo!("{}", d.display_mir_instr(op)),
+                            }
+                        }
                         &Instr::Ret(value) => {
                             let value = d.code.ops[value].as_mir_instr().unwrap();
                             // If this is the main function, we should call exit().

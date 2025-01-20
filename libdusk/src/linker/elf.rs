@@ -11,7 +11,7 @@ use crate::index_vec::IndexVecExt;
 use crate::driver::Driver;
 use crate::mir::FuncId;
 use crate::linker::Linker;
-use crate::backend::{Backend, CodeBlob, CodeBlobExt};
+use crate::backend::{Backend, CodeBlob, CodeBlobExt, Indirection};
 use crate::linker::exe::{Exe, DynLibId, ImportedSymbolId, FixupLocationId};
 use crate::linker::byte_swap::{Buffer, Ref};
 use crate::target::Arch;
@@ -631,12 +631,29 @@ impl Linker for ElfLinker {
                 section_vaddr: 0, // To be filled in later
                 section_file_offset: 0, // To be filled in later
                 section_size: 0, // To be filled in later
-                linked_section_index: dynamic_str_section.raw(),
+                linked_section_index: 0,
                 section_info: 0,
                 section_alignment: 4,
                 section_entry_size: 0,
             }
         );
+        let rodata_section = (!exe.cstrings.is_empty()).then(|| {
+            self.add_section_header(
+                ".rodata",
+                SectionHeaderTableEntry64 {
+                    section_name_offset: 0,
+                    section_type: SectionType::ProgramData as u32,
+                    section_flags: SectionFlags64::ALLOC,
+                    section_vaddr: 0, // To be filled in later
+                    section_file_offset: 0, // To be filled in later
+                    section_size: 0, // To be filled in later
+                    linked_section_index: 0,
+                    section_info: 0,
+                    section_alignment: 8,
+                    section_entry_size: 0,
+                }
+            )
+        });
         let dynamic_section = self.add_section_header(
             ".dynamic",
             SectionHeaderTableEntry64 {
@@ -775,6 +792,16 @@ impl Linker for ElfLinker {
 
         normal_symbol_table.entries[func_symbol].value = text_section_pos;
 
+        let rodata_section_pos = rodata_section.and_then(|rodata_section| {
+            self.buf.pad_both_to_next_boundary(8);
+            let rodata_section_pos = self.buf.pos() as u64;
+            self.buf.extend(&exe.cstrings);
+            self.section_headers[rodata_section].1.section_vaddr = rodata_section_pos;
+            self.section_headers[rodata_section].1.section_file_offset = rodata_section_pos;
+            self.section_headers[rodata_section].1.section_size = exe.cstrings.len() as u64;
+            Some(rodata_section_pos)
+        });
+
         let read_exec_segment_size = self.buf.pos() as u64;
         self.buf.get_mut(read_exec_segment_header).modify(|header| {
             header.segment_file_size = read_exec_segment_size;
@@ -912,7 +939,9 @@ impl Linker for ElfLinker {
         });
 
         let code = code.perform_fixups(text_section_pos as usize, |fixup| {
-            todo!()
+            match exe.fixup_locations[fixup] {
+                ElfFixupLocation::CStringSectionOffset(offset) => (rodata_section_pos.unwrap() as usize + offset, Indirection::Indirect),
+            }
         });
 
         self.buf.data[text_section_pos as usize..][..code.len()].copy_from_slice(code);
