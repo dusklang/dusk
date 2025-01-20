@@ -13,9 +13,9 @@ pub struct ParsedTbd {
 
 #[derive(Debug)]
 pub enum TbdError {
-    FailedToRead(IoError),
-    InvalidYaml(YamlError),
-    InvalidVersion(Yaml),
+    FailedToRead(#[allow(unused)] IoError),
+    InvalidYaml(#[allow(unused)] YamlError),
+    InvalidVersion(#[allow(unused)] Yaml),
     InvalidName,
 }
 
@@ -38,7 +38,7 @@ fn try_parse_version(version: &Yaml) -> Result<Option<u32>, TbdError> {
         Yaml::BadValue => return Ok(None),
         v => return Err(TbdError::InvalidVersion(v.clone())),
     };
-    
+
     let mut components = [0u16; 3];
     for (i, component) in version.split(".").enumerate() {
         if i >= components.len() {
@@ -55,14 +55,14 @@ fn try_parse_version(version: &Yaml) -> Result<Option<u32>, TbdError> {
     let version = (components[0] as u32) << 16
         | (components[1] as u32) << 8
         | (components[2] as u32) << 0;
-    
+
     Ok(Some(version))
 }
 
 fn parse_tbd_inner_doc(doc: &Yaml) -> Result<ParsedTbd, TbdError> {
     let name = doc["install-name"].as_str()
         .ok_or_else(|| TbdError::InvalidName)?;
-    
+
     let current_version = try_parse_version(&doc["current-version"])?
         .unwrap_or(0x10000);
     let compatibility_version = try_parse_version(&doc["compatibility-version"])?

@@ -21,6 +21,7 @@ define_index_type!(struct SectionIndex = u32;);
 define_index_type!(struct SymbolTableEntryIndex = u32;);
 
 #[repr(u8)]
+#[allow(unused)]
 enum OsAbi {
     SystemV = 0x00,
     HpUx = 0x01,
@@ -43,6 +44,7 @@ enum OsAbi {
 }
 
 #[repr(u16)]
+#[allow(unused)]
 enum ObjectFileType {
     None = 0x00,
     Relocatable = 0x01,
@@ -52,6 +54,7 @@ enum ObjectFileType {
 }
 
 #[repr(u16)]
+#[allow(unused)]
 enum Machine {
     None = 0x00,
     X86 = 0x03,
@@ -87,6 +90,7 @@ struct ElfHeader64 {
 }
 
 #[repr(u32)]
+#[allow(unused)]
 enum SegmentType {
     Null,
     Loadable,
@@ -128,6 +132,7 @@ struct DynamicSectionEntry64 {
 }
 
 #[repr(i64)]
+#[allow(unused)]
 enum DynamicSectionEntryTag {
     Null,
     Needed,
@@ -192,6 +197,7 @@ bitflags! {
 }
 
 #[repr(u32)]
+#[allow(unused)]
 enum SectionType {
     Null = 0x00,
     ProgramData = 0x01,
@@ -256,6 +262,7 @@ struct SymbolTableEntry64 {
 }
 
 impl SymbolTableEntry64 {
+    #[allow(unused)]
     fn undefined() -> Self {
         Self {
             name: 0,
@@ -270,6 +277,7 @@ impl SymbolTableEntry64 {
 
 #[repr(u8)]
 #[derive(Copy, Clone)]
+#[allow(unused)]
 enum SymbolType {
     NoType,
     Object,
@@ -281,6 +289,7 @@ enum SymbolType {
 
 #[derive(PartialEq, Copy, Clone)]
 #[repr(u8)]
+#[allow(unused)]
 enum SymbolBinding {
     Local,
     Global,
@@ -292,6 +301,7 @@ fn symbol_info(ty: SymbolType, binding: SymbolBinding) -> u8 {
 }
 
 #[repr(u8)]
+#[allow(unused)]
 enum SymbolVisibility {
     Default,
     Internal,
@@ -299,11 +309,11 @@ enum SymbolVisibility {
     Protected
 }
 
-const SHN_UNDEF:  u16 = 0;
-const SHN_BEFORE: u16 = 0xff00;
-const SHN_AFTER:  u16 = 0xff01;
-const SNH_ABS:    u16 = 0xfff1;
-const SNH_COMMON: u16 = 0xfff2;
+#[allow(unused)] const SHN_UNDEF:  u16 = 0;
+#[allow(unused)] const SHN_BEFORE: u16 = 0xff00;
+#[allow(unused)] const SHN_AFTER:  u16 = 0xff01;
+#[allow(unused)] const SNH_ABS:    u16 = 0xfff1;
+#[allow(unused)] const SNH_COMMON: u16 = 0xfff2;
 
 struct SymbolTableBuilder {
     entries: IndexVec<SymbolTableEntryIndex, SymbolTableEntry64>,
@@ -408,12 +418,12 @@ impl ElfExe {
 }
 
 impl Exe for ElfExe {
-    fn import_dynamic_library(&mut self, name: &str) -> DynLibId {
+    fn import_dynamic_library(&mut self, _name: &str) -> DynLibId {
         todo!("dynamic library import")
         // self.import_dynamic_library_impl(format!("usr/lib/{}", name))
     }
 
-    fn import_symbol(&mut self, dylib: DynLibId, name: String) -> ImportedSymbolId {
+    fn import_symbol(&mut self, _dylib: DynLibId, _name: String) -> ImportedSymbolId {
         todo!("symbol import")
         // let symbol = MachOImportedSymbol { dylib, name };
         // *self.imported_symbol_map.entry(symbol.clone()).or_insert_with(|| {
@@ -421,7 +431,7 @@ impl Exe for ElfExe {
         // })
     }
 
-    fn use_imported_symbol(&mut self, symbol: ImportedSymbolId) -> FixupLocationId {
+    fn use_imported_symbol(&mut self, _symbol: ImportedSymbolId) -> FixupLocationId {
         todo!("symbol import usage")
         // let got_entry = self.add_got_entry(symbol);
         // self.fixup_locations.push(MachOFixupLocation::GotEntry(got_entry))

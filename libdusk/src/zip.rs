@@ -27,7 +27,6 @@ struct FileEntry {
 pub struct ZipFile {
     pub data: Vec<u8>,
 
-    pub local_entries_offset: usize,
     pub central_directory_offset: usize,
     pub eocd_offset: usize,
 }
@@ -279,7 +278,6 @@ impl ZipBuilder {
 
         ZipFile {
             data: buf.data,
-            local_entries_offset: 0,
             central_directory_offset,
             eocd_offset,
         }

@@ -104,7 +104,7 @@ impl<'a, T: ByteSwap, const BIG_ENDIAN: bool> ResolvedRefMut<'a, T, BIG_ENDIAN> 
         }
     }
 
-    pub fn map<U: ByteSwap, M: FnOnce(&'a mut T) -> &mut U>(&'a mut self, mapper: M) -> ResolvedRefMut<'a, U, BIG_ENDIAN> {
+    pub fn map<U: ByteSwap, M: FnOnce(&'a mut T) -> &'a mut U>(&'a mut self, mapper: M) -> ResolvedRefMut<'a, U, BIG_ENDIAN> {
         ResolvedRefMut { value: mapper(self.value) }
     }
 }
@@ -184,7 +184,6 @@ impl Buffer {
         for &value in values {
             self.push(value);
         }
-        self.rva += size;
     }
 
     pub fn erase_last(&mut self, n: usize) {

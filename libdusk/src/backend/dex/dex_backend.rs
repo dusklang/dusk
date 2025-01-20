@@ -13,7 +13,7 @@ impl Backend for DexBackend {
         Arch::Dex
     }
 
-    fn generate_func(&self, d: &Driver, func_index: FuncId, is_main: bool, exe: &mut dyn Exe) {
+    fn generate_func(&self, _d: &Driver, _func_index: FuncId, _is_main: bool, exe: &mut dyn Exe) {
         let exe = exe.as_dex_exe().expect("dex backend only supports writing code into dex files");
 
         let android_activity = exe.add_type(DexType::Class("android.app.Activity"));

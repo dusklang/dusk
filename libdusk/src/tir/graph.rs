@@ -189,7 +189,7 @@ impl Graph {
     pub fn add_type1_dep(&mut self, a: ItemId, b: ItemId) {
         // TODO: maybe remove this hack to prevent type 1 dependencies on the void expression
         if b == VOID_EXPR_ITEM { return; }
-        
+
         self.dependees[a].push(b);
         self.dependers[b].push(a);
     }
@@ -463,7 +463,7 @@ impl Graph {
                     } else {
                         commands.push(MockStateCommand::Discard);
                     }
-                    
+
                     if suhmm_state.next_dep(succeeded) {
                         commands.push(MockStateCommand::Mock);
                     } else {
@@ -522,7 +522,7 @@ impl Graph {
             }
         }
 
-        // Get the components that depend (either directly or indirectly) on components with meta-dependees in them 
+        // Get the components that depend (either directly or indirectly) on components with meta-dependees in them
         let excluded_components = {
             let mut excluded_components = HashSet::new();
             let mut potentially_excluded_components: HashSet<CompId> = outstanding_components
@@ -734,6 +734,7 @@ pub struct MockUnit {
     pub item_level: u32,
 
     /// The levels of each item within this mock unit.
+    #[allow(unused)]
     pub item_to_levels: HashMap<ItemId, u32>,
 
     /// A collection of every item in this mock unit

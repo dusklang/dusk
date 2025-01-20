@@ -548,23 +548,23 @@ impl DexExe {
 }
 
 impl Exe for DexExe {
-    fn import_dynamic_library(&mut self, name: &str) -> DynLibId {
+    fn import_dynamic_library(&mut self, _name: &str) -> DynLibId {
         todo!()
     }
 
-    fn import_symbol(&mut self, dyn_lib: DynLibId, name: String) -> ImportedSymbolId {
+    fn import_symbol(&mut self, _dyn_lib: DynLibId, _name: String) -> ImportedSymbolId {
         todo!()
     }
 
-    fn use_imported_symbol(&mut self, symbol: ImportedSymbolId) -> FixupLocationId {
+    fn use_imported_symbol(&mut self, _symbol: ImportedSymbolId) -> FixupLocationId {
         todo!()
     }
 
-    fn use_cstring(&mut self, string: &CStr) -> FixupLocationId {
+    fn use_cstring(&mut self, _string: &CStr) -> FixupLocationId {
         todo!()
     }
 
-    fn add_code_blob(&mut self, blob: Box<dyn crate::backend::CodeBlob>) {
+    fn add_code_blob(&mut self, _blob: Box<dyn crate::backend::CodeBlob>) {
         unimplemented!()
     }
 
@@ -581,7 +581,7 @@ fn get_level(class_def: &PhysicalClassDef, class_defs: &IndexVec<PhysicalClassDe
 
     // Add a fake value for now, to detect cycles
     levels.insert(class_def.class_idx, usize::MAX);
-    
+
     let level = if let Some(parent) = class_def.superclass_idx.map(|parent| class_map.get(&parent).copied()).flatten() {
         get_level(&class_defs[parent], class_defs, class_map, levels) + 1
     } else {
