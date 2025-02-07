@@ -14,7 +14,7 @@ Pre-pre-alpha. Barely usable for anything. There is a working interpreter and a 
 ### Backends
 | Platform | x86-64 | arm64 | Dalvik bytecode | WASM | JavaScript |
 |----------|--------|-------|-----------------|------|------------|
-| Windows  | 🚧     | 🚧     |                 |      |            |
+| Windows  | 🚧     | 🚧    |                 |      |            |
 | macOS    | ⋯      | 🚧    |                 |      |            |
 | Android  |        | ⋯     | 🚧              |      |            |
 | Linux    | ⋯      | 🚧    |                 |      |            |
@@ -26,7 +26,7 @@ Pre-pre-alpha. Barely usable for anything. There is a working interpreter and a 
 | PE32+  | 🚧     |
 | Mach-O | 🚧     |
 | DEX    | 🚧     |
-| ELF    | ⋯      |
+| ELF    | 🚧     |
 
 ### Bundlers
 | Format            | Status |
