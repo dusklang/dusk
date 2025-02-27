@@ -33,7 +33,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             cmd!(shell, "cargo build --package dls {mode...}").run()?;
 
             shell.change_dir("./dls-client");
-            
+
             let script_ext = if cfg!(windows) {
                 ".cmd"
             } else {
