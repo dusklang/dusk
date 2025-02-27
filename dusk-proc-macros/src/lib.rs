@@ -46,7 +46,7 @@ pub fn display_adapter(attr: TokenStream, item: TokenStream) -> TokenStream {
                         if let Type::Path(ref path) = *reference.elem {
                             if path.qself.is_none() {
                                 let last_segment = path.path.segments.last().unwrap().ident.to_string();
-        
+
                                 if last_segment == "Formatter" {
                                     let pat = arg.pat.clone();
                                     ident = Some(parse_quote! { #pat });
@@ -366,7 +366,7 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
                 }
             })
             .unwrap_or_else(|| LitStr::new(&decl_name.to_string(), decl_name.span()));
-        
+
         let get_ty_to_register = if let Some(variant) = variant {
             let name = syn::Ident::new(&variant.value(), variant.span());
             quote! {
@@ -553,7 +553,7 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                             }
                         }
                         let new_attrs = syn::parse2::<IShouldntHaveToWriteThisStructImo>(quote! { #[allow(non_snake_case)] }).unwrap();
-                        
+
                         method.sig.ident = mangled_name.clone();
                         method.attrs.extend(new_attrs.attrs);
 
@@ -620,20 +620,20 @@ pub fn byteswap_derive(input: TokenStream) -> TokenStream {
     let name = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
-    let mut gen_inner = quote!();
+    let mut generic_inner = quote!();
     match input.data {
         Data::Struct(data) => match data.fields {
             Fields::Named(named) => {
                 for field in &named.named {
                     let name = field.ident.as_ref().unwrap();
-                    gen_inner.extend(quote!(
+                    generic_inner.extend(quote!(
                         self.#name.byte_swap();
                     ));
                 }
             },
             Fields::Unnamed(unnamed) => {
                 for i in (0..unnamed.unnamed.len()).map(syn::Index::from) {
-                    gen_inner.extend(quote! {
+                    generic_inner.extend(quote! {
                         self.#i.byte_swap();
                     })
                 }
@@ -643,15 +643,15 @@ pub fn byteswap_derive(input: TokenStream) -> TokenStream {
         _ => unimplemented!(),
     };
 
-    let gen = quote!(
+    let generic = quote!(
         impl #impl_generics crate::linker::byte_swap::ByteSwap for #name #ty_generics #where_clause {
             fn byte_swap(&mut self) {
-                #gen_inner
+                #generic_inner
             }
         }
     );
 
-    gen.into()
+    generic.into()
 }
 
 #[proc_macro_derive(ByteSwapBitflags)]
@@ -660,12 +660,12 @@ pub fn byteswap_bitflags_derive(input: TokenStream) -> TokenStream {
     let name = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
-    let mut gen_inner = quote!();
+    let mut generic_inner = quote!();
     match input.data {
         Data::Struct(data) => match data.fields {
             Fields::Unnamed(unnamed) => {
                 for i in (0..unnamed.unnamed.len()).map(syn::Index::from) {
-                    gen_inner.extend(quote! {
+                    generic_inner.extend(quote! {
                         self.#i.bits().byte_swap();
                     })
                 }
@@ -675,13 +675,13 @@ pub fn byteswap_bitflags_derive(input: TokenStream) -> TokenStream {
         _ => unimplemented!(),
     };
 
-    let gen = quote!(
+    let generic = quote!(
         impl #impl_generics crate::linker::byte_swap::ByteSwap for #name #ty_generics #where_clause {
             fn byte_swap(&mut self) {
-                #gen_inner
+                #generic_inner
             }
         }
     );
 
-    gen.into()
+    generic.into()
 }

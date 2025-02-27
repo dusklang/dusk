@@ -2,7 +2,7 @@
 name = "dusklang"
 version = "0.1.6"
 authors = ["Zach <zachrwolfe@me.com>"]
-edition = "2021"
+edition = "2024"
 default-run = "dusk"
 description = "This crate contains a compiler for the Dusk programming language"
 license = "MIT"
