@@ -2,7 +2,7 @@
 name = "libdusk"
 version = "0.1.6"
 authors = ["Zach <zachrwolfe@me.com>"]
-edition = "2021"
+edition = "2024"
 description = "This crate implements most of the compiler for the Dusk programming language, in library form."
 license = "MIT"
 repository = "https://github.com/dusklang/dusk/"

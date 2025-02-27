@@ -154,15 +154,15 @@ impl Instr {
                 replace(location, old, new);
                 replace(value, old, new);
             },
-            Instr::Call { arguments: ref mut ops, .. } | Instr::ExternCall { arguments: ref mut ops, .. }
-                | Instr::LegacyIntrinsic { arguments: ref mut ops, .. } | Instr::Struct { fields: ref mut ops, .. }
-                | Instr::Enum { variants: ref mut ops, .. } | Instr::StructLit { fields: ref mut ops, .. }
-                | Instr::Intrinsic { arguments: ref mut ops, .. } => {
+            Instr::Call { arguments: ops, .. } | Instr::ExternCall { arguments: ops, .. }
+                | Instr::LegacyIntrinsic { arguments: ops, .. } | Instr::Struct { fields: ops, .. }
+                | Instr::Enum { variants: ops, .. } | Instr::StructLit { fields: ops, .. }
+                | Instr::Intrinsic { arguments: ops, .. } => {
                     for op in ops {
                         replace(op, old, new);
                     }
                 }
-            Instr::FunctionTy { ref mut param_tys, ref mut ret_ty, .. } => {
+            Instr::FunctionTy { param_tys, ret_ty, .. } => {
                 for op in param_tys {
                     replace(op, old, new);
                 }
@@ -745,7 +745,7 @@ impl Driver {
             let mut cache = cache.borrow_mut();
             cache.struct_layouts.insert(strukt.clone(), layout.clone());
         });
-        
+
         layout
     }
 
@@ -1260,7 +1260,7 @@ impl Driver {
                 break;
             }
         }
-        
+
         for &op_id in &block.ops[start..] {
             writeln!(f, "    {}", self.display_mir_instr(op_id))?;
         }
@@ -1490,7 +1490,7 @@ impl DriverRef<'_> {
             self.check_no_comptime_calls(&function);
         }
         self.read().code.mir.check_all_blocks_ended(&function);
-        function 
+        function
     }
 }
 
@@ -1603,7 +1603,7 @@ impl Driver {
                     }
                 }
             }
-            
+
         }
         transformer.transform(func, self)
     }
@@ -1687,7 +1687,7 @@ impl Driver {
         }
         if let Some((new_entry_block, parameters)) = new_entry_block {
             func.blocks.swap(0, new_entry_block_index.unwrap());
-            
+
             self.code.blocks[new_entry_block].ops.splice(0..0, parameters);
         }
         did_something
@@ -1972,7 +1972,7 @@ impl Driver {
             },
             &Instr::AddressOfStatic(statik) => b.statics[statik].val.ty().mut_ptr(),
             Instr::Ret(_) | Instr::Br(_) | Instr::CondBr { .. } | Instr::SwitchBr { .. } => Type::Never,
-            Instr::Parameter(ref ty) => ty.clone(),
+            Instr::Parameter(ty) => ty.clone(),
             &Instr::DirectFieldAccess { val, index } => {
                 let base_ty = self.type_of(val);
                 match base_ty {
@@ -2450,7 +2450,7 @@ impl DriverRef<'_> {
                                 self.write().push_instr(b, Instr::LogicalNot(operand.instr), expr).direct()
                             }
                         },
-                        LegacyIntrinsic::MultAssign | LegacyIntrinsic::DivAssign | LegacyIntrinsic::ModAssign | LegacyIntrinsic::AddAssign 
+                        LegacyIntrinsic::MultAssign | LegacyIntrinsic::DivAssign | LegacyIntrinsic::ModAssign | LegacyIntrinsic::AddAssign
                             | LegacyIntrinsic::SubAssign | LegacyIntrinsic::AndAssign | LegacyIntrinsic::OrAssign | LegacyIntrinsic::XorAssign
                             | LegacyIntrinsic::LeftShiftAssign | LegacyIntrinsic::RightShiftAssign => {
                             assert_eq!(arguments.len(), 2);
@@ -2777,7 +2777,7 @@ impl DriverRef<'_> {
                     self.write().end_current_bb(b);
                     catch_all_bb
                 };
-                
+
                 self.write().start_bb(b, begin_bb);
                 self.write().push_instr(b, Instr::SwitchBr { scrutinee: discriminant, cases: mir_cases, catch_all_bb }, expr);
                 self.write().end_current_bb(b);

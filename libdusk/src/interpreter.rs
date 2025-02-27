@@ -860,19 +860,19 @@ impl Driver {
 
 #[cfg(windows)]
 unsafe fn open_dyn_lib(path: *const i8) -> *mut c_void {
-    winapi::um::libloaderapi::LoadLibraryA(path) as *mut _
+    unsafe { winapi::um::libloaderapi::LoadLibraryA(path) as *mut _ }
 }
 #[cfg(not(windows))]
 unsafe fn open_dyn_lib(path: *const i8) -> *mut c_void {
-    libc::dlopen(path, libc::RTLD_LAZY)
+    unsafe { libc::dlopen(path, libc::RTLD_LAZY) }
 }
 #[cfg(windows)]
 unsafe fn get_dyn_lib_symbol(dyn_lib: *mut c_void, name: *const i8) -> *const c_void {
-    winapi::um::libloaderapi::GetProcAddress(dyn_lib as *mut _, name) as *const _
+    unsafe { winapi::um::libloaderapi::GetProcAddress(dyn_lib as *mut _, name) as *const _ }
 }
 #[cfg(not(windows))]
 unsafe fn get_dyn_lib_symbol(dyn_lib: *mut c_void, name: *const i8) -> *const c_void {
-    libc::dlsym(dyn_lib, name)
+    unsafe { libc::dlsym(dyn_lib, name) }
 }
 #[cfg(windows)]
 unsafe fn free_dyn_lib(dyn_lib: *mut c_void) {
@@ -880,7 +880,7 @@ unsafe fn free_dyn_lib(dyn_lib: *mut c_void) {
 }
 #[cfg(not(windows))]
 unsafe fn free_dyn_lib(dyn_lib: *mut c_void) {
-    libc::dlclose(dyn_lib);
+    unsafe { libc::dlclose(dyn_lib); }
 }
 
 impl DriverRef<'_> {
