@@ -406,6 +406,7 @@ pub enum PatternKind {
     ContextualMember {
         name: Ident,
         range: SourceRange,
+        payload: Option<Box<PatternKind>>,
     },
     NamedCatchAll(Ident),
     AnonymousCatchAll(SourceRange),

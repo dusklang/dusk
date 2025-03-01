@@ -88,11 +88,11 @@ MyAdt :: enum {
 fn create_adt() {
     blah :: 5
     adt :: MyAdt.a(5)
-    // switch adt {
-    //     .a: {}
-    //     .b: {}
-    //     .c: {}
-    // }
+    switch adt {
+        .a(1): {}
+        .b(2): {}
+        .c(.it_doesnt_matter_what_the_pattern_is_yet): {}
+    }
 }
 
 fn catch_all() {

@@ -202,7 +202,7 @@ impl Driver {
             } else {
                 ""
             };
-            
+
             self.diag.report_warning_no_range_msg(format!("extraneous separator{}", ess), first_extraneous_separator)
                 .adding_secondary_range_with_msg(found_explicit.as_ref().unwrap().1, "first separator here is sufficient");
         }
@@ -898,7 +898,7 @@ impl Driver {
                     });
                     let arg = self.parse_expr(p).unwrap_or_else(|err| err);
                     let paren_range = self.eat_tok(p, TokenKind::RightParen)?;
-    
+
                     (Some(arg), paren_range)
                 }
             },
@@ -926,7 +926,31 @@ impl Driver {
                 self.next(p);
                 let name = self.eat_ident(p);
                 let range = source_info::concat(initial_range, name.range);
-                PatternKind::ContextualMember { name, range }
+                let mut payload = None;
+                if self.try_eat_tok(p, TokenKind::LeftParen).is_some() {
+                    let payload_list = self.begin_list(p, TokenKind::could_begin_pattern, [TokenKind::Comma], Some(TokenKind::RightParen));
+                    let mut payload_patterns = Vec::new();
+                    loop {
+                        match self.cur(p).kind {
+                            TokenKind::Eof => panic!("Unexpected eof while parsing scope"),
+                            TokenKind::RightParen => {
+                                self.next(p);
+                                break;
+                            },
+                            _ => {
+                                self.start_next_list_item(p, payload_list.id());
+                                let payload_pattern = self.parse_pattern(p);
+                                payload_patterns.push(payload_pattern);
+                            },
+                        }
+                    }
+
+                    assert!(payload_patterns.len() <= 1);
+                    if payload_patterns.len() == 1 {
+                        payload = Some(Box::new(payload_patterns.into_iter().next().unwrap()));
+                    }
+                }
+                PatternKind::ContextualMember { name, range, payload }
             },
             &TokenKind::Ident(name) => {
                 self.next(p);
@@ -941,8 +965,8 @@ impl Driver {
                 self.next(p);
                 PatternKind::IntLit { value, range: initial_range }
             },
-            _ => panic!("unexpected token"),
-        }   
+            tok => panic!("unexpected token {:?}", tok),
+        }
     }
 
     fn eat_tok(&mut self, p: &mut Parser, kind: TokenKind) -> ParseResult<SourceRange> {
@@ -957,6 +981,16 @@ impl Driver {
         } else {
             self.next(p);
             Ok(range)
+        }
+    }
+
+    fn try_eat_tok(&mut self, p: &mut Parser, kind: TokenKind) -> Option<SourceRange> {
+        let Token { kind: cur_kind, range } = self.cur(p);
+        if cur_kind != &kind {
+            None
+        } else {
+            self.next(p);
+            Some(range)
         }
     }
 
@@ -981,17 +1015,17 @@ enum AmbiguousGenericListKind {
 /// ```dusk
 ///     ident[
 /// ```
-/// 
+///
 /// There's no way to tell if it is the start of a generic constant, like this:
 /// ```dusk
 ///     Array<|Element|> :: struct { ... }
 /// ```
-/// 
+///
 /// Or the start of a generic decl ref with explicit arguments, like this:
 /// ```dusk
 ///     Array<|u8|>
 /// ```
-/// 
+///
 /// Through the process of parsing the generic list, we may come across tokens
 /// that make it clear it could only be one of the two possibilities, or we
 /// may not. So, there needs to be a way to store elements of the generic list
@@ -1002,7 +1036,7 @@ enum AmbiguousGenericListKind {
 struct AmbiguousGenericList {
     kind: AmbiguousGenericListKind,
     /// Range from the opening square bracket to the closing one (or the last included token,
-    /// if there was a parse error) 
+    /// if there was a parse error)
     range: SourceRange,
 }
 
@@ -1179,7 +1213,7 @@ impl Driver {
             TokenKind::Ident(_) => Some(self.parse_type(p).0),
             _ => None,
         };
-        
+
         let is_mut = match self.cur(p).kind {
             TokenKind::Assign => true,
             TokenKind::Colon => false,
@@ -1201,8 +1235,8 @@ impl Driver {
         let generic_params = self.create_decls_for_generic_param_list(&generic_param_list);
         let generic_ctx = self.begin_decl_generic_ctx(generic_param_list.clone());
         let ns = self.begin_generic_context(generic_params);
-        
-        
+
+
         // If this is a module-scoped decl, we should add an imperative scope to the assigned expression, in order to
         // support manipulation of `ImperRoot` state.
         let imper_scope = self.is_in_mod_scope().then(|| {
@@ -1585,10 +1619,8 @@ impl Driver {
     }
 
     fn parse_self_parameter(&mut self, p: &mut Parser, range: SourceRange) -> SelfParameter {
-        let kind = if *self.cur(p).kind == TokenKind::Asterisk {
-            self.next(p);
-            if *self.cur(p).kind == TokenKind::Mut {
-                self.next(p);
+        let kind = if self.try_eat_tok(p, TokenKind::Asterisk).is_some() {
+            if self.try_eat_tok(p, TokenKind::Mut).is_some() {
                 SelfParameterKind::MutPtr
             } else {
                 SelfParameterKind::Ptr

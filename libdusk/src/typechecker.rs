@@ -555,11 +555,11 @@ impl tir::Expr<tir::Switch> {
                 let variants = &driver.code.ast.enums[id].variants;
                 for case in &self.cases {
                     match case.pattern.kind {
-                        PatternKind::ContextualMember { name, range } => {
+                        PatternKind::ContextualMember { name, range, ref payload } => {
                             let variant_name_str = driver.interner.resolve(name.symbol).unwrap();
                             let index = variants.iter().position(|variant| variant.name == name.symbol);
                             if let Some(index) = index {
-                                if variants[index].payload_ty.is_some() {
+                                if variants[index].payload_ty.is_some() && payload.is_none() {
                                     // Trying to match variant with payload, without acknowledging
                                     // the payload. For example, matching a value of type
                                     // 'enum { a(u32) }' with the pattern '.a' rather than '.a(12)'
