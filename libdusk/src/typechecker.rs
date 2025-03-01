@@ -412,7 +412,7 @@ impl tir::Expr<tir::For> {
             ty
         } else {
             let loop_binding_constraints = driver.intersect_constraints(tp, self.lower_bound, self.upper_bound);
-            
+
             let ty = match driver.solve_constraints(tp, &loop_binding_constraints) {
                 Ok(ty) => ty.qual_ty.ty,
                 Err(_) => {
@@ -658,7 +658,7 @@ impl tir::Expr<tir::Switch> {
                 let mut all_exhausted = false;
                 let mut num_values = BigUint::from(1u64);
                 num_values <<= width.bit_width(driver.arch);
-                
+
                 for case in &self.cases {
                     match case.pattern.kind {
                         PatternKind::IntLit { value, range } => {
@@ -964,7 +964,7 @@ impl tir::Expr<tir::DeclRef> {
                 }
                 generic_args
             };
-            
+
             (Some(overload), Some(generic_args))
         } else if !*tp.decl_ref_has_error(self.decl_ref_id) {
             let name = driver.code.ast.decl_refs[self.decl_ref_id].name;
@@ -1080,7 +1080,7 @@ impl tir::Expr<tir::Call> {
             {
                 return false;
             }
-            
+
             // Check that arguments can unify to their corresponding parameter types, and apply constraints to generic type parameters in the process
             for (arg, ty) in self.args.iter().copied().zip(func.param_tys.iter()) {
                 if driver.can_unify_argument_to(tp, arg, UnificationType::QualType(&ty.clone().into())).is_err() {
@@ -1095,12 +1095,12 @@ impl tir::Expr<tir::Call> {
                 }
             }
             // TODO: is there anything we should be doing to check C variadic arguments here?
-            
+
             one_of.push(func.return_ty.as_ref().clone().into());
             true
         });
         *driver.get_constraints_mut(tp, self.callee) = callee_constraints;
-        
+
         // Find preferred type
         // TODO: this logic seems so broken it should never have worked at all?!?!
         // I apparently just choose the first (argument, function type) pair such that
@@ -1151,7 +1151,7 @@ impl tir::Expr<tir::Call> {
         });
 
         let pref = driver.get_constraints(tp, self.callee).preferred_type().cloned();
-        
+
         // Select callee function type.
         let callee_ty = pref.as_ref().cloned().and_then(|pref| {
             let mut callee_ty = None;
@@ -1261,7 +1261,7 @@ impl tir::Expr<tir::Pointer> {
             driver.diag.push(error);
             driver.get_constraints_mut(tp, self.id).make_error();
         }
-        
+
     }
 
     fn run_pass_2(&self, driver: &mut Driver, tp: &mut dyn TypeProvider) {
@@ -1404,7 +1404,7 @@ impl tir::Expr<tir::StructLit> {
                                 // We can assume there is no match for this field at this point; if we had found one, we
                                 // would've already continued to the next field.
                                 successful = false;
-                                
+
                                 // TODO: Use range of the field identifier, which we don't have fine-grained access to yet
                                 let range = driver.get_range(self.id);
                                 driver.diag.push(
@@ -1659,6 +1659,11 @@ impl Driver {
                 let param_tys = &self.code.ast.intrinsics[intr].param_tys[1..];
                 self.function_decl_type(param_tys, false, explicit_ty, tp)
             },
+            &ast::Decl::Variant { payload_ty, .. } => if let Some(payload_ty) = payload_ty {
+                self.function_decl_type(&[payload_ty], false, explicit_ty, tp)
+            } else {
+                explicit_ty
+            },
             _ => explicit_ty,
         }
     }
@@ -1755,7 +1760,7 @@ impl DriverRef<'_> {
         for unit in &units.units {
             // Pass 1: propagate info down from leaves to roots
             self.write().run_pass_1(&unit.items, 0, tp);
-            
+
             // Pass 2: propagate info up from roots to leaves
             self.write().run_pass_2(&unit.items, tp);
 
@@ -1881,7 +1886,7 @@ impl DriverRef<'_> {
                                 self.write().tir.expr_namespaces.entry(unit.main_expr).or_default().push(ExprNamespace::Error);
                                 continue;
                             };
-    
+
                             match ty {
                                 Const::Ty(Type::Struct(ref strukt)) => {
                                     macro_info = Some(ExprMacroInfo::Struct(strukt.clone()));

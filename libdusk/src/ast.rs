@@ -713,7 +713,7 @@ macro_rules! declare_known_idents {
                     $($name: Sym::try_from_usize((u32::MAX - 1) as usize).unwrap()),*
                 }
             }
-        
+
             fn init(&mut self, interner: &mut StringInterner) {
                 *self = KnownIdents {
                     $(
@@ -886,16 +886,16 @@ impl Driver {
     pub fn int_lit(&mut self, lit: u64, range: SourceRange) -> ExprId {
         self.add_expr(Expr::IntLit { lit }, range)
     }
-    pub fn dec_lit(&mut self, lit: f64, range: SourceRange) -> ExprId { 
+    pub fn dec_lit(&mut self, lit: f64, range: SourceRange) -> ExprId {
         self.add_expr(Expr::DecLit { lit }, range)
     }
-    pub fn str_lit(&mut self, lit: CString, range: SourceRange) -> ExprId { 
+    pub fn str_lit(&mut self, lit: CString, range: SourceRange) -> ExprId {
         self.add_expr(Expr::StrLit { lit }, range)
     }
-    pub fn char_lit(&mut self, lit: i8, range: SourceRange) -> ExprId { 
+    pub fn char_lit(&mut self, lit: i8, range: SourceRange) -> ExprId {
         self.add_expr(Expr::CharLit { lit }, range)
     }
-    pub fn bool_lit(&mut self, lit: bool, range: SourceRange) -> ExprId { 
+    pub fn bool_lit(&mut self, lit: bool, range: SourceRange) -> ExprId {
         self.add_expr(Expr::BoolLit { lit }, range)
     }
     pub fn cast(&mut self, expr: ExprId, ty: ExprId, range: SourceRange) -> ExprId {
@@ -1145,7 +1145,7 @@ impl Driver {
                         break;
                     }
                 }
-                
+
             }
         }
 
@@ -1468,7 +1468,7 @@ impl Driver {
                 root,
             }
         );
-        
+
         if let Some(func) = self.ast.fn_decl_stack.last_mut() {
             assert!(func.imper_scope_stack > 0 || func.scope.is_none(), "Can't add multiple top-level scopes to a function decl");
             let is_first_scope = func.imper_scope_stack == 0;
@@ -1480,10 +1480,10 @@ impl Driver {
             if is_first_scope {
                 let name = self.code.ast.names[func.id];
                 let id = func.id;
-    
+
                 let params = func.params.clone();
                 let generic_params = func.generic_params.clone();
-    
+
                 // Add the current comp decl to the decl scope, to enable recursion
                 self.imper_scoped_decl(
                     ImperScopedDecl {
@@ -1491,7 +1491,7 @@ impl Driver {
                         id
                     }
                 );
-    
+
                 // Add parameters to decl scope
                 for id in range_iter(params.clone()) {
                     self.imper_scoped_decl(
@@ -1501,7 +1501,7 @@ impl Driver {
                         }
                     );
                 }
-    
+
                 // Add generic parameters to decl scope
                 for id in range_iter(generic_params.clone()) {
                     self.imper_scoped_decl(

@@ -67,7 +67,7 @@ fn more_tests(e: MyEnum): u8* {
         .c: "Hello, c!"
     }
     print(hello)
-    print("\n")    
+    print("\n")
 
     switch e {
         .a: switch e { .a: "Hello, a!", .b: "Hello, b!", .c: "Hello, c!" }
@@ -86,27 +86,27 @@ MyAdt :: enum {
 }
 
 fn create_adt() {
-    /*
-    adt :: MyAdt.a(12)
-    switch adt {
-        .a: {}
-        .b: {}
-        .c: {}
-    }*/
+    blah :: 5
+    adt :: MyAdt.a(5)
+    // switch adt {
+    //     .a: {}
+    //     .b: {}
+    //     .c: {}
+    // }
 }
 
 fn catch_all() {
     e :: MyEnum.b
     switch e {
         .a: print("a case\n")
-        //.b: print("b case\n")
+        // .b: print("b case\n")
         .c: print("c case\n")
         value: {
             //copy :: value
             print_enum_the_right_way(_debug_mark(value))
             print("catch-all case\n")
         }
-        //_: print("second catch-all case\n")
+        // _: print("second catch-all case\n")
     }
 }
 /*
