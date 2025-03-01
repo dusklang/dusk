@@ -447,7 +447,7 @@ impl SourceFile {
             }
 
             result.push(
-                LineRange { 
+                LineRange {
                     start_column,
                     end_column,
                     line: i,

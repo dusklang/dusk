@@ -178,8 +178,8 @@ impl TokenKind {
     }
 
     pub fn could_begin_statement(&self) -> bool {
-        self.could_begin_expression() || 
-            self.could_begin_pattern() || 
+        self.could_begin_expression() ||
+            self.could_begin_pattern() ||
             matches!(self, TokenKind::AtSign | TokenKind::Ident(_) | TokenKind::Mut | TokenKind::Fn)
     }
 

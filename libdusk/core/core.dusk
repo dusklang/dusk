@@ -91,16 +91,16 @@ windows :: mod {
         if file as usize == INVALID_HANDLE_VALUE() as usize {
             panic("unable to open file")
         }
-    
+
         size := 0 as u64
         succ :: kernel32.GetFileSizeEx(file, &mut size)
         if succ == FALSE {
             panic("unable to get file size")
         }
-    
+
         size :: size as usize
         buf :: malloc(size)
-    
+
         i := 0 as usize
         while i < size {
             bytes_to_read :: (size - i) as DWORD
@@ -112,7 +112,7 @@ windows :: mod {
             i += bytes_read as usize
         }
         kernel32.CloseHandle(file);
-    
+
         ByteBuffer {
             size: size
             data: buf as u8 *mut

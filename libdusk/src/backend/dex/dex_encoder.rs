@@ -226,7 +226,7 @@ impl DexEncoder {
         self.reference_register_16(first_argument);
         self.num_outs = max(self.num_outs, num_outs);
     }
-    
+
     pub fn invoke_virtual_range(&mut self, num_arguments: u8, first_argument: Register, method: MethodId) {
         self.invoke_range_impl(InvokeKind::Virtual, num_arguments, first_argument, method)
     }

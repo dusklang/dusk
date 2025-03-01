@@ -23,7 +23,7 @@ pub enum BinOp {
 pub enum UnOp {
     /// Prefix
     Not, BitwiseNot, Deref, AddrOf, Neg, Plus, AddrOfMut,
-    
+
     /// Postfix
     Pointer, PointerMut,
 }
@@ -102,7 +102,7 @@ impl BinOp {
             BitwiseAnd | BitwiseOr | BitwiseXor => 4,
             LogicalAnd | LogicalOr => 5,
             Assign | AddAssign | SubAssign | MultAssign |
-                DivAssign | ModAssign | BitwiseAndAssign | 
+                DivAssign | ModAssign | BitwiseAndAssign |
                 BitwiseOrAssign | XorAssign | LeftShiftAssign | RightShiftAssign => 6,
         }
     }

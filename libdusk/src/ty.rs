@@ -210,10 +210,10 @@ impl Type {
     pub fn replace_generic_params(&mut self, replacements: &HashMap<GenericParamId, Type>) {
         match self {
             Type::Error | Type::Int { .. } | Type::Float(_) | Type::LegacyInternal(_) | Type::Internal(_) | Type::Bool | Type::Void | Type::Mod | Type::Ty | Type::TypeVar(_) | Type::Never => {},
-            
+
             // TODO: restructure enum types such that it is possible to call `replace_generic_params` on enum variants' types
             Type::Enum(_) => {},
-            
+
             Type::Pointer(pointee) => pointee.ty.replace_generic_params(replacements),
             Type::Inout(pointee) => pointee.replace_generic_params(replacements),
             Type::Function(func) => {
@@ -241,10 +241,10 @@ impl Type {
     fn add_embedded_type_vars(&self, type_vars: &mut HashSet<TypeVarId>) {
         match self {
             Type::Error | Type::Int { .. } | Type::Float(_) | Type::LegacyInternal(_) | Type::Internal(_) | Type::Bool | Type::Void | Type::Mod | Type::Ty | Type::GenericParam(_) | Type::Never => {},
-            
+
             // TODO: restructure enum types such that it is possible to call `replace_type_vars` on enum variants' types
             Type::Enum(_) => {},
-            
+
             Type::Pointer(pointee) => pointee.ty.add_embedded_type_vars(type_vars),
             Type::Inout(pointee) => pointee.add_embedded_type_vars(type_vars),
             Type::Function(func) => {
@@ -271,10 +271,10 @@ impl Type {
     pub fn replace_type_vars(&mut self, replacements: &HashMap<TypeVarId, Type>) {
         match self {
             Type::Error | Type::Int { .. } | Type::Float(_) | Type::LegacyInternal(_) | Type::Internal(_) | Type::Bool | Type::Void | Type::Mod | Type::Ty | Type::GenericParam(_) | Type::Never => {},
-            
+
             // TODO: restructure enum types such that it is possible to call `replace_type_vars` on enum variants' types
             Type::Enum(_) => {},
-            
+
             Type::Pointer(pointee) => pointee.ty.replace_type_vars(replacements),
             Type::Inout(pointee) => pointee.replace_type_vars(replacements),
             Type::Function(func) => {
@@ -293,7 +293,7 @@ impl Type {
             },
         }
     }
-    
+
     pub fn replacing_type_vars(mut self, replacements: &HashMap<TypeVarId, Type>) -> Self {
         self.replace_type_vars(replacements);
         self
@@ -320,7 +320,7 @@ impl fmt::Debug for Type {
             Type::Ty => write!(f, "type"),
             Type::Int { width, is_signed } => write!(
                 f,
-                "{}{}", 
+                "{}{}",
                 if *is_signed { 'i' } else { 'u' },
                 match width {
                     IntWidth::W8 => "8",
@@ -340,7 +340,7 @@ impl fmt::Debug for Type {
             ),
             Type::Pointer(pointee) => {
                 pointee.ty.fmt(f)?;
-                if pointee.is_mut { 
+                if pointee.is_mut {
                     write!(f, " *mut")
                 } else {
                     write!(f, "*")
@@ -416,7 +416,7 @@ impl QualType {
 impl From<Type> for QualType {
     fn from(ty: Type) -> Self {
         Self {
-            ty, 
+            ty,
             is_mut: false,
         }
     }

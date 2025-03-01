@@ -5,7 +5,7 @@ use std::cell::{RefCell, Ref, RefMut};
 /// performance overhead of repeatedly locking and unlocking. At any given time, a RwRef will either own a
 /// RwLockReadGuard, a RwLockWriteGuard, or neither. That way, repeated read access to the data will only need to
 /// perform a single read lock, even if there is a write access in-between.
-/// 
+///
 /// The trade-off with using a type like this is that it puts a greater burden on the programmer to audit their code
 /// for potential deadlocks. The type also uses interior mutability internally, which makes it possible to accidentally
 /// trigger a panic. This happens under these two conditions, and AFAIK only these two:
@@ -40,7 +40,7 @@ impl<'l, T> RwRef<'l, T> {
             guard: RefCell::new(RwRefGuard::Nothing),
         }
     }
-    
+
     pub fn read(&self) -> Ref<T> {
         if matches!(*self.guard.borrow(), RwRefGuard::Nothing) {
             *self.guard.borrow_mut() = RwRefGuard::Ref(ignore_poison(self.lock.read()));
@@ -51,7 +51,7 @@ impl<'l, T> RwRef<'l, T> {
             _ => unreachable!()
         })
     }
-    
+
     pub fn read_only(&self) -> Ref<T> {
         if !matches!(*self.guard.borrow(), RwRefGuard::Ref(_)) {
             *self.guard.borrow_mut() = RwRefGuard::Nothing;
@@ -62,13 +62,13 @@ impl<'l, T> RwRef<'l, T> {
             _ => unreachable!()
         })
     }
-    
+
     pub fn write(&mut self) -> RefMut<T> {
         if !matches!(*self.guard.borrow(), RwRefGuard::RefMut(_)) {
             *self.guard.borrow_mut() = RwRefGuard::Nothing;
             *self.guard.borrow_mut() = RwRefGuard::RefMut(ignore_poison(self.lock.write()));
         }
-        
+
         RefMut::map(self.guard.borrow_mut(), |guard| match guard {
             RwRefGuard::RefMut(guard) => &mut **guard,
             _ => unreachable!()

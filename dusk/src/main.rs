@@ -157,7 +157,7 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
 
     begin_phase!(Mir);
     driver.build_mir(&tp);
-    
+
     if opt.output_mir {
         println!("{}", driver.read().display_mir());
     }

@@ -125,7 +125,7 @@ macro_rules! declare_tp {
                 forward_trait!($($doc)* $field_name, $fn_name, $id_ty, $payload_ty);
             )*
             forward_trait!(eval_results, eval_result, ExprId, Const);
-        
+
             /// Doesn't get the type *of* `id`, gets the type that `id` as an expression *is*
             fn get_evaluated_type(&self, id: ExprId) -> &Type {
                 match self.eval_result(id) {
@@ -149,7 +149,7 @@ macro_rules! declare_tp {
                         self.set_decl_type_to_explicit_type_if_exists(d, id);
                     }
                 }
-        
+
                 self.decl_type(id).clone()
             }
             #[doc(hidden)]
@@ -162,7 +162,7 @@ macro_rules! declare_tp {
 
             fn save(&mut self);
         }
-        
+
         pub struct RealTypeProvider {
             $(
                 $(#[doc = $doc])*
@@ -170,7 +170,7 @@ macro_rules! declare_tp {
             )*
             eval_results: HashMap<ExprId, Const>,
         }
-        
+
         impl RealTypeProvider {
             pub fn new(d: &Driver) -> Self {
                 let mut tp = RealTypeProvider {
@@ -179,7 +179,7 @@ macro_rules! declare_tp {
                 };
 
                 tp.resize_impl(d, DeclId::new(0));
-                
+
                 tp
             }
 
@@ -217,9 +217,9 @@ macro_rules! declare_tp {
                 }
             }
         }
-        
+
         impl private::Sealed for RealTypeProvider {}
-        
+
         impl TypeProvider for RealTypeProvider {
             fn insert_eval_result(&mut self, expr: ExprId, result: Const) {
                 self.eval_results.insert(expr, result);
@@ -232,7 +232,7 @@ macro_rules! declare_tp {
             $(
                 forward_real!($field_name, $fn_name, $id_ty, $payload_ty);
             )*
-        
+
             fn eval_result(&self, id: ExprId) -> &Const {
                 &self.eval_results[&id]
             }
@@ -244,7 +244,7 @@ macro_rules! declare_tp {
 
             fn save(&mut self) {}
         }
-        
+
         pub struct MockTypeProvider<'base> {
             base: &'base mut dyn TypeProvider,
 
@@ -252,7 +252,7 @@ macro_rules! declare_tp {
                 $(#[doc = $doc])*
                 $field_name: HashMap<$id_ty, $payload_ty>,
             )*
-        
+
             eval_results: HashMap<ExprId, Const>,
         }
 

@@ -84,14 +84,14 @@ WS_TILEDWINDOW: DWORD : WS_OVERLAPPEDWINDOW
  * Common Window Styles
  */
 WS_OVERLAPPEDWINDOW :: WS_OVERLAPPED       |
-                            WS_CAPTION     | 
-                            WS_SYSMENU     | 
-                            WS_THICKFRAME  | 
-                            WS_MINIMIZEBOX | 
+                            WS_CAPTION     |
+                            WS_SYSMENU     |
+                            WS_THICKFRAME  |
+                            WS_MINIMIZEBOX |
                             WS_MAXIMIZEBOX
 
 WS_POPUPWINDOW :: WS_POPUP  |
-                  WS_BORDER | 
+                  WS_BORDER |
                   WS_SYSMENU
 
 WS_CHILDWINDOW :: WS_CHILD

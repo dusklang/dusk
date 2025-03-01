@@ -125,7 +125,7 @@ impl Server {
                                 .encode_utf16()
                                 .chain(last_part.iter().copied())
                                 .collect();
-    
+
                             // Then, I replace the end of the replaced line with the 0th line to be
                             // added.
                             let first_replaced: Vec<u16> = replaced_line_as_utf16[..(range.start.character as usize)]
@@ -134,11 +134,11 @@ impl Server {
                                 .chain(addition_lines[0].encode_utf16())
                                 .collect();
                             file.contents.lines[range.start.line as usize] = String::from_utf16(&first_replaced).unwrap();
-    
+
                             // Then, I insert that line I generated earlier.
                             let begin = range.start.line as usize + 1;
                             file.contents.lines.insert(begin, String::from_utf16(&last_replaced).unwrap());
-    
+
                             // Finally, I insert all the middle lines, if any.
                             file.contents.lines.splice(begin..begin, addition_lines[1..addition_lines.len() - 1].to_owned());
                         }
@@ -432,22 +432,22 @@ impl Server {
                 .borrow()
                 .get(path).unwrap()
                 .contents.lines.join("\n")
-                .to_string();            
+                .to_string();
             let file = src_map.add_file_in_memory(path, src).unwrap();
             **file_id_ref = Some(file);
             let mut driver = DriverRef::new(&DRIVER);
             *driver.write() = Driver::new(src_map, Arch::default(), OperatingSystem::default(), false);
-    
+
             driver.write().initialize_ast();
-    
+
             let fatal_parse_error = driver.write().parse_added_files().is_err();
             salf.flush_diagnostics(&mut driver.write(), path);
-    
+
             let tp = (!fatal_parse_error).then(|| {
                 salf.flush_diagnostics(&mut driver.write(), path);
 
                 driver.write().initialize_tir();
-        
+
                 let tp = RefCell::new(driver.read().make_real_type_provider());
                 let mut tp_ref = tp.borrow_mut();
                 let mut suhmm_tp = None;
@@ -486,13 +486,13 @@ impl Server {
                             break;
                         }
                         new_code = driver.read().get_new_code_since(before);
-    
+
                         salf.flush_diagnostics(&mut driver.write(), path);
                     } else {
                         break;
                     }
                 }
-        
+
                 drop(tp_ref);
                 salf.flush_diagnostics(&mut driver.write(), path);
                 if !driver.read().diag.has_failed() {
@@ -501,7 +501,7 @@ impl Server {
                 }
                 tp.into_inner()
             });
-    
+
             tp
         });
         let mut driver = DriverRef::new(&DRIVER);

@@ -107,7 +107,7 @@ PEFile :: struct {
 fn get_section(file: PEFile*, index: u16): PESectionHeader* {
     if index >= file.header.number_of_sections {
         panic("index out of bounds")
-    } 
+    }
     (file.sections as usize + index as usize * size_of(PESectionHeader)) as PESectionHeader*
 }
 
@@ -129,7 +129,7 @@ fn resolve_rva(file: PEFile*, rva: u32): u32 {
 
 fn main() {
     metadata := read_file("external/win32metadata/Windows.Win32.winmd")
-    
+
     signature_location :: read_u32(metadata, $3c)
     if read_byte(metadata, signature_location) != "P" || read_byte(metadata, signature_location+1) != "E" || read_byte(metadata, signature_location+2) != 0 || read_byte(metadata, signature_location+3) != 0 {
         panic("Invalid PE signature. Exiting.")

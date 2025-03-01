@@ -100,7 +100,7 @@ impl DvmServerCoordinator {
                 self.senders[&id].send(Response(response)).unwrap();
                 return;
             }
-    
+
             let Ok(message) = self.receiver.try_recv() else { continue; };
             self.handle_message(driver, message);
         }

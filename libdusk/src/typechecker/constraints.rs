@@ -313,7 +313,7 @@ impl ConstraintList {
     fn is_never(&self) -> bool {
         match self.one_of {
             None => false,
-            Some(ref one_of) => one_of.len() == 1 
+            Some(ref one_of) => one_of.len() == 1
                 && one_of.types.first().unwrap().ty == Type::Never,
         }
     }
@@ -353,13 +353,13 @@ macro_rules! get_multi_constraints_mut {
                 (a, MutConstraintHaver::ConstraintListMut(b)) => break 'get_multi_constraints (get_constraints_mut!($driver, $tp, a), b),
                 (a, b) => ($driver.to_type_var(a).unwrap(), $driver.to_type_var(b).unwrap()),
             };
-    
+
             assert_ne!(a, b, "`a` ({:?}) must not equal `b` ({:?})", a, b);
-    
+
             // Ensure both exist, in the case of MockTypeProvider
             $tp.constraints_mut(a);
             $tp.constraints_mut(b);
-    
+
             unsafe {
                 let a = $tp.constraints_mut(a) as *mut _;
                 let b = $tp.constraints_mut(b) as *mut _;
@@ -694,7 +694,7 @@ impl Driver {
         }
     }
 
-    // Same as intersect_constraints, but: 
+    // Same as intersect_constraints, but:
     //  - mutates `self` and `other` in-place instead of creating a new `ConstraintList`
     //  - evaluates mutability independently between the arguments, with precedence given to self
     //  - is literally just used for assignment expressions
@@ -784,7 +784,7 @@ impl Driver {
                 return Err(SolveError::NoValidChoices)
             }
         }
-        
+
         match constraints.preferred_type {
             Some(ref pref) => if let Ok(success) = self.can_unify_to(tp, constraints, pref) {
                 Ok(ConstraintSolution { qual_ty: pref.clone(), decl: success.get_decl() })

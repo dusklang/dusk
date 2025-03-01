@@ -120,7 +120,7 @@ fn main() {
     i: u64 = 24
 
     j := h as usize as u8*
-    
+
     k := 5 as u8
     l := k as u16
     m := l as i32

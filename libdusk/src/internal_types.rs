@@ -92,11 +92,11 @@ macro_rules! bridge_ints {
                 fn register(d: &mut Driver) {
                     d.code.ast.bridged_types.insert(TypeId::of::<$int_name>(), Type::$int_name());
                 }
-            
+
                 fn bridge_from_dusk(value: &Value, _d: &Driver) -> Self {
                     unsafe { *value.as_arbitrary_value() }
                 }
-            
+
                 fn bridge_to_dusk(self, _d: &Driver) -> Value {
                     unsafe { Value::from_arbitrary_value(self) }
                 }

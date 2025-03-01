@@ -82,7 +82,7 @@ fn main() {
     }
 
     // And here are the actual generic calls:
-    numbers := make_array<|i32|>()    
+    numbers := make_array<|i32|>()
 
     for i in 0..10 {
         add(&mut numbers, i)

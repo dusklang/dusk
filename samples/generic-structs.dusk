@@ -20,10 +20,10 @@ fn main() {
 
     hello.generic_member *= 8
 
-    
+
 
     //None of these things work yet:
-    
+
     // hello :: DeGenericized { non_generic_member: 54, generic_member: 4 }
     // print_type_of(hello.generic_member)
 }

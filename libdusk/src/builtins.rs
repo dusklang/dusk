@@ -352,7 +352,7 @@ impl Driver {
         }
         ns
     }
-    
+
     fn start_enum(&mut self, name: &str) -> EnumBuilder {
         let (expr, id) = self.reserve_enum();
         self.add_constant_type_decl(name, Type::Enum(id));

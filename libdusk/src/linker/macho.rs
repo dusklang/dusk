@@ -623,7 +623,7 @@ impl Linker for MachOLinker {
 
         let page_zero = self.alloc_segment("__PAGEZERO", VM_PROT_NONE, 0);
         self.add_info_to_segment(page_zero, SegmentOffset::PageZero, SegmentSize::Different { vm_size: TEXT_ADDR as usize, file_size: 0 });
-        
+
         let mut text_segment = self.alloc_text_segment();
         let text_section = self.reserve_text_section(&mut text_segment, "__text", code.len(), 4, SectionFlags::new(SectionType::Regular, S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS));
         let cstring_section = (!exe.cstrings.is_empty()).then(|| self.reserve_text_section(&mut text_segment, "__cstring", exe.cstrings.len(), 1, SectionFlags::new(SectionType::CStringLiterals, 0)));
@@ -663,35 +663,35 @@ impl Linker for MachOLinker {
 
         let chained_fixups = self.alloc_cmd::<LinkEditDataCommand>();
         let exports_trie = self.alloc_cmd::<LinkEditDataCommand>();
-        
+
         let symbol_table = self.alloc_cmd::<SymbolTableCommand>();
         let dynamic_symbol_table = self.alloc_cmd::<DynamicSymbolTableCommand>();
-        
+
         let load_dylinker = self.alloc_cmd::<DylinkerCommand>();
         self.buf.push_null_terminated_string("/usr/lib/dyld");
         self.buf.pad_to_next_boundary(8);
         let load_dylinker_size = self.buf.pos() - load_dylinker.addr;
-        
+
         // let uuid = self.alloc_cmd::<UuidCommand>();
-        
+
         let build_version = self.alloc_cmd::<BuildVersionCommand>();
         let ld_tool = self.buf.alloc::<BuildToolVersion>();
         let build_version_len = self.buf.pos() - build_version.addr;
-        
+
         let src_version = self.alloc_cmd::<SourceVersionCommand>();
-        
+
         let entry_point = self.alloc_cmd::<EntryPointCommand>();
 
         let dylib_load_commands: Vec<_> = exe.dylibs.iter()
             .map(|dylib| self.alloc_dylib_command(&dylib.name))
             .collect();
-        
+
         let function_starts = self.alloc_cmd::<LinkEditDataCommand>();
-        
+
         let data_in_code = self.alloc_cmd::<LinkEditDataCommand>();
-        
+
         let code_signature = self.alloc_cmd::<LinkEditDataCommand>();
-        
+
         let lc_end = self.buf.pos();
 
         self.layout_text_sections(&text_segment, lc_end);
@@ -805,9 +805,9 @@ impl Linker for MachOLinker {
             data_segment_size = self.buf.pos() - data_segment_begin;
             self.add_info_to_segment(segment, data_segment_begin, data_segment_size);
         }
-        
+
         let link_edit_begin = self.buf.pos();
-        
+
         let chained_fixups_header = self.buf.alloc::<DyldChainedFixupsHeader>();
         self.buf.pad_to_next_boundary(8);
         // Push dyld_chained_starts_in_image (a dynamically-sized structure)
@@ -833,7 +833,7 @@ impl Linker for MachOLinker {
             self.buf.pad_to_next_boundary(8);
             let chained_starts_in_segment_pos = self.buf.pos();
             self.buf.get_mut(data_const_starts_offset).set((chained_starts_in_segment_pos -  chained_starts_offset) as u32);
-            
+
             let chained_starts_in_segment = self.buf.alloc::<DyldChainedStartsInSegment>();
             // TODO: these should be fields of DyldChainedStartsInSegment, but need to be here instead because packed
             // structs are not yet supported by our ByteSwap macro.
@@ -862,7 +862,7 @@ impl Linker for MachOLinker {
             self.buf.pad_to_next_boundary(8);
             let chained_starts_in_segment_pos = self.buf.pos();
             self.buf.get_mut(data_segment_starts_offset).set((chained_starts_in_segment_pos - chained_starts_offset) as u32);
-            
+
             let chained_starts_in_segment = self.buf.alloc::<DyldChainedStartsInSegment>();
             // TODO: these should be fields of DyldChainedStartsInSegment, but need to be here instead because packed
             // structs are not yet supported by our ByteSwap macro.
@@ -886,7 +886,7 @@ impl Linker for MachOLinker {
                 }
             );
         }
-        
+
         let imports_offset = self.buf.pos();
         let mut chained_imports = Vec::new();
         for _ in &exe.imported_symbols {
@@ -923,11 +923,11 @@ impl Linker for MachOLinker {
         );
 
         let chained_fixups_data_size = self.buf.pos() - chained_fixups_header.start();
-        
+
         let exports_trie_start = self.buf.pos();
         self.buf.pad_with_zeroes(8);
         let exports_trie_len = self.buf.pos() - exports_trie_start;
-        
+
         let function_starts_start = self.buf.pos();
         // offset to first function, relative to the beginning of the __TEXT segment (aka, beginning of file).
         // subsequent functions would be specified relative to the previous one in the list.
@@ -935,7 +935,7 @@ impl Linker for MachOLinker {
         self.buf.push_uleb128(text_section_offset as u32);
         self.buf.pad_to_next_boundary(8);
         let function_starts_len = self.buf.pos() - function_starts_start;
-        
+
         let data_in_code_start = self.buf.pos();
         let data_in_code_len = self.buf.pos() - data_in_code_start;
 
@@ -953,7 +953,7 @@ impl Linker for MachOLinker {
         for i in 0..imported_symbols.len() {
             self.buf.push(i as u32 + local_symbols.len() as u32);
         }
-        
+
         let string_table_begin = self.buf.pos();
         self.buf.push_null_terminated_string(" ");
         let mut symbol_string_offsets = Vec::new();
@@ -962,16 +962,16 @@ impl Linker for MachOLinker {
         }
         self.buf.pad_to_next_boundary(8);
         let string_table_len = self.buf.pos() - string_table_begin;
-        
+
         self.buf.pad_to_next_boundary(16);
-        
+
         let code_signature_start = self.buf.pos();
         let super_blob = self.buf.alloc_be::<SuperBlobHeader>();
-        
+
         let mut blob_indices = Vec::new();
-        
+
         let code_directory_index = self.buf.alloc_be::<BlobIndex>();
-        
+
         let code_directory_offset = self.buf.pos() - code_signature_start;
         self.buf.get_mut(code_directory_index).set(
             BlobIndex {
@@ -980,26 +980,26 @@ impl Linker for MachOLinker {
             }
         );
         blob_indices.push(code_directory_index);
-        
+
         let code_directory = self.buf.alloc_be::<CodeDirectory>();
-        
+
         let ident_offset = self.buf.pos() - code_directory.start();
         self.buf.push_null_terminated_string("a.out");
-        
+
         // TODO: alignment?
         let hash_offset = self.buf.pos() - code_directory.start();
-        
+
         let num_code_slots = nearest_multiple_of!(code_signature_start, 4096) / 4096;
         let code_slots_len = num_code_slots * 32;
         let code_signature_len = self.buf.pos() + code_slots_len - code_signature_start;
-        
+
         for ((symbol, symbol_header), string_offset) in local_symbols.iter().chain(&imported_symbols).zip(symbol_headers).zip(symbol_string_offsets) {
             let ty = if symbol.internal_address.is_some() {
                 SymbolFlags::new(false, SymbolType::DefinedInSectionNumber, true, 0)
             } else {
                 SymbolFlags::new(true, SymbolType::Undefined, false, 0)
             };
-            let section_number = if symbol.internal_address.is_some() { 
+            let section_number = if symbol.internal_address.is_some() {
                 1 // ordinal of __text section
             } else {
                 0
@@ -1128,7 +1128,7 @@ impl Linker for MachOLinker {
                 }
             );
         }
-        
+
         let num_symbols = self.num_symbol_table_entries;
         self.buf.get_mut(symbol_table).set(
             SymbolTableCommand {
@@ -1523,7 +1523,7 @@ struct MachOExe {
     constant_nsstrings: IndexVec<ConstantNSStringId, ConstantNSString>,
     constant_nsstring_map: HashMap<ConstantNSStringLocation, ConstantNSStringId>,
     cf_constant_string_class_reference_import: Option<ImportedSymbolId>,
-    
+
     got_entries: IndexVec<GotEntryId, ImportedSymbolId>,
     got_map: HashMap<ImportedSymbolId, GotEntryId>,
 

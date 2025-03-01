@@ -117,12 +117,12 @@ impl Bundler for ApkBundler {
             manifest_file += entry;
         }
         let manifest_digest = base64_of_sha256(manifest_file.as_bytes());
-        
+
         let mut signature_file = String::from("Signature-Version: 1.0\r\n");
         signature_file += "Created-By: 1.0 (Android)\r\n";
         signature_file += &format!("SHA-256-Digest-Manifest: {}\r\n", manifest_digest);
         signature_file += "X-Android-APK-Signed: 2\r\n\r\n";
-        
+
         for (file_name, entry) in &manifest_entries {
             let digest = base64_of_sha256(entry.as_bytes());
             signature_file += &format!("Name: {}\r\nSHA-256-Digest: {}\r\n\r\n", file_name, digest);
@@ -175,18 +175,18 @@ impl Bundler for ApkBundler {
         {
             let first_length_of_signing_block = signing_block.alloc::<u64>();
             let pairs_begin = signing_block.pos();
-    
+
             fn store_length(buf: &mut Buffer, length_ref: Ref<u32>) {
                 let length = buf.pos() - length_ref.addr - 4;
                 buf.get_mut(length_ref).set(length as u32);
             }
-    
+
             let signature_algorithm_id = 0x0103u32; // RSASSA-PKCS1-v1_5 with SHA2-256 digest
             {
                 let scheme_v2_block_length = signing_block.alloc::<u64>();
                 let scheme_v2_block_start = signing_block.pos();
                 signing_block.push(APK_SIGNATURE_SCHEME_V2_ID); // Block ID
-    
+
                 let signers_length = signing_block.alloc::<u32>();
                 {
                     let signer_length = signing_block.alloc::<u32>();
@@ -204,14 +204,14 @@ impl Bundler for ApkBundler {
                                 store_length(&mut signing_block, digest_length);
                             }
                             store_length(&mut signing_block, digests_length);
-    
+
                             let certificates_length = signing_block.alloc::<u32>();
                             {
                                 signing_block.push(serialized_cert.len() as u32);
                                 signing_block.extend(&serialized_cert);
                             }
                             store_length(&mut signing_block, certificates_length);
-    
+
                             let attributes_length = signing_block.alloc::<u32>();
                             {
                             }
@@ -224,7 +224,7 @@ impl Bundler for ApkBundler {
                         sha256.update(signed_data);
                         let signed_data_hash: [u8; 32] = sha256.finalize().into();
                         let signature = priv_key.sign(Pkcs1v15Sign::new::<Sha256>(), &signed_data_hash).unwrap();
-    
+
                         let signatures_length = signing_block.alloc::<u32>();
                         {
                             let signature_length = signing_block.alloc::<u32>();
@@ -236,7 +236,7 @@ impl Bundler for ApkBundler {
                             store_length(&mut signing_block, signature_length);
                         }
                         store_length(&mut signing_block, signatures_length);
-    
+
                         let public_key_length = signing_block.alloc::<u32>();
                         {
                             let public_key = priv_key.to_public_key().to_public_key_der().unwrap();
@@ -247,7 +247,7 @@ impl Bundler for ApkBundler {
                     store_length(&mut signing_block, signer_length);
                 }
                 store_length(&mut signing_block, signers_length);
-    
+
                 let block_length = signing_block.pos() - scheme_v2_block_start;
                 signing_block.get_mut(scheme_v2_block_length).set(block_length as u64);
             }
@@ -263,7 +263,7 @@ impl Bundler for ApkBundler {
                 let padding_block_length = signing_block.pos() - padding_block_begin;
                 signing_block.get_mut(padding_block_length_ref).set(padding_block_length as u64);
             }
-    
+
             let second_length_of_signing_block = signing_block.alloc::<u64>();
             signing_block.extend(APK_SIGNING_BLOCK_MAGIC);
             let length_of_signing_block = signing_block.pos() - pairs_begin;

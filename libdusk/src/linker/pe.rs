@@ -367,7 +367,7 @@ impl Linker for PELinker {
                 size_of_uninitialized_data: 0xfaceface,
                 address_of_entry_point: address_of_entry_point as u32,
                 base_of_code: base_of_code as u32,
-    
+
                 image_base: 0x0000000140000000,
                 section_alignment: SECTION_ALIGNMENT as u32,
                 file_alignment: FILE_ALIGNMENT as u32,
@@ -389,7 +389,7 @@ impl Linker for PELinker {
                 size_of_heap_commit: 0x00ceface,
                 loader_flags: 0xfaceface,
                 number_of_rva_and_sizes: 16,
-    
+
                 export_table: ImageDataDirectory { virtual_address: 0, size: 0 },
                 import_table,
                 resource_table: ImageDataDirectory { virtual_address: 0, size: 0 },

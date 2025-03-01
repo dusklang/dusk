@@ -299,7 +299,7 @@ macro_rules! define_legacy_internal_types_internal {
                                 )
                             ),*
                         }
-                    ),*  
+                    ),*
                 };
             }
             fn find_overloads_in_internal(&self, lookup: &NameLookup, ns: InternalNamespace, overloads: &mut HashSet<FoundOverload>) {
@@ -311,7 +311,7 @@ macro_rules! define_legacy_internal_types_internal {
                                 let name = self.code.ast.names[decl];
                                 if self.name_matches(lookup, name) {
                                     overloads.insert(decl.into());
-                                }   
+                                }
                             })*
                         }
                     ),*
@@ -369,7 +369,7 @@ impl Driver {
     }
     fn find_overloads_in_new_namespace(&self, name: &NameLookup, base: ExprId, id: NewNamespaceId, kind: NewNamespaceRefKind, overloads: &mut HashSet<FoundOverload>) {
         let ns = &self.code.ast.new_namespaces[id];
-        
+
         match kind {
             NewNamespaceRefKind::Instance => for decl in &ns.instance_decls {
                 let decl_name = self.code.ast.names[decl.decl];
@@ -401,7 +401,7 @@ impl Driver {
             ast::Decl::Function { params, .. } => {
                 for decl in range_iter(params.clone()) {
                     let param_name = self.code.ast.names[decl];
-                    
+
                     if self.name_matches(name, param_name) {
                         overloads.insert(decl.into());
                     }
@@ -558,7 +558,7 @@ impl Driver {
     /// IMPORTANT NOTE: When/if we stop adding type3 deps to all items in a function's scope,
     /// we will need to bring back the original idea of meta-dependencies:
     /// https://github.com/dusklang/dusk/issues/58
-    /// 
+    ///
     /// Update on Apr. 20, 2023: I feel like we already have the "original idea of meta-dependencies", and I don't
     /// see how they help in this case? The actual issue (as I understand it now, years later) is that we currently
     /// conservatively add type3 deps from each function decl to all items in its scope, because if we need to generate
@@ -952,7 +952,7 @@ impl Driver {
                         ast::Decl::Parameter { .. } | ast::Decl::Static(_) | ast::Decl::Const { .. } | ast::Decl::Stored { .. } | ast::Decl::Field { .. } | ast::Decl::ReturnValue | ast::Decl::InternalField(_) | ast::Decl::LoopBinding { .. } /*  | ast::Decl::PatternBinding { .. }*/ => {},
                         ast::Decl::PatternBinding { id: binding_id, .. } => {
                             let scrutinee = self.code.ast.pattern_binding_decls[binding_id].scrutinee;
-        
+
                             // TODO: find out why this seems to cause an infinite loop if it's moved to build_more_tir() and changed to a type 2 dependency
                             self.tir.graph.add_type2_dep(id, ef!(scrutinee.item));
                         },
@@ -1004,7 +1004,7 @@ impl Driver {
                             add_eval_dep!(id, extern_library_path);
                         },
                     }
-        
+
                     // NOTE: The function decl case in the above match expression depends on this!
                     if let Some(ty) = self.code.ast.explicit_tys[decl_id] {
                         add_eval_dep!(id, ty);
