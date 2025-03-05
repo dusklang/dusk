@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use smallvec::SmallVec;
-use num_bigint::BigUint;
 
 pub mod constraints;
 
@@ -9,7 +8,7 @@ use constraints::*;
 use crate::index_vec::range_iter;
 use crate::type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 
-use crate::ast::{self, ExprId, DeclId, StructId, PatternKind, Ident, VOID_EXPR, GenericCtx, DeclRefId, Decl, NewNamespaceId, StaticDecl, InstanceDecl, SelfParameterKind};
+use crate::ast::{self, Decl, DeclId, DeclRefId, ExprId, GenericCtx, Ident, InstanceDecl, NewNamespaceId, Pattern, PatternKind, SelfParameterKind, StaticDecl, StructId, VOID_EXPR, VOID_TYPE};
 use crate::mir::Const;
 use crate::ty::{Type, LegacyInternalType, FunctionType, QualType, IntWidth, StructType};
 use crate::source_info::SourceRange;
@@ -446,168 +445,93 @@ impl tir::Expr<tir::For> {
     }
 }
 
+#[derive(Hash, PartialEq, Eq, Debug)]
+enum DecisionValue {
+    EnumVariant(usize),
+    UnsignedInt(u64),
+    SignedInt(i64),
+}
 
-enum ExhaustionReason {
-    // Explicitly called out, e.g., '.a' for variant 'a'
-    Explicit {
-        // First pattern to explicitly call out the value/variant
-        first_coverage: SourceRange,
-        // Must be set to true if either another explicit pattern calls out the value/variant, or
-        // there is a catch-all case later
-        more_than_one_coverage: bool,
+#[derive(Debug)]
+enum DecisionNode {
+    Branch {
+        paths: HashMap<DecisionValue, DecisionNode>,
+        default_path: Option<Box<DecisionNode>>,
     },
-    CatchAll(SourceRange),
-}
-
-struct VariantExhaustion {
-    reason: ExhaustionReason,
-    payload: Option<Box<Exhaustion>>,
-}
-
-#[derive(Default)]
-struct EnumExhaustion {
-    variants: HashMap<usize, VariantExhaustion>,
-}
-
-enum Exhaustion {
-    #[allow(unused)]
-    Enum(EnumExhaustion),
-    Total,
-}
-
-impl EnumExhaustion {
-    fn is_total(&self, driver: &Driver, scrutinee_ty: &Type, tp: &dyn TypeProvider) -> bool {
-        let enum_id = match scrutinee_ty {
-            &Type::Enum(enum_id) => enum_id,
-            _ => panic!("expected enum"),
-        };
-
-        let variants = &driver.code.ast.enums[enum_id].variants;
-        if self.variants.len() < variants.len() {
-            false
-        } else {
-            // Return false early if you find something that proves non-total exhaustion.
-            // Otherwise, return true.
-            for (i, variant) in variants.iter().enumerate() {
-                let exhaustion = self.variants.get(&i).unwrap();
-                // No payload == total exhaustion. Otherwise:
-                if let Some(payload) = &exhaustion.payload {
-                    let ty = variant.payload_ty.unwrap();
-                    let ty = tp.get_evaluated_type(ty);
-                    if !payload.is_total(driver, ty, tp) {
-                        return false;
-                    }
-                }
-            }
-            true
-        }
-    }
-
-    fn make_total(&mut self, driver: &Driver, scrutinee_ty: &Type, catch_all_range: SourceRange, tp: &dyn TypeProvider) {
-        let enum_id = match scrutinee_ty {
-            &Type::Enum(enum_id) => enum_id,
-            _ => panic!("expected enum"),
-        };
-        let variants = &driver.code.ast.enums[enum_id].variants;
-        for (i, variant) in variants.iter().enumerate() {
-            if let Some(exhaustion) = self.variants.get_mut(&i) {
-                if let ExhaustionReason::Explicit { more_than_one_coverage, .. } = &mut exhaustion.reason {
-                    *more_than_one_coverage = true;
-                }
-                if let Some(payload) = &mut exhaustion.payload {
-                    let ty = variant.payload_ty.unwrap();
-                    let ty = tp.get_evaluated_type(ty);
-                    payload.make_total(driver, ty, catch_all_range, tp);
-                }
-            } else {
-                let payload = variant.payload_ty.is_some()
-                    .then(|| Box::new(Exhaustion::Total));
-                self.variants.insert(i, VariantExhaustion { reason: ExhaustionReason::CatchAll(catch_all_range), payload });
-            }
-        }
-    }
-}
-
-impl Exhaustion {
-    fn is_total(&self, driver: &Driver, scrutinee_ty: &Type, tp: &dyn TypeProvider) -> bool {
-        match self {
-            Exhaustion::Enum(exhaustion) => exhaustion.is_total(driver, scrutinee_ty, tp),
-            Exhaustion::Total => true,
-        }
-    }
-
-    fn make_total(&mut self, driver: &Driver, scrutinee_ty: &Type, catch_all_range: SourceRange, tp: &dyn TypeProvider) {
-        match self {
-            Exhaustion::Enum(exhaustion) => exhaustion.make_total(driver, scrutinee_ty, catch_all_range, tp),
-            Exhaustion::Total => {},
-        }
-    }
+    Destination {
+        // TODO: maybe this should be a strongly-typed ID?
+        destination_index: usize,
+    },
+    Failure,
 }
 
 impl tir::Expr<tir::Switch> {
-    fn run_pass_1(&self, driver: &mut Driver, tp: &mut dyn TypeProvider) {
-        let scrutinee_ty = driver.solve_constraints(tp, self.scrutinee).expect("Ambiguous type for scrutinee in switch expression").qual_ty.ty;
-        match scrutinee_ty {
+    // Reference:
+    //  - http://moscova.inria.fr/~maranget/papers/ml05e-maranget.pdf
+    //  - https://compiler.club/compiling-pattern-matching/
+    fn match_scrutinee(&self, driver: &mut Driver, tp: &mut dyn TypeProvider, scrutinee: ExprId, mut scrutinee_tys: Vec<Type>, mut pattern_matrix: Vec<Vec<PatternKind>>) -> DecisionNode {
+        if pattern_matrix.is_empty() {
+            return DecisionNode::Failure;
+        }
+
+        // Validate arguments
+        let pattern_matrix_width = pattern_matrix[0].len();
+        for row in &pattern_matrix[1..] {
+            assert_eq!(row.len(), pattern_matrix_width);
+        }
+        assert_eq!(scrutinee_tys.len(), pattern_matrix_width);
+
+        if pattern_matrix_width == 0 {
+            return DecisionNode::Failure;
+        }
+
+
+        // Check if every pattern in first row is irrefutable
+        let mut first_refutable_pattern_index = None;
+        for (i, pattern) in pattern_matrix[0].iter().enumerate() {
+            if !matches!(pattern, PatternKind::NamedCatchAll(_) | PatternKind::AnonymousCatchAll(_)) {
+                first_refutable_pattern_index = Some(i);
+                break;
+            }
+        }
+
+        let Some(first_refutable_pattern_index) = first_refutable_pattern_index else {
+            // TODO: use a real destination here.
+            return DecisionNode::Destination { destination_index: 0 };
+        };
+
+        for row in &mut pattern_matrix {
+            row.swap(0, first_refutable_pattern_index);
+        }
+        scrutinee_tys.swap(0, first_refutable_pattern_index);
+
+        match scrutinee_tys[0] {
             Type::Enum(id) => {
-                // Make sure each switch case matches a variant name in the scrutinized enum, and
-                // that each variant in the enum is matched exactly once.
-                let mut exhaustion = EnumExhaustion::default();
+                let mut paths = HashMap::<DecisionValue, DecisionNode>::new();
+                let mut default_path = None;
                 let variants = &driver.code.ast.enums[id].variants;
-                for case in &self.cases {
-                    match case.pattern.kind {
+
+                let mut child_matrices = HashMap::<usize, Vec<Vec<PatternKind>>>::new();
+                for pattern_row in &pattern_matrix {
+                    match pattern_row[0] {
                         PatternKind::ContextualMember { name, range, ref payload } => {
                             let variant_name_str = driver.interner.resolve(name.symbol).unwrap();
                             let index = variants.iter().position(|variant| variant.name == name.symbol);
                             if let Some(index) = index {
-                                if variants[index].payload_ty.is_some() && payload.is_none() {
-                                    // Trying to match variant with payload, without acknowledging
-                                    // the payload. For example, matching a value of type
-                                    // 'enum { a(u32) }' with the pattern '.a' rather than '.a(12)'
-                                    // or something.
-                                    let decl = variants[index].decl;
-                                    let err = Error::new(format!("Variant `{}` has a payload which goes ignored in pattern", variant_name_str))
-                                        .adding_primary_range(range, "pattern here")
-                                        .adding_secondary_range(decl, "variant here");
-                                    driver.diag.push(err);
-
-                                    // Even though the payload was ignored, still add record of attempt to match it. This will suppress unhandled variant errors.
-                                    exhaustion.variants.entry(index).or_insert_with(|| {
-                                        let payload = Box::new(Exhaustion::Total);
-                                        VariantExhaustion { reason: ExhaustionReason::Explicit { first_coverage: range, more_than_one_coverage: false }, payload: Some(payload) }
-                                    });
-                                } else if let Some(prior_match) = exhaustion.variants.get_mut(&index) {
-                                    // This variant has no payload, and has already been matched.
-                                    let mut err = Error::new(format!("Variant `{}` already covered in `switch` expression", variant_name_str))
-                                        .adding_primary_range(range, "redundant case here");
-                                    match prior_match.reason {
-                                        ExhaustionReason::Explicit { first_coverage, ref mut more_than_one_coverage } => {
-                                            let msg = if *more_than_one_coverage {
-                                                "first covered here"
-                                            } else {
-                                                "covered here"
-                                            };
-                                            err.add_primary_range(first_coverage, msg);
-                                            *more_than_one_coverage = true;
-                                        },
-                                        ExhaustionReason::CatchAll(range) => err.add_primary_range(range, "covered by catch-all pattern here"),
-                                    }
-                                    driver.diag.push(err);
+                                let mut new_row = Vec::new();
+                                if let Some(payload_pattern) = payload {
+                                    new_row.push((**payload_pattern).clone());
                                 } else {
-                                    exhaustion.variants.insert(index, VariantExhaustion { reason: ExhaustionReason::Explicit { first_coverage: range, more_than_one_coverage: false }, payload: None });
+                                    new_row.push(PatternKind::AnonymousCatchAll(SourceRange::default()));
                                 }
+                                new_row.extend_from_slice(&pattern_row[1..]);
+                                child_matrices.entry(index)
+                                    .or_insert_with(|| Vec::new())
+                                    .push(new_row);
                             } else {
-                                let err = Error::new(format!("Variant `{}` does not exist in enum {:?}", variant_name_str, scrutinee_ty))
+                                let err = Error::new(format!("Variant `{}` does not exist in enum {:?}", variant_name_str, scrutinee_tys[0]))
                                     .adding_primary_range(range, "referred to by pattern here");
                                 driver.diag.push(err);
-                            }
-                        },
-                        PatternKind::NamedCatchAll(Ident { range, .. }) | PatternKind::AnonymousCatchAll(range) => {
-                            if exhaustion.is_total(driver, &scrutinee_ty, tp) {
-                                let err = Error::new("switch case unreachable")
-                                    .adding_primary_range(range, "all possible values already handled before this point");
-                                driver.diag.push(err);
-                            } else {
-                                exhaustion.make_total(driver, &scrutinee_ty, range, tp);
                             }
                         },
                         PatternKind::IntLit { range, .. } => {
@@ -616,104 +540,71 @@ impl tir::Expr<tir::Switch> {
                                 .adding_secondary_range(self.scrutinee, "scrutinee here");
                             driver.diag.push(error);
                         },
+                        PatternKind::NamedCatchAll(Ident { .. }) | PatternKind::AnonymousCatchAll(_) => {},
                     }
                 }
-                // If there are more matches than variants, then the sky is falling.
-                debug_assert!(exhaustion.variants.len() <= variants.len());
 
-                // There are more variants than there are matched variants? Then there are
-                // unmatched variants. AKA, the switch expression is non-exhaustive.
-                if exhaustion.variants.len() < variants.len() {
-                    let mut unmatched_variants = Vec::new();
-                    for (index, variant) in variants.iter().enumerate() {
-                        if exhaustion.variants.get(&index).is_none() {
-                            unmatched_variants.push(variant.name);
-                        }
-                    }
+                for (variant_index, child_matrix) in child_matrices {
+                    let variants = &driver.code.ast.enums[id].variants;
+                    let payload_ty = variants[variant_index].payload_ty.unwrap_or(VOID_TYPE);
+                    let payload_ty = tp.get_evaluated_type(payload_ty).clone();
+                    let mut child_scrutinee_tys = vec![payload_ty];
+                    child_scrutinee_tys.extend_from_slice(&scrutinee_tys[1..]);
 
-                    // TODO: using the write!() macro here, or something, would be nicer.
-                    let mut err_msg = String::new();
-                    if unmatched_variants.len() == 1 {
-                        err_msg.push_str(&format!("Variant `{}` is ", driver.interner.resolve(unmatched_variants[0]).unwrap()));
-                    } else {
-                        err_msg.push_str("Variants ");
-                        for (i, &variant) in unmatched_variants[..unmatched_variants.len() - 1].iter().enumerate() {
-                            if i != 0 {
-                                err_msg.push_str(", ");
-                            }
-                            err_msg.push_str(&format!("`{}`", driver.interner.resolve(variant).unwrap()));
-                        }
-                        err_msg.push_str(&format!(" and `{}` are ", driver.interner.resolve(unmatched_variants.last().copied().unwrap()).unwrap()));
-                    }
-                    err_msg.push_str("unhandled in switch expression. switch expressions must be exhaustive.");
-
-                    let err = Error::new(err_msg)
-                        .adding_primary_range(self.id, "");
-                    driver.diag.push(err);
+                    paths.insert(DecisionValue::EnumVariant(variant_index), self.match_scrutinee(driver, tp, scrutinee, child_scrutinee_tys, child_matrix));
                 }
+
+                if paths.len() < driver.code.ast.enums[id].variants.len() {
+                    let default_child_matrix = pattern_matrix[1..].to_vec();
+                    default_path = Some(Box::new(self.match_scrutinee(driver, tp, scrutinee, scrutinee_tys.clone(), default_child_matrix)));
+                }
+
+                DecisionNode::Branch { paths, default_path }
             },
-            Type::Int { width, is_signed: false } => {
-                let mut exhaustion = HashMap::new();
-                let mut catch_all_range = None;
-                let mut all_exhausted = false;
-                let mut num_values = BigUint::from(1u64);
-                num_values <<= width.bit_width(driver.arch);
+            Type::Int { .. } => {
+                let mut paths = HashMap::<DecisionValue, DecisionNode>::new();
 
-                for case in &self.cases {
-                    match case.pattern.kind {
-                        PatternKind::IntLit { value, range } => {
-                            let already_handled_message = || format!("value `{}` already handled in switch expression", value);
-                            if BigUint::from(value) >= num_values {
-                                let err = Error::new(format!("value `{}` does not fit into type {:?}", value, scrutinee_ty))
-                                    .adding_primary_range(range, "in pattern here");
-                                driver.diag.push(err);
-                            }
-                            if let Some(prior_use) = exhaustion.get(&value) {
-                                // TODO: print as hex if necessary to match the user
-                                let err = Error::new(already_handled_message())
-                                    .adding_primary_range(range, "redundant case here")
-                                    .adding_secondary_range(*prior_use, "previously handled here");
-                                driver.diag.push(err);
-                            } else if let Some(catch_all_range) = catch_all_range {
-                                let err = Error::new(already_handled_message())
-                                    .adding_primary_range(range, "redundant case here")
-                                    .adding_secondary_range(catch_all_range, "previously handled by catch-all case here");
-                                driver.diag.push(err);
-                            }
-                            exhaustion.insert(value, range);
-                        },
-                        PatternKind::NamedCatchAll(Ident { range, .. }) | PatternKind::AnonymousCatchAll(range) => {
-                            if all_exhausted {
-                                let mut err = Error::new("switch case unreachable")
-                                    .adding_primary_range(range, "all possible values already handled before this point");
-                                if let Some(catch_all_range) = catch_all_range {
-                                    err.add_secondary_range(catch_all_range, "additional values handled by pattern here");
-                                }
-                                driver.diag.push(err);
-                            } else {
-                                catch_all_range = Some(range);
-                            }
+                let mut child_matrices = HashMap::<DecisionValue, Vec<Vec<PatternKind>>>::new();
+                for pattern_row in &pattern_matrix {
+                    match pattern_row[0] {
+                        PatternKind::IntLit { value, .. } => {
+                            child_matrices.entry(DecisionValue::UnsignedInt(value))
+                                .or_insert_with(|| Vec::new())
+                                .push(pattern_row[1..].to_vec());
                         },
                         PatternKind::ContextualMember { range, .. } => {
-                            let error = Error::new(format!("cannot match integer type {:?} with contextual member pattern", scrutinee_ty))
+                            let error = Error::new("cannot match integer type with contextual member")
                                 .adding_primary_range(range, "pattern here")
                                 .adding_secondary_range(self.scrutinee, "scrutinee here");
                             driver.diag.push(error);
                         },
+                        PatternKind::NamedCatchAll(Ident { .. }) | PatternKind::AnonymousCatchAll(_) => {},
                     }
+                }
 
-                    if !all_exhausted && (catch_all_range.is_some() || BigUint::from(exhaustion.len()) >= num_values) {
-                        all_exhausted = true;
-                    }
+                for (value, child_matrix) in child_matrices {
+                    paths.insert(value, self.match_scrutinee(driver, tp, scrutinee, scrutinee_tys[1..].to_vec(), child_matrix));
                 }
-                if !all_exhausted {
-                    let err = Error::new(format!("not all values of {:?} handled in switch expression. switch expressions must be exhaustive", scrutinee_ty))
-                        .adding_primary_range(self.id, "consider adding a catch-all case to the end of this switch");
-                    driver.diag.push(err);
-                }
+
+                // TODO: handle rare case where all values of a given integer type are individually matched.
+                DecisionNode::Branch { paths, default_path: None }
             }
-            _ => todo!("Type {:?} is not supported in switch expression scrutinee position", scrutinee_ty),
+            _ => todo!("Type {:?} is not supported in switch expression scrutinee position", scrutinee_tys[0]),
         }
+    }
+
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut dyn TypeProvider) {
+        let scrutinee_ty = driver.solve_constraints(tp, self.scrutinee).expect("Ambiguous type for scrutinee in switch expression").qual_ty.ty;
+
+        let mut pattern_matrix = Vec::new();
+        for case in &self.cases {
+            pattern_matrix.push(vec![case.pattern.kind.clone()]);
+        }
+        let tree = self.match_scrutinee(driver, tp, self.scrutinee, vec![scrutinee_ty], pattern_matrix);
+
+        unimplemented!("Generated decision tree: {:#?}", tree);
+
+
 
         let constraints = if self.cases.is_empty() {
             ConstraintList::new().with_type(Type::Void)
