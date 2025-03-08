@@ -508,11 +508,12 @@ impl tir::Expr<tir::Switch> {
         match scrutinee_tys[0] {
             Type::Enum(id) => {
                 let mut paths = HashMap::<DecisionValue, DecisionNode>::new();
-                let mut default_path = None;
                 let variants = &driver.code.ast.enums[id].variants;
 
-                let mut child_matrices = HashMap::<usize, Vec<Vec<PatternKind>>>::new();
-                for pattern_row in &pattern_matrix {
+                let mut child_matrices = HashMap::<usize, Vec<(Vec<PatternKind>, usize)>>::new();
+                let mut catch_all_child_matrix_rows = Vec::<(Vec<PatternKind>, usize)>::new();
+                let mut default_matrix = Vec::<Vec<PatternKind>>::new();
+                for (pattern_row_index, pattern_row) in pattern_matrix.iter().enumerate() {
                     match pattern_row[0] {
                         PatternKind::ContextualMember { name, range, ref payload } => {
                             let variant_name_str = driver.interner.resolve(name.symbol).unwrap();
@@ -527,7 +528,7 @@ impl tir::Expr<tir::Switch> {
                                 new_row.extend_from_slice(&pattern_row[1..]);
                                 child_matrices.entry(index)
                                     .or_insert_with(|| Vec::new())
-                                    .push(new_row);
+                                    .push((new_row, pattern_row_index));
                             } else {
                                 let err = Error::new(format!("Variant `{}` does not exist in enum {:?}", variant_name_str, scrutinee_tys[0]))
                                     .adding_primary_range(range, "referred to by pattern here");
@@ -540,37 +541,54 @@ impl tir::Expr<tir::Switch> {
                                 .adding_secondary_range(self.scrutinee, "scrutinee here");
                             driver.diag.push(error);
                         },
-                        PatternKind::NamedCatchAll(Ident { .. }) | PatternKind::AnonymousCatchAll(_) => {},
+                        PatternKind::NamedCatchAll(Ident { .. }) | PatternKind::AnonymousCatchAll(_) => {
+                            default_matrix.push(pattern_row.clone());
+
+                            let mut new_row = Vec::new();
+                            new_row.push(PatternKind::AnonymousCatchAll(SourceRange::default()));
+                            new_row.extend_from_slice(&pattern_row[1..]);
+                            catch_all_child_matrix_rows.push((new_row, pattern_row_index));
+                        },
                     }
                 }
 
-                for (variant_index, child_matrix) in child_matrices {
+                for (variant_index, mut child_matrix) in child_matrices {
                     let variants = &driver.code.ast.enums[id].variants;
                     let payload_ty = variants[variant_index].payload_ty.unwrap_or(VOID_TYPE);
                     let payload_ty = tp.get_evaluated_type(payload_ty).clone();
                     let mut child_scrutinee_tys = vec![payload_ty];
                     child_scrutinee_tys.extend_from_slice(&scrutinee_tys[1..]);
 
+                    child_matrix.extend_from_slice(&catch_all_child_matrix_rows);
+                    child_matrix.sort_by_key(|(_, row_index)| *row_index);
+                    let child_matrix: Vec<_> = child_matrix.into_iter()
+                        .map(|(pattern, _)| pattern)
+                        .collect();
+
                     paths.insert(DecisionValue::EnumVariant(variant_index), self.match_scrutinee(driver, tp, scrutinee, child_scrutinee_tys, child_matrix));
                 }
 
-                if paths.len() < driver.code.ast.enums[id].variants.len() {
-                    let default_child_matrix = pattern_matrix[1..].to_vec();
-                    default_path = Some(Box::new(self.match_scrutinee(driver, tp, scrutinee, scrutinee_tys.clone(), default_child_matrix)));
-                }
+                let default_path = (!default_matrix.is_empty()).then(|| {
+                    Box::new(self.match_scrutinee(driver, tp, scrutinee, scrutinee_tys, default_matrix))
+                });
 
                 DecisionNode::Branch { paths, default_path }
             },
             Type::Int { .. } => {
                 let mut paths = HashMap::<DecisionValue, DecisionNode>::new();
 
-                let mut child_matrices = HashMap::<DecisionValue, Vec<Vec<PatternKind>>>::new();
-                for pattern_row in &pattern_matrix {
+                let mut child_matrices = HashMap::<DecisionValue, Vec<(Vec<PatternKind>, usize)>>::new();
+                let mut catch_all_child_matrix_rows = Vec::<(Vec<PatternKind>, usize)>::new();
+                let mut default_matrix = Vec::<Vec<PatternKind>>::new();
+                for (pattern_row_index, pattern_row) in pattern_matrix.iter().enumerate() {
                     match pattern_row[0] {
                         PatternKind::IntLit { value, .. } => {
+                            let mut new_row = Vec::new();
+                            new_row.push(PatternKind::AnonymousCatchAll(SourceRange::default()));
+                            new_row.extend_from_slice(&pattern_row[1..]);
                             child_matrices.entry(DecisionValue::UnsignedInt(value))
                                 .or_insert_with(|| Vec::new())
-                                .push(pattern_row[1..].to_vec());
+                                .push((new_row, pattern_row_index));
                         },
                         PatternKind::ContextualMember { range, .. } => {
                             let error = Error::new("cannot match integer type with contextual member")
@@ -578,16 +596,34 @@ impl tir::Expr<tir::Switch> {
                                 .adding_secondary_range(self.scrutinee, "scrutinee here");
                             driver.diag.push(error);
                         },
-                        PatternKind::NamedCatchAll(Ident { .. }) | PatternKind::AnonymousCatchAll(_) => {},
+                        PatternKind::NamedCatchAll(Ident { .. }) | PatternKind::AnonymousCatchAll(_) => {
+                            default_matrix.push(pattern_row.clone());
+
+                            let mut new_row = Vec::new();
+                            new_row.push(PatternKind::AnonymousCatchAll(SourceRange::default()));
+                            new_row.extend_from_slice(&pattern_row[1..]);
+                            catch_all_child_matrix_rows.push((new_row, pattern_row_index));
+                        },
                     }
                 }
 
-                for (value, child_matrix) in child_matrices {
-                    paths.insert(value, self.match_scrutinee(driver, tp, scrutinee, scrutinee_tys[1..].to_vec(), child_matrix));
+                for (value, mut child_matrix) in child_matrices {
+                    let mut child_scrutinee_tys = vec![Type::Void];
+                    child_scrutinee_tys.extend_from_slice(&scrutinee_tys[1..]);
+
+                    child_matrix.extend_from_slice(&catch_all_child_matrix_rows);
+                    child_matrix.sort_by_key(|(_, row_index)| *row_index);
+                    let child_matrix: Vec<_> = child_matrix.into_iter()
+                        .map(|(pattern, _)| pattern)
+                        .collect();
+                    paths.insert(value, self.match_scrutinee(driver, tp, scrutinee, child_scrutinee_tys, child_matrix));
                 }
 
-                // TODO: handle rare case where all values of a given integer type are individually matched.
-                DecisionNode::Branch { paths, default_path: None }
+                let default_path = (!default_matrix.is_empty()).then(|| {
+                    Box::new(self.match_scrutinee(driver, tp, scrutinee, scrutinee_tys, default_matrix))
+                });
+
+                DecisionNode::Branch { paths, default_path }
             }
             _ => todo!("Type {:?} is not supported in switch expression scrutinee position", scrutinee_tys[0]),
         }
