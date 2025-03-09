@@ -8,7 +8,7 @@ use constraints::*;
 use crate::index_vec::range_iter;
 use crate::type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 
-use crate::ast::{self, Decl, DeclId, DeclRefId, ExprId, GenericCtx, Ident, InstanceDecl, NewNamespaceId, Pattern, PatternKind, SelfParameterKind, StaticDecl, StructId, VOID_EXPR, VOID_TYPE};
+use crate::ast::{self, Decl, DeclId, DeclRefId, ExprId, GenericCtx, Ident, InstanceDecl, NewNamespaceId, PatternKind, SelfParameterKind, StaticDecl, StructId, VOID_EXPR};
 use crate::mir::Const;
 use crate::ty::{Type, LegacyInternalType, FunctionType, QualType, IntWidth, StructType};
 use crate::source_info::SourceRange;
@@ -19,6 +19,14 @@ use crate::error::Error;
 use crate::new_code::NewCode;
 use crate::ty::BuiltinTraits;
 use crate::tir::{UnitItems, ExprNamespace, self, NameLookup, NewNamespaceRefKind, ExprMacroInfo, OverloadScope, Units};
+use index_vec::{IndexVec, define_index_type};
+use crate::index_vec::*;
+
+define_index_type!(pub struct SwitchScrutineeValueId = u32;);
+define_index_type!(pub struct SwitchDestinationId = u32;);
+
+pub const VOID_SCRUTINEE_VALUE: SwitchScrutineeValueId = SwitchScrutineeValueId::from_raw_unchecked(0);
+pub const ORIGINAL_SCRUTINEE_VALUE: SwitchScrutineeValueId = SwitchScrutineeValueId::from_raw_unchecked(1);
 
 use dusk_proc_macros::*;
 
@@ -445,33 +453,47 @@ impl tir::Expr<tir::For> {
     }
 }
 
+// TODO: split pattern matching stuff out into its own module
 #[derive(Hash, PartialEq, Eq, Debug)]
-enum DecisionValue {
+enum SwitchDecisionValue {
     EnumVariant(usize),
     UnsignedInt(u64),
     SignedInt(i64),
 }
 
 #[derive(Debug)]
-enum DecisionNode {
+enum SwitchDecisionNode {
     Branch {
-        paths: HashMap<DecisionValue, DecisionNode>,
-        default_path: Option<Box<DecisionNode>>,
+        scrutinee: SwitchScrutineeValueId,
+        paths: HashMap<SwitchDecisionValue, SwitchDecisionNode>,
+        default_path: Option<Box<SwitchDecisionNode>>,
     },
     Destination {
-        // TODO: maybe this should be a strongly-typed ID?
-        destination_index: usize,
+        destination: SwitchDestinationId,
     },
     Failure,
+}
+
+#[derive(Clone, Copy)]
+enum SwitchScrutineeValue {
+    OriginalScrutinee,
+    VoidValue,
+    EnumPayload { enum_value: SwitchScrutineeValueId, variant_index: usize },
+}
+
+#[derive(Clone)]
+struct SwitchScrutinee {
+    value: SwitchScrutineeValueId,
+    ty: Type,
 }
 
 impl tir::Expr<tir::Switch> {
     // Reference:
     //  - http://moscova.inria.fr/~maranget/papers/ml05e-maranget.pdf
     //  - https://compiler.club/compiling-pattern-matching/
-    fn match_scrutinee(&self, driver: &mut Driver, tp: &mut dyn TypeProvider, scrutinee: ExprId, mut scrutinee_tys: Vec<Type>, mut pattern_matrix: Vec<Vec<PatternKind>>, destinations: Vec<usize>) -> DecisionNode {
+    fn match_scrutinee(&self, driver: &mut Driver, tp: &mut dyn TypeProvider, scrutinee: ExprId, scrutinee_values: &mut IndexVec<SwitchScrutineeValueId, SwitchScrutineeValue>, mut scrutinees: Vec<SwitchScrutinee>, mut pattern_matrix: Vec<Vec<PatternKind>>, destinations: Vec<SwitchDestinationId>) -> SwitchDecisionNode {
         if pattern_matrix.is_empty() {
-            return DecisionNode::Failure;
+            return SwitchDecisionNode::Failure;
         }
 
         // Validate arguments
@@ -479,7 +501,7 @@ impl tir::Expr<tir::Switch> {
         for row in &pattern_matrix[1..] {
             assert_eq!(row.len(), pattern_matrix_width);
         }
-        assert_eq!(scrutinee_tys.len(), pattern_matrix_width);
+        assert_eq!(scrutinees.len(), pattern_matrix_width);
         assert_ne!(pattern_matrix_width, 0);
         assert_eq!(pattern_matrix.len(), destinations.len());
 
@@ -495,27 +517,27 @@ impl tir::Expr<tir::Switch> {
 
         let Some(first_refutable_pattern_index) = first_refutable_pattern_index else {
             // TODO: use a real destination here.
-            return DecisionNode::Destination { destination_index: destinations[0] };
+            return SwitchDecisionNode::Destination { destination: destinations[0] };
         };
 
         for row in &mut pattern_matrix {
             row.swap(0, first_refutable_pattern_index);
         }
-        scrutinee_tys.swap(0, first_refutable_pattern_index);
+        scrutinees.swap(0, first_refutable_pattern_index);
 
         // TODO: unreachable code checking (destination not present in tree)
         // TODO: exhaustiveness checking
         // TODO: include way of encoding the scrutinee for each DecisionNode::Branch, so that we can generate code for this tree.
 
-        match scrutinee_tys[0] {
+        match scrutinees[0].ty {
             Type::Enum(id) => {
-                let mut paths = HashMap::<DecisionValue, DecisionNode>::new();
+                let mut paths = HashMap::<SwitchDecisionValue, SwitchDecisionNode>::new();
                 let variants = &driver.code.ast.enums[id].variants;
 
-                let mut child_matrices = HashMap::<usize, Vec<(Vec<PatternKind>, usize)>>::new();
-                let mut catch_all_child_matrix_rows = Vec::<(Vec<PatternKind>, usize)>::new();
+                let mut child_matrices = HashMap::<usize, Vec<(Vec<PatternKind>, SwitchDestinationId)>>::new();
+                let mut catch_all_child_matrix_rows = Vec::<(Vec<PatternKind>, SwitchDestinationId)>::new();
                 let mut default_matrix = Vec::<Vec<PatternKind>>::new();
-                let mut default_matrix_destinations = Vec::<usize>::new();
+                let mut default_matrix_destinations = Vec::<SwitchDestinationId>::new();
                 for (pattern_row, &destination) in pattern_matrix.iter().zip(&destinations) {
                     match pattern_row[0] {
                         PatternKind::ContextualMember { name, range, ref payload } => {
@@ -533,7 +555,7 @@ impl tir::Expr<tir::Switch> {
                                     .or_insert_with(|| Vec::new())
                                     .push((new_row, destination));
                             } else {
-                                let err = Error::new(format!("Variant `{}` does not exist in enum {:?}", variant_name_str, scrutinee_tys[0]))
+                                let err = Error::new(format!("Variant `{}` does not exist in enum {:?}", variant_name_str, scrutinees[0].ty))
                                     .adding_primary_range(range, "referred to by pattern here");
                                 driver.diag.push(err);
                             }
@@ -558,10 +580,15 @@ impl tir::Expr<tir::Switch> {
 
                 for (variant_index, mut child_matrix) in child_matrices {
                     let variants = &driver.code.ast.enums[id].variants;
-                    let payload_ty = variants[variant_index].payload_ty.unwrap_or(VOID_TYPE);
-                    let payload_ty = tp.get_evaluated_type(payload_ty).clone();
-                    let mut child_scrutinee_tys = vec![payload_ty];
-                    child_scrutinee_tys.extend_from_slice(&scrutinee_tys[1..]);
+                    let payload_scrutinee = if let Some(payload_ty) = variants[variant_index].payload_ty {
+                        let payload_ty = tp.get_evaluated_type(payload_ty).clone();
+                        let scrutinee_value = scrutinee_values.push(SwitchScrutineeValue::EnumPayload { enum_value: scrutinees[0].value, variant_index });
+                        SwitchScrutinee { value: scrutinee_value, ty: payload_ty }
+                    } else {
+                        SwitchScrutinee { value: VOID_SCRUTINEE_VALUE, ty: Type::Void }
+                    };
+                    let mut child_scrutinees = vec![payload_scrutinee];
+                    child_scrutinees.extend_from_slice(&scrutinees[1..]);
 
                     child_matrix.extend_from_slice(&catch_all_child_matrix_rows);
                     child_matrix.sort_by_key(|(_, row_index)| *row_index);
@@ -572,29 +599,30 @@ impl tir::Expr<tir::Switch> {
                         .map(|(pattern, _)| pattern)
                         .collect();
 
-                    paths.insert(DecisionValue::EnumVariant(variant_index), self.match_scrutinee(driver, tp, scrutinee, child_scrutinee_tys, child_matrix, child_matrix_destinations));
+                    paths.insert(SwitchDecisionValue::EnumVariant(variant_index), self.match_scrutinee(driver, tp, scrutinee, scrutinee_values, child_scrutinees, child_matrix, child_matrix_destinations));
                 }
 
+                let branch_scrutinee = scrutinees[0].value;
                 let default_path = (!default_matrix.is_empty()).then(|| {
-                    Box::new(self.match_scrutinee(driver, tp, scrutinee, scrutinee_tys, default_matrix, default_matrix_destinations))
+                    Box::new(self.match_scrutinee(driver, tp, scrutinee, scrutinee_values, scrutinees, default_matrix, default_matrix_destinations))
                 });
 
-                DecisionNode::Branch { paths, default_path }
+                SwitchDecisionNode::Branch { scrutinee: branch_scrutinee, paths, default_path }
             },
             Type::Int { .. } => {
-                let mut paths = HashMap::<DecisionValue, DecisionNode>::new();
+                let mut paths = HashMap::<SwitchDecisionValue, SwitchDecisionNode>::new();
 
-                let mut child_matrices = HashMap::<DecisionValue, Vec<(Vec<PatternKind>, usize)>>::new();
-                let mut catch_all_child_matrix_rows = Vec::<(Vec<PatternKind>, usize)>::new();
+                let mut child_matrices = HashMap::<SwitchDecisionValue, Vec<(Vec<PatternKind>, SwitchDestinationId)>>::new();
+                let mut catch_all_child_matrix_rows = Vec::<(Vec<PatternKind>, SwitchDestinationId)>::new();
                 let mut default_matrix = Vec::<Vec<PatternKind>>::new();
-                let mut default_matrix_destinations = Vec::<usize>::new();
+                let mut default_matrix_destinations = Vec::<SwitchDestinationId>::new();
                 for (pattern_row, &destination) in pattern_matrix.iter().zip(&destinations) {
                     match pattern_row[0] {
                         PatternKind::IntLit { value, .. } => {
                             let mut new_row = Vec::new();
                             new_row.push(PatternKind::AnonymousCatchAll(SourceRange::default()));
                             new_row.extend_from_slice(&pattern_row[1..]);
-                            child_matrices.entry(DecisionValue::UnsignedInt(value))
+                            child_matrices.entry(SwitchDecisionValue::UnsignedInt(value))
                                 .or_insert_with(|| Vec::new())
                                 .push((new_row, destination));
                         },
@@ -617,8 +645,8 @@ impl tir::Expr<tir::Switch> {
                 }
 
                 for (value, mut child_matrix) in child_matrices {
-                    let mut child_scrutinee_tys = vec![Type::Void];
-                    child_scrutinee_tys.extend_from_slice(&scrutinee_tys[1..]);
+                    let mut child_scrutinees = vec![SwitchScrutinee { value: VOID_SCRUTINEE_VALUE, ty: Type::Void }];
+                    child_scrutinees.extend_from_slice(&scrutinees[1..]);
 
                     child_matrix.extend_from_slice(&catch_all_child_matrix_rows);
                     child_matrix.sort_by_key(|(_, row_index)| *row_index);
@@ -628,16 +656,17 @@ impl tir::Expr<tir::Switch> {
                     let child_matrix: Vec<_> = child_matrix.into_iter()
                         .map(|(pattern, _)| pattern)
                         .collect();
-                    paths.insert(value, self.match_scrutinee(driver, tp, scrutinee, child_scrutinee_tys, child_matrix, child_matrix_destinations));
+                    paths.insert(value, self.match_scrutinee(driver, tp, scrutinee, scrutinee_values, child_scrutinees, child_matrix, child_matrix_destinations));
                 }
 
+                let branch_scrutinee = scrutinees[0].value;
                 let default_path = (!default_matrix.is_empty()).then(|| {
-                    Box::new(self.match_scrutinee(driver, tp, scrutinee, scrutinee_tys, default_matrix, default_matrix_destinations))
+                    Box::new(self.match_scrutinee(driver, tp, scrutinee, scrutinee_values, scrutinees, default_matrix, default_matrix_destinations))
                 });
 
-                DecisionNode::Branch { paths, default_path }
+                SwitchDecisionNode::Branch { scrutinee: branch_scrutinee, paths, default_path }
             }
-            _ => todo!("Type {:?} is not supported in switch expression scrutinee position", scrutinee_tys[0]),
+            _ => todo!("Type {:?} is not supported in switch expression scrutinee position", scrutinees[0].ty),
         }
     }
 
@@ -648,19 +677,21 @@ impl tir::Expr<tir::Switch> {
         for case in &self.cases {
             pattern_matrix.push(vec![case.pattern.kind.clone()]);
         }
-        let destinations: Vec<_> = (0..self.cases.len()).collect();
-        let tree = self.match_scrutinee(driver, tp, self.scrutinee, vec![scrutinee_ty], pattern_matrix, destinations);
+        let destinations: Vec<_> = (0..self.cases.len()).map(|destination| SwitchDestinationId::from_usize(destination)).collect();
+        let mut scrutinee_values = IndexVec::<SwitchScrutineeValueId, SwitchScrutineeValue>::new();
+        scrutinee_values.push_at(VOID_SCRUTINEE_VALUE, SwitchScrutineeValue::VoidValue);
+        scrutinee_values.push_at(ORIGINAL_SCRUTINEE_VALUE, SwitchScrutineeValue::OriginalScrutinee);
+        let scrutinees = vec![SwitchScrutinee { value: ORIGINAL_SCRUTINEE_VALUE, ty: scrutinee_ty }];
+        let tree = self.match_scrutinee(driver, tp, self.scrutinee, &mut scrutinee_values, scrutinees, pattern_matrix, destinations);
 
         unimplemented!("Generated decision tree: {:#?}", tree);
-
-
 
         let constraints = if self.cases.is_empty() {
             ConstraintList::new().with_type(Type::Void)
         } else {
             let mut constraints = driver.get_constraints(tp, self.cases[0].terminal_expr).clone();
 
-            for case in &self.cases[1..self.cases.len()] {
+            for case in &self.cases[1..] {
                 constraints = driver.intersect_constraints(tp, &constraints, case.terminal_expr);
             }
             constraints
