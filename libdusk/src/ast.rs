@@ -524,15 +524,14 @@ impl LegacyIntrinsic {
     }
 }
 
-// These struct literals are necessary because the methods to make an Idx type are not const.
-pub const VOID_EXPR: ExprId = ExprId { _raw: 0 };
-pub const VOID_EXPR_ITEM: ItemId = ItemId { _raw: 0 };
-pub const ERROR_EXPR: ExprId = ExprId { _raw: 1 };
-pub const VOID_TYPE: ExprId = ExprId { _raw: 2 };
-pub const TYPE_TYPE: ExprId = ExprId { _raw: 3 };
-pub const ERROR_TYPE: ExprId = ExprId { _raw: 4 };
-pub const RETURN_VALUE_DECL: DeclId = DeclId { _raw: 0 };
-pub const BLANK_GENERIC_CTX: GenericCtxId = GenericCtxId::from_usize_unchecked(0);
+pub const VOID_EXPR: ExprId = ExprId::from_raw_unchecked(0);
+pub const VOID_EXPR_ITEM: ItemId = ItemId::from_raw_unchecked(0);
+pub const ERROR_EXPR: ExprId = ExprId::from_raw_unchecked(1);
+pub const VOID_TYPE: ExprId = ExprId::from_raw_unchecked(2);
+pub const TYPE_TYPE: ExprId = ExprId::from_raw_unchecked(3);
+pub const ERROR_TYPE: ExprId = ExprId::from_raw_unchecked(4);
+pub const RETURN_VALUE_DECL: DeclId = DeclId::from_raw_unchecked(0);
+pub const BLANK_GENERIC_CTX: GenericCtxId = GenericCtxId::from_raw_unchecked(0);
 impl Default for GenericCtxId {
     fn default() -> Self { BLANK_GENERIC_CTX }
 }
