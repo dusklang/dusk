@@ -7,7 +7,7 @@ use index_vec::define_index_type;
 use string_interner::DefaultSymbol as Sym;
 
 use crate::source_info::SourceRange;
-use crate::ast::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, NewNamespaceId, RETURN_VALUE_DECL, ParamList, StructId, ExtendBlockId};
+use crate::ast::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, SwitchExprId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, NewNamespaceId, RETURN_VALUE_DECL, ParamList, StructId, ExtendBlockId};
 use crate::internal_types::{internal_fields, internal_field_decls, InternalField, InternalFieldDecls, InternalNamespace};
 use crate::ty::Type;
 use crate::ty::StructType;
@@ -69,7 +69,7 @@ pub struct If { pub condition: ExprId, pub then_expr: ExprId, pub else_expr: Exp
 #[derive(Debug)]
 pub struct While { pub condition: ExprId }
 #[derive(Debug)]
-pub struct Switch { pub scrutinee: ExprId, pub cases: Vec<SwitchCase> }
+pub struct Switch { pub switch_id: SwitchExprId, pub scrutinee: ExprId, pub cases: Vec<SwitchCase> }
 #[derive(Debug)]
 pub struct Struct { pub field_tys: SmallVec<[ExprId; 2]>, }
 #[derive(Debug)]
@@ -667,7 +667,7 @@ impl Driver {
                 let explicit_ty = self.code.ast.explicit_tys[binding];
                 insert_expr!(fors, For { binding_decl: binding, binding_explicit_ty: explicit_ty, lower_bound, upper_bound })
             },
-            &ast::Expr::Switch { scrutinee, ref cases, } => {
+            &ast::Expr::Switch { switch_id, scrutinee, ref cases, } => {
                 let mut tir_cases = Vec::with_capacity(cases.len());
                 for case in cases {
                     let case = SwitchCase {
@@ -676,7 +676,7 @@ impl Driver {
                     };
                     tir_cases.push(case);
                 }
-                insert_expr!(switches, Switch { scrutinee, cases: tir_cases })
+                insert_expr!(switches, Switch { switch_id, scrutinee, cases: tir_cases })
             },
             &ast::Expr::Mod { extern_library_path, .. } => insert_expr!(modules, Module { extern_library_path }),
             &ast::Expr::Struct(struct_id) => {
@@ -873,7 +873,7 @@ impl Driver {
                     self.tir.graph.add_type1_dep(id, ef!(then_expr.item));
                     self.tir.graph.add_type1_dep(id, ef!(else_expr.item));
                 },
-                ast::Expr::Switch { scrutinee, ref cases } => {
+                ast::Expr::Switch { scrutinee, ref cases, .. } => {
                     self.tir.graph.add_type1_dep(id, ef!(scrutinee.item));
                     for case in cases.clone() {
                         let terminal = self.code.ast.imper_scopes[case.scope].terminal_expr;

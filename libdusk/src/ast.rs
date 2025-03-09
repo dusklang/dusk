@@ -39,6 +39,7 @@ define_index_type!(pub struct NewNamespaceId = u32;);
 define_index_type!(pub struct StructId = u32;);
 define_index_type!(pub struct StructLitId = u32;);
 define_index_type!(pub struct EnumId = u32;);
+define_index_type!(pub struct SwitchExprId = u32;);
 define_index_type!(pub struct StoredDeclId = u32;);
 define_index_type!(pub struct PatternBindingDeclId = u32;);
 define_index_type!(pub struct ImperScopeNsId = u32;);
@@ -255,6 +256,7 @@ pub enum Expr {
     Break(Option<LoopId>),
     Continue(Option<LoopId>),
     Switch {
+        switch_id: SwitchExprId,
         scrutinee: ExprId,
         cases: Vec<SwitchCase>,
     },
@@ -584,6 +586,7 @@ pub struct Ast {
     pub bridged_types: HashMap<TypeId, Type>,
     pub structs: IndexVec<StructId, Struct>,
     pub enums: IndexVec<EnumId, Enum>,
+    pub switch_exprs: IndexCounter<SwitchExprId>,
     pub extern_mods: IndexVec<ExternModId, ExternMod>,
     pub extend_blocks: IndexVec<ExtendBlockId, ExtendBlock>,
     pub struct_lits: IndexCounter<StructLitId>,
@@ -1037,7 +1040,8 @@ impl Driver {
         self.add_expr(Expr::For { loop_id, binding, lower_bound, upper_bound, scope }, range)
     }
     pub fn switch_expr(&mut self, scrutinee: ExprId, cases: Vec<SwitchCase>, range: SourceRange) -> ExprId {
-        self.add_expr(Expr::Switch { scrutinee, cases }, range)
+        let switch_id = self.code.ast.switch_exprs.next_idx();
+        self.add_expr(Expr::Switch { switch_id, scrutinee, cases }, range)
     }
     pub fn do_expr(&mut self, scope: ImperScopeId, range: SourceRange) -> ExprId {
         self.add_expr(Expr::Do { scope }, range)

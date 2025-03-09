@@ -2680,7 +2680,7 @@ impl DriverRef<'_> {
                 drop(d);
                 return self.build_if_expr(b, expr, ty, condition, then_scope, else_scope, ctx, tp)
             },
-            Expr::Switch { scrutinee, ref cases } => {
+            Expr::Switch { switch_id: _switch_id, scrutinee, ref cases } => {
                 let cases = cases.clone();
                 drop(d);
                 let scrutinee_val = self.build_expr(b, scrutinee, Context::default(), tp);

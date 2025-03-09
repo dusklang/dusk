@@ -17,14 +17,14 @@ pub const ORIGINAL_SCRUTINEE_VALUE: SwitchScrutineeValueId = SwitchScrutineeValu
 
 
 // TODO: split pattern matching stuff out into its own module
-#[derive(Hash, PartialEq, Eq, Debug)]
+#[derive(Hash, PartialEq, Eq, Debug, Clone)]
 pub enum SwitchDecisionValue {
     EnumVariant(usize),
     UnsignedInt(u64),
     SignedInt(i64),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum SwitchDecisionNode {
     Branch {
         scrutinee: SwitchScrutineeValueId,

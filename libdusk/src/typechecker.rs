@@ -460,9 +460,8 @@ impl tir::Expr<tir::Switch> {
         scrutinee_values.push_at(VOID_SCRUTINEE_VALUE, SwitchScrutineeValue::VoidValue);
         scrutinee_values.push_at(ORIGINAL_SCRUTINEE_VALUE, SwitchScrutineeValue::OriginalScrutinee);
         let scrutinees = vec![SwitchScrutinee { value: ORIGINAL_SCRUTINEE_VALUE, ty: scrutinee_ty }];
-        let tree = match_scrutinee(driver, tp, self.scrutinee, &mut scrutinee_values, scrutinees, pattern_matrix, destinations);
-
-        unimplemented!("Generated decision tree: {:#?}", tree);
+        let decision_tree = match_scrutinee(driver, tp, self.scrutinee, &mut scrutinee_values, scrutinees, pattern_matrix, destinations);
+        *tp.switch_expr_decision_tree_mut(self.switch_id) = Some(decision_tree);
 
         let constraints = if self.cases.is_empty() {
             ConstraintList::new().with_type(Type::Void)
