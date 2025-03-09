@@ -26,6 +26,7 @@ mod builder;
 mod parser;
 mod tir;
 mod typechecker;
+mod pattern_matching;
 mod into_bytes;
 mod backend;
 mod bundler;
