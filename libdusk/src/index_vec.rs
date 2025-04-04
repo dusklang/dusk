@@ -26,14 +26,8 @@ impl<I: Idx, T> IndexVecExt for IndexVec<I, T> {
         indices
     }
     fn index_mut(&mut self, a: I, b: I) -> (&mut T, &mut T) {
-        assert_ne!(a, b);
-        if a < b {
-            let (section_a, section_b) = self.split_at_mut(b);
-            (&mut section_a[a], &mut section_b[0])
-        } else {
-            let (section_b, section_a) = self.split_at_mut(a);
-            (&mut section_a[0], &mut section_b[b])
-        }
+        let [a, b] = self.as_mut_vec().get_disjoint_mut([a.index(), b.index()]).unwrap();
+        (a, b)
     }
     fn push_at(&mut self, id: I, value: T) {
         debug_assert_eq!(self.next_idx(), id);

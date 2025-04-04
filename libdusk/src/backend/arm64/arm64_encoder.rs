@@ -6,7 +6,7 @@ use crate::linker::exe::{Fixup, FixupLocationId};
 
 #[cfg(target_arch="aarch64")]
 #[link(name="c")]
-unsafe extern {
+unsafe extern "C" {
     fn sys_icache_invalidate(start: *mut c_void, len: size_t);
 }
 

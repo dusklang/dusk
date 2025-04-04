@@ -356,15 +356,7 @@ macro_rules! get_multi_constraints_mut {
 
             assert_ne!(a, b, "`a` ({:?}) must not equal `b` ({:?})", a, b);
 
-            // Ensure both exist, in the case of MockTypeProvider
-            $tp.constraints_mut(a);
-            $tp.constraints_mut(b);
-
-            unsafe {
-                let a = $tp.constraints_mut(a) as *mut _;
-                let b = $tp.constraints_mut(b) as *mut _;
-                (&mut *a, &mut *b)
-            }
+            $tp.get_multiple_constraints_mut(a, b)
         }
     }
 }

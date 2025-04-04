@@ -74,6 +74,15 @@ macro_rules! forward_mock {
                 self.$field_name.entry(id).or_insert_with(|| base.$fw_name(id).clone())
             }
         }
+        $(#[doc=$doc])*
+        paste! {
+            fn [<get_multiple_ $fw_name _mut>](&mut self, a_id: $id_ty, b_id: $id_ty) -> (&mut $val_ty, &mut $val_ty) {
+                self.[<$fw_name _mut>](a_id);
+                self.[<$fw_name _mut>](b_id);
+                let [a, b] = self.$field_name.get_disjoint_mut([&a_id, &b_id]);
+                return (a.unwrap(), b.unwrap());
+            }
+        }
     };
 }
 macro_rules! forward_save {
@@ -91,10 +100,16 @@ macro_rules! forward_real {
         fn $fw_name(&self, id: $id_ty) -> &$val_ty {
             &self.$field_name[id]
         }
+        $(#[doc=$doc])*
         paste! {
-            $(#[doc=$doc])*
             fn [<$fw_name _mut>](&mut self, id: $id_ty) -> &mut $val_ty {
                 &mut self.$field_name[id]
+            }
+        }
+        $(#[doc=$doc])*
+        paste! {
+            fn [<get_multiple_ $fw_name _mut>](&mut self, a_id: $id_ty, b_id: $id_ty) -> (&mut $val_ty, &mut $val_ty) {
+                self.$field_name.index_mut(a_id, b_id)
             }
         }
     };
@@ -106,6 +121,10 @@ macro_rules! forward_trait {
         paste! {
             $(#[doc=$doc])*
             fn [<$fw_name _mut>](&mut self, id: $id_ty) -> &mut $val_ty;
+        }
+        paste! {
+            $(#[doc=$doc])*
+            fn [<get_multiple_ $fw_name _mut>](&mut self, a_id: $id_ty, b_id: $id_ty) -> (&mut $val_ty, &mut $val_ty);
         }
     };
 }
@@ -244,6 +263,10 @@ macro_rules! declare_tp {
             }
             fn eval_result_mut(&mut self, id: ExprId) -> &mut Const {
                 self.eval_results.get_mut(&id).unwrap()
+            }
+            fn get_multiple_eval_result_mut(&mut self, a_id: ExprId, b_id: ExprId) -> (&mut Const, &mut Const) {
+                let [a, b] = self.eval_results.get_disjoint_mut([&a_id, &b_id]);
+                (a.unwrap(), b.unwrap())
             }
 
             fn is_mock(&self) -> bool { false }
