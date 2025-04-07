@@ -15,7 +15,7 @@ use crate::code::{Code, Block, BlockId, Op, OpId};
 use crate::source_info::SourceRange;
 
 use crate::internal_types::InternalField;
-use crate::ast::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, NewNamespaceId, LegacyIntrinsic, IntrinsicId, Expr, StoredDeclId, GenericParamId, Item, PatternBindingDeclId, ExternModId, ExternFunctionRef, PatternBindingPathComponent, VOID_TYPE, StructId, LoopId};
+use crate::ast::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, NewNamespaceId, LegacyIntrinsic, IntrinsicId, Expr, StoredDeclId, GenericParamId, Item, ExternModId, ExternFunctionRef, PatternBindingPathComponent, VOID_TYPE, StructId, LoopId};
 use crate::ty::{Type, LegacyInternalType, FunctionType, FloatWidth, StructType};
 use crate::driver::{Driver, DriverRef};
 use crate::typechecker as tc;
@@ -424,7 +424,7 @@ enum Decl {
     ExternFunction(ExternFunctionRef),
     ObjcClassRef { extern_mod: ExternModId, index: usize },
     Parameter { index: usize },
-    PatternBinding { id: PatternBindingDeclId },
+    PatternBinding,
     LegacyIntrinsic(LegacyIntrinsic, Type),
     Intrinsic(IntrinsicId),
     MethodIntrinsic(IntrinsicId),
@@ -898,9 +898,9 @@ impl DriverRef<'_> {
                 self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
-            ast::Decl::PatternBinding { id: index, .. } => {
+            ast::Decl::PatternBinding { .. } => {
                 drop(d);
-                let decl = Decl::PatternBinding { id: index };
+                let decl = Decl::PatternBinding;
                 self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
@@ -1351,7 +1351,6 @@ struct FunctionBuilder {
     blocks: Vec<BlockId>,
     current_block: BlockId,
     stored_decl_locs: IndexVec<StoredDeclId, OpId>,
-    pattern_binding_locs: HashMap<PatternBindingDeclId, Value>,
     instr_namespace: InstrNamespace,
     loops: IndexVec<LoopId, LoopState>,
 }
@@ -1430,7 +1429,6 @@ impl DriverRef<'_> {
             blocks: vec![entry],
             current_block: entry,
             stored_decl_locs: IndexVec::new(),
-            pattern_binding_locs: HashMap::new(),
             instr_namespace,
             loops: Default::default(),
         };
@@ -2735,7 +2733,7 @@ impl DriverRef<'_> {
 
                     self.write().start_bb(b, begin_bb);
                     match case.pattern.kind {
-                        ast::PatternKind::ContextualMember { name, .. } => {
+                        ast::Pattern::ContextualMember { name, .. } => {
                             let (enum_id, variants) = enum_info.as_ref().expect("found contextual member pattern on non-enum type. typechecker should've caught this.");
                             let mut index = None;
                             for (i, variant) in variants.iter().enumerate() {
@@ -2753,7 +2751,7 @@ impl DriverRef<'_> {
                                 }
                             );
                         },
-                        ast::PatternKind::IntLit { value, .. } => {
+                        ast::Pattern::IntLit { value, .. } => {
                             mir_cases.push(
                                 SwitchCase {
                                     value: Const::Int { lit: BigInt::from(value), ty: scrutinee_ty.clone() },
@@ -2761,7 +2759,7 @@ impl DriverRef<'_> {
                                 }
                             );
                         }
-                        ast::PatternKind::NamedCatchAll(_) | ast::PatternKind::AnonymousCatchAll(_) => {
+                        ast::Pattern::NamedCatchAll(_) | ast::Pattern::AnonymousCatchAll(_) => {
                             catch_all_bb = Some(case_bb);
                         },
                     }

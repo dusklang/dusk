@@ -13,10 +13,10 @@ use std::collections::HashMap;
 
 use paste::paste;
 
-use crate::ast::{ExprId, DeclId, DeclRefId, StructLitId, GenericParamId, TypeVarId, CastId, SwitchExprId, Namespace};
+use crate::ast::{ExprId, DeclId, DeclRefId, StructLitId, GenericParamId, TypeVarId, CastId, Namespace, PatternMatchingContextId};
 use crate::mir::Const;
 use crate::ty::{Type, QualType};
-use crate::pattern_matching::SwitchDecisionNode;
+use crate::pattern_matching::{SwitchDecisionTree, SwitchScrutineeValueId, TypedSwitchScrutineeValue};
 use crate::typechecker::{CastMethod, StructLit, constraints::ConstraintList, Overloads};
 use crate::index_vec::*;
 use crate::driver::Driver;
@@ -40,8 +40,11 @@ macro_rules! declare_tp_fields {
             /// The generic arguments for each decl ref
             generic_arguments generic_arguments: DeclRefId -> Option<Vec<Type>>,
 
-            /// The decision tree generated for each switch expression
-            switch_expr_decision_trees switch_expr_decision_tree: SwitchExprId -> Option<SwitchDecisionNode>,
+            /// The decision tree generated for each pattern matching context
+            switch_expr_decision_trees switch_expr_decision_tree: PatternMatchingContextId -> Option<SwitchDecisionTree>,
+
+            /// The typed pattern matching context for each pattern matching context
+            pattern_matching_contexts pattern_matching_context: PatternMatchingContextId -> Option<IndexVec<SwitchScrutineeValueId, TypedSwitchScrutineeValue>>,
 
             /// For each expression, a list of substitutions from generic params to type variable type.
             /// Currently only set on decl refs.
@@ -228,8 +231,8 @@ macro_rules! declare_tp {
                     ($fname:ident, StructId) => {
                         self.$fname.resize_with(d.code.ast.structs.len(), Default::default);
                     };
-                    ($fname:ident, SwitchExprId) => {
-                        self.$fname.resize_with(d.code.ast.switch_exprs.len(), Default::default);
+                    ($fname:ident, PatternMatchingContextId) => {
+                        self.$fname.resize_with(d.code.ast.pattern_matching_contexts.len(), Default::default);
                     };
                 }
                 $(resize_idx_vec!($field_name, $id_ty);)*

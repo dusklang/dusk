@@ -5,7 +5,9 @@ use smallvec::{SmallVec, smallvec};
 use string_interner::DefaultSymbol as Sym;
 use derivative::Derivative;
 
-use crate::ast::{self, ExprId, DeclId, ConditionNsId, Item, ImperScopeId, LegacyIntrinsic, Attribute, FieldAssignment, Ident, Pattern, PatternKind, SwitchCase, ImperScopedDecl, ExternMod, ERROR_EXPR, ERROR_TYPE, VOID_TYPE, ParamList, SelfParameter, SelfParameterKind};
+use crate::ast::{self, Attribute, ConditionNsId, DeclId, ExprId, ExternMod, FieldAssignment, Ident, ImperScopeId, ImperScopedDecl, Item, LegacyIntrinsic, ParamList, Pattern, PatternBindingDecl, PatternKind, PatternMatchingContextId, SelfParameter, SelfParameterKind, SwitchCase, ERROR_EXPR, ERROR_TYPE, VOID_TYPE};
+use crate::pattern_matching::{PatternMatchingContext, SwitchScrutineeValue, SwitchScrutineeValueId, PatternMatchingContext, ORIGINAL_SCRUTINEE_VALUE};
+use crate::tir::Switch;
 use crate::ty::Type;
 use crate::source_info::{self, SourceFileId, SourceRange};
 
@@ -796,6 +798,7 @@ impl Driver {
         self.eat_tok(p, TokenKind::OpenCurly)?;
         let case_list = self.begin_list(p, TokenKind::could_begin_pattern, [TokenKind::Comma, TokenKind::Semicolon], Some(TokenKind::CloseCurly));
         let mut cases = Vec::new();
+        let pattern_matching_context = self.code.ast.pattern_matching_contexts.push(PatternMatchingContext::new(scrutinee));
         let close_curly_range = loop {
             match self.cur(p).kind {
                 TokenKind::Eof => {
@@ -809,9 +812,8 @@ impl Driver {
                 },
                 _ => {
                     self.start_next_list_item(p, case_list.id());
-                    let pattern_kind = self.parse_pattern(p);
-                    let (bindings, binding_ids) = self.get_pattern_bindings(&pattern_kind, scrutinee);
-                    let pattern = Pattern { kind: pattern_kind, bindings: binding_ids };
+                    let pattern = self.parse_pattern(p, pattern_matching_context, ORIGINAL_SCRUTINEE_VALUE);
+                    let bindings = self.get_pattern_bindings(&pattern);
                     self.eat_tok(p, TokenKind::Colon)?;
                     let (scope, scope_range) = match self.cur(p).kind {
                         TokenKind::OpenCurly => {
@@ -918,7 +920,7 @@ impl Driver {
         Ok(Attribute { attr, arg, range })
     }
 
-    fn parse_pattern(&mut self, p: &mut Parser) -> PatternKind {
+    fn parse_pattern(&mut self, p: &mut Parser, context: PatternMatchingContextId, scrutinee: SwitchScrutineeValueId) -> Pattern {
         let initial_tok = self.cur(p);
         let initial_range = initial_tok.range;
         match initial_tok.kind {
@@ -939,7 +941,11 @@ impl Driver {
                             },
                             _ => {
                                 self.start_next_list_item(p, payload_list.id());
-                                let payload_pattern = self.parse_pattern(p);
+                                let payload_scrutinee = self.code.ast.pattern_matching_contexts[context].add_scrutinee_value(SwitchScrutineeValue::EnumPayload { enum_value: scrutinee, variant_name: name.symbol });
+                                let payload_pattern = self.parse_pattern(p, context, payload_scrutinee);
+                                if !payload_patterns.is_empty() {
+                                    todo!("implement tuple destructuring");
+                                }
                                 payload_patterns.push(payload_pattern);
                             },
                         }
@@ -950,20 +956,34 @@ impl Driver {
                         payload = Some(Box::new(payload_patterns.into_iter().next().unwrap()));
                     }
                 }
-                PatternKind::ContextualMember { name, range, payload }
+                Pattern {
+                    kind: PatternKind::ContextualMember { name, range, payload },
+                    scrutinee,
+                }
             },
             &TokenKind::Ident(name) => {
                 self.next(p);
                 if name == self.ast.known_idents.underscore {
-                    PatternKind::AnonymousCatchAll(initial_range)
+                    Pattern {
+                        kind: PatternKind::AnonymousCatchAll(initial_range),
+                        scrutinee,
+                    }
                 } else {
                     let name = Ident { symbol: name, range: initial_range };
-                    PatternKind::NamedCatchAll(name)
+                    let binding_id = self.code.ast.pattern_binding_decls.push(PatternBindingDecl { scrutinee });
+                    let binding_decl = self.add_decl(ast::Decl::PatternBinding { id: binding_id, is_mut: false }, name.symbol, None, name.range);
+                    Pattern {
+                        kind: PatternKind::NamedCatchAll { name, binding_decl },
+                        scrutinee,
+                    }
                 }
             },
             &TokenKind::IntLit(value) => {
                 self.next(p);
-                PatternKind::IntLit { value, range: initial_range }
+                Pattern {
+                    kind: PatternKind::IntLit { value, range: initial_range },
+                    scrutinee,
+                }
             },
             tok => panic!("unexpected token {:?}", tok),
         }

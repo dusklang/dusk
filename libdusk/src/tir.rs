@@ -6,8 +6,9 @@ use smallvec::SmallVec;
 use index_vec::define_index_type;
 use string_interner::DefaultSymbol as Sym;
 
+use crate::pattern_matching::SwitchScrutineeValueId;
 use crate::source_info::SourceRange;
-use crate::ast::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, SwitchExprId, ItemId, ImperScopeId, CastId, GenericParamId, PatternBindingDeclId, Pattern, NewNamespaceId, RETURN_VALUE_DECL, ParamList, StructId, ExtendBlockId};
+use crate::ast::{self, Item, Namespace, FieldAssignment, ExprId, DeclId, DeclRefId, StructLitId, SwitchExprId, ItemId, ImperScopeId, CastId, GenericParamId, Pattern, NewNamespaceId, RETURN_VALUE_DECL, ParamList, StructId, ExtendBlockId};
 use crate::internal_types::{internal_fields, internal_field_decls, InternalField, InternalFieldDecls, InternalNamespace};
 use crate::ty::Type;
 use crate::ty::StructType;
@@ -53,7 +54,7 @@ pub struct Do { pub terminal_expr: ExprId }
 #[derive(Debug)]
 pub struct AssignedDecl { pub explicit_ty: Option<ExprId>, pub root_expr: ExprId, pub decl_id: DeclId }
 #[derive(Debug)]
-pub struct PatternBinding { pub binding_id: PatternBindingDeclId, pub scrutinee: ExprId, pub decl_id: DeclId }
+pub struct PatternBinding { pub switch_id: SwitchExprId, pub scrutinee_value: SwitchScrutineeValueId, pub root_scrutinee: ExprId, pub decl_id: DeclId }
 #[derive(Debug)]
 pub struct For { pub binding_decl: DeclId, pub binding_explicit_ty: Option<ExprId>, pub lower_bound: ExprId, pub upper_bound: ExprId }
 #[derive(Debug)]
@@ -715,7 +716,7 @@ impl Driver {
                 let explicit_ty = self.code.ast.explicit_tys[id];
                 unit.assigned_decls.insert(level, AssignedDecl { explicit_ty, root_expr, decl_id: id });
             },
-            ast::Decl::PatternBinding { id: binding_id, .. } => {
+            ast::Decl::PatternBinding { .. } => {
                 let scrutinee = self.code.ast.pattern_binding_decls[binding_id].scrutinee;
                 unit.pattern_bindings.insert(level, PatternBinding { binding_id, scrutinee, decl_id: id });
             },
@@ -952,8 +953,6 @@ impl Driver {
                         ast::Decl::Parameter { .. } | ast::Decl::Static(_) | ast::Decl::Const { .. } | ast::Decl::Stored { .. } | ast::Decl::Field { .. } | ast::Decl::ReturnValue | ast::Decl::InternalField(_) | ast::Decl::LoopBinding { .. } /*  | ast::Decl::PatternBinding { .. }*/ => {},
                         ast::Decl::PatternBinding { id: binding_id, .. } => {
                             let scrutinee = self.code.ast.pattern_binding_decls[binding_id].scrutinee;
-
-                            // TODO: find out why this seems to cause an infinite loop if it's moved to build_more_tir() and changed to a type 2 dependency
                             self.tir.graph.add_type2_dep(id, ef!(scrutinee.item));
                         },
                         ast::Decl::GenericParam(_) => {

@@ -8,7 +8,7 @@ use constraints::*;
 use crate::index_vec::*;
 use crate::type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 
-use crate::ast::{self, Decl, DeclId, DeclRefId, ExprId, GenericCtx, InstanceDecl, NewNamespaceId, SelfParameterKind, StaticDecl, StructId, VOID_EXPR};
+use crate::ast::{self, Decl, DeclId, DeclRefId, ExprId, GenericCtx, InstanceDecl, NewNamespaceId, PatternMatchingContextId, SelfParameterKind, StaticDecl, StructId, VOID_EXPR};
 use crate::mir::Const;
 use crate::ty::{Type, LegacyInternalType, FunctionType, QualType, IntWidth, StructType};
 use crate::pattern_matching::*;
@@ -446,21 +446,16 @@ impl tir::Expr<tir::For> {
 }
 
 impl tir::Expr<tir::Switch> {
-
-
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut dyn TypeProvider) {
         let scrutinee_ty = driver.solve_constraints(tp, self.scrutinee).expect("Ambiguous type for scrutinee in switch expression").qual_ty.ty;
 
+        let scrutinees = vec![SwitchScrutinee { value: ORIGINAL_SCRUTINEE_VALUE, ty: scrutinee_ty }];
         let mut pattern_matrix = Vec::new();
         for case in &self.cases {
-            pattern_matrix.push(vec![case.pattern.kind.clone()]);
+            pattern_matrix.push(vec![case.pattern.clone()]);
         }
         let destinations: Vec<_> = (0..self.cases.len()).map(|destination| SwitchDestinationId::from_usize(destination)).collect();
-        let mut scrutinee_values = IndexVec::<SwitchScrutineeValueId, SwitchScrutineeValue>::new();
-        scrutinee_values.push_at(VOID_SCRUTINEE_VALUE, SwitchScrutineeValue::VoidValue);
-        scrutinee_values.push_at(ORIGINAL_SCRUTINEE_VALUE, SwitchScrutineeValue::OriginalScrutinee);
-        let scrutinees = vec![SwitchScrutinee { value: ORIGINAL_SCRUTINEE_VALUE, ty: scrutinee_ty }];
-        let decision_tree = match_scrutinee(driver, tp, self.scrutinee, &mut scrutinee_values, scrutinees, pattern_matrix, destinations);
+        let decision_tree = match_scrutinee(driver, tp, self.scrutinee, scrutinees, pattern_matrix, destinations);
         *tp.switch_expr_decision_tree_mut(self.switch_id) = Some(decision_tree);
 
         let constraints = if self.cases.is_empty() {

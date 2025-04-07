@@ -6,6 +6,7 @@ use std::fmt::Debug;
 use std::collections::HashSet;
 
 use crate::display_adapter;
+use crate::pattern_matching::{SwitchScrutineeValueId, PatternMatchingContext};
 use index_vec::{IndexVec, define_index_type};
 use smallvec::{SmallVec, smallvec};
 use string_interner::{DefaultStringInterner as StringInterner, DefaultSymbol as Sym, Symbol};
@@ -39,7 +40,7 @@ define_index_type!(pub struct NewNamespaceId = u32;);
 define_index_type!(pub struct StructId = u32;);
 define_index_type!(pub struct StructLitId = u32;);
 define_index_type!(pub struct EnumId = u32;);
-define_index_type!(pub struct SwitchExprId = u32;);
+define_index_type!(pub struct PatternMatchingContextId = u32;);
 define_index_type!(pub struct StoredDeclId = u32;);
 define_index_type!(pub struct PatternBindingDeclId = u32;);
 define_index_type!(pub struct ImperScopeNsId = u32;);
@@ -293,26 +294,7 @@ impl From<DeclId> for Item {
 
 #[derive(Debug, Clone)]
 pub struct PatternBindingDecl {
-    pub paths: Vec<PatternBindingPath>,
-    pub scrutinee: ExprId,
-}
-
-#[derive(Debug, Clone)]
-pub struct PatternBindingPath {
-    pub components: Vec<PatternBindingPathComponent>,
-}
-
-impl PatternBindingPath {
-    pub fn identity() -> Self {
-        PatternBindingPath {
-            components: Vec::new()
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum PatternBindingPathComponent {
-    VariantPayload(usize),
+    pub scrutinee: SwitchScrutineeValueId,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -400,7 +382,7 @@ pub struct Ident {
 #[derive(Debug, Clone)]
 pub struct Pattern {
     pub kind: PatternKind,
-    pub bindings: Vec<PatternBindingDeclId>,
+    pub scrutinee: SwitchScrutineeValueId,
 }
 
 #[derive(Debug, Clone)]
@@ -408,9 +390,12 @@ pub enum PatternKind {
     ContextualMember {
         name: Ident,
         range: SourceRange,
-        payload: Option<Box<PatternKind>>,
+        payload: Option<Box<Pattern>>,
     },
-    NamedCatchAll(Ident),
+    NamedCatchAll {
+        name: Ident,
+        binding_decl: DeclId,
+    },
     AnonymousCatchAll(SourceRange),
     IntLit {
         value: u64,
@@ -586,7 +571,7 @@ pub struct Ast {
     pub bridged_types: HashMap<TypeId, Type>,
     pub structs: IndexVec<StructId, Struct>,
     pub enums: IndexVec<EnumId, Enum>,
-    pub switch_exprs: IndexCounter<SwitchExprId>,
+    pub pattern_matching_contexts: IndexVec<PatternMatchingContextId, PatternMatchingContext>,
     pub extern_mods: IndexVec<ExternModId, ExternMod>,
     pub extend_blocks: IndexVec<ExtendBlockId, ExtendBlock>,
     pub struct_lits: IndexCounter<StructLitId>,
@@ -1040,7 +1025,7 @@ impl Driver {
         self.add_expr(Expr::For { loop_id, binding, lower_bound, upper_bound, scope }, range)
     }
     pub fn switch_expr(&mut self, scrutinee: ExprId, cases: Vec<SwitchCase>, range: SourceRange) -> ExprId {
-        let switch_id = self.code.ast.switch_exprs.next_idx();
+        let switch_id = self.code.ast.switch_expr_scrutinee_values.push(Default::default());
         self.add_expr(Expr::Switch { switch_id, scrutinee, cases }, range)
     }
     pub fn do_expr(&mut self, scope: ImperScopeId, range: SourceRange) -> ExprId {
@@ -1103,24 +1088,23 @@ impl Driver {
     pub fn error_expr(&mut self, range: SourceRange) -> ExprId {
         self.add_expr(Expr::Error, range)
     }
-    pub fn get_pattern_bindings(&mut self, pattern: &PatternKind, scrutinee: ExprId) -> (Vec<ImperScopedDecl>, Vec<PatternBindingDeclId>) {
-        let mut decls = Vec::new();
-        let mut bindings = Vec::new();
+    fn get_pattern_bindings_impl(&mut self, pattern: &Pattern, decls: &mut Vec<ImperScopedDecl>) {
         match pattern {
-            PatternKind::ContextualMember { .. } | PatternKind::AnonymousCatchAll(_) | PatternKind::IntLit { .. } => {},
-            PatternKind::NamedCatchAll(name) => {
-                let paths = vec![
-                    PatternBindingPath::identity()
-                ];
-                let binding_decl = PatternBindingDecl { paths, scrutinee };
-                let id = self.code.ast.pattern_binding_decls.push(binding_decl);
-                let decl = self.add_decl(Decl::PatternBinding { id, is_mut: false }, name.symbol, None, name.range);
-                let decl = ImperScopedDecl { name: name.symbol, id: decl };
-                decls.push(decl);
-                bindings.push(id);
+            Pattern::AnonymousCatchAll(_) | Pattern::IntLit { .. } => {},
+            Pattern::ContextualMember { payload, .. } => {
+                if let Some(payload) = payload {
+                    self.get_pattern_bindings_impl(payload, decls);
+                }
+            },
+            &Pattern::NamedCatchAll { name, binding_decl } => {
+                decls.push(ImperScopedDecl { name: name.symbol, id: binding_decl });
             },
         }
-        (decls, bindings)
+    }
+    pub fn get_pattern_bindings(&mut self, pattern: &Pattern) -> Vec<ImperScopedDecl> {
+        let mut decls = Vec::new();
+        self.get_pattern_bindings_impl(pattern, &mut decls);
+        decls
     }
     pub fn push_to_scope_stack<Id: PartialEq<ScopeState> + Debug + Copy>(&mut self, id: Id, state: ScopeState) -> AutoPopStackEntry<ScopeState, Id> {
         self.ast.scope_stack.push(id, state)
