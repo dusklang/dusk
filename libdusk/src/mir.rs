@@ -15,7 +15,7 @@ use crate::code::{Code, Block, BlockId, Op, OpId};
 use crate::source_info::SourceRange;
 
 use crate::internal_types::InternalField;
-use crate::ast::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, NewNamespaceId, LegacyIntrinsic, IntrinsicId, Expr, StoredDeclId, GenericParamId, Item, ExternModId, ExternFunctionRef, PatternBindingPathComponent, VOID_TYPE, StructId, LoopId};
+use crate::ast::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, NewNamespaceId, LegacyIntrinsic, IntrinsicId, Expr, StoredDeclId, GenericParamId, Item, ExternModId, ExternFunctionRef, VOID_TYPE, StructId, LoopId};
 use crate::ty::{Type, LegacyInternalType, FunctionType, FloatWidth, StructType};
 use crate::driver::{Driver, DriverRef};
 use crate::typechecker as tc;
@@ -2097,8 +2097,9 @@ impl DriverRef<'_> {
             Decl::Stored(id) => {
                 DeclRef::Value(b.stored_decl_locs[id].indirect())
             },
-            Decl::PatternBinding { id: binding_id } => {
-                DeclRef::Value(b.pattern_binding_locs[&binding_id])
+            Decl::PatternBinding { .. } => {
+                todo!()
+                // DeclRef::Value(b.pattern_binding_locs[&binding_id])
             },
             Decl::Parameter { index } => {
                 let entry_block = b.blocks[0];
@@ -2678,7 +2679,7 @@ impl DriverRef<'_> {
                 drop(d);
                 return self.build_if_expr(b, expr, ty, condition, then_scope, else_scope, ctx, tp)
             },
-            Expr::Switch { switch_id: _switch_id, scrutinee, ref cases } => {
+            Expr::Switch { scrutinee, ref cases, .. } => {
                 let cases = cases.clone();
                 drop(d);
                 let scrutinee_val = self.build_expr(b, scrutinee, Context::default(), tp);
@@ -2708,61 +2709,62 @@ impl DriverRef<'_> {
                 };
                 let mut catch_all_bb = None;
                 for case in cases {
-                    let case_bb = self.write().create_bb(b);
-                    self.write().start_bb(b, case_bb);
-                    // Can only bind at most one binding at a time. The exception is when they alias. E.g., '.a(int_val) & enum_val' <- int_val and enum_val are two bindings that alias.
-                    // I will need some way of detecting aliases and allowing them, but at the same time splitting up the list of bindings when they don't alias, such as in disjuction patterns.
-                    assert!(case.pattern.bindings.len() <= 1);
-                    for &binding_id in &case.pattern.bindings {
-                        let binding = self.read().code.ast.pattern_binding_decls[binding_id].clone();
-                        // Can only ever bind one path to a particular binding at a time. Will need some way of splitting these up when I implement disjunction patterns
-                        assert_eq!(binding.paths.len(), 1);
-                        for path in &binding.paths {
-                            let val = self.write().handle_indirection(b, scrutinee_val);
-                            for step in &path.components {
-                                match step {
-                                    &PatternBindingPathComponent::VariantPayload(_index) => {
-                                        todo!();
-                                    }
-                                }
-                            }
-                            b.pattern_binding_locs.insert(binding_id, val.direct());
-                        }
-                    }
-                    self.build_scope(b, case.scope, scope_ctx, tp);
+                    todo!();
+                    // let case_bb = self.write().create_bb(b);
+                    // self.write().start_bb(b, case_bb);
+                    // // Can only bind at most one binding at a time. The exception is when they alias. E.g., '.a(int_val) & enum_val' <- int_val and enum_val are two bindings that alias.
+                    // // I will need some way of detecting aliases and allowing them, but at the same time splitting up the list of bindings when they don't alias, such as in disjuction patterns.
+                    // assert!(case.pattern.bindings.len() <= 1);
+                    // for &binding_id in &case.pattern.bindings {
+                    //     let binding = self.read().code.ast.pattern_binding_decls[binding_id].clone();
+                    //     // Can only ever bind one path to a particular binding at a time. Will need some way of splitting these up when I implement disjunction patterns
+                    //     assert_eq!(binding.paths.len(), 1);
+                    //     for path in &binding.paths {
+                    //         let val = self.write().handle_indirection(b, scrutinee_val);
+                    //         for step in &path.components {
+                    //             match step {
+                    //                 &PatternBindingPathComponent::VariantPayload(_index) => {
+                    //                     todo!();
+                    //                 }
+                    //             }
+                    //         }
+                    //         b.pattern_binding_locs.insert(binding_id, val.direct());
+                    //     }
+                    // }
+                    // self.build_scope(b, case.scope, scope_ctx, tp);
 
-                    self.write().start_bb(b, begin_bb);
-                    match case.pattern.kind {
-                        ast::Pattern::ContextualMember { name, .. } => {
-                            let (enum_id, variants) = enum_info.as_ref().expect("found contextual member pattern on non-enum type. typechecker should've caught this.");
-                            let mut index = None;
-                            for (i, variant) in variants.iter().enumerate() {
-                                if variant.name == name.symbol {
-                                    index = Some(i);
-                                    break;
-                                }
-                            }
-                            let index = index.expect("Unrecognized variant in switch case. Typechecker should have caught this.");
-                            let discriminant = self.read().get_const_discriminant(*enum_id, index);
-                            mir_cases.push(
-                                SwitchCase {
-                                    value: discriminant,
-                                    bb: case_bb,
-                                }
-                            );
-                        },
-                        ast::Pattern::IntLit { value, .. } => {
-                            mir_cases.push(
-                                SwitchCase {
-                                    value: Const::Int { lit: BigInt::from(value), ty: scrutinee_ty.clone() },
-                                    bb: case_bb,
-                                }
-                            );
-                        }
-                        ast::Pattern::NamedCatchAll(_) | ast::Pattern::AnonymousCatchAll(_) => {
-                            catch_all_bb = Some(case_bb);
-                        },
-                    }
+                    // self.write().start_bb(b, begin_bb);
+                    // match case.pattern.kind {
+                    //     ast::PatternKind::ContextualMember { name, .. } => {
+                    //         let (enum_id, variants) = enum_info.as_ref().expect("found contextual member pattern on non-enum type. typechecker should've caught this.");
+                    //         let mut index = None;
+                    //         for (i, variant) in variants.iter().enumerate() {
+                    //             if variant.name == name.symbol {
+                    //                 index = Some(i);
+                    //                 break;
+                    //             }
+                    //         }
+                    //         let index = index.expect("Unrecognized variant in switch case. Typechecker should have caught this.");
+                    //         let discriminant = self.read().get_const_discriminant(*enum_id, index);
+                    //         mir_cases.push(
+                    //             SwitchCase {
+                    //                 value: discriminant,
+                    //                 bb: case_bb,
+                    //             }
+                    //         );
+                    //     },
+                    //     ast::PatternKind::IntLit { value, .. } => {
+                    //         mir_cases.push(
+                    //             SwitchCase {
+                    //                 value: Const::Int { lit: BigInt::from(value), ty: scrutinee_ty.clone() },
+                    //                 bb: case_bb,
+                    //             }
+                    //         );
+                    //     }
+                    //     ast::PatternKind::NamedCatchAll { .. } | ast::PatternKind::AnonymousCatchAll(_) => {
+                    //         catch_all_bb = Some(case_bb);
+                    //     },
+                    // }
                 }
 
                 let catch_all_bb = if let Some(catch_all_bb) = catch_all_bb {

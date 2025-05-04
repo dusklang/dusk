@@ -8,7 +8,7 @@ use constraints::*;
 use crate::index_vec::*;
 use crate::type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 
-use crate::ast::{self, Decl, DeclId, DeclRefId, ExprId, GenericCtx, InstanceDecl, NewNamespaceId, PatternMatchingContextId, SelfParameterKind, StaticDecl, StructId, VOID_EXPR};
+use crate::ast::{self, Decl, DeclId, DeclRefId, ExprId, GenericCtx, InstanceDecl, NewNamespaceId, SelfParameterKind, StaticDecl, StructId, VOID_EXPR};
 use crate::mir::Const;
 use crate::ty::{Type, LegacyInternalType, FunctionType, QualType, IntWidth, StructType};
 use crate::pattern_matching::*;
@@ -213,35 +213,10 @@ impl tir::AssignedDecl {
 }
 
 impl tir::PatternBinding {
-    fn run_pass_1(&self, driver: &mut Driver, tp: &mut dyn TypeProvider) {
-        let constraints = driver.get_constraints(tp, self.scrutinee);
-        let scrutinee_ty = driver.solve_constraints(tp, constraints).expect("Ambiguous type for assigned declaration").qual_ty.ty;
-        let mut binding_ty = None;
-        let binding = &driver.code.ast.pattern_binding_decls[self.binding_id];
-        // Note: no need to worry about mutability matching because that can be handled in the parser
-        for path in &binding.paths {
-            let mut path_ty = scrutinee_ty.clone();
-            for step in &path.components {
-                match step {
-                    &ast::PatternBindingPathComponent::VariantPayload(index) => {
-                        match path_ty {
-                            Type::Enum(enuum) => {
-                                let payload_ty = driver.code.ast.enums[enuum].variants[index].payload_ty.unwrap();
-                                let payload_ty = tp.get_evaluated_type(payload_ty);
-                                path_ty = payload_ty.clone();
-                            },
-                            _ => panic!("expected enum"),
-                        }
-                    }
-                }
-            }
-            if let Some(binding_ty) = &binding_ty {
-                assert_eq!(binding_ty, &path_ty, "pattern binding contains paths of different types");
-            } else {
-                binding_ty = Some(path_ty);
-            }
-        }
-        tp.decl_type_mut(self.decl_id).ty = binding_ty.unwrap();
+    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut dyn TypeProvider) {
+        let context = tp.pattern_matching_context(self.context).as_ref().unwrap();
+        let binding_ty = context[self.scrutinee_value].ty.clone();
+        tp.decl_type_mut(self.decl_id).ty = binding_ty;
     }
 
     fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut dyn TypeProvider) {
@@ -455,8 +430,8 @@ impl tir::Expr<tir::Switch> {
             pattern_matrix.push(vec![case.pattern.clone()]);
         }
         let destinations: Vec<_> = (0..self.cases.len()).map(|destination| SwitchDestinationId::from_usize(destination)).collect();
-        let decision_tree = match_scrutinee(driver, tp, self.scrutinee, scrutinees, pattern_matrix, destinations);
-        *tp.switch_expr_decision_tree_mut(self.switch_id) = Some(decision_tree);
+        let decision_tree = match_scrutinee(driver, tp, self.scrutinee, self.context, scrutinees, pattern_matrix, destinations);
+        *tp.switch_expr_decision_tree_mut(self.context) = Some(decision_tree);
 
         let constraints = if self.cases.is_empty() {
             ConstraintList::new().with_type(Type::Void)

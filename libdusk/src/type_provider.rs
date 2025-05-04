@@ -16,7 +16,7 @@ use paste::paste;
 use crate::ast::{ExprId, DeclId, DeclRefId, StructLitId, GenericParamId, TypeVarId, CastId, Namespace, PatternMatchingContextId};
 use crate::mir::Const;
 use crate::ty::{Type, QualType};
-use crate::pattern_matching::{SwitchDecisionTree, SwitchScrutineeValueId, TypedSwitchScrutineeValue};
+use crate::pattern_matching::{SwitchScrutineeValueId, TypedSwitchScrutineeValue, SwitchDecisionNode};
 use crate::typechecker::{CastMethod, StructLit, constraints::ConstraintList, Overloads};
 use crate::index_vec::*;
 use crate::driver::Driver;
@@ -41,7 +41,7 @@ macro_rules! declare_tp_fields {
             generic_arguments generic_arguments: DeclRefId -> Option<Vec<Type>>,
 
             /// The decision tree generated for each pattern matching context
-            switch_expr_decision_trees switch_expr_decision_tree: PatternMatchingContextId -> Option<SwitchDecisionTree>,
+            switch_expr_decision_trees switch_expr_decision_tree: PatternMatchingContextId -> Option<SwitchDecisionNode>,
 
             /// The typed pattern matching context for each pattern matching context
             pattern_matching_contexts pattern_matching_context: PatternMatchingContextId -> Option<IndexVec<SwitchScrutineeValueId, TypedSwitchScrutineeValue>>,

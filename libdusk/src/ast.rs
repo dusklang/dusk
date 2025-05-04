@@ -42,7 +42,6 @@ define_index_type!(pub struct StructLitId = u32;);
 define_index_type!(pub struct EnumId = u32;);
 define_index_type!(pub struct PatternMatchingContextId = u32;);
 define_index_type!(pub struct StoredDeclId = u32;);
-define_index_type!(pub struct PatternBindingDeclId = u32;);
 define_index_type!(pub struct ImperScopeNsId = u32;);
 define_index_type!(pub struct ModScopeNsId = u32;);
 define_index_type!(pub struct ExtendBlockNsId = u32;);
@@ -257,8 +256,8 @@ pub enum Expr {
     Break(Option<LoopId>),
     Continue(Option<LoopId>),
     Switch {
-        switch_id: SwitchExprId,
         scrutinee: ExprId,
+        context: PatternMatchingContextId,
         cases: Vec<SwitchCase>,
     },
     Cast { expr: ExprId, ty: ExprId, cast_id: CastId },
@@ -292,11 +291,6 @@ impl From<DeclId> for Item {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct PatternBindingDecl {
-    pub scrutinee: SwitchScrutineeValueId,
-}
-
 #[derive(Default, Debug, Clone)]
 pub struct ParamList {
     pub param_tys: SmallVec<[ExprId; 2]>,
@@ -317,7 +311,7 @@ pub enum Decl {
     },
     ObjcClassRef { extern_mod: ExternModId, index: usize },
     Stored { id: StoredDeclId, is_mut: bool, root_expr: ExprId, },
-    PatternBinding { id: PatternBindingDeclId, is_mut: bool, },
+    PatternBinding { context: PatternMatchingContextId, scrutinee: SwitchScrutineeValueId, root_scrutinee: ExprId, is_mut: bool,  },
     LoopBinding { id: StoredDeclId, is_mut: bool }, // The `i` in `for i in 0..100 {}`
     Parameter {
         /// Parameter index within the function
@@ -550,7 +544,6 @@ pub struct Ast {
     pub source_ranges: IndexVec<ItemId, SourceRange>,
     pub decl_refs: IndexVec<DeclRefId, DeclRef>,
     pub decls: IndexVec<DeclId, Decl>,
-    pub pattern_binding_decls: IndexVec<PatternBindingDeclId, PatternBindingDecl>,
     pub decl_attributes: HashMap<DeclId, Vec<Attribute>>,
     pub decl_self_parameters: IndexVec<DeclId, Option<SelfParameter>>,
     pub expr_to_items: IndexVec<ExprId, ItemId>,
@@ -1024,9 +1017,8 @@ impl Driver {
     pub fn for_expr(&mut self, loop_id: LoopId, binding: DeclId, lower_bound: ExprId, upper_bound: ExprId, scope: ImperScopeId, range: SourceRange) -> ExprId {
         self.add_expr(Expr::For { loop_id, binding, lower_bound, upper_bound, scope }, range)
     }
-    pub fn switch_expr(&mut self, scrutinee: ExprId, cases: Vec<SwitchCase>, range: SourceRange) -> ExprId {
-        let switch_id = self.code.ast.switch_expr_scrutinee_values.push(Default::default());
-        self.add_expr(Expr::Switch { switch_id, scrutinee, cases }, range)
+    pub fn switch_expr(&mut self, scrutinee: ExprId, context: PatternMatchingContextId, cases: Vec<SwitchCase>, range: SourceRange) -> ExprId {
+        self.add_expr(Expr::Switch { scrutinee, context, cases }, range)
     }
     pub fn do_expr(&mut self, scope: ImperScopeId, range: SourceRange) -> ExprId {
         self.add_expr(Expr::Do { scope }, range)
@@ -1089,14 +1081,14 @@ impl Driver {
         self.add_expr(Expr::Error, range)
     }
     fn get_pattern_bindings_impl(&mut self, pattern: &Pattern, decls: &mut Vec<ImperScopedDecl>) {
-        match pattern {
-            Pattern::AnonymousCatchAll(_) | Pattern::IntLit { .. } => {},
-            Pattern::ContextualMember { payload, .. } => {
+        match pattern.kind {
+            PatternKind::AnonymousCatchAll(_) | PatternKind::IntLit { .. } => {},
+            PatternKind::ContextualMember { ref payload, .. } => {
                 if let Some(payload) = payload {
                     self.get_pattern_bindings_impl(payload, decls);
                 }
             },
-            &Pattern::NamedCatchAll { name, binding_decl } => {
+            PatternKind::NamedCatchAll { name, binding_decl } => {
                 decls.push(ImperScopedDecl { name: name.symbol, id: binding_decl });
             },
         }

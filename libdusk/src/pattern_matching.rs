@@ -137,7 +137,7 @@ impl Driver {
             };
             scrutinee_values.push_at(scrutinee, scrutinee_value);
         }
-        
+
         let context = tp.pattern_matching_context_mut(context);
         *context = Some(scrutinee_values);
     }
@@ -204,7 +204,6 @@ pub fn match_scrutinee(driver: &mut Driver, tp: &mut dyn TypeProvider, scrutinee
                                 new_row.push(Pattern { kind: PatternKind::AnonymousCatchAll(SourceRange::default()), scrutinee: VOID_SCRUTINEE_VALUE });
                             }
                             new_row.extend_from_slice(&pattern_row[1..]);
-                            let scrutinee_value = payload.map(|payload| payload.scrutinee).unwrap_or(VOID_SCRUTINEE_VALUE);
                             child_matrices.entry(index)
                                 .or_insert_with(|| Vec::new())
                                 .push((new_row, destination));
@@ -233,8 +232,10 @@ pub fn match_scrutinee(driver: &mut Driver, tp: &mut dyn TypeProvider, scrutinee
             }
 
             for (variant_index, mut child_matrix) in child_matrices {
-                let context = tp.pattern_matching_context(context).as_ref().unwrap();
-                let scrutinee_ty = context[scrutinee_value].ty.clone();
+                let variant_name = driver.code.ast.enums[id].variants[variant_index].name;
+                let scrutinee_value = *driver.code.ast.pattern_matching_contexts[context].scrutinee_map.get(&SwitchScrutineeValue::EnumPayload { enum_value: scrutinees[0].value, variant_name }).unwrap();
+                let tctx = tp.pattern_matching_context(context).as_ref().unwrap();
+                let scrutinee_ty = tctx[scrutinee_value].ty.clone();
                 let payload_scrutinee = SwitchScrutinee { value: scrutinee_value, ty: scrutinee_ty };
                 let mut child_scrutinees = vec![payload_scrutinee];
                 child_scrutinees.extend_from_slice(&scrutinees[1..]);
@@ -248,12 +249,12 @@ pub fn match_scrutinee(driver: &mut Driver, tp: &mut dyn TypeProvider, scrutinee
                     .map(|(pattern, _)| pattern)
                     .collect();
 
-                paths.insert(SwitchDecisionValue::EnumVariant(variant_index), match_scrutinee(driver, tp, scrutinee, child_scrutinees, child_matrix, child_matrix_destinations));
+                paths.insert(SwitchDecisionValue::EnumVariant(variant_index), match_scrutinee(driver, tp, scrutinee, context, child_scrutinees, child_matrix, child_matrix_destinations));
             }
 
             let branch_scrutinee = scrutinees[0].value;
             let default_path = (!default_matrix.is_empty()).then(|| {
-                Box::new(match_scrutinee(driver, tp, scrutinee, scrutinees, default_matrix, default_matrix_destinations))
+                Box::new(match_scrutinee(driver, tp, scrutinee, context, scrutinees, default_matrix, default_matrix_destinations))
             });
 
             SwitchDecisionNode::Branch { scrutinee: branch_scrutinee, paths, default_path }
@@ -305,12 +306,12 @@ pub fn match_scrutinee(driver: &mut Driver, tp: &mut dyn TypeProvider, scrutinee
                 let child_matrix: Vec<_> = child_matrix.into_iter()
                     .map(|(pattern, _)| pattern)
                     .collect();
-                paths.insert(value, match_scrutinee(driver, tp, scrutinee, child_scrutinees, child_matrix, child_matrix_destinations));
+                paths.insert(value, match_scrutinee(driver, tp, scrutinee, context, child_scrutinees, child_matrix, child_matrix_destinations));
             }
 
             let branch_scrutinee = scrutinees[0].value;
             let default_path = (!default_matrix.is_empty()).then(|| {
-                Box::new(match_scrutinee(driver, tp, scrutinee, scrutinees, default_matrix, default_matrix_destinations))
+                Box::new(match_scrutinee(driver, tp, scrutinee, context, scrutinees, default_matrix, default_matrix_destinations))
             });
 
             SwitchDecisionNode::Branch { scrutinee: branch_scrutinee, paths, default_path }

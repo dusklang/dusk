@@ -5,9 +5,8 @@ use smallvec::{SmallVec, smallvec};
 use string_interner::DefaultSymbol as Sym;
 use derivative::Derivative;
 
-use crate::ast::{self, Attribute, ConditionNsId, DeclId, ExprId, ExternMod, FieldAssignment, Ident, ImperScopeId, ImperScopedDecl, Item, LegacyIntrinsic, ParamList, Pattern, PatternBindingDecl, PatternKind, PatternMatchingContextId, SelfParameter, SelfParameterKind, SwitchCase, ERROR_EXPR, ERROR_TYPE, VOID_TYPE};
-use crate::pattern_matching::{PatternMatchingContext, SwitchScrutineeValue, SwitchScrutineeValueId, PatternMatchingContext, ORIGINAL_SCRUTINEE_VALUE};
-use crate::tir::Switch;
+use crate::ast::{self, Attribute, ConditionNsId, DeclId, ExprId, ExternMod, FieldAssignment, Ident, ImperScopeId, ImperScopedDecl, Item, LegacyIntrinsic, ParamList, Pattern, PatternKind, PatternMatchingContextId, SelfParameter, SelfParameterKind, SwitchCase, ERROR_EXPR, ERROR_TYPE, VOID_TYPE};
+use crate::pattern_matching::{PatternMatchingContext, SwitchScrutineeValue, SwitchScrutineeValueId, ORIGINAL_SCRUTINEE_VALUE};
 use crate::ty::Type;
 use crate::source_info::{self, SourceFileId, SourceRange};
 
@@ -812,7 +811,7 @@ impl Driver {
                 },
                 _ => {
                     self.start_next_list_item(p, case_list.id());
-                    let pattern = self.parse_pattern(p, pattern_matching_context, ORIGINAL_SCRUTINEE_VALUE);
+                    let pattern = self.parse_pattern(p, pattern_matching_context, ORIGINAL_SCRUTINEE_VALUE, scrutinee);
                     let bindings = self.get_pattern_bindings(&pattern);
                     self.eat_tok(p, TokenKind::Colon)?;
                     let (scope, scope_range) = match self.cur(p).kind {
@@ -844,7 +843,7 @@ impl Driver {
         };
 
         let range = source_info::concat(switch_range, close_curly_range);
-        Ok(self.switch_expr(scrutinee, cases, range))
+        Ok(self.switch_expr(scrutinee, pattern_matching_context, cases, range))
     }
 
     fn parse_attribute(&mut self, p: &mut Parser, condition_ns: &mut Option<ConditionNsId>) -> ParseResult<Attribute> {
@@ -920,7 +919,7 @@ impl Driver {
         Ok(Attribute { attr, arg, range })
     }
 
-    fn parse_pattern(&mut self, p: &mut Parser, context: PatternMatchingContextId, scrutinee: SwitchScrutineeValueId) -> Pattern {
+    fn parse_pattern(&mut self, p: &mut Parser, context: PatternMatchingContextId, scrutinee: SwitchScrutineeValueId, root_scrutinee: ExprId) -> Pattern {
         let initial_tok = self.cur(p);
         let initial_range = initial_tok.range;
         match initial_tok.kind {
@@ -942,7 +941,7 @@ impl Driver {
                             _ => {
                                 self.start_next_list_item(p, payload_list.id());
                                 let payload_scrutinee = self.code.ast.pattern_matching_contexts[context].add_scrutinee_value(SwitchScrutineeValue::EnumPayload { enum_value: scrutinee, variant_name: name.symbol });
-                                let payload_pattern = self.parse_pattern(p, context, payload_scrutinee);
+                                let payload_pattern = self.parse_pattern(p, context, payload_scrutinee, root_scrutinee);
                                 if !payload_patterns.is_empty() {
                                     todo!("implement tuple destructuring");
                                 }
@@ -956,8 +955,12 @@ impl Driver {
                         payload = Some(Box::new(payload_patterns.into_iter().next().unwrap()));
                     }
                 }
+                let payload = payload.unwrap_or_else(|| {
+                    let payload_scrutinee = self.code.ast.pattern_matching_contexts[context].add_scrutinee_value(SwitchScrutineeValue::EnumPayload { enum_value: scrutinee, variant_name: name.symbol });
+                    Box::new(Pattern { kind: PatternKind::AnonymousCatchAll(SourceRange::default()), scrutinee: payload_scrutinee })
+                });
                 Pattern {
-                    kind: PatternKind::ContextualMember { name, range, payload },
+                    kind: PatternKind::ContextualMember { name, range, payload: Some(payload) },
                     scrutinee,
                 }
             },
@@ -970,8 +973,7 @@ impl Driver {
                     }
                 } else {
                     let name = Ident { symbol: name, range: initial_range };
-                    let binding_id = self.code.ast.pattern_binding_decls.push(PatternBindingDecl { scrutinee });
-                    let binding_decl = self.add_decl(ast::Decl::PatternBinding { id: binding_id, is_mut: false }, name.symbol, None, name.range);
+                    let binding_decl = self.add_decl(ast::Decl::PatternBinding { context, scrutinee, root_scrutinee, is_mut: false }, name.symbol, None, name.range);
                     Pattern {
                         kind: PatternKind::NamedCatchAll { name, binding_decl },
                         scrutinee,
