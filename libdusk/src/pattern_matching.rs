@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use index_vec::define_index_type;
 use string_interner::DefaultSymbol as Sym;
 use crate::driver::Driver;
-use crate::ast::{DeclId, ExprId, Pattern, PatternKind, PatternMatchingContextId};
+use crate::ast::{DeclId, ExprId, Pattern, PatternKind, PatternMatchingContextId, VOID_TYPE};
 use crate::ty::Type;
 use crate::source_info::SourceRange;
 use crate::error::Error;
@@ -127,7 +127,7 @@ impl Driver {
 
                     let variants = &self.code.ast.enums[enum_id].variants;
                     let variant_index = variants.iter().position(|variant| variant.name == variant_name).unwrap();
-                    let payload_ty = variants[variant_index].payload_ty.unwrap();
+                    let payload_ty = variants[variant_index].payload_ty.unwrap_or(VOID_TYPE);
                     let payload_ty = tp.get_evaluated_type(payload_ty).clone();
                     TypedSwitchScrutineeValue {
                         kind: TypedSwitchScrutineeValueKind::EnumPayload { enum_value, variant_index },
@@ -234,6 +234,7 @@ pub fn match_scrutinee(driver: &mut Driver, tp: &mut dyn TypeProvider, scrutinee
             for (variant_index, mut child_matrix) in child_matrices {
                 let variant_name = driver.code.ast.enums[id].variants[variant_index].name;
                 let scrutinee_value = *driver.code.ast.pattern_matching_contexts[context].scrutinee_map.get(&SwitchScrutineeValue::EnumPayload { enum_value: scrutinees[0].value, variant_name }).unwrap();
+                driver.get_typed_pattern_matching_context(tp, context);
                 let tctx = tp.pattern_matching_context(context).as_ref().unwrap();
                 let scrutinee_ty = tctx[scrutinee_value].ty.clone();
                 let payload_scrutinee = SwitchScrutinee { value: scrutinee_value, ty: scrutinee_ty };
