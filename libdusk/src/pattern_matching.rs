@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use index_vec::define_index_type;
 use string_interner::DefaultSymbol as Sym;
 use crate::driver::Driver;
-use crate::ast::{DeclId, ExprId, Pattern, PatternKind, PatternMatchingContextId, VOID_TYPE};
+use crate::ast::{DeclId, ExprId, ImperScopeId, Pattern, PatternKind, PatternMatchingContextId, VOID_TYPE};
 use crate::ty::Type;
 use crate::source_info::SourceRange;
 use crate::error::Error;
@@ -14,7 +14,6 @@ use crate::type_provider::TypeProvider;
 use crate::index_vec::*;
 
 define_index_type!(pub struct SwitchScrutineeValueId = u32;);
-define_index_type!(pub struct SwitchDestinationId = u32;);
 
 pub const VOID_SCRUTINEE_VALUE: SwitchScrutineeValueId = SwitchScrutineeValueId::from_raw_unchecked(0);
 pub const ORIGINAL_SCRUTINEE_VALUE: SwitchScrutineeValueId = SwitchScrutineeValueId::from_raw_unchecked(1);
@@ -34,7 +33,7 @@ pub enum SwitchDecisionNode {
         default_path: Option<Box<SwitchDecisionNode>>,
     },
     Destination {
-        destination: SwitchDestinationId,
+        destination: ImperScopeId,
         bindings: Vec<SwitchBinding>,
     },
     Failure,
@@ -143,7 +142,7 @@ impl Driver {
     }
 }
 
-pub fn match_scrutinee(driver: &mut Driver, tp: &mut dyn TypeProvider, scrutinee: ExprId, context: PatternMatchingContextId, mut scrutinees: Vec<SwitchScrutinee>, mut pattern_matrix: Vec<Vec<Pattern>>, destinations: Vec<SwitchDestinationId>) -> SwitchDecisionNode {
+pub fn match_scrutinee(driver: &mut Driver, tp: &mut dyn TypeProvider, scrutinee: ExprId, context: PatternMatchingContextId, mut scrutinees: Vec<SwitchScrutinee>, mut pattern_matrix: Vec<Vec<Pattern>>, destinations: Vec<ImperScopeId>) -> SwitchDecisionNode {
     if pattern_matrix.is_empty() {
         return SwitchDecisionNode::Failure;
     }
@@ -186,11 +185,11 @@ pub fn match_scrutinee(driver: &mut Driver, tp: &mut dyn TypeProvider, scrutinee
     match scrutinees[0].ty {
         Type::Enum(id) => {
             let mut paths = HashMap::<SwitchDecisionValue, SwitchDecisionNode>::new();
-            let mut child_matrices = HashMap::<usize, Vec<(Vec<Pattern>, SwitchDestinationId)>>::new();
-            let mut catch_all_child_matrix_rows = Vec::<(Vec<Pattern>, SwitchDestinationId)>::new();
+            let mut child_matrices = HashMap::<usize, Vec<(Vec<Pattern>, ImperScopeId)>>::new();
+            let mut catch_all_child_matrix_rows = Vec::<(Vec<Pattern>, ImperScopeId)>::new();
             let mut default_matrix = Vec::<Vec<Pattern>>::new();
             let variants = &driver.code.ast.enums[id].variants;
-            let mut default_matrix_destinations = Vec::<SwitchDestinationId>::new();
+            let mut default_matrix_destinations = Vec::<ImperScopeId>::new();
             for (pattern_row, &destination) in pattern_matrix.iter().zip(&destinations) {
                 match pattern_row[0].kind {
                     PatternKind::ContextualMember { name, range, ref payload } => {
@@ -263,10 +262,10 @@ pub fn match_scrutinee(driver: &mut Driver, tp: &mut dyn TypeProvider, scrutinee
         Type::Int { .. } => {
             let mut paths = HashMap::<SwitchDecisionValue, SwitchDecisionNode>::new();
 
-            let mut child_matrices = HashMap::<SwitchDecisionValue, Vec<(Vec<Pattern>, SwitchDestinationId)>>::new();
-            let mut catch_all_child_matrix_rows = Vec::<(Vec<Pattern>, SwitchDestinationId)>::new();
+            let mut child_matrices = HashMap::<SwitchDecisionValue, Vec<(Vec<Pattern>, ImperScopeId)>>::new();
+            let mut catch_all_child_matrix_rows = Vec::<(Vec<Pattern>, ImperScopeId)>::new();
             let mut default_matrix = Vec::<Vec<Pattern>>::new();
-            let mut default_matrix_destinations = Vec::<SwitchDestinationId>::new();
+            let mut default_matrix_destinations = Vec::<ImperScopeId>::new();
             for (pattern_row, &destination) in pattern_matrix.iter().zip(&destinations) {
                 match pattern_row[0].kind {
                     PatternKind::IntLit { value, .. } => {

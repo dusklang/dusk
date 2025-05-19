@@ -33,6 +33,7 @@ pub struct SwitchCase {
     // TODO: might want a different, typechecker-specific data structure for patterns here at some point
     pub pattern: Pattern,
     pub terminal_expr: ExprId,
+    pub scope: ImperScopeId,
 }
 
 #[derive(Debug)]
@@ -674,6 +675,7 @@ impl Driver {
                     let case = SwitchCase {
                         pattern: case.pattern.clone(),
                         terminal_expr: self.code.ast.imper_scopes[case.scope].terminal_expr,
+                        scope: case.scope,
                     };
                     tir_cases.push(case);
                 }

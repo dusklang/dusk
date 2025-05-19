@@ -1756,6 +1756,9 @@ impl DriverRef<'_> {
                     let payload = frame.get_val(payload, &*self.read()).clone();
                     Value::from_variant(&*self.read(), enuum, index, payload)
                 },
+                &Instr::PayloadAccess { val, variant_index } => {
+                    todo!()
+                },
                 &Instr::DiscriminantAccess { val } => {
                     let enuum = frame.get_val(val, &*self.read()).as_enum();
                     Value::from_u32(enuum.discriminant)

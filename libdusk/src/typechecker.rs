@@ -429,7 +429,7 @@ impl tir::Expr<tir::Switch> {
         for case in &self.cases {
             pattern_matrix.push(vec![case.pattern.clone()]);
         }
-        let destinations: Vec<_> = (0..self.cases.len()).map(|destination| SwitchDestinationId::from_usize(destination)).collect();
+        let destinations: Vec<_> = self.cases.iter().map(|case| case.scope).collect();
         let decision_tree = match_scrutinee(driver, tp, self.scrutinee, self.context, scrutinees, pattern_matrix, destinations);
         *tp.switch_expr_decision_tree_mut(self.context) = Some(decision_tree);
 
