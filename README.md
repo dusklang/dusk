@@ -36,4 +36,4 @@ Pre-pre-alpha. Barely usable for anything. There is a working interpreter and a 
 
 ## AI Policy
 
-This project strictly forbids all AI-generated code, docs, etc., while still allowing agents to be used to assist in reading, reviewing and debugging. This is not set in stone, nor should it be taken as a personal statement against the use of AI coding tools more generally; my main reason for the policy is to give myself an outlet where I can do things more like how I used to.
+This project strictly forbids all AI-generated code, docs, etc., while still allowing agents to be used to assist in reading, reviewing and debugging. This is not set in stone, nor should it be taken as a personal statement against the use of AI coding tools more generally; my main reason for the policy is to give myself an outlet where I can do things more like how I used to!
