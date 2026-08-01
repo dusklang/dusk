@@ -4,7 +4,7 @@ use std::ops::Range;
 use std::cmp::{min, Ord};
 
 use cryptographic_message_syntax::SignerBuilder;
-use rcgen::{Certificate, CertificateParams, DistinguishedName, DnType, KeyPair};
+use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
 use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey};
 use rsa::{Pkcs1v15Sign, RsaPrivateKey};
 use rsa::sha2::{Sha256, Digest};
@@ -12,6 +12,7 @@ use base64::prelude::*;
 use x509_certificate::InMemorySigningKeyPair;
 use x509_certificate::certificate::CapturedX509Certificate;
 use cryptographic_message_syntax::SignedDataBuilder;
+use rsa::rand_core::OsRng;
 
 use crate::driver::Driver;
 use crate::linker::byte_swap::{Buffer, Ref};
@@ -70,18 +71,15 @@ impl Bundler for ApkBundler {
         // TODO: maybe cache the generated key pair somewhere, and/or allow the user to pass one in?
 
         // Generate RSA key pair
-        let mut rng = rand::thread_rng();
-        let priv_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
+        let priv_key = RsaPrivateKey::new(&mut OsRng, 2048).unwrap();
 
         // Generate certificate
         let algorithm = &rcgen::PKCS_RSA_SHA256;
         let mut cert_params = CertificateParams::default();
-        cert_params.alg = algorithm;
-        cert_params.key_pair = Some(KeyPair::from_der_and_sign_algo(priv_key.to_pkcs8_der().unwrap().as_bytes(), algorithm).unwrap());
         cert_params.distinguished_name = DistinguishedName::new();
         cert_params.distinguished_name.push(DnType::CommonName, "Dusk self-signed certificate");
-        let cert = Certificate::from_params(cert_params).unwrap();
-        let serialized_cert = cert.serialize_der().unwrap();
+        let cert = cert_params.self_signed(&KeyPair::from_pkcs8_der_and_sign_algo(&priv_key.to_pkcs8_der().unwrap().as_bytes().into(), algorithm).unwrap()).unwrap();
+        let serialized_cert = cert.der();
 
         let mut archive = ZipBuilder::new(PAGE_ALIGNMENT);
         let mut files = Vec::new();
@@ -133,7 +131,7 @@ impl Bundler for ApkBundler {
         let signed_digest = priv_key.sign(Pkcs1v15Sign::new::<Sha256>(), &signature_file_digest).unwrap();
 
         let cms_key_pair = InMemorySigningKeyPair::from_pkcs8_der(priv_key.to_pkcs8_der().unwrap().as_bytes()).unwrap();
-        let cms_cert = CapturedX509Certificate::from_der(serialized_cert.clone()).unwrap();
+        let cms_cert = CapturedX509Certificate::from_der(&**serialized_cert).unwrap();
         let signed_data = SignedDataBuilder::default()
             .content_inline(signed_digest)
             .certificate(cms_cert.clone())

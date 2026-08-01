@@ -10,26 +10,25 @@ homepage = "https://dusklang.org/"
 
 [dependencies]
 unicode-segmentation = "1.9"
-string-interner = "0.15"
+string-interner = "0.20"
 bitflags = "2.4"
 smallvec = { version = "1.6.1", features = ["const_generics"] }
 arrayvec = "0.7.0"
 paste = "1.0.0"
-num-bigint = "0.4"
+num-bigint = "0.5.1"
 index_vec = { version = "0.1.2" }
 indenter = "0.3.2"
 region = "3.0"
 dusk-proc-macros = { version = "0.1", path = "../dusk-proc-macros" }
 derivative = "2.2"
-md-5 = "0.10.0"
+md-5 = "0.11.0"
 yaml-rust = "0.4.5"
-sha1 = "0.10"
+sha1 = "0.11"
 crc32fast = "1.4"
-rcgen = "0.12"
-rand = "0.8"
+rcgen = "0.14.8"
 rsa = { version = "0.9", features = ["sha2"] }
 deflate = "1.0"
-base64 = "0.22"
+base64 = "0.23"
 cryptographic-message-syntax = "0.26"
 x509-certificate = "0.23"
 
