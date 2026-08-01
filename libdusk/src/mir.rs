@@ -1990,7 +1990,7 @@ impl Driver {
             },
             Instr::InternalFieldAccess { field, .. } => field.ty(),
             &Instr::Variant { enuum, .. } => Type::Enum(enuum),
-            Instr::PayloadAccess { val, variant_index } => todo!(),
+            Instr::PayloadAccess { val: _, variant_index: _ } => todo!(),
             Instr::DiscriminantAccess { .. } => TYPE_OF_DISCRIMINANTS, // TODO: update this when discriminants can be other types
         }
     }
@@ -2684,7 +2684,7 @@ impl DriverRef<'_> {
                 return self.build_if_expr(b, expr, ty, condition, then_scope, else_scope, ctx, tp)
             },
             Expr::Switch { scrutinee, context: pattern_matching_ctx, ref cases } => {
-                let cases = cases.clone();
+                let _cases = cases.clone();
                 drop(d);
                 let scrutinee_val = self.build_expr(b, scrutinee, Context::default(), tp);
                 let scrutinee_ty = tp.ty(scrutinee);
@@ -2702,16 +2702,16 @@ impl DriverRef<'_> {
                 };
                 let begin_bb = b.current_block;
                 let post_bb = self.write().create_bb(b);
-                let scope_ctx = ctx.redirect(result_location, Some(post_bb));
-                let mut mir_cases = Vec::new();
-                let enum_info = match scrutinee_ty {
+                let _scope_ctx = ctx.redirect(result_location, Some(post_bb));
+                let mir_cases = Vec::new();
+                let _enum_info = match scrutinee_ty {
                     &Type::Enum(id) => {
                         Some((id, self.read().code.ast.enums[id].variants.clone()))
                     },
                     Type::Int { .. } => None,
                     _ => todo!(),
                 };
-                let mut catch_all_bb = None;
+                let catch_all_bb = None;
                 let decision_tree = tp.switch_expr_decision_tree(pattern_matching_ctx).as_ref().expect("should always set decision tree on switch expr");
                 let pattern_matching_ctx = tp.pattern_matching_context(pattern_matching_ctx).as_ref().expect("should always set pattern matching context on switch expr");
                 let mut scope_blocks = HashMap::<ImperScopeId, BlockId>::new();
@@ -2879,14 +2879,14 @@ impl DriverRef<'_> {
         value
     }
 
-    fn handle_pattern_matching(&mut self, b: &mut FunctionBuilder, expr: ExprId, ctx: Context, tp: &dyn TypeProvider, scrutinee: ExprId, node: &SwitchDecisionNode, pattern_matching_ctx: &IndexVec<SwitchScrutineeValueId, TypedSwitchScrutineeValue>, scope_blocks: &mut HashMap<ImperScopeId, BlockId>) {
+    fn handle_pattern_matching(&mut self, _b: &mut FunctionBuilder, _expr: ExprId, _ctx: Context, _tp: &dyn TypeProvider, _scrutinee: ExprId, node: &SwitchDecisionNode, _pattern_matching_ctx: &IndexVec<SwitchScrutineeValueId, TypedSwitchScrutineeValue>, _scope_blocks: &mut HashMap<ImperScopeId, BlockId>) {
         match *node {
-            SwitchDecisionNode::Branch { scrutinee, ref paths, ref default_path } => {
-                for (value, node) in paths {
+            SwitchDecisionNode::Branch { scrutinee: _, ref paths, default_path: _ } => {
+                for (value, _node) in paths {
                     match *value {
-                        SwitchDecisionValue::EnumVariant(variant_index) => todo!(),
-                        SwitchDecisionValue::SignedInt(value) => todo!(),
-                        SwitchDecisionValue::UnsignedInt(value) => todo!(),
+                        SwitchDecisionValue::EnumVariant(_variant_index) => todo!(),
+                        SwitchDecisionValue::SignedInt(_value) => todo!(),
+                        SwitchDecisionValue::UnsignedInt(_value) => todo!(),
                     }
                 }
 
@@ -2948,7 +2948,7 @@ impl DriverRef<'_> {
                 //     },
                 // }
             },
-            SwitchDecisionNode::Destination { destination, ref bindings } => todo!(),
+            SwitchDecisionNode::Destination { destination: _, bindings: _ } => todo!(),
             SwitchDecisionNode::Failure => panic!("pattern matching failure"),
         }
     }
