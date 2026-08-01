@@ -108,7 +108,7 @@ struct Enum {
     discriminant: u32,
 }
 impl Value {
-    fn as_bytes_with_driver_maybe(&self, d: Option<&Driver>) -> Cow<[u8]> {
+    fn as_bytes_with_driver_maybe(&self, d: Option<&Driver>) -> Cow<'_, [u8]> {
         match self {
             Value::Inline(storage) => Cow::Borrowed(storage.as_ref()),
             Value::Dynamic(ptr) => unsafe {
@@ -123,10 +123,10 @@ impl Value {
             Value::Nothing => Cow::Borrowed(&[]),
         }
     }
-    fn as_bytes_with_driver(&self, d: &Driver) -> Cow<[u8]> {
+    fn as_bytes_with_driver(&self, d: &Driver) -> Cow<'_, [u8]> {
         self.as_bytes_with_driver_maybe(Some(d))
     }
-    fn as_bytes(&self) -> Cow<[u8]> {
+    fn as_bytes(&self) -> Cow<'_, [u8]> {
         self.as_bytes_with_driver_maybe(None)
     }
 
@@ -173,7 +173,7 @@ impl Value {
     }
 
     pub fn as_raw_ptr(&self) -> *mut u8 {
-        unsafe { mem::transmute(usize::from_le_bytes(self.as_bytes().as_ref().try_into().unwrap())) }
+        std::ptr::without_provenance_mut(usize::from_le_bytes(self.as_bytes().as_ref().try_into().unwrap()))
     }
 
     fn as_f64(&self) -> f64 {
@@ -300,7 +300,7 @@ impl Value {
     }
 
     fn from_bool(val: bool) -> Value {
-        Value::from_u8(unsafe { mem::transmute(val) })
+        Value::from_u8(u8::from(val))
     }
 
     fn from_variant(d: &Driver, enuum: EnumId, index: usize, payload: Value) -> Value {

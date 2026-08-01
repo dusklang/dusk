@@ -15,7 +15,7 @@ impl DiagnosticReporter {
     pub fn has_errors(&self) -> bool {
         !self.errors.is_empty()
     }
-    pub fn report_error(&mut self, message: impl Into<Cow<'static, str>>, range: impl Into<ToSourceRange>, range_message: impl Into<Cow<'static, str>>) -> DiagnosticBuilder {
+    pub fn report_error(&mut self, message: impl Into<Cow<'static, str>>, range: impl Into<ToSourceRange>, range_message: impl Into<Cow<'static, str>>) -> DiagnosticBuilder<'_> {
         self.report_error_no_range(message)
             .adding_primary_range_with_msg(range, range_message)
     }
@@ -51,11 +51,11 @@ impl DiagnosticReporter {
         }
     }
 
-    pub fn report_error_no_range_msg(&mut self, message: impl Into<Cow<'static, str>>, range: impl Into<ToSourceRange>) -> DiagnosticBuilder {
+    pub fn report_error_no_range_msg(&mut self, message: impl Into<Cow<'static, str>>, range: impl Into<ToSourceRange>) -> DiagnosticBuilder<'_> {
         self.report_error(message, range, "")
     }
 
-    pub fn report_error_no_range(&mut self, message: impl Into<Cow<'static, str>>) -> DiagnosticBuilder {
+    pub fn report_error_no_range(&mut self, message: impl Into<Cow<'static, str>>) -> DiagnosticBuilder<'_> {
         DiagnosticBuilder {
             diag: Diagnostic {
                 kind: DiagnosticKind::Error,
@@ -66,16 +66,16 @@ impl DiagnosticReporter {
         }
     }
 
-    pub fn report_warning(&mut self, message: impl Into<Cow<'static, str>>, range: impl Into<ToSourceRange>, range_message: impl Into<Cow<'static, str>>) -> DiagnosticBuilder {
+    pub fn report_warning(&mut self, message: impl Into<Cow<'static, str>>, range: impl Into<ToSourceRange>, range_message: impl Into<Cow<'static, str>>) -> DiagnosticBuilder<'_> {
         self.report_warning_no_range(message)
             .adding_primary_range_with_msg(range, range_message)
     }
 
-    pub fn report_warning_no_range_msg(&mut self, message: impl Into<Cow<'static, str>>, range: impl Into<ToSourceRange>) -> DiagnosticBuilder {
+    pub fn report_warning_no_range_msg(&mut self, message: impl Into<Cow<'static, str>>, range: impl Into<ToSourceRange>) -> DiagnosticBuilder<'_> {
         self.report_warning(message, range, "")
     }
 
-    pub fn report_warning_no_range(&mut self, message: impl Into<Cow<'static, str>>) -> DiagnosticBuilder {
+    pub fn report_warning_no_range(&mut self, message: impl Into<Cow<'static, str>>) -> DiagnosticBuilder<'_> {
         DiagnosticBuilder {
             diag: Diagnostic {
                 kind: DiagnosticKind::Warning,

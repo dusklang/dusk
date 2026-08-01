@@ -1726,7 +1726,7 @@ impl Driver {
         self.try_parse_type(p).unwrap()
     }
 
-    fn cur(&self, p: &Parser) -> Token {
+    fn cur(&self, p: &Parser) -> Token<'_> {
         self.toks[p.file].at(p.cur)
     }
 
@@ -1737,26 +1737,26 @@ impl Driver {
         }
     }
 
-    fn next_including_whitespace(&mut self, p: &mut Parser) -> Token {
+    fn next_including_whitespace(&mut self, p: &mut Parser) -> Token<'_> {
         p.cur += 1;
         self.cur(p)
     }
 
-    fn next(&mut self, p: &mut Parser) -> Token {
+    fn next(&mut self, p: &mut Parser) -> Token<'_> {
         self.next_including_whitespace(p);
         self.skip_whitespace(p);
         self.cur(p)
     }
 
-    fn peek_next_including_whitespace(&self, p: &Parser) -> Token {
+    fn peek_next_including_whitespace(&self, p: &Parser) -> Token<'_> {
         self.toks[p.file].at(p.cur+1)
     }
 
-    fn peek_prev_including_whitespace(&self, p: &Parser) -> Token {
+    fn peek_prev_including_whitespace(&self, p: &Parser) -> Token<'_> {
         self.toks[p.file].at(p.cur - 1)
     }
 
-    fn find_first_nonwhitespace(&self, p: &Parser, token_range: impl Iterator<Item=usize>) -> Option<Token> {
+    fn find_first_nonwhitespace(&self, p: &Parser, token_range: impl Iterator<Item=usize>) -> Option<Token<'_>> {
         let toks = &self.toks[p.file];
         for i in token_range {
             let cur = toks.at(i);
@@ -1767,11 +1767,11 @@ impl Driver {
         None
     }
 
-    fn peek_prev(&self, p: &Parser) -> Token {
+    fn peek_prev(&self, p: &Parser) -> Token<'_> {
         self.find_first_nonwhitespace(p, (0..p.cur).rev()).unwrap()
     }
 
-    fn peek_next(&self, p: &Parser) -> Token {
+    fn peek_next(&self, p: &Parser) -> Token<'_> {
         self.find_first_nonwhitespace(p, (p.cur+1)..self.toks[p.file].len()).unwrap()
     }
 }

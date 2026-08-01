@@ -416,7 +416,7 @@ impl Server {
         self.open_files.borrow_mut().get_mut(path).unwrap()
             .flushed_diagnostics.extend(new_diagnostics);
     }
-    fn analyze_file(&self, path: &Url) -> (DriverRef, Option<RealTypeProvider>) {
+    fn analyze_file(&self, path: &Url) -> (DriverRef<'_>, Option<RealTypeProvider>) {
         // I *think* this is safe...
         let salf = AssertUnwindSafe(self);
         let mut file_id = None;

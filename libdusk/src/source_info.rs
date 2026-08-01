@@ -139,7 +139,7 @@ impl SourceFileLocation {
             Self::Virtual { name } => write!(f, "{}", name),
         }
     }
-    pub fn as_path(&self) -> Option<Cow<Path>> {
+    pub fn as_path(&self) -> Option<Cow<'_, Path>> {
         match self {
             Self::OnDisk(path) => Some(Cow::Borrowed(path)),
             #[cfg(feature = "dls")]

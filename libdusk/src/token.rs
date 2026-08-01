@@ -125,7 +125,7 @@ impl TokenVec {
         self.ranges.push(range);
     }
 
-    pub fn at(&self, i: usize) -> Token {
+    pub fn at(&self, i: usize) -> Token<'_> {
         let i = std::cmp::min(i, self.kinds.len()-1);
         Token {
             kind: &self.kinds[i],

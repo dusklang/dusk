@@ -41,7 +41,7 @@ impl<'l, T> RwRef<'l, T> {
         }
     }
 
-    pub fn read(&self) -> Ref<T> {
+    pub fn read(&self) -> Ref<'_, T> {
         if matches!(*self.guard.borrow(), RwRefGuard::Nothing) {
             *self.guard.borrow_mut() = RwRefGuard::Ref(ignore_poison(self.lock.read()));
         }
@@ -52,7 +52,7 @@ impl<'l, T> RwRef<'l, T> {
         })
     }
 
-    pub fn read_only(&self) -> Ref<T> {
+    pub fn read_only(&self) -> Ref<'_, T> {
         if !matches!(*self.guard.borrow(), RwRefGuard::Ref(_)) {
             *self.guard.borrow_mut() = RwRefGuard::Nothing;
             *self.guard.borrow_mut() = RwRefGuard::Ref(ignore_poison(self.lock.read()));
@@ -63,7 +63,7 @@ impl<'l, T> RwRef<'l, T> {
         })
     }
 
-    pub fn write(&mut self) -> RefMut<T> {
+    pub fn write(&mut self) -> RefMut<'_, T> {
         if !matches!(*self.guard.borrow(), RwRefGuard::RefMut(_)) {
             *self.guard.borrow_mut() = RwRefGuard::Nothing;
             *self.guard.borrow_mut() = RwRefGuard::RefMut(ignore_poison(self.lock.write()));
