@@ -375,7 +375,7 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
         } else {
             quote! {
                 let namespace = d.code.ast.new_namespaces.push(NewNamespace::default());
-                let internal_type = InternalType { name: String::from(#bridged_name), size: std::mem::size_of::<#decl_name>(), namespace };
+                let internal_type = InternalType { name: String::from(#bridged_name), size: size_of::<#decl_name>(), namespace };
                 let type_id = d.code.ast.internal_types.push(internal_type);
                 let ty = Type::Internal(type_id);
             }
@@ -620,22 +620,18 @@ pub fn byteswap_derive(input: TokenStream) -> TokenStream {
     let name = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
-    let mut generic_inner = quote!();
+    let mut field_names = Vec::new();
     match input.data {
         Data::Struct(data) => match data.fields {
             Fields::Named(named) => {
                 for field in &named.named {
-                    let name = field.ident.as_ref().unwrap();
-                    generic_inner.extend(quote!(
-                        self.#name.byte_swap();
-                    ));
+                    let field_name = field.ident.as_ref().unwrap();
+                    field_names.push(quote! { #field_name });
                 }
             },
             Fields::Unnamed(unnamed) => {
                 for i in (0..unnamed.unnamed.len()).map(syn::Index::from) {
-                    generic_inner.extend(quote! {
-                        self.#i.byte_swap();
-                    })
+                    field_names.push(quote! { #i });
                 }
             },
             _ => unimplemented!(),
@@ -645,8 +641,22 @@ pub fn byteswap_derive(input: TokenStream) -> TokenStream {
 
     let generic = quote!(
         impl #impl_generics crate::linker::byte_swap::ByteSwap for #name #ty_generics #where_clause {
-            fn byte_swap(&mut self) {
-                #generic_inner
+            fn write_to(&self, buf: &mut [u8], big_endian: bool) {
+                #({
+                    let offset = core::mem::offset_of!(#name #ty_generics, #field_names);
+                    let value = self.#field_names;
+                    let size = size_of_val(&value);
+                    value.write_to(&mut buf[offset..(offset + size)], big_endian);
+                })*
+            }
+
+            fn read_from(buf: &[u8], big_endian: bool) -> #name #ty_generics {
+                #name {
+                    #(#field_names: {
+                        let offset = core::mem::offset_of!(#name #ty_generics, #field_names);
+                        crate::linker::byte_swap::read_bs_from_oversized_buf(&buf[offset..], big_endian)
+                    }),*
+                }
             }
         }
     );
@@ -660,14 +670,12 @@ pub fn byteswap_bitflags_derive(input: TokenStream) -> TokenStream {
     let name = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
-    let mut generic_inner = quote!();
+    let mut field_names = Vec::new();
     match input.data {
         Data::Struct(data) => match data.fields {
             Fields::Unnamed(unnamed) => {
                 for i in (0..unnamed.unnamed.len()).map(syn::Index::from) {
-                    generic_inner.extend(quote! {
-                        self.#i.bits().byte_swap();
-                    })
+                    field_names.push(quote! { #i });
                 }
             },
             _ => unimplemented!(),
@@ -677,8 +685,12 @@ pub fn byteswap_bitflags_derive(input: TokenStream) -> TokenStream {
 
     let generic = quote!(
         impl #impl_generics crate::linker::byte_swap::ByteSwap for #name #ty_generics #where_clause {
-            fn byte_swap(&mut self) {
-                #generic_inner
+            fn write_to(&self, buf: &mut [u8], big_endian: bool) {
+                #(self.#field_names.bits().write_to(buf, big_endian));*
+            }
+
+            fn read_from(buf: &[u8], big_endian: bool) -> #name #ty_generics {
+                #name::from_bits(crate::linker::byte_swap::ByteSwap::read_from(buf, big_endian)).unwrap()
             }
         }
     );

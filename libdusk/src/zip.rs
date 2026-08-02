@@ -1,5 +1,3 @@
-use std::mem;
-
 use dusk_proc_macros::ByteSwap;
 
 use crate::linker::byte_swap::Buffer;
@@ -34,8 +32,8 @@ pub struct ZipFile {
 // NOTE: my current system for copying Rust structs into a buffer does not handle unaligned fields, so I have
 // to carefully split up each struct so as to not break the expected layout of a ZIP file.
 
-#[repr(C)]
-#[derive(ByteSwap)]
+#[repr(C, packed)]
+#[derive(ByteSwap, Clone, Copy)]
 struct LocalFileHeader1 {
     sig: u32,
     version: u16,
@@ -46,7 +44,7 @@ struct LocalFileHeader1 {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct LocalFileHeader2 {
     checksum: u32,
     compressed_size: u32,
@@ -56,7 +54,7 @@ struct LocalFileHeader2 {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct CentralDirectoryFileHeader {
     sig: u32,
     made_version: u16,
@@ -78,7 +76,7 @@ struct CentralDirectoryFileHeader {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 pub struct EndOfCentralDirectoryRecord {
     pub sig: u32,
     pub disk_number: u16,
@@ -209,9 +207,9 @@ impl ZipBuilder {
             for file in self.central_directory_aligned_entries.iter().rev() {
                 layout_manager.alloc_aligned(file.contents.len(), file.alignment as usize);
                 layout_manager.alloc(file.name.len());
-                layout_manager.alloc(mem::size_of::<LocalFileHeader2>());
-                layout_manager.alloc(mem::size_of::<u16>());
-                layout_manager.alloc(mem::size_of::<LocalFileHeader1>());
+                layout_manager.alloc(size_of::<LocalFileHeader2>());
+                layout_manager.alloc(size_of::<u16>());
+                layout_manager.alloc(size_of::<LocalFileHeader1>());
 
                 if layout_manager.failed {
                     break;

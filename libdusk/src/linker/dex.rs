@@ -744,7 +744,7 @@ impl Linker for DexLinker {
             }
         );
         let header_item = self.buf.alloc::<HeaderItem>();
-        assert_eq!(mem::size_of::<HeaderItem>(), 0x70);
+        assert_eq!(size_of::<HeaderItem>(), 0x70);
 
         self.buf.pad_to_next_boundary(4);
         let string_ids_off = self.get_offset(exe.physical_strings.len());
@@ -1023,7 +1023,7 @@ impl Linker for DexLinker {
             checksum: 0,
             signature: [0; 20],
             file_size: file_size as u32,
-            header_size: mem::size_of::<HeaderItem>() as u32,
+            header_size: size_of::<HeaderItem>() as u32,
             endian_tag: 0x12345678,
             link_size: 0,
             link_off: 0,

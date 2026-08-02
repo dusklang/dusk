@@ -113,7 +113,7 @@ impl Value {
             Value::Inline(storage) => Cow::Borrowed(storage.as_ref()),
             Value::Dynamic(ptr) => unsafe {
                 let address_bits = mem::transmute::<&Box<_>, *const u8>(ptr);
-                Cow::Borrowed(slice::from_raw_parts(address_bits, mem::size_of::<usize>()))
+                Cow::Borrowed(slice::from_raw_parts(address_bits, size_of::<usize>()))
             },
             &Value::Internal { val: InternalValue::FunctionPointer { ref generic_arguments, func }, indirection: 0 } if d.is_some() => {
                 assert!(generic_arguments.is_empty());
@@ -326,7 +326,7 @@ impl Value {
     pub unsafe fn from_arbitrary_value<T>(val: T) -> Value {
         let addr = &raw const val as *const u8;
         let bytes = unsafe {
-            slice::from_raw_parts(addr, mem::size_of::<T>())
+            slice::from_raw_parts(addr, size_of::<T>())
         };
         let value = Value::from_bytes(bytes);
         std::mem::forget(val);

@@ -65,7 +65,7 @@ enum Machine {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct ElfHeader64 {
     magic: [u8; 4],
     class: u8,
@@ -112,7 +112,7 @@ bitflags! {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct ProgramHeaderTableEntry64 {
     segment_type: u32,
     segment_flags: SegmentFlags,
@@ -125,7 +125,7 @@ struct ProgramHeaderTableEntry64 {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct DynamicSectionEntry64 {
     tag: i64,
     value: u64,
@@ -236,7 +236,7 @@ bitflags! {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct SectionHeaderTableEntry64 {
     section_name_offset: u32,
     section_type: u32,
@@ -251,7 +251,7 @@ struct SectionHeaderTableEntry64 {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct SymbolTableEntry64 {
     name: u32,
     info: u8,
@@ -494,10 +494,10 @@ impl Linker for ElfLinker {
                 program_header_table_offset: 0,
                 section_header_table_offset: 0,
                 flags: 0,
-                elf_header_size: mem::size_of::<ElfHeader64>() as u16,
-                program_header_table_entry_size: mem::size_of::<ProgramHeaderTableEntry64>() as u16,
+                elf_header_size: size_of::<ElfHeader64>() as u16,
+                program_header_table_entry_size: size_of::<ProgramHeaderTableEntry64>() as u16,
                 num_program_header_table_entries: 0,
-                section_header_table_entry_size: mem::size_of::<SectionHeaderTableEntry64>() as u16,
+                section_header_table_entry_size: size_of::<SectionHeaderTableEntry64>() as u16,
                 num_section_header_table_entries: 0,
                 name_section_header_table_entry_index: 0,
             }

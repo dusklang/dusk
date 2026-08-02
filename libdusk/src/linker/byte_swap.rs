@@ -1,7 +1,8 @@
 #![allow(unused)]
 
+use std::array;
 use std::marker::PhantomData;
-use std::mem;
+use std::mem::{self, MaybeUninit};
 
 // Thank you, Hagen von Eitzen: https://math.stackexchange.com/a/291494
 macro_rules! nearest_multiple_of {
@@ -34,20 +35,46 @@ pub const fn is_power_of_2(num: usize) -> bool {
     false
 }
 
-pub trait ByteSwap {
-    fn byte_swap(&mut self);
+// TODO: rename
+pub trait ByteSwap: Copy {
+    fn write_to(&self, buf: &mut [u8], big_endian: bool);
+
+    fn read_from(buf: &[u8], big_endian: bool) -> Self;
+}
+
+pub fn read_bs_from_oversized_buf<T: ByteSwap>(buf: &[u8], big_endian: bool) -> T {
+    T::read_from(&buf[..size_of::<T>()], big_endian)
 }
 
 macro_rules! byte_swap_impl {
     (@noop: $ty:ty) => {
         impl ByteSwap for $ty {
-            fn byte_swap(&mut self) {}
+            fn write_to(&self, buf: &mut [u8], _big_endian: bool) {
+                // Note: yes, I know to_ne_bytes() just returns a single-element array in this case
+                buf.copy_from_slice(&self.to_ne_bytes())
+            }
+
+            fn read_from(buf: &[u8], _big_endian: bool) -> $ty {
+                <$ty>::from_ne_bytes(buf.try_into().unwrap())
+            }
         }
     };
     (@num: $ty:ty) => {
         impl ByteSwap for $ty {
-            fn byte_swap(&mut self) {
-                *self = <$ty>::from_be_bytes(self.to_le_bytes());
+            fn write_to(&self, buf: &mut [u8], big_endian: bool) {
+                if big_endian {
+                    buf.copy_from_slice(&self.to_be_bytes());
+                } else {
+                    buf.copy_from_slice(&self.to_le_bytes());
+                }
+            }
+
+            fn read_from(buf: &[u8], big_endian: bool) -> $ty {
+                if big_endian {
+                    <$ty>::from_be_bytes(buf.try_into().unwrap())
+                } else {
+                    <$ty>::from_le_bytes(buf.try_into().unwrap())
+                }
             }
         }
     };
@@ -59,15 +86,20 @@ macro_rules! byte_swap_impl {
 }
 
 impl<T: ByteSwap, const N: usize> ByteSwap for [T; N] {
-    fn byte_swap(&mut self) {
-        for value in self {
-            value.byte_swap();
+    fn write_to(&self, buf: &mut [u8], big_endian: bool) {
+        assert_eq!(buf.len(), size_of::<T>() * N);
+        for (dest, element) in buf.chunks_mut(size_of::<T>()).zip(self) {
+            element.write_to(dest, big_endian);
         }
     }
-}
 
-impl ByteSwap for &[u8] {
-    fn byte_swap(&mut self) {}
+    fn read_from(buf: &[u8], big_endian: bool) -> Self {
+        assert_eq!(buf.len(), size_of::<T>() * N);
+        array::from_fn(|index| {
+            let index = index * size_of::<T>();
+            T::read_from(&buf[index..(index+size_of::<T>())], big_endian)
+        })
+    }
 }
 
 byte_swap_impl!(noops: u8, i8; nums: u16, u32, u64, usize, i16, i32, i64, isize);
@@ -79,33 +111,19 @@ pub struct Ref<T: ByteSwap, const BIG_ENDIAN: bool = false> {
 }
 
 pub struct ResolvedRefMut<'a, T: ByteSwap, const BIG_ENDIAN: bool = false> {
-    value: &'a mut T,
+    value: &'a mut [u8],
+    _phantom: PhantomData<T>,
 }
 
 impl<'a, T: ByteSwap, const BIG_ENDIAN: bool> ResolvedRefMut<'a, T, BIG_ENDIAN> {
-    pub unsafe fn get_value(&mut self) -> &mut T {
-        self.value
-    }
-
     pub fn set(&mut self, new_value: T) {
-        *self.value = new_value;
-        if BIG_ENDIAN != cfg!(target_endian = "big") {
-            self.value.byte_swap();
-        }
+        new_value.write_to(self.value, BIG_ENDIAN);
     }
 
     pub fn modify(&mut self, modifier: impl FnOnce(&mut T)) {
-        if BIG_ENDIAN != cfg!(target_endian = "big") {
-            self.value.byte_swap();
-        }
-        modifier(self.value);
-        if BIG_ENDIAN != cfg!(target_endian = "big") {
-            self.value.byte_swap();
-        }
-    }
-
-    pub fn map<U: ByteSwap, M: FnOnce(&'a mut T) -> &'a mut U>(&'a mut self, mapper: M) -> ResolvedRefMut<'a, U, BIG_ENDIAN> {
-        ResolvedRefMut { value: mapper(self.value) }
+        let mut value = T::read_from(self.value, BIG_ENDIAN);
+        modifier(&mut value);
+        value.write_to(self.value, BIG_ENDIAN);
     }
 }
 
@@ -129,7 +147,7 @@ impl<T: ByteSwap, const BIG_ENDIAN: bool> Ref<T, BIG_ENDIAN> {
         }
     }
 
-    pub fn size(self) -> usize { mem::size_of::<T>() }
+    pub fn size(self) -> usize { size_of::<T>() }
     pub fn start(self) -> usize { self.addr }
     pub fn end(self) -> usize { self.addr + self.size() }
 }
@@ -156,13 +174,13 @@ impl Buffer {
 
     pub fn alloc<T: ByteSwap>(&mut self) -> Ref<T> {
         let reff = Ref::new(self.data.len(), self.rva);
-        self.pad_with_zeroes(mem::size_of::<T>());
+        self.pad_with_zeroes(size_of::<T>());
         reff
     }
 
     pub fn alloc_be<T: ByteSwap>(&mut self) -> Ref<T, true> {
         let reff = Ref::new(self.data.len(), self.rva);
-        self.pad_with_zeroes(mem::size_of::<T>());
+        self.pad_with_zeroes(size_of::<T>());
         reff
     }
 
@@ -179,7 +197,7 @@ impl Buffer {
     }
 
     pub fn extend<T: ByteSwap + Copy>(&mut self, values: &[T]) {
-        let size = mem::size_of::<T>() * values.len();
+        let size = size_of::<T>() * values.len();
         self.data.reserve(size);
         for &value in values {
             self.push(value);
@@ -228,12 +246,7 @@ impl Buffer {
     }
 
     pub fn get_mut<'a, T: ByteSwap, const BIG_ENDIAN: bool>(&'a mut self, addr: Ref<T, BIG_ENDIAN>) -> ResolvedRefMut<'a, T, BIG_ENDIAN> {
-        debug_assert!(addr.addr + mem::size_of::<T>() <= self.data.len());
-
-        // TODO: don't produce a &mut T at all. I didn't think we would need to support unaligned access, but we do.
-        let region = &mut self.data[addr.addr..];
-        let ptr = region.as_mut_ptr() as *mut T;
-
-        ResolvedRefMut { value: unsafe { &mut *ptr } }
+        let value = &mut self.data[addr.addr..(addr.addr + size_of::<T>())];
+        ResolvedRefMut { value, _phantom: PhantomData }
     }
 }

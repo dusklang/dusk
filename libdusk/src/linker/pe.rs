@@ -52,7 +52,7 @@ pub enum Machine {
 }
 
 bitflags! {
-    #[derive(ByteSwapBitflags)]
+    #[derive(ByteSwapBitflags, Clone, Copy)]
     pub struct Characteristics: u16 {
         const RELOCS_STRIPPED = 0x0001;
         const EXECUTABLE_IMAGE = 0x0002;
@@ -73,7 +73,7 @@ bitflags! {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 pub struct CoffHeader {
     pub machine: u16,
     pub number_of_sections: u16,
@@ -97,7 +97,7 @@ pub enum Subsystem {
 
 bitflags! {
     // Deprecated fields are included but commented out
-    #[derive(ByteSwapBitflags)]
+    #[derive(ByteSwapBitflags, Clone, Copy)]
     pub struct DllCharacteristics: u16 {
         const DYNAMIC_BASE = 0x0040;
         const NX_COMPAT = 0x0100;
@@ -116,7 +116,7 @@ pub struct ImageDataDirectory {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 pub struct Pe32PlusOptionalHeader {
     // standard fields
 
@@ -181,7 +181,7 @@ pub struct Pe32PlusOptionalHeader {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 pub struct SectionHeader {
     pub name: [u8; 8],
     pub virtual_size: u32,
@@ -351,7 +351,7 @@ impl Linker for PELinker {
                 time_date_stamp: 0, // should be set to a meaningful timestamp, I guess
                 pointer_to_symbol_table: 0xfaceface,
                 number_of_symbols: 0xfaceface,
-                size_of_optional_header: mem::size_of::<Pe32PlusOptionalHeader>() as u16,
+                size_of_optional_header: size_of::<Pe32PlusOptionalHeader>() as u16,
                 characteristics: Characteristics::EXECUTABLE_IMAGE | Characteristics::LARGE_ADDRESS_AWARE,
             }
         );

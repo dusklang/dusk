@@ -95,7 +95,7 @@ const CD_HASH_TYPE_SHA1: u8 = 1;
 const CD_HASH_TYPE_SHA256: u8 = 2;
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct MachHeader {
     magic: u32,
     cpu_type: u32,
@@ -108,7 +108,7 @@ struct MachHeader {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct LcSegment64 {
     command: u32,
     command_size: u32,
@@ -124,7 +124,7 @@ struct LcSegment64 {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct Section64 {
     name: [u8; 16],
     segment_name: [u8; 16],
@@ -139,7 +139,7 @@ struct Section64 {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct Dylib {
     name_offset: u32,
     timestamp: u32,
@@ -148,7 +148,7 @@ struct Dylib {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct DylibCommand {
     command: u32,
     command_size: u32,
@@ -156,7 +156,7 @@ struct DylibCommand {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct DylinkerCommand {
     command: u32,
     command_size: u32,
@@ -164,7 +164,7 @@ struct DylinkerCommand {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct UuidCommand {
     command: u32,
     command_size: u32,
@@ -199,7 +199,7 @@ enum ToolEnum {
 type Tool = u32;
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct BuildVersionCommand {
     command: u32,
     command_size: u32,
@@ -210,14 +210,14 @@ struct BuildVersionCommand {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct BuildToolVersion {
     tool: Tool,
     version: u32,
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct SourceVersionCommand {
     command: u32,
     command_size: u32,
@@ -225,7 +225,7 @@ struct SourceVersionCommand {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct SymbolTableCommand {
     command: u32,
     command_size: u32,
@@ -236,7 +236,7 @@ struct SymbolTableCommand {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct SymbolTableEntry {
     string_table_offset: u32,
     ty: SymbolFlags,
@@ -257,7 +257,7 @@ impl SymbolDescription {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct DynamicSymbolTableCommand {
     command: u32,
     command_size: u32,
@@ -291,7 +291,7 @@ struct DynamicSymbolTableCommand {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct EntryPointCommand {
     command: u32,
     command_size: u32,
@@ -327,15 +327,9 @@ enum SectionType {
     InitFuncOffsets,
 }
 
-#[derive(Clone, Copy)]
+#[derive(ByteSwap, Clone, Copy)]
 #[repr(transparent)]
 struct SectionFlags(u32);
-
-impl ByteSwap for SectionFlags {
-    fn byte_swap(&mut self) {
-        self.0.byte_swap();
-    }
-}
 
 impl SectionFlags {
     fn new(ty: SectionType, attributes: u32) -> SectionFlags {
@@ -376,7 +370,7 @@ impl DylibCommandBuilder {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct LinkEditDataCommand {
     command: u32,
     command_size: u32,
@@ -385,7 +379,7 @@ struct LinkEditDataCommand {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct DyldChainedFixupsHeader {
     fixups_version: u32, // 0
     starts_offset: u32,  // offset of DyldChainedStartsInImage in bytes, relative to start of this structure
@@ -397,7 +391,7 @@ struct DyldChainedFixupsHeader {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct DyldChainedStartsInSegment {
     size: u32, // size of this
     page_size: u16, // 0x1000 or 0x4000
@@ -408,21 +402,22 @@ struct DyldChainedStartsInSegment {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct DyldChainedPtr64(u64);
 
 impl ResolvedRefMut<'_, DyldChainedPtr64> {
     fn set_next(&mut self, next: u16) {
         assert!(next <= 0xFFF); // 12 bits
         let mask = 0xFFF << 51;
-        let value = unsafe { self.get_value() };
-        value.0 = value.0 & !mask;
-        value.0 |= (next as u64) << 51;
+        self.modify(|value| {
+            value.0 = value.0 & !mask;
+            value.0 |= (next as u64) << 51;
+        });
     }
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct DyldChainedPtr64Bind(u64);
 
 impl DyldChainedPtr64Bind {
@@ -444,7 +439,7 @@ impl From<Ref<DyldChainedPtr64Bind>> for Ref<DyldChainedPtr64> {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct DyldChainedPtr64Rebase(u64);
 
 impl DyldChainedPtr64Rebase {
@@ -462,7 +457,7 @@ impl From<Ref<DyldChainedPtr64Rebase>> for Ref<DyldChainedPtr64> {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct DyldChainedImport(u32);
 
 impl DyldChainedImport {
@@ -483,7 +478,7 @@ enum SymbolType {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct SymbolFlags(u8);
 
 impl SymbolFlags {
@@ -494,7 +489,7 @@ impl SymbolFlags {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct SuperBlobHeader {
     magic: u32,
     length: u32,
@@ -502,14 +497,14 @@ struct SuperBlobHeader {
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct BlobIndex {
     ty: u32,
     offset: u32,
 }
 
 #[repr(C)]
-#[derive(ByteSwap)]
+#[derive(ByteSwap, Clone, Copy)]
 struct CodeDirectory {
     magic: u32,
     length: u32,
