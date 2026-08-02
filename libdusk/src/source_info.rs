@@ -12,7 +12,7 @@ use crate::ast::{ExprId, DeclId, ItemId, Item};
 use crate::code::OpId;
 
 #[cfg(feature = "dls")]
-use lsp_types::Url;
+use url::Url;
 
 use crate::driver::Driver;
 use crate::index_vec::*;
@@ -252,8 +252,8 @@ impl SourceMap {
     }
 
     #[cfg(feature = "dls")]
-    pub fn add_file_in_memory(&mut self, url: &Url, src: String) -> io::Result<SourceFileId> {
-        self.add_file_impl(url.clone(), || Ok(src))
+    pub fn add_file_in_memory(&mut self, url: impl ToOwned<Owned=Url>, src: String) -> io::Result<SourceFileId> {
+        self.add_file_impl(url.to_owned(), || Ok(src))
     }
 
     pub fn add_virtual_file(&mut self, name: impl Into<String>, src: String) -> io::Result<SourceFileId> {

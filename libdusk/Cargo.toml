@@ -33,13 +33,13 @@ cryptographic-message-syntax = "0.28"
 x509-certificate = "0.25"
 
 # LSP-related dependencies
-lsp-types = { version = "0.95", optional = true }
+url = { version = "2.5.8", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"
 
 [features]
-dls = ["dep:lsp-types"]
+dls = ["dep:url"]
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3.9", features = ["libloaderapi"] }

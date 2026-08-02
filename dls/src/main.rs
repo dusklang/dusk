@@ -1,7 +1,8 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
-use std::mem;
+use std::str::FromStr;
+use std::{assert_matches, mem};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use libdusk::ast::{Item, Expr};
@@ -11,7 +12,8 @@ use libdusk::type_provider::{RealTypeProvider, TypeProvider, MockStateCommand, M
 use lsp_server::{Connection, Message, Request, RequestId, ExtractError, Notification, Response};
 use lsp_types::notification::{PublishDiagnostics, DidOpenTextDocument, Notification as NotificationTrait, DidChangeTextDocument, DidCloseTextDocument};
 use lsp_types::request::{Completion, ResolveCompletionItem, HoverRequest};
-use lsp_types::{ServerCapabilities, CompletionOptions, WorkspaceServerCapabilities, WorkspaceFoldersServerCapabilities, TextDocumentSyncKind, Diagnostic, Url, DidOpenTextDocumentParams, Position, Range, Location, DiagnosticRelatedInformation, DiagnosticSeverity, PublishDiagnosticsParams, CompletionParams, CompletionItem, Documentation, DidCloseTextDocumentParams, DidChangeTextDocumentParams, CompletionResponse, CompletionItemKind, HoverProviderCapability, HoverParams, Hover, MarkupContent, HoverContents, MarkupKind};
+use lsp_types::{ServerCapabilities, CompletionOptions, WorkspaceServerCapabilities, WorkspaceFoldersServerCapabilities, TextDocumentSyncKind, Diagnostic, Uri, DidOpenTextDocumentParams, Position, Range, Location, DiagnosticRelatedInformation, DiagnosticSeverity, PublishDiagnosticsParams, CompletionParams, CompletionItem, Documentation, DidCloseTextDocumentParams, DidChangeTextDocumentParams, CompletionResponse, CompletionItemKind, HoverProviderCapability, HoverParams, Hover, MarkupContent, HoverContents, MarkupKind};
+use url::Url;
 
 use libdusk::source_info::{SourceFileId, SourceRange, SourceMap};
 use libdusk::driver::{Driver, DRIVER, DriverRef};
@@ -63,7 +65,7 @@ struct OpenFile {
 
 struct Server {
     connection: Connection,
-    open_files: RefCell<HashMap<Url, OpenFile>>,
+    open_files: RefCell<HashMap<Uri, OpenFile>>,
 }
 
 impl Server {
@@ -332,8 +334,8 @@ fn dusk_range_to_lsp_range(driver: &Driver, range: SourceRange) -> (SourceFileId
     (start_file, range)
 }
 
-fn lsp_pos_to_dusk_pos(driver: &Driver, url: &Url, pos: Position) -> usize {
-    let file = driver.lookup_file_by_url(url).unwrap();
+fn lsp_pos_to_dusk_pos(driver: &Driver, url: &Uri, pos: Position) -> usize {
+    let file = driver.lookup_file_by_url(&Url::parse(url.as_str()).unwrap()).unwrap();
 
     // byte offset to the beginning of the file
     let file_offset = driver.src_map.get_begin_offset(file);
@@ -367,12 +369,12 @@ where
 
 fn send_response<R: serde::Serialize>(connection: &Connection, id: RequestId, response: R) {
     let result = serde_json::to_value(&response).unwrap();
-    let response = Response { id, result: Some(result), error: None };
+    let response = Response { id, response_result: Ok(result) };
     connection.sender.send(Message::Response(response)).unwrap();
 }
 
 impl Server {
-    fn flush_diagnostics(&self, driver: &mut Driver, path: &Url) {
+    fn flush_diagnostics(&self, driver: &mut Driver, path: &Uri) {
         let diagnostics = driver.diag.get_latest_diagnostics();
         let mut new_diagnostics = Vec::new();
         if !diagnostics.is_empty() {
@@ -387,7 +389,7 @@ impl Server {
                     let file = &driver.src_map.files[file];
                     let uri = file.location.as_url().unwrap();
                     let location = Location {
-                        uri,
+                        uri: Uri::from_str(uri.as_str()).unwrap(),
                         range,
                     };
                     let info = DiagnosticRelatedInformation {
@@ -416,24 +418,27 @@ impl Server {
         self.open_files.borrow_mut().get_mut(path).unwrap()
             .flushed_diagnostics.extend(new_diagnostics);
     }
-    fn analyze_file(&self, path: &Url) -> (DriverRef<'_>, Option<RealTypeProvider>) {
+    fn analyze_file(&self, path: &Uri) -> (DriverRef<'_>, Option<RealTypeProvider>) {
         // I *think* this is safe...
         let salf = AssertUnwindSafe(self);
         let mut file_id = None;
         let mut file_id_ref = AssertUnwindSafe(&mut file_id);
+        let path_ref = AssertUnwindSafe(path);
         let unwind_result = catch_unwind(move || {
-            eprintln!("ANALYZING FILE AT PATH: {}", path);
+            eprintln!("ANALYZING FILE AT PATH: {}", path_ref.as_str());
             let mut src_map = SourceMap::new();
             // TODO: non-file schemes, I guess?
-            assert_eq!(path.scheme(), "file");
+            let scheme = path_ref.scheme().map(|scheme| scheme.as_str());
+            assert_matches!(scheme, Some("file") | None);
             // TODO: Add all files to the source map that are currently open
 
             let src = salf.open_files
                 .borrow()
-                .get(path).unwrap()
+                .get(&*path_ref).unwrap()
                 .contents.lines.join("\n")
                 .to_string();
-            let file = src_map.add_file_in_memory(path, src).unwrap();
+
+            let file = src_map.add_file_in_memory(Url::parse(path_ref.as_str()).unwrap(), src).unwrap();
             **file_id_ref = Some(file);
             let mut driver = DriverRef::new(&DRIVER);
             *driver.write() = Driver::new(src_map, Arch::default(), OperatingSystem::default(), false);
@@ -441,10 +446,10 @@ impl Server {
             driver.write().initialize_ast();
 
             let fatal_parse_error = driver.write().parse_added_files().is_err();
-            salf.flush_diagnostics(&mut driver.write(), path);
+            salf.flush_diagnostics(&mut driver.write(), &*path_ref);
 
             let tp = (!fatal_parse_error).then(|| {
-                salf.flush_diagnostics(&mut driver.write(), path);
+                salf.flush_diagnostics(&mut driver.write(), &*path_ref);
 
                 driver.write().initialize_tir();
 
@@ -487,17 +492,17 @@ impl Server {
                         }
                         new_code = driver.read().get_new_code_since(before);
 
-                        salf.flush_diagnostics(&mut driver.write(), path);
+                        salf.flush_diagnostics(&mut driver.write(), &*path_ref);
                     } else {
                         break;
                     }
                 }
 
                 drop(tp_ref);
-                salf.flush_diagnostics(&mut driver.write(), path);
+                salf.flush_diagnostics(&mut driver.write(), &*path_ref);
                 if !driver.read().diag.has_failed() {
                     driver.build_mir(&*tp.borrow());
-                    salf.flush_diagnostics(&mut driver.write(), path);
+                    salf.flush_diagnostics(&mut driver.write(), &*path_ref);
                 }
                 tp.into_inner()
             });
