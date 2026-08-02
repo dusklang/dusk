@@ -3,7 +3,8 @@ use std::mem::offset_of;
 use std::ops::Range;
 use std::cmp::{min, Ord};
 
-use cryptographic_message_syntax::SignerBuilder;
+use cryptographic_message_syntax::{Bytes, Oid, SignerBuilder};
+use cryptographic_message_syntax::asn1::rfc5652::OID_ID_DATA;
 use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
 use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey};
 use rsa::{Pkcs1v15Sign, RsaPrivateKey};
@@ -125,17 +126,14 @@ impl Bundler for ApkBundler {
             let digest = base64_of_sha256(entry.as_bytes());
             signature_file += &format!("Name: {}\r\nSHA-256-Digest: {}\r\n\r\n", file_name, digest);
         }
-        let mut sha256 = Sha256::new();
-        sha256.update(signature_file.as_bytes());
-        let signature_file_digest: [u8; 32] = sha256.finalize().into();
-        let signed_digest = priv_key.sign(Pkcs1v15Sign::new::<Sha256>(), &signature_file_digest).unwrap();
 
         let cms_key_pair = InMemorySigningKeyPair::from_pkcs8_der(priv_key.to_pkcs8_der().unwrap().as_bytes()).unwrap();
         let cms_cert = CapturedX509Certificate::from_der(&**serialized_cert).unwrap();
         let signed_data = SignedDataBuilder::default()
-            .content_inline(signed_digest)
+            .content_external(signature_file.clone().into_bytes())
             .certificate(cms_cert.clone())
             .signer(SignerBuilder::new(&cms_key_pair, cms_cert))
+            .content_type(Oid(Bytes::from_static(OID_ID_DATA.as_ref())))
             .build_der()
             .unwrap();
 
