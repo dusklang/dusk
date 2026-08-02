@@ -1,4 +1,6 @@
-#[derive(Copy, Clone, Debug)]
+use clap::ValueEnum;
+
+#[derive(ValueEnum, Copy, Clone, Debug)]
 pub enum Arch {
     X86_64,
     Arm64,
@@ -25,7 +27,7 @@ impl Default for Arch {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(ValueEnum, Copy, Clone, Debug)]
 pub enum OperatingSystem {
     Windows,
     MacOS,

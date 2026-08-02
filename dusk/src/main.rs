@@ -32,6 +32,12 @@ enum StopPhase {
 #[derive(Parser, Debug)]
 #[clap(name = "dusk")]
 struct Opt {
+    #[arg(value_enum, long, default_value_t)]
+    os: OperatingSystem,
+
+    #[arg(value_enum, long, default_value_t)]
+    arch: Arch,
+
     /// Output MIR in textual format
     #[arg(short='m', long)]
     output_mir: bool,
@@ -67,8 +73,7 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
     let mut src_map = SourceMap::new();
     let loaded_file = src_map.add_file_on_disk(&opt.input).is_ok();
     let mut driver = DriverRef::new(&DRIVER);
-    // TODO: don't hardcode the operating system (use OperatingSystem::default() and support overriding with a flag on the command line and/or in build scripts)
-    *driver.write() = Driver::new(src_map, Arch::Arm64, OperatingSystem::Linux, opt.no_core);
+    *driver.write() = Driver::new(src_map, opt.arch, opt.os, opt.no_core);
     driver.write().initialize_ast();
 
     if !loaded_file {
