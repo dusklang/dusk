@@ -29,23 +29,15 @@ pub struct ZipFile {
     pub eocd_offset: usize,
 }
 
-// NOTE: my current system for copying Rust structs into a buffer does not handle unaligned fields, so I have
-// to carefully split up each struct so as to not break the expected layout of a ZIP file.
-
 #[repr(C, packed)]
 #[derive(ByteSwap, Clone, Copy)]
-struct LocalFileHeader1 {
+struct LocalFileHeader {
     sig: u32,
     version: u16,
     flags: u16,
     compression_method: u16,
     modification_time: u16,
-    // modification_date: u16,
-}
-
-#[repr(C)]
-#[derive(ByteSwap, Clone, Copy)]
-struct LocalFileHeader2 {
+    modification_date: u16,
     checksum: u32,
     compressed_size: u32,
     uncompressed_size: u32,
@@ -53,7 +45,7 @@ struct LocalFileHeader2 {
     extra_field_length: u16,
 }
 
-#[repr(C)]
+#[repr(C, packed)]
 #[derive(ByteSwap, Clone, Copy)]
 struct CentralDirectoryFileHeader {
     sig: u32,
@@ -70,12 +62,12 @@ struct CentralDirectoryFileHeader {
     extra_field_length: u16,
     file_comment_length: u16,
     file_start_disk_number: u16,
-    // internal_file_attributes: u16,
-    // external_file_attributes: u32,
-    // local_header_offset: u32,
+    internal_file_attributes: u16,
+    external_file_attributes: u32,
+    local_header_offset: u32,
 }
 
-#[repr(C)]
+#[repr(C, packed)]
 #[derive(ByteSwap, Clone, Copy)]
 pub struct EndOfCentralDirectoryRecord {
     pub sig: u32,
@@ -85,33 +77,29 @@ pub struct EndOfCentralDirectoryRecord {
     pub total_num_central_directory_records: u16,
     pub central_directory_size: u32,
     pub central_directory_offset: u32,
-    // pub comment_length: u16,
+    pub comment_length: u16,
 }
 
 fn push_entry(buf: &mut Buffer, file: &FileEntry) {
-    let local_header_1 = LocalFileHeader1 {
+    let local_header = LocalFileHeader {
         sig: 0x04034b50,
         version: 0,
         flags: 0,
         compression_method: file.compression_method,
         modification_time: 0,
-    };
-    let modification_date = 0u16;
-    let local_header_2 = LocalFileHeader2 {
+        modification_date: 0,
         checksum: file.checksum,
         compressed_size: file.contents.len() as u32,
         uncompressed_size: file.uncompressed_size as u32,
         file_name_length: file.name.len() as u16,
         extra_field_length: 0,
     };
-    buf.push(local_header_1);
-    buf.push(modification_date);
-    let local_header_2 = buf.push(local_header_2);
+    let local_header = buf.push(local_header);
     buf.extend(file.name.as_bytes());
     let extra_field_offset = buf.pos();
     buf.pad_to_next_boundary(file.alignment as usize);
     let extra_field_length = buf.pos() - extra_field_offset;
-    buf.get_mut(local_header_2).modify(|header| header.extra_field_length = extra_field_length.try_into().unwrap());
+    buf.get_mut(local_header).modify(|header| header.extra_field_length = extra_field_length.try_into().unwrap());
     buf.extend(&file.contents);
 }
 
@@ -207,9 +195,7 @@ impl ZipBuilder {
             for file in self.central_directory_aligned_entries.iter().rev() {
                 layout_manager.alloc_aligned(file.contents.len(), file.alignment as usize);
                 layout_manager.alloc(file.name.len());
-                layout_manager.alloc(size_of::<LocalFileHeader2>());
-                layout_manager.alloc(size_of::<u16>());
-                layout_manager.alloc(size_of::<LocalFileHeader1>());
+                layout_manager.alloc(size_of::<LocalFileHeader>());
 
                 if layout_manager.failed {
                     break;
@@ -249,13 +235,11 @@ impl ZipBuilder {
                 extra_field_length: 0,
                 file_comment_length: 0,
                 file_start_disk_number: 0,
+                internal_file_attributes: 0,
+                external_file_attributes: 0,
+                local_header_offset: local_header_offset as u32,
             };
-            let internal_file_attributes = 0u16;
-            let external_file_attributes = 0u32;
             buf.push(central_header);
-            buf.push(internal_file_attributes);
-            buf.push(external_file_attributes);
-            buf.push(local_header_offset as u32);
             buf.extend(file.name.as_bytes());
         }
         let central_directory_size = buf.pos() - central_directory_offset;
@@ -270,9 +254,9 @@ impl ZipBuilder {
             total_num_central_directory_records: total_num_entries as u16,
             central_directory_size: central_directory_size as u32,
             central_directory_offset: central_directory_offset as u32,
+            comment_length: 0,
         };
         buf.push(eocd);
-        buf.push(0u16); // EOCD.comment_length
 
         ZipFile {
             data: buf.data,
