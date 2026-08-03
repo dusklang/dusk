@@ -97,7 +97,7 @@ impl<T: ByteSwap, const N: usize> ByteSwap for [T; N] {
         assert_eq!(buf.len(), size_of::<T>() * N);
         array::from_fn(|index| {
             let index = index * size_of::<T>();
-            T::read_from(&buf[index..(index+size_of::<T>())], big_endian)
+            T::read_from(&buf[index..][..size_of::<T>()], big_endian)
         })
     }
 }
@@ -246,7 +246,7 @@ impl Buffer {
     }
 
     pub fn get_mut<'a, T: ByteSwap, const BIG_ENDIAN: bool>(&'a mut self, addr: Ref<T, BIG_ENDIAN>) -> ResolvedRefMut<'a, T, BIG_ENDIAN> {
-        let value = &mut self.data[addr.addr..(addr.addr + size_of::<T>())];
+        let value = &mut self.data[addr.addr..][..size_of::<T>()];
         ResolvedRefMut { value, _phantom: PhantomData }
     }
 }

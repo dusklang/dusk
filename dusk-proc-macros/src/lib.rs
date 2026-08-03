@@ -646,7 +646,7 @@ pub fn byteswap_derive(input: TokenStream) -> TokenStream {
                     let offset = core::mem::offset_of!(#name #ty_generics, #field_names);
                     let value = self.#field_names;
                     let size = size_of_val(&value);
-                    value.write_to(&mut buf[offset..(offset + size)], big_endian);
+                    value.write_to(&mut buf[offset..][..size], big_endian);
                 })*
             }
 
