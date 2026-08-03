@@ -214,9 +214,12 @@ impl tir::AssignedDecl {
 
 impl tir::PatternBinding {
     fn run_pass_1(&self, _driver: &mut Driver, tp: &mut dyn TypeProvider) {
-        let context = tp.pattern_matching_context(self.context).as_ref().unwrap();
-        let binding_ty = context[self.scrutinee_value].ty.clone();
-        tp.decl_type_mut(self.decl_id).ty = binding_ty;
+        if let Some(context) = tp.pattern_matching_context(self.context).as_ref() {
+            let binding_ty = context[self.scrutinee_value].ty.clone();
+            tp.decl_type_mut(self.decl_id).ty = binding_ty;
+        } else {
+            tp.decl_type_mut(self.decl_id).ty = Type::Error;
+        }
     }
 
     fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut dyn TypeProvider) {

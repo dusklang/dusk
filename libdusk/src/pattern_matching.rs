@@ -315,7 +315,8 @@ pub fn match_scrutinee(driver: &mut Driver, tp: &mut dyn TypeProvider, scrutinee
             });
 
             SwitchDecisionNode::Branch { scrutinee: branch_scrutinee, paths, default_path }
-        }
+        },
+        Type::Error => SwitchDecisionNode::Failure,
         _ => todo!("Type {:?} is not supported in switch expression scrutinee position", scrutinees[0].ty),
     }
 }
