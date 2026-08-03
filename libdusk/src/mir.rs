@@ -17,7 +17,7 @@ use crate::source_info::SourceRange;
 
 use crate::internal_types::InternalField;
 use crate::ast::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, NewNamespaceId, LegacyIntrinsic, IntrinsicId, Expr, StoredDeclId, GenericParamId, Item, ExternModId, ExternFunctionRef, VOID_TYPE, StructId, LoopId};
-use crate::ty::{Type, LegacyInternalType, FunctionType, FloatWidth, StructType};
+use crate::ty::{EnumType, FloatWidth, FunctionType, LegacyInternalType, StructType, Type};
 use crate::driver::{Driver, DriverRef};
 use crate::typechecker as tc;
 use crate::type_provider::TypeProvider;
@@ -185,7 +185,8 @@ pub enum Const {
     Bool(bool),
     Ty(Type),
     Mod(NewNamespaceId),
-    BasicVariant { enuum: EnumId, index: usize },
+    // TODO: Support payloads in consts
+    Variant { enuum: EnumId, index: usize, payload_tys: Vec<Type> },
     StructLit { fields: Vec<Const>, id: StructId },
     Void,
     Invalid,
@@ -198,7 +199,7 @@ impl Const {
             Const::StrLit(_) => Type::LegacyInternal(LegacyInternalType::StringLiteral),
             Const::Bool(_) => Type::Bool,
             Const::Ty(_) => Type::Ty,
-            &Const::BasicVariant { enuum, .. } => Type::Enum(enuum),
+            &Const::Variant { enuum, ref payload_tys, .. } => Type::Enum(EnumType { payload_tys: payload_tys.clone(), identity: enuum }),
             Const::Mod(_) => Type::Mod,
             &Const::StructLit { id, ref fields } => Type::Struct(
                 StructType {
@@ -303,6 +304,7 @@ pub struct StructLayout {
 
 #[derive(Clone)]
 pub struct EnumLayout {
+    pub payload_tys: SmallVec<[Type; 2]>,
     pub payload_offsets: SmallVec<[usize; 2]>,
     pub alignment: usize,
     pub size: usize,
@@ -677,7 +679,7 @@ impl Driver {
             },
             Type::Bool => 1,
             Type::Struct(strukt) => self.layout_struct(strukt).size,
-            &Type::Enum(_id) => 4,
+            Type::Enum(enuum) => self.layout_enum(enuum).size,
             Type::GenericParam(_) => panic!("can't get size of generic type without more context"),
             Type::TypeVar(_) => panic!("can't get size of type variable without more context"),
             Type::Inout(_) => panic!("can't get size of inout parameter type"),
@@ -751,10 +753,10 @@ impl Driver {
         layout
     }
 
-    pub fn layout_enum(&self, variant_payload_tys: &[Type]) -> EnumLayout {
+    pub fn layout_enum(&self, enuum: &EnumType) -> EnumLayout {
         use std::cmp::max;
         // Get max alignment of all the payload types.
-        let alignment = variant_payload_tys.iter()
+        let alignment = enuum.payload_tys.iter()
             .map(|ty| self.align_of(ty))
             .max()
             .unwrap_or(0);
@@ -762,14 +764,14 @@ impl Driver {
 
         let mut payload_offsets = SmallVec::new();
         let mut size = 4;
-        for ty in variant_payload_tys {
+        for ty in &enuum.payload_tys {
             let offset = next_multiple_of(4, self.align_of(ty));
             payload_offsets.push(offset);
             size = max(size, offset + self.size_of(ty));
         }
         let stride = next_multiple_of(size, alignment);
 
-        EnumLayout { payload_offsets, alignment, size, stride }
+        EnumLayout { payload_tys: enuum.payload_tys.clone().into(), payload_offsets, alignment, size, stride }
     }
 }
 
@@ -998,7 +1000,7 @@ impl Driver {
             Const::Ty(ref ty) => write!(f, "`{:?}`", ty)?,
             Const::Void => write!(f, "void")?,
             Const::Mod(id) => write!(f, "%mod{}", id.index())?,
-            Const::BasicVariant { enuum, index } => write!(f, "%enum{}.{}", enuum.index(), self.fmt_variant_name(enuum, index))?,
+            Const::Variant { enuum, index, .. } => write!(f, "%enum{}.{}", enuum.index(), self.fmt_variant_name(enuum, index))?,
             Const::StructLit { ref fields, id } => {
                 write!(f, "const literal struct{} {{ ", id.index())?;
                 for i in 0..fields.len() {
@@ -1034,7 +1036,7 @@ impl Driver {
 
             // TODO: heuristics for associating declaration names with modules and types
             Const::Mod(id) => write!(f, "mod{}", id.index())?,
-            Const::BasicVariant { enuum, index } => write!(f, "enum{}_variant_{}", enuum.index(), self.fmt_variant_name(enuum, index))?,
+            Const::Variant { enuum, index, .. } => write!(f, "enum{}_variant_{}", enuum.index(), self.fmt_variant_name(enuum, index))?,
 
             Const::StructLit { id, .. } => write!(f, "const_struct_literal_{}", id.index())?,
             Const::Invalid => write!(f, "INVALID_CONST")?,
@@ -1989,8 +1991,22 @@ impl Driver {
                 }
             },
             Instr::InternalFieldAccess { field, .. } => field.ty(),
-            &Instr::Variant { enuum, .. } => Type::Enum(enuum),
-            Instr::PayloadAccess { val: _, variant_index: _ } => todo!(),
+            &Instr::Variant { enuum, .. } => {
+                let payload_tys = self.code.mir.enums[&enuum].payload_tys.to_vec();
+                Type::Enum(
+                    EnumType {
+                        payload_tys,
+                        identity: enuum,
+                    }
+                )
+            },
+            &Instr::PayloadAccess { val, variant_index } => {
+                let base_ty = self.type_of(val);
+                match base_ty {
+                    &Type::Enum(EnumType { identity, .. }) => self.code.mir.enums[&identity].payload_tys[variant_index].clone(),
+                    _ => panic!("Cannot directly access payload of non-enum type {:?}!", base_ty),
+                }
+            },
             Instr::DiscriminantAccess { .. } => TYPE_OF_DISCRIMINANTS, // TODO: update this when discriminants can be other types
         }
     }
@@ -2160,7 +2176,8 @@ impl DriverRef<'_> {
                 if payload_ty.is_some() {
                     DeclRef::EnumVariantWithPayload { enuum, index, payload_ty }
                 } else {
-                    let konst = Const::BasicVariant { enuum, index };
+                    let payload_tys = self.read().code.mir.enums[&enuum].payload_tys.to_vec();
+                    let konst = Const::Variant { enuum, index, payload_tys };
                     let name = self.read().fmt_const_for_instr_name(&konst).to_string();
                     DeclRef::Value(self.write().push_instr_with_name(b, Instr::Const(konst), expr, name).direct())
                 }
@@ -2686,13 +2703,6 @@ impl DriverRef<'_> {
             Expr::Switch { scrutinee, context: pattern_matching_ctx, ref cases } => {
                 let _cases = cases.clone();
                 drop(d);
-                let scrutinee_val = self.build_expr(b, scrutinee, Context::default(), tp);
-                let scrutinee_ty = tp.ty(scrutinee);
-                let discriminant = match scrutinee_ty {
-                    Type::Enum(_) => self.write().get_discriminant(b, scrutinee_val),
-                    Type::Int { .. } => self.write().handle_indirection(b, scrutinee_val),
-                    _ => todo!(),
-                };
                 let result_location = match &ctx.data {
                     DataDest::Read => Some(
                         // TODO: this will be the wrong type if indirection != 0
@@ -2700,22 +2710,13 @@ impl DriverRef<'_> {
                     ),
                     _ => None,
                 };
-                let begin_bb = b.current_block;
                 let post_bb = self.write().create_bb(b);
-                let _scope_ctx = ctx.redirect(result_location, Some(post_bb));
-                let _enum_info = match scrutinee_ty {
-                    &Type::Enum(id) => {
-                        Some((id, self.read().code.ast.enums[id].variants.clone()))
-                    },
-                    Type::Int { .. } => None,
-                    _ => todo!(),
-                };
+                let scope_ctx = ctx.redirect(result_location, Some(post_bb));
                 let decision_tree = tp.switch_expr_decision_tree(pattern_matching_ctx).as_ref().expect("should always set decision tree on switch expr");
                 let pattern_matching_ctx = tp.pattern_matching_context(pattern_matching_ctx).as_ref().expect("should always set pattern matching context on switch expr");
                 let mut scope_blocks = HashMap::<ImperScopeId, BlockId>::new();
                 let mut scrutinee_values = HashMap::new();
-                let redirected_ctx = ctx.redirect(result_location, Some(post_bb));
-                self.handle_pattern_matching(b, expr, redirected_ctx, tp, scrutinee, decision_tree, pattern_matching_ctx, &mut scope_blocks, &mut scrutinee_values, post_bb);
+                self.handle_pattern_matching(b, expr, scope_ctx, tp, scrutinee, decision_tree, pattern_matching_ctx, &mut scope_blocks, &mut scrutinee_values, post_bb);
 
                 self.write().start_bb(b, post_bb);
                 if let Some(location) = result_location {
@@ -2871,23 +2872,25 @@ impl DriverRef<'_> {
                 self.write().start_bb(b, begin_bb);
 
                 let scrutinee_val = self.get_scrutinee_value(b, tp, og_scrutinee, scrutinee_id, pattern_matching_ctx, scrutinee_values);
-                let scrutinee_ty = self.read().type_of(scrutinee_val.instr).clone();
+                // TODO: support pattern matching of pointers
+                let scrutinee = self.write().handle_indirection(b, scrutinee_val);
+                let scrutinee_ty = self.read().type_of(scrutinee).clone();
 
-                let mut discriminant_enum_id = None;
+                let mut discriminant_enum_ty = None;
                 let discriminant: OpId = match scrutinee_ty {
-                    Type::Enum(enum_id) => {
-                        discriminant_enum_id = Some(enum_id);
-                        self.write().get_discriminant(b, scrutinee_val)
+                    Type::Enum(ref enum_ty) => {
+                        discriminant_enum_ty = Some(enum_ty.clone());
+                        self.write().get_discriminant(b, Value { instr: scrutinee, indirection: 0 })
                     }
-                    Type::Int { .. } => self.write().handle_indirection(b, scrutinee_val),
-                    ty => todo!("{:?}", ty),
+                    Type::Int { .. } => scrutinee,
+                    ty => todo!("Pattern matching for {:?}", ty),
                 };
 
                 let mut mir_cases = Vec::new();
                 let mut nodes = Vec::new();
                 for (value, node) in paths {
                     let const_value = match *value {
-                        SwitchDecisionValue::EnumVariant(variant_index) => self.read().get_const_discriminant(discriminant_enum_id.expect("Must be enum type"), variant_index),
+                        SwitchDecisionValue::EnumVariant(variant_index) => self.read().get_const_discriminant(discriminant_enum_ty.clone().expect("Must be enum type").identity, variant_index),
                         SwitchDecisionValue::SignedInt(value) => Const::Int { lit: BigInt::from(value), ty: scrutinee_ty.clone() },
                         SwitchDecisionValue::UnsignedInt(value) => Const::Int { lit: BigInt::from(value), ty: scrutinee_ty.clone() },
                     };
@@ -2916,7 +2919,8 @@ impl DriverRef<'_> {
                     self.write().end_current_bb(b);
                 }
             },
-            SwitchDecisionNode::Destination { destination, ref bindings } => {
+            // TODO: codegen for bindings
+            SwitchDecisionNode::Destination { destination, .. } => {
                 self.build_scope(b, destination, ctx, tp);
             },
             SwitchDecisionNode::Failure => panic!("pattern matching failure"),

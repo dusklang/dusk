@@ -46,6 +46,12 @@ pub struct StructType {
     pub identity: StructId,
 }
 
+#[derive(Clone, PartialEq, Eq, Debug, Hash)]
+pub struct EnumType {
+    pub payload_tys: Vec<Type>,
+    pub identity: EnumId,
+}
+
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub enum LegacyInternalType {
     StringLiteral,
@@ -97,7 +103,7 @@ pub enum Type {
     Inout(Box<Type>),
     Function(FunctionType),
     Struct(StructType),
-    Enum(EnumId),
+    Enum(EnumType),
     /// Used for internal compiler data structures exposed to compile-time code
     /// TODO: Mod and Ty, at minimum, could probably be moved here
     LegacyInternal(LegacyInternalType),
@@ -359,8 +365,8 @@ impl fmt::Debug for Type {
                 }
                 write!(f, " }}")
             },
-            &Type::Enum(id) => {
-                write!(f, "enum{}", id.index())
+            &Type::Enum(EnumType { identity, .. }) => {
+                write!(f, "enum{}", identity.index())
             }
             Type::GenericParam(id) => {
                 write!(f, "generic_param{}", id.index())

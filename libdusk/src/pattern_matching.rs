@@ -120,11 +120,11 @@ impl Driver {
                     ty: Type::Void,
                 },
                 &SwitchScrutineeValue::EnumPayload { enum_value, variant_name } => {
-                    let Type::Enum(enum_id) = scrutinee_values[enum_value].ty else {
+                    let Type::Enum(enuum) = &scrutinee_values[enum_value].ty else {
                         panic!("enum scrutinee is not of enum type");
                     };
 
-                    let variants = &self.code.ast.enums[enum_id].variants;
+                    let variants = &self.code.ast.enums[enuum.identity].variants;
                     let variant_index = variants.iter().position(|variant| variant.name == variant_name).unwrap();
                     let payload_ty = variants[variant_index].payload_ty.unwrap_or(VOID_TYPE);
                     let payload_ty = tp.get_evaluated_type(payload_ty).clone();
@@ -183,12 +183,12 @@ pub fn match_scrutinee(driver: &mut Driver, tp: &mut dyn TypeProvider, scrutinee
     // TODO: exhaustiveness checking
 
     match scrutinees[0].ty {
-        Type::Enum(id) => {
+        Type::Enum(ref enuum) => {
             let mut paths = HashMap::<SwitchDecisionValue, SwitchDecisionNode>::new();
             let mut child_matrices = HashMap::<usize, Vec<(Vec<Pattern>, ImperScopeId)>>::new();
             let mut catch_all_child_matrix_rows = Vec::<(Vec<Pattern>, ImperScopeId)>::new();
             let mut default_matrix = Vec::<Vec<Pattern>>::new();
-            let variants = &driver.code.ast.enums[id].variants;
+            let variants = &driver.code.ast.enums[enuum.identity].variants;
             let mut default_matrix_destinations = Vec::<ImperScopeId>::new();
             for (pattern_row, &destination) in pattern_matrix.iter().zip(&destinations) {
                 match pattern_row[0].kind {
@@ -231,7 +231,7 @@ pub fn match_scrutinee(driver: &mut Driver, tp: &mut dyn TypeProvider, scrutinee
             }
 
             for (variant_index, mut child_matrix) in child_matrices {
-                let variant_name = driver.code.ast.enums[id].variants[variant_index].name;
+                let variant_name = driver.code.ast.enums[enuum.identity].variants[variant_index].name;
                 let scrutinee_value = *driver.code.ast.pattern_matching_contexts[context].scrutinee_map.get(&SwitchScrutineeValue::EnumPayload { enum_value: scrutinees[0].value, variant_name }).unwrap();
                 driver.get_typed_pattern_matching_context(tp, context);
                 let tctx = tp.pattern_matching_context(context).as_ref().unwrap();

@@ -12,33 +12,38 @@ MyInnerEnum :: enum {
 // }
 
 fn main() {
-    my_enum :: MyEnum.b(5)
+    my_enum :: MyEnum.a(MyInnerEnum.d)
     _debug_mark(switch my_enum {
-        .a(.d): {}
+        .a(.d): print("a(d)\n")
         .b(6): {}
         .a(inner): {}
         .c: {}
         .b(4): {}
-        .b(6): {}
+        .b(6): {
+            // Should never be printed (case already covered above)
+            print("b6!\n")
+        }
+        .b(5): print("b5!\n")
         .a(.f): {}
+        _: {}
     })
-    // print_enum(my_enum)
-    // print_enum(MyEnum.c)
+    // // print_enum(my_enum)
+    // // print_enum(MyEnum.c)
 
-    // val :: MyStruct {
-    //     a: 43
-    //     b: MyEnum.a
-    // }
-    // print_enum_the_right_way(val.b)
+    // // val :: MyStruct {
+    // //     a: 43
+    // //     b: MyEnum.a
+    // // }
+    // // print_enum_the_right_way(val.b)
 
-    // // Expected output:
-    // // enum is b!
-    // // enum is c!
-    // // enum is a!
+    // // // Expected output:
+    // // // enum is b!
+    // // // enum is c!
+    // // // enum is a!
 
-    // create_adt()
+    // // create_adt()
 
-    // catch_all()
+    // // catch_all()
 }
 
 // fn print_enum(e: MyEnum) {

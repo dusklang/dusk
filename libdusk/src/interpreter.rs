@@ -24,7 +24,7 @@ use crate::target::Arch;
 use crate::ast::{LegacyIntrinsic, EnumId, GenericParamId, ExternFunctionRef, ExternModId, NewNamespaceId};
 use crate::dvm::{MessageKind, Call, self};
 use crate::mir::{Const, Instr, InstrId, FuncId, StaticId, ExternFunction};
-use crate::ty::{Type, FunctionType, QualType, IntWidth, FloatWidth, StructType, LegacyInternalType};
+use crate::ty::{EnumType, FloatWidth, FunctionType, IntWidth, LegacyInternalType, QualType, StructType, Type};
 use crate::code::{OpId, BlockId};
 use crate::internal_types::{DuskBridge, InternalField, internal_fields};
 
@@ -60,7 +60,7 @@ impl Clone for Value {
     fn clone(&self) -> Value {
         match self {
             Value::Inline(storage) => Value::Inline(storage.clone()),
-            Value::Dynamic(_) => Value::from_bytes(&self.as_bytes()),
+            Value::Dynamic(_) => Value::from_bytes(&self.as_bytes_without_driver()),
             &Value::Internal { ref val, indirection } => Value::Internal { val: val.clone(), indirection },
             Value::Nothing => Value::Nothing,
         }
@@ -74,7 +74,7 @@ macro_rules! int_conversions {
                 $(
                     #[allow(dead_code)]
                     fn [<as_ $ty_name>](&self) -> $ty_name {
-                        $ty_name::from_le_bytes(self.as_bytes().as_ref().try_into().unwrap())
+                        $ty_name::from_le_bytes(self.as_bytes_without_driver().as_ref().try_into().unwrap())
                     }
 
                     #[allow(dead_code)]
@@ -97,16 +97,19 @@ impl Driver {
             let offset = layout.field_offsets[i];
             let ty = &strukt.field_tys[i];
             let size = self.size_of(ty);
-            let val = field.as_bytes_with_driver(self);
+            let val = field.as_bytes(self);
             buf[offset..][..size].copy_from_slice(&val);
         }
         Value::Inline(buf)
     }
 }
 
+#[derive(Debug)]
 struct Enum {
     discriminant: u32,
+    payload: Value,
 }
+
 impl Value {
     fn as_bytes_with_driver_maybe(&self, d: Option<&Driver>) -> Cow<'_, [u8]> {
         match self {
@@ -117,16 +120,16 @@ impl Value {
             },
             &Value::Internal { val: InternalValue::FunctionPointer { ref generic_arguments, func }, indirection: 0 } if d.is_some() => {
                 assert!(generic_arguments.is_empty());
-                Cow::Owned(d.unwrap().fetch_inverse_thunk(func).as_bytes().to_vec())
+                Cow::Owned(d.unwrap().fetch_inverse_thunk(func).as_bytes_without_driver().to_vec())
             },
             Value::Internal { .. } => panic!("Can't get bytes of a compiler internal data structure!"),
             Value::Nothing => Cow::Borrowed(&[]),
         }
     }
-    fn as_bytes_with_driver(&self, d: &Driver) -> Cow<'_, [u8]> {
+    fn as_bytes(&self, d: &Driver) -> Cow<'_, [u8]> {
         self.as_bytes_with_driver_maybe(Some(d))
     }
-    fn as_bytes(&self) -> Cow<'_, [u8]> {
+    fn as_bytes_without_driver(&self) -> Cow<'_, [u8]> {
         self.as_bytes_with_driver_maybe(None)
     }
 
@@ -153,7 +156,7 @@ impl Value {
             Value::Internal { val, indirection } => *self = Value::Internal { val, indirection: indirection + 1 },
             _ => {
                 let ptr = self.as_raw_ptr();
-                let val = val.as_bytes();
+                let val = val.as_bytes_without_driver();
                 let slice = unsafe { std::slice::from_raw_parts_mut(ptr, val.len()) };
                 slice.copy_from_slice(&val);
             }
@@ -162,9 +165,9 @@ impl Value {
 
     pub fn as_big_int(&self, signed: bool) -> BigInt {
         if signed {
-            BigInt::from_signed_bytes_le(self.as_bytes().as_ref())
+            BigInt::from_signed_bytes_le(self.as_bytes_without_driver().as_ref())
         } else {
-            BigInt::from_bytes_le(Sign::Plus, self.as_bytes().as_ref())
+            BigInt::from_bytes_le(Sign::Plus, self.as_bytes_without_driver().as_ref())
         }
     }
 
@@ -173,7 +176,7 @@ impl Value {
     }
 
     pub fn as_raw_ptr(&self) -> *mut u8 {
-        std::ptr::without_provenance_mut(usize::from_le_bytes(self.as_bytes().as_ref().try_into().unwrap()))
+        std::ptr::without_provenance_mut(usize::from_le_bytes(self.as_bytes_without_driver().as_ref().try_into().unwrap()))
     }
 
     fn as_f64(&self) -> f64 {
@@ -185,14 +188,17 @@ impl Value {
     }
 
     fn as_bool(&self) -> bool {
-        let bytes = self.as_bytes();
+        let bytes = self.as_bytes_without_driver();
         assert!(bytes.len() == 1);
         bytes[0] != 0
     }
 
     fn as_enum(&self) -> Enum {
+        let bytes = self.as_bytes_without_driver();
+        let (discriminant_bytes, payload_bytes) = bytes.split_at(4);
         Enum {
-            discriminant: self.as_u32()
+            discriminant: u32::from_le_bytes(discriminant_bytes.try_into().unwrap()),
+            payload: Value::from_bytes(payload_bytes),
         }
     }
 
@@ -208,7 +214,7 @@ impl Value {
 
     pub unsafe fn as_arbitrary_value<T>(&self) -> &T {
         // TODO: alignment!
-        unsafe { &*(self.as_bytes().as_ptr() as *const T) }
+        unsafe { &*(self.as_bytes_without_driver().as_ptr() as *const T) }
     }
 
     fn as_ty(&self) -> Type {
@@ -277,7 +283,7 @@ impl Value {
             Const::Ty(ref ty) => Value::from_new_internal(ty.clone(), driver),
             Const::Void => Value::Nothing,
             Const::Mod(id) => Value::from_mod(id),
-            Const::BasicVariant { enuum, index } => Value::from_variant(driver, enuum, index, Value::Nothing),
+            Const::Variant { enuum, index, .. } => Value::from_variant(driver, enuum, index, Value::Nothing),
             Const::StructLit { ref fields, id } => {
                 let field_tys: Vec<_> = fields.iter().map(|val| val.ty()).collect();
                 let fields = fields.iter().map(|val| Value::from_const(val, driver));
@@ -307,11 +313,11 @@ impl Value {
         let layout = &d.code.mir.enums[&enuum];
         let payload_offset = layout.payload_offsets[index];
         let mut bytes = Vec::new();
-        bytes.extend(Value::from_u32(index as u32).as_bytes().as_ref());
+        bytes.extend(Value::from_u32(index as u32).as_bytes_without_driver().as_ref());
         while bytes.len() < payload_offset {
             bytes.push(0);
         }
-        bytes.extend(payload.as_bytes().as_ref());
+        bytes.extend(payload.as_bytes_without_driver().as_ref());
         Value::from_bytes(&bytes)
     }
 
@@ -375,6 +381,12 @@ impl StackFrame {
             &Type::Struct(StructType { ref field_tys, identity }) => Type::Struct(
                 StructType {
                     field_tys: field_tys.iter().map(|ty| self.canonicalize_type(ty)).collect(),
+                    identity,
+                }
+            ),
+            &Type::Enum(EnumType { ref payload_tys, identity }) => Type::Enum(
+                EnumType {
+                    payload_tys: payload_tys.iter().map(|ty| self.canonicalize_type(ty)).collect(),
                     identity,
                 }
             ),
@@ -620,7 +632,7 @@ impl Driver {
             Type::Mod => Const::Mod(val.as_mod()),
             Type::Struct(strukt) => {
                 let layout = self.layout_struct(&strukt);
-                let buf = val.as_bytes();
+                let buf = val.as_bytes_without_driver();
                 let mut fields = Vec::new();
                 for i in 0..strukt.field_tys.len() {
                     let offset = layout.field_offsets[i];
@@ -633,10 +645,10 @@ impl Driver {
                 Const::StructLit { fields, id: strukt.identity }
             },
             Type::Enum(enuum) => {
-                let enum_val = &self.code.ast.enums[enuum];
+                let enum_val = &self.code.ast.enums[enuum.identity];
                 let valid = enum_val.variants.iter().map(|variant| variant.payload_ty).all(|ty| ty.is_none());
-                assert!(valid, "In order to output vaue of type {:?} as constant, it must not have any payloads", Type::Enum(enuum));
-                Const::BasicVariant { enuum, index: val.as_enum().discriminant as usize }
+                assert!(valid, "In order to output value of type {:?} as constant, it must not have any payloads", Type::Enum(enuum));
+                Const::Variant { enuum: enuum.identity, index: val.as_enum().discriminant as usize, payload_tys: enuum.payload_tys.clone() }
             },
             Type::Void => Const::Void,
             Type::LegacyInternal(LegacyInternalType::StringLiteral) => match val.as_internal() {
@@ -1271,7 +1283,7 @@ impl DriverRef<'_> {
                     let mut arg_tys = Vec::new();
                     arg_tys.reserve_exact(arguments.len());
                     for &arg in arguments {
-                        copied_args.push(frame.get_val(arg, &*self.read()).as_bytes().as_ref().to_owned().into_boxed_slice());
+                        copied_args.push(frame.get_val(arg, &*self.read()).as_bytes_without_driver().as_ref().to_owned().into_boxed_slice());
                         arg_tys.push(d.type_of(arg).clone());
                     }
                     drop(stack);
@@ -1536,7 +1548,7 @@ impl DriverRef<'_> {
                 &Instr::Reinterpret(instr, _) => frame.get_val(instr, &*self.read()).clone(),
                 &Instr::Truncate(instr, ref ty) => {
                     let frame = stack.last().unwrap();
-                    let bytes = frame.get_val(instr, &*self.read()).as_bytes();
+                    let bytes = frame.get_val(instr, &*self.read()).as_bytes_without_driver();
                     let new_size = self.read().size_of(ty);
                     Value::from_bytes(&bytes[0..new_size])
                 },
@@ -1567,7 +1579,7 @@ impl DriverRef<'_> {
                 &Instr::FloatCast(instr, ref ty) => {
                     let frame = stack.last().unwrap();
                     let val = frame.get_val(instr, &*self.read());
-                    match (val.as_bytes().len(), self.read().size_of(ty)) {
+                    match (val.as_bytes_without_driver().len(), self.read().size_of(ty)) {
                         (x, y) if x == y => val.clone(),
                         (4, 8) => Value::from_f64(val.as_f32() as f64),
                         (8, 4) => Value::from_f32(val.as_f64() as f32),
@@ -1653,7 +1665,7 @@ impl DriverRef<'_> {
                     let static_value = Value::from_const(&self.read().code.mir.statics[statik].val.clone(), &*self.read());
                     let statik = INTERP.write().unwrap().statics.entry(statik)
                         .or_insert(static_value)
-                        .as_bytes()
+                        .as_bytes_without_driver()
                         .as_ptr();
                     Value::from_usize(statik as usize)
                 },
@@ -1683,18 +1695,19 @@ impl DriverRef<'_> {
                 },
                 &Instr::Enum { ref variants, id } => {
                     if !self.read().code.mir.enums.contains_key(&id) {
-                        let mut variant_tys = Vec::new();
+                        let mut payload_tys = Vec::new();
                         for &variant in variants {
-                            variant_tys.push(frame.get_val(variant, &*self.read()).as_ty());
+                            payload_tys.push(frame.get_val(variant, &*self.read()).as_ty());
                         }
-                        let layout = self.read().layout_enum(&variant_tys);
+                        let layout = self.read().layout_enum(&EnumType { payload_tys, identity: id });
                         drop(d);
                         self.write().code.mir.enums.insert(
                             id,
                             layout,
                         );
                     }
-                    Value::from_new_internal(Type::Enum(id), &self.read())
+                    let payload_tys = self.read().code.mir.enums[&id].payload_tys.to_vec();
+                    Value::from_new_internal(Type::Enum(EnumType { identity: id, payload_tys }), &self.read())
                 }
                 &Instr::StructLit { ref fields, id } => {
                     let frame = stack.last().unwrap();
@@ -1730,7 +1743,7 @@ impl DriverRef<'_> {
                 },
                 &Instr::SwitchBr { scrutinee, ref cases, catch_all_bb } => {
                     // TODO: this is a very crude (and possibly slow) way of supporting arbitrary integer scrutinees
-                    let scrutinee = frame.get_val(scrutinee, &*self.read()).as_bytes().to_owned();
+                    let scrutinee = frame.get_val(scrutinee, &*self.read()).as_bytes_without_driver().to_owned();
                     let interp = INTERP.read().unwrap();
                     let block = if let Some(table) = interp.switch_cache.get(&next_op) {
                         let block = table.get(scrutinee.as_ref()).copied();
@@ -1741,7 +1754,7 @@ impl DriverRef<'_> {
                         let mut table = HashMap::new();
                         for case in cases.clone() {
                             let val = Value::from_const(&case.value, &*self.read());
-                            let val = val.as_bytes();
+                            let val = val.as_bytes_without_driver();
                             table.insert(val.as_ref().to_owned().into_boxed_slice(), case.bb);
                         }
                         INTERP.write().unwrap().switch_cache.entry(next_op).or_insert(table)
@@ -1756,8 +1769,9 @@ impl DriverRef<'_> {
                     let payload = frame.get_val(payload, &*self.read()).clone();
                     Value::from_variant(&*self.read(), enuum, index, payload)
                 },
-                &Instr::PayloadAccess { val: _, variant_index: _ } => {
-                    todo!()
+                &Instr::PayloadAccess { val, variant_index: _ } => {
+                    let enum_val = frame.get_val(val, &*self.read()).as_enum();
+                    enum_val.payload
                 },
                 &Instr::DiscriminantAccess { val } => {
                     let enuum = frame.get_val(val, &*self.read()).as_enum();
@@ -1765,7 +1779,7 @@ impl DriverRef<'_> {
                 },
                 &Instr::DirectFieldAccess { val, index } => {
                     let frame = stack.last().unwrap();
-                    let bytes = frame.get_val(val, &*self.read()).as_bytes();
+                    let bytes = frame.get_val(val, &*self.read()).as_bytes_without_driver();
                     let strukt = match d.type_of(val) {
                         Type::Struct(strukt) => strukt,
                         _ => panic!("Can't directly get field of non-struct"),

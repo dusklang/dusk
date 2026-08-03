@@ -4,12 +4,13 @@ use std::mem;
 use internal_types::ExternParam;
 use smallvec::{smallvec, SmallVec};
 use num_bigint::BigInt;
+use string_interner::DefaultSymbol as Sym;
 
 use crate::index_vec::empty_range;
 use crate::internal_types;
 use crate::source_info::SourceRange;
-use crate::ast::{ModScopeNs, LegacyIntrinsic, Expr, Decl, VOID_TYPE, ModScopeNsId, NewNamespaceId, EnumId, ExprId, VariantDecl, StaticDecl, InstanceDecl, NewNamespace, ExternFunctionRef, ExternFunction, ParamList};
-use crate::ty::{Type, LegacyInternalType};
+use crate::ast::{ModScopeNs, LegacyIntrinsic, Expr, Decl, VOID_TYPE, ModScopeNsId, NewNamespaceId, ExprId, StaticDecl, InstanceDecl, NewNamespace, ExternFunctionRef, ExternFunction, ParamList};
+use crate::ty::{EnumType, LegacyInternalType, Type};
 use crate::mir::Const;
 
 use crate::driver::Driver;
@@ -107,10 +108,14 @@ impl Driver {
     }
 }
 
+struct VariantBuilder {
+    name: Sym,
+    payload_ty: Option<Type>,
+}
+
 struct EnumBuilder {
-    expr: ExprId,
-    id:  EnumId,
-    variants: Vec<VariantDecl>,
+    name: String,
+    variants: Vec<VariantBuilder>,
 }
 impl Drop for EnumBuilder {
     fn drop(&mut self) {
@@ -246,11 +251,10 @@ impl Driver {
 
         // Add Platform enum
         let mut platform_enum = self.start_enum("Platform");
-        let platform_id = platform_enum.id;
         self.add_variant(&mut platform_enum, "windows", None);
         self.add_variant(&mut platform_enum, "linux", None);
         self.add_variant(&mut platform_enum, "macos", None);
-        self.end_enum(platform_enum);
+        let platform_enum = self.end_enum(platform_enum);
 
         // TODO: brittle
         let index = if cfg!(target_os = "windows") {
@@ -262,7 +266,7 @@ impl Driver {
         } else {
             todo!("unsupported OS");
         };
-        self.add_constant_decl("target", Const::BasicVariant { enuum: platform_id, index });
+        self.add_constant_decl("target", Const::Variant { enuum: platform_enum.identity, index, payload_tys: platform_enum.payload_tys.clone() });
         drop(compiler_module);
 
         let runtime_module = self.add_module_decl("runtime");
@@ -354,21 +358,30 @@ impl Driver {
     }
 
     fn start_enum(&mut self, name: &str) -> EnumBuilder {
-        let (expr, id) = self.reserve_enum();
-        self.add_constant_type_decl(name, Type::Enum(id));
-        EnumBuilder { expr, id, variants: Default::default() }
+        EnumBuilder { name: name.to_owned(), variants: Default::default() }
     }
 
     fn add_variant(&mut self, b: &mut EnumBuilder, name: &str, payload_ty: Option<Type>) {
         let name = self.interner.get_or_intern(name);
-        let payload_ty = payload_ty.map(|ty| self.add_const_expr(Const::Ty(ty)));
-        let next_variant = self.variant_decl(name, b.expr, b.id, b.variants.len(), payload_ty, SourceRange::default());
-        b.variants.push(next_variant);
+        b.variants.push(VariantBuilder { name, payload_ty });
     }
 
-    fn end_enum(&mut self, mut b: EnumBuilder) {
-        self.finish_enum(mem::take(&mut b.variants), SourceRange::default(), b.expr, b.id);
+    fn end_enum(&mut self, b: EnumBuilder) -> EnumType {
+        let (expr, id) = self.reserve_enum();
+        let enum_ty = EnumType {
+            payload_tys: b.variants.iter().map(|variant| variant.payload_ty.clone().unwrap_or(Type::Void)).collect(),
+            identity: id,
+        };
+        let mut variants = b.variants.iter().enumerate().map(|(i, variant)| {
+            let payload_ty = variant.payload_ty.clone().map(|ty| self.add_const_expr(Const::Ty(ty)));
+            self.variant_decl(variant.name, expr, id, i, payload_ty, SourceRange::default())
+        }).collect();
+
+        self.add_constant_type_decl(&b.name, Type::Enum(enum_ty.clone()));
+        self.finish_enum(mem::take(&mut variants), SourceRange::default(), expr, id);
         mem::forget(b);
+
+        enum_ty
     }
 
     fn add_virtual_file_module(&mut self, name: &str, src: &str) -> ParseResult<()>  {

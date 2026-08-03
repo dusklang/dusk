@@ -10,7 +10,7 @@ use crate::type_provider::{TypeProvider, RealTypeProvider, MockTypeProvider};
 
 use crate::ast::{self, Decl, DeclId, DeclRefId, ExprId, GenericCtx, InstanceDecl, NewNamespaceId, SelfParameterKind, StaticDecl, StructId, VOID_EXPR};
 use crate::mir::Const;
-use crate::ty::{Type, LegacyInternalType, FunctionType, QualType, IntWidth, StructType};
+use crate::ty::{EnumType, FunctionType, IntWidth, LegacyInternalType, QualType, StructType, Type};
 use crate::pattern_matching::*;
 use crate::internal_types::InternalNamespace;
 
@@ -1588,12 +1588,12 @@ impl DriverRef<'_> {
                         Type::Struct(strukt) => {
                             ExprNamespace::New(self.read().code.ast.structs[strukt.identity].namespace, NewNamespaceRefKind::Instance)
                         },
-                        Type::Enum(id) => ExprNamespace::New(self.read().code.ast.enums[id].namespace, NewNamespaceRefKind::Instance),
+                        Type::Enum(EnumType { identity, .. }) => ExprNamespace::New(self.read().code.ast.enums[identity].namespace, NewNamespaceRefKind::Instance),
                         Type::Internal(id) => ExprNamespace::New(self.read().code.ast.internal_types[id].namespace, NewNamespaceRefKind::Instance),
                         Type::Pointer(ref pointee) => {
                             match &pointee.ty {
                                 Type::Struct(strukt) => ExprNamespace::New(self.read().code.ast.structs[strukt.identity].namespace, NewNamespaceRefKind::Instance),
-                                &Type::Enum(id) => ExprNamespace::New(self.read().code.ast.enums[id].namespace, NewNamespaceRefKind::Instance),
+                                &Type::Enum(EnumType { identity, .. }) => ExprNamespace::New(self.read().code.ast.enums[identity].namespace, NewNamespaceRefKind::Instance),
                                 &Type::Internal(id) => ExprNamespace::New(self.read().code.ast.internal_types[id].namespace, NewNamespaceRefKind::Instance),
                                 _ => continue,
                             }
@@ -1610,7 +1610,7 @@ impl DriverRef<'_> {
                                     macro_info = Some(ExprMacroInfo::Struct(strukt.clone()));
                                     ExprNamespace::New(self.read().code.ast.structs[strukt.identity].namespace, NewNamespaceRefKind::Static)
                                 },
-                                Const::Ty(Type::Enum(id)) => ExprNamespace::New(self.read().code.ast.enums[id].namespace, NewNamespaceRefKind::Static),
+                                Const::Ty(Type::Enum(EnumType { identity, .. })) => ExprNamespace::New(self.read().code.ast.enums[identity].namespace, NewNamespaceRefKind::Static),
                                 Const::Ty(Type::Internal(id)) => ExprNamespace::New(self.read().code.ast.internal_types[id].namespace, NewNamespaceRefKind::Static),
                                 _ => panic!("Unexpected const kind, expected enum!"),
                             }
@@ -1636,7 +1636,7 @@ impl Driver {
     fn find_namespace_for_type(&self, ty: &Type) -> NewNamespaceId {
         match ty {
             &Type::Struct(StructType { identity, .. }) => self.code.ast.structs[identity].namespace,
-            &Type::Enum(enuum) => self.code.ast.enums[enuum].namespace,
+            &Type::Enum(EnumType { identity, .. }) => self.code.ast.enums[identity].namespace,
             _ => todo!("find namespace for type {:?}", ty),
         }
     }
