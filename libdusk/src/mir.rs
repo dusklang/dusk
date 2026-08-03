@@ -2703,7 +2703,6 @@ impl DriverRef<'_> {
                 let begin_bb = b.current_block;
                 let post_bb = self.write().create_bb(b);
                 let _scope_ctx = ctx.redirect(result_location, Some(post_bb));
-                let mir_cases = Vec::new();
                 let _enum_info = match scrutinee_ty {
                     &Type::Enum(id) => {
                         Some((id, self.read().code.ast.enums[id].variants.clone()))
@@ -2711,32 +2710,18 @@ impl DriverRef<'_> {
                     Type::Int { .. } => None,
                     _ => todo!(),
                 };
-                let catch_all_bb = None;
                 let decision_tree = tp.switch_expr_decision_tree(pattern_matching_ctx).as_ref().expect("should always set decision tree on switch expr");
                 let pattern_matching_ctx = tp.pattern_matching_context(pattern_matching_ctx).as_ref().expect("should always set pattern matching context on switch expr");
                 let mut scope_blocks = HashMap::<ImperScopeId, BlockId>::new();
-                self.handle_pattern_matching(b, expr, ctx, tp, scrutinee, decision_tree, pattern_matching_ctx, &mut scope_blocks);
-
-                let catch_all_bb = if let Some(catch_all_bb) = catch_all_bb {
-                    catch_all_bb
-                } else {
-                    let catch_all_bb = self.write().create_bb(b);
-                    self.write().start_bb(b, catch_all_bb);
-                    // TODO: add unreachable instruction I guess?
-                    self.write().push_instr(b, Instr::LegacyIntrinsic { arguments: SmallVec::new(), ty: Type::Never, intr: LegacyIntrinsic::Panic }, SourceRange::default());
-                    self.write().end_current_bb(b);
-                    catch_all_bb
-                };
-
-                self.write().start_bb(b, begin_bb);
-                self.write().push_instr(b, Instr::SwitchBr { scrutinee: discriminant, cases: mir_cases, catch_all_bb }, expr);
-                self.write().end_current_bb(b);
+                let mut scrutinee_values = HashMap::new();
+                let redirected_ctx = ctx.redirect(result_location, Some(post_bb));
+                self.handle_pattern_matching(b, expr, redirected_ctx, tp, scrutinee, decision_tree, pattern_matching_ctx, &mut scope_blocks, &mut scrutinee_values, post_bb);
 
                 self.write().start_bb(b, post_bb);
                 if let Some(location) = result_location {
-                    return self.write().push_instr(b, Instr::Load(location), expr).direct()
+                    self.write().push_instr(b, Instr::Load(location), expr).direct()
                 } else {
-                    return self.write().handle_control(b, VOID_INSTR.direct(), ctx.control)
+                    self.write().handle_control(b, VOID_INSTR.direct(), ctx.control)
                 }
             },
             Expr::While { loop_id, condition, scope } => {
@@ -2857,7 +2842,7 @@ impl DriverRef<'_> {
         self.handle_context(b, val, ctx, tp)
     }
 
-    fn get_scrutinee_value(&mut self, b: &mut FunctionBuilder, tp: &dyn TypeProvider, scrutinee_expr: ExprId, scrutinee: SwitchScrutineeValueId, pattern_matching_ctx: &IndexVec<SwitchScrutineeValueId, TypedSwitchScrutineeValue>, scrutinee_values: &mut HashMap<SwitchScrutineeValueId, Value>) -> Value {
+    fn get_scrutinee_value(&mut self, b: &mut FunctionBuilder, tp: &dyn TypeProvider, og_scrutinee: ExprId, scrutinee: SwitchScrutineeValueId, pattern_matching_ctx: &IndexVec<SwitchScrutineeValueId, TypedSwitchScrutineeValue>, scrutinee_values: &mut HashMap<SwitchScrutineeValueId, Value>) -> Value {
         if let Some(scrutinee) = scrutinee_values.get(&scrutinee) {
             return scrutinee.clone();
         }
@@ -2865,12 +2850,12 @@ impl DriverRef<'_> {
         let scrutinee_value = &pattern_matching_ctx[scrutinee];
         let value = match scrutinee_value.kind {
             TypedSwitchScrutineeValueKind::EnumPayload { enum_value, variant_index } => {
-                let val = self.get_scrutinee_value(b, tp, scrutinee_expr, enum_value, pattern_matching_ctx, scrutinee_values);
+                let val = self.get_scrutinee_value(b, tp, og_scrutinee, enum_value, pattern_matching_ctx, scrutinee_values);
                 let val = self.write().handle_indirection(b, val);
-                self.write().push_instr(b, Instr::PayloadAccess { val, variant_index }, scrutinee_expr).direct()
+                self.write().push_instr(b, Instr::PayloadAccess { val, variant_index }, og_scrutinee).direct()
             },
             TypedSwitchScrutineeValueKind::OriginalScrutinee => {
-                self.build_expr(b, scrutinee_expr, Context::new(0, DataDest::Read, ControlDest::Continue), tp)
+                self.build_expr(b, og_scrutinee, Context::new(0, DataDest::Read, ControlDest::Continue), tp)
             },
             TypedSwitchScrutineeValueKind::VoidValue => VOID_INSTR.direct(),
         };
@@ -2879,76 +2864,61 @@ impl DriverRef<'_> {
         value
     }
 
-    fn handle_pattern_matching(&mut self, _b: &mut FunctionBuilder, _expr: ExprId, _ctx: Context, _tp: &dyn TypeProvider, _scrutinee: ExprId, node: &SwitchDecisionNode, _pattern_matching_ctx: &IndexVec<SwitchScrutineeValueId, TypedSwitchScrutineeValue>, _scope_blocks: &mut HashMap<ImperScopeId, BlockId>) {
+    fn handle_pattern_matching(&mut self, b: &mut FunctionBuilder, expr: ExprId, ctx: Context, tp: &dyn TypeProvider, og_scrutinee: ExprId, node: &SwitchDecisionNode, pattern_matching_ctx: &IndexVec<SwitchScrutineeValueId, TypedSwitchScrutineeValue>, scope_blocks: &mut HashMap<ImperScopeId, BlockId>, scrutinee_values: &mut HashMap<SwitchScrutineeValueId, Value>, post_bb: BlockId) {
         match *node {
-            SwitchDecisionNode::Branch { scrutinee: _, ref paths, default_path: _ } => {
-                for (value, _node) in paths {
-                    match *value {
-                        SwitchDecisionValue::EnumVariant(_variant_index) => todo!(),
-                        SwitchDecisionValue::SignedInt(_value) => todo!(),
-                        SwitchDecisionValue::UnsignedInt(_value) => todo!(),
+            SwitchDecisionNode::Branch { scrutinee: scrutinee_id, ref paths, ref default_path } => {
+                let begin_bb = b.current_block;
+                self.write().start_bb(b, begin_bb);
+
+                let scrutinee_val = self.get_scrutinee_value(b, tp, og_scrutinee, scrutinee_id, pattern_matching_ctx, scrutinee_values);
+                let scrutinee_ty = self.read().type_of(scrutinee_val.instr).clone();
+
+                let mut discriminant_enum_id = None;
+                let discriminant: OpId = match scrutinee_ty {
+                    Type::Enum(enum_id) => {
+                        discriminant_enum_id = Some(enum_id);
+                        self.write().get_discriminant(b, scrutinee_val)
                     }
+                    Type::Int { .. } => self.write().handle_indirection(b, scrutinee_val),
+                    ty => todo!("{:?}", ty),
+                };
+
+                let mut mir_cases = Vec::new();
+                let mut nodes = Vec::new();
+                for (value, node) in paths {
+                    let const_value = match *value {
+                        SwitchDecisionValue::EnumVariant(variant_index) => self.read().get_const_discriminant(discriminant_enum_id.expect("Must be enum type"), variant_index),
+                        SwitchDecisionValue::SignedInt(value) => Const::Int { lit: BigInt::from(value), ty: scrutinee_ty.clone() },
+                        SwitchDecisionValue::UnsignedInt(value) => Const::Int { lit: BigInt::from(value), ty: scrutinee_ty.clone() },
+                    };
+
+                    let case_bb = self.write().create_bb(b);
+                    mir_cases.push(SwitchCase { value: const_value, bb: case_bb });
+                    nodes.push(node);
                 }
 
-                // THIS WAS THE OLD PATTERN MATCHING CODE:
+                let default_bb = self.write().create_bb(b);
 
-                // let case_bb = self.write().create_bb(b);
-                // self.write().start_bb(b, case_bb);
-                // // Can only bind at most one binding at a time. The exception is when they alias. E.g., '.a(int_val) & enum_val' <- int_val and enum_val are two bindings that alias.
-                // // I will need some way of detecting aliases and allowing them, but at the same time splitting up the list of bindings when they don't alias, such as in disjuction patterns.
-                // assert!(case.pattern.bindings.len() <= 1);
-                // for &binding_id in &case.pattern.bindings {
-                //     let binding = self.read().code.ast.pattern_binding_decls[binding_id].clone();
-                //     // Can only ever bind one path to a particular binding at a time. Will need some way of splitting these up when I implement disjunction patterns
-                //     assert_eq!(binding.paths.len(), 1);
-                //     for path in &binding.paths {
-                //         let val = self.write().handle_indirection(b, scrutinee_val);
-                //         for step in &path.components {
-                //             match step {
-                //                 &PatternBindingPathComponent::VariantPayload(_index) => {
-                //                     todo!();
-                //                 }
-                //             }
-                //         }
-                //         b.pattern_binding_locs.insert(binding_id, val.direct());
-                //     }
-                // }
-                // self.build_scope(b, case.scope, scope_ctx, tp);
+                self.write().push_instr(b, Instr::SwitchBr { scrutinee: discriminant, cases: mir_cases.clone(), catch_all_bb: default_bb }, expr);
+                self.write().end_current_bb(b);
 
-                // self.write().start_bb(b, begin_bb);
-                // match case.pattern.kind {
-                //     ast::PatternKind::ContextualMember { name, .. } => {
-                //         let (enum_id, variants) = enum_info.as_ref().expect("found contextual member pattern on non-enum type. typechecker should've caught this.");
-                //         let mut index = None;
-                //         for (i, variant) in variants.iter().enumerate() {
-                //             if variant.name == name.symbol {
-                //                 index = Some(i);
-                //                 break;
-                //             }
-                //         }
-                //         let index = index.expect("Unrecognized variant in switch case. Typechecker should have caught this.");
-                //         let discriminant = self.read().get_const_discriminant(*enum_id, index);
-                //         mir_cases.push(
-                //             SwitchCase {
-                //                 value: discriminant,
-                //                 bb: case_bb,
-                //             }
-                //         );
-                //     },
-                //     ast::PatternKind::IntLit { value, .. } => {
-                //         mir_cases.push(
-                //             SwitchCase {
-                //                 value: Const::Int { lit: BigInt::from(value), ty: scrutinee_ty.clone() },
-                //                 bb: case_bb,
-                //             }
-                //         );
-                //     }
-                //     ast::PatternKind::NamedCatchAll { .. } | ast::PatternKind::AnonymousCatchAll(_) => {
-                //         catch_all_bb = Some(case_bb);
-                //     },
-                // }
+                for (mir_case, node) in mir_cases.iter().zip(nodes) {
+                    self.write().start_bb(b, mir_case.bb);
+                    self.handle_pattern_matching(b, expr, ctx, tp, og_scrutinee, node, pattern_matching_ctx, scope_blocks, scrutinee_values, post_bb);
+                }
+
+                self.write().start_bb(b, default_bb);
+                if let Some(default_path) = &default_path {
+                    self.handle_pattern_matching(b, expr, ctx, tp, og_scrutinee, default_path, pattern_matching_ctx, scope_blocks, scrutinee_values, post_bb);
+                } else {
+                    // TODO: add unreachable instruction I guess?
+                    self.write().push_instr(b, Instr::LegacyIntrinsic { arguments: SmallVec::new(), ty: Type::Never, intr: LegacyIntrinsic::Panic }, SourceRange::default());
+                    self.write().end_current_bb(b);
+                }
             },
-            SwitchDecisionNode::Destination { destination: _, bindings: _ } => todo!(),
+            SwitchDecisionNode::Destination { destination, ref bindings } => {
+                self.build_scope(b, destination, ctx, tp);
+            },
             SwitchDecisionNode::Failure => panic!("pattern matching failure"),
         }
     }
