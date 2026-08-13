@@ -23,7 +23,7 @@ use index_vec::IndexVec;
 use crate::target::Arch;
 use crate::ast::{LegacyIntrinsic, EnumId, GenericParamId, ExternFunctionRef, ExternModId, NewNamespaceId};
 use crate::dvm::{MessageKind, Call, self};
-use crate::mir::{Const, Instr, InstrId, FuncId, StaticId, ExternFunction};
+use crate::mir::{BranchTarget, Const, ExternFunction, FuncId, Instr, InstrId, StaticId};
 use crate::ty::{EnumType, FloatWidth, FunctionType, IntWidth, LegacyInternalType, QualType, StructType, Type};
 use crate::code::{OpId, BlockId};
 use crate::internal_types::{DuskBridge, InternalField, internal_fields};
@@ -353,8 +353,8 @@ pub struct StackFrame {
 }
 
 impl StackFrame {
-    fn branch_to(&mut self, bb: BlockId) {
-        self.block = bb;
+    fn branch_to(&mut self, target: &BranchTarget) {
+        self.block = target.bb;
         self.pc = 0;
     }
 
@@ -430,7 +430,7 @@ unsafe impl Send for CachedLib {}
 pub struct Interpreter {
     statics: HashMap<StaticId, Value>,
     allocations: HashMap<usize, alloc::Layout>,
-    switch_cache: HashMap<OpId, HashMap<Box<[u8]>, BlockId>>,
+    switch_cache: HashMap<OpId, HashMap<Box<[u8]>, BranchTarget>>,
     #[cfg(windows)]
     inverse_thunk_cache: HashMap<FuncId, Allocation>,
     #[allow(unused)]
@@ -1731,38 +1731,38 @@ impl DriverRef<'_> {
                     let val = frame.get_val(instr, &*self.read()).clone();
                     return Ok(Some(val));
                 },
-                &Instr::Br(bb) => {
-                    frame.branch_to(bb);
+                Instr::Br(target) => {
+                    frame.branch_to(target);
                     return Ok(None);
                 },
-                &Instr::CondBr { condition, true_bb, false_bb } => {
-                    let condition = frame.get_val(condition, &*self.read()).as_bool();
-                    let branch = if condition { true_bb } else { false_bb };
-                    frame.branch_to(branch);
+                Instr::CondBr { condition, true_target, false_target } => {
+                    let condition = frame.get_val(*condition, &*self.read()).as_bool();
+                    let target = if condition { true_target } else { false_target };
+                    frame.branch_to(target);
                     return Ok(None);
                 },
-                &Instr::SwitchBr { scrutinee, ref cases, catch_all_bb } => {
+                &Instr::SwitchBr { scrutinee, ref cases, ref catch_all_target } => {
                     // TODO: this is a very crude (and possibly slow) way of supporting arbitrary integer scrutinees
                     let scrutinee = frame.get_val(scrutinee, &*self.read()).as_bytes_without_driver().to_owned();
                     let interp = INTERP.read().unwrap();
-                    let block = if let Some(table) = interp.switch_cache.get(&next_op) {
-                        let block = table.get(scrutinee.as_ref()).copied();
+                    let target = if let Some(table) = interp.switch_cache.get(&next_op) {
+                        let target = table.get(scrutinee.as_ref()).cloned();
                         drop(interp);
-                        block
+                        target
                     } else {
                         drop(interp);
                         let mut table = HashMap::new();
                         for case in cases.clone() {
                             let val = Value::from_const(&case.value, &*self.read());
                             let val = val.as_bytes_without_driver();
-                            table.insert(val.as_ref().to_owned().into_boxed_slice(), case.bb);
+                            table.insert(val.as_ref().to_owned().into_boxed_slice(), case.target);
                         }
                         INTERP.write().unwrap().switch_cache.entry(next_op).or_insert(table)
-                            .get(scrutinee.as_ref()).copied()
-                    }.unwrap_or(catch_all_bb);
+                            .get(scrutinee.as_ref()).cloned()
+                    }.unwrap_or(catch_all_target.clone());
 
                     let frame = stack.last_mut().unwrap();
-                    frame.branch_to(block);
+                    frame.branch_to(&target);
                     return Ok(None);
                 },
                 &Instr::Variant { enuum, index, payload } => {
