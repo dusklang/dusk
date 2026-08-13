@@ -1254,9 +1254,28 @@ impl Driver {
     }
 
     #[display_adapter]
-    pub fn display_mir_block(&self, id: BlockId, f: &mut Formatter) {
-        writeln!(f, "%bb{}:", id.index())?;
+    pub fn display_mir_block(&self, block_index: usize, id: BlockId, f: &mut Formatter) {
         let block = &self.code.blocks[id];
+        write!(f, "%bb{}", id.index())?;
+        if block_index > 0 && matches!(block.ops.first().and_then(|&op| self.code.ops[op].as_mir_instr()), Some(Instr::Parameter(_))) {
+            write!(f, "(")?;
+            let mut first = true;
+            for &op in &block.ops {
+                let instr = self.code.ops[op].as_mir_instr().unwrap();
+                if let Instr::Parameter(ty) = instr {
+                    if first {
+                        first = false;
+                    } else {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "%{}: {:?}", self.display_instr_name(op), ty)?;
+                } else {
+                    break;
+                }
+            }
+            write!(f, ")")?;
+        }
+        writeln!(f, ":")?;
         let mut start = 0;
         for (i, &op) in block.ops.iter().enumerate() {
             let instr = self.code.ops[op].as_mir_instr().unwrap();
@@ -1311,7 +1330,7 @@ impl Driver {
         writeln!(f, "): {:?} {{", func.ty.return_ty.as_ref())?;
         for i in 0..func.blocks.len() {
             let block_id = func.blocks[i];
-            write!(f, "{}", self.display_mir_block(block_id))?;
+            write!(f, "{}", self.display_mir_block(i, block_id))?;
         }
         write!(f, "}}")
     }
