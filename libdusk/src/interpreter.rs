@@ -23,7 +23,7 @@ use index_vec::IndexVec;
 use crate::target::Arch;
 use crate::ast::{LegacyIntrinsic, EnumId, GenericParamId, ExternFunctionRef, ExternModId, NewNamespaceId};
 use crate::dvm::{MessageKind, Call, self};
-use crate::mir::{BranchTarget, Const, ExternFunction, FuncId, Instr, InstrId, StaticId};
+use crate::mir::{JumpTarget, Const, ExternFunction, FuncId, Instr, InstrId, StaticId};
 use crate::ty::{EnumType, FloatWidth, FunctionType, IntWidth, LegacyInternalType, QualType, StructType, Type};
 use crate::code::{OpId, BlockId};
 use crate::internal_types::{DuskBridge, InternalField, internal_fields};
@@ -353,7 +353,7 @@ pub struct StackFrame {
 }
 
 impl StackFrame {
-    fn branch_to(&mut self, target: &BranchTarget) {
+    fn jump_to(&mut self, target: &JumpTarget) {
         self.block = target.bb;
         self.pc = 0;
     }
@@ -430,7 +430,7 @@ unsafe impl Send for CachedLib {}
 pub struct Interpreter {
     statics: HashMap<StaticId, Value>,
     allocations: HashMap<usize, alloc::Layout>,
-    switch_cache: HashMap<OpId, HashMap<Box<[u8]>, BranchTarget>>,
+    switch_cache: HashMap<OpId, HashMap<Box<[u8]>, JumpTarget>>,
     #[cfg(windows)]
     inverse_thunk_cache: HashMap<FuncId, Allocation>,
     #[allow(unused)]
@@ -1731,14 +1731,14 @@ impl DriverRef<'_> {
                     let val = frame.get_val(instr, &*self.read()).clone();
                     return Ok(Some(val));
                 },
-                Instr::Br(target) => {
-                    frame.branch_to(target);
+                Instr::Jump(target) => {
+                    frame.jump_to(target);
                     return Ok(None);
                 },
                 Instr::CondBr { condition, true_target, false_target } => {
                     let condition = frame.get_val(*condition, &*self.read()).as_bool();
                     let target = if condition { true_target } else { false_target };
-                    frame.branch_to(target);
+                    frame.jump_to(target);
                     return Ok(None);
                 },
                 &Instr::SwitchBr { scrutinee, ref cases, ref catch_all_target } => {
@@ -1762,7 +1762,7 @@ impl DriverRef<'_> {
                     }.unwrap_or(catch_all_target.clone());
 
                     let frame = stack.last_mut().unwrap();
-                    frame.branch_to(&target);
+                    frame.jump_to(&target);
                     return Ok(None);
                 },
                 &Instr::Variant { enuum, index, payload } => {

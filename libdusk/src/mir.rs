@@ -37,21 +37,21 @@ define_index_type!(pub struct InstrId = u32;);
 pub const VOID_INSTR: OpId = OpId::from_usize_unchecked(0);
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct BranchTarget {
+pub struct JumpTarget {
     pub bb: BlockId,
     pub arguments: SmallVec<[OpId; 2]>,
 }
 
-impl From<BlockId> for BranchTarget {
+impl From<BlockId> for JumpTarget {
     fn from(value: BlockId) -> Self {
-        BranchTarget { bb: value, arguments: Default::default() }
+        JumpTarget { bb: value, arguments: Default::default() }
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SwitchCase {
     pub value: Const,
-    pub target: BranchTarget,
+    pub target: JumpTarget,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -89,9 +89,9 @@ pub enum Instr {
     DiscriminantAccess { val: OpId },
     PayloadAccess { val: OpId, variant_index: usize },
     Ret(OpId),
-    Br(BranchTarget),
-    CondBr { condition: OpId, true_target: BranchTarget, false_target: BranchTarget },
-    SwitchBr { scrutinee: OpId, cases: Vec<SwitchCase>, catch_all_target: BranchTarget },
+    Jump(JumpTarget),
+    CondBr { condition: OpId, true_target: JumpTarget, false_target: JumpTarget },
+    SwitchBr { scrutinee: OpId, cases: Vec<SwitchCase>, catch_all_target: JumpTarget },
     /// This variant currently exists (rather than just stuffing a constant `Type` into `Instr::Const()`) so that we
     /// know to lookup the generic param instead of preserving it as-is.
     GenericParam(GenericParamId),
@@ -102,7 +102,7 @@ pub enum Instr {
 
 impl Instr {
     pub fn replace_bb(&mut self, old: BlockId, new: BlockId) {
-        fn replace(target: &mut BranchTarget, old: BlockId, new: BlockId) {
+        fn replace(target: &mut JumpTarget, old: BlockId, new: BlockId) {
             // TODO: handle basic block arguments (currently not needed by any callers of this method)
             assert_eq!(target.arguments.len(), 0);
             if target.bb == old {
@@ -110,7 +110,7 @@ impl Instr {
             }
         }
         match self {
-            Instr::Br(target) => replace(target, old, new),
+            Instr::Jump(target) => replace(target, old, new),
             Instr::CondBr { true_target, false_target, .. } => {
                 replace(true_target, old, new);
                 replace(false_target, old, new);
@@ -128,7 +128,7 @@ impl Instr {
     // TODO: allocating a Vec here sucks!
     pub fn referenced_values(&self) -> Vec<OpId> {
         match *self {
-            Instr::Void | Instr::Const(_) | Instr::Alloca(_) | Instr::AddressOfStatic(_) | Instr::Br(_)
+            Instr::Void | Instr::Const(_) | Instr::Alloca(_) | Instr::AddressOfStatic(_) | Instr::Jump(_)
                 | Instr::GenericParam(_) | Instr::Parameter(_) | Instr::FunctionRef { .. } | Instr::Invalid | Instr::ObjcClassRef { .. } => vec![],
             Instr::LogicalNot(op) | Instr::Reinterpret(op, _) | Instr::Truncate(op, _) | Instr::SignExtend(op, _)
                 | Instr::ZeroExtend(op, _) | Instr::FloatCast(op, _) | Instr::FloatToInt(op, _)
@@ -157,7 +157,7 @@ impl Instr {
             }
         }
         match self {
-            Instr::Void | Instr::Const(_) | Instr::Alloca(_) | Instr::AddressOfStatic(_) | Instr::Br(_)
+            Instr::Void | Instr::Const(_) | Instr::Alloca(_) | Instr::AddressOfStatic(_) | Instr::Jump(_)
                 | Instr::GenericParam(_) | Instr::Parameter(_) | Instr::FunctionRef { .. } | Instr::Invalid | Instr::ObjcClassRef { .. } => {},
             Instr::LogicalNot(op) | Instr::Reinterpret(op, _) | Instr::Truncate(op, _) | Instr::SignExtend(op, _)
                 | Instr::ZeroExtend(op, _) | Instr::FloatCast(op, _) | Instr::FloatToInt(op, _)
@@ -471,8 +471,8 @@ enum DataDest {
     Read,
     /// This value will never be used
     Void,
-    /// If this value is true, branch to the first target, otherwise branch to the second
-    Branch(BranchTarget, BranchTarget),
+    /// If this value is true, jump to the first target, otherwise jump to the second
+    Branch(JumpTarget, JumpTarget),
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -530,10 +530,10 @@ impl Indirection for OpId {
 enum ControlDest {
     Continue,
     Unreachable,
-    Branch(BranchTarget),
-    IncrementVariableAndThenBranch {
+    Jump(JumpTarget),
+    IncrementVariableAndThenJump {
         location: OpId,
-        target: BranchTarget
+        target: JumpTarget
     },
     RetVoid,
 }
@@ -559,7 +559,7 @@ impl Context {
         Context { indirection, data, control }
     }
 
-    fn redirect(&self, read: Option<OpId>, kontinue: Option<BranchTarget>) -> Context {
+    fn redirect(&self, read: Option<OpId>, kontinue: Option<JumpTarget>) -> Context {
         Context::new(
             self.indirection,
             match (&self.data, read) {
@@ -567,7 +567,7 @@ impl Context {
                 (x, _) => x.clone(),
             },
             match (&self.control, kontinue) {
-                (ControlDest::Continue, Some(target)) => ControlDest::Branch(target),
+                (ControlDest::Continue, Some(target)) => ControlDest::Jump(target),
                 (x, _) => x.clone(),
             }
         )
@@ -1090,7 +1090,7 @@ impl Driver {
     }
 
     #[display_adapter]
-    pub fn display_branch_target(&self, target: &BranchTarget, f: &mut Formatter) {
+    pub fn display_branch_target(&self, target: &JumpTarget, f: &mut Formatter) {
         write!(f, "%bb{}", target.bb.index())?;
         if !target.arguments.is_empty() {
             write!(f, "(")?;
@@ -1145,7 +1145,7 @@ impl Driver {
         }
         match instr {
             Instr::Alloca(ty) => write!(f, "%{} = alloca {:?}", self.display_instr_name(op_id), ty)?,
-            Instr::Br(block) => write!(f, "br {}", self.display_branch_target(block))?,
+            Instr::Jump(block) => write!(f, "jump {}", self.display_branch_target(block))?,
             &Instr::CondBr { condition, ref true_target, ref false_target }
                 => write!(f, "condbr %{}, {}, {}", self.display_instr_name(condition), self.display_branch_target(true_target), self.display_branch_target(false_target))?,
             &Instr::SwitchBr { scrutinee, ref cases, ref catch_all_target } => {
@@ -1395,7 +1395,7 @@ enum FunctionBody {
 
 #[derive(Clone, Debug, PartialEq)]
 struct LoopState {
-    break_target: BranchTarget,
+    break_target: JumpTarget,
     continue_block: BlockId,
     continue_location_of_variable_to_increment: Option<OpId>,
 }
@@ -1442,7 +1442,7 @@ impl Driver {
         let block = &self.code.blocks[bb];
         let last_instr = self.code.ops[block.ops.last().copied().unwrap()].as_mir_instr().unwrap();
         assert!(
-            matches!(last_instr, Instr::Br(_) | Instr::CondBr { .. } | Instr::SwitchBr { .. } | Instr::Ret { .. } | Instr::LegacyIntrinsic { intr: LegacyIntrinsic::Panic, .. }),
+            matches!(last_instr, Instr::Jump(_) | Instr::CondBr { .. } | Instr::SwitchBr { .. } | Instr::Ret { .. } | Instr::LegacyIntrinsic { intr: LegacyIntrinsic::Panic, .. }),
             "expected terminal instruction before moving on to next block, found {:?}",
             last_instr,
         );
@@ -1711,7 +1711,7 @@ impl Driver {
             let terminal = *block.ops.last().unwrap();
             let terminal = self.code.ops[terminal].as_mir_instr().unwrap();
             // TODO: continue the transformation even if there are basic block arguments
-            if let Instr::Br(other) = terminal && other.arguments.is_empty() && other.bb != block_id {
+            if let Instr::Jump(other) = terminal && other.arguments.is_empty() && other.bb != block_id {
                 replace_list.push((block_id, other.bb));
                 delete_list.insert(block_id);
                 did_something = true;
@@ -1751,7 +1751,7 @@ impl Driver {
         let terminal = *self.code.blocks[block].ops.last().unwrap();
         let terminal = self.code.ops[terminal].as_mir_instr().unwrap();
         match terminal {
-            Instr::Br(target) => self.traverse_descendants(func, visited, target.bb),
+            Instr::Jump(target) => self.traverse_descendants(func, visited, target.bb),
             Instr::CondBr { true_target, false_target, .. } => {
                 self.traverse_descendants(func, visited, true_target.bb);
                 self.traverse_descendants(func, visited, false_target.bb);
@@ -1791,7 +1791,7 @@ impl Driver {
                             } else {
                                 false_target
                             };
-                            transformer.q_replace_instr(terminal, Instr::Br(destination.clone()));
+                            transformer.q_replace_instr(terminal, Instr::Jump(destination.clone()));
                         }
                     },
                     Instr::SwitchBr { scrutinee, cases, catch_all_target } => {
@@ -1801,7 +1801,7 @@ impl Driver {
                                 .find(|case| *scrutinee == case.value)
                                 .map(|case| &case.target)
                                 .unwrap_or(&catch_all_target);
-                            transformer.q_replace_instr(terminal, Instr::Br(destination.clone()));
+                            transformer.q_replace_instr(terminal, Instr::Jump(destination.clone()));
                         }
                     },
                     _ => {},
@@ -2027,7 +2027,7 @@ impl Driver {
                 _ => Type::Error,
             },
             &Instr::AddressOfStatic(statik) => b.statics[statik].val.ty().mut_ptr(),
-            Instr::Ret(_) | Instr::Br(_) | Instr::CondBr { .. } | Instr::SwitchBr { .. } => Type::Never,
+            Instr::Ret(_) | Instr::Jump(_) | Instr::CondBr { .. } | Instr::SwitchBr { .. } => Type::Never,
             Instr::Parameter(ty) => ty.clone(),
             &Instr::DirectFieldAccess { val, index } => {
                 let base_ty = self.type_of(val);
@@ -2239,7 +2239,7 @@ impl DriverRef<'_> {
         }
     }
 
-    fn build_if_expr_recurse(&mut self, b: &mut FunctionBuilder, condition: ExprId, then_scope: ImperScopeId, result_location: Option<OpId>, true_target: BranchTarget, false_target: BranchTarget, post_target: BranchTarget, ctx: Context, tp: &dyn TypeProvider) {
+    fn build_if_expr_recurse(&mut self, b: &mut FunctionBuilder, condition: ExprId, then_scope: ImperScopeId, result_location: Option<OpId>, true_target: JumpTarget, false_target: JumpTarget, post_target: JumpTarget, ctx: Context, tp: &dyn TypeProvider) {
         self.build_expr(
             b,
             condition,
@@ -2265,13 +2265,13 @@ impl DriverRef<'_> {
         };
 
         let true_bb = self.write().create_bb(b);
-        let mut false_target = BranchTarget::from(self.write().create_bb(b));
+        let mut false_target = JumpTarget::from(self.write().create_bb(b));
         // specifies whether or not we created the `post_bb` within this call to build_if_expr().
         // If not, we mustn't call start_bb() on it later, because it may already have been completed.
         let mut we_own_post_target = true;
         let post_target = if else_scope.is_some() {
-            BranchTarget::from(self.write().create_bb(b))
-        } else if let ControlDest::Branch(target) = &ctx.control {
+            JumpTarget::from(self.write().create_bb(b))
+        } else if let ControlDest::Jump(target) = &ctx.control {
             false_target = target.clone();
             we_own_post_target = false;
             target.clone()
@@ -2299,7 +2299,7 @@ impl DriverRef<'_> {
                     drop(d);
                     let true_bb = self.write().create_bb(b);
                     let false_target = if else_scope.is_some() {
-                        BranchTarget::from(self.write().create_bb(b))
+                        JumpTarget::from(self.write().create_bb(b))
                     } else {
                         post_target.clone()
                     };
@@ -2784,11 +2784,11 @@ impl DriverRef<'_> {
                 let test_bb = self.write().create_bb(b);
                 let loop_bb = self.write().create_bb(b);
                 let post_target = match &ctx.control {
-                    ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenBranch { .. } => BranchTarget::from(self.write().create_bb(b)),
-                    ControlDest::Branch(block) => block.clone(),
+                    ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenJump { .. } => JumpTarget::from(self.write().create_bb(b)),
+                    ControlDest::Jump(block) => block.clone(),
                 };
 
-                self.write().push_instr(b, Instr::Br(test_bb.into()), expr);
+                self.write().push_instr(b, Instr::Jump(test_bb.into()), expr);
                 self.write().end_current_bb(b);
                 self.write().start_bb(b, test_bb);
                 self.build_expr(b, condition, Context::new(0, DataDest::Branch(loop_bb.into(), post_target.clone()), ControlDest::Continue), tp);
@@ -2800,15 +2800,15 @@ impl DriverRef<'_> {
                     continue_location_of_variable_to_increment: None,
                 };
                 b.loops.push_at(loop_id, loop_state);
-                self.build_scope(b, scope, Context::new(0, DataDest::Void, ControlDest::Branch(test_bb.into())), tp);
+                self.build_scope(b, scope, Context::new(0, DataDest::Void, ControlDest::Jump(test_bb.into())), tp);
 
                 match ctx.control {
-                    ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenBranch { .. } => {
+                    ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenJump { .. } => {
                         self.write().start_bb(b, post_target.bb);
                         VOID_INSTR.direct()
                     },
                     // Already handled this above
-                    ControlDest::Branch(_) => return VOID_INSTR.direct(),
+                    ControlDest::Jump(_) => return VOID_INSTR.direct(),
                 }
             },
             Expr::For { loop_id, binding, lower_bound, upper_bound, scope } => {
@@ -2827,11 +2827,11 @@ impl DriverRef<'_> {
                 let test_bb = self.write().create_bb(b);
                 let loop_bb = self.write().create_bb(b);
                 let post_target = match &ctx.control {
-                    ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenBranch { .. } => BranchTarget::from(self.write().create_bb(b)),
-                    ControlDest::Branch(target) => target.clone(),
+                    ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenJump { .. } => JumpTarget::from(self.write().create_bb(b)),
+                    ControlDest::Jump(target) => target.clone(),
                 };
 
-                self.write().push_instr(b, Instr::Br(test_bb.into()), expr);
+                self.write().push_instr(b, Instr::Jump(test_bb.into()), expr);
                 self.write().end_current_bb(b);
                 self.write().start_bb(b, test_bb);
                 let cur_binding_value = self.write().push_instr_with_name(b, Instr::Load(binding_location), binding, &binding_name);
@@ -2846,22 +2846,22 @@ impl DriverRef<'_> {
                     continue_location_of_variable_to_increment: Some(binding_location),
                 };
                 b.loops.push_at(loop_id, loop_state);
-                self.build_scope(b, scope, Context::new(0, DataDest::Void, ControlDest::IncrementVariableAndThenBranch { location: binding_location, target: test_bb.into() }), tp);
+                self.build_scope(b, scope, Context::new(0, DataDest::Void, ControlDest::IncrementVariableAndThenJump { location: binding_location, target: test_bb.into() }), tp);
 
                 match &ctx.control {
-                    ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenBranch { .. } => {
+                    ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenJump { .. } => {
                         self.write().start_bb(b, post_target.bb);
                         VOID_INSTR.direct()
                     },
                     // Already handled this above
-                    ControlDest::Branch(_) => return VOID_INSTR.direct(),
+                    ControlDest::Jump(_) => return VOID_INSTR.direct(),
                 }
             },
             Expr::Break(loop_id) => {
                 drop(d);
                 let loop_id = loop_id.expect("loop id should be filled in by MIR generation time");
                 let loop_state = b.loops[loop_id].clone();
-                let branch = self.write().push_instr(b, Instr::Br(loop_state.break_target.clone()), expr);
+                let branch = self.write().push_instr(b, Instr::Jump(loop_state.break_target.clone()), expr);
                 self.write().end_current_bb(b);
                 // Must create unreachable basic block in case there are more statements in this loop
                 let unreachable_bb = self.write().create_bb(b);
@@ -2876,7 +2876,7 @@ impl DriverRef<'_> {
                 if let Some(variable_to_increment) = loop_state.continue_location_of_variable_to_increment {
                     self.write().increment_variable(b, variable_to_increment);
                 }
-                let branch = self.write().push_instr(b, Instr::Br(loop_state.continue_block.into()), expr);
+                let branch = self.write().push_instr(b, Instr::Jump(loop_state.continue_block.into()), expr);
                 self.write().end_current_bb(b);
                 // Must create unreachable basic block in case there are more statements in this loop
                 let unreachable_bb = self.write().create_bb(b);
@@ -3024,17 +3024,17 @@ impl Driver {
 
     fn handle_control(&mut self, b: &mut FunctionBuilder, val: Value, control: ControlDest) -> Value {
         match control {
-            ControlDest::Branch(target) => {
-                let val: Value = self.push_instr(b, Instr::Br(target), val.instr).direct();
+            ControlDest::Jump(target) => {
+                let val: Value = self.push_instr(b, Instr::Jump(target), val.instr).direct();
                 self.end_current_bb(b);
                 val
             },
-            ControlDest::IncrementVariableAndThenBranch { location, target } => {
+            ControlDest::IncrementVariableAndThenJump { location, target } => {
                 // *location += 1
                 self.increment_variable(b, location);
 
                 // br block
-                let val = self.push_instr(b, Instr::Br(target), val.instr).direct();
+                let val = self.push_instr(b, Instr::Jump(target), val.instr).direct();
                 self.end_current_bb(b);
                 val
             },
@@ -3068,7 +3068,7 @@ impl DriverRef<'_> {
                     } else {
                         false_target
                     };
-                    Instr::Br(target)
+                    Instr::Jump(target)
                 } else {
                     Instr::CondBr { condition: op, true_target, false_target }
                 };
