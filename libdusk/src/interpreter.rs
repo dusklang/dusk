@@ -25,7 +25,7 @@ use crate::ast::{LegacyIntrinsic, EnumId, GenericParamId, ExternFunctionRef, Ext
 use crate::dvm::{MessageKind, Call, self};
 use crate::mir::{JumpTarget, Const, ExternFunction, FuncId, Instr, InstrId, StaticId};
 use crate::ty::{EnumType, FloatWidth, FunctionType, IntWidth, LegacyInternalType, QualType, StructType, Type};
-use crate::code::{OpId, BlockId};
+use crate::code::{BlockId, Op, OpId};
 use crate::internal_types::{DuskBridge, InternalField, internal_fields};
 
 use crate::driver::{DRIVER, Driver, DriverRef};
@@ -353,8 +353,18 @@ pub struct StackFrame {
 }
 
 impl StackFrame {
-    fn jump_to(&mut self, target: &JumpTarget) {
+    fn jump_to(&mut self, target: &JumpTarget, d: &Driver) {
         self.block = target.bb;
+        for (i, &arg) in target.arguments.iter().enumerate() {
+            let op = d.code.blocks[target.bb].ops[i];
+            let Op::MirInstr(ref param, param_instr_id, _) = d.code.ops[op] else {
+                panic!("expected MIR instruction");
+            };
+            assert!(matches!(param, Instr::Parameter(_)));
+            let arg_instr_id = d.code.ops[arg].get_mir_instr_id().expect("MIR instruction");
+            // let arg_value = self.results[
+            self.results[param_instr_id] = self.results[arg_instr_id].clone();
+        }
         self.pc = 0;
     }
 
@@ -1732,13 +1742,13 @@ impl DriverRef<'_> {
                     return Ok(Some(val));
                 },
                 Instr::Jump(target) => {
-                    frame.jump_to(target);
+                    frame.jump_to(target, &d);
                     return Ok(None);
                 },
                 Instr::CondBr { condition, true_target, false_target } => {
-                    let condition = frame.get_val(*condition, &*self.read()).as_bool();
+                    let condition = frame.get_val(*condition, &*d).as_bool();
                     let target = if condition { true_target } else { false_target };
-                    frame.jump_to(target);
+                    frame.jump_to(target, &d);
                     return Ok(None);
                 },
                 &Instr::SwitchBr { scrutinee, ref cases, ref catch_all_target } => {
@@ -1762,7 +1772,7 @@ impl DriverRef<'_> {
                     }.unwrap_or(catch_all_target.clone());
 
                     let frame = stack.last_mut().unwrap();
-                    frame.jump_to(&target);
+                    frame.jump_to(&target, &d);
                     return Ok(None);
                 },
                 &Instr::Variant { enuum, index, payload } => {
