@@ -1834,6 +1834,10 @@ struct MirCopier {
     old_to_new: HashMap<OpId, OpId>,
 }
 
+struct BlockMetadata {
+    param_tys: SmallVec<[Type; 2]>,
+}
+
 impl DriverRef<'_> {
     fn instruction_is_const(&self, instr: OpId) -> bool {
         let d = self.read();
@@ -1941,6 +1945,61 @@ impl DriverRef<'_> {
         }
     }
 
+    fn check_jump_target(&self, target: &JumpTarget, block_metadata: &HashMap<BlockId, BlockMetadata>) {
+        // TODO: check that all jump targets include arguments for all parameters, and that their types match
+        let metadata = &block_metadata[&target.bb];
+        assert_eq!(target.arguments.len(), metadata.param_tys.len(), "number of basic block arguments != params");
+
+        let d = self.read();
+        for (&arg, param_ty) in target.arguments.iter().zip(&metadata.param_tys) {
+            let arg_ty = d.code.ops[arg].get_mir_instr_type().unwrap();
+            assert!(arg_ty.trivially_convertible_to(param_ty), "basic block argument type doesn't match param type ({:?}, {:?})", arg_ty, param_ty);
+        }
+    }
+
+    fn check_basic_block_params(&self, func: &Function) {
+        let mut block_metadata = HashMap::<BlockId, BlockMetadata>::new();
+        let d = self.read();
+        for &bb in &func.blocks {
+            let block = &d.code.blocks[bb];
+            let mut expecting_parameters = true;
+            let mut param_tys = SmallVec::new();
+            for &op in &block.ops {
+                let instr = d.code.ops[op].as_mir_instr().unwrap();
+                if let Instr::Parameter(ty) = instr {
+                    assert!(expecting_parameters, "Parameter instruction in the middle of a block");
+                    param_tys.push(ty.clone());
+                } else {
+                    expecting_parameters = false;
+                }
+            }
+
+            block_metadata.insert(bb, BlockMetadata { param_tys });
+        }
+
+        for &bb in &func.blocks {
+            let block = &d.code.blocks[bb];
+            let metadata = &block_metadata[&bb];
+            for &op in &block.ops[metadata.param_tys.len()..] {
+                let instr = d.code.ops[op].as_mir_instr().unwrap();
+                match instr {
+                    Instr::Jump(target) => self.check_jump_target(target, &block_metadata),
+                    Instr::CondBr { true_target, false_target, .. } => {
+                        self.check_jump_target(true_target, &block_metadata);
+                        self.check_jump_target(false_target, &block_metadata);
+                    },
+                    Instr::SwitchBr { cases, catch_all_target, .. } => {
+                        for case in cases {
+                            self.check_jump_target(&case.target, &block_metadata);
+                        }
+                        self.check_jump_target(catch_all_target, &block_metadata);
+                    },
+                    _ => {},
+                }
+            }
+        }
+    }
+
     fn check_no_invalid_instructions(&self, func: &Function) {
         let d = self.read();
         for &block in &func.blocks {
@@ -1977,6 +2036,7 @@ impl DriverRef<'_> {
     fn validate_function(&self, func: &Function) {
         self.read().code.mir.check_all_blocks_ended(func);
         self.check_no_invalid_instructions(func);
+        self.check_basic_block_params(func);
     }
 }
 
