@@ -362,10 +362,9 @@ impl StackFrame {
             };
             assert!(matches!(param, Instr::Parameter(_)));
             let arg_instr_id = d.code.ops[arg].get_mir_instr_id().expect("MIR instruction");
-            // let arg_value = self.results[
             self.results[param_instr_id] = self.results[arg_instr_id].clone();
         }
-        self.pc = 0;
+        self.pc = target.arguments.len();
     }
 
     fn canonicalize_type(&self, ty: &Type) -> Type {
