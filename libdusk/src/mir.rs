@@ -129,14 +129,13 @@ impl Instr {
     // TODO: allocating a Vec here sucks!
     pub fn referenced_values(&self) -> Vec<OpId> {
         match *self {
-            Instr::Void | Instr::Const(_) | Instr::Alloca(_) | Instr::AddressOfStatic(_) | Instr::Jump(_)
+            Instr::Void | Instr::Const(_) | Instr::Alloca(_) | Instr::AddressOfStatic(_)
                 | Instr::GenericParam(_) | Instr::Parameter(_) | Instr::FunctionRef { .. } | Instr::Invalid | Instr::ObjcClassRef { .. } => vec![],
             Instr::LogicalNot(op) | Instr::Reinterpret(op, _) | Instr::Truncate(op, _) | Instr::SignExtend(op, _)
                 | Instr::ZeroExtend(op, _) | Instr::FloatCast(op, _) | Instr::FloatToInt(op, _)
                 | Instr::IntToFloat(op, _) | Instr::Load(op) | Instr::Pointer { op, .. }
                 | Instr::DirectFieldAccess { val: op, .. } | Instr::IndirectFieldAccess { val: op, .. }
-                | Instr::DiscriminantAccess { val: op } | Instr::Ret(op) | Instr::CondBr { condition: op, .. }
-                | Instr::SwitchBr { scrutinee: op, .. } | Instr::Variant { payload: op, .. } | Instr::PayloadAccess { val: op, .. }
+                | Instr::DiscriminantAccess { val: op } | Instr::Ret(op) | Instr::Variant { payload: op, .. } | Instr::PayloadAccess { val: op, .. }
                 | Instr::InternalFieldAccess { val: op, .. } => vec![op],
             Instr::Store { location, value } => vec![location, value],
             Instr::Call { arguments: ref ops, .. } | Instr::ExternCall { arguments: ref ops, .. }
@@ -144,6 +143,15 @@ impl Instr {
                 | Instr::Enum { variants: ref ops, .. } | Instr::StructLit { fields: ref ops, .. }
                 | Instr::Intrinsic { arguments: ref ops, .. } => ops.iter().copied().collect(),
             Instr::FunctionTy { ref param_tys, ret_ty, .. } => param_tys.iter().copied().chain(std::iter::once(ret_ty)).collect(),
+            Instr::Jump(ref target) => target.arguments.iter().copied().collect(),
+            Instr::CondBr { condition: op, ref true_target, ref false_target } => std::iter::once(op)
+                .chain(true_target.arguments.iter().copied())
+                .chain(false_target.arguments.iter().copied())
+                .collect(),
+            Instr::SwitchBr { scrutinee: op, ref cases, ref catch_all_target } => std::iter::once(op)
+                .chain(cases.iter().flat_map(|case| case.target.arguments.iter().copied()))
+                .chain(catch_all_target.arguments.iter().copied())
+                .collect()
         }
     }
 
