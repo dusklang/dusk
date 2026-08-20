@@ -165,15 +165,19 @@ impl Instr {
                 *target = new;
             }
         }
+        fn replace_args(target: &mut JumpTarget, old: OpId, new: OpId) {
+            for arg in &mut target.arguments {
+                replace(arg, old, new);
+            }
+        }
         match self {
-            Instr::Void | Instr::Const(_) | Instr::Alloca(_) | Instr::AddressOfStatic(_) | Instr::Jump(_)
+            Instr::Void | Instr::Const(_) | Instr::Alloca(_) | Instr::AddressOfStatic(_)
                 | Instr::GenericParam(_) | Instr::Parameter(_) | Instr::FunctionRef { .. } | Instr::Invalid | Instr::ObjcClassRef { .. } => {},
             Instr::LogicalNot(op) | Instr::Reinterpret(op, _) | Instr::Truncate(op, _) | Instr::SignExtend(op, _)
                 | Instr::ZeroExtend(op, _) | Instr::FloatCast(op, _) | Instr::FloatToInt(op, _)
                 | Instr::IntToFloat(op, _) | Instr::Load(op) | Instr::Pointer { op, .. }
                 | Instr::DirectFieldAccess { val: op, .. } | Instr::IndirectFieldAccess { val: op, .. }
-                | Instr::DiscriminantAccess { val: op } | Instr::Ret(op) | Instr::CondBr { condition: op, .. }
-                | Instr::SwitchBr { scrutinee: op, .. } | Instr::Variant { payload: op, .. } | Instr::PayloadAccess { val: op, .. }
+                | Instr::DiscriminantAccess { val: op } | Instr::Ret(op) | Instr::Variant { payload: op, .. } | Instr::PayloadAccess { val: op, .. }
                 | Instr::InternalFieldAccess { val: op, .. } => replace(op, old, new),
             Instr::Store { location, value } => {
                 replace(location, old, new);
@@ -192,7 +196,20 @@ impl Instr {
                     replace(op, old, new);
                 }
                 replace(ret_ty, old, new);
-            }
+            },
+            Instr::Jump(target) => replace_args(target, old, new),
+            Instr::CondBr { condition: op, true_target, false_target } => {
+                replace(op, old, new);
+                replace_args(true_target, old, new);
+                replace_args(false_target, old, new);
+            },
+            Instr::SwitchBr { scrutinee: op, cases, catch_all_target } => {
+                replace(op, old, new);
+                for case in cases {
+                    replace_args(&mut case.target, old, new);
+                }
+                replace_args(catch_all_target, old, new);
+            },
         }
     }
 }
