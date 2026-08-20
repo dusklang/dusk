@@ -2427,10 +2427,11 @@ impl DriverRef<'_> {
             },
             Expr::Set { lhs, rhs } => {
                 drop(d);
+                let ctx = ctx.new_data_dest(DataDest::Read);
                 let val = self.build_expr(
                     b,
                     rhs,
-                    ctx.new_data_dest(DataDest::Read),
+                    ctx,
                     tp,
                 );
                 let instr = self.write().handle_indirection(b, val);
