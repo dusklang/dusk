@@ -1,3 +1,4 @@
+use std::assert_matches;
 use std::collections::{HashSet, HashMap};
 use std::ffi::CString;
 use std::ops::Range;
@@ -457,22 +458,20 @@ enum Decl {
 }
 
 /// What to do with a value
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 enum DataDest {
     /// This value needs to be returned from the current function
     Ret,
     /// A particular value needs to be assigned to this value
     Receive { value: OpId },
-    /// This value needs to be assigned to a particular expression
-    Set { dest: ExprId },
-    /// This value needs to be written to a particular memory location
-    Store { location: OpId },
+    /// Jump to a particular basic block argument, with this value as an argument
+    JumpWithArgument(BlockId),
     /// This value just needs to be read
     Read,
     /// This value will never be used
     Void,
     /// If this value is true, jump to the first target, otherwise jump to the second
-    Branch(JumpTarget, JumpTarget),
+    Branch(BlockId, BlockId),
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -526,19 +525,19 @@ impl Indirection for OpId {
 }
 
 /// Where to go after the current value is computed (whether implicitly or explicitly, such as via a `break` in a loop)
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 enum ControlDest {
     Continue,
     Unreachable,
-    Jump(JumpTarget),
+    Jump(BlockId),
     IncrementVariableAndThenJump {
         location: OpId,
-        target: JumpTarget
+        target: BlockId,
     },
     RetVoid,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 struct Context {
     /// Relative to a Value indirection of 0, a:
     ///   - positive indirection means I need to move the value further away from me
@@ -559,16 +558,19 @@ impl Context {
         Context { indirection, data, control }
     }
 
-    fn redirect(&self, read: Option<OpId>, kontinue: Option<JumpTarget>) -> Context {
+    fn redirect(&self, kontinue: BlockId, pass_value_as_argument: bool) -> Context {
+        let jump_with_argument = pass_value_as_argument && matches!(self.data, DataDest::Read);
         Context::new(
             self.indirection,
-            match (&self.data, read) {
-                (DataDest::Read, Some(location)) => DataDest::Store { location },
-                (x, _) => x.clone(),
+            if jump_with_argument {
+                DataDest::JumpWithArgument(kontinue)
+            } else {
+                self.data
             },
-            match (&self.control, kontinue) {
-                (ControlDest::Continue, Some(target)) => ControlDest::Jump(target),
-                (x, _) => x.clone(),
+            match &self.control {
+                _ if jump_with_argument => ControlDest::Unreachable,
+                ControlDest::Continue => ControlDest::Jump(kontinue.into()),
+                x => x.clone(),
             }
         )
     }
@@ -1395,7 +1397,7 @@ enum FunctionBody {
 
 #[derive(Clone, Debug, PartialEq)]
 struct LoopState {
-    break_target: JumpTarget,
+    break_block: BlockId,
     continue_block: BlockId,
     continue_location_of_variable_to_increment: Option<OpId>,
 }
@@ -2168,7 +2170,10 @@ impl DriverRef<'_> {
                     let name = self.read().display_item(decl).to_string();
                     let location = self.write().push_instr_with_name(b, Instr::Alloca(ty), decl, name);
                     b.stored_decl_locs.push_at(id, location);
-                    self.build_expr(b, root_expr, Context::new(0, DataDest::Store { location }, ControlDest::Continue), tp);
+                    let val = self.build_expr(b, root_expr, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                    let instr = self.write().handle_indirection(b, val);
+                    let range = self.read().get_range(location) + self.read().get_range(instr);
+                    self.write().push_instr(b, Instr::Store { location, value: instr }, range);
                 },
                 ast::Decl::Function { .. } => {},
                 _ => panic!("Invalid scope item"),
@@ -2299,57 +2304,46 @@ impl DriverRef<'_> {
         }
     }
 
-    fn build_if_expr_recurse(&mut self, b: &mut FunctionBuilder, condition: ExprId, then_scope: ImperScopeId, result_location: Option<OpId>, true_target: JumpTarget, false_target: JumpTarget, post_target: JumpTarget, ctx: Context, tp: &dyn TypeProvider) {
+    fn build_if_expr_recurse(&mut self, b: &mut FunctionBuilder, condition: ExprId, then_scope: ImperScopeId, true_bb: BlockId, false_bb: BlockId, post_bb: BlockId, pass_value_as_argument: bool, ctx: Context, tp: &dyn TypeProvider) {
         self.build_expr(
             b,
             condition,
-            Context::new(0, DataDest::Branch(true_target.clone(), false_target), ControlDest::Continue),
+            Context::new(0, DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
             tp,
         );
-        self.write().start_bb(b, true_target.bb);
-        self.write().push_instr_with_name(b, Instr::Parameter(Type::Bool), condition, "result");
-        let scope_ctx = ctx.redirect(result_location, Some(post_target.clone()));
+        self.write().start_bb(b, true_bb);
+        let scope_ctx = ctx.redirect(post_bb, pass_value_as_argument);
         self.build_scope(b, then_scope, scope_ctx, tp);
     }
 }
 
 impl DriverRef<'_> {
     fn build_if_expr(&mut self, b: &mut FunctionBuilder, expr: ExprId, ty: Type, condition: ExprId, then_scope: ImperScopeId, else_scope: Option<ImperScopeId>, ctx: Context, tp: &dyn TypeProvider) -> Value {
-        // Create a location on the stack to store the result of the if, if necessary
-        let result_location = match (&ctx.data, else_scope) {
-            (DataDest::Read, Some(_)) => Some(
-                // TODO: this will be the wrong type if indirection != 0
-                self.write().push_instr(b, Instr::Alloca(ty), expr)
-            ),
-            _ => None,
-        };
-
         let true_bb = self.write().create_bb(b);
-        let mut false_target = JumpTarget::from(self.write().create_bb(b));
-        // specifies whether or not we created the `post_bb` within this call to build_if_expr().
-        // If not, we mustn't call start_bb() on it later, because it may already have been completed.
-        let mut we_own_post_target = true;
-        let post_target = if else_scope.is_some() {
-            JumpTarget::from(self.write().create_bb(b))
-        } else if let ControlDest::Jump(target) = &ctx.control {
-            false_target = target.clone();
-            we_own_post_target = false;
-            target.clone()
-        } else {
-            false_target.clone()
+        let mut false_bb: BlockId = self.write().create_bb(b);
+        if matches!(ctx.data, DataDest::Read) {
+            assert_matches!(ctx.control, ControlDest::Continue);
+        }
+        let pass_value_as_argument = matches!((&ctx.data, else_scope), (DataDest::Read, Some(_)));
+        let (post_bb, we_own_post_bb) = match ctx.control {
+            ControlDest::Jump(target) => (target, false),
+            _ => (self.write().create_bb(b), true),
         };
+        if else_scope.is_none() && !pass_value_as_argument {
+            false_bb = post_bb;
+        }
 
-        self.build_if_expr_recurse(b, condition, then_scope, result_location, true_bb.into(), false_target.clone(), post_target.clone(), ctx.clone(), tp);
+        self.build_if_expr_recurse(b, condition, then_scope, true_bb, false_bb, post_bb, pass_value_as_argument, ctx, tp);
         let mut next_scope = else_scope;
-        let mut next_target = false_target.clone();
+        let mut next_bb = false_bb;
 
         // Iterate through a linked list of if-else-if branches. Terminate when you find an if with no else branch or
         // an else branch with something other than an if.
         // This is done to reduce the size of the stack when generating code for long chains of if statements.
         while let Some(cur) = next_scope {
-            self.write().start_bb(b, next_target.bb);
+            self.write().start_bb(b, next_bb);
 
-            let scope_ctx = ctx.redirect(result_location, Some(post_target.clone()));
+            let scope_ctx = ctx.redirect(post_bb, pass_value_as_argument);
             let terminal_expr = self.read().code.ast.imper_scopes[cur].terminal_expr;
             let block = self.read().code.ast.imper_scopes[cur].block;
             // If the current scope consists of a lone if expression
@@ -2358,14 +2352,14 @@ impl DriverRef<'_> {
                 if let Expr::If { condition, then_scope, else_scope } = ef!(d, terminal_expr.ast) {
                     drop(d);
                     let true_bb = self.write().create_bb(b);
-                    let false_target = if else_scope.is_some() {
-                        JumpTarget::from(self.write().create_bb(b))
+                    let false_bb = if else_scope.is_some() {
+                        self.write().create_bb(b)
                     } else {
-                        post_target.clone()
+                        post_bb
                     };
-                    self.build_if_expr_recurse(b, condition, then_scope, result_location, true_bb.into(), false_target.clone(), post_target.clone(), scope_ctx, tp);
+                    self.build_if_expr_recurse(b, condition, then_scope, true_bb, false_bb, post_bb, pass_value_as_argument, scope_ctx, tp);
                     next_scope = else_scope;
-                    next_target = false_target;
+                    next_bb = false_bb;
                     continue;
                 }
             }
@@ -2374,12 +2368,13 @@ impl DriverRef<'_> {
             next_scope = None;
         }
 
-        if we_own_post_target {
-            self.write().start_bb(b, post_target.bb);
-            if let Some(location) = result_location {
-                self.write().push_instr(b, Instr::Load(location), expr).direct()
+        if we_own_post_bb {
+            self.write().start_bb(b, post_bb);
+            if pass_value_as_argument {
+                // TODO: this might be the wrong type if indirection != 0
+                self.write().push_instr(b, Instr::Parameter(ty.clone()), expr).direct()
             } else if else_scope.is_none() {
-                self.handle_context(b, VOID_INSTR.direct(), ctx, tp)
+                self.handle_context(b, VOID_INSTR.direct(), ctx)
             } else {
                 VOID_INSTR.direct()
             }
@@ -2407,12 +2402,19 @@ impl DriverRef<'_> {
             },
             Expr::Set { lhs, rhs } => {
                 drop(d);
-                return self.build_expr(
+                let val = self.build_expr(
                     b,
                     rhs,
-                    ctx.new_data_dest(DataDest::Set { dest: lhs }),
+                    ctx.new_data_dest(DataDest::Read),
                     tp,
-                )
+                );
+                let instr = self.write().handle_indirection(b, val);
+                return self.build_expr(
+                    b,
+                    lhs,
+                    Context::new(0, DataDest::Receive { value: instr }, ctx.control),
+                    tp,
+                );
             },
             Expr::DeclRef { id, .. } => {
                 drop(d);
@@ -2479,13 +2481,12 @@ impl DriverRef<'_> {
                             assert_eq!(arguments.len(), 2);
                             let (lhs, rhs) = (arguments[0], arguments[1]);
                             let left_true_bb = self.write().create_bb(b);
-                            let location = matches!(ctx.data, DataDest::Read)
-                                .then(|| self.write().push_instr(b, Instr::Alloca(ty), expr));
-                            if let DataDest::Branch(true_target, false_target) = ctx.data {
+                            let pass_value_as_argument = matches!(ctx.data, DataDest::Read);
+                            if let DataDest::Branch(true_bb, false_bb) = ctx.data {
                                 self.build_expr(
                                     b,
                                     lhs,
-                                    Context::new(0, DataDest::Branch(left_true_bb.into(), false_target.clone()), ControlDest::Continue),
+                                    Context::new(0, DataDest::Branch(left_true_bb, false_bb), ControlDest::Continue),
                                     tp,
                                 );
 
@@ -2493,7 +2494,7 @@ impl DriverRef<'_> {
                                 return self.build_expr(
                                     b,
                                     rhs,
-                                    Context::new(0, DataDest::Branch(true_target, false_target), ControlDest::Continue),
+                                    Context::new(0, DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
                                     tp,
                                 );
                             } else {
@@ -2508,18 +2509,18 @@ impl DriverRef<'_> {
 
                                 self.write().start_bb(b, left_true_bb);
                                 // No further branching required, because (true && foo) <=> foo
-                                let branch_ctx = ctx.redirect(location, Some(after_bb.into()));
-                                self.build_expr(b, rhs, branch_ctx.clone(), tp);
+                                let branch_ctx = ctx.redirect(after_bb, pass_value_as_argument);
+                                self.build_expr(b, rhs, branch_ctx, tp);
 
                                 self.write().start_bb(b, left_false_bb);
                                 let false_const = Const::Bool(false);
                                 let name = self.read().fmt_const_for_instr_name(&false_const).to_string();
                                 let false_val = self.write().push_instr_with_name(b, Instr::Const(false_const), expr, name).direct();
-                                self.handle_context(b, false_val, branch_ctx, tp);
+                                self.handle_context(b, false_val, branch_ctx);
 
                                 self.write().start_bb(b, after_bb);
-                                if let Some(location) = location {
-                                    self.write().push_instr(b, Instr::Load(location), expr).direct()
+                                if pass_value_as_argument {
+                                    self.write().push_instr(b, Instr::Parameter(ty), expr).direct()
                                 } else {
                                     return VOID_INSTR.direct()
                                 }
@@ -2529,11 +2530,11 @@ impl DriverRef<'_> {
                             assert_eq!(arguments.len(), 2);
                             let (lhs, rhs) = (arguments[0], arguments[1]);
                             let left_false_bb = self.write().create_bb(b);
-                            if let DataDest::Branch(true_target, false_target) = ctx.data {
+                            if let DataDest::Branch(true_bb, false_bb) = ctx.data {
                                 self.build_expr(
                                     b,
                                     lhs,
-                                    Context::new(0, DataDest::Branch(true_target.clone(), left_false_bb.into()), ControlDest::Continue),
+                                    Context::new(0, DataDest::Branch(true_bb, left_false_bb), ControlDest::Continue),
                                     tp,
                                 );
 
@@ -2541,14 +2542,13 @@ impl DriverRef<'_> {
                                 return self.build_expr(
                                     b,
                                     rhs,
-                                    Context::new(0, DataDest::Branch(true_target, false_target), ControlDest::Continue),
+                                    Context::new(0, DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
                                     tp
                                 );
                             } else {
                                 let left_true_bb = self.write().create_bb(b);
                                 let after_bb = self.write().create_bb(b);
-                                let location = matches!(ctx.data, DataDest::Read)
-                                    .then(|| self.write().push_instr(b, Instr::Alloca(ty), expr));
+                                let pass_value_as_argument = matches!(ctx.data, DataDest::Read);
                                 self.build_expr(
                                     b,
                                     lhs,
@@ -2560,15 +2560,15 @@ impl DriverRef<'_> {
                                 let true_const = Const::Bool(true);
                                 let name = self.read().fmt_const_for_instr_name(&true_const).to_string();
                                 let true_val = self.write().push_instr_with_name(b, Instr::Const(true_const), expr, name).direct();
-                                let branch_ctx = ctx.redirect(location, Some(after_bb.into()));
-                                self.handle_context(b, true_val, branch_ctx.clone(), tp);
+                                let branch_ctx = ctx.redirect(after_bb, pass_value_as_argument);
+                                self.handle_context(b, true_val, branch_ctx);
 
                                 self.write().start_bb(b, left_false_bb);
-                                self.build_expr(b, rhs, branch_ctx.clone(), tp);
+                                self.build_expr(b, rhs, branch_ctx, tp);
 
                                 self.write().start_bb(b, after_bb);
-                                if let Some(location) = location {
-                                    self.write().push_instr(b, Instr::Load(location), expr).direct()
+                                if pass_value_as_argument {
+                                    self.write().push_instr(b, Instr::Parameter(ty), expr).direct()
                                 } else {
                                     return VOID_INSTR.direct()
                                 }
@@ -2817,15 +2817,9 @@ impl DriverRef<'_> {
             Expr::Switch { scrutinee, context: pattern_matching_ctx, ref cases } => {
                 let _cases = cases.clone();
                 drop(d);
-                let result_location = match &ctx.data {
-                    DataDest::Read => Some(
-                        // TODO: this will be the wrong type if indirection != 0
-                        self.write().push_instr(b, Instr::Alloca(ty), expr)
-                    ),
-                    _ => None,
-                };
+                let pass_value_as_argument = matches!(ctx.data, DataDest::Read);
                 let post_bb = self.write().create_bb(b);
-                let scope_ctx = ctx.redirect(result_location, Some(post_bb.into()));
+                let scope_ctx = ctx.redirect(post_bb, pass_value_as_argument);
                 let decision_tree = tp.switch_expr_decision_tree(pattern_matching_ctx).as_ref().expect("should always set decision tree on switch expr");
                 let pattern_matching_ctx = tp.pattern_matching_context(pattern_matching_ctx).as_ref().expect("should always set pattern matching context on switch expr");
                 let mut scope_blocks = HashMap::<ImperScopeId, BlockId>::new();
@@ -2833,8 +2827,9 @@ impl DriverRef<'_> {
                 self.handle_pattern_matching(b, expr, scope_ctx, tp, scrutinee, decision_tree, pattern_matching_ctx, &mut scope_blocks, &mut scrutinee_values, post_bb);
 
                 self.write().start_bb(b, post_bb);
-                if let Some(location) = result_location {
-                    self.write().push_instr(b, Instr::Load(location), expr).direct()
+                if pass_value_as_argument {
+                    // TODO: this will be the wrong type if indirection != 0
+                    self.write().push_instr(b, Instr::Parameter(ty), expr).direct()
                 } else {
                     self.write().handle_control(b, VOID_INSTR.direct(), ctx.control.clone())
                 }
@@ -2843,19 +2838,19 @@ impl DriverRef<'_> {
                 drop(d);
                 let test_bb = self.write().create_bb(b);
                 let loop_bb = self.write().create_bb(b);
-                let post_target = match &ctx.control {
-                    ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenJump { .. } => JumpTarget::from(self.write().create_bb(b)),
-                    ControlDest::Jump(block) => block.clone(),
+                let post_bb = match ctx.control {
+                    ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenJump { .. } => self.write().create_bb(b),
+                    ControlDest::Jump(block) => block,
                 };
 
                 self.write().push_instr(b, Instr::Jump(test_bb.into()), expr);
                 self.write().end_current_bb(b);
                 self.write().start_bb(b, test_bb);
-                self.build_expr(b, condition, Context::new(0, DataDest::Branch(loop_bb.into(), post_target.clone()), ControlDest::Continue), tp);
+                self.build_expr(b, condition, Context::new(0, DataDest::Branch(loop_bb, post_bb), ControlDest::Continue), tp);
 
                 self.write().start_bb(b, loop_bb);
                 let loop_state = LoopState {
-                    break_target: post_target.clone(),
+                    break_block: post_bb,
                     continue_block: test_bb,
                     continue_location_of_variable_to_increment: None,
                 };
@@ -2864,7 +2859,7 @@ impl DriverRef<'_> {
 
                 match ctx.control {
                     ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenJump { .. } => {
-                        self.write().start_bb(b, post_target.bb);
+                        self.write().start_bb(b, post_bb);
                         VOID_INSTR.direct()
                     },
                     // Already handled this above
@@ -2880,15 +2875,18 @@ impl DriverRef<'_> {
                 let binding_name = self.read().display_item(binding).to_string();
                 let binding_location = self.write().push_instr_with_name(b, Instr::Alloca(binding_ty), binding, &binding_name);
                 b.stored_decl_locs.push_at(binding_stored_decl_id, binding_location);
-                self.build_expr(b, lower_bound, Context::new(0, DataDest::Store { location: binding_location }, ControlDest::Continue), tp);
+                let val = self.build_expr(b, lower_bound, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
+                let instr = self.write().handle_indirection(b, val);
+                let range = self.read().get_range(binding_location) + self.read().get_range(instr);
+                self.write().push_instr(b, Instr::Store { location: binding_location, value: instr }, range);
                 let upper_bound = self.build_expr(b, upper_bound, Context::default(), tp);
                 let upper_bound = self.write().handle_indirection(b, upper_bound);
 
                 let test_bb = self.write().create_bb(b);
                 let loop_bb = self.write().create_bb(b);
-                let post_target = match &ctx.control {
-                    ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenJump { .. } => JumpTarget::from(self.write().create_bb(b)),
-                    ControlDest::Jump(target) => target.clone(),
+                let post_bb = match ctx.control {
+                    ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenJump { .. } => self.write().create_bb(b),
+                    ControlDest::Jump(target) => target,
                 };
 
                 self.write().push_instr(b, Instr::Jump(test_bb.into()), expr);
@@ -2896,12 +2894,12 @@ impl DriverRef<'_> {
                 self.write().start_bb(b, test_bb);
                 let cur_binding_value = self.write().push_instr_with_name(b, Instr::Load(binding_location), binding, &binding_name);
                 let less_than = self.write().push_instr_with_name(b, Instr::LegacyIntrinsic { arguments: smallvec![cur_binding_value, upper_bound], ty: Type::Bool, intr: LegacyIntrinsic::Less }, binding, &binding_name);
-                self.write().push_instr_with_name(b, Instr::CondBr { condition: less_than, true_target: loop_bb.into(), false_target: post_target.clone() }, binding, &binding_name);
+                self.write().push_instr_with_name(b, Instr::CondBr { condition: less_than, true_target: loop_bb.into(), false_target: post_bb.into() }, binding, &binding_name);
                 self.write().end_current_bb(b);
 
                 self.write().start_bb(b, loop_bb);
                 let loop_state = LoopState {
-                    break_target: post_target.clone(),
+                    break_block: post_bb,
                     continue_block: test_bb,
                     continue_location_of_variable_to_increment: Some(binding_location),
                 };
@@ -2910,7 +2908,7 @@ impl DriverRef<'_> {
 
                 match &ctx.control {
                     ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenJump { .. } => {
-                        self.write().start_bb(b, post_target.bb);
+                        self.write().start_bb(b, post_bb);
                         VOID_INSTR.direct()
                     },
                     // Already handled this above
@@ -2921,7 +2919,7 @@ impl DriverRef<'_> {
                 drop(d);
                 let loop_id = loop_id.expect("loop id should be filled in by MIR generation time");
                 let loop_state = b.loops[loop_id].clone();
-                let branch = self.write().push_instr(b, Instr::Jump(loop_state.break_target.clone()), expr);
+                let branch = self.write().push_instr(b, Instr::Jump(loop_state.break_block.into()), expr);
                 self.write().end_current_bb(b);
                 // Must create unreachable basic block in case there are more statements in this loop
                 let unreachable_bb = self.write().create_bb(b);
@@ -2954,7 +2952,7 @@ impl DriverRef<'_> {
                 );
             },
         };
-        self.handle_context(b, val, ctx, tp)
+        self.handle_context(b, val, ctx)
     }
 
     fn get_scrutinee_value(&mut self, b: &mut FunctionBuilder, tp: &dyn TypeProvider, og_scrutinee: ExprId, scrutinee: SwitchScrutineeValueId, pattern_matching_ctx: &IndexVec<SwitchScrutineeValueId, TypedSwitchScrutineeValue>, scrutinee_values: &mut HashMap<SwitchScrutineeValueId, Value>) -> Value {
@@ -3021,7 +3019,7 @@ impl DriverRef<'_> {
 
                 for (mir_case, node) in mir_cases.iter().zip(nodes) {
                     self.write().start_bb(b, mir_case.target.bb);
-                    self.handle_pattern_matching(b, expr, ctx.clone(), tp, og_scrutinee, node, pattern_matching_ctx, scope_blocks, scrutinee_values, post_bb);
+                    self.handle_pattern_matching(b, expr, ctx, tp, og_scrutinee, node, pattern_matching_ctx, scope_blocks, scrutinee_values, post_bb);
                 }
 
                 self.write().start_bb(b, default_bb);
@@ -3085,7 +3083,7 @@ impl Driver {
     fn handle_control(&mut self, b: &mut FunctionBuilder, val: Value, control: ControlDest) -> Value {
         match control {
             ControlDest::Jump(target) => {
-                let val: Value = self.push_instr(b, Instr::Jump(target), val.instr).direct();
+                let val: Value = self.push_instr(b, Instr::Jump(target.into()), val.instr).direct();
                 self.end_current_bb(b);
                 val
             },
@@ -3094,7 +3092,7 @@ impl Driver {
                 self.increment_variable(b, location);
 
                 // br block
-                let val = self.push_instr(b, Instr::Jump(target), val.instr).direct();
+                let val = self.push_instr(b, Instr::Jump(target.into()), val.instr).direct();
                 self.end_current_bb(b);
                 val
             },
@@ -3110,7 +3108,7 @@ impl Driver {
 }
 
 impl DriverRef<'_> {
-    fn handle_context(&mut self, b: &mut FunctionBuilder, mut val: Value, ctx: Context, tp: &dyn TypeProvider) -> Value {
+    fn handle_context(&mut self, b: &mut FunctionBuilder, mut val: Value, ctx: Context) -> Value {
         val = val.adjusted(ctx.indirection);
         match ctx.data {
             DataDest::Read => return val,
@@ -3120,17 +3118,23 @@ impl DriverRef<'_> {
                 self.write().end_current_bb(b);
                 return val;
             },
-            DataDest::Branch(true_target, false_target) => {
+            DataDest::JumpWithArgument(bb) => {
+                let instr = self.write().handle_indirection(b, val);
+                let val = self.write().push_instr(b, Instr::Jump(JumpTarget { bb, arguments: smallvec![instr] }), instr).direct();
+                self.write().end_current_bb(b);
+                return val;
+            },
+            DataDest::Branch(true_bb, false_bb) => {
                 let op = self.write().handle_indirection(b, val);
                 let instr = if let &Instr::Const(Const::Bool(val)) = self.read().code.ops[op].as_mir_instr().unwrap() {
-                    let target = if val {
-                        true_target
+                    let bb = if val {
+                        true_bb
                     } else {
-                        false_target
+                        false_bb
                     };
-                    Instr::Jump(target)
+                    Instr::Jump(bb.into())
                 } else {
-                    Instr::CondBr { condition: op, true_target, false_target }
+                    Instr::CondBr { condition: op, true_target: true_bb.into(), false_target: false_bb.into() }
                 };
                 let val = self.write().push_instr(b, instr, op).direct();
                 self.write().end_current_bb(b);
@@ -3141,20 +3145,6 @@ impl DriverRef<'_> {
                 let range = self.read().get_range(location) + self.read().get_range(value);
                 self.write().push_instr(b, Instr::Store { location, value }, range);
             },
-            DataDest::Store { location } => {
-                let instr = self.write().handle_indirection(b, val);
-                let range = self.read().get_range(location) + self.read().get_range(instr);
-                self.write().push_instr(b, Instr::Store { location, value: instr }, range);
-            },
-            DataDest::Set { dest } => {
-                let instr = self.write().handle_indirection(b, val);
-                return self.build_expr(
-                    b,
-                    dest,
-                    Context::new(0, DataDest::Receive { value: instr }, ctx.control),
-                    tp,
-                );
-            }
             DataDest::Void => {},
         }
 
