@@ -1436,6 +1436,7 @@ struct FunctionBuilder {
     stored_decl_locs: IndexVec<StoredDeclId, OpId>,
     instr_namespace: InstrNamespace,
     loops: IndexVec<LoopId, LoopState>,
+    pattern_matching_scrutinees: HashMap<PatternMatchingContextId, HashMap<SwitchScrutineeValueId, Value>>,
 }
 
 #[derive(Debug)]
@@ -1514,6 +1515,7 @@ impl DriverRef<'_> {
             stored_decl_locs: IndexVec::new(),
             instr_namespace,
             loops: Default::default(),
+            pattern_matching_scrutinees: Default::default(),
         };
         self.write().start_bb(&mut b, entry);
         let ctx = Context::new(0, DataDest::Ret, ControlDest::Unreachable);
@@ -2261,9 +2263,8 @@ impl DriverRef<'_> {
                 DeclRef::Value(b.stored_decl_locs[id].indirect())
             },
             Decl::PatternBinding { context, scrutinee, root_scrutinee  } => {
-                let mut scrutinee_values = HashMap::new();
-                let context = tp.pattern_matching_context(context).as_ref().expect("must set pattern matching context before MIR generation");
-                let scrutinee_value = self.get_scrutinee_value(b, tp, root_scrutinee, scrutinee, &context, &mut scrutinee_values);
+                let context_val = tp.pattern_matching_context(context).as_ref().expect("must set pattern matching context before MIR generation");
+                let scrutinee_value = self.get_scrutinee_value(b, tp, root_scrutinee, scrutinee, &context_val, context);
                 DeclRef::Value(scrutinee_value)
             },
             Decl::Parameter { index } => {
@@ -2842,17 +2843,17 @@ impl DriverRef<'_> {
                 drop(d);
                 return self.build_if_expr(b, expr, ty, condition, then_scope, else_scope, ctx, tp)
             },
-            Expr::Switch { scrutinee, context: pattern_matching_ctx, ref cases } => {
+            Expr::Switch { scrutinee, context: pattern_matching_ctx_id, ref cases } => {
                 let _cases = cases.clone();
                 drop(d);
                 let pass_value_as_argument = matches!(ctx.data, DataDest::Read);
                 let post_bb = self.write().create_bb(b);
                 let scope_ctx = ctx.redirect(post_bb, pass_value_as_argument);
-                let decision_tree = tp.switch_expr_decision_tree(pattern_matching_ctx).as_ref().expect("should always set decision tree on switch expr");
-                let pattern_matching_ctx = tp.pattern_matching_context(pattern_matching_ctx).as_ref().expect("should always set pattern matching context on switch expr");
+                let decision_tree = tp.switch_expr_decision_tree(pattern_matching_ctx_id).as_ref().expect("should always set decision tree on switch expr");
+                let pattern_matching_ctx = tp.pattern_matching_context(pattern_matching_ctx_id).as_ref().expect("should always set pattern matching context on switch expr");
                 let mut scope_blocks = HashMap::<ImperScopeId, BlockId>::new();
                 let mut scrutinee_values = HashMap::new();
-                self.handle_pattern_matching(b, expr, scope_ctx, tp, scrutinee, decision_tree, pattern_matching_ctx, &mut scope_blocks, &mut scrutinee_values, post_bb);
+                self.handle_pattern_matching(b, expr, scope_ctx, tp, scrutinee, decision_tree, pattern_matching_ctx_id, pattern_matching_ctx, &mut scope_blocks, &mut scrutinee_values, post_bb);
 
                 self.write().start_bb(b, post_bb);
                 if pass_value_as_argument {
@@ -2983,7 +2984,8 @@ impl DriverRef<'_> {
         self.handle_context(b, val, ctx)
     }
 
-    fn get_scrutinee_value(&mut self, b: &mut FunctionBuilder, tp: &dyn TypeProvider, og_scrutinee: ExprId, scrutinee: SwitchScrutineeValueId, pattern_matching_ctx: &IndexVec<SwitchScrutineeValueId, TypedSwitchScrutineeValue>, scrutinee_values: &mut HashMap<SwitchScrutineeValueId, Value>) -> Value {
+    fn get_scrutinee_value(&mut self, b: &mut FunctionBuilder, tp: &dyn TypeProvider, og_scrutinee: ExprId, scrutinee: SwitchScrutineeValueId, pattern_matching_ctx: &IndexVec<SwitchScrutineeValueId, TypedSwitchScrutineeValue>, pattern_matching_ctx_id: PatternMatchingContextId) -> Value {
+        let scrutinee_values = b.pattern_matching_scrutinees.entry(pattern_matching_ctx_id).or_default();
         if let Some(scrutinee) = scrutinee_values.get(&scrutinee) {
             return scrutinee.clone();
         }
@@ -2991,7 +2993,7 @@ impl DriverRef<'_> {
         let scrutinee_value = &pattern_matching_ctx[scrutinee];
         let value = match scrutinee_value.kind {
             TypedSwitchScrutineeValueKind::EnumPayload { enum_value, variant_index } => {
-                let val = self.get_scrutinee_value(b, tp, og_scrutinee, enum_value, pattern_matching_ctx, scrutinee_values);
+                let val = self.get_scrutinee_value(b, tp, og_scrutinee, enum_value, pattern_matching_ctx, pattern_matching_ctx_id);
                 let val = self.write().handle_indirection(b, val);
                 self.write().push_instr(b, Instr::PayloadAccess { val, variant_index }, og_scrutinee).direct()
             },
@@ -3000,18 +3002,19 @@ impl DriverRef<'_> {
             },
             TypedSwitchScrutineeValueKind::VoidValue => VOID_INSTR.direct(),
         };
+        let scrutinee_values = b.pattern_matching_scrutinees.get_mut(&pattern_matching_ctx_id).expect("just inserted entry above");
         scrutinee_values.insert(scrutinee, value);
 
         value
     }
 
-    fn handle_pattern_matching(&mut self, b: &mut FunctionBuilder, expr: ExprId, ctx: Context, tp: &dyn TypeProvider, og_scrutinee: ExprId, node: &SwitchDecisionNode, pattern_matching_ctx: &IndexVec<SwitchScrutineeValueId, TypedSwitchScrutineeValue>, scope_blocks: &mut HashMap<ImperScopeId, BlockId>, scrutinee_values: &mut HashMap<SwitchScrutineeValueId, Value>, post_bb: BlockId) {
+    fn handle_pattern_matching(&mut self, b: &mut FunctionBuilder, expr: ExprId, ctx: Context, tp: &dyn TypeProvider, og_scrutinee: ExprId, node: &SwitchDecisionNode, pattern_matching_ctx_id: PatternMatchingContextId, pattern_matching_ctx: &IndexVec<SwitchScrutineeValueId, TypedSwitchScrutineeValue>, scope_blocks: &mut HashMap<ImperScopeId, BlockId>, scrutinee_values: &mut HashMap<SwitchScrutineeValueId, Value>, post_bb: BlockId) {
         match *node {
             SwitchDecisionNode::Branch { scrutinee: scrutinee_id, ref paths, ref default_path } => {
                 let begin_bb = b.current_block;
                 self.write().start_bb(b, begin_bb);
 
-                let scrutinee_val = self.get_scrutinee_value(b, tp, og_scrutinee, scrutinee_id, pattern_matching_ctx, scrutinee_values);
+                let scrutinee_val = self.get_scrutinee_value(b, tp, og_scrutinee, scrutinee_id, pattern_matching_ctx, pattern_matching_ctx_id);
                 // TODO: support pattern matching of pointers
                 let scrutinee = self.write().handle_indirection(b, scrutinee_val);
                 let scrutinee_ty = self.read().type_of(scrutinee).clone();
@@ -3047,19 +3050,18 @@ impl DriverRef<'_> {
 
                 for (mir_case, node) in mir_cases.iter().zip(nodes) {
                     self.write().start_bb(b, mir_case.target.bb);
-                    self.handle_pattern_matching(b, expr, ctx, tp, og_scrutinee, node, pattern_matching_ctx, scope_blocks, scrutinee_values, post_bb);
+                    self.handle_pattern_matching(b, expr, ctx, tp, og_scrutinee, node, pattern_matching_ctx_id, pattern_matching_ctx, scope_blocks, scrutinee_values, post_bb);
                 }
 
                 self.write().start_bb(b, default_bb);
                 if let Some(default_path) = &default_path {
-                    self.handle_pattern_matching(b, expr, ctx, tp, og_scrutinee, default_path, pattern_matching_ctx, scope_blocks, scrutinee_values, post_bb);
+                    self.handle_pattern_matching(b, expr, ctx, tp, og_scrutinee, default_path, pattern_matching_ctx_id, pattern_matching_ctx, scope_blocks, scrutinee_values, post_bb);
                 } else {
                     // TODO: add unreachable instruction I guess?
                     self.write().push_instr(b, Instr::LegacyIntrinsic { arguments: SmallVec::new(), ty: Type::Never, intr: LegacyIntrinsic::Panic }, SourceRange::default());
                     self.write().end_current_bb(b);
                 }
             },
-            // TODO: codegen for bindings
             SwitchDecisionNode::Destination { destination, .. } => {
                 self.build_scope(b, destination, ctx, tp);
             },
