@@ -233,7 +233,6 @@ pub fn match_scrutinee(driver: &mut Driver, tp: &mut dyn TypeProvider, scrutinee
             for (variant_index, mut child_matrix) in child_matrices {
                 let variant_name = driver.code.ast.enums[enuum.identity].variants[variant_index].name;
                 let scrutinee_value = *driver.code.ast.pattern_matching_contexts[context].scrutinee_map.get(&SwitchScrutineeValue::EnumPayload { enum_value: scrutinees[0].value, variant_name }).unwrap();
-                driver.get_typed_pattern_matching_context(tp, context);
                 let tctx = tp.pattern_matching_context(context).as_ref().unwrap();
                 let scrutinee_ty = tctx[scrutinee_value].ty.clone();
                 let payload_scrutinee = SwitchScrutinee { value: scrutinee_value, ty: scrutinee_ty };

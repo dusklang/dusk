@@ -213,7 +213,8 @@ impl tir::AssignedDecl {
 }
 
 impl tir::PatternBinding {
-    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_1(&self, driver: &mut Driver, tp: &mut dyn TypeProvider) {
+        driver.get_typed_pattern_matching_context(tp, self.context);
         if let Some(context) = tp.pattern_matching_context(self.context).as_ref() {
             let binding_ty = context[self.scrutinee_value].ty.clone();
             tp.decl_type_mut(self.decl_id).ty = binding_ty;
@@ -425,6 +426,7 @@ impl tir::Expr<tir::For> {
 
 impl tir::Expr<tir::Switch> {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut dyn TypeProvider) {
+        driver.get_typed_pattern_matching_context(tp, self.context);
         let scrutinee_ty = driver.solve_constraints(tp, self.scrutinee).expect("Ambiguous type for scrutinee in switch expression").qual_ty.ty;
 
         let scrutinees = vec![SwitchScrutinee { value: ORIGINAL_SCRUTINEE_VALUE, ty: scrutinee_ty }];
