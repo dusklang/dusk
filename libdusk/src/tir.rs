@@ -806,11 +806,9 @@ impl Driver {
             match df!(decl_id.ast) {
                 // NOTE: type 1 dependencies are currently added to LoopBinding by its parent `for` loop; see below.
                 ast::Decl::Parameter { .. } | ast::Decl::LegacyIntrinsic { .. } | ast::Decl::Intrinsic(_) | ast::Decl::MethodIntrinsic(_) | ast::Decl::Field { .. } | ast::Decl::ReturnValue | ast::Decl::GenericParam(_) | ast::Decl::Variant { .. } | ast::Decl::FunctionPrototype { .. } | ast::Decl::InternalField(_) | ast::Decl::LoopBinding { .. } | ast::Decl::ObjcClassRef { .. } => {},
-                ast::Decl::PatternBinding { .. } => {
-                    // let scrutinee = self.code.ast.pattern_binding_decls[binding_id].scrutinee;
-
-                    // // TODO: find out why this seems to cause an infinite loop if it's moved to build_more_tir() and changed to a type 2 dependency
-                    // self.tir.graph.add_type1_dep(id, ef!(scrutinee.item));
+                ast::Decl::PatternBinding { root_scrutinee, .. } => {
+                    // TODO: find out why this seems to cause an infinite loop if it's moved to build_more_tir() and changed to a type 2 dependency
+                    self.tir.graph.add_type1_dep(id, ef!(root_scrutinee.item));
                 },
                 ast::Decl::Static(expr) | ast::Decl::Const { assigned_expr: expr, .. } | ast::Decl::Stored { root_expr: expr, .. } => self.tir.graph.add_type1_dep(id, ef!(expr.item)),
                 ast::Decl::Function { scope, .. } => {

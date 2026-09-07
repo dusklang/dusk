@@ -823,6 +823,9 @@ impl Driver {
                         _ => {
                             let scope = self.begin_imper_scope();
                             let scope_id = scope.id();
+                            for decl in bindings {
+                                self.imper_scoped_decl(decl);
+                            }
                             let case_expr = self.parse_expr(p).unwrap_or_else(|err| err);
                             let separators = self.eat_separators(p);
                             let has_semicolon = matches!(separators, SeparatorResult::Explicit(TokenKind::Semicolon));
