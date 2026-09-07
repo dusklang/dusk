@@ -17,7 +17,7 @@ use crate::pattern_matching::{SwitchDecisionNode, SwitchDecisionValue, SwitchScr
 use crate::source_info::SourceRange;
 
 use crate::internal_types::InternalField;
-use crate::ast::{self, DeclId, ExprId, EnumId, DeclRefId, ImperScopeId, NewNamespaceId, LegacyIntrinsic, IntrinsicId, Expr, StoredDeclId, GenericParamId, Item, ExternModId, ExternFunctionRef, VOID_TYPE, StructId, LoopId};
+use crate::ast::{self, DeclId, DeclRefId, EnumId, Expr, ExprId, ExternFunctionRef, ExternModId, GenericParamId, ImperScopeId, IntrinsicId, Item, LegacyIntrinsic, LoopId, NewNamespaceId, PatternMatchingContextId, StoredDeclId, StructId, VOID_TYPE};
 use crate::ty::{EnumType, FloatWidth, FunctionType, LegacyInternalType, StructType, Type};
 use crate::driver::{Driver, DriverRef};
 use crate::typechecker as tc;
@@ -468,7 +468,7 @@ enum Decl {
     ExternFunction(ExternFunctionRef),
     ObjcClassRef { extern_mod: ExternModId, index: usize },
     Parameter { index: usize },
-    PatternBinding,
+    PatternBinding { context: PatternMatchingContextId, scrutinee: SwitchScrutineeValueId, root_scrutinee: ExprId },
     LegacyIntrinsic(LegacyIntrinsic, Type),
     Intrinsic(IntrinsicId),
     MethodIntrinsic(IntrinsicId),
@@ -942,9 +942,9 @@ impl DriverRef<'_> {
                 self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
-            ast::Decl::PatternBinding { .. } => {
+            ast::Decl::PatternBinding { context, scrutinee, root_scrutinee, .. } => {
                 drop(d);
-                let decl = Decl::PatternBinding;
+                let decl = Decl::PatternBinding { context, scrutinee, root_scrutinee };
                 self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
@@ -2260,9 +2260,11 @@ impl DriverRef<'_> {
             Decl::Stored(id) => {
                 DeclRef::Value(b.stored_decl_locs[id].indirect())
             },
-            Decl::PatternBinding { .. } => {
-                todo!()
-                // DeclRef::Value(b.pattern_binding_locs[&binding_id])
+            Decl::PatternBinding { context, scrutinee, root_scrutinee  } => {
+                let mut scrutinee_values = HashMap::new();
+                let context = tp.pattern_matching_context(context).as_ref().expect("must set pattern matching context before MIR generation");
+                let scrutinee_value = self.get_scrutinee_value(b, tp, root_scrutinee, scrutinee, &context, &mut scrutinee_values);
+                DeclRef::Value(scrutinee_value)
             },
             Decl::Parameter { index } => {
                 let entry_block = b.blocks[0];
