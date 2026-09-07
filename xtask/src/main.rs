@@ -41,7 +41,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             };
             let npm = format!("npm{}", script_ext);
             let vsce = format!("vsce{}", script_ext);
-            let editor_name = include_str!("../editor-name.txt");
+            let editor_name = include_str!("../editor-name.txt").trim();
             let code = format!("{}{}", editor_name, script_ext);
             let esbuild = format!("esbuild{}", script_ext);
             cmd!(shell, "{npm} install").run()?;
