@@ -193,12 +193,17 @@ impl Value {
         bytes[0] != 0
     }
 
-    fn as_enum(&self) -> Enum {
-        let bytes = self.as_bytes_without_driver();
-        let (discriminant_bytes, payload_bytes) = bytes.split_at(4);
+    fn as_enum(&self, enum_ty: &EnumType, d: &Driver) -> Enum {
+        let bytes = self.as_bytes(d);
+        const DISCRIMINANT_SIZE: usize = 4;
+        let discriminant_bytes = &bytes[..DISCRIMINANT_SIZE];
+        let discriminant = u32::from_le_bytes(discriminant_bytes.try_into().unwrap());
+        let layout = d.layout_enum(enum_ty);
+        let payload_offset = layout.payload_offsets[discriminant as usize];
+        assert!(payload_offset >= DISCRIMINANT_SIZE);
         Enum {
-            discriminant: u32::from_le_bytes(discriminant_bytes.try_into().unwrap()),
-            payload: Value::from_bytes(payload_bytes),
+            discriminant,
+            payload: Value::from_bytes(&bytes[payload_offset..]),
         }
     }
 
@@ -657,7 +662,7 @@ impl Driver {
                 let enum_val = &self.code.ast.enums[enuum.identity];
                 let valid = enum_val.variants.iter().map(|variant| variant.payload_ty).all(|ty| ty.is_none());
                 assert!(valid, "In order to output value of type {:?} as constant, it must not have any payloads", Type::Enum(enuum));
-                Const::Variant { enuum: enuum.identity, index: val.as_enum().discriminant as usize, payload_tys: enuum.payload_tys.clone() }
+                Const::Variant { enuum: enuum.identity, index: val.as_enum(&enuum, self).discriminant as usize, payload_tys: enuum.payload_tys.clone() }
             },
             Type::Void => Const::Void,
             Type::LegacyInternal(LegacyInternalType::StringLiteral) => match val.as_internal() {
@@ -1779,11 +1784,13 @@ impl DriverRef<'_> {
                     Value::from_variant(&*self.read(), enuum, index, payload)
                 },
                 &Instr::PayloadAccess { val, variant_index: _ } => {
-                    let enum_val = frame.get_val(val, &*self.read()).as_enum();
+                    let enum_ty = d.type_of(val).as_enum().unwrap();
+                    let enum_val = frame.get_val(val, &*self.read()).as_enum(enum_ty, &d);
                     enum_val.payload
                 },
                 &Instr::DiscriminantAccess { val } => {
-                    let enuum = frame.get_val(val, &*self.read()).as_enum();
+                    let enum_ty = d.type_of(val).as_enum().unwrap();
+                    let enuum = frame.get_val(val, &*self.read()).as_enum(&enum_ty, &d);
                     Value::from_u32(enuum.discriminant)
                 },
                 &Instr::DirectFieldAccess { val, index } => {

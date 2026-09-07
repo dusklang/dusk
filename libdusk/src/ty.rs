@@ -146,6 +146,13 @@ impl Type {
         }
     }
 
+    pub fn as_enum(&self) -> Option<&EnumType> {
+        match self {
+            Type::Enum(enum_ty) => Some(enum_ty),
+            _ => None,
+        }
+    }
+
     pub fn return_ty(&self) -> Option<&Type> {
         self.as_function().map(|fun| fun.return_ty.as_ref())
     }
