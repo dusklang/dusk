@@ -3061,7 +3061,11 @@ impl DriverRef<'_> {
             SwitchDecisionNode::Destination { destination, .. } => {
                 self.build_scope(b, destination, ctx, tp);
             },
-            SwitchDecisionNode::Failure => panic!("pattern matching failure"),
+            SwitchDecisionNode::Failure => {
+                self.write().diag.report_error_no_range_msg("Pattern matching failure", expr);
+                self.write().push_instr(b, Instr::LegacyIntrinsic { arguments: SmallVec::new(), ty: Type::Never, intr: LegacyIntrinsic::Panic }, expr);
+                self.write().end_current_bb(b);
+            }
         }
     }
 }
