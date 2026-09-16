@@ -11,6 +11,8 @@ use dusk_proc_macros::DuskBridge;
 use crate::target::Arch;
 use crate::ast::{StructId, EnumId, GenericParamId, NewNamespaceId, TypeVarId};
 
+define_index_type!(pub struct TypeId = u32;);
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum IntWidth {
     W8, W16, W32, W64, Pointer,

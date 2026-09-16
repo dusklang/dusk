@@ -383,7 +383,7 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
         quote! {
             impl crate::internal_types::DuskBridge for #decl_name {
                 fn register(d: &mut crate::driver::Driver) {
-                    use std::any::TypeId;
+                    use std::any;
                     use crate::{ast::*, ty::*, mir::*};
                     use crate::index_vec::empty_range;
 
@@ -393,7 +393,7 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
                     let expr = d.add_const_expr(konst);
                     d.add_decl_to_path(#bridged_name, #module, Decl::Const { assigned_expr: expr, generic_params: empty_range() }, None);
 
-                    d.code.ast.bridged_types.insert(TypeId::of::<Self>(), ty);
+                    d.code.ast.bridged_types.insert(any::TypeId::of::<Self>(), ty);
                 }
 
                 fn bridge_from_dusk(value: &crate::interpreter::Value, _d: &crate::driver::Driver) -> Self {
@@ -415,12 +415,12 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
 
             impl crate::internal_types::DuskBridge for &'static mut #decl_name {
                 fn register(d: &mut crate::driver::Driver) {
-                    use std::any::TypeId;
+                    use std::any;
                     use crate::{ast::*, ty::*, mir::*};
 
-                    let base_ty = d.code.ast.bridged_types.get(&TypeId::of::<#decl_name>()).unwrap().clone();
+                    let base_ty = d.code.ast.bridged_types.get(&any::TypeId::of::<#decl_name>()).unwrap().clone();
 
-                    d.code.ast.bridged_types.insert(TypeId::of::<Self>(), base_ty.mut_ptr());
+                    d.code.ast.bridged_types.insert(any::TypeId::of::<Self>(), base_ty.mut_ptr());
                 }
 
                 fn bridge_from_dusk(value: &crate::interpreter::Value, _d: &crate::driver::Driver) -> Self {

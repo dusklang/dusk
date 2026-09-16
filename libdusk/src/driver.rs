@@ -9,6 +9,7 @@ use crate::code::Code;
 use crate::internal_types::InternalFieldDecls;
 use crate::source_info::SourceMap;
 use crate::token::TokenVec;
+use crate::type_interner::TypeInterner;
 use crate::ast;
 use crate::tir;
 use crate::error::DiagnosticReporter;
@@ -27,6 +28,7 @@ pub struct Driver {
     pub src_map: SourceMap,
     pub toks: IndexVec<SourceFileId, TokenVec>,
     pub interner: StringInterner,
+    pub types: TypeInterner,
     pub ast: ast::Builder,
     pub tir: tir::Builder,
     pub diag: DiagnosticReporter,
@@ -47,6 +49,7 @@ impl Driver {
             src_map,
             toks: IndexVec::new(),
             interner: StringInterner::new(),
+            types: TypeInterner::new(),
             ast: ast::Builder::default(),
             tir: tir::Builder::default(),
             diag: Default::default(),

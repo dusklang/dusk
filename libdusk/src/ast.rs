@@ -1,4 +1,4 @@
-use std::any::TypeId;
+use std::any;
 use std::ffi::CString;
 use std::collections::HashMap;
 use std::ops::Range;
@@ -561,7 +561,7 @@ pub struct Ast {
     pub new_namespaces: IndexVec<NewNamespaceId, NewNamespace>,
     pub cast_counter: IndexCounter<CastId>,
     pub internal_types: IndexVec<InternalTypeId, InternalType>,
-    pub bridged_types: HashMap<TypeId, Type>,
+    pub bridged_types: HashMap<any::TypeId, Type>,
     pub structs: IndexVec<StructId, Struct>,
     pub enums: IndexVec<EnumId, Enum>,
     pub pattern_matching_contexts: IndexVec<PatternMatchingContextId, PatternMatchingContext>,

@@ -18,6 +18,7 @@ pub mod code;
 pub mod dvm;
 pub mod target;
 
+mod type_interner;
 mod display_adapter;
 mod dep_vec;
 mod lexer;

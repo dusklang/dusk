@@ -1,4 +1,4 @@
-use std::any::TypeId;
+use std::any;
 
 use dusk_proc_macros::DuskBridge;
 
@@ -34,7 +34,7 @@ pub struct Module(pub NewNamespaceId);
 
 pub trait DuskBridge: 'static {
     fn to_dusk_type(d: &Driver) -> Type {
-        let id = TypeId::of::<Self>();
+        let id = any::TypeId::of::<Self>();
 
         d.code.ast.bridged_types[&id].clone()
     }
@@ -45,7 +45,7 @@ pub trait DuskBridge: 'static {
 
 impl DuskBridge for () {
     fn register(d: &mut Driver) {
-        d.code.ast.bridged_types.insert(TypeId::of::<Self>(), Type::Void);
+        d.code.ast.bridged_types.insert(any::TypeId::of::<Self>(), Type::Void);
     }
 
     fn bridge_from_dusk(_value: &Value, _d: &Driver) -> Self {
@@ -59,7 +59,7 @@ impl DuskBridge for () {
 
 impl DuskBridge for &'static str {
     fn register(d: &mut Driver) {
-        d.code.ast.bridged_types.insert(TypeId::of::<Self>(), Type::i8().ptr());
+        d.code.ast.bridged_types.insert(any::TypeId::of::<Self>(), Type::i8().ptr());
     }
 
     fn bridge_from_dusk(value: &Value, _d: &Driver) -> Self {
@@ -73,7 +73,7 @@ impl DuskBridge for &'static str {
 
 impl DuskBridge for Module {
     fn register(d: &mut Driver) {
-        d.code.ast.bridged_types.insert(TypeId::of::<Self>(), Type::Mod);
+        d.code.ast.bridged_types.insert(any::TypeId::of::<Self>(), Type::Mod);
     }
 
     fn bridge_from_dusk(value: &Value, _d: &Driver) -> Self {
@@ -90,7 +90,7 @@ macro_rules! bridge_ints {
         $(
             impl DuskBridge for $int_name {
                 fn register(d: &mut Driver) {
-                    d.code.ast.bridged_types.insert(TypeId::of::<$int_name>(), Type::$int_name());
+                    d.code.ast.bridged_types.insert(any::TypeId::of::<$int_name>(), Type::$int_name());
                 }
 
                 fn bridge_from_dusk(value: &Value, _d: &Driver) -> Self {
