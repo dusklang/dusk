@@ -16,7 +16,7 @@ use lsp_types::{ServerCapabilities, CompletionOptions, WorkspaceServerCapabiliti
 use url::Url;
 
 use libdusk::source_info::{SourceFileId, SourceRange, SourceMap};
-use libdusk::driver::{Driver, DRIVER, DriverRef};
+use libdusk::driver::{Driver, DRIVER, DriverRwRef};
 use libdusk::dvm;
 use dusk_proc_macros::ef;
 use libdusk::target::{Arch, OperatingSystem};
@@ -418,7 +418,7 @@ impl Server {
         self.open_files.borrow_mut().get_mut(path).unwrap()
             .flushed_diagnostics.extend(new_diagnostics);
     }
-    fn analyze_file(&self, path: &Uri) -> (DriverRef<'_>, Option<RealTypeProvider>) {
+    fn analyze_file(&self, path: &Uri) -> (DriverRwRef<'_>, Option<RealTypeProvider>) {
         // I *think* this is safe...
         let salf = AssertUnwindSafe(self);
         let mut file_id = None;
@@ -440,7 +440,7 @@ impl Server {
 
             let file = src_map.add_file_in_memory(Url::parse(path_ref.as_str()).unwrap(), src).unwrap();
             **file_id_ref = Some(file);
-            let mut driver = DriverRef::new(&DRIVER);
+            let mut driver = DriverRwRef::new(&DRIVER);
             *driver.write() = Driver::new(src_map, Arch::default(), OperatingSystem::default(), false);
 
             driver.write().initialize_ast();
@@ -509,7 +509,7 @@ impl Server {
 
             tp
         });
-        let mut driver = DriverRef::new(&DRIVER);
+        let mut driver = DriverRwRef::new(&DRIVER);
         let mut tp = None;
         match unwind_result {
             Ok(type_provider) => tp = type_provider,

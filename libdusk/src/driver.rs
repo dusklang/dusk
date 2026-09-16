@@ -1,5 +1,7 @@
 use std::sync::{RwLock, LazyLock};
 use string_interner::DefaultStringInterner as StringInterner;
+use borrow::traits::*;
+use borrow::partial as p;
 
 use crate::ast::ExprId;
 use crate::mir::Const;
@@ -21,7 +23,8 @@ use crate::interpreter::EvalError;
 
 // This derive is here so that I can initialize the global Driver instance with something. It is *not* recommended that
 // anyone actually uses `Driver` in its default state.
-#[derive(Default)]
+#[derive(Default, borrow::Partial)]
+#[module(crate)]
 pub struct Driver {
     pub arch: Arch,
     pub os: OperatingSystem,
@@ -39,7 +42,7 @@ pub struct Driver {
 
     pub boxed_ints: Vec<usize>,
 }
-pub type DriverRef<'l> = RwRef<'l, Driver>;
+pub type DriverRwRef<'l> = RwRef<'l, Driver>;
 
 impl Driver {
     pub fn new(src_map: SourceMap, arch: Arch, os: OperatingSystem, no_core: bool) -> Self {
@@ -62,7 +65,7 @@ impl Driver {
         }
     }
 }
-impl DriverRef<'_> {
+impl DriverRwRef<'_> {
     pub fn eval_expr(&mut self, expr: ExprId, tp: &dyn TypeProvider) -> Result<Const, EvalError> {
         let func = self.build_standalone_expr(expr, tp);
         let function_ref = FunctionRef::Ref(func);

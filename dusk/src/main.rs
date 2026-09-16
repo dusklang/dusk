@@ -14,7 +14,7 @@ use std::os::unix::fs::PermissionsExt;
 use libdusk::new_code::NewCode;
 use libdusk::ty::Type;
 use libdusk::target::{Arch, OperatingSystem};
-use libdusk::driver::{DRIVER, Driver, DriverRef};
+use libdusk::driver::{DRIVER, Driver, DriverRwRef};
 use libdusk::source_info::SourceMap;
 use libdusk::error::DiagnosticKind;
 
@@ -72,7 +72,7 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
     dvm::launch_coordinator_thread();
     let mut src_map = SourceMap::new();
     let loaded_file = src_map.add_file_on_disk(&opt.input).is_ok();
-    let mut driver = DriverRef::new(&DRIVER);
+    let mut driver = DriverRwRef::new(&DRIVER);
     *driver.write() = Driver::new(src_map, opt.arch, opt.os, opt.no_core);
     driver.write().initialize_ast();
 

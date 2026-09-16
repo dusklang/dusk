@@ -14,7 +14,7 @@ use crate::ty::{EnumType, FunctionType, IntWidth, LegacyInternalType, QualType, 
 use crate::pattern_matching::*;
 use crate::internal_types::InternalNamespace;
 
-use crate::driver::{Driver, DriverRef};
+use crate::driver::{Driver, DriverRwRef};
 use crate::error::Error;
 use crate::new_code::NewCode;
 use crate::ty::BuiltinTraits;
@@ -1477,7 +1477,7 @@ impl Driver {
     }
 }
 
-impl DriverRef<'_> {
+impl DriverRwRef<'_> {
     pub fn type_check(&mut self, units: &Units, tp: &mut dyn TypeProvider, new_code: NewCode) -> Result<(), ()> {
         tp.resize(&self.read(), new_code);
         for unit in &units.units {

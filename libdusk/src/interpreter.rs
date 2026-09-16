@@ -28,7 +28,7 @@ use crate::ty::{EnumType, FloatWidth, FunctionType, IntWidth, LegacyInternalType
 use crate::code::{BlockId, Op, OpId};
 use crate::internal_types::{DuskBridge, InternalField, internal_fields};
 
-use crate::driver::{DRIVER, Driver, DriverRef};
+use crate::driver::{DRIVER, Driver, DriverRwRef};
 use crate::mir::{FunctionRef, function_by_ref};
 use crate::type_provider::TypeProvider;
 #[cfg(target_arch="x86_64")]
@@ -552,7 +552,7 @@ macro_rules! bin_op {
 extern "C" fn interp_ffi_entry_point(func: u32, params: *const *const (), return_value_addr: *mut ()) {
     let func_id = FuncId::new(func as usize);
 
-    let mut driver = DriverRef::new(&DRIVER);
+    let mut driver = DriverRwRef::new(&DRIVER);
 
     let func_ty = driver.read().code.mir.functions[func_id].ty.clone();
     let return_ty = func_ty.return_ty.as_ref().clone();
@@ -728,7 +728,7 @@ impl Driver {
     }
 }
 
-impl DriverRef<'_> {
+impl DriverRwRef<'_> {
     pub fn set_command_line_arguments(&mut self, args: &[OsString]) {
         INTERP.write().unwrap().command_line_args = args.iter().map(|arg| {
             CString::new(arg.to_string_lossy().as_bytes()).unwrap()
@@ -909,7 +909,7 @@ unsafe fn free_dyn_lib(dyn_lib: *mut c_void) {
     unsafe { libc::dlclose(dyn_lib); }
 }
 
-impl DriverRef<'_> {
+impl DriverRwRef<'_> {
     #[cfg(windows)]
     #[cfg(target_arch="x86_64")]
     fn generate_thunk(&self, func: &ExternFunction, func_address: i64, arg_tys: &[Type]) -> region::Allocation {
@@ -1252,7 +1252,7 @@ impl Driver {
 #[derive(Debug)]
 pub struct EvalError;
 
-impl DriverRef<'_> {
+impl DriverRwRef<'_> {
     /// Execute the next instruction. Iff the instruction is a return, this function returns its `Value`. Otherwise, it returns `None`.
     // NOTE FOR CORRECTNESS: If you return an Err() result, you MUST first report an error! Otherwise
     // compilation could end up "succeeding", even though compile-time code execution failed.

@@ -4,7 +4,7 @@ use std::thread::{self, ThreadId};
 use std::sync::{Mutex, LazyLock};
 use std::thread_local;
 
-use crate::driver::{DriverRef, DRIVER};
+use crate::driver::{DriverRwRef, DRIVER};
 use crate::interpreter::{Value, Result as EvalResult};
 use crate::mir::FunctionRef;
 use crate::ty::Type;
@@ -72,14 +72,14 @@ impl DvmServerCoordinator {
         let (call_tx, call_rx) = mpsc::channel::<Call>();
         let (call_response_tx, call_response_rx) = mpsc::channel::<EvalResult<Value>>();
         thread::spawn(move || {
-            let mut driver = DriverRef::new(&DRIVER);
+            let mut driver = DriverRwRef::new(&DRIVER);
             while let Ok(call) = call_rx.recv() {
                 let res = driver.call_direct(call.func_ref, call.arguments, call.generic_arguments);
                 driver.unlock(); // prevent deadlock
                 _ = call_response_tx.send(res);
             }
         });
-        let mut driver = DriverRef::new(&DRIVER);
+        let mut driver = DriverRwRef::new(&DRIVER);
         loop {
             driver.unlock();
             let Ok(message) = self.receiver.recv() else { continue; };
@@ -94,7 +94,7 @@ impl DvmServerCoordinator {
         }
     }
 
-    fn wait_for_response(&mut self, driver: &mut DriverRef, call_response_rx: &mpsc::Receiver<EvalResult<Value>>, id: ThreadId) {
+    fn wait_for_response(&mut self, driver: &mut DriverRwRef, call_response_rx: &mpsc::Receiver<EvalResult<Value>>, id: ThreadId) {
         loop {
             if let Ok(response) = call_response_rx.try_recv() {
                 self.senders[&id].send(Response(response)).unwrap();
@@ -106,7 +106,7 @@ impl DvmServerCoordinator {
         }
     }
 
-    fn handle_message(&mut self, _driver: &mut DriverRef, message: Message) {
+    fn handle_message(&mut self, _driver: &mut DriverRwRef, message: Message) {
         match message.kind {
             MessageKind::Call(_) => unimplemented!("unable to accept another call while the previous one is still in-flight"),
             MessageKind::Connect(new_sender) => {

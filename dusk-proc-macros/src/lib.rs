@@ -569,7 +569,7 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                         };
                         registrations.push(
                             quote! {
-                                fn thunk(d: &mut DriverRef, parameters: Vec<&Value>) -> Value {
+                                fn thunk(d: &mut DriverRwRef, parameters: Vec<&Value>) -> Value {
                                     #(#param_val_decls)*
                                     let val = #implementation(#(#param_val_names),*);
                                     val.bridge_to_dusk(&d.read())
@@ -603,7 +603,7 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
         pub fn register_bridged_rust_methods(d: &mut crate::driver::Driver) {
             use crate::internal_types::DuskBridge;
             use crate::{ast::*, ty::*, mir::*};
-            use crate::driver::DriverRef;
+            use crate::driver::DriverRwRef;
             use crate::ast::Intrinsic;
             use crate::interpreter::Value;
             use smallvec::smallvec;

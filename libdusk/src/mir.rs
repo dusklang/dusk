@@ -19,7 +19,7 @@ use crate::source_info::SourceRange;
 use crate::internal_types::InternalField;
 use crate::ast::{self, DeclId, DeclRefId, EnumId, Expr, ExprId, ExternFunctionRef, ExternModId, GenericParamId, ImperScopeId, IntrinsicId, Item, LegacyIntrinsic, LoopId, NewNamespaceId, PatternMatchingContextId, StoredDeclId, StructId, VOID_TYPE};
 use crate::ty::{EnumType, FloatWidth, FunctionType, LegacyInternalType, StructType, Type};
-use crate::driver::{Driver, DriverRef};
+use crate::driver::{Driver, DriverRwRef};
 use crate::typechecker as tc;
 use crate::type_provider::TypeProvider;
 use tc::CastMethod;
@@ -815,7 +815,7 @@ impl Driver {
     }
 }
 
-impl DriverRef<'_> {
+impl DriverRwRef<'_> {
     pub fn build_mir(&mut self, tp: &dyn TypeProvider) {
         // It is important to hold on to the write lock throughout this entire method, maybe
         self.write();
@@ -827,7 +827,7 @@ impl DriverRef<'_> {
     }
 }
 
-impl DriverRef<'_> {
+impl DriverRwRef<'_> {
     pub fn build_standalone_expr(&mut self, expr: ExprId, tp: &dyn TypeProvider) -> Function {
         let func_ty = FunctionType { param_tys: Vec::new(), return_ty: Box::new(tp.ty(expr).clone()), has_c_variadic_param: false };
         self.build_function(None, func_ty, FunctionBody::Expr(expr), empty_range(), empty_range(), false, tp)
@@ -874,7 +874,7 @@ impl Driver {
     }
 }
 
-impl DriverRef<'_> {
+impl DriverRwRef<'_> {
     fn get_decl(&mut self, id: DeclId, tp: &dyn TypeProvider) -> Decl {
         if let Some(decl) = self.read().mir.decls.get(&id) { return decl.clone(); }
         let d = self.read();
@@ -1481,7 +1481,7 @@ impl Driver {
     }
 }
 
-impl DriverRef<'_> {
+impl DriverRwRef<'_> {
     fn build_function(&mut self, name: Option<Sym>, func_ty: FunctionType, body: FunctionBody, params: Range<DeclId>, generic_params: Range<GenericParamId>, is_comptime: bool, tp: &dyn TypeProvider) -> Function {
         debug_assert_ne!(func_ty.return_ty.as_ref(), &Type::Error, "can't build MIR function with Error return type");
 
@@ -1867,7 +1867,7 @@ struct BlockMetadata {
     param_tys: SmallVec<[Type; 2]>,
 }
 
-impl DriverRef<'_> {
+impl DriverRwRef<'_> {
     fn instruction_is_const(&self, instr: OpId) -> bool {
         let d = self.read();
         let instr = d.code.ops[instr].as_mir_instr().unwrap();
@@ -2182,7 +2182,7 @@ impl Driver {
     }
 }
 
-impl DriverRef<'_> {
+impl DriverRwRef<'_> {
     fn build_scope_item(&mut self, b: &mut FunctionBuilder, item: Item, tp: &dyn TypeProvider) {
         let d = self.read();
         match item {
@@ -2231,7 +2231,7 @@ impl Driver {
     }
 }
 
-impl DriverRef<'_> {
+impl DriverRwRef<'_> {
     fn get_callee_declref(&mut self, b: &mut FunctionBuilder, tp: &dyn TypeProvider, callee_id: ExprId) -> DeclRef {
         let d = self.read();
         let callee = &ef!(d, callee_id.ast);
@@ -2345,7 +2345,7 @@ impl DriverRef<'_> {
     }
 }
 
-impl DriverRef<'_> {
+impl DriverRwRef<'_> {
     fn build_if_expr(&mut self, b: &mut FunctionBuilder, expr: ExprId, ty: Type, condition: ExprId, then_scope: ImperScopeId, else_scope: Option<ImperScopeId>, ctx: Context, tp: &dyn TypeProvider) -> Value {
         let true_bb = self.write().create_bb(b);
         let mut false_bb: BlockId = self.write().create_bb(b);
@@ -2467,7 +2467,7 @@ impl DriverRef<'_> {
                 drop(d);
                 let decl_ref = self.get_callee_declref(b, tp, callee);
 
-                fn get_args(d: &mut DriverRef, b: &mut FunctionBuilder, tp: &dyn TypeProvider, arguments: &[ExprId]) -> SmallVec<[OpId; 2]> {
+                fn get_args(d: &mut DriverRwRef, b: &mut FunctionBuilder, tp: &dyn TypeProvider, arguments: &[ExprId]) -> SmallVec<[OpId; 2]> {
                     arguments.iter().map(|&argument| {
                         let val = d.build_expr(b, argument, Context::default(), tp);
                         d.write().handle_indirection(b, val)
@@ -3141,7 +3141,7 @@ impl Driver {
     }
 }
 
-impl DriverRef<'_> {
+impl DriverRwRef<'_> {
     fn handle_context(&mut self, b: &mut FunctionBuilder, mut val: Value, ctx: Context) -> Value {
         val = val.adjusted(ctx.indirection);
         match ctx.data {
