@@ -801,7 +801,7 @@ impl Driver {
         self.add_const_ty(Type::Error);
         assert_eq!(self.code.ast.exprs.len(), 5);
 
-        self.ast.known_idents.init(&mut self.interner);
+        self.ast.known_idents.init(&self.interner);
         self.add_decl(Decl::ReturnValue, self.ast.known_idents.return_value, None, SourceRange::default());
 
         self.register_internal_fields();
@@ -964,7 +964,7 @@ impl Driver {
         }
         self.add_expr(Expr::Ret { expr, decl }, range)
     }
-    fn lookup_loop_by_label(&mut self, label: Option<Ident>) -> Option<LoopId> {
+    fn lookup_loop_by_label(&self, label: Option<Ident>) -> Option<LoopId> {
         let imper_root = self.get_imper_root().unwrap();
         let loop_stack = self.ast.imper_roots[imper_root].loop_stack.clone();
         let loop_stack = loop_stack.stack.lock().unwrap();
@@ -986,7 +986,7 @@ impl Driver {
             loop_stack.last().map(|state| state.id)
         }
     }
-    fn control_flow_outside_loop_error(&mut self, kind: &str, range: SourceRange) {
+    fn control_flow_outside_loop_error(&self, kind: &str, range: SourceRange) {
         self.diag.push(
             Error::new(format!("`{}` expression found outside of a loop", kind))
                 .adding_primary_range(range, "only valid inside a `for` or `while` loop")
@@ -1107,7 +1107,7 @@ impl Driver {
         let imper_root = self.get_imper_root().unwrap();
         let imper_root = &mut self.ast.imper_roots[imper_root];
         let id = imper_root.loop_counter.next_idx();
-        let mut loop_stack = imper_root.loop_stack.clone();
+        let loop_stack = imper_root.loop_stack.clone();
         {
             let loop_stack = loop_stack.stack.lock().unwrap();
             let loop_stack = loop_stack.borrow();
@@ -1135,15 +1135,14 @@ impl Driver {
     }
     pub fn end_loop(&mut self, entry: AutoPopStackEntry<LoopState, LoopId>) {
         let state = entry.stack.peek().unwrap();
-        if let Some(name) = state.name {
-            if !state.used {
+        if let Some(name) = state.name
+            && !state.used {
                 let name_str = self.interner.read().unwrap().resolve(name.symbol).unwrap().to_string();
                 self.diag.report_warning_no_range_msg(
                     format!("loop label `{}` never used", name_str),
                     name.range
                 );
             }
-        }
     }
     pub fn create_condition_namespace(&mut self) -> ConditionNsId {
         let parent = self.cur_namespace();
@@ -1364,14 +1363,13 @@ impl Driver {
 
     fn flush_stmt_buffer(&mut self) {
         self.ast.scope_stack.peek_mut(|state| {
-            if let Some(ScopeState::Imper { id, stmt_buffer, .. }) = state {
-                if let Some(stmt) = *stmt_buffer {
+            if let Some(ScopeState::Imper { id, stmt_buffer, .. }) = state
+                && let Some(stmt) = *stmt_buffer {
                     let block = self.code.ast.imper_scopes[*id].block;
                     let op = self.code.ops.push(Op::AstItem { item: Item::Expr(stmt.expr), has_semicolon: stmt.has_semicolon });
                     self.code.blocks[block].ops.push(op);
                     *stmt_buffer = None;
                 }
-            }
         });
     }
 

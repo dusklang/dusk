@@ -42,9 +42,9 @@ pub fn display_adapter(attr: TokenStream, item: TokenStream) -> TokenStream {
                     if reference.lifetime.is_none() {
                         reference.lifetime = Some(lifetime.clone());
                     }
-                    if reference.mutability.is_some() {
-                        if let Type::Path(ref path) = *reference.elem {
-                            if path.qself.is_none() {
+                    if reference.mutability.is_some()
+                        && let Type::Path(ref path) = *reference.elem
+                            && path.qself.is_none() {
                                 let last_segment = path.path.segments.last().unwrap().ident.to_string();
 
                                 if last_segment == "Formatter" {
@@ -52,8 +52,6 @@ pub fn display_adapter(attr: TokenStream, item: TokenStream) -> TokenStream {
                                     ident = Some(parse_quote! { #pat });
                                 }
                             }
-                        }
-                    }
                 }
             },
             FnArg::Receiver(ref mut receiver) => {
@@ -539,7 +537,7 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
 
                         let mangled_name = format!("builtin_{}{}",
                             if path.is_empty() { path.clone() } else { path.replace(".", "_") },
-                            method.sig.ident.to_string(),
+                            method.sig.ident,
                         );
                         let mangled_name = syn::Ident::new(&mangled_name, method.sig.ident.span());
                         struct IShouldntHaveToWriteThisStructImo {

@@ -25,7 +25,7 @@ use crate::zip::{EndOfCentralDirectoryRecord, ZipBuilder};
 
 const PAGE_ALIGNMENT: usize = 4096;
 
-const APK_SIGNING_BLOCK_MAGIC: &'static [u8] = b"APK Sig Block 42";
+const APK_SIGNING_BLOCK_MAGIC: &[u8] = b"APK Sig Block 42";
 const APK_SIGNATURE_SCHEME_V2_ID: u32 = 0x7109871a;
 // const APK_SIGNATURE_SCHEME_V3_ID: u32 = 0xf05368c0;
 const PADDING_BLOCK_ID: u32 = 0x42726577;
@@ -83,30 +83,25 @@ impl Bundler for ApkBundler {
         let serialized_cert = cert.der();
 
         let mut archive = ZipBuilder::new(PAGE_ALIGNMENT);
-        let mut files = Vec::new();
-
-        files.push(
+        let files = vec![
             FileToAdd {
                 name: "classes.dex",
                 alignment: 4,
                 should_compress: true,
                 data: &classes_dex,
-            }
-        );
-        files.push(
+            },
             FileToAdd {
                 name: "AndroidManifest.xml",
                 alignment: 4,
                 should_compress: true,
                 // TODO: generate a binary-encoded AndroidManifest.xml instead of hardcoding this one.
                 data: include_bytes!("../../files/AndroidManifest.xml"),
-            }
-        );
+            },
+        ];
 
-        let mut manifest_entries = Vec::new();
-        manifest_entries.reserve(files.len());
+        let mut manifest_entries = Vec::with_capacity(files.len());
         for file in &files {
-            let digest = base64_of_sha256(&file.data);
+            let digest = base64_of_sha256(file.data);
             manifest_entries.push((file.name.to_owned(), format!("Name: {}\r\nSHA-256-Digest: {}\r\n\r\n", file.name, digest)));
         }
         manifest_entries.sort_by(|(a, _), (b, _)| a.cmp(b));
@@ -149,7 +144,7 @@ impl Bundler for ApkBundler {
 
         let mut chunks = Vec::new();
         chunkify(&archive.data, 0..archive.central_directory_offset, &mut chunks);
-        chunkify(&archive.data, archive.central_directory_offset as usize..archive.eocd_offset, &mut chunks);
+        chunkify(&archive.data, archive.central_directory_offset..archive.eocd_offset, &mut chunks);
         chunkify(&archive.data, archive.eocd_offset..archive.data.len(), &mut chunks);
 
         let mut digests = Vec::<[u8; 32]>::new();
@@ -204,7 +199,7 @@ impl Bundler for ApkBundler {
                             let certificates_length = signing_block.alloc::<u32>();
                             {
                                 signing_block.push(serialized_cert.len() as u32);
-                                signing_block.extend(&serialized_cert);
+                                signing_block.extend(serialized_cert);
                             }
                             store_length(&mut signing_block, certificates_length);
 
@@ -249,7 +244,7 @@ impl Bundler for ApkBundler {
             }
 
             let length_without_padding = signing_block.pos() + 24;
-            if length_without_padding % PAGE_ALIGNMENT != 0 {
+            if !length_without_padding.is_multiple_of(PAGE_ALIGNMENT) {
                 let padding_block_length_ref = signing_block.alloc::<u64>();
                 let padding_block_begin = signing_block.pos();
                 signing_block.push(PADDING_BLOCK_ID);

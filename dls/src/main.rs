@@ -1,3 +1,5 @@
+#![warn(clippy::needless_pass_by_ref_mut)]
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
@@ -258,11 +260,10 @@ impl Server {
                             let interner = d.interner.read().unwrap();
                             let name = interner.resolve(name).unwrap();
                             let mut ty = None;
-                            if let Some(tp) = &tp {
-                                if let Some(overload) = *tp.selected_overload(id) {
+                            if let Some(tp) = &tp
+                                && let Some(overload) = *tp.selected_overload(id) {
                                     ty = Some(tp.decl_type(overload).clone());
                                 }
-                            }
                             if ty.as_ref().map(|ty| ty.is_mut).unwrap_or(false) {
                                 message.push_str("mut ");
                             }
@@ -377,7 +378,7 @@ fn send_response<R: serde::Serialize>(connection: &Connection, id: RequestId, re
 }
 
 impl Server {
-    fn flush_diagnostics(&self, driver: &mut Driver, path: &Uri) {
+    fn flush_diagnostics(&self, driver: &Driver, path: &Uri) {
         let diagnostics = driver.diag.get_latest_diagnostics();
         let mut new_diagnostics = Vec::new();
         if !diagnostics.is_empty() {
@@ -412,7 +413,7 @@ impl Server {
                     severity: Some(severity),
                     source: Some("dusk".to_string()),
                     message: diagnostic.message.to_string(),
-                    related_information: (!related_info.is_empty()).then(|| related_info),
+                    related_information: (!related_info.is_empty()).then_some(related_info),
                     ..Default::default()
                 };
                 new_diagnostics.push(diagnostic);
@@ -437,7 +438,7 @@ impl Server {
 
             let src: String = salf.open_files
                 .borrow()
-                .get(&*path_ref).unwrap()
+                .get(*path_ref).unwrap()
                 .contents.lines.join("\n")
                 .to_string();
 
@@ -449,10 +450,12 @@ impl Server {
             driver.write().initialize_ast();
 
             let fatal_parse_error = driver.write().parse_added_files().is_err();
-            salf.flush_diagnostics(&mut driver.write(), &*path_ref);
+            salf.flush_diagnostics(&driver.read(), &path_ref);
 
-            let tp = (!fatal_parse_error).then(|| {
-                salf.flush_diagnostics(&mut driver.write(), &*path_ref);
+
+
+            (!fatal_parse_error).then(|| {
+                salf.flush_diagnostics(&driver.read(), &path_ref);
 
                 driver.write().initialize_tir();
 
@@ -495,22 +498,20 @@ impl Server {
                         }
                         new_code = driver.read().get_new_code_since(before);
 
-                        salf.flush_diagnostics(&mut driver.write(), &*path_ref);
+                        salf.flush_diagnostics(&driver.read(), &path_ref);
                     } else {
                         break;
                     }
                 }
 
                 drop(tp_ref);
-                salf.flush_diagnostics(&mut driver.write(), &*path_ref);
+                salf.flush_diagnostics(&driver.read(), &path_ref);
                 if !driver.read().diag.has_failed() {
                     driver.build_mir(&*tp.borrow());
-                    salf.flush_diagnostics(&mut driver.write(), &*path_ref);
+                    salf.flush_diagnostics(&driver.read(), &path_ref);
                 }
                 tp.into_inner()
-            });
-
-            tp
+            })
         });
         let mut driver = DriverRwRef::new(&DRIVER);
         let mut tp = None;
@@ -525,7 +526,7 @@ impl Server {
                     error_msg.push_str(&format!(": {}", reason.downcast::<&'static str>().unwrap()));
                 }
                 driver.write().diag.report_error_no_range_msg(error_msg, range);
-                self.flush_diagnostics(&mut driver.write(), path)
+                self.flush_diagnostics(&driver.read(), path)
             }
         }
         for (url, file) in self.open_files.borrow_mut().iter_mut() {
@@ -542,7 +543,7 @@ impl Server {
 }
 
 impl Server {
-    fn run(&mut self) -> Result<(), Box<dyn Error + Sync + Send>> {
+    fn run(&self) -> Result<(), Box<dyn Error + Sync + Send>> {
         dvm::launch_coordinator_thread();
         for msg in &self.connection.receiver {
             match msg {
@@ -596,7 +597,7 @@ impl Server {
 }
 
 fn run_server(connection: Connection) -> Result<(), Box<dyn Error + Sync + Send>> {
-    let mut server = Server::new(connection);
+    let server = Server::new(connection);
     server.run()
 }
 

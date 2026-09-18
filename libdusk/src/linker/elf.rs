@@ -462,7 +462,7 @@ impl ElfLinker {
 
 impl Linker for ElfLinker {
     fn write(&mut self, d: &Driver, main_function_index: FuncId, backend: &mut dyn Backend, dest: &mut dyn Write) -> IoResult<()> {
-        let bss_size = 8 as u64; // TODO: don't hardcode this.
+        let bss_size = 8_u64; // TODO: don't hardcode this.
 
         let mut exe = ElfExe::default();
         backend.generate_func(d, main_function_index, true, &mut exe);
@@ -802,14 +802,14 @@ impl Linker for ElfLinker {
 
         normal_symbol_table.entries[func_symbol].value = text_section_pos;
 
-        let rodata_section_pos = rodata_section.and_then(|rodata_section| {
+        let rodata_section_pos = rodata_section.map(|rodata_section| {
             self.buf.pad_both_to_next_boundary(8);
             let rodata_section_pos = self.buf.pos() as u64;
             self.buf.extend(&exe.cstrings);
             self.section_headers[rodata_section].1.section_vaddr = rodata_section_pos;
             self.section_headers[rodata_section].1.section_file_offset = rodata_section_pos;
             self.section_headers[rodata_section].1.section_size = exe.cstrings.len() as u64;
-            Some(rodata_section_pos)
+            rodata_section_pos
         });
 
         let read_exec_segment_size = self.buf.pos() as u64;

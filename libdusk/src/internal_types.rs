@@ -49,7 +49,7 @@ impl DuskBridge for () {
     }
 
     fn bridge_from_dusk(_value: &Value, _d: &Driver) -> Self {
-        ()
+        
     }
 
     fn bridge_to_dusk(self, _d: &Driver) -> Value {

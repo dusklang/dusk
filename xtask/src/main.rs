@@ -29,7 +29,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     shell.change_dir(root_path);
     match args.command {
         Command::InstallDls { debug } => {
-            let mode = (!debug).then(|| "--release");
+            let mode = (!debug).then_some("--release");
             cmd!(shell, "cargo build --package dls {mode...}").run()?;
 
             shell.change_dir("./dls-client");
@@ -49,7 +49,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             println!("Copying DLS server to vscode extension dir");
             let server_dir = "./server";
-            shell.create_dir(&server_dir)?;
+            shell.create_dir(server_dir)?;
             let artifact_dir = if debug { "debug" } else { "release" };
             let extension = if cfg!(windows) {
                 ".exe"

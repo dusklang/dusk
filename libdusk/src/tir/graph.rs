@@ -500,11 +500,10 @@ impl Graph {
                 outstanding_components.insert(comp);
 
                 for (&dep, relation) in &self.components[comp].deps {
-                    if relation.contains(ComponentRelation::BEFORE) {
-                        if !outstanding_components.contains(&dep) {
+                    if relation.contains(ComponentRelation::BEFORE)
+                        && !outstanding_components.contains(&dep) {
                             component_stack.push(dep);
                         }
-                    }
                 }
             }
             outstanding_components
@@ -678,8 +677,8 @@ impl Graph {
 
         // Update the real `outstanding_components`.
         self.component_state.outstanding_components.retain(|comp|
-            !self.component_state.staged_components.contains_key(&comp) &&
-            !self.component_state.included_components.contains(&comp)
+            !self.component_state.staged_components.contains_key(comp) &&
+            !self.component_state.included_components.contains(comp)
         );
 
         let main_levels = Levels {

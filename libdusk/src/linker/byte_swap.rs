@@ -197,7 +197,7 @@ impl Buffer {
     }
 
     pub fn extend<T: ByteSwap + Copy>(&mut self, values: &[T]) {
-        let size = size_of::<T>() * values.len();
+        let size = std::mem::size_of_val(values);
         self.data.reserve(size);
         for &value in values {
             self.push(value);
@@ -210,14 +210,14 @@ impl Buffer {
     }
 
     pub fn pad_with_zeroes(&mut self, size: usize) {
-        self.data.extend(std::iter::repeat(0).take(size as usize));
+        self.data.extend(std::iter::repeat_n(0, size));
         self.rva += size;
     }
 
     pub fn pad_to_next_boundary(&mut self, alignment: usize) {
         let padded_pos = nearest_multiple_of_rt!(self.data.len(), alignment);
         let amount_to_add = padded_pos as usize - self.pos();
-        self.data.extend(std::iter::repeat(0).take(amount_to_add as usize));
+        self.data.extend(std::iter::repeat_n(0, amount_to_add as usize));
     }
 
     pub fn pad_rva_to_next_boundary(&mut self, alignment: usize) {

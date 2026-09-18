@@ -1,3 +1,5 @@
+#![warn(clippy::needless_pass_by_ref_mut)]
+
 use clap::{ValueEnum, Parser};
 use libdusk::interpreter::{InterpMode, restart_interp};
 use libdusk::mir::{FunctionRef, FuncId};
@@ -54,14 +56,14 @@ struct Opt {
     input: PathBuf,
 }
 
-fn flush_diagnostics(driver: &mut Driver) {
+fn flush_diagnostics(driver: &Driver) {
     let diagnostics = driver.diag.get_latest_diagnostics();
     for mut diagnostic in diagnostics {
         let (color_code, kind) = match diagnostic.kind {
             DiagnosticKind::Error => (31, "error"),
             DiagnosticKind::Warning => (33, "warning"),
         };
-        println!("\u{001B}[{}m{}:\u{001B}[0m {}", color_code, kind, &diagnostic.message);
+        println!("\u{001B}[{}m{}:\u{001B}[0m {}", color_code, kind, diagnostic.message);
         driver.print_commentated_source_ranges(&mut diagnostic.ranges);
     }
 }
@@ -95,7 +97,7 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
     begin_phase!(Parse);
     let fatal_parse_error = driver.write().parse_added_files().is_err();
     if fatal_parse_error {
-        flush_diagnostics(&mut driver.write());
+        flush_diagnostics(&driver.read());
         // TODO: still proceed with other phases after some forms of parse error. I had to add this in the short term
         // because after I improved the quality of the parser's error handling, some errors would prevent important data
         // from being properly initialized (e.g., the two-phase initialization of various AST data structures), leading to
@@ -157,7 +159,7 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
     drop(tp_ref);
     let tp = tp.into_inner();
 
-    flush_diagnostics(&mut driver.write());
+    flush_diagnostics(&driver.read());
     if driver.read().diag.check_for_failure() { return; }
 
     begin_phase!(Mir);
@@ -167,7 +169,7 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
         println!("{}", driver.read().display_mir());
     }
 
-    flush_diagnostics(&mut driver.write());
+    flush_diagnostics(&driver.read());
     if driver.read().diag.check_for_failure() { return; }
 
     begin_phase!(Interp);
@@ -188,7 +190,7 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
             driver.set_command_line_arguments(program_args);
             let _ = driver.call(FunctionRef::Id(main), Vec::new(), Vec::new());
 
-            flush_diagnostics(&mut driver.write());
+            flush_diagnostics(&driver.read());
         } else {
             let path = match driver.read().os {
                 OperatingSystem::Windows => "a.exe",
@@ -213,14 +215,14 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
         driver.write().diag.report_error_no_range(
             "Couldn't find main function with no parameters and a return type of `void`"
         );
-        flush_diagnostics(&mut driver.write());
+        flush_diagnostics(&driver.read());
         driver.read().diag.check_for_failure();
     }
 }
 
 fn main() {
     let args: Vec<_> = std::env::args_os().collect();
-    match args.iter().nth(1).map(|arg| arg.as_os_str()) {
+    match args.get(1).map(|arg| arg.as_os_str()) {
         Some(val) if val == OsStr::new("run") => {
             let mut split = args.split(|arg| arg == OsStr::new("--"));
             let clap_args = &split.next().unwrap()[1..]; // ignore 0th argument, which we know is "run"

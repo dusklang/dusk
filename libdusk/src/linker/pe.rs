@@ -523,7 +523,7 @@ impl PELinker {
 
     fn push_pe_ascii_string(&mut self, val: &str) {
         self.buf.push_null_terminated_string(val);
-        if val.len() % 2 == 0 {
+        if val.len().is_multiple_of(2) {
             self.buf.push(0u8);
         }
     }
@@ -605,7 +605,7 @@ impl PEExe {
         *self.cstring_map.entry(string.to_owned()).or_insert_with(|| {
             let offset = self.cstrings.len();
             self.cstrings.extend(string.to_bytes_with_nul());
-            if self.cstrings.len() % 2 != 0 {
+            if !self.cstrings.len().is_multiple_of(2) {
                 self.cstrings.push(0);
             }
             offset

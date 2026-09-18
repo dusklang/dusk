@@ -156,7 +156,7 @@ impl Instr {
     }
 
     pub fn references_value(&self, val: OpId) -> bool {
-        self.referenced_values().iter().any(|&referenced| referenced == val)
+        self.referenced_values().contains(&val)
     }
 
     pub fn replace_value(&mut self, old: OpId, new: OpId) {
@@ -255,7 +255,7 @@ impl Const {
 
 impl From<Result<Const, EvalError>> for Const {
     fn from(value: Result<Const, EvalError>) -> Self {
-        value.unwrap_or_else(|_| Const::Invalid)
+        value.unwrap_or(Const::Invalid)
     }
 }
 
@@ -594,8 +594,8 @@ impl Context {
             },
             match &self.control {
                 _ if jump_with_argument => ControlDest::Unreachable,
-                ControlDest::Continue => ControlDest::Jump(kontinue.into()),
-                x => x.clone(),
+                ControlDest::Continue => ControlDest::Jump(kontinue),
+                x => *x,
             }
         )
     }
@@ -605,7 +605,7 @@ impl Context {
             assert!(matches!(self.control, ControlDest::Unreachable));
             Context::new(self.indirection, data, ControlDest::RetVoid)
         } else {
-            Context::new(self.indirection, data, self.control.clone())
+            Context::new(self.indirection, data, self.control)
         }
     }
 }
@@ -701,7 +701,7 @@ impl Driver {
     pub fn size_of(&self, ty: &Type) -> usize {
         let arch = self.arch;
         match ty {
-            Type::Error | Type::Void | Type::Never | Type::Ty | Type::Mod { .. } | Type::LegacyInternal(_) => 0,
+            Type::Error | Type::Void | Type::Never | Type::Ty | Type::Mod | Type::LegacyInternal(_) => 0,
             &Type::Internal(id) => self.code.ast.internal_types[id].size,
             Type::Int { width, .. } => {
                 let bit_width = width.bit_width(arch);
@@ -839,7 +839,7 @@ impl Driver {
         if self.code.mir.extern_mods.get(&id).is_some() { return; }
 
         let extern_mod = &self.code.ast.extern_mods[id];
-        let library_path = extern_mod.library_path.clone();
+        let library_path = extern_mod.library_path;
         let library_path = match *tp.eval_result(library_path) {
             Const::Str { id, .. } => self.code.mir.strings[id].clone(),
             Const::StrLit(ref string) => string.clone(),
@@ -1203,7 +1203,7 @@ impl Driver {
                 f,
                 "%{} = objc_class_ref `{}` from {:?}",
                 self.display_instr_name(op_id),
-                &self.code.ast.extern_mods[extern_mod].objc_class_references[index],
+                self.code.ast.extern_mods[extern_mod].objc_class_references[index],
                 self.code.mir.extern_mods[&extern_mod].library_path
             )?,
             Instr::Const(konst) => {
@@ -1603,7 +1603,7 @@ impl MirTransformer {
         self.replace_list.push((to_replace, instr));
     }
 
-    fn transform(self, func: &mut Function, d: &mut Driver) -> bool {
+    fn transform(self, func: &Function, d: &mut Driver) -> bool {
         if self.delete_list.is_empty() && self.ref_replace_list.is_empty() && self.replace_list.is_empty() {
             return false;
         }
@@ -1626,30 +1626,28 @@ impl MirTransformer {
 }
 
 impl Driver {
-    fn remove_redundant_loads(&mut self, func: &mut Function) -> bool {
+    fn remove_redundant_loads(&mut self, func: &Function) -> bool {
         // Remove obviously-redundant loads (assumes no other threads are accessing a memory location simultaneously)
         let mut transformer = MirTransformer::default();
         for &block_id in &func.blocks {
             let block = &self.code.blocks[block_id];
             for (i, &op_id) in block.ops.iter().enumerate() {
                 let instr = self.code.ops[op_id].as_mir_instr().unwrap();
-                if let &Instr::Store { location, value } = instr {
-                    if i + 1 < block.ops.len() {
+                if let &Instr::Store { location, value } = instr
+                    && i + 1 < block.ops.len() {
                         let next_op = block.ops[i+1];
                         let next_instr = self.code.ops[next_op].as_mir_instr().unwrap();
-                        if let &Instr::Load(load_loc) = next_instr {
-                            if load_loc == location {
+                        if let &Instr::Load(load_loc) = next_instr
+                            && load_loc == location {
                                 transformer.q_delete_and_replace_references(next_op, value);
                             }
-                        }
                     }
-                }
             }
         }
         transformer.transform(func, self)
     }
 
-    fn remove_unused_allocas(&mut self, func: &mut Function) -> bool {
+    fn remove_unused_allocas(&mut self, func: &Function) -> bool {
         let mut transformer = MirTransformer::default();
         for &block_id in &func.blocks {
             let block = &self.code.blocks[block_id];
@@ -1692,7 +1690,7 @@ impl Driver {
         transformer.transform(func, self)
     }
 
-    fn remove_unused_values(&mut self, func: &mut Function) -> bool {
+    fn remove_unused_values(&mut self, func: &Function) -> bool {
         let mut transformer = MirTransformer::default();
         for &block_id in &func.blocks {
             let block = &self.code.blocks[block_id];
@@ -1796,7 +1794,7 @@ impl Driver {
         }
     }
 
-    fn remove_unreachable_blocks(&mut self, func: &mut Function) -> bool {
+    fn remove_unreachable_blocks(&self, func: &mut Function) -> bool {
         let num_blocks_before = func.blocks.len();
 
         let mut visited = HashSet::new();
@@ -1807,7 +1805,7 @@ impl Driver {
         num_blocks_before != num_blocks_after
     }
 
-    fn remove_constant_branches(&mut self, func: &mut Function) -> bool {
+    fn remove_constant_branches(&mut self, func: &Function) -> bool {
         let mut transformer = MirTransformer::default();
         for &block_id in &func.blocks {
             let block = &self.code.blocks[block_id];
@@ -1830,7 +1828,7 @@ impl Driver {
                             let destination = cases.iter()
                                 .find(|case| *scrutinee == case.value)
                                 .map(|case| &case.target)
-                                .unwrap_or(&catch_all_target);
+                                .unwrap_or(catch_all_target);
                             transformer.q_replace_instr(terminal, Instr::Jump(destination.clone()));
                         }
                     },
@@ -1842,17 +1840,16 @@ impl Driver {
         transformer.transform(func, self)
     }
 
-    fn remove_return_non_shared_void(&mut self, func: &mut Function) -> bool {
+    fn remove_return_non_shared_void(&mut self, func: &Function) -> bool {
         let mut transformer = MirTransformer::default();
         for &block_id in &func.blocks {
             let block = &self.code.blocks[block_id];
             for op_id in block.ops.clone() {
                 let instr = self.code.ops[op_id].as_mir_instr().unwrap();
-                if let &Instr::Ret(ret_val) = instr {
-                    if *func.ty.return_ty == Type::Void && ret_val != VOID_INSTR {
+                if let &Instr::Ret(ret_val) = instr
+                    && *func.ty.return_ty == Type::Void && ret_val != VOID_INSTR {
                         transformer.q_replace_instr(op_id, Instr::Ret(VOID_INSTR));
                     }
-                }
             }
         }
         transformer.transform(func, self)
@@ -1916,7 +1913,7 @@ impl DriverRwRef<'_> {
         }
     }
 
-    fn eval_constants(&mut self, func: &mut Function, tp: &dyn TypeProvider) -> bool {
+    fn eval_constants(&mut self, func: &Function, tp: &dyn TypeProvider) -> bool {
         let mut did_something = false;
         self.write();
         for &block in &func.blocks {
@@ -2047,11 +2044,10 @@ impl DriverRwRef<'_> {
         for &block in &func.blocks {
             let block = &self.read().code.blocks[block];
             for &instr in &block.ops {
-                if let &Instr::Call { func: called_func, .. } = self.read().code.ops[instr].as_mir_instr().unwrap() {
-                    if self.read().code.mir.functions[called_func].is_comptime {
+                if let &Instr::Call { func: called_func, .. } = self.read().code.ops[instr].as_mir_instr().unwrap()
+                    && self.read().code.mir.functions[called_func].is_comptime {
                         comptime_calls.push((called_func, instr));
                     }
-                }
             }
         }
 
@@ -2265,7 +2261,7 @@ impl DriverRwRef<'_> {
             },
             Decl::PatternBinding { context, scrutinee, root_scrutinee  } => {
                 let context_val = tp.pattern_matching_context(context).as_ref().expect("must set pattern matching context before MIR generation");
-                let scrutinee_value = self.get_scrutinee_value(b, tp, root_scrutinee, scrutinee, &context_val, context);
+                let scrutinee_value = self.get_scrutinee_value(b, tp, root_scrutinee, scrutinee, context_val, context);
                 DeclRef::Value(scrutinee_value)
             },
             Decl::Parameter { index } => {
@@ -2533,7 +2529,7 @@ impl DriverRwRef<'_> {
                                 self.build_expr(
                                     b,
                                     lhs,
-                                    Context::new(0, DataDest::Branch(left_true_bb.into(), left_false_bb.into()), ControlDest::Continue),
+                                    Context::new(0, DataDest::Branch(left_true_bb, left_false_bb), ControlDest::Continue),
                                     tp,
                                 );
 
@@ -2582,7 +2578,7 @@ impl DriverRwRef<'_> {
                                 self.build_expr(
                                     b,
                                     lhs,
-                                    Context::new(0, DataDest::Branch(left_true_bb.into(), left_false_bb.into()), ControlDest::Continue),
+                                    Context::new(0, DataDest::Branch(left_true_bb, left_false_bb), ControlDest::Continue),
                                     tp,
                                 );
 
@@ -2861,7 +2857,7 @@ impl DriverRwRef<'_> {
                     // TODO: this will be the wrong type if indirection != 0
                     self.write().push_instr(b, Instr::Parameter(ty), expr).direct()
                 } else {
-                    self.write().handle_control(b, VOID_INSTR.direct(), ctx.control.clone())
+                    self.write().handle_control(b, VOID_INSTR.direct(), ctx.control)
                 }
             },
             Expr::While { loop_id, condition, scope } => {
@@ -2885,7 +2881,7 @@ impl DriverRwRef<'_> {
                     continue_location_of_variable_to_increment: None,
                 };
                 b.loops.push_at(loop_id, loop_state);
-                self.build_scope(b, scope, Context::new(0, DataDest::Void, ControlDest::Jump(test_bb.into())), tp);
+                self.build_scope(b, scope, Context::new(0, DataDest::Void, ControlDest::Jump(test_bb)), tp);
 
                 match ctx.control {
                     ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenJump { .. } => {
@@ -2934,7 +2930,7 @@ impl DriverRwRef<'_> {
                     continue_location_of_variable_to_increment: Some(binding_location),
                 };
                 b.loops.push_at(loop_id, loop_state);
-                self.build_scope(b, scope, Context::new(0, DataDest::Void, ControlDest::IncrementVariableAndThenJump { location: binding_location, target: test_bb.into() }), tp);
+                self.build_scope(b, scope, Context::new(0, DataDest::Void, ControlDest::IncrementVariableAndThenJump { location: binding_location, target: test_bb }), tp);
 
                 match &ctx.control {
                     ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenJump { .. } => {
@@ -2977,7 +2973,7 @@ impl DriverRwRef<'_> {
                 return self.build_expr(
                     b,
                     expr,
-                    Context::new(0, DataDest::Ret, ctx.control.clone()),
+                    Context::new(0, DataDest::Ret, ctx.control),
                     tp,
                 );
             },
@@ -2988,7 +2984,7 @@ impl DriverRwRef<'_> {
     fn get_scrutinee_value(&mut self, b: &mut FunctionBuilder, tp: &dyn TypeProvider, og_scrutinee: ExprId, scrutinee: SwitchScrutineeValueId, pattern_matching_ctx: &IndexVec<SwitchScrutineeValueId, TypedSwitchScrutineeValue>, pattern_matching_ctx_id: PatternMatchingContextId) -> Value {
         let scrutinee_values = b.pattern_matching_scrutinees.entry(pattern_matching_ctx_id).or_default();
         if let Some(scrutinee) = scrutinee_values.get(&scrutinee) {
-            return scrutinee.clone();
+            return *scrutinee;
         }
 
         let scrutinee_value = &pattern_matching_ctx[scrutinee];

@@ -5,7 +5,7 @@ use std::ffi::CStr;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::convert::identity;
-use std::{mem, iter};
+use std::mem;
 use std::hash::Hash;
 
 use crate::backend::dex::DexEncoder;
@@ -581,7 +581,7 @@ fn get_level(class_def: &PhysicalClassDef, class_defs: &IndexVec<PhysicalClassDe
     // Add a fake value for now, to detect cycles
     levels.insert(class_def.class_idx, usize::MAX);
 
-    let level = if let Some(parent) = class_def.superclass_idx.map(|parent| class_map.get(&parent).copied()).flatten() {
+    let level = if let Some(parent) = class_def.superclass_idx.and_then(|parent| class_map.get(&parent).copied()) {
         get_level(&class_defs[parent], class_defs, class_map, levels) + 1
     } else {
         0
@@ -596,7 +596,7 @@ fn convert_to_physical<LogicalId: Idx, LogicalItem, LogicalMapKey: Hash, Physica
     let mut combined: Vec<(LogicalId, PhysicalItem)> = mem::take(logical_list).into_iter_enumerated()
         .map(|(id, item)| (id, to_physical_item(item))).collect();
     combined.sort_unstable_by(|(_, a), (_, b)| ordering(a, b));
-    *physical_map = iter::repeat(PhysicalId::from_usize(0)).take(combined.len()).collect();
+    *physical_map = std::iter::repeat_n(PhysicalId::from_usize(0), combined.len()).collect();
     for (physical_id, &(logical_id, _)) in combined.iter().enumerate() {
         physical_map[logical_id] = PhysicalId::from_usize(physical_id);
     }
@@ -960,7 +960,7 @@ impl Linker for DexLinker {
             assert_eq!(class_data.num_static_fields, 0);
             assert_eq!(class_data.num_instance_fields, 0);
 
-            let mut prev_method_idx = 0 as u32;
+            let mut prev_method_idx = 0_u32;
             for method in &class_data.direct_methods {
                 let method_idx = method.method_idx.index() as u32;
 
@@ -968,10 +968,10 @@ impl Linker for DexLinker {
                 self.buf.push_uleb128(method.access_flags.bits());
                 self.buf.push_uleb128(method.code.map(|code| code_item_offs[code]).unwrap_or(0));
 
-                prev_method_idx = method_idx as u32;
+                prev_method_idx = method_idx;
             }
 
-            let mut prev_method_idx = 0 as u32;
+            let mut prev_method_idx = 0_u32;
             for method in &class_data.virtual_methods {
                 let method_idx = method.method_idx.index() as u32;
 

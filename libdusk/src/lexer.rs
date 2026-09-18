@@ -125,13 +125,13 @@ impl Driver {
         }
     }
 
-    fn set_pos(&mut self, l: &mut Lexer, pos: usize) {
+    fn set_pos(&self, l: &mut Lexer, pos: usize) {
         l.start = pos;
         self.next_boundary_from(l, pos);
     }
 
     /// Skip to next grapheme.
-    fn advance(&mut self, l: &mut Lexer) {
+    fn advance(&self, l: &mut Lexer) {
         l.start = l.end.cur_cursor();
         self.next_boundary(l);
     }
@@ -194,7 +194,7 @@ impl Driver {
         (kind, range)
     }
 
-    fn diagnose_cpp_style_digit_separator(&mut self, l: &Lexer) {
+    fn diagnose_cpp_style_digit_separator(&self, l: &Lexer) {
         self.diag.report_error("C++14-style digit separators are not supported in Dusk", l.make_src_range(l.cur_loc()..(l.cur_loc() + 1)), "hint: replace ' with _");
     }
 
@@ -394,7 +394,7 @@ impl Driver {
                 }
 
                 if is_num {
-                    numeric_chars.extend(self.cur_grapheme(l).chars());
+                    numeric_chars.push_str(self.cur_grapheme(l));
                     last_was_dot = None;
                 } else if is_dot {
                     // A decimal literal may have a maximum of one '.'
@@ -402,7 +402,7 @@ impl Driver {
                         break;
                     } else {
                         has_dot = true;
-                        numeric_chars.extend(self.cur_grapheme(l).chars());
+                        numeric_chars.push_str(self.cur_grapheme(l));
                     }
                     last_was_dot = Some(l.cur_loc());
                 } else {
@@ -445,7 +445,7 @@ impl Driver {
                 }
 
                 if is_hex {
-                    numeric_chars.extend(self.cur_grapheme(l).chars());
+                    numeric_chars.push_str(self.cur_grapheme(l));
                 } else if is_single_quote && !has_cpp_style_digit_separator {
                     has_cpp_style_digit_separator = true;
                     self.diagnose_cpp_style_digit_separator(l);

@@ -24,11 +24,11 @@ impl<T: Debug> AutoPopStack<T> {
     pub fn new() -> Self {
         Self::default()
     }
-    pub fn push<Id>(&mut self, id: Id, entry: T) -> AutoPopStackEntry<T, Id> where Id: PartialEq<T> + Debug + Copy {
+    pub fn push<Id>(&self, id: Id, entry: T) -> AutoPopStackEntry<T, Id> where Id: PartialEq<T> + Debug + Copy {
         self.stack.lock().unwrap().borrow_mut().push(entry);
         AutoPopStackEntry::new(id, self.clone())
     }
-    pub fn peek_mut<U>(&mut self, f: impl FnOnce(Option<&mut T>) -> U) -> U {
+    pub fn peek_mut<U>(&self, f: impl FnOnce(Option<&mut T>) -> U) -> U {
         f(self.stack.lock().unwrap().borrow_mut().last_mut())
     }
 }

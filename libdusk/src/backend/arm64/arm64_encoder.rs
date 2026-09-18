@@ -209,7 +209,7 @@ impl Arm64Encoder {
     }
 
     fn adr_impl(&mut self, l_shift_by_12: bool, dest: Reg, imm: i32) {
-        assert!(imm >= -1048576 && imm <= 1048575);
+        assert!((-1048576..=1048575).contains(&imm));
 
         let mut instr = InstrEncoder::new();
 
@@ -231,7 +231,7 @@ impl Arm64Encoder {
     }
 
     fn access_pair_impl64(&mut self, bits64: bool, mode: PairAddressMode, is_load: bool, val1: Reg, val2: Reg, addr: impl Into<RegOrSp>, imm: i16) {
-        assert!(imm >= -512 && imm <= 504 && imm % 8 == 0);
+        assert!((-512..=504).contains(&imm) && imm % 8 == 0);
         let imm7 = imm / 8;
 
         let mut instr = InstrEncoder::new();
@@ -260,7 +260,7 @@ impl Arm64Encoder {
     // used for str & ldr with unsigned offsets
     fn mem_access_reg_impl(&mut self, size: DataSize, is_load: bool, reg: RegOrZero, addr: impl Into<RegOrSp>, imm: u16) {
         let fac = 1u32 << (size as u32);
-        assert!(imm as u32 % fac == 0);
+        assert!((imm as u32).is_multiple_of(fac));
         let imm12 = imm as u32 / fac;
         assert!(imm12 <= 4095);
 
@@ -269,7 +269,7 @@ impl Arm64Encoder {
         instr.push_value_of_size(size as u32, 2);
         instr.push_value_of_size(0x39, 6);
         instr.push_value_of_size(is_load as u32, 2);
-        instr.push_value_of_size(imm12 as u32, 12);
+        instr.push_value_of_size(imm12, 12);
         instr.push_reg(addr.into());
         instr.push_reg(reg);
 
@@ -309,7 +309,7 @@ impl Arm64Encoder {
     }
 
     fn mov_wide64_impl(&mut self, should_keep_other_bits: bool, dest: Reg, imm: u16, shift_amount: u8) {
-        assert!(shift_amount <= 48 && shift_amount % 16 == 0);
+        assert!(shift_amount <= 48 && shift_amount.is_multiple_of(16));
 
         let mut instr = InstrEncoder::new();
 
@@ -334,7 +334,7 @@ impl Arm64Encoder {
     }
 
     pub fn macro_mov64_abs(&mut self, dest: Reg, value: u64) {
-        self.movz64(dest, (value >> 0 & 0xFFFF) as u16, 0);
+        self.movz64(dest, (value & 0xFFFF) as u16, 0);
         self.movk64(dest, (value >> 16 & 0xFFFF) as u16, 16);
         self.movk64(dest, (value >> 32 & 0xFFFF) as u16, 32);
         self.movk64(dest, (value >> 48 & 0xFFFF) as u16, 48);
@@ -368,7 +368,7 @@ impl Arm64Encoder {
     }
 
     pub fn bl(&mut self, offset: i32) {
-        assert!(offset >= -134217728 && offset <= 134217724 && offset % 4 == 0);
+        assert!((-134217728..=134217724).contains(&offset) && offset % 4 == 0);
         let imm26 = ((offset / 4) as u32) & 0x03FF_FFFF;
 
         let mut instr = InstrEncoder::new();
@@ -414,7 +414,7 @@ impl Arm64Encoder {
     /// instructions with unknown values that need to be filled in later.
     pub fn allocate_instructions(&mut self, n: usize) -> usize {
         let offset = self.data.len();
-        self.data.extend(std::iter::repeat(0).take(n * 4));
+        self.data.extend(std::iter::repeat_n(0, n * 4));
         offset
     }
 
@@ -463,7 +463,7 @@ impl CodeBlob for Arm64Encoder {
                 Indirection::Direct => fixed_up_code.ldr64(fixup.dest, fixup.dest, (fixup_addr & page_mask).try_into().unwrap()),
                 Indirection::Indirect => fixed_up_code.add64_imm(false, fixup.dest, fixup.dest, (fixup_addr & page_mask).try_into().unwrap()),
             }
-            self.data[fixup.offset..][..8].copy_from_slice(&fixed_up_code.get_bytes());
+            self.data[fixup.offset..][..8].copy_from_slice(fixed_up_code.get_bytes());
         }
 
         &self.data

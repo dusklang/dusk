@@ -472,7 +472,7 @@ impl X64Encoder {
             id: rip_offset,
         };
         self.fixups.push(fixup);
-        self.data.extend(std::iter::repeat(0).take(4));
+        self.data.extend(std::iter::repeat_n(0, 4));
     }
 
     pub fn ret(&mut self) {

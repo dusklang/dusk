@@ -63,6 +63,7 @@ impl<'l, T> RwRef<'l, T> {
         })
     }
 
+    #[allow(clippy::needless_pass_by_ref_mut)]
     pub fn write(&mut self) -> RefMut<'_, T> {
         if !matches!(*self.guard.borrow(), RwRefGuard::RefMut(_)) {
             *self.guard.borrow_mut() = RwRefGuard::Nothing;

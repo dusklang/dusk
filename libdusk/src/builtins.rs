@@ -82,28 +82,28 @@ impl Driver {
     }
 
     #[path="compiler.ModuleBuilder"]
-    fn build(&mut self, #[self] b: ModuleBuilder) -> Module {
+    fn build(&self, #[self] b: ModuleBuilder) -> Module {
         Module(b.namespace)
     }
 
     #[path="compiler.ExternFunctionBuilder"]
-    fn new(&mut self, name: &'static str, ret_ty: Type, lib_name: &'static str) -> ExternFunctionBuilder {
+    fn new(&self, name: &'static str, ret_ty: Type, lib_name: &'static str) -> ExternFunctionBuilder {
         ExternFunctionBuilder { name: name.to_string(), ret_ty, lib_name: lib_name.to_string(), params: Default::default(), has_variadic_param: false }
     }
 
     #[path="compiler.ExternFunctionBuilder"]
-    fn add_param(&mut self, #[self] b: &mut ExternFunctionBuilder, name: &'static str, ty: Type) {
+    fn add_param(&self, #[self] b: &mut ExternFunctionBuilder, name: &'static str, ty: Type) {
         assert!(!b.has_variadic_param, "no parameters can be added after a variadic parameter");
         b.params.push(ExternParam { name: name.to_string(), ty });
     }
 
     #[path="compiler.ExternFunctionBuilder"]
-    fn add_variadic_param(&mut self, #[self] b: &mut ExternFunctionBuilder) {
+    fn add_variadic_param(&self, #[self] b: &mut ExternFunctionBuilder) {
         assert!(!b.has_variadic_param, "a variadic parameter can only be added once");
         b.has_variadic_param = true;
     }
 
-    fn print_int(&mut self, val: usize) {
+    fn print_int(&self, val: usize) {
         println!("int: {}", val);
     }
 }
@@ -357,11 +357,11 @@ impl Driver {
         ns
     }
 
-    fn start_enum(&mut self, name: &str) -> EnumBuilder {
+    fn start_enum(&self, name: &str) -> EnumBuilder {
         EnumBuilder { name: name.to_owned(), variants: Default::default() }
     }
 
-    fn add_variant(&mut self, b: &mut EnumBuilder, name: &str, payload_ty: Option<Type>) {
+    fn add_variant(&self, b: &mut EnumBuilder, name: &str, payload_ty: Option<Type>) {
         let name = self.interner.write().unwrap().get_or_intern(name);
         b.variants.push(VariantBuilder { name, payload_ty });
     }

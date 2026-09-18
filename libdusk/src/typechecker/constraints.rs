@@ -107,7 +107,7 @@ impl OneOfConstraint {
 impl From<SmallVec<[QualType; 1]>> for OneOfConstraint {
     fn from(types: SmallVec<[QualType; 1]>) -> Self {
         Self {
-            types: types.into(),
+            types,
             decls: Default::default(),
         }
     }
@@ -213,7 +213,7 @@ impl ConstraintList {
 
     pub fn one_of(&self) -> Option<&OneOfConstraint> {
         if let Some(one_of) = &self.one_of {
-            Some(&one_of)
+            Some(one_of)
         } else {
             None
         }
@@ -278,7 +278,7 @@ impl ConstraintList {
     }
 
     pub fn set_one_of(&mut self, one_of: impl Into<OneOfConstraint>) {
-        self.one_of = Some(one_of.into().into());
+        self.one_of = Some(one_of.into());
     }
 
     pub fn max_ranked_type_with_assoc_data<T: Clone>(&self, mut rank: impl FnMut(&QualType) -> (usize, T)) -> Result<(&QualType, Option<DeclId>, T), Vec<(&QualType, Option<DeclId>, T)>> {

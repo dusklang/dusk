@@ -34,29 +34,29 @@ pub struct DexEncoder {
 
 #[derive(Clone)]
 pub enum DexFixup {
-    MethodIdFixup {
+    MethodId {
         code_offset: usize,
         id: MethodId,
     },
-    TypeIdFixup {
+    TypeId {
         code_offset: usize,
         id: TypeId,
     },
-    StringIdFixup {
+    StringId {
         code_offset: usize,
         id: StringId,
     },
-    InId4Fixup {
+    InId4 {
         code_offset: usize,
         bit_offset: usize,
         in_id: InId,
     },
-    InId8Fixup {
+    InId8 {
         code_offset: usize,
         bit_offset: usize,
         in_id: InId,
     },
-    InId16Fixup {
+    InId16 {
         code_offset: usize,
         in_id: InId,
     },
@@ -90,17 +90,17 @@ impl DexEncoder {
     }
 
     fn reference_method(&mut self, id: MethodId) {
-        self.fixups.push(DexFixup::MethodIdFixup { code_offset: self.code.len(), id });
+        self.fixups.push(DexFixup::MethodId { code_offset: self.code.len(), id });
         self.push(0);
     }
 
     fn reference_type(&mut self, id: TypeId) {
-        self.fixups.push(DexFixup::TypeIdFixup { code_offset: self.code.len(), id });
+        self.fixups.push(DexFixup::TypeId { code_offset: self.code.len(), id });
         self.push(0);
     }
 
     fn reference_string(&mut self, id: StringId) {
-        self.fixups.push(DexFixup::StringIdFixup { code_offset: self.code.len(), id });
+        self.fixups.push(DexFixup::StringId { code_offset: self.code.len(), id });
         self.push(0);
     }
 
@@ -108,7 +108,7 @@ impl DexEncoder {
         match reg {
             Register::KnownRegister(reg) => self.push_nibble(reg.index() as u16),
             Register::In(in_id) => {
-                self.fixups.push(DexFixup::InId4Fixup { code_offset: self.code.len(), bit_offset: self.bit_offset, in_id });
+                self.fixups.push(DexFixup::InId4 { code_offset: self.code.len(), bit_offset: self.bit_offset, in_id });
                 self.push_nibble(0);
             },
         }
@@ -118,7 +118,7 @@ impl DexEncoder {
         match reg {
             Register::KnownRegister(reg) => self.push_byte(reg.index().try_into().unwrap()),
             Register::In(in_id) => {
-                self.fixups.push(DexFixup::InId8Fixup { code_offset: self.code.len(), bit_offset: self.bit_offset, in_id });
+                self.fixups.push(DexFixup::InId8 { code_offset: self.code.len(), bit_offset: self.bit_offset, in_id });
                 self.push_byte(0);
             },
         }
@@ -128,7 +128,7 @@ impl DexEncoder {
         match reg {
             Register::KnownRegister(reg) => self.push(reg.index() as u16),
             Register::In(in_id) => {
-                self.fixups.push(DexFixup::InId16Fixup { code_offset: self.code.len(), in_id });
+                self.fixups.push(DexFixup::InId16 { code_offset: self.code.len(), in_id });
                 self.push(0);
             },
         }
@@ -156,7 +156,7 @@ impl DexEncoder {
         assert!(nibble <= 0xF);
         assert!(self.bit_offset & 3 == 0); // bit offset must be divisible by 4
         assert!(self.bit_offset <= 12);
-        self.next_unit |= nibble << 12 - self.bit_offset;
+        self.next_unit |= nibble << (12 - self.bit_offset);
         self.bit_offset += 4;
         self.flush_next_unit();
     }
@@ -165,7 +165,7 @@ impl DexEncoder {
         let byte = byte as u16;
         assert!(self.bit_offset & 7 == 0); // bit offset must be divisible by 8
         assert!(self.bit_offset <= 8);
-        self.next_unit |= byte << 8 - self.bit_offset;
+        self.next_unit |= byte << (8 - self.bit_offset);
         self.bit_offset += 8;
         self.flush_next_unit();
     }
@@ -266,28 +266,28 @@ impl DexEncoder {
 
         for fixup in mem::take(&mut self.fixups) {
             match fixup {
-                DexFixup::MethodIdFixup { code_offset, id } => {
+                DexFixup::MethodId { code_offset, id } => {
                     self.code[code_offset] = phys_method_ids[id].index().try_into().unwrap();
                 },
-                DexFixup::TypeIdFixup { code_offset, id } => {
+                DexFixup::TypeId { code_offset, id } => {
                     self.code[code_offset] = phys_type_ids[id].index().try_into().unwrap();
                 },
-                DexFixup::StringIdFixup { code_offset, id } => {
+                DexFixup::StringId { code_offset, id } => {
                     self.code[code_offset] = phys_string_ids[id].index().try_into().unwrap();
                 },
-                DexFixup::InId4Fixup { code_offset, bit_offset, in_id } => {
+                DexFixup::InId4 { code_offset, bit_offset, in_id } => {
                     let reg_id = in_id.index() as u16 + in_offset;
                     assert!(reg_id <= 0xF);
-                    assert_eq!(self.code[code_offset] & (0xF << 12 - bit_offset), 0);
+                    assert_eq!(self.code[code_offset] & (0xF << (12 - bit_offset)), 0);
                     self.code[code_offset] |= reg_id << (12 - bit_offset);
                 },
-                DexFixup::InId8Fixup { code_offset, bit_offset, in_id } => {
+                DexFixup::InId8 { code_offset, bit_offset, in_id } => {
                     let reg_id = in_id.index() as u16 + in_offset;
                     assert!(reg_id <= 0xFF);
-                    assert_eq!(self.code[code_offset] & (0xFF << 8 - bit_offset), 0);
+                    assert_eq!(self.code[code_offset] & (0xFF << (8 - bit_offset)), 0);
                     self.code[code_offset] |= reg_id << (8 - bit_offset);
                 },
-                DexFixup::InId16Fixup { code_offset, in_id } => {
+                DexFixup::InId16 { code_offset, in_id } => {
                     let reg_id = in_id.index() as u16 + in_offset;
                     self.code[code_offset] = reg_id;
                 },

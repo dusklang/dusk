@@ -1,3 +1,5 @@
+#![warn(clippy::needless_pass_by_ref_mut)]
+
 #[macro_use]
 pub mod index_vec;
 #[macro_use]

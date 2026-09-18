@@ -54,7 +54,7 @@ fn try_parse_version(version: &Yaml) -> Result<Option<u32>, TbdError> {
 
     let version = (components[0] as u32) << 16
         | (components[1] as u32) << 8
-        | (components[2] as u32) << 0;
+        | (components[2] as u32);
 
     Ok(Some(version))
 }

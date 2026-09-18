@@ -204,7 +204,7 @@ pub fn match_scrutinee(driver: &mut Driver, tp: &mut dyn TypeProvider, scrutinee
                             }
                             new_row.extend_from_slice(&pattern_row[1..]);
                             child_matrices.entry(index)
-                                .or_insert_with(|| Vec::new())
+                                .or_default()
                                 .push((new_row, destination));
                         } else {
                             let err = Error::new(format!("Variant `{}` does not exist in enum {:?}", variant_name_str, scrutinees[0].ty))
@@ -272,7 +272,7 @@ pub fn match_scrutinee(driver: &mut Driver, tp: &mut dyn TypeProvider, scrutinee
                         new_row.push(Pattern { kind: PatternKind::AnonymousCatchAll(SourceRange::default()), scrutinee: VOID_SCRUTINEE_VALUE });
                         new_row.extend_from_slice(&pattern_row[1..]);
                         child_matrices.entry(SwitchDecisionValue::UnsignedInt(value))
-                            .or_insert_with(|| Vec::new())
+                            .or_default()
                             .push((new_row, destination));
                     },
                     PatternKind::ContextualMember { range, .. } => {

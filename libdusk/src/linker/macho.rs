@@ -410,7 +410,7 @@ impl ResolvedRefMut<'_, DyldChainedPtr64> {
         assert!(next <= 0xFFF); // 12 bits
         let mask = 0xFFF << 51;
         self.modify(|value| {
-            value.0 = value.0 & !mask;
+            value.0 &= !mask;
             value.0 |= (next as u64) << 51;
         });
     }
@@ -446,7 +446,7 @@ impl DyldChainedPtr64Rebase {
     fn new(target: u64, high8: u8, next: u16) -> Self {
         assert!(target <= 0xF_FFFF_FFFF); // 36 bits
         assert!(next <= 0xFFF); // 12 bits
-        Self(target as u64 | (high8 as u64) << 36 | (next as u64) << 51)
+        Self(target | (high8 as u64) << 36 | (next as u64) << 51)
     }
 }
 
@@ -756,7 +756,7 @@ impl Linker for MachOLinker {
                     // CFString's fields on a new page)
                     let cstring_section_offset = cstring_section.map(|section| self.get_section_offset(section));
                     let (offset, flags) = match str.location {
-                        ConstantNSStringLocation::CStringSectionOffset(offset) => (cstring_section_offset.unwrap() + offset, 0x7C8 as u64),
+                        ConstantNSStringLocation::CStringSectionOffset(offset) => (cstring_section_offset.unwrap() + offset, 0x7C8_u64),
                         // TODO: UTF-16 strings
                         // ConstantNSStringLocation::UStringSectionOffset(offset) => (text_segment.sections[ustring_section.as_ref().unwrap().id].offset + offset, 0x7D0 as u64),
                     };
@@ -808,7 +808,7 @@ impl Linker for MachOLinker {
         // Push dyld_chained_starts_in_image (a dynamically-sized structure)
         let chained_starts_offset = self.buf.pos();
         let num_segments = self.segments.len() as u32;
-        self.buf.push(num_segments as u32);
+        self.buf.push(num_segments);
         let mut data_const_starts_offset = None;
         let mut data_segment_starts_offset = None;
         for i in self.segments.indices() {
@@ -819,7 +819,7 @@ impl Linker for MachOLinker {
             } else {
                 // AFAICT, the offset is relative to the start of dyld_chained_starts_in_image, which makes any offset less
                 // than 4 + 4 * num_segments invalid, thus 0 should indicate "no starts for this page"
-                self.buf.push(0 as u32);
+                self.buf.push(0_u32);
             }
         }
 
@@ -832,14 +832,14 @@ impl Linker for MachOLinker {
             let chained_starts_in_segment = self.buf.alloc::<DyldChainedStartsInSegment>();
             // TODO: these should be fields of DyldChainedStartsInSegment, but need to be here instead because packed
             // structs are not yet supported by our ByteSwap macro.
-            self.buf.push(0 as u32); // max_valid_pointer
+            self.buf.push(0_u32); // max_valid_pointer
             let page_count = (data_const_size - 1) / PAGE_SIZE + 1;
             self.buf.push(u16::try_from(page_count).unwrap());
 
             // The first fix-up in each page is at offset 0, because the whole point of the __got section is to provide
             // fixed up addresses, and __cfstring values also begin with a fix-up.
             for _ in 0..page_count {
-                self.buf.push(0 as u16);
+                self.buf.push(0_u16);
             }
 
             let chained_starts_in_segment_size = self.buf.pos() - chained_starts_in_segment_pos;
@@ -861,14 +861,14 @@ impl Linker for MachOLinker {
             let chained_starts_in_segment = self.buf.alloc::<DyldChainedStartsInSegment>();
             // TODO: these should be fields of DyldChainedStartsInSegment, but need to be here instead because packed
             // structs are not yet supported by our ByteSwap macro.
-            self.buf.push(0 as u32); // max_valid_pointer
+            self.buf.push(0_u32); // max_valid_pointer
             let page_count = (data_segment_size - 1) / PAGE_SIZE + 1;
             self.buf.push(u16::try_from(page_count).unwrap());
 
             // The first fix-up in each page is at offset 0, because the whole point of the __objc_selrefs and
             // __objc_classrefs sections is to provide fixed up addresses.
             for _ in 0..page_count {
-                self.buf.push(0 as u16);
+                self.buf.push(0_u16);
             }
 
             let chained_starts_in_segment_size = self.buf.pos() - chained_starts_in_segment_pos;
@@ -888,7 +888,7 @@ impl Linker for MachOLinker {
             chained_imports.push(self.buf.alloc::<DyldChainedImport>());
         }
         let imported_symbols_offset = self.buf.pos();
-        self.buf.push(0 as u8);
+        self.buf.push(0_u8);
         for (&import_header, import) in chained_imports.iter().zip(&exe.imported_symbols) {
             let offset = self.buf.pos() - imported_symbols_offset;
             self.buf.push_null_terminated_string(&import.name);
@@ -1309,7 +1309,7 @@ impl MachOLinker {
     fn fill_segment_headers(&mut self) {
         let segments = std::mem::take(&mut self.segments);
         for segment in &segments {
-            let info = segment.info.as_ref().expect(&format!("no info found for segment '{}'", segment.name));
+            let info = segment.info.as_ref().unwrap_or_else(|| panic!("no info found for segment '{}'", segment.name));
             let vm_addr = match info.offset {
                 SegmentOffset::PageZero => 0,
                 SegmentOffset::FileOffset(offset) => TEXT_ADDR + offset as u64,
@@ -1390,7 +1390,7 @@ impl MachOLinker {
         let text_segment_size = text_end_addr - TEXT_ADDR as usize;
 
         for (i, (section, &offset_from_end)) in segment.sections.iter().zip(offsets_from_end.iter().rev()).enumerate() {
-            self.add_info_to_section((segment.segment, i), text_segment_size as usize - offset_from_end, section.size);
+            self.add_info_to_section((segment.segment, i), text_segment_size - offset_from_end, section.size);
         }
 
         self.add_info_to_segment(segment.segment, 0, text_segment_size);
@@ -1526,7 +1526,7 @@ struct MachOExe {
 }
 
 // TODO: don't hardcode this
-const SDK_ROOT: &'static str = "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk";
+const SDK_ROOT: &str = "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk";
 
 impl MachOExe {
     fn new() -> Self {
@@ -1545,7 +1545,7 @@ impl MachOExe {
     #[doc(hidden)]
     fn intern_objc_method_name(&mut self, name: &CStr) -> usize {
         *self.objc_method_names_map.entry(name.to_owned()).or_insert_with(|| {
-            if self.objc_method_names.len() % 2 != 0 {
+            if !self.objc_method_names.len().is_multiple_of(2) {
                 self.objc_method_names.push(0); // Align to an even boundary. Not sure if necessary, but this what Clang does.
             }
             let offset = self.objc_method_names.len();

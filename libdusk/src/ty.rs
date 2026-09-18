@@ -93,7 +93,9 @@ impl From<InternalTypeId> for Type {
 #[module = ""]
 #[name = "type"]
 #[variant = "Ty"]
+#[derive(Default)]
 pub enum Type {
+    #[default]
     Error,
     Int {
         width: IntWidth,
@@ -318,11 +320,6 @@ impl Type {
     pub fn is_int(&self) -> bool { matches!(self, Type::Int { .. }) }
 }
 
-impl Default for Type {
-    fn default() -> Self {
-        Type::Error
-    }
-}
 
 impl fmt::Debug for Type {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

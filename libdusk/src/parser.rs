@@ -97,7 +97,7 @@ impl Driver {
         self.get_tok_begin_loc(range)
     }
 
-    fn begin_list(&mut self, p: &mut Parser, could_begin_item_proc: fn(&TokenKind) -> bool, separators: impl IntoIterator<Item=TokenKind>, terminator: Option<TokenKind>) -> AutoPopStackEntry<ListState, usize> {
+    fn begin_list(&self, p: &mut Parser, could_begin_item_proc: fn(&TokenKind) -> bool, separators: impl IntoIterator<Item=TokenKind>, terminator: Option<TokenKind>) -> AutoPopStackEntry<ListState, usize> {
         let id = p.list_counter;
         p.list_counter += 1;
         let first_token_loc = self.get_cur_begin_loc(p);
@@ -119,7 +119,7 @@ impl Driver {
         )
     }
 
-    fn start_next_list_item(&mut self, p: &mut Parser, id: usize) {
+    fn start_next_list_item(&self, p: &Parser, id: usize) {
         let new_loc = self.get_cur_begin_loc(p);
         let (begin_range, had_separator) = p.list_stack.peek_mut(|state| {
             let state = state.unwrap();
@@ -168,7 +168,7 @@ impl Driver {
         self.has_implicit_separator_impl(p, cur, prev_range)
     }
 
-    fn eat_separators(&mut self, p: &mut Parser) -> SeparatorResult {
+    fn eat_separators(&self, p: &mut Parser) -> SeparatorResult {
         let list_state = p.list_stack.peek().expect("invalid call to expect_separator()");
         let found_implicit = self.has_implicit_separator(p);
         let mut found_explicit = None;
@@ -241,7 +241,7 @@ impl Driver {
                     self.next(&mut p);
                 },
                 _ => {
-                    self.start_next_list_item(&mut p, item_list.id());
+                    self.start_next_list_item(&p, item_list.id());
                     self.parse_item(&mut p)?;
                     self.eat_separators(&mut p);
                 }
@@ -250,7 +250,7 @@ impl Driver {
         Ok(())
     }
 
-    fn parse_binary_operator(&mut self, p: &mut Parser) -> Option<BinOp> {
+    fn parse_binary_operator(&self, p: &mut Parser) -> Option<BinOp> {
         let op = match self.cur(p).kind {
             TokenKind::Add => BinOp::Add,
             TokenKind::Sub => BinOp::Sub,
@@ -296,7 +296,7 @@ impl Driver {
         Some(op)
     }
 
-    fn parse_prefix_operator(&mut self, p: &mut Parser) -> Option<(UnOp, SourceRange)> {
+    fn parse_prefix_operator(&self, p: &mut Parser) -> Option<(UnOp, SourceRange)> {
         let tok = self.cur(p);
         let mut range = tok.range;
         let op = match tok.kind {
@@ -319,7 +319,7 @@ impl Driver {
         Some((op, range))
     }
 
-    fn parse_postfix_operator(&mut self, p: &mut Parser) -> Option<(UnOp, SourceRange)> {
+    fn parse_postfix_operator(&self, p: &mut Parser) -> Option<(UnOp, SourceRange)> {
         let lhs_whitespace = self.peek_prev_including_whitespace(p).kind.is_whitespace();
         let tok = self.cur(p);
         let mut range = tok.range;
@@ -351,8 +351,8 @@ impl Driver {
     fn try_parse_term(&mut self, p: &mut Parser, parse_struct_lits: bool) -> ParseResult<ExprId> {
         let mut term = self.try_parse_restricted_term(p)?;
         let range = self.get_range(term);
-        if parse_struct_lits {
-            if let TokenKind::OpenCurly = self.cur(p).kind {
+        if parse_struct_lits
+            && let TokenKind::OpenCurly = self.cur(p).kind {
                 self.next(p);
                 let mut fields = Vec::new();
                 let field_list = self.begin_list(p, TokenKind::could_begin_struct_literal_field, [TokenKind::Comma], Some(TokenKind::CloseCurly));
@@ -385,7 +385,6 @@ impl Driver {
                 let lit_range = source_info::concat(range, close_curly_range);
                 term = self.struct_lit(term, fields, lit_range);
             }
-        }
         while let TokenKind::As = self.cur(p).kind {
             let as_range = self.cur(p).range;
             self.next(p);
@@ -910,14 +909,13 @@ impl Driver {
         };
         let range = source_info::concat(at_range, final_tok_range);
 
-        if let &Some(arg) = &arg {
-            if is_comptime {
+        if let &Some(arg) = &arg
+            && is_comptime {
                 self.diag.push(
                     Error::new("argument passed to @comptime attribute")
                         .adding_primary_range(arg, "consider removing this expression and surrounding parentheses")
                 );
             }
-        }
 
         Ok(Attribute { attr, arg, range })
     }
@@ -994,7 +992,7 @@ impl Driver {
         }
     }
 
-    fn eat_tok(&mut self, p: &mut Parser, kind: TokenKind) -> ParseResult<SourceRange> {
+    fn eat_tok(&self, p: &mut Parser, kind: TokenKind) -> ParseResult<SourceRange> {
         let Token { kind: cur_kind, range } = self.cur(p);
         if cur_kind != &kind {
             let cur_kind = cur_kind.clone();
@@ -1009,7 +1007,7 @@ impl Driver {
         }
     }
 
-    fn try_eat_tok(&mut self, p: &mut Parser, kind: TokenKind) -> Option<SourceRange> {
+    fn try_eat_tok(&self, p: &mut Parser, kind: TokenKind) -> Option<SourceRange> {
         let Token { kind: cur_kind, range } = self.cur(p);
         if cur_kind != &kind {
             None
@@ -1019,7 +1017,7 @@ impl Driver {
         }
     }
 
-    fn eat_ident(&mut self, p: &mut Parser) -> Ident {
+    fn eat_ident(&self, p: &mut Parser) -> Ident {
         let Token { kind, range } = self.cur(p);
         if let &TokenKind::Ident(symbol) = kind {
             self.next(p);
@@ -1212,14 +1210,13 @@ impl Driver {
                 if let Some(condition_ns) = condition_ns {
                     self.code.ast.condition_ns[condition_ns].func = decl;
                 }
-                if let Some(attr) = attributes.iter().find(|attr| attr.attr == self.ast.known_idents.comptime) {
-                    if !matches!(df!(decl.ast), ast::Decl::Function { .. }) {
+                if let Some(attr) = attributes.iter().find(|attr| attr.attr == self.ast.known_idents.comptime)
+                    && !matches!(df!(decl.ast), ast::Decl::Function { .. }) {
                         self.diag.push(
                             Error::new("unexpected @comptime attribute")
                                 .adding_primary_range(attr.range, "can only be applied to function declarations")
                         );
                     }
-                }
                 self.code.ast.decl_attributes.entry(decl).or_default()
                     .extend(attributes);
                 Ok(Item::Decl(decl))
@@ -1559,8 +1556,8 @@ impl Driver {
 
                 let ty = 'blk: {
                     // Handle `self` parameters.
-                    if name == self.ast.known_idents.salf {
-                        if *self.cur(p).kind != TokenKind::Colon {
+                    if name == self.ast.known_idents.salf
+                        && *self.cur(p).kind != TokenKind::Colon {
                             let self_param = self.parse_self_parameter(p, param_range);
                             if param_names.len() > 1 {
                                 // `parse_self_parameter` will return ERROR_TYPE as the self type in the case where this self parameter is inside a free function's parameter list.
@@ -1579,7 +1576,6 @@ impl Driver {
                             };
                             break 'blk ty;
                         }
-                    }
 
                     self.eat_tok(p, TokenKind::Colon)?;
                     let (ty, _ty_range) = self.parse_type(p);
@@ -1644,7 +1640,7 @@ impl Driver {
         Ok(decl_id)
     }
 
-    fn parse_self_parameter(&mut self, p: &mut Parser, range: SourceRange) -> SelfParameter {
+    fn parse_self_parameter(&self, p: &mut Parser, range: SourceRange) -> SelfParameter {
         let kind = if self.try_eat_tok(p, TokenKind::Asterisk).is_some() {
             if self.try_eat_tok(p, TokenKind::Mut).is_some() {
                 SelfParameterKind::MutPtr
@@ -1735,18 +1731,18 @@ impl Driver {
     }
 
     /// Skips whitespace and comments
-    fn skip_whitespace(&mut self, p: &mut Parser) {
+    fn skip_whitespace(&self, p: &mut Parser) {
         while self.cur(p).kind.is_whitespace() {
             self.next_including_whitespace(p);
         }
     }
 
-    fn next_including_whitespace(&mut self, p: &mut Parser) -> Token<'_> {
+    fn next_including_whitespace(&self, p: &mut Parser) -> Token<'_> {
         p.cur += 1;
         self.cur(p)
     }
 
-    fn next(&mut self, p: &mut Parser) -> Token<'_> {
+    fn next(&self, p: &mut Parser) -> Token<'_> {
         self.next_including_whitespace(p);
         self.skip_whitespace(p);
         self.cur(p)
