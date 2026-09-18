@@ -2,25 +2,27 @@ use std::borrow::Cow;
 use std::mem;
 
 use crate::source_info::{ToSourceRange, CommentatedSourceRange};
+use crossbeam_queue::SegQueue;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 #[derive(Default)]
 pub struct DiagnosticReporter {
-    errors: Vec<Diagnostic>,
-    warnings: Vec<Diagnostic>,
-    flushed_errors: u32,
-    flushed_warnings: u32,
+    errors: SegQueue<Diagnostic>,
+    warnings: SegQueue<Diagnostic>,
+    flushed_errors: AtomicU32,
+    flushed_warnings: AtomicU32,
 }
 
 impl DiagnosticReporter {
     pub fn has_errors(&self) -> bool {
         !self.errors.is_empty()
     }
-    pub fn report_error(&mut self, message: impl Into<Cow<'static, str>>, range: impl Into<ToSourceRange>, range_message: impl Into<Cow<'static, str>>) -> DiagnosticBuilder<'_> {
+    pub fn report_error(&self, message: impl Into<Cow<'static, str>>, range: impl Into<ToSourceRange>, range_message: impl Into<Cow<'static, str>>) -> DiagnosticBuilder<'_> {
         self.report_error_no_range(message)
             .adding_primary_range_with_msg(range, range_message)
     }
     pub fn has_failed(&self) -> bool {
-        self.flushed_errors > 0
+        self.flushed_errors.load(Ordering::Relaxed) > 0
     }
 
     fn print_pluralized(&self, base: &str, num: u32) {
@@ -34,7 +36,7 @@ impl DiagnosticReporter {
     pub fn check_for_failure(&self) -> bool {
         if self.has_failed() {
             print!("\n\u{001B}[31mcompilation failed due to previous ");
-            self.print_pluralized("error", self.flushed_errors);
+            self.print_pluralized("error", self.flushed_errors.load(Ordering::Relaxed));
             println!("\u{001B}[0m");
             self.print_warnings();
             true
@@ -44,59 +46,68 @@ impl DiagnosticReporter {
     }
 
     pub fn print_warnings(&self) {
-        if self.flushed_warnings > 0 {
+        let num_warnings = self.flushed_warnings.load(Ordering::Relaxed);
+        if num_warnings > 0 {
             print!("\u{001B}[33mreported ");
-            self.print_pluralized("warning", self.flushed_warnings);
+            self.print_pluralized("warning", num_warnings);
             println!("\u{001B}[0m");
         }
     }
 
-    pub fn report_error_no_range_msg(&mut self, message: impl Into<Cow<'static, str>>, range: impl Into<ToSourceRange>) -> DiagnosticBuilder<'_> {
+    pub fn report_error_no_range_msg(&self, message: impl Into<Cow<'static, str>>, range: impl Into<ToSourceRange>) -> DiagnosticBuilder<'_> {
         self.report_error(message, range, "")
     }
 
-    pub fn report_error_no_range(&mut self, message: impl Into<Cow<'static, str>>) -> DiagnosticBuilder<'_> {
+    pub fn report_error_no_range(&self, message: impl Into<Cow<'static, str>>) -> DiagnosticBuilder<'_> {
         DiagnosticBuilder {
             diag: Diagnostic {
                 kind: DiagnosticKind::Error,
                 message: message.into(),
                 ranges: Vec::new()
             },
-            diagnostics: &mut self.errors,
+            diagnostics: &self.errors,
         }
     }
 
-    pub fn report_warning(&mut self, message: impl Into<Cow<'static, str>>, range: impl Into<ToSourceRange>, range_message: impl Into<Cow<'static, str>>) -> DiagnosticBuilder<'_> {
+    pub fn report_warning(&self, message: impl Into<Cow<'static, str>>, range: impl Into<ToSourceRange>, range_message: impl Into<Cow<'static, str>>) -> DiagnosticBuilder<'_> {
         self.report_warning_no_range(message)
             .adding_primary_range_with_msg(range, range_message)
     }
 
-    pub fn report_warning_no_range_msg(&mut self, message: impl Into<Cow<'static, str>>, range: impl Into<ToSourceRange>) -> DiagnosticBuilder<'_> {
+    pub fn report_warning_no_range_msg(&self, message: impl Into<Cow<'static, str>>, range: impl Into<ToSourceRange>) -> DiagnosticBuilder<'_> {
         self.report_warning(message, range, "")
     }
 
-    pub fn report_warning_no_range(&mut self, message: impl Into<Cow<'static, str>>) -> DiagnosticBuilder<'_> {
+    pub fn report_warning_no_range(&self, message: impl Into<Cow<'static, str>>) -> DiagnosticBuilder<'_> {
         DiagnosticBuilder {
             diag: Diagnostic {
                 kind: DiagnosticKind::Warning,
                 message: message.into(),
                 ranges: Vec::new()
             },
-            diagnostics: &mut self.warnings,
+            diagnostics: &self.warnings,
         }
     }
 
-    pub fn get_latest_diagnostics(&mut self) -> Vec<Diagnostic> {
-        let mut diagnostics = mem::take(&mut self.errors);
-        self.flushed_errors += diagnostics.len() as u32;
-        let warnings = mem::take(&mut self.warnings);
-        self.flushed_warnings += warnings.len() as u32;
-        diagnostics.extend(warnings);
+    pub fn get_latest_diagnostics(&self) -> Vec<Diagnostic> {
+        let mut diagnostics = Vec::new();
+        let mut num_errors = 0;
+        let mut num_warnings = 0;
+        while let Some(error) = self.warnings.pop() {
+            diagnostics.push(error);
+            num_warnings += 1;
+        }
+        while let Some(error) = self.errors.pop() {
+            diagnostics.push(error);
+            num_errors += 1;
+        }
+        self.flushed_errors.fetch_add(num_errors as u32, Ordering::Relaxed);
+        self.flushed_warnings.fetch_add(num_warnings as u32, Ordering::Relaxed);
         diagnostics
     }
 
     // TODO: remove this once everyone is moved off of the old error system
-    pub fn push(&mut self, error: Error) {
+    pub fn push(&self, error: Error) {
         self.errors.push(
             Diagnostic {
                 kind: DiagnosticKind::Error,
@@ -115,7 +126,7 @@ pub enum DiagnosticKind {
 
 pub struct DiagnosticBuilder<'a> {
     diag: Diagnostic,
-    diagnostics: &'a mut Vec<Diagnostic>,
+    diagnostics: &'a SegQueue<Diagnostic>,
 }
 
 impl Drop for DiagnosticBuilder<'_> {

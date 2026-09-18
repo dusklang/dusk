@@ -1,7 +1,5 @@
-use std::sync::{RwLock, LazyLock};
+use std::sync::{RwLock, LazyLock, Arc};
 use string_interner::DefaultStringInterner as StringInterner;
-use borrow::traits::*;
-use borrow::partial as p;
 
 use crate::ast::ExprId;
 use crate::mir::Const;
@@ -23,24 +21,25 @@ use crate::interpreter::EvalError;
 
 // This derive is here so that I can initialize the global Driver instance with something. It is *not* recommended that
 // anyone actually uses `Driver` in its default state.
-#[derive(Default, borrow::Partial)]
-#[module(crate)]
+#[derive(Default)]
 pub struct Driver {
+    // Constant compiler options
     pub arch: Arch,
     pub os: OperatingSystem,
+    pub no_core: bool,
+
+    // Concurrently-accessible global state
+    pub diag: Arc<DiagnosticReporter>,
+
     pub src_map: SourceMap,
     pub toks: IndexVec<SourceFileId, TokenVec>,
     pub interner: StringInterner,
     pub types: TypeInterner,
     pub ast: ast::Builder,
     pub tir: tir::Builder,
-    pub diag: DiagnosticReporter,
     pub mir: mir::Builder,
     pub code: Code,
     pub internal_field_decls: InternalFieldDecls,
-    pub no_core: bool,
-
-    pub boxed_ints: Vec<usize>,
 }
 pub type DriverRwRef<'l> = RwRef<'l, Driver>;
 
@@ -60,8 +59,6 @@ impl Driver {
             code: Code::default(),
             internal_field_decls: InternalFieldDecls::default(),
             no_core,
-
-            boxed_ints: Vec::default(),
         }
     }
 }
