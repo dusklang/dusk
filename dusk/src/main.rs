@@ -79,14 +79,14 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
     driver.write().initialize_ast();
 
     if !loaded_file {
-        driver.write().diag.report_error_no_range(
+        driver.read().diag.report_error_no_range(
             format!("unable to load input file \"{}\"", opt.input.as_os_str().to_string_lossy())
         );
     }
 
     macro_rules! begin_phase {
         ($phase:ident) => {{
-            flush_diagnostics(&mut driver.write());
+            flush_diagnostics(&driver.read());
             if (opt.stop_phase as u8) < (StopPhase::$phase as u8) {
                 driver.read().diag.check_for_failure();
                 return;
@@ -150,7 +150,7 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
 
 
             new_code = driver.read().get_new_code_since(before);
-            // { flush_diagnostics(&mut driver.write()); }
+            // { flush_diagnostics(&driver.read()); }
         } else {
             break;
         }
@@ -173,7 +173,7 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
     if driver.read().diag.check_for_failure() { return; }
 
     begin_phase!(Interp);
-    let main_sym = driver.write().interner.write().unwrap().get_or_intern_static("main");
+    let main_sym = driver.read().interner.write().unwrap().get_or_intern_static("main");
     let main = driver.read().code.mir.functions.iter()
         .position(|func| {
             match func.name {
@@ -212,7 +212,7 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
             bundler.write(&driver.read(), main, &mut *linker, &mut *backend, &mut w).unwrap();
         }
     } else {
-        driver.write().diag.report_error_no_range(
+        driver.read().diag.report_error_no_range(
             "Couldn't find main function with no parameters and a return type of `void`"
         );
         flush_diagnostics(&driver.read());

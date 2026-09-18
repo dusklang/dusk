@@ -917,7 +917,7 @@ impl DriverRwRef<'_> {
                     let err = Error::new("cannot declare prototype outside of extern module")
                         .adding_primary_range(id, "prototype here");
                     drop(d);
-                    self.write().diag.push(err);
+                    self.read().diag.push(err);
                     Decl::Invalid
                 };
                 self.write().mir.decls.insert(id, decl.clone());
@@ -2039,7 +2039,7 @@ impl DriverRwRef<'_> {
         }
     }
 
-    fn check_no_comptime_calls(&mut self, func: &Function) {
+    fn check_no_comptime_calls(&self, func: &Function) {
         let mut comptime_calls = Vec::new();
         for &block in &func.blocks {
             let block = &self.read().code.blocks[block];
@@ -2053,7 +2053,7 @@ impl DriverRwRef<'_> {
 
         for (func, _instr) in comptime_calls {
             let name = self.read().fn_name(self.read().code.mir.functions[func].name).to_string();
-            self.write().diag.push(
+            self.read().diag.push(
                 Error::new(format!("unable to evaluate call to @comptime function '{}'", name))
             );
         }
@@ -3063,7 +3063,7 @@ impl DriverRwRef<'_> {
                 self.build_scope(b, destination, ctx, tp);
             },
             SwitchDecisionNode::Failure => {
-                self.write().diag.report_error_no_range_msg("Pattern matching failure", expr);
+                self.read().diag.report_error_no_range_msg("Pattern matching failure", expr);
                 self.write().push_instr(b, Instr::LegacyIntrinsic { arguments: SmallVec::new(), ty: Type::Never, intr: LegacyIntrinsic::Panic }, expr);
                 self.write().end_current_bb(b);
             }

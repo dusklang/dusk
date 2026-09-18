@@ -513,7 +513,7 @@ impl Server {
                 tp.into_inner()
             })
         });
-        let mut driver = DriverRwRef::new(&DRIVER);
+        let driver = DriverRwRef::new(&DRIVER);
         let mut tp = None;
         match unwind_result {
             Ok(type_provider) => tp = type_provider,
@@ -525,7 +525,7 @@ impl Server {
                 } else if reason.is::<&'static str>() {
                     error_msg.push_str(&format!(": {}", reason.downcast::<&'static str>().unwrap()));
                 }
-                driver.write().diag.report_error_no_range_msg(error_msg, range);
+                driver.read().diag.report_error_no_range_msg(error_msg, range);
                 self.flush_diagnostics(&driver.read(), path)
             }
         }

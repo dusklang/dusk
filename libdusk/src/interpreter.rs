@@ -1425,7 +1425,7 @@ impl DriverRwRef<'_> {
                             assert!(arguments.len() <= 1);
                             let panic_message = self.read().panic_message(&stack, arguments.first().copied()).to_string();
                             drop(d);
-                            self.write().diag.report_error(panic_message, next_op, "panic occured here");
+                            self.read().diag.report_error(panic_message, next_op, "panic occured here");
                             return Err(EvalError);
                         },
                         LegacyIntrinsic::Print => {
@@ -1542,7 +1542,7 @@ impl DriverRwRef<'_> {
                                 .map(|base| base.parent().unwrap().join(path))
                                 .unwrap_or_else(|| path.into());
                             drop(d);
-                            let file = self.write().src_map.add_file_on_disk(path).unwrap();
+                            let file = self.read().src_map.add_file_on_disk(path).unwrap();
                             self.write().parse_file(file).unwrap();
 
                             let added_module = self.read().code.ast.global_scopes[&file];
@@ -1737,7 +1737,7 @@ impl DriverRwRef<'_> {
                         field_tys,
                         identity: id,
                     };
-                    self.write().eval_struct_lit(&strukt, fields.into_iter())
+                    self.read().eval_struct_lit(&strukt, fields.into_iter())
                 },
                 &Instr::Ret(instr) => {
                     let val = frame.get_val(instr, &self.read()).clone();
