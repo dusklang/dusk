@@ -33,6 +33,7 @@ cryptographic-message-syntax = "0.28"
 x509-certificate = "0.25"
 clap = { version = "4.6", features = ["derive"] }
 crossbeam-queue = "0.3"
+crossbeam-skiplist = "0.1"
 boxcar = "0.2"
 papaya = "0.2"
 

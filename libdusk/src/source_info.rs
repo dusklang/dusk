@@ -7,6 +7,9 @@ use std::io;
 use std::collections::{HashMap, HashSet};
 use std::ops::{Add, Range};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use crossbeam_skiplist::SkipMap;
 
 use crate::display_adapter;
 use crate::ast::{ExprId, DeclId, ItemId, Item};
@@ -79,11 +82,9 @@ pub struct SourceMap {
     pub(crate) unparsed_files: HashSet<SourceFileId>,
     locations: HashMap<SourceFileLocation, SourceFileId>,
 
-    /// Contains vec![0, end(0), end(1), end(2)], etc.,
-    /// where end(i) is the global byte index of the end of the file with id SourceFileId(i).
-    ///
-    /// Used to search for the right file for SourceRanges
-    file_ends: Vec<usize>,
+    /// Total bytes in all files added (not necessarily parsed) so far
+    total_file_bytes: AtomicUsize,
+    files_by_byte_offset: SkipMap<usize, SourceFileId>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -162,6 +163,7 @@ pub struct SourceFile {
     /// The starting position of each line (relative to this source file!!!).
     pub lines: OnceLock<Vec<usize>>,
     pub location: SourceFileLocation,
+    begin_offset: usize,
 }
 
 #[derive(Debug)]
@@ -211,12 +213,13 @@ impl SourceMap {
             files: Default::default(),
             unparsed_files: Default::default(),
             locations: Default::default(),
-            file_ends: vec![0],
+            total_file_bytes: AtomicUsize::new(0),
+            files_by_byte_offset: SkipMap::new(),
         }
     }
 
     pub fn get_begin_offset(&self, file: SourceFileId) -> usize {
-        self.file_ends[file.index()]
+        self.files[file].begin_offset
     }
 
     pub fn get_file_range(&self, file: SourceFileId) -> SourceRange {
@@ -233,15 +236,16 @@ impl SourceMap {
 
         let src = src()?;
         let file_len = src.len();
+        let begin_offset = self.total_file_bytes.fetch_add(file_len, Ordering::Relaxed);
         let id = self.files.push(
-            SourceFile { src, lines: OnceLock::new(), location: location.clone(), }
+            SourceFile { src, lines: OnceLock::new(), location: location.clone(), begin_offset }
         );
+        if file_len > 0 {
+            self.files_by_byte_offset.insert(begin_offset, id);
+        }
         self.unparsed_files.insert(id);
         let had_result = self.locations.insert(location, id);
         debug_assert_eq!(had_result, None);
-        let end = self.file_ends.last().unwrap() + file_len;
-        self.file_ends.push(end);
-        debug_assert_eq!(self.file_ends.len(), self.files.len() + 1);
         Ok(id)
     }
 
@@ -264,22 +268,24 @@ impl SourceMap {
 impl Driver {
     pub fn lookup_file(&self, range: impl Into<ToSourceRange>) -> (SourceFileId, Range<usize>) {
         let range = self.get_range(range);
-        // TODO: Speed. Binary search would be better.
-        for (i, &end) in self.src_map.file_ends.iter().enumerate() {
-            if end >= range.end {
-                let i = i.saturating_sub(1);
-                let start = self.src_map.file_ends[i];
-                let adjusted_range = (range.start - start)..(range.end - start);
-                return (SourceFileId::new(i), adjusted_range);
-            }
+        assert!(!self.src_map.files.is_empty());
+        if range.end == 0 {
+            return (SourceFileId::new(0), 0..0);
         }
 
-        // At this point, range.end must be past the end of any file.
-        // So make sure it has zero content.
-        assert_eq!(range.start, range.end, "Invalid range");
+        let entry = self.src_map.files_by_byte_offset
+            .range(..range.end)
+            .next_back()
+            .expect("range.end comes before beginning of first file");
 
-        assert!(!self.src_map.files.is_empty());
-        (SourceFileId::new(0), 0..0)
+        let start = *entry.key();
+        let file_id = *entry.value();
+        let end = start + self.src_map.files[file_id].src.len();
+        if range.start < start || range.end > end {
+            panic!("invalid range");
+        }
+        let adjusted_range = (range.start - start)..(range.end - start);
+        (file_id, adjusted_range)
     }
 
     /// For a source location, returns its file id, zero-based line number, and byte offset from the beginning of that line.
