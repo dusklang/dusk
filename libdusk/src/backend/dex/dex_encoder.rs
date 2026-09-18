@@ -12,7 +12,6 @@ use std::cmp::max;
 
 use crate::index_vec::*;
 use crate::index_counter::IndexCounter;
-use index_vec::define_index_type;
 use crate::linker::dex::{StringId, PhysicalStringId, TypeId, PhysicalTypeId, MethodId, PhysicalMethodId};
 
 define_index_type!(pub struct RegisterId = u16;);

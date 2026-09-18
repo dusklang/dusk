@@ -171,7 +171,7 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
     if driver.read().diag.check_for_failure() { return; }
 
     begin_phase!(Interp);
-    let main_sym = driver.write().interner.get_or_intern_static("main");
+    let main_sym = driver.write().interner.write().unwrap().get_or_intern_static("main");
     let main = driver.read().code.mir.functions.iter()
         .position(|func| {
             match func.name {

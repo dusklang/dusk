@@ -1,13 +1,12 @@
-use std::{collections::HashMap, ops::Index};
+use std::ops::Index;
 
-use index_vec::IndexVec;
-
+use crate::index_vec::ConcurrentIndexVec;
 use crate::ty::{Type, TypeId};
 
 #[derive(Default)]
 pub struct TypeInterner {
-    types: IndexVec<TypeId, Type>,
-    type_map: HashMap<Type, TypeId>,
+    types: ConcurrentIndexVec<TypeId, Type>,
+    type_map: papaya::HashMap<Type, TypeId>,
 }
 
 impl Index<TypeId> for TypeInterner {
@@ -21,9 +20,8 @@ impl Index<TypeId> for TypeInterner {
 impl TypeInterner {
     pub fn new() -> TypeInterner { Default::default() }
 
-    pub fn intern(&mut self, ty: Type) -> TypeId {
-        *self.type_map.entry(ty.clone()).or_insert_with(|| {
-            self.types.push(ty)
-        })
+    pub fn intern(&self, ty: Type) -> TypeId {
+        *self.type_map.pin()
+            .get_or_insert_with(ty.clone(), || self.types.push(ty))
     }
 }

@@ -1,4 +1,4 @@
-use std::sync::{RwLock, LazyLock, Arc};
+use std::sync::{Arc, LazyLock, OnceLock, RwLock};
 use string_interner::DefaultStringInterner as StringInterner;
 
 use crate::ast::ExprId;
@@ -28,18 +28,19 @@ pub struct Driver {
     pub os: OperatingSystem,
     pub no_core: bool,
 
-    // Concurrently-accessible global state
+    // Concurrently-accessible global state (these don't really need to be Arcs, they just are for the time being).
     pub diag: Arc<DiagnosticReporter>,
+    pub types: Arc<TypeInterner>,
+    pub interner: Arc<RwLock<StringInterner>>,
+    pub internal_field_decls: OnceLock<InternalFieldDecls>,
 
+    // Mutable state
     pub src_map: SourceMap,
     pub toks: IndexVec<SourceFileId, TokenVec>,
-    pub interner: StringInterner,
-    pub types: TypeInterner,
     pub ast: ast::Builder,
     pub tir: tir::Builder,
     pub mir: mir::Builder,
     pub code: Code,
-    pub internal_field_decls: InternalFieldDecls,
 }
 pub type DriverRwRef<'l> = RwRef<'l, Driver>;
 
@@ -50,14 +51,14 @@ impl Driver {
             os,
             src_map,
             toks: IndexVec::new(),
-            interner: StringInterner::new(),
-            types: TypeInterner::new(),
+            interner: Default::default(),
+            types: Default::default(),
             ast: ast::Builder::default(),
             tir: tir::Builder::default(),
             diag: Default::default(),
             mir: mir::Builder::new(),
             code: Code::default(),
-            internal_field_decls: InternalFieldDecls::default(),
+            internal_field_decls: Default::default(),
             no_core,
         }
     }

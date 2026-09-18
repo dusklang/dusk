@@ -1,6 +1,6 @@
 use std::ffi::CStr;
 
-use index_vec::*;
+use crate::index_vec::*;
 
 use crate::{backend::CodeBlob, linker::dex::DexExe};
 

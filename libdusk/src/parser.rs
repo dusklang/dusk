@@ -864,7 +864,7 @@ impl Driver {
 
         if !is_condition && !is_comptime {
             self.diag.push(
-                Error::new(format!("unrecognized attribute '{}'", self.interner.resolve(attr).unwrap()))
+                Error::new(format!("unrecognized attribute '{}'", self.interner.read().unwrap().resolve(attr).unwrap()))
                     .adding_primary_range(ident_range, "")
             );
         }
@@ -1357,7 +1357,8 @@ impl Driver {
                         let range = source_info::concat(ident_range, ty_range);
                         fields.push(self.field_decl(name, strukt, ty, index, range));
                         if let Some(first_range) = used_names.get(&name).copied() {
-                            let name_str = self.interner.resolve(name).unwrap();
+                            let interner = self.interner.read().unwrap();
+                            let name_str = interner.resolve(name).unwrap();
                             self.diag.report_error_no_range_msg(format!("field with name '{}' already exists", name_str), ident_range)
                                 .adding_secondary_range_with_msg(first_range, "first field with that name here");
                         } else {

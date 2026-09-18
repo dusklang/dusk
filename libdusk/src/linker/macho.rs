@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::mem;
 
 use rsa::sha2::{Sha256, Digest};
-use index_vec::define_index_type;
+use crate::index_vec::define_index_type;
 
 use dusk_proc_macros::ByteSwap;
 

@@ -6,8 +6,8 @@ use std::ffi::{CStr, CString};
 use std::mem;
 
 use bitflags::bitflags;
-use index_vec::IndexVec;
 
+use crate::index_vec::IndexVec;
 use crate::backend::{Backend, CodeBlob, CodeBlobExt, Indirection};
 use crate::linker::Linker;
 use crate::linker::exe::*;

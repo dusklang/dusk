@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use num_bigint::BigInt;
 use smallvec::{SmallVec, smallvec};
 use string_interner::DefaultSymbol as Sym;
-use index_vec::{IndexVec, define_index_type};
+use crate::index_vec::{IndexVec, define_index_type};
 use crate::display_adapter;
 
 use crate::index_counter::IndexCounter;
@@ -1025,7 +1025,8 @@ impl Driver {
     #[display_adapter]
     fn fmt_variant_name(&self, f: &mut Formatter, enuum: EnumId, index: usize) {
         let variant = &self.code.ast.enums[enuum].variants[index];
-        let name = self.interner.resolve(variant.name).unwrap();
+        let interner = self.interner.read().unwrap();
+        let name = interner.resolve(variant.name).unwrap();
         write!(f, "{}", name)
     }
 
@@ -1085,10 +1086,10 @@ impl Driver {
         Ok(())
     }
 
-    pub fn fn_name(&self, name: Option<Sym>) -> &str {
+    pub fn fn_name(&self, name: Option<Sym>) -> String {
         match name {
-            Some(name) => self.interner.resolve(name).unwrap(),
-            None => "{anonymous}",
+            Some(name) => self.interner.read().unwrap().resolve(name).unwrap().to_owned(),
+            None => "{anonymous}".to_string(),
         }
     }
 
@@ -1260,7 +1261,7 @@ impl Driver {
                 write!(f, "%{} = define enum{} {{", self.display_instr_name(op_id), id.index())?;
 
                 for (i, variant) in self.code.ast.enums[id].variants.iter().enumerate() {
-                    write!(f, "{}", self.interner.resolve(variant.name).unwrap())?;
+                    write!(f, "{}", self.interner.read().unwrap().resolve(variant.name).unwrap())?;
                     if variant.payload_ty.is_some() {
                         write!(f, "(%{})", self.display_instr_name(variants[i]))?;
                     }
@@ -1291,7 +1292,7 @@ impl Driver {
             &Instr::Variant { enuum, index, payload } => {
                 let variant = &self.code.ast.enums[enuum].variants[index];
                 let variant_name = variant.name;
-                write!(f, "%{} = %enum{}.{}", self.display_instr_name(op_id), enuum.index(), self.interner.resolve(variant_name).unwrap())?;
+                write!(f, "%{} = %enum{}.{}", self.display_instr_name(op_id), enuum.index(), self.interner.read().unwrap().resolve(variant_name).unwrap())?;
                 if variant.payload_ty.is_some() {
                     write!(f, "(%{})", self.display_instr_name(payload))?
                 }

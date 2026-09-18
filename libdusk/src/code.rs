@@ -1,4 +1,4 @@
-use index_vec::{IndexVec, index_vec, define_index_type};
+use crate::index_vec::{IndexVec, index_vec, define_index_type};
 use crate::display_adapter;
 
 use crate::ast::{Ast, Item, GenericCtx};

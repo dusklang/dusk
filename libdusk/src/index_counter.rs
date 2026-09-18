@@ -1,6 +1,6 @@
 use std::ops::AddAssign;
 
-use index_vec::Idx;
+use crate::index_vec::Idx;
 
 #[derive(Debug, Clone)]
 pub struct IndexCounter<I: Idx + AddAssign<usize>> {

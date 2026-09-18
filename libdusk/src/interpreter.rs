@@ -17,8 +17,7 @@ use smallvec::SmallVec;
 use paste::paste;
 use num_bigint::{BigInt, Sign};
 use crate::display_adapter;
-use crate::index_vec::range_iter;
-use index_vec::IndexVec;
+use crate::index_vec::{IndexVec, range_iter};
 
 use crate::target::Arch;
 use crate::ast::{LegacyIntrinsic, EnumId, GenericParamId, ExternFunctionRef, ExternModId, NewNamespaceId};
@@ -680,7 +679,7 @@ impl Driver {
 
         let num_parameters = self.code.num_parameters(func);
         if num_parameters != arguments.len() {
-            let interner = &self.interner;
+            let interner = self.interner.read().unwrap();
             let func_name = func.name.map(|name| interner.resolve(name).unwrap()).unwrap_or("<anonymous func>");
             panic!(
                 "Compiler bug! Tried to call {} with {} arguments, but {} were expected.",
@@ -1503,7 +1502,7 @@ impl DriverRwRef<'_> {
                             assert_eq!(arguments.len(), 2);
                             let ty = frame.get_val(arguments[0], &*self.read()).as_ty();
                             let field_name = unsafe { CStr::from_ptr(frame.get_val(arguments[1], &*self.read()).as_raw_ptr() as *const _) };
-                            let field_name = self.read().interner.get(field_name.to_str().unwrap());
+                            let field_name = self.read().interner.read().unwrap().get(field_name.to_str().unwrap());
                             let mut offset = None;
                             if let Some(field_name) = field_name {
                                 match ty {

@@ -4,7 +4,7 @@ use std::fmt;
 use arrayvec::ArrayVec;
 use bitflags::bitflags;
 
-use index_vec::define_index_type;
+use crate::index_vec::define_index_type;
 
 use dusk_proc_macros::DuskBridge;
 

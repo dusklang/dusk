@@ -3,9 +3,9 @@ use std::collections::{HashMap, HashSet};
 use std::mem;
 
 use smallvec::SmallVec;
-use index_vec::define_index_type;
 use string_interner::DefaultSymbol as Sym;
 
+use crate::index_vec::define_index_type;
 use crate::pattern_matching::SwitchScrutineeValueId;
 use crate::source_info::SourceRange;
 use crate::ast::{self, CastId, DeclId, DeclRefId, ExprId, ExtendBlockId, FieldAssignment, GenericParamId, ImperScopeId, Item, ItemId, Namespace, NewNamespaceId, ParamList, Pattern, PatternMatchingContextId, StructId, StructLitId, RETURN_VALUE_DECL};
@@ -290,7 +290,7 @@ macro_rules! define_legacy_internal_types_internal {
     })*) => {
         impl Driver {
             pub fn register_internal_fields(&mut self) {
-                self.internal_field_decls = InternalFieldDecls {
+                let internal_field_decls = InternalFieldDecls {
                     $(
                         $name: internal_field_decls::$name {
                             $(
@@ -303,13 +303,14 @@ macro_rules! define_legacy_internal_types_internal {
                         }
                     ),*
                 };
+                self.internal_field_decls.set(internal_field_decls).unwrap();
             }
             fn find_overloads_in_internal(&self, lookup: &NameLookup, ns: InternalNamespace, overloads: &mut HashSet<FoundOverload>) {
                 match ns {
                     $(
                         InternalNamespace::$name => {
                             $({
-                                let decl = self.internal_field_decls.$name.$field_name;
+                                let decl = self.internal_field_decls.get().unwrap().$name.$field_name;
                                 let name = self.code.ast.names[decl];
                                 if self.name_matches(lookup, name) {
                                     overloads.insert(decl.into());
@@ -506,7 +507,8 @@ impl Driver {
     fn name_matches(&self, lookup: &NameLookup, actual: Sym) -> bool {
         match lookup {
             NameLookup::Beginning(beginning) => {
-                let actual = self.interner.resolve(actual).unwrap();
+                let interner = self.interner.read().unwrap();
+                let actual = interner.resolve(actual).unwrap();
                 actual.starts_with(beginning)
             },
             &NameLookup::Exact(name) => name == actual,

@@ -255,7 +255,8 @@ impl Server {
                     match ef!(d, expr.ast) {
                         Expr::DeclRef { id, .. } => {
                             let name = d.code.ast.decl_refs[id].name;
-                            let name = d.interner.resolve(name).unwrap();
+                            let interner = d.interner.read().unwrap();
+                            let name = interner.resolve(name).unwrap();
                             let mut ty = None;
                             if let Some(tp) = &tp {
                                 if let Some(overload) = *tp.selected_overload(id) {
@@ -281,7 +282,8 @@ impl Server {
                     let mut message = String::new();
                     let d = driver.read();
                     let name = d.code.ast.names[decl];
-                    let name = d.interner.resolve(name).unwrap();
+                    let interner = d.interner.read().unwrap();
+                    let name = interner.resolve(name).unwrap();
                     let mut ty = None;
                     if let Some(tp) = &tp {
                         ty = Some(tp.decl_type(decl).clone());
@@ -343,7 +345,8 @@ fn lsp_pos_to_dusk_pos(driver: &Driver, url: &Uri, pos: Position) -> usize {
     let file = &driver.src_map.files[file];
 
     // byte offset from the beginning of the file to the beginning of the line
-    let line_offset = file.lines[pos.line as usize];
+    let lines = file.lines.get().unwrap();
+    let line_offset = lines[pos.line as usize];
 
     let line = file.substring_from_line(pos.line as usize);
     let utf16: Vec<_> = line.encode_utf16().take(pos.character as usize).collect();
@@ -432,7 +435,7 @@ impl Server {
             assert_matches!(scheme, Some("file") | None);
             // TODO: Add all files to the source map that are currently open
 
-            let src = salf.open_files
+            let src: String = salf.open_files
                 .borrow()
                 .get(&*path_ref).unwrap()
                 .contents.lines.join("\n")

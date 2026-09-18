@@ -3,8 +3,8 @@
 //  - https://compiler.club/compiling-pattern-matching/
 
 use std::collections::HashMap;
-use index_vec::define_index_type;
 use string_interner::DefaultSymbol as Sym;
+use crate::index_vec::define_index_type;
 use crate::driver::Driver;
 use crate::ast::{DeclId, ExprId, ImperScopeId, Pattern, PatternKind, PatternMatchingContextId, VOID_TYPE};
 use crate::ty::Type;
@@ -193,7 +193,7 @@ pub fn match_scrutinee(driver: &mut Driver, tp: &mut dyn TypeProvider, scrutinee
             for (pattern_row, &destination) in pattern_matrix.iter().zip(&destinations) {
                 match pattern_row[0].kind {
                     PatternKind::ContextualMember { name, range, ref payload } => {
-                        let variant_name_str = driver.interner.resolve(name.symbol).unwrap();
+                        let variant_name_str = driver.interner.read().unwrap().resolve(name.symbol).unwrap().to_owned();
                         let index = variants.iter().position(|variant| variant.name == name.symbol);
                         if let Some(index) = index {
                             let mut new_row = Vec::new();

@@ -6,6 +6,7 @@ use std::fs;
 use std::io;
 use std::collections::{HashMap, HashSet};
 use std::ops::{Add, Range};
+use std::sync::OnceLock;
 
 use crate::display_adapter;
 use crate::ast::{ExprId, DeclId, ItemId, Item};
@@ -16,7 +17,6 @@ use url::Url;
 
 use crate::driver::Driver;
 use crate::index_vec::*;
-use index_vec::define_index_type;
 
 use dusk_proc_macros::*;
 
@@ -160,7 +160,7 @@ impl SourceFileLocation {
 pub struct SourceFile {
     pub src: String,
     /// The starting position of each line (relative to this source file!!!).
-    pub lines: Vec<usize>,
+    pub lines: OnceLock<Vec<usize>>,
     pub location: SourceFileLocation,
 }
 
@@ -234,7 +234,7 @@ impl SourceMap {
         let src = src()?;
         let file_len = src.len();
         let id = self.files.push(
-            SourceFile { src, lines: vec![0], location: location.clone(), }
+            SourceFile { src, lines: OnceLock::new(), location: location.clone(), }
         );
         self.unparsed_files.insert(id);
         let had_result = self.locations.insert(location, id);
@@ -287,14 +287,15 @@ impl Driver {
         let (file_id, intrafile_range) = self.lookup_file(SourceRange { start: loc, end: loc });
         let intrafile_loc = intrafile_range.start;
         let file = &self.src_map.files[file_id];
-        let mut line = file.lines.len().saturating_sub(1);
-        for (i, line_start) in file.lines.iter().copied().enumerate() {
+        let lines = file.lines.get().unwrap();
+        let mut line = lines.len().saturating_sub(1);
+        for (i, line_start) in lines.iter().copied().enumerate() {
             if line_start > intrafile_loc {
                 line = i.saturating_sub(1);
                 break;
             }
         }
-        let byte_offset = intrafile_loc - file.lines[line];
+        let byte_offset = intrafile_loc - lines[line];
 
         (file_id, line, byte_offset)
     }
@@ -412,22 +413,24 @@ impl SourceFile {
     }
 
     pub fn substring_from_line(&self, line: usize) -> &str {
-        let start = self.lines[line];
-        let end = if line == self.lines.len() - 1 {
+        let lines = self.lines.get().unwrap();
+        let start = lines[line];
+        let end = if line == lines.len() - 1 {
             self.src.len()
         } else {
-            self.lines[line + 1]
+            lines[line + 1]
         };
         self.substring_from_range(start..end)
     }
 
     fn lines_in_range(&self, range: Range<usize>) -> Vec<LineRange> {
         let mut result = Vec::new();
-        for (i, &line_start) in self.lines.iter().enumerate() {
-            let line_end = if i == self.lines.len() - 1 {
+        let lines = self.lines.get().unwrap();
+        for (i, &line_start) in lines.iter().enumerate() {
+            let line_end = if i == lines.len() - 1 {
                 self.src.len()
             } else {
-                self.lines[i + 1]
+                lines[i + 1]
             };
 
             let mut start_column = 0;

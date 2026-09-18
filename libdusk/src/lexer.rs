@@ -70,20 +70,22 @@ impl Driver {
         self.next_boundary(&mut l);
 
         // Find line breaks.
+        let mut lines = vec![0];
         while l.has_chars() {
             if self.is(&l, b'\n') {
                 self.advance(&mut l);
-                self.src_map.files[file].lines.push(l.cur_loc());
+                lines.push(l.cur_loc());
             } else if self.is_str(&l, b"\r\n") {
                 unsafe { self.advance_by_ascii(&mut l, 2); }
-                self.src_map.files[file].lines.push(l.cur_loc());
+                lines.push(l.cur_loc());
             } else if self.is(&l, b'\r') {
                 self.advance(&mut l);
-                self.src_map.files[file].lines.push(l.cur_loc());
+                lines.push(l.cur_loc());
             } else {
                 self.advance(&mut l);
             }
         }
+        self.src_map.files[file].lines.set(lines).unwrap();
         self.set_pos(&mut l, 0);
         self.toks.resize_with(max(self.toks.len(), file.index() + 1), Default::default);
         loop {
@@ -107,11 +109,11 @@ impl Driver {
     }
 
     /// Calls `self.end.next_boundary()`, with a fast-path for ASCII
-    fn next_boundary(&mut self, l: &mut Lexer) {
+    fn next_boundary(&self, l: &mut Lexer) {
         self.next_boundary_from(l, l.end.cur_cursor());
     }
 
-    fn next_boundary_from(&mut self, l: &mut Lexer, start: usize) {
+    fn next_boundary_from(&self, l: &mut Lexer, start: usize) {
         if start == self.file(l).src.len() { return; }
 
         let cur_byte = self.file(l).src.as_bytes()[start];
@@ -372,7 +374,7 @@ impl Driver {
                 "extern_mod" => ExternModule,
                 "_debug_mark" => DebugMark,
                 _ => {
-                    let ident = self.interner.get_or_intern(ident);
+                    let ident = self.interner.write().unwrap().get_or_intern(ident);
                     Ident(ident)
                 },
             };

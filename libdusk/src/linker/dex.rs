@@ -8,7 +8,6 @@ use std::convert::identity;
 use std::{mem, iter};
 use std::hash::Hash;
 
-use index_vec::define_index_type;
 use crate::backend::dex::DexEncoder;
 use crate::index_vec::*;
 use bitflags::bitflags;

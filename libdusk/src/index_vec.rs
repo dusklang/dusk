@@ -1,7 +1,42 @@
-use std::ops::Range;
+use std::ops::{Index, Range};
+use std::marker::PhantomData;
 
 use index_vec::IdxRangeBounds;
-pub use index_vec::{IndexVec, Idx};
+pub use index_vec::{IndexVec, Idx, define_index_type, index_vec};
+
+#[derive(Clone)]
+pub struct ConcurrentIndexVec<I: Idx, T> {
+    raw: boxcar::Vec<T>,
+    _marker: PhantomData<fn(&I)>,
+}
+
+impl<I: Idx, T> ConcurrentIndexVec<I, T> {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    pub fn push(&self, element: T) -> I {
+        let index = self.raw.push(element);
+        I::from_usize(index)
+    }
+}
+
+impl<I: Idx, T> Default for ConcurrentIndexVec<I, T> {
+    fn default() -> Self {
+        ConcurrentIndexVec {
+            raw: Default::default(),
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<I: Idx, T> Index<I> for ConcurrentIndexVec<I, T> {
+    type Output = T;
+
+    fn index(&self, index: I) -> &Self::Output {
+        &self.raw[index.index()]
+    }
+}
 
 pub trait IndexVecExt {
     type I: Idx;

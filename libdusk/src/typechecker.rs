@@ -691,7 +691,8 @@ impl tir::Expr<tir::DeclRef> {
             (Some(overload), Some(generic_args))
         } else if !*tp.decl_ref_has_error(self.decl_ref_id) {
             let name = driver.code.ast.decl_refs[self.decl_ref_id].name;
-            let name = driver.interner.resolve(name).unwrap();
+            let interner = driver.interner.read().unwrap();
+            let name = interner.resolve(name).unwrap();
             if overloads.nonviable_overloads.is_empty() {
                 driver.diag.push(
                     Error::new(format!("no declarations named \"{}\" found in scope", name))
@@ -1131,7 +1132,7 @@ impl tir::Expr<tir::StructLit> {
                                 // TODO: Use range of the field identifier, which we don't have fine-grained access to yet
                                 let range = driver.get_range(self.id);
                                 driver.diag.push(
-                                    Error::new(format!("Unknown field {} in struct literal", driver.interner.resolve(lit_field.name).unwrap()))
+                                    Error::new(format!("Unknown field {} in struct literal", driver.interner.read().unwrap().resolve(lit_field.name).unwrap()))
                                         .adding_primary_range(range, "")
                                 );
                             }
@@ -1148,7 +1149,7 @@ impl tir::Expr<tir::StructLit> {
                                     successful = false;
 
                                     driver.diag.push(
-                                        Error::new(format!("Field {} not included in struct literal", driver.interner.resolve(field.name).unwrap()))
+                                        Error::new(format!("Field {} not included in struct literal", driver.interner.read().unwrap().resolve(field.name).unwrap()))
                                             .adding_primary_range(lit_range, "")
                                             .adding_secondary_range(field.decl, "field declared here")
                                     );

@@ -7,7 +7,7 @@ use std::collections::HashSet;
 
 use crate::display_adapter;
 use crate::pattern_matching::{SwitchScrutineeValueId, PatternMatchingContext};
-use index_vec::{IndexVec, define_index_type};
+use crate::index_vec::{IndexVec, define_index_type};
 use smallvec::{SmallVec, smallvec};
 use string_interner::{DefaultStringInterner as StringInterner, DefaultSymbol as Sym, Symbol};
 
@@ -695,7 +695,8 @@ macro_rules! declare_known_idents {
                 }
             }
 
-            fn init(&mut self, interner: &mut StringInterner) {
+            fn init(&mut self, interner: &std::sync::RwLock<StringInterner>) {
+                let mut interner = interner.write().unwrap();
                 *self = KnownIdents {
                     $(
                         $name: declare_known_idents!(@init interner, $name $(= $assignment)?)
@@ -975,7 +976,7 @@ impl Driver {
                     return Some(looop.id);
                 }
             }
-            let label_str = self.interner.resolve(label.symbol).unwrap().to_owned();
+            let label_str = self.interner.read().unwrap().resolve(label.symbol).unwrap().to_owned();
             self.diag.report_error_no_range_msg(
                 format!("unable to find loop label `{}`", label_str),
                 label.range,
@@ -1116,7 +1117,8 @@ impl Driver {
                         // AFAICT this is the first time I have emitted an error from inside the AST generator instead
                         // of the parser. This makes me a little uncomfortable. On the other hand, diagnosing this
                         // inside the parser would require exposing more state to the parser, which I also don't love.
-                        let name_str = self.interner.resolve(name.symbol).unwrap();
+                        let interner = self.interner.read().unwrap();
+                        let name_str = interner.resolve(name.symbol).unwrap();
                         self.diag.push(
                             Error::new(format!("loop with label `{}` already exists", name_str))
                                 .adding_primary_range(name.range, "")
@@ -1135,7 +1137,7 @@ impl Driver {
         let state = entry.stack.peek().unwrap();
         if let Some(name) = state.name {
             if !state.used {
-                let name_str = self.interner.resolve(name.symbol).unwrap().to_string();
+                let name_str = self.interner.read().unwrap().resolve(name.symbol).unwrap().to_string();
                 self.diag.report_warning_no_range_msg(
                     format!("loop label `{}` never used", name_str),
                     name.range
@@ -1236,7 +1238,8 @@ impl Driver {
             ScopeState::Mod { extern_mod: Some(extern_mod), .. } => {
                 let funcs = &mut self.code.ast.extern_mods[extern_mod].imported_functions;
                 let index = funcs.len();
-                let name = self.interner.resolve(name).unwrap();
+                let interner = self.interner.read().unwrap();
+                let name = interner.resolve(name).unwrap();
                 funcs.push(ExternFunction { name: name.to_string(), param_list: param_list.clone(), return_ty });
                 Some(
                     ExternFunctionRef {
@@ -1302,14 +1305,14 @@ impl Driver {
         self.add_const_expr(Const::Ty(ty))
     }
     pub fn add_intrinsic(&mut self, intrinsic: LegacyIntrinsic, param_tys: SmallVec<[ExprId; 2]>, ret_ty: ExprId, function_like: bool) {
-        let name = self.interner.get_or_intern(intrinsic.name());
+        let name = self.interner.write().unwrap().get_or_intern(intrinsic.name());
         let id = self.add_decl(Decl::LegacyIntrinsic { intr: intrinsic, param_tys, function_like }, name, Some(ret_ty), SourceRange::default());
         self.mod_scoped_decl(
             StaticDecl { name, decl: id }
         );
     }
     pub fn internal_field(&mut self, field: InternalField, name: &str, ty: Type) -> DeclId {
-        let name = self.interner.get_or_intern(name);
+        let name = self.interner.write().unwrap().get_or_intern(name);
         let ty = self.add_const_ty(ty);
         self.add_decl(
             Decl::InternalField(field), name, Some(ty), SourceRange::default()
@@ -1319,7 +1322,7 @@ impl Driver {
         match op {
             BinOp::Assign => self.add_expr(Expr::Set { lhs, rhs }, range),
             _ => {
-                let name = self.interner.get_or_intern(op.symbol());
+                let name = self.interner.write().unwrap().get_or_intern(op.symbol());
                 // TODO: create generic context before parsing operands
                 let generic_ctx = self.begin_decl_ref_generic_ctx();
                 self.decl_ref(None, name, None, smallvec![lhs, rhs], true, range, generic_ctx)
@@ -1334,7 +1337,7 @@ impl Driver {
             UnOp::Pointer    => self.add_expr(Expr::Pointer { expr, is_mut: false }, range),
             UnOp::PointerMut => self.add_expr(Expr::Pointer { expr, is_mut: true  }, range),
             _ => {
-                let name = self.interner.get_or_intern(op.symbol());
+                let name = self.interner.write().unwrap().get_or_intern(op.symbol());
                 // TODO: create generic context before parsing operand
                 let generic_ctx = self.begin_decl_ref_generic_ctx();
                 self.decl_ref(None, name, None, smallvec![expr], true, range, generic_ctx)

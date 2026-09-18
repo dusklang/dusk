@@ -32,7 +32,7 @@ impl Driver {
 
     #[path="compiler.ModuleBuilder"]
     fn add_usize_constant(&mut self, #[self] b: ModuleBuilder, name: &'static str, value: usize) {
-        let name = self.interner.get_or_intern(name);
+        let name = self.interner.write().unwrap().get_or_intern(name);
         let konst = self.add_const_expr(Const::Int { lit: BigInt::from(value), ty: Type::usize() });
         let ty = self.add_const_ty(Type::usize());
         let decl_id = self.add_decl(Decl::Const { assigned_expr: konst, generic_params: empty_range() }, name, Some(ty), SourceRange::default());
@@ -44,7 +44,7 @@ impl Driver {
     fn add_extern_function(&mut self, #[self] b: ModuleBuilder, func_builder: ExternFunctionBuilder) {
         // TODO: should group functions from the same library into the same ExternMod, and then also de-duplicate functions within the same ExternMod
         // TODO: also, rename ExternMod, since it no longer corresponds to a lexical module in the source code
-        let name = self.interner.get_or_intern(&func_builder.name);
+        let name = self.interner.write().unwrap().get_or_intern(&func_builder.name);
         let ret_ty = self.add_const_ty(func_builder.ret_ty);
         let mut param_tys = SmallVec::new();
         for param in func_builder.params {
@@ -71,7 +71,7 @@ impl Driver {
 
     #[path="compiler.ModuleBuilder"]
     fn add_objc_class_ref(&mut self, #[self] b: ModuleBuilder, class_name: &'static str, lib_name: &'static str) {
-        let name = self.interner.get_or_intern(class_name);
+        let name = self.interner.write().unwrap().get_or_intern(class_name);
         let library_path = self.add_const_expr(Const::StrLit(CString::new(lib_name).unwrap()));
         let extern_mod = crate::ast::ExternMod { library_path, imported_functions: Default::default(), objc_class_references: vec![class_name.to_string()] };
         let extern_mod = self.code.ast.extern_mods.push(extern_mod);
@@ -284,7 +284,7 @@ impl Driver {
 
     fn add_constant_decl(&mut self, name: &str, value: Const) {
         let expr = self.add_const_expr(value);
-        let name = self.interner.get_or_intern(name);
+        let name = self.interner.write().unwrap().get_or_intern(name);
         let decl = self.add_decl(Decl::Const { assigned_expr: expr, generic_params: empty_range() }, name, None, SourceRange::default());
         self.mod_scoped_decl(
             StaticDecl {
@@ -300,7 +300,7 @@ impl Driver {
 
     pub fn add_decl_to_path(&mut self, name: &str, path: &str, decl: Decl, explicit_ty: Option<ExprId>) {
         let scope = self.find_or_build_relative_ns_path(path);
-        let name = self.interner.get_or_intern(name);
+        let name = self.interner.write().unwrap().get_or_intern(name);
         if let Decl::MethodIntrinsic(id) = decl {
             let decl_id = self.add_decl(Decl::Intrinsic(id), name, explicit_ty, SourceRange::default());
             let static_decl = StaticDecl { name, decl: decl_id };
@@ -341,7 +341,7 @@ impl Driver {
         for name in path.split('.').map(str::trim) {
             assert!(!name.is_empty());
 
-            let name = self.interner.get_or_intern(name);
+            let name = self.interner.write().unwrap().get_or_intern(name);
             let matching_decls: Vec<&StaticDecl> = self.code.ast.new_namespaces[ns].static_decls.iter().filter(|decl| decl.name == name).collect();
 
             assert!(matching_decls.len() == 1);
@@ -362,7 +362,7 @@ impl Driver {
     }
 
     fn add_variant(&mut self, b: &mut EnumBuilder, name: &str, payload_ty: Option<Type>) {
-        let name = self.interner.get_or_intern(name);
+        let name = self.interner.write().unwrap().get_or_intern(name);
         b.variants.push(VariantBuilder { name, payload_ty });
     }
 
