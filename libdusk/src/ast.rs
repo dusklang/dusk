@@ -1099,7 +1099,7 @@ impl Driver {
         self.get_pattern_bindings_impl(pattern, &mut decls);
         decls
     }
-    pub fn push_to_scope_stack<Id: PartialEq<ScopeState> + Debug + Copy>(&mut self, id: Id, state: ScopeState) -> AutoPopStackEntry<ScopeState, Id> {
+    pub fn push_to_scope_stack<Id: PartialEq<ScopeState> + Debug + Copy>(&self, id: Id, state: ScopeState) -> AutoPopStackEntry<ScopeState, Id> {
         self.ast.scope_stack.push(id, state)
     }
     /// unchecked invariant: must call end_loop after this
@@ -1133,7 +1133,7 @@ impl Driver {
 
         loop_stack.push(id, LoopState { id, name, used: false })
     }
-    pub fn end_loop(&mut self, entry: AutoPopStackEntry<LoopState, LoopId>) {
+    pub fn end_loop(&self, entry: AutoPopStackEntry<LoopState, LoopId>) {
         let state = entry.stack.peek().unwrap();
         if let Some(name) = state.name
             && !state.used {
@@ -1148,7 +1148,7 @@ impl Driver {
         let parent = self.cur_namespace();
         self.code.ast.condition_ns.push(ConditionNs { func: DeclId::from_raw(u32::MAX), parent: Some(parent) })
     }
-    pub fn enter_condition_namespace(&mut self, ns: ConditionNsId, condition_kind: ConditionKind) -> AutoPopStackEntry<ScopeState, ConditionNsId> {
+    pub fn enter_condition_namespace(&self, ns: ConditionNsId, condition_kind: ConditionKind) -> AutoPopStackEntry<ScopeState, ConditionNsId> {
         // This condition kind is just a placeholder which will be reset by each attribute. It is done this way so I can share a single
         // condition namespace across all condition attributes on a single function.
         self.push_to_scope_stack(ns, ScopeState::Condition { ns, condition_kind })

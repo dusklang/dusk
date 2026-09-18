@@ -72,7 +72,7 @@ fn flush_diagnostics(driver: &Driver) {
 // Otherwise, we will build the program.
 fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
     dvm::launch_coordinator_thread();
-    let mut src_map = SourceMap::new();
+    let src_map = SourceMap::new();
     let loaded_file = src_map.add_file_on_disk(&opt.input).is_ok();
     let mut driver = DriverRwRef::new(&DRIVER);
     *driver.write() = Driver::new(src_map, opt.arch, opt.os, opt.no_core);

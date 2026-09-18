@@ -19,6 +19,15 @@ impl<I: Idx, T> ConcurrentIndexVec<I, T> {
         let index = self.raw.push(element);
         I::from_usize(index)
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.raw.is_empty()
+    }
+
+    pub fn iter_enumerated(&self) -> impl Iterator<Item=(I, &T)> {
+        self.raw.iter()
+            .map(|(i, value)| (I::from_usize(i), value))
+    }
 }
 
 impl<I: Idx, T> Default for ConcurrentIndexVec<I, T> {

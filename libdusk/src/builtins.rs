@@ -331,7 +331,7 @@ impl Driver {
         self.push_to_scope_stack(namespace, ScopeState::Mod { id: scope, namespace, extern_mod: None })
     }
 
-    pub fn find_or_build_relative_ns_path(&mut self, path: &str) -> NewNamespaceId {
+    pub fn find_or_build_relative_ns_path(&self, path: &str) -> NewNamespaceId {
         let mut ns = self.find_nearest_mod_scope().unwrap();
 
         if path.trim().is_empty() {

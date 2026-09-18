@@ -32,10 +32,10 @@ pub struct Driver {
     pub diag: Arc<DiagnosticReporter>,
     pub types: Arc<TypeInterner>,
     pub interner: Arc<RwLock<StringInterner>>,
+    pub src_map: Arc<SourceMap>,
     pub internal_field_decls: OnceLock<InternalFieldDecls>,
 
     // Mutable state
-    pub src_map: SourceMap,
     pub toks: IndexVec<SourceFileId, TokenVec>,
     pub ast: ast::Builder,
     pub tir: tir::Builder,
@@ -49,7 +49,7 @@ impl Driver {
         Self {
             arch,
             os,
-            src_map,
+            src_map: Arc::new(src_map),
             toks: IndexVec::new(),
             interner: Default::default(),
             types: Default::default(),

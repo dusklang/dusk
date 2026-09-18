@@ -74,10 +74,7 @@ enum SeparatorResult {
 
 impl Driver {
     pub fn parse_added_files(&mut self) -> ParseResult<()> {
-        // TODO: is it possible to make this a Range instead of a Vec?
-        let mut unparsed_files: Vec<_> = self.src_map.unparsed_files.iter().copied().collect();
-        unparsed_files.sort();
-        for file in unparsed_files {
+        while let Some(file) = self.src_map.unparsed_files.pop() {
             self.parse_file(file)?;
         }
         Ok(())
@@ -218,11 +215,11 @@ impl Driver {
         }
     }
 
-    /// Parses the given file.
-    /// Panics if `file` has already been parsed.
+    /// Parses the given file, if not already parsed. Otherwise, immediately returns `Ok(())`.
     pub fn parse_file(&mut self, file: SourceFileId) -> ParseResult<()> {
-        let file_was_unparsed = self.src_map.unparsed_files.remove(&file);
-        assert!(file_was_unparsed);
+        if !self.src_map.should_begin_parsing(file) {
+            return Ok(());
+        }
 
         self.lex(file).map_err(|_| ParseError::UnableToLex)?;
         let _new_file = self.begin_new_file(file);

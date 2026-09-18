@@ -836,7 +836,7 @@ impl DriverRwRef<'_> {
 
 impl Driver {
     fn resolve_extern_mod(&mut self, id: ExternModId, tp: &dyn TypeProvider) {
-        if self.code.mir.extern_mods.get(&id).is_some() { return; }
+        if self.code.mir.extern_mods.contains_key(&id) { return; }
 
         let extern_mod = &self.code.ast.extern_mods[id];
         let library_path = extern_mod.library_path;

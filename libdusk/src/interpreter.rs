@@ -1543,7 +1543,7 @@ impl DriverRwRef<'_> {
                                 .unwrap_or_else(|| path.into());
                             drop(d);
                             let file = self.write().src_map.add_file_on_disk(path).unwrap();
-                            self.write().parse_added_files().unwrap();
+                            self.write().parse_file(file).unwrap();
 
                             let added_module = self.read().code.ast.global_scopes[&file];
                             Value::from_mod(added_module)

@@ -430,7 +430,7 @@ impl Server {
         let path_ref = AssertUnwindSafe(path);
         let unwind_result = catch_unwind(move || {
             eprintln!("ANALYZING FILE AT PATH: {}", path_ref.as_str());
-            let mut src_map = SourceMap::new();
+            let src_map = SourceMap::new();
             // TODO: non-file schemes, I guess?
             let scheme = path_ref.scheme().map(|scheme| scheme.as_str());
             assert_matches!(scheme, Some("file") | None);

@@ -4,12 +4,13 @@ use std::str;
 use std::path::{PathBuf, Path};
 use std::fs;
 use std::io;
-use std::collections::{HashMap, HashSet};
 use std::ops::{Add, Range};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use crossbeam_queue::SegQueue;
 use crossbeam_skiplist::SkipMap;
+use dashmap::{DashMap, DashSet};
 
 use crate::display_adapter;
 use crate::ast::{ExprId, DeclId, ItemId, Item};
@@ -78,9 +79,10 @@ impl Add<SourceRange> for SourceRange {
 
 #[derive(Default)]
 pub struct SourceMap {
-    pub files: IndexVec<SourceFileId, SourceFile>,
-    pub(crate) unparsed_files: HashSet<SourceFileId>,
-    locations: HashMap<SourceFileLocation, SourceFileId>,
+    pub files: ConcurrentIndexVec<SourceFileId, SourceFile>,
+    pub(crate) unparsed_files: SegQueue<SourceFileId>,
+    locations: DashMap<SourceFileLocation, SourceFileId>,
+    files_begun_parsing: DashSet<SourceFileId>,
 
     /// Total bytes in all files added (not necessarily parsed) so far
     total_file_bytes: AtomicUsize,
@@ -212,10 +214,15 @@ impl SourceMap {
         SourceMap {
             files: Default::default(),
             unparsed_files: Default::default(),
+            files_begun_parsing: Default::default(),
             locations: Default::default(),
             total_file_bytes: AtomicUsize::new(0),
             files_by_byte_offset: SkipMap::new(),
         }
+    }
+
+    pub fn should_begin_parsing(&self, file_id: SourceFileId) -> bool {
+        self.files_begun_parsing.insert(file_id)
     }
 
     pub fn get_begin_offset(&self, file: SourceFileId) -> usize {
@@ -228,39 +235,45 @@ impl SourceMap {
         SourceRange { start, end: start + len }
     }
 
-    fn add_file_impl(&mut self, location: impl Into<SourceFileLocation>, src: impl FnOnce() -> io::Result<String>) -> io::Result<SourceFileId> {
+    fn add_file_impl(&self, location: impl Into<SourceFileLocation>, src: impl FnOnce() -> io::Result<String>) -> io::Result<SourceFileId> {
         let location = location.into().canonicalize_if_on_disk()?;
-        if let Some(&id) = self.locations.get(&location) {
-            return Ok(id);
+        if let Some(id) = self.locations.get(&location) {
+            return Ok(*id);
         }
 
         let src = src()?;
-        let file_len = src.len();
-        let begin_offset = self.total_file_bytes.fetch_add(file_len, Ordering::Relaxed);
-        let id = self.files.push(
-            SourceFile { src, lines: OnceLock::new(), location: location.clone(), begin_offset }
-        );
-        if file_len > 0 {
-            self.files_by_byte_offset.insert(begin_offset, id);
-        }
-        self.unparsed_files.insert(id);
-        let had_result = self.locations.insert(location, id);
-        debug_assert_eq!(had_result, None);
+        let id = *self.locations.entry(location.clone()).or_insert_with(|| {
+            let file_len = src.len();
+            let begin_offset = self.total_file_bytes.fetch_add(file_len, Ordering::Relaxed);
+            let id = self.files.push(
+                SourceFile {
+                    src,
+                    lines: OnceLock::new(),
+                    location: location.clone(),
+                    begin_offset,
+                }
+            );
+            if file_len > 0 {
+                self.files_by_byte_offset.insert(begin_offset, id);
+            }
+            self.unparsed_files.push(id);
+            id
+        });
         Ok(id)
     }
 
-    pub fn add_file_on_disk(&mut self, path: impl Into<PathBuf>) -> io::Result<SourceFileId> {
+    pub fn add_file_on_disk(&self, path: impl Into<PathBuf>) -> io::Result<SourceFileId> {
         let path = path.into();
         let path_clone = path.clone();
         self.add_file_impl(path, || fs::read_to_string(path_clone))
     }
 
     #[cfg(feature = "dls")]
-    pub fn add_file_in_memory(&mut self, url: impl ToOwned<Owned=Url>, src: String) -> io::Result<SourceFileId> {
+    pub fn add_file_in_memory(&self, url: impl ToOwned<Owned=Url>, src: String) -> io::Result<SourceFileId> {
         self.add_file_impl(url.to_owned(), || Ok(src))
     }
 
-    pub fn add_virtual_file(&mut self, name: impl Into<String>, src: String) -> io::Result<SourceFileId> {
+    pub fn add_virtual_file(&self, name: impl Into<String>, src: String) -> io::Result<SourceFileId> {
         self.add_file_impl(SourceFileLocation::Virtual { name: name.into() }, || Ok(src))
     }
 }
@@ -309,12 +322,7 @@ impl Driver {
     #[cfg(feature = "dls")]
     pub fn lookup_file_by_url(&self, url: &Url) -> Option<SourceFileId> {
         let location: SourceFileLocation = url.clone().into();
-        for (id, file) in self.src_map.files.iter_enumerated() {
-            if file.location == location {
-                return Some(id)
-            }
-        }
-        None
+        self.src_map.locations.get(&location).map(|loc| *loc)
     }
 }
 
