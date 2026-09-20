@@ -1,15 +1,13 @@
 use std::sync::{Arc, LazyLock, OnceLock, RwLock};
-use crossbeam_skiplist::SkipMap;
 use string_interner::DefaultStringInterner as StringInterner;
 
 use crate::index_vec::*;
 use crate::ast::{Ast, ExprId, GenericCtx};
 use crate::mir::{Const, Instr, InstrId, Mir, VOID_INSTR};
 use crate::target::{Arch, OperatingSystem};
-use crate::source_info::{SourceFileId, SourceRange};
+use crate::source_info::SourceRange;
 use crate::internal_types::InternalFieldDecls;
 use crate::source_info::SourceMap;
-use crate::token::TokenVec;
 use crate::ty::Type;
 use crate::type_interner::TypeInterner;
 use crate::tir;
@@ -128,7 +126,6 @@ pub struct Driver {
     pub types: Arc<TypeInterner>,
     pub interner: Arc<RwLock<StringInterner>>,
     pub src_map: Arc<SourceMap>,
-    pub toks: SkipMap<SourceFileId, TokenVec>,
     pub internal_field_decls: OnceLock<InternalFieldDecls>,
 
     // Mutable state
@@ -146,7 +143,6 @@ impl Driver {
             arch,
             os,
             src_map: Arc::new(src_map),
-            toks: Default::default(),
             interner: Default::default(),
             types: Default::default(),
             tir_builder: tir::Builder::default(),
