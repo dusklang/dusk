@@ -7,7 +7,7 @@ use num_bigint::BigInt;
 use string_interner::DefaultSymbol as Sym;
 
 use crate::index_vec::empty_range;
-use crate::internal_types;
+use crate::{ast, internal_types};
 use crate::source_info::SourceRange;
 use crate::ast::{ModScopeNs, LegacyIntrinsic, Expr, Decl, VOID_TYPE, ModScopeNsId, NewNamespaceId, ExprId, StaticDecl, InstanceDecl, NewNamespace, ExternFunctionRef, ExternFunction, ParamList};
 use crate::ty::{EnumType, LegacyInternalType, Type};
@@ -33,9 +33,10 @@ impl Driver {
     #[path="compiler.ModuleBuilder"]
     fn add_usize_constant(&mut self, #[self] b: ModuleBuilder, name: &'static str, value: usize) {
         let name = self.interner.write().unwrap().get_or_intern(name);
-        let konst = self.add_const_expr(Const::Int { lit: BigInt::from(value), ty: Type::usize() });
-        let ty = self.add_const_ty(Type::usize());
-        let decl_id = self.add_decl(Decl::Const { assigned_expr: konst, generic_params: empty_range() }, name, Some(ty), SourceRange::default());
+        let builder = ast::Builder::default();
+        let konst = self.add_const_expr(&builder, Const::Int { lit: BigInt::from(value), ty: Type::usize() });
+        let ty = self.add_const_ty(&builder, Type::usize());
+        let decl_id = self.add_decl(&builder, Decl::Const { assigned_expr: konst, generic_params: empty_range() }, name, Some(ty), SourceRange::default());
         let static_decl = StaticDecl { name, decl: decl_id };
         self.ast.new_namespaces[b.namespace].static_decls.push(static_decl);
     }
@@ -45,13 +46,14 @@ impl Driver {
         // TODO: should group functions from the same library into the same ExternMod, and then also de-duplicate functions within the same ExternMod
         // TODO: also, rename ExternMod, since it no longer corresponds to a lexical module in the source code
         let name = self.interner.write().unwrap().get_or_intern(&func_builder.name);
-        let ret_ty = self.add_const_ty(func_builder.ret_ty);
+        let builder = ast::Builder::default();
+        let ret_ty = self.add_const_ty(&builder, func_builder.ret_ty);
         let mut param_tys = SmallVec::new();
         for param in func_builder.params {
-            let ty = self.add_const_ty(param.ty);
+            let ty = self.add_const_ty(&builder, param.ty);
             param_tys.push(ty);
         }
-        let library_path = self.add_const_expr(Const::StrLit(CString::new(func_builder.lib_name).unwrap()));
+        let library_path = self.add_const_expr(&builder, Const::StrLit(CString::new(func_builder.lib_name).unwrap()));
         let param_list = ParamList { param_tys: param_tys.clone(), has_c_variadic_param: func_builder.has_variadic_param };
         let func = ExternFunction {
             name: func_builder.name,
@@ -64,7 +66,7 @@ impl Driver {
             extern_mod,
             index: 0,
         };
-        let decl_id = self.add_decl(Decl::FunctionPrototype { param_list, extern_func: Some(extern_func_ref) }, name, Some(ret_ty), SourceRange::default());
+        let decl_id = self.add_decl(&builder, Decl::FunctionPrototype { param_list, extern_func: Some(extern_func_ref) }, name, Some(ret_ty), SourceRange::default());
         let static_decl = StaticDecl { name, decl: decl_id };
         self.ast.new_namespaces[b.namespace].static_decls.push(static_decl);
     }
@@ -72,11 +74,12 @@ impl Driver {
     #[path="compiler.ModuleBuilder"]
     fn add_objc_class_ref(&mut self, #[self] b: ModuleBuilder, class_name: &'static str, lib_name: &'static str) {
         let name = self.interner.write().unwrap().get_or_intern(class_name);
-        let library_path = self.add_const_expr(Const::StrLit(CString::new(lib_name).unwrap()));
+        let builder = ast::Builder::default();
+        let library_path = self.add_const_expr(&builder, Const::StrLit(CString::new(lib_name).unwrap()));
         let extern_mod = crate::ast::ExternMod { library_path, imported_functions: Default::default(), objc_class_references: vec![class_name.to_string()] };
         let extern_mod = self.ast.extern_mods.push(extern_mod);
-        let void_ptr = self.add_const_ty(Type::Void.ptr());
-        let decl_id = self.add_decl(Decl::ObjcClassRef { extern_mod, index: 0 }, name, Some(void_ptr), SourceRange::default());
+        let void_ptr = self.add_const_ty(&builder, Type::Void.ptr());
+        let decl_id = self.add_decl(&builder, Decl::ObjcClassRef { extern_mod, index: 0 }, name, Some(void_ptr), SourceRange::default());
         let static_decl = StaticDecl { name, decl: decl_id };
         self.ast.new_namespaces[b.namespace].static_decls.push(static_decl);
     }
@@ -124,7 +127,7 @@ impl Drop for EnumBuilder {
 }
 
 impl Driver {
-    pub fn add_prelude(&mut self) {
+    pub fn add_prelude(&mut self, b: &mut ast::Builder) {
         assert!(self.ast.prelude_namespace.is_none());
         let prelude_scope = self.ast.new_namespaces.push(NewNamespace::default());
         let prelude_namespace = self.ast.mod_ns.push(
@@ -133,7 +136,7 @@ impl Driver {
                 parent: None
             }
         );
-        let _prelude_scope = self.push_to_scope_stack(prelude_namespace, ScopeState::Mod { id: prelude_scope, namespace: prelude_namespace, extern_mod: None });
+        let _prelude_scope = b.push_to_scope_stack(prelude_namespace, ScopeState::Mod { id: prelude_scope, namespace: prelude_namespace, extern_mod: None });
         self.ast.prelude_namespace = Some(prelude_namespace);
 
         // Add intrinsics to prelude
@@ -145,8 +148,8 @@ impl Driver {
             Type::f32(), Type::f64(), Type::Bool
         ];
         let inout_types = types.clone().into_iter().map(|ty| ty.inout());
-        let types: Vec<_> = types.iter().map(|ty| self.add_const_ty(ty.clone())).collect();
-        let inout_types: Vec<_> = inout_types.map(|ty| self.add_const_ty(ty)).collect();
+        let types: Vec<_> = types.iter().map(|ty| self.add_const_ty(b, ty.clone())).collect();
+        let inout_types: Vec<_> = inout_types.map(|ty| self.add_const_ty(b, ty)).collect();
 
         let numerics = &types[0..12];
         let inout_numerics = &inout_types[0..12];
@@ -157,81 +160,81 @@ impl Driver {
         let boool        = types[12];
         let inout_bool   = inout_types[12];
         let uu8          = types[0];
-        let never        = self.add_const_ty(Type::Never);
-        let uusize       = self.add_const_ty(Type::usize());
-        let u8_ptr       = self.add_const_ty(Type::u8().ptr());
-        let void_mut_ptr = self.add_const_ty(Type::Void.mut_ptr());
-        let type_type    = self.add_const_ty(Type::Ty);
-        let mod_type     = self.add_const_ty(Type::Mod);
+        let never        = self.add_const_ty(b, Type::Never);
+        let uusize       = self.add_const_ty(b, Type::usize());
+        let u8_ptr       = self.add_const_ty(b, Type::u8().ptr());
+        let void_mut_ptr = self.add_const_ty(b, Type::Void.mut_ptr());
+        let type_type    = self.add_const_ty(b, Type::Ty);
+        let mod_type     = self.add_const_ty(b, Type::Mod);
 
         use LegacyIntrinsic::*;
         for &intr in &[Mult, Div, Mod, Add, Sub] {
             for &ty in numerics {
-                self.add_intrinsic(intr, smallvec![ty, ty], ty, true);
+                self.add_intrinsic(b, intr, smallvec![ty, ty], ty, true);
             }
         }
         for &intr in &[MultAssign, DivAssign, ModAssign, AddAssign, SubAssign] {
             for (&inout_ty, &ty) in inout_numerics.iter().zip(numerics) {
-                self.add_intrinsic(intr, smallvec![inout_ty, ty], VOID_TYPE, true);
+                self.add_intrinsic(b, intr, smallvec![inout_ty, ty], VOID_TYPE, true);
             }
         }
         for &intr in &[Less, LessOrEq, Greater, GreaterOrEq] {
             for &ty in numerics {
-                self.add_intrinsic(intr, smallvec![ty, ty], boool, true);
+                self.add_intrinsic(b, intr, smallvec![ty, ty], boool, true);
             }
         }
         for &intr in &[Eq, NotEq] {
             for &ty in &types {
-                self.add_intrinsic(intr, smallvec![ty, ty], boool, true);
+                self.add_intrinsic(b, intr, smallvec![ty, ty], boool, true);
             }
         }
         for &intr in &[BitwiseAnd, BitwiseOr, BitwiseXor, LeftShift, RightShift] {
             for &ty in integers {
-                self.add_intrinsic(intr, smallvec![ty, ty], ty, true);
+                self.add_intrinsic(b, intr, smallvec![ty, ty], ty, true);
             }
         }
         for &intr in &[AndAssign, OrAssign, XorAssign, LeftShiftAssign, RightShiftAssign] {
             for (&inout_ty, &ty) in inout_integers.iter().zip(integers) {
-                self.add_intrinsic(intr, smallvec![inout_ty, ty], VOID_TYPE, true);
+                self.add_intrinsic(b, intr, smallvec![inout_ty, ty], VOID_TYPE, true);
             }
         }
         for &intr in &[AndAssign, OrAssign, XorAssign] {
-            self.add_intrinsic(intr, smallvec![inout_bool, boool], VOID_TYPE, true);
+            self.add_intrinsic(b, intr, smallvec![inout_bool, boool], VOID_TYPE, true);
         }
         for &ty in integers {
-            self.add_intrinsic(BitwiseNot, smallvec![ty], ty, true);
+            self.add_intrinsic(b, BitwiseNot, smallvec![ty], ty, true);
         }
         for &intr in &[LogicalAnd, LogicalOr] {
-            self.add_intrinsic(intr, smallvec![boool, boool], boool, true);
+            self.add_intrinsic(b, intr, smallvec![boool, boool], boool, true);
         }
         for &ty in signed_numerics {
-            self.add_intrinsic(Neg, smallvec![ty], ty, true);
+            self.add_intrinsic(b, Neg, smallvec![ty], ty, true);
         }
         for &ty in numerics {
-            self.add_intrinsic(Pos, smallvec![ty], ty, true);
+            self.add_intrinsic(b, Pos, smallvec![ty], ty, true);
         }
-        self.add_intrinsic(LogicalNot, smallvec![boool], boool, true);
+        self.add_intrinsic(b, LogicalNot, smallvec![boool], boool, true);
 
-        self.add_intrinsic(Panic, SmallVec::new(), never, true);
-        self.add_intrinsic(Panic, smallvec![u8_ptr], never, true);
+        self.add_intrinsic(b, Panic, SmallVec::new(), never, true);
+        self.add_intrinsic(b, Panic, smallvec![u8_ptr], never, true);
 
-        self.add_intrinsic(Malloc, smallvec![uusize], void_mut_ptr, true);
-        self.add_intrinsic(Free, smallvec![void_mut_ptr], VOID_TYPE, true);
+        self.add_intrinsic(b, Malloc, smallvec![uusize], void_mut_ptr, true);
+        self.add_intrinsic(b, Free, smallvec![void_mut_ptr], VOID_TYPE, true);
 
-        self.add_intrinsic(Print, smallvec![u8_ptr], VOID_TYPE, true);
-        self.add_intrinsic(Print, smallvec![uu8], VOID_TYPE, true);
-        self.add_intrinsic(PrintType, smallvec![type_type], VOID_TYPE, true);
+        self.add_intrinsic(b, Print, smallvec![u8_ptr], VOID_TYPE, true);
+        self.add_intrinsic(b, Print, smallvec![uu8], VOID_TYPE, true);
+        self.add_intrinsic(b, PrintType, smallvec![type_type], VOID_TYPE, true);
 
-        self.add_intrinsic(AlignOf, smallvec![type_type], uusize, true);
-        self.add_intrinsic(SizeOf, smallvec![type_type], uusize, true);
-        self.add_intrinsic(StrideOf, smallvec![type_type], uusize, true);
-        self.add_intrinsic(OffsetOf, smallvec![type_type, u8_ptr], uusize, true);
+        self.add_intrinsic(b, AlignOf, smallvec![type_type], uusize, true);
+        self.add_intrinsic(b, SizeOf, smallvec![type_type], uusize, true);
+        self.add_intrinsic(b, StrideOf, smallvec![type_type], uusize, true);
+        self.add_intrinsic(b, OffsetOf, smallvec![type_type, u8_ptr], uusize, true);
 
-        self.add_intrinsic(Import, smallvec![u8_ptr], mod_type, true);
+        self.add_intrinsic(b, Import, smallvec![u8_ptr], mod_type, true);
 
         macro_rules! types {
             ($($ty:ident),+) => {
-                $(self.add_constant_type_decl(stringify!($ty), Type::$ty());)+
+                $(self.add_constant_type_decl(b, stringify!($ty), Type::$ty());)+
             };
         }
 
@@ -240,21 +243,21 @@ impl Driver {
             u8, u16, u32, u64, usize,
             f32, f64
         );
-        self.add_constant_type_decl("never", Type::Never);
-        self.add_constant_type_decl("bool", Type::Bool);
-        self.add_constant_type_decl("void", Type::Void);
-        self.add_constant_type_decl("module", Type::Mod);
+        self.add_constant_type_decl(b, "never", Type::Never);
+        self.add_constant_type_decl(b, "bool", Type::Bool);
+        self.add_constant_type_decl(b, "void", Type::Void);
+        self.add_constant_type_decl(b, "module", Type::Mod);
 
-        let compiler_module = self.add_module_decl("compiler");
-        let string_lit_type = self.add_const_ty(Type::LegacyInternal(LegacyInternalType::StringLiteral));
-        self.add_constant_type_decl("StringLiteral", Type::LegacyInternal(LegacyInternalType::StringLiteral));
+        let compiler_module = self.add_module_decl(b, "compiler");
+        let string_lit_type = self.add_const_ty(b, Type::LegacyInternal(LegacyInternalType::StringLiteral));
+        self.add_constant_type_decl(b, "StringLiteral", Type::LegacyInternal(LegacyInternalType::StringLiteral));
 
         // Add Platform enum
         let mut platform_enum = self.start_enum("Platform");
         self.add_variant(&mut platform_enum, "windows", None);
         self.add_variant(&mut platform_enum, "linux", None);
         self.add_variant(&mut platform_enum, "macos", None);
-        let platform_enum = self.end_enum(platform_enum);
+        let platform_enum = self.end_enum(b, platform_enum);
 
         // TODO: brittle
         let index = if cfg!(target_os = "windows") {
@@ -266,27 +269,28 @@ impl Driver {
         } else {
             todo!("unsupported OS");
         };
-        self.add_constant_decl("target", Const::Variant { enuum: platform_enum.identity, index, payload_tys: platform_enum.payload_tys.clone() });
+        self.add_constant_decl(b, "target", Const::Variant { enuum: platform_enum.identity, index, payload_tys: platform_enum.payload_tys.clone() });
         drop(compiler_module);
 
-        let runtime_module = self.add_module_decl("runtime");
-        self.add_intrinsic(GetNumArgs, smallvec![], uusize, true);
-        self.add_intrinsic(GetArg, smallvec![uusize], string_lit_type, true);
+        let runtime_module = self.add_module_decl(b, "runtime");
+        self.add_intrinsic(b, GetNumArgs, smallvec![], uusize, true);
+        self.add_intrinsic(b, GetArg, smallvec![uusize], string_lit_type, true);
         drop(runtime_module);
 
         if !self.no_core {
-            self.add_virtual_file_module("core", include_str!("../core/core.dusk")).unwrap();
+            self.add_virtual_file_module(b, "core", include_str!("../core/core.dusk")).unwrap();
         }
 
-        internal_types::register(self);
-        register_bridged_rust_methods(self);
+        internal_types::register(b, self);
+        register_bridged_rust_methods(b, self);
     }
 
-    fn add_constant_decl(&mut self, name: &str, value: Const) {
-        let expr = self.add_const_expr(value);
+    fn add_constant_decl(&mut self, b: &ast::Builder, name: &str, value: Const) {
+        let expr = self.add_const_expr(b, value);
         let name = self.interner.write().unwrap().get_or_intern(name);
-        let decl = self.add_decl(Decl::Const { assigned_expr: expr, generic_params: empty_range() }, name, None, SourceRange::default());
+        let decl = self.add_decl(b, Decl::Const { assigned_expr: expr, generic_params: empty_range() }, name, None, SourceRange::default());
         self.mod_scoped_decl(
+            b,
             StaticDecl {
                 name,
                 decl,
@@ -294,28 +298,28 @@ impl Driver {
         );
     }
 
-    fn add_constant_type_decl(&mut self, name: &str, ty: Type) {
-        self.add_constant_decl(name, Const::Ty(ty));
+    fn add_constant_type_decl(&mut self, b: &ast::Builder, name: &str, ty: Type) {
+        self.add_constant_decl(b, name, Const::Ty(ty));
     }
 
-    pub fn add_decl_to_path(&mut self, name: &str, path: &str, decl: Decl, explicit_ty: Option<ExprId>) {
-        let scope = self.find_or_build_relative_ns_path(path);
+    pub fn add_decl_to_path(&mut self, b: &ast::Builder, name: &str, path: &str, decl: Decl, explicit_ty: Option<ExprId>) {
+        let scope = self.find_or_build_relative_ns_path(b, path);
         let name = self.interner.write().unwrap().get_or_intern(name);
         if let Decl::MethodIntrinsic(id) = decl {
-            let decl_id = self.add_decl(Decl::Intrinsic(id), name, explicit_ty, SourceRange::default());
+            let decl_id = self.add_decl(b, Decl::Intrinsic(id), name, explicit_ty, SourceRange::default());
             let static_decl = StaticDecl { name, decl: decl_id };
             self.ast.new_namespaces[scope].static_decls.push(static_decl);
 
-            let decl_id = self.add_decl(decl, name, explicit_ty, SourceRange::default());
+            let decl_id = self.add_decl(b, decl, name, explicit_ty, SourceRange::default());
             self.ast.new_namespaces[scope].instance_decls.push(InstanceDecl { decl: decl_id, field_info: None });
         } else {
-            let decl_id = self.add_decl(decl, name, explicit_ty, SourceRange::default());
+            let decl_id = self.add_decl(b, decl, name, explicit_ty, SourceRange::default());
             let static_decl = StaticDecl { name, decl: decl_id };
             self.ast.new_namespaces[scope].static_decls.push(static_decl);
         }
     }
 
-    fn add_module_decl(&mut self, name: &str) -> AutoPopStackEntry<ScopeState, ModScopeNsId> {
+    fn add_module_decl(&mut self, b: &ast::Builder, name: &str) -> AutoPopStackEntry<ScopeState, ModScopeNsId> {
         let scope = self.ast.new_namespaces.push(NewNamespace::default());
         let namespace = self.ast.mod_ns.push(
             ModScopeNs {
@@ -327,12 +331,12 @@ impl Driver {
                 parent: None,
             }
         );
-        self.add_constant_decl(name, Const::Mod(scope));
-        self.push_to_scope_stack(namespace, ScopeState::Mod { id: scope, namespace, extern_mod: None })
+        self.add_constant_decl(b, name, Const::Mod(scope));
+        b.push_to_scope_stack(namespace, ScopeState::Mod { id: scope, namespace, extern_mod: None })
     }
 
-    pub fn find_or_build_relative_ns_path(&self, path: &str) -> NewNamespaceId {
-        let mut ns = self.find_nearest_mod_scope().unwrap();
+    pub fn find_or_build_relative_ns_path(&self, b: &ast::Builder, path: &str) -> NewNamespaceId {
+        let mut ns = b.find_nearest_mod_scope().unwrap();
 
         if path.trim().is_empty() {
             return ns;
@@ -366,29 +370,29 @@ impl Driver {
         b.variants.push(VariantBuilder { name, payload_ty });
     }
 
-    fn end_enum(&mut self, b: EnumBuilder) -> EnumType {
-        let (expr, id) = self.reserve_enum();
+    fn end_enum(&mut self, b: &ast::Builder, enum_b: EnumBuilder) -> EnumType {
+        let (expr, id) = self.reserve_enum(b);
         let enum_ty = EnumType {
-            payload_tys: b.variants.iter().map(|variant| variant.payload_ty.clone().unwrap_or(Type::Void)).collect(),
+            payload_tys: enum_b.variants.iter().map(|variant| variant.payload_ty.clone().unwrap_or(Type::Void)).collect(),
             identity: id,
         };
-        let mut variants = b.variants.iter().enumerate().map(|(i, variant)| {
-            let payload_ty = variant.payload_ty.clone().map(|ty| self.add_const_expr(Const::Ty(ty)));
-            self.variant_decl(variant.name, expr, id, i, payload_ty, SourceRange::default())
+        let mut variants = enum_b.variants.iter().enumerate().map(|(i, variant)| {
+            let payload_ty = variant.payload_ty.clone().map(|ty| self.add_const_expr(b, Const::Ty(ty)));
+            self.variant_decl(b, variant.name, expr, id, i, payload_ty, SourceRange::default())
         }).collect();
 
-        self.add_constant_type_decl(&b.name, Type::Enum(enum_ty.clone()));
+        self.add_constant_type_decl(b, &enum_b.name, Type::Enum(enum_ty.clone()));
         self.finish_enum(mem::take(&mut variants), SourceRange::default(), expr, id);
-        mem::forget(b);
+        mem::forget(enum_b);
 
         enum_ty
     }
 
-    fn add_virtual_file_module(&mut self, name: &str, src: &str) -> ParseResult<()>  {
+    fn add_virtual_file_module(&mut self, b: &ast::Builder, name: &str, src: &str) -> ParseResult<()>  {
         let file = self.src_map.add_virtual_file(name, src.to_string()).unwrap();
         self.parse_file(file)?;
         let scope = self.ast.global_scopes[&file];
-        self.add_constant_decl(name, Const::Mod(scope));
+        self.add_constant_decl(b, name, Const::Mod(scope));
         Ok(())
     }
 }

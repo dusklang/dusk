@@ -289,12 +289,13 @@ macro_rules! define_legacy_internal_types_internal {
         $($field_name:ident: $ty:expr),*$(,)?
     })*) => {
         impl Driver {
-            pub fn register_internal_fields(&mut self) {
+            pub fn register_internal_fields(&mut self, b: &mut ast::Builder) {
                 let internal_field_decls = InternalFieldDecls {
                     $(
                         $name: internal_field_decls::$name {
                             $(
                                 $field_name: self.internal_field(
+                                    b,
                                     InternalField::$name(internal_fields::$name::$field_name),
                                     stringify!($field_name),
                                     $ty

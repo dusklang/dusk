@@ -2,7 +2,7 @@ use std::any;
 
 use dusk_proc_macros::DuskBridge;
 
-use crate::ast::NewNamespaceId;
+use crate::ast::{self, NewNamespaceId};
 use crate::ty::Type;
 use crate::driver::Driver;
 use crate::interpreter::Value;
@@ -38,13 +38,13 @@ pub trait DuskBridge: 'static {
 
         d.ast.bridged_types[&id].clone()
     }
-    fn register(d: &mut Driver);
+    fn register(b: &mut ast::Builder, d: &mut Driver);
     fn bridge_from_dusk(value: &Value, d: &Driver) -> Self;
     fn bridge_to_dusk(self, d: &Driver) -> Value;
 }
 
 impl DuskBridge for () {
-    fn register(d: &mut Driver) {
+    fn register(_b: &mut ast::Builder, d: &mut Driver) {
         d.ast.bridged_types.insert(any::TypeId::of::<Self>(), Type::Void);
     }
 
@@ -58,7 +58,7 @@ impl DuskBridge for () {
 }
 
 impl DuskBridge for &'static str {
-    fn register(d: &mut Driver) {
+    fn register(_b: &mut ast::Builder, d: &mut Driver) {
         d.ast.bridged_types.insert(any::TypeId::of::<Self>(), Type::i8().ptr());
     }
 
@@ -72,7 +72,7 @@ impl DuskBridge for &'static str {
 }
 
 impl DuskBridge for Module {
-    fn register(d: &mut Driver) {
+    fn register(_b: &mut ast::Builder, d: &mut Driver) {
         d.ast.bridged_types.insert(any::TypeId::of::<Self>(), Type::Mod);
     }
 
@@ -89,7 +89,7 @@ macro_rules! bridge_ints {
     ($($int_name: ident),*) => {
         $(
             impl DuskBridge for $int_name {
-                fn register(d: &mut Driver) {
+                fn register(_b: &mut ast::Builder, d: &mut Driver) {
                     d.ast.bridged_types.insert(any::TypeId::of::<$int_name>(), Type::$int_name());
                 }
 
@@ -109,9 +109,9 @@ bridge_ints!(u8, u16, u32, u64, usize, i8, i16, i32, i64, isize);
 
 macro_rules! declare_internal_types {
     ($register_name:ident : $($name:ty),*) => {
-        pub fn $register_name(d: &mut Driver) {
+        pub fn $register_name(b: &mut ast::Builder, d: &mut Driver) {
             $(
-                <$name>::register(d);
+                <$name>::register(b, d);
             )*
         }
     };

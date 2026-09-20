@@ -19,6 +19,7 @@ use libdusk::target::{Arch, OperatingSystem};
 use libdusk::driver::{DRIVER, Driver, DriverRwRef};
 use libdusk::source_info::SourceMap;
 use libdusk::error::DiagnosticKind;
+use libdusk::ast;
 
 use libdusk::dvm;
 
@@ -76,7 +77,8 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
     let loaded_file = src_map.add_file_on_disk(&opt.input).is_ok();
     let mut driver = DriverRwRef::new(&DRIVER);
     *driver.write() = Driver::new(src_map, opt.arch, opt.os, opt.no_core);
-    driver.write().initialize_ast();
+    let mut builder = ast::Builder::default();
+    driver.write().initialize_ast(&mut builder);
 
     if !loaded_file {
         driver.read().diag.report_error_no_range(

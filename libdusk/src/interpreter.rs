@@ -114,7 +114,7 @@ impl Value {
         match self {
             Value::Inline(storage) => Cow::Borrowed(storage.as_ref()),
             Value::Dynamic(ptr) => unsafe {
-                let address_bits = mem::transmute::<&Box<_>, *const u8>(ptr);
+                let address_bits = ptr as *const Box<[u8]> as *const u8;
                 Cow::Borrowed(slice::from_raw_parts(address_bits, size_of::<usize>()))
             },
             &Value::Internal { val: InternalValue::FunctionPointer { ref generic_arguments, func }, indirection: 0 } if d.is_some() => {

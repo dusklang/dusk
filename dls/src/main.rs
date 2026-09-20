@@ -7,7 +7,7 @@ use std::str::FromStr;
 use std::{assert_matches, mem};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use libdusk::ast::{Item, Expr};
+use libdusk::ast::{self, Expr, Item};
 use libdusk::error::DiagnosticKind;
 use libdusk::new_code::NewCode;
 use libdusk::type_provider::{RealTypeProvider, TypeProvider, MockStateCommand, MockTypeProvider};
@@ -447,7 +447,8 @@ impl Server {
             let mut driver = DriverRwRef::new(&DRIVER);
             *driver.write() = Driver::new(src_map, Arch::default(), OperatingSystem::default(), false);
 
-            driver.write().initialize_ast();
+            let mut builder = ast::Builder::default();
+            driver.write().initialize_ast(&mut builder);
 
             let fatal_parse_error = driver.write().parse_added_files().is_err();
             salf.flush_diagnostics(&driver.read(), &path_ref);

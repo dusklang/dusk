@@ -379,7 +379,7 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
         };
         quote! {
             impl crate::internal_types::DuskBridge for #decl_name {
-                fn register(d: &mut crate::driver::Driver) {
+                fn register(b: &mut crate::ast::Builder, d: &mut crate::driver::Driver) {
                     use std::any;
                     use crate::{ast::*, ty::*, mir::*};
                     use crate::index_vec::empty_range;
@@ -387,8 +387,8 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
                     #get_ty_to_register // defines `ty` variable used below
 
                     let konst = Const::Ty(ty.clone());
-                    let expr = d.add_const_expr(konst);
-                    d.add_decl_to_path(#bridged_name, #module, Decl::Const { assigned_expr: expr, generic_params: empty_range() }, None);
+                    let expr = d.add_const_expr(b, konst);
+                    d.add_decl_to_path(b, #bridged_name, #module, Decl::Const { assigned_expr: expr, generic_params: empty_range() }, None);
 
                     d.ast.bridged_types.insert(any::TypeId::of::<Self>(), ty);
                 }
@@ -411,7 +411,7 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
             }
 
             impl crate::internal_types::DuskBridge for &'static mut #decl_name {
-                fn register(d: &mut crate::driver::Driver) {
+                fn register(b: &mut crate::ast::Builder, d: &mut crate::driver::Driver) {
                     use std::any;
                     use crate::{ast::*, ty::*, mir::*};
 
@@ -575,16 +575,16 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                                 let intr = Intrinsic {
                                     param_tys: smallvec![
                                         #(
-                                            d.add_const_ty(<#param_tys>::to_dusk_type(d)),
+                                            d.add_const_ty(b, <#param_tys>::to_dusk_type(d)),
                                         )*
                                     ],
                                     ret_ty: ret_ty.clone(),
                                     name: String::from(#name),
                                     implementation: thunk,
                                 };
-                                let ret_ty = d.add_const_ty(ret_ty);
+                                let ret_ty = d.add_const_ty(b, ret_ty);
                                 let intr_id = d.ast.intrinsics.push(intr);
-                                d.add_decl_to_path(#name, #path, #decl, Some(ret_ty));
+                                d.add_decl_to_path(b, #name, #path, #decl, Some(ret_ty));
                             }
                         );
                     },
@@ -597,7 +597,7 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
     quote! {
         #item
 
-        pub fn register_bridged_rust_methods(d: &mut crate::driver::Driver) {
+        pub fn register_bridged_rust_methods(b: &mut crate::ast::Builder, d: &mut crate::driver::Driver) {
             use crate::internal_types::DuskBridge;
             use crate::{ast::*, ty::*, mir::*};
             use crate::driver::DriverRwRef;
