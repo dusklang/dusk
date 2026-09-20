@@ -382,6 +382,7 @@ pub struct MirCode {
     pub enums: HashMap<EnumId, EnumLayout>,
     pub source_ranges: HashMap<OpId, SourceRange>,
     pub instr_names: HashMap<OpId, String>,
+    decls: HashMap<DeclId, Decl>,
 
     // The set of instructions that failed to be const-eval'ed (e.g., due to a panic)
     pub poisoned_ops: HashSet<OpId>,
@@ -412,6 +413,7 @@ impl MirCode {
             instr_names: HashMap::new(),
             poisoned_ops: HashSet::new(),
             block_states: HashMap::new(),
+            decls: HashMap::new(),
         }
     }
 
@@ -651,17 +653,6 @@ pub enum FunctionRef {
     Ref(Function),
 }
 
-#[derive(Default)]
-pub struct Builder {
-    decls: HashMap<DeclId, Decl>,
-}
-
-impl Builder {
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
-
 // TODO: remove this as soon as discriminants can be other types, and deal with the fallout from that
 const TYPE_OF_DISCRIMINANTS: Type = Type::u32();
 
@@ -876,7 +867,7 @@ impl Driver {
 
 impl DriverRwRef<'_> {
     fn get_decl(&mut self, id: DeclId, tp: &dyn TypeProvider) -> Decl {
-        if let Some(decl) = self.read().mir_builder.decls.get(&id) { return decl.clone(); }
+        if let Some(decl) = self.read().mir.decls.get(&id) { return decl.clone(); }
         let d = self.read();
         match df!(d, id.ast) {
             ast::Decl::Function { ref params, scope, ref generic_params, .. } => {
@@ -886,7 +877,7 @@ impl DriverRwRef<'_> {
                 drop(d);
                 let get = self.write().mir.functions.push(Function::default());
                 let decl = Decl::Function { get };
-                self.write().mir_builder.decls.insert(id, decl.clone());
+                self.write().mir.decls.insert(id, decl.clone());
 
                 let func_ty = self.read().decl_type(id, tp).as_function().unwrap().clone();
                 let name = self.read().ast.names[id];
@@ -920,32 +911,32 @@ impl DriverRwRef<'_> {
                     self.read().diag.push(err);
                     Decl::Invalid
                 };
-                self.write().mir_builder.decls.insert(id, decl.clone());
+                self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
             ast::Decl::ObjcClassRef { extern_mod, index } => {
                 drop(d);
                 self.write().resolve_extern_mod(extern_mod, tp);
                 let decl = Decl::ObjcClassRef { extern_mod, index };
-                self.write().mir_builder.decls.insert(id, decl.clone());
+                self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
             ast::Decl::Stored { id: index, .. } | ast::Decl::LoopBinding { id: index, .. } => {
                 drop(d);
                 let decl = Decl::Stored(index);
-                self.write().mir_builder.decls.insert(id, decl.clone());
+                self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
             ast::Decl::Parameter { index } => {
                 drop(d);
                 let decl = Decl::Parameter { index };
-                self.write().mir_builder.decls.insert(id, decl.clone());
+                self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
             ast::Decl::PatternBinding { context, scrutinee, root_scrutinee, .. } => {
                 drop(d);
                 let decl = Decl::PatternBinding { context, scrutinee, root_scrutinee };
-                self.write().mir_builder.decls.insert(id, decl.clone());
+                self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
             ast::Decl::LegacyIntrinsic { intr, function_like, .. } => {
@@ -955,19 +946,19 @@ impl DriverRwRef<'_> {
                     ty = ty.return_ty().unwrap().clone();
                 }
                 let decl = Decl::LegacyIntrinsic(intr, ty);
-                self.write().mir_builder.decls.insert(id, decl.clone());
+                self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
             ast::Decl::Intrinsic(intr) => {
                 drop(d);
                 let decl = Decl::Intrinsic(intr);
-                self.write().mir_builder.decls.insert(id, decl.clone());
+                self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
             ast::Decl::MethodIntrinsic(intr) => {
                 drop(d);
                 let decl = Decl::MethodIntrinsic(intr);
-                self.write().mir_builder.decls.insert(id, decl.clone());
+                self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
             ast::Decl::Static(expr) => {
@@ -981,7 +972,7 @@ impl DriverRwRef<'_> {
                     }
                 );
                 let decl = Decl::Static(statik);
-                self.write().mir_builder.decls.insert(id, decl.clone());
+                self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
             ast::Decl::Const { assigned_expr: root_expr, .. } => {
@@ -990,19 +981,19 @@ impl DriverRwRef<'_> {
 
                 // TODO: Deal with cycles!
                 let decl = Decl::Const(konst.into());
-                self.write().mir_builder.decls.insert(id, decl.clone());
+                self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
             ast::Decl::Field { index, .. } => {
                 drop(d);
                 let decl = Decl::Field { index };
-                self.write().mir_builder.decls.insert(id, decl.clone());
+                self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
             ast::Decl::InternalField(field) => {
                 drop(d);
                 let decl = Decl::InternalField(field);
-                self.write().mir_builder.decls.insert(id, decl.clone());
+                self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
             ast::Decl::Variant { enuum, index, payload_ty } => {
@@ -1012,7 +1003,7 @@ impl DriverRwRef<'_> {
             ast::Decl::GenericParam(param) => {
                 drop(d);
                 let decl = Decl::GenericParam(param);
-                self.write().mir_builder.decls.insert(id, decl.clone());
+                self.write().mir.decls.insert(id, decl.clone());
                 decl
             },
             ast::Decl::ReturnValue => panic!("Can't get_decl() the return_value decl"),

@@ -16,7 +16,7 @@ use crate::type_interner::TypeInterner;
 use crate::ast;
 use crate::tir;
 use crate::error::DiagnosticReporter;
-use crate::mir::{self, FunctionRef};
+use crate::mir::FunctionRef;
 use crate::type_provider::TypeProvider;
 use crate::rw_ref::RwRef;
 use crate::interpreter::EvalError;
@@ -41,7 +41,6 @@ pub struct Driver {
     // Mutable state
     pub ast_builder: ast::Builder,
     pub tir_builder: tir::Builder,
-    pub mir_builder: mir::Builder,
     pub blocks: IndexVec<BlockId, Block>,
     pub ops: IndexVec<OpId, Op>,
     pub ast: Ast,
@@ -60,7 +59,6 @@ impl Driver {
             types: Default::default(),
             ast_builder: ast::Builder::default(),
             tir_builder: tir::Builder::default(),
-            mir_builder: mir::Builder::new(),
             diag: Default::default(),
             internal_field_decls: Default::default(),
             no_core,
