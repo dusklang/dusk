@@ -341,7 +341,7 @@ fn lsp_pos_to_dusk_pos(driver: &Driver, url: &Uri, pos: Position) -> usize {
     let file = driver.lookup_file_by_url(&Url::parse(url.as_str()).unwrap()).unwrap();
 
     // byte offset to the beginning of the file
-    let file_offset = driver.src_map.get_begin_offset(file);
+    let file_offset = driver.src_map.files[file].begin_offset;
 
     let file = &driver.src_map.files[file];
 

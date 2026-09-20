@@ -165,7 +165,7 @@ pub struct SourceFile {
     /// The starting position of each line (relative to this source file!!!).
     pub lines: OnceLock<Vec<usize>>,
     pub location: SourceFileLocation,
-    begin_offset: usize,
+    pub begin_offset: usize,
 }
 
 #[derive(Debug)]
@@ -225,12 +225,8 @@ impl SourceMap {
         self.files_begun_parsing.insert(file_id)
     }
 
-    pub fn get_begin_offset(&self, file: SourceFileId) -> usize {
-        self.files[file].begin_offset
-    }
-
     pub fn get_file_range(&self, file: SourceFileId) -> SourceRange {
-        let start = self.get_begin_offset(file);
+        let start = self.files[file].begin_offset;
         let len = self.files[file].src.len();
         SourceRange { start, end: start + len }
     }
