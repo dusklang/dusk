@@ -24,7 +24,7 @@ use crate::ast::{LegacyIntrinsic, EnumId, GenericParamId, ExternFunctionRef, Ext
 use crate::dvm::{MessageKind, Call, self};
 use crate::mir::{JumpTarget, Const, ExternFunction, FuncId, Instr, InstrId, StaticId};
 use crate::ty::{EnumType, FloatWidth, FunctionType, IntWidth, LegacyInternalType, QualType, StructType, Type};
-use crate::code::{BlockId, Op, OpId};
+use crate::driver::{BlockId, Op, OpId};
 use crate::internal_types::{DuskBridge, InternalField, internal_fields};
 
 use crate::driver::{DRIVER, Driver, DriverRwRef};

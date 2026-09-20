@@ -14,7 +14,7 @@ use dashmap::{DashMap, DashSet};
 
 use crate::display_adapter;
 use crate::ast::{ExprId, DeclId, ItemId, Item};
-use crate::code::OpId;
+use crate::driver::OpId;
 
 #[cfg(feature = "dls")]
 use url::Url;

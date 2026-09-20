@@ -16,7 +16,6 @@ pub mod type_provider;
 pub mod linker;
 pub mod ast;
 pub mod index_counter;
-pub mod code;
 pub mod dvm;
 pub mod target;
 

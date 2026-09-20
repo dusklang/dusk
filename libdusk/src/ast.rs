@@ -12,8 +12,7 @@ use smallvec::{SmallVec, smallvec};
 use string_interner::{DefaultStringInterner as StringInterner, DefaultSymbol as Sym, Symbol};
 
 use crate::mir::Const;
-use crate::code::{Op, Block};
-use crate::code::BlockId;
+use crate::driver::{Op, Block, BlockId};
 use crate::index_counter::IndexCounter;
 use crate::source_info::{SourceFileId, SourceRange};
 use crate::internal_types::InternalField;

@@ -12,7 +12,7 @@ use crate::index_vec::{IndexVec, define_index_type};
 use crate::display_adapter;
 
 use crate::index_counter::IndexCounter;
-use crate::code::{Block, BlockId, Op, OpId};
+use crate::driver::{Block, BlockId, Op, OpId};
 use crate::pattern_matching::{SwitchDecisionNode, SwitchDecisionValue, SwitchScrutineeValueId, TypedSwitchScrutineeValue, TypedSwitchScrutineeValueKind};
 use crate::source_info::SourceRange;
 
