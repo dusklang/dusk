@@ -4,7 +4,7 @@ use string_interner::DefaultStringInterner as StringInterner;
 
 use crate::index_vec::*;
 use crate::ast::{Ast, ExprId, GenericCtx};
-use crate::mir::{Const, Instr, InstrId, MirCode, VOID_INSTR};
+use crate::mir::{Const, Instr, InstrId, Mir, VOID_INSTR};
 use crate::target::{Arch, OperatingSystem};
 use crate::source_info::{SourceFileId, SourceRange};
 use crate::code::{Block, BlockId, Op, OpId};
@@ -42,7 +42,7 @@ pub struct Driver {
     pub blocks: IndexVec<BlockId, Block>,
     pub ops: IndexVec<OpId, Op>,
     pub ast: Ast,
-    pub mir: MirCode,
+    pub mir: Mir,
 }
 pub type DriverRwRef<'l> = RwRef<'l, Driver>;
 
@@ -63,7 +63,7 @@ impl Driver {
             blocks: IndexVec::default(),
             ops: index_vec![Op::MirInstr(Instr::Void, InstrId::new(0), Type::Void)],
             ast: Ast::default(),
-            mir: MirCode::default(),
+            mir: Mir::default(),
         };
         val.mir.source_ranges.insert(VOID_INSTR, SourceRange::default());
         val.mir.instr_names.insert(VOID_INSTR, "void".to_string());

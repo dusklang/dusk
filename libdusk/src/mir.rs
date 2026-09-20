@@ -374,7 +374,7 @@ pub struct ExternFunction {
     pub ty: FunctionType,
 }
 
-pub struct MirCode {
+pub struct Mir {
     pub strings: IndexVec<StrId, CString>,
     pub functions: IndexVec<FuncId, Function>,
     pub statics: IndexVec<StaticId, Static>,
@@ -401,9 +401,9 @@ pub enum EndBlockError {
     BlockNotStarted,
 }
 
-impl MirCode {
+impl Mir {
     pub fn new() -> Self {
-        MirCode {
+        Mir {
             strings: IndexVec::new(),
             functions: IndexVec::new(),
             statics: IndexVec::new(),
@@ -459,7 +459,7 @@ impl MirCode {
     }
 }
 
-impl Default for MirCode {
+impl Default for Mir {
     fn default() -> Self { Self::new() }
 }
 
@@ -656,7 +656,7 @@ pub enum FunctionRef {
 // TODO: remove this as soon as discriminants can be other types, and deal with the fallout from that
 const TYPE_OF_DISCRIMINANTS: Type = Type::u32();
 
-pub fn function_by_ref<'a>(code: &'a MirCode, func_ref: &'a FunctionRef) -> &'a Function {
+pub fn function_by_ref<'a>(code: &'a Mir, func_ref: &'a FunctionRef) -> &'a Function {
     match func_ref {
         &FunctionRef::Id(id) => &code.functions[id],
         FunctionRef::Ref(func) => func,
